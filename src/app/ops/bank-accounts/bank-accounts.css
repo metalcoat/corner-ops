@@ -1,0 +1,202 @@
+.bankAccountShell {
+  min-height: 100vh;
+  padding: 2rem;
+  background: #f4f1ea;
+  color: #1d2a24;
+}
+
+.bankAccountHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+  align-items: flex-start;
+  max-width: 1180px;
+  margin: 0 auto 1.5rem;
+}
+
+.bankAccountHeader h1,
+.bankAccountPanel h1,
+.bankAccountPanel h2 {
+  margin: 0;
+}
+
+.bankAccountHeader p {
+  max-width: 720px;
+  margin: .5rem 0 0;
+  color: #5c675f;
+}
+
+.bankEyebrow {
+  margin: 0 0 .35rem !important;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-size: .72rem;
+  font-weight: 800;
+  color: #6b746d !important;
+}
+
+.bankBusinessSwitch {
+  display: flex;
+  padding: .3rem;
+  border-radius: 999px;
+  background: #e4ded2;
+  white-space: nowrap;
+}
+
+.bankBusinessSwitch button {
+  border: 0;
+  border-radius: 999px;
+  padding: .65rem 1rem;
+  background: transparent;
+  color: #445048;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.bankBusinessSwitch button.selected {
+  background: #1d4f3b;
+  color: white;
+}
+
+.bankNotice {
+  max-width: 1180px;
+  margin: 0 auto 1rem;
+  padding: .9rem 1rem;
+  border: 1px solid #c8b98f;
+  border-radius: 12px;
+  background: #fff8df;
+}
+
+.bankConnectionGrid {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.bankAccountPanel {
+  padding: 1.4rem;
+  border: 1px solid #d9d2c5;
+  border-radius: 18px;
+  background: white;
+  box-shadow: 0 10px 30px rgba(39, 48, 42, .06);
+}
+
+.bankPanelHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.bankBadge {
+  display: inline-flex;
+  padding: .35rem .65rem;
+  border-radius: 999px;
+  background: #e7f2eb;
+  color: #1d6b47;
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+.bankAccountList {
+  display: grid;
+  gap: .75rem;
+  margin-bottom: 1rem;
+}
+
+.bankAccountChoice {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: .8rem;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid #d8d4cb;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+
+.bankAccountChoice:hover {
+  transform: translateY(-1px);
+  border-color: #80988b;
+}
+
+.bankAccountChoice.chosen {
+  border-color: #1d6b47;
+  background: #f0f8f3;
+}
+
+.bankAccountChoice input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bankRadio {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #8d978f;
+  border-radius: 50%;
+  background: white;
+  box-shadow: inset 0 0 0 4px white;
+}
+
+.bankAccountChoice.chosen .bankRadio {
+  border-color: #1d6b47;
+  background: #1d6b47;
+}
+
+.bankAccountDetails,
+.bankBalance {
+  display: grid;
+  gap: .25rem;
+}
+
+.bankAccountDetails small,
+.bankBalance small {
+  color: #6b746d;
+}
+
+.bankBalance {
+  text-align: right;
+}
+
+.bankPrimary {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 42px;
+  padding: .7rem 1rem;
+  border: 0;
+  border-radius: 10px;
+  background: #1d4f3b;
+  color: white;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.bankPrimary:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.emptyState {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.emptyState p {
+  color: #667068;
+}
+
+@media (max-width: 760px) {
+  .bankAccountShell { padding: 1rem; }
+  .bankAccountHeader { flex-direction: column; }
+  .bankBusinessSwitch { width: 100%; }
+  .bankBusinessSwitch button { flex: 1; }
+  .bankAccountChoice { grid-template-columns: auto auto minmax(0, 1fr); }
+  .bankBalance { grid-column: 3; text-align: left; }
+}
