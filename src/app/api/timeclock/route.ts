@@ -1,4 +1,6 @@
 import { punchTiki } from "@/lib/operations";
+import { ensureWorkforceSchema } from "@/lib/workforce";
+import { getSql } from "@/lib/db";
 import { apiError } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -17,7 +19,41 @@ export async function POST(request: Request) {
       longitude: body.longitude,
       accuracy: body.accuracy,
     });
-    return Response.json(result);
+
+    if (result.action !== "clocked-in") return Response.json(result);
+
+    await ensureWorkforceSchema();
+    const instructions = await getSql()`
+      SELECT s.id, s.position, s.starts_at, s.ends_at, s.notes
+      FROM time_entries t
+      JOIN schedule_shifts s
+        ON s.employee_id = t.employee_id
+       AND s.business = 'Tiki'
+       AND s.status = 'Published'
+      WHERE t.id = ${result.entry.id}
+        AND NOW() >= s.starts_at - INTERVAL '4 hours'
+        AND NOW() <= s.ends_at + INTERVAL '4 hours'
+      ORDER BY ABS(EXTRACT(EPOCH FROM (s.starts_at - NOW())))
+      LIMIT 1
+    ` as unknown as Array<{
+      id: string;
+      position: string;
+      starts_at: string;
+      ends_at: string;
+      notes: string;
+    }>;
+
+    const shift = instructions[0];
+    return Response.json({
+      ...result,
+      scheduledShift: shift ? {
+        id: shift.id,
+        position: shift.position,
+        startsAt: shift.starts_at,
+        endsAt: shift.ends_at,
+        instructions: shift.notes,
+      } : null,
+    });
   } catch (error) {
     return apiError(error);
   }
