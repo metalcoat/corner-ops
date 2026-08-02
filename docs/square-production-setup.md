@@ -12,3 +12,5 @@ Configure these Vercel environment variables for the Preview environment while t
 Register the active Corner Ops deployment URL plus `/api/square/callback` in the Production OAuth settings of the Square Developer Dashboard.
 
 After changing Vercel environment variables, create a new deployment so the serverless functions receive the updated values.
+
+Latest credential refresh redeployment triggered: 2026-08-02 18:10 America/New_York.
