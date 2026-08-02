@@ -51,38 +51,111 @@ export async function updateDirectoryEmployee(input: {
   email?: string;
   pin?: string;
   active?: boolean;
+  name?: string;
+  position?: string;
+  roleGroup?: "Driver" | "In-House" | "Ignore";
+  countsForTips?: boolean;
+  hourlyRate?: number;
+  tippedRate?: number;
 }) {
   await ensureEmployeeDirectorySchema();
   const sql = getSql();
   const current = await sql`
-    SELECT id, business, email
+    SELECT id, business, email, name, position, role_group, counts_for_tips,
+      hourly_rate, tipped_rate, active
     FROM employees
     WHERE id = ${input.id} AND business = ${input.business}
     LIMIT 1
-  ` as unknown as Array<{ id: string; business: Business; email: string }>;
-  if (!current[0]) throw new Error("Employee not found.");
+  ` as unknown as Array<{
+    id: string;
+    business: Business;
+    email: string;
+    name: string;
+    position: string;
+    role_group: "Driver" | "In-House" | "Ignore";
+    counts_for_tips: boolean;
+    hourly_rate: number | string;
+    tipped_rate: number | string;
+    active: boolean;
+  }>;
+  const existing = current[0];
+  if (!existing) throw new Error("Employee not found.");
 
-  const email = input.email === undefined ? current[0].email : clean(input.email, 255).toLowerCase();
+  const email = input.email === undefined ? existing.email : clean(input.email, 255).toLowerCase();
+  const name = input.name === undefined ? existing.name : clean(input.name, 120);
+  const position = input.position === undefined ? existing.position : clean(input.position, 80);
+  const roleGroup = input.roleGroup ?? existing.role_group;
+  const countsForTips = input.countsForTips ?? existing.counts_for_tips;
+  const hourlyRate = Math.max(0, input.hourlyRate ?? Number(existing.hourly_rate));
+  const tippedRate = Math.max(0, input.tippedRate ?? Number(existing.tipped_rate));
+  const active = input.active ?? existing.active;
+
+  if (!name) throw new Error("Employee name is required.");
+  if (!position) throw new Error("Employee position is required.");
   if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new Error("Employee email is invalid.");
   const pin = input.pin ? clean(input.pin, 5) : "";
   if (pin && !/^\d{5}$/.test(pin)) throw new Error("Employee PINs must contain exactly five digits.");
 
+  const duplicate = await sql`
+    SELECT id FROM employees
+    WHERE business = ${input.business}
+      AND id <> ${input.id}
+      AND LOWER(BTRIM(name)) = LOWER(BTRIM(${name}))
+    LIMIT 1
+  ` as unknown as Array<{ id: string }>;
+  if (duplicate[0]) throw new Error("Another employee at this location already uses that name.");
+
   const rows = await sql`
     UPDATE employees SET
       email = ${email},
-      active = COALESCE(${input.active ?? null}, active),
+      name = ${name},
+      position = ${position},
+      role_group = ${roleGroup},
+      counts_for_tips = ${countsForTips},
+      hourly_rate = ${hourlyRate},
+      tipped_rate = ${tippedRate},
+      active = ${active},
       pin_hash = CASE WHEN ${pin} <> '' THEN ${pin ? pinHash(input.business, pin) : ""} ELSE pin_hash END,
       pin_enabled = CASE WHEN ${pin} <> '' THEN TRUE ELSE pin_enabled END,
       updated_at = NOW()
     WHERE id = ${input.id} AND business = ${input.business}
-    RETURNING id, email, name, pin_enabled, active
-  ` as unknown as Array<{ id: string; email: string; name: string; pin_enabled: boolean; active: boolean }>;
+    RETURNING id, email, name, position, role_group, counts_for_tips,
+      hourly_rate, tipped_rate, pin_enabled, active
+  ` as unknown as Array<Record<string, unknown>>;
 
+  if (name !== existing.name) {
+    await Promise.all([
+      sql`
+        UPDATE time_entries
+        SET employee_name = ${name}, updated_at = NOW()
+        WHERE employee_id = ${input.id}
+      `,
+      sql`
+        UPDATE employee_messages
+        SET sender_name = ${name}
+        WHERE sender_employee_id = ${input.id}
+      `,
+      input.business === "Corner Deli"
+        ? sql`
+            UPDATE rezku_shifts
+            SET employee_name = ${name}
+            WHERE LOWER(BTRIM(employee_name)) = LOWER(BTRIM(${existing.name}))
+          `
+        : Promise.resolve([]),
+    ]);
+  }
+
+  const row = rows[0];
   return {
-    id: rows[0].id,
-    email: rows[0].email,
-    name: rows[0].name,
-    pinEnabled: rows[0].pin_enabled,
-    active: rows[0].active,
+    id: String(row.id),
+    email: String(row.email || ""),
+    name: String(row.name),
+    position: String(row.position),
+    roleGroup: row.role_group as "Driver" | "In-House" | "Ignore",
+    countsForTips: Boolean(row.counts_for_tips),
+    hourlyRate: Number(row.hourly_rate || 0),
+    tippedRate: Number(row.tipped_rate || 0),
+    pinEnabled: Boolean(row.pin_enabled),
+    active: Boolean(row.active),
   };
 }
