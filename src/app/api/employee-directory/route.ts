@@ -15,6 +15,12 @@ function businessFrom(value: unknown): Business {
   throw new Error("Unknown business.");
 }
 
+function roleGroupFrom(value: unknown): "Driver" | "In-House" | "Ignore" | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value === "Driver" || value === "In-House" || value === "Ignore") return value;
+  throw new Error("Invalid employee role group.");
+}
+
 export async function GET(request: Request) {
   try {
     const session = await getSession();
@@ -41,30 +47,32 @@ export async function POST(request: Request) {
 
     const action = String(body.action || "create");
     if (action === "create") {
-      const roleGroup = String(body.roleGroup || "In-House");
-      if (roleGroup !== "Driver" && roleGroup !== "In-House" && roleGroup !== "Ignore") {
-        throw new Error("Invalid employee role group.");
-      }
       return Response.json(await createDirectoryEmployee({
         business,
         email: body.email ? String(body.email) : "",
         name: String(body.name || ""),
         pin: String(body.pin || ""),
         position: String(body.position || ""),
-        roleGroup,
+        roleGroup: roleGroupFrom(body.roleGroup) || "In-House",
         countsForTips: body.countsForTips !== false,
         hourlyRate: Number(body.hourlyRate || 0),
         tippedRate: Number(body.tippedRate || 0),
       }), { status: 201 });
     }
 
-    if (action === "update-access") {
+    if (action === "update-access" || action === "update-profile") {
       return Response.json(await updateDirectoryEmployee({
         id: String(body.id || ""),
         business,
         email: body.email === undefined ? undefined : String(body.email || ""),
         pin: body.pin ? String(body.pin) : undefined,
         active: body.active === undefined ? undefined : body.active === true,
+        name: body.name === undefined ? undefined : String(body.name || ""),
+        position: body.position === undefined ? undefined : String(body.position || ""),
+        roleGroup: roleGroupFrom(body.roleGroup),
+        countsForTips: body.countsForTips === undefined ? undefined : body.countsForTips === true,
+        hourlyRate: body.hourlyRate === undefined ? undefined : Number(body.hourlyRate || 0),
+        tippedRate: body.tippedRate === undefined ? undefined : Number(body.tippedRate || 0),
       }));
     }
 
