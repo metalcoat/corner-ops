@@ -1,7 +1,10 @@
 {
   "name": "corner-ops",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -9,9 +12,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "16.0.0",
-    "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "@neondatabase/serverless": "^1.0.2",
+    "@vercel/blob": "^2.3.0",
+    "next": "^16.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

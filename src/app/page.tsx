@@ -1,182 +1,255 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  businesses,
+  documentStatuses,
+  type Business,
+  type DocumentRecord,
+  type DocumentStatus,
+  type SessionView,
+} from "@/lib/types";
 
-type Business = "Corner Deli" | "Tiki";
-type Status = "Active" | "Needs Review" | "Archived";
+const categories = ["Operations", "Inventory", "Financial", "Compliance", "Employee", "Vendor", "General"];
 
-type DocumentRecord = {
-  id: string;
-  business: Business;
-  title: string;
-  category: string;
-  documentDate: string;
-  status: Status;
-  notes: string;
-  fileName: string;
-  createdAt: string;
-};
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
-const starterDocuments: DocumentRecord[] = [
-  {
-    id: "starter-1",
-    business: "Corner Deli",
-    title: "Opening checklist",
-    category: "Operations",
-    documentDate: "2026-08-01",
-    status: "Active",
-    notes: "Daily opening and food-prep checklist.",
-    fileName: "opening-checklist.pdf",
-    createdAt: "2026-08-01T09:00:00.000Z",
-  },
-  {
-    id: "starter-2",
-    business: "Tiki",
-    title: "Seasonal liquor inventory",
-    category: "Inventory",
-    documentDate: "2026-07-30",
-    status: "Needs Review",
-    notes: "Reconcile against current bar stock.",
-    fileName: "tiki-inventory.xlsx",
-    createdAt: "2026-07-30T15:30:00.000Z",
-  },
-];
-
-const STORAGE_KEY = "corner-ops-documents-v1";
+async function responseMessage(response: Response): Promise<string> {
+  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+  return payload?.error || `Request failed (${response.status}).`;
+}
 
 export default function Home() {
+  const [session, setSession] = useState<SessionView | null>(null);
   const [business, setBusiness] = useState<Business>("Corner Deli");
-  const [documents, setDocuments] = useState<DocumentRecord[]>(starterDocuments);
+  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<"All" | Status>("All");
+  const [status, setStatus] = useState<"All" | DocumentStatus>("All");
   const [showUpload, setShowUpload] = useState(false);
+  const [loadingDocuments, setLoadingDocuments] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (saved) setDocuments(JSON.parse(saved) as DocumentRecord[]);
+    fetch("/api/auth/session", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: SessionView) => setSession(data))
+      .catch(() => setSession({ authenticated: false, configured: false, missing: ["Unable to reach the server"] }));
   }, []);
 
+  async function loadDocuments(activeBusiness = business) {
+    setLoadingDocuments(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/documents?business=${encodeURIComponent(activeBusiness)}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      const payload = (await response.json()) as { documents: DocumentRecord[] };
+      setDocuments(payload.documents);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Documents could not be loaded.");
+    } finally {
+      setLoadingDocuments(false);
+    }
+  }
+
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(documents));
-  }, [documents]);
+    if (session?.authenticated && session.configured) void loadDocuments(business);
+    // loadDocuments intentionally stays outside the dependency list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [business, session?.authenticated, session?.configured]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return documents
-      .filter((document) => document.business === business)
-      .filter((document) => status === "All" || document.status === status)
-      .filter((document) =>
-        !needle ||
-        [document.title, document.category, document.notes, document.fileName]
-          .join(" ")
-          .toLowerCase()
-          .includes(needle),
-      )
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [business, documents, query, status]);
+    return documents.filter((document) => {
+      const matchesStatus = status === "All" || document.status === status;
+      const matchesQuery = !needle || [document.title, document.category, document.notes, document.fileName]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+      return matchesStatus && matchesQuery;
+    });
+  }, [documents, query, status]);
 
-  function addDocument(event: FormEvent<HTMLFormElement>) {
+  async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setBusy(true);
+    setMessage("");
     const form = new FormData(event.currentTarget);
-    const file = form.get("file") as File;
-    const record: DocumentRecord = {
-      id: crypto.randomUUID(),
-      business,
-      title: String(form.get("title") || file?.name || "Untitled document"),
-      category: String(form.get("category") || "General"),
-      documentDate: String(form.get("documentDate") || new Date().toISOString().slice(0, 10)),
-      status: String(form.get("status") || "Active") as Status,
-      notes: String(form.get("notes") || ""),
-      fileName: file?.name || "No file selected",
-      createdAt: new Date().toISOString(),
-    };
-    setDocuments((current) => [record, ...current]);
-    event.currentTarget.reset();
-    setShowUpload(false);
+    try {
+      const response = await fetch("/api/auth/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: String(form.get("password") || "") }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      const data = (await response.json()) as SessionView;
+      setSession({ ...data, configured: true, missing: [] });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Login failed.");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  const businessDocuments = documents.filter((document) => document.business === business);
-  const needsReview = businessDocuments.filter((document) => document.status === "Needs Review").length;
+  async function logout() {
+    await fetch("/api/auth/session", { method: "DELETE" });
+    setDocuments([]);
+    setSession((current) => ({ authenticated: false, configured: current?.configured ?? true, missing: current?.missing ?? [] }));
+  }
+
+  async function uploadDocument(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage("");
+    const form = new FormData(event.currentTarget);
+    form.set("business", business);
+    try {
+      const response = await fetch("/api/documents", { method: "POST", body: form });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      event.currentTarget.reset();
+      setShowUpload(false);
+      await loadDocuments();
+      setMessage("Document uploaded.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Upload failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteDocument(document: DocumentRecord) {
+    if (!window.confirm(`Delete “${document.title}” and its stored file?`)) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/documents/${document.id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      setDocuments((current) => current.filter((item) => item.id !== document.id));
+      setMessage("Document deleted.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!session) {
+    return <main className="centered"><div className="loginCard"><p className="eyebrow">Corner Ops</p><h1>Loading</h1><p className="muted">Checking the filing cabinet for signs of life.</p></div></main>;
+  }
+
+  if (!session.configured) {
+    return (
+      <main className="centered">
+        <section className="loginCard setupCard">
+          <p className="eyebrow">Setup required</p>
+          <h1>Connect storage and secrets</h1>
+          <p className="muted">The app is built, but these environment variables are still missing:</p>
+          <div className="missingList">{session.missing.map((name) => <code key={name}>{name}</code>)}</div>
+          <p className="muted">Add them in Vercel or <code>.env.local</code>, then reload.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!session.authenticated) {
+    return (
+      <main className="centered">
+        <form className="loginCard" onSubmit={login}>
+          <p className="eyebrow">Internal operations</p>
+          <h1>Corner Ops</h1>
+          <p className="muted">One password between you and the paperwork. Civilization remains fragile.</p>
+          <label>Password<input name="password" type="password" autoComplete="current-password" required autoFocus /></label>
+          {message && <p className="formMessage errorMessage">{message}</p>}
+          <button className="primary" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+        </form>
+      </main>
+    );
+  }
+
+  const needsReview = documents.filter((document) => document.status === "Needs Review").length;
+  const currentDate = new Intl.DateTimeFormat("en-US", { dateStyle: "full" }).format(new Date());
 
   return (
     <main className="shell">
       <aside className="sidebar">
-        <div>
-          <p className="eyebrow">Internal operations</p>
-          <h1>Corner Ops</h1>
-        </div>
+        <div><p className="eyebrow">Internal operations</p><h1>Corner Ops</h1></div>
         <nav>
-          <button className="navItem active">Dashboard</button>
-          <button className="navItem">Documents</button>
-          <button className="navItem">Tasks</button>
-          <button className="navItem">Reports</button>
+          <button className="navItem active">Documents</button>
+          <button className="navItem" disabled>Tasks <span>Soon</span></button>
+          <button className="navItem" disabled>Reports <span>Soon</span></button>
         </nav>
-        <p className="sidebarNote">Built for the deli and the bar, because apparently one business was not enough paperwork.</p>
+        <div className="sidebarFooter">
+          <p>{session.email}</p>
+          <button className="textButton neutral" onClick={logout}>Sign out</button>
+        </div>
       </aside>
 
       <section className="content">
         <header className="topbar">
-          <div>
-            <p className="eyebrow">Sunday, August 2, 2026</p>
-            <h2>{business} dashboard</h2>
-          </div>
+          <div><p className="eyebrow">{currentDate}</p><h2>{business} documents</h2></div>
           <div className="businessSwitch" aria-label="Choose business">
-            {(["Corner Deli", "Tiki"] as Business[]).map((name) => (
-              <button key={name} className={business === name ? "selected" : ""} onClick={() => setBusiness(name)}>
-                {name}
-              </button>
+            {businesses.map((name) => (
+              <button key={name} className={business === name ? "selected" : ""} onClick={() => setBusiness(name)}>{name}</button>
             ))}
           </div>
         </header>
 
         <section className="stats">
-          <article><span>Total documents</span><strong>{businessDocuments.length}</strong></article>
+          <article><span>Total documents</span><strong>{documents.length}</strong></article>
           <article><span>Needs review</span><strong>{needsReview}</strong></article>
-          <article><span>Active records</span><strong>{businessDocuments.filter((d) => d.status === "Active").length}</strong></article>
+          <article><span>Active records</span><strong>{documents.filter((d) => d.status === "Active").length}</strong></article>
         </section>
 
         <section className="panel">
           <div className="panelHeader">
-            <div>
-              <p className="eyebrow">Document vault</p>
-              <h3>Files and records</h3>
-            </div>
-            <button className="primary" onClick={() => setShowUpload((value) => !value)}>
-              {showUpload ? "Close" : "+ Add document"}
+            <div><p className="eyebrow">Private document vault</p><h3>Files and records</h3></div>
+            <button className="primary" onClick={() => setShowUpload((value) => !value)} disabled={busy}>
+              {showUpload ? "Close" : "+ Upload document"}
             </button>
           </div>
 
           {showUpload && (
-            <form className="uploadForm" onSubmit={addDocument}>
-              <label>Title<input name="title" required /></label>
-              <label>Category<select name="category"><option>Operations</option><option>Inventory</option><option>Financial</option><option>Compliance</option><option>Employee</option><option>General</option></select></label>
-              <label>Document date<input name="documentDate" type="date" required /></label>
-              <label>Status<select name="status"><option>Active</option><option>Needs Review</option><option>Archived</option></select></label>
-              <label className="wide">Original file<input name="file" type="file" required /></label>
-              <label className="wide">Notes<textarea name="notes" rows={3} /></label>
-              <button className="primary" type="submit">Save record</button>
+            <form className="uploadForm" onSubmit={uploadDocument}>
+              <label>Title<input name="title" maxLength={180} required /></label>
+              <label>Category<select name="category">{categories.map((category) => <option key={category}>{category}</option>)}</select></label>
+              <label>Document date<input name="documentDate" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required /></label>
+              <label>Status<select name="status">{documentStatuses.map((name) => <option key={name}>{name}</option>)}</select></label>
+              <label className="wide">Original file<input name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.csv,.txt,.doc,.docx,.xls,.xlsx" required /></label>
+              <label className="wide">Notes<textarea name="notes" rows={3} maxLength={2000} /></label>
+              <button className="primary" type="submit" disabled={busy}>{busy ? "Uploading…" : "Upload and save"}</button>
             </form>
           )}
 
           <div className="filters">
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, category, filename, or notes" />
-            <select value={status} onChange={(event) => setStatus(event.target.value as "All" | Status)}>
-              <option>All</option><option>Active</option><option>Needs Review</option><option>Archived</option>
+            <select value={status} onChange={(event) => setStatus(event.target.value as "All" | DocumentStatus)}>
+              <option>All</option>{documentStatuses.map((name) => <option key={name}>{name}</option>)}
             </select>
           </div>
 
-          <div className="documentList">
-            {filtered.length === 0 ? (
-              <div className="empty">No documents match those filters. Humanity survives another search box.</div>
+          {message && <div className="notice">{message}</div>}
+
+          <div className="documentList" aria-busy={loadingDocuments}>
+            {loadingDocuments ? (
+              <div className="empty">Loading documents…</div>
+            ) : filtered.length === 0 ? (
+              <div className="empty">No documents match those filters. The filing cabinet has achieved temporary peace.</div>
             ) : filtered.map((document) => (
               <article className="documentRow" key={document.id}>
                 <div className="fileIcon">{document.fileName.split(".").pop()?.toUpperCase() || "FILE"}</div>
                 <div className="documentMain">
                   <div className="documentTitle"><strong>{document.title}</strong><span className={`badge ${document.status.replaceAll(" ", "").toLowerCase()}`}>{document.status}</span></div>
-                  <p>{document.fileName}</p>
+                  <p>{document.fileName} · {formatBytes(document.sizeBytes)}</p>
                   <small>{document.category} · {document.documentDate}{document.notes ? ` · ${document.notes}` : ""}</small>
                 </div>
-                <button className="textButton" onClick={() => setDocuments((current) => current.filter((item) => item.id !== document.id))}>Remove</button>
+                <div className="rowActions">
+                  <a className="secondary" href={`/api/documents/${document.id}/download`}>Download</a>
+                  <button className="textButton" onClick={() => deleteDocument(document)} disabled={busy}>Delete</button>
+                </div>
               </article>
             ))}
           </div>

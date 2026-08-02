@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Corner Ops",
-  description: "Corner Deli and Tiki operations dashboard",
+  description: "Internal operations for Corner Deli and Tiki",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
