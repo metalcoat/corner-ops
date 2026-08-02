@@ -26,9 +26,55 @@ export default function GlobalNav() {
   const pathname = usePathname();
 
   useEffect(() => {
+    let restoredPageSelection = false;
+
+    function savedBusiness(): Business | null {
+      const saved = window.localStorage.getItem("corner-ops-business-theme");
+      return validBusiness(saved) ? saved : null;
+    }
+
     function applyTheme(business: Business) {
       document.documentElement.dataset.businessTheme = business;
       window.localStorage.setItem("corner-ops-business-theme", business);
+    }
+
+    function restoreBusinessControl(): boolean {
+      if (restoredPageSelection || pathname === "/clock") return false;
+
+      if (pathname.startsWith("/employee")) {
+        const employeeLabel = Array.from(document.querySelectorAll<HTMLElement>(".empEyebrow"))
+          .map((element) => element.textContent?.trim())
+          .find(validBusiness);
+        if (employeeLabel) {
+          restoredPageSelection = true;
+          return false;
+        }
+
+        const select = document.querySelector<HTMLSelectElement>('select[name="business"]');
+        const saved = savedBusiness();
+        if (!select) return false;
+        restoredPageSelection = true;
+        if (saved && select.value !== saved) select.value = saved;
+        if (saved) applyTheme(saved);
+        return false;
+      }
+
+      const switcher = document.querySelector<HTMLElement>(".businessSwitch, .wfBusinessSwitch");
+      if (!switcher) return false;
+      restoredPageSelection = true;
+
+      const saved = savedBusiness();
+      if (!saved) return false;
+      const selected = switcher.querySelector<HTMLElement>(".selected")?.textContent?.trim();
+      if (selected === saved) return false;
+
+      const matchingButton = Array.from(switcher.querySelectorAll<HTMLButtonElement>("button"))
+        .find((button) => button.textContent?.trim() === saved);
+      if (!matchingButton) return false;
+
+      applyTheme(saved);
+      matchingButton.click();
+      return true;
     }
 
     function detectBusiness(): Business {
@@ -50,22 +96,13 @@ export default function GlobalNav() {
         if (validBusiness(loginBusiness)) return loginBusiness;
       }
 
-      const saved = window.localStorage.getItem("corner-ops-business-theme");
-      return validBusiness(saved) ? saved : "Corner Deli";
+      return savedBusiness() || "Corner Deli";
     }
 
     function synchronizeTheme() {
+      if (restoreBusinessControl()) return;
       applyTheme(detectBusiness());
     }
-
-    synchronizeTheme();
-    const observer = new MutationObserver(synchronizeTheme);
-    observer.observe(document.body, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: ["class"],
-    });
 
     function handleInteraction(event: Event) {
       const target = event.target;
@@ -83,8 +120,17 @@ export default function GlobalNav() {
       }
     }
 
+    const observer = new MutationObserver(synchronizeTheme);
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["class"],
+    });
     document.addEventListener("click", handleInteraction, true);
     document.addEventListener("change", handleInteraction, true);
+    window.requestAnimationFrame(synchronizeTheme);
+
     return () => {
       observer.disconnect();
       document.removeEventListener("click", handleInteraction, true);
