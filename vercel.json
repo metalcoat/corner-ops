@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/scheduler-0700",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/scheduler-0800",
+      "schedule": "0 8 * * *"
+    }
+  ]
+}
