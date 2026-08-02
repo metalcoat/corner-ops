@@ -40,12 +40,12 @@ export async function updateScheduleShiftSafely(input: {
   const requestedEmployee = input.employeeId === undefined
     ? (current.employee_id ? String(current.employee_id) : null)
     : input.employeeId;
-  const employeeId = status === "Open" || status === "Cancelled" ? null : requestedEmployee;
+  const employeeId = status === "Open" ? null : requestedEmployee;
   if (status !== "Open" && status !== "Cancelled" && !employeeId) {
     throw new Error("Choose an employee or mark the shift open.");
   }
 
-  if (employeeId) {
+  if (employeeId && status !== "Cancelled") {
     const employee = await sql`
       SELECT id FROM employees
       WHERE id = ${employeeId} AND business = ${input.business} AND active = TRUE
