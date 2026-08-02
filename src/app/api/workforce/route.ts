@@ -1,6 +1,7 @@
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import { createEmployee, updateEmployee } from "@/lib/operations";
+import { updateScheduleShiftSafely } from "@/lib/schedule-actions";
 import type { Business } from "@/lib/types";
 import {
   copyScheduleWeek,
@@ -9,7 +10,6 @@ import {
   reviewTimeCorrection,
   reviewTimeOff,
   sendOwnerMessage,
-  updateScheduleShift,
   workforceDashboard,
 } from "@/lib/workforce";
 
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
       if (status && status !== "Draft" && status !== "Published" && status !== "Open" && status !== "Cancelled") {
         throw new Error("Invalid shift status.");
       }
-      return Response.json(await updateScheduleShift({
+      return Response.json(await updateScheduleShiftSafely({
         id: String(body.id || ""),
         business,
         employeeId: body.employeeId === undefined ? undefined : body.employeeId ? String(body.employeeId) : null,
