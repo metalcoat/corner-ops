@@ -9,10 +9,19 @@ type Position = {
   status: string;
 };
 
+type ScheduledShift = {
+  id: string;
+  position: string;
+  startsAt: string;
+  endsAt: string;
+  instructions: string;
+};
+
 export default function TikiClockPage() {
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [instructions, setInstructions] = useState<ScheduledShift | null>(null);
   const [tone, setTone] = useState<"good" | "bad" | "">("");
   const [now, setNow] = useState(new Date());
   const [position, setPosition] = useState<Position>({
@@ -48,6 +57,7 @@ export default function TikiClockPage() {
     event.preventDefault();
     setBusy(true);
     setMessage("");
+    setInstructions(null);
     setTone("");
     try {
       const response = await fetch("/api/timeclock", {
@@ -64,10 +74,12 @@ export default function TikiClockPage() {
         error?: string;
         action?: "clocked-in" | "clocked-out";
         employee?: string;
+        scheduledShift?: ScheduledShift | null;
       };
       if (!response.ok) throw new Error(payload.error || "Punch failed.");
       const action = payload.action === "clocked-out" ? "clocked out" : "clocked in";
       setMessage(`${payload.employee} ${action} successfully.`);
+      setInstructions(payload.action === "clocked-in" ? payload.scheduledShift || null : null);
       setTone("good");
       setPin("");
     } catch (error) {
@@ -123,6 +135,12 @@ export default function TikiClockPage() {
 
         <p className="locationStatus">{position.status}</p>
         {message && <div className={`clockMessage ${tone}`}>{message}</div>}
+        {instructions && <section className="clockInstructions" aria-live="polite">
+          <p className="eyebrow">Instructions for this shift</p>
+          <strong>{instructions.position || "Scheduled shift"}</strong>
+          <span>{new Date(instructions.startsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} – {new Date(instructions.endsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+          {instructions.instructions ? <p>{instructions.instructions}</p> : <p>No additional instructions were added.</p>}
+        </section>}
         <a className="clockAdminLink" href="/">Owner sign-in</a>
       </section>
     </main>
