@@ -6,6 +6,7 @@ import "./global-nav.css";
 const links = [
   ["Operations", "/ops"],
   ["Workforce", "/ops/workforce"],
+  ["Employees", "/ops/employees"],
   ["Scheduler & Integrations", "/ops/integrations"],
   ["Bank Accounts", "/ops/bank-accounts"],
   ["Documents", "/"],
