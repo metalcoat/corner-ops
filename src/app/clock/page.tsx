@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import "./clock.css";
 
 type Position = {
   latitude: number | null;
