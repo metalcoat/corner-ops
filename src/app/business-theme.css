@@ -1,0 +1,233 @@
+/* Business identity themes. Layout remains shared; only visual tokens change. */
+:root,
+html[data-business-theme="Corner Deli"] {
+  --bg: #170d0f;
+  --panel: #251619;
+  --panel-2: #342024;
+  --border: #5a3438;
+  --muted: #c3a5a0;
+  --text: #fff8ef;
+  --accent: #f4a261;
+  --accent-strong: #e4572e;
+  --accent-soft: #4a2020;
+  --accent-contrast: #2a0d08;
+  --theme-glow: rgb(228 87 46 / 24%);
+  --theme-glow-secondary: rgb(244 162 97 / 12%);
+  --theme-panel-top: #2c191c;
+  --theme-panel-bottom: #180f12;
+  --theme-nav: rgb(25 12 14 / 95%);
+  --theme-input: #120a0c;
+  --theme-table-head: #2b181b;
+  --theme-chip: #4a292c;
+  --theme-chip-text: #ffe0c2;
+}
+
+html[data-business-theme="Tiki"] {
+  --bg: #04151e;
+  --panel: #0a2530;
+  --panel-2: #103640;
+  --border: #23586a;
+  --muted: #91bcc5;
+  --text: #efffff;
+  --accent: #48dfc6;
+  --accent-strong: #20a9bd;
+  --accent-soft: #0b4149;
+  --accent-contrast: #03272b;
+  --theme-glow: rgb(32 169 189 / 28%);
+  --theme-glow-secondary: rgb(255 126 103 / 10%);
+  --theme-panel-top: #0d2c37;
+  --theme-panel-bottom: #061923;
+  --theme-nav: rgb(3 19 27 / 95%);
+  --theme-input: #03131b;
+  --theme-table-head: #0b2b35;
+  --theme-chip: #164956;
+  --theme-chip-text: #c4fff5;
+}
+
+html[data-business-theme] body {
+  background:
+    radial-gradient(circle at 8% 0%, var(--theme-glow), transparent 34rem),
+    radial-gradient(circle at 92% 12%, var(--theme-glow-secondary), transparent 30rem),
+    var(--bg);
+  transition: background-color .22s ease, color .22s ease;
+}
+
+html[data-business-theme] .globalOwnerNav {
+  background: var(--theme-nav);
+  border-bottom-color: var(--border);
+}
+html[data-business-theme] .globalBrand { color: var(--text); }
+html[data-business-theme] .globalBrand::after {
+  display: inline-flex;
+  margin-left: 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: .62rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
+html[data-business-theme="Corner Deli"] .globalBrand::after { content: "Corner Deli"; }
+html[data-business-theme="Tiki"] .globalBrand::after { content: "Tiki"; }
+html[data-business-theme] .globalNavLinks a:hover { background: var(--panel-2); color: var(--text); }
+html[data-business-theme] .globalNavLinks a.active {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  color: var(--accent);
+}
+
+html[data-business-theme] .sidebar,
+html[data-business-theme] .panel,
+html[data-business-theme] .stats article,
+html[data-business-theme] .moduleCard,
+html[data-business-theme] .toolbarPanel,
+html[data-business-theme] .clockCard,
+html[data-business-theme] .workforcePanel,
+html[data-business-theme] .wfStats article,
+html[data-business-theme] .employeeCard,
+html[data-business-theme] .employeeStats article,
+html[data-business-theme] .employeeLoginCard {
+  border-color: var(--border);
+  background: linear-gradient(180deg, var(--theme-panel-top), var(--theme-panel-bottom));
+}
+
+html[data-business-theme] .businessSwitch,
+html[data-business-theme] .wfBusinessSwitch {
+  border-color: var(--border);
+  background: var(--panel);
+}
+html[data-business-theme] .businessSwitch button,
+html[data-business-theme] .wfBusinessSwitch button,
+html[data-business-theme] .wfTabs button,
+html[data-business-theme] .employeeTabs button {
+  border-color: var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+}
+html[data-business-theme] .businessSwitch .selected,
+html[data-business-theme] .wfBusinessSwitch button.selected,
+html[data-business-theme] .wfTabs button.active,
+html[data-business-theme] .employeeTabs button.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+html[data-business-theme] .eyebrow,
+html[data-business-theme] .wfEyebrow,
+html[data-business-theme] .empEyebrow,
+html[data-business-theme] .fileIcon,
+html[data-business-theme] .wfTextLink,
+html[data-business-theme] .wfSourceNote,
+html[data-business-theme] .empClockLink {
+  color: var(--accent) !important;
+}
+
+html[data-business-theme] .primary,
+html[data-business-theme] .wfPrimary,
+html[data-business-theme] .employeeLoginForm button,
+html[data-business-theme] .employeeForm button,
+html[data-business-theme] .employeeShift button,
+html[data-business-theme] .employeeRequest button:not(.empSecondary) {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+html[data-business-theme] .primary:hover,
+html[data-business-theme] .wfPrimary:hover,
+html[data-business-theme] .employeeForm button:hover,
+html[data-business-theme] .employeeShift button:hover {
+  background: color-mix(in srgb, var(--accent) 82%, white);
+}
+html[data-business-theme] .secondary,
+html[data-business-theme] .wfSecondary,
+html[data-business-theme] .wfActions button,
+html[data-business-theme] .employeeHeaderActions a,
+html[data-business-theme] .employeeHeaderActions button,
+html[data-business-theme] .employeeRequest button.empSecondary {
+  border-color: var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+html[data-business-theme] input,
+html[data-business-theme] select,
+html[data-business-theme] textarea,
+html[data-business-theme] .pinDisplay {
+  border-color: var(--border);
+  background: var(--theme-input);
+  color: var(--text);
+}
+html[data-business-theme] input:focus,
+html[data-business-theme] select:focus,
+html[data-business-theme] textarea:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  outline-offset: 1px;
+}
+
+html[data-business-theme] .notice,
+html[data-business-theme] .wfNotice,
+html[data-business-theme] .empNotice {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-soft);
+  color: var(--text);
+}
+html[data-business-theme] .dataTable th { background: var(--theme-table-head); }
+html[data-business-theme] .dataTable th,
+html[data-business-theme] .dataTable td,
+html[data-business-theme] .panelHeader,
+html[data-business-theme] .documentRow,
+html[data-business-theme] .compactList > div,
+html[data-business-theme] .ruleStrip {
+  border-color: var(--border);
+}
+html[data-business-theme] .ruleStrip span,
+html[data-business-theme] .badge,
+html[data-business-theme] .wfBadge {
+  background: var(--theme-chip);
+  color: var(--theme-chip-text);
+}
+
+html[data-business-theme] .wfShift,
+html[data-business-theme] .wfRequest,
+html[data-business-theme] .wfCorrection,
+html[data-business-theme] .wfMessage,
+html[data-business-theme] .wfAvailabilityGrid article,
+html[data-business-theme] .employeeShift,
+html[data-business-theme] .employeeRequest,
+html[data-business-theme] .employeeHistory,
+html[data-business-theme] .employeeMessage,
+html[data-business-theme] .teamSchedule div {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--panel) 72%, black);
+}
+
+html[data-business-theme="Corner Deli"] .clockPage,
+html[data-business-theme="Corner Deli"] .employeeLoginShell {
+  background: radial-gradient(circle at top, rgb(228 87 46 / 28%), transparent 38rem), var(--bg);
+}
+html[data-business-theme="Tiki"] .clockPage,
+html[data-business-theme="Tiki"] .employeeLoginShell {
+  background:
+    radial-gradient(circle at 15% 0%, rgb(72 223 198 / 24%), transparent 36rem),
+    radial-gradient(circle at 85% 15%, rgb(255 126 103 / 13%), transparent 28rem),
+    var(--bg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html[data-business-theme] body,
+  html[data-business-theme] .globalOwnerNav,
+  html[data-business-theme] .panel,
+  html[data-business-theme] .workforcePanel,
+  html[data-business-theme] .employeeCard,
+  html[data-business-theme] button,
+  html[data-business-theme] input,
+  html[data-business-theme] select,
+  html[data-business-theme] textarea {
+    transition: background-color .2s ease, border-color .2s ease, color .2s ease, box-shadow .2s ease;
+  }
+}
