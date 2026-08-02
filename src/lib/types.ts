@@ -19,6 +19,16 @@ export type DocumentRecord = {
   createdBy: string;
 };
 
+export type AuditEvent = {
+  id: string;
+  business: Business;
+  documentId: string | null;
+  action: "uploaded" | "updated" | "archived" | "restored" | "deleted";
+  actor: string;
+  details: Record<string, unknown>;
+  createdAt: string;
+};
+
 export type SessionView = {
   authenticated: boolean;
   configured: boolean;

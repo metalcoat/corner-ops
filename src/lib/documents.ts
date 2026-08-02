@@ -101,3 +101,21 @@ export async function removeDocument(id: string): Promise<StoredDocument | null>
   `) as DocumentRow[];
   return rows[0] ? mapRow(rows[0]) : null;
 }
+
+export type DocumentUpdate = Pick<StoredDocument, "title" | "category" | "documentDate" | "status" | "notes">;
+
+export async function updateDocument(id: string, input: DocumentUpdate): Promise<DocumentRecord | null> {
+  await ensureSchema();
+  const rows = (await getSql()`
+    UPDATE documents
+    SET title = ${input.title},
+        category = ${input.category},
+        document_date = ${input.documentDate},
+        status = ${input.status},
+        notes = ${input.notes}
+    WHERE id = ${id}
+    RETURNING id, business, title, category, document_date, status, notes, file_name,
+              content_type, size_bytes, blob_url, blob_pathname, created_by, created_at
+  `) as DocumentRow[];
+  return rows[0] ? mapRow(rows[0]) : null;
+}

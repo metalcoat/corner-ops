@@ -97,3 +97,23 @@ textarea { resize: vertical; }
   .documentRow { grid-template-columns: 48px 1fr; }
   .rowActions { grid-column: 2; justify-content: flex-start; }
 }
+
+.editForm { border-top: 0; }
+.editHeading { display: flex !important; align-items: center; justify-content: space-between; gap: 16px; }
+.editHeading p { margin-bottom: 4px; }
+.activityPanel { margin-top: 20px; }
+.activityList { display: grid; }
+.activityList article { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 15px 20px; border-bottom: 1px solid var(--border); }
+.activityList article:last-child { border-bottom: 0; }
+.activityList strong, .activityList small { display: block; }
+.activityList small, .activityList time { margin-top: 5px; color: var(--muted); font-size: 12px; }
+.activityList time { flex: 0 0 auto; }
+
+@media (max-width: 1000px) {
+  .documentRow { grid-template-columns: 48px 1fr; }
+  .rowActions { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; }
+}
+
+@media (max-width: 600px) {
+  .activityList article { align-items: flex-start; flex-direction: column; gap: 3px; }
+}

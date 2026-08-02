@@ -1,4 +1,5 @@
 import { del, put } from "@vercel/blob";
+import { recordAuditEvent } from "@/lib/audit";
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { assertConfigured } from "@/lib/config";
 import { insertDocument, listDocuments } from "@/lib/documents";
@@ -94,6 +95,14 @@ export async function POST(request: Request) {
       blobUrl: blob.url,
       blobPathname: blob.pathname,
       createdBy: session.email,
+    });
+
+    await recordAuditEvent({
+      business,
+      documentId: document.id,
+      action: "uploaded",
+      actor: session.email,
+      details: { title: document.title, fileName: document.fileName },
     });
 
     return Response.json({ document }, { status: 201 });

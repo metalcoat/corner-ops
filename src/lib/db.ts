@@ -34,6 +34,18 @@ export function ensureSchema(): Promise<void> {
       `;
       await sql`CREATE INDEX IF NOT EXISTS documents_business_created_idx ON documents (business, created_at DESC)`;
       await sql`CREATE INDEX IF NOT EXISTS documents_status_idx ON documents (status)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS audit_events (
+          id UUID PRIMARY KEY,
+          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
+          document_id UUID,
+          action TEXT NOT NULL CHECK (action IN ('uploaded', 'updated', 'archived', 'restored', 'deleted')),
+          actor TEXT NOT NULL,
+          details JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS audit_events_business_created_idx ON audit_events (business, created_at DESC)`;
     })().catch((error) => {
       schemaPromise = null;
       throw error;

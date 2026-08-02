@@ -11,7 +11,10 @@ Corner Ops is the internal document system for **Corner Deli** and **Tiki**. The
 - Store original files in a private Vercel Blob store
 - Search and filter by title, category, filename, notes, and status
 - Authenticated file downloads streamed through the app
+- Edit document metadata and status
+- Archive and restore records before permanent deletion
 - Delete both the database record and private stored file
+- Record uploads, edits, archives, restores, and deletions in an audit trail
 - Automatic database table/index creation on the first request
 - Friendly setup screen when required environment variables are missing
 
@@ -36,7 +39,7 @@ Corner Ops is the internal document system for **Corner Deli** and **Tiki**. The
 
 Neon supplies `DATABASE_URL`; Blob supplies `BLOB_READ_WRITE_TOKEN`. Deploy again after all variables are present.
 
-The `documents` table is created automatically. The equivalent SQL is kept in `db/schema.sql` for inspection or manual setup.
+The `documents` and `audit_events` tables are created automatically. The equivalent SQL is kept in `db/schema.sql` for inspection or manual setup.
 
 ## Local development
 
@@ -62,16 +65,16 @@ GitHub Actions runs both checks for every pull request and push to `main`.
 ## Security notes
 
 - Files are uploaded to a private Blob store and are never linked directly in the UI.
-- Every list, upload, delete, and download route validates the signed session and business access.
+- Every list, upload, edit, delete, and download route validates the signed session and business access.
 - Private downloads use `Cache-Control: private, no-cache` and are streamed through an authenticated route.
 - Password comparison uses constant-time comparison.
+- Permanent deletion is blocked until a record has been archived.
 - This milestone intentionally supports one owner account. Multi-user invitations and role management belong in the next milestone.
 
 ## Next milestones
 
 1. User invitations and employee roles
-2. Edit document metadata and archive instead of delete
-3. OCR and automatic document classification
-4. Email/scan inbox ingestion
-5. Audit log and retention rules
-6. Dashboard tasks, expiration reminders, and reports
+2. OCR and automatic document classification
+3. Email/scan inbox ingestion
+4. Exportable audit reports and retention rules
+5. Dashboard tasks, expiration reminders, and reports
