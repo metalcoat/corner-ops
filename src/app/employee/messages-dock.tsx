@@ -74,9 +74,9 @@ export default function EmployeeMessagesDock() {
     void load().catch((error) => setNotice(error instanceof Error ? error.message : "Messages could not be loaded."));
     const interval = window.setInterval(() => {
       void load().catch(() => undefined);
-    }, 30_000);
+    }, session ? 30_000 : 5_000);
     return () => window.clearInterval(interval);
-  }, [load]);
+  }, [load, session]);
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
