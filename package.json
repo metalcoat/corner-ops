@@ -1,6 +1,6 @@
 {
   "name": "corner-ops",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "engines": {
     "node": "22.x"
@@ -17,6 +17,7 @@
     "next": "^16.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "resend": "^6.9.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
