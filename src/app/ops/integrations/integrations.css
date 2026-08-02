@@ -1,0 +1,33 @@
+.integrationShell { min-height: 100vh; padding: 84px 32px 40px; background: var(--bg); }
+.integrationHeader { display: flex; align-items: center; justify-content: space-between; gap: 24px; max-width: 1500px; margin: 0 auto; }
+.integrationHeader h1 { font-size: clamp(30px, 4vw, 52px); }
+.integrationNotice { max-width: 1500px; margin: 22px auto 0; border: 1px solid var(--border); border-radius: 10px; }
+.integrationStats, .integrationGrid, .integrationSection { max-width: 1500px; margin-left: auto; margin-right: auto; }
+.integrationGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 22px; }
+.integrationCard { min-width: 0; }
+.integrationBody { display: grid; gap: 16px; padding: 22px; }
+.integrationBody p { color: var(--muted); line-height: 1.55; }
+.connectionRow { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.connectionRow strong, .connectionRow small { display: block; }
+.connectionRow small { margin-top: 5px; color: var(--muted); }
+.miniStats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.miniStats div { padding: 13px; border: 1px solid var(--border); border-radius: 9px; background: #101620; }
+.miniStats span, .miniStats strong { display: block; }
+.miniStats span { color: var(--muted); font-size: 11px; }
+.miniStats strong { margin-top: 6px; }
+.integrationSection { margin-top: 22px; }
+.lowerGrid { margin-bottom: 30px; }
+.positiveAmount { color: #8fe2c2; }
+.negativeAmount { color: #ffb0b0; }
+.approveButton { white-space: nowrap; }
+.disabledLink { pointer-events: none; opacity: .45; }
+.opsUtilityNav { position: fixed; top: 14px; right: 18px; z-index: 100; display: flex; gap: 8px; padding: 5px; border: 1px solid var(--border); border-radius: 11px; background: rgb(16 22 32 / 92%); backdrop-filter: blur(10px); }
+.opsUtilityNav a { padding: 8px 11px; border-radius: 7px; color: var(--muted); text-decoration: none; font-size: 12px; font-weight: 800; }
+.opsUtilityNav a:hover { color: var(--text); background: var(--panel-2); }
+@media (max-width: 900px) {
+  .integrationShell { padding: 78px 16px 30px; }
+  .integrationHeader { align-items: flex-start; flex-direction: column; }
+  .integrationGrid { grid-template-columns: 1fr; }
+  .miniStats { grid-template-columns: 1fr; }
+  .opsUtilityNav { left: 12px; right: 12px; justify-content: center; }
+}
