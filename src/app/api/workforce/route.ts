@@ -1,5 +1,6 @@
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
+import { createEmployee, updateEmployee } from "@/lib/operations";
 import type { Business } from "@/lib/types";
 import {
   copyScheduleWeek,
@@ -40,6 +41,37 @@ export async function POST(request: Request) {
     const business = businessFrom(body.business);
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
     const action = String(body.action || "");
+
+    if (action === "employee-create") {
+      const roleGroup = String(body.roleGroup || "In-House");
+      if (roleGroup !== "Driver" && roleGroup !== "In-House" && roleGroup !== "Ignore") throw new Error("Invalid employee role group.");
+      return Response.json(await createEmployee({
+        business,
+        name: String(body.name || ""),
+        pin: String(body.pin || ""),
+        position: String(body.position || ""),
+        roleGroup,
+        countsForTips: body.countsForTips !== false,
+        hourlyRate: Number(body.hourlyRate || 0),
+        tippedRate: Number(body.tippedRate || 0),
+      }), { status: 201 });
+    }
+
+    if (action === "employee-update") {
+      const roleGroup = body.roleGroup ? String(body.roleGroup) : undefined;
+      if (roleGroup && roleGroup !== "Driver" && roleGroup !== "In-House" && roleGroup !== "Ignore") throw new Error("Invalid employee role group.");
+      return Response.json(await updateEmployee({
+        id: String(body.id || ""),
+        active: body.active === undefined ? undefined : body.active === true,
+        pin: body.pin ? String(body.pin) : undefined,
+        name: body.name === undefined ? undefined : String(body.name || ""),
+        position: body.position === undefined ? undefined : String(body.position || ""),
+        roleGroup: roleGroup as "Driver" | "In-House" | "Ignore" | undefined,
+        countsForTips: body.countsForTips === undefined ? undefined : body.countsForTips === true,
+        hourlyRate: body.hourlyRate === undefined ? undefined : Number(body.hourlyRate || 0),
+        tippedRate: body.tippedRate === undefined ? undefined : Number(body.tippedRate || 0),
+      }));
+    }
 
     if (action === "shift-create") {
       const status = String(body.status || "Draft");
