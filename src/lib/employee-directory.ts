@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { ensureSchema, getSql } from "@/lib/db";
+import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
 import { validateEmployeePin } from "@/lib/employee-pin";
 import type { Business } from "@/lib/types";
 
@@ -54,17 +55,18 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
             RETURN NEW;
           END IF;
 
-          employee_position := COALESCE(NULLIF(BTRIM(NEW.position), ''), 'Employee');
-          employee_role := CASE
-            WHEN NEW.role_group IN ('Driver', 'In-House', 'Ignore') THEN NEW.role_group
-            ELSE 'In-House'
+          employee_position := CASE
+            WHEN NEW.role_group = 'Driver' OR LOWER(COALESCE(NEW.position, '')) ~ '(driver|deliver)' THEN 'Delivery'
+            WHEN LOWER(COALESCE(NEW.position, '')) ~ 'fry' THEN 'Fryer'
+            ELSE 'Pizza'
           END;
+          employee_role := CASE WHEN employee_position = 'Delivery' THEN 'Driver' ELSE 'In-House' END;
 
           UPDATE employees
           SET
             position = employee_position,
             role_group = employee_role,
-            counts_for_tips = employee_role <> 'Ignore',
+            counts_for_tips = TRUE,
             updated_at = NOW()
           WHERE business = 'Corner Deli'
             AND LOWER(BTRIM(name)) = LOWER(BTRIM(NEW.employee_name));
@@ -82,7 +84,7 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
               FALSE,
               employee_position,
               employee_role,
-              employee_role <> 'Ignore',
+              TRUE,
               0,
               0,
               TRUE
@@ -131,16 +133,20 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
           FALSE,
           source.position,
           source.role_group,
-          source.role_group <> 'Ignore',
+          TRUE,
           0,
           0,
           TRUE
         FROM (
           SELECT DISTINCT ON (LOWER(BTRIM(employee_name)))
             BTRIM(employee_name) AS employee_name,
-            COALESCE(NULLIF(BTRIM(position), ''), 'Employee') AS position,
             CASE
-              WHEN role_group IN ('Driver', 'In-House', 'Ignore') THEN role_group
+              WHEN role_group = 'Driver' OR LOWER(COALESCE(position, '')) ~ '(driver|deliver)' THEN 'Delivery'
+              WHEN LOWER(COALESCE(position, '')) ~ 'fry' THEN 'Fryer'
+              ELSE 'Pizza'
+            END AS position,
+            CASE
+              WHEN role_group = 'Driver' OR LOWER(COALESCE(position, '')) ~ '(driver|deliver)' THEN 'Driver'
               ELSE 'In-House'
             END AS role_group
           FROM rezku_shifts
@@ -154,6 +160,23 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
             AND LOWER(BTRIM(existing.name)) = LOWER(BTRIM(source.employee_name))
         )
         ON CONFLICT (business, pin_hash) DO NOTHING
+      `;
+
+      await sql`
+        UPDATE employees
+        SET
+          position = CASE
+            WHEN role_group = 'Driver' OR LOWER(COALESCE(position, '')) ~ '(driver|deliver)' THEN 'Delivery'
+            WHEN LOWER(COALESCE(position, '')) ~ 'fry' THEN 'Fryer'
+            ELSE 'Pizza'
+          END,
+          role_group = CASE
+            WHEN role_group = 'Driver' OR LOWER(COALESCE(position, '')) ~ '(driver|deliver)' THEN 'Driver'
+            ELSE 'In-House'
+          END,
+          updated_at = NOW()
+        WHERE business = 'Corner Deli'
+          AND position NOT IN ('Pizza', 'Fryer', 'Delivery')
       `;
     })().catch((error) => {
       directorySchemaPromise = null;
@@ -173,8 +196,8 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
     const name = clean(input.name, 120);
     const email = clean(input.email, 255).toLowerCase();
     const pin = validateEmployeePin(business, input.pin, name || "Employee");
-    const position = clean(input.position, 80) || (business === "Tiki" ? "Bartender" : "Employee");
-    const roleGroup = input.roleGroup || "In-House";
+    const position = normalizePosition(business, input.position || (business === "Tiki" ? "Bartender" : "Pizza"));
+    const roleGroup = input.roleGroup === "Ignore" ? "Ignore" : roleGroupForPosition(business, position);
     const countsForTips = input.countsForTips ?? roleGroup !== "Ignore";
     const hourlyRate = Math.max(0, Number(input.hourlyRate || 0));
     const tippedRate = Math.max(0, Number(input.tippedRate || 0));
