@@ -93,13 +93,27 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
         $$
       `;
 
-      await sql`DROP TRIGGER IF EXISTS rezku_employee_directory_sync ON rezku_shifts`;
       await sql`
-        CREATE TRIGGER rezku_employee_directory_sync
-        AFTER INSERT OR UPDATE OF employee_name, position, role_group
-        ON rezku_shifts
-        FOR EACH ROW
-        EXECUTE FUNCTION corner_ops_sync_rezku_employee()
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1
+            FROM pg_trigger
+            WHERE tgname = 'rezku_employee_directory_sync'
+              AND tgrelid = 'rezku_shifts'::regclass
+              AND NOT tgisinternal
+          ) THEN
+            CREATE TRIGGER rezku_employee_directory_sync
+            AFTER INSERT OR UPDATE OF employee_name, position, role_group
+            ON rezku_shifts
+            FOR EACH ROW
+            EXECUTE FUNCTION corner_ops_sync_rezku_employee();
+          END IF;
+        EXCEPTION
+          WHEN duplicate_object THEN
+            NULL;
+        END;
+        $$
       `;
 
       await sql`
