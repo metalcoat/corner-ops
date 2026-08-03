@@ -44,6 +44,16 @@ function local(value: string): string {
   });
 }
 
+function firstName(value: string | null): string {
+  const text = String(value || "").trim();
+  if (!text) return "Unknown";
+  if (text.toLowerCase() === "crfrary@gmail.com") return "Chris";
+  const candidate = text.includes("@")
+    ? text.split("@")[0].split(/[._-]/)[0]
+    : text.split(/\s+/)[0];
+  return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+}
+
 export default function EmployeeMessagesDock() {
   const [session, setSession] = useState<EmployeeSession | null>(null);
   const [data, setData] = useState<EmployeeData | null>(null);
@@ -127,7 +137,7 @@ export default function EmployeeMessagesDock() {
           <select name="recipientEmployeeId" defaultValue="">
             <option value="">Everyone at {session.business}</option>
             {recipients.map((person) => (
-              <option key={person.id} value={person.id}>{person.name}</option>
+              <option key={person.id} value={person.id}>{firstName(person.name)}</option>
             ))}
           </select>
         </label>
@@ -144,8 +154,8 @@ export default function EmployeeMessagesDock() {
         {(data?.messages || []).map((message) => (
           <article className="employeeMessagesItem" key={message.id}>
             <div>
-              <strong>{message.sender_name}</strong>
-              <span>{message.recipient_name ? `to ${message.recipient_name}` : message.message_type}</span>
+              <strong>{firstName(message.sender_name)}</strong>
+              <span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span>
             </div>
             <p>{message.body}</p>
             <small>{local(message.created_at)}</small>
