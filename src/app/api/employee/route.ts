@@ -1,5 +1,6 @@
 import { del, put } from "@vercel/blob";
 import { getEmployeeSession } from "@/lib/employee-auth";
+import { setEmployeeProfilePhoto } from "@/lib/employee-profile";
 import { apiError, unauthorized } from "@/lib/http";
 import { sendEmployeePhotoMessage } from "@/lib/message-attachments";
 import { markEmployeeMessageSeen } from "@/lib/message-reads";
@@ -17,6 +18,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_MESSAGE_PHOTO = 12 * 1024 * 1024;
+const MAX_PROFILE_PHOTO = 8 * 1024 * 1024;
 
 function safeFileName(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "photo.jpg";
@@ -25,6 +27,11 @@ function safeFileName(value: string): string {
 function employeeMessagePath(business: string, fileName: string): string {
   const location = business === "Corner Deli" ? "corner-deli" : "tiki";
   return `employee-messages/${location}/${Date.now()}-${safeFileName(fileName)}`;
+}
+
+function employeeProfilePath(business: string, employeeId: string, fileName: string): string {
+  const location = business === "Corner Deli" ? "corner-deli" : "tiki";
+  return `employee-profiles/${location}/${employeeId}/${Date.now()}-${safeFileName(fileName)}`;
 }
 
 export async function GET() {
@@ -46,7 +53,42 @@ export async function POST(request: Request) {
 
     if (contentType.includes("multipart/form-data")) {
       const form = await request.formData();
-      if (String(form.get("action") || "") !== "message-send") {
+      const action = String(form.get("action") || "");
+
+      if (action === "profile-photo") {
+        const cameraPhoto = form.get("cameraProfilePhoto");
+        const libraryPhoto = form.get("profilePhoto");
+        const photo = cameraPhoto instanceof File && cameraPhoto.size > 0
+          ? cameraPhoto
+          : libraryPhoto instanceof File && libraryPhoto.size > 0
+            ? libraryPhoto
+            : null;
+        if (!photo) throw new Error("Choose a profile photo.");
+        if (!photo.type.toLowerCase().startsWith("image/")) {
+          return Response.json({ error: "Profile photos must be image files." }, { status: 415 });
+        }
+        if (photo.size > MAX_PROFILE_PHOTO) {
+          return Response.json({ error: "Profile photos are limited to 8 MB." }, { status: 413 });
+        }
+        const blob = await put(employeeProfilePath(session.business, session.employeeId, photo.name), photo, {
+          access: "private",
+          addRandomSuffix: true,
+        });
+        uploadedUrl = blob.url;
+        const result = await setEmployeeProfilePhoto({
+          business: session.business,
+          employeeId: session.employeeId,
+          url: blob.url,
+          pathname: blob.pathname,
+          fileName: photo.name,
+          contentType: photo.type || "application/octet-stream",
+          size: photo.size,
+        });
+        if (result.previousUrl && result.previousUrl !== blob.url) await del(result.previousUrl).catch(() => undefined);
+        return Response.json({ uploaded: true }, { status: 201 });
+      }
+
+      if (action !== "message-send") {
         return Response.json({ error: "Unknown employee upload action." }, { status: 400 });
       }
       const cameraPhoto = form.get("cameraPhoto");
