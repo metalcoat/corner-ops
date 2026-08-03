@@ -1,5 +1,4 @@
 import { Resend } from "resend";
-import { processAttendanceReply } from "@/lib/attendance";
 import { importRezkuReport } from "@/lib/operations";
 
 export const runtime = "nodejs";
@@ -9,14 +8,12 @@ type ReceivedEvent = {
   data: {
     email_id: string;
     from?: string;
-    to?: string[];
     subject?: string;
   };
 };
 
 type ReceivedEmail = {
   from?: string;
-  to?: string[];
   subject?: string;
   html?: string | null;
   text?: string | null;
@@ -45,16 +42,6 @@ function decodeHtml(value: string): string {
     .replaceAll("&#39;", "'")
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">");
-}
-
-function htmlText(value: string): string {
-  return decodeHtml(value)
-    .replace(/<br\s*\/?\s*>/gi, "\n")
-    .replace(/<\/p>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n\s+/g, "\n")
-    .trim();
 }
 
 function senderAddress(value: string): string {
@@ -126,18 +113,10 @@ export async function POST(request: Request) {
 
   const email = emailData as ReceivedEmail;
   const sender = email.from || event.data.from || "";
-  const recipients = email.to || event.data.to || [];
   const subject = email.subject || event.data.subject || "";
-  const text = email.text || htmlText(email.html || "");
-
-  const attendance = await processAttendanceReply({ recipients, from: sender, text, subject });
-  if (attendance.handled) {
-    return Response.json({ processed: true, kind: "attendance-reply", emailId: event.data.email_id, ...attendance });
-  }
-
   const allowedSender = (process.env.REZKU_ALLOWED_SENDER?.trim() || "support@rezku.com").toLowerCase();
   if (senderAddress(sender) !== allowedSender || subject !== REZKU_SUBJECT) {
-    return Response.json({ ignored: true, reason: "Email did not match an attendance reply or the trusted Rezku sender and subject." });
+    return Response.json({ ignored: true, reason: "Email did not match the trusted Rezku sender and subject." });
   }
 
   const sources = excelLinks(`${email.html || ""}\n${email.text || ""}`);
