@@ -1,6 +1,6 @@
 import { getSql } from "@/lib/db";
+import { ensureScheduleMealSchema, normalizeScheduledMealFields } from "@/lib/schedule-meal-storage";
 import type { Business } from "@/lib/types";
-import { ensureWorkforceSchema } from "@/lib/workforce";
 
 function clean(value: unknown, max = 500): string {
   return String(value ?? "").trim().slice(0, max);
@@ -19,10 +19,14 @@ export async function updateScheduleShiftSafely(input: {
   position?: string;
   startsAt?: string;
   endsAt?: string;
+  mealBreakStart?: string | null;
+  mealBreakMinutes?: number;
+  extraMealBreakStart?: string | null;
+  extraMealBreakMinutes?: number;
   status?: "Draft" | "Published" | "Open" | "Cancelled";
   notes?: string;
 }) {
-  await ensureWorkforceSchema();
+  await ensureScheduleMealSchema();
   const sql = getSql();
   const rows = await sql`
     SELECT * FROM schedule_shifts
@@ -35,6 +39,15 @@ export async function updateScheduleShiftSafely(input: {
   const start = input.startsAt ? dateValue(input.startsAt, "Shift start") : new Date(String(current.starts_at));
   const end = input.endsAt ? dateValue(input.endsAt, "Shift end") : new Date(String(current.ends_at));
   if (end <= start) throw new Error("Shift end must be after the start.");
+
+  const meals = normalizeScheduledMealFields({
+    startsAt: start,
+    endsAt: end,
+    mealBreakStart: input.mealBreakStart === undefined ? current.meal_break_start : input.mealBreakStart,
+    mealBreakMinutes: input.mealBreakMinutes === undefined ? current.meal_break_minutes : input.mealBreakMinutes,
+    extraMealBreakStart: input.extraMealBreakStart === undefined ? current.extra_meal_break_start : input.extraMealBreakStart,
+    extraMealBreakMinutes: input.extraMealBreakMinutes === undefined ? current.extra_meal_break_minutes : input.extraMealBreakMinutes,
+  });
 
   const status = (input.status || clean(current.status, 30)) as "Draft" | "Published" | "Open" | "Cancelled";
   const requestedEmployee = input.employeeId === undefined
@@ -71,6 +84,10 @@ export async function updateScheduleShiftSafely(input: {
       position = ${clean(input.position ?? current.position, 100)},
       starts_at = ${start.toISOString()},
       ends_at = ${end.toISOString()},
+      meal_break_start = ${meals.mealBreakStart},
+      meal_break_minutes = ${meals.mealBreakMinutes},
+      extra_meal_break_start = ${meals.extraMealBreakStart},
+      extra_meal_break_minutes = ${meals.extraMealBreakMinutes},
       status = ${status},
       notes = ${clean(input.notes ?? current.notes, 1000)},
       published_at = CASE
