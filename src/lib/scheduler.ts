@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { detectMissedShifts } from "@/lib/attendance";
 import { getSql } from "@/lib/db";
 import { payrollSummary } from "@/lib/operations";
 import {
@@ -9,6 +10,7 @@ import {
   syncSquareConnection,
 } from "@/lib/integrations";
 import type { Business } from "@/lib/types";
+import { syncOperationalWeather } from "@/lib/weather-intelligence";
 
 function previousWeekStart(localDate: string): string {
   const date = new Date(`${localDate}T12:00:00Z`);
@@ -135,6 +137,19 @@ export async function runScheduledOperations(input: { force?: boolean; source?: 
   try {
     details.openTikiPunches = await flagOpenTikiPunches(local.date);
     details.rezkuFresh = await checkRezkuFreshness(local.date);
+
+    try {
+      details.weather = await syncOperationalWeather();
+    } catch (error) {
+      details.weather = { error: error instanceof Error ? error.message : String(error) };
+    }
+
+    try {
+      details.missedShifts = await detectMissedShifts();
+    } catch (error) {
+      details.missedShifts = { error: error instanceof Error ? error.message : String(error) };
+    }
+
     details.bankSync = await syncAllBankConnections();
     try {
       details.squareSync = await syncSquareConnection();
