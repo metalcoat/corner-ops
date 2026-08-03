@@ -28,7 +28,7 @@ function validBusiness(value: string | null | undefined): value is Business {
 }
 
 function linkIsActive(pathname: string, link: NavLink): boolean {
-  if (link.href === "/") return pathname === "/";
+  if (link.href === "/" || link.href === "/ops") return pathname === link.href;
   const paths = link.activePaths || [link.href];
   return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
