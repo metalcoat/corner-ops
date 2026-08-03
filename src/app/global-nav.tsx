@@ -11,6 +11,7 @@ const links = [
   { label: "Weather", href: "/ops/weather" },
   { label: "Attendance", href: "/ops/attendance" },
   { label: "Accounting Control", href: "/ops/accounting-control" },
+  { label: "Cards & Receipts", href: "/ops/expense-control" },
   { label: "Payroll Control", href: "/ops/payroll-control" },
   { label: "Workforce", href: "/ops/workforce" },
   { label: "Employees", href: "/ops/employees" },
