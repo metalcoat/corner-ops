@@ -3,6 +3,7 @@ import { detectMissedShifts } from "@/lib/attendance";
 import { getSql } from "@/lib/db";
 import { runExpenseAutomation } from "@/lib/expense-control";
 import { payrollSummary } from "@/lib/operations";
+import { generateDueRecurringInvoices } from "@/lib/receivables";
 import {
   createOperationIssue,
   ensureIntegrationSchema,
@@ -156,6 +157,15 @@ export async function runScheduledOperations(input: { force?: boolean; source?: 
       details.expenses = await runExpenseAutomation();
     } catch (error) {
       details.expenses = { error: error instanceof Error ? error.message : String(error) };
+    }
+
+    try {
+      details.recurringInvoices = await generateDueRecurringInvoices({
+        throughDate: local.date,
+        actor: "Nightly recurring invoice scheduler",
+      });
+    } catch (error) {
+      details.recurringInvoices = { error: error instanceof Error ? error.message : String(error) };
     }
 
     try {
