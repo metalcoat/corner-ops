@@ -5,13 +5,11 @@ import { listDirectoryEmployees } from "@/lib/employee-directory-admin";
 import { apiError, unauthorized } from "@/lib/http";
 import { createEmployee, updateEmployee } from "@/lib/operations";
 import { updateScheduleShiftSafely } from "@/lib/schedule-actions";
+import { createScheduleDraftWithMeals } from "@/lib/schedule-draft";
 import { ensureScheduleMealSchema } from "@/lib/schedule-meal-storage";
 import { publishValidatedScheduleWeek } from "@/lib/schedule-publish-validation";
 import { copyScheduleWeekToTarget } from "@/lib/schedule-week-copy";
-import {
-  createScheduleDraft,
-  sendStaffNotification,
-} from "@/lib/staff-notifications";
+import { sendStaffNotification } from "@/lib/staff-notifications";
 import type { Business } from "@/lib/types";
 import {
   reviewShiftRequest,
@@ -173,7 +171,7 @@ export async function POST(request: Request) {
 
     if (action === "shift-create") {
       try {
-        return Response.json(await createScheduleDraft({
+        return Response.json(await createScheduleDraftWithMeals({
           business,
           employeeId: body.employeeId ? String(body.employeeId) : null,
           position: normalizePosition(business, body.position),
