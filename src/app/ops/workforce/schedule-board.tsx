@@ -1,6 +1,7 @@
 "use client";
 
-import { DragEvent, FormEvent, useMemo, useState } from "react";
+import { CSSProperties, DragEvent, FormEvent, useMemo, useState } from "react";
+import { positionsForBusiness } from "@/lib/business-positions";
 import type { Business } from "@/lib/types";
 import "./schedule-board.css";
 
@@ -10,6 +11,8 @@ export type ScheduleEmployee = {
   email: string;
   position: string;
   active: boolean;
+  scheduleColor: string;
+  avatarSet: boolean;
 };
 
 export type ScheduleShift = {
@@ -21,6 +24,8 @@ export type ScheduleShift = {
   endsAt: string;
   status: string;
   notes: string;
+  employeeColor?: string;
+  employeeAvatarSet?: boolean;
   publishedAt?: string | null;
 };
 
@@ -64,6 +69,10 @@ function dateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function dateFromKey(value: string): Date {
+  return new Date(`${value}T12:00:00`);
+}
+
 function localTime(value: string): string {
   return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
@@ -83,6 +92,10 @@ function shiftHours(shift: ScheduleShift): number {
   return Math.max(0, (new Date(shift.endsAt).getTime() - new Date(shift.startsAt).getTime()) / 3_600_000);
 }
 
+function initials(value: string): string {
+  return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
+}
+
 function defaultEditor(employeeId: string | null, day: Date, employee?: ScheduleEmployee): EditorState {
   return {
     shift: null,
@@ -95,15 +108,19 @@ function defaultEditor(employeeId: string | null, day: Date, employee?: Schedule
   };
 }
 
+function avatarUrl(business: Business, employeeId: string): string {
+  return `/api/employee-directory/avatar?business=${encodeURIComponent(business)}&id=${encodeURIComponent(employeeId)}`;
+}
+
 export default function ScheduleBoard({ business, employees, shifts, busy, runAction }: Props) {
   const [weekStart, setWeekStart] = useState(() => startOfMonday(new Date()));
   const [copiedShift, setCopiedShift] = useState<ScheduleShift | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
 
-  const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
   const weekEnd = addDays(weekStart, 7);
   const activeEmployees = employees.filter((employee) => employee.active);
+  const employeeById = useMemo(() => new Map(activeEmployees.map((employee) => [employee.id, employee])), [activeEmployees]);
   const weekShifts = useMemo(() => shifts.filter((shift) => {
     const start = new Date(shift.startsAt);
     return start >= weekStart && start < weekEnd && shift.status !== "Cancelled";
@@ -111,16 +128,18 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
   const draftCount = weekShifts.filter((shift) => shift.status === "Draft").length;
   const publishedCount = weekShifts.filter((shift) => shift.status === "Published" || shift.status === "Open").length;
   const missingEmailCount = activeEmployees.filter((employee) => !employee.email.trim()).length;
-
-  const shiftsByCell = useMemo(() => {
+  const scheduledDayKeys = useMemo(() => [...new Set(weekShifts.map((shift) => dateKey(new Date(shift.startsAt))))].sort(), [weekShifts]);
+  const shiftsByDay = useMemo(() => {
     const map = new Map<string, ScheduleShift[]>();
     for (const shift of weekShifts) {
-      const key = `${shift.employeeId || "open"}:${dateKey(new Date(shift.startsAt))}`;
+      const key = dateKey(new Date(shift.startsAt));
       const list = map.get(key) || [];
       list.push(shift);
       map.set(key, list);
     }
-    for (const list of map.values()) list.sort((left, right) => left.startsAt.localeCompare(right.startsAt));
+    for (const list of map.values()) {
+      list.sort((left, right) => left.startsAt.localeCompare(right.startsAt) || left.employeeName.localeCompare(right.employeeName));
+    }
     return map;
   }, [weekShifts]);
 
@@ -156,7 +175,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     setEditor(null);
   }
 
-  async function moveShift(shift: ScheduleShift, employeeId: string | null, targetDay: Date) {
+  async function moveShiftToDay(shift: ScheduleShift, targetDay: Date) {
     const originalStart = new Date(shift.startsAt);
     const originalEnd = new Date(shift.endsAt);
     const duration = originalEnd.getTime() - originalStart.getTime();
@@ -166,14 +185,14 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     await runAction({
       action: "shift-update",
       id: shift.id,
-      employeeId,
+      employeeId: shift.employeeId,
       startsAt: start.toISOString(),
       endsAt: end.toISOString(),
       status: "Draft",
-    }, `Shift moved to ${employeeId ? activeEmployees.find((employee) => employee.id === employeeId)?.name || "employee" : "Unassigned"} and marked for publishing.`);
+    }, `Shift moved to ${targetDay.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })} and marked for publishing.`);
   }
 
-  async function pasteShift(employeeId: string | null, targetDay: Date) {
+  async function pasteShift(targetDay: Date) {
     if (!copiedShift) return;
     const sourceStart = new Date(copiedShift.startsAt);
     const sourceEnd = new Date(copiedShift.endsAt);
@@ -182,7 +201,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     const end = new Date(start.getTime() + (sourceEnd.getTime() - sourceStart.getTime()));
     await runAction({
       action: "shift-create",
-      employeeId,
+      employeeId: copiedShift.employeeId,
       position: copiedShift.position,
       startsAt: start.toISOString(),
       endsAt: end.toISOString(),
@@ -197,7 +216,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     await runAction({
       action: "week-publish",
       weekStart: dateKey(weekStart),
-    }, `Schedule published for everyone. Employee Hub was updated and email was sent wherever an address is configured.`);
+    }, "Schedule published for everyone. Employee Hub was updated and email was sent wherever an address is configured.");
   }
 
   function onDragStart(event: DragEvent<HTMLDivElement>, shift: ScheduleShift) {
@@ -206,24 +225,23 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     setDraggingId(shift.id);
   }
 
-  async function onDrop(event: DragEvent<HTMLDivElement>, employeeId: string | null, day: Date) {
+  async function onDrop(event: DragEvent<HTMLDivElement>, day: Date) {
     event.preventDefault();
     const id = event.dataTransfer.getData("text/plain");
     const shift = shifts.find((candidate) => candidate.id === id);
     setDraggingId(null);
-    if (shift) await moveShift(shift, employeeId, day);
+    if (shift) await moveShiftToDay(shift, day);
   }
 
-  const rows: Array<{ id: string; name: string; position: string; employeeId: string | null }> = [
-    ...activeEmployees.map((employee) => ({ id: employee.id, name: employee.name, position: employee.position, employeeId: employee.id })),
-    { id: "open", name: "Unassigned shifts", position: "Become open when the week is published", employeeId: null },
-  ];
+  const firstScheduledDate = scheduledDayKeys[0] ? dateFromKey(scheduledDayKeys[0]) : weekStart;
+  const positionOptions = positionsForBusiness(business);
 
   return <section className="scheduleBoardPanel">
     <header className="scheduleToolbar">
       <div>
-        <p className="wfEyebrow">Monday through Sunday</p>
+        <p className="wfEyebrow">Scheduled-day planning board</p>
         <h2>{weekStart.toLocaleDateString([], { month: "long", day: "numeric" })} – {addDays(weekStart, 6).toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" })}</h2>
+        <span className="scheduleSubline">Only days containing shifts are shown. Shifts are sorted by start time.</span>
       </div>
       <div className="scheduleToolbarActions">
         <span className="scheduleClipboard">
@@ -235,60 +253,92 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
         <button type="button" onClick={() => setWeekStart(startOfMonday(new Date()))}>Today</button>
         <button type="button" onClick={() => setWeekStart(addDays(weekStart, 7))}>Next →</button>
         <button type="button" className="schedulePrimary" disabled={busy || weekShifts.length === 0} onClick={() => void publishWeek()}>{draftCount > 0 ? `Publish week (${draftCount})` : "Resend schedule"}</button>
-        <button type="button" className="schedulePrimary" onClick={() => setEditor(defaultEditor(activeEmployees[0]?.id || null, weekStart, activeEmployees[0]))}>+ Add shift</button>
+        <button type="button" className="schedulePrimary" onClick={() => setEditor(defaultEditor(activeEmployees[0]?.id || null, firstScheduledDate, activeEmployees[0]))}>+ Add shift</button>
       </div>
     </header>
 
-    <div className="scheduleScroll">
-      <div className="scheduleGrid" style={{ gridTemplateColumns: "190px repeat(7, minmax(155px, 1fr))" }}>
-        <div className="scheduleCorner">{business}<small>Build drafts, then publish the entire week once</small></div>
-        {days.map((day) => <div className={`scheduleDayHeader ${dateKey(day) === dateKey(new Date()) ? "today" : ""}`} key={day.toISOString()}><strong>{day.toLocaleDateString([], { weekday: "short" })}</strong><span>{day.toLocaleDateString([], { month: "short", day: "numeric" })}</span></div>)}
-
-        {rows.map((row) => <div className="scheduleRowContents" key={row.id}>
-          <div className="scheduleEmployee"><strong>{row.name}</strong><span>{row.position}</span>{row.employeeId && <small>{weekShifts.filter((shift) => shift.employeeId === row.employeeId).reduce((total, shift) => total + shiftHours(shift), 0).toFixed(1)} hrs</small>}</div>
-          {days.map((day) => {
-            const key = `${row.employeeId || "open"}:${dateKey(day)}`;
-            const cellShifts = shiftsByCell.get(key) || [];
-            return <div
-              className={`scheduleCell ${draggingId ? "dragReady" : ""}`}
-              key={key}
-              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }}
-              onDrop={(event) => void onDrop(event, row.employeeId, day)}
-            >
-              <div className="scheduleCellActions">
-                <button type="button" title="Add shift" onClick={() => setEditor(defaultEditor(row.employeeId, day, activeEmployees.find((employee) => employee.id === row.employeeId)))}>+</button>
-                {copiedShift && <button type="button" className="pasteButton" onClick={() => void pasteShift(row.employeeId, day)}>Paste</button>}
-              </div>
-              {cellShifts.map((shift) => <div
-                className={`scheduleShiftCard ${shift.status.toLowerCase()} ${draggingId === shift.id ? "dragging" : ""}`}
-                key={shift.id}
-                draggable
-                onDragStart={(event) => onDragStart(event, shift)}
-                onDragEnd={() => setDraggingId(null)}
-                onDoubleClick={() => openExisting(shift)}
-              >
-                <button type="button" className="shiftMain" onClick={() => openExisting(shift)}>
-                  <strong>{localTime(shift.startsAt)} – {localTime(shift.endsAt)}</strong>
-                  <span>{shift.position || "Shift"}</span>
-                  {shift.notes && <small>📝 {shift.notes}</small>}
-                </button>
-                <div className="shiftQuickActions"><button type="button" onClick={() => setCopiedShift(shift)}>Copy</button><span>{shift.status}</span></div>
-              </div>)}
-            </div>;
-          })}
-        </div>)}
-      </div>
+    <div className="scheduleLegend" aria-label="Employee schedule colors">
+      {activeEmployees.map((employee) => {
+        const hours = weekShifts.filter((shift) => shift.employeeId === employee.id).reduce((total, shift) => total + shiftHours(shift), 0);
+        return <div className="scheduleLegendPerson" key={employee.id} style={{ "--employee-color": employee.scheduleColor } as CSSProperties}>
+          <span className="scheduleAvatar small">
+            {employee.avatarSet ? <img src={avatarUrl(business, employee.id)} alt="" loading="lazy" /> : initials(employee.name)}
+          </span>
+          <div><strong>{employee.name}</strong><small>{employee.position} · {hours.toFixed(1)} hrs</small></div>
+        </div>;
+      })}
     </div>
+
+    {scheduledDayKeys.length === 0 ? <div className="scheduleEmpty">
+      <h3>No shifts scheduled this week</h3>
+      <p>Blank days stay hidden. Add the first shift and its day will appear as a planning stage.</p>
+      <button type="button" className="schedulePrimary" onClick={() => setEditor(defaultEditor(activeEmployees[0]?.id || null, weekStart, activeEmployees[0]))}>Add first shift</button>
+    </div> : <div className="scheduleScroll">
+      <div className="scheduleStageGrid" style={{ gridTemplateColumns: `repeat(${scheduledDayKeys.length}, minmax(285px, 1fr))` }}>
+        {scheduledDayKeys.map((key) => {
+          const day = dateFromKey(key);
+          const dayShifts = shiftsByDay.get(key) || [];
+          const totalHours = dayShifts.reduce((total, shift) => total + shiftHours(shift), 0);
+          return <section
+            className={`scheduleDayStage ${dateKey(new Date()) === key ? "today" : ""} ${draggingId ? "dragReady" : ""}`}
+            key={key}
+            onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }}
+            onDrop={(event) => void onDrop(event, day)}
+          >
+            <header className="scheduleDayStageHeader">
+              <div><strong>{day.toLocaleDateString([], { weekday: "long" })}</strong><span>{day.toLocaleDateString([], { month: "long", day: "numeric" })}</span><small>{dayShifts.length} shift{dayShifts.length === 1 ? "" : "s"} · {totalHours.toFixed(1)} hrs</small></div>
+              <div><button type="button" title="Add shift" onClick={() => setEditor(defaultEditor(activeEmployees[0]?.id || null, day, activeEmployees[0]))}>+</button>{copiedShift && <button type="button" onClick={() => void pasteShift(day)}>Paste</button>}</div>
+            </header>
+            <div className="scheduleDayCards">
+              {dayShifts.map((shift) => {
+                const employee = shift.employeeId ? employeeById.get(shift.employeeId) : undefined;
+                const color = employee?.scheduleColor || shift.employeeColor || "#64748B";
+                const avatarSet = employee?.avatarSet || shift.employeeAvatarSet || false;
+                const name = employee?.name || shift.employeeName || "Unassigned";
+                return <div
+                  className={`scheduleShiftCard ${shift.status.toLowerCase()} ${draggingId === shift.id ? "dragging" : ""}`}
+                  style={{ "--employee-color": color } as CSSProperties}
+                  key={shift.id}
+                  draggable
+                  onDragStart={(event) => onDragStart(event, shift)}
+                  onDragEnd={() => setDraggingId(null)}
+                  onDoubleClick={() => openExisting(shift)}
+                >
+                  <button type="button" className="shiftMain" onClick={() => openExisting(shift)}>
+                    <span className="scheduleAvatar">
+                      {shift.employeeId && avatarSet ? <img src={avatarUrl(business, shift.employeeId)} alt="" loading="lazy" /> : initials(name)}
+                    </span>
+                    <span className="shiftDetails">
+                      <strong>{name}</strong>
+                      <b>{localTime(shift.startsAt)} – {localTime(shift.endsAt)}</b>
+                      <em>{shift.position || "Shift"}</em>
+                      {shift.notes && <small>📝 {shift.notes}</small>}
+                    </span>
+                  </button>
+                  <div className="shiftQuickActions"><button type="button" onClick={() => setCopiedShift(shift)}>Copy</button><span>{shift.status}</span></div>
+                </div>;
+              })}
+            </div>
+          </section>;
+        })}
+      </div>
+    </div>}
 
     {editor && <div className="scheduleModalBackdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setEditor(null); }}>
       <section className="scheduleModal" role="dialog" aria-modal="true" aria-labelledby="shift-editor-heading">
         <header><div><p className="wfEyebrow">{editor.shift ? "Edit shift" : "New shift"}</p><h2 id="shift-editor-heading">Shift details</h2></div><button type="button" aria-label="Close" onClick={() => setEditor(null)}>×</button></header>
         <form onSubmit={saveShift} className="scheduleEditForm">
-          <label>Employee<select value={editor.employeeId || ""} onChange={(event) => setEditor((current) => current ? { ...current, employeeId: event.target.value || null } : current)}><option value="">Unassigned / open when published</option>{activeEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>
+          <label>Employee<select value={editor.employeeId || ""} onChange={(event) => {
+            const employeeId = event.target.value || null;
+            const employee = employeeId ? employeeById.get(employeeId) : undefined;
+            setEditor((current) => current ? { ...current, employeeId, position: current.shift ? current.position : employee?.position || current.position } : current);
+          }}><option value="">Unassigned / open when published</option>{activeEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>
           <label>Date<input type="date" value={editor.date} onChange={(event) => setEditor((current) => current ? { ...current, date: event.target.value } : current)} required /></label>
           <label>Start<input type="time" value={editor.startTime} onChange={(event) => setEditor((current) => current ? { ...current, startTime: event.target.value } : current)} required /></label>
           <label>End<input type="time" value={editor.endTime} onChange={(event) => setEditor((current) => current ? { ...current, endTime: event.target.value } : current)} required /></label>
-          <label>Position<input value={editor.position} onChange={(event) => setEditor((current) => current ? { ...current, position: event.target.value } : current)} required /></label>
+          <label>Position{business === "Corner Deli"
+            ? <select value={editor.position} onChange={(event) => setEditor((current) => current ? { ...current, position: event.target.value } : current)} required><option value="">Choose position</option>{positionOptions.map((position) => <option key={position} value={position}>{position}</option>)}</select>
+            : <input value={editor.position} onChange={(event) => setEditor((current) => current ? { ...current, position: event.target.value } : current)} required />}</label>
           <p className="scheduleNotes">Saving creates a draft. Staff do not receive the change until the entire week is published.</p>
           <label className="scheduleNotes">Shift instructions shown to the employee<textarea rows={5} value={editor.notes} onChange={(event) => setEditor((current) => current ? { ...current, notes: event.target.value } : current)} placeholder="Example: Restock the outside cooler before opening. Private party arrives at 6:30." /></label>
           <div className="scheduleModalActions">
