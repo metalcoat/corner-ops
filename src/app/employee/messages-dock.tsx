@@ -15,12 +15,14 @@ type DirectoryEmployee = {
   position: string;
   scheduleColor: string;
   avatarSet: boolean;
+  chatNickname: string;
 };
 
 type Message = {
   id: string;
   sender_employee_id: string | null;
   sender_name: string;
+  sender_chat_nickname?: string;
   sender_schedule_color?: string;
   sender_avatar_set?: boolean;
   recipient_name: string | null;
@@ -100,18 +102,12 @@ export default function EmployeeMessagesDock() {
     const response = await fetch("/api/employee", { cache: "no-store" });
     if (!response.ok) throw new Error(await responseMessage(response));
     const payload = await response.json() as EmployeeData;
-    setData({
-      employee: payload.employee,
-      messages: payload.messages || [],
-      directory: payload.directory || [],
-    });
+    setData({ employee: payload.employee, messages: payload.messages || [], directory: payload.directory || [] });
   }, []);
 
   useEffect(() => {
     void load().catch((error) => setNotice(error instanceof Error ? error.message : "Messages could not be loaded."));
-    const interval = window.setInterval(() => {
-      void load().catch(() => undefined);
-    }, session ? 30_000 : 5_000);
+    const interval = window.setInterval(() => void load().catch(() => undefined), session ? 30_000 : 5_000);
     return () => window.clearInterval(interval);
   }, [load, session]);
 
@@ -120,8 +116,7 @@ export default function EmployeeMessagesDock() {
     const observer = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting || entry.intersectionRatio < 0.6) continue;
-        const element = entry.target as HTMLElement;
-        const messageId = element.dataset.messageId || "";
+        const messageId = (entry.target as HTMLElement).dataset.messageId || "";
         if (!messageId || reportedSeen.current.has(messageId)) continue;
         reportedSeen.current.add(messageId);
         void fetch("/api/employee", {
@@ -131,11 +126,31 @@ export default function EmployeeMessagesDock() {
         }).catch(() => reportedSeen.current.delete(messageId));
       }
     }, { threshold: [0.6] });
-
-    const elements = document.querySelectorAll<HTMLElement>("[data-message-id]");
-    elements.forEach((element) => observer.observe(element));
+    document.querySelectorAll<HTMLElement>("[data-message-id]").forEach((element) => observer.observe(element));
     return () => observer.disconnect();
   }, [data?.messages, session]);
+
+  async function updateNickname(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/employee", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "nickname-update", nickname: form.get("nickname") }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      await load();
+      setNotice(String(form.get("nickname") || "").trim() ? "Chat nickname updated." : "Chat nickname cleared.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Chat nickname could not be updated.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -187,83 +202,58 @@ export default function EmployeeMessagesDock() {
 
   const recipients = (data?.directory || []).filter((person) => person.id !== session.employeeId);
   const current = data?.employee;
+  const currentDisplay = current?.chatNickname || firstName(session.name);
 
-  return (
-    <aside className="employeeMessagesDock" aria-label="Employee messages">
-      <header className="employeeMessagesHeader">
-        <div className="employeeMessagesIdentity" style={{ "--employee-color": current?.scheduleColor || "#64748B" } as CSSProperties}>
-          <span className="employeeMessageAvatar large">{current?.avatarSet ? <img src={avatarUrl(session.employeeId)} alt="Your profile" /> : initials(session.name)}</span>
-          <div><p className="employeeMessagesEyebrow">Always visible</p><h2>Messages</h2><small>{session.name}</small></div>
-        </div>
-        <button type="button" onClick={() => void load()} disabled={busy} aria-label="Refresh messages">Refresh</button>
-      </header>
-
-      <form className="employeeProfilePhotoForm" onSubmit={uploadProfilePhoto}>
-        <label>Take icon photo<input name="cameraProfilePhoto" type="file" accept="image/*" capture="user" /></label>
-        <label>Choose icon photo<input name="profilePhoto" type="file" accept="image/*" /></label>
-        <button disabled={busy}>Update my icon</button>
-      </form>
-
-      <form className="employeeMessagesComposer" onSubmit={sendMessage}>
-        <input type="hidden" name="action" value="message-send" />
-        <label>
-          Send to
-          <select name="recipientEmployeeId" defaultValue="">
-            <option value="">Everyone at {session.business}</option>
-            {recipients.map((person) => (
-              <option key={person.id} value={person.id}>{firstName(person.name)}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Message
-          <textarea name="body" rows={3} placeholder="Type a message, add a photo, or both" />
-        </label>
-        <div className="employeeMessagesPhotoControls">
-          <label className="employeeMessagesPhotoButton">
-            Take photo
-            <input name="cameraPhoto" type="file" accept="image/*" capture="environment" />
-          </label>
-          <label className="employeeMessagesPhotoButton secondary">
-            Choose photo
-            <input name="photo" type="file" accept="image/*" />
-          </label>
-        </div>
-        <small className="employeeMessagesPhotoHelp">One image per message, up to 12 MB.</small>
-        <button className="employeeMessagesSend" disabled={busy}>Send message</button>
-      </form>
-
-      {notice && <div className="employeeMessagesNotice">{notice}</div>}
-
-      <div className="employeeMessagesFeed" aria-live="polite">
-        {(data?.messages || []).map((message) => {
-          const senderColor = message.sender_schedule_color || "#64748B";
-          return <article className="employeeMessagesItem" key={message.id} data-message-id={message.id} style={{ "--employee-color": senderColor } as CSSProperties}>
-            <header className="employeeMessageMeta">
-              <span className="employeeMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(message.sender_employee_id)} alt="" loading="lazy" /> : initials(message.sender_name)}</span>
-              <div><strong>{firstName(message.sender_name)}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div>
-              <small>{local(message.created_at)}</small>
-            </header>
-            {message.body && <p>{message.body}</p>}
-            {message.attachment_name && (
-              <a
-                className="employeeMessagesPhoto"
-                href={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={`Open photo from ${firstName(message.sender_name)}`}
-              >
-                <img
-                  src={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`}
-                  alt={message.body || `Photo from ${firstName(message.sender_name)}`}
-                  loading="lazy"
-                />
-              </a>
-            )}
-          </article>;
-        })}
-        {!data?.messages.length && <p className="employeeMessagesEmpty">No messages yet.</p>}
+  return <aside className="employeeMessagesDock" aria-label="Employee messages">
+    <header className="employeeMessagesHeader">
+      <div className="employeeMessagesIdentity" style={{ "--employee-color": current?.scheduleColor || "#64748B" } as CSSProperties}>
+        <span className="employeeMessageAvatar large">{current?.avatarSet ? <img src={avatarUrl(session.employeeId)} alt="Your profile" /> : initials(currentDisplay)}</span>
+        <div><p className="employeeMessagesEyebrow">Always visible</p><h2>Messages</h2><small>{current?.chatNickname ? `${current.chatNickname} · ${session.name}` : session.name}</small></div>
       </div>
-    </aside>
-  );
+      <button type="button" onClick={() => void load()} disabled={busy} aria-label="Refresh messages">Refresh</button>
+    </header>
+
+    <form className="employeeNicknameForm" key={current?.chatNickname || "no-nickname"} onSubmit={updateNickname}>
+      <label>Chat nickname<input name="nickname" maxLength={32} defaultValue={current?.chatNickname || ""} placeholder={firstName(session.name)} /></label>
+      <button disabled={busy}>Save nickname</button>
+      <small>Used in messages only. Leave blank to use your regular name.</small>
+    </form>
+
+    <form className="employeeProfilePhotoForm" onSubmit={uploadProfilePhoto}>
+      <label>Take icon photo<input name="cameraProfilePhoto" type="file" accept="image/*" capture="user" /></label>
+      <label>Choose icon photo<input name="profilePhoto" type="file" accept="image/*" /></label>
+      <button disabled={busy}>Update my icon</button>
+    </form>
+
+    <form className="employeeMessagesComposer" onSubmit={sendMessage}>
+      <input type="hidden" name="action" value="message-send" />
+      <label>Send to<select name="recipientEmployeeId" defaultValue=""><option value="">Everyone at {session.business}</option>{recipients.map((person) => <option key={person.id} value={person.id}>{person.chatNickname || firstName(person.name)}</option>)}</select></label>
+      <label>Message<textarea name="body" rows={3} placeholder="Type a message, add a photo, or both" /></label>
+      <div className="employeeMessagesPhotoControls">
+        <label className="employeeMessagesPhotoButton">Take photo<input name="cameraPhoto" type="file" accept="image/*" capture="environment" /></label>
+        <label className="employeeMessagesPhotoButton secondary">Choose photo<input name="photo" type="file" accept="image/*" /></label>
+      </div>
+      <small className="employeeMessagesPhotoHelp">One image per message, up to 12 MB.</small>
+      <button className="employeeMessagesSend" disabled={busy}>Send message</button>
+    </form>
+
+    {notice && <div className="employeeMessagesNotice">{notice}</div>}
+
+    <div className="employeeMessagesFeed" aria-live="polite">
+      {(data?.messages || []).map((message) => {
+        const senderColor = message.sender_schedule_color || "#64748B";
+        const senderDisplay = message.sender_chat_nickname || firstName(message.sender_name);
+        return <article className="employeeMessagesItem" key={message.id} data-message-id={message.id} style={{ "--employee-color": senderColor } as CSSProperties}>
+          <header className="employeeMessageMeta">
+            <span className="employeeMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(message.sender_employee_id)} alt="" loading="lazy" /> : initials(senderDisplay)}</span>
+            <div><strong>{senderDisplay}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div>
+            <small>{local(message.created_at)}</small>
+          </header>
+          {message.body && <p>{message.body}</p>}
+          {message.attachment_name && <a className="employeeMessagesPhoto" href={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer" aria-label={`Open photo from ${senderDisplay}`}><img src={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${senderDisplay}`} loading="lazy" /></a>}
+        </article>;
+      })}
+      {!data?.messages.length && <p className="employeeMessagesEmpty">No messages yet.</p>}
+    </div>
+  </aside>;
 }
