@@ -20,12 +20,97 @@ export function ensureMessageReadSchema(): Promise<void> {
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS employee_message_reads_employee_idx ON employee_message_reads (employee_id, read_at DESC)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS owner_message_reads (
+          message_id UUID NOT NULL REFERENCES employee_messages(id) ON DELETE CASCADE,
+          reader_email TEXT NOT NULL,
+          read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (message_id, reader_email)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS owner_message_reads_reader_idx ON owner_message_reads (reader_email, read_at DESC)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS owner_message_notification_state (
+          reader_email TEXT PRIMARY KEY,
+          started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
     })().catch((error) => {
       readSchemaPromise = null;
       throw error;
     });
   }
   return readSchemaPromise;
+}
+
+function normalizedReaderEmail(value: string): string {
+  return String(value || "").trim().toLowerCase();
+}
+
+async function notificationStart(readerEmail: string): Promise<string> {
+  const email = normalizedReaderEmail(readerEmail);
+  if (!email) throw new Error("A signed-in manager is required for message notifications.");
+  const inserted = await getSql()`
+    INSERT INTO owner_message_notification_state (reader_email)
+    VALUES (${email})
+    ON CONFLICT (reader_email) DO NOTHING
+    RETURNING started_at
+  ` as unknown as Array<{ started_at: string }>;
+  if (inserted[0]?.started_at) return inserted[0].started_at;
+  const rows = await getSql()`
+    SELECT started_at
+    FROM owner_message_notification_state
+    WHERE reader_email = ${email}
+    LIMIT 1
+  ` as unknown as Array<{ started_at: string }>;
+  return rows[0]?.started_at || new Date().toISOString();
+}
+
+export async function adminUnreadMessageSummary(readerEmail: string, businesses: Business[]) {
+  await ensureMessageReadSchema();
+  const email = normalizedReaderEmail(readerEmail);
+  const startedAt = await notificationStart(email);
+  const canReadDeli = businesses.includes("Corner Deli");
+  const canReadTiki = businesses.includes("Tiki");
+  const rows = await getSql()`
+    SELECT m.business, COUNT(*)::INTEGER AS unread_count
+    FROM employee_messages m
+    WHERE m.sender_employee_id IS NOT NULL
+      AND m.created_at >= ${startedAt}
+      AND (
+        (m.business = 'Corner Deli' AND ${canReadDeli})
+        OR (m.business = 'Tiki' AND ${canReadTiki})
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM owner_message_reads r
+        WHERE r.message_id = m.id AND r.reader_email = ${email}
+      )
+    GROUP BY m.business
+  ` as unknown as Array<{ business: Business; unread_count: string | number }>;
+  const byBusiness: Record<Business, number> = { "Corner Deli": 0, Tiki: 0 };
+  for (const row of rows) byBusiness[row.business] = Number(row.unread_count || 0);
+  return {
+    messages: byBusiness["Corner Deli"] + byBusiness.Tiki,
+    byBusiness,
+  };
+}
+
+export async function markAdminMessagesRead(readerEmail: string, business: Business) {
+  await ensureMessageReadSchema();
+  const email = normalizedReaderEmail(readerEmail);
+  const startedAt = await notificationStart(email);
+  const rows = await getSql()`
+    INSERT INTO owner_message_reads (message_id, reader_email)
+    SELECT m.id, ${email}
+    FROM employee_messages m
+    WHERE m.business = ${business}
+      AND m.sender_employee_id IS NOT NULL
+      AND m.created_at >= ${startedAt}
+    ON CONFLICT (message_id, reader_email) DO NOTHING
+    RETURNING message_id
+  ` as unknown as Array<{ message_id: string }>;
+  return { markedRead: rows.length };
 }
 
 export async function markEmployeeMessageSeen(session: EmployeeSession, messageId: string) {
