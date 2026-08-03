@@ -34,5 +34,8 @@ export type SessionView = {
   configured: boolean;
   missing: string[];
   email?: string;
+  displayName?: string;
+  role?: "Owner" | "Co-Owner" | "Accountant" | "Manager" | "Viewer";
+  permissions?: string[];
   businesses?: Business[];
 };

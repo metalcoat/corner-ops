@@ -2,13 +2,17 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { assertConfigured } from "@/lib/config";
 import { businesses, type Business } from "@/lib/types";
+import { permissionsForRole, type AppRole, type AppUserIdentity } from "@/lib/users";
 
 const COOKIE_NAME = "corner_ops_session";
 const SESSION_SECONDS = 60 * 60 * 12;
 
-type SessionPayload = {
+export type SessionPayload = {
   email: string;
+  displayName: string;
+  role: AppRole;
   businesses: Business[];
+  permissions: string[];
   expiresAt: number;
 };
 
@@ -36,14 +40,25 @@ function createToken(payload: SessionPayload): string {
   return `${encoded}.${signature(encoded)}`;
 }
 
+function normalizePayload(value: Partial<SessionPayload>): SessionPayload | null {
+  if (!value.email || !Array.isArray(value.businesses) || Number(value.expiresAt || 0) <= Date.now()) return null;
+  const role = value.role || "Owner";
+  const validBusinesses = value.businesses.filter((business): business is Business => businesses.includes(business as Business));
+  return {
+    email: value.email,
+    displayName: value.displayName || value.email,
+    role,
+    businesses: validBusinesses,
+    permissions: Array.isArray(value.permissions) && value.permissions.length ? value.permissions : permissionsForRole(role),
+    expiresAt: Number(value.expiresAt),
+  };
+}
+
 function parseToken(token: string): SessionPayload | null {
   const [encoded, suppliedSignature] = token.split(".");
   if (!encoded || !suppliedSignature || !safeEqual(signature(encoded), suppliedSignature)) return null;
-
   try {
-    const payload = JSON.parse(decode(encoded)) as SessionPayload;
-    if (!payload.email || !Array.isArray(payload.businesses) || payload.expiresAt <= Date.now()) return null;
-    return payload;
+    return normalizePayload(JSON.parse(decode(encoded)) as Partial<SessionPayload>);
   } catch {
     return null;
   }
@@ -54,10 +69,13 @@ export function isValidPassword(candidate: string): boolean {
   return safeEqual(candidate, process.env.APP_PASSWORD!);
 }
 
-export async function createSession(): Promise<SessionPayload> {
+export async function createSession(identity?: AppUserIdentity): Promise<SessionPayload> {
   const payload: SessionPayload = {
-    email: process.env.APP_EMAIL?.trim() || "crfrary@gmail.com",
-    businesses: [...businesses],
+    email: identity?.email || process.env.APP_EMAIL?.trim().toLowerCase() || "crfrary@gmail.com",
+    displayName: identity?.displayName || "Owner",
+    role: identity?.role || "Owner",
+    businesses: identity?.businesses?.length ? [...identity.businesses] : [...businesses],
+    permissions: identity?.permissions?.length ? [...identity.permissions] : ["*"],
     expiresAt: Date.now() + SESSION_SECONDS * 1000,
   };
 
@@ -69,7 +87,6 @@ export async function createSession(): Promise<SessionPayload> {
     path: "/",
     maxAge: SESSION_SECONDS,
   });
-
   return payload;
 }
 
@@ -92,4 +109,12 @@ export async function getSession(): Promise<SessionPayload | null> {
 
 export function canAccessBusiness(session: SessionPayload, business: string): business is Business {
   return session.businesses.includes(business as Business);
+}
+
+export function hasPermission(session: SessionPayload, permission: string): boolean {
+  return session.permissions.includes("*") || session.permissions.includes(permission);
+}
+
+export function requirePermission(session: SessionPayload, permission: string): void {
+  if (!hasPermission(session, permission)) throw new Error("Your account does not have permission for this action.");
 }
