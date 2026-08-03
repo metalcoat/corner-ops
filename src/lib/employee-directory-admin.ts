@@ -1,5 +1,7 @@
 import { createHmac } from "node:crypto";
+import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
 import { ensureEmployeeDirectorySchema, upsertDirectoryEmployees, type DirectoryEmployeeInput } from "@/lib/employee-directory";
+import { ensureEmployeeProfileSchema, scheduleColorFromId, validScheduleColor } from "@/lib/employee-profile";
 import { getSql } from "@/lib/db";
 import { employeePinLength, validateEmployeePin } from "@/lib/employee-pin";
 import type { Business } from "@/lib/types";
@@ -15,10 +17,11 @@ function pinHash(business: Business, pin: string): string {
 }
 
 export async function listDirectoryEmployees(business: Business) {
-  await ensureEmployeeDirectorySchema();
+  await ensureEmployeeProfileSchema();
   const rows = await getSql()`
     SELECT id, business, email, name, position, role_group, counts_for_tips,
-      hourly_rate, tipped_rate, active, pin_enabled, created_at, updated_at
+      hourly_rate, tipped_rate, active, pin_enabled, schedule_color,
+      profile_photo_pathname, created_at, updated_at
     FROM employees
     WHERE business = ${business}
     ORDER BY active DESC, name
@@ -36,12 +39,15 @@ export async function listDirectoryEmployees(business: Business) {
     tippedRate: Number(row.tipped_rate || 0),
     active: Boolean(row.active),
     pinEnabled: Boolean(row.pin_enabled),
+    scheduleColor: String(row.schedule_color || scheduleColorFromId(String(row.id))),
+    avatarSet: Boolean(row.profile_photo_pathname),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   }));
 }
 
 export async function createDirectoryEmployee(input: DirectoryEmployeeInput) {
+  await ensureEmployeeProfileSchema();
   const result = await upsertDirectoryEmployees([input]);
   return result.employees[0];
 }
@@ -113,12 +119,13 @@ export async function updateDirectoryEmployee(input: {
   countsForTips?: boolean;
   hourlyRate?: number;
   tippedRate?: number;
+  scheduleColor?: string;
 }) {
-  await ensureEmployeeDirectorySchema();
+  await ensureEmployeeProfileSchema();
   const sql = getSql();
   const current = await sql`
     SELECT id, business, email, name, position, role_group, counts_for_tips,
-      hourly_rate, tipped_rate, active
+      hourly_rate, tipped_rate, active, schedule_color, profile_photo_pathname
     FROM employees
     WHERE id = ${input.id} AND business = ${input.business}
     LIMIT 1
@@ -133,18 +140,30 @@ export async function updateDirectoryEmployee(input: {
     hourly_rate: number | string;
     tipped_rate: number | string;
     active: boolean;
+    schedule_color: string;
+    profile_photo_pathname: string;
   }>;
   const existing = current[0];
   if (!existing) throw new Error("Employee not found.");
 
   const email = input.email === undefined ? existing.email : clean(input.email, 255).toLowerCase();
   const name = input.name === undefined ? existing.name : clean(input.name, 120);
-  const position = input.position === undefined ? existing.position : clean(input.position, 80);
-  const roleGroup = input.roleGroup ?? existing.role_group;
+  const position = input.position === undefined
+    ? normalizePosition(input.business, existing.position)
+    : normalizePosition(input.business, input.position);
+  const derivedRole = roleGroupForPosition(input.business, position);
+  const roleGroup = input.roleGroup === "Ignore"
+    ? "Ignore"
+    : input.business === "Corner Deli"
+      ? derivedRole
+      : input.roleGroup ?? existing.role_group;
   const countsForTips = input.countsForTips ?? existing.counts_for_tips;
   const hourlyRate = Math.max(0, input.hourlyRate ?? Number(existing.hourly_rate));
   const tippedRate = Math.max(0, input.tippedRate ?? Number(existing.tipped_rate));
   const active = input.active ?? existing.active;
+  const scheduleColor = input.scheduleColor === undefined
+    ? existing.schedule_color || scheduleColorFromId(existing.id)
+    : validScheduleColor(input.scheduleColor);
 
   if (!name) throw new Error("Employee name is required.");
   if (!position) throw new Error("Employee position is required.");
@@ -170,12 +189,13 @@ export async function updateDirectoryEmployee(input: {
       hourly_rate = ${hourlyRate},
       tipped_rate = ${tippedRate},
       active = ${active},
+      schedule_color = ${scheduleColor},
       pin_hash = CASE WHEN ${pin} <> '' THEN ${pin ? pinHash(input.business, pin) : ""} ELSE pin_hash END,
       pin_enabled = CASE WHEN ${pin} <> '' THEN TRUE ELSE pin_enabled END,
       updated_at = NOW()
     WHERE id = ${input.id} AND business = ${input.business}
     RETURNING id, email, name, position, role_group, counts_for_tips,
-      hourly_rate, tipped_rate, pin_enabled, active
+      hourly_rate, tipped_rate, pin_enabled, active, schedule_color, profile_photo_pathname
   ` as unknown as Array<Record<string, unknown>>;
 
   if (name !== existing.name) {
@@ -212,5 +232,7 @@ export async function updateDirectoryEmployee(input: {
     tippedRate: Number(row.tipped_rate || 0),
     pinEnabled: Boolean(row.pin_enabled),
     active: Boolean(row.active),
+    scheduleColor: String(row.schedule_color),
+    avatarSet: Boolean(row.profile_photo_pathname),
   };
 }
