@@ -13,8 +13,12 @@ Corner Ops is the private operating system for **Corner Deli** and **Tiki**.
 - Honest Corner Deli report coverage based only on the Rezku files received by email
 - Weekly draft scheduling with one publish action and personalized employee schedule emails
 - Missed-shift detection with secure Employee Hub corrections and management approval
+- Plaid checking, savings, and credit-card transaction feeds
+- Credit-card payment matching between bank withdrawals and card credits
+- Receipt uploads, Google Drive folder monitoring, Document AI OCR, and receipt-to-transaction matching
 - Private document storage in Vercel Blob
 - Tiki five-digit PIN time clock with GPS capture
+- Corner Deli four-digit and Tiki five-digit Employee Hub PINs
 - Tiki employee, rate, role, punch, overtime, and payroll views
 - Corner Deli Rezku labor, order, transaction, payroll, and tip processing
 - Direct Rezku inbound email processing through Resend and Vercel
@@ -46,6 +50,47 @@ No weather API key is required for the proof of concept. Coordinates can be over
 WEATHER_LATITUDE=44.6942
 WEATHER_LONGITUDE=-75.4863
 ```
+
+## Cards, payments, and receipts
+
+Plaid Transactions supplies checking, savings, and credit-card activity. Each issuer should be connected
+under the correct business. The same institution connection can return multiple authorized accounts,
+including credit cards.
+
+The `/ops/expense-control` module distinguishes account types and searches for the two sides of a
+credit-card payment:
+
+- the withdrawal from a checking account
+- the matching credit on the card account
+
+High-confidence pairs can be matched automatically. Other pairs remain suggestions for owner review. A
+confirmed payment is posted once from cash to the Credit Cards liability account; the card-feed mirror is
+ignored. Credit-card purchases post through the Credit Cards liability control account rather than
+incorrectly reducing bank cash.
+
+Receipts can be uploaded directly or discovered recursively in separate Corner Deli and Tiki Google
+Drive folders. The original upload is retained, Google Document AI extracts the merchant, date, total,
+tax, currency, and OCR text, and Corner Ops compares the result with bank and card purchases by amount,
+date, and merchant.
+
+Required Google settings:
+
+```text
+GOOGLE_SERVICE_ACCOUNT_EMAIL
+GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
+GOOGLE_CLOUD_PROJECT_ID
+GOOGLE_DOCUMENT_AI_LOCATION=us
+GOOGLE_DOCUMENT_AI_EXPENSE_PROCESSOR_ID
+GOOGLE_DRIVE_RECEIPTS_FOLDER_CORNER_DELI
+GOOGLE_DRIVE_RECEIPTS_FOLDER_TIKI
+```
+
+Enable the Google Drive API and Document AI API in the Google Cloud project. Create an Expense Parser
+processor, then share each receipt folder with the service-account email as a Viewer. The nightly
+scheduler scans both folders and reruns payment and receipt matching after Plaid synchronization.
+
+Supported receipt inputs include PDF, GIF, TIFF, JPEG, PNG, BMP, and WebP. Online OCR uploads are
+limited to 40 MB.
 
 ## Schedule publishing and staff email
 
@@ -115,6 +160,9 @@ DATABASE_URL
 APP_EMAIL
 APP_PASSWORD
 SESSION_SECRET
+PLAID_CLIENT_ID
+PLAID_SECRET
+PLAID_ENV
 ```
 
 Vercel Blob uses automatic OIDC credentials when deployed on Vercel. A static
