@@ -1,6 +1,8 @@
 # 3CX Professional CDR integration
 
-Corner Ops receives durable 3CX Call Data Records through a small Node.js socket receiver. This does not require the Enterprise Call Control API.
+Corner Ops receives durable 3CX Call Data Records through a small cross-platform Node.js socket receiver. This does not require the Enterprise Call Control API.
+
+For a self-hosted Linux 3CX system, run the receiver as a hardened `systemd` service either on the PBX itself or on another always-on Linux host that can reach the CDR socket. Do not install it on a vendor-managed 3CX host where custom services are prohibited.
 
 ## 1. Configure these Vercel environment variables
 
@@ -42,33 +44,50 @@ Keep comma delimiters enabled. The receiver supports quoted commas in names.
 
 ## 3. Choose the socket direction
 
-### Receiver connects to 3CX
+### Recommended on the Linux PBX: receiver connects to 3CX
 
-Use 3CX **Server / Passive Socket** and run:
+Configure 3CX as **Server / Passive Socket** on a local TCP port, such as `5483`. Bind or firewall that port so only localhost or the receiver host can reach it.
 
-```powershell
-$env:CDR_MODE="connect"
-$env:CDR_HOST="your-pbx-host"
-$env:CDR_PORT="5483"
-$env:CORNER_OPS_URL="https://your-corner-ops-host"
-$env:CORNER_OPS_CDR_SECRET="the-same-secret-as-vercel"
-node tools/3cx-cdr-receiver.mjs
+Create `/etc/corner-ops/3cx-cdr.env`:
+
+```bash
+CDR_MODE=connect
+CDR_HOST=127.0.0.1
+CDR_PORT=5483
+CORNER_OPS_URL=https://your-corner-ops-host
+CORNER_OPS_CDR_SECRET=the-same-secret-as-vercel
+CDR_SPOOL_FILE=/var/lib/corner-ops-cdr/spool.jsonl
+# VERCEL_PROTECTION_BYPASS=preview-bypass-secret
 ```
 
-### 3CX connects to the receiver
+Install the files:
 
-Use 3CX **Client / Active Socket** and run the receiver on an address reachable by the PBX:
-
-```powershell
-$env:CDR_MODE="listen"
-$env:CDR_HOST="0.0.0.0"
-$env:CDR_PORT="5483"
-$env:CORNER_OPS_URL="https://your-corner-ops-host"
-$env:CORNER_OPS_CDR_SECRET="the-same-secret-as-vercel"
-node tools/3cx-cdr-receiver.mjs
+```bash
+sudo useradd --system --home /opt/corner-ops-cdr --shell /usr/sbin/nologin cornerops
+sudo install -d -o cornerops -g cornerops /opt/corner-ops-cdr /var/lib/corner-ops-cdr
+sudo install -d -m 0750 /etc/corner-ops
+sudo install -o cornerops -g cornerops -m 0755 tools/3cx-cdr-receiver.mjs /opt/corner-ops-cdr/3cx-cdr-receiver.mjs
+sudo install -m 0644 tools/3cx-cdr-receiver.service /etc/systemd/system/corner-ops-3cx-cdr.service
+sudo chmod 0600 /etc/corner-ops/3cx-cdr.env
+sudo systemctl daemon-reload
+sudo systemctl enable --now corner-ops-3cx-cdr
+sudo journalctl -u corner-ops-3cx-cdr -f
 ```
 
-Install the receiver as a Windows service with NSSM, WinSW, or Task Scheduler after a successful foreground test.
+### 3CX connects to a separate receiver host
+
+Configure 3CX as **Client / Active Socket** and run the receiver on an address reachable by the PBX:
+
+```bash
+CDR_MODE=listen
+CDR_HOST=0.0.0.0
+CDR_PORT=5483
+CORNER_OPS_URL=https://your-corner-ops-host
+CORNER_OPS_CDR_SECRET=the-same-secret-as-vercel
+CDR_SPOOL_FILE=/var/lib/corner-ops-cdr/spool.jsonl
+```
+
+Restrict the listener port to the PBX source IP. The receiver forwards records to Corner Ops over HTTPS and keeps failed deliveries in the local spool for automatic retry.
 
 ## 4. View the report
 
