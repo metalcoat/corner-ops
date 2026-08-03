@@ -1,5 +1,10 @@
 import { Resend } from "resend";
 import { importRezkuReport } from "@/lib/operations";
+import {
+  finishRezkuInboundEmail,
+  recordRezkuInboundReport,
+  startRezkuInboundEmail,
+} from "@/lib/rezku-monitor";
 
 export const runtime = "nodejs";
 
@@ -48,6 +53,13 @@ function senderAddress(value: string): string {
   return value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]?.toLowerCase() || "";
 }
 
+function reportDate(content: string): string | null {
+  const match = decodeHtml(content).match(/overview of your day,\s*([A-Z][a-z]+\s+\d{1,2},\s+\d{4})/i);
+  if (!match) return null;
+  const date = new Date(`${match[1]} 12:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+}
+
 function excelLinks(content: string): Array<{ url: string; fileName: string }> {
   const matches = decodeHtml(content).match(/https:\/\/[^\s"'<>]+?\.(?:xlsx|xls)(?:\?[^\s"'<>]*)?/gi) || [];
   const unique = new Map<string, { url: string; fileName: string }>();
@@ -76,7 +88,13 @@ async function downloadAndImport(url: string, fileName: string, importedBy: stri
   const download = await fetch(url, { redirect: "follow", cache: "no-store" });
   if (!download.ok) throw new Error(`Rezku download failed for ${fileName}: HTTP ${download.status}`);
   const result = await importRezkuReport(fileName, await download.arrayBuffer(), reportType(fileName), importedBy);
-  return { fileName, reportType: result.reportType, rowsRead: result.rowsRead, imported: result.imported };
+  return {
+    fileName,
+    batchId: result.batchId,
+    reportType: result.reportType,
+    rowsRead: result.rowsRead,
+    imported: result.imported,
+  };
 }
 
 export async function POST(request: Request) {
@@ -119,9 +137,28 @@ export async function POST(request: Request) {
     return Response.json({ ignored: true, reason: "Email did not match the trusted Rezku sender and subject." });
   }
 
-  const sources = excelLinks(`${email.html || ""}\n${email.text || ""}`);
+  const content = `${email.html || ""}\n${email.text || ""}`;
+  const sources = excelLinks(content);
+  const emailReportDate = reportDate(content);
+
   const { data: rawAttachments, error: attachmentError } = await resend.emails.receiving.attachments.list({ emailId: event.data.email_id });
-  if (attachmentError) return Response.json({ error: attachmentError.message }, { status: 502 });
+  if (attachmentError) {
+    await startRezkuInboundEmail({
+      emailId: event.data.email_id,
+      webhookId: id,
+      sender,
+      subject,
+      reportDate: emailReportDate,
+      reportsFound: sources.length,
+    });
+    await finishRezkuInboundEmail({
+      emailId: event.data.email_id,
+      status: "Failed",
+      reportsProcessed: 0,
+      error: attachmentError.message,
+    });
+    return Response.json({ error: attachmentError.message }, { status: 502 });
+  }
 
   for (const attachment of attachmentList(rawAttachments)) {
     if (!/\.(xlsx|xls)$/i.test(attachment.filename)) continue;
@@ -129,14 +166,73 @@ export async function POST(request: Request) {
   }
 
   const uniqueSources = [...new Map(sources.map((source) => [source.url, source])).values()];
+  await startRezkuInboundEmail({
+    emailId: event.data.email_id,
+    webhookId: id,
+    sender,
+    subject,
+    reportDate: emailReportDate,
+    reportsFound: uniqueSources.length,
+  });
+
   if (uniqueSources.length === 0) {
-    return Response.json({ error: "The Rezku email did not contain any Excel report links." }, { status: 422 });
+    const error = "The Rezku email did not contain any Excel report links.";
+    await finishRezkuInboundEmail({ emailId: event.data.email_id, status: "Failed", reportsProcessed: 0, error });
+    return Response.json({ error }, { status: 422 });
   }
 
-  const results = [];
+  const results: Array<Record<string, unknown>> = [];
+  const failures: string[] = [];
   for (const source of uniqueSources) {
-    results.push(await downloadAndImport(source.url, source.fileName, `Resend inbound ${event.data.email_id}`));
+    const kind = reportType(source.fileName) || "";
+    await recordRezkuInboundReport({
+      emailId: event.data.email_id,
+      fileName: source.fileName,
+      reportType: kind,
+      status: "Processing",
+    });
+    try {
+      const result = await downloadAndImport(source.url, source.fileName, `Resend inbound ${event.data.email_id}`);
+      results.push(result);
+      await recordRezkuInboundReport({
+        emailId: event.data.email_id,
+        fileName: source.fileName,
+        reportType: result.reportType,
+        status: "Processed",
+        batchId: result.batchId,
+        rowsRead: result.rowsRead,
+        rowsImported: result.imported,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(`${source.fileName}: ${message}`);
+      await recordRezkuInboundReport({
+        emailId: event.data.email_id,
+        fileName: source.fileName,
+        reportType: kind,
+        status: "Failed",
+        error: message,
+      });
+    }
   }
 
-  return Response.json({ processed: true, kind: "rezku-reports", emailId: event.data.email_id, webhookId: id, reports: results });
+  const successful = results.length;
+  const status = failures.length === 0 ? "Processed" : successful > 0 ? "Partial" : "Failed";
+  await finishRezkuInboundEmail({
+    emailId: event.data.email_id,
+    status,
+    reportsProcessed: successful,
+    error: failures.join("\n"),
+  });
+
+  const response = {
+    processed: failures.length === 0,
+    kind: "rezku-reports",
+    emailId: event.data.email_id,
+    webhookId: id,
+    reportDate: emailReportDate,
+    reports: results,
+    failures,
+  };
+  return Response.json(response, { status: failures.length ? 500 : 200 });
 }
