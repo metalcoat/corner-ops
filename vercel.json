@@ -1,4 +1,10 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "agent/rebuild-corner-ops": false
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/scheduler-0700",
