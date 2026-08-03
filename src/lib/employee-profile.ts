@@ -31,6 +31,7 @@ export function ensureEmployeeProfileSchema(): Promise<void> {
       await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS profile_photo_name TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS profile_photo_type TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS profile_photo_size BIGINT NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS chat_nickname TEXT NOT NULL DEFAULT ''`;
       await sql`
         UPDATE employees
         SET schedule_color = (ARRAY[
@@ -66,6 +67,33 @@ export async function updateEmployeeScheduleColor(input: {
   ` as unknown as Array<{ id: string; schedule_color: string }>;
   if (!rows[0]) throw new Error("Employee not found.");
   return { id: rows[0].id, scheduleColor: rows[0].schedule_color };
+}
+
+export async function updateEmployeeChatNickname(session: EmployeeSession, value: unknown) {
+  await ensureEmployeeProfileSchema();
+  const nickname = clean(value, 32).replace(/\s+/g, " ");
+  if (nickname && nickname.length < 2) throw new Error("Chat nicknames must contain at least two characters.");
+  if (/[\r\n<>]/.test(nickname)) throw new Error("Chat nickname contains unsupported characters.");
+
+  if (nickname) {
+    const duplicate = await getSql()`
+      SELECT id FROM employees
+      WHERE business = ${session.business}
+        AND id <> ${session.employeeId}
+        AND active = TRUE
+        AND LOWER(BTRIM(chat_nickname)) = LOWER(BTRIM(${nickname}))
+      LIMIT 1
+    ` as unknown as Array<{ id: string }>;
+    if (duplicate[0]) throw new Error("Another employee is already using that chat nickname.");
+  }
+
+  const rows = await getSql()`
+    UPDATE employees SET chat_nickname = ${nickname}, updated_at = NOW()
+    WHERE id = ${session.employeeId} AND business = ${session.business} AND active = TRUE
+    RETURNING chat_nickname
+  ` as unknown as Array<{ chat_nickname: string }>;
+  if (!rows[0]) throw new Error("Employee profile was not found.");
+  return { chatNickname: rows[0].chat_nickname };
 }
 
 export async function setEmployeeProfilePhoto(input: {
