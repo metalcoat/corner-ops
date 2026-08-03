@@ -24,7 +24,6 @@ type MissedShiftRow = {
   employee_note: string;
   submission_channel: string;
   status: string;
-  reply_token: string;
   notified_at: string | null;
   notification_error: string;
   detected_at: string;
@@ -35,10 +34,6 @@ type MissedShiftRow = {
 
 function clean(value: unknown, max = 1000): string {
   return String(value ?? "").trim().slice(0, max);
-}
-
-function emailAddress(value: string): string {
-  return value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]?.toLowerCase() || "";
 }
 
 function getOffsetMilliseconds(date: Date): number {
@@ -98,21 +93,6 @@ function formatLocal(value: string): string {
   }).format(new Date(value));
 }
 
-function localTemplate(value: string): string {
-  const date = new Date(value);
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute} ${values.dayPeriod}`;
-}
-
 export function ensureAttendanceSchema(): Promise<void> {
   if (!attendanceSchemaPromise) {
     attendanceSchemaPromise = (async () => {
@@ -134,8 +114,7 @@ export function ensureAttendanceSchema(): Promise<void> {
           correction_end TIMESTAMPTZ,
           employee_note TEXT NOT NULL DEFAULT '',
           submission_channel TEXT NOT NULL DEFAULT '',
-          status TEXT NOT NULL DEFAULT 'Awaiting Reply' CHECK (status IN ('Awaiting Reply', 'Submitted', 'Approved', 'Rejected', 'Resolved')),
-          reply_token TEXT NOT NULL UNIQUE,
+          status TEXT NOT NULL DEFAULT 'Awaiting Correction' CHECK (status IN ('Awaiting Correction', 'Submitted', 'Approved', 'Rejected', 'Resolved')),
           notified_at TIMESTAMPTZ,
           notification_error TEXT NOT NULL DEFAULT '',
           detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -144,6 +123,14 @@ export function ensureAttendanceSchema(): Promise<void> {
           manager_note TEXT NOT NULL DEFAULT ''
         )
       `;
+      await sql`ALTER TABLE missed_shift_cases DROP CONSTRAINT IF EXISTS missed_shift_cases_status_check`;
+      await sql`UPDATE missed_shift_cases SET status = 'Awaiting Correction' WHERE status = 'Awaiting Reply'`;
+      await sql`
+        ALTER TABLE missed_shift_cases
+        ADD CONSTRAINT missed_shift_cases_status_check
+        CHECK (status IN ('Awaiting Correction', 'Submitted', 'Approved', 'Rejected', 'Resolved'))
+      `;
+      await sql`ALTER TABLE missed_shift_cases DROP COLUMN IF EXISTS reply_token`;
       await sql`CREATE INDEX IF NOT EXISTS missed_shift_business_status_idx ON missed_shift_cases (business, status, scheduled_start DESC)`;
       await sql`CREATE INDEX IF NOT EXISTS missed_shift_employee_idx ON missed_shift_cases (employee_id, scheduled_start DESC)`;
     })().catch((error) => {
@@ -185,7 +172,7 @@ async function actualRecordExists(input: {
 async function reconcileCases() {
   const rows = await getSql()`
     SELECT * FROM missed_shift_cases
-    WHERE status IN ('Awaiting Reply', 'Submitted')
+    WHERE status IN ('Awaiting Correction', 'Submitted')
       AND scheduled_start >= NOW() - INTERVAL '30 days'
   ` as unknown as MissedShiftRow[];
   let resolved = 0;
@@ -212,33 +199,29 @@ async function sendMissedShiftEmail(row: MissedShiftRow) {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   const from = process.env.EMPLOYEE_NOTIFICATION_FROM_EMAIL?.trim() || process.env.ALERT_FROM_EMAIL?.trim();
   const appUrl = (process.env.EMPLOYEE_APP_URL?.trim() || process.env.APP_URL?.trim() || "").replace(/\/$/, "");
-  const replyDomain = process.env.ATTENDANCE_REPLY_DOMAIN?.trim().toLowerCase();
   if (!row.employee_email) return { sent: false, reason: "Employee email is missing." };
   if (!apiKey || !from) return { sent: false, reason: "Employee email delivery is not configured." };
+  if (!appUrl) return { sent: false, reason: "Employee Hub URL is not configured." };
 
-  const portalLink = appUrl ? `${appUrl}/employee/attendance?case=${encodeURIComponent(row.id)}` : "";
-  const replyTo = replyDomain ? `attendance+${row.reply_token}@${replyDomain}` : undefined;
+  const portalLink = `${appUrl}/employee/attendance?case=${encodeURIComponent(row.id)}`;
   const text = [
     `Hi ${row.employee_name.split(/\s+/)[0]},`,
     "",
     `Corner Ops could not find a time record matching your scheduled ${row.position || "shift"}:`,
     `${formatLocal(row.scheduled_start)} to ${formatLocal(row.scheduled_end)}`,
     "",
-    "You can correct this in the Employee Hub, or reply to this email using the format below:",
-    `CLOCK IN: ${localTemplate(row.scheduled_start)}`,
-    `CLOCK OUT: ${localTemplate(row.scheduled_end)}`,
-    "REASON: Explain what happened or which punch is missing.",
+    "Use the secure Employee Hub link below to enter the times you actually worked and explain what happened:",
+    portalLink,
     "",
-    portalLink ? `Employee Hub: ${portalLink}` : "Sign in to the Employee Hub to submit the correction.",
+    "Sign in with your normal five-digit Employee Hub PIN. Your correction will remain pending until management approves it.",
     "",
-    "Your correction will remain pending until management approves it.",
+    "Please do not reply to this email. Corrections must be submitted through Employee Hub.",
   ].join("\n");
 
   const resend = new Resend(apiKey);
   const result = await resend.emails.send({
     from,
     to: row.employee_email,
-    replyTo,
     subject: `${row.business} missing shift record: ${new Intl.DateTimeFormat("en-US", { timeZone: TIME_ZONE, month: "short", day: "numeric" }).format(new Date(row.scheduled_start))}`,
     text,
   });
@@ -293,11 +276,11 @@ export async function detectMissedShifts() {
     const inserted = await getSql()`
       INSERT INTO missed_shift_cases (
         id, shift_id, business, employee_id, employee_name, employee_email, position,
-        scheduled_start, scheduled_end, reply_token
+        scheduled_start, scheduled_end
       ) VALUES (
         ${crypto.randomUUID()}, ${shift.shift_id}, ${shift.business}, ${shift.employee_id},
         ${shift.employee_name}, ${clean(shift.employee_email, 255).toLowerCase()}, ${clean(shift.position, 100)},
-        ${shift.starts_at}, ${shift.ends_at}, ${crypto.randomUUID().replaceAll("-", "")}
+        ${shift.starts_at}, ${shift.ends_at}
       )
       ON CONFLICT (shift_id) DO NOTHING
       RETURNING *
@@ -355,7 +338,7 @@ export async function employeeAttendanceCases(session: EmployeeSession) {
     WHERE employee_id = ${session.employeeId}
       AND business = ${session.business}
       AND scheduled_start >= NOW() - INTERVAL '180 days'
-    ORDER BY CASE WHEN status IN ('Awaiting Reply', 'Submitted') THEN 0 ELSE 1 END, scheduled_start DESC
+    ORDER BY CASE WHEN status IN ('Awaiting Correction', 'Submitted') THEN 0 ELSE 1 END, scheduled_start DESC
   ` as unknown as MissedShiftRow[];
   return { business: session.business, employeeId: session.employeeId, cases: rows.map(mapCase) };
 }
@@ -382,79 +365,11 @@ export async function submitEmployeeAttendanceCase(session: EmployeeSession, inp
     WHERE id = ${input.id}
       AND employee_id = ${session.employeeId}
       AND business = ${session.business}
-      AND status IN ('Awaiting Reply', 'Submitted', 'Rejected')
+      AND status IN ('Awaiting Correction', 'Submitted', 'Rejected')
     RETURNING *
   ` as unknown as MissedShiftRow[];
   if (!rows[0]) throw new Error("That missed-shift case is no longer available for correction.");
   return mapCase(rows[0]);
-}
-
-function replyToken(recipients: string[]): string {
-  for (const recipient of recipients) {
-    const match = recipient.toLowerCase().match(/attendance\+([a-z0-9]+)@/);
-    if (match) return match[1];
-  }
-  return "";
-}
-
-function cleanReplyBody(value: string): string {
-  const lines = value.replace(/\r/g, "").split("\n");
-  const kept: string[] = [];
-  for (const line of lines) {
-    if (/^On .+wrote:$/i.test(line.trim())) break;
-    if (line.trim().startsWith(">")) continue;
-    kept.push(line);
-  }
-  return clean(kept.join("\n").trim(), 5000);
-}
-
-function replyField(body: string, label: string): string {
-  const match = body.match(new RegExp(`^${label}\\s*:\\s*(.+)$`, "im"));
-  return clean(match?.[1] || "", 120);
-}
-
-export async function processAttendanceReply(input: {
-  recipients: string[];
-  from: string;
-  text: string;
-  subject?: string;
-}) {
-  await ensureAttendanceSchema();
-  const token = replyToken(input.recipients);
-  if (!token) return { handled: false };
-  const rows = await getSql()`
-    SELECT * FROM missed_shift_cases WHERE reply_token = ${token} LIMIT 1
-  ` as unknown as MissedShiftRow[];
-  const row = rows[0];
-  if (!row) return { handled: true, accepted: false, reason: "Attendance reply token was not recognized." };
-  const sender = emailAddress(input.from);
-  if (!sender || !row.employee_email || sender !== row.employee_email.toLowerCase()) {
-    return { handled: true, accepted: false, reason: "Reply sender did not match the employee email on the case." };
-  }
-  if (!['Awaiting Reply', 'Submitted', 'Rejected'].includes(row.status)) {
-    return { handled: true, accepted: false, reason: `Case is already ${row.status.toLowerCase()}.` };
-  }
-
-  const body = cleanReplyBody(input.text);
-  const clockInText = replyField(body, "CLOCK IN");
-  const clockOutText = replyField(body, "CLOCK OUT");
-  const reasonText = replyField(body, "REASON");
-  const start = clockInText ? parseEmployeeDateTime(clockInText) : new Date(row.scheduled_start);
-  const end = clockOutText ? parseEmployeeDateTime(clockOutText) : new Date(row.scheduled_end);
-  if (!start || !end || end <= start) {
-    return { handled: true, accepted: false, reason: "The replied clock-in or clock-out could not be understood." };
-  }
-  const note = clean(reasonText || body || "Correction submitted by email reply.", 3000);
-  await getSql()`
-    UPDATE missed_shift_cases SET
-      correction_start = ${start.toISOString()},
-      correction_end = ${end.toISOString()},
-      employee_note = ${note},
-      submission_channel = 'Email reply',
-      status = 'Submitted'
-    WHERE id = ${row.id}
-  `;
-  return { handled: true, accepted: true, caseId: row.id };
 }
 
 export async function attendanceAdminDashboard(business: Business) {
@@ -463,12 +378,12 @@ export async function attendanceAdminDashboard(business: Business) {
     SELECT * FROM missed_shift_cases
     WHERE business = ${business}
       AND scheduled_start >= NOW() - INTERVAL '180 days'
-    ORDER BY CASE status WHEN 'Submitted' THEN 0 WHEN 'Awaiting Reply' THEN 1 ELSE 2 END, scheduled_start DESC
+    ORDER BY CASE status WHEN 'Submitted' THEN 0 WHEN 'Awaiting Correction' THEN 1 ELSE 2 END, scheduled_start DESC
   ` as unknown as MissedShiftRow[];
   return {
     business,
     counts: {
-      awaitingReply: rows.filter((row) => row.status === "Awaiting Reply").length,
+      awaitingCorrection: rows.filter((row) => row.status === "Awaiting Correction").length,
       submitted: rows.filter((row) => row.status === "Submitted").length,
       approved: rows.filter((row) => row.status === "Approved").length,
       unresolvedEmail: rows.filter((row) => row.notification_error).length,
