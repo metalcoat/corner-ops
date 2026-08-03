@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import { detectMissedShifts } from "@/lib/attendance";
 import { getSql } from "@/lib/db";
+import { runExpenseAutomation } from "@/lib/expense-control";
 import { payrollSummary } from "@/lib/operations";
 import {
   createOperationIssue,
@@ -151,6 +152,12 @@ export async function runScheduledOperations(input: { force?: boolean; source?: 
     }
 
     details.bankSync = await syncAllBankConnections();
+    try {
+      details.expenses = await runExpenseAutomation();
+    } catch (error) {
+      details.expenses = { error: error instanceof Error ? error.message : String(error) };
+    }
+
     try {
       details.squareSync = await syncSquareConnection();
     } catch (error) {
