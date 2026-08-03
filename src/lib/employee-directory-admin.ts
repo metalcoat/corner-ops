@@ -4,6 +4,7 @@ import { ensureEmployeeDirectorySchema, upsertDirectoryEmployees, type Directory
 import { ensureEmployeeProfileSchema, scheduleColorFromId, validScheduleColor } from "@/lib/employee-profile";
 import { getSql } from "@/lib/db";
 import { employeePinLength, validateEmployeePin } from "@/lib/employee-pin";
+import { normalizeSmsPhone } from "@/lib/phone";
 import type { Business } from "@/lib/types";
 
 function clean(value: unknown, max = 255): string {
@@ -18,8 +19,9 @@ function pinHash(business: Business, pin: string): string {
 
 export async function listDirectoryEmployees(business: Business) {
   await ensureEmployeeProfileSchema();
+  await ensureEmployeeDirectorySchema();
   const rows = await getSql()`
-    SELECT id, business, email, name, position, role_group, counts_for_tips,
+    SELECT id, business, email, phone, sms_opt_in, name, position, role_group, counts_for_tips,
       hourly_rate, tipped_rate, active, pin_enabled, schedule_color,
       profile_photo_pathname, chat_nickname, created_at, updated_at
     FROM employees
@@ -31,6 +33,8 @@ export async function listDirectoryEmployees(business: Business) {
     id: String(row.id),
     business: row.business as Business,
     email: String(row.email || ""),
+    phone: String(row.phone || ""),
+    smsOptIn: Boolean(row.sms_opt_in),
     name: String(row.name),
     position: String(row.position),
     roleGroup: row.role_group as "Driver" | "In-House" | "Ignore",
@@ -96,6 +100,8 @@ export async function updateDirectoryEmployee(input: {
   id: string;
   business: Business;
   email?: string;
+  phone?: string;
+  smsOptIn?: boolean;
   pin?: string;
   active?: boolean;
   name?: string;
@@ -107,9 +113,10 @@ export async function updateDirectoryEmployee(input: {
   scheduleColor?: string;
 }) {
   await ensureEmployeeProfileSchema();
+  await ensureEmployeeDirectorySchema();
   const sql = getSql();
   const current = await sql`
-    SELECT id, business, email, name, position, role_group, counts_for_tips,
+    SELECT id, business, email, phone, sms_opt_in, name, position, role_group, counts_for_tips,
       hourly_rate, tipped_rate, active, schedule_color, profile_photo_pathname, chat_nickname
     FROM employees WHERE id = ${input.id} AND business = ${input.business} LIMIT 1
   ` as unknown as Array<Record<string, unknown>>;
@@ -118,6 +125,8 @@ export async function updateDirectoryEmployee(input: {
 
   const existingRole = existing.role_group as "Driver" | "In-House" | "Ignore";
   const email = input.email === undefined ? String(existing.email || "") : clean(input.email, 255).toLowerCase();
+  const phone = input.phone === undefined ? String(existing.phone || "") : normalizeSmsPhone(input.phone);
+  const smsOptIn = input.smsOptIn === undefined ? Boolean(existing.sms_opt_in) : Boolean(input.smsOptIn && phone);
   const name = input.name === undefined ? String(existing.name) : clean(input.name, 120);
   const positionChanged = input.position !== undefined;
   const position = positionChanged ? normalizePosition(input.business, input.position) : String(existing.position);
@@ -137,6 +146,7 @@ export async function updateDirectoryEmployee(input: {
   if (!name) throw new Error("Employee name is required.");
   if (!position) throw new Error("Employee position is required.");
   if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new Error("Employee email is invalid.");
+  if (input.smsOptIn && !phone) throw new Error("Add a mobile phone number before enabling SMS notifications.");
   const pin = input.pin ? validateEmployeePin(input.business, input.pin, name) : "";
 
   const duplicate = await sql`
@@ -148,13 +158,14 @@ export async function updateDirectoryEmployee(input: {
 
   const rows = await sql`
     UPDATE employees SET
-      email = ${email}, name = ${name}, position = ${position}, role_group = ${roleGroup},
+      email = ${email}, phone = ${phone}, sms_opt_in = ${smsOptIn},
+      name = ${name}, position = ${position}, role_group = ${roleGroup},
       counts_for_tips = ${countsForTips}, hourly_rate = ${hourlyRate}, tipped_rate = ${tippedRate},
       active = ${active}, schedule_color = ${scheduleColor},
       pin_hash = CASE WHEN ${pin} <> '' THEN ${pin ? pinHash(input.business, pin) : ""} ELSE pin_hash END,
       pin_enabled = CASE WHEN ${pin} <> '' THEN TRUE ELSE pin_enabled END, updated_at = NOW()
     WHERE id = ${input.id} AND business = ${input.business}
-    RETURNING id, email, name, position, role_group, counts_for_tips,
+    RETURNING id, email, phone, sms_opt_in, name, position, role_group, counts_for_tips,
       hourly_rate, tipped_rate, pin_enabled, active, schedule_color, profile_photo_pathname, chat_nickname
   ` as unknown as Array<Record<string, unknown>>;
 
@@ -170,8 +181,9 @@ export async function updateDirectoryEmployee(input: {
 
   const row = rows[0];
   return {
-    id: String(row.id), email: String(row.email || ""), name: String(row.name),
-    position: String(row.position), roleGroup: row.role_group as "Driver" | "In-House" | "Ignore",
+    id: String(row.id), email: String(row.email || ""), phone: String(row.phone || ""),
+    smsOptIn: Boolean(row.sms_opt_in), name: String(row.name), position: String(row.position),
+    roleGroup: row.role_group as "Driver" | "In-House" | "Ignore",
     countsForTips: Boolean(row.counts_for_tips), hourlyRate: Number(row.hourly_rate || 0),
     tippedRate: Number(row.tipped_rate || 0), pinEnabled: Boolean(row.pin_enabled),
     active: Boolean(row.active), scheduleColor: String(row.schedule_color),
