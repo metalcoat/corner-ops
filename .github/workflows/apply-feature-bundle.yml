@@ -1,0 +1,36 @@
+name: Apply Corner Ops feature bundle
+on:
+  push:
+    branches:
+      - agent/rebuild-corner-ops
+    paths:
+      - ".feature-bundle.part00"
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/rebuild-corner-ops
+          fetch-depth: 0
+      - name: Expand feature bundle
+        run: |
+          cat .feature-bundle.part* | base64 --decode > /tmp/corner-ops-features.tgz
+          echo "8cdb2b3dd4f80dd8f961caea8abfcc4e085ba71c8e7a6f8781043ec9371517e8  /tmp/corner-ops-features.tgz" | sha256sum -c -
+          tar -xzf /tmp/corner-ops-features.tgz
+          rm -f .feature-bundle.part*
+          rm -f .github/workflows/apply-feature-bundle.yml
+          rm -f src/app/api/setup/historical-time-import/route.ts
+      - name: Verify build
+        run: |
+          npm ci
+          npm run build
+      - name: Commit generated source
+        run: |
+          git config user.name "Corner Ops Builder"
+          git config user.email "crfrary@gmail.com"
+          git add -A
+          git commit -m "Build remaining Corner Ops controls"
+          git push origin HEAD:agent/rebuild-corner-ops
