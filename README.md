@@ -8,8 +8,11 @@ Corner Ops is the private operating system for **Corner Deli** and **Tiki**.
 - Separate role-based user accounts with business-specific access
 - Separate Corner Deli and Tiki business selection
 - Clickable reporting periods with prior-period, prior-week, prior-month, and prior-year comparisons
+- Weather-to-demand reporting with daily history, correlations, similar-day forecasts, and operating recommendations
 - Direct Square range refreshes for Tiki sales, orders, tax, tips, items, and average ticket
 - Honest Corner Deli report coverage based only on the Rezku files received by email
+- Weekly draft scheduling with one publish action and personalized employee schedule emails
+- Missed-shift detection with email reply corrections, Employee Hub corrections, and management approval
 - Private document storage in Vercel Blob
 - Tiki five-digit PIN time clock with GPS capture
 - Tiki employee, rate, role, punch, overtime, and payroll views
@@ -27,6 +30,63 @@ Tiki ranges are refreshed directly from Square and combined with Corner Ops time
 Deli reports show only the labor, order, and tip information present in the Rezku reports received by
 email; unavailable sales and tax totals are clearly identified instead of being represented as zero.
 
+## Weather intelligence
+
+The Weather module stores daily Ogdensburg conditions from Open-Meteo and joins them to business-day
+results. Tiki uses Square sales and order data. Corner Deli uses sales totals when a recognizable total
+field exists in the Rezku order export; otherwise it clearly uses order count as the demand measure.
+
+The upcoming ten-day view finds the most similar historical weather days, estimates sales or orders and
+labor demand, and produces business-specific operating recommendations. These estimates should still be
+adjusted for events, promotions, closures, and river traffic.
+
+No weather API key is required for the proof of concept. Coordinates can be overridden with:
+
+```text
+WEATHER_LATITUDE=44.6942
+WEATHER_LONGITUDE=-75.4863
+```
+
+## Schedule publishing and staff email
+
+New, copied, moved, and edited shifts remain drafts until the week is published. One **Publish Week**
+action publishes every assigned shift, converts unassigned drafts to open shifts, posts an Employee Hub
+announcement, and emails each active employee their personalized schedule.
+
+Required outbound email settings:
+
+```text
+RESEND_API_KEY
+EMPLOYEE_NOTIFICATION_FROM_EMAIL
+APP_URL
+```
+
+`EMPLOYEE_NOTIFICATION_FROM_EMAIL` falls back to `ALERT_FROM_EMAIL`.
+
+## Missed-shift corrections
+
+The nightly scheduler checks published shifts against Tiki time records and imported Corner Deli Rezku
+labor. Tiki cases are eligible after a two-hour delay. Corner Deli cases wait 30 hours so the emailed
+Rezku report has time to arrive.
+
+When no matching time record exists, Corner Ops creates a missed-shift case and emails the employee.
+The employee can:
+
+1. Reply using `CLOCK IN`, `CLOCK OUT`, and `REASON` lines.
+2. Open `/employee/attendance`, sign in with the normal Employee Hub PIN, and submit exact times.
+
+The correction stays pending in `/ops/attendance` until management approves or rejects it. Approval
+creates a corrected Tiki time entry or a manual Corner Deli labor record.
+
+To accept email replies, configure a Resend receiving domain and set:
+
+```text
+ATTENDANCE_REPLY_DOMAIN=your-receiving-domain.example
+```
+
+Replies are addressed to `attendance+<case-token>@ATTENDANCE_REPLY_DOMAIN` and are processed by the
+same verified `email.received` webhook used for Rezku reports.
+
 ## Rezku inbound email flow
 
 Rezku sends `Corner Deli Daily Reports` to a Resend receiving address. Resend posts an
@@ -37,17 +97,19 @@ https://<corner-ops-domain>/api/rezku/inbound
 ```
 
 Corner Ops verifies the webhook signature, retrieves the received email through the Resend
-Receiving API, accepts only `support@rezku.com`, extracts only Excel links hosted at
-`files.reporting.rezkupos.com`, downloads the reports, and imports them into the payroll engine.
+Receiving API, routes attendance replies by their case token, and otherwise accepts only
+`support@rezku.com` Rezku report emails. Rezku Excel links must be hosted at
+`files.reporting.rezkupos.com` before they are downloaded and imported.
 
 The Google Apps Script and Gmail parsing bridge are no longer used.
 
-Required environment variables:
+Required inbound environment variables:
 
 ```text
 RESEND_API_KEY
 RESEND_WEBHOOK_SECRET
 REZKU_ALLOWED_SENDER=support@rezku.com
+ATTENDANCE_REPLY_DOMAIN
 ```
 
 In Resend:
@@ -57,6 +119,7 @@ In Resend:
 3. Point the webhook to `/api/rezku/inbound`.
 4. Copy its signing secret into `RESEND_WEBHOOK_SECRET`.
 5. Change the Rezku daily report recipient to the Resend receiving address.
+6. Use the same receiving domain for attendance reply addresses.
 
 ## Other environment variables
 
