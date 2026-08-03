@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { ensureEmployeeDirectorySchema, upsertDirectoryEmployees, type DirectoryEmployeeInput } from "@/lib/employee-directory";
 import { getSql } from "@/lib/db";
+import { employeePinLength, validateEmployeePin } from "@/lib/employee-pin";
 import type { Business } from "@/lib/types";
 
 function clean(value: unknown, max = 255): string {
@@ -43,6 +44,61 @@ export async function listDirectoryEmployees(business: Business) {
 export async function createDirectoryEmployee(input: DirectoryEmployeeInput) {
   const result = await upsertDirectoryEmployees([input]);
   return result.employees[0];
+}
+
+export async function bulkUpdateDirectoryPins(input: {
+  business: Business;
+  lines: string;
+}) {
+  await ensureEmployeeDirectorySchema();
+  const expectedLength = employeePinLength(input.business);
+  const parsed: Array<{ name: string; pin: string }> = [];
+  const seen = new Set<string>();
+
+  for (const [index, rawLine] of String(input.lines || "").split(/\r?\n/).entries()) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = line.match(/^(.*?)\s+(\d+)$/);
+    if (!match) {
+      throw new Error(`Line ${index + 1} must end with the employee's ${expectedLength}-digit PIN.`);
+    }
+    const name = clean(match[1], 120);
+    const pin = validateEmployeePin(input.business, match[2], name || `Line ${index + 1}`);
+    const key = name.toLowerCase();
+    if (!name) throw new Error(`Line ${index + 1} is missing an employee name.`);
+    if (seen.has(key)) throw new Error(`${name} appears more than once in the PIN list.`);
+    seen.add(key);
+    parsed.push({ name, pin });
+  }
+
+  if (!parsed.length) throw new Error("Enter at least one employee name and PIN.");
+
+  const sql = getSql();
+  const updated: string[] = [];
+  const missing: string[] = [];
+
+  for (const entry of parsed) {
+    const rows = await sql`
+      UPDATE employees
+      SET pin_hash = ${pinHash(input.business, entry.pin)},
+        pin_enabled = TRUE,
+        active = TRUE,
+        updated_at = NOW()
+      WHERE business = ${input.business}
+        AND LOWER(BTRIM(name)) = LOWER(BTRIM(${entry.name}))
+      RETURNING name
+    ` as unknown as Array<{ name: string }>;
+    if (rows[0]) updated.push(rows[0].name);
+    else missing.push(entry.name);
+  }
+
+  return {
+    business: input.business,
+    pinLength: expectedLength,
+    requested: parsed.length,
+    updated,
+    missing,
+  };
 }
 
 export async function updateDirectoryEmployee(input: {
@@ -93,8 +149,7 @@ export async function updateDirectoryEmployee(input: {
   if (!name) throw new Error("Employee name is required.");
   if (!position) throw new Error("Employee position is required.");
   if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new Error("Employee email is invalid.");
-  const pin = input.pin ? clean(input.pin, 5) : "";
-  if (pin && !/^\d{5}$/.test(pin)) throw new Error("Employee PINs must contain exactly five digits.");
+  const pin = input.pin ? validateEmployeePin(input.business, input.pin, name) : "";
 
   const duplicate = await sql`
     SELECT id FROM employees
