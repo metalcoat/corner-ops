@@ -113,11 +113,11 @@ export async function recordRezkuInboundReport(input: {
       ${clean(input.error, 2000)}, NOW()
     )
     ON CONFLICT (email_id, file_name) DO UPDATE SET
-      report_type = EXCLUDED.report_type,
+      report_type = CASE WHEN EXCLUDED.report_type <> '' THEN EXCLUDED.report_type ELSE rezku_inbound_reports.report_type END,
       status = EXCLUDED.status,
-      batch_id = EXCLUDED.batch_id,
-      rows_read = EXCLUDED.rows_read,
-      rows_imported = EXCLUDED.rows_imported,
+      batch_id = COALESCE(EXCLUDED.batch_id, rezku_inbound_reports.batch_id),
+      rows_read = GREATEST(rezku_inbound_reports.rows_read, EXCLUDED.rows_read),
+      rows_imported = GREATEST(rezku_inbound_reports.rows_imported, EXCLUDED.rows_imported),
       error_text = EXCLUDED.error_text,
       processed_at = NOW()
   `;
@@ -133,7 +133,7 @@ export async function finishRezkuInboundEmail(input: {
   await getSql()`
     UPDATE rezku_inbound_emails SET
       status = ${input.status},
-      reports_processed = ${nonNegative(input.reportsProcessed)},
+      reports_processed = GREATEST(reports_processed, ${nonNegative(input.reportsProcessed)}),
       error_text = ${clean(input.error, 3000)},
       updated_at = NOW()
     WHERE email_id = ${clean(input.emailId, 180)}
@@ -200,24 +200,24 @@ export async function rezkuImportDashboard() {
   return {
     emails: emailRows.map((row) => ({
       emailId: String(row.email_id),
-      webhookId: String(row.webhook_id || ''),
-      sender: String(row.sender || ''),
-      subject: String(row.subject || ''),
+      webhookId: String(row.webhook_id || ""),
+      sender: String(row.sender || ""),
+      subject: String(row.subject || ""),
       reportDate: row.report_date ? String(row.report_date) : null,
       receivedAt: String(row.received_at),
       status: String(row.status),
       reportsFound: Number(row.reports_found || 0),
       reportsProcessed: Number(row.reports_processed || 0),
-      error: String(row.error_text || ''),
+      error: String(row.error_text || ""),
       reports: (reportMap.get(String(row.email_id)) || []).map((report) => ({
         id: String(report.id),
         fileName: String(report.file_name),
-        reportType: String(report.report_type || ''),
+        reportType: String(report.report_type || ""),
         status: String(report.status),
         batchId: report.batch_id ? String(report.batch_id) : null,
         rowsRead: Number(report.rows_read || 0),
         rowsImported: Number(report.rows_imported || 0),
-        error: String(report.error_text || ''),
+        error: String(report.error_text || ""),
         processedAt: String(report.processed_at),
       })),
     })),
@@ -230,20 +230,20 @@ export async function rezkuImportDashboard() {
       duplicateOrSkipped: Math.max(0, Number(row.row_count || 0) - Number(row.imported_count || 0)),
       missingClockIn: Number(row.missing_clock_in_count || 0),
       missingClockOut: Number(row.missing_clock_out_count || 0),
-      importedBy: String(row.imported_by || ''),
+      importedBy: String(row.imported_by || ""),
       importedAt: String(row.imported_at),
     })),
     punchExceptions: (exceptions as unknown as Array<Record<string, unknown>>).map((row) => ({
       id: String(row.id),
       batchId: String(row.batch_id),
-      employeeName: String(row.employee_name || ''),
-      position: String(row.position || ''),
-      roleGroup: String(row.role_group || ''),
+      employeeName: String(row.employee_name || ""),
+      position: String(row.position || ""),
+      roleGroup: String(row.role_group || ""),
       clockIn: row.clock_in ? String(row.clock_in) : null,
       clockOut: row.clock_out ? String(row.clock_out) : null,
       reportedHours: Number(row.reported_hours || 0),
-      sheet: row.raw && typeof row.raw === 'object' ? String((row.raw as Record<string, unknown>).__sheet || '') : '',
-      fileName: String(row.file_name || ''),
+      sheet: row.raw && typeof row.raw === "object" ? String((row.raw as Record<string, unknown>).__sheet || "") : "",
+      fileName: String(row.file_name || ""),
       importedAt: String(row.imported_at),
     })),
   };
