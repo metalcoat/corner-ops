@@ -11,6 +11,7 @@ type Message = {
   id: string;
   sender_employee_id: string | null;
   sender_name: string;
+  sender_chat_nickname: string;
   sender_schedule_color: string;
   sender_avatar_set: boolean;
   recipient_name: string | null;
@@ -125,7 +126,7 @@ export default function MessagesPage() {
 
   return <main className="controlPage">
     <header className="controlHeader">
-      <div><p className="eyebrow">Team communication</p><h1>{business} messages</h1><p>Employee colors and profile icons match the schedule, while read receipts still reveal who has heroically managed to open the message.</p></div>
+      <div><p className="eyebrow">Team communication</p><h1>{business} messages</h1><p>Chat nicknames are shown conversationally while the employee’s actual name remains visible to management. Read receipts continue their noble work of documenting who ignored what.</p></div>
       <div className="controlActions"><div className="businessPills">{allowed.map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div><button disabled={busy} onClick={() => void load()}>Refresh</button><a href="/ops/workforce">Workforce</a></div>
     </header>
     {notice && <div className="noticeBar">{notice}</div>}
@@ -140,7 +141,15 @@ export default function MessagesPage() {
       </section>
       <section className="controlCard messageFeedCard">
         <div className="messageFeedHeader"><div><p className="eyebrow">Recent activity</p><h2>Message feed</h2></div><strong>{data?.messages.length || 0}</strong></div>
-        <div className="ownerMessageFeed">{(data?.messages || []).map((message) => <article className="ownerMessageItem" key={message.id} style={{ "--employee-color": message.sender_schedule_color || "#64748B" } as CSSProperties}><header><span className="ownerMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(business, message.sender_employee_id)} alt="" loading="lazy" /> : initials(message.sender_name)}</span><div><strong>{firstName(message.sender_name)}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div><small>{local(message.created_at)}</small></header>{message.body && <p>{message.body}</p>}{message.attachment_name && <a className="ownerMessagePhoto" href={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer"><img src={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${firstName(message.sender_name)}`} loading="lazy" /><span>Open full photo</span></a>}<details className="messageReadReceipt"><summary>{message.expectedCount === 0 ? "No employee recipients" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary><div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {local(read.readAt)}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}{message.expectedCount > 0 && message.unseenNames.length === 0 && <p>Everyone has seen this message.</p>}</div></details></article>)}{!data?.messages.length && <p>No messages yet.</p>}</div>
+        <div className="ownerMessageFeed">{(data?.messages || []).map((message) => {
+          const displayName = message.sender_chat_nickname || firstName(message.sender_name);
+          return <article className="ownerMessageItem" key={message.id} style={{ "--employee-color": message.sender_schedule_color || "#64748B" } as CSSProperties}>
+            <header><span className="ownerMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(business, message.sender_employee_id)} alt="" loading="lazy" /> : initials(displayName)}</span><div><strong>{displayName}</strong>{message.sender_chat_nickname && <small className="ownerMessageLegalName">{message.sender_name}</small>}<span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div><small>{local(message.created_at)}</small></header>
+            {message.body && <p>{message.body}</p>}
+            {message.attachment_name && <a className="ownerMessagePhoto" href={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer"><img src={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${displayName}`} loading="lazy" /><span>Open full photo</span></a>}
+            <details className="messageReadReceipt"><summary>{message.expectedCount === 0 ? "No employee recipients" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary><div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {local(read.readAt)}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}{message.expectedCount > 0 && message.unseenNames.length === 0 && <p>Everyone has seen this message.</p>}</div></details>
+          </article>;
+        })}{!data?.messages.length && <p>No messages yet.</p>}</div>
       </section>
     </div>
   </main>;
