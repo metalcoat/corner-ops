@@ -2,6 +2,7 @@ import { del, put } from "@vercel/blob";
 import { getEmployeeSession } from "@/lib/employee-auth";
 import { apiError, unauthorized } from "@/lib/http";
 import { sendEmployeePhotoMessage } from "@/lib/message-attachments";
+import { markEmployeeMessageSeen } from "@/lib/message-reads";
 import {
   createShiftRequest,
   employeeDashboard,
@@ -90,6 +91,9 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action || "");
 
+    if (action === "message-seen") {
+      return Response.json(await markEmployeeMessageSeen(session, String(body.messageId || "")));
+    }
     if (action === "message-send") {
       return Response.json(await sendEmployeeMessage(session, {
         recipientEmployeeId: body.recipientEmployeeId ? String(body.recipientEmployeeId) : null,
