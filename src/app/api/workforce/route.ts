@@ -3,10 +3,10 @@ import { normalizePosition, roleGroupForPosition } from "@/lib/business-position
 import { listDirectoryEmployees } from "@/lib/employee-directory-admin";
 import { apiError, unauthorized } from "@/lib/http";
 import { createEmployee, updateEmployee } from "@/lib/operations";
+import { publishValidatedScheduleWeek } from "@/lib/schedule-publish-validation";
 import { updateScheduleShiftSafely } from "@/lib/schedule-actions";
 import {
   createScheduleDraft,
-  publishScheduleWeek,
   sendStaffNotification,
 } from "@/lib/staff-notifications";
 import type { Business } from "@/lib/types";
@@ -147,7 +147,7 @@ export async function POST(request: Request) {
     }
 
     if (action === "week-publish") {
-      return Response.json(await publishScheduleWeek({
+      return Response.json(await publishValidatedScheduleWeek({
         business,
         weekStart: String(body.weekStart || ""),
         actor: session.displayName,
