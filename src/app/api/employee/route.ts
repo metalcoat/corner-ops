@@ -1,7 +1,7 @@
 import { del, put } from "@vercel/blob";
 import { getEmployeeSession } from "@/lib/employee-auth";
 import { listDirectoryEmployees } from "@/lib/employee-directory-admin";
-import { setEmployeeProfilePhoto } from "@/lib/employee-profile";
+import { setEmployeeProfilePhoto, updateEmployeeChatNickname } from "@/lib/employee-profile";
 import { apiError, unauthorized } from "@/lib/http";
 import { sendEmployeePhotoMessage } from "@/lib/message-attachments";
 import { markEmployeeMessageSeen } from "@/lib/message-reads";
@@ -51,6 +51,7 @@ export async function GET() {
         ...dashboard.employee,
         scheduleColor: current?.scheduleColor || "#64748B",
         avatarSet: current?.avatarSet || false,
+        chatNickname: current?.chatNickname || "",
       },
       directory: directory.filter((employee) => employee.active).map((employee) => ({
         id: employee.id,
@@ -58,6 +59,7 @@ export async function GET() {
         position: employee.position,
         scheduleColor: employee.scheduleColor,
         avatarSet: employee.avatarSet,
+        chatNickname: employee.chatNickname,
       })),
       teamShifts: dashboard.teamShifts.map((shift) => ({
         ...shift,
@@ -71,6 +73,7 @@ export async function GET() {
           ...message,
           sender_schedule_color: sender?.scheduleColor || "#64748B",
           sender_avatar_set: sender?.avatarSet || false,
+          sender_chat_nickname: sender?.chatNickname || "",
         };
       }),
     });
@@ -138,9 +141,7 @@ export async function POST(request: Request) {
         ? String(form.get("recipientEmployeeId"))
         : null;
 
-      if (!photo) {
-        return Response.json(await sendEmployeeMessage(session, { recipientEmployeeId, body }));
-      }
+      if (!photo) return Response.json(await sendEmployeeMessage(session, { recipientEmployeeId, body }));
       if (!photo.type.toLowerCase().startsWith("image/")) {
         return Response.json({ error: "Message attachments must be image files." }, { status: 415 });
       }
@@ -168,6 +169,9 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action || "");
 
+    if (action === "nickname-update") {
+      return Response.json(await updateEmployeeChatNickname(session, body.nickname));
+    }
     if (action === "message-seen") {
       return Response.json(await markEmployeeMessageSeen(session, String(body.messageId || "")));
     }
