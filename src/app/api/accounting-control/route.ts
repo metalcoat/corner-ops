@@ -15,6 +15,14 @@ import {
   postAllApprovedFinancialTransactions,
   postFinancialTransaction,
 } from "@/lib/bank-posting";
+import {
+  codeBankTransaction,
+  createRecurringInvoiceTemplate,
+  generateDueRecurringInvoices,
+  generateTemplateInvoice,
+  receivablesDashboard,
+  setRecurringInvoiceTemplateActive,
+} from "@/lib/receivables";
 import { squareOperationsDashboard, syncSquareOperations } from "@/lib/square-control";
 import type { Business } from "@/lib/types";
 
@@ -38,7 +46,11 @@ export async function GET(request: Request) {
     }
     const business = businessFrom(url.searchParams.get("business") || "Corner Deli");
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
-    return Response.json(await accountingControlDashboard(business));
+    const [accounting, receivables] = await Promise.all([
+      accountingControlDashboard(business),
+      receivablesDashboard(business),
+    ]);
+    return Response.json({ ...accounting, receivables });
   } catch (error) {
     return apiError(error);
   }
@@ -83,6 +95,37 @@ export async function POST(request: Request) {
 
     const business = businessFrom(body.business);
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
+
+    if (action === "transaction-code") return Response.json(await codeBankTransaction({
+      transactionId: String(body.transactionId || ""),
+      business,
+      lines: Array.isArray(body.lines) ? body.lines as Array<{ accountCode?: string; invoiceId?: string; amount: number; memo?: string }> : [],
+      teach: body.teach === true,
+      actor: session.email,
+    }));
+    if (action === "recurring-template-create") return Response.json(await createRecurringInvoiceTemplate({
+      business,
+      name: String(body.name || ""),
+      customerName: String(body.customerName || ""),
+      description: String(body.description || ""),
+      amount: Number(body.amount || 0),
+      revenueAccountCode: String(body.revenueAccountCode || ""),
+      cadence: body.cadence === "Quarterly" ? "Quarterly" : body.cadence === "Annual" ? "Annual" : "Monthly",
+      dueDays: Number(body.dueDays || 0),
+      nextIssueDate: String(body.nextIssueDate || ""),
+      labelTemplate: String(body.labelTemplate || "{period}"),
+      actor: session.email,
+    }), { status: 201 });
+    if (action === "recurring-template-active") return Response.json(await setRecurringInvoiceTemplateActive({
+      business, id: String(body.id || ""), active: body.active === true,
+    }));
+    if (action === "recurring-generate-due") return Response.json(await generateDueRecurringInvoices({
+      business, throughDate: body.throughDate ? String(body.throughDate) : undefined, actor: session.email,
+    }));
+    if (action === "recurring-generate-one") return Response.json(await generateTemplateInvoice({
+      business, templateId: String(body.templateId || ""), issueDate: body.issueDate ? String(body.issueDate) : undefined, actor: session.email,
+    }));
+
     if (action === "transaction-split") return Response.json(await saveTransactionSplits({
       transactionId: String(body.transactionId || ""), business,
       lines: Array.isArray(body.lines) ? body.lines as Array<{ accountCode: string; amount: number; memo?: string }> : [], actor: session.email,
