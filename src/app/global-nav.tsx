@@ -7,6 +7,7 @@ import "./global-nav.css";
 
 const links = [
   { label: "Operations", href: "/ops" },
+  { label: "Reports", href: "/ops/reports" },
   { label: "Accounting Control", href: "/ops/accounting-control" },
   { label: "Payroll Control", href: "/ops/payroll-control" },
   { label: "Workforce", href: "/ops/workforce" },
