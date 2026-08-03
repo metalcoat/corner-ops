@@ -1,6 +1,7 @@
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
+  bulkUpdateDirectoryPins,
   createDirectoryEmployee,
   listDirectoryEmployees,
   updateDirectoryEmployee,
@@ -58,6 +59,13 @@ export async function POST(request: Request) {
         hourlyRate: Number(body.hourlyRate || 0),
         tippedRate: Number(body.tippedRate || 0),
       }), { status: 201 });
+    }
+
+    if (action === "bulk-pin-update") {
+      return Response.json(await bulkUpdateDirectoryPins({
+        business,
+        lines: String(body.lines || ""),
+      }));
     }
 
     if (action === "update-access" || action === "update-profile") {
