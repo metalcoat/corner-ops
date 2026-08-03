@@ -39,9 +39,7 @@ export async function GET(request: Request) {
     const session = await getSession();
     if (!session) return unauthorized();
     const business = businessFrom(new URL(request.url).searchParams.get("business"));
-    if (!canAccessBusiness(session, business)) {
-      return Response.json({ error: "Business access denied." }, { status: 403 });
-    }
+    if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
     return Response.json({ employees: await listDirectoryEmployees(business) });
   } catch (error) {
     return apiError(error);
@@ -84,15 +82,15 @@ export async function POST(request: Request) {
 
     const body = await request.json() as Record<string, unknown>;
     const business = businessFrom(body.business);
-    if (!canAccessBusiness(session, business)) {
-      return Response.json({ error: "Business access denied." }, { status: 403 });
-    }
+    if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
 
     const action = String(body.action || "create");
     if (action === "create") {
       return Response.json(await createDirectoryEmployee({
         business,
         email: body.email ? String(body.email) : "",
+        phone: body.phone ? String(body.phone) : "",
+        smsOptIn: body.smsOptIn === true,
         name: String(body.name || ""),
         pin: String(body.pin || ""),
         position: String(body.position || ""),
@@ -115,6 +113,8 @@ export async function POST(request: Request) {
         id: String(body.id || ""),
         business,
         email: body.email === undefined ? undefined : String(body.email || ""),
+        phone: body.phone === undefined ? undefined : String(body.phone || ""),
+        smsOptIn: body.smsOptIn === undefined ? undefined : body.smsOptIn === true,
         pin: body.pin ? String(body.pin) : undefined,
         active: body.active === undefined ? undefined : body.active === true,
         name: body.name === undefined ? undefined : String(body.name || ""),
