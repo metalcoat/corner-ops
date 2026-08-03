@@ -1,4 +1,4 @@
-import { analyzeShiftMealCompliance } from "@/lib/schedule-meal-compliance";
+import { analyzeShiftMealCompliance, newYorkDateKey } from "@/lib/schedule-meal-compliance";
 
 export type ScheduleValidationShift = {
   id: string;
@@ -44,6 +44,13 @@ export type LoneWorkerViolation = {
   endsAt: string;
   minutes: number;
   shiftIds: string[];
+};
+
+export type CoverageGap = {
+  dateKey: string;
+  startsAt: string;
+  endsAt: string;
+  minutes: number;
 };
 
 export type MealPeriodViolation = {
@@ -107,6 +114,51 @@ function normalizedShifts(shifts: ScheduleValidationShift[]): NormalizedShift[] 
       };
     })
     .filter((shift) => shift.endMs > shift.startMs);
+}
+
+function coverageGapsForDays(normalized: NormalizedShift[]): CoverageGap[] {
+  const byServiceDay = new Map<string, NormalizedShift[]>();
+  for (const shift of normalized) {
+    const key = newYorkDateKey(shift.startsAt);
+    const list = byServiceDay.get(key) || [];
+    list.push(shift);
+    byServiceDay.set(key, list);
+  }
+
+  const gaps: CoverageGap[] = [];
+  for (const [dateKey, dayShifts] of byServiceDay) {
+    const windowStart = Math.min(...dayShifts.map((shift) => shift.startMs));
+    const windowEnd = Math.max(...dayShifts.map((shift) => shift.endMs));
+    const coverage = dayShifts
+      .filter((shift) => Boolean(shift.employeeId))
+      .flatMap((shift) => shift.workSegments)
+      .sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
+
+    let cursor = windowStart;
+    for (const segment of coverage) {
+      if (segment.endMs <= cursor) continue;
+      if (segment.startMs > cursor) {
+        gaps.push({
+          dateKey,
+          startsAt: new Date(cursor).toISOString(),
+          endsAt: new Date(Math.min(segment.startMs, windowEnd)).toISOString(),
+          minutes: Math.round((Math.min(segment.startMs, windowEnd) - cursor) / 60_000),
+        });
+      }
+      cursor = Math.max(cursor, segment.endMs);
+      if (cursor >= windowEnd) break;
+    }
+    if (cursor < windowEnd) {
+      gaps.push({
+        dateKey,
+        startsAt: new Date(cursor).toISOString(),
+        endsAt: new Date(windowEnd).toISOString(),
+        minutes: Math.round((windowEnd - cursor) / 60_000),
+      });
+    }
+  }
+
+  return gaps.filter((gap) => gap.minutes > 0);
 }
 
 export function hourRisk(hours: number): HourRisk {
@@ -180,6 +232,7 @@ export function analyzeSchedule(
     }));
   });
 
+  const coverageGaps = coverageGapsForDays(normalized);
   const loneWorkerViolations: LoneWorkerViolation[] = [];
   if (enforceLoneWorker) {
     const segments = assigned.flatMap((shift) => shift.workSegments.map((segment) => ({
@@ -232,13 +285,18 @@ export function analyzeSchedule(
 
   const overThirtyEight = Object.values(employeeHours).filter((employee) => employee.hours > 38 && employee.hours <= 40);
   const overForty = Object.values(employeeHours).filter((employee) => employee.hours > 40);
-  const blockingIssueCount = overlaps.length + loneWorkerViolations.length + overForty.length + mealPeriodViolations.length;
+  const blockingIssueCount = overlaps.length
+    + loneWorkerViolations.length
+    + coverageGaps.length
+    + overForty.length
+    + mealPeriodViolations.length;
 
   return {
     employeeHours,
     shiftRisks,
     overlaps,
     loneWorkerViolations,
+    coverageGaps,
     mealPeriodViolations,
     overThirtyEight,
     overForty,
