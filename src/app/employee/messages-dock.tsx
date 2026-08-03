@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import "./messages-dock.css";
 
 type EmployeeSession = {
@@ -69,6 +69,7 @@ export default function EmployeeMessagesDock() {
   const [data, setData] = useState<EmployeeData | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const reportedSeen = useRef(new Set<string>());
 
   const load = useCallback(async () => {
     const sessionResponse = await fetch("/api/employee/session", { cache: "no-store" });
@@ -78,6 +79,7 @@ export default function EmployeeMessagesDock() {
     setSession(activeSession);
     if (!activeSession) {
       setData(null);
+      reportedSeen.current.clear();
       return;
     }
 
@@ -97,6 +99,28 @@ export default function EmployeeMessagesDock() {
     }, session ? 30_000 : 5_000);
     return () => window.clearInterval(interval);
   }, [load, session]);
+
+  useEffect(() => {
+    if (!session || !data?.messages.length) return;
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting || entry.intersectionRatio < 0.6) continue;
+        const element = entry.target as HTMLElement;
+        const messageId = element.dataset.messageId || "";
+        if (!messageId || reportedSeen.current.has(messageId)) continue;
+        reportedSeen.current.add(messageId);
+        void fetch("/api/employee", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "message-seen", messageId }),
+        }).catch(() => reportedSeen.current.delete(messageId));
+      }
+    }, { threshold: [0.6] });
+
+    const elements = document.querySelectorAll<HTMLElement>("[data-message-id]");
+    elements.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [data?.messages, session]);
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -173,7 +197,7 @@ export default function EmployeeMessagesDock() {
 
       <div className="employeeMessagesFeed" aria-live="polite">
         {(data?.messages || []).map((message) => (
-          <article className="employeeMessagesItem" key={message.id}>
+          <article className="employeeMessagesItem" key={message.id} data-message-id={message.id}>
             <div>
               <strong>{firstName(message.sender_name)}</strong>
               <span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span>
