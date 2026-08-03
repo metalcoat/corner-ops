@@ -1,4 +1,5 @@
 import { ensureSchema, getSql } from "@/lib/db";
+import { ensureRezkuVoidSchema } from "@/lib/rezku-voids";
 
 type InboundStatus = "Received" | "Processing" | "Processed" | "Partial" | "Failed";
 type ReportStatus = "Processing" | "Processed" | "Failed";
@@ -141,7 +142,7 @@ export async function finishRezkuInboundEmail(input: {
 }
 
 export async function rezkuImportDashboard() {
-  await ensureRezkuMonitorSchema();
+  await Promise.all([ensureRezkuMonitorSchema(), ensureRezkuVoidSchema()]);
   const sql = getSql();
   const [emails, reports, imports, exceptions] = await Promise.all([
     sql`
@@ -159,21 +160,31 @@ export async function rezkuImportDashboard() {
       LIMIT 120
     `,
     sql`
-      SELECT b.id, b.report_type, b.file_name, b.row_count, b.imported_by, b.imported_at,
-        CASE
-          WHEN b.report_type = 'shifts' THEN (SELECT COUNT(*) FROM rezku_shifts s WHERE s.batch_id = b.id)
-          WHEN b.report_type = 'orders' THEN (SELECT COUNT(*) FROM rezku_orders o WHERE o.batch_id = b.id)
-          WHEN b.report_type = 'transactions' THEN (SELECT COUNT(*) FROM rezku_transactions t WHERE t.batch_id = b.id)
-          ELSE 0
-        END AS imported_count,
-        CASE WHEN b.report_type = 'shifts' THEN (
-          SELECT COUNT(*) FROM rezku_shifts s WHERE s.batch_id = b.id AND s.clock_in IS NULL
-        ) ELSE 0 END AS missing_clock_in_count,
-        CASE WHEN b.report_type = 'shifts' THEN (
-          SELECT COUNT(*) FROM rezku_shifts s WHERE s.batch_id = b.id AND s.clock_out IS NULL
-        ) ELSE 0 END AS missing_clock_out_count
-      FROM rezku_import_batches b
-      ORDER BY b.imported_at DESC
+      SELECT * FROM (
+        SELECT b.id, b.report_type, b.file_name, b.row_count, b.imported_by, b.imported_at,
+          CASE
+            WHEN b.report_type = 'shifts' THEN (SELECT COUNT(*) FROM rezku_shifts s WHERE s.batch_id = b.id)
+            WHEN b.report_type = 'orders' THEN (SELECT COUNT(*) FROM rezku_orders o WHERE o.batch_id = b.id)
+            WHEN b.report_type = 'transactions' THEN (SELECT COUNT(*) FROM rezku_transactions t WHERE t.batch_id = b.id)
+            ELSE 0
+          END AS imported_count,
+          CASE WHEN b.report_type = 'shifts' THEN (
+            SELECT COUNT(*) FROM rezku_shifts s WHERE s.batch_id = b.id AND s.clock_in IS NULL
+          ) ELSE 0 END AS missing_clock_in_count,
+          CASE WHEN b.report_type = 'shifts' THEN (
+            SELECT COUNT(*) FROM rezku_shifts s WHERE s.batch_id = b.id AND s.clock_out IS NULL
+          ) ELSE 0 END AS missing_clock_out_count
+        FROM rezku_import_batches b
+
+        UNION ALL
+
+        SELECT b.id, b.report_type, b.file_name, b.row_count, b.imported_by, b.imported_at,
+          (SELECT COUNT(*) FROM rezku_void_events v WHERE v.batch_id = b.id) AS imported_count,
+          0 AS missing_clock_in_count,
+          0 AS missing_clock_out_count
+        FROM rezku_void_import_batches b
+      ) combined_imports
+      ORDER BY imported_at DESC
       LIMIT 80
     `,
     sql`
