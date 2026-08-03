@@ -11,6 +11,10 @@ type NavLink = {
   activePaths?: string[];
 };
 
+type NotificationSummary = {
+  messages?: number;
+};
+
 const links: NavLink[] = [
   { label: "Operations", href: "/ops" },
   { label: "Reports", href: "/ops/reports", activePaths: ["/ops/reports", "/ops/weather"] },
@@ -37,8 +41,44 @@ export default function GlobalNav() {
   const pathname = usePathname();
   const [currentBusiness, setCurrentBusiness] = useState<Business>("Corner Deli");
   const [open, setOpen] = useState(false);
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const navHidden = pathname === "/clock" || pathname.startsWith("/employee") || pathname === "/signin";
 
   useEffect(() => setOpen(false), [pathname]);
+
+  useEffect(() => {
+    if (navHidden) return;
+    let cancelled = false;
+
+    async function refreshNotifications() {
+      try {
+        const response = await fetch("/api/messages?summary=nav", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json() as NotificationSummary;
+        if (!cancelled) setUnreadMessages(Math.max(0, Number(payload.messages || 0)));
+      } catch {
+        // Navigation remains usable when notification polling is unavailable.
+      }
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") void refreshNotifications();
+    }
+
+    void refreshNotifications();
+    const interval = window.setInterval(() => void refreshNotifications(), 30_000);
+    window.addEventListener("focus", refreshNotifications);
+    window.addEventListener("corner-ops-notifications-refresh", refreshNotifications);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshNotifications);
+      window.removeEventListener("corner-ops-notifications-refresh", refreshNotifications);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [navHidden, pathname]);
 
   useEffect(() => {
     let restored = false;
@@ -127,7 +167,7 @@ export default function GlobalNav() {
     };
   }, [pathname]);
 
-  if (pathname === "/clock" || pathname.startsWith("/employee") || pathname === "/signin") return null;
+  if (navHidden) return null;
 
   return (
     <nav className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label="Corner Ops features" data-business={currentBusiness}>
@@ -138,11 +178,15 @@ export default function GlobalNav() {
         </button>
       </div>
       <div className="globalNavLinks">
-        {links.map((link) => (
-          <a key={link.href} className={linkIsActive(pathname, link) ? "active" : ""} href={link.href}>
-            {link.label}
-          </a>
-        ))}
+        {links.map((link) => {
+          const count = link.href === "/ops/messages" ? unreadMessages : 0;
+          return <a key={link.href} className={linkIsActive(pathname, link) ? "active" : ""} href={link.href}>
+            <span>{link.label}</span>
+            {count > 0 && <span className="globalNavBadge" aria-label={`${count} unread message${count === 1 ? "" : "s"}`}>
+              {count > 99 ? "99+" : count}
+            </span>}
+          </a>;
+        })}
       </div>
     </nav>
   );
