@@ -35,6 +35,19 @@ function safeEqual(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+function firstName(nameValue: unknown, emailValue: unknown): string {
+  const name = String(nameValue ?? "").trim();
+  const email = String(emailValue ?? "").trim().toLowerCase();
+  const ownerEmail = (process.env.APP_EMAIL || "crfrary@gmail.com").trim().toLowerCase();
+
+  if (name && name !== "Owner" && !name.includes("@")) return name.split(/\s+/)[0];
+  if (email === ownerEmail) return "Chris";
+
+  const localPart = email.split("@")[0] || name.split("@")[0] || "Owner";
+  const candidate = localPart.split(/[._-]/)[0] || "Owner";
+  return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+}
+
 function createToken(payload: SessionPayload): string {
   const encoded = encode(JSON.stringify(payload));
   return `${encoded}.${signature(encoded)}`;
@@ -46,7 +59,7 @@ function normalizePayload(value: Partial<SessionPayload>): SessionPayload | null
   const validBusinesses = value.businesses.filter((business): business is Business => businesses.includes(business as Business));
   return {
     email: value.email,
-    displayName: value.displayName || value.email,
+    displayName: firstName(value.displayName, value.email),
     role,
     businesses: validBusinesses,
     permissions: Array.isArray(value.permissions) && value.permissions.length ? value.permissions : permissionsForRole(role),
@@ -70,9 +83,10 @@ export function isValidPassword(candidate: string): boolean {
 }
 
 export async function createSession(identity?: AppUserIdentity): Promise<SessionPayload> {
+  const email = identity?.email || process.env.APP_EMAIL?.trim().toLowerCase() || "crfrary@gmail.com";
   const payload: SessionPayload = {
-    email: identity?.email || process.env.APP_EMAIL?.trim().toLowerCase() || "crfrary@gmail.com",
-    displayName: identity?.displayName || "Owner",
+    email,
+    displayName: firstName(identity?.displayName, email),
     role: identity?.role || "Owner",
     businesses: identity?.businesses?.length ? [...identity.businesses] : [...businesses],
     permissions: identity?.permissions?.length ? [...identity.permissions] : ["*"],
