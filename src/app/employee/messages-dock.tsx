@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { CSSProperties, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import "./messages-dock.css";
 
 type EmployeeSession = {
@@ -13,11 +13,16 @@ type DirectoryEmployee = {
   id: string;
   name: string;
   position: string;
+  scheduleColor: string;
+  avatarSet: boolean;
 };
 
 type Message = {
   id: string;
+  sender_employee_id: string | null;
   sender_name: string;
+  sender_schedule_color?: string;
+  sender_avatar_set?: boolean;
   recipient_name: string | null;
   message_type: string;
   body: string;
@@ -28,6 +33,7 @@ type Message = {
 };
 
 type EmployeeData = {
+  employee: DirectoryEmployee;
   messages: Message[];
   directory: DirectoryEmployee[];
 };
@@ -57,11 +63,19 @@ function firstName(value: string | null): string {
   return candidate.charAt(0).toUpperCase() + candidate.slice(1);
 }
 
+function initials(value: string): string {
+  return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
+}
+
 function selectedPhoto(form: FormData): File | null {
   const camera = form.get("cameraPhoto");
   if (camera instanceof File && camera.size > 0) return camera;
   const library = form.get("photo");
   return library instanceof File && library.size > 0 ? library : null;
+}
+
+function avatarUrl(employeeId: string): string {
+  return `/api/employee/avatar?id=${encodeURIComponent(employeeId)}`;
 }
 
 export default function EmployeeMessagesDock() {
@@ -87,6 +101,7 @@ export default function EmployeeMessagesDock() {
     if (!response.ok) throw new Error(await responseMessage(response));
     const payload = await response.json() as EmployeeData;
     setData({
+      employee: payload.employee,
       messages: payload.messages || [],
       directory: payload.directory || [],
     });
@@ -148,21 +163,46 @@ export default function EmployeeMessagesDock() {
     }
   }
 
+  async function uploadProfilePhoto(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    form.set("action", "profile-photo");
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/employee", { method: "POST", body: form });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      formElement.reset();
+      await load();
+      setNotice("Your schedule and message icon was updated.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Profile photo could not be uploaded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!session) return null;
 
   const recipients = (data?.directory || []).filter((person) => person.id !== session.employeeId);
+  const current = data?.employee;
 
   return (
     <aside className="employeeMessagesDock" aria-label="Employee messages">
       <header className="employeeMessagesHeader">
-        <div>
-          <p className="employeeMessagesEyebrow">Always visible</p>
-          <h2>Messages</h2>
+        <div className="employeeMessagesIdentity" style={{ "--employee-color": current?.scheduleColor || "#64748B" } as CSSProperties}>
+          <span className="employeeMessageAvatar large">{current?.avatarSet ? <img src={avatarUrl(session.employeeId)} alt="Your profile" /> : initials(session.name)}</span>
+          <div><p className="employeeMessagesEyebrow">Always visible</p><h2>Messages</h2><small>{session.name}</small></div>
         </div>
-        <button type="button" onClick={() => void load()} disabled={busy} aria-label="Refresh messages">
-          Refresh
-        </button>
+        <button type="button" onClick={() => void load()} disabled={busy} aria-label="Refresh messages">Refresh</button>
       </header>
+
+      <form className="employeeProfilePhotoForm" onSubmit={uploadProfilePhoto}>
+        <label>Take icon photo<input name="cameraProfilePhoto" type="file" accept="image/*" capture="user" /></label>
+        <label>Choose icon photo<input name="profilePhoto" type="file" accept="image/*" /></label>
+        <button disabled={busy}>Update my icon</button>
+      </form>
 
       <form className="employeeMessagesComposer" onSubmit={sendMessage}>
         <input type="hidden" name="action" value="message-send" />
@@ -196,12 +236,14 @@ export default function EmployeeMessagesDock() {
       {notice && <div className="employeeMessagesNotice">{notice}</div>}
 
       <div className="employeeMessagesFeed" aria-live="polite">
-        {(data?.messages || []).map((message) => (
-          <article className="employeeMessagesItem" key={message.id} data-message-id={message.id}>
-            <div>
-              <strong>{firstName(message.sender_name)}</strong>
-              <span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span>
-            </div>
+        {(data?.messages || []).map((message) => {
+          const senderColor = message.sender_schedule_color || "#64748B";
+          return <article className="employeeMessagesItem" key={message.id} data-message-id={message.id} style={{ "--employee-color": senderColor } as CSSProperties}>
+            <header className="employeeMessageMeta">
+              <span className="employeeMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(message.sender_employee_id)} alt="" loading="lazy" /> : initials(message.sender_name)}</span>
+              <div><strong>{firstName(message.sender_name)}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div>
+              <small>{local(message.created_at)}</small>
+            </header>
             {message.body && <p>{message.body}</p>}
             {message.attachment_name && (
               <a
@@ -218,9 +260,8 @@ export default function EmployeeMessagesDock() {
                 />
               </a>
             )}
-            <small>{local(message.created_at)}</small>
-          </article>
-        ))}
+          </article>;
+        })}
         {!data?.messages.length && <p className="employeeMessagesEmpty">No messages yet.</p>}
       </div>
     </aside>
