@@ -30,7 +30,6 @@ jobs:
             rm -f .feature-bundle.part*
             rm -f .github/workflows/apply-feature-bundle.yml
             rm -f src/app/api/setup/historical-time-import/route.ts
-            git show HEAD^:.github/workflows/ci.yml > .github/workflows/ci.yml
             echo "applied=true" >> "$GITHUB_OUTPUT"
           else
             echo "applied=false" >> "$GITHUB_OUTPUT"
@@ -44,5 +43,6 @@ jobs:
           git config user.name "Corner Ops Builder"
           git config user.email "crfrary@gmail.com"
           git add -A
+          git reset .github/workflows/ci.yml
           git commit -m "Build remaining Corner Ops controls"
           git push origin HEAD:agent/rebuild-corner-ops
