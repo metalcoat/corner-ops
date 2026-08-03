@@ -1,5 +1,7 @@
+import { del, put } from "@vercel/blob";
 import { getEmployeeSession } from "@/lib/employee-auth";
 import { apiError, unauthorized } from "@/lib/http";
+import { sendEmployeePhotoMessage } from "@/lib/message-attachments";
 import {
   createShiftRequest,
   employeeDashboard,
@@ -13,6 +15,17 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+const MAX_MESSAGE_PHOTO = 12 * 1024 * 1024;
+
+function safeFileName(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "photo.jpg";
+}
+
+function employeeMessagePath(business: string, fileName: string): string {
+  const location = business === "Corner Deli" ? "corner-deli" : "tiki";
+  return `employee-messages/${location}/${Date.now()}-${safeFileName(fileName)}`;
+}
+
 export async function GET() {
   try {
     const session = await getEmployeeSession();
@@ -24,9 +37,56 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  let uploadedUrl = "";
   try {
     const session = await getEmployeeSession();
     if (!session) return unauthorized();
+    const contentType = request.headers.get("content-type") || "";
+
+    if (contentType.includes("multipart/form-data")) {
+      const form = await request.formData();
+      if (String(form.get("action") || "") !== "message-send") {
+        return Response.json({ error: "Unknown employee upload action." }, { status: 400 });
+      }
+      const cameraPhoto = form.get("cameraPhoto");
+      const libraryPhoto = form.get("photo");
+      const photo = cameraPhoto instanceof File && cameraPhoto.size > 0
+        ? cameraPhoto
+        : libraryPhoto instanceof File && libraryPhoto.size > 0
+          ? libraryPhoto
+          : null;
+      const body = String(form.get("body") || "");
+      const recipientEmployeeId = form.get("recipientEmployeeId")
+        ? String(form.get("recipientEmployeeId"))
+        : null;
+
+      if (!photo) {
+        return Response.json(await sendEmployeeMessage(session, { recipientEmployeeId, body }));
+      }
+      if (!photo.type.toLowerCase().startsWith("image/")) {
+        return Response.json({ error: "Message attachments must be image files." }, { status: 415 });
+      }
+      if (photo.size > MAX_MESSAGE_PHOTO) {
+        return Response.json({ error: "Message photos are limited to 12 MB." }, { status: 413 });
+      }
+
+      const blob = await put(employeeMessagePath(session.business, photo.name), photo, {
+        access: "private",
+        addRandomSuffix: true,
+      });
+      uploadedUrl = blob.url;
+      const result = await sendEmployeePhotoMessage(session, {
+        recipientEmployeeId,
+        body,
+        attachmentUrl: blob.url,
+        attachmentPathname: blob.pathname,
+        attachmentName: photo.name,
+        attachmentType: photo.type || "application/octet-stream",
+        attachmentSize: photo.size,
+      });
+      return Response.json(result, { status: 201 });
+    }
+
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action || "");
 
@@ -82,6 +142,7 @@ export async function POST(request: Request) {
 
     return Response.json({ error: "Unknown employee action." }, { status: 400 });
   } catch (error) {
+    if (uploadedUrl) await del(uploadedUrl).catch(() => undefined);
     return apiError(error);
   }
 }
