@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import type { EmployeeSession } from "@/lib/employee-auth";
+import { ensureEmployeeProfileSchema, scheduleColorFromId } from "@/lib/employee-profile";
 import type { Business } from "@/lib/types";
 import { ensureMessageAttachmentSchema } from "@/lib/message-attachments";
 
@@ -8,7 +9,7 @@ let readSchemaPromise: Promise<void> | null = null;
 export function ensureMessageReadSchema(): Promise<void> {
   if (!readSchemaPromise) {
     readSchemaPromise = (async () => {
-      await ensureMessageAttachmentSchema();
+      await Promise.all([ensureMessageAttachmentSchema(), ensureEmployeeProfileSchema()]);
       const sql = getSql();
       await sql`
         CREATE TABLE IF NOT EXISTS employee_message_reads (
@@ -59,6 +60,8 @@ type AdminMessageRow = {
   business: Business;
   sender_employee_id: string | null;
   sender_name: string;
+  sender_schedule_color: string;
+  sender_avatar_set: boolean;
   recipient_employee_id: string | null;
   recipient_name: string | null;
   message_type: string;
@@ -74,17 +77,21 @@ export async function adminMessagesDashboard(business: Business) {
   const sql = getSql();
   const [employees, messages, reads] = await Promise.all([
     sql`
-      SELECT id, name, position, active
+      SELECT id, name, position, active, schedule_color,
+        (profile_photo_pathname <> '') AS avatar_set
       FROM employees
       WHERE business = ${business} AND active = TRUE
       ORDER BY name
     `,
     sql`
       SELECT m.id, m.business, m.sender_employee_id, m.sender_name,
+        COALESCE(sender.schedule_color, '#64748B') AS sender_schedule_color,
+        COALESCE(sender.profile_photo_pathname <> '', FALSE) AS sender_avatar_set,
         m.recipient_employee_id, recipient.name AS recipient_name,
         m.message_type, m.body, m.attachment_name, m.attachment_type,
         m.attachment_size, m.created_at
       FROM employee_messages m
+      LEFT JOIN employees sender ON sender.id = m.sender_employee_id
       LEFT JOIN employees recipient ON recipient.id = m.recipient_employee_id
       WHERE m.business = ${business}
       ORDER BY m.created_at DESC
@@ -100,7 +107,14 @@ export async function adminMessagesDashboard(business: Business) {
     `,
   ]);
 
-  const activeEmployees = employees as unknown as Array<{ id: string; name: string; position: string; active: boolean }>;
+  const activeEmployees = (employees as unknown as Array<Record<string, unknown>>).map((employee) => ({
+    id: String(employee.id),
+    name: String(employee.name),
+    position: String(employee.position || ""),
+    active: Boolean(employee.active),
+    scheduleColor: String(employee.schedule_color || scheduleColorFromId(String(employee.id))),
+    avatarSet: Boolean(employee.avatar_set),
+  }));
   const readRows = reads as unknown as Array<{ message_id: string; employee_id: string; read_at: string; name: string }>;
   const readMap = new Map<string, typeof readRows>();
   for (const row of readRows) {
