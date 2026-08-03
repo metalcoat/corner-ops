@@ -137,9 +137,31 @@ export async function ensureUserSchema(): Promise<void> {
       END,
       updated_at = NOW()
   `;
+
+  // Create Michael's requested Tiki-only report account without committing a
+  // password to source control. The owner sets the first password in Users.
+  await sql`
+    INSERT INTO app_users (
+      id, email, display_name, role, businesses, legacy_owner, active, created_by
+    ) VALUES (
+      ${crypto.randomUUID()}, 'mike@fraryfuneralhome.com', 'Michael Frary', 'Viewer',
+      ARRAY['Tiki']::TEXT[], FALSE, TRUE, 'System bootstrap'
+    )
+    ON CONFLICT (email) DO UPDATE SET
+      display_name = 'Michael Frary',
+      businesses = ARRAY['Tiki']::TEXT[],
+      updated_at = NOW()
+  `;
 }
 
-function mapUser(row: UserRow): AppUserIdentity & { active: boolean; createdBy: string; createdAt: string; updatedAt: string; legacyOwner: boolean } {
+function mapUser(row: UserRow): AppUserIdentity & {
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  legacyOwner: boolean;
+  passwordSet: boolean;
+} {
   return {
     id: row.id,
     email: row.email,
@@ -152,6 +174,7 @@ function mapUser(row: UserRow): AppUserIdentity & { active: boolean; createdBy: 
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     legacyOwner: row.legacy_owner,
+    passwordSet: Boolean(row.password_hash && row.password_salt) || row.legacy_owner,
   };
 }
 
