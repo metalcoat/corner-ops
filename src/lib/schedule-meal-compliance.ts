@@ -144,9 +144,9 @@ function midpointRequirement(
     code,
     slot: "primary",
     minimumMinutes,
-    label: code === "late-shift" ? "45-minute late-shift meal" : "30-minute meal",
+    label: code === "late-shift" ? "30-minute shortened late-shift meal" : "30-minute meal",
     detail: code === "late-shift"
-      ? "A shift over six hours starting between 1 PM and 6 AM requires at least 45 off-duty minutes around the middle of the shift."
+      ? "For a shift over six hours starting between 1 PM and 6 AM, New York's statutory 45-minute meal period may be reduced to no less than 30 off-duty minutes around the middle of the shift when there is no indication of hardship to the employee."
       : "Company compliance policy requires at least 30 off-duty minutes around the middle of every shift over six hours.",
     suggestedStart: new Date(suggestedMs).toISOString(),
     midpoint: new Date(midpointMs).toISOString(),
@@ -211,7 +211,7 @@ export function mealRequirements(input: Pick<MealScheduleInput, "startsAt" | "en
     const startMinute = minutesOfDay(start);
     const lateShift = startMinute >= 13 * 60 || startMinute < 6 * 60;
     if (lateShift) {
-      requirements.push(midpointRequirement("late-shift", start, end, 45));
+      requirements.push(midpointRequirement("late-shift", start, end, 30));
     } else {
       requirements.push(noonRequirement(start, end) || midpointRequirement("general-six-hour", start, end, 30));
     }
