@@ -1,15 +1,14 @@
 import { Resend } from "resend";
 import { getSql } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
+import { ensureScheduleMealSchema, normalizeScheduledMealFields } from "@/lib/schedule-meal-storage";
+import { deliverSms, type SmsRecipient } from "@/lib/sms-notifications";
 import type { Business } from "@/lib/types";
-import { ensureWorkforceSchema } from "@/lib/workforce";
 
 const TIME_ZONE = "America/New_York";
 let notificationSchemaPromise: Promise<void> | null = null;
 
-type EmployeeContact = {
-  id: string;
-  name: string;
+type EmployeeContact = SmsRecipient & {
   email: string;
 };
 
@@ -20,6 +19,10 @@ type ScheduleShiftRow = {
   position: string;
   starts_at: string;
   ends_at: string;
+  meal_break_start: string | null;
+  meal_break_minutes: number;
+  extra_meal_break_start: string | null;
+  extra_meal_break_minutes: number;
   notes: string;
   status: string;
 };
@@ -50,6 +53,14 @@ function dateLabel(value: string): string {
   }).format(new Date(`${value}T12:00:00Z`));
 }
 
+function timeLabel(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 function shiftLabel(shift: ScheduleShiftRow): string {
   const start = new Date(shift.starts_at);
   const end = new Date(shift.ends_at);
@@ -64,8 +75,16 @@ function shiftLabel(shift: ScheduleShiftRow): string {
     hour: "numeric",
     minute: "2-digit",
   });
+  const mealParts = [
+    shift.meal_break_start && shift.meal_break_minutes
+      ? `meal ${timeLabel(shift.meal_break_start)} (${shift.meal_break_minutes}m)`
+      : "",
+    shift.extra_meal_break_start && shift.extra_meal_break_minutes
+      ? `extra meal ${timeLabel(shift.extra_meal_break_start)} (${shift.extra_meal_break_minutes}m)`
+      : "",
+  ].filter(Boolean);
   const notes = clean(shift.notes, 1000);
-  return `${date}, ${time.format(start)}–${time.format(end)} — ${clean(shift.position, 100) || "Shift"}${notes ? `\n  ${notes}` : ""}`;
+  return `${date}, ${time.format(start)}–${time.format(end)} — ${clean(shift.position, 100) || "Shift"}${mealParts.length ? ` [${mealParts.join(", ")}]` : ""}${notes ? `\n  ${notes}` : ""}`;
 }
 
 function employeeHubUrl(): string {
@@ -83,16 +102,22 @@ function emailConfiguration() {
 
 async function activeContacts(business: Business): Promise<EmployeeContact[]> {
   await ensureEmployeeDirectorySchema();
-  return await getSql()`
-    SELECT id, name, email
+  const rows = await getSql()`
+    SELECT id, name, email, phone, sms_opt_in
     FROM employees
     WHERE business = ${business} AND active = TRUE
     ORDER BY name
-  ` as unknown as EmployeeContact[];
+  ` as unknown as Array<{ id: string; name: string; email: string; phone: string; sms_opt_in: boolean }>;
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email || "",
+    phone: row.phone || "",
+    smsOptIn: Boolean(row.sms_opt_in),
+  }));
 }
 
 async function deliverEmails(input: {
-  business: Business;
   recipients: EmployeeContact[];
   subject: (employee: EmployeeContact) => string;
   text: (employee: EmployeeContact) => string;
@@ -124,10 +149,7 @@ async function deliverEmails(input: {
       if (result.error) throw new Error(result.error.message);
       sent += 1;
     } catch (error) {
-      failures.push({
-        employeeId: employee.id,
-        message: error instanceof Error ? error.message : String(error),
-      });
+      failures.push({ employeeId: employee.id, message: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -144,7 +166,7 @@ async function deliverEmails(input: {
 export function ensureStaffNotificationSchema(): Promise<void> {
   if (!notificationSchemaPromise) {
     notificationSchemaPromise = (async () => {
-      await ensureWorkforceSchema();
+      await ensureScheduleMealSchema();
       await ensureEmployeeDirectorySchema();
       const sql = getSql();
       await sql`
@@ -160,10 +182,18 @@ export function ensureStaffNotificationSchema(): Promise<void> {
           email_missing_count INTEGER NOT NULL DEFAULT 0,
           email_failed_count INTEGER NOT NULL DEFAULT 0,
           email_configured BOOLEAN NOT NULL DEFAULT FALSE,
+          sms_sent_count INTEGER NOT NULL DEFAULT 0,
+          sms_missing_count INTEGER NOT NULL DEFAULT 0,
+          sms_failed_count INTEGER NOT NULL DEFAULT 0,
+          sms_configured BOOLEAN NOT NULL DEFAULT FALSE,
           details JSONB NOT NULL DEFAULT '{}'::jsonb,
           published_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
+      await sql`ALTER TABLE schedule_publications ADD COLUMN IF NOT EXISTS sms_sent_count INTEGER NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE schedule_publications ADD COLUMN IF NOT EXISTS sms_missing_count INTEGER NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE schedule_publications ADD COLUMN IF NOT EXISTS sms_failed_count INTEGER NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE schedule_publications ADD COLUMN IF NOT EXISTS sms_configured BOOLEAN NOT NULL DEFAULT FALSE`;
       await sql`
         CREATE INDEX IF NOT EXISTS schedule_publications_business_week_idx
         ON schedule_publications (business, week_start, published_at DESC)
@@ -182,6 +212,10 @@ export async function createScheduleDraft(input: {
   position: string;
   startsAt: string;
   endsAt: string;
+  mealBreakStart?: string | null;
+  mealBreakMinutes?: number;
+  extraMealBreakStart?: string | null;
+  extraMealBreakMinutes?: number;
   notes?: string;
   actor: string;
 }) {
@@ -192,6 +226,14 @@ export async function createScheduleDraft(input: {
   if (end <= start) throw new Error("Shift end must be after the start.");
   const position = clean(input.position, 100);
   if (!position) throw new Error("Shift position is required.");
+  const meals = normalizeScheduledMealFields({
+    startsAt: start,
+    endsAt: end,
+    mealBreakStart: input.mealBreakStart,
+    mealBreakMinutes: input.mealBreakMinutes,
+    extraMealBreakStart: input.extraMealBreakStart,
+    extraMealBreakMinutes: input.extraMealBreakMinutes,
+  });
 
   if (input.employeeId) {
     const employee = await getSql()`
@@ -215,12 +257,15 @@ export async function createScheduleDraft(input: {
   const id = crypto.randomUUID();
   await getSql()`
     INSERT INTO schedule_shifts (
-      id, business, employee_id, position, starts_at, ends_at, status,
-      notes, created_by, published_at
+      id, business, employee_id, position, starts_at, ends_at,
+      meal_break_start, meal_break_minutes, extra_meal_break_start, extra_meal_break_minutes,
+      status, notes, created_by, published_at
     ) VALUES (
       ${id}, ${input.business}, ${input.employeeId || null}, ${position},
-      ${start.toISOString()}, ${end.toISOString()}, 'Draft', ${clean(input.notes, 1000)},
-      ${input.actor}, NULL
+      ${start.toISOString()}, ${end.toISOString()},
+      ${meals.mealBreakStart}, ${meals.mealBreakMinutes},
+      ${meals.extraMealBreakStart}, ${meals.extraMealBreakMinutes},
+      'Draft', ${clean(input.notes, 1000)}, ${input.actor}, NULL
     )
   `;
   return { id, status: "Draft" };
@@ -246,11 +291,17 @@ export async function publishScheduleWeek(input: {
   ` as unknown as Array<{ id: string }>;
   if (!existing[0]) throw new Error("There are no shifts to publish for this week.");
 
+  const priorPublication = await sql`
+    SELECT id FROM schedule_publications
+    WHERE business = ${input.business} AND week_start = ${weekStart}
+    LIMIT 1
+  ` as unknown as Array<{ id: string }>;
+  const scheduleVerb = priorPublication[0] ? "updated" : "published";
+
   await sql`
     UPDATE schedule_shifts SET
       status = CASE WHEN employee_id IS NULL THEN 'Open' ELSE 'Published' END,
-      published_at = NOW(),
-      updated_at = NOW()
+      published_at = NOW(), updated_at = NOW()
     WHERE business = ${input.business}
       AND starts_at >= (${weekStart}::date AT TIME ZONE ${TIME_ZONE})
       AND starts_at < ((${weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
@@ -259,7 +310,8 @@ export async function publishScheduleWeek(input: {
 
   const shifts = await sql`
     SELECT s.id, s.employee_id, e.name AS employee_name, s.position,
-      s.starts_at, s.ends_at, s.notes, s.status
+      s.starts_at, s.ends_at, s.meal_break_start, s.meal_break_minutes,
+      s.extra_meal_break_start, s.extra_meal_break_minutes, s.notes, s.status
     FROM schedule_shifts s
     LEFT JOIN employees e ON e.id = s.employee_id
     WHERE s.business = ${input.business}
@@ -279,14 +331,13 @@ export async function publishScheduleWeek(input: {
       id, business, sender_name, recipient_employee_id, message_type, body
     ) VALUES (
       ${crypto.randomUUID()}, ${input.business}, ${input.actor}, NULL, 'Announcement',
-      ${`${input.business} schedule published for ${rangeLabel}. Open Employee Hub to review your shifts${openShifts.length ? ` and ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"}` : ""}.`}
+      ${`${input.business} schedule ${scheduleVerb} for ${rangeLabel}. Open Employee Hub to review your shifts${openShifts.length ? ` and ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"}` : ""}.`}
     )
   `;
 
-  const delivery = await deliverEmails({
-    business: input.business,
+  const email = await deliverEmails({
     recipients: contacts,
-    subject: () => `${input.business} schedule: ${dateLabel(weekStart)}–${dateLabel(weekEnd)}`,
+    subject: () => `${input.business} schedule ${scheduleVerb}: ${dateLabel(weekStart)}–${dateLabel(weekEnd)}`,
     text: (employee) => {
       const employeeShifts = shifts.filter((shift) => shift.employee_id === employee.id);
       const schedule = employeeShifts.length
@@ -295,11 +346,11 @@ export async function publishScheduleWeek(input: {
       return [
         `Hi ${clean(employee.name, 120).split(/\s+/)[0] || "there"},`,
         "",
-        `The ${input.business} schedule for ${rangeLabel} has been published.`,
+        `The ${input.business} schedule for ${rangeLabel} was ${scheduleVerb}.`,
         "",
         "Your schedule:",
         schedule,
-        openShifts.length ? `\nThere ${openShifts.length === 1 ? "is" : "are"} ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"} available in Employee Hub.` : "",
+        openShifts.length ? `\nThere ${openShifts.length === 1 ? "is" : "are"} ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"} in Employee Hub.` : "",
         hubUrl ? `\nView the schedule: ${hubUrl}` : "",
         "",
         "This email was sent by Corner Ops.",
@@ -307,16 +358,27 @@ export async function publishScheduleWeek(input: {
     },
   });
 
+  const sms = await deliverSms({
+    recipients: contacts,
+    text: () => [
+      `${input.business} schedule ${scheduleVerb} for ${dateLabel(weekStart)}-${dateLabel(weekEnd)}.`,
+      hubUrl ? `Review: ${hubUrl}` : "Open Employee Hub to review.",
+      "Reply STOP to opt out.",
+    ].join(" "),
+  });
+
   const publicationId = crypto.randomUUID();
   await sql`
     INSERT INTO schedule_publications (
       id, business, week_start, week_end, published_by, shift_count,
       active_employee_count, email_sent_count, email_missing_count,
-      email_failed_count, email_configured, details
+      email_failed_count, email_configured, sms_sent_count, sms_missing_count,
+      sms_failed_count, sms_configured, details
     ) VALUES (
       ${publicationId}, ${input.business}, ${weekStart}, ${weekEnd}, ${input.actor}, ${shifts.length},
-      ${contacts.length}, ${delivery.sent}, ${delivery.missingEmail}, ${delivery.failed},
-      ${delivery.configured}, ${JSON.stringify({ failures: delivery.failures, skipped: delivery.skipped })}::jsonb
+      ${contacts.length}, ${email.sent}, ${email.missingEmail}, ${email.failed}, ${email.configured},
+      ${sms.sent}, ${sms.missingPhone}, ${sms.failed}, ${sms.configured},
+      ${JSON.stringify({ emailFailures: email.failures, emailSkipped: email.skipped, smsFailures: sms.failures, smsNotOptedIn: sms.notOptedIn, smsSkipped: sms.skipped })}::jsonb
     )
   `;
 
@@ -327,7 +389,8 @@ export async function publishScheduleWeek(input: {
     publishedShifts: shifts.length,
     activeEmployees: contacts.length,
     openShifts: openShifts.length,
-    email: delivery,
+    email,
+    sms,
   };
 }
 
@@ -356,8 +419,7 @@ export async function sendStaffNotification(input: {
   `;
 
   const hubUrl = employeeHubUrl();
-  const delivery = await deliverEmails({
-    business: input.business,
+  const email = await deliverEmails({
     recipients,
     subject: () => `${input.business} staff message`,
     text: (employee) => [
@@ -370,9 +432,5 @@ export async function sendStaffNotification(input: {
     ].filter(Boolean).join("\n"),
   });
 
-  return {
-    sent: true,
-    recipients: recipients.length,
-    email: delivery,
-  };
+  return { sent: true, recipients: recipients.length, email };
 }
