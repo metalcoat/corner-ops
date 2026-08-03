@@ -1,15 +1,18 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { CSSProperties, FormEvent, useEffect, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
 import "./messages.css";
 
-type Employee = { id: string; name: string; active: boolean };
+type Employee = { id: string; name: string; position: string; active: boolean; scheduleColor: string; avatarSet: boolean };
 type SeenBy = { employeeId: string; name: string; readAt: string };
 type Message = {
   id: string;
+  sender_employee_id: string | null;
   sender_name: string;
+  sender_schedule_color: string;
+  sender_avatar_set: boolean;
   recipient_name: string | null;
   message_type: string;
   body: string;
@@ -37,6 +40,10 @@ function firstName(value: string | null) {
   return candidate.charAt(0).toUpperCase() + candidate.slice(1);
 }
 
+function initials(value: string) {
+  return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
+}
+
 function local(value: string) {
   return new Date(value).toLocaleString([], {
     weekday: "short",
@@ -45,6 +52,10 @@ function local(value: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function avatarUrl(business: Business, employeeId: string) {
+  return `/api/employee-directory/avatar?business=${encodeURIComponent(business)}&id=${encodeURIComponent(employeeId)}`;
 }
 
 export default function MessagesPage() {
@@ -114,7 +125,7 @@ export default function MessagesPage() {
 
   return <main className="controlPage">
     <header className="controlHeader">
-      <div><p className="eyebrow">Team communication</p><h1>{business} messages</h1><p>Send announcements or direct messages, review uploaded photos, and see exactly who has opened each message.</p></div>
+      <div><p className="eyebrow">Team communication</p><h1>{business} messages</h1><p>Employee colors and profile icons match the schedule, while read receipts still reveal who has heroically managed to open the message.</p></div>
       <div className="controlActions"><div className="businessPills">{allowed.map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div><button disabled={busy} onClick={() => void load()}>Refresh</button><a href="/ops/workforce">Workforce</a></div>
     </header>
     {notice && <div className="noticeBar">{notice}</div>}
@@ -122,14 +133,14 @@ export default function MessagesPage() {
       <section className="controlCard messageComposerCard">
         <div><p className="eyebrow">Owner message</p><h2>Send a message</h2></div>
         <form className="messageComposer" onSubmit={sendMessage}>
-          <label>Recipient<select name="recipientEmployeeId" defaultValue=""><option value="">Everyone at {business}</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>
+          <label>Recipient<select name="recipientEmployeeId" defaultValue=""><option value="">Everyone at {business}</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} · {employee.position}</option>)}</select></label>
           <label>Message<textarea name="body" rows={7} required /></label>
           <button disabled={busy}>Send message</button>
         </form>
       </section>
       <section className="controlCard messageFeedCard">
         <div className="messageFeedHeader"><div><p className="eyebrow">Recent activity</p><h2>Message feed</h2></div><strong>{data?.messages.length || 0}</strong></div>
-        <div className="ownerMessageFeed">{(data?.messages || []).map((message) => <article className="ownerMessageItem" key={message.id}><header><div><strong>{firstName(message.sender_name)}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div><small>{local(message.created_at)}</small></header>{message.body && <p>{message.body}</p>}{message.attachment_name && <a className="ownerMessagePhoto" href={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer"><img src={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${firstName(message.sender_name)}`} loading="lazy" /><span>Open full photo</span></a>}<details className="messageReadReceipt"><summary>{message.expectedCount === 0 ? "No employee recipients" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary><div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {local(read.readAt)}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}{message.expectedCount > 0 && message.unseenNames.length === 0 && <p>Everyone has seen this message.</p>}</div></details></article>)}{!data?.messages.length && <p>No messages yet.</p>}</div>
+        <div className="ownerMessageFeed">{(data?.messages || []).map((message) => <article className="ownerMessageItem" key={message.id} style={{ "--employee-color": message.sender_schedule_color || "#64748B" } as CSSProperties}><header><span className="ownerMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(business, message.sender_employee_id)} alt="" loading="lazy" /> : initials(message.sender_name)}</span><div><strong>{firstName(message.sender_name)}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div><small>{local(message.created_at)}</small></header>{message.body && <p>{message.body}</p>}{message.attachment_name && <a className="ownerMessagePhoto" href={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer"><img src={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${firstName(message.sender_name)}`} loading="lazy" /><span>Open full photo</span></a>}<details className="messageReadReceipt"><summary>{message.expectedCount === 0 ? "No employee recipients" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary><div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {local(read.readAt)}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}{message.expectedCount > 0 && message.unseenNames.length === 0 && <p>Everyone has seen this message.</p>}</div></details></article>)}{!data?.messages.length && <p>No messages yet.</p>}</div>
       </section>
     </div>
   </main>;
