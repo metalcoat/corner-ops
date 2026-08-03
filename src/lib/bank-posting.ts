@@ -46,6 +46,7 @@ export async function postFinancialTransaction(input: {
   actor: string;
 }) {
   await ensureAccountingControlSchema();
+  await getSql()`ALTER TABLE bank_transaction_splits ADD COLUMN IF NOT EXISTS invoice_id UUID`;
   const transaction = await loadTransaction(input.transactionId, input.business);
   if (transaction.pending) throw new Error("Pending transactions cannot be posted.");
   if (transaction.removed) throw new Error("Removed transactions cannot be posted.");
@@ -59,13 +60,17 @@ export async function postFinancialTransaction(input: {
   if (existing[0]) return { posted: false, journalEntryId: existing[0].journal_entry_id, duplicate: true };
 
   const splitRows = await getSql()`
-    SELECT account_code, amount, memo FROM bank_transaction_splits
+    SELECT account_code, amount, memo, invoice_id FROM bank_transaction_splits
     WHERE bank_transaction_id = ${input.transactionId}
     ORDER BY line_number
-  ` as unknown as Array<{ account_code: string; amount: string | number; memo: string }>;
+  ` as unknown as Array<{ account_code: string; amount: string | number; memo: string; invoice_id: string | null }>;
   const amount = roundMoney(Math.abs(numberValue(transaction.signed_amount)));
   const categoryLines = splitRows.length
-    ? splitRows.map((row) => ({ code: clean(row.account_code, 20), amount: roundMoney(numberValue(row.amount)), memo: row.memo }))
+    ? splitRows.map((row) => ({
+        code: row.invoice_id ? "1200" : clean(row.account_code, 20),
+        amount: roundMoney(numberValue(row.amount)),
+        memo: row.memo,
+      }))
     : [{ code: clean(transaction.account_code, 20), amount, memo: "" }];
   if (!categoryLines[0].code) throw new Error("Choose an accounting account before posting.");
   if (Math.abs(categoryLines.reduce((sum, line) => sum + line.amount, 0) - amount) > 0.005) {
