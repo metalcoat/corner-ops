@@ -2,6 +2,7 @@
 
 import { CSSProperties, DragEvent, FormEvent, useMemo, useState } from "react";
 import { positionsForBusiness } from "@/lib/business-positions";
+import { analyzeSchedule } from "@/lib/schedule-validation";
 import type { Business } from "@/lib/types";
 import "./schedule-board.css";
 
@@ -77,6 +78,10 @@ function localTime(value: string): string {
   return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+function localDateTime(value: string): string {
+  return new Date(value).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
 function inputTime(value: string): string {
   const date = new Date(value);
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
@@ -112,11 +117,21 @@ function avatarUrl(business: Business, employeeId: string): string {
   return `/api/employee-directory/avatar?business=${encodeURIComponent(business)}&id=${encodeURIComponent(employeeId)}`;
 }
 
+function moveShiftDates(shift: ScheduleShift, targetDay: Date): ScheduleShift {
+  const originalStart = new Date(shift.startsAt);
+  const originalEnd = new Date(shift.endsAt);
+  const start = new Date(targetDay);
+  start.setHours(originalStart.getHours(), originalStart.getMinutes(), 0, 0);
+  const end = new Date(start.getTime() + (originalEnd.getTime() - originalStart.getTime()));
+  return { ...shift, startsAt: start.toISOString(), endsAt: end.toISOString() };
+}
+
 export default function ScheduleBoard({ business, employees, shifts, busy, runAction }: Props) {
   const [weekStart, setWeekStart] = useState(() => startOfMonday(new Date()));
   const [copiedShift, setCopiedShift] = useState<ScheduleShift | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragTargetDayKey, setDragTargetDayKey] = useState<string | null>(null);
 
   const weekEnd = addDays(weekStart, 7);
   const activeEmployees = employees.filter((employee) => employee.active);
@@ -125,6 +140,15 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     const start = new Date(shift.startsAt);
     return start >= weekStart && start < weekEnd && shift.status !== "Cancelled";
   }), [shifts, weekStart, weekEnd]);
+  const previewWeekShifts = useMemo(() => {
+    if (!draggingId || !dragTargetDayKey) return weekShifts;
+    const target = dateFromKey(dragTargetDayKey);
+    return weekShifts.map((shift) => shift.id === draggingId ? moveShiftDates(shift, target) : shift);
+  }, [dragTargetDayKey, draggingId, weekShifts]);
+  const scheduleAnalysis = useMemo(() => analyzeSchedule(previewWeekShifts), [previewWeekShifts]);
+  const publishAnalysis = useMemo(() => analyzeSchedule(weekShifts), [weekShifts]);
+  const overlapShiftIds = new Set(scheduleAnalysis.overlaps.flatMap((overlap) => [overlap.firstShiftId, overlap.secondShiftId]));
+  const loneShiftIds = new Set(scheduleAnalysis.loneWorkerViolations.flatMap((violation) => violation.shiftIds));
   const draftCount = weekShifts.filter((shift) => shift.status === "Draft").length;
   const publishedCount = weekShifts.filter((shift) => shift.status === "Published" || shift.status === "Open").length;
   const missingEmailCount = activeEmployees.filter((employee) => !employee.email.trim()).length;
@@ -143,6 +167,38 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     return map;
   }, [weekShifts]);
 
+  const editorPreview = useMemo(() => {
+    if (!editor) return null;
+    try {
+      const start = dateFromParts(editor.date, editor.startTime);
+      let end = dateFromParts(editor.date, editor.endTime);
+      if (end <= start) end = new Date(end.getTime() + DAY_MS);
+      const previewId = editor.shift?.id || "__schedule_editor_preview__";
+      const employee = editor.employeeId ? employeeById.get(editor.employeeId) : undefined;
+      const candidates = weekShifts.filter((shift) => shift.id !== editor.shift?.id);
+      if (start >= weekStart && start < weekEnd) {
+        candidates.push({
+          id: previewId,
+          employeeId: editor.employeeId,
+          employeeName: employee?.name || "Unassigned",
+          position: editor.position,
+          startsAt: start.toISOString(),
+          endsAt: end.toISOString(),
+          status: "Draft",
+          notes: editor.notes,
+        });
+      }
+      const analysis = analyzeSchedule(candidates);
+      return {
+        hours: editor.employeeId ? analysis.employeeHours[editor.employeeId]?.hours || 0 : 0,
+        risk: editor.employeeId ? analysis.employeeHours[editor.employeeId]?.risk || "normal" : "normal",
+        overlap: analysis.overlaps.find((item) => item.firstShiftId === previewId || item.secondShiftId === previewId) || null,
+      };
+    } catch {
+      return null;
+    }
+  }, [editor, employeeById, weekEnd, weekShifts, weekStart]);
+
   function openExisting(shift: ScheduleShift) {
     setEditor({
       shift,
@@ -158,6 +214,10 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
   async function saveShift(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editor) return;
+    if (editorPreview?.overlap) {
+      window.alert("This employee already has an overlapping shift. Change the employee or the shift time before saving.");
+      return;
+    }
     const start = dateFromParts(editor.date, editor.startTime);
     let end = dateFromParts(editor.date, editor.endTime);
     if (end <= start) end = new Date(end.getTime() + DAY_MS);
@@ -176,41 +236,41 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
   }
 
   async function moveShiftToDay(shift: ScheduleShift, targetDay: Date) {
-    const originalStart = new Date(shift.startsAt);
-    const originalEnd = new Date(shift.endsAt);
-    const duration = originalEnd.getTime() - originalStart.getTime();
-    const start = new Date(targetDay);
-    start.setHours(originalStart.getHours(), originalStart.getMinutes(), 0, 0);
-    const end = new Date(start.getTime() + duration);
+    const moved = moveShiftDates(shift, targetDay);
     await runAction({
       action: "shift-update",
       id: shift.id,
       employeeId: shift.employeeId,
-      startsAt: start.toISOString(),
-      endsAt: end.toISOString(),
+      startsAt: moved.startsAt,
+      endsAt: moved.endsAt,
       status: "Draft",
     }, `Shift moved to ${targetDay.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })} and marked for publishing.`);
   }
 
   async function pasteShift(targetDay: Date) {
     if (!copiedShift) return;
-    const sourceStart = new Date(copiedShift.startsAt);
-    const sourceEnd = new Date(copiedShift.endsAt);
-    const start = new Date(targetDay);
-    start.setHours(sourceStart.getHours(), sourceStart.getMinutes(), 0, 0);
-    const end = new Date(start.getTime() + (sourceEnd.getTime() - sourceStart.getTime()));
+    const copied = moveShiftDates(copiedShift, targetDay);
     await runAction({
       action: "shift-create",
       employeeId: copiedShift.employeeId,
       position: copiedShift.position,
-      startsAt: start.toISOString(),
-      endsAt: end.toISOString(),
+      startsAt: copied.startsAt,
+      endsAt: copied.endsAt,
       status: "Draft",
       notes: copiedShift.notes,
     }, "Copied shift pasted as a draft.");
   }
 
   async function publishWeek() {
+    if (!publishAnalysis.canPublish) {
+      const details = [
+        ...publishAnalysis.overForty.map((employee) => `${employee.employeeName}: ${employee.hours.toFixed(1)} hours`),
+        ...publishAnalysis.overlaps.map((overlap) => `${overlap.employeeName}: overlapping shifts at ${localDateTime(overlap.startsAt)}`),
+        ...publishAnalysis.loneWorkerViolations.map((violation) => `${violation.employeeName}: alone ${violation.minutes} minutes starting ${localDateTime(violation.startsAt)}`),
+      ];
+      window.alert(`The schedule cannot be published yet.\n\n${details.slice(0, 10).join("\n")}`);
+      return;
+    }
     const actionLabel = draftCount > 0 ? "Publish week" : "Resend schedule";
     if (!window.confirm(`${actionLabel} for ${business}? This will notify all active employees.`)) return;
     await runAction({
@@ -230,6 +290,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     const id = event.dataTransfer.getData("text/plain");
     const shift = shifts.find((candidate) => candidate.id === id);
     setDraggingId(null);
+    setDragTargetDayKey(null);
     if (shift) await moveShiftToDay(shift, day);
   }
 
@@ -241,7 +302,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       <div>
         <p className="wfEyebrow">Scheduled-day planning board</p>
         <h2>{weekStart.toLocaleDateString([], { month: "long", day: "numeric" })} – {addDays(weekStart, 6).toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" })}</h2>
-        <span className="scheduleSubline">Only days containing shifts are shown. Shifts are sorted by start time.</span>
+        <span className="scheduleSubline">Weekly totals update with every change. Yellow means over 38 hours; red means over 40. Publication also checks overlaps and lone-worker coverage.</span>
       </div>
       <div className="scheduleToolbarActions">
         <span className="scheduleClipboard">
@@ -252,19 +313,45 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
         <button type="button" onClick={() => setWeekStart(addDays(weekStart, -7))}>← Previous</button>
         <button type="button" onClick={() => setWeekStart(startOfMonday(new Date()))}>Today</button>
         <button type="button" onClick={() => setWeekStart(addDays(weekStart, 7))}>Next →</button>
-        <button type="button" className="schedulePrimary" disabled={busy || weekShifts.length === 0} onClick={() => void publishWeek()}>{draftCount > 0 ? `Publish week (${draftCount})` : "Resend schedule"}</button>
+        <button
+          type="button"
+          className="schedulePrimary"
+          disabled={busy || weekShifts.length === 0 || !publishAnalysis.canPublish}
+          title={!publishAnalysis.canPublish ? `${publishAnalysis.blockingIssueCount} blocking schedule issue${publishAnalysis.blockingIssueCount === 1 ? "" : "s"}` : ""}
+          onClick={() => void publishWeek()}
+        >{draftCount > 0 ? `Publish week (${draftCount})` : "Resend schedule"}</button>
         <button type="button" className="schedulePrimary" onClick={() => setEditor(defaultEditor(activeEmployees[0]?.id || null, firstScheduledDate, activeEmployees[0]))}>+ Add shift</button>
       </div>
     </header>
 
-    <div className="scheduleLegend" aria-label="Employee schedule colors">
+    <section className={`scheduleValidation ${publishAnalysis.canPublish ? "ready" : "blocked"}`}>
+      <div className="scheduleValidationHeader">
+        <div><strong>{publishAnalysis.canPublish ? "Schedule checks passed" : "Schedule cannot be published yet"}</strong><span>Drafts may remain incomplete while you build. These checks become mandatory at publication.</span></div>
+        <div className="scheduleCheckBadges">
+          <span className={publishAnalysis.overThirtyEight.length ? "warning" : "clear"}>{publishAnalysis.overThirtyEight.length} over 38</span>
+          <span className={publishAnalysis.overForty.length ? "danger" : "clear"}>{publishAnalysis.overForty.length} over 40</span>
+          <span className={publishAnalysis.overlaps.length ? "danger" : "clear"}>{publishAnalysis.overlaps.length} overlap{publishAnalysis.overlaps.length === 1 ? "" : "s"}</span>
+          <span className={publishAnalysis.loneWorkerViolations.length ? "danger" : "clear"}>{publishAnalysis.loneWorkerViolations.length} alone &gt;30m</span>
+        </div>
+      </div>
+      {(publishAnalysis.overThirtyEight.length > 0 || !publishAnalysis.canPublish) && <div className="scheduleIssueList">
+        {publishAnalysis.overThirtyEight.map((employee) => <div className="scheduleIssue warning" key={`warning-${employee.employeeId}`}><strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} scheduled hours. Review before this becomes overtime.</span></div>)}
+        {publishAnalysis.overForty.map((employee) => <div className="scheduleIssue danger" key={`overtime-${employee.employeeId}`}><strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} scheduled hours. Reduce the week to 40 or fewer before publishing.</span></div>)}
+        {publishAnalysis.overlaps.map((overlap) => <div className="scheduleIssue danger" key={`${overlap.firstShiftId}-${overlap.secondShiftId}`}><strong>{overlap.employeeName}</strong><span>Scheduled twice from {localDateTime(overlap.startsAt)} to {localTime(overlap.endsAt)}.</span></div>)}
+        {publishAnalysis.loneWorkerViolations.map((violation) => <div className="scheduleIssue danger" key={`${violation.employeeId}-${violation.startsAt}`}><strong>{violation.employeeName}</strong><span>Alone from {localDateTime(violation.startsAt)} to {localTime(violation.endsAt)} ({violation.minutes} minutes).</span></div>)}
+      </div>}
+    </section>
+
+    <div className="scheduleLegend" aria-label="Employee schedule colors and weekly hours">
       {activeEmployees.map((employee) => {
-        const hours = weekShifts.filter((shift) => shift.employeeId === employee.id).reduce((total, shift) => total + shiftHours(shift), 0);
-        return <div className="scheduleLegendPerson" key={employee.id} style={{ "--employee-color": employee.scheduleColor } as CSSProperties}>
+        const totals = scheduleAnalysis.employeeHours[employee.id];
+        const hours = totals?.hours || 0;
+        const risk = totals?.risk || "normal";
+        return <div className={`scheduleLegendPerson hours-${risk}`} key={employee.id} style={{ "--employee-color": employee.scheduleColor } as CSSProperties}>
           <span className="scheduleAvatar small">
             {employee.avatarSet ? <img src={avatarUrl(business, employee.id)} alt="" loading="lazy" /> : initials(employee.name)}
           </span>
-          <div><strong>{employee.name}</strong><small>{employee.position} · {hours.toFixed(1)} hrs</small></div>
+          <div><strong>{employee.name}</strong><small>{employee.position} · <b>{hours.toFixed(1)} hrs</b></small></div>
         </div>;
       })}
     </div>
@@ -279,10 +366,16 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
           const day = dateFromKey(key);
           const dayShifts = shiftsByDay.get(key) || [];
           const totalHours = dayShifts.reduce((total, shift) => total + shiftHours(shift), 0);
+          const dayHasOverlap = scheduleAnalysis.overlaps.some((overlap) => dateKey(new Date(overlap.startsAt)) === key);
+          const dayHasLoneWorker = scheduleAnalysis.loneWorkerViolations.some((violation) => dateKey(new Date(violation.startsAt)) === key);
           return <section
-            className={`scheduleDayStage ${dateKey(new Date()) === key ? "today" : ""} ${draggingId ? "dragReady" : ""}`}
+            className={`scheduleDayStage ${dateKey(new Date()) === key ? "today" : ""} ${draggingId ? "dragReady" : ""} ${dragTargetDayKey === key ? "dragTarget" : ""} ${dayHasOverlap || dayHasLoneWorker ? "hasSafetyIssue" : ""}`}
             key={key}
-            onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              if (dragTargetDayKey !== key) setDragTargetDayKey(key);
+            }}
             onDrop={(event) => void onDrop(event, day)}
           >
             <header className="scheduleDayStageHeader">
@@ -295,13 +388,16 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
                 const color = employee?.scheduleColor || shift.employeeColor || "#64748B";
                 const avatarSet = employee?.avatarSet || shift.employeeAvatarSet || false;
                 const name = employee?.name || shift.employeeName || "Unassigned";
+                const hourStatus = scheduleAnalysis.shiftRisks[shift.id];
+                const hasOverlap = overlapShiftIds.has(shift.id);
+                const hasLoneWorker = loneShiftIds.has(shift.id);
                 return <div
-                  className={`scheduleShiftCard ${shift.status.toLowerCase()} ${draggingId === shift.id ? "dragging" : ""}`}
+                  className={`scheduleShiftCard ${shift.status.toLowerCase()} ${draggingId === shift.id ? "dragging" : ""} hours-${hourStatus?.risk || "normal"} ${hasOverlap ? "hasOverlap" : ""} ${hasLoneWorker ? "hasLoneWorker" : ""}`}
                   style={{ "--employee-color": color } as CSSProperties}
                   key={shift.id}
                   draggable
                   onDragStart={(event) => onDragStart(event, shift)}
-                  onDragEnd={() => setDraggingId(null)}
+                  onDragEnd={() => { setDraggingId(null); setDragTargetDayKey(null); }}
                   onDoubleClick={() => openExisting(shift)}
                 >
                   <button type="button" className="shiftMain" onClick={() => openExisting(shift)}>
@@ -311,11 +407,20 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
                     <span className="shiftDetails">
                       <strong>{name}</strong>
                       <b>{localTime(shift.startsAt)} – {localTime(shift.endsAt)}</b>
-                      <em>{shift.position || "Shift"}</em>
+                      <em>{shift.position || "Shift"} · {shiftHours(shift).toFixed(1)} hrs</em>
                       {shift.notes && <small>📝 {shift.notes}</small>}
                     </span>
                   </button>
-                  <div className="shiftQuickActions"><button type="button" onClick={() => setCopiedShift(shift)}>Copy</button><span>{shift.status}</span></div>
+                  <div className="shiftQuickActions">
+                    <button type="button" onClick={() => setCopiedShift(shift)}>Copy</button>
+                    <span className="shiftStatusLabels">
+                      {hourStatus?.risk === "warning" && <b className="hoursWarning">38+ hrs</b>}
+                      {hourStatus?.risk === "overtime" && <b className="hoursOvertime">40+ hrs</b>}
+                      {hasOverlap && <b className="safetyDanger">Overlap</b>}
+                      {hasLoneWorker && <b className="safetyDanger">Alone &gt;30m</b>}
+                      <i>{shift.status}</i>
+                    </span>
+                  </div>
                 </div>;
               })}
             </div>
@@ -339,12 +444,22 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
           <label>Position{business === "Corner Deli"
             ? <select value={editor.position} onChange={(event) => setEditor((current) => current ? { ...current, position: event.target.value } : current)} required><option value="">Choose position</option>{positionOptions.map((position) => <option key={position} value={position}>{position}</option>)}</select>
             : <input value={editor.position} onChange={(event) => setEditor((current) => current ? { ...current, position: event.target.value } : current)} required />}</label>
+          {editor.employeeId && editorPreview && <div className={`scheduleEditorCheck ${editorPreview.overlap ? "danger" : editorPreview.risk}`}>
+            <strong>Projected weekly total: {editorPreview.hours.toFixed(1)} hours</strong>
+            <span>{editorPreview.overlap
+              ? "This shift overlaps another assignment and cannot be saved."
+              : editorPreview.risk === "overtime"
+                ? "This draft takes the employee over 40 hours and will block publication."
+                : editorPreview.risk === "warning"
+                  ? "This draft takes the employee over 38 hours. Review before publishing."
+                  : "No overlap or weekly-hour warning for this employee."}</span>
+          </div>}
           <p className="scheduleNotes">Saving creates a draft. Staff do not receive the change until the entire week is published.</p>
           <label className="scheduleNotes">Shift instructions shown to the employee<textarea rows={5} value={editor.notes} onChange={(event) => setEditor((current) => current ? { ...current, notes: event.target.value } : current)} placeholder="Example: Restock the outside cooler before opening. Private party arrives at 6:30." /></label>
           <div className="scheduleModalActions">
             {editor.shift && <><button type="button" onClick={() => setCopiedShift(editor.shift)}>Copy shift</button><button type="button" className="danger" disabled={busy} onClick={() => void runAction({ action: "shift-update", id: editor.shift?.id, status: "Cancelled" }, "Shift cancelled.").then(() => setEditor(null))}>Cancel shift</button></>}
             <button type="button" onClick={() => setEditor(null)}>Close</button>
-            <button type="submit" className="schedulePrimary" disabled={busy}>Save draft</button>
+            <button type="submit" className="schedulePrimary" disabled={busy || Boolean(editorPreview?.overlap)}>Save draft</button>
           </div>
         </form>
       </section>
