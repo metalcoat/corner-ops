@@ -57,7 +57,7 @@ function needed(path: string, method: string): string | null {
   if (path.startsWith("/api/integrations") || path.startsWith("/api/bank-accounts") || path.startsWith("/api/square/connect")) {
     return write ? "integrations.write" : "integrations.read";
   }
-  if (path.startsWith("/api/workforce") || path.startsWith("/api/employee-directory") || path.startsWith("/api/attendance")) {
+  if (path.startsWith("/api/messages") || path.startsWith("/api/workforce") || path.startsWith("/api/employee-directory") || path.startsWith("/api/attendance")) {
     return write ? "workforce.write" : "workforce.read";
   }
   if (path.startsWith("/api/documents") || path.startsWith("/api/audit")) {
