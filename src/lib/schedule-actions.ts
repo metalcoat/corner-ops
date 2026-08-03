@@ -41,8 +41,8 @@ export async function updateScheduleShiftSafely(input: {
     ? (current.employee_id ? String(current.employee_id) : null)
     : input.employeeId;
   const employeeId = status === "Open" ? null : requestedEmployee;
-  if (status !== "Open" && status !== "Cancelled" && !employeeId) {
-    throw new Error("Choose an employee or mark the shift open.");
+  if (status === "Published" && !employeeId) {
+    throw new Error("Published assigned shifts require an employee.");
   }
 
   if (employeeId && status !== "Cancelled") {
@@ -74,6 +74,7 @@ export async function updateScheduleShiftSafely(input: {
       status = ${status},
       notes = ${clean(input.notes ?? current.notes, 1000)},
       published_at = CASE
+        WHEN ${status} = 'Draft' THEN NULL
         WHEN ${status} IN ('Published', 'Open') THEN COALESCE(published_at, NOW())
         ELSE published_at
       END,
