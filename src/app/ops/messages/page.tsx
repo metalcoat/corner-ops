@@ -6,6 +6,7 @@ import "../control-center.css";
 import "./messages.css";
 
 type Employee = { id: string; name: string; active: boolean };
+type SeenBy = { employeeId: string; name: string; readAt: string };
 type Message = {
   id: string;
   sender_name: string;
@@ -15,9 +16,13 @@ type Message = {
   attachment_name?: string;
   attachment_type?: string;
   attachment_size?: number | string;
+  expectedCount: number;
+  seenCount: number;
+  seenBy: SeenBy[];
+  unseenNames: string[];
   created_at: string;
 };
-type WorkforcePayload = { business: Business; employees: Employee[]; messages: Message[] };
+type MessagesPayload = { business: Business; employees: Employee[]; messages: Message[] };
 
 async function responseMessage(response: Response) {
   const payload = await response.json().catch(() => null) as { error?: string } | null;
@@ -45,7 +50,7 @@ function local(value: string) {
 export default function MessagesPage() {
   const [session, setSession] = useState<SessionView | null>(null);
   const [business, setBusiness] = useState<Business>("Corner Deli");
-  const [data, setData] = useState<WorkforcePayload | null>(null);
+  const [data, setData] = useState<MessagesPayload | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -62,14 +67,16 @@ export default function MessagesPage() {
   }, []);
 
   async function load(activeBusiness = business) {
-    const response = await fetch(`/api/workforce?business=${encodeURIComponent(activeBusiness)}`, { cache: "no-store" });
+    const response = await fetch(`/api/messages?business=${encodeURIComponent(activeBusiness)}`, { cache: "no-store" });
     if (!response.ok) throw new Error(await responseMessage(response));
-    setData(await response.json() as WorkforcePayload);
+    setData(await response.json() as MessagesPayload);
   }
 
   useEffect(() => {
     if (!session?.authenticated) return;
     void load(business).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
+    const interval = window.setInterval(() => void load(business).catch(() => undefined), 30_000);
+    return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [business, session?.authenticated]);
 
@@ -80,11 +87,10 @@ export default function MessagesPage() {
     setBusy(true);
     setNotice("");
     try {
-      const response = await fetch("/api/workforce", {
+      const response = await fetch("/api/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "message-send",
           business,
           recipientEmployeeId: form.get("recipientEmployeeId") || null,
           body: form.get("body"),
@@ -104,11 +110,11 @@ export default function MessagesPage() {
   if (!session) return <main className="controlPage">Loading messages…</main>;
   if (!session.authenticated) return <main className="controlPage"><a href="/signin">Sign in to Corner Ops</a></main>;
   const allowed = session.businesses?.length ? session.businesses : (["Corner Deli", "Tiki"] as Business[]);
-  const employees = (data?.employees || []).filter((employee) => employee.active);
+  const employees = (data?.employees || []).filter((employee) => employee.active !== false);
 
   return <main className="controlPage">
     <header className="controlHeader">
-      <div><p className="eyebrow">Team communication</p><h1>{business} messages</h1><p>Send announcements or direct messages and review photos uploaded by employees from their phones.</p></div>
+      <div><p className="eyebrow">Team communication</p><h1>{business} messages</h1><p>Send announcements or direct messages, review uploaded photos, and see exactly who has opened each message.</p></div>
       <div className="controlActions"><div className="businessPills">{allowed.map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div><button disabled={busy} onClick={() => void load()}>Refresh</button><a href="/ops/workforce">Workforce</a></div>
     </header>
     {notice && <div className="noticeBar">{notice}</div>}
@@ -123,7 +129,7 @@ export default function MessagesPage() {
       </section>
       <section className="controlCard messageFeedCard">
         <div className="messageFeedHeader"><div><p className="eyebrow">Recent activity</p><h2>Message feed</h2></div><strong>{data?.messages.length || 0}</strong></div>
-        <div className="ownerMessageFeed">{(data?.messages || []).map((message) => <article className="ownerMessageItem" key={message.id}><header><div><strong>{firstName(message.sender_name)}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div><small>{local(message.created_at)}</small></header>{message.body && <p>{message.body}</p>}{message.attachment_name && <a className="ownerMessagePhoto" href={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer"><img src={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${firstName(message.sender_name)}`} loading="lazy" /><span>Open full photo</span></a>}</article>)}{!data?.messages.length && <p>No messages yet.</p>}</div>
+        <div className="ownerMessageFeed">{(data?.messages || []).map((message) => <article className="ownerMessageItem" key={message.id}><header><div><strong>{firstName(message.sender_name)}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div><small>{local(message.created_at)}</small></header>{message.body && <p>{message.body}</p>}{message.attachment_name && <a className="ownerMessagePhoto" href={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer"><img src={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${firstName(message.sender_name)}`} loading="lazy" /><span>Open full photo</span></a>}<details className="messageReadReceipt"><summary>{message.expectedCount === 0 ? "No employee recipients" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary><div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {local(read.readAt)}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}{message.expectedCount > 0 && message.unseenNames.length === 0 && <p>Everyone has seen this message.</p>}</div></details></article>)}{!data?.messages.length && <p>No messages yet.</p>}</div>
       </section>
     </div>
   </main>;
