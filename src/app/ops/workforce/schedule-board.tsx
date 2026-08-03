@@ -225,7 +225,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     setDraggingId(shift.id);
   }
 
-  async function onDrop(event: DragEvent<HTMLDivElement>, day: Date) {
+  async function onDrop(event: DragEvent<HTMLElement>, day: Date) {
     event.preventDefault();
     const id = event.dataTransfer.getData("text/plain");
     const shift = shifts.find((candidate) => candidate.id === id);
