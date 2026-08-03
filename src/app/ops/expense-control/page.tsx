@@ -186,6 +186,7 @@ export default function ExpenseControlPage() {
   const allowed = session.businesses?.length ? session.businesses : (["Corner Deli", "Tiki"] as Business[]);
   const suggestedTransfers = (data?.transfers || []).filter((item) => item.status === "Suggested");
   const suggestedReceipts = (data?.receiptMatches || []).filter((item) => item.status === "Suggested");
+  const connectUrl = `/ops/integrations?connect=accounts&business=${encodeURIComponent(business)}`;
 
   return <main className="controlPage">
     <header className="controlHeader">
@@ -198,7 +199,7 @@ export default function ExpenseControlPage() {
         <div className="businessPills">{allowed.map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div>
         <button disabled={busy} onClick={() => void action({ action: "refresh" }, "Bank, card, transfer, and receipt matching refreshed.")}>Refresh everything</button>
         <button disabled={busy} onClick={() => void action({ action: "drive-sync" }, "Google Drive receipt folders scanned.")}>Scan Drive</button>
-        <a href="/ops/integrations">Connect accounts</a>
+        <a href={connectUrl}>Connect bank or card</a>
       </div>
     </header>
 
@@ -235,7 +236,7 @@ export default function ExpenseControlPage() {
       </section>
 
       <section className="controlCard">
-        <div className="expenseSectionHeader"><div><p className="eyebrow">Plaid accounts</p><h2>Connected banks and cards</h2></div><a href="/ops/integrations">Add another issuer</a></div>
+        <div className="expenseSectionHeader"><div><p className="eyebrow">Plaid accounts</p><h2>Connected banks and cards</h2></div><a href={connectUrl}>Add another issuer</a></div>
         <div className="expenseAccounts">{(data?.accounts || []).map((account) => <article className={`expenseAccount ${account.accountType === "credit" ? "credit" : "bank"}`} key={account.id}><div><strong>{account.institutionName} · {account.name}</strong><span>{account.accountType === "credit" ? "Credit card" : account.accountSubtype || account.accountType} {account.mask ? `ending ${account.mask}` : ""}</span><small>Last sync: {local(account.lastSyncAt)} · {account.connectionStatus}</small></div><div className="expenseBalance"><strong>{money(account.currentBalance)}</strong><small>{account.accountType === "credit" ? "Current amount owed" : "Current balance"}</small></div></article>)}{!data?.accounts.length && <p className="expenseEmpty">No Plaid accounts connected for this business.</p>}</div>
       </section>
 
