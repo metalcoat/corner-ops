@@ -15,12 +15,6 @@ const settings = [
     action: "Open integrations",
   },
   {
-    title: "Users & permissions",
-    description: "Control owner and staff access to Corner Ops features and business data.",
-    href: "/ops/users",
-    action: "Manage users",
-  },
-  {
     title: "Cards & receipt setup",
     description: "Review card connections, OCR status, receipt folders, and transaction matching.",
     href: "/ops/expense-control",
