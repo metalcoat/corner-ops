@@ -1,0 +1,22 @@
+[Unit]
+Description=Corner Ops 3CX CDR Receiver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cornerops
+Group=cornerops
+WorkingDirectory=/opt/corner-ops-cdr
+EnvironmentFile=/etc/corner-ops/3cx-cdr.env
+ExecStart=/usr/bin/node /opt/corner-ops-cdr/3cx-cdr-receiver.mjs
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/corner-ops-cdr
+
+[Install]
+WantedBy=multi-user.target
