@@ -1,5 +1,6 @@
 import { del, put } from "@vercel/blob";
 import { getEmployeeSession } from "@/lib/employee-auth";
+import { listDirectoryEmployees } from "@/lib/employee-directory-admin";
 import { setEmployeeProfilePhoto } from "@/lib/employee-profile";
 import { apiError, unauthorized } from "@/lib/http";
 import { sendEmployeePhotoMessage } from "@/lib/message-attachments";
@@ -38,7 +39,41 @@ export async function GET() {
   try {
     const session = await getEmployeeSession();
     if (!session) return unauthorized();
-    return Response.json(await employeeDashboard(session));
+    const [dashboard, directory] = await Promise.all([
+      employeeDashboard(session),
+      listDirectoryEmployees(session.business),
+    ]);
+    const byId = new Map(directory.map((employee) => [employee.id, employee]));
+    const current = byId.get(session.employeeId);
+    return Response.json({
+      ...dashboard,
+      employee: {
+        ...dashboard.employee,
+        scheduleColor: current?.scheduleColor || "#64748B",
+        avatarSet: current?.avatarSet || false,
+      },
+      directory: directory.filter((employee) => employee.active).map((employee) => ({
+        id: employee.id,
+        name: employee.name,
+        position: employee.position,
+        scheduleColor: employee.scheduleColor,
+        avatarSet: employee.avatarSet,
+      })),
+      teamShifts: dashboard.teamShifts.map((shift) => ({
+        ...shift,
+        employeeColor: shift.employeeId ? byId.get(shift.employeeId)?.scheduleColor || "#64748B" : "#64748B",
+        employeeAvatarSet: shift.employeeId ? byId.get(shift.employeeId)?.avatarSet || false : false,
+      })),
+      messages: (dashboard.messages as Array<Record<string, unknown>>).map((message) => {
+        const senderId = message.sender_employee_id ? String(message.sender_employee_id) : "";
+        const sender = senderId ? byId.get(senderId) : undefined;
+        return {
+          ...message,
+          sender_schedule_color: sender?.scheduleColor || "#64748B",
+          sender_avatar_set: sender?.avatarSet || false,
+        };
+      }),
+    });
   } catch (error) {
     return apiError(error);
   }
