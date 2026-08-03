@@ -74,7 +74,7 @@ export async function GET(request: Request) {
       FROM integration_connections c
       JOIN bank_accounts a ON a.connection_id = c.id
       WHERE c.provider = 'Plaid' AND c.business = ${business}
-      ORDER BY c.created_at, a.name, a.mask
+      ORDER BY c.created_at, a.account_type, a.name, a.mask
     ` as unknown as Array<{
       connection_id: string;
       business: Business;
@@ -97,7 +97,7 @@ export async function GET(request: Request) {
       const first = accounts[0];
       return {
         id: connectionId,
-        institutionName: first?.institution_name || "Connected bank",
+        institutionName: first?.institution_name || "Connected institution",
         status: first?.connection_status || "Active",
         accounts: accounts.map((row) => ({
           id: row.account_id,
@@ -125,7 +125,8 @@ export async function POST(request: Request) {
     const session = await getSession();
     if (!session) return unauthorized();
     const body = await request.json() as Record<string, unknown>;
-    if (body.action !== "select-account") {
+    const action = String(body.action || "");
+    if (action !== "select-account" && action !== "set-active-accounts") {
       return Response.json({ error: "Unknown bank account action." }, { status: 400 });
     }
 
@@ -135,57 +136,70 @@ export async function POST(request: Request) {
     }
 
     const connectionId = String(body.connectionId || "");
-    const accountId = String(body.accountId || "");
-    if (!connectionId || !accountId) {
-      return Response.json({ error: "Choose the bank account to use." }, { status: 400 });
+    const accountIds = Array.from(new Set(
+      action === "select-account"
+        ? [String(body.accountId || "")]
+        : Array.isArray(body.accountIds) ? body.accountIds.map((value) => String(value || "")) : [],
+    )).filter(Boolean);
+    if (!connectionId || accountIds.length === 0) {
+      return Response.json({ error: "Choose at least one bank or credit-card account to synchronize." }, { status: 400 });
     }
 
     await ensureIntegrationSchema();
     await ensureAccountFilterTrigger();
     const sql = getSql();
-    const selectedRows = await sql`
-      SELECT a.external_account_id
+    const accountRows = await sql`
+      SELECT a.id, a.external_account_id
       FROM bank_accounts a
       JOIN integration_connections c ON c.id = a.connection_id
-      WHERE a.id = ${accountId}
-        AND a.connection_id = ${connectionId}
+      WHERE a.connection_id = ${connectionId}
         AND c.provider = 'Plaid'
         AND c.business = ${business}
-      LIMIT 1
-    ` as unknown as Array<{ external_account_id: string }>;
-    const selected = selectedRows[0];
-    if (!selected) {
-      return Response.json({ error: "That account does not belong to this bank connection." }, { status: 404 });
+      ORDER BY a.name, a.mask
+    ` as unknown as Array<{ id: string; external_account_id: string }>;
+
+    if (!accountRows.length) {
+      return Response.json({ error: "That Plaid connection was not found for this business." }, { status: 404 });
+    }
+    const validIds = new Set(accountRows.map((row) => row.id));
+    if (accountIds.some((id) => !validIds.has(id))) {
+      return Response.json({ error: "One or more selected accounts do not belong to this connection." }, { status: 404 });
     }
 
-    await sql`
-      UPDATE bank_accounts
-      SET active = (id = ${accountId}), updated_at = NOW()
-      WHERE connection_id = ${connectionId}
-    `;
+    const selectedIds = new Set(accountIds);
+    for (const account of accountRows) {
+      const active = selectedIds.has(account.id);
+      await sql`
+        UPDATE bank_accounts
+        SET active = ${active}, updated_at = NOW()
+        WHERE id = ${account.id}
+      `;
 
-    await sql`
-      UPDATE bank_transactions
-      SET review_status = 'Ignored',
-          user_override = TRUE,
-          classification_source = 'Excluded bank account',
-          updated_at = NOW()
-      WHERE connection_id = ${connectionId}
-        AND external_account_id <> ${selected.external_account_id}
-    `;
+      if (active) {
+        await sql`
+          UPDATE bank_transactions
+          SET review_status = CASE WHEN confidence >= 0.9 THEN 'Approved' ELSE 'Needs Review' END,
+              user_override = FALSE,
+              classification_source = 'Selected account feed',
+              updated_at = NOW()
+          WHERE connection_id = ${connectionId}
+            AND external_account_id = ${account.external_account_id}
+            AND classification_source = 'Excluded bank account'
+        `;
+      } else {
+        await sql`
+          UPDATE bank_transactions
+          SET review_status = 'Ignored',
+              user_override = TRUE,
+              classification_source = 'Excluded bank account',
+              updated_at = NOW()
+          WHERE connection_id = ${connectionId}
+            AND external_account_id = ${account.external_account_id}
+        `;
+      }
+    }
 
-    await sql`
-      UPDATE bank_transactions
-      SET review_status = CASE WHEN confidence >= 0.9 THEN 'Approved' ELSE 'Needs Review' END,
-          user_override = FALSE,
-          classification_source = 'Selected bank account',
-          updated_at = NOW()
-      WHERE connection_id = ${connectionId}
-        AND external_account_id = ${selected.external_account_id}
-        AND classification_source = 'Excluded bank account'
-    `;
-
-    return Response.json({ ok: true, connectionId, accountId });
+    return Response.json({ ok: true, connectionId, accountIds, activeCount: accountIds.length });
   } catch (error) {
     return apiError(error);
   }
