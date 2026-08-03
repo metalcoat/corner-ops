@@ -78,17 +78,32 @@ export default function MessagesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function load(activeBusiness = business) {
-    const response = await fetch(`/api/messages?business=${encodeURIComponent(activeBusiness)}`, { cache: "no-store" });
+  async function load(activeBusiness = business, markRead = document.visibilityState === "visible") {
+    const query = new URLSearchParams({
+      business: activeBusiness,
+      markRead: markRead ? "1" : "0",
+    });
+    const response = await fetch(`/api/messages?${query.toString()}`, { cache: "no-store" });
     if (!response.ok) throw new Error(await responseMessage(response));
     setData(await response.json() as MessagesPayload);
+    window.dispatchEvent(new Event("corner-ops-notifications-refresh"));
   }
 
   useEffect(() => {
     if (!session?.authenticated) return;
-    void load(business).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
-    const interval = window.setInterval(() => void load(business).catch(() => undefined), 30_000);
-    return () => window.clearInterval(interval);
+    void load(business, document.visibilityState === "visible").catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
+    const interval = window.setInterval(
+      () => void load(business, document.visibilityState === "visible").catch(() => undefined),
+      30_000,
+    );
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") void load(business, true).catch(() => undefined);
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [business, session?.authenticated]);
 
