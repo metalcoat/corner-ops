@@ -49,7 +49,7 @@ function token(request: NextRequest): Token | null {
 function needed(path: string, method: string): string | null {
   const write = method !== "GET" && method !== "HEAD";
   if (path.startsWith("/api/reports") || path.startsWith("/api/weather")) return "reports.read";
-  if (path.startsWith("/api/accounting-control") || path.startsWith("/api/expense-control")) {
+  if (path.startsWith("/api/banking") || path.startsWith("/api/accounting-control") || path.startsWith("/api/expense-control")) {
     return write ? "accounting.write" : "accounting.read";
   }
   if (path.startsWith("/api/payroll-control") || path.startsWith("/api/rezku-monitor")) {
