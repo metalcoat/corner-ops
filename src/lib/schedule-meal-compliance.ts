@@ -1,5 +1,7 @@
 const TIME_ZONE = "America/New_York";
 const MINUTE_MS = 60_000;
+const RUSH_START = "17:00";
+const RUSH_END = "19:30";
 
 type DateParts = {
   year: number;
@@ -128,8 +130,42 @@ function roundDownQuarter(value: number): number {
   return Math.floor(value / (15 * MINUTE_MS)) * 15 * MINUTE_MS;
 }
 
+function roundUpQuarter(value: number): number {
+  return Math.ceil(value / (15 * MINUTE_MS)) * 15 * MINUTE_MS;
+}
+
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function overlapsDinnerRush(startMs: number, endMs: number): boolean {
+  const start = new Date(startMs);
+  const end = new Date(endMs);
+  return dateKeysBetween(start, end).some((key) => {
+    const rushStart = newYorkDateTime(key, RUSH_START).getTime();
+    const rushEnd = newYorkDateTime(key, RUSH_END).getTime();
+    return startMs < rushEnd && endMs > rushStart;
+  });
+}
+
+function rushAwareSuggestedStart(
+  earliestStartMs: number,
+  latestStartMs: number,
+  midpointMs: number,
+  minimumMinutes: number,
+): number {
+  const breakMs = minimumMinutes * MINUTE_MS;
+  const targetStart = midpointMs - breakMs / 2;
+  const candidates: number[] = [];
+  for (let value = roundUpQuarter(earliestStartMs); value <= roundDownQuarter(latestStartMs); value += 15 * MINUTE_MS) {
+    candidates.push(value);
+  }
+  if (!candidates.length) return clamp(roundDownQuarter(targetStart), earliestStartMs, latestStartMs);
+
+  const outsideRush = candidates.filter((value) => !overlapsDinnerRush(value, value + breakMs));
+  const choices = outsideRush.length ? outsideRush : candidates;
+  choices.sort((left, right) => Math.abs(left - targetStart) - Math.abs(right - targetStart) || left - right);
+  return choices[0];
 }
 
 function midpointRequirement(
@@ -138,16 +174,40 @@ function midpointRequirement(
   end: Date,
   minimumMinutes: number,
 ): MealRequirement {
-  const midpointMs = start.getTime() + (end.getTime() - start.getTime()) / 2;
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+  const durationMs = endMs - startMs;
+  const midpointMs = startMs + durationMs / 2;
+
+  if (code === "late-shift") {
+    const windowStartMs = startMs + durationMs / 4;
+    const windowEndMs = endMs - durationMs / 4;
+    const latestStartMs = windowEndMs - minimumMinutes * MINUTE_MS;
+    const suggestedMs = rushAwareSuggestedStart(
+      windowStartMs,
+      latestStartMs,
+      midpointMs,
+      minimumMinutes,
+    );
+    return {
+      code,
+      slot: "primary",
+      minimumMinutes,
+      label: "30-minute shortened late-shift meal",
+      detail: "For a shift over six hours starting between 1 PM and 6 AM, Corner Ops accepts a 30-minute off-duty meal within the middle half of the shift. It avoids the 5:00–7:30 PM rush when another compliant slot is available. New York permits shortening the statutory 45-minute period to at least 30 minutes when there is no indication of hardship to the employee.",
+      suggestedStart: new Date(suggestedMs).toISOString(),
+      windowStart: new Date(windowStartMs).toISOString(),
+      windowEnd: new Date(windowEndMs).toISOString(),
+    };
+  }
+
   const suggestedMs = roundDownQuarter(midpointMs - minimumMinutes * MINUTE_MS / 2);
   return {
     code,
     slot: "primary",
     minimumMinutes,
-    label: code === "late-shift" ? "30-minute shortened late-shift meal" : "30-minute meal",
-    detail: code === "late-shift"
-      ? "For a shift over six hours starting between 1 PM and 6 AM, New York's statutory 45-minute meal period may be reduced to no less than 30 off-duty minutes around the middle of the shift when there is no indication of hardship to the employee."
-      : "Company compliance policy requires at least 30 off-duty minutes around the middle of every shift over six hours.",
+    label: "30-minute meal",
+    detail: "Company compliance policy requires at least 30 off-duty minutes around the middle of every shift over six hours.",
     suggestedStart: new Date(suggestedMs).toISOString(),
     midpoint: new Date(midpointMs).toISOString(),
   };
