@@ -1,6 +1,6 @@
 import { getSql } from "@/lib/db";
+import { ensureScheduleMealSchema } from "@/lib/schedule-meal-storage";
 import type { Business } from "@/lib/types";
-import { ensureWorkforceSchema } from "@/lib/workforce";
 
 const TIME_ZONE = "America/New_York";
 
@@ -20,7 +20,7 @@ export async function copyScheduleWeekToTarget(input: {
   targetWeekStart: string;
   actor: string;
 }) {
-  await ensureWorkforceSchema();
+  await ensureScheduleMealSchema();
   const sourceWeekStart = normalizeWeek(input.sourceWeekStart, "Source week");
   const targetWeekStart = normalizeWeek(input.targetWeekStart, "Target week");
   if (sourceWeekStart === targetWeekStart) throw new Error("Source and target weeks must be different.");
@@ -46,8 +46,10 @@ export async function copyScheduleWeekToTarget(input: {
 
   const inserted = await sql`
     INSERT INTO schedule_shifts (
-      id, business, employee_id, position, starts_at, ends_at, status,
-      notes, created_by, published_at, created_at, updated_at
+      id, business, employee_id, position, starts_at, ends_at,
+      meal_break_start, meal_break_minutes,
+      extra_meal_break_start, extra_meal_break_minutes,
+      status, notes, created_by, published_at, created_at, updated_at
     )
     SELECT
       gen_random_uuid(),
@@ -62,6 +64,16 @@ export async function copyScheduleWeekToTarget(input: {
         (s.ends_at AT TIME ZONE ${TIME_ZONE})
         + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day'
       ) AT TIME ZONE ${TIME_ZONE},
+      CASE WHEN s.meal_break_start IS NULL THEN NULL ELSE (
+        (s.meal_break_start AT TIME ZONE ${TIME_ZONE})
+        + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day'
+      ) AT TIME ZONE ${TIME_ZONE} END,
+      s.meal_break_minutes,
+      CASE WHEN s.extra_meal_break_start IS NULL THEN NULL ELSE (
+        (s.extra_meal_break_start AT TIME ZONE ${TIME_ZONE})
+        + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day'
+      ) AT TIME ZONE ${TIME_ZONE} END,
+      s.extra_meal_break_minutes,
       'Draft',
       s.notes,
       ${input.actor},
