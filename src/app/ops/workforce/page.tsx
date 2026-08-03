@@ -81,6 +81,16 @@ function dateOnly(value: string) {
   return new Date(`${value}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 }
 
+function firstName(value: string | null) {
+  const text = String(value || "").trim();
+  if (!text) return "Unknown";
+  if (text.toLowerCase() === "crfrary@gmail.com") return "Chris";
+  const candidate = text.includes("@")
+    ? text.split("@")[0].split(/[._-]/)[0]
+    : text.split(/\s+/)[0];
+  return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+}
+
 export default function WorkforcePage() {
   const [session, setSession] = useState<SessionView | null>(null);
   const [business, setBusiness] = useState<Business>("Corner Deli");
@@ -189,14 +199,14 @@ export default function WorkforcePage() {
       <article className="workforcePanel">
         <div className="wfPanelHeader"><div><p className="wfEyebrow">Team communication</p><h2>Send a message</h2></div></div>
         <form className="wfForm oneColumn" onSubmit={sendMessage}>
-          <label>Recipient<select name="recipientEmployeeId" defaultValue=""><option value="">Everyone at {business}</option>{activeEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>
+          <label>Recipient<select name="recipientEmployeeId" defaultValue=""><option value="">Everyone at {business}</option>{activeEmployees.map((employee) => <option key={employee.id} value={employee.id}>{firstName(employee.name)}</option>)}</select></label>
           <label>Message<textarea name="body" rows={6} required /></label>
           <button className="wfPrimary" disabled={busy}>Send</button>
         </form>
       </article>
       <article className="workforcePanel">
         <div className="wfPanelHeader"><div><p className="wfEyebrow">Recent</p><h2>Message board</h2></div></div>
-        <div className="wfList">{(data?.messages || []).map((message) => <div className="wfMessage" key={message.id}><div><strong>{message.sender_name}</strong><span>{message.recipient_name ? `to ${message.recipient_name}` : message.message_type}</span></div><p>{message.body}</p><small>{local(message.created_at)}</small></div>)}{!data?.messages.length && <p className="wfEmpty">No messages yet.</p>}</div>
+        <div className="wfList">{(data?.messages || []).map((message) => <div className="wfMessage" key={message.id}><div><strong>{firstName(message.sender_name)}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div><p>{message.body}</p><small>{local(message.created_at)}</small></div>)}{!data?.messages.length && <p className="wfEmpty">No messages yet.</p>}</div>
       </article>
     </section>}
 
