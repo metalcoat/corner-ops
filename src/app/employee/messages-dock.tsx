@@ -21,6 +21,9 @@ type Message = {
   recipient_name: string | null;
   message_type: string;
   body: string;
+  attachment_name?: string;
+  attachment_type?: string;
+  attachment_size?: number | string;
   created_at: string;
 };
 
@@ -52,6 +55,13 @@ function firstName(value: string | null): string {
     ? text.split("@")[0].split(/[._-]/)[0]
     : text.split(/\s+/)[0];
   return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+}
+
+function selectedPhoto(form: FormData): File | null {
+  const camera = form.get("cameraPhoto");
+  if (camera instanceof File && camera.size > 0) return camera;
+  const library = form.get("photo");
+  return library instanceof File && library.size > 0 ? library : null;
 }
 
 export default function EmployeeMessagesDock() {
@@ -92,22 +102,21 @@ export default function EmployeeMessagesDock() {
     event.preventDefault();
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
+    const body = String(form.get("body") || "").trim();
+    const photo = selectedPhoto(form);
+    if (!body && !photo) {
+      setNotice("Type a message or attach a photo.");
+      return;
+    }
+    form.set("action", "message-send");
     setBusy(true);
     setNotice("");
     try {
-      const response = await fetch("/api/employee", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "message-send",
-          recipientEmployeeId: form.get("recipientEmployeeId") || null,
-          body: form.get("body"),
-        }),
-      });
+      const response = await fetch("/api/employee", { method: "POST", body: form });
       if (!response.ok) throw new Error(await responseMessage(response));
       formElement.reset();
       await load();
-      setNotice("Message sent.");
+      setNotice(photo ? "Photo message sent." : "Message sent.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Message could not be sent.");
     } finally {
@@ -132,6 +141,7 @@ export default function EmployeeMessagesDock() {
       </header>
 
       <form className="employeeMessagesComposer" onSubmit={sendMessage}>
+        <input type="hidden" name="action" value="message-send" />
         <label>
           Send to
           <select name="recipientEmployeeId" defaultValue="">
@@ -143,8 +153,19 @@ export default function EmployeeMessagesDock() {
         </label>
         <label>
           Message
-          <textarea name="body" rows={3} placeholder="Type a team or direct message" required />
+          <textarea name="body" rows={3} placeholder="Type a message, add a photo, or both" />
         </label>
+        <div className="employeeMessagesPhotoControls">
+          <label className="employeeMessagesPhotoButton">
+            Take photo
+            <input name="cameraPhoto" type="file" accept="image/*" capture="environment" />
+          </label>
+          <label className="employeeMessagesPhotoButton secondary">
+            Choose photo
+            <input name="photo" type="file" accept="image/*" />
+          </label>
+        </div>
+        <small className="employeeMessagesPhotoHelp">One image per message, up to 12 MB.</small>
         <button className="employeeMessagesSend" disabled={busy}>Send message</button>
       </form>
 
@@ -157,7 +178,22 @@ export default function EmployeeMessagesDock() {
               <strong>{firstName(message.sender_name)}</strong>
               <span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span>
             </div>
-            <p>{message.body}</p>
+            {message.body && <p>{message.body}</p>}
+            {message.attachment_name && (
+              <a
+                className="employeeMessagesPhoto"
+                href={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`Open photo from ${firstName(message.sender_name)}`}
+              >
+                <img
+                  src={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`}
+                  alt={message.body || `Photo from ${firstName(message.sender_name)}`}
+                  loading="lazy"
+                />
+              </a>
+            )}
             <small>{local(message.created_at)}</small>
           </article>
         ))}
