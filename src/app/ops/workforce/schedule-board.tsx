@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, DragEvent, FormEvent, useMemo, useState } from "react";
+import { CSSProperties, DragEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { positionsForBusiness } from "@/lib/business-positions";
 import {
   analyzeShiftMealCompliance,
@@ -73,10 +73,12 @@ type GridRow = {
 };
 
 type DragTarget = { dayKey: string; employeeId: string | null } | null;
+type TimeOption = { value: string; label: string };
 
 const DAY_MS = 86_400_000;
+const MINUTE_MS = 60_000;
 const UNASSIGNED_KEY = "__unassigned__";
-const TIME_OPTIONS = Array.from({ length: 96 }, (_, index) => {
+const TIME_OPTIONS: TimeOption[] = Array.from({ length: 96 }, (_, index) => {
   const hour = Math.floor(index / 4);
   const minute = (index % 4) * 15;
   const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
@@ -156,6 +158,32 @@ function editorDates(editor: EditorState) {
   return { start, end, mealBreakStart, extraMealBreakStart };
 }
 
+function mealStartOptions(editor: EditorState, slot: "primary" | "extra"): TimeOption[] {
+  try {
+    const { start, end } = editorDates(editor);
+    const requirements = mealRequirements({ startsAt: start.toISOString(), endsAt: end.toISOString() });
+    const requirement = requirements.find((candidate) => candidate.slot === slot);
+    const selectedMinutes = slot === "primary" ? editor.mealBreakMinutes : editor.extraMealBreakMinutes;
+    const durationMinutes = selectedMinutes || requirement?.minimumMinutes || 0;
+    if (!durationMinutes) return [];
+
+    const allowedStart = requirement?.windowStart ? new Date(requirement.windowStart) : start;
+    const allowedEnd = requirement?.windowEnd ? new Date(requirement.windowEnd) : end;
+    const midpoint = requirement?.midpoint ? new Date(requirement.midpoint) : null;
+
+    return TIME_OPTIONS.filter((option) => {
+      const candidateStart = shiftTimeForSelectedDay(editor.date, editor.startTime, option.value);
+      const candidateEnd = new Date(candidateStart.getTime() + durationMinutes * MINUTE_MS);
+      if (candidateStart < start || candidateEnd > end) return false;
+      if (candidateStart < allowedStart || candidateEnd > allowedEnd) return false;
+      if (midpoint && !(candidateStart <= midpoint && candidateEnd >= midpoint)) return false;
+      return true;
+    });
+  } catch {
+    return [];
+  }
+}
+
 function shiftHours(shift: ScheduleShift): number {
   return analyzeShiftMealCompliance(shift).paidHours;
 }
@@ -214,15 +242,16 @@ function cellKey(employeeId: string | null, dayKeyValue: string): string {
   return `${employeeId || UNASSIGNED_KEY}|${dayKeyValue}`;
 }
 
-function TimeSelect({ value, onChange, required = false, allowBlank = false }: {
+function TimeSelect({ value, onChange, required = false, allowBlank = false, options = TIME_OPTIONS }: {
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
   allowBlank?: boolean;
+  options?: TimeOption[];
 }) {
   return <select value={value} onChange={(event) => onChange(event.target.value)} required={required}>
     {allowBlank && <option value="">Not scheduled</option>}
-    {TIME_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+    {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
   </select>;
 }
 
@@ -343,6 +372,29 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       return null;
     }
   }, [editor, employeeById, loneWorkerApplies, weekEnd, weekShifts, weekStart]);
+
+  const primaryMealTimeOptions = useMemo(
+    () => editor ? mealStartOptions(editor, "primary") : [],
+    [editor],
+  );
+  const extraMealTimeOptions = useMemo(
+    () => editor ? mealStartOptions(editor, "extra") : [],
+    [editor],
+  );
+
+  useEffect(() => {
+    if (!editor) return;
+    const primaryValid = !editor.mealBreakTime || primaryMealTimeOptions.some((option) => option.value === editor.mealBreakTime);
+    const extraValid = !editor.extraMealBreakTime || extraMealTimeOptions.some((option) => option.value === editor.extraMealBreakTime);
+    if (primaryValid && extraValid) return;
+    setEditor((current) => current ? {
+      ...current,
+      mealBreakTime: primaryValid ? current.mealBreakTime : "",
+      mealBreakMinutes: primaryValid ? current.mealBreakMinutes : 0,
+      extraMealBreakTime: extraValid ? current.extraMealBreakTime : "",
+      extraMealBreakMinutes: extraValid ? current.extraMealBreakMinutes : 0,
+    } : current);
+  }, [editor, extraMealTimeOptions, primaryMealTimeOptions]);
 
   function openExisting(shift: ScheduleShift) {
     setEditor({
@@ -629,8 +681,8 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
             <header><div><h3>Meal-period compliance</h3><p>Off-duty meals reduce paid hours and staffing coverage.</p></div>{editorPreview.meals.requirements.length > 0 && <button type="button" onClick={applyRequiredMeals}>Apply required meals</button>}</header>
             {editorPreview.meals.requirements.length > 0 ? <div className="scheduleMealRequirements">{editorPreview.meals.requirements.map((requirement) => <div className="scheduleMealRequirement" key={requirement.code}><strong>{requirement.label}</strong><span>{requirement.detail}</span></div>)}</div> : <div className="scheduleMealClear">No required meal period for this shift.</div>}
             <div className="scheduleMealGrid">
-              <div className="scheduleMealRow"><strong>Primary meal</strong><label>Start<TimeSelect allowBlank value={editor.mealBreakTime} onChange={(value) => setEditor((current) => current ? { ...current, mealBreakTime: value, mealBreakMinutes: value ? current.mealBreakMinutes || 30 : 0 } : current)} /></label><label>Duration<select value={editor.mealBreakMinutes} onChange={(event) => setEditor((current) => current ? { ...current, mealBreakMinutes: Number(event.target.value), mealBreakTime: Number(event.target.value) ? current.mealBreakTime : "" } : current)}>{BREAK_DURATION_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{minutes ? `${minutes} minutes` : "None"}</option>)}</select></label></div>
-              <div className="scheduleMealRow"><strong>Additional meal</strong><label>Start<TimeSelect allowBlank value={editor.extraMealBreakTime} onChange={(value) => setEditor((current) => current ? { ...current, extraMealBreakTime: value, extraMealBreakMinutes: value ? current.extraMealBreakMinutes || 20 : 0 } : current)} /></label><label>Duration<select value={editor.extraMealBreakMinutes} onChange={(event) => setEditor((current) => current ? { ...current, extraMealBreakMinutes: Number(event.target.value), extraMealBreakTime: Number(event.target.value) ? current.extraMealBreakTime : "" } : current)}>{BREAK_DURATION_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{minutes ? `${minutes} minutes` : "None"}</option>)}</select></label></div>
+              <div className="scheduleMealRow"><strong>Primary meal</strong><label>Start<TimeSelect allowBlank options={primaryMealTimeOptions} value={editor.mealBreakTime} onChange={(value) => setEditor((current) => current ? { ...current, mealBreakTime: value, mealBreakMinutes: value ? current.mealBreakMinutes || 30 : 0 } : current)} /></label><label>Duration<select value={editor.mealBreakMinutes} onChange={(event) => setEditor((current) => current ? { ...current, mealBreakMinutes: Number(event.target.value), mealBreakTime: Number(event.target.value) ? current.mealBreakTime : "" } : current)}>{BREAK_DURATION_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{minutes ? `${minutes} minutes` : "None"}</option>)}</select></label></div>
+              <div className="scheduleMealRow"><strong>Additional meal</strong><label>Start<TimeSelect allowBlank options={extraMealTimeOptions} value={editor.extraMealBreakTime} onChange={(value) => setEditor((current) => current ? { ...current, extraMealBreakTime: value, extraMealBreakMinutes: value ? current.extraMealBreakMinutes || 20 : 0 } : current)} /></label><label>Duration<select value={editor.extraMealBreakMinutes} onChange={(event) => setEditor((current) => current ? { ...current, extraMealBreakMinutes: Number(event.target.value), extraMealBreakTime: Number(event.target.value) ? current.extraMealBreakTime : "" } : current)}>{BREAK_DURATION_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{minutes ? `${minutes} minutes` : "None"}</option>)}</select></label></div>
             </div>
             {editorPreview.meals.issues.length > 0 ? <div className="scheduleMealIssues">{editorPreview.meals.issues.map((issue) => <div className="scheduleMealIssue" key={issue.code}>{issue.message}</div>)}</div> : editorPreview.meals.requirements.length > 0 ? <div className="scheduleMealClear">Meal periods comply.</div> : null}
           </section>}
