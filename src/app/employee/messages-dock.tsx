@@ -132,8 +132,7 @@ export default function EmployeeMessagesDock() {
 
   async function updateNickname(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
+    const form = new FormData(event.currentTarget);
     setBusy(true);
     setNotice("");
     try {
@@ -208,22 +207,27 @@ export default function EmployeeMessagesDock() {
     <header className="employeeMessagesHeader">
       <div className="employeeMessagesIdentity" style={{ "--employee-color": current?.scheduleColor || "#64748B" } as CSSProperties}>
         <span className="employeeMessageAvatar large">{current?.avatarSet ? <img src={avatarUrl(session.employeeId)} alt="Your profile" /> : initials(currentDisplay)}</span>
-        <div><p className="employeeMessagesEyebrow">Always visible</p><h2>Messages</h2><small>{current?.chatNickname ? `${current.chatNickname} · ${session.name}` : session.name}</small></div>
+        <div><p className="employeeMessagesEyebrow">Team chat</p><h2>Messages</h2><small>{current?.chatNickname ? `${current.chatNickname} · ${session.name}` : session.name}</small></div>
       </div>
       <button type="button" onClick={() => void load()} disabled={busy} aria-label="Refresh messages">Refresh</button>
     </header>
 
-    <form className="employeeNicknameForm" key={current?.chatNickname || "no-nickname"} onSubmit={updateNickname}>
-      <label>Chat nickname<input name="nickname" maxLength={32} defaultValue={current?.chatNickname || ""} placeholder={firstName(session.name)} /></label>
-      <button disabled={busy}>Save nickname</button>
-      <small>Used in messages only. Leave blank to use your regular name.</small>
-    </form>
+    <details className="employeeMessageOptions">
+      <summary>Profile & chat options</summary>
+      <div className="employeeMessageOptionsBody">
+        <form className="employeeNicknameForm" key={current?.chatNickname || "no-nickname"} onSubmit={updateNickname}>
+          <label>Chat nickname<input name="nickname" maxLength={32} defaultValue={current?.chatNickname || ""} placeholder={firstName(session.name)} /></label>
+          <button disabled={busy}>Save nickname</button>
+          <small>Used in messages only. Leave blank to use your regular name.</small>
+        </form>
 
-    <form className="employeeProfilePhotoForm" onSubmit={uploadProfilePhoto}>
-      <label>Take icon photo<input name="cameraProfilePhoto" type="file" accept="image/*" capture="user" /></label>
-      <label>Choose icon photo<input name="profilePhoto" type="file" accept="image/*" /></label>
-      <button disabled={busy}>Update my icon</button>
-    </form>
+        <form className="employeeProfilePhotoForm" onSubmit={uploadProfilePhoto}>
+          <label>Take icon photo<input name="cameraProfilePhoto" type="file" accept="image/*" capture="user" /></label>
+          <label>Choose icon photo<input name="profilePhoto" type="file" accept="image/*" /></label>
+          <button disabled={busy}>Update icon</button>
+        </form>
+      </div>
+    </details>
 
     <form className="employeeMessagesComposer" onSubmit={sendMessage}>
       <input type="hidden" name="action" value="message-send" />
@@ -233,7 +237,6 @@ export default function EmployeeMessagesDock() {
         <label className="employeeMessagesPhotoButton">Take photo<input name="cameraPhoto" type="file" accept="image/*" capture="environment" /></label>
         <label className="employeeMessagesPhotoButton secondary">Choose photo<input name="photo" type="file" accept="image/*" /></label>
       </div>
-      <small className="employeeMessagesPhotoHelp">One image per message, up to 12 MB.</small>
       <button className="employeeMessagesSend" disabled={busy}>Send message</button>
     </form>
 
