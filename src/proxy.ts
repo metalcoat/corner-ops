@@ -48,6 +48,7 @@ function token(request: NextRequest): Token | null {
 
 function needed(path: string, method: string): string | null {
   const write = method !== "GET" && method !== "HEAD";
+  if (path.startsWith("/api/reports")) return "reports.read";
   if (path.startsWith("/api/accounting-control")) return write ? "accounting.write" : "accounting.read";
   if (path.startsWith("/api/payroll-control")) return write ? "payroll.write" : "payroll.read";
   if (path.startsWith("/api/users")) return "users.manage";
