@@ -52,7 +52,9 @@ function needed(path: string, method: string): string | null {
   if (path.startsWith("/api/accounting-control") || path.startsWith("/api/expense-control")) {
     return write ? "accounting.write" : "accounting.read";
   }
-  if (path.startsWith("/api/payroll-control")) return write ? "payroll.write" : "payroll.read";
+  if (path.startsWith("/api/payroll-control") || path.startsWith("/api/rezku-monitor")) {
+    return write ? "payroll.write" : "payroll.read";
+  }
   if (path.startsWith("/api/users")) return "users.manage";
   if (path.startsWith("/api/integrations") || path.startsWith("/api/bank-accounts") || path.startsWith("/api/square/connect")) {
     return write ? "integrations.write" : "integrations.read";
