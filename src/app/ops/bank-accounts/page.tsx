@@ -34,6 +34,11 @@ function money(value: number | null) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
 }
 
+function requestedBusiness(): Business {
+  if (typeof window === "undefined") return "Corner Deli";
+  return new URLSearchParams(window.location.search).get("business") === "Tiki" ? "Tiki" : "Corner Deli";
+}
+
 async function responseMessage(response: Response) {
   const payload = await response.json().catch(() => null) as { error?: string } | null;
   return payload?.error || `Request failed (${response.status}).`;
@@ -41,7 +46,7 @@ async function responseMessage(response: Response) {
 
 export default function BankAccountsPage() {
   const [session, setSession] = useState<SessionView | null>(null);
-  const [business, setBusiness] = useState<Business>("Corner Deli");
+  const [business, setBusiness] = useState<Business>(requestedBusiness);
   const [data, setData] = useState<Payload | null>(null);
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState("");
