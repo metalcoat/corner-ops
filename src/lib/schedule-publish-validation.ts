@@ -24,6 +24,14 @@ function localStamp(value: string): string {
   }).format(new Date(value));
 }
 
+function localTime(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 export async function publishValidatedScheduleWeek(input: {
   business: Business;
   weekStart: string;
@@ -77,8 +85,11 @@ export async function publishValidatedScheduleWeek(input: {
   if (analysis.overlaps.length) {
     problems.push(`Overlapping shifts: ${analysis.overlaps.slice(0, 4).map((overlap) => `${overlap.employeeName} at ${localStamp(overlap.startsAt)}`).join("; ")}`);
   }
+  if (analysis.coverageGaps.length) {
+    problems.push(`Coverage gaps: ${analysis.coverageGaps.slice(0, 6).map((gap) => `${localStamp(gap.startsAt)}–${localTime(gap.endsAt)} (${gap.minutes} min)`).join("; ")}`);
+  }
   if (input.business === "Corner Deli" && analysis.loneWorkerViolations.length) {
-    problems.push(`Alone over 30 minutes: ${analysis.loneWorkerViolations.slice(0, 4).map((violation) => `${violation.employeeName}, ${localStamp(violation.startsAt)}–${new Intl.DateTimeFormat("en-US", { timeZone: TIME_ZONE, hour: "numeric", minute: "2-digit" }).format(new Date(violation.endsAt))} (${violation.minutes} min)`).join("; ")}`);
+    problems.push(`Alone over 30 minutes: ${analysis.loneWorkerViolations.slice(0, 4).map((violation) => `${violation.employeeName}, ${localStamp(violation.startsAt)}–${localTime(violation.endsAt)} (${violation.minutes} min)`).join("; ")}`);
   }
   if (analysis.mealPeriodViolations.length) {
     problems.push(`Meal periods: ${analysis.mealPeriodViolations.slice(0, 6).map((violation) => `${violation.employeeName}, ${localStamp(violation.startsAt)}: ${violation.message}`).join("; ")}`);
