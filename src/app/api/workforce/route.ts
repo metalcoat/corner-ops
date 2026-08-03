@@ -5,13 +5,13 @@ import { apiError, unauthorized } from "@/lib/http";
 import { createEmployee, updateEmployee } from "@/lib/operations";
 import { publishValidatedScheduleWeek } from "@/lib/schedule-publish-validation";
 import { updateScheduleShiftSafely } from "@/lib/schedule-actions";
+import { copyScheduleWeekToTarget } from "@/lib/schedule-week-copy";
 import {
   createScheduleDraft,
   sendStaffNotification,
 } from "@/lib/staff-notifications";
 import type { Business } from "@/lib/types";
 import {
-  copyScheduleWeek,
   reviewShiftRequest,
   reviewTimeCorrection,
   reviewTimeOff,
@@ -26,41 +26,68 @@ function businessFrom(value: unknown): Business {
   throw new Error("Unknown business.");
 }
 
+function transientSchemaRace(error: unknown): boolean {
+  const candidate = error as { code?: unknown; message?: unknown };
+  return candidate?.code === "XX000"
+    && String(candidate.message || "").toLowerCase().includes("tuple concurrently updated");
+}
+
+function delay(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function buildWorkforcePayload(business: Business) {
+  // Directory setup modifies the employees table. Finish it before Workforce setup/querying
+  // so one request does not ask PostgreSQL to update the same system tuple concurrently.
+  const directory = await listDirectoryEmployees(business);
+  const dashboard = await workforceDashboard(business);
+  const contactById = new Map(directory.map((employee) => [employee.id, employee]));
+  return {
+    ...dashboard,
+    employees: dashboard.employees.map((employee) => ({
+      ...employee,
+      email: contactById.get(employee.id)?.email || "",
+      scheduleColor: contactById.get(employee.id)?.scheduleColor || "#64748B",
+      avatarSet: contactById.get(employee.id)?.avatarSet || false,
+    })),
+    shifts: dashboard.shifts.map((shift) => ({
+      ...shift,
+      employeeColor: shift.employeeId ? contactById.get(shift.employeeId)?.scheduleColor || "#64748B" : "#64748B",
+      employeeAvatarSet: shift.employeeId ? contactById.get(shift.employeeId)?.avatarSet || false : false,
+    })),
+    messages: (dashboard.messages as Array<Record<string, unknown>>).map((message) => {
+      const senderId = message.sender_employee_id ? String(message.sender_employee_id) : "";
+      const sender = senderId ? contactById.get(senderId) : undefined;
+      return {
+        ...message,
+        sender_schedule_color: sender?.scheduleColor || "#64748B",
+        sender_avatar_set: sender?.avatarSet || false,
+      };
+    }),
+  };
+}
+
+async function loadWorkforcePayload(business: Business) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await buildWorkforcePayload(business);
+    } catch (error) {
+      lastError = error;
+      if (!transientSchemaRace(error) || attempt === 2) throw error;
+      await delay(100 * (attempt + 1) + Math.floor(Math.random() * 100));
+    }
+  }
+  throw lastError;
+}
+
 export async function GET(request: Request) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
     const business = businessFrom(new URL(request.url).searchParams.get("business"));
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
-
-    const [dashboard, directory] = await Promise.all([
-      workforceDashboard(business),
-      listDirectoryEmployees(business),
-    ]);
-    const contactById = new Map(directory.map((employee) => [employee.id, employee]));
-    return Response.json({
-      ...dashboard,
-      employees: dashboard.employees.map((employee) => ({
-        ...employee,
-        email: contactById.get(employee.id)?.email || "",
-        scheduleColor: contactById.get(employee.id)?.scheduleColor || "#64748B",
-        avatarSet: contactById.get(employee.id)?.avatarSet || false,
-      })),
-      shifts: dashboard.shifts.map((shift) => ({
-        ...shift,
-        employeeColor: shift.employeeId ? contactById.get(shift.employeeId)?.scheduleColor || "#64748B" : "#64748B",
-        employeeAvatarSet: shift.employeeId ? contactById.get(shift.employeeId)?.avatarSet || false : false,
-      })),
-      messages: (dashboard.messages as Array<Record<string, unknown>>).map((message) => {
-        const senderId = message.sender_employee_id ? String(message.sender_employee_id) : "";
-        const sender = senderId ? contactById.get(senderId) : undefined;
-        return {
-          ...message,
-          sender_schedule_color: sender?.scheduleColor || "#64748B",
-          sender_avatar_set: sender?.avatarSet || false,
-        };
-      }),
-    });
+    return Response.json(await loadWorkforcePayload(business));
   } catch (error) {
     return apiError(error);
   }
@@ -155,11 +182,18 @@ export async function POST(request: Request) {
     }
 
     if (action === "week-copy") {
-      return Response.json(await copyScheduleWeek({
-        business,
-        sourceWeekStart: String(body.sourceWeekStart || ""),
-        actor: session.displayName,
-      }));
+      try {
+        return Response.json(await copyScheduleWeekToTarget({
+          business,
+          sourceWeekStart: String(body.sourceWeekStart || ""),
+          targetWeekStart: String(body.targetWeekStart || ""),
+          actor: session.displayName,
+        }));
+      } catch (error) {
+        const candidate = error as { code?: unknown; message?: unknown };
+        if (candidate?.code) return apiError(error);
+        return Response.json({ error: error instanceof Error ? error.message : "The schedule week could not be copied." }, { status: 400 });
+      }
     }
 
     if (action === "message-send") {
