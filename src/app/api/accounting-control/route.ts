@@ -5,14 +5,16 @@ import {
   buildSquareDepositSuggestions,
   createOpeningBalance,
   importCodedHistory,
-  postAllApprovedBankTransactions,
-  postBankTransaction,
   postSquareDay,
   reopenBankReconciliation,
   saveBankReconciliation,
   saveTransactionSplits,
   setSquareDepositMatchStatus,
 } from "@/lib/accounting-control";
+import {
+  postAllApprovedFinancialTransactions,
+  postFinancialTransaction,
+} from "@/lib/bank-posting";
 import { squareOperationsDashboard, syncSquareOperations } from "@/lib/square-control";
 import type { Business } from "@/lib/types";
 
@@ -85,8 +87,8 @@ export async function POST(request: Request) {
       transactionId: String(body.transactionId || ""), business,
       lines: Array.isArray(body.lines) ? body.lines as Array<{ accountCode: string; amount: number; memo?: string }> : [], actor: session.email,
     }));
-    if (action === "transaction-post") return Response.json(await postBankTransaction({ transactionId: String(body.transactionId || ""), business, actor: session.email }));
-    if (action === "post-approved") return Response.json(await postAllApprovedBankTransactions({ business, actor: session.email }));
+    if (action === "transaction-post") return Response.json(await postFinancialTransaction({ transactionId: String(body.transactionId || ""), business, actor: session.email }));
+    if (action === "post-approved") return Response.json(await postAllApprovedFinancialTransactions({ business, actor: session.email }));
     if (action === "opening-balance") return Response.json(await createOpeningBalance({
       business, entryDate: String(body.entryDate || ""), description: String(body.description || "Opening balances"),
       reference: String(body.reference || ""), lines: Array.isArray(body.lines) ? body.lines as Array<{ accountCode: string; debit?: number; credit?: number }> : [],
