@@ -29,7 +29,9 @@ export async function GET(request: Request) {
       end: String(url.searchParams.get("end") || ""),
       compareStart: url.searchParams.get("compareStart") || undefined,
       compareEnd: url.searchParams.get("compareEnd") || undefined,
-      refresh: url.searchParams.get("refresh") === "1",
+      // Reports read stored data. Institution/POS synchronization belongs to Integrations
+      // and must never run merely because a manager switches businesses or report tabs.
+      refresh: false,
     }));
   } catch (error) {
     return apiError(error);
