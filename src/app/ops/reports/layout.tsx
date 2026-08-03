@@ -5,6 +5,7 @@ export default function ReportsLayout({ children }: Readonly<{ children: ReactNo
   return <>
     <nav className="reportsSubnav" aria-label="Reporting areas">
       <a href="/ops/reports">Performance & weather</a>
+      <a href="/ops/reports/calls">Deli calls</a>
       <a href="/ops/reports/voids">Voids & reversals</a>
     </nav>
     {children}
