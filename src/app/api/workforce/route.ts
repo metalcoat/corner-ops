@@ -1,4 +1,5 @@
 import { canAccessBusiness, getSession } from "@/lib/auth";
+import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
 import { listDirectoryEmployees } from "@/lib/employee-directory-admin";
 import { apiError, unauthorized } from "@/lib/http";
 import { createEmployee, updateEmployee } from "@/lib/operations";
@@ -42,7 +43,23 @@ export async function GET(request: Request) {
       employees: dashboard.employees.map((employee) => ({
         ...employee,
         email: contactById.get(employee.id)?.email || "",
+        scheduleColor: contactById.get(employee.id)?.scheduleColor || "#64748B",
+        avatarSet: contactById.get(employee.id)?.avatarSet || false,
       })),
+      shifts: dashboard.shifts.map((shift) => ({
+        ...shift,
+        employeeColor: shift.employeeId ? contactById.get(shift.employeeId)?.scheduleColor || "#64748B" : "#64748B",
+        employeeAvatarSet: shift.employeeId ? contactById.get(shift.employeeId)?.avatarSet || false : false,
+      })),
+      messages: (dashboard.messages as Array<Record<string, unknown>>).map((message) => {
+        const senderId = message.sender_employee_id ? String(message.sender_employee_id) : "";
+        const sender = senderId ? contactById.get(senderId) : undefined;
+        return {
+          ...message,
+          sender_schedule_color: sender?.scheduleColor || "#64748B",
+          sender_avatar_set: sender?.avatarSet || false,
+        };
+      }),
     });
   } catch (error) {
     return apiError(error);
@@ -59,13 +76,15 @@ export async function POST(request: Request) {
     const action = String(body.action || "");
 
     if (action === "employee-create") {
-      const roleGroup = String(body.roleGroup || "In-House");
-      if (roleGroup !== "Driver" && roleGroup !== "In-House" && roleGroup !== "Ignore") throw new Error("Invalid employee role group.");
+      const position = normalizePosition(business, body.position);
+      const requestedRole = String(body.roleGroup || "In-House");
+      if (requestedRole !== "Driver" && requestedRole !== "In-House" && requestedRole !== "Ignore") throw new Error("Invalid employee role group.");
+      const roleGroup = requestedRole === "Ignore" ? "Ignore" : roleGroupForPosition(business, position);
       return Response.json(await createEmployee({
         business,
         name: String(body.name || ""),
         pin: String(body.pin || ""),
-        position: String(body.position || ""),
+        position,
         roleGroup,
         countsForTips: body.countsForTips !== false,
         hourlyRate: Number(body.hourlyRate || 0),
@@ -74,15 +93,21 @@ export async function POST(request: Request) {
     }
 
     if (action === "employee-update") {
-      const roleGroup = body.roleGroup ? String(body.roleGroup) : undefined;
-      if (roleGroup && roleGroup !== "Driver" && roleGroup !== "In-House" && roleGroup !== "Ignore") throw new Error("Invalid employee role group.");
+      const position = body.position === undefined ? undefined : normalizePosition(business, body.position);
+      const requestedRole = body.roleGroup ? String(body.roleGroup) : undefined;
+      if (requestedRole && requestedRole !== "Driver" && requestedRole !== "In-House" && requestedRole !== "Ignore") throw new Error("Invalid employee role group.");
+      const roleGroup = requestedRole === "Ignore"
+        ? "Ignore"
+        : position
+          ? roleGroupForPosition(business, position)
+          : requestedRole as "Driver" | "In-House" | undefined;
       return Response.json(await updateEmployee({
         id: String(body.id || ""),
         active: body.active === undefined ? undefined : body.active === true,
         pin: body.pin ? String(body.pin) : undefined,
         name: body.name === undefined ? undefined : String(body.name || ""),
-        position: body.position === undefined ? undefined : String(body.position || ""),
-        roleGroup: roleGroup as "Driver" | "In-House" | "Ignore" | undefined,
+        position,
+        roleGroup,
         countsForTips: body.countsForTips === undefined ? undefined : body.countsForTips === true,
         hourlyRate: body.hourlyRate === undefined ? undefined : Number(body.hourlyRate || 0),
         tippedRate: body.tippedRate === undefined ? undefined : Number(body.tippedRate || 0),
@@ -93,7 +118,7 @@ export async function POST(request: Request) {
       return Response.json(await createScheduleDraft({
         business,
         employeeId: body.employeeId ? String(body.employeeId) : null,
-        position: String(body.position || ""),
+        position: normalizePosition(business, body.position),
         startsAt: String(body.startsAt || ""),
         endsAt: String(body.endsAt || ""),
         notes: body.notes ? String(body.notes) : "",
@@ -113,7 +138,7 @@ export async function POST(request: Request) {
         id: String(body.id || ""),
         business,
         employeeId: body.employeeId === undefined ? undefined : body.employeeId ? String(body.employeeId) : null,
-        position: body.position === undefined ? undefined : String(body.position || ""),
+        position: body.position === undefined ? undefined : normalizePosition(business, body.position),
         startsAt: body.startsAt === undefined ? undefined : String(body.startsAt || ""),
         endsAt: body.endsAt === undefined ? undefined : String(body.endsAt || ""),
         status: status as "Draft" | "Cancelled" | undefined,
