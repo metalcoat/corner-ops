@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "./integrations.css";
 
@@ -81,6 +81,11 @@ function money(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0);
 }
 
+function requestedBusiness(): Business {
+  if (typeof window === "undefined") return "Corner Deli";
+  return new URLSearchParams(window.location.search).get("business") === "Tiki" ? "Tiki" : "Corner Deli";
+}
+
 async function responseMessage(response: Response) {
   const payload = await response.json().catch(() => null) as { error?: string } | null;
   return payload?.error || `Request failed (${response.status}).`;
@@ -106,11 +111,12 @@ function loadPlaidScript(): Promise<void> {
 
 export default function IntegrationsPage() {
   const [session, setSession] = useState<SessionView | null>(null);
-  const [business, setBusiness] = useState<Business>("Corner Deli");
+  const [business, setBusiness] = useState<Business>(requestedBusiness);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [accountSelections, setAccountSelections] = useState<Record<string, string>>({});
+  const autoConnectStarted = useRef(false);
 
   async function api(body: Record<string, unknown>) {
     const response = await fetch("/api/integrations", {
@@ -122,8 +128,8 @@ export default function IntegrationsPage() {
     return response.json();
   }
 
-  async function load() {
-    const response = await fetch(`/api/integrations?business=${encodeURIComponent(business)}`, { cache: "no-store" });
+  async function load(activeBusiness = business) {
+    const response = await fetch(`/api/integrations?business=${encodeURIComponent(activeBusiness)}`, { cache: "no-store" });
     if (!response.ok) throw new Error(await responseMessage(response));
     setDashboard(await response.json() as Dashboard);
   }
@@ -136,7 +142,7 @@ export default function IntegrationsPage() {
   }, []);
 
   useEffect(() => {
-    if (session?.authenticated) void load().catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
+    if (session?.authenticated) void load(business).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.authenticated, business]);
 
@@ -147,7 +153,20 @@ export default function IntegrationsPage() {
     if (!oauthState || !stored || !session?.authenticated) return;
     const saved = JSON.parse(stored) as { token: string; business: Business };
     setBusiness(saved.business);
+    autoConnectStarted.current = true;
     void launchPlaid(saved.business, saved.token, window.location.href);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.authenticated]);
+
+  useEffect(() => {
+    if (!session?.authenticated || autoConnectStarted.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("connect") !== "accounts" || params.get("oauth_state_id")) return;
+    const targetBusiness: Business = params.get("business") === "Tiki" ? "Tiki" : "Corner Deli";
+    autoConnectStarted.current = true;
+    setBusiness(targetBusiness);
+    window.history.replaceState({}, "", `/ops/integrations?business=${encodeURIComponent(targetBusiness)}`);
+    void launchPlaid(targetBusiness);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.authenticated]);
 
@@ -171,28 +190,28 @@ export default function IntegrationsPage() {
                 action: "plaid-exchange",
                 business: targetBusiness,
                 publicToken,
-                institutionName: metadata.institution?.name || "Connected bank",
+                institutionName: metadata.institution?.name || "Connected institution",
               });
               sessionStorage.removeItem("corner-ops-plaid-link");
-              window.history.replaceState({}, "", "/ops/integrations");
-              await load();
-              setNotice(`${targetBusiness} bank connection created and synchronized.`);
+              handler.destroy();
+              window.location.assign(`/ops/bank-accounts?business=${encodeURIComponent(targetBusiness)}`);
             } catch (error) {
-              setNotice(error instanceof Error ? error.message : "Bank connection failed.");
-            } finally {
+              setNotice(error instanceof Error ? error.message : "Bank or credit-card connection failed.");
               setBusy(false);
               handler.destroy();
             }
           })();
         },
         onExit: (error) => {
-          if (error) setNotice("Plaid Link closed before the bank was connected.");
+          sessionStorage.removeItem("corner-ops-plaid-link");
+          if (error) setNotice("Plaid Link closed before the institution was connected.");
           setBusy(false);
           handler.destroy();
         },
       });
       handler.open();
     } catch (error) {
+      sessionStorage.removeItem("corner-ops-plaid-link");
       setNotice(error instanceof Error ? error.message : "Plaid connection failed.");
       setBusy(false);
     }
@@ -234,7 +253,7 @@ export default function IntegrationsPage() {
   }
 
   const businessConnections = dashboard?.connections.filter((connection) => connection.business === business) || [];
-  const bankConnections = businessConnections.filter((connection) => connection.provider === "Plaid");
+  const plaidConnections = businessConnections.filter((connection) => connection.provider === "Plaid");
   const squareConnection = dashboard?.connections.find((connection) => connection.provider === "Square");
   const reviewTransactions = dashboard?.transactions.filter((transaction) => transaction.reviewStatus === "Needs Review") || [];
   const totalBalance = useMemo(
@@ -247,26 +266,27 @@ export default function IntegrationsPage() {
 
   return <main className="integrationShell">
     <header className="integrationHeader">
-      <div><p className="eyebrow">Connections and scheduler</p><h1>Automation center</h1><p className="muted">Square, bank feeds, categorization, scheduled checks, and sync history.</p></div>
+      <div><p className="eyebrow">Connections and scheduler</p><h1>Automation center</h1><p className="muted">Square, bank and credit-card feeds, categorization, scheduled checks, and sync history.</p></div>
       <div className="businessSwitch">{(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "selected" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div>
     </header>
 
     {notice && <div className="notice integrationNotice">{notice}</div>}
 
     <section className="stats fourStats integrationStats">
-      <article><span>Connected banks</span><strong>{bankConnections.length}</strong></article>
-      <article><span>Bank balance</span><strong>{money(totalBalance)}</strong></article>
+      <article><span>Connected institutions</span><strong>{plaidConnections.length}</strong></article>
+      <article><span>Combined balance</span><strong>{money(totalBalance)}</strong></article>
       <article><span>Needs review</span><strong>{reviewTransactions.length}</strong></article>
       <article><span>Open issues</span><strong>{dashboard?.issues.filter((issue) => issue.business === business).length || 0}</strong></article>
     </section>
 
     <section className="integrationGrid">
-      <article className="panel integrationCard">
-        <div className="panelHeader"><div><p className="eyebrow">Bank feed</p><h3>{business === "Corner Deli" ? "SEACOMM" : "NBT Bank"}</h3></div><span className={`badge ${dashboard?.configuration.plaid ? "active" : "needsreview"}`}>{dashboard?.configuration.plaid ? dashboard.configuration.plaidEnvironment : "Needs Plaid keys"}</span></div>
+      <article className="panel integrationCard" id="bank-card-connect">
+        <div className="panelHeader"><div><p className="eyebrow">Plaid feeds</p><h3>Banks & credit cards</h3></div><span className={`badge ${dashboard?.configuration.plaid ? "active" : "needsreview"}`}>{dashboard?.configuration.plaid ? dashboard.configuration.plaidEnvironment : "Needs Plaid keys"}</span></div>
         <div className="integrationBody">
-          <p>Connect the bank through Plaid, then transactions synchronize into the review queue and accounting categories.</p>
-          <button className="primary" disabled={busy || !dashboard?.configuration.plaid} onClick={() => void launchPlaid(business)}>Connect {business === "Corner Deli" ? "SEACOMM" : "NBT"}</button>
-          {bankConnections.map((connection) => <div className="connectionRow" key={connection.id}><div><strong>{connection.institutionName}</strong><small>Last sync: {connection.lastSyncAt ? new Date(connection.lastSyncAt).toLocaleString() : "Never"}</small></div><button className="secondary" disabled={busy} onClick={() => void runAction({ action: "bank-sync", connectionId: connection.id }, `${connection.institutionName} synchronized.`)}>Sync now</button></div>)}
+          <p>Connect a bank or credit-card issuer through Plaid. Repeat this for every institution, then choose all checking and card accounts that should remain active.</p>
+          <button className="primary" disabled={busy || !dashboard?.configuration.plaid} onClick={() => void launchPlaid(business)}>Connect another bank or card issuer</button>
+          <a className="secondary" href={`/ops/bank-accounts?business=${encodeURIComponent(business)}`}>Choose active account feeds</a>
+          {plaidConnections.map((connection) => <div className="connectionRow" key={connection.id}><div><strong>{connection.institutionName}</strong><small>Last sync: {connection.lastSyncAt ? new Date(connection.lastSyncAt).toLocaleString() : "Never"}</small></div><button className="secondary" disabled={busy} onClick={() => void runAction({ action: "bank-sync", connectionId: connection.id }, `${connection.institutionName} synchronized.`)}>Sync now</button></div>)}
         </div>
       </article>
 
@@ -285,14 +305,14 @@ export default function IntegrationsPage() {
       <article className="panel integrationCard">
         <div className="panelHeader"><div><p className="eyebrow">Nightly automation</p><h3>Scheduler</h3></div><span className={`badge ${dashboard?.configuration.cron ? "active" : "needsreview"}`}>{dashboard?.configuration.cron ? "Configured" : "Needs CRON_SECRET"}</span></div>
         <div className="integrationBody">
-          <p>Runs at 3 AM New York time, checks Tiki open punches, verifies Rezku freshness, syncs both banks and Square, and saves Monday payroll runs.</p>
+          <p>Runs at 3 AM New York time, checks Tiki open punches, verifies Rezku freshness, syncs all active bank and credit-card connections plus Square, and saves Monday payroll runs.</p>
           <button className="secondary" disabled={busy} onClick={() => void runAction({ action: "scheduler-run" }, "Scheduler completed manually.")}>Run scheduler now</button>
           <div className="compactList">{(dashboard?.schedulerRuns || []).slice(0, 5).map((run) => <div key={run.id}><strong>{run.status} · {run.localDate}</strong><span>{new Date(run.startedAt).toLocaleString()}</span></div>)}</div>
         </div>
       </article>
 
       <article className="panel integrationCard">
-        <div className="panelHeader"><div><p className="eyebrow">Fallback</p><h3>Bank file import</h3></div></div>
+        <div className="panelHeader"><div><p className="eyebrow">Fallback</p><h3>Bank or card file import</h3></div></div>
         <form className="stackForm integrationBody" onSubmit={importBankFile}>
           <label>Institution<input name="institutionName" defaultValue={business === "Corner Deli" ? "SEACOMM" : "NBT Bank"} required /></label>
           <label>CSV or Excel<input name="file" type="file" accept=".csv,.xlsx,.xls" required /></label>
@@ -302,14 +322,14 @@ export default function IntegrationsPage() {
     </section>
 
     <section className="panel integrationSection">
-      <div className="panelHeader"><div><p className="eyebrow">Accounting review</p><h3>{business} bank transactions</h3></div><span className="badge needsreview">{reviewTransactions.length} need review</span></div>
+      <div className="panelHeader"><div><p className="eyebrow">Accounting review</p><h3>{business} bank and card transactions</h3></div><span className="badge needsreview">{reviewTransactions.length} need review</span></div>
       <div className="dataTableWrap"><table className="dataTable"><thead><tr><th>Date</th><th>Merchant / description</th><th>Amount</th><th>Suggested category</th><th>Account</th><th></th></tr></thead><tbody>
         {(dashboard?.transactions || []).map((transaction) => {
           const selected = accountSelections[transaction.id] || transaction.accountCode;
           const account = dashboard?.accountingAccounts.find((candidate) => candidate.code === selected);
           return <tr key={transaction.id}><td>{transaction.transactionDate}</td><td><strong>{transaction.merchantName || transaction.description}</strong><small>{transaction.description}</small><small>{transaction.classificationSource} · {Math.round(transaction.confidence * 100)}%</small></td><td className={transaction.signedAmount < 0 ? "negativeAmount" : "positiveAmount"}>{money(transaction.signedAmount)}</td><td>{transaction.category || "Uncategorized"}</td><td><select value={selected} onChange={(event: { target: { value: string } }) => setAccountSelections((current) => ({ ...current, [transaction.id]: event.target.value }))}>{(dashboard?.accountingAccounts || []).map((candidate) => <option key={candidate.code} value={candidate.code}>{candidate.code} · {candidate.name}</option>)}</select></td><td>{transaction.reviewStatus === "Approved" ? <span className="badge active">Approved</span> : <button className="textButton neutral approveButton" disabled={busy || !account} onClick={() => void runAction({ action: "transaction-approve", id: transaction.id, business, category: account?.name || transaction.category, accountCode: selected, teach: true }, "Transaction approved and future matching transactions will learn from it.")}>Approve & teach</button>}</td></tr>;
         })}
-        {!dashboard?.transactions.length && <tr><td colSpan={6}>No bank transactions have been imported yet.</td></tr>}
+        {!dashboard?.transactions.length && <tr><td colSpan={6}>No bank or credit-card transactions have been imported yet.</td></tr>}
       </tbody></table></div>
     </section>
 
