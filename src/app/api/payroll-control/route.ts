@@ -6,10 +6,10 @@ import {
   createTipOverride,
   deleteTipOverride,
   lockPayrollRun,
-  payrollControlDashboard,
   payrollCsv,
   reopenPayrollRun,
 } from "@/lib/payroll-control";
+import { safePayrollControlDashboard } from "@/lib/payroll-control-dashboard";
 import type { Business } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     }
     const business = businessFrom(url.searchParams.get("business") || "Corner Deli");
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
-    return Response.json(await payrollControlDashboard(business, String(url.searchParams.get("weekStart") || "")));
+    return Response.json(await safePayrollControlDashboard(business, String(url.searchParams.get("weekStart") || "")));
   } catch (error) {
     return apiError(error);
   }
