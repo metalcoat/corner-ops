@@ -16,7 +16,6 @@ type NotificationSummary = {
 };
 
 const links: NavLink[] = [
-  { label: "Operations", href: "/ops" },
   { label: "Reports", href: "/ops/reports", activePaths: ["/ops/reports", "/ops/weather"] },
   { label: "Banking", href: "/ops/banking", activePaths: ["/ops/banking", "/ops/accounting-control", "/ops/expense-control", "/ops/bank-accounts"] },
   { label: "People", href: "/ops/people", activePaths: ["/ops/people", "/ops/workforce", "/ops/attendance", "/ops/payroll-control", "/ops/employees", "/ops/rezku-monitor"] },
@@ -32,7 +31,7 @@ function validBusiness(value: string | null | undefined): value is Business {
 }
 
 function linkIsActive(pathname: string, link: NavLink): boolean {
-  if (link.href === "/" || link.href === "/ops") return pathname === link.href;
+  if (link.href === "/") return pathname === link.href;
   const paths = link.activePaths || [link.href];
   return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
@@ -172,7 +171,7 @@ export default function GlobalNav() {
   return (
     <nav className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label="Corner Ops features" data-business={currentBusiness}>
       <div className="globalNavTopline">
-        <a className="globalBrand" href="/ops">Corner Ops</a>
+        <a className="globalBrand" href="/ops/people">Corner Ops</a>
         <button className="globalMenuButton" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
           {open ? "Close" : "Menu"}
         </button>
