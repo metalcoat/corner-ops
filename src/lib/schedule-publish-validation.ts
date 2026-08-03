@@ -1,8 +1,8 @@
 import { getSql } from "@/lib/db";
+import { ensureScheduleMealSchema } from "@/lib/schedule-meal-storage";
 import { analyzeSchedule } from "@/lib/schedule-validation";
 import { publishScheduleWeek } from "@/lib/staff-notifications";
 import type { Business } from "@/lib/types";
-import { ensureWorkforceSchema } from "@/lib/workforce";
 
 const TIME_ZONE = "America/New_York";
 
@@ -29,10 +29,13 @@ export async function publishValidatedScheduleWeek(input: {
   weekStart: string;
   actor: string;
 }) {
-  await ensureWorkforceSchema();
+  await ensureScheduleMealSchema();
   const weekStart = validWeekStart(input.weekStart);
   const rows = await getSql()`
-    SELECT s.id, s.employee_id, e.name AS employee_name, s.starts_at, s.ends_at, s.status
+    SELECT s.id, s.employee_id, e.name AS employee_name, s.starts_at, s.ends_at,
+      s.meal_break_start, s.meal_break_minutes,
+      s.extra_meal_break_start, s.extra_meal_break_minutes,
+      s.status
     FROM schedule_shifts s
     LEFT JOIN employees e ON e.id = s.employee_id
     WHERE s.business = ${input.business}
@@ -46,6 +49,10 @@ export async function publishValidatedScheduleWeek(input: {
     employee_name: string | null;
     starts_at: string;
     ends_at: string;
+    meal_break_start: string | null;
+    meal_break_minutes: number;
+    extra_meal_break_start: string | null;
+    extra_meal_break_minutes: number;
     status: string;
   }>;
 
@@ -56,18 +63,25 @@ export async function publishValidatedScheduleWeek(input: {
     employeeName: row.employee_name || "Unassigned",
     startsAt: row.starts_at,
     endsAt: row.ends_at,
+    mealBreakStart: row.meal_break_start,
+    mealBreakMinutes: Number(row.meal_break_minutes || 0),
+    extraMealBreakStart: row.extra_meal_break_start,
+    extraMealBreakMinutes: Number(row.extra_meal_break_minutes || 0),
     status: row.status,
-  })));
+  })), { enforceLoneWorker: input.business === "Corner Deli" });
 
   const problems: string[] = [];
   if (analysis.overForty.length) {
-    problems.push(`Over 40 hours: ${analysis.overForty.map((employee) => `${employee.employeeName} (${employee.hours.toFixed(1)} hrs)`).join(", ")}`);
+    problems.push(`Over 40 paid hours: ${analysis.overForty.map((employee) => `${employee.employeeName} (${employee.hours.toFixed(1)} hrs)`).join(", ")}`);
   }
   if (analysis.overlaps.length) {
     problems.push(`Overlapping shifts: ${analysis.overlaps.slice(0, 4).map((overlap) => `${overlap.employeeName} at ${localStamp(overlap.startsAt)}`).join("; ")}`);
   }
-  if (analysis.loneWorkerViolations.length) {
+  if (input.business === "Corner Deli" && analysis.loneWorkerViolations.length) {
     problems.push(`Alone over 30 minutes: ${analysis.loneWorkerViolations.slice(0, 4).map((violation) => `${violation.employeeName}, ${localStamp(violation.startsAt)}–${new Intl.DateTimeFormat("en-US", { timeZone: TIME_ZONE, hour: "numeric", minute: "2-digit" }).format(new Date(violation.endsAt))} (${violation.minutes} min)`).join("; ")}`);
+  }
+  if (analysis.mealPeriodViolations.length) {
+    problems.push(`Meal periods: ${analysis.mealPeriodViolations.slice(0, 6).map((violation) => `${violation.employeeName}, ${localStamp(violation.startsAt)}: ${violation.message}`).join("; ")}`);
   }
 
   if (problems.length) {
