@@ -1,15 +1,19 @@
 import { canAccessBusiness, getSession } from "@/lib/auth";
+import { listDirectoryEmployees } from "@/lib/employee-directory-admin";
 import { apiError, unauthorized } from "@/lib/http";
 import { createEmployee, updateEmployee } from "@/lib/operations";
 import { updateScheduleShiftSafely } from "@/lib/schedule-actions";
+import {
+  createScheduleDraft,
+  publishScheduleWeek,
+  sendStaffNotification,
+} from "@/lib/staff-notifications";
 import type { Business } from "@/lib/types";
 import {
   copyScheduleWeek,
-  createScheduleShift,
   reviewShiftRequest,
   reviewTimeCorrection,
   reviewTimeOff,
-  sendOwnerMessage,
   workforceDashboard,
 } from "@/lib/workforce";
 
@@ -27,7 +31,19 @@ export async function GET(request: Request) {
     if (!session) return unauthorized();
     const business = businessFrom(new URL(request.url).searchParams.get("business"));
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
-    return Response.json(await workforceDashboard(business));
+
+    const [dashboard, directory] = await Promise.all([
+      workforceDashboard(business),
+      listDirectoryEmployees(business),
+    ]);
+    const contactById = new Map(directory.map((employee) => [employee.id, employee]));
+    return Response.json({
+      ...dashboard,
+      employees: dashboard.employees.map((employee) => ({
+        ...employee,
+        email: contactById.get(employee.id)?.email || "",
+      })),
+    });
   } catch (error) {
     return apiError(error);
   }
@@ -74,25 +90,25 @@ export async function POST(request: Request) {
     }
 
     if (action === "shift-create") {
-      const status = String(body.status || "Draft");
-      if (status !== "Draft" && status !== "Published" && status !== "Open") throw new Error("Invalid shift status.");
-      return Response.json(await createScheduleShift({
+      return Response.json(await createScheduleDraft({
         business,
         employeeId: body.employeeId ? String(body.employeeId) : null,
         position: String(body.position || ""),
         startsAt: String(body.startsAt || ""),
         endsAt: String(body.endsAt || ""),
-        status,
         notes: body.notes ? String(body.notes) : "",
         actor: session.displayName,
       }), { status: 201 });
     }
 
     if (action === "shift-update") {
-      const status = body.status ? String(body.status) : undefined;
-      if (status && status !== "Draft" && status !== "Published" && status !== "Open" && status !== "Cancelled") {
+      const requestedStatus = body.status ? String(body.status) : undefined;
+      if (requestedStatus && requestedStatus !== "Draft" && requestedStatus !== "Published" && requestedStatus !== "Open" && requestedStatus !== "Cancelled") {
         throw new Error("Invalid shift status.");
       }
+      const status = requestedStatus === "Published" || requestedStatus === "Open"
+        ? "Draft"
+        : requestedStatus;
       return Response.json(await updateScheduleShiftSafely({
         id: String(body.id || ""),
         business,
@@ -100,8 +116,16 @@ export async function POST(request: Request) {
         position: body.position === undefined ? undefined : String(body.position || ""),
         startsAt: body.startsAt === undefined ? undefined : String(body.startsAt || ""),
         endsAt: body.endsAt === undefined ? undefined : String(body.endsAt || ""),
-        status: status as "Draft" | "Published" | "Open" | "Cancelled" | undefined,
+        status: status as "Draft" | "Cancelled" | undefined,
         notes: body.notes === undefined ? undefined : String(body.notes || ""),
+      }));
+    }
+
+    if (action === "week-publish") {
+      return Response.json(await publishScheduleWeek({
+        business,
+        weekStart: String(body.weekStart || ""),
+        actor: session.displayName,
       }));
     }
 
@@ -114,7 +138,7 @@ export async function POST(request: Request) {
     }
 
     if (action === "message-send") {
-      return Response.json(await sendOwnerMessage({
+      return Response.json(await sendStaffNotification({
         business,
         recipientEmployeeId: body.recipientEmployeeId ? String(body.recipientEmployeeId) : null,
         body: String(body.body || ""),
