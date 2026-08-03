@@ -68,6 +68,15 @@ function statusClass(status: string) {
   return "bad";
 }
 
+function reportLabel(value: string) {
+  if (value === "product_voids") return "Product Voids";
+  if (value === "transaction_voids") return "Transaction Voids";
+  if (value === "shifts") return "Labor / shifts";
+  if (value === "orders") return "Orders";
+  if (value === "transactions") return "Transactions";
+  return value || "Unknown";
+}
+
 export default function RezkuMonitorPage() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [notice, setNotice] = useState("");
@@ -98,7 +107,7 @@ export default function RezkuMonitorPage() {
       const result = await response.json() as { reportType: string; rowsRead: number; imported: number };
       formElement.reset();
       await load();
-      setNotice(`${result.reportType} report read ${result.rowsRead} rows and added ${result.imported} new rows.`);
+      setNotice(`${reportLabel(result.reportType)} report read ${result.rowsRead} rows and added ${result.imported} new rows.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Rezku report could not be imported.");
     } finally {
@@ -108,12 +117,13 @@ export default function RezkuMonitorPage() {
 
   const latest = data?.emails[0] || null;
   const latestShiftBatch = useMemo(() => data?.imports.find((batch) => batch.reportType === "shifts") || null, [data]);
+  const latestVoidBatch = useMemo(() => data?.imports.find((batch) => batch.reportType === "product_voids" || batch.reportType === "transaction_voids") || null, [data]);
   const recentExceptions = data?.punchExceptions.slice(0, 60) || [];
 
   return <main className="controlPage rezkuMonitorPage">
     <header className="controlHeader">
-      <div><p className="eyebrow">Rezku chain of custody</p><h1>Rezku delivery monitor</h1><p>See whether the daily email reached Corner Ops, which workbooks were processed, how many rows survived import, and which punches are incomplete.</p></div>
-      <div className="controlActions"><button disabled={busy} onClick={() => void load()}>Refresh</button><a href="/ops/payroll-control">Payroll Control</a></div>
+      <div><p className="eyebrow">Rezku chain of custody</p><h1>Rezku delivery monitor</h1><p>See whether the daily email reached Corner Ops, which workbooks were processed, how many rows survived import, which punches are incomplete, and whether void reports arrived even when they contained zero rows.</p></div>
+      <div className="controlActions"><button disabled={busy} onClick={() => void load()}>Refresh</button><a href="/ops/payroll-control">Payroll Control</a><a href="/ops/reports/voids">Void Report</a></div>
     </header>
 
     {notice && <div className="noticeBar">{notice}</div>}
@@ -123,6 +133,7 @@ export default function RezkuMonitorPage() {
       <div className="metric"><span>Latest email</span><strong>{latest?.reportDate || "Not recorded"}</strong><small>{latest ? local(latest.receivedAt) : "No webhook receipt"}</small></div>
       <div className="metric"><span>Email status</span><strong>{latest?.status || "Missing"}</strong><small>{latest ? `${latest.reportsProcessed} of ${latest.reportsFound} reports` : "Deploy and configure inbound mail"}</small></div>
       <div className="metric"><span>Latest labor rows</span><strong>{latestShiftBatch?.rowsImported ?? 0}</strong><small>{latestShiftBatch ? `${latestShiftBatch.rowsRead} read · ${latestShiftBatch.duplicateOrSkipped} duplicate/skipped` : "No labor batch"}</small></div>
+      <div className="metric"><span>Latest void rows</span><strong>{latestVoidBatch?.rowsImported ?? 0}</strong><small>{latestVoidBatch ? `${reportLabel(latestVoidBatch.reportType)} · ${latestVoidBatch.rowsRead} read` : "No void batch"}</small></div>
       <div className="metric"><span>Punch exceptions</span><strong>{recentExceptions.length}</strong><small>Missing clock-in or clock-out</small></div>
     </section>
 
@@ -133,18 +144,18 @@ export default function RezkuMonitorPage() {
           <header><div><strong>{email.reportDate || "Date not parsed"}</strong><span>{local(email.receivedAt)}</span></div><span className={`badge ${statusClass(email.status)}`}>{email.status}</span></header>
           <p>{email.reportsProcessed} of {email.reportsFound} workbook{email.reportsFound === 1 ? "" : "s"} processed.</p>
           {email.error && <pre>{email.error}</pre>}
-          <div className="rezkuReportRows">{email.reports.map((report) => <div key={report.id}><span><strong>{report.fileName}</strong><small>{report.reportType || "unknown"} · {report.rowsRead} read · {report.rowsImported} new</small></span><span className={`badge ${statusClass(report.status)}`}>{report.status}</span>{report.error && <small className="rezkuError">{report.error}</small>}</div>)}</div>
+          <div className="rezkuReportRows">{email.reports.map((report) => <div key={report.id}><span><strong>{report.fileName}</strong><small>{reportLabel(report.reportType)} · {report.rowsRead} read · {report.rowsImported} new</small></span><span className={`badge ${statusClass(report.status)}`}>{report.status}</span>{report.error && <small className="rezkuError">{report.error}</small>}</div>)}</div>
         </article>)}{!data?.emails.length && <p>No webhook delivery receipts yet.</p>}</div>
       </section>
 
       <section className="controlCard">
-        <div><p className="eyebrow">Fallback</p><h2>Manual workbook import</h2><p>Use this for an email received while the newer deployment was offline.</p></div>
+        <div><p className="eyebrow">Fallback</p><h2>Manual workbook import</h2><p>Use this for an email received while the newer deployment was offline. A void report with no data rows is still recorded as a successful zero-row report.</p></div>
         <form className="controlForm" onSubmit={manualImport}>
-          <label>Report type<select name="reportType"><option value="">Detect from filename</option><option value="shifts">Detailed Labor / Shift Attestation</option><option value="orders">Order Export</option><option value="transactions">Transaction Export</option></select></label>
+          <label>Report type<select name="reportType"><option value="">Detect from filename</option><option value="shifts">Detailed Labor / Shift Attestation</option><option value="orders">Order Export</option><option value="transactions">Transaction Export</option><option value="product_voids">Product Voids</option><option value="transaction_voids">Transaction Voids</option></select></label>
           <label>Excel workbook<input name="file" type="file" accept=".xlsx,.xls" required /></label>
           <button className="primary" disabled={busy}>Import workbook</button>
         </form>
-        <div className="rezkuBatchList">{(data?.imports || []).slice(0, 20).map((batch) => <div key={batch.id}><span><strong>{batch.fileName}</strong><small>{local(batch.importedAt)} · {batch.importedBy}</small></span><span><b>{batch.rowsImported}/{batch.rowsRead}</b><small>{batch.reportType === "shifts" ? `Missing in ${batch.missingClockIn} · missing out ${batch.missingClockOut}` : `${batch.duplicateOrSkipped} duplicate/skipped`}</small></span></div>)}</div>
+        <div className="rezkuBatchList">{(data?.imports || []).slice(0, 20).map((batch) => <div key={batch.id}><span><strong>{batch.fileName}</strong><small>{reportLabel(batch.reportType)} · {local(batch.importedAt)} · {batch.importedBy}</small></span><span><b>{batch.rowsImported}/{batch.rowsRead}</b><small>{batch.reportType === "shifts" ? `Missing in ${batch.missingClockIn} · missing out ${batch.missingClockOut}` : `${batch.duplicateOrSkipped} duplicate/skipped`}</small></span></div>)}</div>
       </section>
     </div>
 
