@@ -1,12 +1,20 @@
 import { Resend } from "resend";
 import { importRezkuReport } from "@/lib/operations";
 import {
+  detectRezkuVoidReportType,
+  importRezkuVoidReport,
+  type RezkuVoidReportType,
+} from "@/lib/rezku-voids";
+import {
   finishRezkuInboundEmail,
   recordRezkuInboundReport,
   startRezkuInboundEmail,
 } from "@/lib/rezku-monitor";
 
 export const runtime = "nodejs";
+
+type StandardReportType = "shifts" | "orders" | "transactions";
+type ReportType = StandardReportType | RezkuVoidReportType;
 
 type ReceivedEvent = {
   type: string;
@@ -32,7 +40,9 @@ type ReceivingAttachment = {
 const REZKU_SUBJECT = "Corner Deli Daily Reports";
 const REZKU_FILE_HOST = "files.reporting.rezkupos.com";
 
-function reportType(fileName: string): "shifts" | "orders" | "transactions" | undefined {
+function reportType(fileName: string): ReportType | undefined {
+  const voidType = detectRezkuVoidReportType(fileName);
+  if (voidType) return voidType;
   const lower = fileName.toLowerCase();
   if (lower.includes("labor") || lower.includes("shift") || lower.includes("attestation")) return "shifts";
   if (lower.includes("transaction") || lower.includes("payment")) return "transactions";
@@ -87,7 +97,11 @@ function attachmentList(value: unknown): ReceivingAttachment[] {
 async function downloadAndImport(url: string, fileName: string, importedBy: string) {
   const download = await fetch(url, { redirect: "follow", cache: "no-store" });
   if (!download.ok) throw new Error(`Rezku download failed for ${fileName}: HTTP ${download.status}`);
-  const result = await importRezkuReport(fileName, await download.arrayBuffer(), reportType(fileName), importedBy);
+  const bytes = await download.arrayBuffer();
+  const kind = reportType(fileName);
+  const result = kind === "product_voids" || kind === "transaction_voids"
+    ? await importRezkuVoidReport(fileName, bytes, kind, importedBy)
+    : await importRezkuReport(fileName, bytes, kind, importedBy);
   return {
     fileName,
     batchId: result.batchId,
