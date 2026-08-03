@@ -7,6 +7,7 @@ import "./schedule-board.css";
 export type ScheduleEmployee = {
   id: string;
   name: string;
+  email: string;
   position: string;
   active: boolean;
 };
@@ -20,6 +21,7 @@ export type ScheduleShift = {
   endsAt: string;
   status: string;
   notes: string;
+  publishedAt?: string | null;
 };
 
 type Props = {
@@ -37,7 +39,6 @@ type EditorState = {
   startTime: string;
   endTime: string;
   position: string;
-  status: "Draft" | "Published" | "Open";
   notes: string;
 };
 
@@ -90,7 +91,6 @@ function defaultEditor(employeeId: string | null, day: Date, employee?: Schedule
     startTime: "16:00",
     endTime: "22:00",
     position: employee?.position || "",
-    status: employeeId ? "Published" : "Open",
     notes: "",
   };
 }
@@ -108,6 +108,9 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     const start = new Date(shift.startsAt);
     return start >= weekStart && start < weekEnd && shift.status !== "Cancelled";
   }), [shifts, weekStart, weekEnd]);
+  const draftCount = weekShifts.filter((shift) => shift.status === "Draft").length;
+  const publishedCount = weekShifts.filter((shift) => shift.status === "Published" || shift.status === "Open").length;
+  const missingEmailCount = activeEmployees.filter((employee) => !employee.email.trim()).length;
 
   const shiftsByCell = useMemo(() => {
     const map = new Map<string, ScheduleShift[]>();
@@ -129,7 +132,6 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       startTime: inputTime(shift.startsAt),
       endTime: inputTime(shift.endsAt),
       position: shift.position,
-      status: shift.employeeId ? (shift.status === "Draft" ? "Draft" : "Published") : "Open",
       notes: shift.notes,
     });
   }
@@ -140,18 +142,17 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     const start = dateFromParts(editor.date, editor.startTime);
     let end = dateFromParts(editor.date, editor.endTime);
     if (end <= start) end = new Date(end.getTime() + DAY_MS);
-    const employeeId = editor.status === "Open" ? null : editor.employeeId;
     const action = editor.shift ? "shift-update" : "shift-create";
     await runAction({
       action,
       id: editor.shift?.id,
-      employeeId,
+      employeeId: editor.employeeId,
       position: editor.position,
       startsAt: start.toISOString(),
       endsAt: end.toISOString(),
-      status: employeeId ? editor.status : "Open",
+      status: "Draft",
       notes: editor.notes,
-    }, editor.shift ? "Shift updated." : "Shift added.");
+    }, editor.shift ? "Shift updated and marked for publishing." : "Draft shift added.");
     setEditor(null);
   }
 
@@ -168,8 +169,8 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       employeeId,
       startsAt: start.toISOString(),
       endsAt: end.toISOString(),
-      status: employeeId ? (shift.status === "Draft" ? "Draft" : "Published") : "Open",
-    }, `Shift moved to ${employeeId ? activeEmployees.find((employee) => employee.id === employeeId)?.name || "employee" : "Open shifts"}.`);
+      status: "Draft",
+    }, `Shift moved to ${employeeId ? activeEmployees.find((employee) => employee.id === employeeId)?.name || "employee" : "Unassigned"} and marked for publishing.`);
   }
 
   async function pasteShift(employeeId: string | null, targetDay: Date) {
@@ -185,9 +186,18 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       position: copiedShift.position,
       startsAt: start.toISOString(),
       endsAt: end.toISOString(),
-      status: employeeId ? (copiedShift.status === "Draft" ? "Draft" : "Published") : "Open",
+      status: "Draft",
       notes: copiedShift.notes,
-    }, "Copied shift pasted.");
+    }, "Copied shift pasted as a draft.");
+  }
+
+  async function publishWeek() {
+    const actionLabel = draftCount > 0 ? "Publish week" : "Resend schedule";
+    if (!window.confirm(`${actionLabel} for ${business}? This will notify all active employees.`)) return;
+    await runAction({
+      action: "week-publish",
+      weekStart: dateKey(weekStart),
+    }, `Schedule published for everyone. Employee Hub was updated and email was sent wherever an address is configured.`);
   }
 
   function onDragStart(event: DragEvent<HTMLDivElement>, shift: ScheduleShift) {
@@ -206,7 +216,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
 
   const rows: Array<{ id: string; name: string; position: string; employeeId: string | null }> = [
     ...activeEmployees.map((employee) => ({ id: employee.id, name: employee.name, position: employee.position, employeeId: employee.id })),
-    { id: "open", name: "Open shifts", position: "Unassigned", employeeId: null },
+    { id: "open", name: "Unassigned shifts", position: "Become open when the week is published", employeeId: null },
   ];
 
   return <section className="scheduleBoardPanel">
@@ -216,17 +226,22 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
         <h2>{weekStart.toLocaleDateString([], { month: "long", day: "numeric" })} – {addDays(weekStart, 6).toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" })}</h2>
       </div>
       <div className="scheduleToolbarActions">
+        <span className="scheduleClipboard">
+          {draftCount > 0 ? `${draftCount} unpublished change${draftCount === 1 ? "" : "s"}` : publishedCount > 0 ? "Week published" : "No shifts yet"}
+          {missingEmailCount > 0 ? ` · ${missingEmailCount} employee${missingEmailCount === 1 ? "" : "s"} missing email` : ""}
+        </span>
         {copiedShift && <span className="scheduleClipboard">Copied: {localTime(copiedShift.startsAt)} {copiedShift.position}<button type="button" onClick={() => setCopiedShift(null)}>Clear</button></span>}
         <button type="button" onClick={() => setWeekStart(addDays(weekStart, -7))}>← Previous</button>
         <button type="button" onClick={() => setWeekStart(startOfMonday(new Date()))}>Today</button>
         <button type="button" onClick={() => setWeekStart(addDays(weekStart, 7))}>Next →</button>
+        <button type="button" className="schedulePrimary" disabled={busy || weekShifts.length === 0} onClick={() => void publishWeek()}>{draftCount > 0 ? `Publish week (${draftCount})` : "Resend schedule"}</button>
         <button type="button" className="schedulePrimary" onClick={() => setEditor(defaultEditor(activeEmployees[0]?.id || null, weekStart, activeEmployees[0]))}>+ Add shift</button>
       </div>
     </header>
 
     <div className="scheduleScroll">
       <div className="scheduleGrid" style={{ gridTemplateColumns: "190px repeat(7, minmax(155px, 1fr))" }}>
-        <div className="scheduleCorner">{business}<small>Drag shifts between employees and days</small></div>
+        <div className="scheduleCorner">{business}<small>Build drafts, then publish the entire week once</small></div>
         {days.map((day) => <div className={`scheduleDayHeader ${dateKey(day) === dateKey(new Date()) ? "today" : ""}`} key={day.toISOString()}><strong>{day.toLocaleDateString([], { weekday: "short" })}</strong><span>{day.toLocaleDateString([], { month: "short", day: "numeric" })}</span></div>)}
 
         {rows.map((row) => <div className="scheduleRowContents" key={row.id}>
@@ -269,17 +284,17 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       <section className="scheduleModal" role="dialog" aria-modal="true" aria-labelledby="shift-editor-heading">
         <header><div><p className="wfEyebrow">{editor.shift ? "Edit shift" : "New shift"}</p><h2 id="shift-editor-heading">Shift details</h2></div><button type="button" aria-label="Close" onClick={() => setEditor(null)}>×</button></header>
         <form onSubmit={saveShift} className="scheduleEditForm">
-          <label>Employee<select value={editor.employeeId || ""} onChange={(event) => setEditor((current) => current ? { ...current, employeeId: event.target.value || null, status: event.target.value ? (current.status === "Open" ? "Published" : current.status) : "Open" } : current)}><option value="">Open shift</option>{activeEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>
+          <label>Employee<select value={editor.employeeId || ""} onChange={(event) => setEditor((current) => current ? { ...current, employeeId: event.target.value || null } : current)}><option value="">Unassigned / open when published</option>{activeEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>
           <label>Date<input type="date" value={editor.date} onChange={(event) => setEditor((current) => current ? { ...current, date: event.target.value } : current)} required /></label>
           <label>Start<input type="time" value={editor.startTime} onChange={(event) => setEditor((current) => current ? { ...current, startTime: event.target.value } : current)} required /></label>
           <label>End<input type="time" value={editor.endTime} onChange={(event) => setEditor((current) => current ? { ...current, endTime: event.target.value } : current)} required /></label>
           <label>Position<input value={editor.position} onChange={(event) => setEditor((current) => current ? { ...current, position: event.target.value } : current)} required /></label>
-          <label>Status<select value={editor.status} onChange={(event) => setEditor((current) => current ? { ...current, status: event.target.value as EditorState["status"], employeeId: event.target.value === "Open" ? null : current.employeeId } : current)}><option>Draft</option><option>Published</option><option>Open</option></select></label>
+          <p className="scheduleNotes">Saving creates a draft. Staff do not receive the change until the entire week is published.</p>
           <label className="scheduleNotes">Shift instructions shown to the employee<textarea rows={5} value={editor.notes} onChange={(event) => setEditor((current) => current ? { ...current, notes: event.target.value } : current)} placeholder="Example: Restock the outside cooler before opening. Private party arrives at 6:30." /></label>
           <div className="scheduleModalActions">
             {editor.shift && <><button type="button" onClick={() => setCopiedShift(editor.shift)}>Copy shift</button><button type="button" className="danger" disabled={busy} onClick={() => void runAction({ action: "shift-update", id: editor.shift?.id, status: "Cancelled" }, "Shift cancelled.").then(() => setEditor(null))}>Cancel shift</button></>}
             <button type="button" onClick={() => setEditor(null)}>Close</button>
-            <button type="submit" className="schedulePrimary" disabled={busy}>Save shift</button>
+            <button type="submit" className="schedulePrimary" disabled={busy}>Save draft</button>
           </div>
         </form>
       </section>
