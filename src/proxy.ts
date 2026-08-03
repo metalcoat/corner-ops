@@ -48,14 +48,14 @@ function token(request: NextRequest): Token | null {
 
 function needed(path: string, method: string): string | null {
   const write = method !== "GET" && method !== "HEAD";
-  if (path.startsWith("/api/reports")) return "reports.read";
+  if (path.startsWith("/api/reports") || path.startsWith("/api/weather")) return "reports.read";
   if (path.startsWith("/api/accounting-control")) return write ? "accounting.write" : "accounting.read";
   if (path.startsWith("/api/payroll-control")) return write ? "payroll.write" : "payroll.read";
   if (path.startsWith("/api/users")) return "users.manage";
   if (path.startsWith("/api/integrations") || path.startsWith("/api/bank-accounts") || path.startsWith("/api/square/connect")) {
     return write ? "integrations.write" : "integrations.read";
   }
-  if (path.startsWith("/api/workforce") || path.startsWith("/api/employee-directory")) {
+  if (path.startsWith("/api/workforce") || path.startsWith("/api/employee-directory") || path.startsWith("/api/attendance")) {
     return write ? "workforce.write" : "workforce.read";
   }
   if (path.startsWith("/api/documents") || path.startsWith("/api/audit")) {
@@ -67,10 +67,6 @@ function needed(path: string, method: string): string | null {
 
 function isOwnerSession(session: Token): boolean {
   if (session.role === "Owner" || session.role === "Co-Owner") return true;
-
-  // Sessions created before role-based access was added did not contain a role.
-  // They were exclusively the configured primary-owner login, so preserve that
-  // access until the cookie is naturally replaced at the next sign-in.
   const configuredOwner = (process.env.APP_EMAIL || "crfrary@gmail.com").trim().toLowerCase();
   return !session.role && Boolean(session.email) && session.email!.trim().toLowerCase() === configuredOwner;
 }
