@@ -60,6 +60,7 @@ type AdminMessageRow = {
   business: Business;
   sender_employee_id: string | null;
   sender_name: string;
+  sender_chat_nickname: string;
   sender_schedule_color: string;
   sender_avatar_set: boolean;
   recipient_employee_id: string | null;
@@ -85,6 +86,7 @@ export async function adminMessagesDashboard(business: Business) {
     `,
     sql`
       SELECT m.id, m.business, m.sender_employee_id, m.sender_name,
+        COALESCE(sender.chat_nickname, '') AS sender_chat_nickname,
         COALESCE(sender.schedule_color, '#64748B') AS sender_schedule_color,
         COALESCE(sender.profile_photo_pathname <> '', FALSE) AS sender_avatar_set,
         m.recipient_employee_id, recipient.name AS recipient_name,
