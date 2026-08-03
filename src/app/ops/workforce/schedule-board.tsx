@@ -2,9 +2,16 @@
 
 import { CSSProperties, DragEvent, FormEvent, useMemo, useState } from "react";
 import { positionsForBusiness } from "@/lib/business-positions";
+import {
+  analyzeShiftMealCompliance,
+  mealRequirements,
+  newYorkTimeValue,
+  shiftTimeForSelectedDay,
+} from "@/lib/schedule-meal-compliance";
 import { analyzeSchedule } from "@/lib/schedule-validation";
 import type { Business } from "@/lib/types";
 import "./schedule-board.css";
+import "./schedule-compliance.css";
 
 export type ScheduleEmployee = {
   id: string;
@@ -23,6 +30,10 @@ export type ScheduleShift = {
   position: string;
   startsAt: string;
   endsAt: string;
+  mealBreakStart?: string | null;
+  mealBreakMinutes?: number;
+  extraMealBreakStart?: string | null;
+  extraMealBreakMinutes?: number;
   status: string;
   notes: string;
   employeeColor?: string;
@@ -44,6 +55,10 @@ type EditorState = {
   date: string;
   startTime: string;
   endTime: string;
+  mealBreakTime: string;
+  mealBreakMinutes: number;
+  extraMealBreakTime: string;
+  extraMealBreakMinutes: number;
   position: string;
   notes: string;
 };
@@ -64,6 +79,14 @@ type DragTarget = {
 
 const DAY_MS = 86_400_000;
 const UNASSIGNED_KEY = "__unassigned__";
+const TIME_OPTIONS = Array.from({ length: 96 }, (_, index) => {
+  const hour = Math.floor(index / 4);
+  const minute = (index % 4) * 15;
+  const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  const label = new Date(`2000-01-01T${value}:00`).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return { value, label };
+});
+const BREAK_DURATION_OPTIONS = [0, 20, 30, 45, 60];
 
 function startOfMonday(date: Date): Date {
   const result = new Date(date);
@@ -103,9 +126,18 @@ function localDateTime(value: string): string {
   });
 }
 
-function inputTime(value: string): string {
-  const date = new Date(value);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+function inputTime(value: string | null | undefined): string {
+  if (!value) return "";
+  return newYorkTimeValue(value);
+}
+
+function nearestQuarter(value: string): string {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return "";
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const total = Math.round((hour * 60 + minute) / 15) * 15;
+  return `${String(Math.floor((total % 1440) / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
 function dateFromParts(day: string, time: string): Date {
@@ -114,8 +146,21 @@ function dateFromParts(day: string, time: string): Date {
   return result;
 }
 
+function editorDates(editor: EditorState) {
+  const start = dateFromParts(editor.date, editor.startTime);
+  let end = dateFromParts(editor.date, editor.endTime);
+  if (end <= start) end = new Date(end.getTime() + DAY_MS);
+  const mealBreakStart = editor.mealBreakTime && editor.mealBreakMinutes
+    ? shiftTimeForSelectedDay(editor.date, editor.startTime, editor.mealBreakTime)
+    : null;
+  const extraMealBreakStart = editor.extraMealBreakTime && editor.extraMealBreakMinutes
+    ? shiftTimeForSelectedDay(editor.date, editor.startTime, editor.extraMealBreakTime)
+    : null;
+  return { start, end, mealBreakStart, extraMealBreakStart };
+}
+
 function shiftHours(shift: ScheduleShift): number {
-  return Math.max(0, (new Date(shift.endsAt).getTime() - new Date(shift.startsAt).getTime()) / 3_600_000);
+  return analyzeShiftMealCompliance(shift).paidHours;
 }
 
 function initials(value: string): string {
@@ -129,6 +174,10 @@ function defaultEditor(employeeId: string | null, day: Date, employee?: Schedule
     date: dateKey(day),
     startTime: "16:00",
     endTime: "22:00",
+    mealBreakTime: "",
+    mealBreakMinutes: 0,
+    extraMealBreakTime: "",
+    extraMealBreakMinutes: 0,
     position: employee?.position || "",
     notes: "",
   };
@@ -136,6 +185,10 @@ function defaultEditor(employeeId: string | null, day: Date, employee?: Schedule
 
 function avatarUrl(business: Business, employeeId: string): string {
   return `/api/employee-directory/avatar?business=${encodeURIComponent(business)}&id=${encodeURIComponent(employeeId)}`;
+}
+
+function shiftIso(value: string | null | undefined, differenceMs: number): string | null {
+  return value ? new Date(new Date(value).getTime() + differenceMs).toISOString() : null;
 }
 
 function moveShiftToCell(
@@ -148,18 +201,33 @@ function moveShiftToCell(
   const originalEnd = new Date(shift.endsAt);
   const start = new Date(targetDay);
   start.setHours(originalStart.getHours(), originalStart.getMinutes(), 0, 0);
-  const end = new Date(start.getTime() + (originalEnd.getTime() - originalStart.getTime()));
+  const differenceMs = start.getTime() - originalStart.getTime();
+  const end = new Date(originalEnd.getTime() + differenceMs);
   return {
     ...shift,
     employeeId,
     employeeName: employeeName ?? shift.employeeName,
     startsAt: start.toISOString(),
     endsAt: end.toISOString(),
+    mealBreakStart: shiftIso(shift.mealBreakStart, differenceMs),
+    extraMealBreakStart: shiftIso(shift.extraMealBreakStart, differenceMs),
   };
 }
 
 function cellKey(employeeId: string | null, dayKeyValue: string): string {
   return `${employeeId || UNASSIGNED_KEY}|${dayKeyValue}`;
+}
+
+function TimeSelect({ value, onChange, required = false, allowBlank = false }: {
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  allowBlank?: boolean;
+}) {
+  return <select value={value} onChange={(event) => onChange(event.target.value)} required={required}>
+    {allowBlank && <option value="">Not scheduled</option>}
+    {TIME_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+  </select>;
 }
 
 export default function ScheduleBoard({ business, employees, shifts, busy, runAction }: Props) {
@@ -216,13 +284,23 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       : shift);
   }, [dragTarget, draggingId, employeeById, weekShifts]);
 
-  const scheduleAnalysis = useMemo(() => analyzeSchedule(previewWeekShifts), [previewWeekShifts]);
-  const publishAnalysis = useMemo(() => analyzeSchedule(weekShifts), [weekShifts]);
+  const loneWorkerApplies = business === "Corner Deli";
+  const scheduleAnalysis = useMemo(
+    () => analyzeSchedule(previewWeekShifts, { enforceLoneWorker: loneWorkerApplies }),
+    [loneWorkerApplies, previewWeekShifts],
+  );
+  const publishAnalysis = useMemo(
+    () => analyzeSchedule(weekShifts, { enforceLoneWorker: loneWorkerApplies }),
+    [loneWorkerApplies, weekShifts],
+  );
   const overlapShiftIds = new Set(
     scheduleAnalysis.overlaps.flatMap((overlap) => [overlap.firstShiftId, overlap.secondShiftId]),
   );
   const loneShiftIds = new Set(
     scheduleAnalysis.loneWorkerViolations.flatMap((violation) => violation.shiftIds),
+  );
+  const mealViolationShiftIds = new Set(
+    scheduleAnalysis.mealPeriodViolations.map((violation) => violation.shiftId),
   );
   const draftCount = weekShifts.filter((shift) => shift.status === "Draft").length;
   const publishedCount = weekShifts.filter(
@@ -247,46 +325,70 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
   const editorPreview = useMemo(() => {
     if (!editor) return null;
     try {
-      const start = dateFromParts(editor.date, editor.startTime);
-      let end = dateFromParts(editor.date, editor.endTime);
-      if (end <= start) end = new Date(end.getTime() + DAY_MS);
+      const { start, end, mealBreakStart, extraMealBreakStart } = editorDates(editor);
       const previewId = editor.shift?.id || "__schedule_editor_preview__";
       const employee = editor.employeeId ? employeeById.get(editor.employeeId) : undefined;
+      const previewShift: ScheduleShift = {
+        id: previewId,
+        employeeId: editor.employeeId,
+        employeeName: employee?.name || "Unassigned",
+        position: editor.position,
+        startsAt: start.toISOString(),
+        endsAt: end.toISOString(),
+        mealBreakStart: mealBreakStart?.toISOString() || null,
+        mealBreakMinutes: editor.mealBreakMinutes,
+        extraMealBreakStart: extraMealBreakStart?.toISOString() || null,
+        extraMealBreakMinutes: editor.extraMealBreakMinutes,
+        status: "Draft",
+        notes: editor.notes,
+      };
       const candidates = weekShifts.filter((shift) => shift.id !== editor.shift?.id);
-      if (start >= weekStart && start < weekEnd) {
-        candidates.push({
-          id: previewId,
-          employeeId: editor.employeeId,
-          employeeName: employee?.name || "Unassigned",
-          position: editor.position,
-          startsAt: start.toISOString(),
-          endsAt: end.toISOString(),
-          status: "Draft",
-          notes: editor.notes,
-        });
-      }
-      const analysis = analyzeSchedule(candidates);
+      if (start >= weekStart && start < weekEnd) candidates.push(previewShift);
+      const analysis = analyzeSchedule(candidates, { enforceLoneWorker: loneWorkerApplies });
+      const meals = analyzeShiftMealCompliance(previewShift);
       return {
         hours: editor.employeeId ? analysis.employeeHours[editor.employeeId]?.hours || 0 : 0,
         risk: editor.employeeId ? analysis.employeeHours[editor.employeeId]?.risk || "normal" : "normal",
         overlap: analysis.overlaps.find(
           (item) => item.firstShiftId === previewId || item.secondShiftId === previewId,
         ) || null,
+        meals,
       };
     } catch {
       return null;
     }
-  }, [editor, employeeById, weekEnd, weekShifts, weekStart]);
+  }, [editor, employeeById, loneWorkerApplies, weekEnd, weekShifts, weekStart]);
 
   function openExisting(shift: ScheduleShift) {
     setEditor({
       shift,
       employeeId: shift.employeeId,
       date: dateKey(new Date(shift.startsAt)),
-      startTime: inputTime(shift.startsAt),
-      endTime: inputTime(shift.endsAt),
+      startTime: nearestQuarter(inputTime(shift.startsAt)),
+      endTime: nearestQuarter(inputTime(shift.endsAt)),
+      mealBreakTime: nearestQuarter(inputTime(shift.mealBreakStart)),
+      mealBreakMinutes: Number(shift.mealBreakMinutes || 0),
+      extraMealBreakTime: nearestQuarter(inputTime(shift.extraMealBreakStart)),
+      extraMealBreakMinutes: Number(shift.extraMealBreakMinutes || 0),
       position: shift.position,
       notes: shift.notes,
+    });
+  }
+
+  function applyRequiredMeals() {
+    setEditor((current) => {
+      if (!current) return current;
+      const { start, end } = editorDates(current);
+      const requirements = mealRequirements({ startsAt: start.toISOString(), endsAt: end.toISOString() });
+      const primary = requirements.find((requirement) => requirement.slot === "primary");
+      const extra = requirements.find((requirement) => requirement.slot === "extra");
+      return {
+        ...current,
+        mealBreakTime: primary ? newYorkTimeValue(primary.suggestedStart) : "",
+        mealBreakMinutes: primary?.minimumMinutes || 0,
+        extraMealBreakTime: extra ? newYorkTimeValue(extra.suggestedStart) : "",
+        extraMealBreakMinutes: extra?.minimumMinutes || 0,
+      };
     });
   }
 
@@ -297,9 +399,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       window.alert("This employee already has an overlapping shift. Change the employee or the shift time before saving.");
       return;
     }
-    const start = dateFromParts(editor.date, editor.startTime);
-    let end = dateFromParts(editor.date, editor.endTime);
-    if (end <= start) end = new Date(end.getTime() + DAY_MS);
+    const { start, end, mealBreakStart, extraMealBreakStart } = editorDates(editor);
     const action = editor.shift ? "shift-update" : "shift-create";
     await runAction({
       action,
@@ -308,6 +408,10 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       position: editor.position,
       startsAt: start.toISOString(),
       endsAt: end.toISOString(),
+      mealBreakStart: mealBreakStart?.toISOString() || null,
+      mealBreakMinutes: editor.mealBreakMinutes,
+      extraMealBreakStart: extraMealBreakStart?.toISOString() || null,
+      extraMealBreakMinutes: editor.extraMealBreakMinutes,
       status: "Draft",
       notes: editor.notes,
     }, editor.shift ? "Shift updated and marked for publishing." : "Draft shift added.");
@@ -322,6 +426,10 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       employeeId,
       startsAt: moved.startsAt,
       endsAt: moved.endsAt,
+      mealBreakStart: moved.mealBreakStart || null,
+      mealBreakMinutes: moved.mealBreakMinutes || 0,
+      extraMealBreakStart: moved.extraMealBreakStart || null,
+      extraMealBreakMinutes: moved.extraMealBreakMinutes || 0,
       status: "Draft",
     }, `Shift moved to ${targetDay.toLocaleDateString([], {
       weekday: "long",
@@ -336,11 +444,15 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     await runAction({
       action: "shift-create",
       employeeId,
-      position: copiedShift.position,
+      position: copied.position,
       startsAt: copied.startsAt,
       endsAt: copied.endsAt,
+      mealBreakStart: copied.mealBreakStart || null,
+      mealBreakMinutes: copied.mealBreakMinutes || 0,
+      extraMealBreakStart: copied.extraMealBreakStart || null,
+      extraMealBreakMinutes: copied.extraMealBreakMinutes || 0,
       status: "Draft",
-      notes: copiedShift.notes,
+      notes: copied.notes,
     }, "Copied shift pasted as a draft.");
   }
 
@@ -348,7 +460,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
     if (!publishAnalysis.canPublish) {
       const details = [
         ...publishAnalysis.overForty.map(
-          (employee) => `${employee.employeeName}: ${employee.hours.toFixed(1)} hours`,
+          (employee) => `${employee.employeeName}: ${employee.hours.toFixed(1)} paid hours`,
         ),
         ...publishAnalysis.overlaps.map(
           (overlap) => `${overlap.employeeName}: overlapping shifts at ${localDateTime(overlap.startsAt)}`,
@@ -356,8 +468,11 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
         ...publishAnalysis.loneWorkerViolations.map(
           (violation) => `${violation.employeeName}: alone ${violation.minutes} minutes starting ${localDateTime(violation.startsAt)}`,
         ),
+        ...publishAnalysis.mealPeriodViolations.map(
+          (violation) => `${violation.employeeName}: ${violation.message}`,
+        ),
       ];
-      window.alert(`The schedule cannot be published yet.\n\n${details.slice(0, 10).join("\n")}`);
+      window.alert(`The schedule cannot be published yet.\n\n${details.slice(0, 12).join("\n")}`);
       return;
     }
     const actionLabel = draftCount > 0 ? "Publish week" : "Resend schedule";
@@ -393,7 +508,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
           {weekStart.toLocaleDateString([], { month: "long", day: "numeric" })} – {addDays(weekStart, 6).toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" })}
         </h2>
         <span className="scheduleSubline">
-          Employees run down the left and all seven days stay visible across the top. Drag a shift into any employee/day square to reassign and move it.
+          Times use 15-minute intervals. Paid totals deduct scheduled off-duty meals. {loneWorkerApplies ? "Corner Deli publication also blocks lone-worker periods over 30 minutes." : "The lone-worker rule is not applied to Tiki."}
         </span>
       </div>
       <div className="scheduleToolbarActions">
@@ -435,34 +550,40 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       <div className="scheduleValidationHeader">
         <div>
           <strong>{publishAnalysis.canPublish ? "Schedule checks passed" : "Schedule cannot be published yet"}</strong>
-          <span>Yellow warns at more than 38 hours. Red, overlaps, and lone-worker periods block publishing.</span>
+          <span>Yellow warns at more than 38 paid hours. Red, overlaps, required meals, and {loneWorkerApplies ? "lone-worker periods" : "other blocking checks"} prevent publication.</span>
         </div>
         <div className="scheduleCheckBadges">
           <span className={publishAnalysis.overThirtyEight.length ? "warning" : "clear"}>{publishAnalysis.overThirtyEight.length} over 38</span>
           <span className={publishAnalysis.overForty.length ? "danger" : "clear"}>{publishAnalysis.overForty.length} over 40</span>
           <span className={publishAnalysis.overlaps.length ? "danger" : "clear"}>{publishAnalysis.overlaps.length} overlap{publishAnalysis.overlaps.length === 1 ? "" : "s"}</span>
-          <span className={publishAnalysis.loneWorkerViolations.length ? "danger" : "clear"}>{publishAnalysis.loneWorkerViolations.length} alone &gt;30m</span>
+          <span className={publishAnalysis.mealPeriodViolations.length ? "warning" : "clear"}>{publishAnalysis.mealPeriodViolations.length} meal issue{publishAnalysis.mealPeriodViolations.length === 1 ? "" : "s"}</span>
+          {loneWorkerApplies
+            ? <span className={publishAnalysis.loneWorkerViolations.length ? "danger" : "clear"}>{publishAnalysis.loneWorkerViolations.length} alone &gt;30m</span>
+            : <span className="clear">Tiki lone check off</span>}
         </div>
       </div>
       {(publishAnalysis.overThirtyEight.length > 0 || !publishAnalysis.canPublish) && <div className="scheduleIssueList">
         {publishAnalysis.overThirtyEight.map((employee) => <div className="scheduleIssue warning" key={`warning-${employee.employeeId}`}>
-          <strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} scheduled hours.</span>
+          <strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} paid hours scheduled.</span>
         </div>)}
         {publishAnalysis.overForty.map((employee) => <div className="scheduleIssue danger" key={`overtime-${employee.employeeId}`}>
-          <strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} scheduled hours. Reduce to 40 or fewer.</span>
+          <strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} paid hours. Reduce to 40 or fewer.</span>
         </div>)}
         {publishAnalysis.overlaps.map((overlap) => <div className="scheduleIssue danger" key={`${overlap.firstShiftId}-${overlap.secondShiftId}`}>
           <strong>{overlap.employeeName}</strong><span>Scheduled twice from {localDateTime(overlap.startsAt)} to {localTime(overlap.endsAt)}.</span>
         </div>)}
+        {publishAnalysis.mealPeriodViolations.map((violation) => <div className="scheduleIssue warning" key={`${violation.shiftId}-${violation.code}`}>
+          <strong>{violation.employeeName} · {localDateTime(violation.startsAt)}</strong><span>{violation.message}</span>
+        </div>)}
         {publishAnalysis.loneWorkerViolations.map((violation) => <div className="scheduleIssue danger" key={`${violation.employeeId}-${violation.startsAt}`}>
-          <strong>{violation.employeeName}</strong><span>Alone from {localDateTime(violation.startsAt)} to {localTime(violation.endsAt)} ({violation.minutes} minutes).</span>
+          <strong>{violation.employeeName}</strong><span>Alone from {localDateTime(violation.startsAt)} to {localTime(violation.endsAt)} ({violation.minutes} minutes), excluding off-duty meal periods.</span>
         </div>)}
       </div>}
     </section>
 
     <div className="scheduleGridScroll">
       <div className="scheduleWeekGrid" role="grid" aria-label={`${business} weekly schedule`}>
-        <div className="scheduleGridCorner" role="columnheader"><strong>Employee</strong><span>Weekly total</span></div>
+        <div className="scheduleGridCorner" role="columnheader"><strong>Employee</strong><span>Paid weekly total</span></div>
         {weekDays.map((day) => {
           const key = dateKey(day);
           const dayShifts = weekShifts.filter((shift) => dateKey(new Date(shift.startsAt)) === key);
@@ -470,7 +591,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
           return <div className={`scheduleDayHeader ${dateKey(new Date()) === key ? "today" : ""}`} role="columnheader" key={key}>
             <strong>{day.toLocaleDateString([], { weekday: "short" })}</strong>
             <span>{day.toLocaleDateString([], { month: "short", day: "numeric" })}</span>
-            <small>{dayShifts.length} shift{dayShifts.length === 1 ? "" : "s"} · {dayHours.toFixed(1)} hrs</small>
+            <small>{dayShifts.length} shift{dayShifts.length === 1 ? "" : "s"} · {dayHours.toFixed(1)} paid hrs</small>
           </div>;
         })}
 
@@ -494,7 +615,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
                   ? <img src={avatarUrl(business, row.employee.id)} alt="" loading="lazy" />
                   : initials(row.name)}
               </span>
-              <div><strong>{row.name}</strong><span>{row.position}</span><b>{totalHours.toFixed(1)} hrs</b></div>
+              <div><strong>{row.name}</strong><span>{row.position}</span><b>{totalHours.toFixed(1)} paid hrs</b></div>
             </div>
 
             {weekDays.map((day) => {
@@ -527,8 +648,10 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
                     const hourStatus = scheduleAnalysis.shiftRisks[shift.id];
                     const hasOverlap = overlapShiftIds.has(shift.id);
                     const hasLoneWorker = loneShiftIds.has(shift.id);
+                    const hasMealIssue = mealViolationShiftIds.has(shift.id);
+                    const meal = analyzeShiftMealCompliance(shift);
                     return <div
-                      className={`scheduleShiftCard compact ${shift.status.toLowerCase()} ${draggingId === shift.id ? "dragging" : ""} hours-${hourStatus?.risk || "normal"} ${hasOverlap ? "hasOverlap" : ""} ${hasLoneWorker ? "hasLoneWorker" : ""}`}
+                      className={`scheduleShiftCard compact ${shift.status.toLowerCase()} ${draggingId === shift.id ? "dragging" : ""} hours-${hourStatus?.risk || "normal"} ${hasOverlap ? "hasOverlap" : ""} ${hasLoneWorker ? "hasLoneWorker" : ""} ${hasMealIssue ? "hasMealIssue" : ""}`}
                       style={{ "--employee-color": color } as CSSProperties}
                       key={shift.id}
                       draggable
@@ -540,7 +663,11 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
                         <span className="shiftDetails">
                           <b>{localTime(shift.startsAt)} – {localTime(shift.endsAt)}</b>
                           <em>{shift.position || "Shift"}</em>
-                          <small>{shiftHours(shift).toFixed(1)} hrs{shift.notes ? " · Notes" : ""}</small>
+                          <small>{meal.paidHours.toFixed(1)} paid hrs{shift.notes ? " · Notes" : ""}</small>
+                          {(meal.primaryBreak || meal.extraBreak) && <span className="scheduleMealSummary">
+                            {meal.primaryBreak && <b>Meal {localTime(meal.primaryBreak.start.toISOString())} · {meal.primaryBreak.minutes}m</b>}
+                            {meal.extraBreak && <b>Extra {localTime(meal.extraBreak.start.toISOString())} · {meal.extraBreak.minutes}m</b>}
+                          </span>}
                         </span>
                       </button>
                       <div className="shiftQuickActions">
@@ -550,6 +677,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
                           {hourStatus?.risk === "overtime" && <b className="hoursOvertime">40+</b>}
                           {hasOverlap && <b className="safetyDanger">Overlap</b>}
                           {hasLoneWorker && <b className="safetyDanger">Alone</b>}
+                          {hasMealIssue && <b className="scheduleMealBadge">Meal</b>}
                           <i>{shift.status}</i>
                         </span>
                       </div>
@@ -592,8 +720,12 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
             </select>
           </label>
           <label>Date<input type="date" value={editor.date} onChange={(event) => setEditor((current) => current ? { ...current, date: event.target.value } : current)} required /></label>
-          <label>Start<input type="time" value={editor.startTime} onChange={(event) => setEditor((current) => current ? { ...current, startTime: event.target.value } : current)} required /></label>
-          <label>End<input type="time" value={editor.endTime} onChange={(event) => setEditor((current) => current ? { ...current, endTime: event.target.value } : current)} required /></label>
+          <label>Start
+            <TimeSelect value={editor.startTime} required onChange={(value) => setEditor((current) => current ? { ...current, startTime: value } : current)} />
+          </label>
+          <label>End
+            <TimeSelect value={editor.endTime} required onChange={(value) => setEditor((current) => current ? { ...current, endTime: value } : current)} />
+          </label>
           <label>Position
             {business === "Corner Deli"
               ? <select value={editor.position} onChange={(event) => setEditor((current) => current ? { ...current, position: event.target.value } : current)} required>
@@ -602,17 +734,46 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
                 </select>
               : <input value={editor.position} onChange={(event) => setEditor((current) => current ? { ...current, position: event.target.value } : current)} required />}
           </label>
+
+          {editorPreview && <section className="scheduleMealPlanner">
+            <header>
+              <div><h3>Meal-period compliance</h3><p>Required meals block publication until their start and duration comply.</p></div>
+              {editorPreview.meals.requirements.length > 0 && <button type="button" onClick={applyRequiredMeals}>Apply required meals</button>}
+            </header>
+            {editorPreview.meals.requirements.length > 0 ? <div className="scheduleMealRequirements">
+              {editorPreview.meals.requirements.map((requirement) => <div className="scheduleMealRequirement" key={requirement.code}>
+                <strong>{requirement.label}</strong><span>{requirement.detail}</span>
+              </div>)}
+            </div> : <div className="scheduleMealClear">No statutory meal period is triggered by this shift length and timing.</div>}
+            <div className="scheduleMealGrid">
+              <div className="scheduleMealRow">
+                <strong>Primary meal period</strong>
+                <label>Start<TimeSelect allowBlank value={editor.mealBreakTime} onChange={(value) => setEditor((current) => current ? { ...current, mealBreakTime: value, mealBreakMinutes: value ? current.mealBreakMinutes || 30 : 0 } : current)} /></label>
+                <label>Duration<select value={editor.mealBreakMinutes} onChange={(event) => setEditor((current) => current ? { ...current, mealBreakMinutes: Number(event.target.value), mealBreakTime: Number(event.target.value) ? current.mealBreakTime : "" } : current)}>{BREAK_DURATION_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{minutes ? `${minutes} minutes` : "None"}</option>)}</select></label>
+              </div>
+              <div className="scheduleMealRow">
+                <strong>Additional evening meal</strong>
+                <label>Start<TimeSelect allowBlank value={editor.extraMealBreakTime} onChange={(value) => setEditor((current) => current ? { ...current, extraMealBreakTime: value, extraMealBreakMinutes: value ? current.extraMealBreakMinutes || 20 : 0 } : current)} /></label>
+                <label>Duration<select value={editor.extraMealBreakMinutes} onChange={(event) => setEditor((current) => current ? { ...current, extraMealBreakMinutes: Number(event.target.value), extraMealBreakTime: Number(event.target.value) ? current.extraMealBreakTime : "" } : current)}>{BREAK_DURATION_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{minutes ? `${minutes} minutes` : "None"}</option>)}</select></label>
+              </div>
+            </div>
+            {editorPreview.meals.issues.length > 0 ? <div className="scheduleMealIssues">
+              {editorPreview.meals.issues.map((issue) => <div className="scheduleMealIssue" key={issue.code}>{issue.message}</div>)}
+            </div> : editorPreview.meals.requirements.length > 0 ? <div className="scheduleMealClear">Scheduled meal periods satisfy the configured New York rules.</div> : null}
+            <p className="scheduleLawNote">Meal periods are treated as off-duty and unpaid. They reduce paid-hour totals and do not count as staffing coverage during the break.</p>
+          </section>}
+
           {editor.employeeId && editorPreview && <div className={`scheduleEditorCheck ${editorPreview.overlap ? "danger" : editorPreview.risk}`}>
-            <strong>Projected weekly total: {editorPreview.hours.toFixed(1)} hours</strong>
+            <strong>Projected paid weekly total: {editorPreview.hours.toFixed(1)} hours</strong>
             <span>{editorPreview.overlap
               ? "This shift overlaps another assignment and cannot be saved."
               : editorPreview.risk === "overtime"
-                ? "This draft takes the employee over 40 hours and will block publication."
+                ? "This draft takes the employee over 40 paid hours and will block publication."
                 : editorPreview.risk === "warning"
-                  ? "This draft takes the employee over 38 hours. Review before publishing."
+                  ? "This draft takes the employee over 38 paid hours. Review before publishing."
                   : "No overlap or weekly-hour warning for this employee."}</span>
           </div>}
-          <p className="scheduleNotes">Saving creates a draft. Staff do not receive the change until the entire week is published.</p>
+          <p className="scheduleNotes">Saving creates a draft. Missing required meals may remain while you build, but the week cannot be published until corrected.</p>
           <label className="scheduleNotes">Shift instructions shown to the employee
             <textarea
               rows={5}
