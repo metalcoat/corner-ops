@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { ensureSchema, getSql } from "@/lib/db";
+import { validateEmployeePin } from "@/lib/employee-pin";
 import type { Business } from "@/lib/types";
 
 const EMPLOYEE_COOKIE = "corner_ops_employee";
@@ -58,9 +59,9 @@ function decode(token: string): EmployeeSession | null {
   }
 }
 
-export async function createEmployeeSession(business: Business, pin: string): Promise<EmployeeSession> {
+export async function createEmployeeSession(business: Business, suppliedPin: string): Promise<EmployeeSession> {
   await ensureSchema();
-  if (!/^\d{5}$/.test(pin)) throw new Error("Enter your five-digit PIN.");
+  const pin = validateEmployeePin(business, suppliedPin, business);
   const rows = await getSql()`
     SELECT id, business, name, position
     FROM employees
