@@ -84,7 +84,7 @@ export async function POST(request: Request) {
         endsAt: String(body.endsAt || ""),
         status,
         notes: body.notes ? String(body.notes) : "",
-        actor: session.email,
+        actor: session.displayName,
       }), { status: 201 });
     }
 
@@ -109,7 +109,7 @@ export async function POST(request: Request) {
       return Response.json(await copyScheduleWeek({
         business,
         sourceWeekStart: String(body.sourceWeekStart || ""),
-        actor: session.email,
+        actor: session.displayName,
       }));
     }
 
@@ -118,7 +118,7 @@ export async function POST(request: Request) {
         business,
         recipientEmployeeId: body.recipientEmployeeId ? String(body.recipientEmployeeId) : null,
         body: String(body.body || ""),
-        actor: session.email,
+        actor: session.displayName,
       }));
     }
 
@@ -128,7 +128,7 @@ export async function POST(request: Request) {
         business,
         approve: body.approve === true,
         managerNote: body.managerNote ? String(body.managerNote) : "",
-        actor: session.email,
+        actor: session.displayName,
       }));
     }
 
@@ -138,7 +138,7 @@ export async function POST(request: Request) {
         business,
         approve: body.approve === true,
         managerNote: body.managerNote ? String(body.managerNote) : "",
-        actor: session.email,
+        actor: session.displayName,
       }));
     }
 
@@ -148,7 +148,7 @@ export async function POST(request: Request) {
         business,
         approve: body.approve === true,
         managerNote: body.managerNote ? String(body.managerNote) : "",
-        actor: session.email,
+        actor: session.displayName,
       }));
     }
 
