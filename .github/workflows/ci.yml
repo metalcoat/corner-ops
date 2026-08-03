@@ -5,44 +5,14 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Expand staged feature bundle
-        id: feature_bundle
-        shell: bash
-        run: |
-          if [ -f .feature-bundle.part00 ]; then
-            cat .feature-bundle.part* | base64 --decode > /tmp/corner-ops-features.tgz
-            echo "8cdb2b3dd4f80dd8f961caea8abfcc4e085ba71c8e7a6f8781043ec9371517e8  /tmp/corner-ops-features.tgz" | sha256sum -c -
-            tar -xzf /tmp/corner-ops-features.tgz
-            rm -f .feature-bundle.part*
-            rm -f .github/workflows/apply-feature-bundle.yml
-            rm -f src/app/api/setup/historical-time-import/route.ts
-            echo "applied=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "applied=false" >> "$GITHUB_OUTPUT"
-          fi
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run build
-      - name: Commit expanded feature source
-        if: steps.feature_bundle.outputs.applied == 'true'
-        run: |
-          git config user.name "Corner Ops Builder"
-          git config user.email "crfrary@gmail.com"
-          git add -A
-          git reset .github/workflows/ci.yml
-          git commit -m "Build remaining Corner Ops controls"
-          git push origin HEAD:agent/rebuild-corner-ops
