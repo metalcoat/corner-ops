@@ -10,6 +10,7 @@ import {
   payrollSummary,
   updateEmployee,
 } from "@/lib/operations";
+import { detectRezkuVoidReportType, importRezkuVoidReport } from "@/lib/rezku-voids";
 import { apiError, unauthorized } from "@/lib/http";
 import type { Business } from "@/lib/types";
 
@@ -74,12 +75,12 @@ export async function POST(request: Request) {
       if (!/\.(xlsx|xls)$/i.test(file.name)) {
         return Response.json({ error: "Rezku imports must be Excel files." }, { status: 415 });
       }
-      const result = await importRezkuReport(
-        file.name,
-        await file.arrayBuffer(),
-        String(form.get("reportType") || "") || undefined,
-        session.email,
-      );
+      const requested = String(form.get("reportType") || "") || undefined;
+      const bytes = await file.arrayBuffer();
+      const voidType = detectRezkuVoidReportType(file.name, requested);
+      const result = voidType
+        ? await importRezkuVoidReport(file.name, bytes, voidType, session.email)
+        : await importRezkuReport(file.name, bytes, requested, session.email);
       return Response.json(result, { status: 201 });
     }
 
