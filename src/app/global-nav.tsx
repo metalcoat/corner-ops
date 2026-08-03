@@ -5,23 +5,20 @@ import { usePathname } from "next/navigation";
 import type { Business } from "@/lib/types";
 import "./global-nav.css";
 
-const links = [
+type NavLink = {
+  label: string;
+  href: string;
+  activePaths?: string[];
+};
+
+const links: NavLink[] = [
   { label: "Operations", href: "/ops" },
-  { label: "Reports", href: "/ops/reports" },
-  { label: "Weather", href: "/ops/weather" },
-  { label: "Attendance", href: "/ops/attendance" },
-  { label: "Accounting Control", href: "/ops/accounting-control" },
-  { label: "Cards & Receipts", href: "/ops/expense-control" },
-  { label: "Payroll Control", href: "/ops/payroll-control" },
-  { label: "Rezku Monitor", href: "/ops/rezku-monitor", business: "Corner Deli" as const },
+  { label: "Reports", href: "/ops/reports", activePaths: ["/ops/reports", "/ops/weather"] },
+  { label: "Banking", href: "/ops/banking", activePaths: ["/ops/banking", "/ops/accounting-control", "/ops/expense-control", "/ops/bank-accounts"] },
+  { label: "People", href: "/ops/people", activePaths: ["/ops/people", "/ops/workforce", "/ops/attendance", "/ops/payroll-control", "/ops/employees", "/ops/rezku-monitor"] },
   { label: "Messages", href: "/ops/messages" },
-  { label: "Workforce", href: "/ops/workforce" },
-  { label: "Employees", href: "/ops/employees" },
-  { label: "Scheduler & Integrations", href: "/ops/integrations" },
-  { label: "Settings", href: "/ops/settings" },
+  { label: "Settings", href: "/ops/settings", activePaths: ["/ops/settings", "/ops/integrations", "/ops/users"] },
   { label: "Documents", href: "/" },
-  { label: "Employee Hub", href: "/employee" },
-  { label: "Tiki Clock", href: "/clock", business: "Tiki" as const },
 ];
 
 const businessNames: Business[] = ["Corner Deli", "Tiki"];
@@ -30,9 +27,18 @@ function validBusiness(value: string | null | undefined): value is Business {
   return businessNames.includes(value as Business);
 }
 
+function linkIsActive(pathname: string, link: NavLink): boolean {
+  if (link.href === "/") return pathname === "/";
+  const paths = link.activePaths || [link.href];
+  return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
+
 export default function GlobalNav() {
   const pathname = usePathname();
   const [currentBusiness, setCurrentBusiness] = useState<Business>("Corner Deli");
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => setOpen(false), [pathname]);
 
   useEffect(() => {
     let restored = false;
@@ -70,9 +76,7 @@ export default function GlobalNav() {
       const saved = savedBusiness();
       if (!saved) return false;
 
-      const selected = switcher
-        .querySelector<HTMLElement>(".selected, .active")
-        ?.textContent?.trim();
+      const selected = switcher.querySelector<HTMLElement>(".selected, .active")?.textContent?.trim();
       if (selected === saved) return false;
 
       const button = Array.from(switcher.querySelectorAll<HTMLButtonElement>("button")).find(
@@ -87,17 +91,12 @@ export default function GlobalNav() {
 
     function detect(): Business {
       if (pathname === "/clock") return "Tiki";
-
       const selected = document
-        .querySelector<HTMLElement>(
-          ".businessSwitch .selected, .wfBusinessSwitch .selected, .businessPills .active",
-        )
+        .querySelector<HTMLElement>(".businessSwitch .selected, .wfBusinessSwitch .selected, .businessPills .active")
         ?.textContent?.trim();
       if (validBusiness(selected)) return selected;
-
       const select = document.querySelector<HTMLSelectElement>('select[name="business"]')?.value;
       if (validBusiness(select)) return select;
-
       return savedBusiness() || "Corner Deli";
     }
 
@@ -108,26 +107,15 @@ export default function GlobalNav() {
     function interaction(event: Event) {
       const target = event.target;
       if (!(target instanceof Element)) return;
-
       const text = target.closest("button")?.textContent?.trim();
       if (validBusiness(text)) applyTheme(text);
-
-      if (
-        target instanceof HTMLSelectElement &&
-        target.name === "business" &&
-        validBusiness(target.value)
-      ) {
+      if (target instanceof HTMLSelectElement && target.name === "business" && validBusiness(target.value)) {
         applyTheme(target.value);
       }
     }
 
     const observer = new MutationObserver(sync);
-    observer.observe(document.body, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: ["class"],
-    });
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
     document.addEventListener("click", interaction, true);
     document.addEventListener("change", interaction, true);
     window.requestAnimationFrame(sync);
@@ -139,29 +127,22 @@ export default function GlobalNav() {
     };
   }, [pathname]);
 
-  if (pathname === "/clock" || pathname.startsWith("/employee") || pathname === "/signin") {
-    return null;
-  }
-
-  const visibleLinks = links.filter(
-    (link) => !("business" in link) || link.business === currentBusiness,
-  );
+  if (pathname === "/clock" || pathname.startsWith("/employee") || pathname === "/signin") return null;
 
   return (
-    <nav className="globalOwnerNav" aria-label="Corner Ops features">
-      <a className="globalBrand" href="/ops">
-        Corner Ops
-      </a>
+    <nav className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label="Corner Ops features" data-business={currentBusiness}>
+      <div className="globalNavTopline">
+        <a className="globalBrand" href="/ops">Corner Ops</a>
+        <button className="globalMenuButton" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+          {open ? "Close" : "Menu"}
+        </button>
+      </div>
       <div className="globalNavLinks">
-        {visibleLinks.map(({ label, href }) => {
-          const active =
-            href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
-          return (
-            <a key={href} className={active ? "active" : ""} href={href}>
-              {label}
-            </a>
-          );
-        })}
+        {links.map((link) => (
+          <a key={link.href} className={linkIsActive(pathname, link) ? "active" : ""} href={link.href}>
+            {link.label}
+          </a>
+        ))}
       </div>
     </nav>
   );
