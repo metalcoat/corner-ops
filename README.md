@@ -5,13 +5,27 @@ Corner Ops is the private operating system for **Corner Deli** and **Tiki**.
 ## Current modules
 
 - Owner authentication with a signed HTTP-only session
+- Separate role-based user accounts with business-specific access
 - Separate Corner Deli and Tiki business selection
+- Clickable reporting periods with prior-period, prior-week, prior-month, and prior-year comparisons
+- Direct Square range refreshes for Tiki sales, orders, tax, tips, items, and average ticket
+- Honest Corner Deli report coverage based only on the Rezku files received by email
 - Private document storage in Vercel Blob
 - Tiki five-digit PIN time clock with GPS capture
 - Tiki employee, rate, role, punch, overtime, and payroll views
 - Corner Deli Rezku labor, order, transaction, payroll, and tip processing
 - Direct Rezku inbound email processing through Resend and Vercel
 - Separate double-entry accounting books for Corner Deli and Tiki
+
+## Reporting periods
+
+The Reports module uses a 4 AM to 4 AM `America/New_York` business day. Presets include yesterday,
+last weekend, last week, last 30 days, last month, and year to date. Each range can be compared with
+the immediately preceding period, the week before, the month before, or the year before.
+
+Tiki ranges are refreshed directly from Square and combined with Corner Ops time-clock labor. Corner
+Deli reports show only the labor, order, and tip information present in the Rezku reports received by
+email; unavailable sales and tax totals are clearly identified instead of being represented as zero.
 
 ## Rezku inbound email flow
 
