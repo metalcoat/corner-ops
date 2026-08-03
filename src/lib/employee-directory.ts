@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { ensureSchema, getSql } from "@/lib/db";
+import { validateEmployeePin } from "@/lib/employee-pin";
 import type { Business } from "@/lib/types";
 
 export type DirectoryEmployeeInput = {
@@ -171,7 +172,7 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
     const business = input.business;
     const name = clean(input.name, 120);
     const email = clean(input.email, 255).toLowerCase();
-    const pin = clean(input.pin, 5);
+    const pin = validateEmployeePin(business, input.pin, name || "Employee");
     const position = clean(input.position, 80) || (business === "Tiki" ? "Bartender" : "Employee");
     const roleGroup = input.roleGroup || "In-House";
     const countsForTips = input.countsForTips ?? roleGroup !== "Ignore";
@@ -179,7 +180,6 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
     const tippedRate = Math.max(0, Number(input.tippedRate || 0));
 
     if (!name) throw new Error("Employee name is required.");
-    if (!/^\d{5}$/.test(pin)) throw new Error(`PIN for ${name} must contain exactly five digits.`);
     if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new Error(`Email for ${name} is invalid.`);
 
     const existing = await sql`
