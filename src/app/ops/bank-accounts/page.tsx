@@ -43,7 +43,7 @@ export default function BankAccountsPage() {
   const [session, setSession] = useState<SessionView | null>(null);
   const [business, setBusiness] = useState<Business>("Corner Deli");
   const [data, setData] = useState<Payload | null>(null);
-  const [selected, setSelected] = useState<Record<string, string>>({});
+  const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -52,9 +52,10 @@ export default function BankAccountsPage() {
     if (!response.ok) throw new Error(await responseMessage(response));
     const payload = await response.json() as Payload;
     setData(payload);
-    const next: Record<string, string> = {};
+    const next: Record<string, string[]> = {};
     for (const connection of payload.connections) {
-      next[connection.id] = connection.accounts.find((account) => account.active)?.id || connection.accounts[0]?.id || "";
+      const activeIds = connection.accounts.filter((account) => account.active).map((account) => account.id);
+      next[connection.id] = activeIds.length ? activeIds : connection.accounts[0] ? [connection.accounts[0].id] : [];
     }
     setSelected(next);
   }
@@ -72,20 +73,32 @@ export default function BankAccountsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.authenticated, business]);
 
+  function toggle(connectionId: string, accountId: string, checked: boolean) {
+    setSelected((current) => {
+      const values = new Set(current[connectionId] || []);
+      if (checked) values.add(accountId);
+      else values.delete(accountId);
+      return { ...current, [connectionId]: Array.from(values) };
+    });
+  }
+
   async function save(connectionId: string) {
-    const accountId = selected[connectionId];
-    if (!accountId) return;
+    const accountIds = selected[connectionId] || [];
+    if (!accountIds.length) {
+      setNotice("Keep at least one account active for each connected institution.");
+      return;
+    }
     setBusy(connectionId);
     setNotice("");
     try {
       const response = await fetch("/api/bank-accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "select-account", business, connectionId, accountId }),
+        body: JSON.stringify({ action: "set-active-accounts", business, connectionId, accountIds }),
       });
       if (!response.ok) throw new Error(await responseMessage(response));
       await load();
-      setNotice("Account selection saved. Only the selected account will appear in the active bank feed.");
+      setNotice(`Saved ${accountIds.length} active feed${accountIds.length === 1 ? "" : "s"}. Selected bank and credit-card accounts will synchronize together.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Account selection failed.");
     } finally {
@@ -93,64 +106,73 @@ export default function BankAccountsPage() {
     }
   }
 
-  if (!session) return <main className="bankAccountShell"><section className="bankAccountPanel"><h1>Loading bank accounts</h1></section></main>;
+  if (!session) return <main className="bankAccountShell"><section className="bankAccountPanel"><h1>Loading bank and card accounts</h1></section></main>;
   if (!session.authenticated) return <main className="bankAccountShell"><section className="bankAccountPanel"><h1>Owner access required</h1><a className="bankPrimary" href="/">Return to sign-in</a></section></main>;
 
   return <main className="bankAccountShell">
     <header className="bankAccountHeader">
       <div>
-        <p className="bankEyebrow">Plaid account control</p>
-        <h1>Choose the business bank account</h1>
-        <p>Each bank login can expose several accounts. Select the one Corner Ops should synchronize and ignore the rest.</p>
+        <p className="bankEyebrow">Plaid feed control</p>
+        <h1>Choose bank and credit-card feeds</h1>
+        <p>Each institution login may expose checking, savings, and several credit cards. Keep every account you want synchronized checked.</p>
       </div>
       <div className="bankBusinessSwitch">
         {(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "selected" : ""} onClick={() => setBusiness(name)}>{name}</button>)}
+        <a className="bankPrimary" href={`/ops/integrations?connect=accounts&business=${encodeURIComponent(business)}`}>Connect another bank or card</a>
       </div>
     </header>
 
     {notice && <div className="bankNotice">{notice}</div>}
 
     {!data?.connections.length && <section className="bankAccountPanel emptyState">
-      <h2>No linked bank accounts</h2>
-      <p>Connect {business === "Corner Deli" ? "SEACOMM" : "NBT Bank"} from Scheduler & Integrations first.</p>
-      <a className="bankPrimary" href="/ops/integrations">Open integrations</a>
+      <h2>No linked bank or credit-card accounts</h2>
+      <p>Connect each bank or card issuer through Plaid. You can repeat the connection process for as many institutions as the business uses.</p>
+      <a className="bankPrimary" href={`/ops/integrations?connect=accounts&business=${encodeURIComponent(business)}`}>Connect an account</a>
     </section>}
 
     <div className="bankConnectionGrid">
-      {(data?.connections || []).map((connection) => <section className="bankAccountPanel" key={connection.id}>
-        <div className="bankPanelHeader">
-          <div>
-            <p className="bankEyebrow">Connected institution</p>
-            <h2>{connection.institutionName}</h2>
+      {(data?.connections || []).map((connection) => {
+        const activeCount = selected[connection.id]?.length || 0;
+        return <section className="bankAccountPanel" key={connection.id}>
+          <div className="bankPanelHeader">
+            <div>
+              <p className="bankEyebrow">Connected institution</p>
+              <h2>{connection.institutionName}</h2>
+              <small>{activeCount} of {connection.accounts.length} account{connection.accounts.length === 1 ? "" : "s"} selected</small>
+            </div>
+            <span className="bankBadge">{connection.status}</span>
           </div>
-          <span className="bankBadge">{connection.status}</span>
-        </div>
 
-        <div className="bankAccountList">
-          {connection.accounts.map((account) => <label className={`bankAccountChoice ${selected[connection.id] === account.id ? "chosen" : ""}`} key={account.id}>
-            <input
-              type="radio"
-              name={`connection-${connection.id}`}
-              value={account.id}
-              checked={selected[connection.id] === account.id}
-              onChange={() => setSelected((current) => ({ ...current, [connection.id]: account.id }))}
-            />
-            <span className="bankRadio" />
-            <span className="bankAccountDetails">
-              <strong>{account.officialName || account.name}</strong>
-              <small>{account.type} · {account.subtype}{account.mask ? ` · ending ${account.mask}` : ""}</small>
-            </span>
-            <span className="bankBalance">
-              <strong>{money(account.currentBalance)}</strong>
-              <small>{account.availableBalance === null ? "" : `${money(account.availableBalance)} available`}</small>
-            </span>
-          </label>)}
-        </div>
+          <div className="bankAccountList">
+            {connection.accounts.map((account) => {
+              const checked = (selected[connection.id] || []).includes(account.id);
+              const isCard = account.type === "credit";
+              return <label className={`bankAccountChoice ${checked ? "chosen" : ""}`} key={account.id}>
+                <input
+                  type="checkbox"
+                  name={`connection-${connection.id}`}
+                  value={account.id}
+                  checked={checked}
+                  onChange={(event) => toggle(connection.id, account.id, event.target.checked)}
+                />
+                <span className="bankRadio" />
+                <span className="bankAccountDetails">
+                  <strong>{account.officialName || account.name}</strong>
+                  <small>{isCard ? "Credit card" : account.type || "Bank account"}{account.subtype ? ` · ${account.subtype}` : ""}{account.mask ? ` · ending ${account.mask}` : ""}</small>
+                </span>
+                <span className="bankBalance">
+                  <strong>{money(account.currentBalance)}</strong>
+                  <small>{isCard ? "Current amount owed" : account.availableBalance === null ? "" : `${money(account.availableBalance)} available`}</small>
+                </span>
+              </label>;
+            })}
+          </div>
 
-        <button className="bankPrimary" disabled={busy === connection.id || !selected[connection.id]} onClick={() => void save(connection.id)}>
-          {busy === connection.id ? "Saving…" : `Use selected account for ${business}`}
-        </button>
-      </section>)}
+          <button className="bankPrimary" disabled={busy === connection.id || activeCount === 0} onClick={() => void save(connection.id)}>
+            {busy === connection.id ? "Saving…" : `Save ${activeCount} active feed${activeCount === 1 ? "" : "s"}`}
+          </button>
+        </section>;
+      })}
     </div>
   </main>;
 }
