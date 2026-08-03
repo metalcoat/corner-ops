@@ -8,6 +8,7 @@ const publicPaths = [
   "/api/employee",
   "/api/employee/session",
   "/api/rezku/inbound",
+  "/api/3cx/inbound",
   "/api/square/callback",
   "/api/square/webhook",
   "/api/cron/",
@@ -48,7 +49,7 @@ function token(request: NextRequest): Token | null {
 
 function needed(path: string, method: string): string | null {
   const write = method !== "GET" && method !== "HEAD";
-  if (path.startsWith("/api/reports") || path.startsWith("/api/weather")) return "reports.read";
+  if (path.startsWith("/api/reports") || path.startsWith("/api/weather") || path.startsWith("/api/3cx/calls")) return "reports.read";
   if (path.startsWith("/api/banking") || path.startsWith("/api/accounting-control") || path.startsWith("/api/expense-control")) {
     return write ? "accounting.write" : "accounting.read";
   }
