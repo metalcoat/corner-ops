@@ -1,6 +1,10 @@
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
-import { adminMessagesDashboard } from "@/lib/message-reads";
+import {
+  adminMessagesDashboard,
+  adminUnreadMessageSummary,
+  markAdminMessagesRead,
+} from "@/lib/message-reads";
 import { sendOwnerMessage } from "@/lib/workforce";
 import type { Business } from "@/lib/types";
 
@@ -16,8 +20,17 @@ export async function GET(request: Request) {
     const session = await getSession();
     if (!session) return unauthorized();
     requirePermission(session, "workforce.read");
-    const business = readBusiness(new URL(request.url).searchParams.get("business") || "Corner Deli");
+    const url = new URL(request.url);
+
+    if (url.searchParams.get("summary") === "nav") {
+      return Response.json(await adminUnreadMessageSummary(session.email, session.businesses));
+    }
+
+    const business = readBusiness(url.searchParams.get("business") || "Corner Deli");
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
+    if (url.searchParams.get("markRead") === "1") {
+      await markAdminMessagesRead(session.email, business);
+    }
     return Response.json(await adminMessagesDashboard(business));
   } catch (error) {
     return apiError(error);
