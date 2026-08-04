@@ -47,6 +47,15 @@ export default function PeoplePage() {
       ],
     },
     {
+      eyebrow: "Hire, document, and acknowledge",
+      title: "Employment forms",
+      description: "Assign onboarding packets, collect employee signatures, complete I-9 employer review, and issue immutable New York pay-rate notices.",
+      links: [
+        { label: "Manage employment forms", href: "/ops/employment-forms", primary: true },
+        { label: "Employee forms view", href: "/employee/forms" },
+      ],
+    },
+    {
       eyebrow: "Time and exceptions",
       title: "Attendance",
       description: "Review punches, late arrivals, missing clock-outs, source imports, and exceptions before payroll.",
@@ -89,7 +98,7 @@ export default function PeoplePage() {
     </header>
 
     <section className="peopleFlow" aria-label="People workflow">
-      <span>1. Schedule</span><i>→</i><span>2. Review time</span><i>→</i><span>3. Correct & recalculate payroll</span>
+      <span>1. Hire & document</span><i>→</i><span>2. Schedule</span><i>→</i><span>3. Review time</span><i>→</i><span>4. Correct & recalculate payroll</span>
     </section>
 
     <section className="peopleGrid">
