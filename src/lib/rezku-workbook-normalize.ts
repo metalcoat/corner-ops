@@ -40,16 +40,16 @@ const HEADER_NAMES: Record<HeaderField, string[]> = {
   ],
   clockIn: [
     "Clock In", "Clock-In", "Clock In Time", "Clock-In Time", "Clocked In", "Clocked In At",
-    "Punch In", "Punch-In", "Punch In Time", "Time In", "In Time", "Start", "Start Time",
+    "Punch In", "Punch-In", "Punch In Time", "Time In", "In Time", "In", "Start", "Start Time",
     "Actual Clock In", "Actual In",
   ],
   clockOut: [
     "Clock Out", "Clock-Out", "Clock Out Time", "Clock-Out Time", "Clocked Out", "Clocked Out At",
-    "Punch Out", "Punch-Out", "Punch Out Time", "Time Out", "Out Time", "End", "End Time",
+    "Punch Out", "Punch-Out", "Punch Out Time", "Time Out", "Out Time", "Out", "End", "End Time",
     "Actual Clock Out", "Actual Out",
   ],
   regularHours: [
-    "Regular Hours", "Reg Hours", "Worked Hours", "Hours Worked", "Total Hours", "Hours",
+    "Regular Hours", "Reg Hours", "Reg", "Worked Hours", "Hours Worked", "Total Hours", "Hours",
   ],
   overtimeHours: ["Overtime Hours", "OT Hours", "Overtime", "OT"],
 };
@@ -60,6 +60,59 @@ function clean(value: unknown): string {
 
 function normalized(value: unknown): string {
   return clean(value).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function dateText(value: unknown): string {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getUTCFullYear();
+    if (year <= 1901) return "";
+    return `${year}-${pad(value.getUTCMonth() + 1)}-${pad(value.getUTCDate())}`;
+  }
+
+  const text = clean(value);
+  if (!text) return "";
+
+  let match = text.match(/(?:^|\D)(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})(?:\D|$)/);
+  if (match) return `${match[1]}-${pad(Number(match[2]))}-${pad(Number(match[3]))}`;
+
+  match = text.match(/(?:^|\D)(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})(?:\D|$)/);
+  if (match) {
+    const rawYear = Number(match[3]);
+    const year = rawYear < 100 ? (rawYear >= 70 ? 1900 + rawYear : 2000 + rawYear) : rawYear;
+    return `${year}-${pad(Number(match[1]))}-${pad(Number(match[2]))}`;
+  }
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return `${parsed.getUTCFullYear()}-${pad(parsed.getUTCMonth() + 1)}-${pad(parsed.getUTCDate())}`;
+}
+
+function clockText(value: unknown): string {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const hour = value.getUTCHours();
+    const minute = value.getUTCMinutes();
+    const second = value.getUTCSeconds();
+    if (value.getUTCFullYear() <= 1901 && hour === 0 && minute === 0 && second === 0) return "";
+    return `${pad(hour)}:${pad(minute)}:${pad(second)}`;
+  }
+
+  const text = clean(value);
+  if (!text || /^(?:0|1\/0\/00|1\/0\/1900)$/i.test(text)) return "";
+  const match = text.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
+  if (!match) return "";
+
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3] || 0);
+  const meridiem = match[4]?.toUpperCase();
+  if (meridiem === "PM" && hour < 12) hour += 12;
+  if (meridiem === "AM" && hour === 12) hour = 0;
+  if (hour > 23 || minute > 59 || second > 59) return "";
+  return `${pad(hour)}:${pad(minute)}:${pad(second)}`;
 }
 
 const FIELD_KEYS = Object.fromEntries(
@@ -134,13 +187,10 @@ function joinedName(row: unknown[], map: Map<string, number>): string {
     .join(" ");
 }
 
-function fullDateTime(dateValue: unknown, timeValue: unknown): unknown {
-  if (timeValue instanceof Date) return timeValue;
-  const time = clean(timeValue);
-  if (!time) return "";
-  if (/\d{4}[-\/.]\d{1,2}[-\/.]\d{1,2}|\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}/.test(time)) return timeValue;
-  const date = clean(dateValue);
-  return date ? `${date} ${time}` : timeValue;
+function fullDateTime(dateValue: unknown, timeValue: unknown): string {
+  const date = dateText(dateValue) || dateText(timeValue);
+  const time = clockText(timeValue);
+  return date && time ? `${date} ${time}` : "";
 }
 
 function normalizeShiftSheet(sheetName: string, sheet: XLSX.WorkSheet): XLSX.WorkSheet | null {
@@ -160,7 +210,7 @@ function normalizeShiftSheet(sheetName: string, sheet: XLSX.WorkSheet): XLSX.Wor
   for (const row of matrix.slice(headerIndex + 1)) {
     const employee = joinedName(row, map);
     const position = valueFor(row, map, "position");
-    const commonDate = valueFor(row, map, "date");
+    const commonDate = dateText(valueFor(row, map, "date"));
     const clockIn = fullDateTime(valueFor(row, map, "clockInDate") || commonDate, valueFor(row, map, "clockIn"));
     const clockOut = fullDateTime(valueFor(row, map, "clockOutDate") || commonDate, valueFor(row, map, "clockOut"));
     const regularHours = valueFor(row, map, "regularHours");
@@ -168,7 +218,7 @@ function normalizeShiftSheet(sheetName: string, sheet: XLSX.WorkSheet): XLSX.Wor
 
     // Detailed Labor includes totals and earnings summaries with hours but no actual punches.
     // Those are not shifts and must not become missing-punch exceptions.
-    if (!clean(clockIn) && !clean(clockOut)) continue;
+    if (!clockIn && !clockOut) continue;
 
     // Main is a shared attestation sheet, so every imported row must identify its employee.
     // Employee-specific Detailed Labor sheets may legitimately rely on their sheet name.
