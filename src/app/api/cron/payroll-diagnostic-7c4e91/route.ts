@@ -7,6 +7,10 @@ export const dynamic = "force-dynamic";
 const WEEK_START = "2026-07-27";
 const START = "2026-07-27T08:00:00.000Z";
 const END = "2026-08-03T08:00:00.000Z";
+const LATE_ORDER_IDS = [
+  "BPB-0051B", "BPC-006SH", "BPA-009E8", "BPC-006SJ", "BPC-006SK",
+  "BPC-006SM", "BPC-006SN", "BPA-009EE", "BPC-006SP",
+];
 
 function normalize(value: unknown) {
   return String(value ?? "")
@@ -19,7 +23,7 @@ function normalize(value: unknown) {
 
 export async function GET() {
   const sql = getSql();
-  const [summary, orderRows, transactionRows, shiftRows] = await Promise.all([
+  const [summary, orderRows, transactionRows, shiftRows, lateTransactions, lateOrders] = await Promise.all([
     payrollSummary("Corner Deli", WEEK_START),
     sql`
       SELECT order_id, order_type, opened_at, raw
@@ -28,7 +32,7 @@ export async function GET() {
       ORDER BY opened_at
     `,
     sql`
-      SELECT transaction_id, order_id, transaction_time, tip, raw
+      SELECT id, source_key, batch_id, transaction_id, order_id, transaction_time, tip, raw
       FROM rezku_transactions
       WHERE transaction_time >= ${START} AND transaction_time < ${END} AND tip <> 0
       ORDER BY transaction_time
@@ -38,6 +42,18 @@ export async function GET() {
       FROM rezku_shifts
       WHERE clock_in >= ${START} AND clock_in < ${END}
       ORDER BY clock_in
+    `,
+    sql`
+      SELECT id, source_key, batch_id, transaction_id, order_id, transaction_time, tip, raw
+      FROM rezku_transactions
+      WHERE order_id = ANY(${LATE_ORDER_IDS}::text[])
+      ORDER BY order_id, transaction_time
+    `,
+    sql`
+      SELECT id, source_key, batch_id, order_id, order_type, opened_at, raw
+      FROM rezku_orders
+      WHERE order_id = ANY(${LATE_ORDER_IDS}::text[])
+      ORDER BY order_id, opened_at
     `,
   ]);
 
@@ -95,7 +111,8 @@ export async function GET() {
     payrollRows: (summary as { rows?: unknown[] }).rows || [],
     unallocated: ((summary as { tipJoinIssues?: unknown[] }).tipJoinIssues || []),
     classifications,
-    orders: orders.slice(0, 30),
+    lateTransactions,
+    lateOrders,
     shifts,
   });
 }
