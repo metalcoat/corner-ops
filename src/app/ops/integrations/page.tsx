@@ -57,7 +57,10 @@ type Dashboard = {
   squareSummary: { sales: number; tips: number; payments: number };
 };
 
-type PlaidMetadata = { institution?: { name?: string } };
+type PlaidMetadata = {
+  institution?: { name?: string };
+  accounts?: Array<{ id: string; name?: string; mask?: string | null }>;
+};
 type PlaidHandler = {
   open: () => void;
   destroy: () => void;
@@ -69,6 +72,25 @@ type PlaidStatic = {
     onSuccess: (publicToken: string, metadata: PlaidMetadata) => void;
     onExit: (error: unknown) => void;
   }) => PlaidHandler;
+};
+type StoredPlaidLink = {
+  token: string;
+  business: Business;
+  mode: "initial" | "update";
+  connectionId?: string;
+  institutionName?: string;
+};
+type HistoricalImportResult = {
+  detectedFormat: string;
+  rowsRead: number;
+  parsedRows: number;
+  imported: number;
+  updated: number;
+  matchedExisting: number;
+  skipped: number;
+  accountNames: string[];
+  dateFrom: string;
+  dateTo: string;
 };
 
 declare global {
@@ -151,10 +173,21 @@ export default function IntegrationsPage() {
     const oauthState = params.get("oauth_state_id");
     const stored = sessionStorage.getItem("corner-ops-plaid-link");
     if (!oauthState || !stored || !session?.authenticated) return;
-    const saved = JSON.parse(stored) as { token: string; business: Business };
+    const saved = JSON.parse(stored) as StoredPlaidLink;
     setBusiness(saved.business);
     autoConnectStarted.current = true;
-    void launchPlaid(saved.business, saved.token, window.location.href);
+    if (saved.mode === "update" && saved.connectionId) {
+      void managePlaidAccounts({
+        id: saved.connectionId,
+        provider: "Plaid",
+        business: saved.business,
+        institutionName: saved.institutionName || "Connected institution",
+        status: "Active",
+        lastSyncAt: null,
+      }, saved.token, window.location.href);
+    } else {
+      void launchPlaid(saved.business, saved.token, window.location.href);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.authenticated]);
 
@@ -177,7 +210,11 @@ export default function IntegrationsPage() {
       const tokenResult = existingToken
         ? { linkToken: existingToken }
         : await api({ action: "plaid-link-token", business: targetBusiness }) as { linkToken: string };
-      sessionStorage.setItem("corner-ops-plaid-link", JSON.stringify({ token: tokenResult.linkToken, business: targetBusiness }));
+      sessionStorage.setItem("corner-ops-plaid-link", JSON.stringify({
+        token: tokenResult.linkToken,
+        business: targetBusiness,
+        mode: "initial",
+      } satisfies StoredPlaidLink));
       await loadPlaidScript();
       if (!window.Plaid) throw new Error("Plaid Link was unavailable after loading.");
       const handler = window.Plaid.create({
@@ -217,6 +254,65 @@ export default function IntegrationsPage() {
     }
   }
 
+  async function managePlaidAccounts(connection: Connection, existingToken?: string, receivedRedirectUri?: string) {
+    setBusy(true);
+    setNotice("");
+    try {
+      const tokenResult = existingToken
+        ? { linkToken: existingToken }
+        : await api({
+            action: "plaid-update-token",
+            business: connection.business,
+            connectionId: connection.id,
+          }) as { linkToken: string };
+      sessionStorage.setItem("corner-ops-plaid-link", JSON.stringify({
+        token: tokenResult.linkToken,
+        business: connection.business,
+        mode: "update",
+        connectionId: connection.id,
+        institutionName: connection.institutionName,
+      } satisfies StoredPlaidLink));
+      await loadPlaidScript();
+      if (!window.Plaid) throw new Error("Plaid Link was unavailable after loading.");
+      const handler = window.Plaid.create({
+        token: tokenResult.linkToken,
+        receivedRedirectUri,
+        onSuccess: (_publicToken, metadata) => {
+          void (async () => {
+            try {
+              await api({
+                action: "plaid-update-complete",
+                business: connection.business,
+                connectionId: connection.id,
+              });
+              sessionStorage.removeItem("corner-ops-plaid-link");
+              handler.destroy();
+              await load(connection.business);
+              const count = metadata.accounts?.length || 0;
+              setNotice(`${connection.institutionName} now shares ${count || "the selected"} account${count === 1 ? "" : "s"} through one Plaid connection.`);
+            } catch (error) {
+              setNotice(error instanceof Error ? error.message : "Plaid account selection could not be synchronized.");
+            } finally {
+              setBusy(false);
+              handler.destroy();
+            }
+          })();
+        },
+        onExit: (error) => {
+          sessionStorage.removeItem("corner-ops-plaid-link");
+          if (error) setNotice("Plaid account management closed before the changes were completed.");
+          setBusy(false);
+          handler.destroy();
+        },
+      });
+      handler.open();
+    } catch (error) {
+      sessionStorage.removeItem("corner-ops-plaid-link");
+      setNotice(error instanceof Error ? error.message : "Plaid account management failed.");
+      setBusy(false);
+    }
+  }
+
   async function runAction(body: Record<string, unknown>, success: string) {
     setBusy(true);
     setNotice("");
@@ -241,10 +337,10 @@ export default function IntegrationsPage() {
     try {
       const response = await fetch("/api/integrations", { method: "POST", body: form });
       if (!response.ok) throw new Error(await responseMessage(response));
-      const result = await response.json() as { imported: number; rowsRead: number };
+      const result = await response.json() as HistoricalImportResult;
       event.currentTarget.reset();
       await load();
-      setNotice(`Imported ${result.imported} of ${result.rowsRead} bank rows.`);
+      setNotice(`${result.detectedFormat}: ${result.imported} new, ${result.updated} refreshed, and ${result.matchedExisting} already matched from ${result.dateFrom} through ${result.dateTo}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Bank file import failed.");
     } finally {
@@ -283,10 +379,11 @@ export default function IntegrationsPage() {
       <article className="panel integrationCard" id="bank-card-connect">
         <div className="panelHeader"><div><p className="eyebrow">Plaid feeds</p><h3>Banks & credit cards</h3></div><span className={`badge ${dashboard?.configuration.plaid ? "active" : "needsreview"}`}>{dashboard?.configuration.plaid ? dashboard.configuration.plaidEnvironment : "Needs Plaid keys"}</span></div>
         <div className="integrationBody">
-          <p>Connect a bank or credit-card issuer through Plaid. Repeat this for every institution, then choose all checking and card accounts that should remain active.</p>
-          <button className="primary" disabled={busy || !dashboard?.configuration.plaid} onClick={() => void launchPlaid(business)}>Connect another bank or card issuer</button>
+          <p>One Plaid Item represents one institution login and can contain several checking, savings, and card accounts. Select all accounts for that login instead of reconnecting the same bank and consuming another Trial Item.</p>
+          <button className="primary" disabled={busy || !dashboard?.configuration.plaid} onClick={() => void launchPlaid(business)}>Connect a new institution login</button>
           <a className="secondary" href={`/ops/bank-accounts?business=${encodeURIComponent(business)}`}>Choose active account feeds</a>
-          {plaidConnections.map((connection) => <div className="connectionRow" key={connection.id}><div><strong>{connection.institutionName}</strong><small>Last sync: {connection.lastSyncAt ? new Date(connection.lastSyncAt).toLocaleString() : "Never"}</small></div><button className="secondary" disabled={busy} onClick={() => void runAction({ action: "bank-sync", connectionId: connection.id }, `${connection.institutionName} synchronized.`)}>Sync now</button></div>)}
+          <a className="secondary" href={`/ops/card-statements?business=${encodeURIComponent(business)}`}>Upload and reconcile card statements</a>
+          {plaidConnections.map((connection) => <div className="connectionRow" key={connection.id}><div><strong>{connection.institutionName}</strong><small>One Item · Last sync: {connection.lastSyncAt ? new Date(connection.lastSyncAt).toLocaleString() : "Never"}</small></div><div className="connectionActions"><button className="secondary" disabled={busy} onClick={() => void managePlaidAccounts(connection)}>Manage shared accounts</button><button className="secondary" disabled={busy} onClick={() => void runAction({ action: "bank-sync", connectionId: connection.id }, `${connection.institutionName} synchronized.`)}>Sync now</button></div></div>)}
         </div>
       </article>
 
@@ -312,11 +409,13 @@ export default function IntegrationsPage() {
       </article>
 
       <article className="panel integrationCard">
-        <div className="panelHeader"><div><p className="eyebrow">Fallback</p><h3>Bank or card file import</h3></div></div>
+        <div className="panelHeader"><div><p className="eyebrow">Historical backfill</p><h3>Bank CSV or Excel import</h3></div></div>
         <form className="stackForm integrationBody" onSubmit={importBankFile}>
+          <p>Use this for history before Plaid or whenever an institution does not provide enough history. Reimporting the same file refreshes rows instead of duplicating them.</p>
           <label>Institution<input name="institutionName" defaultValue={business === "Corner Deli" ? "SEACOMM" : "NBT Bank"} required /></label>
+          <label>Account label<input name="accountName" defaultValue={business === "Corner Deli" ? "Business Account" : "At The Docks operating"} required /></label>
           <label>CSV or Excel<input name="file" type="file" accept=".csv,.xlsx,.xls" required /></label>
-          <button className="secondary" disabled={busy}>Import transactions</button>
+          <button className="secondary" disabled={busy}>Import historical transactions</button>
         </form>
       </article>
     </section>
