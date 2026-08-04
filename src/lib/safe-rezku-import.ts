@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { importRezkuReport } from "@/lib/operations";
 import { repairRezkuBatchTimes } from "@/lib/rezku-eastern-time";
+import { normalizeRezkuWorkbook } from "@/lib/rezku-workbook-normalize";
 
 export async function importSafeRezkuReport(
   fileName: string,
@@ -8,14 +9,15 @@ export async function importSafeRezkuReport(
   requestedType: string | undefined,
   actor: string,
 ) {
-  const result = await importRezkuReport(fileName, bytes, requestedType, actor);
+  const normalizedBytes = normalizeRezkuWorkbook(fileName, bytes, requestedType);
+  const result = await importRezkuReport(fileName, normalizedBytes, requestedType, actor);
 
   if (result.reportType === "shifts") {
     const sql = getSql();
     await sql`
       DELETE FROM rezku_shifts
       WHERE batch_id = ${result.batchId}::uuid
-        AND LOWER(BTRIM(employee_name)) IN ('cover', 'main')
+        AND LOWER(BTRIM(employee_name)) = 'cover'
     `;
     await sql`
       UPDATE rezku_shifts
