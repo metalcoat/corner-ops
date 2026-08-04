@@ -12,6 +12,7 @@ import {
 } from "@/lib/rezku-monitor";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type StandardReportType = "shifts" | "orders" | "transactions";
 type ReportType = StandardReportType | RezkuVoidReportType;
@@ -111,17 +112,50 @@ async function downloadAndImport(url: string, fileName: string, importedBy: stri
   };
 }
 
+export async function GET() {
+  const apiKeyConfigured = Boolean(process.env.RESEND_API_KEY?.trim());
+  const webhookSecretConfigured = Boolean(process.env.RESEND_WEBHOOK_SECRET?.trim());
+  const configured = apiKeyConfigured && webhookSecretConfigured;
+  return Response.json({
+    ok: configured,
+    service: "Rezku inbound email",
+    configured: {
+      resendApiKey: apiKeyConfigured,
+      webhookSecret: webhookSecretConfigured,
+      allowedSender: (process.env.REZKU_ALLOWED_SENDER?.trim() || "support@rezku.com").toLowerCase(),
+    },
+    expected: {
+      event: "email.received",
+      subject: REZKU_SUBJECT,
+      excelHost: REZKU_FILE_HOST,
+    },
+  }, { status: configured ? 200 : 503 });
+}
+
 export async function POST(request: Request) {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   const webhookSecret = process.env.RESEND_WEBHOOK_SECRET?.trim();
-  if (!apiKey || !webhookSecret) {
-    return Response.json({ error: "Resend inbound email is not configured." }, { status: 503 });
-  }
-
   const id = request.headers.get("svix-id");
   const timestamp = request.headers.get("svix-timestamp");
   const signature = request.headers.get("svix-signature");
+
+  console.log("[rezku/inbound] request received", {
+    webhookId: id || null,
+    hasTimestamp: Boolean(timestamp),
+    hasSignature: Boolean(signature),
+    configured: Boolean(apiKey && webhookSecret),
+  });
+
+  if (!apiKey || !webhookSecret) {
+    console.error("[rezku/inbound] rejected because Resend environment variables are missing", {
+      apiKeyConfigured: Boolean(apiKey),
+      webhookSecretConfigured: Boolean(webhookSecret),
+    });
+    return Response.json({ error: "Resend inbound email is not configured." }, { status: 503 });
+  }
+
   if (!id || !timestamp || !signature) {
+    console.error("[rezku/inbound] rejected because signature headers are missing", { webhookId: id || null });
     return Response.json({ error: "Missing webhook signature headers." }, { status: 400 });
   }
 
@@ -130,16 +164,32 @@ export async function POST(request: Request) {
   let event: ReceivedEvent;
   try {
     event = resend.webhooks.verify({ payload, headers: { id, timestamp, signature }, webhookSecret }) as ReceivedEvent;
-  } catch {
+  } catch (error) {
+    console.error("[rezku/inbound] invalid webhook signature", {
+      webhookId: id,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return Response.json({ error: "Invalid webhook signature." }, { status: 400 });
   }
 
+  console.log("[rezku/inbound] verified event", {
+    webhookId: id,
+    eventType: event.type,
+    emailId: event.data?.email_id || null,
+  });
+
   if (event.type !== "email.received") {
+    console.log("[rezku/inbound] ignored non-email event", { webhookId: id, eventType: event.type });
     return Response.json({ ignored: true, reason: "Not an inbound email event." });
   }
 
   const { data: emailData, error: emailError } = await resend.emails.receiving.get(event.data.email_id);
   if (emailError || !emailData) {
+    console.error("[rezku/inbound] received email could not be retrieved", {
+      webhookId: id,
+      emailId: event.data.email_id,
+      error: emailError?.message || "No email payload returned",
+    });
     return Response.json({ error: emailError?.message || "Received email could not be retrieved." }, { status: 502 });
   }
 
@@ -148,6 +198,14 @@ export async function POST(request: Request) {
   const subject = email.subject || event.data.subject || "";
   const allowedSender = (process.env.REZKU_ALLOWED_SENDER?.trim() || "support@rezku.com").toLowerCase();
   if (senderAddress(sender) !== allowedSender || subject !== REZKU_SUBJECT) {
+    console.log("[rezku/inbound] ignored unmatched email", {
+      webhookId: id,
+      emailId: event.data.email_id,
+      sender: senderAddress(sender),
+      subject,
+      senderMatched: senderAddress(sender) === allowedSender,
+      subjectMatched: subject === REZKU_SUBJECT,
+    });
     return Response.json({ ignored: true, reason: "Email did not match the trusted Rezku sender and subject." });
   }
 
@@ -157,6 +215,11 @@ export async function POST(request: Request) {
 
   const { data: rawAttachments, error: attachmentError } = await resend.emails.receiving.attachments.list({ emailId: event.data.email_id });
   if (attachmentError) {
+    console.error("[rezku/inbound] attachment listing failed", {
+      webhookId: id,
+      emailId: event.data.email_id,
+      error: attachmentError.message,
+    });
     await startRezkuInboundEmail({
       emailId: event.data.email_id,
       webhookId: id,
@@ -180,6 +243,13 @@ export async function POST(request: Request) {
   }
 
   const uniqueSources = [...new Map(sources.map((source) => [source.url, source])).values()];
+  console.log("[rezku/inbound] trusted email located", {
+    webhookId: id,
+    emailId: event.data.email_id,
+    reportDate: emailReportDate,
+    reportFiles: uniqueSources.map((source) => source.fileName),
+  });
+
   await startRezkuInboundEmail({
     emailId: event.data.email_id,
     webhookId: id,
@@ -191,6 +261,7 @@ export async function POST(request: Request) {
 
   if (uniqueSources.length === 0) {
     const error = "The Rezku email did not contain any Excel report links.";
+    console.error("[rezku/inbound] no Excel reports found", { webhookId: id, emailId: event.data.email_id });
     await finishRezkuInboundEmail({ emailId: event.data.email_id, status: "Failed", reportsProcessed: 0, error });
     return Response.json({ error }, { status: 422 });
   }
@@ -217,9 +288,23 @@ export async function POST(request: Request) {
         rowsRead: result.rowsRead,
         rowsImported: result.imported,
       });
+      console.log("[rezku/inbound] report imported", {
+        webhookId: id,
+        emailId: event.data.email_id,
+        fileName: source.fileName,
+        reportType: result.reportType,
+        rowsRead: result.rowsRead,
+        rowsImported: result.imported,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       failures.push(`${source.fileName}: ${message}`);
+      console.error("[rezku/inbound] report import failed", {
+        webhookId: id,
+        emailId: event.data.email_id,
+        fileName: source.fileName,
+        error: message,
+      });
       await recordRezkuInboundReport({
         emailId: event.data.email_id,
         fileName: source.fileName,
@@ -237,6 +322,14 @@ export async function POST(request: Request) {
     status,
     reportsProcessed: successful,
     error: failures.join("\n"),
+  });
+
+  console.log("[rezku/inbound] email processing finished", {
+    webhookId: id,
+    emailId: event.data.email_id,
+    status,
+    reportsProcessed: successful,
+    failures: failures.length,
   });
 
   const response = {
