@@ -1,5 +1,6 @@
 import { ensureSchema, getSql } from "@/lib/db";
 import { repairExistingRezkuTimesOnce, repairRezkuBatchTimes } from "@/lib/rezku-eastern-time";
+import { ensureRezkuProductSalesSchema } from "@/lib/rezku-product-sales";
 import { ensureRezkuVoidSchema } from "@/lib/rezku-voids";
 
 type InboundStatus = "Received" | "Processing" | "Processed" | "Partial" | "Failed";
@@ -146,7 +147,11 @@ export async function finishRezkuInboundEmail(input: {
 }
 
 export async function rezkuImportDashboard() {
-  await Promise.all([ensureRezkuMonitorSchema(), ensureRezkuVoidSchema()]);
+  await Promise.all([
+    ensureRezkuMonitorSchema(),
+    ensureRezkuVoidSchema(),
+    ensureRezkuProductSalesSchema(),
+  ]);
   await repairExistingRezkuTimesOnce();
   const sql = getSql();
   const [emails, reports, imports, exceptions] = await Promise.all([
@@ -188,6 +193,14 @@ export async function rezkuImportDashboard() {
           0 AS missing_clock_in_count,
           0 AS missing_clock_out_count
         FROM rezku_void_import_batches b
+
+        UNION ALL
+
+        SELECT b.id, b.report_type, b.file_name, b.row_count, b.imported_by, b.imported_at,
+          (SELECT COUNT(*) FROM rezku_product_sales s WHERE s.batch_id = b.id) AS imported_count,
+          0 AS missing_clock_in_count,
+          0 AS missing_clock_out_count
+        FROM rezku_product_sales_import_batches b
       ) combined_imports
       ORDER BY imported_at DESC
       LIMIT 80
