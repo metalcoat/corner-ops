@@ -81,7 +81,7 @@ export async function scheduledPayrollEstimate(business: Business, requestedWeek
     const normalRate = Math.max(0, Number(row.hourly_rate || 0));
     const deliveryRate = Math.max(0, Number(row.tipped_rate || 0));
     const isDelivery = deliveryPosition(row.position);
-    const rate = isDelivery && deliveryRate > 0 ? deliveryRate : normalRate;
+    const rate = isDelivery ? deliveryRate : normalRate;
     const prior = employeeHours.get(row.employee_id!) || 0;
     const regular = Math.max(0, Math.min(shiftHours, 40 - prior));
     const overtime = Math.max(0, shiftHours - regular);
