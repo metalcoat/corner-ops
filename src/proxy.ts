@@ -4,9 +4,11 @@ import { NextRequest, NextResponse } from "next/server";
 const COOKIE_NAME = "corner_ops_session";
 const publicPaths = [
   "/api/auth/session",
+  "/api/auth/password-reset/",
   "/api/timeclock",
   "/api/employee",
   "/api/employee/session",
+  "/api/employee/pin-reset/",
   "/api/rezku/inbound",
   "/api/3cx/inbound",
   "/api/square/callback",
@@ -60,7 +62,7 @@ function needed(path: string, method: string): string | null {
   if (path.startsWith("/api/integrations") || path.startsWith("/api/bank-accounts") || path.startsWith("/api/square/connect")) {
     return write ? "integrations.write" : "integrations.read";
   }
-  if (path.startsWith("/api/messages") || path.startsWith("/api/workforce") || path.startsWith("/api/employee-directory") || path.startsWith("/api/attendance") || path.startsWith("/api/employment-forms")) {
+  if (path.startsWith("/api/messages") || path.startsWith("/api/workforce") || path.startsWith("/api/employee-directory") || path.startsWith("/api/attendance") || path.startsWith("/api/employment-forms") || path.startsWith("/api/direct-deposit")) {
     return write ? "workforce.write" : "workforce.read";
   }
   if (path.startsWith("/api/documents") || path.startsWith("/api/audit")) {
