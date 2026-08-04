@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { ensureSchema, getSql } from "@/lib/db";
 import { getEmploymentFormProfile } from "@/lib/employment-forms";
+import { cornerOpsBaseUrl, ownerNotificationEmails, sendTransactionalEmail } from "@/lib/transactional-email";
 import type { Business } from "@/lib/types";
 
 export type DirectDepositStatus = "Assigned" | "Completed" | "Superseded";
@@ -134,6 +135,29 @@ function noticePayload(business: Business, person: EmployeeRow, employer: Record
   };
 }
 
+async function notifyOwner(input: {
+  subject: string;
+  lines: string[];
+}): Promise<void> {
+  const recipients = ownerNotificationEmails();
+  if (!recipients.length) return;
+  const base = cornerOpsBaseUrl();
+  try {
+    await sendTransactionalEmail({
+      to: recipients,
+      subject: input.subject,
+      text: [
+        ...input.lines,
+        base ? `Review securely: ${base}/ops/direct-deposit` : "Open People > Direct deposit onboarding to review securely.",
+        "",
+        "Full routing and account numbers are intentionally excluded from email.",
+      ].join("\n"),
+    });
+  } catch (error) {
+    console.error("[direct-deposit] owner notification failed", error);
+  }
+}
+
 export async function assignDirectDepositElection(input: {
   business: Business;
   employeeId: string;
@@ -157,6 +181,15 @@ export async function assignDirectDepositElection(input: {
     )
     RETURNING id, business, employee_id, employee_name, status, encrypted_payload, assigned_at, signed_at
   ` as unknown as ElectionRow[];
+  await notifyOwner({
+    subject: `[Corner Ops] Payment-method form assigned: ${person.name}`,
+    lines: [
+      `${person.name} (${input.business}) was assigned a new direct-deposit or paper-check election.`,
+      `Assigned by: ${input.actor}`,
+      "No payroll change should be made until the employee signs and submits the election.",
+      "",
+    ],
+  });
   return summary(rows[0]);
 }
 
@@ -222,6 +255,11 @@ function normalized(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+function lastFour(value: unknown): string {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits ? digits.slice(-4).padStart(4, "•") : "not provided";
+}
+
 export async function submitDirectDepositElection(input: {
   id: string;
   business: Business;
@@ -264,5 +302,22 @@ export async function submitDirectDepositElection(input: {
     WHERE id = ${row.id}
     RETURNING id, business, employee_id, employee_name, status, encrypted_payload, assigned_at, signed_at
   ` as unknown as ElectionRow[];
+
+  const direct = input.payload.paymentChoice === "direct-deposit";
+  await notifyOwner({
+    subject: `[Corner Ops] Payroll payment change: ${row.employee_name}`,
+    lines: direct ? [
+      `${row.employee_name} (${input.business}) submitted a new DIRECT DEPOSIT election.`,
+      `Financial institution: ${String(input.payload.financialInstitution || "Not provided")}`,
+      `Account type: ${String(input.payload.accountType || "Not provided")}`,
+      `Account ending: ${lastFour(input.payload.accountNumber)}`,
+      "Action required: update the employee's payment method in payroll.",
+      "",
+    ] : [
+      `${row.employee_name} (${input.business}) elected PAPER CHECK and declined or withdrew direct deposit.`,
+      "Action required: update the employee's payment method in payroll.",
+      "",
+    ],
+  });
   return summary(updated[0]);
 }
