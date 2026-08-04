@@ -1,3 +1,5 @@
+import { createDecipheriv, createHash } from "node:crypto";
+import { getSql } from "@/lib/db";
 import type { Business } from "@/lib/types";
 
 const PLAID_PRODUCTS = ["transactions"];
@@ -48,6 +50,16 @@ function validRedirectUri(value: string | undefined): string | null {
   }
 }
 
+function redirectUriForOrigin(origin: string): string {
+  return validRedirectUri(process.env.PLAID_REDIRECT_URI)
+    || (origin.includes("localhost") ? `${origin}/ops/integrations` : CANONICAL_OAUTH_REDIRECT);
+}
+
+function customizationFields(): Record<string, string> {
+  const name = process.env.PLAID_LINK_CUSTOMIZATION_NAME?.trim();
+  return name ? { link_customization_name: name } : {};
+}
+
 function isRedirectConfigurationError(payload: PlaidErrorPayload): boolean {
   const text = `${payload.error_code || ""} ${payload.error_message || ""} ${payload.display_message || ""}`.toLowerCase();
   return text.includes("redirect uri") || text.includes("redirect_uri") || text.includes("oauth redirect");
@@ -76,21 +88,7 @@ async function requestLinkToken(body: Record<string, unknown>): Promise<{
   return { ok: false, status: response.status, payload };
 }
 
-export async function createResilientPlaidLinkToken(input: { business: Business; origin: string }) {
-  const origin = allowedOrigin(input.origin);
-  const redirectUri = validRedirectUri(process.env.PLAID_REDIRECT_URI)
-    || (origin.includes("localhost") ? `${origin}/ops/integrations` : CANONICAL_OAUTH_REDIRECT);
-  const baseRequest: Record<string, unknown> = {
-    client_name: "Corner Ops",
-    language: "en",
-    country_codes: ["US"],
-    products: PLAID_PRODUCTS,
-    transactions: { days_requested: 730 },
-    user: {
-      client_user_id: `corner-ops-${input.business.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-    },
-  };
-
+async function resilientToken(baseRequest: Record<string, unknown>, redirectUri: string) {
   let result = await requestLinkToken({ ...baseRequest, redirect_uri: redirectUri });
   let oauthEnabled = true;
   let oauthWarning = "";
@@ -129,5 +127,80 @@ export async function createResilientPlaidLinkToken(input: { business: Business;
     oauthRedirectUri: oauthEnabled ? redirectUri : null,
     oauthCallbackToRegister: redirectUri,
     oauthWarning,
+  };
+}
+
+function integrationKey(): Buffer {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET is required before bank connections can be managed.");
+  return createHash("sha256").update(`corner-ops-integrations:${secret}`).digest();
+}
+
+function decryptSecret(value: string): string {
+  const [ivText, tagText, encryptedText] = value.split(".");
+  if (!ivText || !tagText || !encryptedText) throw new Error("Stored Plaid credentials are invalid.");
+  const decipher = createDecipheriv("aes-256-gcm", integrationKey(), Buffer.from(ivText, "base64url"));
+  decipher.setAuthTag(Buffer.from(tagText, "base64url"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedText, "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
+}
+
+export async function createResilientPlaidLinkToken(input: { business: Business; origin: string }) {
+  const origin = allowedOrigin(input.origin);
+  const redirectUri = redirectUriForOrigin(origin);
+  const baseRequest: Record<string, unknown> = {
+    client_name: "Corner Ops",
+    language: "en",
+    country_codes: ["US"],
+    products: PLAID_PRODUCTS,
+    transactions: { days_requested: 730 },
+    user: {
+      client_user_id: `corner-ops-${input.business.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    },
+    ...customizationFields(),
+  };
+  return resilientToken(baseRequest, redirectUri);
+}
+
+export async function createPlaidAccountSelectionToken(input: {
+  business: Business;
+  connectionId: string;
+  origin: string;
+}) {
+  const rows = await getSql()`
+    SELECT id, provider, business, encrypted_access_token, institution_name
+    FROM integration_connections
+    WHERE id = ${input.connectionId} AND business = ${input.business}
+    LIMIT 1
+  ` as unknown as Array<{
+    id: string;
+    provider: string;
+    business: Business;
+    encrypted_access_token: string;
+    institution_name: string;
+  }>;
+  const connection = rows[0];
+  if (!connection || connection.provider !== "Plaid") throw new Error("Plaid connection was not found.");
+
+  const origin = allowedOrigin(input.origin);
+  const redirectUri = redirectUriForOrigin(origin);
+  const baseRequest: Record<string, unknown> = {
+    client_name: "Corner Ops",
+    language: "en",
+    country_codes: ["US"],
+    access_token: decryptSecret(connection.encrypted_access_token),
+    user: {
+      client_user_id: `corner-ops-${input.business.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    },
+    update: { account_selection_enabled: true },
+    ...customizationFields(),
+  };
+  return {
+    ...(await resilientToken(baseRequest, redirectUri)),
+    updateMode: true,
+    connectionId: connection.id,
+    institutionName: connection.institution_name,
   };
 }
