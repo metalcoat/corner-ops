@@ -233,7 +233,9 @@ export async function importHistoricalBankFile(input: {
   const connectionId = connectionRows[0].id;
 
   for (const accountName of accountNames) {
-    const latestWithBalance = parsedRows.find((row) => row.accountName === accountName && row.balance !== null);
+    const latestWithBalance = parsedRows
+      .filter((row) => row.accountName === accountName && row.balance !== null)
+      .sort((left, right) => right.date.localeCompare(left.date))[0];
     const externalAccountId = `historical-account:${createHash("sha256").update(`${connectionKey}|${accountName}`).digest("hex")}`;
     await getSql()`
       INSERT INTO bank_accounts (
