@@ -1,7 +1,7 @@
 import { getSql } from "@/lib/db";
 import { ensureScheduleMealSchema } from "@/lib/schedule-meal-storage";
 import { analyzeSchedule } from "@/lib/schedule-validation";
-import { publishScheduleWeek } from "@/lib/staff-notifications";
+import { publishBusinessScheduleWeek } from "@/lib/business-schedule-publication";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -99,5 +99,5 @@ export async function publishValidatedScheduleWeek(input: {
     throw new Error(`Schedule cannot be published. ${problems.join(" | ")}`);
   }
 
-  return publishScheduleWeek(input);
+  return publishBusinessScheduleWeek({ ...input, weekStart });
 }
