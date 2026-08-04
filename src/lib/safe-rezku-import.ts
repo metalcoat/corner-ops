@@ -1,7 +1,24 @@
 import { getSql } from "@/lib/db";
 import { importRezkuReport } from "@/lib/operations";
-import { repairRezkuBatchTimes } from "@/lib/rezku-eastern-time";
+import { repairExistingRezkuTimesOnce, repairRezkuBatchTimes } from "@/lib/rezku-eastern-time";
 import { normalizeRezkuWorkbook } from "@/lib/rezku-workbook-normalize";
+
+async function removeInvalidRezkuShiftRows() {
+  const sql = getSql();
+
+  // Excel serial zero is sometimes rendered as 1/0/00. It is not a punch time.
+  await sql`
+    DELETE FROM rezku_shifts
+    WHERE clock_in IS NOT NULL
+      AND clock_out IS NOT NULL
+      AND clock_in = clock_out
+      AND COALESCE(raw->>'In', raw->>'Clock In', '') !~* '[0-9]{1,2}:[0-9]{2}'
+      AND COALESCE(raw->>'Out', raw->>'Clock Out', '') !~* '[0-9]{1,2}:[0-9]{2}'
+  `;
+
+  // Totals-only labor rows are summaries, not punches or missing-punch exceptions.
+  await sql`DELETE FROM rezku_shifts WHERE clock_in IS NULL AND clock_out IS NULL`;
+}
 
 async function cleanRezkuShifts(batchId: string) {
   const sql = getSql();
@@ -19,12 +36,7 @@ async function cleanRezkuShifts(batchId: string) {
     WHERE LOWER(BTRIM(employee_name)) = 'can'
   `;
 
-  // Detailed Labor contains employee totals with hours but no punch timestamps.
-  // Those rows are summaries, not shifts or missing-punch exceptions.
-  await sql`
-    DELETE FROM rezku_shifts
-    WHERE clock_in IS NULL AND clock_out IS NULL
-  `;
+  await removeInvalidRezkuShiftRows();
 
   // Detailed Labor and Shift Attestation can both contain the same punch.
   // Keep one copy, preferring the row that includes a Rezku position.
@@ -76,6 +88,20 @@ async function cleanRezkuShifts(batchId: string) {
   `;
 }
 
+async function forceGlobalRezkuTimeRepair() {
+  const sql = getSql();
+  await sql`
+    CREATE TABLE IF NOT EXISTS rezku_data_migrations (
+      migration_key TEXT PRIMARY KEY,
+      completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`DELETE FROM rezku_data_migrations WHERE migration_key LIKE 'rezku-wall-times-america-new-york-%'`;
+  const repaired = await repairExistingRezkuTimesOnce();
+  await removeInvalidRezkuShiftRows();
+  return repaired;
+}
+
 export async function importSafeRezkuReport(
   fileName: string,
   bytes: ArrayBuffer,
@@ -90,8 +116,9 @@ export async function importSafeRezkuReport(
   }
 
   const repaired = await repairRezkuBatchTimes(result.batchId);
+  const globalRepair = await forceGlobalRezkuTimeRepair();
   if (result.reportType === "shifts") {
-    // Time repair can reveal a duplicate that originally had null or incorrectly zoned timestamps.
+    // Time repair can reveal duplicates that originally had null or incorrectly zoned timestamps.
     await cleanRezkuShifts(result.batchId);
   }
 
@@ -110,5 +137,6 @@ export async function importSafeRezkuReport(
     ...result,
     imported: Number(counts[0]?.imported || 0),
     repaired,
+    globalRepair,
   };
 }
