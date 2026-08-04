@@ -34,6 +34,9 @@ function validateSubmission(type: EmploymentFormType, payload: Record<string, un
   } else if (type === "I9") {
     required(payload, ["lastName", "firstName", "address", "city", "state", "zip", "dateOfBirth", "citizenshipStatus"]);
     if (payload.ssn && digits(payload.ssn).length !== 9) throw new Error("The Social Security number must contain nine digits.");
+    if (payload.preparerTranslator === "used") {
+      throw new Error("A preparer or translator requires Form I-9 Supplement A. Complete that supplement with management before signing electronically.");
+    }
   }
 }
 
