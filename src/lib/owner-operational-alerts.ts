@@ -42,6 +42,12 @@ function decodeBase64url(value: string): Buffer {
   return Buffer.from(value, "base64url");
 }
 
+function requestBody(value: Buffer): ArrayBuffer {
+  const copy = new Uint8Array(value.length);
+  copy.set(value);
+  return copy.buffer;
+}
+
 function pushKeys() {
   const secret = process.env.SESSION_SECRET;
   if (!secret) throw new Error("SESSION_SECRET is required before push notifications can be used.");
@@ -60,7 +66,7 @@ function hmac(key: Buffer, value: Buffer): Buffer {
 
 function hkdfExpand(prk: Buffer, info: Buffer, length: number): Buffer {
   const parts: Buffer[] = [];
-  let previous = Buffer.alloc(0);
+  let previous: Buffer = Buffer.alloc(0);
   let counter = 1;
   while (Buffer.concat(parts).length < length) {
     previous = hmac(prk, Buffer.concat([previous, info, Buffer.from([counter])]));
@@ -136,7 +142,7 @@ async function sendPush(subscription: StoredSubscription, input: AlertInput) {
       TTL: "86400",
       Urgency: "high",
     },
-    body: encryptedPayload(subscription, input),
+    body: requestBody(encryptedPayload(subscription, input)),
     cache: "no-store",
   });
   if (!response.ok && response.status !== 201) {
