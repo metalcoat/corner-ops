@@ -165,8 +165,10 @@ function normalizeShiftSheet(sheetName: string, sheet: XLSX.WorkSheet): XLSX.Wor
     const clockOut = fullDateTime(valueFor(row, map, "clockOutDate") || commonDate, valueFor(row, map, "clockOut"));
     const regularHours = valueFor(row, map, "regularHours");
     const overtimeHours = valueFor(row, map, "overtimeHours");
-    const meaningful = employee || clean(clockIn) || clean(clockOut) || clean(regularHours) || clean(overtimeHours);
-    if (!meaningful) continue;
+
+    // Detailed Labor includes totals and earnings summaries with hours but no actual punches.
+    // Those are not shifts and must not become missing-punch exceptions.
+    if (!clean(clockIn) && !clean(clockOut)) continue;
 
     // Main is a shared attestation sheet, so every imported row must identify its employee.
     // Employee-specific Detailed Labor sheets may legitimately rely on their sheet name.
