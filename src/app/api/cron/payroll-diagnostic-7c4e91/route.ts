@@ -22,19 +22,19 @@ export async function GET() {
   const [summary, orderRows, transactionRows, shiftRows] = await Promise.all([
     payrollSummary("Corner Deli", WEEK_START),
     sql`
-      SELECT order_id, order_type, opened_at
+      SELECT order_id, order_type, opened_at, raw
       FROM rezku_orders
       WHERE opened_at >= ${START} AND opened_at < ${END}
       ORDER BY opened_at
     `,
     sql`
-      SELECT transaction_id, order_id, transaction_time, tip
+      SELECT transaction_id, order_id, transaction_time, tip, raw
       FROM rezku_transactions
       WHERE transaction_time >= ${START} AND transaction_time < ${END} AND tip <> 0
       ORDER BY transaction_time
     `,
     sql`
-      SELECT employee_name, position, role_group, clock_in, clock_out
+      SELECT employee_name, position, role_group, clock_in, clock_out, raw
       FROM rezku_shifts
       WHERE clock_in >= ${START} AND clock_in < ${END}
       ORDER BY clock_in
@@ -57,6 +57,7 @@ export async function GET() {
       orderType,
       delivery: /deliver/i.test(orderType),
       pickup: /pick\s*up|pickup|take\s*out|takeout|carry\s*out|carryout|to\s*go|togo|counter/i.test(orderType),
+      raw: row.raw,
     };
   });
 
@@ -94,6 +95,7 @@ export async function GET() {
     payrollRows: (summary as { rows?: unknown[] }).rows || [],
     unallocated: ((summary as { tipJoinIssues?: unknown[] }).tipJoinIssues || []),
     classifications,
+    orders: orders.slice(0, 30),
     shifts,
   });
 }
