@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Business } from "@/lib/types";
 import "./payroll-cost-banner.css";
 
@@ -21,15 +21,6 @@ type Estimate = {
   missingRateHours: number;
   includesEmployerTaxes: boolean;
   note: string;
-};
-
-type RateEmployee = {
-  id: string;
-  name: string;
-  position: string;
-  hourlyRate: number;
-  tippedRate: number;
-  active: boolean;
 };
 
 function monday(value: Date): Date {
@@ -79,11 +70,8 @@ export default function PayrollCostBanner() {
   const [business, setBusiness] = useState<Business>("Corner Deli");
   const [weekStart, setWeekStart] = useState(() => monday(new Date()));
   const [estimate, setEstimate] = useState<Estimate | null>(null);
-  const [employees, setEmployees] = useState<RateEmployee[]>([]);
   const [notice, setNotice] = useState("");
-  const [rateNotice, setRateNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [rateBusy, setRateBusy] = useState("");
   const businessRef = useRef<Business>(business);
   businessRef.current = business;
 
@@ -122,18 +110,11 @@ export default function PayrollCostBanner() {
     setBusy(true);
     setNotice("");
     try {
-      const [estimateResponse, employeeResponse] = await Promise.all([
-        fetch(`/api/workforce/payroll-estimate?business=${encodeURIComponent(business)}&weekStart=${dateKey(weekStart)}`, { cache: "no-store" }),
-        fetch(`/api/employee-directory?business=${encodeURIComponent(business)}`, { cache: "no-store" }),
-      ]);
-      if (!estimateResponse.ok) throw new Error(await errorMessage(estimateResponse));
-      if (!employeeResponse.ok) throw new Error(await errorMessage(employeeResponse));
-      const directory = await employeeResponse.json() as { employees?: RateEmployee[] };
-      setEstimate(await estimateResponse.json() as Estimate);
-      setEmployees(directory.employees || []);
+      const response = await fetch(`/api/workforce/payroll-estimate?business=${encodeURIComponent(business)}&weekStart=${dateKey(weekStart)}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(await errorMessage(response));
+      setEstimate(await response.json() as Estimate);
     } catch (error) {
       setEstimate(null);
-      setEmployees([]);
       setNotice(error instanceof Error ? error.message : "Payroll estimate could not be loaded.");
     } finally {
       setBusy(false);
@@ -144,41 +125,15 @@ export default function PayrollCostBanner() {
     void load();
   }, [load]);
 
-  async function saveRates(event: FormEvent<HTMLFormElement>, employee: RateEmployee) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    setRateBusy(employee.id);
-    setRateNotice("");
-    try {
-      const response = await fetch("/api/employee-directory", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "update-profile",
-          business,
-          id: employee.id,
-          hourlyRate: Number(form.get("hourlyRate") || 0),
-          tippedRate: Number(form.get("tippedRate") || 0),
-        }),
-      });
-      if (!response.ok) throw new Error(await errorMessage(response));
-      setRateNotice(`${employee.name}'s pay rates were updated.`);
-      await load();
-    } catch (error) {
-      setRateNotice(error instanceof Error ? error.message : "Pay rates could not be updated.");
-    } finally {
-      setRateBusy("");
-    }
-  }
-
   return <section className="payrollEstimateBanner" aria-label="Scheduled payroll estimate">
     <header>
       <div>
         <p>Scheduled payroll forecast</p>
         <h2>{business} · {dateLabel(dateKey(weekStart))}–{dateLabel(dateKey(addDays(weekStart, 6)))}</h2>
-        <span>Gross scheduled wages before employer taxes, tips, reimbursements, and payroll fees.</span>
+        <span>Gross scheduled wages before employer taxes, tips, reimbursements, and payroll fees. Edit employee rates from the Employees page.</span>
       </div>
       <div className="payrollEstimateControls">
+        <a href="/ops/employees">Employees</a>
         <button type="button" onClick={() => setWeekStart((value) => addDays(value, -7))}>← Prior week</button>
         <button type="button" onClick={() => setWeekStart(monday(new Date()))}>Current week</button>
         <button type="button" onClick={() => setWeekStart((value) => addDays(value, 7))}>Next week →</button>
@@ -200,20 +155,5 @@ export default function PayrollCostBanner() {
         {estimate.overtimeHours > 0 && <span>{estimate.overtimeHours.toFixed(1)} overtime hours are priced at 1.5× the applicable regular or tipped rate.</span>}
       </div>}
     </>}
-
-    <details className="payrollRateEditor">
-      <summary>Manage {business} employee pay rates</summary>
-      <p className="payrollRateRule">A schedule position named Delivery, Driver, or Deliveries automatically uses the tipped rate. Every other position uses the regular hourly rate.</p>
-      {rateNotice && <div className="payrollEstimateNotice">{rateNotice}</div>}
-      <div className="payrollRateGrid">
-        {employees.map((employee) => <form key={`${employee.id}-${employee.hourlyRate}-${employee.tippedRate}`} className="payrollRateRow" onSubmit={(event) => void saveRates(event, employee)}>
-          <div className="payrollRateEmployee"><strong>{employee.name}</strong><span>{employee.position}{employee.active ? "" : " · Inactive"}</span></div>
-          <label>Regular hourly rate<input name="hourlyRate" type="number" min="0" step="0.01" defaultValue={employee.hourlyRate} /></label>
-          <label>{business === "Corner Deli" ? "Delivery tipped rate" : "Tipped hourly rate"}<input name="tippedRate" type="number" min="0" step="0.01" defaultValue={employee.tippedRate} /></label>
-          <button type="submit" disabled={Boolean(rateBusy)}>{rateBusy === employee.id ? "Saving…" : "Save rates"}</button>
-        </form>)}
-        {!employees.length && <p className="payrollRateEmpty">No employee records are available for {business}.</p>}
-      </div>
-    </details>
   </section>;
 }
