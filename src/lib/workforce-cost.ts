@@ -35,6 +35,14 @@ function deliveryPosition(value: unknown): boolean {
   return /\b(driver|delivery|deliveries)\b/i.test(String(value || ""));
 }
 
+function bartenderPosition(value: unknown): boolean {
+  return /\bbartender\b/i.test(String(value || ""));
+}
+
+function usesTippedRate(business: Business, position: unknown): boolean {
+  return deliveryPosition(position) || (business === "Tiki" && bartenderPosition(position));
+}
+
 function round(value: number, digits = 2): number {
   const power = 10 ** digits;
   return Math.round((value + Number.EPSILON) * power) / power;
@@ -72,16 +80,16 @@ export async function scheduledPayrollEstimate(business: Business, requestedWeek
   let paidHours = 0;
   let regularHours = 0;
   let overtimeHours = 0;
-  let deliveryHours = 0;
-  let deliveryWages = 0;
+  let tippedHours = 0;
+  let tippedWages = 0;
   let missingRateHours = 0;
 
   for (const row of assigned) {
     const shiftHours = hours(row);
     const normalRate = Math.max(0, Number(row.hourly_rate || 0));
-    const deliveryRate = Math.max(0, Number(row.tipped_rate || 0));
-    const isDelivery = deliveryPosition(row.position);
-    const rate = isDelivery ? deliveryRate : normalRate;
+    const tippedRate = Math.max(0, Number(row.tipped_rate || 0));
+    const isTipped = usesTippedRate(business, row.position);
+    const rate = isTipped ? tippedRate : normalRate;
     const prior = employeeHours.get(row.employee_id!) || 0;
     const regular = Math.max(0, Math.min(shiftHours, 40 - prior));
     const overtime = Math.max(0, shiftHours - regular);
@@ -90,14 +98,14 @@ export async function scheduledPayrollEstimate(business: Business, requestedWeek
     paidHours += shiftHours;
     regularHours += regular;
     overtimeHours += overtime;
-    if (isDelivery) deliveryHours += shiftHours;
+    if (isTipped) tippedHours += shiftHours;
     if (rate <= 0) {
       missingRateHours += shiftHours;
       continue;
     }
     const shiftCost = regular * rate + overtime * rate * 1.5;
     grossWages += shiftCost;
-    if (isDelivery) deliveryWages += shiftCost;
+    if (isTipped) tippedWages += shiftCost;
   }
 
   const employeeCount = new Set(assigned.map((row) => row.employee_id)).size;
@@ -112,11 +120,15 @@ export async function scheduledPayrollEstimate(business: Business, requestedWeek
     paidHours: round(paidHours),
     regularHours: round(regularHours),
     overtimeHours: round(overtimeHours),
-    deliveryHours: round(deliveryHours),
+    tippedHours: round(tippedHours),
+    tippedWages: round(tippedWages),
+    deliveryHours: round(tippedHours),
+    deliveryWages: round(tippedWages),
     grossWages: round(grossWages),
-    deliveryWages: round(deliveryWages),
     missingRateHours: round(missingRateHours),
     includesEmployerTaxes: false,
-    note: "Estimated scheduled gross wages before employer payroll taxes, tips, reimbursements, and payroll-provider fees. Scheduled unpaid meal periods are excluded.",
+    note: business === "Tiki"
+      ? "Estimated scheduled gross wages before employer payroll taxes, tips, reimbursements, and payroll-provider fees. Tiki Bartender shifts use the employee's tipped rate. Scheduled unpaid meal periods are excluded."
+      : "Estimated scheduled gross wages before employer payroll taxes, tips, reimbursements, and payroll-provider fees. Delivery shifts use the employee's tipped rate. Scheduled unpaid meal periods are excluded.",
   };
 }
