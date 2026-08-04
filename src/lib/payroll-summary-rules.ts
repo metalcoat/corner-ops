@@ -319,16 +319,23 @@ export async function payrollSummary(business: Business, weekStart: string) {
   const summary = summarizeShifts(shifts);
   const tipDetails = allocateTips(shifts, transactions, summary);
   const rows = [...summary.values()]
-    .map((row) => ({
-      ...row,
-      hours: Math.round(row.hours * 100) / 100,
-      driverTipHours: Math.round(row.driverTipHours * 100) / 100,
-      regularHours: Math.round(Math.min(40, row.hours) * 100) / 100,
-      overtimeHours: Math.round(Math.max(0, row.hours - 40) * 100) / 100,
-      tips: Math.round(row.tips * 100) / 100,
-      pickupTips: Math.round(row.pickupTips * 100) / 100,
-      deliveryTips: Math.round(row.deliveryTips * 100) / 100,
-    }))
+    .map((row) => {
+      const hours = Math.round(row.hours * 100) / 100;
+      const overtimeHours = Math.round(Math.max(0, hours - 40) * 100) / 100;
+      const straightTimeHours = Math.round(Math.max(0, hours - overtimeHours) * 100) / 100;
+      const driverTipHours = Math.round(Math.min(row.driverTipHours, straightTimeHours) * 100) / 100;
+      const regularHours = Math.round(Math.max(0, straightTimeHours - driverTipHours) * 100) / 100;
+      return {
+        ...row,
+        hours,
+        driverTipHours,
+        regularHours,
+        overtimeHours,
+        tips: Math.round(row.tips * 100) / 100,
+        pickupTips: Math.round(row.pickupTips * 100) / 100,
+        deliveryTips: Math.round(row.deliveryTips * 100) / 100,
+      };
+    })
     .sort((left, right) => left.employee.localeCompare(right.employee));
 
   return {
