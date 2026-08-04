@@ -13,7 +13,7 @@ export default function EmployeeLayout({ children }: Readonly<{ children: ReactN
         <a href="/employee/forms">Forms</a>
         <a href="/employee/direct-deposit">Direct deposit</a>
         <a href="/employee/attendance">Attendance</a>
-        <a href="/employee/forgot-pin">Reset PIN</a>
+        <a href="/employee/forgot-pin">Forgot PIN</a>
       </nav>
       <div className="employeePortalContent">{children}</div>
     </div>
