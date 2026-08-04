@@ -20,8 +20,10 @@ type Punch = {
   id: string;
   employeeName: string;
   position: string;
-  clockIn: string;
+  clockIn: string | null;
   clockOut: string | null;
+  clockInEastern?: string | null;
+  clockOutEastern?: string | null;
   status: string;
   notes: string;
   source: string;
@@ -77,8 +79,11 @@ function previousMonday() {
   return date.toISOString().slice(0, 10);
 }
 
-function easternDateTime(value: string | null) {
+function easternDateTime(value: string | null | undefined, serverLabel?: string | null) {
+  if (serverLabel) return serverLabel;
   if (!value) return "Open";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Time unavailable";
   return new Intl.DateTimeFormat("en-US", {
     timeZone: EASTERN_TIME_ZONE,
     month: "short",
@@ -87,11 +92,13 @@ function easternDateTime(value: string | null) {
     hour: "numeric",
     minute: "2-digit",
     timeZoneName: "short",
-  }).format(new Date(value));
+  }).format(parsed);
 }
 
 function easternInputValue(value: string | null) {
   if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: EASTERN_TIME_ZONE,
     year: "numeric",
@@ -100,7 +107,7 @@ function easternInputValue(value: string | null) {
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
-  }).formatToParts(new Date(value));
+  }).formatToParts(parsed);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
 }
@@ -155,8 +162,8 @@ export default function PayrollControlPage() {
 
   async function load(activeBusiness = business, activeWeek = weekStart) {
     const response = await fetch(
-      `/api/payroll-control?business=${encodeURIComponent(activeBusiness)}&weekStart=${encodeURIComponent(activeWeek)}`,
-      { cache: "no-store" },
+      `/api/payroll-control?business=${encodeURIComponent(activeBusiness)}&weekStart=${encodeURIComponent(activeWeek)}&displayVersion=20260804-2`,
+      { cache: "no-store", headers: { "Cache-Control": "no-cache" } },
     );
     if (!response.ok) throw new Error(await errorMessage(response));
     setData(await response.json() as Dashboard);
@@ -299,7 +306,7 @@ export default function PayrollControlPage() {
         <p>Every displayed and entered time is interpreted as America/New_York. The corrected times are then used for payroll and tip allocation.</p>
         <div className="tableWrap"><table className="controlTable">
           <thead><tr><th>Employee</th><th>Clock in</th><th>Clock out</th><th>Source</th><th>Status</th><th></th></tr></thead>
-          <tbody>{data?.punches.map((punch) => <tr key={punch.id}><td><strong>{punch.employeeName}</strong><small>{punch.position}</small></td><td>{easternDateTime(punch.clockIn)}</td><td>{punch.clockOut ? easternDateTime(punch.clockOut) : "Open"}</td><td>{punch.source}</td><td><span className={`badge ${punch.status === "Complete" ? "good" : "warn"}`}>{punch.status}</span></td><td><button onClick={() => setEditing(punch)}>Correct shift</button></td></tr>)}</tbody>
+          <tbody>{data?.punches.map((punch) => <tr key={punch.id}><td><strong>{punch.employeeName}</strong><small>{punch.position}</small></td><td>{easternDateTime(punch.clockIn, punch.clockInEastern)}</td><td>{punch.clockOut ? easternDateTime(punch.clockOut, punch.clockOutEastern) : "Open"}</td><td>{punch.source}</td><td><span className={`badge ${punch.status === "Complete" ? "good" : "warn"}`}>{punch.status}</span></td><td><button onClick={() => setEditing(punch)}>Correct shift</button></td></tr>)}</tbody>
         </table></div>
       </section>
 
