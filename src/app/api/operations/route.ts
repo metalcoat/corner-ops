@@ -10,6 +10,7 @@ import {
   payrollSummary,
   updateEmployee,
 } from "@/lib/operations";
+import { repairRezkuBatchTimes } from "@/lib/rezku-eastern-time";
 import { detectRezkuVoidReportType, importRezkuVoidReport } from "@/lib/rezku-voids";
 import { apiError, unauthorized } from "@/lib/http";
 import type { Business } from "@/lib/types";
@@ -81,6 +82,7 @@ export async function POST(request: Request) {
       const result = voidType
         ? await importRezkuVoidReport(file.name, bytes, voidType, session.email)
         : await importRezkuReport(file.name, bytes, requested, session.email);
+      if (!voidType) await repairRezkuBatchTimes(result.batchId);
       return Response.json(result, { status: 201 });
     }
 
