@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { ensureScheduleMealSchema, normalizeScheduledMealFields } from "@/lib/schedule-meal-storage";
+import { normalizeScheduleTimeRange } from "@/lib/schedule-time-range";
 import type { Business } from "@/lib/types";
 
 function clean(value: unknown, max = 500): string {
@@ -20,10 +21,7 @@ export async function createScheduleDraftWithMeals(input: {
   actor: string;
 }) {
   await ensureScheduleMealSchema();
-  const start = new Date(input.startsAt);
-  const end = new Date(input.endsAt);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) throw new Error("Shift date or time is invalid.");
-  if (end <= start) throw new Error("Shift end must be after the start.");
+  const { start, end } = normalizeScheduleTimeRange(input.startsAt, input.endsAt);
   const position = clean(input.position, 100);
   if (!position) throw new Error("Shift position is required.");
   const meals = normalizeScheduledMealFields({
