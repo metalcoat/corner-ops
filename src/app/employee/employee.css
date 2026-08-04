@@ -1,1 +1,442 @@
-.employeeLoginShell,.employeeShell{min-height:100vh;color:#f8fafc}.employeeLoginShell{display:grid;place-items:center;padding:24px;background:radial-gradient(circle at top,#163d34,#070b12 58%)}.employeeLoginCard{width:min(440px,100%);background:rgba(10,18,30,.94);border:1px solid #2f4951;border-radius:24px;padding:30px;box-shadow:0 28px 80px rgba(0,0,0,.45)}.employeeLoginCard h1{font-size:2.5rem;margin:.2rem 0}.employeeLoginCard p{color:#aab5c5}.employeeLoginForm,.employeeForm{display:grid;gap:12px}.employeeLoginForm label,.employeeForm label{display:grid;gap:6px;color:#cbd5e1;font-size:.86rem}.employeeLoginForm input,.employeeLoginForm select,.employeeForm input,.employeeForm select,.employeeForm textarea{box-sizing:border-box;width:100%;border:1px solid #344458;border-radius:11px;background:#070d17;color:#f8fafc;padding:12px}.employeeLoginForm button,.employeeForm button,.employeeShift button,.employeeRequest button,.employeeHeaderActions button{border:0;border-radius:10px;background:#76d6b5;color:#06281d;font-weight:850;padding:11px 14px;cursor:pointer}.employeeLoginForm button:disabled,.employeeForm button:disabled,.employeeShift button:disabled,.employeeRequest button:disabled,.employeeHeaderActions button:disabled{opacity:.55}.empClockLink{display:block;text-align:center;margin-top:18px;color:#8ee9ca}.employeeShell{max-width:1450px;margin:auto;padding:34px 26px 80px}.employeeHero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:20px}.employeeHero h1{font-size:clamp(2rem,5vw,4rem);margin:.1rem 0}.employeeHero p{color:#9da9ba}.empEyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:.74rem;font-weight:850;color:#76d6b5!important;margin:0}.employeeHeaderActions{display:flex;gap:8px;flex-wrap:wrap}.employeeHeaderActions a,.employeeHeaderActions button{background:#172235;color:#e8eef7;text-decoration:none;border:1px solid #334155;border-radius:10px;padding:10px 13px}.empNotice{background:#152238;border:1px solid #38506f;border-radius:14px;padding:13px 15px;margin:14px 0}.employeeStats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.employeeStats article,.employeeCard{background:linear-gradient(180deg,#111827,#0a111e);border:1px solid #263244;border-radius:18px;box-shadow:0 15px 36px rgba(0,0,0,.18)}.employeeStats article{padding:17px}.employeeStats span{display:block;color:#94a3b8;font-size:.82rem}.employeeStats strong{font-size:2rem}.employeeTabs{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0}.employeeTabs button{border:1px solid #334155;background:#111827;color:#cbd5e1;border-radius:999px;padding:10px 16px;cursor:pointer}.employeeTabs button.active{background:#e7fff6;color:#06281d;border-color:#76d6b5;font-weight:850}.employeeGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:17px}.employeeWide{grid-column:1/-1}.employeeCard{padding:19px}.employeeCardHeader{display:flex;justify-content:space-between;gap:12px;margin-bottom:14px}.employeeCardHeader h2{margin:.12rem 0}.employeeList{display:grid;gap:10px;max-height:650px;overflow:auto}.employeeShift,.employeeRequest,.employeeHistory,.employeeMessage{background:#080f1a;border:1px solid #253145;border-radius:13px;padding:13px}.employeeShift,.employeeRequest{display:flex;justify-content:space-between;gap:14px;align-items:center}.employeeShift>div,.employeeRequest>div:first-child,.employeeHistory{display:grid;gap:4px}.employeeShift span,.employeeShift small,.employeeRequest span,.employeeHistory span,.employeeHistory small,.employeeMessage span,.employeeMessage small{color:#96a3b6}.employeeRequest>div:last-child{display:flex;gap:7px}.employeeRequest button.empSecondary{background:#263244;color:#e8eef7}.employeeMessage>div{display:flex;justify-content:space-between;gap:10px}.employeeMessage p,.employeeHistory p,.employeeRequest p{margin:.35rem 0;white-space:pre-wrap}.teamSchedule{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px}.teamSchedule div{display:grid;gap:3px;background:#080f1a;border:1px solid #253145;border-radius:12px;padding:12px}.teamSchedule span,.teamSchedule small{color:#96a3b6}.availabilitySummary{display:grid;gap:5px;margin-top:18px}.availabilitySummary div{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid #263244}.availabilitySummary span{color:#96a3b6}.empEmpty{color:#94a3b8}@media(max-width:900px){.employeeStats{grid-template-columns:repeat(2,minmax(0,1fr))}.employeeGrid{grid-template-columns:1fr}.employeeWide{grid-column:auto}.employeeHero{flex-direction:column}}@media(max-width:560px){.employeeShell{padding:23px 13px 70px}.employeeStats{grid-template-columns:1fr 1fr}.employeeShift,.employeeRequest{align-items:flex-start;flex-direction:column}.employeeMessage>div{flex-direction:column}.employeeHeaderActions{width:100%}.employeeHeaderActions a,.employeeHeaderActions button{flex:1;text-align:center}}
+.employeeLoginShell,
+.employeeShell {
+  min-height: 100vh;
+  color: #f8fafc;
+}
+
+.employeeLoginShell {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(circle at top, #163d34, #070b12 58%);
+}
+
+.employeeLoginCard {
+  width: min(440px, 100%);
+  background: rgba(10, 18, 30, .94);
+  border: 1px solid #2f4951;
+  border-radius: 24px;
+  padding: 30px;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .45);
+}
+
+.employeeLoginCard h1 {
+  font-size: 2.5rem;
+  margin: .2rem 0;
+}
+
+.employeeLoginCard p {
+  color: #aab5c5;
+}
+
+.employeeLoginForm,
+.employeeForm {
+  display: grid;
+  gap: 12px;
+}
+
+.employeeLoginForm label,
+.employeeForm label {
+  display: grid;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: .86rem;
+}
+
+.employeeLoginForm input,
+.employeeLoginForm select,
+.employeeForm input,
+.employeeForm select,
+.employeeForm textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #344458;
+  border-radius: 11px;
+  background: #070d17;
+  color: #f8fafc;
+  padding: 12px;
+}
+
+.employeeLoginForm button,
+.employeeForm button,
+.employeeShift button,
+.employeeRequest button,
+.employeeHeaderActions button {
+  border: 0;
+  border-radius: 10px;
+  background: #76d6b5;
+  color: #06281d;
+  font-weight: 850;
+  padding: 11px 14px;
+  cursor: pointer;
+}
+
+.employeeLoginForm button:disabled,
+.employeeForm button:disabled,
+.employeeShift button:disabled,
+.employeeRequest button:disabled,
+.employeeHeaderActions button:disabled {
+  opacity: .55;
+}
+
+.empClockLink {
+  display: block;
+  text-align: center;
+  margin-top: 18px;
+  color: #8ee9ca;
+}
+
+.employeeShell {
+  max-width: 1450px;
+  margin: auto;
+  padding: 34px 26px 80px;
+}
+
+.employeeHero {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.employeeHero h1 {
+  font-size: clamp(2rem, 5vw, 4rem);
+  margin: .1rem 0;
+}
+
+.employeeHero p {
+  color: #9da9ba;
+}
+
+.empEyebrow {
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  font-size: .74rem;
+  font-weight: 850;
+  color: #76d6b5 !important;
+  margin: 0;
+}
+
+.employeeHeaderActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.employeeHeaderActions a,
+.employeeHeaderActions button {
+  background: #172235;
+  color: #e8eef7;
+  text-decoration: none;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 10px 13px;
+}
+
+.empNotice {
+  background: #152238;
+  border: 1px solid #38506f;
+  border-radius: 14px;
+  padding: 13px 15px;
+  margin: 14px 0;
+}
+
+.employeeStats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.employeeStats article,
+.employeeCard {
+  background: linear-gradient(180deg, #111827, #0a111e);
+  border: 1px solid #263244;
+  border-radius: 18px;
+  box-shadow: 0 15px 36px rgba(0, 0, 0, .18);
+}
+
+.employeeStats article {
+  padding: 17px;
+}
+
+.employeeStats span {
+  display: block;
+  color: #94a3b8;
+  font-size: .82rem;
+}
+
+.employeeStats strong {
+  font-size: 2rem;
+}
+
+.employeeTabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+
+.employeeTabs button {
+  border: 1px solid #334155;
+  background: #111827;
+  color: #cbd5e1;
+  border-radius: 999px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+.employeeTabs button.active {
+  background: #e7fff6;
+  color: #06281d;
+  border-color: #76d6b5;
+  font-weight: 850;
+}
+
+.employeeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 17px;
+}
+
+.employeeWide {
+  grid-column: 1 / -1;
+}
+
+.employeeCard {
+  padding: 19px;
+}
+
+.employeeCardHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.employeeCardHeader h2 {
+  margin: .12rem 0;
+}
+
+.employeeList {
+  display: grid;
+  gap: 12px;
+  max-height: 650px;
+  overflow: auto;
+}
+
+.employeeShift,
+.employeeRequest,
+.employeeHistory {
+  background: #080f1a;
+  border: 1px solid #253145;
+  border-radius: 13px;
+  padding: 13px;
+}
+
+.employeeShift,
+.employeeRequest {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+}
+
+.employeeShift > div,
+.employeeRequest > div:first-child,
+.employeeHistory {
+  display: grid;
+  gap: 4px;
+}
+
+.employeeShift span,
+.employeeShift small,
+.employeeRequest span,
+.employeeHistory span,
+.employeeHistory small {
+  color: #96a3b6;
+}
+
+.employeeRequest > div:last-child {
+  display: flex;
+  gap: 7px;
+}
+
+.employeeRequest button.empSecondary {
+  background: #263244;
+  color: #e8eef7;
+}
+
+html[data-business-theme="Corner Deli"] .employeeMessage {
+  --message-business: #9a3412;
+}
+
+html[data-business-theme="Tiki"] .employeeMessage {
+  --message-business: #0f766e;
+}
+
+.employeeMessage {
+  --message-business: #334155;
+  position: relative;
+  border: 2px solid #94a3b8 !important;
+  border-left: 9px solid var(--message-business) !important;
+  border-radius: 12px;
+  background: #f8fafc !important;
+  color: #0f172a !important;
+  padding: 14px 15px;
+  box-shadow: 0 8px 22px rgb(2 6 23 / 20%);
+}
+
+.employeeMessage::before {
+  content: "MESSAGE";
+  display: inline-block;
+  margin-bottom: 10px;
+  border: 1px solid var(--message-business);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--message-business);
+  padding: 3px 7px;
+  font-size: .66rem;
+  font-weight: 950;
+  letter-spacing: .11em;
+}
+
+html[data-business-theme="Corner Deli"] .employeeMessage::before {
+  content: "CORNER DELI";
+}
+
+html[data-business-theme="Tiki"] .employeeMessage::before {
+  content: "TIKI";
+}
+
+.employeeMessage > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  border-bottom: 1px solid #cbd5e1;
+  padding-bottom: 9px;
+}
+
+.employeeMessage > div strong {
+  color: #020617;
+  font-size: 1.02rem;
+  font-weight: 950;
+  line-height: 1.25;
+}
+
+.employeeMessage span,
+.employeeMessage small {
+  color: #334155 !important;
+  font-size: .8rem;
+  font-weight: 750;
+}
+
+.employeeMessage p {
+  margin: 11px 0 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  background: #fff;
+  color: #0f172a;
+  padding: 12px 13px;
+  white-space: pre-wrap;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.employeeHistory p,
+.employeeRequest p {
+  margin: .35rem 0;
+  white-space: pre-wrap;
+}
+
+.teamSchedule {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 9px;
+}
+
+.teamSchedule div {
+  display: grid;
+  gap: 3px;
+  background: #080f1a;
+  border: 1px solid #253145;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.teamSchedule span,
+.teamSchedule small {
+  color: #96a3b6;
+}
+
+.availabilitySummary {
+  display: grid;
+  gap: 5px;
+  margin-top: 18px;
+}
+
+.availabilitySummary div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid #263244;
+}
+
+.availabilitySummary span {
+  color: #96a3b6;
+}
+
+.empEmpty {
+  color: #94a3b8;
+}
+
+@media (max-width: 900px) {
+  .employeeStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .employeeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .employeeWide {
+    grid-column: auto;
+  }
+
+  .employeeHero {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 560px) {
+  .employeeShell {
+    padding: 23px 13px 70px;
+  }
+
+  .employeeStats {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .employeeShift,
+  .employeeRequest {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .employeeMessage > div {
+    flex-direction: column;
+  }
+
+  .employeeHeaderActions {
+    width: 100%;
+  }
+
+  .employeeHeaderActions a,
+  .employeeHeaderActions button {
+    flex: 1;
+    text-align: center;
+  }
+}
