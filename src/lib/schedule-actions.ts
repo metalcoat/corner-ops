@@ -1,15 +1,10 @@
 import { getSql } from "@/lib/db";
 import { ensureScheduleMealSchema, normalizeScheduledMealFields } from "@/lib/schedule-meal-storage";
+import { normalizeScheduleTimeRange } from "@/lib/schedule-time-range";
 import type { Business } from "@/lib/types";
 
 function clean(value: unknown, max = 500): string {
   return String(value ?? "").trim().slice(0, max);
-}
-
-function dateValue(value: unknown, label: string): Date {
-  const result = new Date(String(value || ""));
-  if (Number.isNaN(result.getTime())) throw new Error(`${label} is invalid.`);
-  return result;
 }
 
 export async function updateScheduleShiftSafely(input: {
@@ -36,9 +31,10 @@ export async function updateScheduleShiftSafely(input: {
   const current = rows[0];
   if (!current) throw new Error("Shift not found.");
 
-  const start = input.startsAt ? dateValue(input.startsAt, "Shift start") : new Date(String(current.starts_at));
-  const end = input.endsAt ? dateValue(input.endsAt, "Shift end") : new Date(String(current.ends_at));
-  if (end <= start) throw new Error("Shift end must be after the start.");
+  const { start, end } = normalizeScheduleTimeRange(
+    input.startsAt ?? current.starts_at,
+    input.endsAt ?? current.ends_at,
+  );
 
   const meals = normalizeScheduledMealFields({
     startsAt: start,
