@@ -10,10 +10,28 @@ type PayrollRow = {
   regularHours: number;
   overtimeHours: number;
   driverTipHours: number;
+  tipsBeforeFee?: number;
+  pickupTipsBeforeFee?: number;
+  deliveryTipsBeforeFee?: number;
   tips: number;
   pickupTips: number;
   deliveryTips: number;
   manualTips?: number;
+};
+
+type DailyTipCheck = {
+  date: string;
+  sourceTipsBeforeFee: number;
+  deliveryTipsBeforeFee: number;
+  pickupTipsBeforeFee: number;
+  unclassifiedTipsBeforeFee: number;
+  allocatedTipsBeforeFee: number;
+  unallocatedTipsBeforeFee: number;
+  feeAmount: number;
+  expectedAfterFee: number;
+  allocatedAfterFee: number;
+  balance: number;
+  status: string;
 };
 
 type Punch = {
@@ -49,6 +67,7 @@ type Dashboard = {
     rows: PayrollRow[];
     overrides: Array<Record<string, unknown>>;
     unmatchedTips: Array<Record<string, unknown>>;
+    dailyTipReconciliation?: DailyTipCheck[];
   };
   punches: Punch[];
   versions: Version[];
@@ -77,6 +96,17 @@ function previousMonday() {
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(values.weekday);
   date.setUTCDate(date.getUTCDate() - ((weekday + 6) % 7) - 7);
   return date.toISOString().slice(0, 10);
+}
+
+function payrollDayLabel(value: string) {
+  const parsed = new Date(`${value}T12:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(parsed);
 }
 
 function easternDateTime(value: string | null | undefined, serverLabel?: string | null) {
@@ -162,7 +192,7 @@ export default function PayrollControlPage() {
 
   async function load(activeBusiness = business, activeWeek = weekStart) {
     const response = await fetch(
-      `/api/payroll-control?business=${encodeURIComponent(activeBusiness)}&weekStart=${encodeURIComponent(activeWeek)}&displayVersion=20260804-2`,
+      `/api/payroll-control?business=${encodeURIComponent(activeBusiness)}&weekStart=${encodeURIComponent(activeWeek)}&displayVersion=20260804-3`,
       { cache: "no-store", headers: { "Cache-Control": "no-cache" } },
     );
     if (!response.ok) throw new Error(await errorMessage(response));
@@ -257,6 +287,15 @@ export default function PayrollControlPage() {
     { hours: 0, overtime: 0, tips: 0 },
   ) || { hours: 0, overtime: 0, tips: 0 }, [data]);
 
+  const dailyTotals = useMemo(() => (data?.summary.dailyTipReconciliation || []).reduce(
+    (current, day) => ({
+      source: current.source + day.sourceTipsBeforeFee,
+      net: current.net + day.allocatedAfterFee,
+      review: current.review + (day.status === "Balanced" ? 0 : 1),
+    }),
+    { source: 0, net: 0, review: 0 },
+  ), [data]);
+
   if (!session) return <main className="controlPage">Loading payroll control…</main>;
   if (!session.authenticated) return <main className="controlPage"><a href="/signin">Sign in to Corner Ops</a></main>;
 
@@ -281,11 +320,33 @@ export default function PayrollControlPage() {
         <div className="metricGrid">
           <div className="metric"><span>Total hours</span><strong>{hours(totals.hours)}</strong></div>
           <div className="metric"><span>Overtime</span><strong>{hours(totals.overtime)}</strong></div>
-          <div className="metric"><span>Total tips</span><strong>{dollars(totals.tips)}</strong></div>
-          <div className="metric"><span>Unmatched tips</span><strong>{data?.summary.unmatchedTips.length || 0}</strong></div>
+          {business === "Corner Deli" && <div className="metric"><span>Source tips before fee</span><strong>{dollars(dailyTotals.source)}</strong></div>}
+          <div className="metric"><span>Net tips paid</span><strong>{dollars(totals.tips)}</strong></div>
+          <div className="metric"><span>{business === "Corner Deli" ? "Days needing review" : "Unmatched tips"}</span><strong>{business === "Corner Deli" ? dailyTotals.review : data?.summary.unmatchedTips.length || 0}</strong></div>
         </div>
-        <p className="reportNote">Every saved shift correction and tip override is included the next time totals load. Use “Recalculate payroll & tips” after reviewing several records, or rely on the automatic recalculation after each edit.</p>
+        <p className="reportNote">Every saved shift correction and tip override is included the next time totals load. Corner Deli tips are reconciled by business day before the 3.5% deduction, so rounding cannot quietly create extra payroll.</p>
       </section>
+
+      {business === "Corner Deli" && <section className="controlCard">
+        <p className="eyebrow">Daily tip control</p>
+        <h2>Source tips versus payroll allocation</h2>
+        <p className="reportNote">Each day must balance from the Rezku gross tip total through delivery and pickup allocation to the exact net pool after the 3.5% deduction. Manual overrides are shown separately and are not hidden inside this check.</p>
+        <div className="tableWrap"><table className="controlTable">
+          <thead><tr><th>Day</th><th>Source gross</th><th>Delivery gross</th><th>Pickup gross</th><th>Unallocated gross</th><th>3.5% fee</th><th>Expected net</th><th>Allocated net</th><th>Balance</th><th>Status</th></tr></thead>
+          <tbody>{data?.summary.dailyTipReconciliation?.map((day) => <tr key={day.date}>
+            <td><strong>{payrollDayLabel(day.date)}</strong></td>
+            <td>{dollars(day.sourceTipsBeforeFee)}</td>
+            <td>{dollars(day.deliveryTipsBeforeFee)}</td>
+            <td>{dollars(day.pickupTipsBeforeFee)}</td>
+            <td>{dollars(day.unallocatedTipsBeforeFee + day.unclassifiedTipsBeforeFee)}</td>
+            <td>{dollars(day.feeAmount)}</td>
+            <td>{dollars(day.expectedAfterFee)}</td>
+            <td>{dollars(day.allocatedAfterFee)}</td>
+            <td>{dollars(day.balance)}</td>
+            <td><span className={`badge ${day.status === "Balanced" ? "good" : "warn"}`}>{day.status}</span></td>
+          </tr>)}</tbody>
+        </table></div>
+      </section>}
 
       <section className="controlCard">
         <div className="controlActions">
@@ -295,8 +356,18 @@ export default function PayrollControlPage() {
         <h2>{data?.summary.source}</h2>
         {business === "Corner Deli" && <p className="reportNote">Before 3 PM, tips are split equally among all tip-eligible employees clocked in. After 3 PM, delivery tips go to the driver and takeout tips are split equally among clocked-in non-driver positions.</p>}
         <div className="tableWrap"><table className="controlTable">
-          <thead><tr><th>Employee</th><th>Total</th><th>Regular</th><th>OT</th><th>Driver tipped</th><th>Pickup tips</th><th>Delivery tips</th><th>Manual</th><th>Total tips</th></tr></thead>
-          <tbody>{data?.summary.rows.map((row) => <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.pickupTips)}</td><td>{dollars(row.deliveryTips)}</td><td>{dollars(row.manualTips || 0)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>)}</tbody>
+          {business === "Corner Deli" ? <>
+            <thead><tr><th>Employee</th><th>Total</th><th>Regular</th><th>OT</th><th>Driver tipped</th><th>Pickup gross</th><th>Delivery gross</th><th>Gross tips</th><th>3.5% fee</th><th>Manual</th><th>Net paid</th></tr></thead>
+            <tbody>{data?.summary.rows.map((row) => {
+              const manual = row.manualTips || 0;
+              const gross = row.tipsBeforeFee || 0;
+              const automaticNet = row.tips - manual;
+              return <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.pickupTipsBeforeFee || 0)}</td><td>{dollars(row.deliveryTipsBeforeFee || 0)}</td><td><strong>{dollars(gross)}</strong></td><td>{dollars(gross - automaticNet)}</td><td>{dollars(manual)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>;
+            })}</tbody>
+          </> : <>
+            <thead><tr><th>Employee</th><th>Total</th><th>Regular</th><th>OT</th><th>Tipped hours</th><th>Pickup tips</th><th>Delivery tips</th><th>Manual</th><th>Total tips</th></tr></thead>
+            <tbody>{data?.summary.rows.map((row) => <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.pickupTips)}</td><td>{dollars(row.deliveryTips)}</td><td>{dollars(row.manualTips || 0)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>)}</tbody>
+          </>}
         </table></div>
       </section>
 
