@@ -1,4 +1,5 @@
 import { ensureSchema, getSql } from "@/lib/db";
+import { repairExistingRezkuTimesOnce, repairRezkuBatchTimes } from "@/lib/rezku-eastern-time";
 import { ensureRezkuVoidSchema } from "@/lib/rezku-voids";
 
 type InboundStatus = "Received" | "Processing" | "Processed" | "Partial" | "Failed";
@@ -103,6 +104,9 @@ export async function recordRezkuInboundReport(input: {
   error?: string;
 }) {
   await ensureRezkuMonitorSchema();
+  if (input.status === "Processed" && input.batchId) {
+    await repairRezkuBatchTimes(input.batchId);
+  }
   await getSql()`
     INSERT INTO rezku_inbound_reports (
       id, email_id, file_name, report_type, status, batch_id,
@@ -143,6 +147,7 @@ export async function finishRezkuInboundEmail(input: {
 
 export async function rezkuImportDashboard() {
   await Promise.all([ensureRezkuMonitorSchema(), ensureRezkuVoidSchema()]);
+  await repairExistingRezkuTimesOnce();
   const sql = getSql();
   const [emails, reports, imports, exceptions] = await Promise.all([
     sql`
