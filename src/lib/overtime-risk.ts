@@ -6,6 +6,7 @@ import { notifyOwnersOfOperationalAlert } from "@/lib/owner-operational-alerts";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
+const WORKWEEK_START_HOUR = 4;
 const WARNING_HOURS = 38;
 const OVERTIME_HOURS = 40;
 const MAX_OPEN_SHIFT_HOURS = 18;
@@ -137,14 +138,23 @@ function dateKey(value: Date): string {
 }
 
 function localDateParts(value = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    hourCycle: "h23",
   }).formatToParts(value);
-  const part = (type: string) => Number(parts.find((item) => item.type === type)?.value || 0);
-  return { year: part("year"), month: part("month"), day: part("day") };
+  const text = (type: string) => parts.find((item) => item.type === type)?.value || "";
+  return {
+    year: Number(text("year")),
+    month: Number(text("month")),
+    day: Number(text("day")),
+    weekday: text("weekday"),
+    hour: Number(text("hour")),
+  };
 }
 
 function localDateString(value: Date | string): string {
@@ -152,12 +162,47 @@ function localDateString(value: Date | string): string {
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
 }
 
+function getOffsetMilliseconds(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const represented = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second),
+  );
+  return represented - date.getTime();
+}
+
+function zonedDateToUtc(dateText: string, hour: number): Date {
+  const [year, month, day] = dateText.split("-").map(Number);
+  let timestamp = Date.UTC(year, month - 1, day, hour, 0, 0);
+  for (let index = 0; index < 2; index += 1) {
+    timestamp = Date.UTC(year, month - 1, day, hour, 0, 0)
+      - getOffsetMilliseconds(new Date(timestamp), TIME_ZONE);
+  }
+  return new Date(timestamp);
+}
+
 export function currentOvertimeWeekStart(value = new Date()): string {
   const local = localDateParts(value);
-  const noon = new Date(Date.UTC(local.year, local.month - 1, local.day, 12));
-  const weekday = noon.getUTCDay();
-  noon.setUTCDate(noon.getUTCDate() - (weekday === 0 ? 6 : weekday - 1));
-  return dateKey(noon);
+  const date = new Date(Date.UTC(local.year, local.month - 1, local.day, 12));
+  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(local.weekday);
+  const daysSinceMonday = (Math.max(0, weekday) + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - daysSinceMonday);
+  if (daysSinceMonday === 0 && local.hour < WORKWEEK_START_HOUR) date.setUTCDate(date.getUTCDate() - 7);
+  return dateKey(date);
 }
 
 function addDays(value: string, days: number): string {
@@ -166,20 +211,39 @@ function addDays(value: string, days: number): string {
   return dateKey(date);
 }
 
+function workweekBounds(requestedWeekStart?: string) {
+  const weekStart = requestedWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(requestedWeekStart)
+    ? requestedWeekStart
+    : currentOvertimeWeekStart();
+  const start = zonedDateToUtc(weekStart, WORKWEEK_START_HOUR);
+  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+  return { weekStart, start, end };
+}
+
 function riskLevel(hours: number): RiskLevel {
   if (hours > OVERTIME_HOURS) return "overtime";
   if (hours >= WARNING_HOURS) return "warning";
   return "normal";
 }
 
-function actualHours(row: ActualRow): number {
+function actualHours(row: ActualRow, weekStartMs: number, weekEndMs: number): number {
   const reported = Number(row.reported_hours || 0);
-  if (reported > 0) return roundHours(reported);
-  if (!row.clock_in) return 0;
-  const start = new Date(row.clock_in).getTime();
-  const rawEnd = row.clock_out ? new Date(row.clock_out).getTime() : Date.now();
-  if (!Number.isFinite(start) || !Number.isFinite(rawEnd) || rawEnd <= start) return 0;
-  return roundHours(Math.min(MAX_OPEN_SHIFT_HOURS, (rawEnd - start) / 3_600_000));
+  if (!row.clock_in) return reported > 0 ? roundHours(reported) : 0;
+
+  const fullStart = new Date(row.clock_in).getTime();
+  const fullEnd = row.clock_out ? new Date(row.clock_out).getTime() : Date.now();
+  if (!Number.isFinite(fullStart) || !Number.isFinite(fullEnd) || fullEnd <= fullStart) return 0;
+
+  const overlapStart = Math.max(fullStart, weekStartMs);
+  const overlapEnd = Math.min(fullEnd, weekEndMs);
+  if (overlapEnd <= overlapStart) return 0;
+
+  const fullDuration = fullEnd - fullStart;
+  const overlapDuration = overlapEnd - overlapStart;
+  if (reported > 0 && row.clock_out && fullDuration > 0) {
+    return roundHours(reported * (overlapDuration / fullDuration));
+  }
+  return roundHours(Math.min(MAX_OPEN_SHIFT_HOURS, overlapDuration / 3_600_000));
 }
 
 function shiftFor(row: ScheduleRow): ScheduledShift {
@@ -207,8 +271,12 @@ function remainingPaidHours(shift: ScheduledShift, nowMs: number): number {
 
   let remainingMs = shiftEnd - nowMs;
   for (const planned of [
-    shift.mealBreakStart && shift.mealBreakMinutes ? { start: new Date(shift.mealBreakStart).getTime(), minutes: shift.mealBreakMinutes } : null,
-    shift.extraMealBreakStart && shift.extraMealBreakMinutes ? { start: new Date(shift.extraMealBreakStart).getTime(), minutes: shift.extraMealBreakMinutes } : null,
+    shift.mealBreakStart && shift.mealBreakMinutes
+      ? { start: new Date(shift.mealBreakStart).getTime(), minutes: shift.mealBreakMinutes }
+      : null,
+    shift.extraMealBreakStart && shift.extraMealBreakMinutes
+      ? { start: new Date(shift.extraMealBreakStart).getTime(), minutes: shift.extraMealBreakMinutes }
+      : null,
   ]) {
     if (!planned || !Number.isFinite(planned.start)) continue;
     const breakEnd = planned.start + planned.minutes * 60_000;
@@ -249,7 +317,11 @@ function timeMinutes(value: string): number | null {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
-function availabilityForShift(rows: AvailabilityRow[], employeeId: string, shift: ScheduledShift): "Available" | "Not set" | "Unavailable" {
+function availabilityForShift(
+  rows: AvailabilityRow[],
+  employeeId: string,
+  shift: ScheduledShift,
+): "Available" | "Not set" | "Unavailable" {
   const start = localWeekdayAndMinutes(shift.startsAt);
   const end = localWeekdayAndMinutes(shift.endsAt);
   const row = rows.find((item) => item.employee_id === employeeId && Number(item.weekday) === start.weekday);
@@ -372,7 +444,8 @@ export async function ensureOvertimeRiskSchema(): Promise<void> {
             new_employee_id, new_employee_name, starts_at, ends_at, details
           ) VALUES (
             gen_random_uuid(), NEW.business, NEW.id, kind,
-            prior_employee, COALESCE(old_name, ''), NEW.employee_id, COALESCE(new_name, ''), NEW.starts_at, NEW.ends_at,
+            prior_employee, COALESCE(old_name, ''), NEW.employee_id, COALESCE(new_name, ''),
+            NEW.starts_at, NEW.ends_at,
             jsonb_build_object(
               'priorStartsAt', prior_start,
               'priorEndsAt', prior_end,
@@ -407,7 +480,11 @@ export async function ensureOvertimeRiskSchema(): Promise<void> {
   return overtimeSchemaPromise;
 }
 
-async function actualRows(business: Business, weekStart: string, weekEnd: string): Promise<ActualRow[]> {
+async function actualRows(
+  business: Business,
+  weekStartIso: string,
+  weekEndIso: string,
+): Promise<ActualRow[]> {
   if (business === "Tiki") {
     return await getSql()`
       SELECT t.id, t.employee_id, COALESCE(e.name, t.employee_name, '') AS employee_name,
@@ -415,8 +492,8 @@ async function actualRows(business: Business, weekStart: string, weekEnd: string
       FROM time_entries t
       LEFT JOIN employees e ON e.id = t.employee_id
       WHERE t.business = 'Tiki'
-        AND t.clock_in < (${weekEnd}::date AT TIME ZONE ${TIME_ZONE})
-        AND COALESCE(t.clock_out, NOW()) >= (${weekStart}::date AT TIME ZONE ${TIME_ZONE})
+        AND t.clock_in < ${weekEndIso}
+        AND COALESCE(t.clock_out, NOW()) > ${weekStartIso}
       ORDER BY t.clock_in
     ` as unknown as ActualRow[];
   }
@@ -428,18 +505,19 @@ async function actualRows(business: Business, weekStart: string, weekEnd: string
     LEFT JOIN employees e
       ON e.business = 'Corner Deli'
      AND LOWER(BTRIM(e.name)) = LOWER(BTRIM(r.employee_name))
-    WHERE COALESCE(r.clock_in, r.clock_out) < (${weekEnd}::date AT TIME ZONE ${TIME_ZONE})
-      AND COALESCE(r.clock_out, r.clock_in) >= (${weekStart}::date AT TIME ZONE ${TIME_ZONE})
+    WHERE COALESCE(r.clock_in, r.clock_out) < ${weekEndIso}
+      AND COALESCE(r.clock_out, r.clock_in) > ${weekStartIso}
     ORDER BY COALESCE(r.clock_in, r.clock_out)
   ` as unknown as ActualRow[];
 }
 
 export async function overtimeRiskDashboard(business: Business, requestedWeekStart?: string) {
   await ensureOvertimeRiskSchema();
-  const weekStart = requestedWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(requestedWeekStart)
-    ? requestedWeekStart
-    : currentOvertimeWeekStart();
-  const weekEnd = addDays(weekStart, 7);
+  const bounds = workweekBounds(requestedWeekStart);
+  const weekStart = bounds.weekStart;
+  const weekEndDate = addDays(weekStart, 7);
+  const weekStartIso = bounds.start.toISOString();
+  const weekEndIso = bounds.end.toISOString();
   const sql = getSql();
 
   const [employeeRows, scheduleRows, availabilityRows, timeOffRows, actualSourceRows, changeRows] = await Promise.all([
@@ -455,8 +533,8 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
       FROM schedule_shifts s
       LEFT JOIN employees e ON e.id = s.employee_id
       WHERE s.business = ${business}
-        AND s.starts_at >= (${weekStart}::date AT TIME ZONE ${TIME_ZONE})
-        AND s.starts_at < (${weekEnd}::date AT TIME ZONE ${TIME_ZONE})
+        AND s.starts_at >= ${weekStartIso}
+        AND s.starts_at < ${weekEndIso}
         AND s.status <> 'Cancelled'
       ORDER BY s.starts_at
     ` as unknown as ScheduleRow[],
@@ -469,15 +547,16 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
       SELECT employee_id, starts_on::text, ends_on::text
       FROM time_off_requests
       WHERE business = ${business} AND status = 'Approved'
-        AND starts_on < ${weekEnd}::date AND ends_on >= ${weekStart}::date
+        AND starts_on < ${weekEndDate}::date AND ends_on >= ${weekStart}::date
     ` as unknown as TimeOffRow[],
-    actualRows(business, weekStart, weekEnd),
+    actualRows(business, weekStartIso, weekEndIso),
     sql`
       SELECT id, shift_id, change_type, prior_employee_id, prior_employee_name,
         new_employee_id, new_employee_name, starts_at, ends_at, details, created_at
       FROM shift_change_log
       WHERE business = ${business}
-        AND created_at >= (${weekStart}::date AT TIME ZONE ${TIME_ZONE})
+        AND created_at >= ${weekStartIso}
+        AND created_at < ${weekEndIso}
       ORDER BY created_at DESC
       LIMIT 100
     ` as unknown as Array<Record<string, unknown>>,
@@ -497,7 +576,7 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
     position: clean(row.position, 100),
     clockIn: row.clock_in ? String(row.clock_in) : null,
     clockOut: row.clock_out ? String(row.clock_out) : null,
-    hours: actualHours(row),
+    hours: actualHours(row, bounds.start.getTime(), bounds.end.getTime()),
   })).filter((entry) => entry.hours > 0);
 
   const mismatches: ShiftCoverageMismatch[] = actual.flatMap((entry) => {
@@ -516,11 +595,13 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
         detail: `${entry.employeeName} does not match an active ${business} employee record.`,
       }];
     }
+
     const candidates = shifts
       .map((shift) => ({ shift, overlap: overlapHours(entry, shift) }))
       .filter((candidate) => candidate.overlap >= 0.5)
       .sort((left, right) => right.overlap - left.overlap);
     const matched = candidates[0]?.shift || null;
+
     if (!matched) {
       return [{
         actualEntryId: entry.id,
@@ -536,7 +617,24 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
         detail: `${entry.employeeName} worked ${entry.hours.toFixed(1)} hours without an overlapping scheduled assignment.`,
       }];
     }
-    if (matched.employeeId && matched.employeeId !== entry.employeeId) {
+
+    if (!matched.employeeId) {
+      return [{
+        actualEntryId: entry.id,
+        actualEmployeeId: entry.employeeId,
+        actualEmployeeName: entry.employeeName,
+        scheduledEmployeeId: null,
+        scheduledEmployeeName: "Open shift",
+        scheduledShiftId: matched.id,
+        startsAt: entry.clockIn,
+        endsAt: entry.clockOut,
+        hours: entry.hours,
+        kind: "Unscheduled" as const,
+        detail: `${entry.employeeName} worked an open or unassigned scheduled shift.`,
+      }];
+    }
+
+    if (matched.employeeId !== entry.employeeId) {
       return [{
         actualEntryId: entry.id,
         actualEmployeeId: entry.employeeId,
@@ -559,6 +657,7 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
     if (!entry.employeeId) continue;
     actualByEmployee.set(entry.employeeId, roundHours((actualByEmployee.get(entry.employeeId) || 0) + entry.hours));
   }
+
   const unplannedByEmployee = new Map<string, number>();
   for (const mismatch of mismatches) {
     if (!mismatch.actualEmployeeId) continue;
@@ -613,10 +712,11 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
         if (onApprovedTimeOff(timeOffRows, candidate.id, target)) return null;
         const availability = availabilityForShift(availabilityRows, candidate.id, target);
         if (availability === "Unavailable") return null;
-        const projectedAfterShift = roundHours(candidateBase.projectedHours + target.paidHours);
-        if (projectedAfterShift > OVERTIME_HOURS) return null;
         const exactPosition = candidate.position.toLowerCase() === target.position.toLowerCase();
         const sameRole = Boolean(candidate.roleGroup && candidate.roleGroup === item.employee.roleGroup);
+        if (!exactPosition && !sameRole) return null;
+        const projectedAfterShift = roundHours(candidateBase.projectedHours + target.paidHours);
+        if (projectedAfterShift > OVERTIME_HOURS) return null;
         const score = (exactPosition ? 100 : 0)
           + (sameRole ? 40 : 0)
           + (availability === "Available" ? 15 : 0)
@@ -630,9 +730,7 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
           availability,
           reason: exactPosition
             ? `Same position; projected at ${projectedAfterShift.toFixed(1)} hours after the shift.`
-            : sameRole
-              ? `Same role group; projected at ${projectedAfterShift.toFixed(1)} hours after the shift.`
-              : `No overlap; projected at ${projectedAfterShift.toFixed(1)} hours after the shift.`,
+            : `Same role group; projected at ${projectedAfterShift.toFixed(1)} hours after the shift.`,
           score,
         };
       })
@@ -657,7 +755,7 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
       replacements,
     };
   }).sort((left, right) => {
-    const rank = { overtime: 2, warning: 1, normal: 0 };
+    const rank: Record<RiskLevel, number> = { overtime: 2, warning: 1, normal: 0 };
     return rank[right.risk] - rank[left.risk] || right.projectedHours - left.projectedHours;
   });
 
@@ -674,7 +772,9 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
       coverageMismatches: mismatches.length,
     },
     risks,
-    coverageMismatches: mismatches.sort((left, right) => String(right.startsAt || "").localeCompare(String(left.startsAt || ""))),
+    coverageMismatches: mismatches.sort(
+      (left, right) => String(right.startsAt || "").localeCompare(String(left.startsAt || "")),
+    ),
     shiftChanges: changeRows.map((row) => ({
       id: String(row.id),
       shiftId: row.shift_id ? String(row.shift_id) : null,
@@ -699,7 +799,7 @@ export async function evaluateAndNotifyOvertimeRisk(input: {
   const dashboard = await overtimeRiskDashboard(input.business);
   const activeRisks = dashboard.risks.filter((item) => item.risk !== "normal");
   const sql = getSql();
-  const notified: Array<{ employeeId: string; delivered: number; failed: number }> = [];
+  const notified: Array<{ employeeId: string; delivered: number; failed: number; emailSent: boolean }> = [];
 
   for (const risk of activeRisks) {
     const signature = createHash("sha256").update(JSON.stringify({
@@ -708,18 +808,22 @@ export async function evaluateAndNotifyOvertimeRisk(input: {
       remaining: risk.remainingScheduledHours,
       projected: risk.projectedHours,
       trigger: risk.replacementShift?.id || "",
-      mismatches: dashboard.coverageMismatches.filter((item) => item.actualEmployeeId === risk.employeeId).map((item) => item.actualEntryId),
+      mismatches: dashboard.coverageMismatches
+        .filter((item) => item.actualEmployeeId === risk.employeeId)
+        .map((item) => item.actualEntryId),
       replacements: risk.replacements.map((item) => item.employeeId),
     })).digest("hex");
     const previous = await sql`
       SELECT signature, last_notified_at
       FROM overtime_risk_alerts
-      WHERE business = ${input.business} AND employee_id = ${risk.employeeId} AND week_start = ${dashboard.weekStart}
+      WHERE business = ${input.business}
+        AND employee_id = ${risk.employeeId}
+        AND week_start = ${dashboard.weekStart}
       LIMIT 1
     ` as unknown as Array<{ signature: string; last_notified_at: string | null }>;
     const lastNotified = previous[0]?.last_notified_at ? new Date(previous[0].last_notified_at).getTime() : 0;
     const shouldNotify = input.notify !== false
-      && (previous[0]?.signature !== signature || Date.now() - lastNotified >= 24 * 60 * 60 * 1000);
+      && (previous[0]?.signature !== signature || !lastNotified || Date.now() - lastNotified >= 24 * 60 * 60 * 1000);
 
     const storedRiskLevel = risk.risk === "overtime" ? "overtime" : "warning";
     await sql`
@@ -728,8 +832,7 @@ export async function evaluateAndNotifyOvertimeRisk(input: {
         first_seen_at, last_seen_at, last_notified_at, resolved_at
       ) VALUES (
         ${crypto.randomUUID()}, ${input.business}, ${risk.employeeId}, ${dashboard.weekStart},
-        ${storedRiskLevel}, ${signature}, ${JSON.stringify(risk)}::jsonb, 'Open', NOW(), NOW(),
-        ${shouldNotify ? new Date().toISOString() : null}, NULL
+        ${storedRiskLevel}, ${signature}, ${JSON.stringify(risk)}::jsonb, 'Open', NOW(), NOW(), NULL, NULL
       )
       ON CONFLICT (business, employee_id, week_start) DO UPDATE SET
         risk_level = EXCLUDED.risk_level,
@@ -737,15 +840,22 @@ export async function evaluateAndNotifyOvertimeRisk(input: {
         details = EXCLUDED.details,
         status = 'Open',
         last_seen_at = NOW(),
-        last_notified_at = CASE WHEN ${shouldNotify} THEN NOW() ELSE overtime_risk_alerts.last_notified_at END,
         resolved_at = NULL
     `;
 
     const trigger = risk.replacementShift
-      ? `${new Intl.DateTimeFormat("en-US", { timeZone: TIME_ZONE, weekday: "short", hour: "numeric", minute: "2-digit" }).format(new Date(risk.replacementShift.startsAt))} shift`
+      ? `${new Intl.DateTimeFormat("en-US", {
+          timeZone: TIME_ZONE,
+          weekday: "short",
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(new Date(risk.replacementShift.startsAt))} shift`
       : "remaining schedule";
-    const suggestion = risk.replacements[0]?.employeeName ? ` Best replacement: ${risk.replacements[0].employeeName}.` : "";
+    const suggestion = risk.replacements[0]?.employeeName
+      ? ` Best replacement: ${risk.replacements[0].employeeName}.`
+      : "";
     const details = `${risk.actualHours.toFixed(1)} worked + ${risk.remainingScheduledHours.toFixed(1)} remaining = ${risk.projectedHours.toFixed(1)} projected. ${trigger} creates the risk.${risk.unplannedHours ? ` ${risk.unplannedHours.toFixed(1)} hours were unscheduled or covered for someone else.` : ""}${suggestion}`;
+
     await createOperationIssue({
       issueKey: `overtime-risk:${input.business}:${dashboard.weekStart}:${risk.employeeId}`,
       business: input.business,
@@ -767,9 +877,23 @@ export async function evaluateAndNotifyOvertimeRisk(input: {
           url: `/ops/overtime?business=${encodeURIComponent(input.business)}`,
           tag: `overtime-${input.business}-${risk.employeeId}-${dashboard.weekStart}`,
         });
-        notified.push({ employeeId: risk.employeeId, delivered: result.delivered, failed: result.failed });
+        const emailSent = Boolean(result.email && "sent" in result.email && result.email.sent);
+        if (result.delivered > 0 || emailSent) {
+          await sql`
+            UPDATE overtime_risk_alerts SET last_notified_at = NOW()
+            WHERE business = ${input.business}
+              AND employee_id = ${risk.employeeId}
+              AND week_start = ${dashboard.weekStart}
+          `;
+        }
+        notified.push({
+          employeeId: risk.employeeId,
+          delivered: result.delivered,
+          failed: result.failed,
+          emailSent,
+        });
       } catch (error) {
-        console.error("[overtime-risk] owner push failed", {
+        console.error("[overtime-risk] owner notification failed", {
           business: input.business,
           employeeId: risk.employeeId,
           error: error instanceof Error ? error.message : String(error),
@@ -783,13 +907,17 @@ export async function evaluateAndNotifyOvertimeRisk(input: {
     await sql`
       UPDATE overtime_risk_alerts SET status = 'Resolved', resolved_at = NOW(), last_seen_at = NOW()
       WHERE business = ${input.business} AND week_start = ${dashboard.weekStart} AND status = 'Open'
-        AND employee_id NOT IN (SELECT value::uuid FROM jsonb_array_elements_text(${JSON.stringify(activeIds)}::jsonb))
+        AND employee_id NOT IN (
+          SELECT value::uuid FROM jsonb_array_elements_text(${JSON.stringify(activeIds)}::jsonb)
+        )
     `;
     await sql`
       UPDATE operation_issues SET status = 'Resolved', resolved_at = NOW(), last_seen_at = NOW()
       WHERE business = ${input.business} AND issue_type = 'Overtime Risk' AND status = 'Open'
         AND issue_key LIKE ${`overtime-risk:${input.business}:${dashboard.weekStart}:%`}
-        AND reference NOT IN (SELECT value FROM jsonb_array_elements_text(${JSON.stringify(activeIds)}::jsonb))
+        AND reference NOT IN (
+          SELECT value FROM jsonb_array_elements_text(${JSON.stringify(activeIds)}::jsonb)
+        )
     `;
   } else {
     await sql`
