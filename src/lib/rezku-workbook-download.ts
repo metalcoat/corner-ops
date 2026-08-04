@@ -23,15 +23,16 @@ function clean(value: unknown, max = 300): string {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-function safeRezkuUrl(rawUrl: string): URL {
-  const url = new URL(rawUrl);
+function safeRezkuUrl(rawUrl: string): string {
+  const normalized = rawUrl.trim().replace(/[)\]}>.,;]+$/g, "");
+  const url = new URL(normalized);
   if (url.protocol !== "https:" || url.hostname !== REZKU_FILE_HOST) {
     throw new Error("Rezku workbook URL was rejected because the host was not trusted.");
   }
   if (!/\.(xlsx|xls)$/i.test(url.pathname)) {
     throw new Error("Rezku workbook URL did not point to an Excel file.");
   }
-  return url;
+  return normalized;
 }
 
 function responseAttempt(method: string, response: Response, body = ""): DownloadAttempt {
@@ -110,7 +111,7 @@ async function directAttempt(rawUrl: string, fileName: string, method: string, h
 
 async function edgeAttempt(rawUrl: string, fileName: string): Promise<DownloadResult | DownloadAttempt | null> {
   const secret = process.env.CRON_SECRET?.trim();
-  const host = process.env.VERCEL_URL?.trim() || process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() || process.env.VERCEL_URL?.trim();
   if (!secret || !host) return null;
 
   const endpoint = `https://${host.replace(/^https?:\/\//, "").replace(/\/$/, "")}/api/rezku/download-proxy`;
@@ -138,7 +139,7 @@ async function edgeAttempt(rawUrl: string, fileName: string): Promise<DownloadRe
 }
 
 export async function downloadRezkuWorkbook(rawUrl: string, fileName: string): Promise<DownloadResult> {
-  safeRezkuUrl(rawUrl);
+  const normalizedUrl = safeRezkuUrl(rawUrl);
   const attempts: DownloadAttempt[] = [];
   const accept = /\.xls$/i.test(fileName) ? XLS_MIME : XLSX_MIME;
   const profiles: Array<{ method: string; headers: HeadersInit }> = [
@@ -179,7 +180,7 @@ export async function downloadRezkuWorkbook(rawUrl: string, fileName: string): P
 
   for (const profile of profiles) {
     try {
-      const result = await directAttempt(rawUrl, fileName, profile.method, profile.headers);
+      const result = await directAttempt(normalizedUrl, fileName, profile.method, profile.headers);
       if ("bytes" in result) return result;
       attempts.push(result);
     } catch (error) {
@@ -196,7 +197,7 @@ export async function downloadRezkuWorkbook(rawUrl: string, fileName: string): P
   }
 
   try {
-    const edge = await edgeAttempt(rawUrl, fileName);
+    const edge = await edgeAttempt(normalizedUrl, fileName);
     if (edge && "bytes" in edge) return edge;
     if (edge) attempts.push(edge);
   } catch (error) {
