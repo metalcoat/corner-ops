@@ -15,6 +15,8 @@ type Estimate = {
   paidHours: number;
   regularHours: number;
   overtimeHours: number;
+  tippedHours?: number;
+  tippedWages?: number;
   deliveryHours: number;
   grossWages: number;
   deliveryWages: number;
@@ -125,6 +127,9 @@ export default function PayrollCostBanner() {
     void load();
   }, [load]);
 
+  const tippedHours = estimate?.tippedHours ?? estimate?.deliveryHours ?? 0;
+  const tippedWages = estimate?.tippedWages ?? estimate?.deliveryWages ?? 0;
+
   return <section className="payrollEstimateBanner" aria-label="Scheduled payroll estimate">
     <header>
       <div>
@@ -146,7 +151,7 @@ export default function PayrollCostBanner() {
       <div className="payrollEstimateStats">
         <article><span>Potential gross payroll</span><strong>{money(estimate.grossWages)}</strong><small>{estimate.employeeCount} scheduled employees</small></article>
         <article><span>Paid hours</span><strong>{estimate.paidHours.toFixed(1)}</strong><small>{estimate.regularHours.toFixed(1)} regular · {estimate.overtimeHours.toFixed(1)} OT</small></article>
-        <article><span>Delivery-rate work</span><strong>{estimate.deliveryHours.toFixed(1)} hrs</strong><small>{money(estimate.deliveryWages)} at tipped delivery rates</small></article>
+        <article><span>{business === "Tiki" ? "Bartender tipped-rate work" : "Delivery-rate work"}</span><strong>{tippedHours.toFixed(1)} hrs</strong><small>{money(tippedWages)} at {business === "Tiki" ? "bartender tipped rates" : "delivery tipped rates"}</small></article>
         <article><span>Schedule coverage</span><strong>{estimate.assignedShiftCount}/{estimate.shiftCount}</strong><small>{estimate.openShiftCount} open shift{estimate.openShiftCount === 1 ? "" : "s"}</small></article>
       </div>
       {(estimate.missingRateHours > 0 || estimate.openShiftCount > 0 || estimate.overtimeHours > 0) && <div className="payrollEstimateWarnings">
