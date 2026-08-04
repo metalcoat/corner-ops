@@ -49,9 +49,10 @@ export default function PeoplePage() {
     {
       eyebrow: "Hire, document, and acknowledge",
       title: "Employment forms",
-      description: "Assign onboarding packets, collect employee signatures, complete I-9 employer review, and issue immutable New York pay-rate notices.",
+      description: "Assign onboarding packets, collect employee signatures, complete I-9 employer review, issue New York pay-rate notices, and securely collect voluntary direct-deposit elections.",
       links: [
         { label: "Manage employment forms", href: "/ops/employment-forms", primary: true },
+        { label: "Direct deposit onboarding", href: "/ops/direct-deposit" },
         { label: "Employee forms view", href: "/employee/forms" },
       ],
     },
