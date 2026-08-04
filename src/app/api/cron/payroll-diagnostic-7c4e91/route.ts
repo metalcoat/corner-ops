@@ -23,7 +23,7 @@ function normalize(value: unknown) {
 
 export async function GET() {
   const sql = getSql();
-  const [summary, orderRows, transactionRows, shiftRows, lateTransactions, lateOrders] = await Promise.all([
+  const [summary, orderRows, transactionRows, shiftRows, lateTransactions, lateOrders, inboundEmails] = await Promise.all([
     payrollSummary("Corner Deli", WEEK_START),
     sql`
       SELECT order_id, order_type, opened_at, raw
@@ -54,6 +54,12 @@ export async function GET() {
       FROM rezku_orders
       WHERE order_id = ANY(${LATE_ORDER_IDS}::text[])
       ORDER BY order_id, opened_at
+    `,
+    sql`
+      SELECT email_id, report_date, received_at, status, reports_found, reports_processed
+      FROM rezku_inbound_emails
+      ORDER BY received_at DESC
+      LIMIT 8
     `,
   ]);
 
@@ -113,6 +119,7 @@ export async function GET() {
     classifications,
     lateTransactions,
     lateOrders,
+    inboundEmails,
     shifts,
   });
 }
