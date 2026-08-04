@@ -1,4 +1,5 @@
 import { ensureSchema, getSql } from "@/lib/db";
+import { ensureRezkuProductSalesSchema } from "@/lib/rezku-product-sales";
 import { ensureSquareControlSchema } from "@/lib/square-control";
 import { syncSquareReportRange } from "@/lib/square-report-sync";
 import type { Business } from "@/lib/types";
@@ -188,13 +189,17 @@ async function tikiPeriod(start: Date, end: Date): Promise<Period> {
 }
 
 async function deliPeriod(start: Date, end: Date): Promise<Period> {
-  await ensureSchema();
+  await Promise.all([ensureSchema(), ensureRezkuProductSalesSchema()]);
+  const startDate = start.toISOString().slice(0, 10);
+  const endDate = end.toISOString().slice(0, 10);
   const summary = await getSql()`
     SELECT
       (SELECT COUNT(*) FROM rezku_orders
         WHERE opened_at >= ${start.toISOString()} AND opened_at < ${end.toISOString()})::INTEGER AS orders,
       (SELECT COALESCE(SUM(tip), 0) FROM rezku_transactions
         WHERE transaction_time >= ${start.toISOString()} AND transaction_time < ${end.toISOString()}) AS tips,
+      (SELECT COALESCE(SUM(sales), 0) FROM rezku_product_sales
+        WHERE business_date >= ${startDate}::date AND business_date < ${endDate}::date) AS sales,
       (SELECT COALESCE(SUM(
         CASE
           WHEN reported_hours > 0 THEN reported_hours
@@ -227,6 +232,14 @@ async function deliPeriod(start: Date, end: Date): Promise<Period> {
     GROUP BY business_date
     ORDER BY business_date
   ` as unknown as Array<Record<string, unknown>>;
+  const salesDaily = await getSql()`
+    SELECT TO_CHAR(business_date, 'YYYY-MM-DD') AS business_date,
+      COALESCE(SUM(sales), 0) AS sales
+    FROM rezku_product_sales
+    WHERE business_date >= ${startDate}::date AND business_date < ${endDate}::date
+    GROUP BY business_date
+    ORDER BY business_date
+  ` as unknown as Array<Record<string, unknown>>;
   const laborDaily = await getSql()`
     SELECT TO_CHAR(
         (clock_in AT TIME ZONE 'America/New_York' - INTERVAL '4 hours')::date,
@@ -245,8 +258,20 @@ async function deliPeriod(start: Date, end: Date): Promise<Period> {
     GROUP BY business_date
     ORDER BY business_date
   ` as unknown as Array<Record<string, unknown>>;
+  const topItems = await getSql()`
+    SELECT product AS item,
+      COALESCE(SUM(quantity), 0) AS quantity,
+      COALESCE(SUM(sales), 0) AS sales
+    FROM rezku_product_sales
+    WHERE business_date >= ${startDate}::date AND business_date < ${endDate}::date
+    GROUP BY product
+    ORDER BY SUM(sales) DESC, product
+    LIMIT 20
+  ` as unknown as Array<Record<string, unknown>>;
 
   const row = summary[0] || {};
+  const orders = numeric(row.orders);
+  const sales = numeric(row.sales);
   const daily = new Map<string, Period["daily"][number]>();
   const getDay = (date: string) => {
     const existing = daily.get(date);
@@ -257,17 +282,24 @@ async function deliPeriod(start: Date, end: Date): Promise<Period> {
   };
   for (const item of ordersDaily) getDay(String(item.business_date)).orders = numeric(item.orders);
   for (const item of tipsDaily) getDay(String(item.business_date)).tips = numeric(item.tips);
+  for (const item of salesDaily) getDay(String(item.business_date)).sales = numeric(item.sales);
   for (const item of laborDaily) getDay(String(item.business_date)).laborHours = numeric(item.labor_hours);
 
   return {
     metrics: {
       ...emptyMetrics(),
-      orders: numeric(row.orders),
+      sales,
+      orders,
       tips: numeric(row.tips),
       laborHours: numeric(row.labor_hours),
+      averageTicket: orders ? sales / orders : 0,
     },
     daily: Array.from(daily.values()).sort((left, right) => left.date.localeCompare(right.date)),
-    topItems: [],
+    topItems: topItems.map((item) => ({
+      item: String(item.item || "Unnamed item"),
+      quantity: numeric(item.quantity),
+      sales: numeric(item.sales),
+    })),
   };
 }
 
@@ -289,7 +321,7 @@ async function coverage(business: Business) {
     };
   }
 
-  await ensureSchema();
+  await Promise.all([ensureSchema(), ensureRezkuProductSalesSchema()]);
   const rows = await getSql()`
     SELECT MIN(source_time) AS first_record, MAX(source_time) AS last_record,
       COUNT(*)::INTEGER AS records
@@ -299,11 +331,18 @@ async function coverage(business: Business) {
       SELECT transaction_time AS source_time FROM rezku_transactions WHERE transaction_time IS NOT NULL
       UNION ALL
       SELECT clock_in AS source_time FROM rezku_shifts WHERE clock_in IS NOT NULL
+      UNION ALL
+      SELECT business_date::timestamp AT TIME ZONE 'America/New_York' AS source_time
+      FROM rezku_product_sales
     ) source_records
   ` as unknown as Array<Record<string, unknown>>;
   const imports = await getSql()`
     SELECT MAX(imported_at) AS latest_import, COUNT(*)::INTEGER AS import_count
-    FROM rezku_import_batches
+    FROM (
+      SELECT imported_at FROM rezku_import_batches
+      UNION ALL
+      SELECT imported_at FROM rezku_product_sales_import_batches
+    ) imports
   ` as unknown as Array<Record<string, unknown>>;
   return {
     firstRecord: rows[0]?.first_record || null,
@@ -380,20 +419,20 @@ export async function performanceReport(input: {
     comparison,
     deltas: comparison ? metricDeltas(primary.metrics, comparison.metrics) : null,
     availability: {
-      sales: input.business === "Tiki",
+      sales: true,
       taxes: input.business === "Tiki",
-      averageTicket: input.business === "Tiki",
-      topItems: input.business === "Tiki",
+      averageTicket: true,
+      topItems: true,
       orders: true,
       tips: true,
       laborHours: true,
     },
     source: input.business === "Tiki"
       ? "Square orders plus the Corner Ops Tiki time clock"
-      : "Rezku reports received by email",
+      : "Rezku emailed Order, Transaction, Labor, and Sales by Product reports",
     sourceNote: input.business === "Tiki"
       ? "The selected and comparison ranges can be refreshed directly from Square."
-      : "Deli sales and tax totals are unavailable because the emailed Rezku files currently supply labor, orders, and tip records rather than complete sales totals.",
+      : "Deli sales and top products come from Sales by Product. Orders classify transaction tips by matching Order ID to the Order Export. Taxes are not included in the current Rezku email reports.",
     coverage: await coverage(input.business),
     refreshResult,
     refreshWarning,
