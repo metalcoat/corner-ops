@@ -48,16 +48,64 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
       `;
 
       await sql`
+        CREATE OR REPLACE FUNCTION corner_ops_prepare_rezku_employee()
+        RETURNS TRIGGER
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          IF NEW.employee_name IS NULL OR BTRIM(NEW.employee_name) = '' THEN
+            RETURN NEW;
+          END IF;
+
+          IF LOWER(BTRIM(NEW.employee_name)) = 'cover' THEN
+            RETURN NULL;
+          END IF;
+
+          IF LOWER(BTRIM(NEW.employee_name)) = 'can' THEN
+            NEW.employee_name := 'Ken';
+          END IF;
+
+          RETURN NEW;
+        END;
+        $$
+      `;
+
+      await sql`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger
+            WHERE tgname = 'rezku_employee_alias_normalization'
+              AND tgrelid = 'rezku_shifts'::regclass
+              AND NOT tgisinternal
+          ) THEN
+            CREATE TRIGGER rezku_employee_alias_normalization
+            BEFORE INSERT OR UPDATE OF employee_name
+            ON rezku_shifts
+            FOR EACH ROW
+            EXECUTE FUNCTION corner_ops_prepare_rezku_employee();
+          END IF;
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END;
+        $$
+      `;
+
+      await sql`
         CREATE OR REPLACE FUNCTION corner_ops_sync_rezku_employee()
         RETURNS TRIGGER
         LANGUAGE plpgsql
         AS $$
         DECLARE
+          canonical_name TEXT;
           employee_position TEXT;
           employee_role TEXT;
         BEGIN
-          IF NEW.employee_name IS NULL OR BTRIM(NEW.employee_name) = '' THEN
+          canonical_name := BTRIM(COALESCE(NEW.employee_name, ''));
+          IF canonical_name = '' OR LOWER(canonical_name) = 'cover' THEN
             RETURN NEW;
+          END IF;
+          IF LOWER(canonical_name) = 'can' THEN
+            canonical_name := 'Ken';
           END IF;
 
           employee_position := COALESCE(NULLIF(BTRIM(NEW.position), ''), 'Employee');
@@ -75,15 +123,15 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
             counts_for_tips = employee_role <> 'Ignore',
             updated_at = NOW()
           WHERE business = 'Corner Deli'
-            AND LOWER(BTRIM(name)) = LOWER(BTRIM(NEW.employee_name));
+            AND LOWER(BTRIM(name)) = LOWER(canonical_name);
 
           IF NOT FOUND THEN
             INSERT INTO employees (
               id, business, email, name, pin_hash, pin_enabled, position,
               role_group, counts_for_tips, hourly_rate, tipped_rate, active
             ) VALUES (
-              gen_random_uuid(), 'Corner Deli', '', BTRIM(NEW.employee_name),
-              'rezku:' || MD5(LOWER(BTRIM(NEW.employee_name))), FALSE,
+              gen_random_uuid(), 'Corner Deli', '', canonical_name,
+              'rezku:' || MD5(LOWER(canonical_name)), FALSE,
               employee_position, employee_role, employee_role <> 'Ignore', 0, 0, TRUE
             );
           END IF;
@@ -114,6 +162,49 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
       `;
 
       await sql`
+        DELETE FROM rezku_shifts
+        WHERE LOWER(BTRIM(COALESCE(employee_name, ''))) = 'cover'
+      `;
+
+      await sql`
+        UPDATE rezku_shifts
+        SET employee_name = 'Ken'
+        WHERE LOWER(BTRIM(COALESCE(employee_name, ''))) = 'can'
+      `;
+
+      await sql`
+        DELETE FROM employees
+        WHERE business = 'Corner Deli'
+          AND LOWER(BTRIM(name)) = 'cover'
+          AND pin_enabled = FALSE
+      `;
+
+      await sql`
+        UPDATE employees alias_employee
+        SET name = 'Ken', updated_at = NOW()
+        WHERE alias_employee.business = 'Corner Deli'
+          AND LOWER(BTRIM(alias_employee.name)) = 'can'
+          AND alias_employee.pin_enabled = FALSE
+          AND NOT EXISTS (
+            SELECT 1 FROM employees canonical_employee
+            WHERE canonical_employee.business = 'Corner Deli'
+              AND LOWER(BTRIM(canonical_employee.name)) = 'ken'
+          )
+      `;
+
+      await sql`
+        DELETE FROM employees alias_employee
+        WHERE alias_employee.business = 'Corner Deli'
+          AND LOWER(BTRIM(alias_employee.name)) = 'can'
+          AND alias_employee.pin_enabled = FALSE
+          AND EXISTS (
+            SELECT 1 FROM employees canonical_employee
+            WHERE canonical_employee.business = 'Corner Deli'
+              AND LOWER(BTRIM(canonical_employee.name)) = 'ken'
+          )
+      `;
+
+      await sql`
         INSERT INTO employees (
           id, business, email, name, pin_hash, pin_enabled, position,
           role_group, counts_for_tips, hourly_rate, tipped_rate, active
@@ -133,7 +224,9 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
               ELSE 'In-House'
             END AS role_group
           FROM rezku_shifts
-          WHERE employee_name IS NOT NULL AND BTRIM(employee_name) <> ''
+          WHERE employee_name IS NOT NULL
+            AND BTRIM(employee_name) <> ''
+            AND LOWER(BTRIM(employee_name)) <> 'cover'
           ORDER BY LOWER(BTRIM(employee_name)), COALESCE(clock_in, clock_out) DESC NULLS LAST
         ) AS source
         WHERE NOT EXISTS (
