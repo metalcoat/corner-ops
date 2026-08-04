@@ -1,32 +1,36 @@
 .employeeLoginShell,
 .employeeShell {
   min-height: 100vh;
-  color: #f8fafc;
+  color: var(--text);
 }
 
 .employeeLoginShell {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: radial-gradient(circle at top, #163d34, #070b12 58%);
+  background:
+    radial-gradient(circle at 10% 0%, var(--theme-glow), transparent 34rem),
+    radial-gradient(circle at 90% 12%, var(--theme-glow-secondary), transparent 28rem),
+    var(--bg);
 }
 
 .employeeLoginCard {
-  width: min(440px, 100%);
-  background: rgba(10, 18, 30, .94);
-  border: 1px solid #2f4951;
-  border-radius: 24px;
+  width: min(460px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 22px;
   padding: 30px;
-  box-shadow: 0 28px 80px rgba(0, 0, 0, .45);
+  background: linear-gradient(180deg, var(--theme-panel-top), var(--theme-panel-bottom));
+  box-shadow: 0 28px 80px rgb(0 0 0 / 38%);
 }
 
 .employeeLoginCard h1 {
-  font-size: 2.5rem;
   margin: .2rem 0;
+  font-size: clamp(2.2rem, 9vw, 3.4rem);
 }
 
-.employeeLoginCard p {
-  color: #aab5c5;
+.employeeLoginCard > p:not(.empEyebrow) {
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .employeeLoginForm,
@@ -39,8 +43,9 @@
 .employeeForm label {
   display: grid;
   gap: 6px;
-  color: #cbd5e1;
+  color: var(--muted);
   font-size: .86rem;
+  font-weight: 700;
 }
 
 .employeeLoginForm input,
@@ -50,10 +55,10 @@
 .employeeForm textarea {
   box-sizing: border-box;
   width: 100%;
-  border: 1px solid #344458;
+  border: 1px solid var(--border);
   border-radius: 11px;
-  background: #070d17;
-  color: #f8fafc;
+  background: var(--theme-input);
+  color: var(--text);
   padding: 12px;
 }
 
@@ -61,12 +66,14 @@
 .employeeForm button,
 .employeeShift button,
 .employeeRequest button,
-.employeeHeaderActions button {
-  border: 0;
+.employeeHeaderActions button,
+.weekControls button,
+.employeeInlineButton {
+  border: 1px solid var(--accent);
   border-radius: 10px;
-  background: #76d6b5;
-  color: #06281d;
-  font-weight: 850;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 900;
   padding: 11px 14px;
   cursor: pointer;
 }
@@ -75,21 +82,24 @@
 .employeeForm button:disabled,
 .employeeShift button:disabled,
 .employeeRequest button:disabled,
-.employeeHeaderActions button:disabled {
+.employeeHeaderActions button:disabled,
+.weekControls button:disabled {
+  cursor: not-allowed;
   opacity: .55;
 }
 
 .empClockLink {
   display: block;
-  text-align: center;
   margin-top: 18px;
-  color: #8ee9ca;
+  color: var(--accent);
+  font-weight: 850;
+  text-align: center;
 }
 
 .employeeShell {
-  max-width: 1450px;
+  max-width: 1500px;
   margin: auto;
-  padding: 34px 26px 80px;
+  padding: 32px 26px 84px;
 }
 
 .employeeHero {
@@ -101,45 +111,54 @@
 }
 
 .employeeHero h1 {
-  font-size: clamp(2rem, 5vw, 4rem);
   margin: .1rem 0;
+  font-size: clamp(2rem, 5vw, 4rem);
 }
 
-.employeeHero p {
-  color: #9da9ba;
+.employeeHero p:not(.empEyebrow) {
+  color: var(--muted);
 }
 
 .empEyebrow {
-  text-transform: uppercase;
-  letter-spacing: .14em;
-  font-size: .74rem;
-  font-weight: 850;
-  color: #76d6b5 !important;
   margin: 0;
+  color: var(--accent) !important;
+  font-size: .74rem;
+  font-weight: 900;
+  letter-spacing: .14em;
+  text-transform: uppercase;
 }
 
 .employeeHeaderActions {
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
+  gap: 8px;
 }
 
 .employeeHeaderActions a,
-.employeeHeaderActions button {
-  background: #172235;
-  color: #e8eef7;
-  text-decoration: none;
-  border: 1px solid #334155;
+.employeeHeaderActions button,
+.weekControls button {
+  border: 1px solid var(--border);
   border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--text);
   padding: 10px 13px;
+  text-decoration: none;
+}
+
+.employeeHeaderActions button:hover,
+.employeeHeaderActions a:hover,
+.weekControls button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .empNotice {
-  background: #152238;
-  border: 1px solid #38506f;
-  border-radius: 14px;
-  padding: 13px 15px;
   margin: 14px 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--border));
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--text);
+  padding: 13px 15px;
 }
 
 .employeeStats {
@@ -149,48 +168,131 @@
 }
 
 .employeeStats article,
-.employeeCard {
-  background: linear-gradient(180deg, #111827, #0a111e);
-  border: 1px solid #263244;
-  border-radius: 18px;
-  box-shadow: 0 15px 36px rgba(0, 0, 0, .18);
+.employeeCard,
+.employeeDisclosure,
+.employeeUpdateTray {
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--theme-panel-top), var(--theme-panel-bottom));
+  box-shadow: 0 15px 36px rgb(0 0 0 / 18%);
 }
 
 .employeeStats article {
+  border-radius: 16px;
   padding: 17px;
 }
 
 .employeeStats span {
   display: block;
-  color: #94a3b8;
+  color: var(--muted);
   font-size: .82rem;
+  font-weight: 700;
 }
 
 .employeeStats strong {
   font-size: 2rem;
 }
 
+.employeeUpdateTray {
+  margin: 14px 0 18px;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.employeeUpdateTray > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 64px;
+  padding: 12px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.employeeUpdateTray > summary::-webkit-details-marker,
+.employeeDisclosure > summary::-webkit-details-marker,
+.employeeMessageDisclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.employeeUpdateTray > summary::after,
+.employeeDisclosure > summary::after {
+  content: "⌄";
+  color: var(--accent);
+  font-size: 1.35rem;
+  font-weight: 900;
+  transition: transform .18s ease;
+}
+
+.employeeUpdateTray[open] > summary::after,
+.employeeDisclosure[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.employeeUpdateTray > summary > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.employeeUpdateTray > summary strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.employeeUpdateTray > summary small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeeUpdateCount {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  min-width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 950;
+}
+
+.employeeUpdateList {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding: 12px;
+}
+
+.employeeInlineButton {
+  justify-self: start;
+  margin-top: 2px;
+}
+
 .employeeTabs {
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
-  margin: 20px 0;
+  gap: 8px;
+  margin: 18px 0;
 }
 
 .employeeTabs button {
-  border: 1px solid #334155;
-  background: #111827;
-  color: #cbd5e1;
+  border: 1px solid var(--border);
   border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
   padding: 10px 16px;
   cursor: pointer;
 }
 
 .employeeTabs button.active {
-  background: #e7fff6;
-  color: #06281d;
-  border-color: #76d6b5;
-  font-weight: 850;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  font-weight: 900;
 }
 
 .employeeGrid {
@@ -204,6 +306,7 @@
 }
 
 .employeeCard {
+  border-radius: 18px;
   padding: 19px;
 }
 
@@ -218,9 +321,14 @@
   margin: .12rem 0;
 }
 
+.employeeCardHeader > div > span {
+  color: var(--muted);
+  font-size: .88rem;
+}
+
 .employeeList {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   max-height: 650px;
   overflow: auto;
 }
@@ -228,9 +336,9 @@
 .employeeShift,
 .employeeRequest,
 .employeeHistory {
-  background: #080f1a;
-  border: 1px solid #253145;
+  border: 1px solid var(--border);
   border-radius: 13px;
+  background: color-mix(in srgb, var(--panel) 72%, black);
   padding: 13px;
 }
 
@@ -254,7 +362,7 @@
 .employeeRequest span,
 .employeeHistory span,
 .employeeHistory small {
-  color: #96a3b6;
+  color: var(--muted);
 }
 
 .employeeRequest > div:last-child {
@@ -263,86 +371,9 @@
 }
 
 .employeeRequest button.empSecondary {
-  background: #263244;
-  color: #e8eef7;
-}
-
-html[data-business-theme="Corner Deli"] .employeeMessage {
-  --message-business: #9a3412;
-}
-
-html[data-business-theme="Tiki"] .employeeMessage {
-  --message-business: #0f766e;
-}
-
-.employeeMessage {
-  --message-business: #334155;
-  position: relative;
-  border: 2px solid #94a3b8 !important;
-  border-left: 9px solid var(--message-business) !important;
-  border-radius: 12px;
-  background: #f8fafc !important;
-  color: #0f172a !important;
-  padding: 14px 15px;
-  box-shadow: 0 8px 22px rgb(2 6 23 / 20%);
-}
-
-.employeeMessage::before {
-  content: "MESSAGE";
-  display: inline-block;
-  margin-bottom: 10px;
-  border: 1px solid var(--message-business);
-  border-radius: 5px;
-  background: #fff;
-  color: var(--message-business);
-  padding: 3px 7px;
-  font-size: .66rem;
-  font-weight: 950;
-  letter-spacing: .11em;
-}
-
-html[data-business-theme="Corner Deli"] .employeeMessage::before {
-  content: "CORNER DELI";
-}
-
-html[data-business-theme="Tiki"] .employeeMessage::before {
-  content: "TIKI";
-}
-
-.employeeMessage > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  align-items: flex-start;
-  border-bottom: 1px solid #cbd5e1;
-  padding-bottom: 9px;
-}
-
-.employeeMessage > div strong {
-  color: #020617;
-  font-size: 1.02rem;
-  font-weight: 950;
-  line-height: 1.25;
-}
-
-.employeeMessage span,
-.employeeMessage small {
-  color: #334155 !important;
-  font-size: .8rem;
-  font-weight: 750;
-}
-
-.employeeMessage p {
-  margin: 11px 0 0;
-  border: 1px solid #cbd5e1;
-  border-radius: 9px;
-  background: #fff;
-  color: #0f172a;
-  padding: 12px 13px;
-  white-space: pre-wrap;
-  font-size: 1rem;
-  font-weight: 600;
-  line-height: 1.55;
+  border-color: var(--border);
+  background: var(--panel-2);
+  color: var(--text);
 }
 
 .employeeHistory p,
@@ -351,46 +382,267 @@ html[data-business-theme="Tiki"] .employeeMessage::before {
   white-space: pre-wrap;
 }
 
-.teamSchedule {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 9px;
+.teamWeekHeader {
+  align-items: center;
 }
 
-.teamSchedule div {
+.weekControls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.teamWeekScroll {
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scrollbar-color: var(--accent) var(--theme-input);
+}
+
+.teamWeekGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(160px, 1fr));
+  gap: 8px;
+  min-width: 1160px;
+}
+
+.teamDay {
+  min-height: 220px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--panel) 76%, black);
+  overflow: hidden;
+}
+
+.teamDay.today {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.teamDay > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--theme-table-head);
+  padding: 10px;
+}
+
+.teamDay > header strong {
+  color: var(--text);
+}
+
+.teamDay > header span {
+  color: var(--muted);
+  font-size: .8rem;
+}
+
+.teamDayShifts {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 8px;
+}
+
+.teamShiftTile {
   display: grid;
   gap: 3px;
-  background: #080f1a;
-  border: 1px solid #253145;
-  border-radius: 12px;
-  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, white);
+  border-left: 4px solid var(--muted);
+  border-radius: 9px;
+  background: var(--theme-input);
+  padding: 9px;
 }
 
-.teamSchedule span,
-.teamSchedule small {
-  color: #96a3b6;
+.teamShiftTile.mine {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 74%, var(--theme-input));
+}
+
+.teamShiftTile.openShift {
+  border-left-color: #f5c542;
+  background: color-mix(in srgb, #f5c542 12%, var(--theme-input));
+}
+
+.teamShiftTile strong {
+  color: var(--text);
+  font-size: .85rem;
+}
+
+.teamShiftTile span,
+.teamShiftTile small,
+.teamDayEmpty {
+  color: var(--muted);
+  font-size: .76rem;
+}
+
+.teamDayEmpty {
+  padding: 9px;
+  text-align: center;
+}
+
+.employeeMessageWorkspace {
+  display: grid;
+  gap: 14px;
+}
+
+.employeeDisclosure {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.employeeDisclosure > summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 14px;
+  padding: 15px 17px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.employeeDisclosure > summary strong {
+  color: var(--text);
+}
+
+.employeeDisclosure > summary span {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: .82rem;
+}
+
+.employeeDisclosure > summary::after {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+.employeeDisclosureBody {
+  border-top: 1px solid var(--border);
+  padding: 16px;
+}
+
+.employeeMessageCard {
+  padding: 16px;
+}
+
+.employeeMessageTotal {
+  display: grid;
+  place-items: center;
+  min-width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.employeeMessageList {
+  display: grid;
+  gap: 8px;
+}
+
+.employeeMessageDisclosure {
+  --message-rail: #8a351d;
+  border: 1px solid #cbd5e1;
+  border-left: 7px solid var(--message-rail);
+  border-radius: 11px;
+  background: #ffffff;
+  color: #111827;
+  overflow: hidden;
+}
+
+html[data-business-theme="Tiki"] .employeeMessageDisclosure {
+  --message-rail: #075968;
+}
+
+.employeeMessageDisclosure > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.employeeMessageDisclosure > summary::after {
+  content: "›";
+  grid-column: 3;
+  color: #111827;
+  font-size: 1.2rem;
+  font-weight: 950;
+  transition: transform .16s ease;
+}
+
+.employeeMessageDisclosure[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+.employeeMessageSummaryMain {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.employeeMessageSummaryMain strong {
+  color: #0f172a;
+  font-size: .93rem;
+  font-weight: 950;
+}
+
+.employeeMessageSummaryMain > span {
+  overflow: hidden;
+  color: #334155;
+  font-size: .82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employeeMessageSummaryMeta {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  color: #334155;
+  font-size: .7rem;
+  white-space: nowrap;
+}
+
+.employeeMessageSummaryMeta small,
+.employeeMessageSummaryMeta time {
+  color: #334155;
+  font-weight: 800;
+}
+
+.employeeMessageBody {
+  border-top: 1px solid #cbd5e1;
+  background: #f8fafc;
+  padding: 10px 12px 12px;
+}
+
+.employeeMessageBody p {
+  margin: 0;
+  color: #111827;
+  line-height: 1.48;
+  white-space: pre-wrap;
 }
 
 .availabilitySummary {
   display: grid;
   gap: 5px;
-  margin-top: 18px;
+  margin-top: 8px;
 }
 
 .availabilitySummary div {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 0;
-  border-top: 1px solid #263244;
+  border-top: 1px solid var(--border);
+  padding: 9px 0;
 }
 
-.availabilitySummary span {
-  color: #96a3b6;
-}
-
+.availabilitySummary span,
 .empEmpty {
-  color: #94a3b8;
+  color: var(--muted);
 }
 
 @media (max-width: 900px) {
@@ -409,25 +661,50 @@ html[data-business-theme="Tiki"] .employeeMessage::before {
   .employeeHero {
     flex-direction: column;
   }
-}
 
-@media (max-width: 560px) {
-  .employeeShell {
-    padding: 23px 13px 70px;
-  }
-
-  .employeeStats {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .employeeShift,
-  .employeeRequest {
+  .teamWeekHeader {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .employeeMessage > div {
-    flex-direction: column;
+  .weekControls {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .employeeShell {
+    padding: 18px 10px 68px;
+  }
+
+  .employeeLoginShell {
+    padding: 14px;
+  }
+
+  .employeeLoginCard {
+    padding: 22px 18px;
+  }
+
+  .employeeHero {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .employeeHero h1 {
+    font-size: 2rem;
+  }
+
+  .employeeStats {
+    gap: 8px;
+  }
+
+  .employeeStats article {
+    padding: 12px;
+  }
+
+  .employeeStats strong {
+    font-size: 1.45rem;
   }
 
   .employeeHeaderActions {
@@ -437,6 +714,108 @@ html[data-business-theme="Tiki"] .employeeMessage::before {
   .employeeHeaderActions a,
   .employeeHeaderActions button {
     flex: 1;
+    padding: 9px;
     text-align: center;
+  }
+
+  .employeeTabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .employeeTabs button {
+    padding: 9px 7px;
+    font-size: .82rem;
+  }
+
+  .employeeTabs button:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .employeeCard {
+    padding: 13px;
+  }
+
+  .employeeShift,
+  .employeeRequest {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .employeeShift button {
+    width: 100%;
+  }
+
+  .employeeUpdateTray {
+    position: sticky;
+    z-index: 4;
+    top: 6px;
+    margin: 10px 0 14px;
+    box-shadow: 0 10px 30px rgb(0 0 0 / 34%);
+  }
+
+  .employeeUpdateTray > summary {
+    min-height: 54px;
+    padding: 9px 12px;
+  }
+
+  .employeeUpdateList {
+    max-height: 62vh;
+    overflow-y: auto;
+  }
+
+  .employeeMessageDisclosure > summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 52px;
+    padding: 8px 9px;
+  }
+
+  .employeeMessageDisclosure > summary::after {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .employeeMessageSummaryMeta {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .employeeMessageList {
+    max-height: 68vh;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+
+  .employeeMessageBody {
+    padding: 9px 10px 11px;
+  }
+
+  .teamWeekGrid {
+    grid-template-columns: repeat(7, minmax(145px, 1fr));
+    min-width: 1050px;
+  }
+
+  .teamDay {
+    min-height: 190px;
+  }
+
+  .weekControls {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .weekControls button {
+    padding: 9px 6px;
+    font-size: .78rem;
+  }
+
+  .availabilitySummary div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
   }
 }
