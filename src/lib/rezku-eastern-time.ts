@@ -2,7 +2,33 @@ import { createHash } from "node:crypto";
 import { ensureSchema, getSql } from "@/lib/db";
 
 const TIME_ZONE = "America/New_York";
-const MIGRATION_KEY = "rezku-wall-times-america-new-york-v1";
+const MIGRATION_KEY = "rezku-wall-times-america-new-york-v2";
+const MONTHS: Record<string, number> = {
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
+};
 
 type DateParts = {
   year: number;
@@ -29,6 +55,14 @@ function numeric(value: unknown): number {
 
 function normalizeKey(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeOrderId(value: unknown): string {
+  return clean(value, 120)
+    .replace(/^['"]+|['"]+$/g, "")
+    .replace(/\.0+$/, "")
+    .replace(/[^a-z0-9]/gi, "")
+    .toLowerCase();
 }
 
 function rowLookup(row: RawRow, candidates: string[]): unknown {
@@ -69,7 +103,7 @@ function validDateParts(parts: DateParts): boolean {
 }
 
 function dateParts(value: unknown): DateParts | null {
-  const text = clean(value, 120);
+  const text = clean(value, 160);
   if (!text) return null;
 
   let match = text.match(/(?:^|\D)(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})(?:\D|$)/);
@@ -84,11 +118,31 @@ function dateParts(value: unknown): DateParts | null {
     return validDateParts(parts) ? parts : null;
   }
 
+  match = text.match(/(?:^|\s)([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})(?:\s|$)/i);
+  if (match) {
+    const parts = {
+      year: Number(match[3]),
+      month: MONTHS[match[1].toLowerCase()] || 0,
+      day: Number(match[2]),
+    };
+    return validDateParts(parts) ? parts : null;
+  }
+
+  match = text.match(/(?:^|\s)(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})(?:\s|$)/i);
+  if (match) {
+    const parts = {
+      year: Number(match[3]),
+      month: MONTHS[match[2].toLowerCase()] || 0,
+      day: Number(match[1]),
+    };
+    return validDateParts(parts) ? parts : null;
+  }
+
   return null;
 }
 
 function timeParts(value: unknown): TimeParts | null {
-  const text = clean(value, 120);
+  const text = clean(value, 160);
   if (!text) return null;
   const match = text.match(/(?:^|\s|T)(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?(?:\s|$)/i);
   if (!match) return null;
@@ -136,7 +190,7 @@ function easternDate(parts: DateParts, time: TimeParts): Date {
 }
 
 function explicitInstant(value: unknown): Date | null {
-  const text = clean(value, 120);
+  const text = clean(value, 160);
   if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)) return null;
   const parsed = new Date(text);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
@@ -150,9 +204,13 @@ function rezkuDateTime(dateValue: unknown, timeValue: unknown): Date | null {
   const fullTime = timeParts(timeValue);
   if (fullDate && fullTime) return easternDate(fullDate, fullTime);
 
-  const date = dateParts(dateValue);
+  const date = dateParts(dateValue) || fullDate;
   if (!date) return null;
   return easternDate(date, fullTime || { hour: 0, minute: 0, second: 0 });
+}
+
+function repairedRaw(raw: RawRow): string {
+  return JSON.stringify({ ...raw, __easternWallTimeRepaired: true });
 }
 
 async function repairShifts(batchId?: string) {
@@ -193,7 +251,10 @@ async function repairShifts(batchId?: string) {
     }
     await sql`
       UPDATE rezku_shifts
-      SET source_key = ${key}, clock_in = ${clockIn?.toISOString() || null}, clock_out = ${clockOut?.toISOString() || null}
+      SET source_key = ${key},
+        clock_in = ${clockIn?.toISOString() || null},
+        clock_out = ${clockOut?.toISOString() || null},
+        raw = ${repairedRaw(raw)}::jsonb
       WHERE id = ${String(row.id)}::uuid
     `;
     updated += 1;
@@ -222,14 +283,42 @@ async function repairOrders(batchId?: string) {
       deduplicated += 1;
       continue;
     }
-    await sql`UPDATE rezku_orders SET source_key = ${key}, opened_at = ${openedAt.toISOString()} WHERE id = ${String(row.id)}::uuid`;
+    await sql`
+      UPDATE rezku_orders
+      SET source_key = ${key}, opened_at = ${openedAt.toISOString()}, raw = ${repairedRaw(raw)}::jsonb
+      WHERE id = ${String(row.id)}::uuid
+    `;
     updated += 1;
   }
   return { updated, deduplicated };
 }
 
+async function orderTimeMap() {
+  const rows = await getSql()`
+    SELECT order_id, opened_at, raw
+    FROM rezku_orders
+    WHERE opened_at IS NOT NULL
+    ORDER BY opened_at
+  ` as unknown as Array<Record<string, unknown>>;
+  const result = new Map<string, { time: Date; hasClock: boolean }>();
+  for (const row of rows) {
+    const key = normalizeOrderId(row.order_id);
+    const time = new Date(String(row.opened_at));
+    if (!key || Number.isNaN(time.getTime())) continue;
+    const raw = rawObject(row.raw);
+    const rawTime = rowLookup(raw, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]);
+    const candidate = { time, hasClock: Boolean(timeParts(rawTime)) };
+    const current = result.get(key);
+    if (!current || (!current.hasClock && candidate.hasClock) || current.time.getTime() < candidate.time.getTime()) {
+      result.set(key, candidate);
+    }
+  }
+  return result;
+}
+
 async function repairTransactions(batchId?: string) {
   const sql = getSql();
+  const orders = await orderTimeMap();
   const rows = (batchId
     ? await sql`
         SELECT id, batch_id, transaction_id, order_id, tip, raw
@@ -246,7 +335,11 @@ async function repairTransactions(batchId?: string) {
     const raw = rawObject(row.raw);
     const dateValue = rowLookup(raw, ["Date", "Business Date", "Transaction Date"]);
     const timeValue = rowLookup(raw, ["Transaction Time", "Payment Time", "Created At", "Time"]);
-    const transactionTime = rezkuDateTime(dateValue, timeValue);
+    const matchedOrder = orders.get(normalizeOrderId(row.order_id));
+    const parsedTime = rezkuDateTime(dateValue, timeValue);
+    const transactionTime = timeParts(timeValue)
+      ? parsedTime
+      : matchedOrder?.time || parsedTime;
     if (!transactionTime) continue;
     const tip = numeric(row.tip);
     const key = sourceKey([
@@ -264,7 +357,7 @@ async function repairTransactions(batchId?: string) {
     }
     await sql`
       UPDATE rezku_transactions
-      SET source_key = ${key}, transaction_time = ${transactionTime.toISOString()}
+      SET source_key = ${key}, transaction_time = ${transactionTime.toISOString()}, raw = ${repairedRaw(raw)}::jsonb
       WHERE id = ${String(row.id)}::uuid
     `;
     updated += 1;
@@ -274,11 +367,9 @@ async function repairTransactions(batchId?: string) {
 
 export async function repairRezkuBatchTimes(batchId: string) {
   await ensureSchema();
-  const [shifts, orders, transactions] = await Promise.all([
-    repairShifts(batchId),
-    repairOrders(batchId),
-    repairTransactions(batchId),
-  ]);
+  const shifts = await repairShifts(batchId);
+  const orders = await repairOrders(batchId);
+  const transactions = await repairTransactions(batchId);
   return { shifts, orders, transactions };
 }
 
@@ -294,11 +385,9 @@ export async function repairExistingRezkuTimesOnce() {
   const completed = await sql`SELECT migration_key FROM rezku_data_migrations WHERE migration_key = ${MIGRATION_KEY} LIMIT 1` as unknown as Array<{ migration_key: string }>;
   if (completed[0]) return { migrated: false };
 
-  const [shifts, orders, transactions] = await Promise.all([
-    repairShifts(),
-    repairOrders(),
-    repairTransactions(),
-  ]);
+  const shifts = await repairShifts();
+  const orders = await repairOrders();
+  const transactions = await repairTransactions();
   await sql`INSERT INTO rezku_data_migrations (migration_key) VALUES (${MIGRATION_KEY}) ON CONFLICT DO NOTHING`;
   return { migrated: true, shifts, orders, transactions };
 }
