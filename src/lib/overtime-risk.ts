@@ -579,7 +579,7 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
     hours: actualHours(row, bounds.start.getTime(), bounds.end.getTime()),
   })).filter((entry) => entry.hours > 0);
 
-  const mismatches: ShiftCoverageMismatch[] = actual.flatMap((entry) => {
+  const mismatches = actual.flatMap<ShiftCoverageMismatch>((entry): ShiftCoverageMismatch[] => {
     if (!entry.employeeId) {
       return [{
         actualEntryId: entry.id,
