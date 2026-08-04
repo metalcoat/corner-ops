@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { ensureSchema, getSql } from "@/lib/db";
 
 const TIME_ZONE = "America/New_York";
-const MIGRATION_KEY = "rezku-wall-times-america-new-york-v2";
+const MIGRATION_KEY = "rezku-wall-times-america-new-york-v3";
 const MONTHS: Record<string, number> = {
   jan: 1,
   january: 1,
@@ -157,6 +157,10 @@ function timeParts(value: unknown): TimeParts | null {
   return { hour, minute, second };
 }
 
+function hasClock(raw: RawRow, candidates: string[]): boolean {
+  return Boolean(timeParts(rowLookup(raw, candidates)));
+}
+
 function offsetMilliseconds(date: Date): number {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: TIME_ZONE,
@@ -262,6 +266,28 @@ async function repairShifts(batchId?: string) {
   return { updated, deduplicated };
 }
 
+async function removeDateOnlyOrderDuplicates(): Promise<number> {
+  const sql = getSql();
+  const rows = await sql`SELECT id, order_id, raw FROM rezku_orders` as unknown as Array<Record<string, unknown>>;
+  const detailed = new Set<string>();
+  for (const row of rows) {
+    const key = normalizeOrderId(row.order_id);
+    if (key && hasClock(rawObject(row.raw), ["Opened At", "Open Time", "Order Time", "Created At", "Time"])) {
+      detailed.add(key);
+    }
+  }
+  const deleteIds = rows
+    .filter((row) => {
+      const key = normalizeOrderId(row.order_id);
+      return Boolean(key && detailed.has(key)
+        && !hasClock(rawObject(row.raw), ["Opened At", "Open Time", "Order Time", "Created At", "Time"]));
+    })
+    .map((row) => String(row.id));
+  if (!deleteIds.length) return 0;
+  const deleted = await sql`DELETE FROM rezku_orders WHERE id = ANY(${deleteIds}::uuid[]) RETURNING id`;
+  return deleted.length;
+}
+
 async function repairOrders(batchId?: string) {
   const sql = getSql();
   const rows = (batchId
@@ -290,6 +316,7 @@ async function repairOrders(batchId?: string) {
     `;
     updated += 1;
   }
+  deduplicated += await removeDateOnlyOrderDuplicates();
   return { updated, deduplicated };
 }
 
@@ -306,14 +333,42 @@ async function orderTimeMap() {
     const time = new Date(String(row.opened_at));
     if (!key || Number.isNaN(time.getTime())) continue;
     const raw = rawObject(row.raw);
-    const rawTime = rowLookup(raw, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]);
-    const candidate = { time, hasClock: Boolean(timeParts(rawTime)) };
+    const candidate = {
+      time,
+      hasClock: hasClock(raw, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]),
+    };
     const current = result.get(key);
-    if (!current || (!current.hasClock && candidate.hasClock) || current.time.getTime() < candidate.time.getTime()) {
+    if (!current
+      || (!current.hasClock && candidate.hasClock)
+      || (current.hasClock === candidate.hasClock && current.time.getTime() < candidate.time.getTime())) {
       result.set(key, candidate);
     }
   }
   return result;
+}
+
+async function removeDateOnlyTransactionDuplicates(): Promise<number> {
+  const sql = getSql();
+  const rows = await sql`SELECT id, order_id, tip, raw FROM rezku_transactions` as unknown as Array<Record<string, unknown>>;
+  const detailKeys = new Set<string>();
+  for (const row of rows) {
+    const orderKey = normalizeOrderId(row.order_id);
+    const key = `${orderKey}|${Math.round(numeric(row.tip) * 100)}`;
+    if (orderKey && hasClock(rawObject(row.raw), ["Transaction Time", "Payment Time", "Created At", "Time"])) {
+      detailKeys.add(key);
+    }
+  }
+  const deleteIds = rows
+    .filter((row) => {
+      const orderKey = normalizeOrderId(row.order_id);
+      const key = `${orderKey}|${Math.round(numeric(row.tip) * 100)}`;
+      return Boolean(orderKey && detailKeys.has(key)
+        && !hasClock(rawObject(row.raw), ["Transaction Time", "Payment Time", "Created At", "Time"]));
+    })
+    .map((row) => String(row.id));
+  if (!deleteIds.length) return 0;
+  const deleted = await sql`DELETE FROM rezku_transactions WHERE id = ANY(${deleteIds}::uuid[]) RETURNING id`;
+  return deleted.length;
 }
 
 async function repairTransactions(batchId?: string) {
@@ -362,6 +417,7 @@ async function repairTransactions(batchId?: string) {
     `;
     updated += 1;
   }
+  deduplicated += await removeDateOnlyTransactionDuplicates();
   return { updated, deduplicated };
 }
 
