@@ -20,6 +20,55 @@ async function removeInvalidRezkuShiftRows() {
   await sql`DELETE FROM rezku_shifts WHERE clock_in IS NULL AND clock_out IS NULL`;
 }
 
+async function reinterpretLegacyWallTimes() {
+  const sql = getSql();
+
+  const shifts = await sql`
+    UPDATE rezku_shifts
+    SET clock_in = CASE
+          WHEN clock_in IS NULL THEN NULL
+          ELSE (clock_in AT TIME ZONE 'UTC') AT TIME ZONE 'America/New_York'
+        END,
+        clock_out = CASE
+          WHEN clock_out IS NULL THEN NULL
+          ELSE (clock_out AT TIME ZONE 'UTC') AT TIME ZONE 'America/New_York'
+        END,
+        raw = jsonb_set(raw, '{__easternWallTimeRepaired}', 'true'::jsonb, TRUE)
+    WHERE COALESCE(raw->>'__easternWallTimeRepaired', 'false') <> 'true'
+      AND COALESCE(raw->>'Date', '') ~* '[a-z]'
+      AND COALESCE(raw->>'In', raw->>'Clock In', '') ~* '[0-9]{1,2}:[0-9]{2}'
+    RETURNING id
+  `;
+
+  const orders = await sql`
+    UPDATE rezku_orders
+    SET opened_at = CASE
+          WHEN opened_at IS NULL THEN NULL
+          ELSE (opened_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/New_York'
+        END,
+        raw = jsonb_set(raw, '{__easternWallTimeRepaired}', 'true'::jsonb, TRUE)
+    WHERE COALESCE(raw->>'__easternWallTimeRepaired', 'false') <> 'true'
+      AND COALESCE(raw->>'Date', raw->>'Business Date', raw->>'Order Date', '') ~* '[a-z]'
+      AND opened_at IS NOT NULL
+    RETURNING id
+  `;
+
+  const transactions = await sql`
+    UPDATE rezku_transactions
+    SET transaction_time = CASE
+          WHEN transaction_time IS NULL THEN NULL
+          ELSE (transaction_time AT TIME ZONE 'UTC') AT TIME ZONE 'America/New_York'
+        END,
+        raw = jsonb_set(raw, '{__easternWallTimeRepaired}', 'true'::jsonb, TRUE)
+    WHERE COALESCE(raw->>'__easternWallTimeRepaired', 'false') <> 'true'
+      AND COALESCE(raw->>'Date', raw->>'Business Date', raw->>'Transaction Date', '') ~* '[a-z]'
+      AND transaction_time IS NOT NULL
+    RETURNING id
+  `;
+
+  return { shifts: shifts.length, orders: orders.length, transactions: transactions.length };
+}
+
 async function cleanRezkuShifts(batchId: string) {
   const sql = getSql();
 
@@ -98,8 +147,9 @@ async function forceGlobalRezkuTimeRepair() {
   `;
   await sql`DELETE FROM rezku_data_migrations WHERE migration_key LIKE 'rezku-wall-times-america-new-york-%'`;
   const repaired = await repairExistingRezkuTimesOnce();
+  const reinterpreted = await reinterpretLegacyWallTimes();
   await removeInvalidRezkuShiftRows();
-  return repaired;
+  return { repaired, reinterpreted };
 }
 
 export async function importSafeRezkuReport(
