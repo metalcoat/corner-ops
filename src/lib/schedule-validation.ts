@@ -172,6 +172,7 @@ export function analyzeSchedule(
   options: { enforceLoneWorker?: boolean } = {},
 ) {
   const enforceLoneWorker = options.enforceLoneWorker !== false;
+  const allowOnDutyMealForSoloShifts = options.enforceLoneWorker === false;
   const normalized = normalizedShifts(shifts);
   const assigned = normalized.filter((shift): shift is NormalizedShift & { employeeId: string } => Boolean(shift.employeeId));
   const employeeHours: Record<string, { employeeId: string; employeeName: string; hours: number; risk: HourRisk }> = {};
@@ -219,8 +220,26 @@ export function analyzeSchedule(
     };
   }
 
+  const onDutyMealShiftIds = new Set<string>();
   const mealPeriodViolations: MealPeriodViolation[] = normalized.flatMap((shift) => {
     const analysis = analyzeShiftMealCompliance(shift);
+    if (!analysis.issues.length) return [];
+
+    const isSoloAssignedShift = Boolean(
+      allowOnDutyMealForSoloShifts
+      && shift.employeeId
+      && !assigned.some((other) =>
+        other.id !== shift.id
+        && other.employeeId !== shift.employeeId
+        && other.startMs < shift.endMs
+        && other.endMs > shift.startMs,
+      ),
+    );
+    if (isSoloAssignedShift) {
+      onDutyMealShiftIds.add(shift.id);
+      return [];
+    }
+
     return analysis.issues.map((issue) => ({
       shiftId: shift.id,
       employeeId: shift.employeeId,
@@ -298,6 +317,7 @@ export function analyzeSchedule(
     loneWorkerViolations,
     coverageGaps,
     mealPeriodViolations,
+    onDutyMealShiftIds: [...onDutyMealShiftIds],
     overThirtyEight,
     overForty,
     blockingIssueCount,
