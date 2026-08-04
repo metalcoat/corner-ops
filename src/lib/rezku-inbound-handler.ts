@@ -3,6 +3,11 @@ import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import { importSafeRezkuReport } from "@/lib/safe-rezku-import";
 import { downloadRezkuWorkbook } from "@/lib/rezku-workbook-download";
 import {
+  detectRezkuProductSalesReportType,
+  importRezkuProductSalesReport,
+  type RezkuProductSalesReportType,
+} from "@/lib/rezku-product-sales";
+import {
   detectRezkuVoidReportType,
   importRezkuVoidReport,
   type RezkuVoidReportType,
@@ -14,7 +19,7 @@ import {
 } from "@/lib/rezku-monitor";
 
 type StandardReportType = "shifts" | "orders" | "transactions";
-type ReportType = StandardReportType | RezkuVoidReportType;
+type ReportType = StandardReportType | RezkuVoidReportType | RezkuProductSalesReportType;
 type ReportSource = {
   url: string;
   fileName: string;
@@ -55,6 +60,8 @@ function clean(value: unknown, max = 500): string {
 }
 
 function reportType(fileName: string): ReportType | undefined {
+  const productSalesType = detectRezkuProductSalesReportType(fileName);
+  if (productSalesType) return productSalesType;
   const voidType = detectRezkuVoidReportType(fileName);
   if (voidType) return voidType;
   const lower = fileName.toLowerCase();
@@ -139,12 +146,14 @@ function preferredSources(emailLinks: ReportSource[], attachments: ReceivingAtta
 async function downloadAndImport(url: string, fileName: string, importedBy: string) {
   const download = await downloadRezkuWorkbook(url, fileName);
   const kind = reportType(fileName);
-  if (kind !== "product_voids" && kind !== "transaction_voids") {
-    await ensureEmployeeDirectorySchema();
-  }
+  const standardReport = kind === "shifts" || kind === "orders" || kind === "transactions";
+  if (standardReport) await ensureEmployeeDirectorySchema();
+
   const result = kind === "product_voids" || kind === "transaction_voids"
     ? await importRezkuVoidReport(fileName, download.bytes, kind, importedBy)
-    : await importSafeRezkuReport(fileName, download.bytes, kind, importedBy);
+    : kind === "sales_by_product"
+      ? await importRezkuProductSalesReport(fileName, download.bytes, kind, importedBy)
+      : await importSafeRezkuReport(fileName, download.bytes, kind, importedBy);
   return {
     fileName,
     batchId: result.batchId,
