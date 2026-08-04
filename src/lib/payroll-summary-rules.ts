@@ -26,6 +26,7 @@ type Transaction = {
   time: Date;
   tip: number;
   orderType: string;
+  orderMatched: boolean;
 };
 
 type SummaryRow = {
@@ -46,6 +47,15 @@ function canonicalEmployeeName(value: unknown): string {
   const name = String(value ?? "").trim();
   if (/^can$/i.test(name)) return "Ken";
   return name;
+}
+
+function normalizedOrderId(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .replace(/^['"]+|['"]+$/g, "")
+    .replace(/\.0+$/, "")
+    .replace(/[^a-z0-9]/gi, "")
+    .toLowerCase();
 }
 
 function dateValue(value: unknown): Date | null {
@@ -193,8 +203,39 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
     const totalCents = Math.round(transaction.tip * TIP_MULTIPLIER * 100);
     if (!totalCents) continue;
 
-    const beforeThree = localHour(transaction.time) < CUTOFF_HOUR;
+    if (!transaction.orderMatched) {
+      details.push({
+        time: transaction.time.toISOString(),
+        orderId: transaction.orderId,
+        orderType: "",
+        originalTip: transaction.tip,
+        tipAfterFee: totalCents / 100,
+        allocatedTip: 0,
+        employee: "Unallocated",
+        splitCount: 0,
+        rule: "Not allocated: Transaction Export Order ID did not match an Order Export ID",
+      });
+      continue;
+    }
+
     const delivery = /deliver/i.test(transaction.orderType);
+    const pickup = /pick\s*up|pickup|take\s*out|takeout|carry\s*out|carryout|to\s*go|togo|counter/i.test(transaction.orderType);
+    if (!delivery && !pickup) {
+      details.push({
+        time: transaction.time.toISOString(),
+        orderId: transaction.orderId,
+        orderType: transaction.orderType,
+        originalTip: transaction.tip,
+        tipAfterFee: totalCents / 100,
+        allocatedTip: 0,
+        employee: "Unallocated",
+        splitCount: 0,
+        rule: "Not allocated: matched Order Export row did not identify delivery or pickup",
+      });
+      continue;
+    }
+
+    const beforeThree = localHour(transaction.time) < CUTOFF_HOUR;
     let eligible: Shift[] = [];
     let rule = "";
 
@@ -220,24 +261,36 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
       }
     } else {
       eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, transaction.time)));
-      rule = "After 3 PM takeout: equally split among non-driver employees clocked in";
+      rule = "After 3 PM pickup: equally split among non-driver employees clocked in";
     }
 
     if (!eligible.length) {
       const predicate = beforeThree
         ? (_shift: Shift) => true
-        : delivery
-          ? (shift: Shift) => !isDriver(shift)
-          : (shift: Shift) => !isDriver(shift);
+        : (shift: Shift) => !isDriver(shift);
       eligible = lastSignedOut(shifts, transaction, predicate);
       rule = beforeThree
         ? "Before 3 PM after-close fallback: equally split among employees who signed out last"
         : delivery
           ? "After 3 PM delivery fallback: equally split among non-drivers who signed out last"
-          : "After 3 PM takeout fallback: equally split among non-drivers who signed out last";
+          : "After 3 PM pickup fallback: equally split among non-drivers who signed out last";
     }
 
-    if (!eligible.length) continue;
+    if (!eligible.length) {
+      details.push({
+        time: transaction.time.toISOString(),
+        orderId: transaction.orderId,
+        orderType: transaction.orderType,
+        originalTip: transaction.tip,
+        tipAfterFee: totalCents / 100,
+        allocatedTip: 0,
+        employee: "Unallocated",
+        splitCount: 0,
+        rule: "Not allocated: no eligible employee was clocked in or available for fallback",
+      });
+      continue;
+    }
+
     const allocations = splitCents(totalCents, eligible.length);
     eligible.forEach((shift, index) => {
       const amount = allocations[index] / 100;
@@ -301,17 +354,25 @@ export async function payrollSummary(business: Business, weekStart: string) {
     }))
     .filter((shift) => shift.employeeName && !/^cover$/i.test(shift.employeeName));
 
-  const orders = new Map(orderRows.map((row) => [String(row.order_id || ""), String(row.order_type || "")]));
+  const orders = new Map<string, string>();
+  for (const row of orderRows) {
+    const key = normalizedOrderId(row.order_id);
+    if (key) orders.set(key, String(row.order_type || "").trim());
+  }
+
   const transactions: Transaction[] = transactionRows
     .map((row) => {
       const time = dateValue(row.transaction_time);
       if (!time) return null;
+      const orderId = String(row.order_id || "").trim();
+      const orderKey = normalizedOrderId(orderId);
       return {
         id: String(row.id),
-        orderId: String(row.order_id || ""),
+        orderId,
         time,
         tip: numberValue(row.tip),
-        orderType: orders.get(String(row.order_id || "")) || "",
+        orderType: orderKey ? orders.get(orderKey) || "" : "",
+        orderMatched: Boolean(orderKey && orders.has(orderKey)),
       };
     })
     .filter((transaction): transaction is Transaction => Boolean(transaction));
@@ -337,13 +398,15 @@ export async function payrollSummary(business: Business, weekStart: string) {
       };
     })
     .sort((left, right) => left.employee.localeCompare(right.employee));
+  const tipJoinIssues = tipDetails.filter((detail) => detail.employee === "Unallocated");
 
   return {
     business,
-    source: "Rezku daily email reports · verified 3 PM allocation rules",
+    source: "Rezku daily email reports · Order Export ID joined to Transaction Export ID",
     weekStart,
     weekEnd: new Date(bounds.end.getTime() - 1).toISOString(),
     rows,
     tipDetails: tipDetails.slice(-500).reverse(),
+    tipJoinIssues: tipJoinIssues.slice(-200).reverse(),
   };
 }
