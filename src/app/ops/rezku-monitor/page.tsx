@@ -52,6 +52,7 @@ type PunchException = {
   importedAt: string;
 };
 type Dashboard = { emails: EmailReceipt[]; imports: ImportBatch[]; punchExceptions: PunchException[] };
+type ImportResult = { fileName?: string; reportType: string; rowsRead: number; imported: number };
 
 async function responseMessage(response: Response) {
   const payload = await response.json().catch(() => null) as { error?: string } | null;
@@ -104,19 +105,49 @@ export default function RezkuMonitorPage() {
   async function manualImport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-    form.set("action", "rezku-import");
+    const sourceForm = new FormData(formElement);
+    const files = sourceForm.getAll("files").filter((value): value is File => value instanceof File && value.size > 0);
+    if (!files.length) {
+      setNotice("Choose one or more Rezku Excel workbooks.");
+      return;
+    }
+
+    const requestedType = files.length === 1 ? String(sourceForm.get("reportType") || "") : "";
+    const successes: ImportResult[] = [];
+    const failures: string[] = [];
     setBusy(true);
-    setNotice("");
+    setNotice(`Importing 1 of ${files.length}: ${files[0].name}`);
+
     try {
-      const response = await fetch("/api/operations", { method: "POST", body: form });
-      if (!response.ok) throw new Error(await responseMessage(response));
-      const result = await response.json() as { reportType: string; rowsRead: number; imported: number };
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        setNotice(`Importing ${index + 1} of ${files.length}: ${file.name}`);
+        const upload = new FormData();
+        upload.set("action", "rezku-import");
+        upload.set("file", file);
+        if (requestedType) upload.set("reportType", requestedType);
+        try {
+          const response = await fetch("/api/operations", { method: "POST", body: upload });
+          if (!response.ok) throw new Error(await responseMessage(response));
+          successes.push({ ...(await response.json() as ImportResult), fileName: file.name });
+        } catch (error) {
+          failures.push(`${file.name}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      const repair = await fetch("/api/operations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "rezku-repair-times" }),
+      });
+      if (!repair.ok) failures.push(`Eastern-time repair: ${await responseMessage(repair)}`);
+
       formElement.reset();
       await load();
-      setNotice(`${reportLabel(result.reportType)} report read ${result.rowsRead} rows and added ${result.imported} new rows.`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Rezku report could not be imported.");
+      const rowsRead = successes.reduce((total, result) => total + Number(result.rowsRead || 0), 0);
+      const imported = successes.reduce((total, result) => total + Number(result.imported || 0), 0);
+      const summary = `Processed ${successes.length} of ${files.length} workbooks, read ${rowsRead} rows, and added ${imported} new rows. Existing Rezku timestamps were checked as Eastern Time.`;
+      setNotice(failures.length ? `${summary} Failed: ${failures.join(" | ")}` : summary);
     } finally {
       setBusy(false);
     }
@@ -156,11 +187,11 @@ export default function RezkuMonitorPage() {
       </section>
 
       <section className="controlCard">
-        <div><p className="eyebrow">Fallback</p><h2>Manual workbook import</h2><p>Use this for an email received while the newer deployment was offline. A void report with no data rows is still recorded as a successful zero-row report.</p></div>
+        <div><p className="eyebrow">Fallback</p><h2>Bulk manual workbook recovery</h2><p>Select every Excel workbook from the Rezku email at once. Corner Ops processes them sequentially, detects each report from its filename, removes Cover rows, maps Can to Ken, and repairs timestamps to Eastern Time.</p></div>
         <form className="controlForm" onSubmit={manualImport}>
-          <label>Report type<select name="reportType"><option value="">Detect from filename</option><option value="shifts">Detailed Labor / Shift Attestation</option><option value="orders">Order Export</option><option value="transactions">Transaction Export</option><option value="product_voids">Product Voids</option><option value="transaction_voids">Transaction Voids</option></select></label>
-          <label>Excel workbook<input name="file" type="file" accept=".xlsx,.xls" required /></label>
-          <button className="primary" disabled={busy}>Import workbook</button>
+          <label>Report type override<select name="reportType"><option value="">Detect each file from filename</option><option value="shifts">Detailed Labor / Shift Attestation</option><option value="orders">Order Export</option><option value="transactions">Transaction Export</option><option value="product_voids">Product Voids</option><option value="transaction_voids">Transaction Voids</option></select><small>The override is used only when one workbook is selected.</small></label>
+          <label>Excel workbooks<input name="files" type="file" accept=".xlsx,.xls" multiple required /></label>
+          <button className="primary" disabled={busy}>{busy ? "Importing workbooks…" : "Import all selected workbooks"}</button>
         </form>
         <div className="rezkuBatchList">{(data?.imports || []).slice(0, 20).map((batch) => <div key={batch.id}><span><strong>{batch.fileName}</strong><small>{reportLabel(batch.reportType)} · {eastern(batch.importedAt)} · {batch.importedBy}</small></span><span><b>{batch.rowsImported}/{batch.rowsRead}</b><small>{batch.reportType === "shifts" ? `Missing in ${batch.missingClockIn} · missing out ${batch.missingClockOut}` : `${batch.duplicateOrSkipped} duplicate/skipped`}</small></span></div>)}</div>
       </section>
