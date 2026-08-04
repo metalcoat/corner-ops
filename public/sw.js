@@ -1,4 +1,4 @@
-const APP_CACHE = "corner-ops-shell-v1";
+const APP_CACHE = "corner-ops-shell-v2";
 const APP_SHELL = ["/app", "/corner-ops-icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -18,7 +18,7 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith("/api/")) return;
+  if (url.pathname !== "/app" && url.pathname !== "/corner-ops-icon.svg") return;
   event.respondWith(
     fetch(event.request)
       .then((response) => {
