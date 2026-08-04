@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import "../employee.css";
 
@@ -9,7 +9,7 @@ async function message(response: Response): Promise<string> {
   return payload?.error || `Request failed (${response.status}).`;
 }
 
-export default function EmployeeResetPinPage() {
+function EmployeeResetPinForm() {
   const params = useSearchParams();
   const token = useMemo(() => params.get("token") || "", [params]);
   const [busy, setBusy] = useState(false);
@@ -50,4 +50,10 @@ export default function EmployeeResetPinPage() {
     <a href="/employee" className="empClockLink">Return to Employee Hub</a>
     <a href="/employee/forgot-pin" className="empClockLink">Request another link</a>
   </section></main>;
+}
+
+export default function EmployeeResetPinPage() {
+  return <Suspense fallback={<main className="employeeLoginShell"><section className="employeeLoginCard"><h1>Loading reset link…</h1></section></main>}>
+    <EmployeeResetPinForm />
+  </Suspense>;
 }
