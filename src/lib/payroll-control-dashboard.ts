@@ -48,6 +48,26 @@ function weekBounds(weekStart: string) {
   return { start, end, adjustmentStart };
 }
 
+function timestamp(value: unknown): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function easternLabel(value: unknown): string | null {
+  const iso = timestamp(value);
+  if (!iso) return null;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(iso));
+}
+
 export async function safePayrollControlDashboard(business: Business, weekStart: string) {
   await ensurePayrollControlSchema();
   const bounds = weekBounds(weekStart);
@@ -96,16 +116,22 @@ export async function safePayrollControlDashboard(business: Business, weekStart:
 
   return {
     summary,
-    punches: (punches as unknown as Array<Record<string, unknown>>).map((row) => ({
-      id: row.id,
-      employeeName: row.employee_name,
-      position: row.position,
-      clockIn: row.clock_in,
-      clockOut: row.clock_out,
-      status: row.status,
-      notes: row.notes || "",
-      source: row.source,
-    })),
+    punches: (punches as unknown as Array<Record<string, unknown>>).map((row) => {
+      const clockIn = timestamp(row.clock_in);
+      const clockOut = timestamp(row.clock_out);
+      return {
+        id: row.id,
+        employeeName: row.employee_name,
+        position: row.position,
+        clockIn,
+        clockOut,
+        clockInEastern: easternLabel(row.clock_in),
+        clockOutEastern: easternLabel(row.clock_out),
+        status: row.status,
+        notes: row.notes || "",
+        source: row.source,
+      };
+    }),
     versions: versions.map((row) => ({
       id: row.id,
       business: row.business,
