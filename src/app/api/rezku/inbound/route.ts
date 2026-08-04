@@ -1,6 +1,6 @@
 import { Resend } from "resend";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
-import { importRezkuReport } from "@/lib/operations";
+import { importSafeRezkuReport } from "@/lib/safe-rezku-import";
 import {
   detectRezkuVoidReportType,
   importRezkuVoidReport,
@@ -121,8 +121,6 @@ function preferredSources(emailLinks: ReportSource[], attachments: ReceivingAtta
     byFileName.set(sourceKey(source.fileName), source);
   }
 
-  // Resend attachment URLs are generated for the received message and are more reliable
-  // than the duplicate, expiring Rezku links embedded in the email body.
   for (const attachment of attachments) {
     if (!/\.(xlsx|xls)$/i.test(attachment.filename)) continue;
     const fileName = cleanFileName(attachment.filename);
@@ -146,7 +144,7 @@ async function downloadAndImport(url: string, fileName: string, importedBy: stri
   }
   const result = kind === "product_voids" || kind === "transaction_voids"
     ? await importRezkuVoidReport(fileName, bytes, kind, importedBy)
-    : await importRezkuReport(fileName, bytes, kind, importedBy);
+    : await importSafeRezkuReport(fileName, bytes, kind, importedBy);
   return {
     fileName,
     batchId: result.batchId,
