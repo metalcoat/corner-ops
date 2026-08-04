@@ -184,7 +184,6 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
         SET name = 'Ken', updated_at = NOW()
         WHERE alias_employee.business = 'Corner Deli'
           AND LOWER(BTRIM(alias_employee.name)) = 'can'
-          AND alias_employee.pin_enabled = FALSE
           AND NOT EXISTS (
             SELECT 1 FROM employees canonical_employee
             WHERE canonical_employee.business = 'Corner Deli'
