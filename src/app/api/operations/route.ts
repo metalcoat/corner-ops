@@ -1,4 +1,5 @@
 import { getSession, canAccessBusiness } from "@/lib/auth";
+import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import {
   accountingSnapshot,
   createEmployee,
@@ -40,7 +41,10 @@ export async function GET(request: Request) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
     }
 
-    if (area === "employees") return Response.json({ employees: await listEmployees(business) });
+    if (area === "employees") {
+      await ensureEmployeeDirectorySchema();
+      return Response.json({ employees: await listEmployees(business) });
+    }
     if (area === "time") return Response.json({ entries: await listRecentTimeEntries(business) });
     if (area === "payroll") {
       return Response.json(await payrollSummary(business, url.searchParams.get("weekStart") || undefined));
@@ -79,6 +83,7 @@ export async function POST(request: Request) {
       const requested = String(form.get("reportType") || "") || undefined;
       const bytes = await file.arrayBuffer();
       const voidType = detectRezkuVoidReportType(file.name, requested);
+      if (!voidType) await ensureEmployeeDirectorySchema();
       const result = voidType
         ? await importRezkuVoidReport(file.name, bytes, voidType, session.email)
         : await importRezkuReport(file.name, bytes, requested, session.email);
