@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import { importRezkuReport } from "@/lib/operations";
 import {
   detectRezkuVoidReportType,
@@ -140,6 +141,9 @@ async function downloadAndImport(url: string, fileName: string, importedBy: stri
   if (!download.ok) throw new Error(`Rezku download failed for ${fileName}: HTTP ${download.status}`);
   const bytes = await download.arrayBuffer();
   const kind = reportType(fileName);
+  if (kind !== "product_voids" && kind !== "transaction_voids") {
+    await ensureEmployeeDirectorySchema();
+  }
   const result = kind === "product_voids" || kind === "transaction_voids"
     ? await importRezkuVoidReport(fileName, bytes, kind, importedBy)
     : await importRezkuReport(fileName, bytes, kind, importedBy);
