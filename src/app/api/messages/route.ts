@@ -5,6 +5,7 @@ import {
   adminUnreadMessageSummary,
   markAdminMessagesRead,
 } from "@/lib/message-reads";
+import { notifyEmployeesOfOwnerMessage } from "@/lib/push-notifications";
 import { sendOwnerMessage } from "@/lib/workforce";
 import type { Business } from "@/lib/types";
 
@@ -45,12 +46,24 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     const business = readBusiness(body.business);
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
-    return Response.json(await sendOwnerMessage({
+    const recipientEmployeeId = body.recipientEmployeeId ? String(body.recipientEmployeeId) : null;
+    const messageBody = String(body.body || "");
+    const result = await sendOwnerMessage({
       business,
-      recipientEmployeeId: body.recipientEmployeeId ? String(body.recipientEmployeeId) : null,
-      body: String(body.body || ""),
+      recipientEmployeeId,
+      body: messageBody,
       actor: session.email,
-    }));
+    });
+    const push = await notifyEmployeesOfOwnerMessage({
+      business,
+      recipientEmployeeId,
+      body: messageBody,
+      actor: session.email,
+    }).catch((error) => {
+      console.error("[api/messages] owner message saved but push delivery failed", error);
+      return { attempted: 0, delivered: 0, failed: 0 };
+    });
+    return Response.json({ ...result, push });
   } catch (error) {
     return apiError(error);
   }
