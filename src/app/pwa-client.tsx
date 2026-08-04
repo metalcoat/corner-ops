@@ -36,6 +36,10 @@ function isIos() {
   return /iphone|ipad|ipod/i.test(navigator.userAgent);
 }
 
+function currentAudience(): "owner" | "employee" {
+  return window.location.pathname.startsWith("/employee") ? "employee" : "owner";
+}
+
 function deviceLabel() {
   if (/iphone/i.test(navigator.userAgent)) return "iPhone";
   if (/ipad/i.test(navigator.userAgent)) return "iPad";
@@ -60,10 +64,11 @@ export default function PwaClient() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
-  const syncedEndpoint = useRef("");
+  const syncedIdentity = useRef("");
 
   const refresh = useCallback(async () => {
-    const response = await fetch("/api/push", { cache: "no-store" }).catch(() => null);
+    const audience = currentAudience();
+    const response = await fetch(`/api/push?audience=${audience}`, { cache: "no-store" }).catch(() => null);
     if (!response?.ok) {
       setStatus(null);
       return;
@@ -75,19 +80,21 @@ export default function PwaClient() {
     const registration = await registerServiceWorker();
     const subscription = await registration.pushManager.getSubscription();
     setSubscribed(Boolean(subscription));
-    if (subscription && syncedEndpoint.current !== subscription.endpoint) {
-      syncedEndpoint.current = subscription.endpoint;
+    const identity = subscription ? `${audience}:${subscription.endpoint}` : "";
+    if (subscription && syncedIdentity.current !== identity) {
+      syncedIdentity.current = identity;
       const syncResponse = await fetch("/api/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "subscribe",
+          audience,
           subscription: subscription.toJSON(),
           userAgent: navigator.userAgent,
           deviceLabel: deviceLabel(),
         }),
       });
-      if (!syncResponse.ok) syncedEndpoint.current = "";
+      if (!syncResponse.ok) syncedIdentity.current = "";
     }
   }, []);
 
@@ -106,14 +113,14 @@ export default function PwaClient() {
     window.addEventListener("appinstalled", onInstalled);
     window.addEventListener("focus", refresh);
     void refresh();
-    const interval = window.setInterval(() => void refresh(), status ? 60_000 : 15_000);
+    const interval = window.setInterval(() => void refresh(), 30_000);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("beforeinstallprompt", onInstallPrompt);
       window.removeEventListener("appinstalled", onInstalled);
       window.removeEventListener("focus", refresh);
     };
-  }, [refresh, status]);
+  }, [refresh]);
 
   async function installApp() {
     setNotice("");
@@ -153,18 +160,20 @@ export default function PwaClient() {
         userVisibleOnly: true,
         applicationServerKey: applicationServerKey(status.publicKey),
       });
+      const audience = currentAudience();
       const response = await fetch("/api/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "subscribe",
+          audience,
           subscription: subscription.toJSON(),
           userAgent: navigator.userAgent,
           deviceLabel: deviceLabel(),
         }),
       });
       if (!response.ok) throw new Error(await responseMessage(response));
-      syncedEndpoint.current = subscription.endpoint;
+      syncedIdentity.current = `${audience}:${subscription.endpoint}`;
       setSubscribed(true);
       setNotice("Notifications are enabled for this phone. Messages can now arrive while Corner Ops is closed.");
       await refresh();
@@ -185,12 +194,12 @@ export default function PwaClient() {
         const response = await fetch("/api/push", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "unsubscribe", endpoint: subscription.endpoint }),
+          body: JSON.stringify({ action: "unsubscribe", audience: currentAudience(), endpoint: subscription.endpoint }),
         });
         if (!response.ok) throw new Error(await responseMessage(response));
         await subscription.unsubscribe();
       }
-      syncedEndpoint.current = "";
+      syncedIdentity.current = "";
       setSubscribed(false);
       setNotice("Notifications are disabled on this device.");
       await refresh();
@@ -208,7 +217,7 @@ export default function PwaClient() {
       const response = await fetch("/api/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "test" }),
+        body: JSON.stringify({ action: "test", audience: currentAudience() }),
       });
       if (!response.ok) throw new Error(await responseMessage(response));
       const result = await response.json() as { delivered?: number; attempted?: number };
