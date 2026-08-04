@@ -8,13 +8,25 @@ function isBusiness(value: string): value is Business {
   return value === "Corner Deli" || value === "Tiki";
 }
 
+function requestedBusiness(): Business | null {
+  const value = new URLSearchParams(window.location.search).get("business");
+  return value && isBusiness(value) ? value : null;
+}
+
 export default function EmployeePinController() {
   useEffect(() => {
     function sync() {
+      const linkedBusiness = requestedBusiness();
       for (const form of document.querySelectorAll<HTMLFormElement>("form")) {
         const businessSelect = form.querySelector<HTMLSelectElement>('select[name="business"]');
         const pinInput = form.querySelector<HTMLInputElement>('input[name="pin"]');
-        if (!businessSelect || !pinInput || !isBusiness(businessSelect.value)) continue;
+        if (!businessSelect || !pinInput) continue;
+
+        if (linkedBusiness && businessSelect.value !== linkedBusiness) {
+          businessSelect.value = linkedBusiness;
+          businessSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        if (!isBusiness(businessSelect.value)) continue;
 
         const business = businessSelect.value;
         const length = employeePinLength(business);
