@@ -13,21 +13,27 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-async function currentActor(): Promise<PushActor | null> {
+type AudiencePreference = "owner" | "employee" | "";
+
+async function currentActor(preference: AudiencePreference = ""): Promise<PushActor | null> {
+  if (preference === "employee") {
+    const employee = await getEmployeeSession();
+    if (employee) return { type: "employee", employeeId: employee.employeeId, business: employee.business };
+  }
   const owner = await getSession();
   if (owner) return { type: "owner", email: owner.email };
   const employee = await getEmployeeSession();
-  if (employee) return {
-    type: "employee",
-    employeeId: employee.employeeId,
-    business: employee.business,
-  };
+  if (employee) return { type: "employee", employeeId: employee.employeeId, business: employee.business };
   return null;
 }
 
-export async function GET() {
+function preference(value: unknown): AudiencePreference {
+  return value === "employee" || value === "owner" ? value : "";
+}
+
+export async function GET(request: Request) {
   try {
-    const actor = await currentActor();
+    const actor = await currentActor(preference(new URL(request.url).searchParams.get("audience")));
     if (!actor) return unauthorized();
     return Response.json(await pushStatus(actor));
   } catch (error) {
@@ -37,9 +43,9 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const actor = await currentActor();
-    if (!actor) return unauthorized();
     const body = await request.json() as Record<string, unknown>;
+    const actor = await currentActor(preference(body.audience));
+    if (!actor) return unauthorized();
     const action = String(body.action || "subscribe");
 
     if (action === "subscribe") {
