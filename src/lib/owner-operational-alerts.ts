@@ -215,18 +215,18 @@ async function deliverEmail(input: AlertInput) {
 }
 
 export async function notifyOwnersOfOperationalAlert(input: AlertInput) {
-  const [push, email] = await Promise.all([
-    deliverPush(input).catch((error) => ({
-      attempted: 0,
-      delivered: 0,
-      failed: 1,
-      error: error instanceof Error ? error.message : String(error),
-    })),
-    deliverEmail(input).catch((error) => ({
-      configured: true,
-      sent: false,
-      error: error instanceof Error ? error.message : String(error),
-    })),
-  ]);
+  const push = await deliverPush(input).catch((error) => ({
+    attempted: 0,
+    delivered: 0,
+    failed: 1,
+    error: error instanceof Error ? error.message : String(error),
+  }));
+  const email = push.delivered > 0
+    ? { configured: Boolean(process.env.RESEND_API_KEY?.trim()), sent: false, skipped: true }
+    : await deliverEmail(input).catch((error) => ({
+        configured: true,
+        sent: false,
+        error: error instanceof Error ? error.message : String(error),
+      }));
   return { ...push, email };
 }
