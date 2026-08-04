@@ -23,7 +23,7 @@ type Shift = {
 type Transaction = {
   id: string;
   orderId: string;
-  time: Date;
+  allocationTime: Date;
   transactionTime: Date | null;
   tip: number;
   orderType: string;
@@ -57,6 +57,24 @@ function normalizedOrderId(value: unknown): string {
     .replace(/\.0+$/, "")
     .replace(/[^a-z0-9]/gi, "")
     .toLowerCase();
+}
+
+function rawObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+    } catch {
+      // Ignore malformed legacy raw values.
+    }
+  }
+  return {};
+}
+
+function rawHasClock(value: unknown, fields: string[]): boolean {
+  const raw = rawObject(value);
+  return fields.some((field) => /\d{1,2}:\d{2}/.test(String(raw[field] || "")));
 }
 
 function dateValue(value: unknown): Date | null {
@@ -154,11 +172,12 @@ function uniqueEmployees(shifts: Shift[]): Shift[] {
 }
 
 function lastSignedOut(shifts: Shift[], transaction: Transaction, predicate: (shift: Shift) => boolean): Shift[] {
+  const time = transaction.allocationTime;
   const sameDay = shifts.filter((shift) => isEligible(shift)
     && predicate(shift)
     && shift.clockOut
-    && localDayKey(shift.clockOut) === localDayKey(transaction.time));
-  const alreadyOut = sameDay.filter((shift) => (shift.clockOut?.getTime() || 0) <= transaction.time.getTime());
+    && localDayKey(shift.clockOut) === localDayKey(time));
+  const alreadyOut = sameDay.filter((shift) => (shift.clockOut?.getTime() || 0) <= time.getTime());
   const candidates = alreadyOut.length ? alreadyOut : sameDay;
   const latest = Math.max(...candidates.map((shift) => shift.clockOut?.getTime() || 0), 0);
   return uniqueEmployees(candidates.filter((shift) => shift.clockOut?.getTime() === latest));
@@ -199,8 +218,8 @@ function summarizeShifts(shifts: Shift[]) {
 
 function detailBase(transaction: Transaction, totalCents: number) {
   return {
-    time: transaction.time.toISOString(),
-    orderOpenedAt: transaction.time.toISOString(),
+    time: (transaction.transactionTime || transaction.allocationTime).toISOString(),
+    orderOpenedAt: transaction.allocationTime.toISOString(),
     transactionTime: transaction.transactionTime?.toISOString() || null,
     orderId: transaction.orderId,
     orderType: transaction.orderType,
@@ -241,32 +260,33 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
       continue;
     }
 
-    const beforeThree = localHour(transaction.time) < CUTOFF_HOUR;
+    const time = transaction.allocationTime;
+    const beforeThree = localHour(time) < CUTOFF_HOUR;
     let eligible: Shift[] = [];
     let rule = "";
 
     if (beforeThree) {
-      eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && covers(shift, transaction.time)));
+      eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && covers(shift, time)));
       rule = "Before 3 PM order: equally split among all tip-eligible employees clocked in";
     } else if (delivery) {
-      eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && isDriver(shift) && covers(shift, transaction.time)));
+      eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && isDriver(shift) && covers(shift, time)));
       if (eligible.length) {
         rule = "After 3 PM delivery order: assigned to driver clocked in";
       } else {
-        const graceEnd = transaction.time.getTime() + DRIVER_GRACE_MINUTES * 60_000;
+        const graceEnd = time.getTime() + DRIVER_GRACE_MINUTES * 60_000;
         eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift)
           && isDriver(shift)
           && shift.clockIn
-          && shift.clockIn.getTime() > transaction.time.getTime()
+          && shift.clockIn.getTime() > time.getTime()
           && shift.clockIn.getTime() <= graceEnd));
         if (eligible.length) rule = "After 3 PM delivery order: driver arrived within 35 minutes";
       }
       if (!eligible.length) {
-        eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, transaction.time)));
+        eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, time)));
         rule = "After 3 PM delivery fallback: equally split among non-driver employees clocked in";
       }
     } else {
-      eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, transaction.time)));
+      eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, time)));
       rule = "After 3 PM pickup order: equally split among non-driver employees clocked in";
     }
 
@@ -313,10 +333,35 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
   return details;
 }
 
+function deduplicateTransactionRows(rows: Array<Record<string, unknown>>) {
+  const groups = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of rows) {
+    const orderKey = normalizedOrderId(row.order_id);
+    const key = `${orderKey}|${Math.round(numberValue(row.tip) * 100)}`;
+    const group = groups.get(key) || [];
+    group.push(row);
+    groups.set(key, group);
+  }
+
+  const result: Array<Record<string, unknown>> = [];
+  for (const group of groups.values()) {
+    const detailed = group.filter((row) => rawHasClock(row.raw, ["Transaction Time", "Payment Time", "Created At", "Time"]));
+    if (detailed.length) {
+      result.push(...detailed);
+    } else {
+      // Multiple report versions can contain the same date-only payment. Keep one until a timed row arrives.
+      result.push(group[0]);
+    }
+  }
+  return result;
+}
+
 export async function payrollSummary(business: Business, weekStart: string) {
   if (business === "Tiki") return legacyPayrollSummary(business, weekStart);
 
   const bounds = weekBounds(weekStart);
+  const transactionSearchStart = new Date(bounds.start.getTime() - 24 * 60 * 60 * 1000);
+  const transactionSearchEnd = new Date(bounds.end.getTime() + 24 * 60 * 60 * 1000);
   const shiftRows = await getSql()`
     SELECT id, employee_name, position, role_group, clock_in, clock_out, reported_hours
     FROM rezku_shifts
@@ -331,14 +376,15 @@ export async function payrollSummary(business: Business, weekStart: string) {
       AND opened_at < ${bounds.end.toISOString()}
     ORDER BY opened_at
   ` as unknown as Array<Record<string, unknown>>;
-  const transactionRows = await getSql()`
-    SELECT id, order_id, transaction_time, tip
+  const rawTransactionRows = await getSql()`
+    SELECT id, order_id, transaction_time, tip, raw
     FROM rezku_transactions
-    WHERE transaction_time >= ${bounds.start.toISOString()}
-      AND transaction_time < ${bounds.end.toISOString()}
+    WHERE transaction_time >= ${transactionSearchStart.toISOString()}
+      AND transaction_time < ${transactionSearchEnd.toISOString()}
       AND tip <> 0
     ORDER BY transaction_time
   ` as unknown as Array<Record<string, unknown>>;
+  const transactionRows = deduplicateTransactionRows(rawTransactionRows);
 
   const shifts: Shift[] = shiftRows
     .map((row) => ({
@@ -358,15 +404,15 @@ export async function payrollSummary(business: Business, weekStart: string) {
     const key = normalizedOrderId(row.order_id);
     const openedAt = dateValue(row.opened_at);
     if (!key || !openedAt) continue;
-    const raw = row.raw && typeof row.raw === "object" ? row.raw as Record<string, unknown> : {};
-    const rawTime = String(raw["Opened At"] || raw["Open Time"] || raw["Order Time"] || "");
     const candidate = {
       orderType: String(row.order_type || "").trim(),
       openedAt,
-      hasClock: /\d{1,2}:\d{2}/.test(rawTime),
+      hasClock: rawHasClock(row.raw, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]),
     };
     const existing = orders.get(key);
-    if (!existing || (!existing.hasClock && candidate.hasClock) || existing.openedAt.getTime() < candidate.openedAt.getTime()) {
+    if (!existing
+      || (!existing.hasClock && candidate.hasClock)
+      || (existing.hasClock === candidate.hasClock && existing.openedAt.getTime() < candidate.openedAt.getTime())) {
       orders.set(key, candidate);
     }
   }
@@ -378,11 +424,11 @@ export async function payrollSummary(business: Business, weekStart: string) {
       const orderKey = normalizedOrderId(orderId);
       const order = orderKey ? orders.get(orderKey) : undefined;
       const allocationTime = order?.openedAt || transactionTime;
-      if (!allocationTime) return null;
+      if (!allocationTime || allocationTime < bounds.start || allocationTime >= bounds.end) return null;
       return {
         id: String(row.id),
         orderId,
-        time: allocationTime,
+        allocationTime,
         transactionTime,
         tip: numberValue(row.tip),
         orderType: order?.orderType || "",
