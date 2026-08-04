@@ -34,9 +34,30 @@ type SummaryRow = {
   employee: string;
   hours: number;
   driverTipHours: number;
+  tipsBeforeFee: number;
+  pickupTipsBeforeFee: number;
+  deliveryTipsBeforeFee: number;
   tips: number;
   pickupTips: number;
   deliveryTips: number;
+};
+
+type PendingAllocation = {
+  transaction: Transaction;
+  employeeName: string;
+  splitCount: number;
+  rule: string;
+  delivery: boolean;
+  grossCents: number;
+  netCents: number;
+};
+
+type DailySource = {
+  date: string;
+  sourceGrossCents: number;
+  deliveryGrossCents: number;
+  pickupGrossCents: number;
+  unclassifiedGrossCents: number;
 };
 
 function numberValue(value: unknown): number {
@@ -197,6 +218,9 @@ function rowFor(summary: Map<string, SummaryRow>, employeeName: string): Summary
     employee,
     hours: 0,
     driverTipHours: 0,
+    tipsBeforeFee: 0,
+    pickupTipsBeforeFee: 0,
+    deliveryTipsBeforeFee: 0,
     tips: 0,
     pickupTips: 0,
     deliveryTips: 0,
@@ -216,7 +240,7 @@ function summarizeShifts(shifts: Shift[]) {
   return summary;
 }
 
-function detailBase(transaction: Transaction, totalCents: number) {
+function detailBase(transaction: Transaction) {
   return {
     time: (transaction.transactionTime || transaction.allocationTime).toISOString(),
     orderOpenedAt: transaction.allocationTime.toISOString(),
@@ -224,21 +248,76 @@ function detailBase(transaction: Transaction, totalCents: number) {
     orderId: transaction.orderId,
     orderType: transaction.orderType,
     originalTip: transaction.tip,
-    tipAfterFee: totalCents / 100,
   };
+}
+
+function classifyTransaction(transaction: Transaction) {
+  const delivery = /deliver/i.test(transaction.orderType);
+  const pickup = /pick\s*up|pickup|take\s*out|takeout|carry\s*out|carryout|to\s*go|togo|counter/i.test(transaction.orderType);
+  return { delivery, pickup };
+}
+
+function recordDailySource(source: Map<string, DailySource>, transaction: Transaction) {
+  const date = localDayKey(transaction.allocationTime);
+  const grossCents = Math.round(transaction.tip * 100);
+  const current = source.get(date) || {
+    date,
+    sourceGrossCents: 0,
+    deliveryGrossCents: 0,
+    pickupGrossCents: 0,
+    unclassifiedGrossCents: 0,
+  };
+  current.sourceGrossCents += grossCents;
+  const { delivery, pickup } = classifyTransaction(transaction);
+  if (transaction.orderMatched && delivery) current.deliveryGrossCents += grossCents;
+  else if (transaction.orderMatched && pickup) current.pickupGrossCents += grossCents;
+  else current.unclassifiedGrossCents += grossCents;
+  source.set(date, current);
+}
+
+function distributeDailyFee(allocations: PendingAllocation[]) {
+  const byDay = new Map<string, PendingAllocation[]>();
+  for (const allocation of allocations) {
+    const date = localDayKey(allocation.transaction.allocationTime);
+    const group = byDay.get(date) || [];
+    group.push(allocation);
+    byDay.set(date, group);
+  }
+
+  for (const group of byDay.values()) {
+    const targetNetCents = Math.round(group.reduce((total, allocation) => total + allocation.grossCents, 0) * TIP_MULTIPLIER);
+    const ranked = group.map((allocation, index) => {
+      const exact = allocation.grossCents * TIP_MULTIPLIER;
+      allocation.netCents = Math.trunc(exact);
+      return { index, fraction: exact - allocation.netCents };
+    });
+    let difference = targetNetCents - group.reduce((total, allocation) => total + allocation.netCents, 0);
+    ranked.sort((left, right) => difference >= 0
+      ? right.fraction - left.fraction || left.index - right.index
+      : left.fraction - right.fraction || left.index - right.index);
+    const direction = difference < 0 ? -1 : 1;
+    difference = Math.abs(difference);
+    for (let index = 0; index < difference; index += 1) {
+      group[ranked[index % ranked.length].index].netCents += direction;
+    }
+  }
 }
 
 function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map<string, SummaryRow>) {
   const details: Array<Record<string, unknown>> = [];
+  const pending: PendingAllocation[] = [];
+  const dailySource = new Map<string, DailySource>();
 
   for (const transaction of transactions) {
-    const totalCents = Math.round(transaction.tip * TIP_MULTIPLIER * 100);
-    if (!totalCents) continue;
+    recordDailySource(dailySource, transaction);
+    const grossCents = Math.round(transaction.tip * 100);
+    if (!grossCents) continue;
 
     if (!transaction.orderMatched) {
       details.push({
-        ...detailBase(transaction, totalCents),
-        orderType: "",
+        ...detailBase(transaction),
+        allocatedTipBeforeFee: 0,
+        feeAmount: 0,
         allocatedTip: 0,
         employee: "Unallocated",
         splitCount: 0,
@@ -247,11 +326,12 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
       continue;
     }
 
-    const delivery = /deliver/i.test(transaction.orderType);
-    const pickup = /pick\s*up|pickup|take\s*out|takeout|carry\s*out|carryout|to\s*go|togo|counter/i.test(transaction.orderType);
+    const { delivery, pickup } = classifyTransaction(transaction);
     if (!delivery && !pickup) {
       details.push({
-        ...detailBase(transaction, totalCents),
+        ...detailBase(transaction),
+        allocatedTipBeforeFee: 0,
+        feeAmount: 0,
         allocatedTip: 0,
         employee: "Unallocated",
         splitCount: 0,
@@ -304,7 +384,9 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
 
     if (!eligible.length) {
       details.push({
-        ...detailBase(transaction, totalCents),
+        ...detailBase(transaction),
+        allocatedTipBeforeFee: 0,
+        feeAmount: 0,
         allocatedTip: 0,
         employee: "Unallocated",
         splitCount: 0,
@@ -313,24 +395,80 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
       continue;
     }
 
-    const allocations = splitCents(totalCents, eligible.length);
+    const grossAllocations = splitCents(grossCents, eligible.length);
     eligible.forEach((shift, index) => {
-      const amount = allocations[index] / 100;
-      const row = rowFor(summary, shift.employeeName);
-      row.tips = Math.round((row.tips + amount) * 100) / 100;
-      if (delivery) row.deliveryTips = Math.round((row.deliveryTips + amount) * 100) / 100;
-      else row.pickupTips = Math.round((row.pickupTips + amount) * 100) / 100;
-      details.push({
-        ...detailBase(transaction, totalCents),
-        allocatedTip: amount,
-        employee: canonicalEmployeeName(shift.employeeName),
+      pending.push({
+        transaction,
+        employeeName: canonicalEmployeeName(shift.employeeName),
         splitCount: eligible.length,
         rule,
+        delivery,
+        grossCents: grossAllocations[index],
+        netCents: 0,
       });
     });
   }
 
-  return details;
+  distributeDailyFee(pending);
+
+  for (const allocation of pending) {
+    const grossAmount = allocation.grossCents / 100;
+    const netAmount = allocation.netCents / 100;
+    const row = rowFor(summary, allocation.employeeName);
+    row.tipsBeforeFee = Math.round((row.tipsBeforeFee + grossAmount) * 100) / 100;
+    row.tips = Math.round((row.tips + netAmount) * 100) / 100;
+    if (allocation.delivery) {
+      row.deliveryTipsBeforeFee = Math.round((row.deliveryTipsBeforeFee + grossAmount) * 100) / 100;
+      row.deliveryTips = Math.round((row.deliveryTips + netAmount) * 100) / 100;
+    } else {
+      row.pickupTipsBeforeFee = Math.round((row.pickupTipsBeforeFee + grossAmount) * 100) / 100;
+      row.pickupTips = Math.round((row.pickupTips + netAmount) * 100) / 100;
+    }
+    details.push({
+      ...detailBase(allocation.transaction),
+      allocatedTipBeforeFee: grossAmount,
+      feeAmount: (allocation.grossCents - allocation.netCents) / 100,
+      allocatedTip: netAmount,
+      employee: allocation.employeeName,
+      splitCount: allocation.splitCount,
+      rule: allocation.rule,
+    });
+  }
+
+  const pendingByDay = new Map<string, PendingAllocation[]>();
+  for (const allocation of pending) {
+    const date = localDayKey(allocation.transaction.allocationTime);
+    const group = pendingByDay.get(date) || [];
+    group.push(allocation);
+    pendingByDay.set(date, group);
+  }
+
+  const dailyTipReconciliation = [...dailySource.values()]
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .map((source) => {
+      const allocations = pendingByDay.get(source.date) || [];
+      const allocatedGrossCents = allocations.reduce((total, allocation) => total + allocation.grossCents, 0);
+      const allocatedNetCents = allocations.reduce((total, allocation) => total + allocation.netCents, 0);
+      const expectedNetCents = Math.round(allocatedGrossCents * TIP_MULTIPLIER);
+      const unallocatedGrossCents = source.sourceGrossCents - allocatedGrossCents;
+      const balanceCents = allocatedNetCents - expectedNetCents;
+      return {
+        date: source.date,
+        sourceTipsBeforeFee: source.sourceGrossCents / 100,
+        deliveryTipsBeforeFee: source.deliveryGrossCents / 100,
+        pickupTipsBeforeFee: source.pickupGrossCents / 100,
+        unclassifiedTipsBeforeFee: source.unclassifiedGrossCents / 100,
+        allocatedTipsBeforeFee: allocatedGrossCents / 100,
+        unallocatedTipsBeforeFee: unallocatedGrossCents / 100,
+        feeAmount: (allocatedGrossCents - expectedNetCents) / 100,
+        expectedAfterFee: expectedNetCents / 100,
+        allocatedAfterFee: allocatedNetCents / 100,
+        balance: balanceCents / 100,
+        status: unallocatedGrossCents === 0 && balanceCents === 0 ? "Balanced" : "Needs review",
+      };
+    });
+
+  return { details, dailyTipReconciliation };
 }
 
 function deduplicateTransactionRows(rows: Array<Record<string, unknown>>) {
@@ -349,7 +487,6 @@ function deduplicateTransactionRows(rows: Array<Record<string, unknown>>) {
     if (detailed.length) {
       result.push(...detailed);
     } else {
-      // Multiple report versions can contain the same date-only payment. Keep one until a timed row arrives.
       result.push(group[0]);
     }
   }
@@ -438,7 +575,7 @@ export async function payrollSummary(business: Business, weekStart: string) {
     .filter((transaction): transaction is Transaction => Boolean(transaction));
 
   const summary = summarizeShifts(shifts);
-  const tipDetails = allocateTips(shifts, transactions, summary);
+  const allocation = allocateTips(shifts, transactions, summary);
   const rows = [...summary.values()]
     .map((row) => {
       const hours = Math.round(row.hours * 100) / 100;
@@ -452,21 +589,25 @@ export async function payrollSummary(business: Business, weekStart: string) {
         driverTipHours,
         regularHours,
         overtimeHours,
+        tipsBeforeFee: Math.round(row.tipsBeforeFee * 100) / 100,
+        pickupTipsBeforeFee: Math.round(row.pickupTipsBeforeFee * 100) / 100,
+        deliveryTipsBeforeFee: Math.round(row.deliveryTipsBeforeFee * 100) / 100,
         tips: Math.round(row.tips * 100) / 100,
         pickupTips: Math.round(row.pickupTips * 100) / 100,
         deliveryTips: Math.round(row.deliveryTips * 100) / 100,
       };
     })
     .sort((left, right) => left.employee.localeCompare(right.employee));
-  const tipJoinIssues = tipDetails.filter((detail) => detail.employee === "Unallocated");
+  const tipJoinIssues = allocation.details.filter((detail) => detail.employee === "Unallocated");
 
   return {
     business,
-    source: "Rezku daily email reports · Transaction Export tips joined to Order Export type and opened time",
+    source: "Rezku daily email reports · daily pre-fee tip pool reconciled to Order Export type and opened time",
     weekStart,
     weekEnd: new Date(bounds.end.getTime() - 1).toISOString(),
     rows,
-    tipDetails: tipDetails.slice(-500).reverse(),
+    tipDetails: allocation.details.slice(-500).reverse(),
     tipJoinIssues: tipJoinIssues.slice(-200).reverse(),
+    dailyTipReconciliation: allocation.dailyTipReconciliation,
   };
 }
