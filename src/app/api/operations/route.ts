@@ -4,14 +4,14 @@ import {
   accountingSnapshot,
   createEmployee,
   createSimpleJournalEntry,
-  importRezkuReport,
   listEmployees,
   listRecentTimeEntries,
   listRezkuImports,
   payrollSummary,
   updateEmployee,
 } from "@/lib/operations";
-import { repairRezkuBatchTimes } from "@/lib/rezku-eastern-time";
+import { repairExistingRezkuTimesOnce } from "@/lib/rezku-eastern-time";
+import { importSafeRezkuReport } from "@/lib/safe-rezku-import";
 import { detectRezkuVoidReportType, importRezkuVoidReport } from "@/lib/rezku-voids";
 import { apiError, unauthorized } from "@/lib/http";
 import type { Business } from "@/lib/types";
@@ -86,13 +86,19 @@ export async function POST(request: Request) {
       if (!voidType) await ensureEmployeeDirectorySchema();
       const result = voidType
         ? await importRezkuVoidReport(file.name, bytes, voidType, session.email)
-        : await importRezkuReport(file.name, bytes, requested, session.email);
-      if (!voidType) await repairRezkuBatchTimes(result.batchId);
+        : await importSafeRezkuReport(file.name, bytes, requested, session.email);
       return Response.json(result, { status: 201 });
     }
 
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action || "");
+
+    if (action === "rezku-repair-times") {
+      if (!canAccessBusiness(session, "Corner Deli")) {
+        return Response.json({ error: "Business access denied." }, { status: 403 });
+      }
+      return Response.json(await repairExistingRezkuTimesOnce());
+    }
 
     if (action === "employee-create") {
       const business = businessFrom(body.business);
