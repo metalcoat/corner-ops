@@ -54,6 +54,7 @@ type Dashboard = {
   auditEvents: Array<Record<string, unknown>>;
 };
 
+const EASTERN_TIME_ZONE = "America/New_York";
 const dollars = (value: number) => new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -61,17 +62,74 @@ const dollars = (value: number) => new Intl.NumberFormat("en-US", {
 const hours = (value: number) => Number(value || 0).toFixed(2);
 
 function previousMonday() {
-  const date = new Date();
-  const daysSinceMonday = (date.getDay() + 6) % 7;
-  date.setDate(date.getDate() - daysSinceMonday - 7);
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const date = new Date(`${values.year}-${values.month}-${values.day}T12:00:00Z`);
+  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(values.weekday);
+  date.setUTCDate(date.getUTCDate() - ((weekday + 6) % 7) - 7);
   return date.toISOString().slice(0, 10);
 }
 
-function localInputValue(value: string | null) {
+function easternDateTime(value: string | null) {
+  if (!value) return "Open";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIME_ZONE,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(value));
+}
+
+function easternInputValue(value: string | null) {
   if (!value) return "";
-  const date = new Date(value);
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(value));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+}
+
+function easternOffsetMilliseconds(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return Date.UTC(
+    Number(values.year), Number(values.month) - 1, Number(values.day),
+    Number(values.hour), Number(values.minute), Number(values.second),
+  ) - date.getTime();
+}
+
+function easternInputToIso(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if (!match) throw new Error("Enter a valid Eastern date and time.");
+  const wall = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), 0);
+  let timestamp = wall;
+  for (let index = 0; index < 3; index += 1) timestamp = wall - easternOffsetMilliseconds(new Date(timestamp));
+  return new Date(timestamp).toISOString();
 }
 
 async function errorMessage(response: Response) {
@@ -149,6 +207,8 @@ export default function PayrollControlPage() {
     event.preventDefault();
     if (!editing) return;
     const form = new FormData(event.currentTarget);
+    const clockIn = String(form.get("clockIn") || "");
+    const clockOut = String(form.get("clockOut") || "");
     await post({
       action: "punch-correct",
       business,
@@ -156,12 +216,12 @@ export default function PayrollControlPage() {
       sourceId: editing.id,
       employeeName: form.get("employeeName"),
       position: form.get("position"),
-      clockIn: new Date(String(form.get("clockIn"))).toISOString(),
-      clockOut: form.get("clockOut") ? new Date(String(form.get("clockOut"))).toISOString() : null,
+      clockIn: easternInputToIso(clockIn),
+      clockOut: clockOut ? easternInputToIso(clockOut) : null,
       reason: form.get("reason"),
     });
     setEditing(null);
-    setNotice("Shift corrected. Payroll hours and tip allocation were recalculated immediately.");
+    setNotice("Shift corrected in Eastern Time. Payroll hours and tip allocation were recalculated immediately.");
   }
 
   async function tipOverride(event: FormEvent<HTMLFormElement>) {
@@ -196,7 +256,7 @@ export default function PayrollControlPage() {
   return <main className="controlPage">
     <header className="controlHeader">
       <div>
-        <p className="eyebrow">Single payroll workspace</p>
+        <p className="eyebrow">Single payroll workspace · Eastern Time</p>
         <h1>{business} payroll control</h1>
         <p>Correct shifts, recalculate hours and tips, allocate exceptions, version payroll, and lock the final run without visiting a duplicate dashboard.</p>
       </div>
@@ -226,6 +286,7 @@ export default function PayrollControlPage() {
         </div>
         <p className="eyebrow">Calculated summary</p>
         <h2>{data?.summary.source}</h2>
+        {business === "Corner Deli" && <p className="reportNote">Before 3 PM, tips are split equally among all tip-eligible employees clocked in. After 3 PM, delivery tips go to the driver and takeout tips are split equally among clocked-in non-driver positions.</p>}
         <div className="tableWrap"><table className="controlTable">
           <thead><tr><th>Employee</th><th>Total</th><th>Regular</th><th>OT</th><th>Driver tipped</th><th>Pickup tips</th><th>Delivery tips</th><th>Manual</th><th>Total tips</th></tr></thead>
           <tbody>{data?.summary.rows.map((row) => <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.pickupTips)}</td><td>{dollars(row.deliveryTips)}</td><td>{dollars(row.manualTips || 0)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>)}</tbody>
@@ -233,23 +294,23 @@ export default function PayrollControlPage() {
       </section>
 
       <section className="controlCard">
-        <p className="eyebrow">Shift corrections</p>
+        <p className="eyebrow">Shift corrections · Eastern Time</p>
         <h2>Punches used for this payroll week</h2>
-        <p>Correct the source record here. The corrected times are then used for payroll and tip allocation.</p>
+        <p>Every displayed and entered time is interpreted as America/New_York. The corrected times are then used for payroll and tip allocation.</p>
         <div className="tableWrap"><table className="controlTable">
           <thead><tr><th>Employee</th><th>Clock in</th><th>Clock out</th><th>Source</th><th>Status</th><th></th></tr></thead>
-          <tbody>{data?.punches.map((punch) => <tr key={punch.id}><td><strong>{punch.employeeName}</strong><small>{punch.position}</small></td><td>{new Date(punch.clockIn).toLocaleString()}</td><td>{punch.clockOut ? new Date(punch.clockOut).toLocaleString() : "Open"}</td><td>{punch.source}</td><td><span className={`badge ${punch.status === "Complete" ? "good" : "warn"}`}>{punch.status}</span></td><td><button onClick={() => setEditing(punch)}>Correct shift</button></td></tr>)}</tbody>
+          <tbody>{data?.punches.map((punch) => <tr key={punch.id}><td><strong>{punch.employeeName}</strong><small>{punch.position}</small></td><td>{easternDateTime(punch.clockIn)}</td><td>{punch.clockOut ? easternDateTime(punch.clockOut) : "Open"}</td><td>{punch.source}</td><td><span className={`badge ${punch.status === "Complete" ? "good" : "warn"}`}>{punch.status}</span></td><td><button onClick={() => setEditing(punch)}>Correct shift</button></td></tr>)}</tbody>
         </table></div>
       </section>
 
       {editing && <section className="controlCard modalish">
-        <p className="eyebrow">Shift correction</p>
+        <p className="eyebrow">Shift correction · Eastern Time</p>
         <h2>{editing.employeeName}</h2>
         <form className="controlForm" onSubmit={correct}>
           <label>Employee<input name="employeeName" defaultValue={editing.employeeName} /></label>
           <label>Position<input name="position" defaultValue={editing.position} /></label>
-          <label>Clock in<input name="clockIn" type="datetime-local" defaultValue={localInputValue(editing.clockIn)} required /></label>
-          <label>Clock out<input name="clockOut" type="datetime-local" defaultValue={localInputValue(editing.clockOut)} /></label>
+          <label>Clock in (ET)<input name="clockIn" type="datetime-local" defaultValue={easternInputValue(editing.clockIn)} required /></label>
+          <label>Clock out (ET)<input name="clockOut" type="datetime-local" defaultValue={easternInputValue(editing.clockOut)} /></label>
           <label className="wide">Reason<textarea name="reason" required /></label>
           <div className="controlActions wide"><button className="primary" disabled={busy}>Save & recalculate</button><button type="button" onClick={() => setEditing(null)}>Cancel</button></div>
         </form>
@@ -260,7 +321,7 @@ export default function PayrollControlPage() {
         <h2>Unmatched tips</h2>
         <div className="list">{data?.summary.unmatchedTips.map((tip) => {
           const item = tip as Record<string, unknown>;
-          return <div className="listItem" key={String(item.id)}><div><strong>{dollars(Number(item.tip || 0))} · {String(item.source || "")}</strong><span>{String(item.orderId || item.transactionId || "")} · {new Date(String(item.time)).toLocaleString()}</span></div><button onClick={() => { const form = document.querySelector<HTMLFormElement>("#tipOverrideForm"); if (form) { (form.elements.namedItem("sourceTransactionId") as HTMLInputElement).value = String(item.transactionId || ""); (form.elements.namedItem("amount") as HTMLInputElement).value = String(item.tip || 0); } }}>Assign</button></div>;
+          return <div className="listItem" key={String(item.id)}><div><strong>{dollars(Number(item.tip || 0))} · {String(item.source || "")}</strong><span>{String(item.orderId || item.transactionId || "")} · {easternDateTime(String(item.time))}</span></div><button onClick={() => { const form = document.querySelector<HTMLFormElement>("#tipOverrideForm"); if (form) { (form.elements.namedItem("sourceTransactionId") as HTMLInputElement).value = String(item.transactionId || ""); (form.elements.namedItem("amount") as HTMLInputElement).value = String(item.tip || 0); } }}>Assign</button></div>;
         })}{!data?.summary.unmatchedTips.length && <div className="emptyState">No unmatched tips for this week.</div>}</div>
       </section>
 
@@ -285,7 +346,7 @@ export default function PayrollControlPage() {
         <h2>Versions</h2>
         <div className="tableWrap"><table className="controlTable">
           <thead><tr><th>Week</th><th>Version</th><th>Status</th><th>Generated</th><th>Locked</th><th>Actions</th></tr></thead>
-          <tbody>{data?.versions.map((version) => <tr key={version.id}><td>{version.weekStart}</td><td>v{version.version}</td><td><span className={`badge ${version.status === "Locked" ? "good" : "warn"}`}>{version.status}</span></td><td>{version.generatedBy}<small>{new Date(version.generatedAt).toLocaleString()}</small></td><td>{version.lockedBy || "—"}</td><td><a href={`/api/payroll-control?export=${version.id}`}>CSV</a> {version.status === "Draft" ? <button onClick={() => void post({ action: "run-lock", business, id: version.id }).then(() => setNotice(`Payroll v${version.version} locked.`))}>Lock</button> : <button onClick={() => void post({ action: "run-reopen", business, id: version.id }).then((result) => setNotice(`Reopened as payroll draft v${result.version}.`))}>Reopen as new version</button>}</td></tr>)}</tbody>
+          <tbody>{data?.versions.map((version) => <tr key={version.id}><td>{version.weekStart}</td><td>v{version.version}</td><td><span className={`badge ${version.status === "Locked" ? "good" : "warn"}`}>{version.status}</span></td><td>{version.generatedBy}<small>{easternDateTime(version.generatedAt)}</small></td><td>{version.lockedBy || "—"}</td><td><a href={`/api/payroll-control?export=${version.id}`}>CSV</a> {version.status === "Draft" ? <button onClick={() => void post({ action: "run-lock", business, id: version.id }).then(() => setNotice(`Payroll v${version.version} locked.`))}>Lock</button> : <button onClick={() => void post({ action: "run-reopen", business, id: version.id }).then((result) => setNotice(`Reopened as payroll draft v${result.version}.`))}>Reopen as new version</button>}</td></tr>)}</tbody>
         </table></div>
       </section>
 
@@ -294,7 +355,7 @@ export default function PayrollControlPage() {
         <h2>Correction audit</h2>
         <div className="list">{data?.adjustments.slice(0, 15).map((adjustment) => {
           const item = adjustment as Record<string, unknown>;
-          return <div className="listItem" key={String(item.id)}><div><strong>{String(item.sourceType)} shift corrected</strong><span>{String(item.reason)} · {String(item.actor)}</span></div><small>{new Date(String(item.createdAt)).toLocaleString()}</small></div>;
+          return <div className="listItem" key={String(item.id)}><div><strong>{String(item.sourceType)} shift corrected</strong><span>{String(item.reason)} · {String(item.actor)}</span></div><small>{easternDateTime(String(item.createdAt))}</small></div>;
         })}</div>
       </section>
 
@@ -303,7 +364,7 @@ export default function PayrollControlPage() {
         <h2>Audit events</h2>
         <div className="list">{data?.auditEvents.slice(0, 15).map((event) => {
           const item = event as Record<string, unknown>;
-          return <div className="listItem" key={String(item.id)}><div><strong>{String(item.eventType)}</strong><span>{String(item.actor)}</span></div><small>{new Date(String(item.createdAt)).toLocaleString()}</small></div>;
+          return <div className="listItem" key={String(item.id)}><div><strong>{String(item.eventType)}</strong><span>{String(item.actor)}</span></div><small>{easternDateTime(String(item.createdAt))}</small></div>;
         })}</div>
       </section>
     </div>
