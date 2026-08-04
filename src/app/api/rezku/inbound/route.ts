@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     `;
     return Response.json({ rows });
   }
-  return rezkuInboundGet(request);
+  return rezkuInboundGet();
 }
 
 export const POST = rezkuInboundPost;
