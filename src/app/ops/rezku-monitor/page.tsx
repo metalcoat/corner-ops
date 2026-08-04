@@ -58,8 +58,15 @@ async function responseMessage(response: Response) {
   return payload?.error || `Request failed (${response.status}).`;
 }
 
-function local(value: string) {
-  return new Date(value).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+function eastern(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(value));
 }
 
 function statusClass(status: string) {
@@ -122,7 +129,7 @@ export default function RezkuMonitorPage() {
 
   return <main className="controlPage rezkuMonitorPage">
     <header className="controlHeader">
-      <div><p className="eyebrow">Rezku chain of custody</p><h1>Rezku delivery monitor</h1><p>See whether the daily email reached Corner Ops, which workbooks were processed, how many rows survived import, which punches are incomplete, and whether void reports arrived even when they contained zero rows.</p></div>
+      <div><p className="eyebrow">Rezku chain of custody · Eastern Time</p><h1>Rezku delivery monitor</h1><p>See whether the daily email reached Corner Ops, which workbooks were processed, how many rows survived import, which punches are incomplete, and whether void reports arrived even when they contained zero rows. Every timestamp on this page is shown in America/New_York time.</p></div>
       <div className="controlActions"><button disabled={busy} onClick={() => void load()}>Refresh</button><a href="/ops/payroll-control">Payroll Control</a><a href="/ops/reports/voids">Void Report</a></div>
     </header>
 
@@ -130,7 +137,7 @@ export default function RezkuMonitorPage() {
     {!latest && <div className="rezkuWarning"><strong>No inbound Rezku email has been recorded.</strong><span>This means the deployed Resend webhook has not delivered one to this database. A copy existing in Gmail does not prove Corner Ops processed it, because apparently email delivery needed its own forensic discipline.</span></div>}
 
     <section className="metricGrid">
-      <div className="metric"><span>Latest email</span><strong>{latest?.reportDate || "Not recorded"}</strong><small>{latest ? local(latest.receivedAt) : "No webhook receipt"}</small></div>
+      <div className="metric"><span>Latest email</span><strong>{latest?.reportDate || "Not recorded"}</strong><small>{latest ? eastern(latest.receivedAt) : "No webhook receipt"}</small></div>
       <div className="metric"><span>Email status</span><strong>{latest?.status || "Missing"}</strong><small>{latest ? `${latest.reportsProcessed} of ${latest.reportsFound} reports` : "Deploy and configure inbound mail"}</small></div>
       <div className="metric"><span>Latest labor rows</span><strong>{latestShiftBatch?.rowsImported ?? 0}</strong><small>{latestShiftBatch ? `${latestShiftBatch.rowsRead} read · ${latestShiftBatch.duplicateOrSkipped} duplicate/skipped` : "No labor batch"}</small></div>
       <div className="metric"><span>Latest void rows</span><strong>{latestVoidBatch?.rowsImported ?? 0}</strong><small>{latestVoidBatch ? `${reportLabel(latestVoidBatch.reportType)} · ${latestVoidBatch.rowsRead} read` : "No void batch"}</small></div>
@@ -141,7 +148,7 @@ export default function RezkuMonitorPage() {
       <section className="controlCard">
         <div><p className="eyebrow">Inbound email</p><h2>Delivery receipts</h2></div>
         <div className="rezkuEmailList">{(data?.emails || []).map((email) => <article key={email.emailId} className="rezkuEmailCard">
-          <header><div><strong>{email.reportDate || "Date not parsed"}</strong><span>{local(email.receivedAt)}</span></div><span className={`badge ${statusClass(email.status)}`}>{email.status}</span></header>
+          <header><div><strong>{email.reportDate || "Date not parsed"}</strong><span>{eastern(email.receivedAt)}</span></div><span className={`badge ${statusClass(email.status)}`}>{email.status}</span></header>
           <p>{email.reportsProcessed} of {email.reportsFound} workbook{email.reportsFound === 1 ? "" : "s"} processed.</p>
           {email.error && <pre>{email.error}</pre>}
           <div className="rezkuReportRows">{email.reports.map((report) => <div key={report.id}><span><strong>{report.fileName}</strong><small>{reportLabel(report.reportType)} · {report.rowsRead} read · {report.rowsImported} new</small></span><span className={`badge ${statusClass(report.status)}`}>{report.status}</span>{report.error && <small className="rezkuError">{report.error}</small>}</div>)}</div>
@@ -155,13 +162,13 @@ export default function RezkuMonitorPage() {
           <label>Excel workbook<input name="file" type="file" accept=".xlsx,.xls" required /></label>
           <button className="primary" disabled={busy}>Import workbook</button>
         </form>
-        <div className="rezkuBatchList">{(data?.imports || []).slice(0, 20).map((batch) => <div key={batch.id}><span><strong>{batch.fileName}</strong><small>{reportLabel(batch.reportType)} · {local(batch.importedAt)} · {batch.importedBy}</small></span><span><b>{batch.rowsImported}/{batch.rowsRead}</b><small>{batch.reportType === "shifts" ? `Missing in ${batch.missingClockIn} · missing out ${batch.missingClockOut}` : `${batch.duplicateOrSkipped} duplicate/skipped`}</small></span></div>)}</div>
+        <div className="rezkuBatchList">{(data?.imports || []).slice(0, 20).map((batch) => <div key={batch.id}><span><strong>{batch.fileName}</strong><small>{reportLabel(batch.reportType)} · {eastern(batch.importedAt)} · {batch.importedBy}</small></span><span><b>{batch.rowsImported}/{batch.rowsRead}</b><small>{batch.reportType === "shifts" ? `Missing in ${batch.missingClockIn} · missing out ${batch.missingClockOut}` : `${batch.duplicateOrSkipped} duplicate/skipped`}</small></span></div>)}</div>
       </section>
     </div>
 
     <section className="controlCard">
       <div><p className="eyebrow">Punch evidence</p><h2>Rows received with missing punches</h2><p>Rezku role names are shown exactly as imported. These rows reached the database but cannot become complete payroll punches until the missing side is corrected.</p></div>
-      <div className="tableWrap"><table className="controlTable"><thead><tr><th>Employee</th><th>Rezku role</th><th>Clock in</th><th>Clock out</th><th>Reported hours</th><th>Source</th></tr></thead><tbody>{recentExceptions.map((row) => <tr key={row.id}><td><strong>{row.employeeName}</strong></td><td>{row.position || row.roleGroup || "Unspecified"}</td><td className={!row.clockIn ? "missingValue" : ""}>{row.clockIn ? local(row.clockIn) : "Missing"}</td><td className={!row.clockOut ? "missingValue" : ""}>{row.clockOut ? local(row.clockOut) : "Missing"}</td><td>{row.reportedHours.toFixed(2)}</td><td>{row.fileName}<small>{row.sheet ? `Sheet: ${row.sheet}` : ""}</small></td></tr>)}{recentExceptions.length === 0 && <tr><td colSpan={6}>No imported punch exceptions are currently recorded.</td></tr>}</tbody></table></div>
+      <div className="tableWrap"><table className="controlTable"><thead><tr><th>Employee</th><th>Rezku role</th><th>Clock in</th><th>Clock out</th><th>Reported hours</th><th>Source</th></tr></thead><tbody>{recentExceptions.map((row) => <tr key={row.id}><td><strong>{row.employeeName}</strong></td><td>{row.position || row.roleGroup || "Unspecified"}</td><td className={!row.clockIn ? "missingValue" : ""}>{row.clockIn ? eastern(row.clockIn) : "Missing"}</td><td className={!row.clockOut ? "missingValue" : ""}>{row.clockOut ? eastern(row.clockOut) : "Missing"}</td><td>{row.reportedHours.toFixed(2)}</td><td>{row.fileName}<small>{row.sheet ? `Sheet: ${row.sheet}` : ""}</small></td></tr>)}{recentExceptions.length === 0 && <tr><td colSpan={6}>No imported punch exceptions are currently recorded.</td></tr>}</tbody></table></div>
     </section>
   </main>;
 }
