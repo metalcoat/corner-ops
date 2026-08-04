@@ -16,6 +16,11 @@ export const dynamic = "force-dynamic";
 
 type StandardReportType = "shifts" | "orders" | "transactions";
 type ReportType = StandardReportType | RezkuVoidReportType;
+type ReportSource = {
+  url: string;
+  fileName: string;
+  source: "email-link" | "attachment";
+};
 
 type ReceivedEvent = {
   type: string;
@@ -71,15 +76,28 @@ function reportDate(content: string): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
 }
 
-function excelLinks(content: string): Array<{ url: string; fileName: string }> {
+function cleanFileName(value: string): string {
+  const last = value.split("/").pop() || "rezku-report.xlsx";
+  try {
+    return decodeURIComponent(last);
+  } catch {
+    return last;
+  }
+}
+
+function sourceKey(fileName: string): string {
+  return cleanFileName(fileName).trim().toLowerCase();
+}
+
+function excelLinks(content: string): ReportSource[] {
   const matches = decodeHtml(content).match(/https:\/\/[^\s"'<>]+?\.(?:xlsx|xls)(?:\?[^\s"'<>]*)?/gi) || [];
-  const unique = new Map<string, { url: string; fileName: string }>();
+  const unique = new Map<string, ReportSource>();
   for (const rawUrl of matches) {
     try {
       const url = new URL(rawUrl);
       if (url.protocol !== "https:" || url.hostname !== REZKU_FILE_HOST) continue;
-      const fileName = url.pathname.split("/").pop() || "rezku-report.xlsx";
-      unique.set(url.toString(), { url: url.toString(), fileName });
+      const fileName = cleanFileName(url.pathname);
+      unique.set(url.toString(), { url: url.toString(), fileName, source: "email-link" });
     } catch {
       // Ignore malformed links from the email body.
     }
@@ -93,6 +111,28 @@ function attachmentList(value: unknown): ReceivingAttachment[] {
     return (value as { data: ReceivingAttachment[] }).data;
   }
   return [];
+}
+
+function preferredSources(emailLinks: ReportSource[], attachments: ReceivingAttachment[]): ReportSource[] {
+  const byFileName = new Map<string, ReportSource>();
+
+  for (const source of emailLinks) {
+    byFileName.set(sourceKey(source.fileName), source);
+  }
+
+  // Resend attachment URLs are generated for the received message and are more reliable
+  // than the duplicate, expiring Rezku links embedded in the email body.
+  for (const attachment of attachments) {
+    if (!/\.(xlsx|xls)$/i.test(attachment.filename)) continue;
+    const fileName = cleanFileName(attachment.filename);
+    byFileName.set(sourceKey(fileName), {
+      url: attachment.download_url,
+      fileName,
+      source: "attachment",
+    });
+  }
+
+  return [...byFileName.values()];
 }
 
 async function downloadAndImport(url: string, fileName: string, importedBy: string) {
@@ -210,7 +250,7 @@ export async function POST(request: Request) {
   }
 
   const content = `${email.html || ""}\n${email.text || ""}`;
-  const sources = excelLinks(content);
+  const emailLinks = excelLinks(content);
   const emailReportDate = reportDate(content);
 
   const { data: rawAttachments, error: attachmentError } = await resend.emails.receiving.attachments.list({ emailId: event.data.email_id });
@@ -226,7 +266,7 @@ export async function POST(request: Request) {
       sender,
       subject,
       reportDate: emailReportDate,
-      reportsFound: sources.length,
+      reportsFound: emailLinks.length,
     });
     await finishRezkuInboundEmail({
       emailId: event.data.email_id,
@@ -237,17 +277,13 @@ export async function POST(request: Request) {
     return Response.json({ error: attachmentError.message }, { status: 502 });
   }
 
-  for (const attachment of attachmentList(rawAttachments)) {
-    if (!/\.(xlsx|xls)$/i.test(attachment.filename)) continue;
-    sources.push({ url: attachment.download_url, fileName: attachment.filename });
-  }
-
-  const uniqueSources = [...new Map(sources.map((source) => [source.url, source])).values()];
+  const attachments = attachmentList(rawAttachments);
+  const uniqueSources = preferredSources(emailLinks, attachments);
   console.log("[rezku/inbound] trusted email located", {
     webhookId: id,
     emailId: event.data.email_id,
     reportDate: emailReportDate,
-    reportFiles: uniqueSources.map((source) => source.fileName),
+    reportFiles: uniqueSources.map((source) => ({ fileName: source.fileName, source: source.source })),
   });
 
   await startRezkuInboundEmail({
@@ -260,7 +296,7 @@ export async function POST(request: Request) {
   });
 
   if (uniqueSources.length === 0) {
-    const error = "The Rezku email did not contain any Excel report links.";
+    const error = "The Rezku email did not contain any Excel report links or attachments.";
     console.error("[rezku/inbound] no Excel reports found", { webhookId: id, emailId: event.data.email_id });
     await finishRezkuInboundEmail({ emailId: event.data.email_id, status: "Failed", reportsProcessed: 0, error });
     return Response.json({ error }, { status: 422 });
@@ -292,6 +328,7 @@ export async function POST(request: Request) {
         webhookId: id,
         emailId: event.data.email_id,
         fileName: source.fileName,
+        source: source.source,
         reportType: result.reportType,
         rowsRead: result.rowsRead,
         rowsImported: result.imported,
@@ -303,6 +340,7 @@ export async function POST(request: Request) {
         webhookId: id,
         emailId: event.data.email_id,
         fileName: source.fileName,
+        source: source.source,
         error: message,
       });
       await recordRezkuInboundReport({
