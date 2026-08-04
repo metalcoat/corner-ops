@@ -24,6 +24,7 @@ type Transaction = {
   id: string;
   orderId: string;
   time: Date;
+  transactionTime: Date | null;
   tip: number;
   orderType: string;
   orderMatched: boolean;
@@ -196,6 +197,18 @@ function summarizeShifts(shifts: Shift[]) {
   return summary;
 }
 
+function detailBase(transaction: Transaction, totalCents: number) {
+  return {
+    time: transaction.time.toISOString(),
+    orderOpenedAt: transaction.time.toISOString(),
+    transactionTime: transaction.transactionTime?.toISOString() || null,
+    orderId: transaction.orderId,
+    orderType: transaction.orderType,
+    originalTip: transaction.tip,
+    tipAfterFee: totalCents / 100,
+  };
+}
+
 function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map<string, SummaryRow>) {
   const details: Array<Record<string, unknown>> = [];
 
@@ -205,11 +218,8 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
 
     if (!transaction.orderMatched) {
       details.push({
-        time: transaction.time.toISOString(),
-        orderId: transaction.orderId,
+        ...detailBase(transaction, totalCents),
         orderType: "",
-        originalTip: transaction.tip,
-        tipAfterFee: totalCents / 100,
         allocatedTip: 0,
         employee: "Unallocated",
         splitCount: 0,
@@ -222,11 +232,7 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
     const pickup = /pick\s*up|pickup|take\s*out|takeout|carry\s*out|carryout|to\s*go|togo|counter/i.test(transaction.orderType);
     if (!delivery && !pickup) {
       details.push({
-        time: transaction.time.toISOString(),
-        orderId: transaction.orderId,
-        orderType: transaction.orderType,
-        originalTip: transaction.tip,
-        tipAfterFee: totalCents / 100,
+        ...detailBase(transaction, totalCents),
         allocatedTip: 0,
         employee: "Unallocated",
         splitCount: 0,
@@ -241,11 +247,11 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
 
     if (beforeThree) {
       eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && covers(shift, transaction.time)));
-      rule = "Before 3 PM: equally split among all tip-eligible employees clocked in";
+      rule = "Before 3 PM order: equally split among all tip-eligible employees clocked in";
     } else if (delivery) {
       eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && isDriver(shift) && covers(shift, transaction.time)));
       if (eligible.length) {
-        rule = "After 3 PM delivery: assigned to driver clocked in";
+        rule = "After 3 PM delivery order: assigned to driver clocked in";
       } else {
         const graceEnd = transaction.time.getTime() + DRIVER_GRACE_MINUTES * 60_000;
         eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift)
@@ -253,7 +259,7 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
           && shift.clockIn
           && shift.clockIn.getTime() > transaction.time.getTime()
           && shift.clockIn.getTime() <= graceEnd));
-        if (eligible.length) rule = "After 3 PM delivery: driver arrived within 35 minutes";
+        if (eligible.length) rule = "After 3 PM delivery order: driver arrived within 35 minutes";
       }
       if (!eligible.length) {
         eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, transaction.time)));
@@ -261,7 +267,7 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
       }
     } else {
       eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, transaction.time)));
-      rule = "After 3 PM pickup: equally split among non-driver employees clocked in";
+      rule = "After 3 PM pickup order: equally split among non-driver employees clocked in";
     }
 
     if (!eligible.length) {
@@ -278,11 +284,7 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
 
     if (!eligible.length) {
       details.push({
-        time: transaction.time.toISOString(),
-        orderId: transaction.orderId,
-        orderType: transaction.orderType,
-        originalTip: transaction.tip,
-        tipAfterFee: totalCents / 100,
+        ...detailBase(transaction, totalCents),
         allocatedTip: 0,
         employee: "Unallocated",
         splitCount: 0,
@@ -299,11 +301,7 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
       if (delivery) row.deliveryTips = Math.round((row.deliveryTips + amount) * 100) / 100;
       else row.pickupTips = Math.round((row.pickupTips + amount) * 100) / 100;
       details.push({
-        time: transaction.time.toISOString(),
-        orderId: transaction.orderId,
-        orderType: transaction.orderType,
-        originalTip: transaction.tip,
-        tipAfterFee: totalCents / 100,
+        ...detailBase(transaction, totalCents),
         allocatedTip: amount,
         employee: canonicalEmployeeName(shift.employeeName),
         splitCount: eligible.length,
@@ -327,10 +325,11 @@ export async function payrollSummary(business: Business, weekStart: string) {
     ORDER BY clock_in
   ` as unknown as Array<Record<string, unknown>>;
   const orderRows = await getSql()`
-    SELECT order_id, opened_at, order_type
+    SELECT order_id, opened_at, order_type, raw
     FROM rezku_orders
     WHERE opened_at >= ${bounds.start.toISOString()}
       AND opened_at < ${bounds.end.toISOString()}
+    ORDER BY opened_at
   ` as unknown as Array<Record<string, unknown>>;
   const transactionRows = await getSql()`
     SELECT id, order_id, transaction_time, tip
@@ -354,25 +353,40 @@ export async function payrollSummary(business: Business, weekStart: string) {
     }))
     .filter((shift) => shift.employeeName && !/^cover$/i.test(shift.employeeName));
 
-  const orders = new Map<string, string>();
+  const orders = new Map<string, { orderType: string; openedAt: Date; hasClock: boolean }>();
   for (const row of orderRows) {
     const key = normalizedOrderId(row.order_id);
-    if (key) orders.set(key, String(row.order_type || "").trim());
+    const openedAt = dateValue(row.opened_at);
+    if (!key || !openedAt) continue;
+    const raw = row.raw && typeof row.raw === "object" ? row.raw as Record<string, unknown> : {};
+    const rawTime = String(raw["Opened At"] || raw["Open Time"] || raw["Order Time"] || "");
+    const candidate = {
+      orderType: String(row.order_type || "").trim(),
+      openedAt,
+      hasClock: /\d{1,2}:\d{2}/.test(rawTime),
+    };
+    const existing = orders.get(key);
+    if (!existing || (!existing.hasClock && candidate.hasClock) || existing.openedAt.getTime() < candidate.openedAt.getTime()) {
+      orders.set(key, candidate);
+    }
   }
 
   const transactions: Transaction[] = transactionRows
     .map((row) => {
-      const time = dateValue(row.transaction_time);
-      if (!time) return null;
+      const transactionTime = dateValue(row.transaction_time);
       const orderId = String(row.order_id || "").trim();
       const orderKey = normalizedOrderId(orderId);
+      const order = orderKey ? orders.get(orderKey) : undefined;
+      const allocationTime = order?.openedAt || transactionTime;
+      if (!allocationTime) return null;
       return {
         id: String(row.id),
         orderId,
-        time,
+        time: allocationTime,
+        transactionTime,
         tip: numberValue(row.tip),
-        orderType: orderKey ? orders.get(orderKey) || "" : "",
-        orderMatched: Boolean(orderKey && orders.has(orderKey)),
+        orderType: order?.orderType || "",
+        orderMatched: Boolean(order),
       };
     })
     .filter((transaction): transaction is Transaction => Boolean(transaction));
@@ -402,7 +416,7 @@ export async function payrollSummary(business: Business, weekStart: string) {
 
   return {
     business,
-    source: "Rezku daily email reports · Order Export ID joined to Transaction Export ID",
+    source: "Rezku daily email reports · Transaction Export tips joined to Order Export type and opened time",
     weekStart,
     weekEnd: new Date(bounds.end.getTime() - 1).toISOString(),
     rows,
