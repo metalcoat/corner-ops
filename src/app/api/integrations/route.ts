@@ -2,13 +2,13 @@ import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
   approveBankTransaction,
-  createPlaidLinkToken,
   exchangePlaidPublicToken,
   importBankFile,
   integrationDashboard,
   syncBankConnection,
   syncSquareConnection,
 } from "@/lib/integrations";
+import { createResilientPlaidLinkToken } from "@/lib/plaid-link";
 import { runScheduledOperations } from "@/lib/scheduler";
 import type { Business } from "@/lib/types";
 
@@ -79,7 +79,14 @@ export async function POST(request: Request) {
         return Response.json({ error: "Business access denied." }, { status: 403 });
       }
       const origin = new URL(request.url).origin;
-      return Response.json(await createPlaidLinkToken({ business, origin }));
+      try {
+        return Response.json(await createResilientPlaidLinkToken({ business, origin }));
+      } catch (error) {
+        console.error("[api/integrations] Plaid link startup failed", error);
+        return Response.json({
+          error: error instanceof Error ? error.message : "Plaid could not start the bank connection.",
+        }, { status: 502 });
+      }
     }
 
     if (action === "plaid-exchange") {
