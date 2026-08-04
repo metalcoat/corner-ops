@@ -8,12 +8,13 @@ function clean(value: unknown, max = 240): string {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-function trustedUrl(value: unknown): URL {
-  const url = new URL(String(value || ""));
+function trustedRawUrl(value: unknown): string {
+  const rawUrl = String(value || "");
+  const url = new URL(rawUrl);
   if (url.protocol !== "https:" || url.hostname !== REZKU_FILE_HOST || !/\.(xlsx|xls)$/i.test(url.pathname)) {
     throw new Error("Untrusted Rezku workbook URL.");
   }
-  return url;
+  return rawUrl;
 }
 
 export async function POST(request: Request) {
@@ -25,9 +26,9 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json() as { url?: string; fileName?: string };
-    const url = trustedUrl(body.url);
+    const rawUrl = trustedRawUrl(body.url);
     const fileName = clean(body.fileName, 255) || "rezku-report.xlsx";
-    const response = await fetch(url.toString(), {
+    const response = await fetch(rawUrl, {
       method: "GET",
       redirect: "follow",
       cache: "no-store",
