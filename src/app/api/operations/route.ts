@@ -12,6 +12,10 @@ import {
   updateEmployee,
 } from "@/lib/operations";
 import { repairExistingRezkuTimesOnce } from "@/lib/rezku-eastern-time";
+import {
+  detectRezkuProductSalesReportType,
+  importRezkuProductSalesReport,
+} from "@/lib/rezku-product-sales";
 import { importSafeRezkuReport } from "@/lib/safe-rezku-import";
 import { detectRezkuVoidReportType, importRezkuVoidReport } from "@/lib/rezku-voids";
 import { apiError, unauthorized } from "@/lib/http";
@@ -83,11 +87,15 @@ export async function POST(request: Request) {
       }
       const requested = String(form.get("reportType") || "") || undefined;
       const bytes = await file.arrayBuffer();
+      const productSalesType = detectRezkuProductSalesReportType(file.name, requested);
       const voidType = detectRezkuVoidReportType(file.name, requested);
-      if (!voidType) await ensureEmployeeDirectorySchema();
-      const result = voidType
-        ? await importRezkuVoidReport(file.name, bytes, voidType, session.email)
-        : await importSafeRezkuReport(file.name, bytes, requested, session.email);
+      const standardReport = !productSalesType && !voidType;
+      if (standardReport) await ensureEmployeeDirectorySchema();
+      const result = productSalesType
+        ? await importRezkuProductSalesReport(file.name, bytes, productSalesType, session.email)
+        : voidType
+          ? await importRezkuVoidReport(file.name, bytes, voidType, session.email)
+          : await importSafeRezkuReport(file.name, bytes, requested, session.email);
       return Response.json(result, { status: 201 });
     }
 
