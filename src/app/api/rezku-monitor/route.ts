@@ -1,7 +1,7 @@
 import { getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import { retryRezkuInboundEmail } from "@/lib/rezku-inbound-handler";
-import { rezkuImportDashboard } from "@/lib/rezku-monitor";
+import { cleanRezkuImportDashboard } from "@/lib/rezku-monitor-dashboard";
 
 export const runtime = "nodejs";
 
@@ -10,7 +10,7 @@ export async function GET() {
     const session = await getSession();
     if (!session) return unauthorized();
     requirePermission(session, "payroll.read");
-    return Response.json(await rezkuImportDashboard());
+    return Response.json(await cleanRezkuImportDashboard());
   } catch (error) {
     return apiError(error);
   }
