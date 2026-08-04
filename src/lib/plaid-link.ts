@@ -1,6 +1,7 @@
 import type { Business } from "@/lib/types";
 
 const PLAID_PRODUCTS = ["transactions"];
+const CANONICAL_OAUTH_REDIRECT = "https://corner-ops.vercel.app/ops/integrations";
 
 type PlaidErrorPayload = {
   error_code?: string;
@@ -34,8 +35,8 @@ function allowedOrigin(origin: string): string {
   return url.origin;
 }
 
-function configuredRedirectUri(): string | null {
-  const configured = process.env.PLAID_REDIRECT_URI?.trim();
+function validRedirectUri(value: string | undefined): string | null {
+  const configured = value?.trim();
   if (!configured) return null;
   try {
     const url = new URL(configured);
@@ -77,8 +78,8 @@ async function requestLinkToken(body: Record<string, unknown>): Promise<{
 
 export async function createResilientPlaidLinkToken(input: { business: Business; origin: string }) {
   const origin = allowedOrigin(input.origin);
-  const suggestedRedirectUri = `${origin}/ops/integrations`;
-  const redirectUri = configuredRedirectUri();
+  const redirectUri = validRedirectUri(process.env.PLAID_REDIRECT_URI)
+    || (origin.includes("localhost") ? `${origin}/ops/integrations` : CANONICAL_OAUTH_REDIRECT);
   const baseRequest: Record<string, unknown> = {
     client_name: "Corner Ops",
     language: "en",
@@ -90,23 +91,19 @@ export async function createResilientPlaidLinkToken(input: { business: Business;
     },
   };
 
-  let result = await requestLinkToken(redirectUri
-    ? { ...baseRequest, redirect_uri: redirectUri }
-    : baseRequest);
-  let oauthEnabled = Boolean(redirectUri);
-  let oauthWarning = redirectUri
-    ? ""
-    : `OAuth-only institutions require registering ${suggestedRedirectUri} in Plaid and setting PLAID_REDIRECT_URI.`;
+  let result = await requestLinkToken({ ...baseRequest, redirect_uri: redirectUri });
+  let oauthEnabled = true;
+  let oauthWarning = "";
 
-  if (!result.ok && redirectUri && isRedirectConfigurationError(result.payload)) {
-    console.warn("[plaid-link] configured OAuth redirect was rejected; retrying without redirect", {
+  if (!result.ok && isRedirectConfigurationError(result.payload)) {
+    console.warn("[plaid-link] OAuth redirect was rejected; retrying without redirect", {
       redirectUri,
       errorCode: result.payload.error_code || "",
       requestId: result.payload.request_id || "",
     });
     result = await requestLinkToken(baseRequest);
     oauthEnabled = false;
-    oauthWarning = `Plaid rejected the configured OAuth callback. Register ${redirectUri} in the Plaid dashboard. Standard institutions remain available.`;
+    oauthWarning = `OAuth-only institutions require registering ${redirectUri} in the Plaid dashboard. Standard institutions remain available.`;
   }
 
   if (!result.ok) {
@@ -129,8 +126,8 @@ export async function createResilientPlaidLinkToken(input: { business: Business;
     expiration: result.payload.expiration,
     environment: plaidEnvironment(),
     oauthEnabled,
-    oauthRedirectUri: redirectUri,
-    oauthCallbackToRegister: suggestedRedirectUri,
+    oauthRedirectUri: oauthEnabled ? redirectUri : null,
+    oauthCallbackToRegister: redirectUri,
     oauthWarning,
   };
 }
