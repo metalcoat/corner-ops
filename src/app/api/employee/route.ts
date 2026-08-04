@@ -1,10 +1,11 @@
 import { del, put } from "@vercel/blob";
-import { getEmployeeSession } from "@/lib/employee-auth";
+import { getEmployeeSession, type EmployeeSession } from "@/lib/employee-auth";
 import { listDirectoryEmployees } from "@/lib/employee-directory-admin";
 import { setEmployeeProfilePhoto, updateEmployeeChatNickname } from "@/lib/employee-profile";
 import { apiError, unauthorized } from "@/lib/http";
 import { sendEmployeePhotoMessage } from "@/lib/message-attachments";
 import { markEmployeeMessageSeen } from "@/lib/message-reads";
+import { notifyRecipientsOfEmployeeMessage } from "@/lib/push-notifications";
 import {
   createShiftRequest,
   employeeDashboard,
@@ -33,6 +34,22 @@ function employeeMessagePath(business: string, fileName: string): string {
 function employeeProfilePath(business: string, employeeId: string, fileName: string): string {
   const location = business === "Corner Deli" ? "corner-deli" : "tiki";
   return `employee-profiles/${location}/${employeeId}/${Date.now()}-${safeFileName(fileName)}`;
+}
+
+async function sendMessagePush(
+  session: EmployeeSession,
+  input: { recipientEmployeeId?: string | null; body: string; hasPhoto?: boolean },
+) {
+  return notifyRecipientsOfEmployeeMessage({
+    business: session.business,
+    senderEmployeeId: session.employeeId,
+    recipientEmployeeId: input.recipientEmployeeId,
+    body: input.body,
+    hasPhoto: input.hasPhoto,
+  }).catch((error) => {
+    console.error("[api/employee] employee message saved but push delivery failed", error);
+    return { attempted: 0, delivered: 0, failed: 0 };
+  });
 }
 
 export async function GET() {
@@ -141,7 +158,11 @@ export async function POST(request: Request) {
         ? String(form.get("recipientEmployeeId"))
         : null;
 
-      if (!photo) return Response.json(await sendEmployeeMessage(session, { recipientEmployeeId, body }));
+      if (!photo) {
+        const result = await sendEmployeeMessage(session, { recipientEmployeeId, body });
+        const push = await sendMessagePush(session, { recipientEmployeeId, body });
+        return Response.json({ ...result, push });
+      }
       if (!photo.type.toLowerCase().startsWith("image/")) {
         return Response.json({ error: "Message attachments must be image files." }, { status: 415 });
       }
@@ -163,7 +184,8 @@ export async function POST(request: Request) {
         attachmentType: photo.type || "application/octet-stream",
         attachmentSize: photo.size,
       });
-      return Response.json(result, { status: 201 });
+      const push = await sendMessagePush(session, { recipientEmployeeId, body, hasPhoto: true });
+      return Response.json({ ...result, push }, { status: 201 });
     }
 
     const body = await request.json() as Record<string, unknown>;
@@ -176,10 +198,14 @@ export async function POST(request: Request) {
       return Response.json(await markEmployeeMessageSeen(session, String(body.messageId || "")));
     }
     if (action === "message-send") {
-      return Response.json(await sendEmployeeMessage(session, {
-        recipientEmployeeId: body.recipientEmployeeId ? String(body.recipientEmployeeId) : null,
-        body: String(body.body || ""),
-      }));
+      const recipientEmployeeId = body.recipientEmployeeId ? String(body.recipientEmployeeId) : null;
+      const messageBody = String(body.body || "");
+      const result = await sendEmployeeMessage(session, {
+        recipientEmployeeId,
+        body: messageBody,
+      });
+      const push = await sendMessagePush(session, { recipientEmployeeId, body: messageBody });
+      return Response.json({ ...result, push });
     }
     if (action === "availability-save") {
       return Response.json(await setEmployeeAvailability(session, {
