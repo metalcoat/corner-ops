@@ -49,9 +49,10 @@ function refreshOvernightLabels() {
   const selected = endSelect.selectedOptions[0];
   const selectedLabel = selected?.dataset.baseTimeLabel || selected?.textContent || endSelect.value;
   const overnight = startMinutes >= 0 && selectedEndMinutes >= 0 && selectedEndMinutes <= startMinutes;
-  hint.textContent = overnight
+  const message = overnight
     ? `Ends ${selectedLabel} on the following day.`
     : `Ends ${selectedLabel} on the selected day.`;
+  if (hint.textContent !== message) hint.textContent = message;
 }
 
 export default function OvernightShiftHelper() {
