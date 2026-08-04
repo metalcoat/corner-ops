@@ -1,5 +1,5 @@
 import { ensureSchema, getSql } from "@/lib/db";
-import { payrollSummary } from "@/lib/operations";
+import { payrollSummary } from "@/lib/payroll-summary-rules";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
