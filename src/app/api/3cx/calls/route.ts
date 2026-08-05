@@ -1,6 +1,6 @@
 import { getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
-import { threeCxDeliCallReport } from "@/lib/three-cx-cdr";
+import { threeCxDeliCallReport } from "@/lib/three-cx-calls-report";
 
 export const runtime = "nodejs";
 
