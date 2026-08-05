@@ -46,6 +46,9 @@
 .employeeMessageStatus{justify-items:end;align-content:center}
 .employeeMessagesItem span,.employeeMessagesItem small{color:#a8b3c4;font-size:.76rem}
 .employeeMessagesUnreadMark{display:inline-flex!important;align-items:center;justify-content:center;width:max-content;border:1px solid #fbbf24;border-radius:999px;background:#fbbf24;color:#251a03!important;font-size:.62rem!important;font-weight:950!important;letter-spacing:.04em;padding:2px 7px;text-transform:uppercase}
+.employeeMessageDelete{border:0;background:transparent;color:#fca5a5;padding:2px 0;font:inherit;font-size:.68rem;font-weight:900;text-decoration:underline;cursor:pointer}
+.employeeMessageDelete:hover{color:#fecaca}
+.employeeMessageDelete:disabled{cursor:wait;opacity:.55}
 .employeeMessagesItem p{margin:.55rem 0;white-space:pre-wrap;line-height:1.35}
 .employeeMessagesPhoto{display:block;margin:.55rem 0;border-radius:10px;overflow:hidden;border:1px solid #334155;background:#020617}
 .employeeMessagesPhoto img{display:block;width:100%;max-height:280px;object-fit:cover}
