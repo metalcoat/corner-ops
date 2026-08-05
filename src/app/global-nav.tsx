@@ -18,6 +18,7 @@ type NotificationSummary = {
 const links: NavLink[] = [
   { label: "Reports", href: "/ops/reports", activePaths: ["/ops/reports", "/ops/weather"] },
   { label: "Banking", href: "/ops/banking", activePaths: ["/ops/banking", "/ops/accounting-control", "/ops/expense-control", "/ops/bank-accounts", "/ops/card-statements"] },
+  { label: "Finance", href: "/ops/finance-operations" },
   { label: "People", href: "/ops/people", activePaths: ["/ops/people", "/ops/workforce", "/ops/attendance", "/ops/payroll-control", "/ops/employees", "/ops/employment-forms", "/ops/rezku-monitor"] },
   { label: "Overtime", href: "/ops/overtime" },
   { label: "Messages", href: "/ops/messages" },
