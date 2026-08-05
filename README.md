@@ -1,6 +1,6 @@
 # Corner Ops
 
-Corner Ops is the owner and employee operations system for Corner Deli and Tiki. It includes employee scheduling, time and attendance, payroll review, messaging, business reporting, banking integrations, documents, and operational alerts.
+Corner Ops is the owner and employee operations system for Corner Deli and Tiki. It includes employee scheduling, time and attendance, payroll review, messaging, business reporting, banking integrations, finance operations, documents, and operational alerts.
 
 ## Development status
 
@@ -8,48 +8,59 @@ Production deployments are intentionally paused. Current work remains on the dep
 
 ## Banking and historical imports
 
-The Automation Center supports:
-
-- Plaid institution connections for bank and credit-card accounts
-- several accounts under one Plaid Item/institution login
-- Plaid update mode for changing the accounts shared by an existing Item
-- CSV and Excel historical transaction imports
-- format recognition for the supplied SEACOMM and NBT exports
-- stable source identifiers and reimport-safe transaction identifiers
-- duplicate checks against transactions received from other feeds
-- accounting classification and owner review
-
-The historical import screen is under **Settings → Integrations**. Choose the business, institution, account label, and CSV or Excel file. Corner Deli and Tiki/At The Docks remain separate accounting entities.
+The Automation Center supports Plaid bank and credit-card connections, several accounts under one institution Item, Plaid update mode, CSV and Excel history imports, duplicate protection, transaction classification, and owner review. Corner Deli and Tiki/At The Docks remain separate accounting entities.
 
 ## Credit-card statements
 
-The Banking area includes a card-statement reconciliation page. Owners can upload PDF, CSV, XLS, or XLSX statements. PDFs are stored securely as source documents. Spreadsheet statements also extract transaction rows.
+The Banking area accepts PDF, CSV, XLS, and XLSX card statements. PDFs are stored securely as source documents. Spreadsheet statements can extract transaction rows. Reconciliation matches the checking-account payment to the statement, rather than incorrectly matching every card purchase to a bank withdrawal.
 
-A card statement is reconciled to the bank account through the statement payment, not by matching every card purchase to the bank feed. The system searches for equal bank withdrawals around the statement date and requires owner confirmation before marking a statement matched.
-
-## Automatic invoice OCR
+## Azure invoice and receipt OCR
 
 The **Invoices** owner navigation item opens `/ops/finance-operations/invoice-ocr`.
 
-Selecting a PDF, JPG, PNG, or WebP invoice automatically sends it to a Google Document AI Invoice Parser. Corner Ops extracts:
+Invoice and receipt recognition uses Azure Document Intelligence through a provider abstraction. The current provider is Azure, while the interface can later support a self-hosted invoice2data worker without replacing the owner or scanner workflows.
 
-- supplier/vendor name
-- invoice number
-- invoice and due dates
+Azure extracts:
+
+- vendor or merchant name
+- invoice/reference number
+- invoice, transaction, and due dates
 - subtotal, tax, total, and currency
-- line descriptions, product codes, quantities, units, unit prices, and line totals
+- descriptions, product codes, quantities, units, prices, and line totals
 - field and line confidence scores
 
-OCR results remain an editable draft. Warnings identify missing, low-confidence, or inconsistent fields. Nothing is written to accounts payable or inventory until the owner reviews the draft and chooses **Save reviewed bill**. The original invoice is then stored privately with the AP record.
+Owner invoice OCR results remain editable drafts. Nothing is written to accounts payable or inventory until the owner reviews the result and chooses **Save reviewed bill**.
 
-Required Google configuration:
+The free-tier configuration deliberately analyzes only the first two invoice pages and the first receipt page.
 
-- `GOOGLE_CLOUD_PROJECT_ID`
-- `GOOGLE_SERVICE_ACCOUNT_EMAIL`
-- `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
-- `GOOGLE_DOCUMENT_AI_LOCATION`
-- `GOOGLE_DOCUMENT_AI_INVOICE_PROCESSOR_ID`
-- optional `GOOGLE_DOCUMENT_AI_INVOICE_PROCESSOR_VERSION`
+Required Azure configuration:
+
+- `INVOICE_OCR_PROVIDER=azure`
+- `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`
+- `AZURE_DOCUMENT_INTELLIGENCE_KEY`
+- optional `AZURE_DOCUMENT_INTELLIGENCE_API_VERSION`, defaulting to `2024-11-30`
+
+## Mobile document scanner
+
+The scanner is available at `/scan`, in owner navigation, and in Employee Hub navigation.
+
+It supports:
+
+- phone rear-camera capture or image selection
+- browser-side black-and-white conversion
+- adjustable threshold and image rotation
+- Invoice, Receipt, Insurance, Permit, Contract, Employee, Inventory, and Other classifications
+- standardized filenames using date, business, type, vendor/title, and reference number
+- private Vercel Blob storage in the Documents vault
+- automatic Azure extraction for invoices and receipts
+- no OCR charge for insurance, permits, contracts, employee records, inventory documents, and other files
+
+Owners can save directly. Employee and upload-only submissions are always marked **Needs Review**. Outside uploaders can use a business-specific PIN and cannot browse stored documents.
+
+Optional outside-upload configuration:
+
+- `DOCUMENT_UPLOAD_PIN_CORNER_DELI`
+- `DOCUMENT_UPLOAD_PIN_TIKI`
 
 ## Overtime and shift coverage
 
@@ -57,9 +68,9 @@ The overtime monitor calculates Corner Deli and Tiki independently and uses the 
 
 ## Employee and owner apps
 
-Corner Ops includes an installable PWA shell, owner and employee messaging, push-notification registration, high-contrast message displays, mobile Employee Hub updates, and a weekly employee schedule grid.
+Corner Ops includes an installable PWA shell, owner and employee messaging, push-notification registration, mobile Employee Hub tools, a weekly employee schedule grid, and the document scanner.
 
-## Environment variables
+## Core environment variables
 
 Core deployment variables include:
 
@@ -69,7 +80,8 @@ Core deployment variables include:
 - `EMPLOYMENT_FORMS_ENCRYPTION_KEY` with at least 32 characters
 - `CRON_SECRET`
 - Plaid credentials and optional `PLAID_LINK_CUSTOMIZATION_NAME`
-- Google Document AI invoice OCR credentials
+- Azure Document Intelligence endpoint and key
+- optional outside document-upload PINs
 - Resend and alert-email variables when email delivery is enabled
 
 Do not store live credentials in the repository.
