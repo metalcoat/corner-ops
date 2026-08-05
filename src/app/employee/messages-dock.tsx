@@ -202,6 +202,37 @@ export default function EmployeeMessagesDock() {
     }
   }
 
+  async function deleteMessage(message: Message) {
+    const description = message.body.trim()
+      ? `“${message.body.trim().slice(0, 60)}${message.body.trim().length > 60 ? "…" : ""}”`
+      : message.attachment_name
+        ? "this photo message"
+        : "this message";
+    if (!window.confirm(`Delete ${description} for everyone? This cannot be undone.`)) return;
+
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/employee/messages/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: message.id }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      reportedSeen.current.delete(message.id);
+      setData((current) => current ? {
+        ...current,
+        messages: current.messages.filter((item) => item.id !== message.id),
+        unreadMessageIds: current.unreadMessageIds.filter((id) => id !== message.id),
+      } : current);
+      setNotice("Message deleted for everyone.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Message could not be deleted.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function uploadProfilePhoto(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
@@ -304,11 +335,16 @@ export default function EmployeeMessagesDock() {
           const senderColor = message.sender_schedule_color || "#64748B";
           const senderDisplay = message.sender_chat_nickname || firstName(message.sender_name);
           const unread = unreadIds.has(message.id);
+          const canDelete = message.sender_employee_id === session.employeeId;
           return <article className={`employeeMessagesItem ${unread ? "isUnread" : ""}`} key={message.id} data-message-id={message.id} style={{ "--employee-color": senderColor } as CSSProperties}>
             <header className="employeeMessageMeta">
               <span className="employeeMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(message.sender_employee_id)} alt="" loading="lazy" /> : initials(senderDisplay)}</span>
               <div><strong>{senderDisplay}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div>
-              <div className="employeeMessageStatus">{unread ? <span className="employeeMessagesUnreadMark">New</span> : null}<small>{local(message.created_at)}</small></div>
+              <div className="employeeMessageStatus">
+                {unread ? <span className="employeeMessagesUnreadMark">New</span> : null}
+                <small>{local(message.created_at)}</small>
+                {canDelete && <button type="button" className="employeeMessageDelete" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>}
+              </div>
             </header>
             {message.body && <p>{message.body}</p>}
             {message.attachment_name && <a className="employeeMessagesPhoto" href={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer" aria-label={`Open photo from ${senderDisplay}`}><img src={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${senderDisplay}`} loading="lazy" /></a>}
