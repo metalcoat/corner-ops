@@ -5,12 +5,7 @@ import type { Business, SessionView } from "@/lib/types";
 import "../../control-center.css";
 import "./invoice-ocr.css";
 
-type OcrField<T> = {
-  value: T;
-  confidence: number;
-  sourceText: string;
-};
-
+type OcrField<T> = { value: T; confidence: number; sourceText: string };
 type OcrLine = {
   description: string;
   productCode: string;
@@ -20,11 +15,11 @@ type OcrLine = {
   amount: number;
   confidence: number;
 };
-
 type OcrResult = {
   business: Business;
   fileName: string;
   provider: string;
+  model: string;
   pageCount: number;
   overallConfidence: number;
   fields: {
@@ -41,14 +36,14 @@ type OcrResult = {
   warnings: string[];
   textPreview: string;
 };
-
 type Configuration = {
   configured: boolean;
   missing: string[];
   provider: string;
   location: string;
+  apiVersion?: string;
+  pageLimit?: number;
 };
-
 type Draft = {
   vendor: string;
   invoiceNumber: string;
@@ -74,7 +69,6 @@ const emptyDraft: Draft = {
   accountCode: "5900",
   notes: "",
 };
-
 const accountOptions = [
   ["5000", "Cost of Goods Sold"],
   ["5100", "Payroll"],
@@ -90,26 +84,21 @@ function requestedBusiness(): Business {
   if (typeof window === "undefined") return "Corner Deli";
   return new URLSearchParams(window.location.search).get("business") === "Tiki" ? "Tiki" : "Corner Deli";
 }
-
 function money(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0);
 }
-
 function confidencePercent(value: number) {
   return `${Math.round(Math.max(0, Math.min(1, value || 0)) * 100)}%`;
 }
-
 function confidenceClass(value: number) {
-  if (value >= 0.85) return "high";
-  if (value >= 0.65) return "medium";
+  if (value >= .85) return "high";
+  if (value >= .65) return "medium";
   return "low";
 }
-
 async function responseMessage(response: Response) {
   const payload = await response.json().catch(() => null) as { error?: string } | null;
   return payload?.error || `Request failed (${response.status}).`;
 }
-
 function dateAfter(dateText: string, days: number) {
   if (!dateText) return "";
   const date = new Date(`${dateText}T12:00:00Z`);
@@ -138,7 +127,7 @@ export default function InvoiceOcrPage() {
     fetch("/api/finance-operations/invoice-ocr", { cache: "no-store" })
       .then((response) => response.json())
       .then((value: Configuration) => setConfiguration(value))
-      .catch(() => setConfiguration({ configured: false, missing: ["Unable to read OCR configuration"], provider: "Google Document AI Invoice Parser", location: "us" }));
+      .catch(() => setConfiguration({ configured: false, missing: ["Unable to read OCR configuration"], provider: "Azure Document Intelligence", location: "Azure" }));
   }, []);
 
   useEffect(() => {
@@ -173,24 +162,25 @@ export default function InvoiceOcrPage() {
     try {
       const form = new FormData();
       form.set("business", business);
+      form.set("documentType", "Invoice");
       form.set("file", nextFile);
       const response = await fetch("/api/finance-operations/invoice-ocr", { method: "POST", body: form });
       if (!response.ok) throw new Error(await responseMessage(response));
       const payload = await response.json() as OcrResult;
+      const invoiceDate = payload.fields.invoiceDate.value;
       setResult(payload);
       setLines(payload.lines);
-      const detectedInvoiceDate = payload.fields.invoiceDate.value;
       setDraft({
         vendor: payload.fields.vendor.value,
         invoiceNumber: payload.fields.invoiceNumber.value,
-        invoiceDate: detectedInvoiceDate,
-        dueDate: payload.fields.dueDate.value || dateAfter(detectedInvoiceDate, 30),
+        invoiceDate,
+        dueDate: payload.fields.dueDate.value || dateAfter(invoiceDate, 30),
         subtotal: payload.fields.subtotal.value,
         taxAmount: payload.fields.taxAmount.value,
         totalAmount: payload.fields.totalAmount.value,
         category: "Other Expense",
         accountCode: "5900",
-        notes: `Extracted by ${payload.provider} at ${confidencePercent(payload.overallConfidence)} overall confidence. Review completed before posting.`,
+        notes: `Extracted by ${payload.provider} at ${confidencePercent(payload.overallConfidence)} overall confidence. Reviewed before posting.`,
       });
       setNotice(`OCR completed for ${payload.fileName}. Review every highlighted field before saving.`);
     } catch (error) {
@@ -206,40 +196,21 @@ export default function InvoiceOcrPage() {
     setFile(nextFile);
     void scanInvoice(nextFile);
   }
-
   function updateLine(index: number, values: Partial<OcrLine>) {
     setLines((current) => current.map((line, lineIndex) => {
       if (lineIndex !== index) return line;
       const updated = { ...line, ...values };
-      if (values.quantity !== undefined || values.unitPrice !== undefined) {
-        updated.amount = Math.round(updated.quantity * updated.unitPrice * 100) / 100;
-      }
+      if (values.quantity !== undefined || values.unitPrice !== undefined) updated.amount = Math.round(updated.quantity * updated.unitPrice * 100) / 100;
       return updated;
     }));
   }
-
-  function removeLine(index: number) {
-    setLines((current) => current.filter((_, lineIndex) => lineIndex !== index));
-  }
-
   function addLine() {
-    setLines((current) => [...current, {
-      description: "",
-      productCode: "",
-      quantity: 1,
-      unit: "each",
-      unitPrice: 0,
-      amount: 0,
-      confidence: 1,
-    }]);
+    setLines((current) => [...current, { description: "", productCode: "", quantity: 1, unit: "each", unitPrice: 0, amount: 0, confidence: 1 }]);
   }
 
   async function saveBill(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!file) {
-      setNotice("Choose and scan an invoice before saving.");
-      return;
-    }
+    if (!file) return setNotice("Choose and scan an invoice before saving.");
     setSaving(true);
     setNotice("");
     try {
@@ -247,16 +218,7 @@ export default function InvoiceOcrPage() {
       form.set("action", "create-bill");
       form.set("business", business);
       form.set("file", file);
-      form.set("vendor", draft.vendor);
-      form.set("invoiceNumber", draft.invoiceNumber);
-      form.set("invoiceDate", draft.invoiceDate);
-      form.set("dueDate", draft.dueDate);
-      form.set("subtotal", String(draft.subtotal));
-      form.set("taxAmount", String(draft.taxAmount));
-      form.set("totalAmount", String(draft.totalAmount));
-      form.set("category", draft.category);
-      form.set("accountCode", draft.accountCode);
-      form.set("notes", draft.notes);
+      Object.entries(draft).forEach(([key, value]) => form.set(key, String(value)));
       form.set("lines", JSON.stringify(lines.map((line) => ({
         inventoryItemId: null,
         description: line.productCode ? `${line.productCode} · ${line.description}` : line.description,
@@ -266,9 +228,9 @@ export default function InvoiceOcrPage() {
       }))));
       const response = await fetch("/api/finance-operations", { method: "POST", body: form });
       if (!response.ok) throw new Error(await responseMessage(response));
-      const payload = await response.json() as { id: string; lines: number; totalAmount: number };
+      const payload = await response.json() as { lines: number; totalAmount: number };
       resetDraft();
-      setNotice(`Bill saved for ${money(payload.totalAmount)} with ${payload.lines} extracted line item${payload.lines === 1 ? "" : "s"}.`);
+      setNotice(`Bill saved for ${money(payload.totalAmount)} with ${payload.lines} line item${payload.lines === 1 ? "" : "s"}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The reviewed invoice could not be saved.");
     } finally {
@@ -284,35 +246,29 @@ export default function InvoiceOcrPage() {
       <div>
         <p className="eyebrow">Accounts payable automation</p>
         <h1>{business} invoice OCR</h1>
-        <p>Select a PDF or invoice image. Google Document AI extracts the invoice fields and line items, then you review and correct the draft before it enters accounts payable.</p>
+        <p>Select a PDF or invoice image. Azure Document Intelligence extracts invoice fields and line items, then you review the draft before it enters accounts payable.</p>
       </div>
       <div className="controlActions">
-        <div className="businessPills" aria-label="Business">
-          {(["Corner Deli", "Tiki"] as Business[]).map((name) => <button type="button" key={name} className={business === name ? "active" : ""} onClick={() => { setBusiness(name); resetDraft(); }}>{name}</button>)}
-        </div>
+        <div className="businessPills">{(["Corner Deli", "Tiki"] as Business[]).map((name) => <button type="button" key={name} className={business === name ? "active" : ""} onClick={() => { setBusiness(name); resetDraft(); }}>{name}</button>)}</div>
+        <a href={`/scan?business=${encodeURIComponent(business)}`}>Mobile scanner</a>
         <a href={`/ops/finance-operations?business=${encodeURIComponent(business)}`}>Back to Finance</a>
       </div>
     </header>
 
     {notice && <div className="noticeBar">{notice}</div>}
-
     {configuration && !configuration.configured && <section className="controlCard invoiceConfigError">
-      <div><p className="eyebrow">Configuration required</p><h2>Invoice OCR is not ready</h2><p>Add the missing Google Document AI variables to Vercel before attempting a scan.</p></div>
+      <div><p className="eyebrow">Configuration required</p><h2>Invoice OCR is not ready</h2><p>Add the Azure Document Intelligence endpoint and key to Vercel before attempting OCR.</p></div>
       <code>{configuration.missing.join("\n")}</code>
     </section>}
 
     <section className="controlCard invoiceUploadCard">
-      <div>
-        <p className="eyebrow">Step 1</p>
-        <h2>Choose an invoice</h2>
-        <p>Supported files: PDF, JPG, PNG, and WebP, up to 25 MB. OCR begins immediately after selection.</p>
-      </div>
+      <div><p className="eyebrow">Step 1</p><h2>Choose an invoice</h2><p>PDF, JPG, PNG, or WebP, up to 25 MB. The Azure free-tier configuration analyzes the first two pages.</p></div>
       <label className={`invoiceDrop ${scanning ? "busy" : ""}`}>
         <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" disabled={scanning || !configuration?.configured} onChange={(event) => chooseFile(event.target.files?.[0] || null)} />
         <strong>{scanning ? "Reading invoice…" : file ? file.name : "Select PDF or invoice image"}</strong>
-        <span>{scanning ? "Extracting invoice fields and line items" : "The source file is not stored until the reviewed bill is saved"}</span>
+        <span>{scanning ? "Extracting fields and line items" : "The source file is stored only after owner review"}</span>
       </label>
-      {scanning && <div className="invoiceProgress" aria-label="OCR in progress"><i /></div>}
+      {scanning && <div className="invoiceProgress"><i /></div>}
     </section>
 
     {result && <form className="invoiceReview" onSubmit={saveBill}>
@@ -320,10 +276,7 @@ export default function InvoiceOcrPage() {
         <div><p className="eyebrow">Step 2</p><h2>Review extracted invoice</h2><p>{result.pageCount} page{result.pageCount === 1 ? "" : "s"} · {result.provider}</p></div>
         <div className={`invoiceOverall ${confidenceClass(result.overallConfidence)}`}><span>Overall confidence</span><strong>{confidencePercent(result.overallConfidence)}</strong></div>
       </section>
-
-      {result.warnings.length > 0 && <section className="invoiceWarnings" aria-label="OCR review warnings">
-        {result.warnings.map((warning) => <div key={warning}>{warning}</div>)}
-      </section>}
+      {result.warnings.length > 0 && <section className="invoiceWarnings">{result.warnings.map((warning) => <div key={warning}>{warning}</div>)}</section>}
 
       <section className="controlCard invoiceHeaderFields">
         <div className="invoiceSectionTitle"><div><p className="eyebrow">Invoice header</p><h2>Vendor, dates, and totals</h2></div><span>Low-confidence fields require extra review.</span></div>
@@ -349,7 +302,7 @@ export default function InvoiceOcrPage() {
         <div className="invoiceSectionTitle"><div><p className="eyebrow">Line-item extraction</p><h2>Invoice lines</h2></div><button type="button" onClick={addLine}>Add line</button></div>
         <div className="invoiceLineList">
           {lines.map((line, index) => <article className={`invoiceLine ${confidenceClass(line.confidence)}`} key={`${index}-${line.productCode}`}>
-            <div className="invoiceLineTop"><strong>Line {index + 1}</strong><Confidence value={line.confidence} /><button type="button" onClick={() => removeLine(index)}>Remove</button></div>
+            <div className="invoiceLineTop"><strong>Line {index + 1}</strong><Confidence value={line.confidence} /><button type="button" onClick={() => setLines((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button></div>
             <label className="lineDescription"><span>Description</span><input value={line.description} onChange={(event) => updateLine(index, { description: event.target.value })} required /></label>
             <label><span>Product code</span><input value={line.productCode} onChange={(event) => updateLine(index, { productCode: event.target.value })} /></label>
             <label><span>Quantity</span><input type="number" step="0.0001" min="0" value={line.quantity} onChange={(event) => updateLine(index, { quantity: Number(event.target.value) })} /></label>
@@ -357,15 +310,14 @@ export default function InvoiceOcrPage() {
             <label><span>Unit price</span><input type="number" step="0.0001" min="0" value={line.unitPrice} onChange={(event) => updateLine(index, { unitPrice: Number(event.target.value) })} /></label>
             <div className="invoiceLineAmount"><span>Line total</span><strong>{money(line.amount)}</strong></div>
           </article>)}
-          {!lines.length && <div className="invoiceEmptyLines">No line items were extracted. Add lines manually or save the invoice header only.</div>}
+          {!lines.length && <div className="invoiceEmptyLines">No line items were extracted. Add them manually or save the invoice header only.</div>}
         </div>
       </section>
 
       <section className="controlCard invoiceSaveBar">
-        <div><p className="eyebrow">Step 3</p><h2>Save reviewed bill</h2><p>The original invoice will be stored privately with the AP record. Extracted lines are not linked to inventory until they are deliberately mapped to inventory items.</p></div>
+        <div><p className="eyebrow">Step 3</p><h2>Save reviewed bill</h2><p>The original invoice is stored privately with the AP record. Nothing enters AP until this button is pressed.</p></div>
         <div><strong>{money(draft.totalAmount)}</strong><button className="primary" disabled={saving || scanning}>{saving ? "Saving…" : "Save reviewed bill"}</button></div>
       </section>
-
       {result.textPreview && <details className="controlCard invoiceTextPreview"><summary>Show OCR text preview</summary><pre>{result.textPreview}</pre></details>}
     </form>}
   </main>;
