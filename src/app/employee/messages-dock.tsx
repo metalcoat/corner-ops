@@ -38,6 +38,7 @@ type EmployeeData = {
   employee: DirectoryEmployee;
   messages: Message[];
   directory: DirectoryEmployee[];
+  unreadMessageIds: string[];
 };
 
 async function responseMessage(response: Response): Promise<string> {
@@ -69,6 +70,11 @@ function initials(value: string): string {
   return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
 }
 
+function compact(value: string, max = 58): string {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
 function selectedPhoto(form: FormData): File | null {
   const camera = form.get("cameraPhoto");
   if (camera instanceof File && camera.size > 0) return camera;
@@ -85,6 +91,7 @@ export default function EmployeeMessagesDock() {
   const [data, setData] = useState<EmployeeData | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [expanded, setExpanded] = useState(false);
   const reportedSeen = useRef(new Set<string>());
 
   const load = useCallback(async () => {
@@ -95,14 +102,26 @@ export default function EmployeeMessagesDock() {
     setSession(activeSession);
     if (!activeSession) {
       setData(null);
+      setExpanded(false);
       reportedSeen.current.clear();
       return;
     }
 
-    const response = await fetch("/api/employee", { cache: "no-store" });
+    const [response, unreadResponse] = await Promise.all([
+      fetch("/api/employee", { cache: "no-store" }),
+      fetch("/api/employee/messages/unread", { cache: "no-store" }),
+    ]);
     if (!response.ok) throw new Error(await responseMessage(response));
-    const payload = await response.json() as EmployeeData;
-    setData({ employee: payload.employee, messages: payload.messages || [], directory: payload.directory || [] });
+    const payload = await response.json() as Omit<EmployeeData, "unreadMessageIds">;
+    const unreadPayload = unreadResponse.ok
+      ? await unreadResponse.json() as { unreadMessageIds?: string[] }
+      : { unreadMessageIds: [] };
+    setData({
+      employee: payload.employee,
+      messages: payload.messages || [],
+      directory: payload.directory || [],
+      unreadMessageIds: unreadPayload.unreadMessageIds || [],
+    });
   }, []);
 
   useEffect(() => {
@@ -123,6 +142,12 @@ export default function EmployeeMessagesDock() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "message-seen", messageId }),
+        }).then(async (response) => {
+          if (!response.ok) throw new Error(await responseMessage(response));
+          setData((current) => current ? {
+            ...current,
+            unreadMessageIds: current.unreadMessageIds.filter((id) => id !== messageId),
+          } : current);
         }).catch(() => reportedSeen.current.delete(messageId));
       }
     }, { threshold: [0.6] });
@@ -202,8 +227,39 @@ export default function EmployeeMessagesDock() {
   const recipients = (data?.directory || []).filter((person) => person.id !== session.employeeId);
   const current = data?.employee;
   const currentDisplay = current?.chatNickname || firstName(session.name);
+  const unreadIds = new Set(data?.unreadMessageIds || []);
+  const unreadMessages = (data?.messages || []).filter((message) => unreadIds.has(message.id));
+  const previewMessage = unreadMessages[0] || data?.messages[0];
+  const previewSender = previewMessage
+    ? previewMessage.sender_chat_nickname || firstName(previewMessage.sender_name)
+    : "";
+  const previewText = unreadMessages.length
+    ? compact(`${previewSender}: ${previewMessage?.body || (previewMessage?.attachment_name ? "Photo message" : "New message")}`)
+    : data?.messages.length
+      ? "All caught up"
+      : "No messages yet";
 
-  return <aside className="employeeMessagesDock" aria-label="Employee messages">
+  return <aside className={`employeeMessagesDock ${expanded ? "isOpen" : "isCollapsed"} ${unreadMessages.length ? "hasUnread" : ""}`} aria-label="Employee messages">
+    <header className="employeeMessagesMobileHeader">
+      <button
+        className="employeeMessagesToggle"
+        type="button"
+        aria-expanded={expanded}
+        aria-controls="employee-messages-panel"
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span className="employeeMessagesBell" aria-hidden="true">✉</span>
+        <span className="employeeMessagesCompactCopy">
+          <span className="employeeMessagesCompactTitle">
+            Messages
+            {unreadMessages.length ? <span className="employeeMessagesUnreadCount">{unreadMessages.length}</span> : null}
+          </span>
+          <span className="employeeMessagesPreview">{previewText}</span>
+        </span>
+        <span className="employeeMessagesChevron" aria-hidden="true">{expanded ? "Close" : "Open"}</span>
+      </button>
+    </header>
+
     <header className="employeeMessagesHeader">
       <div className="employeeMessagesIdentity" style={{ "--employee-color": current?.scheduleColor || "#64748B" } as CSSProperties}>
         <span className="employeeMessageAvatar large">{current?.avatarSet ? <img src={avatarUrl(session.employeeId)} alt="Your profile" /> : initials(currentDisplay)}</span>
@@ -212,51 +268,54 @@ export default function EmployeeMessagesDock() {
       <button type="button" onClick={() => void load()} disabled={busy} aria-label="Refresh messages">Refresh</button>
     </header>
 
-    <details className="employeeMessageOptions">
-      <summary>Profile & chat options</summary>
-      <div className="employeeMessageOptionsBody">
-        <form className="employeeNicknameForm" key={current?.chatNickname || "no-nickname"} onSubmit={updateNickname}>
-          <label>Chat nickname<input name="nickname" maxLength={32} defaultValue={current?.chatNickname || ""} placeholder={firstName(session.name)} /></label>
-          <button disabled={busy}>Save nickname</button>
-          <small>Used in messages only. Leave blank to use your regular name.</small>
-        </form>
+    <div className="employeeMessagesPanel" id="employee-messages-panel">
+      <details className="employeeMessageOptions">
+        <summary>Profile & chat options</summary>
+        <div className="employeeMessageOptionsBody">
+          <form className="employeeNicknameForm" key={current?.chatNickname || "no-nickname"} onSubmit={updateNickname}>
+            <label>Chat nickname<input name="nickname" maxLength={32} defaultValue={current?.chatNickname || ""} placeholder={firstName(session.name)} /></label>
+            <button disabled={busy}>Save nickname</button>
+            <small>Used in messages only. Leave blank to use your regular name.</small>
+          </form>
 
-        <form className="employeeProfilePhotoForm" onSubmit={uploadProfilePhoto}>
-          <label>Take icon photo<input name="cameraProfilePhoto" type="file" accept="image/*" capture="user" /></label>
-          <label>Choose icon photo<input name="profilePhoto" type="file" accept="image/*" /></label>
-          <button disabled={busy}>Update icon</button>
-        </form>
+          <form className="employeeProfilePhotoForm" onSubmit={uploadProfilePhoto}>
+            <label>Take icon photo<input name="cameraProfilePhoto" type="file" accept="image/*" capture="user" /></label>
+            <label>Choose icon photo<input name="profilePhoto" type="file" accept="image/*" /></label>
+            <button disabled={busy}>Update icon</button>
+          </form>
+        </div>
+      </details>
+
+      <form className="employeeMessagesComposer" onSubmit={sendMessage}>
+        <input type="hidden" name="action" value="message-send" />
+        <label>Send to<select name="recipientEmployeeId" defaultValue=""><option value="">Everyone at {session.business}</option>{recipients.map((person) => <option key={person.id} value={person.id}>{person.chatNickname || firstName(person.name)}</option>)}</select></label>
+        <label>Message<textarea name="body" rows={3} placeholder="Type a message, add a photo, or both" /></label>
+        <div className="employeeMessagesPhotoControls">
+          <label className="employeeMessagesPhotoButton">Take photo<input name="cameraPhoto" type="file" accept="image/*" capture="environment" /></label>
+          <label className="employeeMessagesPhotoButton secondary">Choose photo<input name="photo" type="file" accept="image/*" /></label>
+        </div>
+        <button className="employeeMessagesSend" disabled={busy}>Send message</button>
+      </form>
+
+      {notice && <div className="employeeMessagesNotice">{notice}</div>}
+
+      <div className="employeeMessagesFeed" aria-live="polite">
+        {(data?.messages || []).map((message) => {
+          const senderColor = message.sender_schedule_color || "#64748B";
+          const senderDisplay = message.sender_chat_nickname || firstName(message.sender_name);
+          const unread = unreadIds.has(message.id);
+          return <article className={`employeeMessagesItem ${unread ? "isUnread" : ""}`} key={message.id} data-message-id={message.id} style={{ "--employee-color": senderColor } as CSSProperties}>
+            <header className="employeeMessageMeta">
+              <span className="employeeMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(message.sender_employee_id)} alt="" loading="lazy" /> : initials(senderDisplay)}</span>
+              <div><strong>{senderDisplay}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div>
+              <div className="employeeMessageStatus">{unread ? <span className="employeeMessagesUnreadMark">New</span> : null}<small>{local(message.created_at)}</small></div>
+            </header>
+            {message.body && <p>{message.body}</p>}
+            {message.attachment_name && <a className="employeeMessagesPhoto" href={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer" aria-label={`Open photo from ${senderDisplay}`}><img src={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${senderDisplay}`} loading="lazy" /></a>}
+          </article>;
+        })}
+        {!data?.messages.length && <p className="employeeMessagesEmpty">No messages yet.</p>}
       </div>
-    </details>
-
-    <form className="employeeMessagesComposer" onSubmit={sendMessage}>
-      <input type="hidden" name="action" value="message-send" />
-      <label>Send to<select name="recipientEmployeeId" defaultValue=""><option value="">Everyone at {session.business}</option>{recipients.map((person) => <option key={person.id} value={person.id}>{person.chatNickname || firstName(person.name)}</option>)}</select></label>
-      <label>Message<textarea name="body" rows={3} placeholder="Type a message, add a photo, or both" /></label>
-      <div className="employeeMessagesPhotoControls">
-        <label className="employeeMessagesPhotoButton">Take photo<input name="cameraPhoto" type="file" accept="image/*" capture="environment" /></label>
-        <label className="employeeMessagesPhotoButton secondary">Choose photo<input name="photo" type="file" accept="image/*" /></label>
-      </div>
-      <button className="employeeMessagesSend" disabled={busy}>Send message</button>
-    </form>
-
-    {notice && <div className="employeeMessagesNotice">{notice}</div>}
-
-    <div className="employeeMessagesFeed" aria-live="polite">
-      {(data?.messages || []).map((message) => {
-        const senderColor = message.sender_schedule_color || "#64748B";
-        const senderDisplay = message.sender_chat_nickname || firstName(message.sender_name);
-        return <article className="employeeMessagesItem" key={message.id} data-message-id={message.id} style={{ "--employee-color": senderColor } as CSSProperties}>
-          <header className="employeeMessageMeta">
-            <span className="employeeMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(message.sender_employee_id)} alt="" loading="lazy" /> : initials(senderDisplay)}</span>
-            <div><strong>{senderDisplay}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div>
-            <small>{local(message.created_at)}</small>
-          </header>
-          {message.body && <p>{message.body}</p>}
-          {message.attachment_name && <a className="employeeMessagesPhoto" href={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer" aria-label={`Open photo from ${senderDisplay}`}><img src={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${senderDisplay}`} loading="lazy" /></a>}
-        </article>;
-      })}
-      {!data?.messages.length && <p className="employeeMessagesEmpty">No messages yet.</p>}
     </div>
   </aside>;
 }
