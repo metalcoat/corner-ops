@@ -26,6 +26,12 @@ type ScheduleShiftRow = {
   status: string;
 };
 
+type PublicationRow = {
+  id: string;
+  details: unknown;
+  published_at: string;
+};
+
 function clean(value: unknown, max = 500): string {
   return String(value ?? "").trim().slice(0, max);
 }
@@ -102,6 +108,58 @@ function emailConfiguration() {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   const from = process.env.EMPLOYEE_NOTIFICATION_FROM_EMAIL?.trim() || process.env.ALERT_FROM_EMAIL?.trim();
   return apiKey && from ? { resend: new Resend(apiKey), from } : null;
+}
+
+function publicationDetails(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function storedEmployeeSchedules(value: unknown): Record<string, string> {
+  const details = publicationDetails(value);
+  const schedules = details.employeeSchedules;
+  if (!schedules || typeof schedules !== "object" || Array.isArray(schedules)) return {};
+  return Object.fromEntries(
+    Object.entries(schedules as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
+}
+
+function employeeScheduleSignatures(shifts: ScheduleShiftRow[]): Record<string, string> {
+  const byEmployee = new Map<string, ScheduleShiftRow[]>();
+  for (const shift of shifts) {
+    if (!shift.employee_id) continue;
+    const list = byEmployee.get(shift.employee_id) || [];
+    list.push(shift);
+    byEmployee.set(shift.employee_id, list);
+  }
+
+  return Object.fromEntries(Array.from(byEmployee.entries()).map(([employeeId, employeeShifts]) => {
+    const signature = employeeShifts
+      .sort((left, right) => left.starts_at.localeCompare(right.starts_at) || left.id.localeCompare(right.id))
+      .map((shift) => JSON.stringify({
+        id: shift.id,
+        position: clean(shift.position, 100),
+        startsAt: String(shift.starts_at),
+        endsAt: String(shift.ends_at),
+        mealBreakStart: shift.meal_break_start ? String(shift.meal_break_start) : null,
+        mealBreakMinutes: Number(shift.meal_break_minutes || 0),
+        extraMealBreakStart: shift.extra_meal_break_start ? String(shift.extra_meal_break_start) : null,
+        extraMealBreakMinutes: Number(shift.extra_meal_break_minutes || 0),
+        notes: clean(shift.notes, 1000),
+      }))
+      .join("|");
+    return [employeeId, signature];
+  }));
 }
 
 async function activeContacts(business: Business): Promise<EmployeeContact[]> {
@@ -186,12 +244,25 @@ export async function publishBusinessScheduleWeek(input: {
   ` as unknown as Array<{ id: string }>;
   if (!existing[0]) throw new Error("There are no shifts to publish for this week.");
 
-  const priorPublication = await sql`
-    SELECT id FROM schedule_publications
+  const draftRows = await sql`
+    SELECT id, employee_id
+    FROM schedule_shifts
+    WHERE business = ${input.business}
+      AND starts_at >= (${input.weekStart}::date AT TIME ZONE ${TIME_ZONE})
+      AND starts_at < ((${input.weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+      AND status = 'Draft'
+  ` as unknown as Array<{ id: string; employee_id: string | null }>;
+
+  const priorPublications = await sql`
+    SELECT id, details, published_at
+    FROM schedule_publications
     WHERE business = ${input.business} AND week_start = ${input.weekStart}
+    ORDER BY published_at DESC
     LIMIT 1
-  ` as unknown as Array<{ id: string }>;
-  const scheduleVerb = priorPublication[0] ? "updated" : "published";
+  ` as unknown as PublicationRow[];
+  const priorPublication = priorPublications[0] || null;
+  const isResend = Boolean(priorPublication) && draftRows.length === 0;
+  const scheduleVerb = !priorPublication ? "published" : isResend ? "resent" : "updated";
 
   await sql`
     UPDATE schedule_shifts SET
@@ -216,21 +287,42 @@ export async function publishBusinessScheduleWeek(input: {
     ORDER BY s.starts_at, e.name
   ` as unknown as ScheduleShiftRow[];
 
-  const contacts = await activeContacts(input.business);
+  const currentSchedules = employeeScheduleSignatures(shifts);
+  const previousSchedules = storedEmployeeSchedules(priorPublication?.details);
+  const assignedEmployeeIds = new Set(shifts.flatMap((shift) => shift.employee_id ? [shift.employee_id] : []));
+  const draftEmployeeIds = new Set(draftRows.flatMap((shift) => shift.employee_id ? [shift.employee_id] : []));
+  const affectedEmployeeIds = new Set<string>();
+
+  if (!priorPublication || isResend) {
+    for (const employeeId of assignedEmployeeIds) affectedEmployeeIds.add(employeeId);
+  } else if (Object.keys(previousSchedules).length) {
+    const employeeIds = new Set([...Object.keys(previousSchedules), ...Object.keys(currentSchedules)]);
+    for (const employeeId of employeeIds) {
+      if ((previousSchedules[employeeId] || "") !== (currentSchedules[employeeId] || "")) {
+        affectedEmployeeIds.add(employeeId);
+      }
+    }
+  } else {
+    for (const employeeId of draftEmployeeIds) affectedEmployeeIds.add(employeeId);
+  }
+
+  const allContacts = await activeContacts(input.business);
+  const contacts = allContacts.filter((employee) => affectedEmployeeIds.has(employee.id));
   const openShifts = shifts.filter((shift) => !shift.employee_id);
   const rangeLabel = `${dateLabel(input.weekStart)} through ${dateLabel(weekEnd)}`;
   const hubUrl = employeeHubUrl(input.business);
   const accessInstruction = pinInstruction(input.business);
-  const accessText = hubUrl ? `Employee Portal: ${hubUrl} ${accessInstruction}` : accessInstruction;
 
-  await sql`
-    INSERT INTO employee_messages (
-      id, business, sender_name, recipient_employee_id, message_type, body
-    ) VALUES (
-      ${crypto.randomUUID()}, ${input.business}, ${input.actor}, NULL, 'Announcement',
-      ${`${input.business} schedule ${scheduleVerb} for ${rangeLabel}. ${accessText}${openShifts.length ? ` There ${openShifts.length === 1 ? "is" : "are"} ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"}.` : ""}`}
-    )
-  `;
+  for (const employee of contacts) {
+    await sql`
+      INSERT INTO employee_messages (
+        id, business, sender_name, recipient_employee_id, message_type, body
+      ) VALUES (
+        ${crypto.randomUUID()}, ${input.business}, ${input.actor}, ${employee.id}, 'Schedule',
+        ${`Your ${input.business} schedule was ${scheduleVerb} for ${rangeLabel}.${hubUrl ? ` Review it in the Employee Portal: ${hubUrl}` : " Review it in the Employee Hub."}`}
+      )
+    `;
+  }
 
   const email = await deliverEmails({
     recipients: contacts,
@@ -243,11 +335,10 @@ export async function publishBusinessScheduleWeek(input: {
       return [
         `Hi ${clean(employee.name, 120).split(/\s+/)[0] || "there"},`,
         "",
-        `The ${input.business} schedule for ${rangeLabel} was ${scheduleVerb}.`,
+        `Your ${input.business} schedule for ${rangeLabel} was ${scheduleVerb}.`,
         "",
-        "Your schedule:",
+        "Your current schedule:",
         schedule,
-        openShifts.length ? `\nThere ${openShifts.length === 1 ? "is" : "are"} ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"} in the Employee Portal.` : "",
         hubUrl ? `\nOpen the ${input.business} Employee Portal: ${hubUrl}` : "",
         accessInstruction,
         "",
@@ -258,8 +349,8 @@ export async function publishBusinessScheduleWeek(input: {
 
   const sms = await deliverSms({
     recipients: contacts,
-    text: () => [
-      `${input.business} schedule ${scheduleVerb} for ${dateLabel(input.weekStart)}-${dateLabel(weekEnd)}.`,
+    text: (employee) => [
+      `${clean(employee.name, 120).split(/\s+/)[0] || "Your"}, your ${input.business} schedule was ${scheduleVerb} for ${dateLabel(input.weekStart)}-${dateLabel(weekEnd)}.`,
       hubUrl ? `Portal: ${hubUrl}` : "Open Employee Hub to review.",
       accessInstruction,
       "Reply STOP to opt out.",
@@ -277,7 +368,20 @@ export async function publishBusinessScheduleWeek(input: {
       ${publicationId}, ${input.business}, ${input.weekStart}, ${weekEnd}, ${input.actor}, ${shifts.length},
       ${contacts.length}, ${email.sent}, ${email.missingEmail}, ${email.failed}, ${email.configured},
       ${sms.sent}, ${sms.missingPhone}, ${sms.failed}, ${sms.configured},
-      ${JSON.stringify({ emailFailures: email.failures, emailSkipped: email.skipped, smsFailures: sms.failures, smsNotOptedIn: sms.notOptedIn, smsSkipped: sms.skipped, hubUrl, pinInstruction: accessInstruction })}::jsonb
+      ${JSON.stringify({
+        emailFailures: email.failures,
+        emailSkipped: email.skipped,
+        smsFailures: sms.failures,
+        smsNotOptedIn: sms.notOptedIn,
+        smsSkipped: sms.skipped,
+        hubUrl,
+        pinInstruction: accessInstruction,
+        employeeSchedules: currentSchedules,
+        affectedEmployeeIds: Array.from(affectedEmployeeIds),
+        notificationRecipientIds: contacts.map((employee) => employee.id),
+        openShiftCount: openShifts.length,
+        mode: !priorPublication ? "initial" : isResend ? "resend" : "changes",
+      })}::jsonb
     )
   `;
 
@@ -286,10 +390,13 @@ export async function publishBusinessScheduleWeek(input: {
     weekStart: input.weekStart,
     weekEnd,
     publishedShifts: shifts.length,
-    activeEmployees: contacts.length,
+    activeEmployees: allContacts.length,
+    affectedEmployees: contacts.length,
+    affectedEmployeeIds: contacts.map((employee) => employee.id),
     openShifts: openShifts.length,
     email,
     sms,
     hubUrl,
+    mode: !priorPublication ? "initial" : isResend ? "resend" : "changes",
   };
 }
