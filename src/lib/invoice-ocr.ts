@@ -1,48 +1,9 @@
-import { createPrivateKey, sign } from "node:crypto";
-
-const GOOGLE_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
-const TOKEN_URL = "https://oauth2.googleapis.com/token";
+const DEFAULT_API_VERSION = "2024-11-30";
 const MAX_PREVIEW_TEXT = 2_000;
+const POLL_INTERVAL_MS = 750;
+const MAX_POLL_ATTEMPTS = 120;
 
-let cachedToken: { value: string; expiresAt: number } | null = null;
-
-type MoneyValue = {
-  currencyCode?: string;
-  units?: string | number;
-  nanos?: number;
-};
-
-type DateValue = {
-  year?: number;
-  month?: number;
-  day?: number;
-};
-
-type NormalizedValue = {
-  text?: string;
-  moneyValue?: MoneyValue;
-  dateValue?: DateValue;
-  integerValue?: string | number;
-  floatValue?: number;
-};
-
-type DocumentEntity = {
-  type?: string;
-  mentionText?: string;
-  confidence?: number;
-  normalizedValue?: NormalizedValue;
-  textAnchor?: { content?: string };
-  properties?: DocumentEntity[];
-};
-
-type DocumentAiResponse = {
-  document?: {
-    text?: string;
-    pages?: unknown[];
-    entities?: DocumentEntity[];
-  };
-  error?: { message?: string; status?: string };
-};
+export type InvoiceDocumentType = "Invoice" | "Receipt";
 
 export type InvoiceOcrField<T> = {
   value: T;
@@ -61,7 +22,9 @@ export type InvoiceOcrLine = {
 };
 
 export type InvoiceOcrResult = {
-  provider: "Google Document AI Invoice Parser";
+  provider: "Azure Document Intelligence";
+  model: "prebuilt-invoice" | "prebuilt-receipt";
+  documentType: InvoiceDocumentType;
   pageCount: number;
   overallConfidence: number;
   fields: {
@@ -79,12 +42,64 @@ export type InvoiceOcrResult = {
   textPreview: string;
 };
 
+type AzureCurrency = {
+  amount?: number;
+  currencyCode?: string;
+};
+
+type AzureField = {
+  type?: string;
+  content?: string;
+  confidence?: number;
+  value?: unknown;
+  valueString?: string;
+  valueDate?: string;
+  valueNumber?: number;
+  valueInteger?: number;
+  valueCurrency?: AzureCurrency;
+  valueArray?: AzureField[];
+  valueObject?: Record<string, AzureField>;
+};
+
+type AzureDocument = {
+  docType?: string;
+  confidence?: number;
+  fields?: Record<string, AzureField>;
+};
+
+type AzureAnalyzeOperation = {
+  status?: "notStarted" | "running" | "succeeded" | "failed" | "canceled";
+  error?: { code?: string; message?: string };
+  analyzeResult?: {
+    apiVersion?: string;
+    modelId?: string;
+    content?: string;
+    pages?: unknown[];
+    documents?: AzureDocument[];
+  };
+};
+
+type OcrProviderConfiguration = {
+  configured: boolean;
+  missing: string[];
+  provider: "Azure Document Intelligence";
+  location: string;
+  apiVersion: string;
+  pageLimit: number;
+};
+
+type OcrProvider = {
+  configuration(): OcrProviderConfiguration;
+  analyze(input: {
+    bytes: ArrayBuffer;
+    mimeType: string;
+    displayName: string;
+    documentType: InvoiceDocumentType;
+  }): Promise<InvoiceOcrResult>;
+};
+
 function clean(value: unknown, max = 1_000): string {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
-}
-
-function base64url(value: Buffer | string): string {
-  return Buffer.from(value).toString("base64url");
 }
 
 function configuredValue(name: string): string {
@@ -93,109 +108,71 @@ function configuredValue(name: string): string {
   return value;
 }
 
-export function invoiceOcrConfiguration() {
-  const required = [
-    "GOOGLE_CLOUD_PROJECT_ID",
-    "GOOGLE_SERVICE_ACCOUNT_EMAIL",
-    "GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY",
-    "GOOGLE_DOCUMENT_AI_INVOICE_PROCESSOR_ID",
-  ];
+function providerSetting(): string {
+  return (process.env.INVOICE_OCR_PROVIDER || "azure").trim().toLowerCase();
+}
+
+function azureConfiguration(): OcrProviderConfiguration {
+  const required = ["AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT", "AZURE_DOCUMENT_INTELLIGENCE_KEY"];
   const missing = required.filter((name) => !process.env[name]?.trim());
+  if (providerSetting() !== "azure") missing.unshift("INVOICE_OCR_PROVIDER must currently be set to azure");
+  let location = "Azure";
+  try {
+    const endpoint = process.env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT?.trim();
+    if (endpoint) location = new URL(endpoint).hostname;
+  } catch {
+    location = "Invalid endpoint";
+  }
   return {
     configured: missing.length === 0,
     missing,
-    provider: "Google Document AI Invoice Parser" as const,
-    location: process.env.GOOGLE_DOCUMENT_AI_LOCATION?.trim() || "us",
+    provider: "Azure Document Intelligence",
+    location,
+    apiVersion: process.env.AZURE_DOCUMENT_INTELLIGENCE_API_VERSION?.trim() || DEFAULT_API_VERSION,
+    pageLimit: 2,
   };
 }
 
-async function accessToken(): Promise<string> {
-  if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.value;
-
-  const email = configuredValue("GOOGLE_SERVICE_ACCOUNT_EMAIL");
-  const privateKeyText = configuredValue("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY").replace(/\\n/g, "\n");
-  const now = Math.floor(Date.now() / 1_000);
-  const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const claims = base64url(JSON.stringify({
-    iss: email,
-    scope: GOOGLE_SCOPE,
-    aud: TOKEN_URL,
-    iat: now,
-    exp: now + 3_600,
-  }));
-  const unsigned = `${header}.${claims}`;
-  const signature = sign("RSA-SHA256", Buffer.from(unsigned), createPrivateKey(privateKeyText));
-  const assertion = `${unsigned}.${base64url(signature)}`;
-
-  const response = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion,
-    }),
-    cache: "no-store",
-    signal: AbortSignal.timeout(30_000),
-  });
-  const payload = await response.json().catch(() => ({})) as {
-    access_token?: string;
-    expires_in?: number;
-    error_description?: string;
-  };
-  if (!response.ok || !payload.access_token) {
-    throw new Error(payload.error_description || `Google authentication failed (${response.status}).`);
-  }
-  cachedToken = {
-    value: payload.access_token,
-    expiresAt: Date.now() + Math.max(300, Number(payload.expires_in || 3_600)) * 1_000,
-  };
-  return cachedToken.value;
+export function invoiceOcrConfiguration(): OcrProviderConfiguration {
+  return activeProvider().configuration();
 }
 
-function entityText(entity: DocumentEntity | undefined): string {
-  if (!entity) return "";
-  return clean(entity.normalizedValue?.text || entity.mentionText || entity.textAnchor?.content, 2_000);
+function activeProvider(): OcrProvider {
+  const provider = providerSetting();
+  if (provider === "azure") return azureProvider;
+  throw new Error(`Unsupported invoice OCR provider: ${provider}. Use azure.`);
 }
 
-function confidence(entity: DocumentEntity | undefined): number {
-  const value = Number(entity?.confidence || 0);
+function fieldConfidence(field: AzureField | undefined): number {
+  const value = Number(field?.confidence || 0);
   return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
 }
 
-function moneyFrom(entity: DocumentEntity | undefined): number {
-  if (!entity) return 0;
-  const normalized = entity.normalizedValue;
-  if (normalized?.moneyValue) {
-    const units = Number(normalized.moneyValue.units || 0);
-    const nanos = Number(normalized.moneyValue.nanos || 0) / 1_000_000_000;
-    return Math.round((units + nanos) * 100) / 100;
-  }
-  const parsed = Number(entityText(entity).replace(/[^0-9.-]+/g, ""));
-  return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : 0;
+function fieldText(field: AzureField | undefined): string {
+  if (!field) return "";
+  const direct = field.valueString ?? (typeof field.value === "string" ? field.value : "");
+  return clean(direct || field.content, 2_000);
 }
 
-function numberFrom(entity: DocumentEntity | undefined): number {
-  if (!entity) return 0;
-  const normalized = entity.normalizedValue;
-  const normalizedNumber = normalized?.floatValue ?? normalized?.integerValue;
-  if (normalizedNumber !== undefined) {
-    const parsed = Number(normalizedNumber);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  const parsed = Number(entityText(entity).replace(/[^0-9.-]+/g, ""));
-  return Number.isFinite(parsed) ? parsed : 0;
+function fieldNumber(field: AzureField | undefined): number {
+  if (!field) return 0;
+  const direct = field.valueCurrency?.amount
+    ?? field.valueNumber
+    ?? field.valueInteger
+    ?? (typeof field.value === "number" ? field.value : undefined);
+  if (direct !== undefined && Number.isFinite(Number(direct))) return Math.round(Number(direct) * 10_000) / 10_000;
+  const parsed = Number(fieldText(field).replace(/[^0-9.-]+/g, ""));
+  return Number.isFinite(parsed) ? Math.round(parsed * 10_000) / 10_000 : 0;
 }
 
-function dateFrom(entity: DocumentEntity | undefined): string {
-  const date = entity?.normalizedValue?.dateValue;
-  if (date?.year && date.month && date.day) {
-    return `${String(date.year).padStart(4, "0")}-${String(date.month).padStart(2, "0")}-${String(date.day).padStart(2, "0")}`;
-  }
-  const text = entityText(entity);
+function fieldDate(field: AzureField | undefined): string {
+  const value = clean(field?.valueDate || (typeof field?.value === "string" ? field.value : ""), 40);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const text = fieldText(field);
   if (!text) return "";
-  const iso = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/.exec(text);
+  const iso = /\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/.exec(text);
   if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
-  const us = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/.exec(text);
+  const us = /\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b/.exec(text);
   if (us) {
     const year = us[3].length === 2 ? `20${us[3]}` : us[3];
     return `${year}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}`;
@@ -203,129 +180,169 @@ function dateFrom(entity: DocumentEntity | undefined): string {
   return "";
 }
 
-function bestEntity(entities: DocumentEntity[], type: string): DocumentEntity | undefined {
-  return entities
-    .filter((entity) => entity.type === type)
-    .sort((left, right) => confidence(right) - confidence(left))[0];
+function textResult(field: AzureField | undefined): InvoiceOcrField<string> {
+  const value = fieldText(field);
+  return { value, confidence: fieldConfidence(field), sourceText: clean(field?.content || value, 2_000) };
 }
 
-function textField(entity: DocumentEntity | undefined): InvoiceOcrField<string> {
-  return { value: entityText(entity), confidence: confidence(entity), sourceText: entityText(entity) };
+function dateResult(field: AzureField | undefined): InvoiceOcrField<string> {
+  return { value: fieldDate(field), confidence: fieldConfidence(field), sourceText: fieldText(field) };
 }
 
-function dateField(entity: DocumentEntity | undefined): InvoiceOcrField<string> {
-  return { value: dateFrom(entity), confidence: confidence(entity), sourceText: entityText(entity) };
+function moneyResult(field: AzureField | undefined): InvoiceOcrField<number> {
+  return { value: Math.round(fieldNumber(field) * 100) / 100, confidence: fieldConfidence(field), sourceText: fieldText(field) };
 }
 
-function moneyField(entity: DocumentEntity | undefined): InvoiceOcrField<number> {
-  return { value: moneyFrom(entity), confidence: confidence(entity), sourceText: entityText(entity) };
+function objectField(value: Record<string, AzureField> | undefined, ...names: string[]): AzureField | undefined {
+  if (!value) return undefined;
+  for (const name of names) {
+    if (value[name]) return value[name];
+  }
+  const normalized = new Map(Object.entries(value).map(([key, field]) => [key.toLowerCase(), field]));
+  for (const name of names) {
+    const match = normalized.get(name.toLowerCase());
+    if (match) return match;
+  }
+  return undefined;
 }
 
-function lineProperty(line: DocumentEntity, name: string): DocumentEntity | undefined {
-  return (line.properties || [])
-    .filter((property) => property.type === `line_item/${name}` || property.type === name)
-    .sort((left, right) => confidence(right) - confidence(left))[0];
+function itemObject(field: AzureField): Record<string, AzureField> {
+  if (field.valueObject) return field.valueObject;
+  if (field.value && typeof field.value === "object" && !Array.isArray(field.value)) {
+    return field.value as Record<string, AzureField>;
+  }
+  return {};
 }
 
-function parseLines(entities: DocumentEntity[]): InvoiceOcrLine[] {
-  return entities
-    .filter((entity) => entity.type === "line_item")
-    .map((line) => {
-      const description = lineProperty(line, "description");
-      const productCode = lineProperty(line, "product_code");
-      const quantityEntity = lineProperty(line, "quantity");
-      const unit = lineProperty(line, "unit");
-      const unitPriceEntity = lineProperty(line, "unit_price");
-      const amountEntity = lineProperty(line, "amount");
-      const lineQuantity = numberFrom(quantityEntity) || 1;
-      const amount = moneyFrom(amountEntity);
-      const explicitUnitPrice = moneyFrom(unitPriceEntity);
-      const unitPrice = explicitUnitPrice || (amount && lineQuantity ? amount / lineQuantity : 0);
-      const scores = [description, quantityEntity, unitPriceEntity, amountEntity]
-        .filter(Boolean)
-        .map((entity) => confidence(entity));
-      return {
-        description: entityText(description) || entityText(line),
-        productCode: entityText(productCode),
-        quantity: Math.round(lineQuantity * 10_000) / 10_000,
-        unit: entityText(unit) || "each",
-        unitPrice: Math.round(unitPrice * 10_000) / 10_000,
-        amount: Math.round((amount || lineQuantity * unitPrice) * 100) / 100,
-        confidence: scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : confidence(line),
-      };
-    })
-    .filter((line) => line.description || line.amount > 0);
+function parseLines(fields: Record<string, AzureField>, documentType: InvoiceDocumentType): InvoiceOcrLine[] {
+  const items = objectField(fields, "Items")?.valueArray || [];
+  return items.map((item) => {
+    const value = itemObject(item);
+    const description = objectField(value, "Description", "Name");
+    const productCode = objectField(value, "ProductCode", "SKU");
+    const quantityField = objectField(value, "Quantity");
+    const unitField = objectField(value, "Unit");
+    const unitPriceField = objectField(value, "UnitPrice", "Price");
+    const amountField = objectField(value, "Amount", "TotalPrice");
+    const quantity = fieldNumber(quantityField) || 1;
+    const amount = fieldNumber(amountField);
+    const explicitUnitPrice = fieldNumber(unitPriceField);
+    const unitPrice = explicitUnitPrice || (amount && quantity ? amount / quantity : 0);
+    const scores = [description, quantityField, unitPriceField, amountField]
+      .filter((field): field is AzureField => Boolean(field))
+      .map(fieldConfidence)
+      .filter((score) => score > 0);
+    return {
+      description: fieldText(description) || fieldText(item),
+      productCode: fieldText(productCode),
+      quantity: Math.round(quantity * 10_000) / 10_000,
+      unit: fieldText(unitField) || (documentType === "Receipt" ? "each" : "each"),
+      unitPrice: Math.round(unitPrice * 10_000) / 10_000,
+      amount: Math.round((amount || quantity * unitPrice) * 100) / 100,
+      confidence: scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : fieldConfidence(item),
+    };
+  }).filter((line) => line.description || line.amount > 0);
 }
 
 function approximateEqual(left: number, right: number, tolerance = 0.05): boolean {
   return Math.abs(left - right) <= tolerance;
 }
 
-export async function processInvoiceDocument(input: {
-  bytes: ArrayBuffer;
-  mimeType: string;
-  displayName: string;
-}): Promise<InvoiceOcrResult> {
-  const projectId = configuredValue("GOOGLE_CLOUD_PROJECT_ID");
-  const location = process.env.GOOGLE_DOCUMENT_AI_LOCATION?.trim() || "us";
-  const processorId = configuredValue("GOOGLE_DOCUMENT_AI_INVOICE_PROCESSOR_ID");
-  const processorVersion = process.env.GOOGLE_DOCUMENT_AI_INVOICE_PROCESSOR_VERSION?.trim();
-  const resource = `projects/${projectId}/locations/${location}/processors/${processorId}${processorVersion ? `/processorVersions/${processorVersion}` : ""}`;
-  const endpoint = `https://${location}-documentai.googleapis.com/v1/${resource}:process`;
-  const token = await accessToken();
+async function pause(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
-  const response = await fetch(endpoint, {
+async function azureAnalyze(input: {
+  bytes: ArrayBuffer;
+  documentType: InvoiceDocumentType;
+}): Promise<AzureAnalyzeOperation> {
+  const endpoint = configuredValue("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT").replace(/\/+$/, "");
+  const key = configuredValue("AZURE_DOCUMENT_INTELLIGENCE_KEY");
+  const apiVersion = process.env.AZURE_DOCUMENT_INTELLIGENCE_API_VERSION?.trim() || DEFAULT_API_VERSION;
+  const model = input.documentType === "Receipt" ? "prebuilt-receipt" : "prebuilt-invoice";
+  const pages = input.documentType === "Receipt" ? "1" : "1-2";
+  const url = `${endpoint}/documentintelligence/documentModels/${model}:analyze?_overload=analyzeDocument&api-version=${encodeURIComponent(apiVersion)}&pages=${pages}&locale=en-US&stringIndexType=utf16CodeUnit`;
+  const response = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      "Ocp-Apim-Subscription-Key": key,
     },
-    body: JSON.stringify({
-      rawDocument: {
-        content: Buffer.from(input.bytes).toString("base64"),
-        mimeType: input.mimeType,
-        displayName: clean(input.displayName, 200),
-      },
-      fieldMask: "text,entities,pages.pageNumber",
-      imagelessMode: true,
-      labels: { source: "corner-ops", document_type: "vendor-invoice" },
-    }),
+    body: JSON.stringify({ base64Source: Buffer.from(input.bytes).toString("base64") }),
     cache: "no-store",
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(45_000),
   });
-  const payload = await response.json().catch(() => ({})) as DocumentAiResponse;
-  if (!response.ok || !payload.document) {
-    throw new Error(payload.error?.message || `Google Document AI failed (${response.status}).`);
+  const errorPayload = await response.clone().json().catch(() => ({})) as { error?: { message?: string } };
+  if (response.status !== 202) {
+    throw new Error(errorPayload.error?.message || `Azure Document Intelligence rejected the document (${response.status}).`);
   }
+  const operationLocation = response.headers.get("operation-location");
+  if (!operationLocation) throw new Error("Azure Document Intelligence did not return an operation location.");
 
-  const entities = payload.document.entities || [];
-  const vendor = bestEntity(entities, "supplier_name");
-  const invoiceNumber = bestEntity(entities, "invoice_id");
-  const invoiceDate = bestEntity(entities, "invoice_date");
-  const dueDate = bestEntity(entities, "due_date");
-  const subtotalEntity = bestEntity(entities, "net_amount");
-  const taxEntity = bestEntity(entities, "total_tax_amount");
-  const totalEntity = bestEntity(entities, "total_amount");
-  const currencyEntity = bestEntity(entities, "currency");
-  const lines = parseLines(entities);
+  for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+    if (attempt) await pause(POLL_INTERVAL_MS);
+    const resultResponse = await fetch(operationLocation, {
+      headers: { "Ocp-Apim-Subscription-Key": key },
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+    });
+    const operation = await resultResponse.json().catch(() => ({})) as AzureAnalyzeOperation;
+    if (!resultResponse.ok) {
+      throw new Error(operation.error?.message || `Azure Document Intelligence result lookup failed (${resultResponse.status}).`);
+    }
+    if (operation.status === "succeeded") return operation;
+    if (operation.status === "failed" || operation.status === "canceled") {
+      throw new Error(operation.error?.message || `Azure Document Intelligence analysis ${operation.status}.`);
+    }
+  }
+  throw new Error("Azure Document Intelligence did not finish within 90 seconds.");
+}
 
-  const totalAmount = moneyFrom(totalEntity);
-  const taxAmount = moneyFrom(taxEntity);
+function normalizedFields(document: AzureDocument | undefined): Record<string, AzureField> {
+  return document?.fields || {};
+}
+
+function currencyCode(field: AzureField | undefined): string {
+  return clean(field?.valueCurrency?.currencyCode || fieldText(field), 12);
+}
+
+function resultFromAzure(operation: AzureAnalyzeOperation, documentType: InvoiceDocumentType): InvoiceOcrResult {
+  const analyzeResult = operation.analyzeResult || {};
+  const document = analyzeResult.documents?.[0];
+  const fieldsMap = normalizedFields(document);
+  const receipt = documentType === "Receipt";
+  const vendorField = objectField(fieldsMap, receipt ? "MerchantName" : "VendorName");
+  const invoiceNumberField = receipt ? undefined : objectField(fieldsMap, "InvoiceId", "InvoiceNumber");
+  const invoiceDateField = objectField(fieldsMap, receipt ? "TransactionDate" : "InvoiceDate");
+  const dueDateField = receipt ? undefined : objectField(fieldsMap, "DueDate");
+  const subtotalField = objectField(fieldsMap, "SubTotal", "Subtotal");
+  const taxField = objectField(fieldsMap, "TotalTax", "Tax");
+  const totalField = objectField(fieldsMap, receipt ? "Total" : "InvoiceTotal", "Total");
+  const amountDueField = objectField(fieldsMap, "AmountDue");
+  const lines = parseLines(fieldsMap, documentType);
   const lineTotal = Math.round(lines.reduce((sum, line) => sum + line.amount, 0) * 100) / 100;
-  const extractedSubtotal = moneyFrom(subtotalEntity);
+  const totalAmount = fieldNumber(totalField) || fieldNumber(amountDueField);
+  const taxAmount = fieldNumber(taxField);
+  const extractedSubtotal = fieldNumber(subtotalField);
   const subtotal = extractedSubtotal || Math.max(0, Math.round((totalAmount - taxAmount) * 100) / 100) || lineTotal;
+  const currencySource = totalField || amountDueField || subtotalField;
   const fields = {
-    vendor: textField(vendor),
-    invoiceNumber: textField(invoiceNumber),
-    invoiceDate: dateField(invoiceDate),
-    dueDate: dateField(dueDate),
-    subtotal: { ...moneyField(subtotalEntity), value: subtotal },
-    taxAmount: moneyField(taxEntity),
-    totalAmount: moneyField(totalEntity),
-    currency: textField(currencyEntity),
+    vendor: textResult(vendorField),
+    invoiceNumber: textResult(invoiceNumberField),
+    invoiceDate: dateResult(invoiceDateField),
+    dueDate: dateResult(dueDateField),
+    subtotal: { ...moneyResult(subtotalField), value: Math.round(subtotal * 100) / 100 },
+    taxAmount: moneyResult(taxField),
+    totalAmount: { ...moneyResult(totalField || amountDueField), value: Math.round(totalAmount * 100) / 100 },
+    currency: {
+      value: currencyCode(currencySource),
+      confidence: fieldConfidence(currencySource),
+      sourceText: fieldText(currencySource),
+    },
   };
 
   const confidenceValues = [
+    Number(document?.confidence || 0),
     fields.vendor.confidence,
     fields.invoiceNumber.confidence,
     fields.invoiceDate.confidence,
@@ -336,13 +353,16 @@ export async function processInvoiceDocument(input: {
     ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
     : 0;
   const warnings: string[] = [];
-  if (!fields.vendor.value) warnings.push("Vendor was not detected.");
-  if (!fields.invoiceNumber.value) warnings.push("Invoice number was not detected; duplicate protection will be weaker.");
-  if (!fields.invoiceDate.value) warnings.push("Invoice date was not detected.");
-  if (!fields.dueDate.value) warnings.push("Due date was not detected and must be entered before saving.");
-  if (!fields.totalAmount.value) warnings.push("Invoice total was not detected.");
+  if (!fields.vendor.value) warnings.push(`${receipt ? "Merchant" : "Vendor"} was not detected.`);
+  if (!receipt && !fields.invoiceNumber.value) warnings.push("Invoice number was not detected; duplicate protection will be weaker.");
+  if (!fields.invoiceDate.value) warnings.push(`${receipt ? "Transaction" : "Invoice"} date was not detected.`);
+  if (!receipt && !fields.dueDate.value) warnings.push("Due date was not detected and must be entered before saving to accounts payable.");
+  if (!fields.totalAmount.value) warnings.push(`${receipt ? "Receipt" : "Invoice"} total was not detected.`);
   if (fields.totalAmount.value && lineTotal && !approximateEqual(fields.totalAmount.value, lineTotal + fields.taxAmount.value, 0.5)) {
-    warnings.push(`Extracted line items plus tax total $${(lineTotal + fields.taxAmount.value).toFixed(2)}, which differs from the invoice total.`);
+    warnings.push(`Extracted line items plus tax total $${(lineTotal + fields.taxAmount.value).toFixed(2)}, which differs from the document total.`);
+  }
+  if ((analyzeResult.pages?.length || 0) >= (receipt ? 1 : 2)) {
+    warnings.push(`Only the first ${receipt ? "page" : "two pages"} were analyzed to stay within the Azure free-tier document limits.`);
   }
   if (overallConfidence > 0 && overallConfidence < 0.7) warnings.push("Overall OCR confidence is low; compare every field with the source document.");
   for (const [label, field] of Object.entries(fields)) {
@@ -350,12 +370,45 @@ export async function processInvoiceDocument(input: {
   }
 
   return {
-    provider: "Google Document AI Invoice Parser",
-    pageCount: payload.document.pages?.length || 0,
+    provider: "Azure Document Intelligence",
+    model: receipt ? "prebuilt-receipt" : "prebuilt-invoice",
+    documentType,
+    pageCount: analyzeResult.pages?.length || 0,
     overallConfidence: Math.round(overallConfidence * 10_000) / 10_000,
     fields,
     lines,
     warnings: [...new Set(warnings)],
-    textPreview: clean(payload.document.text, MAX_PREVIEW_TEXT),
+    textPreview: clean(analyzeResult.content, MAX_PREVIEW_TEXT),
   };
+}
+
+const azureProvider: OcrProvider = {
+  configuration: azureConfiguration,
+  async analyze(input) {
+    const operation = await azureAnalyze({ bytes: input.bytes, documentType: input.documentType });
+    return resultFromAzure(operation, input.documentType);
+  },
+};
+
+export async function processInvoiceDocument(input: {
+  bytes: ArrayBuffer;
+  mimeType: string;
+  displayName: string;
+  documentType?: InvoiceDocumentType;
+}): Promise<InvoiceOcrResult> {
+  const configuration = invoiceOcrConfiguration();
+  if (!configuration.configured) {
+    throw new Error(`Invoice OCR is not configured. Missing: ${configuration.missing.join(", ")}.`);
+  }
+  if (!input.bytes.byteLength) throw new Error("The invoice file is empty.");
+  const mimeType = clean(input.mimeType, 100);
+  if (!/^(application\/pdf|image\/(jpeg|png|webp))$/i.test(mimeType)) {
+    throw new Error(`Unsupported OCR file type: ${mimeType || "unknown"}.`);
+  }
+  return activeProvider().analyze({
+    bytes: input.bytes,
+    mimeType,
+    displayName: clean(input.displayName, 200),
+    documentType: input.documentType === "Receipt" ? "Receipt" : "Invoice",
+  });
 }
