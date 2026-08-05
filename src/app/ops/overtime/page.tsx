@@ -30,6 +30,9 @@ type RiskItem = {
   position: string;
   risk: "normal" | "warning" | "overtime";
   actualHours: number;
+  expectedHoursToDate: number;
+  paceDeltaHours: number;
+  paceStatus: "ahead" | "behind" | "on-pace";
   remainingScheduledHours: number;
   projectedHours: number;
   plannedHours: number;
@@ -67,6 +70,8 @@ type Dashboard = {
   weekStart: string;
   weekEnd: string;
   generatedAt: string;
+  paceAsOf?: string;
+  suppressedMinorTimingDifferences?: number;
   thresholds: { warning: number; overtime: number };
   summary: { activeEmployees: number; warning: number; overtime: number; coverageMismatches: number };
   risks: RiskItem[];
@@ -80,7 +85,7 @@ async function responseMessage(response: Response) {
   return payload?.error || `Request failed (${response.status}).`;
 }
 
-function local(value: string | null) {
+function local(value: string | null | undefined) {
   if (!value) return "Unknown time";
   return new Date(value).toLocaleString([], {
     weekday: "short",
@@ -98,6 +103,12 @@ function shiftLabel(shift: ScheduledShift | null) {
 
 function hours(value: number) {
   return Number(value || 0).toFixed(1);
+}
+
+function paceText(risk: RiskItem) {
+  if (risk.paceStatus === "ahead") return `${hours(Math.abs(risk.paceDeltaHours))}h ahead of schedule`;
+  if (risk.paceStatus === "behind") return `${hours(Math.abs(risk.paceDeltaHours))}h behind schedule`;
+  return "On scheduled pace";
 }
 
 export default function OvertimeRiskPage() {
@@ -140,7 +151,9 @@ export default function OvertimeRiskPage() {
       setData(payload);
       if (sendAlerts) {
         const delivered = (payload.notified || []).reduce((total, item) => total + item.delivered, 0);
-        setNotice(delivered ? `Overtime check completed and ${delivered} owner notification${delivered === 1 ? " was" : "s were"} delivered.` : "Overtime check completed. No new owner alert was required.");
+        setNotice(delivered
+          ? `Overtime check completed and ${delivered} owner notification${delivered === 1 ? " was" : "s were"} delivered.`
+          : "Overtime check completed. No new owner alert was required.");
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to load overtime risk.");
@@ -155,7 +168,10 @@ export default function OvertimeRiskPage() {
   }, [business, load, session?.authenticated]);
 
   const currentData = data?.business === business ? data : null;
-  const activeRisks = useMemo(() => (currentData?.risks || []).filter((item) => item.risk !== "normal"), [currentData?.risks]);
+  const activeRisks = useMemo(
+    () => (currentData?.risks || []).filter((item) => item.risk !== "normal"),
+    [currentData?.risks],
+  );
 
   if (!session) return <main className="overtimeShell"><section className="overtimePanel"><h1>Loading overtime monitor</h1></section></main>;
   if (!session.authenticated) return <main className="overtimeShell"><section className="overtimePanel"><h1>Owner access required</h1><a className="otPrimary" href="/">Return to sign-in</a></section></main>;
@@ -163,9 +179,9 @@ export default function OvertimeRiskPage() {
   return <main className="overtimeShell">
     <header className="overtimeHero">
       <div>
-        <p className="otEyebrow">Actual hours + remaining schedule</p>
+        <p className="otEyebrow">Daily pace + weekly projection</p>
         <h1>Overtime & Shift Coverage</h1>
-        <p>Forecasts each employee independently for the selected business, identifies unscheduled coverage, and suggests replacements before a remaining shift creates overtime.</p>
+        <p>Compares hours actually worked with the hours each employee should have reached by this point in the week, then keeps the remaining schedule projection and overtime status.</p>
       </div>
       <div className="otBusinessSwitch">
         {(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "selected" : ""} onClick={() => setBusiness(name)}>{name}</button>)}
@@ -175,7 +191,7 @@ export default function OvertimeRiskPage() {
     <div className="overtimeActions">
       <div>
         <strong>{currentData ? `${currentData.weekStart} through ${currentData.weekEnd}` : "Current Monday–Sunday week"}</strong>
-        <span>Warning at 38 hours · overtime above 40 hours</span>
+        <span>{currentData ? `Pace measured through ${local(currentData.paceAsOf || currentData.generatedAt)}` : "Warning at 38 hours · overtime above 40 hours"}</span>
       </div>
       <button className="otPrimary" disabled={busy} onClick={() => void load(business, true)}>{busy ? "Checking…" : "Run check & alert"}</button>
     </div>
@@ -186,7 +202,7 @@ export default function OvertimeRiskPage() {
       <article><span>Employees checked</span><strong>{currentData?.summary.activeEmployees || 0}</strong></article>
       <article><span>Near 40 hours</span><strong>{currentData?.summary.warning || 0}</strong></article>
       <article className="danger"><span>Projected overtime</span><strong>{currentData?.summary.overtime || 0}</strong></article>
-      <article><span>Coverage differences</span><strong>{currentData?.summary.coverageMismatches || 0}</strong></article>
+      <article><span>True coverage differences</span><strong>{currentData?.summary.coverageMismatches || 0}</strong><small>{currentData?.suppressedMinorTimingDifferences ? `${currentData.suppressedMinorTimingDifferences} minor same-day timing difference${currentData.suppressedMinorTimingDifferences === 1 ? "" : "s"} ignored` : "Late arrivals and early/late departures are matched to the employee's own shift"}</small></article>
     </section>
 
     <section className="overtimeSection">
@@ -197,6 +213,11 @@ export default function OvertimeRiskPage() {
             <div><h3>{risk.employeeName}</h3><span>{risk.position}</span></div>
             <strong>{risk.risk === "overtime" ? "OVERTIME" : "CLOSE"}</strong>
           </header>
+          <div className="paceSummary">
+            <div><span>Should have by now</span><b>{hours(risk.expectedHoursToDate)}h</b></div>
+            <div><span>Actually worked</span><b>{hours(risk.actualHours)}h</b></div>
+            <strong className={`paceBadge ${risk.paceStatus}`}>{paceText(risk)}</strong>
+          </div>
           <div className="riskEquation">
             <div><span>Worked</span><b>{hours(risk.actualHours)}h</b></div>
             <i>+</i>
@@ -204,7 +225,7 @@ export default function OvertimeRiskPage() {
             <i>=</i>
             <div><span>Projected</span><b>{hours(risk.projectedHours)}h</b></div>
           </div>
-          {risk.unplannedHours > 0 && <p className="unplannedCallout"><strong>{hours(risk.unplannedHours)} unplanned hours</strong> came from an unscheduled shift or covering another employee.</p>}
+          {risk.unplannedHours > 0 && <p className="unplannedCallout"><strong>{hours(risk.unplannedHours)} unplanned hours</strong> remain after matching minor same-day punch differences to the employee's own schedule.</p>}
           <div className="triggerShift">
             <span>{risk.risk === "overtime" ? "First shift creating overtime" : "First shift reaching the warning range"}</span>
             <strong>{shiftLabel(risk.risk === "overtime" ? risk.overtimeShift : risk.warningShift)}</strong>
@@ -216,7 +237,7 @@ export default function OvertimeRiskPage() {
               <div><strong>{replacement.employeeName}</strong><span>{replacement.position} · {replacement.availability}</span><small>{replacement.reason}</small></div>
               <b>{hours(replacement.projectedAfterShift)}h</b>
             </div>)}
-            {!risk.replacements.length && <p>No conflict-free replacement stays at or below 40 hours. The shift may need to be shortened, split, or filled outside the current active roster.</p>}
+            {!risk.replacements.length && <p>No conflict-free replacement stays at or below 40 hours. The shift may need to be shortened, split, or filled outside the active roster.</p>}
           </div>
         </article>)}
         {!activeRisks.length && <article className="overtimeClear"><strong>No current overtime risk</strong><span>Actual worked hours plus remaining assigned shifts keep every active employee below 38 hours.</span></article>}
@@ -224,9 +245,17 @@ export default function OvertimeRiskPage() {
     </section>
 
     <section className="overtimeSection">
-      <div className="otSectionHeader"><div><p className="otEyebrow">Entire roster</p><h2>Weekly projection</h2></div><span>Separate employer calculation</span></div>
-      <div className="otTableWrap"><table className="otTable"><thead><tr><th>Employee</th><th>Planned</th><th>Worked</th><th>Remaining</th><th>Projected</th><th>Status</th></tr></thead><tbody>
-        {(currentData?.risks || []).map((risk) => <tr key={risk.employeeId}><td><strong>{risk.employeeName}</strong><span>{risk.position}</span></td><td>{hours(risk.plannedHours)}</td><td>{hours(risk.actualHours)}</td><td>{hours(risk.remainingScheduledHours)}</td><td><strong>{hours(risk.projectedHours)}</strong></td><td><span className={`otStatus ${risk.risk}`}>{risk.risk === "normal" ? "OK" : risk.risk === "warning" ? "Close" : "Overtime"}</span></td></tr>)}
+      <div className="otSectionHeader"><div><p className="otEyebrow">Entire roster</p><h2>Daily pace and weekly projection</h2></div><span>Calculated separately by business</span></div>
+      <div className="otTableWrap"><table className="otTable paceTable"><thead><tr><th>Employee</th><th>Should have by now</th><th>Worked</th><th>Pace</th><th>Remaining</th><th>Projected</th><th>Status</th></tr></thead><tbody>
+        {(currentData?.risks || []).map((risk) => <tr key={risk.employeeId}>
+          <td><strong>{risk.employeeName}</strong><span>{risk.position}</span></td>
+          <td>{hours(risk.expectedHoursToDate)}</td>
+          <td>{hours(risk.actualHours)}</td>
+          <td><span className={`paceBadge ${risk.paceStatus}`}>{paceText(risk)}</span></td>
+          <td>{hours(risk.remainingScheduledHours)}</td>
+          <td><strong>{hours(risk.projectedHours)}</strong></td>
+          <td><span className={`otStatus ${risk.risk}`}>{risk.risk === "normal" ? "OK" : risk.risk === "warning" ? "Close" : "Overtime"}</span></td>
+        </tr>)}
       </tbody></table></div>
     </section>
 
@@ -235,7 +264,7 @@ export default function OvertimeRiskPage() {
         <div className="otSectionHeader"><div><p className="otEyebrow">Actual versus assigned</p><h2>Coverage differences</h2></div></div>
         <div className="otActivityList">
           {(currentData?.coverageMismatches || []).map((item) => <div key={item.actualEntryId}><header><strong>{item.actualEmployeeName}</strong><span>{item.kind}</span></header><p>{item.detail}</p><small>{local(item.startsAt)} · {hours(item.hours)} hours</small></div>)}
-          {!currentData?.coverageMismatches.length && <p className="otEmpty">No unscheduled or substituted work detected this week.</p>}
+          {!currentData?.coverageMismatches.length && <p className="otEmpty">No genuine unscheduled or substituted work detected this week. Minor late arrivals and early or late departures are ignored here.</p>}
         </div>
       </article>
 
