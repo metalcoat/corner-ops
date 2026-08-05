@@ -1,0 +1,72 @@
+/* Attendance history should be reviewed before starting a new correction request. */
+.attendanceTimeGrid > .attendanceEmployeeCard {
+  grid-column: 1 / -1;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.attendanceTimeGrid > .attendanceEmployeeCard:nth-child(2) {
+  order: 1;
+}
+
+.attendanceTimeGrid > .attendanceEmployeeCard:nth-child(3) {
+  order: 2;
+}
+
+.attendanceTimeGrid > .attendanceEmployeeCard:nth-child(1) {
+  order: 3;
+}
+
+/* Keep schedule cards inside the mobile viewport while allowing the weekly grid itself to scroll. */
+.employeePortalFrame,
+.employeePortalContent,
+.employeeShell,
+.employeeGrid,
+.employeeGrid > .employeeCard,
+.teamWeekCard,
+.teamWeekScroll {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.employeePortalFrame,
+.employeePortalContent,
+.employeeGrid,
+.employeeGrid > .employeeCard,
+.teamWeekCard {
+  width: 100%;
+  max-width: 100%;
+}
+
+.employeeShell {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+.employeeGrid > .employeeCard {
+  justify-self: stretch;
+}
+
+.teamWeekScroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.employeeShift > div,
+.employeeRequest > div,
+.employeeCardHeader > div {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .employeeGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
