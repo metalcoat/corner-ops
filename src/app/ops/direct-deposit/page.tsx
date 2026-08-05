@@ -10,9 +10,13 @@ type Summary = {
   id: string;
   employeeId: string;
   employeeName: string;
-  status: "Assigned" | "Completed" | "Superseded";
+  status: "Assigned" | "Completed" | "Superseded" | "Rescinded";
   assignedAt: string;
+  assignedBy: string;
   signedAt: string | null;
+  rescindedAt: string | null;
+  rescindedBy: string | null;
+  rescindReason: string;
 };
 type Detail = Summary & { payload: Record<string, unknown> };
 type PageData = { business: Business; employees: Employee[]; elections: Summary[] };
@@ -92,6 +96,31 @@ export default function DirectDepositAdminPage() {
     }
   }
 
+  async function rescind(item: Summary) {
+    const reason = window.prompt(
+      `Rescind the unsigned direct-deposit form assigned to ${item.employeeName}? The audit record will be preserved.`,
+      "Assigned in error",
+    );
+    if (reason === null) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/direct-deposit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "rescind", business, id: item.id, reason }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      if (review?.id === item.id) setReview(null);
+      await load();
+      setNotice(`${item.employeeName}'s unsigned direct-deposit form was rescinded and removed from Employee Hub.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Direct-deposit form could not be rescinded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function open(id: string) {
     setNotice("");
     const response = await fetch(`/api/direct-deposit?business=${encodeURIComponent(business)}&id=${encodeURIComponent(id)}`, { cache: "no-store" });
@@ -118,8 +147,8 @@ export default function DirectDepositAdminPage() {
         <article className="controlCard"><p className="eyebrow">Assign or replace</p><h2>Direct-deposit election</h2><p className="ddHelp">Assigning another form supersedes only an unsigned form. Prior signed elections remain preserved.</p><form className="ddAdminForm" onSubmit={assign}><label>Employee<select name="employeeId" required><option value="">Choose employee</option>{data.employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} · {employee.position}</option>)}</select></label><button disabled={busy}>Assign form</button></form></article>
         <article className="controlCard ddSecurity"><p className="eyebrow">Handling rule</p><h2>Confidential payroll data</h2><p>Routing and account numbers are encrypted at rest and shown only in this authenticated review. Enter them directly into payroll, avoid screenshots, and do not paste them into messages or general documents.</p></article>
       </section>
-      <section className="controlCard ddRecords"><div className="ddRecordsHeader"><div><p className="eyebrow">Payment elections</p><h2>Employee records</h2></div><span>{data.elections.length} total</span></div><div className="tableWrap"><table><thead><tr><th>Employee</th><th>Status</th><th>Assigned</th><th>Signed</th><th>Action</th></tr></thead><tbody>{data.elections.map((item) => <tr key={item.id}><td>{item.employeeName}</td><td><span className={`ddStatus ${item.status.toLowerCase()}`}>{item.status}</span></td><td>{new Date(item.assignedAt).toLocaleString()}</td><td>{item.signedAt ? new Date(item.signedAt).toLocaleString() : "—"}</td><td><button disabled={busy} onClick={() => void open(item.id)}>Review</button></td></tr>)}{!data.elections.length && <tr><td colSpan={5}>No direct-deposit elections yet.</td></tr>}</tbody></table></div></section>
-      {review && <section className="controlCard ddReview"><div className="ddRecordsHeader"><div><p className="eyebrow">Secure record</p><h2>{review.employeeName}</h2><p>{review.status} · assigned {new Date(review.assignedAt).toLocaleString()}</p></div><button onClick={() => setReview(null)}>Close</button></div>
+      <section className="controlCard ddRecords"><div className="ddRecordsHeader"><div><p className="eyebrow">Payment elections</p><h2>Employee records</h2></div><span>{data.elections.length} total</span></div><div className="tableWrap"><table><thead><tr><th>Employee</th><th>Status</th><th>Assigned</th><th>Assigned by</th><th>Signed</th><th>Action</th></tr></thead><tbody>{data.elections.map((item) => <tr key={item.id}><td>{item.employeeName}</td><td><span className={`ddStatus ${item.status.toLowerCase()}`}>{item.status}</span></td><td>{new Date(item.assignedAt).toLocaleString()}</td><td>{item.assignedBy || "Unknown"}</td><td>{item.signedAt ? new Date(item.signedAt).toLocaleString() : "—"}</td><td><div className="ddRowActions"><button disabled={busy} onClick={() => void open(item.id)}>Review</button>{item.status === "Assigned" && <button className="ddDanger" disabled={busy} onClick={() => void rescind(item)}>Rescind</button>}</div></td></tr>)}{!data.elections.length && <tr><td colSpan={6}>No direct-deposit elections yet.</td></tr>}</tbody></table></div></section>
+      {review && <section className="controlCard ddReview"><div className="ddRecordsHeader"><div><p className="eyebrow">Secure record</p><h2>{review.employeeName}</h2><p>{review.status} · assigned {new Date(review.assignedAt).toLocaleString()} by {review.assignedBy || "Unknown"}</p>{review.rescindedAt && <p className="ddAuditLine">Rescinded {new Date(review.rescindedAt).toLocaleString()} by {review.rescindedBy || "Unknown"}{review.rescindReason ? ` · ${review.rescindReason}` : ""}</p>}</div><button onClick={() => setReview(null)}>Close</button></div>
         <div className="ddReviewGrid">{Object.entries(submission).map(([key, value]) => <div key={key}><span>{label(key)}</span><strong>{display(value)}</strong></div>)}{!Object.keys(submission).length && <p>The employee has not submitted this form yet.</p>}</div>
         {review.status === "Completed" && <button className="ddPrint" type="button" onClick={() => window.print()}>Print secure payroll copy</button>}
       </section>}
