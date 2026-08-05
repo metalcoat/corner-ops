@@ -1,6 +1,6 @@
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
-import { invoiceOcrConfiguration, processInvoiceDocument } from "@/lib/invoice-ocr";
+import { invoiceOcrConfiguration, processInvoiceDocument, type InvoiceDocumentType } from "@/lib/invoice-ocr";
 import type { Business } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -11,6 +11,10 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024;
 function businessFrom(value: unknown): Business {
   if (value === "Corner Deli" || value === "Tiki") return value;
   throw new Error("Unknown business.");
+}
+
+function documentTypeFrom(value: unknown): InvoiceDocumentType {
+  return value === "Receipt" ? "Receipt" : "Invoice";
 }
 
 function mimeTypeFor(file: File): string {
@@ -45,15 +49,16 @@ export async function POST(request: Request) {
     if (!canAccessBusiness(session, business)) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
     }
+    const documentType = documentTypeFrom(form.get("documentType"));
     const file = form.get("file");
     if (!(file instanceof File) || !file.size) {
-      return Response.json({ error: "Choose a PDF or invoice image." }, { status: 400 });
+      return Response.json({ error: `Choose a PDF or ${documentType.toLowerCase()} image.` }, { status: 400 });
     }
     if (file.size > MAX_FILE_SIZE) {
-      return Response.json({ error: "Invoice OCR files are limited to 25 MB." }, { status: 413 });
+      return Response.json({ error: "OCR files are limited to 25 MB." }, { status: 413 });
     }
     if (!/\.(pdf|jpg|jpeg|png|webp)$/i.test(file.name)) {
-      return Response.json({ error: "Invoice OCR accepts PDF, JPG, PNG, or WebP files." }, { status: 415 });
+      return Response.json({ error: "OCR accepts PDF, JPG, PNG, or WebP files." }, { status: 415 });
     }
 
     const configuration = invoiceOcrConfiguration();
@@ -68,6 +73,7 @@ export async function POST(request: Request) {
       bytes: await file.arrayBuffer(),
       mimeType: mimeTypeFor(file),
       displayName: file.name,
+      documentType,
     });
     return Response.json({ business, fileName: file.name, ...result });
   } catch (error) {
