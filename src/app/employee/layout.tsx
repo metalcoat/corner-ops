@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
 import EmployeeMessagesDock from "./messages-dock";
 import EmployeePinController from "./pin-controller";
+import ProfilePhotoOptimizer from "./profile-photo-optimizer";
 import "./employee-nav.css";
 
 export default function EmployeeLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <div className="employeePortalFrame">
+      <ProfilePhotoOptimizer />
       <EmployeePinController />
       <EmployeeMessagesDock />
       <nav className="employeePortalNav" aria-label="Employee Hub navigation">
