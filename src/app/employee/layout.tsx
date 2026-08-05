@@ -5,6 +5,7 @@ import EmployeeMessagesDock from "./messages-dock";
 import EmployeePinController from "./pin-controller";
 import ProfilePhotoOptimizer from "./profile-photo-optimizer";
 import "./employee-nav.css";
+import "./portal-layout-fixes.css";
 
 export default function EmployeeLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
