@@ -25,6 +25,7 @@ const links: NavLink[] = [
   { label: "Overtime", href: "/ops/overtime" },
   { label: "Messages", href: "/ops/messages" },
   { label: "Settings", href: "/ops/settings", activePaths: ["/ops/settings", "/ops/integrations", "/ops/users"] },
+  { label: "Scan", href: "/scan" },
   { label: "Documents", href: "/" },
 ];
 
@@ -45,7 +46,7 @@ export default function GlobalNav() {
   const [currentBusiness, setCurrentBusiness] = useState<Business>("Corner Deli");
   const [open, setOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const navHidden = pathname === "/clock" || pathname.startsWith("/employee") || pathname === "/signin";
+  const navHidden = pathname === "/clock" || pathname === "/scan" || pathname.startsWith("/employee") || pathname === "/signin";
 
   useEffect(() => setOpen(false), [pathname]);
 
