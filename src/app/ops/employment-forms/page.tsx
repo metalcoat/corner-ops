@@ -6,6 +6,12 @@ import "../control-center.css";
 import "./employment-forms.css";
 
 type Employee = { id: string; name: string; position: string; hourlyRate: number; tippedRate: number };
+type FormAuditEvent = {
+  action: string;
+  actor: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
 type FormSummary = {
   id: string;
   employeeId: string;
@@ -16,6 +22,7 @@ type FormSummary = {
   status: "Assigned" | "Employee Signed" | "Employer Review" | "Completed" | "Superseded";
   effectiveDate: string | null;
   assignedAt: string;
+  assignedBy: string;
   employeeSignedAt: string | null;
   employerSignedAt: string | null;
   sourceUrl: string;
@@ -32,7 +39,7 @@ type Profile = {
   dependentHealthEligibility: string;
 };
 type PageData = { business: Business; employees: Employee[]; forms: FormSummary[]; profile: Profile };
-type FormDetail = FormSummary & { payload: Record<string, unknown> };
+type FormDetail = FormSummary & { payload: Record<string, unknown>; events: FormAuditEvent[] };
 
 async function responseMessage(response: Response) {
   const payload = await response.json().catch(() => null) as { error?: string } | null;
@@ -41,6 +48,20 @@ async function responseMessage(response: Response) {
 
 function dateLabel(value: string | null) {
   return value ? new Date(`${value}T12:00:00`).toLocaleDateString() : "Not specified";
+}
+
+function dateTimeLabel(value: string | null | undefined) {
+  if (!value) return "Not recorded";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not recorded";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function formDataObject(form: FormData): Record<string, unknown> {
@@ -60,6 +81,10 @@ function display(value: unknown): string {
 
 function friendlyField(value: string): string {
   return value.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function auditAction(value: string): string {
+  return value.replace(/[-_]+/g, " ").replace(/^./, (letter) => letter.toUpperCase());
 }
 
 export default function EmploymentFormsPage() {
@@ -153,11 +178,30 @@ export default function EmploymentFormsPage() {
   }
 
   async function openReview(id: string) {
+    setBusy(true);
     setNotice("");
-    const response = await fetch(`/api/employment-forms?business=${encodeURIComponent(business)}&id=${encodeURIComponent(id)}`, { cache: "no-store" });
-    if (!response.ok) throw new Error(await responseMessage(response));
-    const payload = await response.json() as { form: FormDetail };
-    setReview(payload.form);
+    try {
+      const response = await fetch(`/api/employment-forms?business=${encodeURIComponent(business)}&id=${encodeURIComponent(id)}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      const payload = await response.json() as { form: FormDetail };
+      setReview(payload.form);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The employment form could not be opened.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unassignForm(form: FormSummary) {
+    const reason = window.prompt(
+      `Unassign ${form.title} from ${form.employeeName}?\n\nThe record will remain in the audit history as Superseded. Enter a reason:`,
+      "Assigned in error.",
+    );
+    if (reason === null) return;
+    await action(
+      { action: "unassign", id: form.id, reason },
+      `${form.title} was unassigned from ${form.employeeName}. The audit history was preserved.`,
+    );
   }
 
   async function completeI9(event: FormEvent<HTMLFormElement>) {
@@ -187,7 +231,7 @@ export default function EmploymentFormsPage() {
       <section className="employmentAdminStats"><article><span>Active employees</span><strong>{data.employees.length}</strong></article><article><span>Action required</span><strong>{pending.length}</strong></article><article><span>Completed records</span><strong>{completed.length}</strong></article><article><span>I-9 employer reviews</span><strong>{data.forms.filter((form) => form.status === "Employer Review").length}</strong></article></section>
 
       <section className="employmentAdminGrid">
-        <article className="controlCard"><p className="eyebrow">Business identity</p><h2>Employer form profile</h2><p className="employmentHelp">Used to prefill W-4/IT-2104 employer details and New York pay notices. This is business information, not the employee's private submission.</p><form className="employmentAdminForm" onSubmit={saveProfile} key={`${business}-${JSON.stringify(data.profile)}`}>
+        <article className="controlCard"><p className="eyebrow">Business identity</p><h2>Employer form profile</h2><p className="employmentHelp">Used to prefill W-4/IT-2104 employer details and New York pay notices. This is business information, not the employee&apos;s private submission.</p><form className="employmentAdminForm" onSubmit={saveProfile} key={`${business}-${JSON.stringify(data.profile)}`}>
           <label>Legal employer name<input name="legalName" defaultValue={data.profile.legalName} required /></label>
           <label>DBA or operating name<input name="dba" defaultValue={data.profile.dba} required /></label>
           <label>Federal EIN<input name="ein" defaultValue={data.profile.ein} placeholder="00-0000000" required /></label>
@@ -217,10 +261,12 @@ export default function EmploymentFormsPage() {
         </form></article>
       </section>
 
-      <section className="controlCard employmentRecords"><div className="employmentRecordsHeader"><div><p className="eyebrow">Signature and review queue</p><h2>Employment form records</h2></div><span>{data.forms.length} total</span></div><div className="tableWrap"><table><thead><tr><th>Employee</th><th>Form</th><th>Version</th><th>Effective</th><th>Status</th><th>Assigned</th><th>Action</th></tr></thead><tbody>{data.forms.map((form) => <tr key={form.id}><td>{form.employeeName}</td><td>{form.title}</td><td>{form.templateVersion}</td><td>{dateLabel(form.effectiveDate)}</td><td><span className={`employmentStatus ${form.status.replace(/\s+/g, "").toLowerCase()}`}>{form.status}</span></td><td>{new Date(form.assignedAt).toLocaleDateString()}</td><td>{form.status === "Employer Review" ? <button disabled={busy} onClick={() => void openReview(form.id)}>Complete I-9</button> : <button disabled={busy} onClick={() => void openReview(form.id)}>Review</button>}</td></tr>)}{!data.forms.length && <tr><td colSpan={7}>No employment forms assigned yet.</td></tr>}</tbody></table></div></section>
+      <section className="controlCard employmentRecords"><div className="employmentRecordsHeader"><div><p className="eyebrow">Signature and review queue</p><h2>Employment form records</h2></div><span>{data.forms.length} total</span></div><div className="tableWrap"><table><thead><tr><th>Employee</th><th>Form</th><th>Version</th><th>Effective</th><th>Status</th><th>Assigned</th><th>Action</th></tr></thead><tbody>{data.forms.map((form) => <tr key={form.id}><td>{form.employeeName}</td><td>{form.title}</td><td>{form.templateVersion}</td><td>{dateLabel(form.effectiveDate)}</td><td><span className={`employmentStatus ${form.status.replace(/\s+/g, "").toLowerCase()}`}>{form.status}</span></td><td><strong>{dateTimeLabel(form.assignedAt)}</strong><small>by {form.assignedBy || "Unknown account"}</small></td><td><div className="employmentRowActions"><button disabled={busy} onClick={() => void openReview(form.id)}>{form.status === "Employer Review" ? "Complete I-9" : "Review"}</button>{form.status === "Assigned" && <button className="employmentUnassign" disabled={busy} onClick={() => void unassignForm(form)}>Unassign</button>}</div></td></tr>)}{!data.forms.length && <tr><td colSpan={7}>No employment forms assigned yet.</td></tr>}</tbody></table></div></section>
 
       {review && <section className="controlCard employmentReview"><div className="employmentRecordsHeader"><div><p className="eyebrow">Secure record</p><h2>{review.employeeName} · {review.title}</h2><p>{review.status} · {review.templateVersion}</p></div><button onClick={() => setReview(null)}>Close</button></div>
+        <section className="employmentAuditSummary"><div><span>Assigned by</span><strong>{review.assignedBy || "Unknown account"}</strong></div><div><span>Assigned at</span><strong>{dateTimeLabel(review.assignedAt)}</strong></div><div><span>Current status</span><strong>{review.status}</strong></div>{review.status === "Assigned" && <button className="employmentUnassign" disabled={busy} onClick={() => void unassignForm(review)}>Unassign this form</button>}</section>
         <div className="employmentSubmissionGrid">{Object.entries(employeeSubmission).map(([key, value]) => <div key={key}><span>{friendlyField(key)}</span><strong>{key.toLowerCase().includes("ssn") ? "Stored securely" : display(value)}</strong></div>)}{!Object.keys(employeeSubmission).length && <p>No employee submission is available yet.</p>}</div>
+        <section className="employmentAuditTrail"><p className="eyebrow">Audit trail</p>{review.events?.length ? review.events.map((entry, index) => <article key={`${entry.createdAt}-${entry.action}-${index}`}><div><strong>{auditAction(entry.action)}</strong><span>{dateTimeLabel(entry.createdAt)}</span></div><p>{entry.actor}</p>{entry.metadata.reason ? <small>{String(entry.metadata.reason)}</small> : null}</article>) : <p>No audit events were recorded.</p>}</section>
         {review.formType === "I9" && review.status === "Employer Review" && <form className="employmentAdminForm employmentI9Form" onSubmit={completeI9}>
           <div className="wide employmentWarning">Examine documents selected by the employee. Do not demand a particular List A, B, or C document. Record either one acceptable List A document or an acceptable List B plus List C combination.</div>
           <label>Document method<select name="documentMethod" required><option value="">Choose method</option><option value="List A">List A</option><option value="List B and C">List B and List C</option><option value="Acceptable receipt">Acceptable receipt</option></select></label>
