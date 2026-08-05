@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getEmployeeSession } from "@/lib/employee-auth";
+import { latestDirectDepositAssignmentWasRescinded } from "@/lib/direct-deposit-admin";
 import {
   ensureEmployeeDirectDepositElection,
   getDirectDepositElection,
@@ -48,18 +49,28 @@ export async function GET(request: NextRequest) {
   try {
     const session = await getEmployeeSession();
     if (!session) return NextResponse.json({ error: "Employee sign-in required." }, { status: 401 });
-    await ensureEmployeeDirectDepositElection({ business: session.business, employeeId: session.employeeId });
+
+    const autoAssignmentSuppressed = await latestDirectDepositAssignmentWasRescinded({
+      business: session.business,
+      employeeId: session.employeeId,
+    });
+    if (!autoAssignmentSuppressed) {
+      await ensureEmployeeDirectDepositElection({ business: session.business, employeeId: session.employeeId });
+    }
+
     const id = request.nextUrl.searchParams.get("id");
     if (id) {
       const election = await getDirectDepositElection(id);
-      if (!election || election.employeeId !== session.employeeId || election.business !== session.business) {
+      if (!election || election.employeeId !== session.employeeId || election.business !== session.business || election.status === "Superseded") {
         return NextResponse.json({ error: "Direct-deposit form was not found." }, { status: 404 });
       }
       return NextResponse.json({ election });
     }
+
+    const elections = await listDirectDepositElections(session.business, session.employeeId);
     return NextResponse.json({
       employee: { id: session.employeeId, name: session.name, business: session.business, position: session.position },
-      elections: await listDirectDepositElections(session.business, session.employeeId),
+      elections: elections.filter((election) => election.status !== "Superseded"),
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Direct-deposit records could not be loaded." }, { status: 400 });
