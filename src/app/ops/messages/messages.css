@@ -152,6 +152,32 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
   font-weight: 750;
 }
 
+.ownerMessageHeaderActions {
+  justify-items: end;
+  align-content: center;
+}
+
+.ownerMessageHeaderActions button {
+  border: 1px solid #b91c1c;
+  border-radius: 8px;
+  background: #fff;
+  color: #b91c1c;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: .72rem;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.ownerMessageHeaderActions button:hover {
+  background: #fee2e2;
+}
+
+.ownerMessageHeaderActions button:disabled {
+  cursor: wait;
+  opacity: .55;
+}
+
 .ownerMessageItem > p {
   margin: 13px 0 0;
   border: 1px solid #cbd5e1;
@@ -255,8 +281,11 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
     grid-template-columns: auto 1fr;
   }
 
-  .ownerMessageItem header > small {
+  .ownerMessageHeaderActions {
     grid-column: 2;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    width: 100%;
   }
 
   .ownerMessagePhoto img {
