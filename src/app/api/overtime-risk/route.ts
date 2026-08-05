@@ -1,6 +1,9 @@
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
-import { evaluateAndNotifyOvertimeRisk, overtimeRiskDashboard } from "@/lib/overtime-risk";
+import {
+  evaluateAndNotifyOvertimeRiskView,
+  overtimeRiskDashboardView,
+} from "@/lib/overtime-risk-view";
 import type { Business } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -21,7 +24,7 @@ export async function GET(request: Request) {
     if (!canAccessBusiness(session, business)) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
     }
-    return Response.json(await overtimeRiskDashboard(business, url.searchParams.get("weekStart") || undefined));
+    return Response.json(await overtimeRiskDashboardView(business, url.searchParams.get("weekStart") || undefined));
   } catch (error) {
     return apiError(error);
   }
@@ -40,7 +43,7 @@ export async function POST(request: Request) {
     if (String(body.action || "") !== "run-check") {
       return Response.json({ error: "Unknown overtime action." }, { status: 400 });
     }
-    return Response.json(await evaluateAndNotifyOvertimeRisk({
+    return Response.json(await evaluateAndNotifyOvertimeRiskView({
       business,
       source: `Manual check by ${session.displayName}`,
       notify: true,
