@@ -41,17 +41,26 @@ export default function EmployeePinController() {
         if (firstNode?.nodeType === Node.TEXT_NODE) {
           firstNode.textContent = employeePinLabel(business);
         }
+
+        const submitButton = form.querySelector<HTMLButtonElement>('button[type="submit"], button:not([type])');
+        if (submitButton) {
+          const signingIn = submitButton.textContent?.includes("Signing in") ?? false;
+          submitButton.disabled = signingIn || pinInput.value.length !== length;
+        }
       }
     }
 
-    const observer = new MutationObserver(sync);
+    const scheduleSync = () => window.requestAnimationFrame(sync);
+    const observer = new MutationObserver(scheduleSync);
     observer.observe(document.body, { subtree: true, childList: true });
-    document.addEventListener("change", sync, true);
-    window.requestAnimationFrame(sync);
+    document.addEventListener("change", scheduleSync, true);
+    document.addEventListener("input", scheduleSync, true);
+    scheduleSync();
 
     return () => {
       observer.disconnect();
-      document.removeEventListener("change", sync, true);
+      document.removeEventListener("change", scheduleSync, true);
+      document.removeEventListener("input", scheduleSync, true);
     };
   }, []);
 

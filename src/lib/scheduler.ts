@@ -3,6 +3,7 @@ import { detectMissedShifts } from "@/lib/attendance";
 import { getSql } from "@/lib/db";
 import { runExpenseAutomation } from "@/lib/expense-control";
 import { payrollSummary } from "@/lib/operations";
+import { evaluateAndNotifyOvertimeRisk } from "@/lib/overtime-risk";
 import { generateDueRecurringInvoices } from "@/lib/receivables";
 import {
   createOperationIssue,
@@ -150,6 +151,27 @@ export async function runScheduledOperations(input: { force?: boolean; source?: 
       details.missedShifts = await detectMissedShifts();
     } catch (error) {
       details.missedShifts = { error: error instanceof Error ? error.message : String(error) };
+    }
+
+    try {
+      const [cornerDeli, tiki] = await Promise.all([
+        evaluateAndNotifyOvertimeRisk({
+          business: "Corner Deli",
+          source: "Nightly scheduler",
+          notify: true,
+        }),
+        evaluateAndNotifyOvertimeRisk({
+          business: "Tiki",
+          source: "Nightly scheduler",
+          notify: true,
+        }),
+      ]);
+      details.overtimeRisk = {
+        cornerDeli: cornerDeli.summary,
+        tiki: tiki.summary,
+      };
+    } catch (error) {
+      details.overtimeRisk = { error: error instanceof Error ? error.message : String(error) };
     }
 
     details.bankSync = await syncAllBankConnections();

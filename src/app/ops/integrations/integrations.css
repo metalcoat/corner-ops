@@ -10,6 +10,8 @@
 .connectionRow { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
 .connectionRow strong, .connectionRow small { display: block; }
 .connectionRow small { margin-top: 5px; color: var(--muted); }
+.connectionActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.connectionActions button { white-space: nowrap; }
 .miniStats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .miniStats div { padding: 13px; border: 1px solid var(--border); border-radius: 9px; background: #101620; }
 .miniStats span, .miniStats strong { display: block; }
@@ -29,5 +31,8 @@
   .integrationHeader { align-items: flex-start; flex-direction: column; }
   .integrationGrid { grid-template-columns: 1fr; }
   .miniStats { grid-template-columns: 1fr; }
+  .connectionRow { align-items: flex-start; flex-direction: column; }
+  .connectionActions { width: 100%; justify-content: stretch; }
+  .connectionActions button { flex: 1 1 180px; }
   .opsUtilityNav { left: 12px; right: 12px; justify-content: center; }
 }

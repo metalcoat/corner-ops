@@ -1,50 +1,60 @@
-# Corner Ops scheduler and integrations
+# Corner Ops integrations
 
-## Nightly scheduler
+## Plaid banks and cards
 
-Vercel Cron calls two UTC routes so one lands at 3 AM in `America/New_York` across daylight-saving changes. The route ignores the call that does not land at local hour 3 and de-duplicates each local date.
+A Plaid **Item** represents one institution login, not one individual bank account. When the same online-banking login exposes several checking, savings, or credit-card accounts, select all required accounts in a single Link session.
 
-Nightly work:
+For the Plaid Dashboard Link customization used by Corner Ops:
 
-- flag open Tiki punches for review
-- verify Corner Deli Rezku reports are fresh
-- synchronize all connected Plaid bank feeds
-- synchronize the connected Tiki Square seller
-- save previous-week payroll calculations on Mondays
-- send an issue digest when `ALERT_FROM_EMAIL` is configured
+1. Enable Account Select.
+2. Set the selection mode to Multiple or All.
+3. Assign that customization name to `PLAID_LINK_CUSTOMIZATION_NAME`.
+4. Connect each distinct institution login once.
 
-Required variable: `CRON_SECRET`.
+Existing Plaid connections have a **Manage shared accounts** action. It opens Plaid update mode with account selection enabled, allowing accounts to be added or removed without creating a second Item or exchanging a new public token.
 
-Cron jobs only execute on a production Vercel deployment.
+New Items request up to 730 days of Transactions history. Institutions can still return less history. Existing Items initialized with a shorter history window may need to be removed and relinked to request a larger window.
 
-## Bank mapping
+## Historical bank imports
 
-- SEACOMM connection → Corner Deli
-- NBT Bank connection → Tiki
+The Automation Center accepts CSV, XLS, and XLSX bank history files. The importer currently recognizes the supplied:
 
-Both use Plaid Transactions Sync. Each connection stores its own encrypted access token and cursor. Transactions enter a review queue, receive suggested GL categories, and can be approved with `Approve & teach` to create a future matching rule.
+- SEACOMM Corner Deli transaction-history export
+- NBT Bank At The Docks/Tiki transaction export
 
-Required variables:
+It also supports generic exports containing a transaction date, description, amount or debit/credit columns, and optional balance/account/check fields.
 
-- `PLAID_CLIENT_ID`
-- `PLAID_SECRET`
-- `PLAID_ENV=production` after Plaid production access is approved
+Historical imports:
 
-CSV and Excel import remains available when an institution is unavailable or temporarily broken in Plaid.
+- remain separate by business
+- preserve institution and account labels
+- parse parenthesized withdrawals and minus-sign withdrawals
+- generate stable transaction identifiers
+- can be reimported safely
+- compare against other feeds for strong duplicate matches
+- apply existing classification rules
+
+## Credit-card statements
+
+Card statements are handled under **Banking → Card statements**.
+
+Accepted files:
+
+- PDF
+- CSV
+- XLS
+- XLSX
+
+PDF statements are retained securely as source documents. Spreadsheet statements also extract transaction lines. Individual card purchases do not normally match checking-account transactions. The system instead matches the credit-card statement payment to an equal bank withdrawal near the statement date, then requires owner confirmation.
 
 ## Square
 
-Square is Tiki-only. Corner Ops uses Square OAuth, stores the seller token encrypted, and synchronizes payment and tip totals. Tiki employee time remains sourced from the Corner Ops PIN clock.
+Square supplies Tiki payment and tip activity. Corner Ops remains the employee time-clock source.
 
-Required variables:
+## Rezku
 
-- `SQUARE_APPLICATION_ID`
-- `SQUARE_APPLICATION_SECRET`
-- `SQUARE_ENV=production`
-- `SQUARE_API_VERSION=2026-07-15`
+Trusted Rezku daily-report emails provide Corner Deli labor, order, transaction, product-sales, and void information. Inbound report processing validates the sender, subject, and download host before importing workbooks.
 
-Register the following OAuth redirect URL in the Square Developer dashboard:
+## Scheduler
 
-```text
-https://<corner-ops-domain>/api/square/callback
-```
+The nightly scheduler performs operational checks and synchronizes configured feeds. Production deployments remain paused until the owner explicitly authorizes them.

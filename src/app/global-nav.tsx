@@ -9,6 +9,7 @@ type NavLink = {
   label: string;
   href: string;
   activePaths?: string[];
+  exact?: boolean;
 };
 
 type NotificationSummary = {
@@ -17,10 +18,14 @@ type NotificationSummary = {
 
 const links: NavLink[] = [
   { label: "Reports", href: "/ops/reports", activePaths: ["/ops/reports", "/ops/weather"] },
-  { label: "Banking", href: "/ops/banking", activePaths: ["/ops/banking", "/ops/accounting-control", "/ops/expense-control", "/ops/bank-accounts"] },
+  { label: "Banking", href: "/ops/banking", activePaths: ["/ops/banking", "/ops/accounting-control", "/ops/expense-control", "/ops/bank-accounts", "/ops/card-statements"] },
+  { label: "Finance", href: "/ops/finance-operations", exact: true },
+  { label: "Invoices", href: "/ops/finance-operations/invoice-ocr" },
   { label: "People", href: "/ops/people", activePaths: ["/ops/people", "/ops/workforce", "/ops/attendance", "/ops/payroll-control", "/ops/employees", "/ops/employment-forms", "/ops/rezku-monitor"] },
+  { label: "Overtime", href: "/ops/overtime" },
   { label: "Messages", href: "/ops/messages" },
   { label: "Settings", href: "/ops/settings", activePaths: ["/ops/settings", "/ops/integrations", "/ops/users"] },
+  { label: "Scan", href: "/scan" },
   { label: "Documents", href: "/" },
 ];
 
@@ -31,7 +36,7 @@ function validBusiness(value: string | null | undefined): value is Business {
 }
 
 function linkIsActive(pathname: string, link: NavLink): boolean {
-  if (link.href === "/") return pathname === link.href;
+  if (link.href === "/" || link.exact) return pathname === link.href;
   const paths = link.activePaths || [link.href];
   return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
@@ -41,7 +46,7 @@ export default function GlobalNav() {
   const [currentBusiness, setCurrentBusiness] = useState<Business>("Corner Deli");
   const [open, setOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const navHidden = pathname === "/clock" || pathname.startsWith("/employee") || pathname === "/signin";
+  const navHidden = pathname === "/clock" || pathname === "/scan" || pathname.startsWith("/employee") || pathname === "/signin";
 
   useEffect(() => setOpen(false), [pathname]);
 

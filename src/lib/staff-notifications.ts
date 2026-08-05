@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import { getSql } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
+import { employeePinLength } from "@/lib/employee-pin";
 import { ensureScheduleMealSchema, normalizeScheduledMealFields } from "@/lib/schedule-meal-storage";
 import { deliverSms, type SmsRecipient } from "@/lib/sms-notifications";
 import type { Business } from "@/lib/types";
@@ -87,11 +88,12 @@ function shiftLabel(shift: ScheduleShiftRow): string {
   return `${date}, ${time.format(start)}–${time.format(end)} — ${clean(shift.position, 100) || "Shift"}${mealParts.length ? ` [${mealParts.join(", ")}]` : ""}${notes ? `\n  ${notes}` : ""}`;
 }
 
-function employeeHubUrl(): string {
+function employeeHubUrl(business: Business): string {
+  const suffix = `/employee?business=${encodeURIComponent(business)}`;
   const configured = process.env.EMPLOYEE_APP_URL?.trim() || process.env.APP_URL?.trim();
-  if (configured) return `${configured.replace(/\/$/, "")}/employee`;
+  if (configured) return `${configured.replace(/\/$/, "")}${suffix}`;
   const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() || process.env.VERCEL_URL?.trim();
-  return vercelUrl ? `https://${vercelUrl.replace(/\/$/, "")}/employee` : "";
+  return vercelUrl ? `https://${vercelUrl.replace(/\/$/, "")}${suffix}` : "";
 }
 
 function emailConfiguration() {
@@ -324,7 +326,8 @@ export async function publishScheduleWeek(input: {
   const contacts = await activeContacts(input.business);
   const openShifts = shifts.filter((shift) => !shift.employee_id);
   const rangeLabel = `${dateLabel(weekStart)} through ${dateLabel(weekEnd)}`;
-  const hubUrl = employeeHubUrl();
+  const hubUrl = employeeHubUrl(input.business);
+  const pinLength = employeePinLength(input.business);
 
   await sql`
     INSERT INTO employee_messages (
@@ -352,6 +355,7 @@ export async function publishScheduleWeek(input: {
         schedule,
         openShifts.length ? `\nThere ${openShifts.length === 1 ? "is" : "are"} ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"} in Employee Hub.` : "",
         hubUrl ? `\nView the schedule: ${hubUrl}` : "",
+        hubUrl ? `Sign in with your ${pinLength}-digit employee PIN.` : "",
         "",
         "This email was sent by Corner Ops.",
       ].filter(Boolean).join("\n");
@@ -363,6 +367,7 @@ export async function publishScheduleWeek(input: {
     text: () => [
       `${input.business} schedule ${scheduleVerb} for ${dateLabel(weekStart)}-${dateLabel(weekEnd)}.`,
       hubUrl ? `Review: ${hubUrl}` : "Open Employee Hub to review.",
+      `Use your ${pinLength}-digit employee PIN.`,
       "Reply STOP to opt out.",
     ].join(" "),
   });
@@ -418,7 +423,8 @@ export async function sendStaffNotification(input: {
     )
   `;
 
-  const hubUrl = employeeHubUrl();
+  const hubUrl = employeeHubUrl(input.business);
+  const pinLength = employeePinLength(input.business);
   const email = await deliverEmails({
     recipients,
     subject: () => `${input.business} staff message`,
@@ -427,6 +433,7 @@ export async function sendStaffNotification(input: {
       "",
       body,
       hubUrl ? `\nOpen Employee Hub: ${hubUrl}` : "",
+      hubUrl ? `Sign in with your ${pinLength}-digit employee PIN.` : "",
       "",
       `Sent by ${input.actor} through Corner Ops.`,
     ].filter(Boolean).join("\n"),

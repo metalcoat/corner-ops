@@ -30,5 +30,6 @@ jobs:
         run: npm run build
         env:
           SESSION_SECRET: github-actions-build-placeholder-with-sufficient-length
+          EMPLOYMENT_FORMS_ENCRYPTION_KEY: github-actions-employment-key-placeholder-1234567890
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
           BLOB_READ_WRITE_TOKEN: vercel_blob_rw_placeholder

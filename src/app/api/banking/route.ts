@@ -1,6 +1,7 @@
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
-import { apiError, unauthorized } from "@/lib/http";
 import { applyBankCodingSuggestions, bankCodingIntelligence } from "@/lib/bank-coding-intelligence";
+import { bankFinancialInsights } from "@/lib/bank-financial-insights";
+import { apiError, unauthorized } from "@/lib/http";
 import type { Business } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -16,9 +17,19 @@ export async function GET(request: Request) {
     const session = await getSession();
     if (!session) return unauthorized();
     requirePermission(session, "accounting.read");
-    const business = businessFrom(new URL(request.url).searchParams.get("business") || "Corner Deli");
+    const url = new URL(request.url);
+    const business = businessFrom(url.searchParams.get("business") || "Corner Deli");
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
-    return Response.json(await bankCodingIntelligence(business));
+    const [coding, financial] = await Promise.all([
+      bankCodingIntelligence(business),
+      bankFinancialInsights({
+        business,
+        start: url.searchParams.get("start") || undefined,
+        end: url.searchParams.get("end") || undefined,
+        interval: url.searchParams.get("interval") || undefined,
+      }),
+    ]);
+    return Response.json({ ...coding, financial });
   } catch (error) {
     return apiError(error);
   }

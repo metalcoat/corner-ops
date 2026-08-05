@@ -1,14 +1,14 @@
 import { canAccessBusiness, getSession } from "@/lib/auth";
+import { importHistoricalBankFile } from "@/lib/historical-bank-import";
 import { apiError, unauthorized } from "@/lib/http";
 import {
   approveBankTransaction,
   exchangePlaidPublicToken,
-  importBankFile,
   integrationDashboard,
   syncBankConnection,
   syncSquareConnection,
 } from "@/lib/integrations";
-import { createResilientPlaidLinkToken } from "@/lib/plaid-link";
+import { createPlaidAccountSelectionToken, createResilientPlaidLinkToken } from "@/lib/plaid-link";
 import { runScheduledOperations } from "@/lib/scheduler";
 import type { Business } from "@/lib/types";
 
@@ -60,9 +60,10 @@ export async function POST(request: Request) {
       if (!/\.(csv|xlsx|xls)$/i.test(file.name)) {
         return Response.json({ error: "Bank imports must be CSV or Excel files." }, { status: 415 });
       }
-      const result = await importBankFile({
+      const result = await importHistoricalBankFile({
         business,
-        institutionName: String(form.get("institutionName") || "Bank CSV"),
+        institutionName: String(form.get("institutionName") || "Imported bank"),
+        accountName: String(form.get("accountName") || ""),
         fileName: file.name,
         bytes: await file.arrayBuffer(),
         actor: session.email,
@@ -87,6 +88,26 @@ export async function POST(request: Request) {
           error: error instanceof Error ? error.message : "Plaid could not start the bank connection.",
         }, { status: 502 });
       }
+    }
+
+    if (action === "plaid-update-token") {
+      const business = businessFrom(body.business);
+      if (!canAccessBusiness(session, business)) {
+        return Response.json({ error: "Business access denied." }, { status: 403 });
+      }
+      return Response.json(await createPlaidAccountSelectionToken({
+        business,
+        connectionId: String(body.connectionId || ""),
+        origin: new URL(request.url).origin,
+      }));
+    }
+
+    if (action === "plaid-update-complete") {
+      const business = businessFrom(body.business);
+      if (!canAccessBusiness(session, business)) {
+        return Response.json({ error: "Business access denied." }, { status: 403 });
+      }
+      return Response.json(await syncBankConnection(String(body.connectionId || "")));
     }
 
     if (action === "plaid-exchange") {

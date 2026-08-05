@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { importRezkuReport } from "@/lib/operations";
+import { evaluateAndNotifyOvertimeRisk } from "@/lib/overtime-risk";
 import { repairExistingRezkuTimesOnce, repairRezkuBatchTimes } from "@/lib/rezku-eastern-time";
 import { normalizeRezkuWorkbook } from "@/lib/rezku-workbook-normalize";
 
@@ -183,10 +184,26 @@ export async function importSafeRezkuReport(
     ) imported_rows
   ` as unknown as Array<{ imported: number }>;
 
+  const overtimeRisk = result.reportType === "shifts"
+    ? await evaluateAndNotifyOvertimeRisk({
+        business: "Corner Deli",
+        source: `Rezku labor import ${fileName}`,
+        notify: true,
+      }).then((dashboard) => ({
+        warning: dashboard.summary.warning,
+        overtime: dashboard.summary.overtime,
+        coverageMismatches: dashboard.summary.coverageMismatches,
+      })).catch((error) => {
+        console.error("[rezku/import] labor data saved but overtime check failed", error);
+        return null;
+      })
+    : null;
+
   return {
     ...result,
     imported: Number(counts[0]?.imported || 0),
     repaired,
     globalRepair,
+    overtimeRisk,
   };
 }

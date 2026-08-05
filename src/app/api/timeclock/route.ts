@@ -2,6 +2,7 @@ import { punchTiki } from "@/lib/operations";
 import { ensureWorkforceSchema } from "@/lib/workforce";
 import { getSql } from "@/lib/db";
 import { apiError } from "@/lib/http";
+import { evaluateAndNotifyOvertimeRisk } from "@/lib/overtime-risk";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,20 @@ export async function POST(request: Request) {
       accuracy: body.accuracy,
     });
 
-    if (result.action !== "clocked-in") return Response.json(result);
+    if (result.action === "clocked-out") {
+      const overtimeRisk = await evaluateAndNotifyOvertimeRisk({
+        business: "Tiki",
+        source: `Tiki clock-out by ${result.employee}`,
+        notify: true,
+      }).then((dashboard) => ({
+        warning: dashboard.summary.warning,
+        overtime: dashboard.summary.overtime,
+      })).catch((error) => {
+        console.error("[timeclock] punch saved but overtime check failed", error);
+        return null;
+      });
+      return Response.json({ ...result, overtimeRisk });
+    }
 
     await ensureWorkforceSchema();
     const instructions = await getSql()`

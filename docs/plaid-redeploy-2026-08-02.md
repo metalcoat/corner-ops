@@ -1,11 +1,7 @@
-# Plaid environment redeploy
+# Plaid and Corner Ops deployment status
 
-This commit triggers a fresh Preview deployment after Plaid environment variables were added or updated in Vercel.
+Production deployment is paused indefinitely until the owner explicitly authorizes another attempt.
 
-Expected Preview variables:
+Current Plaid, PWA, messaging, overtime, historical banking, and card-statement work remains on the deployment-disabled `agent/rebuild-corner-ops` branch and draft pull request #3.
 
-- `PLAID_CLIENT_ID`
-- `PLAID_SECRET`
-- `PLAID_ENV`
-
-A new deployment is required before the serverless functions can use changed environment values.
+Do not merge the draft pull request, move the branch to `main`, trigger a Vercel redeploy, or re-enable the deployment automation merely because a quota window has elapsed.
