@@ -1,8 +1,10 @@
 import { timingSafeEqual } from "node:crypto";
 import { apiError } from "@/lib/http";
 import { ingestThreeCxCdr, type ThreeCxCdrInput } from "@/lib/three-cx-cdr";
+import { notifyClockedInDeliEmployeesOfMissedCalls } from "@/lib/three-cx-missed-call-messages";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 function equal(left: string, right: string): boolean {
   const a = Buffer.from(left);
@@ -26,7 +28,9 @@ export async function POST(request: Request) {
     if (!authorized(request)) return Response.json({ error: "Invalid 3CX CDR secret." }, { status: 401 });
     const body = await request.json() as { records?: ThreeCxCdrInput[]; record?: ThreeCxCdrInput } | ThreeCxCdrInput[];
     const records = Array.isArray(body) ? body : Array.isArray(body.records) ? body.records : body.record ? [body.record] : [];
-    return Response.json(await ingestThreeCxCdr(records), { status: 202 });
+    const ingestion = await ingestThreeCxCdr(records);
+    const missedCallMessages = await notifyClockedInDeliEmployeesOfMissedCalls();
+    return Response.json({ ...ingestion, missedCallMessages }, { status: 202 });
   } catch (error) {
     return apiError(error);
   }
