@@ -1,0 +1,170 @@
+/* Shared cleanup for owner-facing operations pages. */
+.controlPage,
+.integrationShell,
+.rezkuMonitorPage,
+.reportsPage,
+.workforceShell,
+.overtimeShell {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.controlGrid,
+.controlCard,
+.integrationGrid,
+.integrationCard,
+.rezkuHealth,
+.rezkuPrimaryGrid,
+.rezkuLatestCard,
+.rezkuRecoveryCard,
+.reportMetricGrid,
+.intelligenceGrid,
+.metricGrid {
+  min-width: 0;
+}
+
+/* Keep summary metrics readable instead of allowing values to collide. */
+.controlPage .metricGrid,
+.reportsPage .reportMetricGrid {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)) !important;
+  gap: 12px !important;
+}
+
+.controlPage .metric,
+.reportsPage .reportMetric {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.controlPage .metric strong,
+.reportsPage .reportMetric strong {
+  max-width: 100%;
+  font-size: clamp(1.05rem, 2vw, 1.55rem) !important;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.controlPage .metric span,
+.controlPage .metric small,
+.reportsPage .reportMetric span,
+.reportsPage .reportMetric small {
+  overflow-wrap: anywhere;
+}
+
+/* Demand, weather, and next operating signal stay together. */
+.reportsPage .intelligenceGrid {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(220px, 1fr)) !important;
+  gap: 14px;
+  align-items: stretch;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+  padding-bottom: 4px;
+}
+
+.reportsPage .intelligenceCard {
+  min-width: 220px;
+  height: 100%;
+}
+
+/* Square is a Tiki-only source. Do not show the card while Corner Deli is selected. */
+html[data-business-theme="Corner Deli"] .integrationGrid > .integrationCard:nth-child(2) {
+  display: none !important;
+}
+
+/* Rezku monitor: keep every panel inside the viewport and make wide data intentionally scrollable. */
+.rezkuMonitorPage {
+  width: min(100%, 1500px);
+  padding-inline: clamp(12px, 2vw, 32px);
+  box-sizing: border-box;
+}
+
+.rezkuHealth,
+.rezkuPrimaryGrid {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.rezkuHealthStats,
+.rezkuReportItem,
+.rezkuHistoryItem,
+.rezkuHistoryBody,
+.rezkuHistoryReports,
+.rezkuRecoveryForm {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rezkuMonitorPage .tableWrap,
+.rezkuMonitorPage .dataTableWrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rezkuMonitorPage .controlTable,
+.rezkuMonitorPage .rezkuImportTable,
+.rezkuMonitorPage .rezkuExceptionTable {
+  width: max-content;
+  min-width: 100%;
+}
+
+.rezkuMonitorPage code,
+.rezkuMonitorPage small,
+.rezkuMonitorPage strong,
+.rezkuMonitorPage span,
+.rezkuMonitorPage p {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1150px) {
+  .reportsPage .intelligenceGrid {
+    grid-template-columns: repeat(3, minmax(240px, 1fr)) !important;
+  }
+
+  .rezkuHealthStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .reportsPage .reportMetricGrid,
+  .controlPage .metricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .reportsPage .intelligenceGrid {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(260px, 86vw);
+    grid-template-columns: none !important;
+  }
+
+  .rezkuMonitorPage {
+    padding-inline: 10px;
+  }
+
+  .rezkuHealth,
+  .rezkuPrimaryGrid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .rezkuHealthStats {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .rezkuRecoveryCard {
+    position: static !important;
+  }
+}
+
+@media (max-width: 440px) {
+  .reportsPage .reportMetricGrid,
+  .controlPage .metricGrid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
