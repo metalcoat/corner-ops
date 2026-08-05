@@ -27,6 +27,30 @@ The Banking area includes a card-statement reconciliation page. Owners can uploa
 
 A card statement is reconciled to the bank account through the statement payment, not by matching every card purchase to the bank feed. The system searches for equal bank withdrawals around the statement date and requires owner confirmation before marking a statement matched.
 
+## Automatic invoice OCR
+
+The **Invoices** owner navigation item opens `/ops/finance-operations/invoice-ocr`.
+
+Selecting a PDF, JPG, PNG, or WebP invoice automatically sends it to a Google Document AI Invoice Parser. Corner Ops extracts:
+
+- supplier/vendor name
+- invoice number
+- invoice and due dates
+- subtotal, tax, total, and currency
+- line descriptions, product codes, quantities, units, unit prices, and line totals
+- field and line confidence scores
+
+OCR results remain an editable draft. Warnings identify missing, low-confidence, or inconsistent fields. Nothing is written to accounts payable or inventory until the owner reviews the draft and chooses **Save reviewed bill**. The original invoice is then stored privately with the AP record.
+
+Required Google configuration:
+
+- `GOOGLE_CLOUD_PROJECT_ID`
+- `GOOGLE_SERVICE_ACCOUNT_EMAIL`
+- `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
+- `GOOGLE_DOCUMENT_AI_LOCATION`
+- `GOOGLE_DOCUMENT_AI_INVOICE_PROCESSOR_ID`
+- optional `GOOGLE_DOCUMENT_AI_INVOICE_PROCESSOR_VERSION`
+
 ## Overtime and shift coverage
 
 The overtime monitor calculates Corner Deli and Tiki independently and uses the Monday 4:00 AM to Monday 4:00 AM payroll week. It combines actual worked hours with remaining assigned shifts, warns at 38 hours, flags projected overtime above 40 hours, identifies unscheduled or substituted work, and suggests qualified same-business replacements.
@@ -45,6 +69,7 @@ Core deployment variables include:
 - `EMPLOYMENT_FORMS_ENCRYPTION_KEY` with at least 32 characters
 - `CRON_SECRET`
 - Plaid credentials and optional `PLAID_LINK_CUSTOMIZATION_NAME`
+- Google Document AI invoice OCR credentials
 - Resend and alert-email variables when email delivery is enabled
 
 Do not store live credentials in the repository.
