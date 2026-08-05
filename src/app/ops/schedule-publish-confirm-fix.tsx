@@ -32,7 +32,7 @@ export default function SchedulePublishConfirmFix() {
         try {
           const body = JSON.parse(init.body) as { action?: string };
           if (body.action === "week-publish") {
-            target = "/api/workforce/week-publish";
+            target = "/api/workforce/week-publish-v2";
             isSchedulePublish = true;
           }
         } catch {
@@ -41,10 +41,30 @@ export default function SchedulePublishConfirmFix() {
       }
 
       const response = await originalFetch(target, init);
-      if (isSchedulePublish && !response.ok) {
-        const payload = await response.clone().json().catch(() => null) as { error?: string } | null;
+      if (!isSchedulePublish) return response;
+
+      const payload = await response.clone().json().catch(() => null) as {
+        error?: string;
+        remainingDraftShiftIds?: string[];
+        draftEmployeesBefore?: string[];
+        targetWeekStart?: string;
+      } | null;
+
+      if (!response.ok) {
         window.alert(`Schedule publish failed:\n\n${payload?.error || `Request failed (${response.status}).`}`);
+        return response;
       }
+
+      const remaining = payload?.remainingDraftShiftIds?.length || 0;
+      if (remaining) {
+        window.alert(`Schedule publish returned successfully, but ${remaining} draft shift${remaining === 1 ? " remains" : "s remain"}.`);
+        return response;
+      }
+
+      const employees = payload?.draftEmployeesBefore?.filter(Boolean) || [];
+      const employeeLabel = employees.length ? ` for ${Array.from(new Set(employees)).join(", ")}` : "";
+      window.setTimeout(() => window.location.reload(), 250);
+      window.alert(`Schedule published${employeeLabel}. The page will refresh to verify the draft count.`);
       return response;
     };
 
