@@ -1,6 +1,7 @@
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { getSql } from "@/lib/db";
 import { apiError, unauthorized } from "@/lib/http";
+import { ensurePostgresStringTimestamps } from "@/lib/postgres-string-timestamps";
 import { publishValidatedScheduleWeek } from "@/lib/schedule-publish-validation";
 import { ensureStaffNotificationSchema } from "@/lib/staff-notifications";
 import type { Business } from "@/lib/types";
@@ -14,11 +15,11 @@ type ShiftRow = {
   id: string;
   employee_id: string | null;
   position: string;
-  starts_at: string;
-  ends_at: string;
-  meal_break_start: string | null;
+  starts_at: string | Date;
+  ends_at: string | Date;
+  meal_break_start: string | Date | null;
   meal_break_minutes: number;
-  extra_meal_break_start: string | null;
+  extra_meal_break_start: string | Date | null;
   extra_meal_break_minutes: number;
   notes: string;
   status: string;
@@ -55,6 +56,10 @@ function storedSchedules(value: unknown): Record<string, string> {
   );
 }
 
+function sortableTimestamp(value: string | Date): string {
+  return value instanceof Date ? value.toISOString() : String(value);
+}
+
 function currentSchedules(shifts: ShiftRow[]): Record<string, string> {
   const grouped = new Map<string, ShiftRow[]>();
   for (const shift of shifts) {
@@ -67,15 +72,15 @@ function currentSchedules(shifts: ShiftRow[]): Record<string, string> {
   return Object.fromEntries(Array.from(grouped.entries()).map(([employeeId, rows]) => [
     employeeId,
     rows
-      .sort((left, right) => left.starts_at.localeCompare(right.starts_at) || left.id.localeCompare(right.id))
+      .sort((left, right) => sortableTimestamp(left.starts_at).localeCompare(sortableTimestamp(right.starts_at)) || String(left.id).localeCompare(String(right.id)))
       .map((shift) => JSON.stringify({
         id: shift.id,
         position: clean(shift.position, 100),
-        startsAt: String(shift.starts_at),
-        endsAt: String(shift.ends_at),
-        mealBreakStart: shift.meal_break_start ? String(shift.meal_break_start) : null,
+        startsAt: sortableTimestamp(shift.starts_at),
+        endsAt: sortableTimestamp(shift.ends_at),
+        mealBreakStart: shift.meal_break_start ? sortableTimestamp(shift.meal_break_start) : null,
         mealBreakMinutes: Number(shift.meal_break_minutes || 0),
-        extraMealBreakStart: shift.extra_meal_break_start ? String(shift.extra_meal_break_start) : null,
+        extraMealBreakStart: shift.extra_meal_break_start ? sortableTimestamp(shift.extra_meal_break_start) : null,
         extraMealBreakMinutes: Number(shift.extra_meal_break_minutes || 0),
         notes: clean(shift.notes, 1000),
       }))
@@ -171,6 +176,7 @@ async function recoverDraftState(business: Business, weekStart: string) {
 
 export async function POST(request: Request) {
   try {
+    ensurePostgresStringTimestamps();
     const session = await getSession();
     if (!session) return unauthorized();
     const body = await request.json() as Record<string, unknown>;
