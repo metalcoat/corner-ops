@@ -134,6 +134,36 @@ export default function MessagesPage() {
     }
   }
 
+  async function deleteMessage(message: Message) {
+    const description = message.body.trim()
+      ? `“${message.body.trim().slice(0, 80)}${message.body.trim().length > 80 ? "…" : ""}”`
+      : message.attachment_name
+        ? "this photo message"
+        : "this message";
+    if (!window.confirm(`Delete ${description} for everyone? This cannot be undone.`)) return;
+
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/messages/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business, id: message.id }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      setData((current) => current ? {
+        ...current,
+        messages: current.messages.filter((item) => item.id !== message.id),
+      } : current);
+      window.dispatchEvent(new Event("corner-ops-notifications-refresh"));
+      setNotice("Message deleted for everyone.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Message could not be deleted.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!session) return <main className="controlPage">Loading messages…</main>;
   if (!session.authenticated) return <main className="controlPage"><a href="/signin">Sign in to Corner Ops</a></main>;
   const allowed = session.businesses?.length ? session.businesses : (["Corner Deli", "Tiki"] as Business[]);
@@ -159,7 +189,11 @@ export default function MessagesPage() {
         <div className="ownerMessageFeed">{(data?.messages || []).map((message) => {
           const displayName = message.sender_chat_nickname || firstName(message.sender_name);
           return <article className="ownerMessageItem" key={message.id} style={{ "--employee-color": message.sender_schedule_color || "#64748B" } as CSSProperties}>
-            <header><span className="ownerMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(business, message.sender_employee_id)} alt="" loading="lazy" /> : initials(displayName)}</span><div><strong>{displayName}</strong>{message.sender_chat_nickname && <small className="ownerMessageLegalName">{message.sender_name}</small>}<span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div><small>{local(message.created_at)}</small></header>
+            <header>
+              <span className="ownerMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(business, message.sender_employee_id)} alt="" loading="lazy" /> : initials(displayName)}</span>
+              <div><strong>{displayName}</strong>{message.sender_chat_nickname && <small className="ownerMessageLegalName">{message.sender_name}</small>}<span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div>
+              <div className="ownerMessageHeaderActions"><small>{local(message.created_at)}</small><button type="button" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button></div>
+            </header>
             {message.body && <p>{message.body}</p>}
             {message.attachment_name && <a className="ownerMessagePhoto" href={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer"><img src={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${displayName}`} loading="lazy" /><span>Open full photo</span></a>}
             <details className="messageReadReceipt"><summary>{message.expectedCount === 0 ? "No employee recipients" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary><div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {local(read.readAt)}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}{message.expectedCount > 0 && message.unseenNames.length === 0 && <p>Everyone has seen this message.</p>}</div></details>
