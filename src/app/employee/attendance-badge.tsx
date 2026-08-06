@@ -2,24 +2,23 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-type AttendancePayload = {
-  cases?: Array<{ status?: string }>;
+type AttendanceCountPayload = {
+  count?: number;
 };
 
 export default function EmployeeAttendanceBadge() {
   const [count, setCount] = useState(0);
 
   const refresh = useCallback(async () => {
+    if (document.visibilityState === "hidden") return;
     try {
-      const response = await fetch("/api/employee/attendance", { cache: "no-store" });
+      const response = await fetch("/api/employee/attendance/count", { cache: "no-store" });
       if (!response.ok) {
         setCount(0);
         return;
       }
-      const payload = await response.json() as AttendancePayload;
-      setCount((payload.cases || []).filter((item) =>
-        ["Awaiting Correction", "Rejected"].includes(String(item.status || "")),
-      ).length);
+      const payload = await response.json() as AttendanceCountPayload;
+      setCount(Math.max(0, Number(payload.count || 0)));
     } catch {
       setCount(0);
     }
@@ -28,13 +27,18 @@ export default function EmployeeAttendanceBadge() {
   useEffect(() => {
     void refresh();
     const onUpdate = () => void refresh();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
     window.addEventListener("focus", onUpdate);
     window.addEventListener("corner-ops-attendance-updated", onUpdate);
-    const interval = window.setInterval(onUpdate, 60_000);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const interval = window.setInterval(onUpdate, 5 * 60_000);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", onUpdate);
       window.removeEventListener("corner-ops-attendance-updated", onUpdate);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [refresh]);
 

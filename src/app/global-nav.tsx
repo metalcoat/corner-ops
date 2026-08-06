@@ -55,6 +55,7 @@ export default function GlobalNav() {
     let cancelled = false;
 
     async function refreshNotifications() {
+      if (document.visibilityState === "hidden") return;
       try {
         const response = await fetch("/api/messages?summary=nav", { cache: "no-store" });
         if (!response.ok) return;
@@ -70,7 +71,7 @@ export default function GlobalNav() {
     }
 
     void refreshNotifications();
-    const interval = window.setInterval(() => void refreshNotifications(), 30_000);
+    const interval = window.setInterval(() => void refreshNotifications(), 90_000);
     window.addEventListener("focus", refreshNotifications);
     window.addEventListener("corner-ops-notifications-refresh", refreshNotifications);
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -82,7 +83,7 @@ export default function GlobalNav() {
       window.removeEventListener("corner-ops-notifications-refresh", refreshNotifications);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [navHidden, pathname]);
+  }, [navHidden]);
 
   useEffect(() => {
     let restored = false;
