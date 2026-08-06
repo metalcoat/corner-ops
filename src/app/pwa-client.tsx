@@ -67,6 +67,7 @@ export default function PwaClient() {
   const syncedIdentity = useRef("");
 
   const refresh = useCallback(async () => {
+    if (document.visibilityState === "hidden") return;
     const audience = currentAudience();
     const response = await fetch(`/api/push?audience=${audience}`, { cache: "no-store" }).catch(() => null);
     if (!response?.ok) {
@@ -109,16 +110,21 @@ export default function PwaClient() {
       setInstallPrompt(null);
       setNotice("Corner Ops is installed on this device.");
     };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
     window.addEventListener("beforeinstallprompt", onInstallPrompt);
     window.addEventListener("appinstalled", onInstalled);
     window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     void refresh();
-    const interval = window.setInterval(() => void refresh(), 30_000);
+    const interval = window.setInterval(() => void refresh(), 15 * 60_000);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("beforeinstallprompt", onInstallPrompt);
       window.removeEventListener("appinstalled", onInstalled);
       window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [refresh]);
 
