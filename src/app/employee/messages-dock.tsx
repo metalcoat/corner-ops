@@ -238,12 +238,21 @@ export default function EmployeeMessagesDock() {
   }, [loadMessages, session]);
 
   useEffect(() => {
-    if (!session || !data?.messages.length) return;
+    if (!session || !data?.messages.length || !data.unreadMessageIds.length) return;
+    const unreadIds = new Set(data.unreadMessageIds);
+    const messageById = new Map(data.messages.map((message) => [message.id, message]));
     const observer = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting || entry.intersectionRatio < 0.6) continue;
         const messageId = (entry.target as HTMLElement).dataset.messageId || "";
-        if (!messageId || reportedSeen.current.has(messageId)) continue;
+        const message = messageById.get(messageId);
+        if (
+          !messageId
+          || !message
+          || message.sender_employee_id === session.employeeId
+          || !unreadIds.has(messageId)
+          || reportedSeen.current.has(messageId)
+        ) continue;
         reportedSeen.current.add(messageId);
         void fetch("/api/employee", {
           method: "POST",
@@ -261,7 +270,7 @@ export default function EmployeeMessagesDock() {
     }, { threshold: [0.6] });
     document.querySelectorAll<HTMLElement>("[data-message-id]").forEach((element) => observer.observe(element));
     return () => observer.disconnect();
-  }, [data?.messages, session]);
+  }, [data?.messages, data?.unreadMessageIds, session]);
 
   async function toggleExpanded() {
     const next = !expandedRef.current;
@@ -384,6 +393,7 @@ export default function EmployeeMessagesDock() {
   const currentDisplay = current?.chatNickname || firstName(session.name);
   const unreadIds = new Set(data?.unreadMessageIds || []);
   const unreadMessages = (data?.messages || []).filter((message) => unreadIds.has(message.id));
+  const displayedUnreadCount = data ? unreadMessages.length : status.unreadCount;
   const previewMessage = unreadMessages[0] || data?.messages[0];
   const previewSender = previewMessage
     ? previewMessage.sender_chat_nickname || firstName(previewMessage.sender_name)
@@ -392,13 +402,13 @@ export default function EmployeeMessagesDock() {
     || (previewMessage?.attachment_name ? "Photo message" : "")
     || status.preview?.body
     || (status.preview?.hasPhoto ? "Photo message" : "");
-  const previewText = status.unreadCount
+  const previewText = displayedUnreadCount
     ? compact(`${previewSender}: ${previewBody || "New message"}`)
     : status.latestMessageId
       ? "All caught up"
       : "No messages yet";
 
-  return <aside className={`employeeMessagesDock ${expanded ? "isOpen" : "isCollapsed"} ${status.unreadCount ? "hasUnread" : ""}`} aria-label="Employee messages">
+  return <aside className={`employeeMessagesDock ${expanded ? "isOpen" : "isCollapsed"} ${displayedUnreadCount ? "hasUnread" : ""}`} aria-label="Employee messages">
     <header className="employeeMessagesMobileHeader">
       <button
         className="employeeMessagesToggle"
@@ -411,7 +421,7 @@ export default function EmployeeMessagesDock() {
         <span className="employeeMessagesCompactCopy">
           <span className="employeeMessagesCompactTitle">
             Messages
-            {status.unreadCount ? <span className="employeeMessagesUnreadCount">{status.unreadCount}</span> : null}
+            {displayedUnreadCount ? <span className="employeeMessagesUnreadCount">{displayedUnreadCount}</span> : null}
           </span>
           <span className="employeeMessagesPreview">{previewText}</span>
         </span>
