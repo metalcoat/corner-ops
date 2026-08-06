@@ -1,6 +1,7 @@
 import { del, put } from "@vercel/blob";
 import { getEmployeeSession, type EmployeeSession } from "@/lib/employee-auth";
 import { listDirectoryEmployees } from "@/lib/employee-directory-admin";
+import { employeePortalDashboard } from "@/lib/employee-portal-dashboard";
 import { setEmployeeProfilePhoto, updateEmployeeChatNickname } from "@/lib/employee-profile";
 import { apiError, unauthorized } from "@/lib/http";
 import { sendEmployeePhotoMessage } from "@/lib/message-attachments";
@@ -8,7 +9,6 @@ import { markEmployeeMessageSeen } from "@/lib/message-reads";
 import { notifyRecipientsOfEmployeeMessage } from "@/lib/push-notifications";
 import {
   createShiftRequest,
-  employeeDashboard,
   requestTimeCorrection,
   requestTimeOff,
   respondToShiftRequest,
@@ -57,7 +57,7 @@ export async function GET() {
     const session = await getEmployeeSession();
     if (!session) return unauthorized();
     const [dashboard, directory] = await Promise.all([
-      employeeDashboard(session),
+      employeePortalDashboard(session),
       listDirectoryEmployees(session.business),
     ]);
     const byId = new Map(directory.map((employee) => [employee.id, employee]));
