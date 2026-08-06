@@ -41,6 +41,23 @@ type EmployeeData = {
   unreadMessageIds: string[];
 };
 
+type MessageStatus = {
+  unreadCount: number;
+  latestMessageId: string | null;
+  preview: {
+    senderName: string;
+    body: string;
+    hasPhoto: boolean;
+    createdAt: string;
+  } | null;
+};
+
+const emptyStatus: MessageStatus = {
+  unreadCount: 0,
+  latestMessageId: null,
+  preview: null,
+};
+
 async function responseMessage(response: Response): Promise<string> {
   const payload = await response.json().catch(() => null) as { error?: string } | null;
   return payload?.error || `Request failed (${response.status}).`;
@@ -89,46 +106,136 @@ function avatarUrl(employeeId: string): string {
 export default function EmployeeMessagesDock() {
   const [session, setSession] = useState<EmployeeSession | null>(null);
   const [data, setData] = useState<EmployeeData | null>(null);
+  const [status, setStatus] = useState<MessageStatus>(emptyStatus);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [expanded, setExpanded] = useState(false);
   const reportedSeen = useRef(new Set<string>());
+  const sessionRef = useRef<EmployeeSession | null>(null);
+  const expandedRef = useRef(false);
+  const hasLoadedRef = useRef(false);
+  const loadedLatestIdRef = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
+  const loadMessages = useCallback(async () => {
+    const response = await fetch("/api/employee/messages?limit=80", { cache: "no-store" });
+    if (!response.ok) throw new Error(await responseMessage(response));
+    const payload = await response.json() as EmployeeData;
+    const next: EmployeeData = {
+      employee: payload.employee,
+      messages: payload.messages || [],
+      directory: payload.directory || [],
+      unreadMessageIds: payload.unreadMessageIds || [],
+    };
+    hasLoadedRef.current = true;
+    loadedLatestIdRef.current = next.messages[0]?.id || null;
+    setData(next);
+    setStatus((current) => ({
+      unreadCount: Math.max(current.unreadCount, next.unreadMessageIds.length),
+      latestMessageId: next.messages[0]?.id || null,
+      preview: next.messages[0] ? {
+        senderName: next.messages[0].sender_chat_nickname || firstName(next.messages[0].sender_name),
+        body: next.messages[0].body || "",
+        hasPhoto: Boolean(next.messages[0].attachment_name),
+        createdAt: next.messages[0].created_at,
+      } : null,
+    }));
+  }, []);
+
+  const loadStatus = useCallback(async () => {
+    const response = await fetch("/api/employee/messages/status", { cache: "no-store" });
+    if (!response.ok) {
+      if (response.status === 401) {
+        sessionRef.current = null;
+        setSession(null);
+        setData(null);
+        setStatus(emptyStatus);
+        hasLoadedRef.current = false;
+        loadedLatestIdRef.current = null;
+        return;
+      }
+      throw new Error(await responseMessage(response));
+    }
+    const next = await response.json() as MessageStatus;
+    setStatus({
+      unreadCount: Math.max(0, Number(next.unreadCount || 0)),
+      latestMessageId: next.latestMessageId || null,
+      preview: next.preview || null,
+    });
+    if (
+      expandedRef.current
+      && hasLoadedRef.current
+      && next.latestMessageId !== loadedLatestIdRef.current
+    ) {
+      await loadMessages();
+    }
+  }, [loadMessages]);
+
+  const checkSession = useCallback(async () => {
     const sessionResponse = await fetch("/api/employee/session", { cache: "no-store" });
     if (!sessionResponse.ok) return;
     const sessionPayload = await sessionResponse.json() as { session?: EmployeeSession | null };
     const activeSession = sessionPayload.session || null;
+    sessionRef.current = activeSession;
     setSession(activeSession);
     if (!activeSession) {
       setData(null);
+      setStatus(emptyStatus);
       setExpanded(false);
+      expandedRef.current = false;
+      hasLoadedRef.current = false;
+      loadedLatestIdRef.current = null;
       reportedSeen.current.clear();
       return;
     }
 
-    const [response, unreadResponse] = await Promise.all([
-      fetch("/api/employee", { cache: "no-store" }),
-      fetch("/api/employee/messages/unread", { cache: "no-store" }),
-    ]);
-    if (!response.ok) throw new Error(await responseMessage(response));
-    const payload = await response.json() as Omit<EmployeeData, "unreadMessageIds">;
-    const unreadPayload = unreadResponse.ok
-      ? await unreadResponse.json() as { unreadMessageIds?: string[] }
-      : { unreadMessageIds: [] };
-    setData({
-      employee: payload.employee,
-      messages: payload.messages || [],
-      directory: payload.directory || [],
-      unreadMessageIds: unreadPayload.unreadMessageIds || [],
-    });
-  }, []);
+    await loadStatus();
+    if (window.matchMedia("(min-width: 1101px)").matches && !hasLoadedRef.current) {
+      await loadMessages();
+    }
+  }, [loadMessages, loadStatus]);
 
   useEffect(() => {
-    void load().catch((error) => setNotice(error instanceof Error ? error.message : "Messages could not be loaded."));
-    const interval = window.setInterval(() => void load().catch(() => undefined), session ? 30_000 : 5_000);
-    return () => window.clearInterval(interval);
-  }, [load, session]);
+    void checkSession().catch((error) => setNotice(error instanceof Error ? error.message : "Messages could not be loaded."));
+    const onSessionCheck = () => void checkSession().catch(() => undefined);
+    window.addEventListener("pageshow", onSessionCheck);
+    window.addEventListener("focus", onSessionCheck);
+    const interval = window.setInterval(() => {
+      if (!sessionRef.current) void checkSession().catch(() => undefined);
+    }, 15_000);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("pageshow", onSessionCheck);
+      window.removeEventListener("focus", onSessionCheck);
+    };
+  }, [checkSession]);
+
+  useEffect(() => {
+    if (!session) return;
+    const poll = () => {
+      if (document.visibilityState === "visible") void loadStatus().catch(() => undefined);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") poll();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const interval = window.setInterval(poll, 90_000);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [loadStatus, session]);
+
+  useEffect(() => {
+    if (!session) return;
+    const media = window.matchMedia("(min-width: 1101px)");
+    const onChange = () => {
+      if (media.matches && !hasLoadedRef.current) {
+        void loadMessages().catch((error) => setNotice(error instanceof Error ? error.message : "Messages could not be loaded."));
+      }
+    };
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [loadMessages, session]);
 
   useEffect(() => {
     if (!session || !data?.messages.length) return;
@@ -148,12 +255,26 @@ export default function EmployeeMessagesDock() {
             ...current,
             unreadMessageIds: current.unreadMessageIds.filter((id) => id !== messageId),
           } : current);
+          setStatus((current) => ({ ...current, unreadCount: Math.max(0, current.unreadCount - 1) }));
         }).catch(() => reportedSeen.current.delete(messageId));
       }
     }, { threshold: [0.6] });
     document.querySelectorAll<HTMLElement>("[data-message-id]").forEach((element) => observer.observe(element));
     return () => observer.disconnect();
   }, [data?.messages, session]);
+
+  async function toggleExpanded() {
+    const next = !expandedRef.current;
+    expandedRef.current = next;
+    setExpanded(next);
+    if (!next) return;
+    try {
+      if (!hasLoadedRef.current) await loadMessages();
+      else await loadStatus();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Messages could not be loaded.");
+    }
+  }
 
   async function updateNickname(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -167,7 +288,7 @@ export default function EmployeeMessagesDock() {
         body: JSON.stringify({ action: "nickname-update", nickname: form.get("nickname") }),
       });
       if (!response.ok) throw new Error(await responseMessage(response));
-      await load();
+      await loadMessages();
       setNotice(String(form.get("nickname") || "").trim() ? "Chat nickname updated." : "Chat nickname cleared.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Chat nickname could not be updated.");
@@ -193,7 +314,8 @@ export default function EmployeeMessagesDock() {
       const response = await fetch("/api/employee", { method: "POST", body: form });
       if (!response.ok) throw new Error(await responseMessage(response));
       formElement.reset();
-      await load();
+      await loadMessages();
+      await loadStatus();
       setNotice(photo ? "Photo message sent." : "Message sent.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Message could not be sent.");
@@ -225,6 +347,8 @@ export default function EmployeeMessagesDock() {
         messages: current.messages.filter((item) => item.id !== message.id),
         unreadMessageIds: current.unreadMessageIds.filter((id) => id !== message.id),
       } : current);
+      await loadStatus();
+      if (message.id === loadedLatestIdRef.current) await loadMessages();
       setNotice("Message deleted for everyone.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Message could not be deleted.");
@@ -244,7 +368,7 @@ export default function EmployeeMessagesDock() {
       const response = await fetch("/api/employee", { method: "POST", body: form });
       if (!response.ok) throw new Error(await responseMessage(response));
       formElement.reset();
-      await load();
+      await loadMessages();
       setNotice("Your schedule and message icon was updated.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Profile photo could not be uploaded.");
@@ -263,27 +387,31 @@ export default function EmployeeMessagesDock() {
   const previewMessage = unreadMessages[0] || data?.messages[0];
   const previewSender = previewMessage
     ? previewMessage.sender_chat_nickname || firstName(previewMessage.sender_name)
-    : "";
-  const previewText = unreadMessages.length
-    ? compact(`${previewSender}: ${previewMessage?.body || (previewMessage?.attachment_name ? "Photo message" : "New message")}`)
-    : data?.messages.length
+    : status.preview?.senderName || "";
+  const previewBody = previewMessage?.body
+    || (previewMessage?.attachment_name ? "Photo message" : "")
+    || status.preview?.body
+    || (status.preview?.hasPhoto ? "Photo message" : "");
+  const previewText = status.unreadCount
+    ? compact(`${previewSender}: ${previewBody || "New message"}`)
+    : status.latestMessageId
       ? "All caught up"
       : "No messages yet";
 
-  return <aside className={`employeeMessagesDock ${expanded ? "isOpen" : "isCollapsed"} ${unreadMessages.length ? "hasUnread" : ""}`} aria-label="Employee messages">
+  return <aside className={`employeeMessagesDock ${expanded ? "isOpen" : "isCollapsed"} ${status.unreadCount ? "hasUnread" : ""}`} aria-label="Employee messages">
     <header className="employeeMessagesMobileHeader">
       <button
         className="employeeMessagesToggle"
         type="button"
         aria-expanded={expanded}
         aria-controls="employee-messages-panel"
-        onClick={() => setExpanded((value) => !value)}
+        onClick={() => void toggleExpanded()}
       >
         <span className="employeeMessagesBell" aria-hidden="true">✉</span>
         <span className="employeeMessagesCompactCopy">
           <span className="employeeMessagesCompactTitle">
             Messages
-            {unreadMessages.length ? <span className="employeeMessagesUnreadCount">{unreadMessages.length}</span> : null}
+            {status.unreadCount ? <span className="employeeMessagesUnreadCount">{status.unreadCount}</span> : null}
           </span>
           <span className="employeeMessagesPreview">{previewText}</span>
         </span>
@@ -296,7 +424,7 @@ export default function EmployeeMessagesDock() {
         <span className="employeeMessageAvatar large">{current?.avatarSet ? <img src={avatarUrl(session.employeeId)} alt="Your profile" /> : initials(currentDisplay)}</span>
         <div><p className="employeeMessagesEyebrow">Team chat</p><h2>Messages</h2><small>{current?.chatNickname ? `${current.chatNickname} · ${session.name}` : session.name}</small></div>
       </div>
-      <button type="button" onClick={() => void load()} disabled={busy} aria-label="Refresh messages">Refresh</button>
+      <button type="button" onClick={() => void loadMessages()} disabled={busy} aria-label="Refresh messages">Refresh</button>
     </header>
 
     <div className="employeeMessagesPanel" id="employee-messages-panel">
