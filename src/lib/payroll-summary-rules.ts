@@ -6,6 +6,7 @@ const TIME_ZONE = "America/New_York";
 const TIP_MULTIPLIER = 0.965;
 const CUTOFF_HOUR = 15;
 const DRIVER_GRACE_MINUTES = 35;
+const LATE_TIP_LOOKAHEAD_DAYS = 14;
 
 type RoleGroup = "Driver" | "In-House" | "Ignore";
 
@@ -58,6 +59,21 @@ type DailySource = {
   deliveryGrossCents: number;
   pickupGrossCents: number;
   unclassifiedGrossCents: number;
+};
+
+type ScheduledDriver = {
+  employeeName: string;
+  position: string;
+  startsAt: Date;
+  endsAt: Date;
+};
+
+type DriverCoverageWarning = {
+  date: string;
+  orderCount: number;
+  tipsBeforeFee: number;
+  scheduledDrivers: string[];
+  message: string;
 };
 
 function numberValue(value: unknown): number {
@@ -156,8 +172,12 @@ function localDayKey(date: Date): string {
   }).format(date);
 }
 
+function isDriverPosition(position: string): boolean {
+  return /\b(driver|delivery|deliveries)\b/i.test(position);
+}
+
 function isDriver(shift: Shift): boolean {
-  return shift.roleGroup === "Driver" || /\b(driver|delivery|deliveries)\b/i.test(shift.position);
+  return shift.roleGroup === "Driver" || isDriverPosition(shift.position);
 }
 
 function isEligible(shift: Shift): boolean {
@@ -202,6 +222,18 @@ function lastSignedOut(shifts: Shift[], transaction: Transaction, predicate: (sh
   const candidates = alreadyOut.length ? alreadyOut : sameDay;
   const latest = Math.max(...candidates.map((shift) => shift.clockOut?.getTime() || 0), 0);
   return uniqueEmployees(candidates.filter((shift) => shift.clockOut?.getTime() === latest));
+}
+
+function nextDriversWithinGrace(shifts: Shift[], time: Date): Shift[] {
+  const graceEnd = time.getTime() + DRIVER_GRACE_MINUTES * 60_000;
+  const candidates = shifts.filter((shift) => isEligible(shift)
+    && isDriver(shift)
+    && shift.clockIn
+    && shift.clockIn.getTime() > time.getTime()
+    && shift.clockIn.getTime() <= graceEnd);
+  if (!candidates.length) return [];
+  const earliestClockIn = Math.min(...candidates.map((shift) => shift.clockIn?.getTime() || Number.MAX_SAFE_INTEGER));
+  return uniqueEmployees(candidates.filter((shift) => shift.clockIn?.getTime() === earliestClockIn));
 }
 
 function splitCents(totalCents: number, count: number): number[] {
@@ -353,17 +385,21 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
       if (eligible.length) {
         rule = "After 3 PM delivery order: assigned to driver clocked in";
       } else {
-        const graceEnd = time.getTime() + DRIVER_GRACE_MINUTES * 60_000;
-        eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift)
-          && isDriver(shift)
-          && shift.clockIn
-          && shift.clockIn.getTime() > time.getTime()
-          && shift.clockIn.getTime() <= graceEnd));
-        if (eligible.length) rule = "After 3 PM delivery order: driver arrived within 35 minutes";
+        eligible = nextDriversWithinGrace(shifts, time);
+        if (eligible.length) rule = "After 3 PM delivery order: next driver arrived within 35 minutes";
       }
+
       if (!eligible.length) {
-        eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, time)));
-        rule = "After 3 PM delivery fallback: equally split among non-driver employees clocked in";
+        details.push({
+          ...detailBase(transaction),
+          allocatedTipBeforeFee: 0,
+          feeAmount: 0,
+          allocatedTip: 0,
+          employee: "Unallocated",
+          splitCount: 0,
+          rule: "After 3 PM delivery: no driver clocked in or arriving within 35 minutes",
+        });
+        continue;
       }
     } else {
       eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, time)));
@@ -377,9 +413,7 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
       eligible = lastSignedOut(shifts, transaction, predicate);
       rule = beforeThree
         ? "Before 3 PM after-close fallback: equally split among employees who signed out last"
-        : delivery
-          ? "After 3 PM delivery fallback: equally split among non-drivers who signed out last"
-          : "After 3 PM pickup fallback: equally split among non-drivers who signed out last";
+        : "After 3 PM pickup fallback: equally split among non-drivers who signed out last";
     }
 
     if (!eligible.length) {
@@ -484,13 +518,100 @@ function deduplicateTransactionRows(rows: Array<Record<string, unknown>>) {
   const result: Array<Record<string, unknown>> = [];
   for (const group of groups.values()) {
     const detailed = group.filter((row) => rawHasClock(row.raw, ["Transaction Time", "Payment Time", "Created At", "Time"]));
-    if (detailed.length) {
-      result.push(...detailed);
-    } else {
-      result.push(group[0]);
-    }
+    if (detailed.length) result.push(...detailed);
+    else result.push(group[0]);
   }
   return result;
+}
+
+async function scheduledDriversForWeek(business: Business, start: Date, end: Date): Promise<ScheduledDriver[]> {
+  if (business !== "Corner Deli") return [];
+  try {
+    const scheduleEnd = new Date(end.getTime() + DRIVER_GRACE_MINUTES * 60_000);
+    const rows = await getSql()`
+      SELECT s.position, s.starts_at, s.ends_at, e.name AS employee_name, e.position AS employee_position
+      FROM schedule_shifts s
+      LEFT JOIN employees e ON e.id = s.employee_id
+      WHERE s.business = ${business}
+        AND s.status = 'Published'
+        AND s.starts_at < ${scheduleEnd.toISOString()}
+        AND s.ends_at > ${start.toISOString()}
+      ORDER BY s.starts_at
+    ` as unknown as Array<Record<string, unknown>>;
+
+    return rows.map((row) => {
+      const startsAt = dateValue(row.starts_at);
+      const endsAt = dateValue(row.ends_at);
+      const scheduledPosition = String(row.position || "").trim();
+      const employeePosition = String(row.employee_position || "").trim();
+      return {
+        employeeName: canonicalEmployeeName(row.employee_name),
+        position: scheduledPosition || employeePosition,
+        startsAt,
+        endsAt,
+        driverPosition: isDriverPosition(scheduledPosition) || isDriverPosition(employeePosition),
+      };
+    }).filter((row): row is ScheduledDriver & { driverPosition: true } => Boolean(
+      row.employeeName && row.startsAt && row.endsAt && row.driverPosition,
+    )).map((row) => ({
+      employeeName: row.employeeName,
+      position: row.position,
+      startsAt: row.startsAt,
+      endsAt: row.endsAt,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function driverCoverageWarnings(
+  details: Array<Record<string, unknown>>,
+  scheduledDrivers: ScheduledDriver[],
+): DriverCoverageWarning[] {
+  const byDay = new Map<string, {
+    orderKeys: Set<string>;
+    tipsCents: number;
+    scheduledDrivers: Set<string>;
+  }>();
+
+  for (const detail of details) {
+    if (detail.employee !== "Unallocated") continue;
+    if (!String(detail.rule || "").startsWith("After 3 PM delivery: no driver")) continue;
+    const openedAt = dateValue(detail.orderOpenedAt);
+    if (!openedAt) continue;
+    const date = localDayKey(openedAt);
+    const current = byDay.get(date) || {
+      orderKeys: new Set<string>(),
+      tipsCents: 0,
+      scheduledDrivers: new Set<string>(),
+    };
+    const orderKey = `${String(detail.orderId || "")}|${openedAt.toISOString()}|${String(detail.transactionTime || "")}`;
+    if (!current.orderKeys.has(orderKey)) {
+      current.orderKeys.add(orderKey);
+      current.tipsCents += Math.round(numberValue(detail.originalTip) * 100);
+    }
+
+    const graceEnd = openedAt.getTime() + DRIVER_GRACE_MINUTES * 60_000;
+    for (const scheduled of scheduledDrivers) {
+      if (scheduled.startsAt.getTime() <= graceEnd && scheduled.endsAt.getTime() >= openedAt.getTime()) {
+        current.scheduledDrivers.add(scheduled.employeeName);
+      }
+    }
+    byDay.set(date, current);
+  }
+
+  return [...byDay.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, value]) => {
+    const names = [...value.scheduledDrivers].sort();
+    return {
+      date,
+      orderCount: value.orderKeys.size,
+      tipsBeforeFee: value.tipsCents / 100,
+      scheduledDrivers: names,
+      message: names.length
+        ? `Driver punch missing: ${names.join(", ")} was scheduled, but no qualifying Driver punch covered these deliveries or started within 35 minutes.`
+        : "No driver coverage: delivery tips are unallocated because no qualifying Driver punch covered the orders or started within 35 minutes.",
+    };
+  });
 }
 
 export async function payrollSummary(business: Business, weekStart: string) {
@@ -498,29 +619,41 @@ export async function payrollSummary(business: Business, weekStart: string) {
 
   const bounds = weekBounds(weekStart);
   const transactionSearchStart = new Date(bounds.start.getTime() - 24 * 60 * 60 * 1000);
-  const transactionSearchEnd = new Date(bounds.end.getTime() + 24 * 60 * 60 * 1000);
-  const shiftRows = await getSql()`
-    SELECT id, employee_name, position, role_group, clock_in, clock_out, reported_hours
-    FROM rezku_shifts
-    WHERE clock_in >= ${bounds.start.toISOString()}
-      AND clock_in < ${bounds.end.toISOString()}
-    ORDER BY clock_in
-  ` as unknown as Array<Record<string, unknown>>;
-  const orderRows = await getSql()`
-    SELECT order_id, opened_at, order_type, raw
-    FROM rezku_orders
-    WHERE opened_at >= ${bounds.start.toISOString()}
-      AND opened_at < ${bounds.end.toISOString()}
-    ORDER BY opened_at
-  ` as unknown as Array<Record<string, unknown>>;
-  const rawTransactionRows = await getSql()`
-    SELECT id, order_id, transaction_time, tip, raw
-    FROM rezku_transactions
-    WHERE transaction_time >= ${transactionSearchStart.toISOString()}
-      AND transaction_time < ${transactionSearchEnd.toISOString()}
-      AND tip <> 0
-    ORDER BY transaction_time
-  ` as unknown as Array<Record<string, unknown>>;
+  const transactionSearchEnd = new Date(bounds.end.getTime() + LATE_TIP_LOOKAHEAD_DAYS * 24 * 60 * 60 * 1000);
+  const orderSearchStart = new Date(bounds.start.getTime() - LATE_TIP_LOOKAHEAD_DAYS * 24 * 60 * 60 * 1000);
+  const orderSearchEnd = new Date(bounds.end.getTime() + 24 * 60 * 60 * 1000);
+
+  const [shiftRows, orderRows, rawTransactionRows, scheduledDrivers] = await Promise.all([
+    getSql()`
+      SELECT id, employee_name, position, role_group, clock_in, clock_out, reported_hours
+      FROM rezku_shifts
+      WHERE clock_in >= ${bounds.start.toISOString()}
+        AND clock_in < ${bounds.end.toISOString()}
+      ORDER BY clock_in
+    `,
+    getSql()`
+      SELECT order_id, opened_at, order_type, raw
+      FROM rezku_orders
+      WHERE opened_at >= ${orderSearchStart.toISOString()}
+        AND opened_at < ${orderSearchEnd.toISOString()}
+      ORDER BY opened_at
+    `,
+    getSql()`
+      SELECT id, order_id, transaction_time, tip, raw
+      FROM rezku_transactions
+      WHERE transaction_time >= ${transactionSearchStart.toISOString()}
+        AND transaction_time < ${transactionSearchEnd.toISOString()}
+        AND tip <> 0
+      ORDER BY transaction_time
+    `,
+    scheduledDriversForWeek(business, bounds.start, bounds.end),
+  ]) as unknown as [
+    Array<Record<string, unknown>>,
+    Array<Record<string, unknown>>,
+    Array<Record<string, unknown>>,
+    ScheduledDriver[],
+  ];
+
   const transactionRows = deduplicateTransactionRows(rawTransactionRows);
 
   const shifts: Shift[] = shiftRows
@@ -576,6 +709,17 @@ export async function payrollSummary(business: Business, weekStart: string) {
 
   const summary = summarizeShifts(shifts);
   const allocation = allocateTips(shifts, transactions, summary);
+  const coverageWarnings = driverCoverageWarnings(allocation.details, scheduledDrivers);
+  const warningByDate = new Map(coverageWarnings.map((warning) => [warning.date, warning]));
+  const dailyTipReconciliation = allocation.dailyTipReconciliation.map((day) => {
+    const warning = warningByDate.get(day.date);
+    if (!warning) return day;
+    return {
+      ...day,
+      status: warning.scheduledDrivers.length ? "Driver punch missing" : "No driver coverage",
+    };
+  });
+
   const rows = [...summary.values()]
     .map((row) => {
       const hours = Math.round(row.hours * 100) / 100;
@@ -598,16 +742,18 @@ export async function payrollSummary(business: Business, weekStart: string) {
       };
     })
     .sort((left, right) => left.employee.localeCompare(right.employee));
+
   const tipJoinIssues = allocation.details.filter((detail) => detail.employee === "Unallocated");
 
   return {
     business,
-    source: "Rezku daily email reports · daily pre-fee tip pool reconciled to Order Export type and opened time",
+    source: "Rezku daily email reports · tips allocated by Order Export opened time · 35-minute future-driver grace",
     weekStart,
     weekEnd: new Date(bounds.end.getTime() - 1).toISOString(),
     rows,
     tipDetails: allocation.details.slice(-500).reverse(),
     tipJoinIssues: tipJoinIssues.slice(-200).reverse(),
-    dailyTipReconciliation: allocation.dailyTipReconciliation,
+    driverCoverageWarnings: coverageWarnings,
+    dailyTipReconciliation,
   };
 }
