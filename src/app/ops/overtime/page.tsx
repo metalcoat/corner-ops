@@ -72,7 +72,7 @@ type Dashboard = {
   generatedAt: string;
   paceAsOf?: string;
   suppressedMinorTimingDifferences?: number;
-  thresholds: { warning: number; overtime: number };
+  thresholds: { warning: number; overtime: number; projectionAlertWeekProgress?: number };
   summary: { activeEmployees: number; warning: number; overtime: number; coverageMismatches: number };
   risks: RiskItem[];
   coverageMismatches: CoverageMismatch[];
@@ -181,7 +181,7 @@ export default function OvertimeRiskPage() {
       <div>
         <p className="otEyebrow">Daily pace + weekly projection</p>
         <h1>Overtime & Shift Coverage</h1>
-        <p>Compares hours actually worked with the hours each employee should have reached by this point in the week, then keeps the remaining schedule projection and overtime status.</p>
+        <p>Compares hours actually worked with where each employee should be by this point in the week. Full-week projections remain visible for planning, but projected-hour warnings wait until about 75% of the week has elapsed unless actual worked hours already reach the warning threshold.</p>
       </div>
       <div className="otBusinessSwitch">
         {(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "selected" : ""} onClick={() => setBusiness(name)}>{name}</button>)}
@@ -191,7 +191,7 @@ export default function OvertimeRiskPage() {
     <div className="overtimeActions">
       <div>
         <strong>{currentData ? `${currentData.weekStart} through ${currentData.weekEnd}` : "Current Monday–Sunday week"}</strong>
-        <span>{currentData ? `Pace measured through ${local(currentData.paceAsOf || currentData.generatedAt)}` : "Warning at 38 hours · overtime above 40 hours"}</span>
+        <span>{currentData ? `Pace measured through ${local(currentData.paceAsOf || currentData.generatedAt)} · projected warnings begin about 75% through the week` : "Actual warning at 38 hours · projected warnings begin about 75% through the week"}</span>
       </div>
       <button className="otPrimary" disabled={busy} onClick={() => void load(business, true)}>{busy ? "Checking…" : "Run check & alert"}</button>
     </div>

@@ -6,9 +6,10 @@ import { notifyOwnersOfOperationalAlert } from "@/lib/owner-operational-alerts";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
-const WORKWEEK_START_HOUR = 4;
+const WORKWEEK_START_HOUR = 0;
 const WARNING_HOURS = 38;
 const OVERTIME_HOURS = 40;
+const PROJECTION_ALERT_WEEK_PROGRESS = 0.75;
 const MAX_OPEN_SHIFT_HOURS = 18;
 let overtimeSchemaPromise: Promise<void> | null = null;
 
@@ -224,6 +225,22 @@ function riskLevel(hours: number): RiskLevel {
   if (hours > OVERTIME_HOURS) return "overtime";
   if (hours >= WARNING_HOURS) return "warning";
   return "normal";
+}
+
+function operationalRiskLevel(input: {
+  actualHours: number;
+  projectedHours: number;
+  weekStartMs: number;
+  weekEndMs: number;
+  nowMs: number;
+}): RiskLevel {
+  const actualRisk = riskLevel(input.actualHours);
+  if (actualRisk !== "normal") return actualRisk;
+
+  const duration = Math.max(1, input.weekEndMs - input.weekStartMs);
+  const progress = Math.max(0, Math.min(1, (input.nowMs - input.weekStartMs) / duration));
+  if (progress < PROJECTION_ALERT_WEEK_PROGRESS) return "normal";
+  return riskLevel(input.projectedHours);
 }
 
 function actualHours(row: ActualRow, weekStartMs: number, weekEndMs: number): number {
@@ -696,7 +713,13 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
       warningShift,
       overtimeShift,
       replacementShift: overtimeShift || warningShift || remaining[0]?.shift || null,
-      risk: riskLevel(projected),
+      risk: operationalRiskLevel({
+        actualHours: actualValue,
+        projectedHours: projected,
+        weekStartMs: bounds.start.getTime(),
+        weekEndMs: bounds.end.getTime(),
+        nowMs,
+      }),
     };
   });
   const baseById = new Map(base.map((item) => [item.employee.id, item]));
@@ -764,7 +787,11 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
     weekStart,
     weekEnd: addDays(weekStart, 6),
     generatedAt: new Date().toISOString(),
-    thresholds: { warning: WARNING_HOURS, overtime: OVERTIME_HOURS },
+    thresholds: {
+      warning: WARNING_HOURS,
+      overtime: OVERTIME_HOURS,
+      projectionAlertWeekProgress: PROJECTION_ALERT_WEEK_PROGRESS,
+    },
     summary: {
       activeEmployees: employees.length,
       warning: risks.filter((item) => item.risk === "warning").length,
