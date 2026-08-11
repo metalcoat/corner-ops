@@ -1,4 +1,4 @@
-name: Fix employee current week schedule
+name: Cleanup employee schedule patch
 
 on:
   push:
@@ -9,26 +9,19 @@ permissions:
   contents: write
 
 jobs:
-  patch:
+  cleanup:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           ref: main
-      - name: Apply patch
-        run: python .github/patches/fix_employee_current_week.py
-      - name: Verify
+      - name: Remove temporary patch files
         run: |
-          npm install --no-audit --no-fund
-          npm run typecheck
-          npm run build
-          grep -n "No assigned shifts this week" src/app/employee/page.tsx
-          grep -n "Past shifts cannot be claimed" src/lib/workforce.ts
-      - name: Commit
+          git rm .github/workflows/fix-employee-current-week.yml
+          git rm .github/patches/fix_employee_current_week.py
+      - name: Commit cleanup
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/app/employee/page.tsx src/lib/workforce.ts
-          git diff --cached --check
-          git commit -m "Keep employee schedules current and future"
+          git commit -m "Remove employee schedule patch scaffolding"
           git push origin HEAD:main
