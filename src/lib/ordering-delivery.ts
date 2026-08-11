@@ -8,7 +8,6 @@ export type DeliveryPricingSettings = {
   business: OrderingBusiness;
   enabled: boolean;
   minimumOrderCents: number;
-  deliveryFeeCountsTowardMinimum: boolean;
   offerUpsellBeforeShortfallFee: boolean;
   allowShortfallFee: boolean;
   shortfallFeeLabel: string;
@@ -26,7 +25,6 @@ export type DeliveryPricingSettings = {
 type PolicyRow = {
   enabled: boolean;
   minimum_order_cents: number;
-  minimum_basis: string;
   offer_upsell_before_shortfall_fee: boolean;
   allow_shortfall_fee: boolean;
   shortfall_fee_label: string;
@@ -82,7 +80,6 @@ export async function getDeliveryPricingSettings(business: OrderingBusiness): Pr
     SELECT
       policy.enabled,
       policy.minimum_order_cents,
-      policy.minimum_basis,
       policy.offer_upsell_before_shortfall_fee,
       policy.allow_shortfall_fee,
       policy.shortfall_fee_label,
@@ -112,7 +109,6 @@ export async function getDeliveryPricingSettings(business: OrderingBusiness): Pr
     business,
     enabled: Boolean(policy?.enabled),
     minimumOrderCents: Number(policy?.minimum_order_cents || 0),
-    deliveryFeeCountsTowardMinimum: policy?.minimum_basis === "order_total_including_delivery_fee",
     offerUpsellBeforeShortfallFee: policy?.offer_upsell_before_shortfall_fee !== false,
     allowShortfallFee: policy?.allow_shortfall_fee !== false,
     shortfallFeeLabel: policy?.shortfall_fee_label || "Round up to delivery minimum",
@@ -159,24 +155,20 @@ export async function saveDeliveryPricingSettings(input: DeliveryPricingSettings
     WHERE business = ${input.business}
   `;
 
-  const minimumBasis = input.deliveryFeeCountsTowardMinimum
-    ? "order_total_including_delivery_fee"
-    : "merchandise_after_discounts";
-
   await sql`
     INSERT INTO ordering_delivery_policies (
       business, enabled, minimum_order_cents, minimum_basis, offer_upsell_before_shortfall_fee,
       allow_shortfall_fee, shortfall_fee_label, allow_manager_bypass,
       notify_management_on_bypass, max_distance_miles, updated_by
     ) VALUES (
-      ${input.business}, ${input.enabled}, ${minimumOrderCents}, ${minimumBasis}, ${input.offerUpsellBeforeShortfallFee},
+      ${input.business}, ${input.enabled}, ${minimumOrderCents}, 'merchandise_after_discounts', ${input.offerUpsellBeforeShortfallFee},
       ${input.allowShortfallFee}, ${input.shortfallFeeLabel || "Round up to delivery minimum"}, ${input.allowManagerBypass},
       ${input.notifyManagementOnBypass}, ${maxDistanceMiles}, ${updatedBy}
     )
     ON CONFLICT (business) DO UPDATE SET
       enabled = EXCLUDED.enabled,
       minimum_order_cents = EXCLUDED.minimum_order_cents,
-      minimum_basis = EXCLUDED.minimum_basis,
+      minimum_basis = 'merchandise_after_discounts',
       offer_upsell_before_shortfall_fee = EXCLUDED.offer_upsell_before_shortfall_fee,
       allow_shortfall_fee = EXCLUDED.allow_shortfall_fee,
       shortfall_fee_label = EXCLUDED.shortfall_fee_label,
@@ -226,7 +218,6 @@ export async function quoteDelivery(input: {
   const minimum = evaluateDeliveryMinimum({
     merchandiseSubtotalCents: input.merchandiseSubtotalCents,
     deliveryFeeCents,
-    deliveryFeeCountsTowardMinimum: settings.deliveryFeeCountsTowardMinimum,
     minimumOrderCents: settings.minimumOrderCents,
     customerDeclinedUpsell: input.customerDeclinedUpsell,
     allowShortfallFee: settings.allowShortfallFee,
@@ -282,7 +273,7 @@ export async function recordDeliveryMinimumResolution(input: {
         ) VALUES (
           ${alertId}, ${input.business}, ${input.orderId}, 'delivery_minimum_bypass', 'warning',
           'Delivery minimum bypassed',
-          ${`A delivery order was allowed below the configured minimum by $${(input.shortfallCents / 100).toFixed(2)}.`},
+          ${`A delivery order was allowed below the configured merchandise minimum by $${(input.shortfallCents / 100).toFixed(2)}.`},
           ${input.actorId || input.approvedBy || "system"},
           CAST(${JSON.stringify({
             minimumOrderCents: input.minimumOrderCents,
