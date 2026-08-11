@@ -26,7 +26,7 @@ Current development defaults:
 
 The owner can edit the minimum, maximum distance, every mileage boundary, and every fee without a code change.
 
-The stated outer range was "10 to 12 miles is $10." The development seed currently uses a contiguous >8-12 mile $10 tier so there is no accidental unpriced 8-10 mile hole. The settings are explicitly editable before production.
+The stated outer range was "10 to 12 miles is $10." The development seed currently uses a contiguous >8-12 mile $10 tier so there is no accidental unpriced 8-10 mile hole. This is a working development interpretation, not a claim that 8-10 miles was explicitly specified. The settings are editable before production.
 
 ## Under-minimum delivery flow
 
