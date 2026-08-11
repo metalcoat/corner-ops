@@ -12,6 +12,8 @@ Corner Deli delivery policy is also being built as shared server-side logic so P
 
 For example, a $14 delivery order against a $20 minimum should first trigger a useful add-on offer such as fries. If the customer declines and still wants delivery, policy can add a visible $6 minimum-order adjustment. That is not a true bypass. A true waiver of the missing $6 requires authorized management action and creates an alert.
 
+The replacement POS and these delivery/tax settings remain development-only. They are not merged into the existing live Vercel workflow during this build phase.
+
 ## Banking and historical imports
 
 The Automation Center supports Plaid bank and credit-card connections, several accounts under one institution Item, Plaid update mode, CSV and Excel history imports, duplicate protection, transaction classification, and owner review. Corner Deli and Tiki/At The Docks remain separate accounting entities.
