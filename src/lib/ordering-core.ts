@@ -167,6 +167,7 @@ export function calculateLineTotalCents(input: {
   quantity: number;
   unitPriceCents: number;
   modifierUnitDeltaCents?: number;
+  comboUnitDeltaCents?: number;
 }): number {
   const quantity = Math.trunc(input.quantity);
   if (!Number.isSafeInteger(quantity) || quantity <= 0) {
@@ -175,13 +176,17 @@ export function calculateLineTotalCents(input: {
 
   const unitPrice = assertMoneyCents(input.unitPriceCents, "unitPriceCents");
   const modifierDelta = input.modifierUnitDeltaCents ?? 0;
+  const comboDelta = input.comboUnitDeltaCents ?? 0;
   if (!Number.isSafeInteger(modifierDelta)) {
     throw new Error("modifierUnitDeltaCents must be an integer number of cents.");
   }
+  if (!Number.isSafeInteger(comboDelta)) {
+    throw new Error("comboUnitDeltaCents must be an integer number of cents.");
+  }
 
-  const perUnit = unitPrice + modifierDelta;
+  const perUnit = unitPrice + modifierDelta + comboDelta;
   if (perUnit < 0) {
-    throw new Error("The item price after modifiers cannot be negative.");
+    throw new Error("The item price after modifiers and combo adjustments cannot be negative.");
   }
 
   const total = perUnit * quantity;
