@@ -5,6 +5,7 @@ import type { Business } from "@/lib/types";
 const TIME_ZONE = "America/New_York";
 const TIP_MULTIPLIER = 0.965;
 const CUTOFF_HOUR = 15;
+const DRIVER_GRACE_MINUTES = 35;
 const LATE_TIP_LOOKAHEAD_DAYS = 14;
 
 type RoleGroup = "Driver" | "In-House" | "Ignore";
@@ -231,6 +232,18 @@ function lastSignedOut(shifts: Shift[], transaction: Transaction, predicate: (sh
   return uniqueEmployees(candidates.filter((shift) => shift.clockOut?.getTime() === latest));
 }
 
+function nextDriversWithinGrace(shifts: Shift[], time: Date): Shift[] {
+  const graceEnd = time.getTime() + DRIVER_GRACE_MINUTES * 60_000;
+  const candidates = shifts.filter((shift) => isEligible(shift)
+    && isDriver(shift)
+    && shift.clockIn
+    && shift.clockIn.getTime() > time.getTime()
+    && shift.clockIn.getTime() <= graceEnd);
+  if (!candidates.length) return [];
+  const earliestClockIn = Math.min(...candidates.map((shift) => shift.clockIn?.getTime() || Number.MAX_SAFE_INTEGER));
+  return uniqueEmployees(candidates.filter((shift) => shift.clockIn?.getTime() === earliestClockIn));
+}
+
 function splitCents(totalCents: number, count: number): number[] {
   if (count <= 0) return [];
   const base = Math.trunc(totalCents / count);
@@ -376,26 +389,31 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
       eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && covers(shift, time)));
       rule = "Before 3 PM order: equally split among all tip-eligible employees clocked in";
     } else if (delivery) {
-    eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && isDriver(shift) && covers(shift, time)));
-    if (eligible.length) {
-      rule = "After 3 PM delivery order: assigned to driver clocked in";
-    } else {
-      eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, time)));
-      rule = "After 3 PM delivery fallback: no driver clocked in; equally split among non-driver employees clocked in";
-    }
+      eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && isDriver(shift) && covers(shift, time)));
+      if (eligible.length) {
+        rule = "After 3 PM delivery order: assigned to driver clocked in";
+      } else {
+        eligible = nextDriversWithinGrace(shifts, time);
+        if (eligible.length) {
+          rule = "After 3 PM delivery order: next driver arrived within 35 minutes";
+        } else {
+          eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, time)));
+          rule = "After 3 PM delivery fallback: no driver clocked in or arriving within 35 minutes; equally split among non-driver employees clocked in";
+        }
+      }
 
-    if (!eligible.length) {
-      details.push({
-        ...detailBase(transaction),
-        allocatedTipBeforeFee: 0,
-        feeAmount: 0,
-        allocatedTip: 0,
-        employee: "Unallocated",
-        splitCount: 0,
-        rule: "After 3 PM delivery: no driver or other tip-eligible employee was clocked in",
-      });
-      continue;
-    }
+      if (!eligible.length) {
+        details.push({
+          ...detailBase(transaction),
+          allocatedTipBeforeFee: 0,
+          feeAmount: 0,
+          allocatedTip: 0,
+          employee: "Unallocated",
+          splitCount: 0,
+          rule: "After 3 PM delivery: no driver within 35 minutes and no other tip-eligible employee was clocked in",
+        });
+        continue;
+      }
     } else {
       eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, time)));
       rule = "After 3 PM pickup order: equally split among non-driver employees clocked in";
@@ -533,13 +551,14 @@ function deduplicateTransactionRows(rows: Array<Record<string, unknown>>) {
 async function scheduledDriversForWeek(business: Business, start: Date, end: Date): Promise<ScheduledDriver[]> {
   if (business !== "Corner Deli") return [];
   try {
+    const scheduleEnd = new Date(end.getTime() + DRIVER_GRACE_MINUTES * 60_000);
     const rows = await getSql()`
       SELECT s.position, s.starts_at, s.ends_at, e.name AS employee_name, e.position AS employee_position
       FROM schedule_shifts s
       LEFT JOIN employees e ON e.id = s.employee_id
       WHERE s.business = ${business}
         AND s.status = 'Published'
-        AND s.starts_at < ${end.toISOString()}
+        AND s.starts_at < ${scheduleEnd.toISOString()}
         AND s.ends_at > ${start.toISOString()}
       ORDER BY s.starts_at
     ` as unknown as Array<Record<string, unknown>>;
@@ -595,8 +614,9 @@ function driverCoverageWarnings(
       current.tipsCents += Math.round(numberValue(detail.originalTip) * 100);
     }
 
+    const graceEnd = openedAt.getTime() + DRIVER_GRACE_MINUTES * 60_000;
     for (const scheduled of scheduledDrivers) {
-      if (scheduled.startsAt.getTime() <= openedAt.getTime() && scheduled.endsAt.getTime() >= openedAt.getTime()) {
+      if (scheduled.startsAt.getTime() <= graceEnd && scheduled.endsAt.getTime() >= openedAt.getTime()) {
         current.scheduledDrivers.add(scheduled.employeeName);
       }
     }
@@ -613,7 +633,7 @@ function driverCoverageWarnings(
         orderCount: value.orderKeys.size,
         tipsBeforeFee: value.tipsCents / 100,
         scheduledDrivers: names,
-        message: `Driver punch missing: ${names.join(", ")} was scheduled as Driver, but no Driver punch covered these deliveries. Tips fell back to the tip-eligible staff actually clocked in.`,
+        message: `Driver punch missing: ${names.join(", ")} was scheduled as Driver, but no qualifying Driver punch covered these deliveries or started within 35 minutes. Tips fell back to the tip-eligible staff actually clocked in.`,
       };
     });
 }
@@ -751,7 +771,7 @@ export async function payrollSummary(business: Business, weekStart: string) {
 
   return {
     business,
-    source: "Rezku daily email reports · tips allocated by Order Export opened time · no-driver fallback splits among clocked-in staff",
+    source: "Rezku daily email reports · tips allocated by Order Export opened time · 35-minute future-driver grace · then staff fallback",
     weekStart,
     weekEnd: new Date(bounds.end.getTime() - 1).toISOString(),
     rows,
