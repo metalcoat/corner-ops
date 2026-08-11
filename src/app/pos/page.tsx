@@ -1,5 +1,6 @@
 import { orderingBusinessConfigs } from "@/lib/ordering-business-config";
 import "./pos.css";
+import "./pos-separation.css";
 
 export default function PosDevelopmentHome() {
   const deli = orderingBusinessConfigs["Corner Deli"];
