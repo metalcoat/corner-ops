@@ -681,7 +681,7 @@ export async function importRezkuReport(fileName: string, bytes: ArrayBuffer, re
       const orderId = clean(rowLookup(row, ["Order ID", "Order Number", "Order #", "ID"]), 100);
       if (!orderId) continue;
       const dateValue = rowLookup(row, ["Date", "Business Date", "Order Date"]);
-      const openedAt = combineDateAndTime(dateValue, rowLookup(row, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]));
+      const openedAt = combineDateAndTime(dateValue, rowLookup(row, ["Order Opened At", "Order Opened", "Opened At", "Opened", "Open Time", "Order Time", "Created At", "Time"]));
       const orderType = clean(rowLookup(row, ["Order Type", "Dining Option", "Service Type", "Type"]), 100);
       const key = sourceKey(["order", orderId, openedAt?.toISOString(), orderType]);
       const result = await getSql()`

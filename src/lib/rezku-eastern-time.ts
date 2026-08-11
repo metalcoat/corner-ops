@@ -74,6 +74,33 @@ function rowLookup(row: RawRow, candidates: string[]): unknown {
   return "";
 }
 
+function orderOpenedValue(raw: RawRow): unknown {
+  const exact = rowLookup(raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]);
+  if (exact !== "") return exact;
+  const candidates = Object.entries(raw)
+    .filter(([key, value]) => {
+      const normalized = normalizeKey(key);
+      return value !== undefined && value !== null && String(value).trim() !== ""
+        && (normalized.includes("opened") || normalized.includes("opentime") || normalized.includes("orderopen"));
+    })
+    .sort(([left], [right]) => {
+      const score = (key: string) => {
+        const normalized = normalizeKey(key);
+        if (normalized === "orderopenedat") return 0;
+        if (normalized.includes("openedat")) return 1;
+        if (normalized.includes("orderopen")) return 2;
+        if (normalized.includes("opened")) return 3;
+        return 4;
+      };
+      return score(left) - score(right);
+    });
+  return candidates[0]?.[1] ?? "";
+}
+
+function orderRawHasClock(raw: RawRow): boolean {
+  return Boolean(timeParts(orderOpenedValue(raw)));
+}
+
 function sourceKey(parts: unknown[]): string {
   return createHash("sha256").update(parts.map((part) => String(part ?? "")).join("|")).digest("hex");
 }
@@ -272,7 +299,7 @@ async function removeDateOnlyOrderDuplicates(): Promise<number> {
   const detailed = new Set<string>();
   for (const row of rows) {
     const key = normalizeOrderId(row.order_id);
-    if (key && hasClock(rawObject(row.raw), ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"])) {
+    if (key && orderRawHasClock(rawObject(row.raw))) {
       detailed.add(key);
     }
   }
@@ -280,7 +307,7 @@ async function removeDateOnlyOrderDuplicates(): Promise<number> {
     .filter((row) => {
       const key = normalizeOrderId(row.order_id);
       return Boolean(key && detailed.has(key)
-        && !hasClock(rawObject(row.raw), ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]));
+        && !orderRawHasClock(rawObject(row.raw)));
     })
     .map((row) => String(row.id));
   if (!deleteIds.length) return 0;
@@ -299,7 +326,7 @@ async function repairOrders(batchId?: string) {
   for (const row of rows) {
     const raw = rawObject(row.raw);
     const dateValue = rowLookup(raw, ["Date", "Business Date", "Order Date"]);
-    const timeValue = rowLookup(raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]);
+    const timeValue = orderOpenedValue(raw);
     const openedAt = rezkuDateTime(dateValue, timeValue);
     if (!openedAt) continue;
     const key = sourceKey(["order", clean(row.order_id, 100), openedAt.toISOString(), clean(row.order_type, 100)]);
@@ -335,7 +362,7 @@ async function orderTimeMap() {
     const raw = rawObject(row.raw);
     const candidate = {
       time,
-      hasClock: hasClock(raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]),
+      hasClock: orderRawHasClock(raw),
     };
     const current = result.get(key);
     if (!current

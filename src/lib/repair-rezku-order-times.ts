@@ -59,6 +59,29 @@ function rawLookup(raw: Record<string, unknown>, candidates: string[]): unknown 
   return "";
 }
 
+function orderOpenedValue(raw: Record<string, unknown>): unknown {
+  const exact = rawLookup(raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]);
+  if (exact !== "") return exact;
+  const candidates = Object.entries(raw)
+    .filter(([key, value]) => {
+      const normalized = normalizedKey(key);
+      return value !== undefined && value !== null && String(value).trim() !== ""
+        && (normalized.includes("opened") || normalized.includes("opentime") || normalized.includes("orderopen"));
+    })
+    .sort(([left], [right]) => {
+      const score = (key: string) => {
+        const normalized = normalizedKey(key);
+        if (normalized === "orderopenedat") return 0;
+        if (normalized.includes("openedat")) return 1;
+        if (normalized.includes("orderopen")) return 2;
+        if (normalized.includes("opened")) return 3;
+        return 4;
+      };
+      return score(left) - score(right);
+    });
+  return candidates[0]?.[1] ?? "";
+}
+
 function offsetMilliseconds(date: Date): number {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: TIME_ZONE,
@@ -221,7 +244,7 @@ function fullOpenedAt(value: unknown): Date | null {
 }
 
 function recoveredOpenedAt(raw: Record<string, unknown>): Date | null {
-  const openedValue = rawLookup(raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]);
+  const openedValue = orderOpenedValue(raw);
   const full = fullOpenedAt(openedValue);
   if (full) return full;
 
@@ -249,7 +272,7 @@ export async function repairRezkuOrderTimesForPayroll(start: Date, end: Date) {
   let numericRawClock = 0;
   for (const row of rows) {
     const raw = rawObject(row.raw);
-    const rawValue = rawLookup(raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]);
+    const rawValue = orderOpenedValue(raw);
     if (numericValue(rawValue) !== null) numericRawClock += 1;
     const recovered = recoveredOpenedAt(raw);
     if (!recovered) {

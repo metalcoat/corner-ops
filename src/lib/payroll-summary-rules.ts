@@ -122,6 +122,18 @@ function rawHasClock(value: unknown, fields: string[]): boolean {
   return fields.some((field) => /\d{1,2}:\d{2}/.test(String(raw[field] || "")));
 }
 
+function rawOrderHasClock(value: unknown): boolean {
+  const raw = rawObject(value);
+  const exact = ["Order Opened At", "Order Opened", "Opened At", "Opened", "Open Time", "Order Time", "Created At", "Time"]
+    .some((field) => /\d{1,2}:\d{2}/.test(String(raw[field] || "")));
+  if (exact) return true;
+  return Object.entries(raw).some(([key, fieldValue]) => {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return (normalized.includes("opened") || normalized.includes("opentime") || normalized.includes("orderopen"))
+      && /\d{1,2}:\d{2}/.test(String(fieldValue || ""));
+  });
+}
+
 function dateValue(value: unknown): Date | null {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(String(value));
@@ -701,7 +713,7 @@ export async function payrollSummary(business: Business, weekStart: string) {
     const candidate = {
       orderType: String(row.order_type || "").trim(),
       openedAt,
-      hasClock: rawHasClock(row.raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]),
+      hasClock: rawOrderHasClock(row.raw),
     };
     const existing = orders.get(key);
     if (!existing
