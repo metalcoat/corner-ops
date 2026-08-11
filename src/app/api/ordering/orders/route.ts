@@ -2,6 +2,7 @@ import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import { createDraftOrder, type ConfiguredOrderItemInput } from "@/lib/ordering-orders";
 import type { OrderingBusiness, ServiceType } from "@/lib/ordering-core";
+import { ensureOrderingDeliverySchema } from "@/lib/ordering-delivery-schema";
 
 export const runtime = "nodejs";
 
@@ -11,7 +12,7 @@ function readBusiness(value: unknown): OrderingBusiness {
 }
 
 function readServiceType(value: unknown): ServiceType {
-  if (value === "pickup" || value === "delivery" || value === "no_contact_delivery" || value === "dine_in" || value === "curbside" || value === "bar") {
+  if (value === "undecided" || value === "pickup" || value === "delivery" || value === "no_contact_delivery" || value === "dine_in" || value === "curbside" || value === "bar") {
     return value;
   }
   throw new Error("Unknown fulfillment type.");
@@ -26,6 +27,10 @@ export async function POST(request: Request) {
     if (!canAccessBusiness(session, business)) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
     }
+
+    // Keep delivery/tax settings additive to the development POS foundation.
+    // This does not deploy or mutate the existing live Corner Ops workflows.
+    await ensureOrderingDeliverySchema();
 
     const rawItems = Array.isArray(body.items) ? body.items : [];
     const items = rawItems.map((item) => {
