@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import "../../pos-separation.css";
 
- type FeeBand = {
+type FeeBand = {
   minMilesExclusive: number;
   maxMilesInclusive: number;
   feeCents: number;
@@ -13,6 +13,7 @@ type Settings = {
   business: "Corner Deli";
   enabled: boolean;
   minimumOrderCents: number;
+  deliveryFeeCountsTowardMinimum: boolean;
   offerUpsellBeforeShortfallFee: boolean;
   allowShortfallFee: boolean;
   shortfallFeeLabel: string;
@@ -123,11 +124,12 @@ export default function DeliverySettingsClient() {
       <article className="posSettingsCard">
         <h2>Delivery policy</h2>
         <label><span>Delivery enabled</span><input type="checkbox" checked={settings.enabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /></label>
-        <label><span>Minimum merchandise order</span><div className="posMoneyInput"><b>$</b><input type="number" min="0" step="0.01" value={dollars(settings.minimumOrderCents)} onChange={(event) => setSettings({ ...settings, minimumOrderCents: cents(event.target.value) })} /></div></label>
+        <label><span>Minimum delivery total</span><div className="posMoneyInput"><b>$</b><input type="number" min="0" step="0.01" value={dollars(settings.minimumOrderCents)} onChange={(event) => setSettings({ ...settings, minimumOrderCents: cents(event.target.value) })} /></div></label>
+        <label><span>Delivery fee counts toward minimum</span><input type="checkbox" checked={settings.deliveryFeeCountsTowardMinimum} onChange={(event) => setSettings({ ...settings, deliveryFeeCountsTowardMinimum: event.target.checked })} /></label>
         <label><span>Maximum delivery miles</span><input type="number" min="0.1" step="0.1" value={settings.maxDistanceMiles ?? ""} onChange={(event) => setSettings({ ...settings, maxDistanceMiles: Number(event.target.value) })} /></label>
-        <label><span>Offer add-ons before fee</span><input type="checkbox" checked={settings.offerUpsellBeforeShortfallFee} onChange={(event) => setSettings({ ...settings, offerUpsellBeforeShortfallFee: event.target.checked })} /></label>
-        <label><span>Allow exact shortfall fee</span><input type="checkbox" checked={settings.allowShortfallFee} onChange={(event) => setSettings({ ...settings, allowShortfallFee: event.target.checked })} /></label>
-        <label><span>Shortfall fee label</span><input type="text" value={settings.shortfallFeeLabel} onChange={(event) => setSettings({ ...settings, shortfallFeeLabel: event.target.value })} /></label>
+        <label><span>Offer add-ons before round-up</span><input type="checkbox" checked={settings.offerUpsellBeforeShortfallFee} onChange={(event) => setSettings({ ...settings, offerUpsellBeforeShortfallFee: event.target.checked })} /></label>
+        <label><span>Allow round-up to minimum</span><input type="checkbox" checked={settings.allowShortfallFee} onChange={(event) => setSettings({ ...settings, allowShortfallFee: event.target.checked })} /></label>
+        <label><span>Round-up label</span><input type="text" value={settings.shortfallFeeLabel} onChange={(event) => setSettings({ ...settings, shortfallFeeLabel: event.target.value })} /></label>
         <label><span>Allow manager bypass</span><input type="checkbox" checked={settings.allowManagerBypass} onChange={(event) => setSettings({ ...settings, allowManagerBypass: event.target.checked })} /></label>
         <label><span>Notify management on bypass</span><input type="checkbox" checked={settings.notifyManagementOnBypass} onChange={(event) => setSettings({ ...settings, notifyManagementOnBypass: event.target.checked })} /></label>
       </article>
@@ -137,7 +139,7 @@ export default function DeliverySettingsClient() {
         <label><span>Menu prices include tax</span><input type="checkbox" checked={settings.pricesIncludeTax} onChange={(event) => setSettings({ ...settings, pricesIncludeTax: event.target.checked })} /></label>
         <label><span>Tax rate</span><div className="posMoneyInput"><input type="number" min="0" max="100" step="0.001" value={(settings.taxRateBps / 100).toFixed(3)} onChange={(event) => setSettings({ ...settings, taxRateBps: Math.max(0, Math.round(Number(event.target.value) * 100)) })} /><b>%</b></div></label>
         <label><span>Delivery fee taxable</span><input type="checkbox" checked={settings.deliveryFeeTaxable} onChange={(event) => setSettings({ ...settings, deliveryFeeTaxable: event.target.checked })} /></label>
-        <label><span>Minimum adjustment taxable</span><input type="checkbox" checked={settings.minimumAdjustmentTaxable} onChange={(event) => setSettings({ ...settings, minimumAdjustmentTaxable: event.target.checked })} /></label>
+        <label><span>Minimum round-up taxable</span><input type="checkbox" checked={settings.minimumAdjustmentTaxable} onChange={(event) => setSettings({ ...settings, minimumAdjustmentTaxable: event.target.checked })} /></label>
         {!settings.taxRateConfigured && <p className="posSettingsWarning">Tax rate has not yet been explicitly configured. Set it before any production testing.</p>}
       </article>
     </section>
@@ -157,7 +159,7 @@ export default function DeliverySettingsClient() {
           <button type="button" disabled={settings.feeBands.length <= 1} onClick={() => removeBand(index)}>Remove</button>
         </div>)}
       </div>
-      <p className="posSettingsHint">Bands must stay contiguous. The development seed currently uses 0-4 = $4.00, over 4-8 = $7.75, and over 8-12 = $10.00 so there is no unpriced mileage gap.</p>
+      <p className="posSettingsHint">With the current $20 minimum, the merchandise threshold is effectively $16.00 in the $4 delivery zone, $12.25 in the $7.75 zone, and $10.00 in the $10 zone. Bands remain editable.</p>
     </section>
 
     {message && <div className="posSettingsMessage">{message}</div>}
