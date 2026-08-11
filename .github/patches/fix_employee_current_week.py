@@ -1,0 +1,133 @@
+from pathlib import Path
+
+page = Path('src/app/employee/page.tsx')
+text = page.read_text()
+
+old = 'import type { Business } from "@/lib/types";\nimport "./employee.css";'
+new = 'import { newYorkDateKey } from "@/lib/schedule-meal-compliance";\nimport type { Business } from "@/lib/types";\nimport "./employee.css";'
+if old not in text:
+    raise SystemExit('employee imports block not found')
+text = text.replace(old, new, 1)
+
+old = '''function mondayFor(date: Date) {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  const day = result.getDay();
+  result.setDate(result.getDate() - (day === 0 ? 6 : day - 1));
+  return result;
+}'''
+new = '''function addDateKeyDays(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function mondayDateKey(value: Date | string) {
+  const key = newYorkDateKey(value);
+  const date = new Date(`${key}T12:00:00Z`);
+  const day = date.getUTCDay();
+  return addDateKeyDays(key, -(day === 0 ? 6 : day - 1));
+}
+
+function mondayFor(date: Date) {
+  return new Date(`${mondayDateKey(date)}T12:00:00`);
+}'''
+if old not in text:
+    raise SystemExit('mondayFor helper not found')
+text = text.replace(old, new, 1)
+
+old = '''  const myShifts = useMemo(
+    () => (data?.teamShifts || []).filter((shift) => shift.employeeId === session?.employeeId),
+    [data?.teamShifts, session?.employeeId],
+  );
+  const openShifts = useMemo(
+    () => (data?.teamShifts || []).filter((shift) => !shift.employeeId && shift.status === "Open"),
+    [data?.teamShifts],
+  );
+  const otherShifts = useMemo(
+    () => (data?.teamShifts || []).filter(
+      (shift) => shift.employeeId && shift.employeeId !== session?.employeeId && shift.status === "Published",
+    ),
+    [data?.teamShifts, session?.employeeId],
+  );'''
+new = '''  const currentWeekStartKey = mondayDateKey(new Date());
+  const currentWeekEndKey = addDateKeyDays(currentWeekStartKey, 7);
+  const shiftIsInCurrentWeek = (shift: Shift) => {
+    const key = newYorkDateKey(shift.startsAt);
+    return key >= currentWeekStartKey && key < currentWeekEndKey;
+  };
+  const shiftIsFuture = (shift: Shift) => new Date(shift.startsAt).getTime() > Date.now();
+
+  const myShifts = useMemo(
+    () => (data?.teamShifts || []).filter(
+      (shift) => shift.employeeId === session?.employeeId && shiftIsInCurrentWeek(shift),
+    ),
+    [data?.teamShifts, session?.employeeId, currentWeekEndKey, currentWeekStartKey],
+  );
+  const tradeableMyShifts = useMemo(() => myShifts.filter(shiftIsFuture), [myShifts]);
+  const openShifts = useMemo(
+    () => (data?.teamShifts || []).filter(
+      (shift) => !shift.employeeId && shift.status === "Open" && shiftIsFuture(shift),
+    ),
+    [data?.teamShifts],
+  );
+  const otherShifts = useMemo(
+    () => (data?.teamShifts || []).filter(
+      (shift) => shift.employeeId
+        && shift.employeeId !== session?.employeeId
+        && shift.status === "Published"
+        && shiftIsFuture(shift),
+    ),
+    [data?.teamShifts, session?.employeeId],
+  );'''
+if old not in text:
+    raise SystemExit('employee shift filters block not found')
+text = text.replace(old, new, 1)
+
+text = text.replace('<article><span>My upcoming shifts</span><strong>{myShifts.length}</strong></article>', '<article><span>My upcoming shifts</span><strong>{tradeableMyShifts.length}</strong></article>', 1)
+
+old = '            <button disabled={busy} onClick={() => void action({ action: "shift-request", requestType: "Offer", shiftId: shift.id }, "Shift offered for manager approval.")}>Offer shift</button>'
+new = '            {shiftIsFuture(shift) && <button disabled={busy} onClick={() => void action({ action: "shift-request", requestType: "Offer", shiftId: shift.id }, "Shift offered for manager approval.")}>Offer shift</button>}'
+if old not in text:
+    raise SystemExit('offer button not found')
+text = text.replace(old, new, 1)
+text = text.replace('{myShifts.length === 0 && <p className="empEmpty">No upcoming assigned shifts.</p>}', '{myShifts.length === 0 && <p className="empEmpty">No assigned shifts this week.</p>}', 1)
+
+old = '{myShifts.map((shift) => <option key={shift.id} value={shift.id}>{local(shift.startsAt)} · {shift.position}</option>)}'
+new = '{tradeableMyShifts.map((shift) => <option key={shift.id} value={shift.id}>{local(shift.startsAt)} · {shift.position}</option>)}'
+if old not in text:
+    raise SystemExit('swap own-shift dropdown not found')
+text = text.replace(old, new, 1)
+page.write_text(text)
+
+workforce = Path('src/lib/workforce.ts')
+text = workforce.read_text()
+old = '''  const shift = shifts[0];
+  if (!shift) throw new Error("Shift not found.");
+
+  if (input.requestType === "Claim") {'''
+new = '''  const shift = shifts[0];
+  if (!shift) throw new Error("Shift not found.");
+  if (new Date(String(shift.starts_at)).getTime() <= Date.now()) {
+    throw new Error("Past shifts cannot be claimed, offered, or swapped.");
+  }
+
+  if (input.requestType === "Claim") {'''
+if old not in text:
+    raise SystemExit('shift request guard location not found')
+text = text.replace(old, new, 1)
+
+old = '''      SELECT employee_id FROM schedule_shifts
+      WHERE id = ${input.offeredShiftId} AND business = ${session.business} AND status = 'Published'
+      LIMIT 1'''
+new = '''      SELECT employee_id FROM schedule_shifts
+      WHERE id = ${input.offeredShiftId}
+        AND business = ${session.business}
+        AND status = 'Published'
+        AND starts_at > NOW()
+      LIMIT 1'''
+if old not in text:
+    raise SystemExit('swap offered shift query not found')
+text = text.replace(old, new, 1)
+text = text.replace('throw new Error("Choose another employee\'s published shift.");', 'throw new Error("Choose another employee\'s future published shift.");', 1)
+workforce.write_text(text)
