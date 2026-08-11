@@ -1,6 +1,7 @@
 import type { Business } from "@/lib/types";
 import { orderingBusinessConfig } from "@/lib/ordering-business-config";
 import "./pos.css";
+import "./pos-separation.css";
 
 export default function PosReports({ business }: { business: Business }) {
   const config = orderingBusinessConfig(business);
