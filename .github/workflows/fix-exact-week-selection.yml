@@ -1,0 +1,71 @@
+name: Fix exact week selection
+
+on:
+  push:
+    paths:
+      - .github/workflows/fix-exact-week-selection.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Keep publish and payroll on exact selected week
+        shell: python
+        run: |
+          from pathlib import Path
+
+          # Schedule publish must never silently switch to a nearby week.
+          p = Path('src/app/api/workforce/week-publish-v2/route.ts')
+          t = p.read_text()
+          old = '''    let targetWeekStart = requestedWeekStart;
+    let draftsBefore = await draftShiftsForWeek(business, targetWeekStart);
+
+    if (!draftsBefore.length) {
+      const nearby = await nearbyDraftShifts(business, requestedWeekStart);
+      const nearbyWeeks = new Set(nearby.map((shift) => mondayForDate(shift.starts_at)));
+      if (nearby.length === 1 || nearbyWeeks.size === 1) {
+        targetWeekStart = mondayForDate(nearby[0].starts_at);
+        draftsBefore = await draftShiftsForWeek(business, targetWeekStart);
+      }
+    }
+'''
+          new = '''    const targetWeekStart = requestedWeekStart;
+    const draftsBefore = await draftShiftsForWeek(business, targetWeekStart);
+'''
+          if old not in t:
+            raise SystemExit('schedule publish fallback block not found')
+          t = t.replace(old, new, 1)
+          p.write_text(t)
+
+          # Payroll Control must use the same Monday-midnight boundary as payroll summary.
+          for path in ['src/lib/payroll-control.ts', 'src/lib/payroll-control-dashboard.ts']:
+            p = Path(path)
+            t = p.read_text()
+            old = 'const start = zonedDateToUtc(weekStart, 4);'
+            if old not in t:
+              raise SystemExit(f'4 AM week boundary not found in {path}')
+            t = t.replace(old, 'const start = zonedDateToUtc(weekStart, 0);', 1)
+            p.write_text(t)
+
+      - name: Verify
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm run build
+          grep -n "const targetWeekStart = requestedWeekStart" src/app/api/workforce/week-publish-v2/route.ts
+          grep -n "zonedDateToUtc(weekStart, 0)" src/lib/payroll-control.ts src/lib/payroll-control-dashboard.ts
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/api/workforce/week-publish-v2/route.ts src/lib/payroll-control.ts src/lib/payroll-control-dashboard.ts
+          git diff --cached --check
+          git commit -m "Keep publish and payroll on selected week"
+          git push origin HEAD:main
