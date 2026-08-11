@@ -1,6 +1,8 @@
 import { getSql } from "@/lib/db";
 
 const TIME_ZONE = "America/New_York";
+const EXCEL_EPOCH_UTC = Date.UTC(1899, 11, 30);
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const MONTHS: Record<string, number> = {
   jan: 1, january: 1,
@@ -17,14 +19,19 @@ const MONTHS: Record<string, number> = {
   dec: 12, december: 12,
 };
 
-type DateTimeParts = {
+type DateParts = {
   year: number;
   month: number;
   day: number;
+};
+
+type TimeParts = {
   hour: number;
   minute: number;
   second: number;
 };
+
+type DateTimeParts = DateParts & TimeParts;
 
 function rawObject(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
@@ -91,7 +98,79 @@ function easternWallTime(parts: DateTimeParts): Date {
   return new Date(timestamp);
 }
 
-function clock(hourText: string, minuteText: string, secondText: string | undefined, meridiemText: string | undefined) {
+function validDateParts(parts: DateParts | null): parts is DateParts {
+  if (!parts) return false;
+  const test = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  return test.getUTCFullYear() === parts.year
+    && test.getUTCMonth() === parts.month - 1
+    && test.getUTCDate() === parts.day;
+}
+
+function numericValue(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const text = String(value ?? "").trim();
+  if (!/^-?\d+(?:\.\d+)?$/.test(text)) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function excelParts(serial: number): DateTimeParts | null {
+  if (!Number.isFinite(serial) || serial < 0) return null;
+  const date = new Date(EXCEL_EPOCH_UTC + serial * DAY_MS);
+  if (Number.isNaN(date.getTime())) return null;
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+    hour: date.getUTCHours(),
+    minute: date.getUTCMinutes(),
+    second: date.getUTCSeconds(),
+  };
+}
+
+function dateParts(value: unknown): DateParts | null {
+  const numeric = numericValue(value);
+  if (numeric !== null && numeric >= 1) {
+    const excel = excelParts(Math.floor(numeric));
+    if (excel) return { year: excel.year, month: excel.month, day: excel.day };
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return { year: value.getUTCFullYear(), month: value.getUTCMonth() + 1, day: value.getUTCDate() };
+  }
+
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+
+  let match = text.match(/^([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})/i);
+  if (match) {
+    const month = MONTHS[match[1].toLowerCase()] || 0;
+    const parts = { year: Number(match[3]), month, day: Number(match[2]) };
+    return validDateParts(parts) ? parts : null;
+  }
+
+  match = text.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);
+  if (match) {
+    const parts = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+    return validDateParts(parts) ? parts : null;
+  }
+
+  match = text.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);
+  if (match) {
+    const shortYear = Number(match[3]);
+    const year = shortYear < 100 ? (shortYear >= 70 ? 1900 + shortYear : 2000 + shortYear) : shortYear;
+    const parts = { year, month: Number(match[1]), day: Number(match[2]) };
+    return validDateParts(parts) ? parts : null;
+  }
+
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return { year: parsed.getUTCFullYear(), month: parsed.getUTCMonth() + 1, day: parsed.getUTCDate() };
+  }
+  return null;
+}
+
+function clock(hourText: string, minuteText: string, secondText: string | undefined, meridiemText: string | undefined): TimeParts | null {
   let hour = Number(hourText);
   const minute = Number(minuteText);
   const second = Number(secondText || 0);
@@ -102,7 +181,31 @@ function clock(hourText: string, minuteText: string, secondText: string | undefi
   return { hour, minute, second };
 }
 
-function rawOpenedAt(value: unknown): Date | null {
+function timeParts(value: unknown): TimeParts | null {
+  const numeric = numericValue(value);
+  if (numeric !== null) {
+    const fraction = ((numeric % 1) + 1) % 1;
+    const totalSeconds = Math.round(fraction * 24 * 60 * 60) % (24 * 60 * 60);
+    return {
+      hour: Math.floor(totalSeconds / 3600),
+      minute: Math.floor((totalSeconds % 3600) / 60),
+      second: totalSeconds % 60,
+    };
+  }
+
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const match = text.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
+  return match ? clock(match[1], match[2], match[3], match[4]) : null;
+}
+
+function fullOpenedAt(value: unknown): Date | null {
+  const numeric = numericValue(value);
+  if (numeric !== null && numeric >= 1) {
+    const parts = excelParts(numeric);
+    if (parts && parts.year > 1971) return easternWallTime(parts);
+  }
+
   const text = String(value ?? "").trim();
   if (!text) return null;
 
@@ -111,34 +214,22 @@ function rawOpenedAt(value: unknown): Date | null {
     if (!Number.isNaN(instant.getTime())) return instant;
   }
 
-  let match = text.match(/^([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
-  if (match) {
-    const time = clock(match[4], match[5], match[6], match[7]);
-    const month = MONTHS[match[1].toLowerCase()] || 0;
-    if (time && month) return easternWallTime({
-      year: Number(match[3]), month, day: Number(match[2]), ...time,
-    });
-  }
-
-  match = text.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
-  if (match) {
-    const time = clock(match[4], match[5], match[6], match[7]);
-    if (time) return easternWallTime({
-      year: Number(match[1]), month: Number(match[2]), day: Number(match[3]), ...time,
-    });
-  }
-
-  match = text.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
-  if (match) {
-    const time = clock(match[4], match[5], match[6], match[7]);
-    const shortYear = Number(match[3]);
-    const year = shortYear < 100 ? (shortYear >= 70 ? 1900 + shortYear : 2000 + shortYear) : shortYear;
-    if (time) return easternWallTime({
-      year, month: Number(match[1]), day: Number(match[2]), ...time,
-    });
-  }
-
+  const date = dateParts(text);
+  const time = timeParts(text);
+  if (date && time && /\d{1,2}:\d{2}/.test(text)) return easternWallTime({ ...date, ...time });
   return null;
+}
+
+function recoveredOpenedAt(raw: Record<string, unknown>): Date | null {
+  const openedValue = rawLookup(raw, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]);
+  const full = fullOpenedAt(openedValue);
+  if (full) return full;
+
+  const dateValue = rawLookup(raw, ["Date", "Business Date", "Order Date"]);
+  const date = dateParts(dateValue);
+  const time = timeParts(openedValue);
+  if (!date || !time) return null;
+  return easternWallTime({ ...date, ...time });
 }
 
 export async function repairRezkuOrderTimesForPayroll(start: Date, end: Date) {
@@ -155,10 +246,12 @@ export async function repairRezkuOrderTimesForPayroll(start: Date, end: Date) {
   let repaired = 0;
   let checked = 0;
   let missingRawClock = 0;
+  let numericRawClock = 0;
   for (const row of rows) {
     const raw = rawObject(row.raw);
     const rawValue = rawLookup(raw, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]);
-    const recovered = rawOpenedAt(rawValue);
+    if (numericValue(rawValue) !== null) numericRawClock += 1;
+    const recovered = recoveredOpenedAt(raw);
     if (!recovered) {
       missingRawClock += 1;
       continue;
@@ -181,5 +274,5 @@ export async function repairRezkuOrderTimesForPayroll(start: Date, end: Date) {
     }
   }
 
-  return { checked, repaired, missingRawClock };
+  return { checked, repaired, missingRawClock, numericRawClock };
 }
