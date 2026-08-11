@@ -23,6 +23,16 @@ import path from "node:path";
 const sourceUrl = process.env.REZKU_URL || "https://order.rezku.com/cornerdeli/cover";
 const browserChannel = process.env.REZKU_BROWSER_CHANNEL || "bundled";
 const outputPath = process.env.REZKU_DISCOVERY_OUT || "tmp/rezku-cornerdeli-discovery.json";
+const representativeProducts = [
+  "Pizza",
+  "Breakfast Pizza",
+  "Wings",
+  "Turkey",
+  "Turkey Big Boss",
+  "Steak",
+  "Chicken Bacon Ranch",
+  "Garlic Meatball Pepperoni Sub",
+];
 
 let chromium;
 try {
@@ -37,6 +47,7 @@ try {
 }
 
 const captured = [];
+const detailScreens = [];
 const launchOptions = { headless: true };
 if (browserChannel && browserChannel !== "bundled") launchOptions.channel = browserChannel;
 const browser = await chromium.launch(launchOptions);
@@ -87,6 +98,38 @@ async function clickFirstMatching(patterns) {
   return false;
 }
 
+async function openProductDetails(name) {
+  try {
+    const exactName = page.getByText(name, { exact: true });
+    const item = page.locator("app-menu-item").filter({ has: exactName }).first();
+    if (!(await item.count())) return false;
+    const button = item.getByRole("button").first();
+    await button.scrollIntoViewIfNeeded();
+    await button.click({ timeout: 8_000 });
+    await page.waitForTimeout(1_500);
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+    detailScreens.push({
+      product: name,
+      url: page.url(),
+      text: (await page.locator("body").innerText().catch(() => "")).slice(0, 40_000),
+    });
+
+    const closeButton = page.getByRole("button", { name: /close/i }).last();
+    if (await closeButton.count()) {
+      await closeButton.click({ timeout: 4_000 }).catch(() => {});
+    } else {
+      await page.keyboard.press("Escape").catch(() => {});
+    }
+    await page.waitForTimeout(600);
+    return true;
+  } catch (error) {
+    detailScreens.push({ product: name, error: String(error) });
+    await page.keyboard.press("Escape").catch(() => {});
+    await page.waitForTimeout(300);
+    return false;
+  }
+}
+
 try {
   await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await page.waitForTimeout(2_500);
@@ -104,6 +147,13 @@ try {
   await page.waitForTimeout(2_000);
   await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
 
+  // Opening representative products forces Rezku to reveal the detail payloads
+  // that contain size/variation/modifier rules. We do not add anything to the
+  // cart or submit an order.
+  for (const product of representativeProducts) {
+    await openProductDetails(product);
+  }
+
   const renderedText = await page.locator("body").innerText().catch(() => "");
   const renderedHtml = await page.content();
   const payload = {
@@ -112,6 +162,8 @@ try {
     finalUrl: page.url(),
     browserChannel,
     title: await page.title().catch(() => ""),
+    representativeProducts,
+    detailScreens,
     jsonResponses: captured,
     renderedText,
     renderedHtml,
@@ -120,6 +172,7 @@ try {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await fs.writeFile(outputPath, JSON.stringify(payload, null, 2), "utf8");
   console.log(`Captured ${captured.length} JSON responses from Rezku.`);
+  console.log(`Opened ${detailScreens.filter((entry) => !entry.error).length}/${representativeProducts.length} representative products.`);
   console.log(`Final URL: ${payload.finalUrl}`);
   console.log(`Rendered text chars: ${renderedText.length}`);
   console.log(`Saved discovery file: ${outputPath}`);
