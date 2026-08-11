@@ -50,7 +50,7 @@ export function newAiFulfillmentState(): AiFulfillmentState {
 export function advanceAiFulfillmentTurn(input: AiFulfillmentTurnInput): AiFulfillmentTurnResult {
   const state: AiFulfillmentState = { ...input.state };
 
-  if (input.explicitServiceType && input.explicitServiceType !== "undecided") {
+  if (input.explicitServiceType) {
     state.serviceType = input.explicitServiceType;
     state.questionState = "resolved";
     state.itemsCapturedSinceQuestion = 0;
