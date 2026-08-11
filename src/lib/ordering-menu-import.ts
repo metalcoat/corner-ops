@@ -68,38 +68,58 @@ export type MenuImportPreview = {
   snapshotHash: string;
 };
 
+type ImportRunRow = {
+  id: string;
+  business: OrderingBusiness;
+  source: ImportedMenuSnapshot["source"];
+  status: string;
+  warning_count: number;
+  snapshot: ImportedMenuSnapshot & { preview?: MenuImportPreview };
+};
+
+type IdRow = { id: string };
+type MapRow = { internal_id: string };
+type SourceEntityType = "category" | "item" | "modifier_group" | "modifier_option";
+
 function clean(value: unknown, max = 500): string {
   return String(value ?? "").trim().slice(0, max);
 }
 
+function hashValue(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
 function hashSnapshot(snapshot: ImportedMenuSnapshot): string {
-  return createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+  return hashValue(snapshot);
 }
 
 export function previewImportedMenu(snapshot: ImportedMenuSnapshot): MenuImportPreview {
   const warnings: MenuImportWarning[] = [];
-  const ids = new Set<string>();
+  const idsByType = new Map<string, Set<string>>();
   const categoryNames = new Set<string>();
+  const modifierGroupNames = new Map<string, string>();
   let items = 0;
   let modifierGroups = 0;
   let modifierOptions = 0;
 
-  function checkId(sourceId: string, path: string) {
+  function checkId(entityType: string, sourceId: string, path: string) {
     const id = clean(sourceId, 300);
     if (!id) {
       warnings.push({ code: "missing_source_id", path, message: "Imported entity has no stable source ID." });
       return;
     }
+    const ids = idsByType.get(entityType) || new Set<string>();
     if (ids.has(id)) {
-      warnings.push({ code: "duplicate_source_id", path, message: `Duplicate source ID: ${id}` });
+      warnings.push({ code: "duplicate_source_id", path, message: `Duplicate ${entityType} source ID: ${id}` });
       return;
     }
     ids.add(id);
+    idsByType.set(entityType, ids);
   }
 
   snapshot.categories.forEach((category, categoryIndex) => {
     const categoryPath = `categories[${categoryIndex}]`;
-    checkId(category.sourceId, categoryPath);
+    checkId("category", category.sourceId, categoryPath);
     const categoryName = clean(category.name).toLowerCase();
     if (categoryNames.has(categoryName)) {
       warnings.push({ code: "duplicate_name", path: categoryPath, message: `Duplicate category name: ${category.name}` });
@@ -110,7 +130,7 @@ export function previewImportedMenu(snapshot: ImportedMenuSnapshot): MenuImportP
     category.items.forEach((item, itemIndex) => {
       items += 1;
       const itemPath = `${categoryPath}.items[${itemIndex}]`;
-      checkId(item.sourceId, itemPath);
+      checkId("item", item.sourceId, itemPath);
       const itemName = clean(item.name).toLowerCase();
       if (itemNames.has(itemName)) {
         warnings.push({ code: "duplicate_name", path: itemPath, message: `Duplicate item name in category: ${item.name}` });
@@ -123,7 +143,19 @@ export function previewImportedMenu(snapshot: ImportedMenuSnapshot): MenuImportP
       (item.modifierGroups || []).forEach((group, groupIndex) => {
         modifierGroups += 1;
         const groupPath = `${itemPath}.modifierGroups[${groupIndex}]`;
-        checkId(group.sourceId, groupPath);
+        checkId("modifier_group", group.sourceId, groupPath);
+        const groupName = clean(group.name).toLowerCase();
+        const previousGroupId = modifierGroupNames.get(groupName);
+        if (previousGroupId && previousGroupId !== clean(group.sourceId, 300)) {
+          warnings.push({
+            code: "duplicate_name",
+            path: groupPath,
+            message: `Modifier group name '${group.name}' is used by more than one source group. Review before merging them.`,
+          });
+        } else {
+          modifierGroupNames.set(groupName, clean(group.sourceId, 300));
+        }
+
         const min = Math.max(0, Math.trunc(group.minSelections ?? 0));
         const max = Math.max(1, Math.trunc(group.maxSelections ?? 1));
         if (max < min) {
@@ -134,7 +166,7 @@ export function previewImportedMenu(snapshot: ImportedMenuSnapshot): MenuImportP
         group.options.forEach((option, optionIndex) => {
           modifierOptions += 1;
           const optionPath = `${groupPath}.options[${optionIndex}]`;
-          checkId(option.sourceId, optionPath);
+          checkId("modifier_option", option.sourceId, optionPath);
           const optionName = clean(option.name).toLowerCase();
           if (optionNames.has(optionName)) {
             warnings.push({ code: "duplicate_name", path: optionPath, message: `Duplicate modifier option: ${option.name}` });
@@ -186,4 +218,385 @@ export async function createMenuImportPreview(input: {
   `;
 
   return { runId, preview };
+}
+
+async function mappedInternalId(input: {
+  business: OrderingBusiness;
+  source: ImportedMenuSnapshot["source"];
+  entityType: SourceEntityType;
+  sourceId: string;
+}): Promise<string | null> {
+  const rows = (await getSql()`
+    SELECT internal_id
+    FROM ordering_menu_source_map
+    WHERE business = ${input.business}
+      AND source = ${input.source}
+      AND entity_type = ${input.entityType}
+      AND source_id = ${input.sourceId}
+    LIMIT 1
+  `) as MapRow[];
+  return rows[0]?.internal_id || null;
+}
+
+async function rememberSource(input: {
+  business: OrderingBusiness;
+  source: ImportedMenuSnapshot["source"];
+  entityType: SourceEntityType;
+  sourceId: string;
+  internalId: string;
+  payload: unknown;
+  runId: string;
+}): Promise<void> {
+  const sql = getSql();
+  await sql`
+    INSERT INTO ordering_menu_source_map (
+      id, business, source, entity_type, source_id, internal_id,
+      source_hash, source_payload, last_import_run_id
+    ) VALUES (
+      ${randomUUID()}, ${input.business}, ${input.source}, ${input.entityType}, ${input.sourceId}, ${input.internalId},
+      ${hashValue(input.payload)}, CAST(${JSON.stringify(input.payload)} AS jsonb), ${input.runId}
+    )
+    ON CONFLICT (business, source, entity_type, source_id) DO UPDATE SET
+      internal_id = EXCLUDED.internal_id,
+      source_hash = EXCLUDED.source_hash,
+      source_payload = EXCLUDED.source_payload,
+      last_import_run_id = EXCLUDED.last_import_run_id,
+      last_seen_at = NOW()
+  `;
+}
+
+async function upsertCategory(input: {
+  snapshot: ImportedMenuSnapshot;
+  category: ImportedMenuCategory;
+  runId: string;
+}): Promise<string> {
+  const sql = getSql();
+  const mapped = await mappedInternalId({
+    business: input.snapshot.business,
+    source: input.snapshot.source,
+    entityType: "category",
+    sourceId: input.category.sourceId,
+  });
+
+  let id = mapped;
+  if (id) {
+    const updated = (await sql`
+      UPDATE ordering_menu_categories
+      SET name = ${clean(input.category.name)},
+          sort_order = ${Math.trunc(input.category.sortOrder ?? 0)},
+          active = TRUE,
+          updated_at = NOW()
+      WHERE id = ${id} AND business = ${input.snapshot.business}
+      RETURNING id
+    `) as IdRow[];
+    if (!updated.length) id = null;
+  }
+
+  if (!id) {
+    const rows = (await sql`
+      INSERT INTO ordering_menu_categories (id, business, name, sort_order, active)
+      VALUES (${randomUUID()}, ${input.snapshot.business}, ${clean(input.category.name)}, ${Math.trunc(input.category.sortOrder ?? 0)}, TRUE)
+      ON CONFLICT (business, name) DO UPDATE SET
+        sort_order = EXCLUDED.sort_order,
+        active = TRUE,
+        updated_at = NOW()
+      RETURNING id
+    `) as IdRow[];
+    id = rows[0].id;
+  }
+
+  await rememberSource({
+    business: input.snapshot.business,
+    source: input.snapshot.source,
+    entityType: "category",
+    sourceId: input.category.sourceId,
+    internalId: id,
+    payload: input.category,
+    runId: input.runId,
+  });
+  return id;
+}
+
+async function upsertItem(input: {
+  snapshot: ImportedMenuSnapshot;
+  categoryId: string;
+  item: ImportedMenuItem;
+  runId: string;
+}): Promise<string> {
+  const sql = getSql();
+  const mapped = await mappedInternalId({
+    business: input.snapshot.business,
+    source: input.snapshot.source,
+    entityType: "item",
+    sourceId: input.item.sourceId,
+  });
+  const price = Math.max(0, Math.trunc(input.item.basePriceCents));
+
+  let id = mapped;
+  if (id) {
+    const updated = (await sql`
+      UPDATE ordering_menu_items
+      SET category_id = ${input.categoryId},
+          name = ${clean(input.item.name)},
+          description = ${clean(input.item.description, 5000)},
+          sku = ${clean(input.item.sku, 200)},
+          base_price_cents = ${price},
+          taxable = ${input.item.taxable !== false},
+          available = ${input.item.available !== false},
+          active = TRUE,
+          sort_order = ${Math.trunc(input.item.sortOrder ?? 0)},
+          updated_at = NOW()
+      WHERE id = ${id} AND business = ${input.snapshot.business}
+      RETURNING id
+    `) as IdRow[];
+    if (!updated.length) id = null;
+  }
+
+  if (!id) {
+    const rows = (await sql`
+      INSERT INTO ordering_menu_items (
+        id, business, category_id, name, description, sku, base_price_cents,
+        taxable, available, active, sort_order
+      ) VALUES (
+        ${randomUUID()}, ${input.snapshot.business}, ${input.categoryId}, ${clean(input.item.name)},
+        ${clean(input.item.description, 5000)}, ${clean(input.item.sku, 200)}, ${price},
+        ${input.item.taxable !== false}, ${input.item.available !== false}, TRUE, ${Math.trunc(input.item.sortOrder ?? 0)}
+      )
+      ON CONFLICT (business, category_id, name) DO UPDATE SET
+        description = EXCLUDED.description,
+        sku = EXCLUDED.sku,
+        base_price_cents = EXCLUDED.base_price_cents,
+        taxable = EXCLUDED.taxable,
+        available = EXCLUDED.available,
+        active = TRUE,
+        sort_order = EXCLUDED.sort_order,
+        updated_at = NOW()
+      RETURNING id
+    `) as IdRow[];
+    id = rows[0].id;
+  }
+
+  await rememberSource({
+    business: input.snapshot.business,
+    source: input.snapshot.source,
+    entityType: "item",
+    sourceId: input.item.sourceId,
+    internalId: id,
+    payload: input.item,
+    runId: input.runId,
+  });
+  return id;
+}
+
+async function upsertModifierGroup(input: {
+  snapshot: ImportedMenuSnapshot;
+  group: ImportedModifierGroup;
+  runId: string;
+}): Promise<string> {
+  const sql = getSql();
+  const mapped = await mappedInternalId({
+    business: input.snapshot.business,
+    source: input.snapshot.source,
+    entityType: "modifier_group",
+    sourceId: input.group.sourceId,
+  });
+  const min = Math.max(0, Math.trunc(input.group.minSelections ?? 0));
+  const max = Math.max(min, Math.max(1, Math.trunc(input.group.maxSelections ?? 1)));
+
+  let id = mapped;
+  if (id) {
+    const updated = (await sql`
+      UPDATE ordering_modifier_groups
+      SET name = ${clean(input.group.name)},
+          prompt = ${clean(input.group.prompt, 1000)},
+          min_selections = ${min},
+          max_selections = ${max},
+          allow_option_quantity = ${Boolean(input.group.allowOptionQuantity)},
+          active = TRUE,
+          sort_order = ${Math.trunc(input.group.sortOrder ?? 0)},
+          updated_at = NOW()
+      WHERE id = ${id} AND business = ${input.snapshot.business}
+      RETURNING id
+    `) as IdRow[];
+    if (!updated.length) id = null;
+  }
+
+  if (!id) {
+    const rows = (await sql`
+      INSERT INTO ordering_modifier_groups (
+        id, business, name, prompt, min_selections, max_selections,
+        allow_option_quantity, active, sort_order
+      ) VALUES (
+        ${randomUUID()}, ${input.snapshot.business}, ${clean(input.group.name)}, ${clean(input.group.prompt, 1000)},
+        ${min}, ${max}, ${Boolean(input.group.allowOptionQuantity)}, TRUE, ${Math.trunc(input.group.sortOrder ?? 0)}
+      )
+      ON CONFLICT (business, name) DO UPDATE SET
+        prompt = EXCLUDED.prompt,
+        min_selections = EXCLUDED.min_selections,
+        max_selections = EXCLUDED.max_selections,
+        allow_option_quantity = EXCLUDED.allow_option_quantity,
+        active = TRUE,
+        sort_order = EXCLUDED.sort_order,
+        updated_at = NOW()
+      RETURNING id
+    `) as IdRow[];
+    id = rows[0].id;
+  }
+
+  await rememberSource({
+    business: input.snapshot.business,
+    source: input.snapshot.source,
+    entityType: "modifier_group",
+    sourceId: input.group.sourceId,
+    internalId: id,
+    payload: input.group,
+    runId: input.runId,
+  });
+  return id;
+}
+
+async function upsertModifierOption(input: {
+  snapshot: ImportedMenuSnapshot;
+  groupId: string;
+  option: ImportedModifierOption;
+  runId: string;
+}): Promise<string> {
+  const sql = getSql();
+  const mapped = await mappedInternalId({
+    business: input.snapshot.business,
+    source: input.snapshot.source,
+    entityType: "modifier_option",
+    sourceId: input.option.sourceId,
+  });
+  const delta = Math.trunc(input.option.priceDeltaCents);
+
+  let id = mapped;
+  if (id) {
+    const updated = (await sql`
+      UPDATE ordering_modifier_options
+      SET group_id = ${input.groupId},
+          name = ${clean(input.option.name)},
+          price_delta_cents = ${delta},
+          available = ${input.option.available !== false},
+          active = TRUE,
+          sort_order = ${Math.trunc(input.option.sortOrder ?? 0)},
+          updated_at = NOW()
+      WHERE id = ${id}
+      RETURNING id
+    `) as IdRow[];
+    if (!updated.length) id = null;
+  }
+
+  if (!id) {
+    const rows = (await sql`
+      INSERT INTO ordering_modifier_options (
+        id, group_id, name, price_delta_cents, available, active, sort_order
+      ) VALUES (
+        ${randomUUID()}, ${input.groupId}, ${clean(input.option.name)}, ${delta},
+        ${input.option.available !== false}, TRUE, ${Math.trunc(input.option.sortOrder ?? 0)}
+      )
+      ON CONFLICT (group_id, name) DO UPDATE SET
+        price_delta_cents = EXCLUDED.price_delta_cents,
+        available = EXCLUDED.available,
+        active = TRUE,
+        sort_order = EXCLUDED.sort_order,
+        updated_at = NOW()
+      RETURNING id
+    `) as IdRow[];
+    id = rows[0].id;
+  }
+
+  await rememberSource({
+    business: input.snapshot.business,
+    source: input.snapshot.source,
+    entityType: "modifier_option",
+    sourceId: input.option.sourceId,
+    internalId: id,
+    payload: input.option,
+    runId: input.runId,
+  });
+  return id;
+}
+
+/**
+ * Applies an owner-approved preview to the development menu. The operation is
+ * idempotent through source-ID mappings. It never deactivates records merely
+ * because a scraper failed to see them; removals require a later reviewed diff.
+ */
+export async function applyMenuImportRun(input: {
+  runId: string;
+  approvedBy: string;
+  allowWarnings?: boolean;
+}): Promise<{ runId: string; applied: true; counts: MenuImportPreview["counts"] }> {
+  await ensureOrderingMenuImportSchema();
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT id, business, source, status, warning_count, snapshot
+    FROM ordering_menu_import_runs
+    WHERE id = ${input.runId}
+    LIMIT 1
+  `) as ImportRunRow[];
+  const run = rows[0];
+  if (!run) throw new Error("Menu import preview was not found.");
+  if (run.status === "applied") throw new Error("This menu import has already been applied.");
+  if (Number(run.warning_count) > 0 && !input.allowWarnings) {
+    throw new Error("This menu import contains warnings. Review them before explicitly approving the import.");
+  }
+
+  const snapshot = run.snapshot;
+  const preview = snapshot.preview || previewImportedMenu(snapshot);
+  await sql`
+    UPDATE ordering_menu_import_runs
+    SET status = 'approved', approved_by = ${input.approvedBy}, approved_at = NOW(), error_message = ''
+    WHERE id = ${run.id}
+  `;
+
+  try {
+    for (const category of snapshot.categories) {
+      const categoryId = await upsertCategory({ snapshot, category, runId: run.id });
+      for (const item of category.items) {
+        const itemId = await upsertItem({ snapshot, categoryId, item, runId: run.id });
+        for (const group of item.modifierGroups || []) {
+          const groupId = await upsertModifierGroup({ snapshot, group, runId: run.id });
+          await sql`
+            INSERT INTO ordering_menu_item_modifier_groups (id, item_id, group_id, sort_order)
+            VALUES (${randomUUID()}, ${itemId}, ${groupId}, ${Math.trunc(group.sortOrder ?? 0)})
+            ON CONFLICT (item_id, group_id) DO UPDATE SET sort_order = EXCLUDED.sort_order
+          `;
+
+          for (const option of group.options) {
+            const optionId = await upsertModifierOption({ snapshot, groupId, option, runId: run.id });
+            await sql`
+              INSERT INTO ordering_menu_item_modifier_defaults (
+                id, item_id, option_id, default_selected, included_quantity,
+                price_delta_override_cents, active
+              ) VALUES (
+                ${randomUUID()}, ${itemId}, ${optionId}, ${Boolean(option.defaultSelected)},
+                ${Math.max(0, Math.trunc(option.includedQuantity ?? 0))}, NULL, TRUE
+              )
+              ON CONFLICT (item_id, option_id) DO UPDATE SET
+                default_selected = EXCLUDED.default_selected,
+                included_quantity = EXCLUDED.included_quantity,
+                active = TRUE,
+                updated_at = NOW()
+            `;
+          }
+        }
+      }
+    }
+
+    await sql`
+      UPDATE ordering_menu_import_runs
+      SET status = 'applied', applied_at = NOW(), error_message = ''
+      WHERE id = ${run.id}
+    `;
+    return { runId: run.id, applied: true, counts: preview.counts };
+  } catch (error) {
+    await sql`
+      UPDATE ordering_menu_import_runs
+      SET status = 'failed', error_message = ${error instanceof Error ? error.message : String(error)}
+      WHERE id = ${run.id}
+    `;
+    throw error;
+  }
 }
