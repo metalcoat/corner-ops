@@ -1,6 +1,6 @@
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
-import { orderingMenu } from "@/lib/ordering-menu";
+import { orderingMenuWithVariants } from "@/lib/ordering-menu-variants";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 
 export const runtime = "nodejs";
@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     if (!canAccessBusiness(session, business)) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
     }
-    return Response.json({ business, categories: await orderingMenu(business) });
+    return Response.json({ business, categories: await orderingMenuWithVariants(business) });
   } catch (error) {
     return apiError(error);
   }
