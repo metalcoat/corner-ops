@@ -20,7 +20,13 @@ export type PaymentStatus =
   | "refunded"
   | "failed";
 
-export type ServiceType = "pickup" | "delivery" | "dine_in" | "bar";
+export type ServiceType =
+  | "pickup"
+  | "delivery"
+  | "no_contact_delivery"
+  | "dine_in"
+  | "curbside"
+  | "bar";
 
 export type ModifierRequirement = {
   groupId: string;
@@ -36,6 +42,11 @@ export type ModifierValidationIssue = {
   code: "too_few" | "too_many";
   required: number;
   actual: number;
+};
+
+export type FulfillmentValidationIssue = {
+  code: "curbside_payment_required" | "sms_verification_required";
+  message: string;
 };
 
 /**
@@ -93,6 +104,53 @@ export function validateModifierRequirements(
         actual,
       });
     }
+  }
+
+  return issues;
+}
+
+/**
+ * Web orders that are not fully paid must prove control of the supplied phone
+ * number before they can be confirmed or sent to the kitchen. This includes
+ * delivery orders that select cash payment.
+ */
+export function requiresSmsVerification(input: {
+  source: OrderSource;
+  paymentStatus: PaymentStatus;
+}): boolean {
+  return input.source === "web" && input.paymentStatus !== "paid";
+}
+
+/**
+ * Curbside web orders must be fully paid online before confirmation.
+ */
+export function requiresOnlinePrepayment(input: {
+  source: OrderSource;
+  serviceType: ServiceType;
+}): boolean {
+  return input.source === "web" && input.serviceType === "curbside";
+}
+
+export function validateFulfillmentForConfirmation(input: {
+  source: OrderSource;
+  serviceType: ServiceType;
+  paymentStatus: PaymentStatus;
+  smsVerified: boolean;
+}): FulfillmentValidationIssue[] {
+  const issues: FulfillmentValidationIssue[] = [];
+
+  if (requiresOnlinePrepayment(input) && input.paymentStatus !== "paid") {
+    issues.push({
+      code: "curbside_payment_required",
+      message: "Curbside web orders must be paid online before confirmation.",
+    });
+  }
+
+  if (requiresSmsVerification(input) && !input.smsVerified) {
+    issues.push({
+      code: "sms_verification_required",
+      message: "Unpaid web orders require SMS verification before confirmation.",
+    });
   }
 
   return issues;
