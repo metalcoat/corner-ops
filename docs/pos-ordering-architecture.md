@@ -76,15 +76,28 @@ Supported fulfillment modes include:
 - Curbside
 - Bar/service use where applicable
 
-Delivery can be paid online by card or left unpaid for cash collection. No-contact delivery is a separate fulfillment mode so the customer can provide appropriate drop-off instructions and the ticket can clearly identify it.
+Standard delivery can be paid online by card or left unpaid for cash collection. No-contact delivery is a separate fulfillment mode and **requires full online payment** before confirmation. The customer can provide drop-off instructions and the ticket must clearly identify no-contact orders.
 
 ### Unpaid online order verification
 
-Any web order that is not fully paid must be verified by SMS before it can be confirmed or sent to the kitchen. This includes a delivery order where the customer chooses cash payment.
+Any web order that is allowed to remain unpaid must be verified by SMS before it can be confirmed or sent to the kitchen. This includes a standard delivery order where the customer chooses cash payment.
 
 The verification flow uses a short-lived one-time code tied to the order and phone number. Only a hash of the code is stored. Verification tracks expiration, attempts, resends, and verification time. Changing the phone number invalidates the previous verification.
 
-Paid web orders do not require this anti-fraud SMS step unless a future business rule explicitly enables it.
+Paid web orders do not require this anti-fraud SMS step unless a future business rule explicitly enables it. SMS verification is not a substitute for payment on fulfillment modes that require prepayment.
+
+### No-contact delivery
+
+No-contact delivery web orders require full online payment before confirmation. Cash payment is not available for no-contact delivery.
+
+The order captures drop-off instructions so the driver ticket can prominently show details such as:
+
+- front/side/back door
+- porch or lobby location
+- knock/do not knock
+- ring bell/do not ring bell
+- text/call delivery preference
+- other customer instructions
 
 ### Curbside
 
@@ -242,8 +255,8 @@ The first foundation is complete when we can:
 8. detect unresolved required modifier and combo groups
 9. calculate deterministic line/order totals
 10. apply fulfillment rules for delivery, no-contact, pickup, eat-in, and curbside
-11. require full online payment for curbside web orders
-12. require SMS verification for any web order not fully paid, including cash delivery
+11. require full online payment for curbside and no-contact web orders
+12. require SMS verification for any web order that is allowed to remain unpaid, including standard cash delivery
 13. record curbside customer arrival and alert the POS
 14. increment an order version on changes
 15. confirm an order only when all channel/payment/verification validation passes
