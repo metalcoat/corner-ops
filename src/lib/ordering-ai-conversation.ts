@@ -1,4 +1,5 @@
 import type { ServiceType } from "@/lib/ordering-core";
+import { buildAfterHoursAiPrompt } from "@/lib/ordering-timing-core";
 
 export type FulfillmentQuestionState =
   | "not_asked"
@@ -31,6 +32,12 @@ export type AiFulfillmentTurnResult = {
   state: AiFulfillmentState;
   directive: AiFulfillmentDirective;
   suggestedPrompt: string;
+};
+
+export type AiAfterHoursDirective = {
+  canTakeOrderNow: boolean;
+  canOfferFutureOrder: boolean;
+  prompt: string;
 };
 
 export function newAiFulfillmentState(): AiFulfillmentState {
@@ -109,4 +116,34 @@ export function advanceAiFulfillmentTurn(input: AiFulfillmentTurnInput): AiFulfi
   }
 
   return { state, directive: "none", suggestedPrompt: "" };
+}
+
+/**
+ * Phone answering can stay available while the restaurant itself is closed.
+ * The shared hours engine supplies open/next-open state; the AI simply explains
+ * it and offers a valid future order rather than pretending an ASAP order can
+ * be made while nobody is in the kitchen.
+ */
+export function afterHoursAiDirective(input: {
+  openNow: boolean;
+  nextOpenAt: Date | null;
+  allowFutureOrdersWhenClosed: boolean;
+}): AiAfterHoursDirective {
+  if (input.openNow) {
+    return { canTakeOrderNow: true, canOfferFutureOrder: true, prompt: "" };
+  }
+
+  if (!input.allowFutureOrdersWhenClosed) {
+    return {
+      canTakeOrderNow: false,
+      canOfferFutureOrder: false,
+      prompt: "We're closed right now. Please call back during our next open ordering period.",
+    };
+  }
+
+  return {
+    canTakeOrderNow: false,
+    canOfferFutureOrder: true,
+    prompt: buildAfterHoursAiPrompt({ openNow: false, nextOpenAt: input.nextOpenAt }),
+  };
 }
