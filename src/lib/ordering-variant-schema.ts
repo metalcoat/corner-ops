@@ -27,17 +27,35 @@ export function ensureOrderingVariantSchema(): Promise<void> {
           available BOOLEAN NOT NULL DEFAULT TRUE,
           active BOOLEAN NOT NULL DEFAULT TRUE,
           sort_order INTEGER NOT NULL DEFAULT 0,
+          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           UNIQUE (item_id, name)
         )
       `;
+      await sql`ALTER TABLE ordering_menu_item_variants ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_menu_item_variants_item_idx ON ordering_menu_item_variants (item_id, active, available, sort_order, name)`;
       await sql`
         CREATE UNIQUE INDEX IF NOT EXISTS ordering_menu_item_one_default_variant_idx
         ON ordering_menu_item_variants (item_id)
         WHERE default_variant = TRUE AND active = TRUE
       `;
+
+      // Natural-language aliases let the AI understand that callers saying
+      // "whole" or "full" mean Rezku's Full Sub variant without renaming the
+      // customer-facing variant or letting the model invent a size mapping.
+      await sql`
+        CREATE TABLE IF NOT EXISTS ordering_menu_variant_aliases (
+          id UUID PRIMARY KEY,
+          variant_id UUID NOT NULL REFERENCES ordering_menu_item_variants(id) ON DELETE CASCADE,
+          alias TEXT NOT NULL,
+          normalized_alias TEXT NOT NULL,
+          active BOOLEAN NOT NULL DEFAULT TRUE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (variant_id, normalized_alias)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_menu_variant_aliases_lookup_idx ON ordering_menu_variant_aliases (normalized_alias, active)`;
 
       // A modifier can cost differently by variant. The base modifier option
       // remains the fallback, while these rows override it for one item/variant.
