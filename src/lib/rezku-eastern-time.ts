@@ -75,8 +75,8 @@ function rowLookup(row: RawRow, candidates: string[]): unknown {
 }
 
 function orderOpenedValue(raw: RawRow): unknown {
-  const exact = rowLookup(raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]);
-  if (exact !== "") return exact;
+  const strong = rowLookup(raw, ["Order Opened At", "Order Opened", "Opened At", "Opened", "Open Time", "Order Time"]);
+  if (strong !== "") return strong;
   const candidates = Object.entries(raw)
     .filter(([key, value]) => {
       const normalized = normalizeKey(key);
@@ -94,7 +94,8 @@ function orderOpenedValue(raw: RawRow): unknown {
       };
       return score(left) - score(right);
     });
-  return candidates[0]?.[1] ?? "";
+  if (candidates[0]) return candidates[0][1];
+  return rowLookup(raw, ["Created At", "Time"]);
 }
 
 function orderRawHasClock(raw: RawRow): boolean {

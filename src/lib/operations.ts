@@ -68,6 +68,19 @@ function rowLookup(row: Record<string, unknown>, candidates: string[]): unknown 
   return "";
 }
 
+function orderOpenedLookup(row: Record<string, unknown>): unknown {
+  const strong = rowLookup(row, ["Order Opened At", "Order Opened", "Opened At", "Opened", "Open Time", "Order Time"]);
+  if (strong !== "") return strong;
+  const candidates = Object.entries(row)
+    .filter(([key, value]) => {
+      const normalized = normalizeKey(key);
+      return value !== undefined && value !== null && String(value).trim() !== ""
+        && (normalized.includes("opened") || normalized.includes("opentime") || normalized.includes("orderopen"));
+    });
+  if (candidates[0]) return candidates[0][1];
+  return rowLookup(row, ["Created At", "Time"]);
+}
+
 function parseDate(value: unknown): Date | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
   if (typeof value === "number") {
@@ -681,7 +694,7 @@ export async function importRezkuReport(fileName: string, bytes: ArrayBuffer, re
       const orderId = clean(rowLookup(row, ["Order ID", "Order Number", "Order #", "ID"]), 100);
       if (!orderId) continue;
       const dateValue = rowLookup(row, ["Date", "Business Date", "Order Date"]);
-      const openedAt = combineDateAndTime(dateValue, rowLookup(row, ["Order Opened At", "Order Opened", "Opened At", "Opened", "Open Time", "Order Time", "Created At", "Time"]));
+      const openedAt = combineDateAndTime(dateValue, orderOpenedLookup(row));
       const orderType = clean(rowLookup(row, ["Order Type", "Dining Option", "Service Type", "Type"]), 100);
       const key = sourceKey(["order", orderId, openedAt?.toISOString(), orderType]);
       const result = await getSql()`

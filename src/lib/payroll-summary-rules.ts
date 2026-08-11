@@ -124,7 +124,7 @@ function rawHasClock(value: unknown, fields: string[]): boolean {
 
 function rawOrderHasClock(value: unknown): boolean {
   const raw = rawObject(value);
-  const exact = ["Order Opened At", "Order Opened", "Opened At", "Opened", "Open Time", "Order Time", "Created At", "Time"]
+  const exact = ["Order Opened At", "Order Opened", "Opened At", "Opened", "Open Time", "Order Time"]
     .some((field) => /\d{1,2}:\d{2}/.test(String(raw[field] || "")));
   if (exact) return true;
   return Object.entries(raw).some(([key, fieldValue]) => {
