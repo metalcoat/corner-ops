@@ -701,7 +701,7 @@ export async function payrollSummary(business: Business, weekStart: string) {
     const candidate = {
       orderType: String(row.order_type || "").trim(),
       openedAt,
-      hasClock: rawHasClock(row.raw, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]),
+      hasClock: rawHasClock(row.raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]),
     };
     const existing = orders.get(key);
     if (!existing

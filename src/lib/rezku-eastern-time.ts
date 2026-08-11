@@ -272,7 +272,7 @@ async function removeDateOnlyOrderDuplicates(): Promise<number> {
   const detailed = new Set<string>();
   for (const row of rows) {
     const key = normalizeOrderId(row.order_id);
-    if (key && hasClock(rawObject(row.raw), ["Opened At", "Open Time", "Order Time", "Created At", "Time"])) {
+    if (key && hasClock(rawObject(row.raw), ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"])) {
       detailed.add(key);
     }
   }
@@ -280,7 +280,7 @@ async function removeDateOnlyOrderDuplicates(): Promise<number> {
     .filter((row) => {
       const key = normalizeOrderId(row.order_id);
       return Boolean(key && detailed.has(key)
-        && !hasClock(rawObject(row.raw), ["Opened At", "Open Time", "Order Time", "Created At", "Time"]));
+        && !hasClock(rawObject(row.raw), ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]));
     })
     .map((row) => String(row.id));
   if (!deleteIds.length) return 0;
@@ -299,7 +299,7 @@ async function repairOrders(batchId?: string) {
   for (const row of rows) {
     const raw = rawObject(row.raw);
     const dateValue = rowLookup(raw, ["Date", "Business Date", "Order Date"]);
-    const timeValue = rowLookup(raw, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]);
+    const timeValue = rowLookup(raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]);
     const openedAt = rezkuDateTime(dateValue, timeValue);
     if (!openedAt) continue;
     const key = sourceKey(["order", clean(row.order_id, 100), openedAt.toISOString(), clean(row.order_type, 100)]);
@@ -335,7 +335,7 @@ async function orderTimeMap() {
     const raw = rawObject(row.raw);
     const candidate = {
       time,
-      hasClock: hasClock(raw, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]),
+      hasClock: hasClock(raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]),
     };
     const current = result.get(key);
     if (!current
