@@ -104,6 +104,8 @@ When a delivery is below the merchandise minimum, the normal flow is:
 
 Example: a $14 merchandise order against a $20 minimum first gets a $6 upsell opportunity. If the customer declines everything else, policy may add a $6 minimum-order adjustment.
 
+For AI phone ordering, the AI should explain the shortfall naturally rather than reciting policy. A representative flow is: "You're about six dollars short of the delivery minimum. Want to add fries or another side?" If the customer declines, the AI may explain that it can still send the delivery with a $6 minimum-order adjustment and obtain the customer's agreement before adding it.
+
 A true bypass is different: the order is allowed below minimum without charging the shortfall. True bypasses require authorized management action, record who approved the exception and why, and create a management alert. The AI and website cannot independently grant a true bypass.
 
 The shared confirmation gate blocks delivery when distance, delivery fee, or minimum resolution remains unresolved.
