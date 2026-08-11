@@ -8,6 +8,7 @@ on:
     paths:
       - .github/workflows/rezku-menu-capture.yml
       - scripts/rezku-discover-menu.mjs
+      - scripts/rezku-normalize-menu.mjs
 
 permissions:
   contents: read
@@ -38,10 +39,21 @@ jobs:
           REZKU_DISCOVERY_OUT: tmp/rezku-cornerdeli-discovery.json
         run: node scripts/rezku-discover-menu.mjs
 
+      - name: Normalize captured menu
+        run: node scripts/rezku-normalize-menu.mjs tmp/rezku-cornerdeli-discovery.json tmp/rezku-cornerdeli-normalized.json
+
       - name: Upload capture
         uses: actions/upload-artifact@v6
         with:
           name: rezku-cornerdeli-discovery
           path: tmp/rezku-cornerdeli-discovery.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload normalized menu
+        uses: actions/upload-artifact@v6
+        with:
+          name: rezku-cornerdeli-normalized
+          path: tmp/rezku-cornerdeli-normalized.json
           if-no-files-found: error
           retention-days: 7
