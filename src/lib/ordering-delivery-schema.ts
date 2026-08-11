@@ -26,7 +26,6 @@ export function ensureOrderingDeliverySchema(): Promise<void> {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
-
       await sql`
         INSERT INTO ordering_business_tax_settings (business, prices_include_tax)
         VALUES ('Corner Deli', TRUE), ('Tiki', TRUE)
@@ -38,7 +37,7 @@ export function ensureOrderingDeliverySchema(): Promise<void> {
           business TEXT PRIMARY KEY CHECK (business IN ('Corner Deli', 'Tiki')),
           enabled BOOLEAN NOT NULL DEFAULT FALSE,
           minimum_order_cents INTEGER NOT NULL DEFAULT 0 CHECK (minimum_order_cents >= 0),
-          minimum_basis TEXT NOT NULL DEFAULT 'order_total_including_delivery_fee',
+          minimum_basis TEXT NOT NULL DEFAULT 'merchandise_after_discounts',
           offer_upsell_before_shortfall_fee BOOLEAN NOT NULL DEFAULT TRUE,
           allow_shortfall_fee BOOLEAN NOT NULL DEFAULT TRUE,
           shortfall_fee_label TEXT NOT NULL DEFAULT 'Round up to delivery minimum',
@@ -51,33 +50,31 @@ export function ensureOrderingDeliverySchema(): Promise<void> {
         )
       `;
 
-      // Expand the minimum basis safely for databases created by earlier
-      // development revisions, then make Corner Deli count its delivery charge
-      // toward the $20 minimum.
       await sql`ALTER TABLE ordering_delivery_policies DROP CONSTRAINT IF EXISTS ordering_delivery_policies_minimum_basis_check`;
-      await sql`ALTER TABLE ordering_delivery_policies ALTER COLUMN minimum_basis SET DEFAULT 'order_total_including_delivery_fee'`;
+      await sql`ALTER TABLE ordering_delivery_policies ALTER COLUMN minimum_basis SET DEFAULT 'merchandise_after_discounts'`;
       await sql`
         ALTER TABLE ordering_delivery_policies
         ADD CONSTRAINT ordering_delivery_policies_minimum_basis_check
         CHECK (minimum_basis IN ('merchandise_after_discounts', 'order_total_including_delivery_fee'))
       `;
 
+      // Corner Deli policy: $16.00 of merchandise is required for delivery.
+      // The mileage-based delivery fee is then added on top. The customer may
+      // choose a useful add-on or an exact round-up adjustment if short.
       await sql`
         INSERT INTO ordering_delivery_policies (
-          business, enabled, minimum_order_cents, minimum_basis, offer_upsell_before_shortfall_fee,
-          allow_shortfall_fee, shortfall_fee_label, allow_manager_bypass,
+          business, enabled, minimum_order_cents, minimum_basis,
+          offer_upsell_before_shortfall_fee, allow_shortfall_fee,
+          shortfall_fee_label, allow_manager_bypass,
           notify_management_on_bypass, max_distance_miles
         ) VALUES (
-          'Corner Deli', TRUE, 2000, 'order_total_including_delivery_fee', TRUE, TRUE,
-          'Round up to delivery minimum', TRUE, TRUE, 12
+          'Corner Deli', TRUE, 1600, 'merchandise_after_discounts',
+          TRUE, TRUE, 'Round up to delivery minimum', TRUE, TRUE, 12
         )
         ON CONFLICT (business) DO UPDATE SET
-          minimum_basis = 'order_total_including_delivery_fee',
-          shortfall_fee_label = CASE
-            WHEN ordering_delivery_policies.shortfall_fee_label = 'Minimum order adjustment'
-              THEN 'Round up to delivery minimum'
-            ELSE ordering_delivery_policies.shortfall_fee_label
-          END,
+          minimum_order_cents = 1600,
+          minimum_basis = 'merchandise_after_discounts',
+          shortfall_fee_label = 'Round up to delivery minimum',
           updated_at = NOW()
       `;
 
@@ -99,17 +96,19 @@ export function ensureOrderingDeliverySchema(): Promise<void> {
       `;
       await sql`CREATE INDEX IF NOT EXISTS ordering_delivery_fee_bands_lookup_idx ON ordering_delivery_fee_bands (business, active, sort_order, max_miles)`;
 
-      // Seed a contiguous working interpretation of the stated tiers:
-      // 0-4 mi $4.00, >4-8 mi $7.75, >8-12 mi $10.00. The owner UI will make
-      // every boundary and fee editable, so the 8-10 boundary can be changed
-      // without code if a different tier was intended.
+      // Working contiguous delivery pricing. Every boundary and fee remains
+      // owner-editable before production.
       await sql`
         INSERT INTO ordering_delivery_fee_bands (id, business, min_miles, max_miles, fee_cents, sort_order)
         VALUES
           ('0f8b0abc-2cb9-4fb6-b9bd-8b2e0a000401', 'Corner Deli', 0, 4, 400, 10),
           ('0f8b0abc-2cb9-4fb6-b9bd-8b2e0a000402', 'Corner Deli', 4, 8, 775, 20),
           ('0f8b0abc-2cb9-4fb6-b9bd-8b2e0a000403', 'Corner Deli', 8, 12, 1000, 30)
-        ON CONFLICT (business, min_miles, max_miles) DO NOTHING
+        ON CONFLICT (business, min_miles, max_miles) DO UPDATE SET
+          fee_cents = EXCLUDED.fee_cents,
+          active = TRUE,
+          sort_order = EXCLUDED.sort_order,
+          updated_at = NOW()
       `;
 
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS delivery_distance_miles NUMERIC(6,2)`;
@@ -121,7 +120,16 @@ export function ensureOrderingDeliverySchema(): Promise<void> {
       await sql`ALTER TABLE ordering_orders DROP CONSTRAINT IF EXISTS ordering_orders_delivery_distance_check`;
       await sql`ALTER TABLE ordering_orders ADD CONSTRAINT ordering_orders_delivery_distance_check CHECK (delivery_distance_miles IS NULL OR delivery_distance_miles >= 0)`;
       await sql`ALTER TABLE ordering_orders DROP CONSTRAINT IF EXISTS ordering_orders_delivery_fee_check`;
-      await sql`ALTER TABLE ordering_orders ADD CONSTRAINT ordering_orders_delivery_fee_check CHECK (delivery_fee_cents >= 0 AND minimum_order_cents_snapshot >= 0 AND minimum_order_adjustment_cents >= 0 AND tax_rate_bps_snapshot >= 0)`;
+      await sql`
+        ALTER TABLE ordering_orders
+        ADD CONSTRAINT ordering_orders_delivery_fee_check
+        CHECK (
+          delivery_fee_cents >= 0
+          AND minimum_order_cents_snapshot >= 0
+          AND minimum_order_adjustment_cents >= 0
+          AND tax_rate_bps_snapshot >= 0
+        )
+      `;
 
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_delivery_minimum_exceptions (
