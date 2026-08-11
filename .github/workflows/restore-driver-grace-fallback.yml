@@ -1,0 +1,125 @@
+name: Restore driver grace fallback
+
+on:
+  push:
+    paths:
+      - .github/workflows/restore-driver-grace-fallback.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Restore 35-minute driver grace before staff fallback
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("src/lib/payroll-summary-rules.ts")
+          text = path.read_text()
+
+          if "const DRIVER_GRACE_MINUTES = 35;" not in text:
+              text = text.replace(
+                  "const CUTOFF_HOUR = 15;\n",
+                  "const CUTOFF_HOUR = 15;\nconst DRIVER_GRACE_MINUTES = 35;\n",
+              )
+
+          if "function nextDriversWithinGrace(" not in text:
+              marker = "function splitCents(totalCents: number, count: number): number[] {"
+              helper = '''function nextDriversWithinGrace(shifts: Shift[], time: Date): Shift[] {
+            const graceEnd = time.getTime() + DRIVER_GRACE_MINUTES * 60_000;
+            const candidates = shifts.filter((shift) => isEligible(shift)
+              && isDriver(shift)
+              && shift.clockIn
+              && shift.clockIn.getTime() > time.getTime()
+              && shift.clockIn.getTime() <= graceEnd);
+            if (!candidates.length) return [];
+            const earliestClockIn = Math.min(...candidates.map((shift) => shift.clockIn?.getTime() || Number.MAX_SAFE_INTEGER));
+            return uniqueEmployees(candidates.filter((shift) => shift.clockIn?.getTime() === earliestClockIn));
+          }
+
+          '''
+              if marker not in text:
+                  raise SystemExit("splitCents marker not found")
+              text = text.replace(marker, helper + marker, 1)
+
+          start = text.index("    } else if (delivery) {")
+          finish = text.index("    } else {\n      eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, time)));", start)
+          desired = '''    } else if (delivery) {
+              eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && isDriver(shift) && covers(shift, time)));
+              if (eligible.length) {
+                rule = "After 3 PM delivery order: assigned to driver clocked in";
+              } else {
+                eligible = nextDriversWithinGrace(shifts, time);
+                if (eligible.length) {
+                  rule = "After 3 PM delivery order: next driver arrived within 35 minutes";
+                } else {
+                  eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, time)));
+                  rule = "After 3 PM delivery fallback: no driver clocked in or arriving within 35 minutes; equally split among non-driver employees clocked in";
+                }
+              }
+
+              if (!eligible.length) {
+                details.push({
+                  ...detailBase(transaction),
+                  allocatedTipBeforeFee: 0,
+                  feeAmount: 0,
+                  allocatedTip: 0,
+                  employee: "Unallocated",
+                  splitCount: 0,
+                  rule: "After 3 PM delivery: no driver within 35 minutes and no other tip-eligible employee was clocked in",
+                });
+                continue;
+              }
+'''
+          text = text[:start] + desired + text[finish:]
+
+          text = text.replace(
+              "  try {\n    const rows = await getSql()`\n      SELECT s.position, s.starts_at, s.ends_at, e.name AS employee_name, e.position AS employee_position",
+              "  try {\n    const scheduleEnd = new Date(end.getTime() + DRIVER_GRACE_MINUTES * 60_000);\n    const rows = await getSql()`\n      SELECT s.position, s.starts_at, s.ends_at, e.name AS employee_name, e.position AS employee_position",
+              1,
+          )
+          text = text.replace(
+              "        AND s.starts_at < ${end.toISOString()}\n",
+              "        AND s.starts_at < ${scheduleEnd.toISOString()}\n",
+              1,
+          )
+
+          old_sched = '''    for (const scheduled of scheduledDrivers) {
+              if (scheduled.startsAt.getTime() <= openedAt.getTime() && scheduled.endsAt.getTime() >= openedAt.getTime()) {
+                current.scheduledDrivers.add(scheduled.employeeName);
+              }
+            }'''
+          new_sched = '''    const graceEnd = openedAt.getTime() + DRIVER_GRACE_MINUTES * 60_000;
+            for (const scheduled of scheduledDrivers) {
+              if (scheduled.startsAt.getTime() <= graceEnd && scheduled.endsAt.getTime() >= openedAt.getTime()) {
+                current.scheduledDrivers.add(scheduled.employeeName);
+              }
+            }'''
+          if old_sched not in text:
+              raise SystemExit("scheduled-driver warning block not found")
+          text = text.replace(old_sched, new_sched, 1)
+
+          text = text.replace(
+              'message: `Driver punch missing: ${names.join(", ")} was scheduled as Driver, but no Driver punch covered these deliveries. Tips fell back to the tip-eligible staff actually clocked in.`,',
+              'message: `Driver punch missing: ${names.join(", ")} was scheduled as Driver, but no qualifying Driver punch covered these deliveries or started within 35 minutes. Tips fell back to the tip-eligible staff actually clocked in.`,',
+          )
+          text = text.replace(
+              'source: "Rezku daily email reports · tips allocated by Order Export opened time · no-driver fallback splits among clocked-in staff",',
+              'source: "Rezku daily email reports · tips allocated by Order Export opened time · 35-minute future-driver grace · then staff fallback",',
+          )
+
+          path.write_text(text)
+      - name: Commit restored grace rule
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/payroll-summary-rules.ts
+          git diff --cached --check
+          git commit -m "Restore 35-minute driver grace before staff fallback"
+          git push origin HEAD:main
