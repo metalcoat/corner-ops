@@ -1,0 +1,67 @@
+name: Add payroll time repair diagnostics
+
+on:
+  push:
+    paths:
+      - .github/workflows/add-payroll-time-diagnostics.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Add repair diagnostics to tip audit
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/app/ops/payroll-tip-audit/page.tsx')
+          t = p.read_text()
+          old = '''type PayrollResponse = {
+            summary: {
+              weekStart: string;
+              weekEnd: string;
+              rows: PayrollRow[];
+              tipDetails?: TipDetail[];
+            };
+          };'''
+          new = '''type PayrollResponse = {
+            rezkuOrderTimeRepair?: {
+              checked?: number;
+              repaired?: number;
+              missingRawClock?: number;
+              numericRawClock?: number;
+            } | null;
+            summary: {
+              weekStart: string;
+              weekEnd: string;
+              rows: PayrollRow[];
+              tipDetails?: TipDetail[];
+            };
+          };'''
+          if old not in t:
+            raise SystemExit('PayrollResponse block not found')
+          t = t.replace(old, new, 1)
+          old = '''        <p className="reportNote">If order-open times incorrectly show 12:00 AM, use <strong>Re-import Rezku source week</strong>. It re-downloads the original daily workbooks and then recalculates this week.</p>'''
+          new = '''        <p className="reportNote"><strong>Rezku time repair:</strong> checked {data?.rezkuOrderTimeRepair?.checked ?? 0}, repaired {data?.rezkuOrderTimeRepair?.repaired ?? 0}, missing usable raw clock {data?.rezkuOrderTimeRepair?.missingRawClock ?? 0}, numeric raw clock {data?.rezkuOrderTimeRepair?.numericRawClock ?? 0}.</p>'''
+          if old not in t:
+            raise SystemExit('old repair note not found')
+          t = t.replace(old, new, 1)
+          p.write_text(t)
+      - name: Verify
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm run build
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/ops/payroll-tip-audit/page.tsx
+          git diff --cached --check
+          git commit -m "Show Rezku payroll time repair diagnostics"
+          git push origin HEAD:main
