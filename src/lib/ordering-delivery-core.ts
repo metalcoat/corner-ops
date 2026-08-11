@@ -55,16 +55,16 @@ export function resolveDeliveryFeeCents(distanceMiles: number, bands: DeliveryFe
 }
 
 /**
- * Delivery minimums may count the configured delivery charge toward the order
- * minimum. Corner Deli currently does. The normal path is still to offer a
- * useful add-on first; if the customer declines, the system can round the
- * order up to the minimum with an explicit adjustment equal to the remaining
- * shortfall. A true waiver/bypass is separate and management-visible.
+ * Corner Deli's delivery minimum is a merchandise minimum. The configured
+ * mileage-based delivery charge is added after the merchandise minimum is met
+ * and does not reduce the amount of food required. The normal path is to offer
+ * a useful add-on first; if the customer declines, the system can round the
+ * merchandise portion up to the minimum with an explicit adjustment equal to
+ * the exact shortfall. A true waiver/bypass is separate and management-visible.
  */
 export function evaluateDeliveryMinimum(input: {
   merchandiseSubtotalCents: number;
   deliveryFeeCents?: number;
-  deliveryFeeCountsTowardMinimum?: boolean;
   minimumOrderCents: number;
   customerDeclinedUpsell?: boolean;
   allowShortfallFee?: boolean;
@@ -73,7 +73,7 @@ export function evaluateDeliveryMinimum(input: {
   const subtotal = Math.max(0, Math.trunc(input.merchandiseSubtotalCents));
   const deliveryFee = Math.max(0, Math.trunc(input.deliveryFeeCents ?? 0));
   const minimum = Math.max(0, Math.trunc(input.minimumOrderCents));
-  const qualifyingAmount = subtotal + (input.deliveryFeeCountsTowardMinimum ? deliveryFee : 0);
+  const qualifyingAmount = subtotal;
   const shortfall = Math.max(0, minimum - qualifyingAmount);
 
   if (shortfall === 0) {
@@ -144,7 +144,7 @@ export function buildDeliveryMinimumOfferPrompt(shortfallCents: number): string 
   const shortfall = Math.max(0, Math.trunc(shortfallCents));
   if (!shortfall) return "";
   const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(shortfall / 100);
-  return `You're ${dollars} short of the delivery minimum. Would you like to add fries or something else, or just have us round the order up to the minimum?`;
+  return `You're ${dollars} short of the delivery minimum. Would you like to add fries or something else, or just have us round it up to the minimum?`;
 }
 
 /**
@@ -156,7 +156,6 @@ export function validateDeliveryForConfirmation(input: {
   serviceType: ServiceType;
   distanceMiles: number | null;
   deliveryFeeCents: number | null;
-  deliveryFeeCountsTowardMinimum?: boolean;
   merchandiseSubtotalCents: number;
   minimumOrderCents: number;
   minimumAdjustmentCents: number;
@@ -180,15 +179,13 @@ export function validateDeliveryForConfirmation(input: {
   }
 
   const subtotal = Math.max(0, Math.trunc(input.merchandiseSubtotalCents));
-  const deliveryFee = Math.max(0, Math.trunc(input.deliveryFeeCents ?? 0));
-  const qualifyingAmount = subtotal + (input.deliveryFeeCountsTowardMinimum ? deliveryFee : 0);
   const minimum = Math.max(0, Math.trunc(input.minimumOrderCents));
-  const shortfall = Math.max(0, minimum - qualifyingAmount);
+  const shortfall = Math.max(0, minimum - subtotal);
   if (shortfall > 0 && !input.minimumBypassApproved) {
     if (Math.max(0, Math.trunc(input.minimumAdjustmentCents)) < shortfall) {
       issues.push({
         code: "delivery_minimum_not_met",
-        message: "The delivery order minimum has not been met or resolved.",
+        message: "The delivery merchandise minimum has not been met or resolved.",
         shortfallCents: shortfall,
       });
     }
