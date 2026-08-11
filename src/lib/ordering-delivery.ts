@@ -44,6 +44,35 @@ type BandRow = {
   fee_cents: number;
 };
 
+function normalizeBands(bands: DeliveryFeeBand[]): DeliveryFeeBand[] {
+  if (!bands.length) throw new Error("At least one delivery fee band is required.");
+  const normalized = bands.map((band) => ({
+    minMilesExclusive: Number(band.minMilesExclusive),
+    maxMilesInclusive: Number(band.maxMilesInclusive),
+    feeCents: Math.trunc(Number(band.feeCents)),
+  })).sort((a, b) => a.maxMilesInclusive - b.maxMilesInclusive);
+
+  for (const [index, band] of normalized.entries()) {
+    if (!Number.isFinite(band.minMilesExclusive) || !Number.isFinite(band.maxMilesInclusive)) {
+      throw new Error("Delivery mileage bands must contain valid numbers.");
+    }
+    if (band.minMilesExclusive < 0 || band.maxMilesInclusive <= band.minMilesExclusive) {
+      throw new Error("Each delivery mileage band must have an increasing positive range.");
+    }
+    if (!Number.isSafeInteger(band.feeCents) || band.feeCents < 0) {
+      throw new Error("Delivery fees must be non-negative whole cents.");
+    }
+    if (index === 0 && band.minMilesExclusive !== 0) {
+      throw new Error("The first delivery mileage band must begin at 0 miles.");
+    }
+    if (index > 0 && band.minMilesExclusive !== normalized[index - 1].maxMilesInclusive) {
+      throw new Error("Delivery mileage bands must be contiguous without gaps or overlaps.");
+    }
+  }
+
+  return normalized;
+}
+
 export async function getDeliveryPricingSettings(business: OrderingBusiness): Promise<DeliveryPricingSettings> {
   await ensureOrderingDeliverySchema();
   const sql = getSql();
@@ -97,6 +126,76 @@ export async function getDeliveryPricingSettings(business: OrderingBusiness): Pr
       feeCents: Number(band.fee_cents),
     })),
   };
+}
+
+export async function saveDeliveryPricingSettings(input: DeliveryPricingSettings, updatedBy: string): Promise<DeliveryPricingSettings> {
+  await ensureOrderingDeliverySchema();
+  const sql = getSql();
+  const minimumOrderCents = Math.max(0, Math.trunc(input.minimumOrderCents));
+  const taxRateBps = Math.max(0, Math.trunc(input.taxRateBps));
+  if (taxRateBps > 10_000) throw new Error("Tax rate cannot exceed 100%.");
+  const bands = normalizeBands(input.feeBands);
+  const maxDistanceMiles = input.maxDistanceMiles == null
+    ? bands[bands.length - 1].maxMilesInclusive
+    : Number(input.maxDistanceMiles);
+  if (!Number.isFinite(maxDistanceMiles) || maxDistanceMiles <= 0) throw new Error("Maximum delivery distance must be greater than zero.");
+  if (bands[bands.length - 1].maxMilesInclusive !== maxDistanceMiles) {
+    throw new Error("The last delivery fee band must end at the configured maximum delivery distance.");
+  }
+
+  await sql`
+    UPDATE ordering_business_tax_settings
+    SET prices_include_tax = ${input.pricesIncludeTax},
+        tax_rate_bps = ${taxRateBps},
+        tax_rate_configured = TRUE,
+        delivery_fee_taxable = ${input.deliveryFeeTaxable},
+        minimum_adjustment_taxable = ${input.minimumAdjustmentTaxable},
+        updated_by = ${updatedBy},
+        updated_at = NOW()
+    WHERE business = ${input.business}
+  `;
+
+  await sql`
+    INSERT INTO ordering_delivery_policies (
+      business, enabled, minimum_order_cents, offer_upsell_before_shortfall_fee,
+      allow_shortfall_fee, shortfall_fee_label, allow_manager_bypass,
+      notify_management_on_bypass, max_distance_miles, updated_by
+    ) VALUES (
+      ${input.business}, ${input.enabled}, ${minimumOrderCents}, ${input.offerUpsellBeforeShortfallFee},
+      ${input.allowShortfallFee}, ${input.shortfallFeeLabel || "Minimum order adjustment"}, ${input.allowManagerBypass},
+      ${input.notifyManagementOnBypass}, ${maxDistanceMiles}, ${updatedBy}
+    )
+    ON CONFLICT (business) DO UPDATE SET
+      enabled = EXCLUDED.enabled,
+      minimum_order_cents = EXCLUDED.minimum_order_cents,
+      offer_upsell_before_shortfall_fee = EXCLUDED.offer_upsell_before_shortfall_fee,
+      allow_shortfall_fee = EXCLUDED.allow_shortfall_fee,
+      shortfall_fee_label = EXCLUDED.shortfall_fee_label,
+      allow_manager_bypass = EXCLUDED.allow_manager_bypass,
+      notify_management_on_bypass = EXCLUDED.notify_management_on_bypass,
+      max_distance_miles = EXCLUDED.max_distance_miles,
+      updated_by = EXCLUDED.updated_by,
+      updated_at = NOW()
+  `;
+
+  await sql`UPDATE ordering_delivery_fee_bands SET active = FALSE, updated_by = ${updatedBy}, updated_at = NOW() WHERE business = ${input.business}`;
+  for (const [index, band] of bands.entries()) {
+    await sql`
+      INSERT INTO ordering_delivery_fee_bands (
+        id, business, min_miles, max_miles, fee_cents, active, sort_order, updated_by
+      ) VALUES (
+        ${randomUUID()}, ${input.business}, ${band.minMilesExclusive}, ${band.maxMilesInclusive}, ${band.feeCents}, TRUE, ${(index + 1) * 10}, ${updatedBy}
+      )
+      ON CONFLICT (business, min_miles, max_miles) DO UPDATE SET
+        fee_cents = EXCLUDED.fee_cents,
+        active = TRUE,
+        sort_order = EXCLUDED.sort_order,
+        updated_by = EXCLUDED.updated_by,
+        updated_at = NOW()
+    `;
+  }
+
+  return getDeliveryPricingSettings(input.business);
 }
 
 export async function quoteDelivery(input: {
