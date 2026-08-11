@@ -11,7 +11,7 @@ Delivery rules are owned by the server-side order engine, not by a particular sc
 - website orders
 - future kiosk/mobile clients
 
-A client can explain or suggest alternatives, but it cannot confirm a delivery that fails the shared delivery confirmation gate.
+A client can explain or suggest alternatives, but it cannot confirm a delivery that fails the shared delivery confirmation gate. This keeps the minimum and distance fee from becoming three different answers depending on whether a human, website, or robot happened to take the order.
 
 ## Corner Deli working delivery policy
 
