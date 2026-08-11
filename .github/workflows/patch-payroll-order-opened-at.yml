@@ -1,0 +1,44 @@
+name: Patch payroll Order Opened At repair
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-payroll-order-opened-at.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Patch payroll repair header lookup
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/lib/repair-rezku-order-times.ts')
+          text = path.read_text()
+          old = '["Opened At", "Open Time", "Order Time", "Created At", "Time"]'
+          new = '["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]'
+          count = text.count(old)
+          if count != 2:
+              raise SystemExit(f'Expected 2 payroll repair lookups, found {count}')
+          path.write_text(text.replace(old, new))
+          PY
+      - name: Verify patch
+        run: |
+          grep -n 'Order Opened At' src/lib/repair-rezku-order-times.ts
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm run build
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/repair-rezku-order-times.ts
+          git diff --cached --check
+          git commit -m 'Repair payroll from Rezku Order Opened At'
+          git push origin HEAD:main
