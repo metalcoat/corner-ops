@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import type { OrderingBusiness, OrderSource, ServiceType } from "@/lib/ordering-core";
-import { createDraftOrder, type ConfiguredOrderItemInput } from "@/lib/ordering-orders";
+import { createDraftOrderWithVariants, type VariantConfiguredOrderItemInput } from "@/lib/ordering-orders-with-variants";
 import type { OrderTimingMode } from "@/lib/ordering-timing-core";
 import { quoteTimingForOrder } from "@/lib/ordering-timing";
 import { ensureOrderingTimingSchema } from "@/lib/ordering-timing-schema";
@@ -13,7 +13,7 @@ export type CreateTimedDraftOrderInput = {
   customerId?: string | null;
   callerPhone?: string;
   createdBy: string;
-  items?: ConfiguredOrderItemInput[];
+  items?: VariantConfiguredOrderItemInput[];
   timingMode?: OrderTimingMode;
   requestedFor?: Date | null;
 };
@@ -55,7 +55,7 @@ export async function createTimedDraftOrder(input: CreateTimedDraftOrderInput): 
   });
   if (!quote.accepted) throw new Error(quote.customerMessage || "The requested order time is not available.");
 
-  const base = await createDraftOrder({
+  const base = await createDraftOrderWithVariants({
     business: input.business,
     source: input.source,
     serviceType: input.serviceType,
