@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { newYorkDateKey } from "@/lib/schedule-meal-compliance";
 import type { Business } from "@/lib/types";
 import "./employee.css";
 
@@ -117,12 +118,21 @@ function localDateKey(value: Date | string) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function addDateKeyDays(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function mondayDateKey(value: Date | string) {
+  const key = newYorkDateKey(value);
+  const date = new Date(`${key}T12:00:00Z`);
+  const day = date.getUTCDay();
+  return addDateKeyDays(key, -(day === 0 ? 6 : day - 1));
+}
+
 function mondayFor(date: Date) {
-  const result = new Date(date);
-  result.setHours(0, 0, 0, 0);
-  const day = result.getDay();
-  result.setDate(result.getDate() - (day === 0 ? 6 : day - 1));
-  return result;
+  return new Date(`${mondayDateKey(date)}T12:00:00`);
 }
 
 function messagePreview(value: string) {
@@ -329,17 +339,33 @@ export default function EmployeePage() {
     formElement.reset();
   }
 
+  const currentWeekStartKey = mondayDateKey(new Date());
+  const currentWeekEndKey = addDateKeyDays(currentWeekStartKey, 7);
+  const shiftIsInCurrentWeek = (shift: Shift) => {
+    const key = newYorkDateKey(shift.startsAt);
+    return key >= currentWeekStartKey && key < currentWeekEndKey;
+  };
+  const shiftIsFuture = (shift: Shift) => new Date(shift.startsAt).getTime() > Date.now();
+
   const myShifts = useMemo(
-    () => (data?.teamShifts || []).filter((shift) => shift.employeeId === session?.employeeId),
-    [data?.teamShifts, session?.employeeId],
+    () => (data?.teamShifts || []).filter(
+      (shift) => shift.employeeId === session?.employeeId && shiftIsInCurrentWeek(shift),
+    ),
+    [data?.teamShifts, session?.employeeId, currentWeekEndKey, currentWeekStartKey],
   );
+  const tradeableMyShifts = useMemo(() => myShifts.filter(shiftIsFuture), [myShifts]);
   const openShifts = useMemo(
-    () => (data?.teamShifts || []).filter((shift) => !shift.employeeId && shift.status === "Open"),
+    () => (data?.teamShifts || []).filter(
+      (shift) => !shift.employeeId && shift.status === "Open" && shiftIsFuture(shift),
+    ),
     [data?.teamShifts],
   );
   const otherShifts = useMemo(
     () => (data?.teamShifts || []).filter(
-      (shift) => shift.employeeId && shift.employeeId !== session?.employeeId && shift.status === "Published",
+      (shift) => shift.employeeId
+        && shift.employeeId !== session?.employeeId
+        && shift.status === "Published"
+        && shiftIsFuture(shift),
     ),
     [data?.teamShifts, session?.employeeId],
   );
@@ -430,7 +456,7 @@ export default function EmployeePage() {
     {notice && <div className="empNotice">{notice}</div>}
 
     <section className="employeeStats">
-      <article><span>My upcoming shifts</span><strong>{myShifts.length}</strong></article>
+      <article><span>My upcoming shifts</span><strong>{tradeableMyShifts.length}</strong></article>
       <article><span>Open shifts</span><strong>{openShifts.length}</strong></article>
       <article><span>Incoming requests</span><strong>{incomingRequests.length}</strong></article>
       <article><span>New updates</span><strong>{latestMessages.length}</strong></article>
@@ -462,9 +488,9 @@ export default function EmployeePage() {
         <div className="employeeList">
           {myShifts.map((shift) => <div className="employeeShift" key={shift.id}>
             <div><strong>{shift.position || session.position}</strong><span>{local(shift.startsAt)} to {localTime(shift.endsAt)}</span>{shift.notes && <small>{shift.notes}</small>}</div>
-            <button disabled={busy} onClick={() => void action({ action: "shift-request", requestType: "Offer", shiftId: shift.id }, "Shift offered for manager approval.")}>Offer shift</button>
+            {shiftIsFuture(shift) && <button disabled={busy} onClick={() => void action({ action: "shift-request", requestType: "Offer", shiftId: shift.id }, "Shift offered for manager approval.")}>Offer shift</button>}
           </div>)}
-          {myShifts.length === 0 && <p className="empEmpty">No upcoming assigned shifts.</p>}
+          {myShifts.length === 0 && <p className="empEmpty">No assigned shifts this week.</p>}
         </div>
       </article>
 
@@ -546,7 +572,7 @@ export default function EmployeePage() {
       <article className="employeeCard">
         <div className="employeeCardHeader"><div><p className="empEyebrow">Trade assigned shifts</p><h2>Request a swap</h2></div></div>
         <form className="employeeForm" onSubmit={requestSwap}>
-          <label>My shift<select name="shiftId" required><option value="">Choose shift</option>{myShifts.map((shift) => <option key={shift.id} value={shift.id}>{local(shift.startsAt)} · {shift.position}</option>)}</select></label>
+          <label>My shift<select name="shiftId" required><option value="">Choose shift</option>{tradeableMyShifts.map((shift) => <option key={shift.id} value={shift.id}>{local(shift.startsAt)} · {shift.position}</option>)}</select></label>
           <label>Other employee&apos;s shift<select name="offeredShiftId" required><option value="">Choose shift</option>{otherShifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.employeeName} · {local(shift.startsAt)} · {shift.position}</option>)}</select></label>
           <label>Note<textarea name="note" rows={3} /></label>
           <button disabled={busy}>Send swap request</button>

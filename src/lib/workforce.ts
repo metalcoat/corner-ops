@@ -560,6 +560,9 @@ export async function createShiftRequest(session: EmployeeSession, input: {
   ` as unknown as Array<Record<string, unknown>>;
   const shift = shifts[0];
   if (!shift) throw new Error("Shift not found.");
+  if (new Date(String(shift.starts_at)).getTime() <= Date.now()) {
+    throw new Error("Past shifts cannot be claimed, offered, or swapped.");
+  }
 
   if (input.requestType === "Claim") {
     if (shift.employee_id || shift.status !== "Open") throw new Error("That shift is no longer open.");
@@ -575,11 +578,14 @@ export async function createShiftRequest(session: EmployeeSession, input: {
     if (!input.offeredShiftId) throw new Error("Choose the other employee's shift for the swap.");
     const offeredRows = await getSql()`
       SELECT employee_id FROM schedule_shifts
-      WHERE id = ${input.offeredShiftId} AND business = ${session.business} AND status = 'Published'
+      WHERE id = ${input.offeredShiftId}
+        AND business = ${session.business}
+        AND status = 'Published'
+        AND starts_at > NOW()
       LIMIT 1
     ` as unknown as Array<{ employee_id: string | null }>;
     const offered = offeredRows[0];
-    if (!offered?.employee_id || offered.employee_id === session.employeeId) throw new Error("Choose another employee's published shift.");
+    if (!offered?.employee_id || offered.employee_id === session.employeeId) throw new Error("Choose another employee's future published shift.");
     targetEmployeeId = offered.employee_id;
     employeeResponse = "Pending";
   }
