@@ -22,6 +22,16 @@ export type DeliveryMinimumEvaluation = {
   managementAlertRequired: boolean;
 };
 
+export type DeliveryConfirmationIssue = {
+  code:
+    | "delivery_distance_required"
+    | "delivery_fee_not_configured"
+    | "delivery_minimum_not_met"
+    | "delivery_minimum_resolution_required";
+  message: string;
+  shortfallCents?: number;
+};
+
 export function isDeliveryServiceType(serviceType: ServiceType): boolean {
   return serviceType === "delivery" || serviceType === "no_contact_delivery";
 }
@@ -111,6 +121,61 @@ export function evaluateDeliveryMinimum(input: {
     adjustmentFeeCents: 0,
     managementAlertRequired: true,
   };
+}
+
+/**
+ * Server-side confirmation gate used by every channel. UI prompts may differ,
+ * but web, AI phone ordering, and employee-entered phone delivery orders all
+ * have to satisfy the same distance/minimum decision before confirmation.
+ */
+export function validateDeliveryForConfirmation(input: {
+  serviceType: ServiceType;
+  distanceMiles: number | null;
+  deliveryFeeCents: number | null;
+  merchandiseSubtotalCents: number;
+  minimumOrderCents: number;
+  minimumAdjustmentCents: number;
+  minimumBypassApproved: boolean;
+}): DeliveryConfirmationIssue[] {
+  if (!isDeliveryServiceType(input.serviceType)) return [];
+
+  const issues: DeliveryConfirmationIssue[] = [];
+  if (input.distanceMiles == null || !Number.isFinite(input.distanceMiles) || input.distanceMiles < 0) {
+    issues.push({
+      code: "delivery_distance_required",
+      message: "A delivery distance must be resolved before this order can be confirmed.",
+    });
+  }
+
+  if (input.deliveryFeeCents == null || input.deliveryFeeCents < 0) {
+    issues.push({
+      code: "delivery_fee_not_configured",
+      message: "A configured delivery fee must be resolved before this order can be confirmed.",
+    });
+  }
+
+  const subtotal = Math.max(0, Math.trunc(input.merchandiseSubtotalCents));
+  const minimum = Math.max(0, Math.trunc(input.minimumOrderCents));
+  const shortfall = Math.max(0, minimum - subtotal);
+  if (shortfall > 0 && !input.minimumBypassApproved) {
+    if (Math.max(0, Math.trunc(input.minimumAdjustmentCents)) < shortfall) {
+      issues.push({
+        code: "delivery_minimum_not_met",
+        message: "The delivery merchandise minimum has not been met or resolved.",
+        shortfallCents: shortfall,
+      });
+    }
+  }
+
+  if (shortfall > 0 && input.minimumBypassApproved && input.minimumAdjustmentCents > 0) {
+    issues.push({
+      code: "delivery_minimum_resolution_required",
+      message: "A delivery minimum must use either the shortfall fee or a manager bypass, not both.",
+      shortfallCents: shortfall,
+    });
+  }
+
+  return issues;
 }
 
 /**
