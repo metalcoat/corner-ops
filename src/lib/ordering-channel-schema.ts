@@ -15,7 +15,8 @@ export function ensureOrderingChannelSchema(): Promise<void> {
       const sql = getSql();
 
       // Expand fulfillment modes without depending on the original generated
-      // CHECK definition. Existing values continue to remain valid.
+      // CHECK definition. AI phone drafts may temporarily remain undecided so
+      // callers can start ordering before answering pickup/delivery.
       await sql`
         ALTER TABLE ordering_orders
         DROP CONSTRAINT IF EXISTS ordering_orders_service_type_check
@@ -24,6 +25,7 @@ export function ensureOrderingChannelSchema(): Promise<void> {
         ALTER TABLE ordering_orders
         ADD CONSTRAINT ordering_orders_service_type_check
         CHECK (service_type IN (
+          'undecided',
           'pickup',
           'delivery',
           'no_contact_delivery',
