@@ -1,5 +1,6 @@
 import { ensureSchema, getSql } from "@/lib/db";
 import type { EmployeeSession } from "@/lib/employee-auth";
+import { sendStaffNotification } from "@/lib/staff-notifications";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -635,10 +636,32 @@ export async function reviewShiftRequest(input: { id: string; business: Business
         WHERE id = ${String(request.shift_id)} AND employee_id IS NULL AND status = 'Open'
       `;
     } else if (request.request_type === "Offer") {
-      await getSql()`
+      const opened = await getSql()`
         UPDATE schedule_shifts SET employee_id = NULL, status = 'Open', updated_at = NOW()
         WHERE id = ${String(request.shift_id)} AND employee_id = ${String(request.requester_employee_id)}
-      `;
+        RETURNING starts_at, ends_at, position
+      ` as unknown as Array<{ starts_at: string | Date; ends_at: string | Date; position: string }>;
+      const openShift = opened[0];
+      if (openShift) {
+        const start = new Date(openShift.starts_at);
+        const end = new Date(openShift.ends_at);
+        const date = new Intl.DateTimeFormat("en-US", {
+          timeZone: TIME_ZONE,
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        }).format(start);
+        const time = new Intl.DateTimeFormat("en-US", {
+          timeZone: TIME_ZONE,
+          hour: "numeric",
+          minute: "2-digit",
+        });
+        await sendStaffNotification({
+          business: input.business,
+          actor: input.actor,
+          body: `Open shift available: ${date}, ${time.format(start)}-${time.format(end)} · ${clean(openShift.position, 100) || "Shift"}. Request it in Employee Hub.`,
+        });
+      }
     } else {
       const offeredShiftId = String(request.offered_shift_id || "");
       if (!offeredShiftId) throw new Error("Swap request is missing the second shift.");

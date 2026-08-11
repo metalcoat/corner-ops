@@ -439,5 +439,14 @@ export async function sendStaffNotification(input: {
     ].filter(Boolean).join("\n"),
   });
 
-  return { sent: true, recipients: recipients.length, email };
+  const sms = await deliverSms({
+    recipients,
+    text: () => [
+      `${input.business}: ${body}`,
+      hubUrl ? `Open Employee Hub: ${hubUrl}` : "",
+      "Reply STOP to opt out.",
+    ].filter(Boolean).join(" "),
+  });
+
+  return { sent: true, recipients: recipients.length, email, sms };
 }
