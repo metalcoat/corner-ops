@@ -58,6 +58,12 @@ Delivery assignments track driver, assignment time, out-for-delivery, delivered/
 
 No-contact delivery and curbside remain prepay-only for web ordering. Standard delivery may be cash with SMS verification.
 
+Corner Deli delivery pricing is server-owned and configurable. The development defaults are a $20 merchandise minimum, $4.00 through 4 miles, $7.75 over 4 through 8 miles, and a working $10.00 outer tier over 8 through 12 miles. Mileage boundaries, maximum distance, minimum amount, and fees are editable settings.
+
+The delivery charge itself does not satisfy the merchandise minimum. If a customer is below minimum, clients should offer useful add-ons first. If the customer declines, policy can add a visible minimum-order adjustment equal to the exact shortfall. A true waiver/bypass is separate, requires authorized management action, and creates a management alert so repeated exceptions are visible.
+
+Menu prices are tax-inclusive. The tax rate and fee taxability are configurable by business, and historical orders snapshot the tax settings used at sale time.
+
 ## Bar tabs
 
 Tiki tabs support:
@@ -113,6 +119,7 @@ Consequential POS events are auditable, including:
 - refund/void/comp/price override
 - manager override
 - driver settlement
+- delivery minimum shortfall fees and true bypasses
 - order reopen/add-on/merge/split
 - bar-tab transfer/close
 - gift/store-credit adjustment
@@ -127,13 +134,14 @@ Near-term implementation sequence:
 
 1. POS shell and menu/order APIs
 2. order lifecycle and modifier/combo completion
-3. payments/tenders and cash drawer
-4. refunds/voids/manager approval
-5. future-order capacity and kitchen routing
-6. delivery assignment and batch cash settlement
-7. bar tabs
-8. promotions/gift cards/store credit
-9. closeout/reporting
-10. offline mutation queue and recovery UX
+3. delivery pricing/minimum/tax-inclusive settings and confirmation gates
+4. payments/tenders and cash drawer
+5. refunds/voids/manager approval
+6. future-order capacity and kitchen routing
+7. delivery assignment and batch cash settlement
+8. bar tabs
+9. promotions/gift cards/store credit
+10. closeout/reporting
+11. offline mutation queue and recovery UX
 
 This remains development-only until explicit production authorization.
