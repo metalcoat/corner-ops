@@ -221,7 +221,7 @@ function fullOpenedAt(value: unknown): Date | null {
 }
 
 function recoveredOpenedAt(raw: Record<string, unknown>): Date | null {
-  const openedValue = rawLookup(raw, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]);
+  const openedValue = rawLookup(raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]);
   const full = fullOpenedAt(openedValue);
   if (full) return full;
 
@@ -249,7 +249,7 @@ export async function repairRezkuOrderTimesForPayroll(start: Date, end: Date) {
   let numericRawClock = 0;
   for (const row of rows) {
     const raw = rawObject(row.raw);
-    const rawValue = rawLookup(raw, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]);
+    const rawValue = rawLookup(raw, ["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]);
     if (numericValue(rawValue) !== null) numericRawClock += 1;
     const recovered = recoveredOpenedAt(raw);
     if (!recovered) {
