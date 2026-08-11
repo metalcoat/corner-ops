@@ -1,0 +1,60 @@
+name: Patch Order Opened At header
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-order-opened-at.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Patch Rezku Order Opened At handling
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          files = [
+              Path('src/lib/operations.ts'),
+              Path('src/lib/rezku-eastern-time.ts'),
+              Path('src/lib/payroll-summary-rules.ts'),
+          ]
+
+          replacements = {
+              '["Opened At", "Open Time", "Order Time", "Created At", "Time"]': '["Order Opened At", "Opened At", "Open Time", "Order Time", "Created At", "Time"]',
+          }
+
+          changed = []
+          for path in files:
+              text = path.read_text()
+              original = text
+              for old, new in replacements.items():
+                  text = text.replace(old, new)
+              if text != original:
+                  path.write_text(text)
+                  changed.append(str(path))
+
+          if len(changed) != 3:
+              raise SystemExit(f'Expected to patch 3 files, patched {changed}')
+          print('Patched:', ', '.join(changed))
+          PY
+      - name: Verify patch
+        run: |
+          grep -n 'Order Opened At' src/lib/operations.ts src/lib/rezku-eastern-time.ts src/lib/payroll-summary-rules.ts
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm run build
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/operations.ts src/lib/rezku-eastern-time.ts src/lib/payroll-summary-rules.ts
+          git diff --cached --check
+          git commit -m 'Recognize Rezku Order Opened At timestamps'
+          git push origin HEAD:main
