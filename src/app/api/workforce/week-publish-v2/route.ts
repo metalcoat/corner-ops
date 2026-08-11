@@ -190,17 +190,8 @@ export async function POST(request: Request) {
     await ensureStaffNotificationSchema();
     await installScheduleMessageCompatibility();
 
-    let targetWeekStart = requestedWeekStart;
-    let draftsBefore = await draftShiftsForWeek(business, targetWeekStart);
-
-    if (!draftsBefore.length) {
-      const nearby = await nearbyDraftShifts(business, requestedWeekStart);
-      const nearbyWeeks = new Set(nearby.map((shift) => mondayForDate(shift.starts_at)));
-      if (nearby.length === 1 || nearbyWeeks.size === 1) {
-        targetWeekStart = mondayForDate(nearby[0].starts_at);
-        draftsBefore = await draftShiftsForWeek(business, targetWeekStart);
-      }
-    }
+    const targetWeekStart = requestedWeekStart;
+    const draftsBefore = await draftShiftsForWeek(business, targetWeekStart);
 
     let result: Record<string, unknown>;
     let recoveredLegacyTimestampError = false;
