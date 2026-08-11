@@ -45,9 +45,64 @@ The order cannot move from Draft to Confirmed while any required modifier group 
 
 Required questions are separate from upsells. Upsells are optional and rule-driven.
 
+### Sub modifiers
+
+Subs need item-specific defaults as well as additions/removals. A sub can define default bread, cheese, vegetables, condiments, preparation, and extras. The order stores explicit modifier state so kitchen tickets can distinguish normal/default selections from changes such as:
+
+- NO ONION
+- EXTRA CHEESE
+- ADD BACON
+- TOASTED
+
+Defaults are configured per menu item, because the same topping can be standard on one sub and optional on another.
+
+### Combo options
+
+Combos are structured component groups, not loose modifiers. A menu item can offer one or more combo definitions. A combo can require component groups such as:
+
+- Side: choose one
+- Drink: choose one
+
+Each component option can be available/unavailable and can carry an additional upcharge. An order item cannot complete a selected combo until every required combo group is resolved. The POS, website, and AI use the same combo definitions.
+
+## Fulfillment / service types
+
+Supported fulfillment modes include:
+
+- Delivery
+- No-contact delivery
+- Pickup
+- Eat in
+- Curbside
+- Bar/service use where applicable
+
+Delivery can be paid online by card or left unpaid for cash collection. No-contact delivery is a separate fulfillment mode so the customer can provide appropriate drop-off instructions and the ticket can clearly identify it.
+
+### Unpaid online order verification
+
+Any web order that is not fully paid must be verified by SMS before it can be confirmed or sent to the kitchen. This includes a delivery order where the customer chooses cash payment.
+
+The verification flow uses a short-lived one-time code tied to the order and phone number. Only a hash of the code is stored. Verification tracks expiration, attempts, resends, and verification time. Changing the phone number invalidates the previous verification.
+
+Paid web orders do not require this anti-fraud SMS step unless a future business rule explicitly enables it.
+
+### Curbside
+
+Curbside web orders require full online payment before confirmation. Cash-at-curbside is not permitted for website orders.
+
+After confirmation, the customer-facing order page must provide an **I'm here** action. The check-in updates the live order and alerts the store POS. The arrival record supports:
+
+- waiting for customer
+- customer arrived
+- employee acknowledged
+- completed
+- optional vehicle/location details
+
+The same arrival action can later be exposed through a signed SMS link without changing the order model.
+
 ## Availability / 86
 
-Availability is centralized. Changing an item or modifier to unavailable immediately affects:
+Availability is centralized. Changing an item, modifier, or combo option to unavailable immediately affects:
 
 - employee POS
 - website ordering
@@ -152,14 +207,17 @@ Templates must support configurable visibility, font size, emphasis, copies, and
 
 - order number
 - customer name/phone
-- pickup/delivery
+- fulfillment type
+- no-contact indicator
+- curbside indicator
 - promised time
-- item/modifier text
+- item/modifier/combo text
 - special instructions
 - total
 - amount paid
 - amount due
 - payment status
+- SMS verification state where relevant
 - reprint marker
 
 Printer delivery should eventually use a tiny store-side print agent while the source order remains cloud-hosted.
@@ -168,7 +226,7 @@ Printer delivery should eventually use a tiny store-side print agent while the s
 
 The web/POS/admin application remains suitable for Vercel. PostgreSQL remains external/managed (currently Neon-compatible). Long-lived 3CX voice streaming may be hosted separately if Vercel's execution model is not appropriate for that process.
 
-Do not couple order logic to a specific host. Keep voice, payments, and printing behind adapters.
+Do not couple order logic to a specific host. Keep voice, payments, SMS, and printing behind adapters.
 
 ## Phase 1 acceptance criteria
 
@@ -176,13 +234,19 @@ The first foundation is complete when we can:
 
 1. create customers and associate multiple phone numbers
 2. create menu categories/items and modifier groups/options
-3. mark menu items/options available or unavailable
-4. create a Draft order from any source
-5. add items/modifiers using stable IDs
-6. detect unresolved required modifier groups
-7. calculate deterministic line/order totals
-8. increment an order version on changes
-9. confirm an order only when validation passes
-10. record loyalty ledger entries tied to orders
+3. configure item-specific default sub modifiers and explicit removals/extras
+4. configure combo definitions with required component groups and upcharges
+5. mark menu items/modifiers/combo options available or unavailable
+6. create a Draft order from any source
+7. add items/modifiers/combos using stable IDs
+8. detect unresolved required modifier and combo groups
+9. calculate deterministic line/order totals
+10. apply fulfillment rules for delivery, no-contact, pickup, eat-in, and curbside
+11. require full online payment for curbside web orders
+12. require SMS verification for any web order not fully paid, including cash delivery
+13. record curbside customer arrival and alert the POS
+14. increment an order version on changes
+15. confirm an order only when all channel/payment/verification validation passes
+16. record loyalty ledger entries tied to orders
 
 No production deployment is authorized by this document. Use preview/test environments until the owner explicitly approves production deployment.
