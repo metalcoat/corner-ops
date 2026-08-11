@@ -7,10 +7,14 @@ import type { OrderTimingMode } from "@/lib/ordering-timing-core";
 import { orderingBusinessConfig, type PosUtility } from "@/lib/ordering-business-config";
 import type {
   OrderingComboView,
-  OrderingMenuCategoryView,
-  OrderingMenuItemView,
   OrderingModifierGroupView,
+  OrderingModifierOptionView,
 } from "@/lib/ordering-menu";
+import type {
+  OrderingItemVariantView,
+  OrderingMenuCategoryWithVariants,
+  OrderingMenuItemWithVariants,
+} from "@/lib/ordering-menu-variants";
 import "./pos.css";
 
 type PosServiceType = Exclude<ServiceType, "undecided">;
@@ -18,6 +22,8 @@ type PosServiceType = Exclude<ServiceType, "undecided">;
 type CartLine = {
   id: string;
   itemId: string;
+  variantId: string | null;
+  variantName: string;
   name: string;
   quantity: number;
   unitPriceCents: number;
@@ -30,7 +36,7 @@ type CartLine = {
 
 type MenuPayload = {
   business: Business;
-  categories: OrderingMenuCategoryView[];
+  categories: OrderingMenuCategoryWithVariants[];
 };
 
 type SavedDraft = {
@@ -69,10 +75,37 @@ function cloneSelections(value: Record<string, string[]>): Record<string, string
   return Object.fromEntries(Object.entries(value).map(([key, ids]) => [key, [...ids]]));
 }
 
-function initialModifierSelections(item: OrderingMenuItemView): Record<string, string[]> {
+function variantOptionPrice(
+  variant: OrderingItemVariantView | null,
+  option: OrderingModifierOptionView,
+): number {
+  const override = variant?.modifierPrices.find((price) => price.optionId === option.id);
+  return override ? override.priceDeltaCents : option.priceDeltaCents;
+}
+
+function variantOptionAvailable(
+  variant: OrderingItemVariantView | null,
+  option: OrderingModifierOptionView,
+): boolean {
+  const override = variant?.modifierPrices.find((price) => price.optionId === option.id);
+  return option.available && (override ? override.available : true);
+}
+
+function initialVariant(item: OrderingMenuItemWithVariants): OrderingItemVariantView | null {
+  if (!item.variants.length) return null;
+  return item.variants.find((variant) => variant.defaultVariant && variant.available)
+    || (item.variants.length === 1 && item.variants[0].available ? item.variants[0] : null);
+}
+
+function initialModifierSelections(
+  item: OrderingMenuItemWithVariants,
+  variant: OrderingItemVariantView | null,
+): Record<string, string[]> {
   const result: Record<string, string[]> = {};
   for (const group of item.modifiers) {
-    result[group.id] = group.options.filter((option) => option.defaultSelected).map((option) => option.id);
+    result[group.id] = group.options
+      .filter((option) => option.defaultSelected && variantOptionAvailable(variant, option))
+      .map((option) => option.id);
   }
   return result;
 }
@@ -86,7 +119,7 @@ export default function PosClient({ business }: { business: Business }) {
   const config = orderingBusinessConfig(business);
   const availableServices = config.serviceTypes.filter((value): value is PosServiceType => value !== "undecided");
   const [session, setSession] = useState<SessionView | null>(null);
-  const [menu, setMenu] = useState<OrderingMenuCategoryView[]>([]);
+  const [menu, setMenu] = useState<OrderingMenuCategoryWithVariants[]>([]);
   const [menuLoading, setMenuLoading] = useState(true);
   const [menuError, setMenuError] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -94,7 +127,8 @@ export default function PosClient({ business }: { business: Business }) {
   const [timingMode, setTimingMode] = useState<OrderTimingMode>("asap");
   const [scheduledFor, setScheduledFor] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
-  const [configuringItem, setConfiguringItem] = useState<OrderingMenuItemView | null>(null);
+  const [configuringItem, setConfiguringItem] = useState<OrderingMenuItemWithVariants | null>(null);
+  const [selectedVariantId, setSelectedVariantId] = useState("");
   const [modifierSelections, setModifierSelections] = useState<Record<string, string[]>>({});
   const [selectedComboId, setSelectedComboId] = useState("");
   const [comboSelections, setComboSelections] = useState<Record<string, string[]>>({});
@@ -141,24 +175,30 @@ export default function PosClient({ business }: { business: Business }) {
   const activeCategory = menu.find((category) => category.id === categoryId) || menu[0];
   const subtotalCents = cart.reduce((sum, line) => sum + line.unitPriceCents * line.quantity, 0);
   const selectedCombo = configuringItem?.combos.find((combo) => combo.id === selectedComboId) || null;
+  const selectedVariant = configuringItem?.variants.find((variant) => variant.id === selectedVariantId) || null;
 
   const configuration = useMemo(() => {
     if (!configuringItem) {
       return { valid: false, unitPriceCents: 0, modifierText: [] as string[], comboText: [] as string[] };
     }
-    let unitPriceCents = configuringItem.basePriceCents;
+
+    const variantRequired = configuringItem.variants.length > 0;
+    let valid = !variantRequired || Boolean(selectedVariant);
+    let unitPriceCents = selectedVariant?.basePriceCents ?? configuringItem.basePriceCents;
     const modifierText: string[] = [];
     const comboText: string[] = [];
-    let valid = true;
 
     for (const group of configuringItem.modifiers) {
       const selected = modifierSelections[group.id] || [];
       if (!selectionsValid(group, selected)) valid = false;
       for (const option of group.options) {
         const chosen = selected.includes(option.id);
+        const available = variantOptionAvailable(selectedVariant, option);
+        const priceDeltaCents = variantOptionPrice(selectedVariant, option);
+        if (chosen && !available) valid = false;
         if (chosen) {
-          unitPriceCents += option.priceDeltaCents;
-          if (!option.defaultSelected || option.priceDeltaCents !== 0) {
+          unitPriceCents += priceDeltaCents;
+          if (!option.defaultSelected || priceDeltaCents !== 0) {
             modifierText.push(`${group.name}: ${option.name}`);
           }
         } else if (option.defaultSelected) {
@@ -181,17 +221,37 @@ export default function PosClient({ business }: { business: Business }) {
     }
 
     return { valid, unitPriceCents, modifierText, comboText };
-  }, [configuringItem, modifierSelections, selectedCombo, comboSelections]);
+  }, [configuringItem, selectedVariant, modifierSelections, selectedCombo, comboSelections]);
 
-  function openItem(item: OrderingMenuItemView) {
+  function openItem(item: OrderingMenuItemWithVariants) {
     if (!item.available) return;
+    const variant = initialVariant(item);
     setConfiguringItem(item);
-    setModifierSelections(initialModifierSelections(item));
+    setSelectedVariantId(variant?.id || "");
+    setModifierSelections(initialModifierSelections(item, variant));
     setSelectedComboId("");
     setComboSelections({});
   }
 
+  function chooseVariant(variant: OrderingItemVariantView) {
+    if (!configuringItem || !variant.available) return;
+    setSelectedVariantId(variant.id);
+    setModifierSelections((current) => {
+      const next: Record<string, string[]> = {};
+      for (const group of configuringItem.modifiers) {
+        const selected = current[group.id] || [];
+        next[group.id] = selected.filter((id) => {
+          const option = group.options.find((candidate) => candidate.id === id);
+          return Boolean(option && variantOptionAvailable(variant, option));
+        });
+      }
+      return next;
+    });
+  }
+
   function toggleModifier(group: OrderingModifierGroupView, optionId: string) {
+    const option = group.options.find((candidate) => candidate.id === optionId);
+    if (!option || !variantOptionAvailable(selectedVariant, option)) return;
     setModifierSelections((current) => {
       const existing = current[group.id] || [];
       if (group.maxSelections === 1) {
@@ -233,6 +293,8 @@ export default function PosClient({ business }: { business: Business }) {
     setCart((current) => [...current, {
       id: crypto.randomUUID(),
       itemId: configuringItem.id,
+      variantId: selectedVariant?.id || null,
+      variantName: selectedVariant?.name || "",
       name: configuringItem.name,
       quantity: 1,
       unitPriceCents: configuration.unitPriceCents,
@@ -243,6 +305,7 @@ export default function PosClient({ business }: { business: Business }) {
       comboSelections: cloneSelections(comboSelections),
     }]);
     setConfiguringItem(null);
+    setSelectedVariantId("");
     setSavedDraft(null);
   }
 
@@ -273,6 +336,7 @@ export default function PosClient({ business }: { business: Business }) {
           scheduledFor: timingMode === "future" ? new Date(scheduledFor).toISOString() : null,
           items: cart.map((line) => ({
             itemId: line.itemId,
+            variantId: line.variantId,
             quantity: line.quantity,
             modifierSelections: line.modifierSelections,
             comboId: line.comboId,
@@ -372,11 +436,19 @@ export default function PosClient({ business }: { business: Business }) {
         {menuError && <div className="posEmpty error">{menuError}</div>}
         {!menuLoading && !menuError && !activeCategory?.items.length && <div className="posEmpty">No active items in this category yet.</div>}
         <div className="posItemGrid">
-          {activeCategory?.items.map((item) => <button key={item.id} type="button" className={`posItemButton ${item.available ? "" : "soldOut"}`} disabled={!item.available} onClick={() => openItem(item)}>
-            <strong>{item.name}</strong>
-            <span>{money(item.basePriceCents)}</span>
-            <small>{!item.available ? "SOLD OUT" : [item.modifiers.length ? "Modifiers" : "", item.combos.length ? "Combo" : ""].filter(Boolean).join(" · ") || "Quick add"}</small>
-          </button>)}
+          {activeCategory?.items.map((item) => {
+            const availableVariants = item.variants.filter((variant) => variant.available);
+            const displayPrice = availableVariants.length
+              ? Math.min(...availableVariants.map((variant) => variant.basePriceCents))
+              : item.basePriceCents;
+            return <button key={item.id} type="button" className={`posItemButton ${item.available ? "" : "soldOut"}`} disabled={!item.available} onClick={() => openItem(item)}>
+              <strong>{item.name}</strong>
+              <span>{availableVariants.length > 1 ? `From ${money(displayPrice)}` : money(displayPrice)}</span>
+              <small>{!item.available
+                ? "SOLD OUT"
+                : [item.variants.length ? `${item.variants.length} sizes/forms` : "", item.modifiers.length ? "Modifiers" : "", item.combos.length ? "Combo" : ""].filter(Boolean).join(" · ") || "Quick add"}</small>
+            </button>;
+          })}
         </div>
       </section>
 
@@ -389,6 +461,7 @@ export default function PosClient({ business }: { business: Business }) {
           {!cart.length && <div className="posEmpty">Tap a menu item to start the order.</div>}
           {cart.map((line) => <article className="posCartLine" key={line.id}>
             <div className="posLineTop"><strong>{line.quantity}× {line.name}</strong><span>{money(line.unitPriceCents * line.quantity)}</span></div>
+            {line.variantName && <small>Size / form: {line.variantName}</small>}
             {[...line.modifierText, ...line.comboText].map((text, index) => <small key={`${text}-${index}`}>{text}</small>)}
             <div className="posQtyControls">
               <button type="button" onClick={() => changeQuantity(line.id, -1)}>−</button>
@@ -418,16 +491,40 @@ export default function PosClient({ business }: { business: Business }) {
           <button type="button" onClick={() => setConfiguringItem(null)}>Close</button>
         </header>
         <div className="posConfigBody">
+          {configuringItem.variants.length > 0 && <fieldset className={!selectedVariant ? "needsSelection" : ""}>
+            <legend>Size / form<small>Required · only valid forms for this item are shown</small></legend>
+            <div className="posChoiceGrid">
+              {configuringItem.variants.map((variant) => <button
+                key={variant.id}
+                type="button"
+                disabled={!variant.available}
+                className={selectedVariantId === variant.id ? "selected" : ""}
+                onClick={() => chooseVariant(variant)}
+              >
+                <strong>{variant.name}</strong>
+                <span>{variant.available ? money(variant.basePriceCents) : "Unavailable"}</span>
+              </button>)}
+            </div>
+          </fieldset>}
+
           {configuringItem.modifiers.map((group) => {
             const selected = modifierSelections[group.id] || [];
             const valid = selectionsValid(group, selected);
             return <fieldset key={group.id} className={!valid ? "needsSelection" : ""}>
               <legend>{group.prompt || group.name}<small>{group.minSelections > 0 ? "Required" : "Optional"} · choose {group.minSelections === group.maxSelections ? group.maxSelections : `${group.minSelections}-${group.maxSelections}`}</small></legend>
               <div className="posChoiceGrid">
-                {group.options.map((option) => <button key={option.id} type="button" disabled={!option.available} className={selected.includes(option.id) ? "selected" : ""} onClick={() => toggleModifier(group, option.id)}>
-                  <strong>{option.name}</strong>
-                  <span>{option.priceDeltaCents ? `${option.priceDeltaCents > 0 ? "+" : ""}${money(option.priceDeltaCents)}` : option.defaultSelected ? "Default" : "Included"}</span>
-                </button>)}
+                {group.options.map((option) => {
+                  const available = variantOptionAvailable(selectedVariant, option);
+                  const priceDeltaCents = variantOptionPrice(selectedVariant, option);
+                  return <button key={option.id} type="button" disabled={!available} className={selected.includes(option.id) ? "selected" : ""} onClick={() => toggleModifier(group, option.id)}>
+                    <strong>{option.name}</strong>
+                    <span>{!available
+                      ? "Unavailable for this size/form"
+                      : priceDeltaCents
+                        ? `${priceDeltaCents > 0 ? "+" : ""}${money(priceDeltaCents)}`
+                        : option.defaultSelected ? "Default" : "Included"}</span>
+                  </button>;
+                })}
               </div>
             </fieldset>;
           })}
@@ -458,7 +555,7 @@ export default function PosClient({ business }: { business: Business }) {
         <footer>
           <div><span>Configured price</span><strong>{money(configuration.unitPriceCents)}</strong></div>
           <button type="button" className="primary" disabled={!configuration.valid} onClick={addConfiguredItem}>
-            {configuration.valid ? "Add to order" : "Complete required choices"}
+            {configuration.valid ? "Add to order" : configuringItem.variants.length && !selectedVariant ? "Choose size / form" : "Complete required choices"}
           </button>
         </footer>
       </section>
