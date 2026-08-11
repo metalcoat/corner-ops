@@ -45,7 +45,7 @@ export type ModifierValidationIssue = {
 };
 
 export type FulfillmentValidationIssue = {
-  code: "curbside_payment_required" | "sms_verification_required";
+  code: "prepayment_required" | "sms_verification_required";
   message: string;
 };
 
@@ -112,7 +112,9 @@ export function validateModifierRequirements(
 /**
  * Web orders that are not fully paid must prove control of the supplied phone
  * number before they can be confirmed or sent to the kitchen. This includes
- * delivery orders that select cash payment.
+ * delivery orders that select cash payment. Fulfillment modes that require
+ * prepayment are handled separately and cannot use SMS verification as a
+ * substitute for payment.
  */
 export function requiresSmsVerification(input: {
   source: OrderSource;
@@ -122,13 +124,17 @@ export function requiresSmsVerification(input: {
 }
 
 /**
- * Curbside web orders must be fully paid online before confirmation.
+ * Curbside and no-contact web orders must be fully paid online before
+ * confirmation. Neither mode offers a cash-at-handoff option online.
  */
 export function requiresOnlinePrepayment(input: {
   source: OrderSource;
   serviceType: ServiceType;
 }): boolean {
-  return input.source === "web" && input.serviceType === "curbside";
+  return (
+    input.source === "web" &&
+    (input.serviceType === "curbside" || input.serviceType === "no_contact_delivery")
+  );
 }
 
 export function validateFulfillmentForConfirmation(input: {
@@ -138,15 +144,22 @@ export function validateFulfillmentForConfirmation(input: {
   smsVerified: boolean;
 }): FulfillmentValidationIssue[] {
   const issues: FulfillmentValidationIssue[] = [];
+  const prepaymentRequired = requiresOnlinePrepayment(input);
 
-  if (requiresOnlinePrepayment(input) && input.paymentStatus !== "paid") {
+  if (prepaymentRequired && input.paymentStatus !== "paid") {
     issues.push({
-      code: "curbside_payment_required",
-      message: "Curbside web orders must be paid online before confirmation.",
+      code: "prepayment_required",
+      message:
+        input.serviceType === "no_contact_delivery"
+          ? "No-contact delivery web orders must be paid online before confirmation."
+          : "Curbside web orders must be paid online before confirmation.",
     });
   }
 
-  if (requiresSmsVerification(input) && !input.smsVerified) {
+  // SMS verification protects unpaid web orders that are actually allowed to
+  // remain unpaid (for example, standard cash delivery). It is not an escape
+  // hatch for curbside or no-contact orders, which require prepayment.
+  if (!prepaymentRequired && requiresSmsVerification(input) && !input.smsVerified) {
     issues.push({
       code: "sms_verification_required",
       message: "Unpaid web orders require SMS verification before confirmation.",
