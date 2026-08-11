@@ -13,7 +13,6 @@ type Settings = {
   business: "Corner Deli";
   enabled: boolean;
   minimumOrderCents: number;
-  deliveryFeeCountsTowardMinimum: boolean;
   offerUpsellBeforeShortfallFee: boolean;
   allowShortfallFee: boolean;
   shortfallFeeLabel: string;
@@ -115,7 +114,7 @@ export default function DeliverySettingsClient() {
         <span className="posDevBadge">DEVELOPMENT · DELI ONLY</span>
         <p className="posDevEyebrow">Corner Deli delivery configuration</p>
         <h1>Delivery, minimums, and tax</h1>
-        <p>These values are shared by the Deli POS, employee-entered phone orders, AI ordering, and future web ordering. Tax is extracted from inclusive prices instead of being added twice, because accounting has suffered enough.</p>
+        <p>These values are shared by the Deli POS, employee-entered phone orders, AI ordering, and future web ordering. The food minimum is separate from the mileage fee.</p>
       </div>
       <a href="/pos/deli">Back to Deli POS</a>
     </header>
@@ -124,8 +123,8 @@ export default function DeliverySettingsClient() {
       <article className="posSettingsCard">
         <h2>Delivery policy</h2>
         <label><span>Delivery enabled</span><input type="checkbox" checked={settings.enabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /></label>
-        <label><span>Minimum delivery total</span><div className="posMoneyInput"><b>$</b><input type="number" min="0" step="0.01" value={dollars(settings.minimumOrderCents)} onChange={(event) => setSettings({ ...settings, minimumOrderCents: cents(event.target.value) })} /></div></label>
-        <label><span>Delivery fee counts toward minimum</span><input type="checkbox" checked={settings.deliveryFeeCountsTowardMinimum} onChange={(event) => setSettings({ ...settings, deliveryFeeCountsTowardMinimum: event.target.checked })} /></label>
+        <label><span>Minimum merchandise for delivery</span><div className="posMoneyInput"><b>$</b><input type="number" min="0" step="0.01" value={dollars(settings.minimumOrderCents)} onChange={(event) => setSettings({ ...settings, minimumOrderCents: cents(event.target.value) })} /></div></label>
+        <p className="posSettingsHint">Current rule: at least {dollars(settings.minimumOrderCents)} of food, then add the mileage-based delivery fee below.</p>
         <label><span>Maximum delivery miles</span><input type="number" min="0.1" step="0.1" value={settings.maxDistanceMiles ?? ""} onChange={(event) => setSettings({ ...settings, maxDistanceMiles: Number(event.target.value) })} /></label>
         <label><span>Offer add-ons before round-up</span><input type="checkbox" checked={settings.offerUpsellBeforeShortfallFee} onChange={(event) => setSettings({ ...settings, offerUpsellBeforeShortfallFee: event.target.checked })} /></label>
         <label><span>Allow round-up to minimum</span><input type="checkbox" checked={settings.allowShortfallFee} onChange={(event) => setSettings({ ...settings, allowShortfallFee: event.target.checked })} /></label>
@@ -159,7 +158,7 @@ export default function DeliverySettingsClient() {
           <button type="button" disabled={settings.feeBands.length <= 1} onClick={() => removeBand(index)}>Remove</button>
         </div>)}
       </div>
-      <p className="posSettingsHint">With the current $20 minimum, the merchandise threshold is effectively $16.00 in the $4 delivery zone, $12.25 in the $7.75 zone, and $10.00 in the $10 zone. Bands remain editable.</p>
+      <p className="posSettingsHint">Current development bands are 0-4 = $4.00, over 4-8 = $7.75, and over 8-12 = $10.00. Those fees are added after the merchandise minimum is satisfied or rounded up.</p>
     </section>
 
     {message && <div className="posSettingsMessage">{message}</div>}
