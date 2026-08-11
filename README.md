@@ -4,13 +4,11 @@ Corner Ops is the owner and employee operations system for Corner Deli and Tiki.
 
 ## Development status
 
-The existing Corner Ops application remains the live system. The replacement POS and AI ordering platform is being built separately on `agent/pos-ordering-foundation` in draft pull request #9 and is not merged into the live application.
+Automatic Vercel Git deployments are intentionally disabled while the replacement POS and AI ordering platform is under construction. Active POS development is on `agent/pos-ordering-foundation` in draft pull request #9. Keep the branch development-only and re-enable deployments deliberately when preview/parallel testing is worth the build and infrastructure cost. Production deployment still requires explicit owner authorization.
 
-Automatic Vercel Git deployments are intentionally disabled in the replacement-POS development branch while construction is heavy. Re-enable deployment deliberately when preview/parallel testing is worth the build and infrastructure cost. Production deployment still requires explicit owner authorization.
+The POS foundation now includes separate Deli/Tiki POS surfaces, shared menu/modifier/combo rules, fulfillment and unpaid-web SMS verification, saved processor payment references, employee meals, house accounts, inventory movement tracking, cash/driver settlement foundations, future-order capacity, Tiki-only bar tabs, promotions, gift/store-credit ledgers, closeout/audit structures, and separate Deli/Tiki reporting direction.
 
-Corner Deli and Tiki are separate POS products even though they share lower-level infrastructure. Development routes are `/pos/deli` and `/pos/tiki`, with separate reporting routes under each business. Corner Deli has delivery/driver workflows and no bar tabs; Tiki has bar/tab workflows and no deli driver workflow by default.
-
-The POS foundation includes shared menu/modifier/combo rules, fulfillment and unpaid-web SMS verification, saved processor payment references, employee meals, house accounts, inventory movement tracking, cash/driver settlement foundations, future-order capacity, bar-tab structures, promotions, gift/store-credit ledgers, closeout/audit structures, and business-specific touch POS shells. AI phone drafts may temporarily leave fulfillment undecided when a caller starts ordering before answering pickup/delivery, but confirmation remains blocked until the required fulfillment field is resolved.
+Corner Deli delivery policy is also being built as shared server-side logic so POS, employee-entered phone orders, AI phone orders, and web ordering cannot quietly disagree. The current development policy uses a $20 merchandise minimum, configurable distance/fee bands, an upsell-first under-minimum flow, an exact shortfall fee when the customer declines add-ons, management-visible true bypasses, and tax-inclusive menu pricing with a configurable tax rate. The actual tax rate must be explicitly configured before production.
 
 ## Banking and historical imports
 
