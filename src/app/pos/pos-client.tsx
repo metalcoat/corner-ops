@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import type { ServiceType } from "@/lib/ordering-core";
+import type { OrderTimingMode } from "@/lib/ordering-timing-core";
 import { orderingBusinessConfig, type PosUtility } from "@/lib/ordering-business-config";
 import type {
   OrderingComboView,
@@ -36,6 +37,9 @@ type SavedDraft = {
   id: string;
   displayNumber: string;
   totalCents: number;
+  timingMessage: string;
+  kitchenTimingLabel: string;
+  scheduledFor: string | null;
 };
 
 const serviceLabels: Record<PosServiceType, { label: string; paymentNote?: string }> = {
@@ -87,6 +91,8 @@ export default function PosClient({ business }: { business: Business }) {
   const [menuError, setMenuError] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [serviceType, setServiceType] = useState<PosServiceType>(availableServices[0] || "pickup");
+  const [timingMode, setTimingMode] = useState<OrderTimingMode>("asap");
+  const [scheduledFor, setScheduledFor] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [configuringItem, setConfiguringItem] = useState<OrderingMenuItemView | null>(null);
   const [modifierSelections, setModifierSelections] = useState<Record<string, string[]>>({});
@@ -249,6 +255,10 @@ export default function PosClient({ business }: { business: Business }) {
 
   async function saveDraft() {
     if (!cart.length || savingDraft) return;
+    if (timingMode === "future" && !scheduledFor) {
+      setCheckoutError("Choose the future pickup/delivery time before saving the order.");
+      return;
+    }
     setSavingDraft(true);
     setCheckoutError("");
     setSavedDraft(null);
@@ -259,6 +269,8 @@ export default function PosClient({ business }: { business: Business }) {
         body: JSON.stringify({
           business,
           serviceType,
+          timingMode,
+          scheduledFor: timingMode === "future" ? new Date(scheduledFor).toISOString() : null,
           items: cart.map((line) => ({
             itemId: line.itemId,
             quantity: line.quantity,
@@ -269,7 +281,14 @@ export default function PosClient({ business }: { business: Business }) {
         }),
       });
       const payload = await response.json() as {
-        order?: { id: string; display_number: string; total_cents: number };
+        order?: {
+          id: string;
+          display_number: string;
+          total_cents: number;
+          scheduled_for: string | null;
+          timing_message_snapshot: string;
+          kitchen_timing_label_snapshot: string;
+        };
         error?: string;
       };
       if (!response.ok || !payload.order) throw new Error(payload.error || "Could not save draft order.");
@@ -277,6 +296,9 @@ export default function PosClient({ business }: { business: Business }) {
         id: payload.order.id,
         displayNumber: payload.order.display_number,
         totalCents: Number(payload.order.total_cents),
+        timingMessage: payload.order.timing_message_snapshot || "",
+        kitchenTimingLabel: payload.order.kitchen_timing_label_snapshot || "",
+        scheduledFor: payload.order.scheduled_for,
       });
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : "Could not save draft order.");
@@ -306,16 +328,32 @@ export default function PosClient({ business }: { business: Business }) {
       </nav>
     </header>
 
-    <section className="posServiceBar" aria-label="Fulfillment type">
+    <section className="posServiceBar" aria-label="Fulfillment type and timing">
       {availableServices.map((service) => <button key={service} type="button" className={serviceType === service ? "active" : ""} onClick={() => { setServiceType(service); setSavedDraft(null); }}>
         <span>{serviceLabels[service].label}</span>
         {serviceLabels[service].paymentNote && <small>{serviceLabels[service].paymentNote}</small>}
       </button>)}
-      <button type="button" className="futureOrderButton">Future Order</button>
+      <button type="button" className={`futureOrderButton ${timingMode === "asap" ? "active" : ""}`} onClick={() => { setTimingMode("asap"); setSavedDraft(null); }}>
+        <span>ASAP</span>
+        <small>Use current quote</small>
+      </button>
+      <button type="button" className={`futureOrderButton ${timingMode === "future" ? "active" : ""}`} onClick={() => { setTimingMode("future"); setSavedDraft(null); }}>
+        <span>Future</span>
+        <small>Choose time</small>
+      </button>
+      {timingMode === "future" && <input
+        className="posFutureTimeInput"
+        aria-label="Future order time"
+        type="datetime-local"
+        value={scheduledFor}
+        onChange={(event) => { setScheduledFor(event.target.value); setSavedDraft(null); }}
+      />}
     </section>
 
     {savedDraft && <div className="posSaveNotice">
-      Draft #{savedDraft.displayNumber} saved · {money(savedDraft.totalCents)} · payment/tender screen is the next build step.
+      Draft #{savedDraft.displayNumber} saved · {money(savedDraft.totalCents)}
+      {savedDraft.timingMessage ? ` · ${savedDraft.timingMessage}` : ""}
+      {savedDraft.kitchenTimingLabel ? ` · Kitchen: ${savedDraft.kitchenTimingLabel.replace(/\n/g, " / ")}` : ""}
     </div>}
     {checkoutError && <div className="posSaveNotice error">{checkoutError}</div>}
 
@@ -328,7 +366,7 @@ export default function PosClient({ business }: { business: Business }) {
       <section className="posMenuPanel">
         <div className="posPanelHeading">
           <div><span>Category</span><h1>{activeCategory?.name || "Menu"}</h1></div>
-          <div className="posStatusPill">{serviceLabels[serviceType].label}</div>
+          <div className="posStatusPill">{serviceLabels[serviceType].label} · {timingMode === "asap" ? "ASAP" : "Future"}</div>
         </div>
         {menuLoading && <div className="posEmpty">Loading menu…</div>}
         {menuError && <div className="posEmpty error">{menuError}</div>}
@@ -344,7 +382,7 @@ export default function PosClient({ business }: { business: Business }) {
 
       <aside className="posCart">
         <div className="posCartHeading">
-          <div><span>Current order</span><h2>New {serviceLabels[serviceType].label}</h2></div>
+          <div><span>Current order</span><h2>New {serviceLabels[serviceType].label} · {timingMode === "asap" ? "ASAP" : "Future"}</h2></div>
           <button type="button" onClick={() => { setCart([]); setSavedDraft(null); }} disabled={!cart.length}>Clear</button>
         </div>
         <div className="posCartLines">
@@ -361,13 +399,13 @@ export default function PosClient({ business }: { business: Business }) {
         </div>
         <div className="posTotals">
           <div><span>Subtotal</span><strong>{money(subtotalCents)}</strong></div>
-          <div><span>Tax</span><strong>Calculated at checkout</strong></div>
+          <div><span>Tax</span><strong>Included/configured at checkout</strong></div>
           <div className="grand"><span>Current total</span><strong>{money(subtotalCents)}</strong></div>
         </div>
         <div className="posCheckoutButtons">
           <button type="button" className="secondary">Hold</button>
-          <button type="button" className="primary" disabled={!cart.length || savingDraft} onClick={() => void saveDraft()}>
-            {savingDraft ? "Saving…" : "Save Draft / Review"}
+          <button type="button" className="primary" disabled={!cart.length || savingDraft || (timingMode === "future" && !scheduledFor)} onClick={() => void saveDraft()}>
+            {savingDraft ? "Saving…" : timingMode === "future" ? "Save Future Draft / Review" : "Save ASAP Draft / Review"}
           </button>
         </div>
       </aside>
