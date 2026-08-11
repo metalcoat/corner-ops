@@ -6,7 +6,7 @@ Target: production-ready by June 1, 2027, with July 2027 reserved for parallel o
 
 Corner Ops owns the deterministic business logic. The POS, website, kiosk, and AI phone agent are clients of the same order engine.
 
-The AI may interpret conversation and request actions. It may **not** invent prices, taxes, discounts, modifier choices, availability, loyalty balances, payment approvals, or order totals.
+The AI may interpret conversation and request actions. It may **not** invent prices, taxes, discounts, modifier choices, availability, loyalty balances, payment approvals, delivery fees, minimum-order rules, or order totals.
 
 ## Shared order flow
 
@@ -30,6 +30,8 @@ The platform is multi-business from the beginning:
 - Tiki
 
 Menus, availability, prices, loyalty programs, payment accounts, ticket templates, and order numbers remain business-specific while sharing application code.
+
+The employee-facing POS products remain separate: Corner Deli does not expose Tiki bar tabs, and Tiki does not expose Corner Deli driver workflows. Reporting is business-scoped by default.
 
 ## Menu and modifier rules
 
@@ -77,6 +79,47 @@ Supported fulfillment modes include:
 - Bar/service use where applicable
 
 Standard delivery can be paid online by card or left unpaid for cash collection. No-contact delivery is a separate fulfillment mode and **requires full online payment** before confirmation. The customer can provide drop-off instructions and the ticket must clearly identify no-contact orders.
+
+### Delivery minimum and distance pricing
+
+Corner Deli delivery rules are server-side and shared across web, AI phone ordering, and employee-entered phone/POS delivery orders.
+
+Current development defaults are:
+
+- $20.00 merchandise minimum
+- delivery fee does not count toward the merchandise minimum
+- 0-4 miles: $4.00
+- over 4 through 8 miles: $7.75
+- working contiguous outer tier over 8 through 12 miles: $10.00
+- 12-mile maximum delivery distance
+
+The minimum, mileage boundaries, maximum distance, and fee for every band are editable business settings rather than constants embedded in clients.
+
+When a delivery is below the merchandise minimum, the normal flow is:
+
+1. calculate the exact shortfall
+2. offer useful upsells first, such as fries or another side
+3. if the customer declines but still wants delivery, add a visible Minimum order adjustment equal to the exact shortfall
+4. continue through the normal delivery/payment rules
+
+Example: a $14 merchandise order against a $20 minimum first gets a $6 upsell opportunity. If the customer declines everything else, policy may add a $6 minimum-order adjustment.
+
+A true bypass is different: the order is allowed below minimum without charging the shortfall. True bypasses require authorized management action, record who approved the exception and why, and create a management alert. The AI and website cannot independently grant a true bypass.
+
+The shared confirmation gate blocks delivery when distance, delivery fee, or minimum resolution remains unresolved.
+
+### Tax-inclusive pricing
+
+Customer-facing menu prices are gross prices with tax included. Tax is therefore extracted from taxable gross amounts for reporting rather than added on top of the displayed menu price again.
+
+The tax model is configurable by business and includes:
+
+- whether customer-facing prices include tax
+- current tax rate
+- whether delivery fees are taxable
+- whether minimum-order adjustments are taxable
+
+The current tax rate is not hard-coded into menu item prices. It must be explicitly configured before production. Orders snapshot the tax rate and pricing mode used at the time of sale so later tax-setting changes never rewrite historical orders.
 
 ### Unpaid online order verification
 
@@ -132,6 +175,12 @@ A customer has one stable customer ID and may have multiple phone numbers and ad
 
 Caller ID is a lookup key, not proof of identity. Sensitive customer information should only be disclosed when appropriate.
 
+## AI conversation order
+
+The AI should follow the customer rather than fighting them over question order. If it asks whether an order is pickup or delivery and the caller immediately starts ordering food, it captures the food first, keeps fulfillment unresolved in structured state, and asks again at the next natural item boundary or before confirmation.
+
+The model decides conversational timing. The deterministic order engine decides whether fulfillment and every other required field are complete enough to confirm.
+
 ## Live AI order and human handoff
 
 The AI updates a real Draft order as the conversation happens. The store POS subscribes to order changes.
@@ -169,6 +218,9 @@ Upsell rules are stored in Corner Ops and evaluated from the current cart. They 
 - availability
 - order source
 - time/day
+- delivery-minimum shortfall
+
+When a delivery is under minimum, upsell rules should prefer useful items that reduce the shortfall before a minimum-order adjustment fee is offered.
 
 Every offer and acceptance should eventually be logged for conversion and incremental-revenue reporting.
 
@@ -226,6 +278,8 @@ Templates must support configurable visibility, font size, emphasis, copies, and
 - promised time
 - item/modifier/combo text
 - special instructions
+- delivery fee
+- minimum-order adjustment where applicable
 - total
 - amount paid
 - amount due
@@ -236,6 +290,8 @@ Templates must support configurable visibility, font size, emphasis, copies, and
 Printer delivery should eventually use a tiny store-side print agent while the source order remains cloud-hosted.
 
 ## Hosting
+
+The live Corner Ops application remains separate while the replacement POS is under construction. Automatic Vercel Git deployment is disabled during this heavy development phase. The replacement POS can be integrated into the existing application deliberately when preview/parallel testing is useful and safe.
 
 The web/POS/admin application remains suitable for Vercel. PostgreSQL remains external/managed (currently Neon-compatible). Long-lived 3CX voice streaming may be hosted separately if Vercel's execution model is not appropriate for that process.
 
@@ -255,11 +311,14 @@ The first foundation is complete when we can:
 8. detect unresolved required modifier and combo groups
 9. calculate deterministic line/order totals
 10. apply fulfillment rules for delivery, no-contact, pickup, eat-in, and curbside
-11. require full online payment for curbside and no-contact web orders
-12. require SMS verification for any web order that is allowed to remain unpaid, including standard cash delivery
-13. record curbside customer arrival and alert the POS
-14. increment an order version on changes
-15. confirm an order only when all channel/payment/verification validation passes
-16. record loyalty ledger entries tied to orders
+11. enforce configurable delivery minimums and distance-based delivery fees across web, AI, and employee-entered phone/POS orders
+12. offer upsells before an exact minimum-order shortfall fee and audit/alert true minimum bypasses
+13. support tax-inclusive customer pricing with a configurable business tax rate and historical snapshots
+14. require full online payment for curbside and no-contact web orders
+15. require SMS verification for any web order that is allowed to remain unpaid, including standard cash delivery
+16. record curbside customer arrival and alert the POS
+17. increment an order version on changes
+18. confirm an order only when all channel/payment/verification/delivery validation passes
+19. record loyalty ledger entries tied to orders
 
-No production deployment is authorized by this document. Use preview/test environments until the owner explicitly approves production deployment.
+No production deployment is authorized by this document. Use preview/test environments only after the owner explicitly authorizes them.
