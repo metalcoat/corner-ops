@@ -48,9 +48,6 @@ export async function PUT(request: Request) {
       business,
       enabled: body.enabled == null ? current.enabled : Boolean(body.enabled),
       minimumOrderCents: body.minimumOrderCents == null ? current.minimumOrderCents : Number(body.minimumOrderCents),
-      deliveryFeeCountsTowardMinimum: body.deliveryFeeCountsTowardMinimum == null
-        ? current.deliveryFeeCountsTowardMinimum
-        : Boolean(body.deliveryFeeCountsTowardMinimum),
       offerUpsellBeforeShortfallFee: body.offerUpsellBeforeShortfallFee == null
         ? current.offerUpsellBeforeShortfallFee
         : Boolean(body.offerUpsellBeforeShortfallFee),
