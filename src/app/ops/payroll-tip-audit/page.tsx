@@ -41,6 +41,22 @@ type PayrollResponse = {
   };
 };
 
+type RezkuEmailReceipt = {
+  emailId: string;
+  reportDate: string | null;
+  status: string;
+};
+
+type RezkuMonitorResponse = {
+  emails?: RezkuEmailReceipt[];
+};
+
+type RezkuRetryResponse = {
+  processed?: boolean;
+  reports?: Array<Record<string, unknown>>;
+  failures?: string[];
+};
+
 function previousMonday() {
   const now = new Date();
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -54,6 +70,12 @@ function previousMonday() {
   const date = new Date(`${values.year}-${values.month}-${values.day}T12:00:00Z`);
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(values.weekday);
   date.setUTCDate(date.getUTCDate() - ((weekday + 6) % 7) - 7);
+  return date.toISOString().slice(0, 10);
+}
+
+function plusDays(dateText: string, days: number) {
+  const date = new Date(`${dateText}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
 
@@ -94,6 +116,11 @@ function dayLabel(value: string) {
   }).format(parsed);
 }
 
+async function responseError(response: Response) {
+  const payload = await response.json().catch(() => null) as { error?: string } | null;
+  return payload?.error || `Request failed (${response.status}).`;
+}
+
 export default function PayrollTipAuditPage() {
   const [session, setSession] = useState<SessionView | null>(null);
   const [weekStart, setWeekStart] = useState(previousMonday());
@@ -101,6 +128,16 @@ export default function PayrollTipAuditPage() {
   const [deliveryOnly, setDeliveryOnly] = useState(false);
   const [data, setData] = useState<PayrollResponse | null>(null);
   const [notice, setNotice] = useState("");
+  const [repairing, setRepairing] = useState(false);
+
+  async function loadPayroll(selectedWeek = weekStart) {
+    const response = await fetch(`/api/payroll-control?business=${encodeURIComponent("Corner Deli")}&weekStart=${encodeURIComponent(selectedWeek)}&displayVersion=20260811-tip-audit-rezku-repair`, {
+      cache: "no-store",
+      headers: { "Cache-Control": "no-cache" },
+    });
+    if (!response.ok) throw new Error(await responseError(response));
+    setData(await response.json() as PayrollResponse);
+  }
 
   useEffect(() => {
     fetch("/api/auth/session", { cache: "no-store" })
@@ -112,17 +149,53 @@ export default function PayrollTipAuditPage() {
   useEffect(() => {
     if (!session?.authenticated) return;
     setNotice("");
-    fetch(`/api/payroll-control?business=${encodeURIComponent("Corner Deli")}&weekStart=${encodeURIComponent(weekStart)}&displayVersion=20260811-tip-audit`, {
-      cache: "no-store",
-      headers: { "Cache-Control": "no-cache" },
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Payroll request failed (${response.status}).`);
-        return response.json();
-      })
-      .then((payload: PayrollResponse) => setData(payload))
-      .catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
+    void loadPayroll(weekStart).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
   }, [session?.authenticated, weekStart]);
+
+  async function reimportRezkuWeek() {
+    setRepairing(true);
+    setNotice("Finding the original Rezku emails for this payroll week…");
+    try {
+      const monitorResponse = await fetch("/api/rezku-monitor", { cache: "no-store" });
+      if (!monitorResponse.ok) throw new Error(await responseError(monitorResponse));
+      const monitor = await monitorResponse.json() as RezkuMonitorResponse;
+      const weekEnd = plusDays(weekStart, 7);
+      const emails = (monitor.emails || [])
+        .filter((email) => Boolean(email.reportDate && email.reportDate >= weekStart && email.reportDate < weekEnd))
+        .sort((left, right) => String(left.reportDate).localeCompare(String(right.reportDate)));
+
+      if (!emails.length) throw new Error("Corner Ops does not have retained Rezku inbound emails for this payroll week.");
+
+      const failures: string[] = [];
+      let completed = 0;
+      for (const email of emails) {
+        setNotice(`Re-importing Rezku source for ${email.reportDate || "unknown date"} (${completed + 1} of ${emails.length})…`);
+        try {
+          const response = await fetch("/api/rezku-monitor", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "retry-email", emailId: email.emailId }),
+          });
+          if (!response.ok) throw new Error(await responseError(response));
+          const result = await response.json() as RezkuRetryResponse;
+          if (result.failures?.length) failures.push(`${email.reportDate}: ${result.failures.join("; ")}`);
+        } catch (error) {
+          failures.push(`${email.reportDate}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        completed += 1;
+      }
+
+      setNotice("Re-import complete. Recalculating payroll from the restored Rezku order times…");
+      await loadPayroll(weekStart);
+      setNotice(failures.length
+        ? `Re-imported ${emails.length} Rezku email${emails.length === 1 ? "" : "s"}, but some reports need review: ${failures.join(" | ")}`
+        : `Re-imported ${emails.length} Rezku email${emails.length === 1 ? "" : "s"} and recalculated payroll from the restored source timestamps.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRepairing(false);
+    }
+  }
 
   const employees = useMemo(() => {
     const names = new Set((data?.summary.tipDetails || [])
@@ -172,12 +245,13 @@ export default function PayrollTipAuditPage() {
       </div>
       <div className="controlActions">
         <a href="/ops/payroll-control">Back to payroll control</a>
-        <label>Payroll week<input type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} /></label>
-        <label>Employee<select value={employee} onChange={(event) => setEmployee(event.target.value)}>
+        <label>Payroll week<input type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} disabled={repairing} /></label>
+        <label>Employee<select value={employee} onChange={(event) => setEmployee(event.target.value)} disabled={repairing}>
           <option>All employees</option>
           {employees.map((name) => <option key={name}>{name}</option>)}
         </select></label>
-        <label><input type="checkbox" checked={deliveryOnly} onChange={(event) => setDeliveryOnly(event.target.checked)} /> Delivery only</label>
+        <label><input type="checkbox" checked={deliveryOnly} onChange={(event) => setDeliveryOnly(event.target.checked)} disabled={repairing} /> Delivery only</label>
+        <button className="primary" disabled={repairing} onClick={() => void reimportRezkuWeek()}>{repairing ? "Re-importing Rezku week…" : "Re-import Rezku source week"}</button>
       </div>
     </header>
 
@@ -194,6 +268,7 @@ export default function PayrollTipAuditPage() {
         {employee !== "All employees" && Math.abs((selectedSummary?.tips || 0) - (selectedSummary?.manualTips || 0) - automaticNet) > 0.02
           ? <p className="reportNote"><strong>Warning:</strong> the payroll summary does not equal the visible automatic allocation detail. That indicates an additional calculation problem and should not be locked.</p>
           : <p className="reportNote">The automatic detail should equal the employee payroll total minus any manual adjustment.</p>}
+        <p className="reportNote">If order-open times incorrectly show 12:00 AM, use <strong>Re-import Rezku source week</strong>. It re-downloads the original daily workbooks and then recalculates this week.</p>
       </section>
 
       <section className="controlCard">
