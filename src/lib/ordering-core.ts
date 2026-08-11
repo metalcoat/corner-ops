@@ -21,6 +21,7 @@ export type PaymentStatus =
   | "failed";
 
 export type ServiceType =
+  | "undecided"
   | "pickup"
   | "delivery"
   | "no_contact_delivery"
@@ -45,7 +46,7 @@ export type ModifierValidationIssue = {
 };
 
 export type FulfillmentValidationIssue = {
-  code: "prepayment_required" | "sms_verification_required";
+  code: "service_type_required" | "prepayment_required" | "sms_verification_required";
   message: string;
 };
 
@@ -144,6 +145,15 @@ export function validateFulfillmentForConfirmation(input: {
   smsVerified: boolean;
 }): FulfillmentValidationIssue[] {
   const issues: FulfillmentValidationIssue[] = [];
+
+  if (input.serviceType === "undecided") {
+    issues.push({
+      code: "service_type_required",
+      message: "Pickup, delivery, or another valid fulfillment type must be confirmed before the order can be submitted.",
+    });
+    return issues;
+  }
+
   const prepaymentRequired = requiresOnlinePrepayment(input);
 
   if (prepaymentRequired && input.paymentStatus !== "paid") {
