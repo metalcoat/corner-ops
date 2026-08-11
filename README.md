@@ -4,7 +4,9 @@ Corner Ops is the owner and employee operations system for Corner Deli and Tiki.
 
 ## Development status
 
-Production deployments are intentionally paused. Current work remains on the deployment-disabled `agent/rebuild-corner-ops` branch and draft pull request #3 until the owner explicitly authorizes deployment.
+Automatic Vercel Git deployments are intentionally disabled while the replacement POS and AI ordering platform is under construction. Active POS development is on `agent/pos-ordering-foundation` in draft pull request #9. Keep the branch development-only and re-enable deployments deliberately when preview/parallel testing is worth the build and infrastructure cost. Production deployment still requires explicit owner authorization.
+
+The POS foundation now includes shared menu/modifier/combo rules, fulfillment and unpaid-web SMS verification, saved processor payment references, employee meals, house accounts, inventory movement tracking, cash/driver settlement foundations, future-order capacity, bar-tab direction, promotions, gift/store-credit ledgers, closeout/audit structures, and a first touch-oriented `/pos` shell.
 
 ## Banking and historical imports
 
