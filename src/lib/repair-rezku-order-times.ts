@@ -150,16 +150,19 @@ export async function repairRezkuOrderTimesForPayroll(start: Date, end: Date) {
     FROM rezku_orders
     WHERE opened_at >= ${searchStart.toISOString()}
       AND opened_at < ${searchEnd.toISOString()}
-      AND COALESCE(raw->>'__payrollOrderTimeRecovered', 'false') <> 'true'
   ` as unknown as Array<Record<string, unknown>>;
 
   let repaired = 0;
   let checked = 0;
+  let missingRawClock = 0;
   for (const row of rows) {
     const raw = rawObject(row.raw);
     const rawValue = rawLookup(raw, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]);
     const recovered = rawOpenedAt(rawValue);
-    if (!recovered) continue;
+    if (!recovered) {
+      missingRawClock += 1;
+      continue;
+    }
 
     checked += 1;
     const current = row.opened_at ? new Date(String(row.opened_at)) : null;
@@ -167,14 +170,16 @@ export async function repairRezkuOrderTimesForPayroll(start: Date, end: Date) {
       || Number.isNaN(current.getTime())
       || Math.abs(current.getTime() - recovered.getTime()) >= 60_000;
 
-    await sql`
-      UPDATE rezku_orders
-      SET opened_at = ${recovered.toISOString()},
-          raw = jsonb_set(raw, '{__payrollOrderTimeRecovered}', 'true'::jsonb, TRUE)
-      WHERE id = ${String(row.id)}::uuid
-    `;
-    if (different) repaired += 1;
+    if (different) {
+      await sql`
+        UPDATE rezku_orders
+        SET opened_at = ${recovered.toISOString()},
+            raw = jsonb_set(raw, '{__payrollOrderTimeRecovered}', 'true'::jsonb, TRUE)
+        WHERE id = ${String(row.id)}::uuid
+      `;
+      repaired += 1;
+    }
   }
 
-  return { checked, repaired };
+  return { checked, repaired, missingRawClock };
 }
