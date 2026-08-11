@@ -38,11 +38,10 @@ export function ensureOrderingDeliverySchema(): Promise<void> {
           business TEXT PRIMARY KEY CHECK (business IN ('Corner Deli', 'Tiki')),
           enabled BOOLEAN NOT NULL DEFAULT FALSE,
           minimum_order_cents INTEGER NOT NULL DEFAULT 0 CHECK (minimum_order_cents >= 0),
-          minimum_basis TEXT NOT NULL DEFAULT 'merchandise_after_discounts'
-            CHECK (minimum_basis IN ('merchandise_after_discounts')),
+          minimum_basis TEXT NOT NULL DEFAULT 'order_total_including_delivery_fee',
           offer_upsell_before_shortfall_fee BOOLEAN NOT NULL DEFAULT TRUE,
           allow_shortfall_fee BOOLEAN NOT NULL DEFAULT TRUE,
-          shortfall_fee_label TEXT NOT NULL DEFAULT 'Minimum order adjustment',
+          shortfall_fee_label TEXT NOT NULL DEFAULT 'Round up to delivery minimum',
           allow_manager_bypass BOOLEAN NOT NULL DEFAULT TRUE,
           notify_management_on_bypass BOOLEAN NOT NULL DEFAULT TRUE,
           max_distance_miles NUMERIC(6,2),
@@ -52,18 +51,34 @@ export function ensureOrderingDeliverySchema(): Promise<void> {
         )
       `;
 
-      // Working Corner Deli policy from the owner: $20 merchandise minimum.
-      // Delivery fee does not count toward that minimum. If the guest declines
-      // an upsell, an explicit fee may bridge the exact shortfall.
+      // Expand the minimum basis safely for databases created by earlier
+      // development revisions, then make Corner Deli count its delivery charge
+      // toward the $20 minimum.
+      await sql`ALTER TABLE ordering_delivery_policies DROP CONSTRAINT IF EXISTS ordering_delivery_policies_minimum_basis_check`;
+      await sql`ALTER TABLE ordering_delivery_policies ALTER COLUMN minimum_basis SET DEFAULT 'order_total_including_delivery_fee'`;
+      await sql`
+        ALTER TABLE ordering_delivery_policies
+        ADD CONSTRAINT ordering_delivery_policies_minimum_basis_check
+        CHECK (minimum_basis IN ('merchandise_after_discounts', 'order_total_including_delivery_fee'))
+      `;
+
       await sql`
         INSERT INTO ordering_delivery_policies (
-          business, enabled, minimum_order_cents, offer_upsell_before_shortfall_fee,
+          business, enabled, minimum_order_cents, minimum_basis, offer_upsell_before_shortfall_fee,
           allow_shortfall_fee, shortfall_fee_label, allow_manager_bypass,
           notify_management_on_bypass, max_distance_miles
         ) VALUES (
-          'Corner Deli', TRUE, 2000, TRUE, TRUE, 'Minimum order adjustment', TRUE, TRUE, 12
+          'Corner Deli', TRUE, 2000, 'order_total_including_delivery_fee', TRUE, TRUE,
+          'Round up to delivery minimum', TRUE, TRUE, 12
         )
-        ON CONFLICT (business) DO NOTHING
+        ON CONFLICT (business) DO UPDATE SET
+          minimum_basis = 'order_total_including_delivery_fee',
+          shortfall_fee_label = CASE
+            WHEN ordering_delivery_policies.shortfall_fee_label = 'Minimum order adjustment'
+              THEN 'Round up to delivery minimum'
+            ELSE ordering_delivery_policies.shortfall_fee_label
+          END,
+          updated_at = NOW()
       `;
 
       await sql`
