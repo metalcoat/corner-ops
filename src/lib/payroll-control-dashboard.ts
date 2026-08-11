@@ -3,6 +3,7 @@ import {
   controlledPayrollSummary,
   ensurePayrollControlSchema,
 } from "@/lib/payroll-control";
+import { repairRezkuOrderTimesForPayroll } from "@/lib/repair-rezku-order-times";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -71,6 +72,9 @@ function easternLabel(value: unknown): string | null {
 export async function safePayrollControlDashboard(business: Business, weekStart: string) {
   await ensurePayrollControlSchema();
   const bounds = weekBounds(weekStart);
+  const rezkuOrderTimeRepair = business === "Corner Deli"
+    ? await repairRezkuOrderTimesForPayroll(bounds.start, bounds.end)
+    : null;
   const summary = await controlledPayrollSummary(business, weekStart);
   const punches = business === "Tiki"
     ? await getSql()`
@@ -116,6 +120,7 @@ export async function safePayrollControlDashboard(business: Business, weekStart:
 
   return {
     summary,
+    rezkuOrderTimeRepair,
     punches: (punches as unknown as Array<Record<string, unknown>>).map((row) => {
       const clockIn = timestamp(row.clock_in);
       const clockOut = timestamp(row.clock_out);
