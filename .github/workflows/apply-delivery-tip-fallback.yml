@@ -35,28 +35,12 @@ jobs:
           if count != 1:
               raise SystemExit(f"Expected to remove one nextDriversWithinGrace function, removed {count}")
 
-          old_delivery = '''    } else if (delivery) {
-              eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && isDriver(shift) && covers(shift, time)));
-              if (eligible.length) {
-                rule = "After 3 PM delivery order: assigned to driver clocked in";
-              } else {
-                eligible = nextDriversWithinGrace(shifts, time);
-                if (eligible.length) rule = "After 3 PM delivery order: next driver arrived within 35 minutes";
-              }
-
-              if (!eligible.length) {
-                details.push({
-                  ...detailBase(transaction),
-                  allocatedTipBeforeFee: 0,
-                  feeAmount: 0,
-                  allocatedTip: 0,
-                  employee: "Unallocated",
-                  splitCount: 0,
-                  rule: "After 3 PM delivery: no driver clocked in or arriving within 35 minutes",
-                });
-                continue;
-              }
-            } else {'''
+          allocation_start = text.index("function allocateTips(")
+          delivery_start = text.index("    } else if (delivery) {", allocation_start)
+          pickup_start = text.index(
+              "    } else {\n      eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && !isDriver(shift) && covers(shift, time)));",
+              delivery_start,
+          )
           new_delivery = '''    } else if (delivery) {
               eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && isDriver(shift) && covers(shift, time)));
               if (eligible.length) {
@@ -78,10 +62,8 @@ jobs:
                 });
                 continue;
               }
-            } else {'''
-          if old_delivery not in text:
-              raise SystemExit("Delivery allocation block did not match expected source")
-          text = text.replace(old_delivery, new_delivery)
+          '''
+          text = text[:delivery_start] + new_delivery + text[pickup_start:]
 
           text = text.replace(
               '''    const scheduleEnd = new Date(end.getTime() + DRIVER_GRACE_MINUTES * 60_000);\n    const rows = await getSql()`''',
