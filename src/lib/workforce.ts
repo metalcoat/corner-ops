@@ -217,7 +217,10 @@ export async function workforceDashboard(business: Business) {
       LIMIT 200
     `,
     sql`
-      SELECT t.*, e.name AS employee_name
+      SELECT t.*,
+        t.starts_on::text AS starts_on,
+        t.ends_on::text AS ends_on,
+        e.name AS employee_name
       FROM time_off_requests t
       JOIN employees e ON e.id = t.employee_id
       WHERE t.business = ${business}
@@ -300,7 +303,10 @@ export async function employeeDashboard(session: EmployeeSession) {
       ORDER BY created_at DESC LIMIT 100
     `,
     sql`
-      SELECT * FROM time_off_requests
+      SELECT *,
+        starts_on::text AS starts_on,
+        ends_on::text AS ends_on
+      FROM time_off_requests
       WHERE employee_id = ${session.employeeId}
       ORDER BY created_at DESC LIMIT 100
     `,

@@ -79,7 +79,17 @@ function local(value: string | null) {
 }
 
 function dateOnly(value: string) {
-  return new Date(`${value}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  const raw = String(value || "").trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+  if (!match) return "Invalid date";
+  const date = new Date(`${match[1]}-${match[2]}-${match[3]}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "Invalid date";
+  return date.toLocaleDateString([], {
+    timeZone: "UTC",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 function firstName(value: string | null) {
