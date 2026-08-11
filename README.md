@@ -10,6 +10,8 @@ The POS foundation now includes separate Deli/Tiki POS surfaces, shared menu/mod
 
 Corner Deli delivery policy is also being built as shared server-side logic so POS, employee-entered phone orders, AI phone orders, and web ordering cannot quietly disagree. The current development policy uses a $20 merchandise minimum, configurable distance/fee bands, an upsell-first under-minimum flow, an exact shortfall fee when the customer declines add-ons, management-visible true bypasses, and tax-inclusive menu pricing with a configurable tax rate. The actual tax rate must be explicitly configured before production.
 
+For example, a $14 delivery order against a $20 minimum should first trigger a useful add-on offer such as fries. If the customer declines and still wants delivery, policy can add a visible $6 minimum-order adjustment. That is not a true bypass. A true waiver of the missing $6 requires authorized management action and creates an alert.
+
 ## Banking and historical imports
 
 The Automation Center supports Plaid bank and credit-card connections, several accounts under one institution Item, Plaid update mode, CSV and Excel history imports, duplicate protection, transaction classification, and owner review. Corner Deli and Tiki/At The Docks remain separate accounting entities.
