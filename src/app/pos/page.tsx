@@ -25,6 +25,10 @@ export default function PosDevelopmentHome() {
           <strong>Tiki POS</strong>
           <span>Bar service, tabs, Tiki inventory, and Tiki-only reporting. No deli driver workflow.</span>
         </a>
+        <a href="/pos/deli/settings">
+          <strong>Deli delivery & tax settings</strong>
+          <span>Edit the delivery minimum, mileage bands, fees, tax-inclusive mode, and current tax rate.</span>
+        </a>
       </div>
       <a className="posDevExit" href="/ops/people">Return to live-style Corner Ops area</a>
     </section>
