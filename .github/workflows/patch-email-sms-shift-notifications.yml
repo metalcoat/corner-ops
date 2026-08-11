@@ -1,0 +1,32 @@
+name: Patch shift email and SMS notifications
+
+on:
+  push:
+    paths:
+      - .github/workflows/patch-email-sms-shift-notifications.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Apply patch
+        run: python scripts/patch-email-sms-shift-notifications.py
+      - name: Verify
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm run build
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/staff-notifications.ts src/lib/workforce.ts
+          git diff --cached --check
+          git commit -m "Notify open shifts by email and SMS"
+          git push origin HEAD:main
