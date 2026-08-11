@@ -1,3 +1,9 @@
+body:has(.posPage) > .globalOwnerNav,
+body:has(.posDevHome) > .globalOwnerNav,
+body:has(.posReportPage) > .globalOwnerNav {
+  display: none;
+}
+
 .posDevHome,
 .posReportPage {
   min-height: 100dvh;
