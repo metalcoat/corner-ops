@@ -170,7 +170,7 @@ function zonedDateToUtc(dateText: string, hour: number): Date {
 
 function weekBounds(weekStart: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw new Error("Choose a valid payroll week.");
-  const start = zonedDateToUtc(weekStart, 4);
+  const start = zonedDateToUtc(weekStart, 0);
   const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
   return { start, end };
 }
