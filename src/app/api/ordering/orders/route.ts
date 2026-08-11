@@ -1,6 +1,6 @@
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
-import type { ConfiguredOrderItemInput } from "@/lib/ordering-orders";
+import type { VariantConfiguredOrderItemInput } from "@/lib/ordering-orders-with-variants";
 import type { OrderingBusiness, ServiceType } from "@/lib/ordering-core";
 import { ensureOrderingDeliverySchema } from "@/lib/ordering-delivery-schema";
 import { createTimedDraftOrder } from "@/lib/ordering-timed-orders";
@@ -51,6 +51,7 @@ export async function POST(request: Request) {
       const record = item as Record<string, unknown>;
       return {
         itemId: String(record.itemId || ""),
+        variantId: record.variantId ? String(record.variantId) : null,
         quantity: Number(record.quantity || 1),
         modifierSelections: record.modifierSelections && typeof record.modifierSelections === "object"
           ? record.modifierSelections as Record<string, string[]>
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
           ? record.comboSelections as Record<string, string[]>
           : {},
         specialInstructions: String(record.specialInstructions || ""),
-      } satisfies ConfiguredOrderItemInput;
+      } satisfies VariantConfiguredOrderItemInput;
     });
 
     const timingMode = readTimingMode(body.timingMode);
