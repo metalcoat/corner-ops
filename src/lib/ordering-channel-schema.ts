@@ -14,25 +14,11 @@ export function ensureOrderingChannelSchema(): Promise<void> {
       await ensureOrderingSchema();
       const sql = getSql();
 
-      // Expand fulfillment modes without depending on the original generated
-      // CHECK definition. AI phone drafts may temporarily remain undecided so
-      // callers can start ordering before answering pickup/delivery.
-      await sql`
-        ALTER TABLE ordering_orders
-        DROP CONSTRAINT IF EXISTS ordering_orders_service_type_check
-      `;
+      await sql`ALTER TABLE ordering_orders DROP CONSTRAINT IF EXISTS ordering_orders_service_type_check`;
       await sql`
         ALTER TABLE ordering_orders
         ADD CONSTRAINT ordering_orders_service_type_check
-        CHECK (service_type IN (
-          'undecided',
-          'pickup',
-          'delivery',
-          'no_contact_delivery',
-          'dine_in',
-          'curbside',
-          'bar'
-        ))
+        CHECK (service_type IN ('undecided','pickup','delivery','no_contact_delivery','dine_in','curbside','bar'))
       `;
 
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS sms_verified_at TIMESTAMPTZ`;
@@ -47,8 +33,6 @@ export function ensureOrderingChannelSchema(): Promise<void> {
         CHECK (arrival_status IN ('not_expected', 'waiting', 'arrived', 'acknowledged', 'completed'))
       `;
 
-      // Item-level modifier behavior supports defaults on subs and explicit
-      // removal/extra treatment on kitchen tickets.
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_menu_item_modifier_defaults (
           id UUID PRIMARY KEY,
@@ -57,12 +41,14 @@ export function ensureOrderingChannelSchema(): Promise<void> {
           default_selected BOOLEAN NOT NULL DEFAULT FALSE,
           included_quantity INTEGER NOT NULL DEFAULT 0 CHECK (included_quantity >= 0),
           price_delta_override_cents INTEGER,
+          available_override BOOLEAN,
           active BOOLEAN NOT NULL DEFAULT TRUE,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           UNIQUE (item_id, option_id)
         )
       `;
+      await sql`ALTER TABLE ordering_menu_item_modifier_defaults ADD COLUMN IF NOT EXISTS available_override BOOLEAN`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_item_modifier_defaults_idx ON ordering_menu_item_modifier_defaults (item_id, active)`;
 
       await sql`ALTER TABLE ordering_order_item_modifiers ADD COLUMN IF NOT EXISTS selection_state TEXT NOT NULL DEFAULT 'selected'`;
@@ -73,9 +59,6 @@ export function ensureOrderingChannelSchema(): Promise<void> {
         CHECK (selection_state IN ('selected', 'removed', 'extra'))
       `;
 
-      // Combos are structured component groups rather than loose modifiers.
-      // A sub can offer a combo with required Side and Drink groups, each with
-      // its own available choices and optional upcharges.
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_combo_definitions (
           id UUID PRIMARY KEY,
@@ -158,8 +141,6 @@ export function ensureOrderingChannelSchema(): Promise<void> {
       `;
       await sql`CREATE INDEX IF NOT EXISTS ordering_order_item_combo_idx ON ordering_order_item_combo_selections (order_item_id, group_id)`;
 
-      // Unpaid web orders must prove control of the supplied phone number.
-      // Only a hash of the one-time code is persisted.
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_sms_verifications (
           id UUID PRIMARY KEY,
