@@ -96,6 +96,14 @@ function normalizedOrderId(value: unknown): string {
     .toLowerCase();
 }
 
+function normalizedTransactionId(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .replace(/^['"]+|['"]+$/g, "")
+    .replace(/\.0+$/, "")
+    .toLowerCase();
+}
+
 function rawObject(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
   if (typeof value === "string") {
@@ -506,22 +514,33 @@ function allocateTips(shifts: Shift[], transactions: Transaction[], summary: Map
 }
 
 function deduplicateTransactionRows(rows: Array<Record<string, unknown>>) {
-  const groups = new Map<string, Array<Record<string, unknown>>>();
+  const selected = new Map<string, Record<string, unknown>>();
+
   for (const row of rows) {
+    const transactionId = normalizedTransactionId(row.transaction_id);
     const orderKey = normalizedOrderId(row.order_id);
-    const key = `${orderKey}|${Math.round(numberValue(row.tip) * 100)}`;
-    const group = groups.get(key) || [];
-    group.push(row);
-    groups.set(key, group);
+    const transactionTime = dateValue(row.transaction_time);
+    const tipCents = Math.round(numberValue(row.tip) * 100);
+    const key = transactionId
+      ? `transaction|${transactionId}|${orderKey}`
+      : `fallback|${orderKey}|${transactionTime?.toISOString() || "no-time"}|${tipCents}`;
+
+    const existing = selected.get(key);
+    if (!existing) {
+      selected.set(key, row);
+      continue;
+    }
+
+    const existingHasClock = rawHasClock(existing.raw, ["Transaction Time", "Payment Time", "Created At", "Time"]);
+    const candidateHasClock = rawHasClock(row.raw, ["Transaction Time", "Payment Time", "Created At", "Time"]);
+    if (!existingHasClock && candidateHasClock) selected.set(key, row);
   }
 
-  const result: Array<Record<string, unknown>> = [];
-  for (const group of groups.values()) {
-    const detailed = group.filter((row) => rawHasClock(row.raw, ["Transaction Time", "Payment Time", "Created At", "Time"]));
-    if (detailed.length) result.push(...detailed);
-    else result.push(group[0]);
-  }
-  return result;
+  return [...selected.values()].sort((left, right) => {
+    const leftTime = dateValue(left.transaction_time)?.getTime() || 0;
+    const rightTime = dateValue(right.transaction_time)?.getTime() || 0;
+    return leftTime - rightTime;
+  });
 }
 
 async function scheduledDriversForWeek(business: Business, start: Date, end: Date): Promise<ScheduledDriver[]> {
@@ -639,7 +658,7 @@ export async function payrollSummary(business: Business, weekStart: string) {
       ORDER BY opened_at
     `,
     getSql()`
-      SELECT id, order_id, transaction_time, tip, raw
+      SELECT id, transaction_id, order_id, transaction_time, tip, raw
       FROM rezku_transactions
       WHERE transaction_time >= ${transactionSearchStart.toISOString()}
         AND transaction_time < ${transactionSearchEnd.toISOString()}
