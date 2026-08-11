@@ -1,0 +1,60 @@
+name: Fix exact week selection v2
+
+on:
+  push:
+    paths:
+      - .github/workflows/fix-exact-week-selection-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Keep exact selected weeks
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('src/app/api/workforce/week-publish-v2/route.ts')
+          t = p.read_text()
+          start_marker = '    let targetWeekStart = requestedWeekStart;'
+          end_marker = '\n\n    let result: Record<string, unknown>;'
+          start = t.find(start_marker)
+          if start < 0:
+              raise SystemExit('schedule week fallback start not found')
+          end = t.find(end_marker, start)
+          if end < 0:
+              raise SystemExit('schedule week fallback end not found')
+          replacement = "    const targetWeekStart = requestedWeekStart;\n    const draftsBefore = await draftShiftsForWeek(business, targetWeekStart);"
+          t = t[:start] + replacement + t[end:]
+          p.write_text(t)
+
+          for path in ['src/lib/payroll-control.ts', 'src/lib/payroll-control-dashboard.ts']:
+              p = Path(path)
+              t = p.read_text()
+              old = 'const start = zonedDateToUtc(weekStart, 4);'
+              if old not in t:
+                  raise SystemExit(f'4 AM payroll boundary not found in {path}')
+              p.write_text(t.replace(old, 'const start = zonedDateToUtc(weekStart, 0);', 1))
+
+      - name: Verify
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm run build
+          grep -n "const targetWeekStart = requestedWeekStart" src/app/api/workforce/week-publish-v2/route.ts
+          grep -n "zonedDateToUtc(weekStart, 0)" src/lib/payroll-control.ts src/lib/payroll-control-dashboard.ts
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/api/workforce/week-publish-v2/route.ts src/lib/payroll-control.ts src/lib/payroll-control-dashboard.ts
+          git diff --cached --check
+          git commit -m "Keep publish and payroll on selected week"
+          git push origin HEAD:main
