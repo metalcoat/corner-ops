@@ -41,6 +41,8 @@ Example: merchandise subtotal is $14.00 and the minimum is $20.00.
 
 The shortfall fee is a distinct order adjustment and is reportable. It is not disguised as merchandise and it is not the delivery fee.
 
+For AI phone ordering, the normal conversational order is: tell the customer how far short they are, offer something useful such as fries first, and only offer the exact shortfall fee if they decline the food suggestion and still want delivery.
+
 ## True minimum bypass
 
 A true bypass means allowing the delivery below the merchandise minimum **without** charging the shortfall fee.
@@ -79,7 +81,7 @@ The actual tax rate must be explicitly configured before production. Historical 
 
 ## Configuration ownership
 
-The development API supports owner/co-owner editing of:
+The development API and Deli settings screen support owner/co-owner editing of:
 
 - minimum delivery order
 - maximum delivery distance
