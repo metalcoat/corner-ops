@@ -18,8 +18,10 @@ export type OrderingBusinessConfig = {
   utilities: PosUtility[];
   features: {
     delivery: boolean;
+    deliveryPricing: boolean;
     drivers: boolean;
     barTabs: boolean;
+    taxInclusivePricing: boolean;
   };
 };
 
@@ -28,6 +30,9 @@ export type OrderingBusinessConfig = {
  * are separate POS/reporting products. Business-specific behavior belongs in
  * this configuration rather than being hidden behind a runtime business
  * switch inside one POS screen.
+ *
+ * Actual tax rates, delivery minimums, mileage boundaries, and fees are stored
+ * in editable database settings rather than hard-coded here.
  */
 export const orderingBusinessConfigs: Record<OrderingBusiness, OrderingBusinessConfig> = {
   "Corner Deli": {
@@ -39,8 +44,10 @@ export const orderingBusinessConfigs: Record<OrderingBusiness, OrderingBusinessC
     utilities: ["orders", "cash_drawer", "drivers", "inventory", "reports", "manager"],
     features: {
       delivery: true,
+      deliveryPricing: true,
       drivers: true,
       barTabs: false,
+      taxInclusivePricing: true,
     },
   },
   Tiki: {
@@ -52,8 +59,10 @@ export const orderingBusinessConfigs: Record<OrderingBusiness, OrderingBusinessC
     utilities: ["orders", "cash_drawer", "bar_tabs", "inventory", "reports", "manager"],
     features: {
       delivery: false,
+      deliveryPricing: false,
       drivers: false,
       barTabs: true,
+      taxInclusivePricing: true,
     },
   },
 };
