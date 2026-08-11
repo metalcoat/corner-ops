@@ -1,0 +1,46 @@
+name: Capture Corner Deli Rezku Menu
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/pos-ordering-foundation
+    paths:
+      - .github/workflows/rezku-menu-capture.yml
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install browser capture dependency
+        run: npm install --no-save --no-package-lock playwright@1.55.0
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Capture Rezku menu
+        env:
+          REZKU_URL: https://order.rezku.com/cornerdeli/cover
+          REZKU_BROWSER_CHANNEL: bundled
+          REZKU_DISCOVERY_OUT: tmp/rezku-cornerdeli-discovery.json
+        run: node scripts/rezku-discover-menu.mjs
+
+      - name: Upload capture
+        uses: actions/upload-artifact@v6
+        with:
+          name: rezku-cornerdeli-discovery
+          path: tmp/rezku-cornerdeli-discovery.json
+          if-no-files-found: error
+          retention-days: 7
