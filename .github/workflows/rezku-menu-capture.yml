@@ -7,6 +7,7 @@ on:
       - agent/pos-ordering-foundation
     paths:
       - .github/workflows/rezku-menu-capture.yml
+      - scripts/rezku-discover-menu.mjs
 
 permissions:
   contents: read
