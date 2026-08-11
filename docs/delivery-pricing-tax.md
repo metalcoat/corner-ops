@@ -52,7 +52,7 @@ That is intentionally different from the normal minimum-order adjustment:
 - requires manager/owner authorization
 - records who authorized it and why
 - records the original minimum, merchandise subtotal, and waived shortfall
-- creates a management alert
+- creates a management alert for owner/management review
 - appears in exception reporting so repeated bypasses can be reviewed
 
 The AI and website cannot independently grant a true bypass. They can only follow the configured minimum/shortfall policy or escalate to an authorized employee.
