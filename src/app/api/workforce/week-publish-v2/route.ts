@@ -24,16 +24,21 @@ function businessFrom(value: unknown): Business {
   throw new Error("Unknown business.");
 }
 
-function validWeekStart(value: unknown): string {
-  const text = String(value || "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error("Choose a valid schedule week.");
-  return text;
-}
-
 function addDays(value: string, days: number): string {
   const date = new Date(`${value}T12:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function validWeekStart(value: unknown): string {
+  const text = String(value || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error("Choose a valid schedule week.");
+  const date = new Date(`${text}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) throw new Error("Choose a valid schedule week.");
+  const weekday = date.getUTCDay();
+  if (weekday === 1) return text;
+  if (weekday === 0) return addDays(text, 1);
+  throw new Error("Schedule weeks must start on Monday.");
 }
 
 function localDateKey(value: string | Date): string {
