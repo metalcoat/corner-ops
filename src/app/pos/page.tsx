@@ -20,11 +20,20 @@ type CartLine = {
   unitPriceCents: number;
   modifierText: string[];
   comboText: string[];
+  modifierSelections: Record<string, string[]>;
+  comboId: string | null;
+  comboSelections: Record<string, string[]>;
 };
 
 type MenuPayload = {
   business: Business;
   categories: OrderingMenuCategoryView[];
+};
+
+type SavedDraft = {
+  id: string;
+  displayNumber: string;
+  totalCents: number;
 };
 
 const businessStorageKey = "corner-ops-business-theme";
@@ -39,6 +48,10 @@ const serviceTypes: Array<{ value: ServiceType; label: string; paymentNote?: str
 
 function money(cents: number): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+}
+
+function cloneSelections(value: Record<string, string[]>): Record<string, string[]> {
+  return Object.fromEntries(Object.entries(value).map(([key, ids]) => [key, [...ids]]));
 }
 
 function initialModifierSelections(item: OrderingMenuItemView): Record<string, string[]> {
@@ -67,6 +80,9 @@ export default function PosPage() {
   const [modifierSelections, setModifierSelections] = useState<Record<string, string[]>>({});
   const [selectedComboId, setSelectedComboId] = useState("");
   const [comboSelections, setComboSelections] = useState<Record<string, string[]>>({});
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [checkoutError, setCheckoutError] = useState("");
+  const [savedDraft, setSavedDraft] = useState<SavedDraft | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(businessStorageKey);
@@ -109,7 +125,9 @@ export default function PosPage() {
   const selectedCombo = configuringItem?.combos.find((combo) => combo.id === selectedComboId) || null;
 
   const configuration = useMemo(() => {
-    if (!configuringItem) return { valid: false, unitPriceCents: 0, modifierText: [] as string[], comboText: [] as string[] };
+    if (!configuringItem) {
+      return { valid: false, unitPriceCents: 0, modifierText: [] as string[], comboText: [] as string[] };
+    }
     let unitPriceCents = configuringItem.basePriceCents;
     const modifierText: string[] = [];
     const comboText: string[] = [];
@@ -122,7 +140,9 @@ export default function PosPage() {
         const chosen = selected.includes(option.id);
         if (chosen) {
           unitPriceCents += option.priceDeltaCents;
-          if (!option.defaultSelected || option.priceDeltaCents !== 0) modifierText.push(`${group.name}: ${option.name}`);
+          if (!option.defaultSelected || option.priceDeltaCents !== 0) {
+            modifierText.push(`${group.name}: ${option.name}`);
+          }
         } else if (option.defaultSelected) {
           modifierText.push(`${group.name}: NO ${option.name.toUpperCase()}`);
         }
@@ -148,6 +168,7 @@ export default function PosPage() {
   function chooseBusiness(next: Business) {
     setBusiness(next);
     setCart([]);
+    setSavedDraft(null);
     window.localStorage.setItem(businessStorageKey, next);
     document.documentElement.dataset.businessTheme = next;
   }
@@ -163,7 +184,9 @@ export default function PosPage() {
   function toggleModifier(group: OrderingModifierGroupView, optionId: string) {
     setModifierSelections((current) => {
       const existing = current[group.id] || [];
-      if (group.maxSelections === 1) return { ...current, [group.id]: existing.includes(optionId) ? [] : [optionId] };
+      if (group.maxSelections === 1) {
+        return { ...current, [group.id]: existing.includes(optionId) ? [] : [optionId] };
+      }
       return {
         ...current,
         [group.id]: existing.includes(optionId)
@@ -183,7 +206,9 @@ export default function PosPage() {
   function toggleComboOption(groupId: string, maxSelections: number, optionId: string) {
     setComboSelections((current) => {
       const existing = current[groupId] || [];
-      if (maxSelections === 1) return { ...current, [groupId]: existing.includes(optionId) ? [] : [optionId] };
+      if (maxSelections === 1) {
+        return { ...current, [groupId]: existing.includes(optionId) ? [] : [optionId] };
+      }
       return {
         ...current,
         [groupId]: existing.includes(optionId)
@@ -203,20 +228,65 @@ export default function PosPage() {
       unitPriceCents: configuration.unitPriceCents,
       modifierText: configuration.modifierText,
       comboText: configuration.comboText,
+      modifierSelections: cloneSelections(modifierSelections),
+      comboId: selectedCombo?.id || null,
+      comboSelections: cloneSelections(comboSelections),
     }]);
     setConfiguringItem(null);
+    setSavedDraft(null);
   }
 
   function changeQuantity(lineId: string, delta: number) {
     setCart((current) => current
       .map((line) => line.id === lineId ? { ...line, quantity: Math.max(0, line.quantity + delta) } : line)
       .filter((line) => line.quantity > 0));
+    setSavedDraft(null);
+  }
+
+  async function saveDraft() {
+    if (!cart.length || savingDraft) return;
+    setSavingDraft(true);
+    setCheckoutError("");
+    setSavedDraft(null);
+    try {
+      const response = await fetch("/api/ordering/orders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          business,
+          serviceType,
+          items: cart.map((line) => ({
+            itemId: line.itemId,
+            quantity: line.quantity,
+            modifierSelections: line.modifierSelections,
+            comboId: line.comboId,
+            comboSelections: line.comboSelections,
+          })),
+        }),
+      });
+      const payload = await response.json() as {
+        order?: { id: string; display_number: string; total_cents: number };
+        error?: string;
+      };
+      if (!response.ok || !payload.order) throw new Error(payload.error || "Could not save draft order.");
+      setSavedDraft({
+        id: payload.order.id,
+        displayNumber: payload.order.display_number,
+        totalCents: Number(payload.order.total_cents),
+      });
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "Could not save draft order.");
+    } finally {
+      setSavingDraft(false);
+    }
   }
 
   if (!session) return <main className="posLoading">Loading POS…</main>;
   if (!session.authenticated) return <main className="posLoading"><a href="/signin">Sign in to Corner Ops</a></main>;
 
-  const allowedBusinesses = session.businesses?.length ? session.businesses : (["Corner Deli", "Tiki"] as Business[]);
+  const allowedBusinesses = session.businesses?.length
+    ? session.businesses
+    : (["Corner Deli", "Tiki"] as Business[]);
 
   return <main className="posPage">
     <header className="posHeader">
@@ -238,12 +308,17 @@ export default function PosPage() {
     </header>
 
     <section className="posServiceBar" aria-label="Fulfillment type">
-      {serviceTypes.map((service) => <button key={service.value} type="button" className={serviceType === service.value ? "active" : ""} onClick={() => setServiceType(service.value)}>
+      {serviceTypes.map((service) => <button key={service.value} type="button" className={serviceType === service.value ? "active" : ""} onClick={() => { setServiceType(service.value); setSavedDraft(null); }}>
         <span>{service.label}</span>
         {service.paymentNote && <small>{service.paymentNote}</small>}
       </button>)}
       <button type="button" className="futureOrderButton">Future Order</button>
     </section>
+
+    {savedDraft && <div className="posSaveNotice">
+      Draft #{savedDraft.displayNumber} saved · {money(savedDraft.totalCents)} · payment/tender screen is the next build step.
+    </div>}
+    {checkoutError && <div className="posSaveNotice error">{checkoutError}</div>}
 
     <section className="posWorkspace">
       <aside className="posCategories">
@@ -269,13 +344,20 @@ export default function PosPage() {
       </section>
 
       <aside className="posCart">
-        <div className="posCartHeading"><div><span>Current order</span><h2>New {serviceTypes.find((service) => service.value === serviceType)?.label}</h2></div><button type="button" onClick={() => setCart([])} disabled={!cart.length}>Clear</button></div>
+        <div className="posCartHeading">
+          <div><span>Current order</span><h2>New {serviceTypes.find((service) => service.value === serviceType)?.label}</h2></div>
+          <button type="button" onClick={() => { setCart([]); setSavedDraft(null); }} disabled={!cart.length}>Clear</button>
+        </div>
         <div className="posCartLines">
           {!cart.length && <div className="posEmpty">Tap a menu item to start the order.</div>}
           {cart.map((line) => <article className="posCartLine" key={line.id}>
             <div className="posLineTop"><strong>{line.quantity}× {line.name}</strong><span>{money(line.unitPriceCents * line.quantity)}</span></div>
-            {[...line.modifierText, ...line.comboText].map((text) => <small key={text}>{text}</small>)}
-            <div className="posQtyControls"><button type="button" onClick={() => changeQuantity(line.id, -1)}>−</button><span>{line.quantity}</span><button type="button" onClick={() => changeQuantity(line.id, 1)}>+</button></div>
+            {[...line.modifierText, ...line.comboText].map((text, index) => <small key={`${text}-${index}`}>{text}</small>)}
+            <div className="posQtyControls">
+              <button type="button" onClick={() => changeQuantity(line.id, -1)}>−</button>
+              <span>{line.quantity}</span>
+              <button type="button" onClick={() => changeQuantity(line.id, 1)}>+</button>
+            </div>
           </article>)}
         </div>
         <div className="posTotals">
@@ -285,14 +367,19 @@ export default function PosPage() {
         </div>
         <div className="posCheckoutButtons">
           <button type="button" className="secondary">Hold</button>
-          <button type="button" className="primary" disabled={!cart.length}>Review & Pay</button>
+          <button type="button" className="primary" disabled={!cart.length || savingDraft} onClick={() => void saveDraft()}>
+            {savingDraft ? "Saving…" : "Save Draft / Review"}
+          </button>
         </div>
       </aside>
     </section>
 
     {configuringItem && <div className="posModalBackdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfiguringItem(null); }}>
       <section className="posConfigModal" role="dialog" aria-modal="true" aria-label={`Configure ${configuringItem.name}`}>
-        <header><div><span>Configure item</span><h2>{configuringItem.name}</h2><p>{configuringItem.description}</p></div><button type="button" onClick={() => setConfiguringItem(null)}>Close</button></header>
+        <header>
+          <div><span>Configure item</span><h2>{configuringItem.name}</h2><p>{configuringItem.description}</p></div>
+          <button type="button" onClick={() => setConfiguringItem(null)}>Close</button>
+        </header>
         <div className="posConfigBody">
           {configuringItem.modifiers.map((group) => {
             const selected = modifierSelections[group.id] || [];
@@ -301,7 +388,8 @@ export default function PosPage() {
               <legend>{group.prompt || group.name}<small>{group.minSelections > 0 ? "Required" : "Optional"} · choose {group.minSelections === group.maxSelections ? group.maxSelections : `${group.minSelections}-${group.maxSelections}`}</small></legend>
               <div className="posChoiceGrid">
                 {group.options.map((option) => <button key={option.id} type="button" disabled={!option.available} className={selected.includes(option.id) ? "selected" : ""} onClick={() => toggleModifier(group, option.id)}>
-                  <strong>{option.name}</strong><span>{option.priceDeltaCents ? `${option.priceDeltaCents > 0 ? "+" : ""}${money(option.priceDeltaCents)}` : option.defaultSelected ? "Default" : "Included"}</span>
+                  <strong>{option.name}</strong>
+                  <span>{option.priceDeltaCents ? `${option.priceDeltaCents > 0 ? "+" : ""}${money(option.priceDeltaCents)}` : option.defaultSelected ? "Default" : "Included"}</span>
                 </button>)}
               </div>
             </fieldset>;
@@ -311,7 +399,9 @@ export default function PosPage() {
             <legend>Combo options<small>Optional unless selected</small></legend>
             <div className="posChoiceGrid">
               <button type="button" className={!selectedComboId ? "selected" : ""} onClick={() => chooseCombo(null)}><strong>No combo</strong><span>Item only</span></button>
-              {configuringItem.combos.map((combo) => <button key={combo.id} type="button" className={selectedComboId === combo.id ? "selected" : ""} onClick={() => chooseCombo(combo)}><strong>{combo.name}</strong><span>{combo.basePriceDeltaCents ? `+${money(combo.basePriceDeltaCents)}` : "Included"}</span></button>)}
+              {configuringItem.combos.map((combo) => <button key={combo.id} type="button" className={selectedComboId === combo.id ? "selected" : ""} onClick={() => chooseCombo(combo)}>
+                <strong>{combo.name}</strong><span>{combo.basePriceDeltaCents ? `+${money(combo.basePriceDeltaCents)}` : "Included"}</span>
+              </button>)}
             </div>
           </fieldset>}
 
@@ -321,12 +411,19 @@ export default function PosPage() {
             return <fieldset key={group.id} className={!valid ? "needsSelection" : ""}>
               <legend>{group.prompt || group.name}<small>Required combo choice</small></legend>
               <div className="posChoiceGrid">
-                {group.options.map((option) => <button key={option.id} type="button" disabled={!option.available} className={selected.includes(option.id) ? "selected" : ""} onClick={() => toggleComboOption(group.id, group.maxSelections, option.id)}><strong>{option.name}</strong><span>{option.priceDeltaCents ? `+${money(option.priceDeltaCents)}` : "Included"}</span></button>)}
+                {group.options.map((option) => <button key={option.id} type="button" disabled={!option.available} className={selected.includes(option.id) ? "selected" : ""} onClick={() => toggleComboOption(group.id, group.maxSelections, option.id)}>
+                  <strong>{option.name}</strong><span>{option.priceDeltaCents ? `+${money(option.priceDeltaCents)}` : "Included"}</span>
+                </button>)}
               </div>
             </fieldset>;
           })}
         </div>
-        <footer><div><span>Configured price</span><strong>{money(configuration.unitPriceCents)}</strong></div><button type="button" className="primary" disabled={!configuration.valid} onClick={addConfiguredItem}>{configuration.valid ? "Add to order" : "Complete required choices"}</button></footer>
+        <footer>
+          <div><span>Configured price</span><strong>{money(configuration.unitPriceCents)}</strong></div>
+          <button type="button" className="primary" disabled={!configuration.valid} onClick={addConfiguredItem}>
+            {configuration.valid ? "Add to order" : "Complete required choices"}
+          </button>
+        </footer>
       </section>
     </div>}
   </main>;
