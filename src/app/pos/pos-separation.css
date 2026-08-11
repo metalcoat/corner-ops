@@ -1,0 +1,112 @@
+.posDevHome,
+.posReportPage {
+  min-height: 100dvh;
+  background: #0b1020;
+  color: #f8fafc;
+  padding: 28px;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.posDevHome {
+  display: grid;
+  place-items: center;
+}
+
+.posDevHomeCard {
+  width: min(920px, 100%);
+  padding: 28px;
+  background: #111827;
+  border: 1px solid #334155;
+  border-radius: 20px;
+}
+
+.posDevEyebrow {
+  margin: 18px 0 4px;
+  color: #93c5fd;
+  font-size: .76rem;
+  font-weight: 900;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.posDevHomeCard h1,
+.posReportHeader h1 { margin: 0 0 10px; }
+
+.posDevHomeCard > p,
+.posReportHeader p { color: #cbd5e1; line-height: 1.6; }
+
+.posDevChoices,
+.posReportGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.posDevChoices a,
+.posReportGrid article {
+  padding: 20px;
+  border: 1px solid #334155;
+  background: #172033;
+  border-radius: 16px;
+  color: #f8fafc;
+  text-decoration: none;
+  display: grid;
+  gap: 8px;
+}
+
+.posDevChoices a:hover { border-color: #60a5fa; background: #1d2940; }
+.posDevChoices strong,
+.posReportGrid strong { font-size: 1.08rem; }
+.posDevChoices span,
+.posReportGrid span { color: #cbd5e1; line-height: 1.45; }
+
+.posDevExit {
+  display: inline-block;
+  margin-top: 22px;
+  color: #bfdbfe;
+}
+
+.posReportHeader {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.posReportHeader > div { max-width: 760px; }
+.posReportHeader > a {
+  border: 1px solid #334155;
+  background: #172033;
+  color: #f8fafc;
+  padding: 11px 14px;
+  border-radius: 10px;
+  text-decoration: none;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.posReportGrid {
+  max-width: 1100px;
+  margin: 24px auto 0;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.posSeparateNote {
+  color: #94a3b8;
+  font-size: .72rem;
+}
+
+.posHeaderFixedBusiness {
+  grid-template-columns: minmax(280px, auto) 1fr;
+}
+
+@media (max-width: 720px) {
+  .posDevHome,
+  .posReportPage { padding: 14px; }
+  .posDevChoices { grid-template-columns: 1fr; }
+  .posReportHeader { flex-direction: column; }
+  .posHeaderFixedBusiness { grid-template-columns: 1fr; }
+}
