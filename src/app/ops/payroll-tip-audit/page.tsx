@@ -33,6 +33,12 @@ type PayrollRow = {
 };
 
 type PayrollResponse = {
+  rezkuOrderTimeRepair?: {
+    checked?: number;
+    repaired?: number;
+    missingRawClock?: number;
+    numericRawClock?: number;
+  } | null;
   summary: {
     weekStart: string;
     weekEnd: string;
@@ -268,7 +274,7 @@ export default function PayrollTipAuditPage() {
         {employee !== "All employees" && Math.abs((selectedSummary?.tips || 0) - (selectedSummary?.manualTips || 0) - automaticNet) > 0.02
           ? <p className="reportNote"><strong>Warning:</strong> the payroll summary does not equal the visible automatic allocation detail. That indicates an additional calculation problem and should not be locked.</p>
           : <p className="reportNote">The automatic detail should equal the employee payroll total minus any manual adjustment.</p>}
-        <p className="reportNote">If order-open times incorrectly show 12:00 AM, use <strong>Re-import Rezku source week</strong>. It re-downloads the original daily workbooks and then recalculates this week.</p>
+        <p className="reportNote"><strong>Rezku time repair:</strong> checked {data?.rezkuOrderTimeRepair?.checked ?? 0}, repaired {data?.rezkuOrderTimeRepair?.repaired ?? 0}, missing usable raw clock {data?.rezkuOrderTimeRepair?.missingRawClock ?? 0}, numeric raw clock {data?.rezkuOrderTimeRepair?.numericRawClock ?? 0}.</p>
       </section>
 
       <section className="controlCard">
