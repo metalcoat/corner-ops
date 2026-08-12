@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ChangeEvent, CSSProperties, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import "./messages-dock.css";
 
 type EmployeeSession = {
@@ -180,11 +180,37 @@ export default function EmployeeMessagesDock() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [expanded, setExpanded] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<{ url: string; name: string; size: number } | null>(null);
   const reportedSeen = useRef(new Set<string>());
   const sessionRef = useRef<EmployeeSession | null>(null);
   const expandedRef = useRef(false);
   const hasLoadedRef = useRef(false);
   const loadedLatestIdRef = useRef<string | null>(null);
+  const cameraPhotoRef = useRef<HTMLInputElement | null>(null);
+  const libraryPhotoRef = useRef<HTMLInputElement | null>(null);
+  const photoPreviewUrlRef = useRef<string | null>(null);
+
+  const clearPhotoAttachment = useCallback((resetInputs = true) => {
+    if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
+    photoPreviewUrlRef.current = null;
+    setPhotoPreview(null);
+    if (resetInputs) {
+      if (cameraPhotoRef.current) cameraPhotoRef.current.value = "";
+      if (libraryPhotoRef.current) libraryPhotoRef.current.value = "";
+    }
+  }, []);
+
+  function choosePhoto(event: ChangeEvent<HTMLInputElement>, source: "camera" | "library") {
+    const file = event.currentTarget.files?.[0] || null;
+    if (!file) return;
+    if (source === "camera" && libraryPhotoRef.current) libraryPhotoRef.current.value = "";
+    if (source === "library" && cameraPhotoRef.current) cameraPhotoRef.current.value = "";
+    if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
+    const url = URL.createObjectURL(file);
+    photoPreviewUrlRef.current = url;
+    setPhotoPreview({ url, name: file.name || "Photo", size: file.size });
+    setNotice("");
+  }
 
   const loadMessages = useCallback(async () => {
     const response = await fetch("/api/employee/messages?limit=80", { cache: "no-store" });
@@ -263,6 +289,10 @@ export default function EmployeeMessagesDock() {
       await loadMessages();
     }
   }, [loadMessages, loadStatus]);
+
+  useEffect(() => () => {
+    if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
+  }, []);
 
   useEffect(() => {
     void checkSession().catch((error) => setNotice(error instanceof Error ? error.message : "Messages could not be loaded."));
@@ -400,6 +430,7 @@ export default function EmployeeMessagesDock() {
       const response = await fetch("/api/employee", { method: "POST", body: form });
       if (!response.ok) throw new Error(await responseMessage(response));
       formElement.reset();
+      clearPhotoAttachment(false);
       await loadMessages();
       await loadStatus();
       setNotice(photo ? "Photo message sent." : "Message sent.");
@@ -544,9 +575,14 @@ export default function EmployeeMessagesDock() {
         <label>Send to<select name="recipientEmployeeId" defaultValue=""><option value="">Everyone at {session.business}</option>{recipients.map((person) => <option key={person.id} value={person.id}>{person.chatNickname || firstName(person.name)}</option>)}</select></label>
         <label>Message<textarea name="body" rows={3} placeholder="Type a message, add a photo, or both" /></label>
         <div className="employeeMessagesPhotoControls">
-          <label className="employeeMessagesPhotoButton">Take photo<input name="cameraPhoto" type="file" accept="image/*" capture="environment" /></label>
-          <label className="employeeMessagesPhotoButton secondary">Choose photo<input name="photo" type="file" accept="image/*" /></label>
+          <label className="employeeMessagesPhotoButton">Take photo<input ref={cameraPhotoRef} name="cameraPhoto" type="file" accept="image/*" capture="environment" onChange={(event) => choosePhoto(event, "camera")} /></label>
+          <label className="employeeMessagesPhotoButton secondary">Choose photo<input ref={libraryPhotoRef} name="photo" type="file" accept="image/*" onChange={(event) => choosePhoto(event, "library")} /></label>
         </div>
+        {photoPreview && <div className="employeeMessagesAttachmentPreview">
+          <div className="employeeMessagesAttachmentThumb"><img src={photoPreview.url} alt="Selected attachment preview" /></div>
+          <div className="employeeMessagesAttachmentInfo"><strong>Photo attached</strong><span>{photoPreview.name}</span><small>{(photoPreview.size / 1024 / 1024).toFixed(1)} MB before upload resizing</small></div>
+          <button type="button" disabled={busy} onClick={() => clearPhotoAttachment()}>Remove photo</button>
+        </div>}
         <button className="employeeMessagesSend" disabled={busy}>Send message</button>
       </form>
 
