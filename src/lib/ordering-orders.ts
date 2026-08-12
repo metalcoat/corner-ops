@@ -11,6 +11,7 @@ export type ConfiguredOrderItemInput = {
   quantity?: number;
   modifierSelections?: Record<string, string[]>;
   modifierQuantities?: Record<string, number>;
+  modifierDeclines?:string[];
   pizzaToppings?: PizzaToppingSelection[];
   comboId?: string | null;
   comboSelections?: Record<string, string[]>;
@@ -50,6 +51,7 @@ type ModifierRow = {
   presentation_behavior: "standard" | "pizza_topping";
   parent_group_id: string | null;
   parent_option_ids: string[] | null;
+  included_choice_count:number|null;
 };
 type ComboRow = {
   combo_id: string;
@@ -126,7 +128,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
       opt.available AS option_available,
       COALESCE(def.price_delta_override_cents, opt.price_delta_cents) AS price_delta_cents,
       COALESCE(def.default_selected, FALSE) AS default_selected
-      ,COALESCE(p.context,'ordinary') AS presentation_context,COALESCE(p.behavior,'standard') AS presentation_behavior,p.parent_group_id,p.parent_option_ids
+      ,COALESCE(p.context,'ordinary') AS presentation_context,COALESCE(p.behavior,'standard') AS presentation_behavior,p.parent_group_id,p.parent_option_ids,p.included_choice_count
     FROM ordering_menu_item_modifier_groups link
     JOIN ordering_modifier_groups grp ON grp.id = link.group_id AND grp.active = TRUE
     LEFT JOIN ordering_modifier_options opt ON opt.group_id = grp.id AND opt.active = TRUE
@@ -137,7 +139,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
     ORDER BY link.sort_order, grp.sort_order, opt.sort_order, opt.name
   `) as ModifierRow[];
 
-  const groups = new Map<string, { name: string; min: number; max: number; allowQuantity: boolean; context: ModifierRow["presentation_context"]; behavior: ModifierRow["presentation_behavior"]; parentGroupId: string | null; parentOptionIds: string[]; rows: ModifierRow[] }>();
+  const groups = new Map<string, { name: string; min: number; max: number; allowQuantity: boolean; includedChoiceCount:number; context: ModifierRow["presentation_context"]; behavior: ModifierRow["presentation_behavior"]; parentGroupId: string | null; parentOptionIds: string[]; rows: ModifierRow[] }>();
   for (const row of modifierRows) {
     if (!groups.has(row.group_id)) {
       groups.set(row.group_id, {
@@ -145,6 +147,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
         min: Number(row.min_selections),
         max: Number(row.max_selections),
         allowQuantity: Boolean(row.allow_option_quantity),
+        includedChoiceCount:Number(row.included_choice_count||0),
         context: row.presentation_context,
         behavior: row.presentation_behavior,
         parentGroupId: row.parent_group_id,
@@ -184,7 +187,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
     optionId: string;
     groupName: string;
     optionName: string;
-    state: "selected" | "removed";
+    state: "selected" | "removed"|"declined_included";
     priceDeltaCents: number;
     quantity: number;
     pizzaToppingPortion: string | null;
@@ -203,25 +206,29 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
       if (!validOptionIds.has(selectedId)) throw new Error(`An invalid modifier option was supplied for ${group.name}.`);
     }
 
+    let selectedOrdinal=0;
     for (const row of group.rows) {
       if (!row.option_id || !row.option_name) continue;
       const isSelected = selected.has(row.option_id);
       if (isSelected && !row.option_available) throw new Error(`${row.option_name} is currently unavailable.`);
       if (isSelected) {
+        selectedOrdinal+=1;
         const delta = Number(row.price_delta_cents ?? 0);
+        const allowance=(input.modifierDeclines||[]).includes(groupId)?0:group.includedChoiceCount;
+        const chargedDelta=selectedOrdinal<=allowance?0:delta;
         const requestedQuantity = Math.trunc(Number(modifierQuantities[row.option_id] ?? 1));
         const optionQuantity = group.allowQuantity ? requestedQuantity : 1;
         if (!Number.isSafeInteger(optionQuantity) || optionQuantity < 1 || optionQuantity > 99) {
           throw new Error(`Invalid quantity for ${row.option_name}.`);
         }
-        modifierUnitDeltaCents += delta * optionQuantity;
+        modifierUnitDeltaCents += chargedDelta * optionQuantity;
         modifierSnapshots.push({
           groupId,
           optionId: row.option_id,
           groupName: group.name,
           optionName: row.option_name,
           state: "selected",
-          priceDeltaCents: delta,
+          priceDeltaCents: chargedDelta,
           quantity: optionQuantity,
           pizzaToppingPortion: null,
           pizzaToppingAmount: null,
@@ -240,6 +247,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
         });
       }
     }
+    if(group.includedChoiceCount>0&&(input.modifierDeclines||[]).includes(groupId)){const first=group.rows.find(row=>row.option_id);if(first)modifierSnapshots.push({groupId,optionId:first.option_id!,groupName:group.name,optionName:"Included choice",state:"declined_included",priceDeltaCents:0,quantity:1,pizzaToppingPortion:null,pizzaToppingAmount:null})}
   }
 
   const toppingGroups = Array.from(groups.entries()).filter(([, group]) => group.behavior === "pizza_topping");

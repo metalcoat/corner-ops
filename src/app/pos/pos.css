@@ -1,5 +1,5 @@
 .posPage {
-  min-height: 100dvh;
+  height: 100dvh;overflow:hidden;display:flex;flex-direction:column;
   background: #0b1020;
   color: #f8fafc;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -129,10 +129,10 @@
 .posWorkspace {
   display: grid;
   grid-template-columns: minmax(430px, 1fr) minmax(330px, 420px);
-  min-height: calc(100dvh - 146px);
+  min-height:0;flex:1;overflow:hidden;
 }
 
-.posMenuPanel { padding: 16px; min-width: 0; }
+.posMenuPanel { padding: 16px; min-width: 0; overflow-y:auto; }
 .posPanelHeading,
 .posCartHeading,
 .posLineTop,
@@ -173,6 +173,7 @@
   cursor: pointer;
 }
 .posItemButton:hover { border-color: #60a5fa; background: #1d2940; }
+.posItemButton img{width:100%;height:88px;object-fit:cover;border-radius:8px}
 .posItemButton strong { font-size: 1rem; }
 .posItemButton span { color: #93c5fd; font-weight: 800; }
 .posItemButton small { color: #94a3b8; }
@@ -191,6 +192,7 @@
 .posCartLines { padding: 10px 14px; overflow-y: auto; }
 .posCartLine { padding: 12px 0; border-bottom: 1px solid #263349; }
 .posCartLine small { display: block; margin-top: 4px; color: #cbd5e1; }
+.posUndo{position:fixed;z-index:130;left:50%;bottom:18px;transform:translateX(-50%);background:#111827;color:#fff;padding:12px 18px;border-radius:10px;box-shadow:0 8px 30px #0008}.posUndo button{margin-left:18px;min-height:42px;color:#93c5fd;background:transparent;border:1px solid #60a5fa;border-radius:7px}
 .posQtyControls { align-items: center; margin-top: 10px; }
 .posQtyControls button { width: 36px; height: 34px; font-size: 1.2rem; }
 .posQtyControls .posLineAction { width: auto; min-width: 64px; padding: 0 10px; font-size: .82rem; }
@@ -250,6 +252,7 @@
 .posSegmented { display: grid; grid-template-columns: repeat(3, minmax(82px, 1fr)); gap: 5px; }
 .posSegmented button, .posToppingControls > button { min-height: 48px; border: 1px solid #475569; border-radius: 8px; background: #172033; color: #fff; font-weight: 900; }
 .posSegmented button.selected { background: #2563eb; border-color: #93c5fd; }
+.posToppingApply{display:grid;gap:8px;margin-bottom:12px}.posToppingGrid{display:grid;gap:6px}.posToppingGrid>div{display:grid;grid-template-columns:52px minmax(140px,1fr) 110px 52px;align-items:center;gap:7px;background:#172033;padding:7px;border-radius:9px}.posToppingGrid button{min-height:48px;font-size:1.35rem}.posToppingGrid span{text-align:center;font-weight:900;color:#93c5fd}
 .posModifierQty { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; gap: 6px; }
 .posModifierQty button { min-width: 44px; min-height: 44px; padding: 0; display: grid; place-items: center; font-size: 1.2rem; }
 .posModifierQty strong { text-align: center; }
@@ -279,15 +282,15 @@
 @media (max-width: 820px) {
   .posHeader { position: static; grid-template-columns: 1fr; }
   .posBusinessSwitch, .posUtilityNav { justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap; }
-  .posWorkspace { grid-template-columns: minmax(0, 1fr); }
-  .posCart { border-left: 0; border-top: 1px solid #273449; min-height: 420px; }
+  .posWorkspace { grid-template-columns: minmax(0, 1fr) minmax(280px,38vw); }
+  .posCart { min-height:0; }
   .posItemGrid { grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); }
 }
 
 @media (max-width: 560px) {
   .posServiceBar { padding-inline: 8px; }
   .posServiceBar button { min-width: 105px; }
-  .posWorkspace { grid-template-columns: 1fr; }
+  .posWorkspace { grid-template-columns:minmax(0,1fr) 0;position:relative}.posCart{position:fixed;right:0;bottom:0;width:min(88vw,380px);height:52dvh;z-index:60;box-shadow:0 -8px 30px #0008}.posMenuPanel{padding-bottom:54dvh}
   .posMenuNavigation { top: 0; }
   .posAddressEntry { align-items: stretch; flex-direction: column; }
   .posMenuPanel { padding: 10px; }

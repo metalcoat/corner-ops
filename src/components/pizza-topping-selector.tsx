@@ -1,38 +1,4 @@
 "use client";
-
-import type { OrderingModifierGroupView, OrderingModifierOptionView } from "@/lib/ordering-menu";
-import type { OrderingItemVariantView } from "@/lib/ordering-menu-variants";
-import { formatPizzaTopping, type PizzaToppingAmount, type PizzaToppingPortion, type PizzaToppingSelection } from "@/lib/ordering-pizza-toppings";
-
-const portions: Array<[PizzaToppingPortion, string]> = [["whole", "WHOLE"], ["left_half", "LEFT HALF"], ["right_half", "RIGHT HALF"]];
-const amounts: Array<[PizzaToppingAmount, string]> = [["regular", "REGULAR"], ["extra", "EXTRA"]];
-
-export default function PizzaToppingSelector({ group, variant, selections, onChange }: {
-  group: OrderingModifierGroupView;
-  variant: OrderingItemVariantView | null;
-  selections: PizzaToppingSelection[];
-  onChange: (value: PizzaToppingSelection[]) => void;
-}) {
-  const available = (option: OrderingModifierOptionView) => {
-    const override = variant?.modifierPrices.find((price) => price.optionId === option.id);
-    return option.available && (override ? override.available : true);
-  };
-  const setEntry = (index: number, patch: Partial<PizzaToppingSelection>) => onChange(selections.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
-  return <fieldset id={`modifier-${group.id}`} className="posToppingFieldset">
-    <legend>{group.name}<small>Choose toppings, then portion and amount</small></legend>
-    <div className="posChoiceGrid">{group.options.filter(available).map((option) => {
-      const entries = selections.map((entry, index) => ({ entry, index })).filter(({ entry }) => entry.modifierOptionId === option.id);
-      return <div className="posModifierChoice posToppingChoice" key={option.id}>
-        <button type="button" className={entries.length ? "selected" : ""} onClick={() => onChange(entries.length ? selections.filter((entry) => entry.modifierOptionId !== option.id) : [...selections, { modifierOptionId: option.id, portion: "whole", amount: "regular" }])}>
-          <strong>{option.name}</strong><span>{entries.length ? entries.map(({ entry }) => formatPizzaTopping(option.name, entry.portion, entry.amount).replace(option.name, "").trim() || "Whole · Regular").join(" / ") : "Select topping"}</span>
-        </button>
-        {entries.map(({ entry, index }) => <div className="posToppingControls" key={`${entry.portion}-${index}`}>
-          <span>Portion</span><div className="posSegmented">{portions.map(([value, label]) => <button type="button" className={entry.portion === value ? "selected" : ""} key={value} onClick={() => setEntry(index, { portion: value })}>{label}</button>)}</div>
-          <span>Amount</span><div className="posSegmented">{amounts.map(([value, label]) => <button type="button" className={entry.amount === value ? "selected" : ""} key={value} onClick={() => setEntry(index, { amount: value })}>{label}</button>)}</div>
-          {entry.portion !== "whole" && entries.length === 1 && <button type="button" onClick={() => onChange([...selections, { modifierOptionId: option.id, portion: entry.portion === "left_half" ? "right_half" : "left_half", amount: entry.amount === "regular" ? "extra" : "regular" }])}>ADD OTHER HALF</button>}
-          {entries.length > 1 && <button type="button" onClick={() => onChange(selections.filter((_, itemIndex) => itemIndex !== index))}>REMOVE THIS HALF</button>}
-        </div>)}
-      </div>;
-    })}</div>
-  </fieldset>;
-}
+import{useState}from"react";import type{OrderingModifierGroupView,OrderingModifierOptionView}from"@/lib/ordering-menu";import type{OrderingItemVariantView}from"@/lib/ordering-menu-variants";import{normalizePizzaToppings,type PizzaToppingAmount,type PizzaToppingPortion,type PizzaToppingSelection}from"@/lib/ordering-pizza-toppings";
+const portions:Array<[PizzaToppingPortion,string]>=[["whole","WHOLE"],["left_half","LEFT HALF"],["right_half","RIGHT HALF"]],amounts:Array<PizzaToppingAmount>=["regular","extra","double_extra","triple_extra"],labels=["REGULAR","EXTRA","2× EXTRA","3× EXTRA"];
+export default function PizzaToppingSelector({group,variant,selections,onChange}:{group:OrderingModifierGroupView;variant:OrderingItemVariantView|null;selections:PizzaToppingSelection[];onChange:(v:PizzaToppingSelection[])=>void}){const[active,setActive]=useState<PizzaToppingPortion>("whole");const available=(o:OrderingModifierOptionView)=>{const p=variant?.modifierPrices.find(x=>x.optionId===o.id);return o.available&&(p?p.available:true)};function level(optionId:string){const exact=selections.find(x=>x.modifierOptionId===optionId&&x.portion===active);if(exact)return amounts.indexOf(exact.amount)+1;if(active!=="whole"){const whole=selections.find(x=>x.modifierOptionId===optionId&&x.portion==="whole");if(whole)return amounts.indexOf(whole.amount)+1}return 0}function change(optionId:string,delta:number){let next=selections.map(x=>({...x}));if(active!=="whole"){const whole=next.find(x=>x.modifierOptionId===optionId&&x.portion==="whole");if(whole){next=next.filter(x=>x!==whole);next.push({modifierOptionId:optionId,portion:"left_half",amount:whole.amount},{modifierOptionId:optionId,portion:"right_half",amount:whole.amount})}}else next=next.filter(x=>x.modifierOptionId!==optionId);const existing=next.find(x=>x.modifierOptionId===optionId&&x.portion===active),current=existing?amounts.indexOf(existing.amount)+1:0,value=Math.max(0,Math.min(4,current+delta));next=next.filter(x=>!(x.modifierOptionId===optionId&&x.portion===active));if(value)next.push({modifierOptionId:optionId,portion:active,amount:amounts[value-1]});onChange(normalizePizzaToppings(next))}return <fieldset id={`modifier-${group.id}`}><legend>{group.name}<small>Choose a portion, then adjust topping intensity</small></legend><div className="posToppingApply"><strong>APPLY TOPPINGS TO</strong><div className="posSegmented">{portions.map(([v,l])=><button type="button" className={active===v?"selected":""} onClick={()=>setActive(v)} key={v}>{l}</button>)}</div></div><div className="posToppingGrid">{group.options.filter(available).map(option=>{const value=level(option.id);return <div key={option.id}><button type="button" aria-label={`Decrease ${option.name}`} disabled={!value} onClick={()=>change(option.id,-1)}>−</button><strong>{option.name}</strong><span>{value?labels[value-1]:"—"}</span><button type="button" aria-label={`Increase ${option.name}`} disabled={value>=4} onClick={()=>change(option.id,1)}>+</button></div>})}</div></fieldset>}

@@ -28,8 +28,12 @@ async function main() {
     ["leftRegular", [{ modifierOptionId: pepperoni.id, portion: "left_half", amount: "regular" }], configuredPrice / 2],
     ["rightRegular", [{ modifierOptionId: pepperoni.id, portion: "right_half", amount: "regular" }], configuredPrice / 2],
     ["wholeExtra", [{ modifierOptionId: pepperoni.id, portion: "whole", amount: "extra" }], configuredPrice * 2],
+    ["wholeDoubleExtra", [{ modifierOptionId: pepperoni.id, portion: "whole", amount: "double_extra" }], configuredPrice * 3],
+    ["wholeTripleExtra", [{ modifierOptionId: pepperoni.id, portion: "whole", amount: "triple_extra" }], configuredPrice * 4],
     ["leftExtra", [{ modifierOptionId: pepperoni.id, portion: "left_half", amount: "extra" }], configuredPrice],
     ["rightExtra", [{ modifierOptionId: pepperoni.id, portion: "right_half", amount: "extra" }], configuredPrice],
+    ["leftDoubleExtra", [{ modifierOptionId: pepperoni.id, portion: "left_half", amount: "double_extra" }], configuredPrice * 1.5],
+    ["rightTripleExtra", [{ modifierOptionId: pepperoni.id, portion: "right_half", amount: "triple_extra" }], configuredPrice * 2],
     ["bothRegular", [{ modifierOptionId: pepperoni.id, portion: "left_half", amount: "regular" }, { modifierOptionId: pepperoni.id, portion: "right_half", amount: "regular" }], configuredPrice],
     ["bothExtra", [{ modifierOptionId: pepperoni.id, portion: "left_half", amount: "extra" }, { modifierOptionId: pepperoni.id, portion: "right_half", amount: "extra" }], configuredPrice * 2],
     ["mixedAmounts", [{ modifierOptionId: pepperoni.id, portion: "left_half", amount: "regular" }, { modifierOptionId: pepperoni.id, portion: "right_half", amount: "extra" }], configuredPrice + configuredPrice / 2],
@@ -49,7 +53,7 @@ async function main() {
       if (label === "bothRegular" && (snapshots.length !== 1 || snapshots[0].pizza_topping_portion !== "whole" || snapshots[0].pizza_topping_amount !== "regular")) throw new Error("Equal regular halves did not normalize.");
       if (label === "bothExtra" && (snapshots.length !== 1 || snapshots[0].pizza_topping_portion !== "whole" || snapshots[0].pizza_topping_amount !== "extra")) throw new Error("Equal extra halves did not normalize.");
       if (label === "mixedAmounts" && snapshots.length !== 2) throw new Error("Differing half amounts were incorrectly normalized.");
-      if (snapshots.some((snapshot) => lineFormat.formatOrderModifier(snapshot as { option_name_snapshot: string; quantity: number; selection_state: string; pizza_topping_portion: "whole" | "left_half" | "right_half"; pizza_topping_amount: "regular" | "extra" }).includes("2×"))) throw new Error("Pizza formatter exposed numeric intensity.");
+      if (snapshots.some((snapshot) => /^2× PEPPERONI$/i.test(lineFormat.formatOrderModifier(snapshot as { option_name_snapshot: string; quantity: number; selection_state: string; pizza_topping_portion: "whole" | "left_half" | "right_half"; pizza_topping_amount: "regular" | "extra" | "double_extra" | "triple_extra" })))) throw new Error("Pizza formatter exposed misleading numeric quantity.");
       results[label] = { chargedCents: Number(item.modifier_total_cents), snapshots };
     }
   } finally {
@@ -57,6 +61,7 @@ async function main() {
   }
   if (topping.pizzaToppingPriceCents(101, "left_half", "regular") !== 51) throw new Error("Odd-cent half pricing must round up.");
   if (lineFormat.formatOrderModifier({ option_name_snapshot: "Pepperoni", quantity: 1, selection_state: "selected", pizza_topping_portion: "left_half", pizza_topping_amount: "extra" }, "ticket") !== "LEFT HALF EXTRA PEPPERONI") throw new Error("Ticket formatter contract failed.");
+  if(lineFormat.formatOrderModifier({option_name_snapshot:"Pepperoni",quantity:1,selection_state:"selected",pizza_topping_portion:"whole",pizza_topping_amount:"double_extra"},"ticket")!=="2× EXTRA PEPPERONI")throw new Error("Double-extra formatter contract failed.");
   console.log(JSON.stringify({ configuredPriceCents: configuredPrice, oddCentHalfRoundsUp: true, sharedCustomerAndKitchenFormatter: true, cases: results }, null, 2));
 }
 

@@ -14,6 +14,7 @@ export function formatOrderModifier(modifier: OrderModifierPresentation, style: 
   }
   const value = modifier.selection_state === "removed"
     ? `NO ${modifier.option_name_snapshot}`
+    : modifier.selection_state === "declined_included" ? "NO INCLUDED CHOICE"
     : `${modifier.quantity > 1 ? `${modifier.quantity}× ` : ""}${modifier.option_name_snapshot}`;
   return style === "ticket" ? value.toUpperCase() : value;
 }

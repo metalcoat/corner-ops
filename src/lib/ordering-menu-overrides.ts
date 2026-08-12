@@ -19,16 +19,21 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
       display_name TEXT, category_id UUID REFERENCES ordering_menu_categories(id), sort_order INTEGER,
       visible BOOLEAN, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_by TEXT NOT NULL DEFAULT ''
     )`;
+    await sql`CREATE TABLE IF NOT EXISTS ordering_category_channel_overrides (category_id UUID NOT NULL REFERENCES ordering_menu_categories(id) ON DELETE CASCADE,channel TEXT NOT NULL CHECK(channel IN ('pos','web')),display_name TEXT,parent_id UUID REFERENCES ordering_menu_categories(id),parent_id_overridden BOOLEAN NOT NULL DEFAULT FALSE,sort_order INTEGER,visible BOOLEAN,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_by TEXT NOT NULL DEFAULT '',PRIMARY KEY(category_id,channel))`;
+    await sql`CREATE TABLE IF NOT EXISTS ordering_item_channel_overrides (item_id UUID NOT NULL REFERENCES ordering_menu_items(id) ON DELETE CASCADE,channel TEXT NOT NULL CHECK(channel IN ('pos','web')),display_name TEXT,category_id UUID REFERENCES ordering_menu_categories(id),sort_order INTEGER,visible BOOLEAN,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_by TEXT NOT NULL DEFAULT '',PRIMARY KEY(item_id,channel))`;
+    await sql`CREATE TABLE IF NOT EXISTS ordering_menu_media (id UUID PRIMARY KEY,target_type TEXT NOT NULL CHECK(target_type IN ('item','modifier_option')),target_id UUID NOT NULL,storage_reference TEXT NOT NULL,alt_text TEXT NOT NULL DEFAULT '',mime_type TEXT NOT NULL,width INTEGER NOT NULL,height INTEGER NOT NULL,size_bytes INTEGER NOT NULL,is_primary BOOLEAN NOT NULL DEFAULT TRUE,show_pos BOOLEAN NOT NULL DEFAULT TRUE,show_web BOOLEAN NOT NULL DEFAULT TRUE,uploaded_by TEXT NOT NULL,uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_modifier_presentation_overrides (
       item_id UUID NOT NULL REFERENCES ordering_menu_items(id) ON DELETE CASCADE,
       group_id UUID NOT NULL REFERENCES ordering_modifier_groups(id) ON DELETE CASCADE,
       context TEXT CHECK (context IN ('ordinary','combo_trigger','dependent','hidden')),
       behavior TEXT CHECK (behavior IN ('standard','pizza_topping')),
+      included_choice_count INTEGER,
       parent_group_id UUID REFERENCES ordering_modifier_groups(id),
       parent_option_ids UUID[], sort_order INTEGER, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_by TEXT NOT NULL DEFAULT '', PRIMARY KEY (item_id, group_id)
     )`;
     await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS behavior TEXT`;
+    await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS included_choice_count INTEGER`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_menu_override_audit (
       id UUID PRIMARY KEY, business TEXT NOT NULL, actor_id TEXT NOT NULL, target_type TEXT NOT NULL,
       target_id UUID NOT NULL, field_name TEXT NOT NULL, previous_value JSONB, new_value JSONB,
@@ -56,6 +61,7 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
       WHERE child.source_id='144180' OR EXISTS (SELECT 1 FROM ordering_menu_item_modifier_groups parent_link WHERE parent_link.item_id=link.item_id AND parent_link.group_id=parent.internal_id)
       ON CONFLICT (item_id,group_id) DO NOTHING
     `;
+    await sql`INSERT INTO ordering_modifier_presentation_overrides(item_id,group_id,included_choice_count,updated_by) SELECT item.internal_id,grp.internal_id,1,'rezku-included-choice-migration' FROM ordering_menu_source_map item JOIN ordering_menu_source_map grp ON grp.business=item.business AND grp.source=item.source WHERE item.business='Corner Deli' AND item.source='rezku' AND item.entity_type='item' AND grp.entity_type='modifier_group' AND ((item.source_id='874189' AND grp.source_id='140367') OR (item.source_id IN ('874196','874199','874201') AND grp.source_id='140369')) ON CONFLICT(item_id,group_id) DO UPDATE SET included_choice_count=1`;
     await sql`
       INSERT INTO ordering_modifier_presentation_overrides(item_id,group_id,behavior,updated_by)
       SELECT link.item_id,link.group_id,'pizza_topping','rezku-pizza-topping-migration'

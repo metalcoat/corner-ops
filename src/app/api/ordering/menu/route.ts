@@ -14,7 +14,8 @@ export async function GET(request: Request) {
   try {
     const business = readBusiness(new URL(request.url).searchParams.get("business") || "Corner Deli");
     if (!await orderingActor(business)) return unauthorized();
-    return Response.json({ business, categories: await orderingMenuWithVariants(business) });
+    const channel=new URL(request.url).searchParams.get("channel")==="web"?"web":"pos";
+    return Response.json({ business,channel,categories:await orderingMenuWithVariants(business,channel) });
   } catch (error) {
     return apiError(error);
   }

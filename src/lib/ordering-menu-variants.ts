@@ -44,9 +44,9 @@ type VariantRow = {
 type AliasRow = { variant_id: string; alias: string };
 type ModifierPriceRow = { variant_id: string; option_id: string; price_delta_cents: number; available: boolean };
 
-export async function orderingMenuWithVariants(business: OrderingBusiness): Promise<OrderingMenuCategoryWithVariants[]> {
+export async function orderingMenuWithVariants(business: OrderingBusiness,channel:import("@/lib/ordering-menu").OrderingMenuChannel="pos"): Promise<OrderingMenuCategoryWithVariants[]> {
   await ensureOrderingVariantSchema();
-  const categories = await orderingMenu(business);
+  const categories = await orderingMenu(business,channel);
   const sql = getSql();
 
   const variants = (await sql`

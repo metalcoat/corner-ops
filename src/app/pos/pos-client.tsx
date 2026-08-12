@@ -20,6 +20,7 @@ import "./pos.css";
 import { usePosIdleLock } from "./use-pos-idle-lock";
 import PizzaToppingSelector from "@/components/pizza-topping-selector";
 import { formatPizzaTopping, normalizePizzaToppings, pizzaToppingPriceCents, type PizzaToppingSelection } from "@/lib/ordering-pizza-toppings";
+import{itemNeedsConfiguration}from"@/lib/ordering-menu-presentation";
 
 type PosServiceType = Exclude<ServiceType, "undecided">;
 
@@ -35,6 +36,7 @@ type CartLine = {
   comboText: string[];
   modifierSelections: Record<string, string[]>;
   modifierQuantities: Record<string, number>;
+  modifierDeclines:string[];
   pizzaToppings: PizzaToppingSelection[];
   comboId: string | null;
   comboSelections: Record<string, string[]>;
@@ -158,6 +160,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
   const [selectedVariantId, setSelectedVariantId] = useState("");
   const [modifierSelections, setModifierSelections] = useState<Record<string, string[]>>({});
   const [modifierQuantities, setModifierQuantities] = useState<Record<string, number>>({});
+  const[modifierDeclines,setModifierDeclines]=useState<string[]>([]);
   const [pizzaToppings, setPizzaToppings] = useState<PizzaToppingSelection[]>([]);
   const [selectedComboId, setSelectedComboId] = useState("");
   const [comboSelections, setComboSelections] = useState<Record<string, string[]>>({});
@@ -171,6 +174,8 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
   const [submittedOrder, setSubmittedOrder] = useState<SubmittedOrder | null>(null);
   const [configurationMessage, setConfigurationMessage] = useState("");
   const [cartNotice, setCartNotice] = useState("");
+  const [removedLine,setRemovedLine]=useState<CartLine|null>(null);
+  const swipeStart=useRef<{id:string;x:number;y:number}|null>(null);
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryUnit, setDeliveryUnit] = useState("");
   const [addressSessionToken, setAddressSessionToken] = useState("");
@@ -289,7 +294,9 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
       for (const option of group.options) {
         const chosen = selected.includes(option.id);
         const available = variantOptionAvailable(selectedVariant, option);
-        const priceDeltaCents = variantOptionPrice(selectedVariant, option);
+        const baseDeltaCents = variantOptionPrice(selectedVariant, option);
+        const selectedOrdinal=group.options.filter(candidate=>selected.includes(candidate.id)).findIndex(candidate=>candidate.id===option.id);
+        const priceDeltaCents=group.includedChoiceCount>0&&!modifierDeclines.includes(group.id)&&selectedOrdinal>=0&&selectedOrdinal<group.includedChoiceCount?0:baseDeltaCents;
         if (chosen && !available) valid = false;
         if (chosen) {
           const optionQuantity = group.allowOptionQuantity ? Math.max(1, modifierQuantities[option.id] || 1) : 1;
@@ -334,7 +341,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
     const lineVariant = line?.variantId ? item.variants.find((candidate) => candidate.id === line.variantId) || variant : variant;
     setSelectedVariantId(lineVariant?.id || "");
     setModifierSelections(line ? cloneSelections(line.modifierSelections) : initialModifierSelections(item, lineVariant));
-    setModifierQuantities(line ? { ...line.modifierQuantities } : {});
+    setModifierQuantities(line ? { ...line.modifierQuantities } : {});setModifierDeclines(line?[...line.modifierDeclines]:[]);
     setPizzaToppings(line ? line.pizzaToppings.map((topping) => ({ ...topping })) : []);
     setSelectedComboId(line?.comboId || "");
     setComboSelections(line ? cloneSelections(line.comboSelections) : {});
@@ -344,6 +351,8 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
     setCheckoutError("");
     setConfigurationMessage("");
   }
+
+  function selectItem(item:OrderingMenuItemWithVariants){if(itemNeedsConfiguration(item)){openItem(item);return}const variant=initialVariant(item);const line:CartLine={id:clientId(),itemId:item.id,variantId:variant?.id||null,variantName:variant?.name||"",name:item.name,quantity:1,unitPriceCents:variant?.basePriceCents??item.basePriceCents,modifierText:[],comboText:[],modifierSelections:{},modifierQuantities:{},modifierDeclines:[],pizzaToppings:[],comboId:null,comboSelections:{},specialInstructions:""};setCart(current=>[...current,line]);setSavedDraft(null);setCartNotice(`Added ${item.name}`);window.setTimeout(()=>setCartNotice(""),1800)}
 
   function chooseVariant(variant: OrderingItemVariantView) {
     if (!configuringItem || !variant.available) return;
@@ -428,6 +437,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
       comboText: configuration.comboText,
       modifierSelections: cloneSelections(modifierSelections),
       modifierQuantities: { ...modifierQuantities },
+      modifierDeclines:[...modifierDeclines],
       pizzaToppings: normalizePizzaToppings(pizzaToppings),
       comboId: selectedCombo?.id || null,
       comboSelections: cloneSelections(comboSelections),
@@ -462,7 +472,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
   }
 
   function removeLine(lineId: string) {
-    setCart((current) => current.filter((line) => line.id !== lineId));
+    setCart((current) => {setRemovedLine(current.find(line=>line.id===lineId)||null);return current.filter((line) => line.id !== lineId)});
     setSavedDraft(null);
   }
 
@@ -504,6 +514,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
             quantity: line.quantity,
             modifierSelections: line.modifierSelections,
             modifierQuantities: line.modifierQuantities,
+            modifierDeclines:line.modifierDeclines,
             pizzaToppings: line.pizzaToppings,
             comboId: line.comboId,
             comboSelections: line.comboSelections,
@@ -687,7 +698,8 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
             const displayPrice = availableVariants.length
               ? Math.min(...availableVariants.map((variant) => variant.basePriceCents))
               : item.basePriceCents;
-            return <button key={item.id} type="button" className={`posItemButton ${item.available ? "" : "soldOut"}`} disabled={!item.available} onClick={() => openItem(item)}>
+            return <button key={item.id} type="button" className={`posItemButton ${item.available ? "" : "soldOut"}`} disabled={!item.available} onClick={() => selectItem(item)}>
+              {item.imageUrl&&<img src={item.imageUrl} alt={item.imageAlt} loading="lazy"/>}
               <strong>{item.name}</strong>
               <span>{availableVariants.length > 1 ? `From ${money(displayPrice)}` : money(displayPrice)}</span>
               {!item.available && <small>SOLD OUT</small>}
@@ -703,7 +715,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
         </div>
         <div className="posCartLines">
           {!cart.length && <div className="posEmpty">Tap a menu item to start the order.</div>}
-          {cart.map((line) => <article className="posCartLine" key={line.id}>
+          {cart.map((line) => <article className="posCartLine" key={line.id} onTouchStart={e=>{const t=e.touches[0];swipeStart.current={id:line.id,x:t.clientX,y:t.clientY}}} onTouchEnd={e=>{const s=swipeStart.current,t=e.changedTouches[0];swipeStart.current=null;if(s?.id===line.id&&s.x-t.clientX>80&&Math.abs(s.y-t.clientY)<45)removeLine(line.id)}}>
             <div className="posLineTop"><strong>{line.quantity}× {line.name}</strong><span>{money(line.unitPriceCents * line.quantity)}</span></div>
             {line.variantName && <small>Size / form: {line.variantName}</small>}
             {[...line.modifierText, ...line.comboText].map((text, index) => <small key={`${text}-${index}`}>{text}</small>)}
@@ -737,6 +749,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
       </aside>
     </section>
 
+    {removedLine&&<div className="posUndo" role="status">Removed {removedLine.name}<button onClick={()=>{setCart(current=>[...current,removedLine]);setRemovedLine(null)}}>UNDO</button></div>}
     {configuringItem && <div className="posModalBackdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfiguringItem(null); }}>
       <section className="posConfigModal" role="dialog" aria-modal="true" aria-label={`Configure ${configuringItem.name}`}>
         <header>
@@ -774,7 +787,9 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
               <div className="posChoiceGrid">
                 {group.options.map((option) => {
                   const available = variantOptionAvailable(selectedVariant, option);
-                  const priceDeltaCents = variantOptionPrice(selectedVariant, option);
+                  const baseDeltaCents = variantOptionPrice(selectedVariant, option);
+                  const selectedOrdinal=group.options.filter(candidate=>selected.includes(candidate.id)).findIndex(candidate=>candidate.id===option.id);
+                  const priceDeltaCents=group.includedChoiceCount>0&&!modifierDeclines.includes(group.id)&&(selected.length<group.includedChoiceCount||(selectedOrdinal>=0&&selectedOrdinal<group.includedChoiceCount))?0:baseDeltaCents;
                   const selectedOption = selected.includes(option.id);
                   return <div className="posModifierChoice" key={option.id}><button type="button" disabled={!available} className={selectedOption ? "selected" : ""} onClick={() => toggleModifier(group, option.id)}>
                     <strong>{option.name}</strong>
@@ -782,10 +797,11 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
                       ? "Unavailable for this size/form"
                       : priceDeltaCents
                         ? `${priceDeltaCents > 0 ? "+" : ""}${money(priceDeltaCents)}`
-                        : option.defaultSelected ? "Default" : "Included"}</span>
+                        : option.defaultSelected ? "FREE · Default" : "FREE"}</span>
                   </button>{selectedOption && group.allowOptionQuantity && <div className="posModifierQty" aria-label={`${option.name} quantity`}><button type="button" onClick={() => changeModifierQuantity(option.id, -1)} aria-label={`Decrease ${option.name}`}>−</button><strong>{modifierQuantities[option.id] || 1}</strong><button type="button" onClick={() => changeModifierQuantity(option.id, 1)} aria-label={`Increase ${option.name}`}>+</button></div>}</div>;
                 })}
               </div>
+              {group.includedChoiceCount>0&&<button type="button" className={modifierDeclines.includes(group.id)?"selected":""} onClick={()=>{setModifierDeclines(current=>current.includes(group.id)?current.filter(id=>id!==group.id):[...current,group.id]);setModifierSelections(current=>({...current,[group.id]:[]}))}}>NO INCLUDED CHOICE</button>}
             </fieldset>;
           })}
 
@@ -794,7 +810,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
             <div className="posChoiceGrid">
               <button type="button" className={!selectedComboId ? "selected" : ""} onClick={() => chooseCombo(null)}><strong>No combo</strong><span>Item only</span></button>
               {configuringItem.combos.map((combo) => <button key={combo.id} type="button" className={selectedComboId === combo.id ? "selected" : ""} onClick={() => chooseCombo(combo)}>
-                <strong>{combo.name}</strong><span>{combo.basePriceDeltaCents ? `+${money(combo.basePriceDeltaCents)}` : "Included"}</span>
+                <strong>{combo.name}</strong><span>{combo.basePriceDeltaCents ? `+${money(combo.basePriceDeltaCents)}` : "FREE"}</span>
               </button>)}
             </div>
           </fieldset>}
@@ -806,7 +822,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
               <legend>{group.prompt || group.name}<small>Required combo choice</small></legend>
               <div className="posChoiceGrid">
                 {group.options.map((option) => <button key={option.id} type="button" disabled={!option.available} className={selected.includes(option.id) ? "selected" : ""} onClick={() => toggleComboOption(group.id, group.maxSelections, option.id)}>
-                  <strong>{option.name}</strong><span>{option.priceDeltaCents ? `+${money(option.priceDeltaCents)}` : "Included"}</span>
+                  <strong>{option.name}</strong><span>{option.priceDeltaCents ? `+${money(option.priceDeltaCents)}` : "FREE"}</span>
                 </button>)}
               </div>
             </fieldset>;

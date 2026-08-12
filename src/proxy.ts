@@ -108,19 +108,23 @@ function isOwnerSession(session: Token): boolean {
 
 export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
-  if (publicPaths.some((prefix) => path === prefix || path.startsWith(prefix))) return NextResponse.next();
-  if (isDeliPosApi(path) && posToken(request)) return NextResponse.next();
+  const allowed=(process.env.ALLOWED_HOSTS||"").split(",").map(v=>v.trim().toLowerCase()).filter(Boolean),host=(request.headers.get("x-forwarded-host")||request.headers.get("host")||"").split(":")[0].toLowerCase();
+  if(allowed.length&&!allowed.includes(host)&&host!=="localhost"&&!/^127\./.test(host)&&!/^192\.168\./.test(host))return NextResponse.json({error:"Host not allowed."},{status:421});
+  const response=NextResponse.next();response.headers.set("X-Robots-Tag","noindex, nofollow, noarchive");response.headers.set("X-Content-Type-Options","nosniff");response.headers.set("Referrer-Policy","same-origin");response.headers.set("Permissions-Policy","camera=(), microphone=(), geolocation=()");response.headers.set("Content-Security-Policy","frame-ancestors 'none'");
+  if(!path.startsWith("/api/"))return response;
+  if (publicPaths.some((prefix) => path === prefix || path.startsWith(prefix))) return response;
+  if (isDeliPosApi(path) && posToken(request)) return response;
 
   const session = token(request);
   if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-  if (isOwnerSession(session)) return NextResponse.next();
+  if (isOwnerSession(session)) return response;
 
   const permission = needed(path, request.method);
   const permissions = session.permissions || [];
   if (permission && !permissions.includes("*") && !permissions.includes(permission)) {
     return NextResponse.json({ error: "Your account does not have permission for this action." }, { status: 403 });
   }
-  return NextResponse.next();
+  return response;
 }
 
-export const config = { matcher: ["/api/:path*"] };
+export const config = { matcher: ["/:path*"] };

@@ -10,28 +10,45 @@ async function manager() {
   return session && roles.has(session.role) && session.businesses.includes("Corner Deli") ? session : null;
 }
 
-export async function GET() {
+export async function GET(request:Request) {
   const session = await manager();
   if (!session) return NextResponse.json({ error: "Manager access required." }, { status: 403 });
   await ensureOrderingMenuOverrideSchema();
   const sql = getSql();
+  const channel=new URL(request.url).searchParams.get("channel")==="web"?"web":"pos";
   const [categories, items, modifiers] = await Promise.all([
-    sql`SELECT c.id,c.name imported_name,c.display_name imported_display_name,c.parent_id imported_parent_id,c.sort_order imported_sort_order,o.display_name,o.parent_id,o.parent_id_overridden,o.sort_order,o.visible FROM ordering_menu_categories c LEFT JOIN ordering_category_overrides o ON o.category_id=c.id WHERE c.business='Corner Deli' ORDER BY COALESCE(o.sort_order,c.sort_order),c.name`,
-    sql`SELECT i.id,i.name imported_name,i.category_id imported_category_id,i.sort_order imported_sort_order,o.display_name,o.category_id,o.sort_order,o.visible FROM ordering_menu_items i LEFT JOIN ordering_item_overrides o ON o.item_id=i.id WHERE i.business='Corner Deli' ORDER BY i.name`,
+    sql`SELECT c.id,c.name imported_name,COALESCE(ch.display_name,o.display_name,c.display_name,c.name) effective_name,c.parent_id imported_parent_id,c.sort_order imported_sort_order,ch.display_name,ch.parent_id,ch.parent_id_overridden,ch.sort_order,ch.visible FROM ordering_menu_categories c LEFT JOIN ordering_category_overrides o ON o.category_id=c.id LEFT JOIN ordering_category_channel_overrides ch ON ch.category_id=c.id AND ch.channel=${channel} WHERE c.business='Corner Deli' ORDER BY COALESCE(ch.sort_order,o.sort_order,c.sort_order),c.name`,
+    sql`SELECT i.id,i.name imported_name,COALESCE(ch.display_name,o.display_name,i.name) effective_name,i.category_id imported_category_id,i.sort_order imported_sort_order,ch.display_name,ch.category_id,ch.sort_order,ch.visible,media.id media_id,media.alt_text FROM ordering_menu_items i LEFT JOIN ordering_item_overrides o ON o.item_id=i.id LEFT JOIN ordering_item_channel_overrides ch ON ch.item_id=i.id AND ch.channel=${channel} LEFT JOIN LATERAL(SELECT * FROM ordering_menu_media m WHERE m.target_type='item' AND m.target_id=i.id ORDER BY uploaded_at DESC LIMIT 1)media ON TRUE WHERE i.business='Corner Deli' ORDER BY COALESCE(ch.sort_order,o.sort_order,i.sort_order),i.name`,
     sql`SELECT link.item_id,i.name item_name,g.id group_id,g.name group_name,p.context,p.parent_group_id,p.parent_option_ids,p.sort_order FROM ordering_menu_item_modifier_groups link JOIN ordering_menu_items i ON i.id=link.item_id JOIN ordering_modifier_groups g ON g.id=link.group_id LEFT JOIN ordering_modifier_presentation_overrides p ON p.item_id=link.item_id AND p.group_id=link.group_id WHERE i.business='Corner Deli' ORDER BY i.name,COALESCE(p.sort_order,link.sort_order),g.name`,
   ]);
-  return NextResponse.json({ categories, items, modifiers });
+  return NextResponse.json({ channel,categories,items,modifiers });
 }
 
 export async function PATCH(request: Request) {
   const session = await manager();
   if (!session) return NextResponse.json({ error: "Manager access required." }, { status: 403 });
   await ensureOrderingMenuOverrideSchema();
-  const body = await request.json() as { targetType?: string; targetId?: string; itemId?: string; field?: string; value?: unknown; reset?: boolean };
+  const body = await request.json() as { targetType?: string; targetId?: string; itemId?: string; field?: string; value?: unknown; reset?: boolean;channel?:string };
   const targetType = String(body.targetType || ""); const targetId = String(body.targetId || ""); const field = String(body.field || "");
   const sql = getSql();
   let previous: unknown = null;
   try {
+    const channel=body.channel==="web"?"web":body.channel==="pos"?"pos":null;
+    if(channel && targetType==="category"){
+      const row=(await sql`SELECT * FROM ordering_category_channel_overrides WHERE category_id=${targetId} AND channel=${channel}`)[0]||{};previous=row[field];
+      if(field==="display_name")await sql`INSERT INTO ordering_category_channel_overrides(category_id,channel,display_name,updated_by)VALUES(${targetId},${channel},${body.reset?null:String(body.value||"").trim()},${session.email})ON CONFLICT(category_id,channel)DO UPDATE SET display_name=EXCLUDED.display_name,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+      else if(field==="sort_order")await sql`INSERT INTO ordering_category_channel_overrides(category_id,channel,sort_order,updated_by)VALUES(${targetId},${channel},${body.reset?null:Number(body.value)},${session.email})ON CONFLICT(category_id,channel)DO UPDATE SET sort_order=EXCLUDED.sort_order,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+      else if(field==="visible")await sql`INSERT INTO ordering_category_channel_overrides(category_id,channel,visible,updated_by)VALUES(${targetId},${channel},${body.reset?null:Boolean(body.value)},${session.email})ON CONFLICT(category_id,channel)DO UPDATE SET visible=EXCLUDED.visible,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+      else if(field==="parent_id")await sql`INSERT INTO ordering_category_channel_overrides(category_id,channel,parent_id,parent_id_overridden,updated_by)VALUES(${targetId},${channel},${body.reset?null:String(body.value||"")||null},${!body.reset},${session.email})ON CONFLICT(category_id,channel)DO UPDATE SET parent_id=EXCLUDED.parent_id,parent_id_overridden=EXCLUDED.parent_id_overridden,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+      else throw new Error("Unsupported category field.");
+    }else if(channel && targetType==="item"){
+      const row=(await sql`SELECT * FROM ordering_item_channel_overrides WHERE item_id=${targetId} AND channel=${channel}`)[0]||{};previous=row[field];
+      if(field==="display_name")await sql`INSERT INTO ordering_item_channel_overrides(item_id,channel,display_name,updated_by)VALUES(${targetId},${channel},${body.reset?null:String(body.value||"").trim()},${session.email})ON CONFLICT(item_id,channel)DO UPDATE SET display_name=EXCLUDED.display_name,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+      else if(field==="sort_order")await sql`INSERT INTO ordering_item_channel_overrides(item_id,channel,sort_order,updated_by)VALUES(${targetId},${channel},${body.reset?null:Number(body.value)},${session.email})ON CONFLICT(item_id,channel)DO UPDATE SET sort_order=EXCLUDED.sort_order,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+      else if(field==="visible")await sql`INSERT INTO ordering_item_channel_overrides(item_id,channel,visible,updated_by)VALUES(${targetId},${channel},${body.reset?null:Boolean(body.value)},${session.email})ON CONFLICT(item_id,channel)DO UPDATE SET visible=EXCLUDED.visible,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+      else if(field==="category_id")await sql`INSERT INTO ordering_item_channel_overrides(item_id,channel,category_id,updated_by)VALUES(${targetId},${channel},${body.reset?null:String(body.value||"")||null},${session.email})ON CONFLICT(item_id,channel)DO UPDATE SET category_id=EXCLUDED.category_id,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+      else throw new Error("Unsupported item field.");
+    }else
     if (targetType === "category") {
       const owned = await sql`SELECT id FROM ordering_menu_categories WHERE id=${targetId} AND business='Corner Deli'`; if (!owned.length) throw new Error("Category not found.");
       const row = (await sql`SELECT * FROM ordering_category_overrides WHERE category_id=${targetId}`)[0] || {}; previous = row[field];
@@ -67,3 +84,5 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Could not update menu override." }, { status: 400 }); }
 }
+
+export async function POST(){const session=await manager();if(!session)return NextResponse.json({error:"Manager access required."},{status:403});await ensureOrderingMenuOverrideSchema();const sql=getSql();await sql`INSERT INTO ordering_category_channel_overrides(category_id,channel,display_name,parent_id,parent_id_overridden,sort_order,visible,updated_by)SELECT c.id,'web',COALESCE(pos.display_name,shared.display_name),CASE WHEN pos.parent_id_overridden THEN pos.parent_id ELSE shared.parent_id END,pos.parent_id_overridden OR shared.parent_id_overridden,COALESCE(pos.sort_order,shared.sort_order,c.sort_order),COALESCE(pos.visible,shared.visible),${session.email} FROM ordering_menu_categories c LEFT JOIN ordering_category_overrides shared ON shared.category_id=c.id LEFT JOIN ordering_category_channel_overrides pos ON pos.category_id=c.id AND pos.channel='pos' WHERE c.business='Corner Deli' ON CONFLICT(category_id,channel)DO UPDATE SET display_name=EXCLUDED.display_name,parent_id=EXCLUDED.parent_id,parent_id_overridden=EXCLUDED.parent_id_overridden,sort_order=EXCLUDED.sort_order,visible=EXCLUDED.visible,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;await sql`INSERT INTO ordering_item_channel_overrides(item_id,channel,display_name,category_id,sort_order,visible,updated_by)SELECT i.id,'web',COALESCE(pos.display_name,shared.display_name),COALESCE(pos.category_id,shared.category_id,i.category_id),COALESCE(pos.sort_order,shared.sort_order,i.sort_order),COALESCE(pos.visible,shared.visible),${session.email} FROM ordering_menu_items i LEFT JOIN ordering_item_overrides shared ON shared.item_id=i.id LEFT JOIN ordering_item_channel_overrides pos ON pos.item_id=i.id AND pos.channel='pos' WHERE i.business='Corner Deli' ON CONFLICT(item_id,channel)DO UPDATE SET display_name=EXCLUDED.display_name,category_id=EXCLUDED.category_id,sort_order=EXCLUDED.sort_order,visible=EXCLUDED.visible,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;await sql`INSERT INTO ordering_menu_override_audit(id,business,actor_id,target_type,target_id,field_name,previous_value,new_value)VALUES(${randomUUID()},'Corner Deli',${session.email},'presentation_copy','00000000-0000-0000-0000-000000000000','pos_to_web','null'::jsonb,'true'::jsonb)`;return NextResponse.json({ok:true})}

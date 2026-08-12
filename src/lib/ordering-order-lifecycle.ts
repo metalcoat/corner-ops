@@ -107,7 +107,8 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
         SELECT grp.name AS group_name, grp.allow_option_quantity, opt.name AS option_name,
                opt.available AS option_available,
                COALESCE(variant_override.available, TRUE) AS variant_available,
-               COALESCE(variant_override.price_delta_cents, def.price_delta_override_cents, opt.price_delta_cents) AS current_price_cents
+               COALESCE(variant_override.price_delta_cents, def.price_delta_override_cents, opt.price_delta_cents) AS current_price_cents,
+               COALESCE(p.included_choice_count,0) included_choice_count
         FROM ordering_menu_item_modifier_groups link
         JOIN ordering_modifier_groups grp ON grp.id = link.group_id AND grp.active = TRUE
         JOIN ordering_modifier_options opt ON opt.id = ${snapshot.option_id} AND opt.group_id = grp.id AND opt.active = TRUE
@@ -115,6 +116,7 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
           ON def.item_id = link.item_id AND def.option_id = opt.id AND def.active = TRUE
         LEFT JOIN ordering_menu_variant_modifier_prices variant_override
           ON variant_override.variant_id = ${item.variant_id} AND variant_override.option_id = opt.id AND variant_override.active = TRUE
+        LEFT JOIN ordering_modifier_presentation_overrides p ON p.item_id=link.item_id AND p.group_id=grp.id
         WHERE link.item_id = ${item.item_id} AND grp.id = ${snapshot.group_id}
         LIMIT 1
       `;
@@ -127,7 +129,8 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
       const currentCharge = snapshot.pizza_topping_portion && snapshot.pizza_topping_amount
         ? pizzaToppingPriceCents(number(option.current_price_cents), snapshot.pizza_topping_portion, snapshot.pizza_topping_amount)
         : number(option.current_price_cents);
-      if (currentCharge !== number(snapshot.unit_price_delta_cents)) {
+      const allowedIncluded=number(option.included_choice_count)>0&&(selectedCounts.get(snapshot.group_id)||0)<number(option.included_choice_count)&&number(snapshot.unit_price_delta_cents)===0;
+      if (currentCharge !== number(snapshot.unit_price_delta_cents)&&!allowedIncluded) {
         throw new OrderConflictError(`A modifier price on ${item.item_name_snapshot} changed. Review and rebuild the order before submitting.`);
       }
       selectedCounts.set(snapshot.group_id, (selectedCounts.get(snapshot.group_id) || 0) + 1);
