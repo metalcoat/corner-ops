@@ -13,7 +13,8 @@
     "db:bootstrap:local": "tsx scripts/local-db.ts bootstrap",
     "db:status": "tsx scripts/local-db.ts status",
     "menu:rezku:preview": "tsx scripts/rezku-menu-local.ts preview",
-    "menu:rezku:apply": "tsx scripts/rezku-menu-local.ts apply"
+    "menu:rezku:apply": "tsx scripts/rezku-menu-local.ts apply",
+    "menu:rezku:validate": "tsx scripts/rezku-menu-validate.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",

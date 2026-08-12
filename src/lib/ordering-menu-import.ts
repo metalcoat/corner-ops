@@ -575,12 +575,14 @@ export async function applyMenuImportRun(input: {
         }
       }
       }
-      if (snapshot.source === "rezku") {
-        await applyRezkuVariantSnapshot({ snapshot: snapshot as unknown as RezkuNormalizedSnapshot, runId: run.id });
-      }
+      const variantResult = snapshot.source === "rezku"
+        ? await applyRezkuVariantSnapshot({ snapshot: snapshot as unknown as RezkuNormalizedSnapshot, runId: run.id })
+        : null;
       await transactionSql`
         UPDATE ordering_menu_import_runs
-        SET status = 'applied', applied_at = NOW(), error_message = ''
+        SET status = 'applied', applied_at = NOW(), error_message = '',
+            variant_count = ${variantResult?.variantsApplied ?? 0},
+            variant_modifier_price_count = ${variantResult?.modifierPricesApplied ?? 0}
         WHERE id = ${run.id}
       `;
     });
