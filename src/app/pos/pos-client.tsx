@@ -50,6 +50,11 @@ type SavedDraft = {
   scheduledFor: string | null;
 };
 
+type SubmittedOrder = {
+  displayNumber: string;
+  totalCents: number;
+};
+
 const serviceLabels: Record<PosServiceType, { label: string; paymentNote?: string }> = {
   pickup: { label: "Pickup" },
   delivery: { label: "Delivery" },
@@ -140,6 +145,8 @@ export default function PosClient({ business }: { business: Business }) {
   const [savingDraft, setSavingDraft] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
   const [savedDraft, setSavedDraft] = useState<SavedDraft | null>(null);
+  const [submittingOrder, setSubmittingOrder] = useState(false);
+  const [submittedOrder, setSubmittedOrder] = useState<SubmittedOrder | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.businessTheme = business;
@@ -401,6 +408,33 @@ export default function PosClient({ business }: { business: Business }) {
     }
   }
 
+  async function submitOrder() {
+    if (!savedDraft || submittingOrder) return;
+    setSubmittingOrder(true);
+    setCheckoutError("");
+    try {
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/submit`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ business }),
+      });
+      const payload = await response.json() as {
+        order?: { display_number: string; total_cents: number };
+        error?: string;
+      };
+      if (!response.ok || !payload.order) throw new Error(payload.error || "Could not submit order.");
+      setSubmittedOrder({ displayNumber: payload.order.display_number, totalCents: Number(payload.order.total_cents) });
+      setCart([]);
+      setSavedDraft(null);
+      setScheduledFor("");
+      setTimingMode("asap");
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "Could not submit order.");
+    } finally {
+      setSubmittingOrder(false);
+    }
+  }
+
   if (!session) return <main className="posLoading">Loading {business} POS…</main>;
   if (!session.authenticated) return <main className="posLoading"><a href="/signin">Sign in to Corner Ops</a></main>;
   if (session.businesses?.length && !session.businesses.includes(business)) {
@@ -418,6 +452,7 @@ export default function PosClient({ business }: { business: Business }) {
         {config.utilities.map((utility) => utility === "reports"
           ? <a key={utility} href={config.reportsPath}>{utilityLabels[utility]}</a>
           : <button key={utility} type="button">{utilityLabels[utility]}</button>)}
+        {business === "Corner Deli" && <a href="/pos/deli/kitchen">Kitchen</a>}
         <a href="/pos">POS Dev Home</a>
       </nav>
     </header>
@@ -445,9 +480,12 @@ export default function PosClient({ business }: { business: Business }) {
     </section>
 
     {savedDraft && <div className="posSaveNotice">
-      Draft #{savedDraft.displayNumber} saved · {money(savedDraft.totalCents)}
+      Draft #{savedDraft.displayNumber} ready for review · {money(savedDraft.totalCents)} · UNPAID
       {savedDraft.timingMessage ? ` · ${savedDraft.timingMessage}` : ""}
       {savedDraft.kitchenTimingLabel ? ` · Kitchen: ${savedDraft.kitchenTimingLabel.replace(/\n/g, " / ")}` : ""}
+    </div>}
+    {submittedOrder && <div className="posSaveNotice success" role="status">
+      Order #{submittedOrder.displayNumber} submitted to kitchen · {money(submittedOrder.totalCents)} · UNPAID
     </div>}
     {checkoutError && <div className="posSaveNotice error">{checkoutError}</div>}
 
@@ -509,9 +547,16 @@ export default function PosClient({ business }: { business: Business }) {
           <div className="grand"><span>{savedDraft ? "Backend total" : "Estimated total"}</span><strong>{money(savedDraft?.totalCents ?? subtotalCents)}</strong></div>
         </div>
         <div className="posCheckoutButtons">
-          <button type="button" className="primary" disabled={!cart.length || savingDraft || (timingMode === "future" && !scheduledFor)} onClick={() => void saveDraft()}>
+          <button type="button" className="primary" disabled={!cart.length || savingDraft || Boolean(savedDraft) || (timingMode === "future" && !scheduledFor)} onClick={() => void saveDraft()}>
             {savingDraft ? "Saving…" : timingMode === "future" ? "Save Future Draft / Review" : "Save ASAP Draft / Review"}
           </button>
+          {savedDraft && <section className="posSubmitReview" aria-label={`Review draft ${savedDraft.displayNumber}`}>
+            <strong>Review order #{savedDraft.displayNumber}</strong>
+            <span>{serviceLabels[serviceType].label} · {cart.length} line{cart.length === 1 ? "" : "s"} · {money(savedDraft.totalCents)} · UNPAID</span>
+            <button type="button" className="submitOrder" disabled={submittingOrder || Boolean(checkoutError)} onClick={() => void submitOrder()}>
+              {submittingOrder ? "Submitting…" : "SUBMIT ORDER"}
+            </button>
+          </section>}
         </div>
       </aside>
     </section>

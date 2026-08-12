@@ -182,10 +182,13 @@
 .posTotals { padding: 13px 14px; border-top: 1px solid #273449; display: grid; gap: 8px; }
 .posTotals span { color: #94a3b8; }
 .posTotals .grand { padding-top: 10px; border-top: 1px solid #334155; font-size: 1.08rem; }
-.posCheckoutButtons { padding: 12px 14px 16px; }
+.posCheckoutButtons { padding: 12px 14px 16px; display: grid; gap: 10px; }
 .posCheckoutButtons button { min-height: 54px; flex: 1; }
 .posCheckoutButtons .primary,
 .posConfigModal .primary { background: #16a34a; border-color: #22c55e; color: white; }
+.posSubmitReview { display: grid; gap: 7px; border: 2px solid #f59e0b; border-radius: 12px; background: #2d2109; padding: 12px; }
+.posSubmitReview span { color: #fde68a; font-size: .82rem; }
+.posSubmitReview .submitOrder { min-height: 62px; background: #f59e0b; border-color: #fbbf24; color: #1f1300; font-size: 1.08rem; font-weight: 950; }
 .posCheckoutButtons button:disabled,
 .posConfigModal button:disabled { opacity: .45; cursor: not-allowed; }
 

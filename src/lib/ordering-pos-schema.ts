@@ -40,8 +40,15 @@ export function ensureOrderingPosSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS tax_exempt_reason TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS ready_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_orders_display_number_idx ON ordering_orders (business, display_number) WHERE display_number <> ''`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_orders_display_number_unique_idx ON ordering_orders (business, display_number) WHERE display_number <> ''`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_orders_scheduled_idx ON ordering_orders (business, scheduled_for) WHERE scheduled_for IS NOT NULL`;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_orders_kitchen_queue_idx ON ordering_orders (business, status, submitted_at) WHERE status IN ('sent_to_kitchen', 'in_progress', 'ready')`;
 
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_pos_terminals (
