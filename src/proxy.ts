@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "corner_ops_session";
+const POS_COOKIE_NAME = "corner_ops_pos";
 const publicPaths = [
   "/api/health",
   "/api/auth/session",
@@ -10,6 +11,7 @@ const publicPaths = [
   "/api/employee",
   "/api/employee/session",
   "/api/employee/pin-reset/",
+  "/api/pos/",
   "/api/rezku/inbound",
   "/api/3cx/inbound",
   "/api/square/callback",
@@ -23,6 +25,8 @@ type Token = {
   permissions?: string[];
   expiresAt?: number;
 };
+
+type PosToken = { employeeId?: string; business?: string; expiresAt?: number; clockInRequired?: boolean };
 
 function equal(left: string, right: string): boolean {
   const a = Buffer.from(left);
@@ -48,6 +52,28 @@ function token(request: NextRequest): Token | null {
   } catch {
     return null;
   }
+}
+
+function posToken(request: NextRequest): PosToken | null {
+  const raw = request.cookies.get(POS_COOKIE_NAME)?.value;
+  const secret = process.env.SESSION_SECRET;
+  if (!raw || !secret) return null;
+  const [encoded, supplied] = raw.split(".");
+  if (!encoded || !supplied) return null;
+  const expected = createHmac("sha256", secret).update(encoded).digest("base64url");
+  if (!equal(expected, supplied)) return null;
+  try {
+    const value = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as PosToken;
+    if (!value.employeeId || value.business !== "Corner Deli" || Number(value.expiresAt || 0) <= Date.now() || value.clockInRequired) return null;
+    return value;
+  } catch { return null; }
+}
+
+function isDeliPosApi(path: string): boolean {
+  return path === "/api/ordering/menu"
+    || path === "/api/ordering/orders"
+    || path === "/api/ordering/kitchen"
+    || /^\/api\/ordering\/orders\/[^/]+\/submit$/.test(path);
 }
 
 function needed(path: string, method: string): string | null {
@@ -82,6 +108,7 @@ function isOwnerSession(session: Token): boolean {
 export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
   if (publicPaths.some((prefix) => path === prefix || path.startsWith(prefix))) return NextResponse.next();
+  if (isDeliPosApi(path) && posToken(request)) return NextResponse.next();
 
   const session = token(request);
   if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });

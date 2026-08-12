@@ -4,21 +4,16 @@ import { expect, test, type Page } from "@playwright/test";
 loadEnvFile("/opt/corner-ops/.env");
 
 async function signIn(page: Page) {
-  const password = process.env.APP_PASSWORD;
-  if (!password) throw new Error("APP_PASSWORD is required for the local order lifecycle browser test");
-  await page.goto("/signin");
-  await page.getByLabel("Email").fill(process.env.APP_EMAIL || "crfrary@gmail.com");
-  await page.getByLabel("Password").fill(password);
-  await Promise.all([
-    page.waitForURL(/\/(?:ops|pos\/deli)/),
-    page.getByRole("button", { name: /sign in/i }).click(),
-  ]);
+  const pin = process.env.POS_TEST_ACTIVE_PIN;
+  if (!pin) throw new Error("POS_TEST_ACTIVE_PIN is required");
+  await page.goto("/pos/deli");
+  for (const digit of pin) await page.getByRole("button", { name: digit, exact: true }).click();
+  await expect(page.getByText("Corner Deli POS", { exact: true })).toBeVisible();
 }
 
 test("cashier submits a real pizza and kitchen completes it", async ({ page }) => {
   const note = `Playwright kitchen acceptance ${Date.now()}`;
   await signIn(page);
-  await page.goto("/pos/deli");
   await page.getByRole("button", { name: "Pizza and Wings", exact: true }).click();
   await page.getByRole("button", { name: /^Pizza From / }).click();
 

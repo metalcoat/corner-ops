@@ -1,10 +1,10 @@
-import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import type { VariantConfiguredOrderItemInput } from "@/lib/ordering-orders-with-variants";
 import type { OrderingBusiness, ServiceType } from "@/lib/ordering-core";
 import { ensureOrderingDeliverySchema } from "@/lib/ordering-delivery-schema";
 import { createTimedDraftOrder } from "@/lib/ordering-timed-orders";
 import type { OrderTimingMode } from "@/lib/ordering-timing-core";
+import { orderingActor } from "@/lib/ordering-route-auth";
 
 export const runtime = "nodejs";
 
@@ -44,13 +44,10 @@ function cashierOrderError(error: unknown): Response | null {
 
 export async function POST(request: Request) {
   try {
-    const session = await getSession();
-    if (!session) return unauthorized();
     const body = await request.json() as Record<string, unknown>;
     const business = readBusiness(body.business);
-    if (!canAccessBusiness(session, business)) {
-      return Response.json({ error: "Business access denied." }, { status: 403 });
-    }
+    const actor = await orderingActor(business);
+    if (!actor) return unauthorized();
 
     await ensureOrderingDeliverySchema();
 
@@ -83,7 +80,8 @@ export async function POST(request: Request) {
       serviceType: readServiceType(body.serviceType),
       customerId: body.customerId ? String(body.customerId) : null,
       callerPhone: body.callerPhone ? String(body.callerPhone) : "",
-      createdBy: session.email,
+      createdBy: actor.id,
+      createdByName: actor.name,
       items,
       timingMode,
       requestedFor: readRequestedFor(body.scheduledFor, timingMode),

@@ -50,6 +50,7 @@ async function main(): Promise<void> {
   }
 
   const results: Record<string, unknown> = {};
+  const lifecycleActor = { id: "order-lifecycle-test", name: "Lifecycle Test", type: "employee" as const };
   try {
     await withTransaction(async () => {
       const sql = getSql();
@@ -59,9 +60,9 @@ async function main(): Promise<void> {
         items: [{ itemId: pizza.itemId, variantId: pizza.variantId, modifierSelections: pizza.selections, specialInstructions: "Lifecycle pizza note" }],
       });
       const before = (await sql`SELECT total_cents FROM ordering_orders WHERE id = ${draft.id}`)[0];
-      const submitted = await submitDraftOrder(String(draft.id), "Corner Deli", "order-lifecycle-test");
+      const submitted = await submitDraftOrder(String(draft.id), "Corner Deli", lifecycleActor);
       if (submitted.order.status !== "sent_to_kitchen" || !submitted.order.submitted_at) throw new Error("Draft did not become submitted.");
-      const duplicate = await submitDraftOrder(String(draft.id), "Corner Deli", "order-lifecycle-test");
+      const duplicate = await submitDraftOrder(String(draft.id), "Corner Deli", lifecycleActor);
       if (!duplicate.alreadySubmitted || duplicate.order.display_number !== submitted.order.display_number) throw new Error("Duplicate submission was not idempotent.");
 
       const snapshotBefore = (await sql`SELECT unit_price_cents, modifier_total_cents, line_total_cents FROM ordering_order_items WHERE order_id = ${draft.id}`)[0];
@@ -71,18 +72,18 @@ async function main(): Promise<void> {
 
       let invalidRejected = false;
       try {
-        await transitionKitchenOrder({ orderId: String(draft.id), business: "Corner Deli", expectedStatus: "sent_to_kitchen", nextStatus: "ready", actor: "order-lifecycle-test" });
+        await transitionKitchenOrder({ orderId: String(draft.id), business: "Corner Deli", expectedStatus: "sent_to_kitchen", nextStatus: "ready", actor: lifecycleActor });
       } catch (error) { invalidRejected = error instanceof OrderConflictError; }
       if (!invalidRejected) throw new Error("Invalid submitted-to-ready transition was accepted.");
 
-      await transitionKitchenOrder({ orderId: String(draft.id), business: "Corner Deli", expectedStatus: "sent_to_kitchen", nextStatus: "in_progress", actor: "order-lifecycle-test" });
+      await transitionKitchenOrder({ orderId: String(draft.id), business: "Corner Deli", expectedStatus: "sent_to_kitchen", nextStatus: "in_progress", actor: lifecycleActor });
       let staleRejected = false;
       try {
-        await transitionKitchenOrder({ orderId: String(draft.id), business: "Corner Deli", expectedStatus: "sent_to_kitchen", nextStatus: "in_progress", actor: "order-lifecycle-test" });
+        await transitionKitchenOrder({ orderId: String(draft.id), business: "Corner Deli", expectedStatus: "sent_to_kitchen", nextStatus: "in_progress", actor: lifecycleActor });
       } catch (error) { staleRejected = error instanceof OrderConflictError; }
       if (!staleRejected) throw new Error("A stale duplicate kitchen transition was accepted.");
-      await transitionKitchenOrder({ orderId: String(draft.id), business: "Corner Deli", expectedStatus: "in_progress", nextStatus: "ready", actor: "order-lifecycle-test" });
-      await transitionKitchenOrder({ orderId: String(draft.id), business: "Corner Deli", expectedStatus: "ready", nextStatus: "completed", actor: "order-lifecycle-test" });
+      await transitionKitchenOrder({ orderId: String(draft.id), business: "Corner Deli", expectedStatus: "in_progress", nextStatus: "ready", actor: lifecycleActor });
+      await transitionKitchenOrder({ orderId: String(draft.id), business: "Corner Deli", expectedStatus: "ready", nextStatus: "completed", actor: lifecycleActor });
       const completed = (await sql`SELECT status, submitted_at, started_at, ready_at, completed_at FROM ordering_orders WHERE id = ${draft.id}`)[0];
       if (completed.status !== "completed" || !completed.submitted_at || !completed.started_at || !completed.ready_at || !completed.completed_at) throw new Error("Lifecycle timestamps were not recorded.");
 
@@ -92,7 +93,7 @@ async function main(): Promise<void> {
       });
       await sql`UPDATE ordering_menu_item_variants SET base_price_cents = base_price_cents + 11 WHERE id = ${pizza.variantId}`;
       let stalePriceRejected = false;
-      try { await submitDraftOrder(String(staleDraft.id), "Corner Deli", "order-lifecycle-test"); }
+      try { await submitDraftOrder(String(staleDraft.id), "Corner Deli", lifecycleActor); }
       catch (error) { stalePriceRejected = error instanceof OrderConflictError && error.message.includes("price"); }
       if (!stalePriceRejected) throw new Error("Stale menu pricing was submitted.");
 
@@ -104,10 +105,10 @@ async function main(): Promise<void> {
       if (String(wingDraft.display_number) === String(draft.display_number) || String(staleDraft.display_number) === String(draft.display_number)) {
         throw new Error("Order counter produced duplicate display numbers.");
       }
-      await submitDraftOrder(String(wingDraft.id), "Corner Deli", "order-lifecycle-test");
-      await transitionKitchenOrder({ orderId: String(wingDraft.id), business: "Corner Deli", expectedStatus: "sent_to_kitchen", nextStatus: "in_progress", actor: "order-lifecycle-test" });
-      await transitionKitchenOrder({ orderId: String(wingDraft.id), business: "Corner Deli", expectedStatus: "in_progress", nextStatus: "ready", actor: "order-lifecycle-test" });
-      await transitionKitchenOrder({ orderId: String(wingDraft.id), business: "Corner Deli", expectedStatus: "ready", nextStatus: "completed", actor: "order-lifecycle-test" });
+      await submitDraftOrder(String(wingDraft.id), "Corner Deli", lifecycleActor);
+      await transitionKitchenOrder({ orderId: String(wingDraft.id), business: "Corner Deli", expectedStatus: "sent_to_kitchen", nextStatus: "in_progress", actor: lifecycleActor });
+      await transitionKitchenOrder({ orderId: String(wingDraft.id), business: "Corner Deli", expectedStatus: "in_progress", nextStatus: "ready", actor: lifecycleActor });
+      await transitionKitchenOrder({ orderId: String(wingDraft.id), business: "Corner Deli", expectedStatus: "ready", nextStatus: "completed", actor: lifecycleActor });
       const wingSnapshot = (await sql`
         SELECT item.variant_name_snapshot, item.special_instructions,
                ARRAY_AGG(modifier.option_name_snapshot ORDER BY modifier.option_name_snapshot) FILTER (WHERE modifier.selection_state IN ('selected','extra')) AS modifiers

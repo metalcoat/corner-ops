@@ -72,6 +72,7 @@
 .posBusinessSwitch button.active { background: #f8fafc; color: #111827; border-color: #f8fafc; }
 
 .posUtilityNav { justify-content: flex-end; flex-wrap: wrap; }
+.posEmployeeName { color: #fde68a; font-weight: 900; padding: 0 6px; }
 .posUtilityNav button,
 .posUtilityNav a { padding: 10px 12px; text-decoration: none; }
 .posUtilityNav button:hover,

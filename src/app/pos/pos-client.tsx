@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
+import PosPinGate, { type PosEmployeeSession, type PosSessionView } from "./pos-pin-gate";
 import type { ServiceType } from "@/lib/ordering-core";
 import type { OrderTimingMode } from "@/lib/ordering-timing-core";
 import { orderingBusinessConfig, type PosUtility } from "@/lib/ordering-business-config";
@@ -125,7 +126,7 @@ function selectionsValid(group: OrderingModifierGroupView, selections: string[])
 export default function PosClient({ business }: { business: Business }) {
   const config = orderingBusinessConfig(business);
   const availableServices = config.serviceTypes.filter((value): value is PosServiceType => value !== "undecided" && (business !== "Corner Deli" || value === "pickup" || value === "delivery" || value === "dine_in"));
-  const [session, setSession] = useState<SessionView | null>(null);
+  const [session, setSession] = useState<SessionView | PosSessionView | null>(null);
   const [menu, setMenu] = useState<OrderingMenuCategoryWithVariants[]>([]);
   const [menuLoading, setMenuLoading] = useState(true);
   const [menuError, setMenuError] = useState("");
@@ -151,11 +152,18 @@ export default function PosClient({ business }: { business: Business }) {
   useEffect(() => {
     document.documentElement.dataset.businessTheme = business;
     window.localStorage.setItem("corner-ops-business-theme", business);
-    fetch("/api/auth/session", { cache: "no-store" })
+    fetch(business === "Corner Deli" ? "/api/pos/session" : "/api/auth/session", { cache: "no-store" })
       .then((response) => response.json())
-      .then((payload: SessionView) => setSession(payload))
+      .then((payload: SessionView | PosSessionView) => setSession(payload))
       .catch(() => setSession({ authenticated: false } as SessionView));
   }, [business]);
+
+  async function lockPos() {
+    await fetch("/api/pos/session", { method: "DELETE" });
+    setSession({ authenticated: false });
+    setCart([]);
+    setSavedDraft(null);
+  }
 
   useEffect(() => {
     if (!session?.authenticated) return;
@@ -436,10 +444,12 @@ export default function PosClient({ business }: { business: Business }) {
   }
 
   if (!session) return <main className="posLoading">Loading {business} POS…</main>;
+  if (!session.authenticated && business === "Corner Deli") return <PosPinGate onAuthenticated={(employee) => setSession({ authenticated: true, session: employee })} />;
   if (!session.authenticated) return <main className="posLoading"><a href="/signin">Sign in to Corner Ops</a></main>;
-  if (session.businesses?.length && !session.businesses.includes(business)) {
+  if ("businesses" in session && session.businesses?.length && !session.businesses.includes(business)) {
     return <main className="posLoading">Your account does not have access to {business}.</main>;
   }
+  const posEmployee = "session" in session ? session.session as PosEmployeeSession | undefined : undefined;
 
   return <main className="posPage">
     <header className="posHeader posHeaderFixedBusiness">
@@ -449,10 +459,12 @@ export default function PosClient({ business }: { business: Business }) {
         <small className="posSeparateNote">Separate development POS · not connected to the live application</small>
       </div>
       <nav className="posUtilityNav" aria-label={`${business} POS utilities`}>
+        {posEmployee && <span className="posEmployeeName">{posEmployee.name}</span>}
         {config.utilities.map((utility) => utility === "reports"
           ? <a key={utility} href={config.reportsPath}>{utilityLabels[utility]}</a>
           : <button key={utility} type="button">{utilityLabels[utility]}</button>)}
         {business === "Corner Deli" && <a href="/pos/deli/kitchen">Kitchen</a>}
+        {business === "Corner Deli" && <button type="button" onClick={() => void lockPos()}>LOCK / SWITCH EMPLOYEE</button>}
         <a href="/pos">POS Dev Home</a>
       </nav>
     </header>

@@ -1,4 +1,3 @@
-import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
   listKitchenOrders,
@@ -7,6 +6,7 @@ import {
   type KitchenOrderStatus,
 } from "@/lib/ordering-order-lifecycle";
 import type { OrderingBusiness } from "@/lib/ordering-core";
+import { orderingActor } from "@/lib/ordering-route-auth";
 
 export const runtime = "nodejs";
 
@@ -22,11 +22,9 @@ function statusFrom(value: unknown): KitchenOrderStatus {
 
 export async function GET(request: Request) {
   try {
-    const session = await getSession();
-    if (!session) return unauthorized();
     const url = new URL(request.url);
     const business = businessFrom(url.searchParams.get("business"));
-    if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
+    if (!await orderingActor(business)) return unauthorized();
     const orders = await listKitchenOrders(business, url.searchParams.get("recent") === "true");
     return Response.json({ business, orders });
   } catch (error) {
@@ -36,17 +34,16 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const session = await getSession();
-    if (!session) return unauthorized();
     const body = await request.json() as Record<string, unknown>;
     const business = businessFrom(body.business);
-    if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
+    const actor = await orderingActor(business);
+    if (!actor) return unauthorized();
     const order = await transitionKitchenOrder({
       orderId: String(body.orderId || ""),
       business,
       expectedStatus: statusFrom(body.expectedStatus),
       nextStatus: statusFrom(body.nextStatus),
-      actor: session.email,
+      actor,
     });
     return Response.json({ order });
   } catch (error) {

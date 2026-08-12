@@ -21,6 +21,7 @@ export type CreateDraftOrderInput = {
   customerId?: string | null;
   callerPhone?: string;
   createdBy: string;
+  createdByName?: string;
   items?: ConfiguredOrderItemInput[];
 };
 
@@ -377,7 +378,7 @@ export async function createDraftOrder(input: CreateDraftOrderInput): Promise<Or
         ${randomUUID()}, ${id}, ${items.length ? 2 : 1}, 'order_created',
         ${input.source === "pos" ? "employee" : input.source === "web" ? "web" : input.source === "ai_phone" ? "ai" : "system"},
         ${input.createdBy},
-        CAST(${JSON.stringify({ source: input.source, serviceType: input.serviceType, itemCount: items.length })} AS jsonb)
+        CAST(${JSON.stringify({ source: input.source, serviceType: input.serviceType, itemCount: items.length, actorName: input.createdByName || null })} AS jsonb)
       )
     `;
   } catch (error) {

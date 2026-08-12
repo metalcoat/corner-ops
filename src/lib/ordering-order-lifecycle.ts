@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getSql, withTransaction } from "@/lib/db";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
+import type { OrderingActor } from "@/lib/ordering-route-auth";
 
 export type StoredOrderStatus = "draft" | "confirmed" | "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
 export type KitchenOrderStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -153,7 +154,7 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
   }
 }
 
-export async function submitDraftOrder(orderId: string, business: OrderingBusiness, actor: string) {
+export async function submitDraftOrder(orderId: string, business: OrderingBusiness, actor: OrderingActor) {
   await ensureOrderingPosSchema();
   return withTransaction(async () => {
     const sql = getSql();
@@ -181,8 +182,8 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
     if (!updated.length) throw new OrderConflictError("This order changed while it was being submitted. Refresh and review it.");
     await sql`
       INSERT INTO ordering_order_events (id, order_id, order_version, event_type, actor_type, actor_id, details)
-      VALUES (${randomUUID()}, ${orderId}, ${updated[0].version}, 'status_changed', 'employee', ${actor},
-              CAST(${JSON.stringify({ from: "draft", to: "sent_to_kitchen" })} AS jsonb))
+      VALUES (${randomUUID()}, ${orderId}, ${updated[0].version}, 'status_changed', ${actor.type}, ${actor.id},
+              CAST(${JSON.stringify({ from: "draft", to: "sent_to_kitchen", actorName: actor.name })} AS jsonb))
     `;
     return { order: updated[0], alreadySubmitted: false };
   });
@@ -193,7 +194,7 @@ export async function transitionKitchenOrder(input: {
   business: OrderingBusiness;
   expectedStatus: KitchenOrderStatus;
   nextStatus: KitchenOrderStatus;
-  actor: string;
+  actor: OrderingActor;
 }) {
   await ensureOrderingPosSchema();
   if (!transitions[input.expectedStatus]?.includes(input.nextStatus)) {
@@ -225,8 +226,8 @@ export async function transitionKitchenOrder(input: {
     if (!rows.length) throw new OrderConflictError("This order changed on another screen. Refresh the kitchen queue.");
     await sql`
       INSERT INTO ordering_order_events (id, order_id, order_version, event_type, actor_type, actor_id, details)
-      VALUES (${randomUUID()}, ${input.orderId}, ${rows[0].version}, 'status_changed', 'employee', ${input.actor},
-              CAST(${JSON.stringify({ from: input.expectedStatus, to: input.nextStatus })} AS jsonb))
+      VALUES (${randomUUID()}, ${input.orderId}, ${rows[0].version}, 'status_changed', ${input.actor.type}, ${input.actor.id},
+              CAST(${JSON.stringify({ from: input.expectedStatus, to: input.nextStatus, actorName: input.actor.name })} AS jsonb))
     `;
     return rows[0];
   });

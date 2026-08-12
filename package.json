@@ -16,7 +16,8 @@
     "menu:rezku:apply": "tsx scripts/rezku-menu-local.ts apply",
     "menu:rezku:validate": "tsx scripts/rezku-menu-validate.ts",
     "test:ordering:lifecycle": "tsx scripts/order-lifecycle-validate.ts",
-    "test:pos:e2e": "playwright test tests/pos-deli.spec.ts tests/deli-order-lifecycle.spec.ts"
+    "test:pos:auth": "tsx scripts/pos-auth-validate.ts",
+    "test:pos:e2e": "playwright test tests/pos-pin-auth.spec.ts tests/pos-deli.spec.ts tests/deli-order-lifecycle.spec.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",

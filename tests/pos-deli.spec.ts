@@ -4,25 +4,15 @@ import { expect, test, type Page } from "@playwright/test";
 loadEnvFile("/opt/corner-ops/.env");
 
 async function signIn(page: Page) {
-  const email = process.env.APP_EMAIL || "crfrary@gmail.com";
-  const password = process.env.APP_PASSWORD;
-
-  if (!password) {
-    throw new Error("APP_PASSWORD is required for the local POS browser test");
-  }
-
-  await page.goto("/signin");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await Promise.all([
-    page.waitForURL(/\/(?:ops|pos\/deli)/),
-    page.getByRole("button", { name: /sign in/i }).click(),
-  ]);
+  const pin = process.env.POS_TEST_ACTIVE_PIN;
+  if (!pin) throw new Error("POS_TEST_ACTIVE_PIN is required");
+  await page.goto("/pos/deli");
+  for (const digit of pin) await page.getByRole("button", { name: digit, exact: true }).click();
+  await expect(page.getByText("Corner Deli POS", { exact: true })).toBeVisible();
 }
 
 test("cashier configures, edits, and saves a backend-priced pizza draft", async ({ page }) => {
   await signIn(page);
-  await page.goto("/pos/deli");
 
   await expect(page.getByText("Corner Deli POS", { exact: true })).toBeVisible();
   await expect(page.getByText("No-contact delivery", { exact: true })).toHaveCount(0);
@@ -65,7 +55,6 @@ test("cashier configures, edits, and saves a backend-priced pizza draft", async 
 
 test("Pizza Sub does not fabricate a Wrap variant", async ({ page }) => {
   await signIn(page);
-  await page.goto("/pos/deli");
   await page.getByRole("button", { name: "Subs/Wraps" }).click();
   await page.getByRole("button", { name: /^Pizza Sub From / }).click();
 

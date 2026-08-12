@@ -13,6 +13,7 @@ export type CreateTimedDraftOrderInput = {
   customerId?: string | null;
   callerPhone?: string;
   createdBy: string;
+  createdByName?: string;
   items?: VariantConfiguredOrderItemInput[];
   timingMode?: OrderTimingMode;
   requestedFor?: Date | null;
@@ -62,6 +63,7 @@ export async function createTimedDraftOrder(input: CreateTimedDraftOrderInput): 
     customerId: input.customerId,
     callerPhone: input.callerPhone,
     createdBy: input.createdBy,
+    createdByName: input.createdByName,
     items: input.items,
   });
 
@@ -96,6 +98,7 @@ export async function createTimedDraftOrder(input: CreateTimedDraftOrderInput): 
         maxMinutes: quote.maxMinutes,
         isBusy: quote.isBusy,
         kitchenLabel: quote.kitchenLabel,
+        actorName: input.createdByName || null,
       })} AS jsonb)
     FROM ordering_orders
     WHERE id = ${base.id}

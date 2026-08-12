@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import PosPinGate, { type PosEmployeeSession, type PosSessionView } from "../../pos-pin-gate";
 
 type KitchenStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
 type KitchenModifier = {
@@ -50,12 +51,18 @@ function elapsed(submittedAt: string, serverNow: string, tick: number): string {
 }
 
 export default function KitchenClient() {
+  const [session, setSession] = useState<PosSessionView | null>(null);
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [busyOrderId, setBusyOrderId] = useState("");
   const [showRecent, setShowRecent] = useState(false);
   const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    fetch("/api/pos/session", { cache: "no-store" }).then((response) => response.json()).then(setSession)
+      .catch(() => setSession({ authenticated: false }));
+  }, []);
 
   const loadOrders = useCallback(async (recent = showRecent) => {
     try {
@@ -73,10 +80,11 @@ export default function KitchenClient() {
   }, [showRecent]);
 
   useEffect(() => {
+    if (!session?.authenticated) return;
     void loadOrders();
     const refresh = window.setInterval(() => void loadOrders(), 5_000);
     return () => window.clearInterval(refresh);
-  }, [loadOrders]);
+  }, [loadOrders, session?.authenticated]);
 
   useEffect(() => {
     const clock = window.setInterval(() => setTick((value) => value + 1), 1_000);
@@ -84,6 +92,12 @@ export default function KitchenClient() {
   }, []);
 
   const activeCount = useMemo(() => orders.filter((order) => order.status === "sent_to_kitchen" || order.status === "in_progress" || order.status === "ready").length, [orders]);
+
+  async function lockKitchen() {
+    await fetch("/api/pos/session", { method: "DELETE" });
+    setOrders([]);
+    setSession({ authenticated: false });
+  }
 
   async function transition(order: KitchenOrder, nextStatus: KitchenStatus) {
     if (busyOrderId) return;
@@ -111,10 +125,14 @@ export default function KitchenClient() {
     }
   }
 
+  if (!session) return <main className="kitchenPage"><div className="kitchenEmpty">Loading employee session…</div></main>;
+  if (!session.authenticated) return <PosPinGate onAuthenticated={(employee) => setSession({ authenticated: true, session: employee })} />;
+  const employee = session.session as PosEmployeeSession;
+
   return <main className="kitchenPage">
     <header className="kitchenHeader">
       <div><span>LOCAL DEVELOPMENT</span><h1>Corner Deli Kitchen</h1><p>{activeCount} active order{activeCount === 1 ? "" : "s"}</p></div>
-      <nav><a href="/pos/deli">Cashier POS</a><button type="button" onClick={() => { const next = !showRecent; setShowRecent(next); void loadOrders(next); }}>{showRecent ? "Active only" : "Recent history"}</button><button type="button" onClick={() => void loadOrders()}>Refresh</button></nav>
+      <nav><strong>{employee.name}</strong><a href="/pos/deli">Cashier POS</a><button type="button" onClick={() => { const next = !showRecent; setShowRecent(next); void loadOrders(next); }}>{showRecent ? "Active only" : "Recent history"}</button><button type="button" onClick={() => void loadOrders()}>Refresh</button><button type="button" onClick={() => void lockKitchen()}>LOCK / SWITCH EMPLOYEE</button></nav>
     </header>
     {error && <div className="kitchenError" role="alert">{error}</div>}
     {loading && <div className="kitchenEmpty">Loading kitchen queue…</div>}

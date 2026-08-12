@@ -1,7 +1,7 @@
-import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import { orderingMenuWithVariants } from "@/lib/ordering-menu-variants";
 import type { OrderingBusiness } from "@/lib/ordering-core";
+import { orderingActor } from "@/lib/ordering-route-auth";
 
 export const runtime = "nodejs";
 
@@ -12,12 +12,8 @@ function readBusiness(value: string | null): OrderingBusiness {
 
 export async function GET(request: Request) {
   try {
-    const session = await getSession();
-    if (!session) return unauthorized();
     const business = readBusiness(new URL(request.url).searchParams.get("business") || "Corner Deli");
-    if (!canAccessBusiness(session, business)) {
-      return Response.json({ error: "Business access denied." }, { status: 403 });
-    }
+    if (!await orderingActor(business)) return unauthorized();
     return Response.json({ business, categories: await orderingMenuWithVariants(business) });
   } catch (error) {
     return apiError(error);

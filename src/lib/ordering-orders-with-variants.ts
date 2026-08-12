@@ -14,6 +14,7 @@ export type CreateVariantDraftOrderInput = {
   customerId?: string | null;
   callerPhone?: string;
   createdBy: string;
+  createdByName?: string;
   items?: VariantConfiguredOrderItemInput[];
 };
 
