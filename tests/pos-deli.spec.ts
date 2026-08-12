@@ -29,7 +29,7 @@ test("cashier configures, edits, and saves a backend-priced pizza draft", async 
   await expect(page.getByText("Curbside", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Bar", { exact: true })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Pizza and Wings" }).click();
+  await page.getByRole("button", { name: "Pizza and Wings", exact: true }).click();
   await page.getByRole("button", { name: /^Pizza From / }).click();
 
   const dialog = page.getByRole("dialog", { name: "Configure Pizza" });
@@ -42,8 +42,9 @@ test("cashier configures, edits, and saves a backend-priced pizza draft", async 
   await dialog.getByLabel("Item notes").fill("Test note");
   await dialog.getByRole("button", { name: /add to order/i }).click();
 
-  await expect(page.getByText('Regular 14"', { exact: true })).toBeVisible();
-  await expect(page.getByText("Test note", { exact: true })).toBeVisible();
+  const cartLine = page.getByRole("article").filter({ has: page.getByText("1× Pizza", { exact: true }) });
+  await expect(cartLine).toContainText('Size / form: Regular 14"');
+  await expect(cartLine).toContainText("Note: Test note");
   await page.getByRole("button", { name: "Edit Pizza" }).click();
   await expect(page.getByRole("dialog", { name: "Configure Pizza" })).toBeVisible();
   await page.getByRole("button", { name: /update item/i }).click();
@@ -54,8 +55,8 @@ test("cashier configures, edits, and saves a backend-priced pizza draft", async 
   await page.getByRole("button", { name: /Save ASAP Draft/i }).click();
   const response = await responsePromise;
   expect(response.status()).toBe(201);
-  const payload = (await response.json()) as { order?: { totalCents?: number } };
-  expect(payload.order?.totalCents).toBe(1400);
+  const payload = (await response.json()) as { order?: { total_cents?: number } };
+  expect(payload.order?.total_cents).toBe(1400);
   await expect(page.getByText("Backend total")).toBeVisible();
   await expect(page.getByText("$14.00", { exact: true }).last()).toBeVisible();
 
@@ -69,7 +70,7 @@ test("Pizza Sub does not fabricate a Wrap variant", async ({ page }) => {
   await page.getByRole("button", { name: /^Pizza Sub From / }).click();
 
   const dialog = page.getByRole("dialog", { name: "Configure Pizza Sub" });
-  await expect(dialog.getByText("Full", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("Half", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("Wrap", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText("Full Sub", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("1/2 Sub", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Wraps", { exact: true })).toHaveCount(0);
 });
