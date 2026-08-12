@@ -1,4 +1,4 @@
-import { del, put } from "@vercel/blob";
+import { del, put } from "@/lib/storage";
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {

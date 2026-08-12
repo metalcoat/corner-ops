@@ -1,12 +1,46 @@
-import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
-import { assertConfigured } from "@/lib/config";
+import { neon } from "@neondatabase/serverless";
+import { Pool } from "pg";
+import { assertConfigured, getDatabaseDriver } from "@/lib/config";
 
-let queryClient: NeonQueryFunction<false, false> | null = null;
+export type SqlRow = Record<string, any>;
+
+export interface SqlClient {
+  (strings: TemplateStringsArray, ...values: any[]): Promise<SqlRow[]>;
+}
+
+let queryClient: SqlClient | null = null;
+let postgresPool: Pool | null = null;
 let schemaPromise: Promise<void> | null = null;
 
-export function getSql(): NeonQueryFunction<false, false> {
+function getPostgresClient(): SqlClient {
+  if (!postgresPool) {
+    postgresPool = new Pool({ connectionString: process.env.DATABASE_URL });
+  }
+
+  const query = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const text = strings.reduce(
+      (statement, part, index) => statement + part + (index < values.length ? `$${index + 1}` : ""),
+      "",
+    );
+    const result = await postgresPool!.query(text, values);
+    return result.rows;
+  };
+
+  return query;
+}
+
+function getNeonClient(): SqlClient {
+  const client = neon(process.env.DATABASE_URL!);
+  return async (strings, ...values) => client(strings, ...values);
+}
+
+export function getSql(): SqlClient {
   assertConfigured("DATABASE_URL");
-  if (!queryClient) queryClient = neon(process.env.DATABASE_URL!);
+  if (!queryClient) {
+    queryClient = getDatabaseDriver() === "postgres"
+      ? getPostgresClient()
+      : getNeonClient();
+  }
   return queryClient;
 }
 

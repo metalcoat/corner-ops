@@ -1,4 +1,4 @@
-import { del } from "@vercel/blob";
+import { del } from "@/lib/storage";
 import { recordAuditEvent } from "@/lib/audit";
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { assertConfigured } from "@/lib/config";

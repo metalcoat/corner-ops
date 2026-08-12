@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "corner_ops_session";
 const publicPaths = [
+  "/api/health",
   "/api/auth/session",
   "/api/auth/password-reset/",
   "/api/timeclock",

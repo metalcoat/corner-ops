@@ -1,4 +1,4 @@
-import { del } from "@vercel/blob";
+import { del } from "@/lib/storage";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import { deleteOwnerMessage } from "@/lib/message-deletion";

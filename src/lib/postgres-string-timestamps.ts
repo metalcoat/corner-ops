@@ -1,4 +1,5 @@
 import { types } from "@neondatabase/serverless";
+import { types as postgresTypes } from "pg";
 
 let installed = false;
 
@@ -13,5 +14,7 @@ export function ensurePostgresStringTimestamps(): void {
   // PostgreSQL OIDs: timestamp without time zone = 1114, timestamptz = 1184.
   types.setTypeParser(1114, (value) => value);
   types.setTypeParser(1184, (value) => value);
+  postgresTypes.setTypeParser(1114, (value) => value);
+  postgresTypes.setTypeParser(1184, (value) => value);
   installed = true;
 }
