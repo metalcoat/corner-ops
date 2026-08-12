@@ -78,7 +78,25 @@ export async function publishValidatedScheduleWeek(input: {
     status: row.status,
   })), { enforceLoneWorker: input.business === "Corner Deli" });
 
+  const approvedTimeOffConflicts = await getSql()`
+    SELECT s.id AS shift_id, e.name AS employee_name, s.starts_at
+    FROM schedule_shifts s
+    JOIN employees e ON e.id = s.employee_id
+    JOIN time_off_requests t ON t.employee_id = s.employee_id AND t.business = s.business
+    WHERE s.business = ${input.business}
+      AND s.starts_at >= (${weekStart}::date AT TIME ZONE ${TIME_ZONE})
+      AND s.starts_at < ((${weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+      AND s.status <> 'Cancelled'
+      AND t.status = 'Approved'
+      AND (t.starts_on::date AT TIME ZONE ${TIME_ZONE}) < s.ends_at
+      AND ((t.ends_on::date + 1) AT TIME ZONE ${TIME_ZONE}) > s.starts_at
+    ORDER BY s.starts_at, e.name
+  ` as unknown as Array<{ shift_id: string; employee_name: string; starts_at: string }>;
+
   const problems: string[] = [];
+  if (approvedTimeOffConflicts.length) {
+    problems.push(`Approved time off conflicts: ${approvedTimeOffConflicts.slice(0, 8).map((item) => `${item.employee_name} at ${localStamp(item.starts_at)}`).join("; ")}. Reassign or open these shifts.`);
+  }
   if (analysis.overForty.length) {
     problems.push(`Over 40 paid hours: ${analysis.overForty.map((employee) => `${employee.employeeName} (${employee.hours.toFixed(1)} hrs)`).join(", ")}`);
   }

@@ -183,6 +183,7 @@ export async function POST(request: Request) {
           extraMealBreakMinutes: Number(body.extraMealBreakMinutes || 0),
           notes: body.notes ? String(body.notes) : "",
           actor: session.displayName,
+          acknowledgePendingTimeOff: body.acknowledgePendingTimeOff === true,
         }), { status: 201 });
       } catch (error) {
         return actionError(error, "The shift could not be created.");
@@ -211,6 +212,7 @@ export async function POST(request: Request) {
           extraMealBreakMinutes: body.extraMealBreakMinutes === undefined ? undefined : Number(body.extraMealBreakMinutes || 0),
           status: status as "Draft" | "Cancelled" | undefined,
           notes: body.notes === undefined ? undefined : String(body.notes || ""),
+          acknowledgePendingTimeOff: body.acknowledgePendingTimeOff === true,
         }));
       } catch (error) {
         return actionError(error, "The shift could not be updated.");

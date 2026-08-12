@@ -1,6 +1,7 @@
 import { ensureSchema, getSql } from "@/lib/db";
 import type { EmployeeSession } from "@/lib/employee-auth";
 import { sendStaffNotification } from "@/lib/staff-notifications";
+import { enforceScheduleTimeOff } from "@/lib/schedule-time-off";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -541,16 +542,48 @@ export async function requestTimeOff(session: EmployeeSession, input: { startsOn
 
 export async function reviewTimeOff(input: { id: string; business: Business; approve: boolean; managerNote?: string; actor: string }) {
   await ensureWorkforceSchema();
-  const rows = await getSql()`
+  const sql = getSql();
+  const requests = await sql`
+    SELECT t.id, t.employee_id, t.starts_on::text AS starts_on, t.ends_on::text AS ends_on, e.name AS employee_name
+    FROM time_off_requests t
+    JOIN employees e ON e.id = t.employee_id
+    WHERE t.id = ${input.id} AND t.business = ${input.business} AND t.status = 'Pending'
+    LIMIT 1
+  ` as unknown as Array<{ id: string; employee_id: string; starts_on: string; ends_on: string; employee_name: string }>;
+  const request = requests[0];
+  if (!request) throw new Error("Pending time-off request not found.");
+
+  await sql`
     UPDATE time_off_requests SET
       status = ${input.approve ? "Approved" : "Rejected"},
       manager_note = ${clean(input.managerNote, 1000)},
       reviewed_by = ${input.actor}, reviewed_at = NOW()
-    WHERE id = ${input.id} AND business = ${input.business} AND status = 'Pending'
-    RETURNING id
-  ` as unknown as Array<{ id: string }>;
-  if (!rows[0]) throw new Error("Pending time-off request not found.");
-  return { id: rows[0].id };
+    WHERE id = ${input.id}
+  `;
+
+  const conflicts = input.approve ? await sql`
+    SELECT id, starts_at, ends_at, position, status
+    FROM schedule_shifts
+    WHERE business = ${input.business}
+      AND employee_id = ${request.employee_id}
+      AND status <> 'Cancelled'
+      AND starts_at < ((${request.ends_on}::date + 1) AT TIME ZONE ${TIME_ZONE})
+      AND ends_at > (${request.starts_on}::date AT TIME ZONE ${TIME_ZONE})
+    ORDER BY starts_at
+  ` as unknown as Array<{ id: string; starts_at: string; ends_at: string; position: string; status: string }> : [];
+
+  return {
+    id: request.id,
+    employeeName: request.employee_name,
+    requiresReassignment: conflicts.length > 0,
+    conflictingShifts: conflicts.map((shift) => ({
+      id: String(shift.id),
+      startsAt: String(shift.starts_at),
+      endsAt: String(shift.ends_at),
+      position: clean(shift.position, 100),
+      status: clean(shift.status, 30),
+    })),
+  };
 }
 
 export async function createShiftRequest(session: EmployeeSession, input: {
@@ -573,6 +606,13 @@ export async function createShiftRequest(session: EmployeeSession, input: {
 
   if (input.requestType === "Claim") {
     if (shift.employee_id || shift.status !== "Open") throw new Error("That shift is no longer open.");
+    await enforceScheduleTimeOff({
+      business: session.business,
+      employeeId: session.employeeId,
+      startsAt: String(shift.starts_at),
+      endsAt: String(shift.ends_at),
+      acknowledgePendingTimeOff: true,
+    });
   } else if (String(shift.employee_id || "") !== session.employeeId) {
     throw new Error("You can only offer or swap one of your own shifts.");
   }
@@ -637,6 +677,19 @@ export async function reviewShiftRequest(input: { id: string; business: Business
 
   if (input.approve) {
     if (request.request_type === "Claim") {
+      const claimShift = await getSql()`
+        SELECT starts_at, ends_at FROM schedule_shifts
+        WHERE id = ${String(request.shift_id)} AND employee_id IS NULL AND status = 'Open'
+        LIMIT 1
+      ` as unknown as Array<{ starts_at: string; ends_at: string }>;
+      if (!claimShift[0]) throw new Error("That shift is no longer open.");
+      await enforceScheduleTimeOff({
+        business: input.business,
+        employeeId: String(request.requester_employee_id),
+        startsAt: claimShift[0].starts_at,
+        endsAt: claimShift[0].ends_at,
+        acknowledgePendingTimeOff: true,
+      });
       await getSql()`
         UPDATE schedule_shifts SET employee_id = ${String(request.requester_employee_id)}, status = 'Published', updated_at = NOW()
         WHERE id = ${String(request.shift_id)} AND employee_id IS NULL AND status = 'Open'
@@ -672,13 +725,27 @@ export async function reviewShiftRequest(input: { id: string; business: Business
       const offeredShiftId = String(request.offered_shift_id || "");
       if (!offeredShiftId) throw new Error("Swap request is missing the second shift.");
       const shiftRows = await getSql()`
-        SELECT id, employee_id FROM schedule_shifts
+        SELECT id, employee_id, starts_at, ends_at FROM schedule_shifts
         WHERE id IN (${String(request.shift_id)}, ${offeredShiftId})
         ORDER BY id
-      ` as unknown as Array<{ id: string; employee_id: string | null }>;
+      ` as unknown as Array<{ id: string; employee_id: string | null; starts_at: string; ends_at: string }>;
       const first = shiftRows.find((row) => row.id === String(request.shift_id));
       const second = shiftRows.find((row) => row.id === offeredShiftId);
       if (!first?.employee_id || !second?.employee_id) throw new Error("Both swap shifts must still be assigned.");
+      await enforceScheduleTimeOff({
+        business: input.business,
+        employeeId: second.employee_id,
+        startsAt: first.starts_at,
+        endsAt: first.ends_at,
+        acknowledgePendingTimeOff: true,
+      });
+      await enforceScheduleTimeOff({
+        business: input.business,
+        employeeId: first.employee_id,
+        startsAt: second.starts_at,
+        endsAt: second.ends_at,
+        acknowledgePendingTimeOff: true,
+      });
       await getSql()`UPDATE schedule_shifts SET employee_id = ${second.employee_id}, updated_at = NOW() WHERE id = ${first.id}`;
       await getSql()`UPDATE schedule_shifts SET employee_id = ${first.employee_id}, updated_at = NOW() WHERE id = ${second.id}`;
     }

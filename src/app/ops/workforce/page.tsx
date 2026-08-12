@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
-import ScheduleBoard, { type ScheduleEmployee, type ScheduleShift } from "./schedule-board";
+import ScheduleBoard, { type ScheduleEmployee, type ScheduleShift, type ScheduleTimeOff } from "./schedule-board";
 import WeekCopyPanel from "./week-copy-panel";
 import "./workforce.css";
 
@@ -29,13 +29,11 @@ type Correction = {
   reason: string;
   status: string;
 };
-type TimeOff = {
-  id: string;
+type TimeOff = ScheduleTimeOff & {
+  reason: string;
   employee_name: string;
   starts_on: string;
   ends_on: string;
-  reason: string;
-  status: string;
 };
 type Message = {
   id: string;
@@ -89,6 +87,27 @@ function dateOnly(value: string) {
     month: "short",
     day: "numeric",
     year: "numeric",
+  });
+}
+
+function newYorkDateKey(value: string | Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${map.year}-${map.month}-${map.day}`;
+}
+
+function timeOffShiftConflicts(request: TimeOff, shifts: ScheduleShift[]) {
+  return shifts.filter((shift) => {
+    if (shift.status === "Cancelled" || shift.employeeId !== request.employee_id) return false;
+    const shiftStart = newYorkDateKey(shift.startsAt);
+    const endInstant = new Date(Math.max(new Date(shift.startsAt).getTime(), new Date(shift.endsAt).getTime() - 1));
+    const shiftEnd = newYorkDateKey(endInstant);
+    return request.starts_on <= shiftEnd && request.ends_on >= shiftStart;
   });
 }
 
@@ -174,6 +193,34 @@ export default function WorkforcePage() {
     }
   }
 
+  async function approveTimeOff(request: TimeOff) {
+    const actionBusiness = businessRef.current;
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/workforce", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "time-off-review", business: actionBusiness, id: request.id, approve: true }),
+      });
+      const payload = await response.json().catch(() => null) as { error?: string; requiresReassignment?: boolean; conflictingShifts?: unknown[]; employeeName?: string } | null;
+      if (!response.ok) throw new Error(payload?.error || `Request failed (${response.status}).`);
+      if (businessRef.current === actionBusiness) {
+        await load(actionBusiness);
+        if (businessRef.current === actionBusiness) {
+          const count = payload?.conflictingShifts?.length || 0;
+          setNotice(payload?.requiresReassignment
+            ? `Time off approved. ${payload.employeeName || request.employee_name} is already assigned to ${count} conflicting shift${count === 1 ? "" : "s"}. Reassign or open ${count === 1 ? "that shift" : "those shifts"} before publishing/resending.`
+            : "Time off approved.");
+        }
+      }
+    } catch (error) {
+      if (businessRef.current === actionBusiness) setNotice(error instanceof Error ? error.message : "Time off could not be approved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
@@ -246,6 +293,7 @@ export default function WorkforcePage() {
         business={business}
         employees={activeEmployees}
         shifts={currentData?.shifts || []}
+        timeOff={currentData?.timeOff || []}
         busy={busy}
         runAction={action}
       />
@@ -273,7 +321,10 @@ export default function WorkforcePage() {
       </article>
       <article className="workforcePanel">
         <div className="wfPanelHeader"><div><p className="wfEyebrow">Requested days away</p><h2>Time off</h2></div></div>
-        <div className="wfList">{(currentData?.timeOff || []).map((request) => <div className="wfRequest" key={request.id}><div><strong>{request.employee_name}</strong><span>{dateOnly(request.starts_on)} through {dateOnly(request.ends_on)}</span>{request.reason && <p>{request.reason}</p>}</div><div className="wfActions"><span className={`wfBadge ${request.status.toLowerCase()}`}>{request.status}</span>{request.status === "Pending" && <><button disabled={busy} onClick={() => void action({ action: "time-off-review", id: request.id, approve: true }, "Time off approved.").catch(() => undefined)}>Approve</button><button disabled={busy} onClick={() => void action({ action: "time-off-review", id: request.id, approve: false }, "Time off rejected.").catch(() => undefined)}>Reject</button></>}</div></div>)}{!currentData?.timeOff.length && <p className="wfEmpty">No time-off requests.</p>}</div>
+        <div className="wfList">{(currentData?.timeOff || []).map((request) => {
+          const conflicts = timeOffShiftConflicts(request, currentData?.shifts || []);
+          return <div className="wfRequest" key={request.id}><div><strong>{request.employee_name}</strong><span>{dateOnly(request.starts_on)} through {dateOnly(request.ends_on)}</span>{request.reason && <p>{request.reason}</p>}{conflicts.length > 0 && <p className="wfTimeOffConflict"><strong>Schedule conflict:</strong> already assigned to {conflicts.map((shift) => `${local(shift.startsAt)}–${new Date(shift.endsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`).join("; ")}. {request.status === "Pending" ? "Approving this request will require reassignment." : request.status === "Approved" ? "Reassign or open the conflicting shift." : ""}</p>}</div><div className="wfActions"><span className={`wfBadge ${request.status.toLowerCase()}`}>{request.status}</span>{request.status === "Pending" && <><button disabled={busy} onClick={() => void approveTimeOff(request)}>Approve</button><button disabled={busy} onClick={() => void action({ action: "time-off-review", id: request.id, approve: false }, "Time off rejected.").catch(() => undefined)}>Reject</button></>}</div></div>;
+        })}{!currentData?.timeOff.length && <p className="wfEmpty">No time-off requests.</p>}</div>
       </article>
     </section>}
 

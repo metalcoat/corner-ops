@@ -45,6 +45,35 @@ export async function copyScheduleWeekToTarget(input: {
   if (!sourceCount) throw new Error("No shifts were found in the selected source week.");
 
   const inserted = await sql`
+    WITH source_shifts AS (
+      SELECT
+        s.*,
+        COALESCE(e.active, FALSE) AS employee_active,
+        ((s.starts_at AT TIME ZONE ${TIME_ZONE}) + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day') AT TIME ZONE ${TIME_ZONE} AS target_starts_at,
+        ((s.ends_at AT TIME ZONE ${TIME_ZONE}) + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day') AT TIME ZONE ${TIME_ZONE} AS target_ends_at,
+        CASE WHEN s.meal_break_start IS NULL THEN NULL ELSE ((s.meal_break_start AT TIME ZONE ${TIME_ZONE}) + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day') AT TIME ZONE ${TIME_ZONE} END AS target_meal_break_start,
+        CASE WHEN s.extra_meal_break_start IS NULL THEN NULL ELSE ((s.extra_meal_break_start AT TIME ZONE ${TIME_ZONE}) + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day') AT TIME ZONE ${TIME_ZONE} END AS target_extra_meal_break_start
+      FROM schedule_shifts s
+      LEFT JOIN employees e ON e.id = s.employee_id AND e.business = s.business
+      WHERE s.business = ${input.business}
+        AND s.starts_at >= (${sourceWeekStart}::date AT TIME ZONE ${TIME_ZONE})
+        AND s.starts_at < ((${sourceWeekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+        AND s.status <> 'Cancelled'
+    ), prepared AS (
+      SELECT source_shifts.*,
+        CASE
+          WHEN employee_active = TRUE AND employee_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM time_off_requests t
+            WHERE t.business = source_shifts.business
+              AND t.employee_id = source_shifts.employee_id
+              AND t.status = 'Approved'
+              AND (t.starts_on::date AT TIME ZONE ${TIME_ZONE}) < source_shifts.target_ends_at
+              AND ((t.ends_on::date + 1) AT TIME ZONE ${TIME_ZONE}) > source_shifts.target_starts_at
+          ) THEN employee_id
+          ELSE NULL
+        END AS target_employee_id
+      FROM source_shifts
+    )
     INSERT INTO schedule_shifts (
       id, business, employee_id, position, starts_at, ends_at,
       meal_break_start, meal_break_minutes,
@@ -52,57 +81,19 @@ export async function copyScheduleWeekToTarget(input: {
       status, notes, created_by, published_at, created_at, updated_at
     )
     SELECT
-      gen_random_uuid(),
-      s.business,
-      CASE WHEN COALESCE(e.active, FALSE) = TRUE THEN s.employee_id ELSE NULL END,
-      s.position,
-      (
-        (s.starts_at AT TIME ZONE ${TIME_ZONE})
-        + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day'
-      ) AT TIME ZONE ${TIME_ZONE},
-      (
-        (s.ends_at AT TIME ZONE ${TIME_ZONE})
-        + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day'
-      ) AT TIME ZONE ${TIME_ZONE},
-      CASE WHEN s.meal_break_start IS NULL THEN NULL ELSE (
-        (s.meal_break_start AT TIME ZONE ${TIME_ZONE})
-        + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day'
-      ) AT TIME ZONE ${TIME_ZONE} END,
-      s.meal_break_minutes,
-      CASE WHEN s.extra_meal_break_start IS NULL THEN NULL ELSE (
-        (s.extra_meal_break_start AT TIME ZONE ${TIME_ZONE})
-        + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day'
-      ) AT TIME ZONE ${TIME_ZONE} END,
-      s.extra_meal_break_minutes,
-      'Draft',
-      s.notes,
-      ${input.actor},
-      NULL,
-      NOW(),
-      NOW()
-    FROM schedule_shifts s
-    LEFT JOIN employees e ON e.id = s.employee_id AND e.business = s.business
-    WHERE s.business = ${input.business}
-      AND s.starts_at >= (${sourceWeekStart}::date AT TIME ZONE ${TIME_ZONE})
-      AND s.starts_at < ((${sourceWeekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
-      AND s.status <> 'Cancelled'
-      AND NOT EXISTS (
-        SELECT 1
-        FROM schedule_shifts existing
-        WHERE existing.business = s.business
-          AND existing.status <> 'Cancelled'
-          AND existing.employee_id IS NOT DISTINCT FROM
-            CASE WHEN COALESCE(e.active, FALSE) = TRUE THEN s.employee_id ELSE NULL END
-          AND existing.position = s.position
-          AND existing.starts_at = (
-            (s.starts_at AT TIME ZONE ${TIME_ZONE})
-            + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day'
-          ) AT TIME ZONE ${TIME_ZONE}
-          AND existing.ends_at = (
-            (s.ends_at AT TIME ZONE ${TIME_ZONE})
-            + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day'
-          ) AT TIME ZONE ${TIME_ZONE}
-      )
+      gen_random_uuid(), business, target_employee_id, position, target_starts_at, target_ends_at,
+      target_meal_break_start, meal_break_minutes, target_extra_meal_break_start, extra_meal_break_minutes,
+      'Draft', notes, ${input.actor}, NULL, NOW(), NOW()
+    FROM prepared
+    WHERE NOT EXISTS (
+      SELECT 1 FROM schedule_shifts existing
+      WHERE existing.business = prepared.business
+        AND existing.status <> 'Cancelled'
+        AND existing.employee_id IS NOT DISTINCT FROM prepared.target_employee_id
+        AND existing.position = prepared.position
+        AND existing.starts_at = prepared.target_starts_at
+        AND existing.ends_at = prepared.target_ends_at
+    )
     RETURNING id, employee_id
   ` as unknown as Array<{ id: string; employee_id: string | null }>;
 

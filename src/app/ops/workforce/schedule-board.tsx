@@ -5,6 +5,7 @@ import { positionsForBusiness } from "@/lib/business-positions";
 import {
   analyzeShiftMealCompliance,
   mealRequirements,
+  newYorkDateKey,
   newYorkTimeValue,
   shiftTimeForSelectedDay,
 } from "@/lib/schedule-meal-compliance";
@@ -21,6 +22,16 @@ export type ScheduleEmployee = {
   active: boolean;
   scheduleColor: string;
   avatarSet: boolean;
+};
+
+
+export type ScheduleTimeOff = {
+  id: string;
+  employee_id: string;
+  employee_name: string;
+  starts_on: string;
+  ends_on: string;
+  status: string;
 };
 
 export type ScheduleShift = {
@@ -45,6 +56,7 @@ type Props = {
   business: Business;
   employees: ScheduleEmployee[];
   shifts: ScheduleShift[];
+  timeOff: ScheduleTimeOff[];
   busy: boolean;
   runAction: (body: Record<string, unknown>, success: string) => Promise<void>;
 };
@@ -238,6 +250,31 @@ function moveShiftToCell(
   };
 }
 
+function timeOffKey(value: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(String(value || ""));
+  return match?.[1] || "";
+}
+
+function timeOffOverlapsShift(request: ScheduleTimeOff, employeeId: string | null, startsAt: string | Date, endsAt: string | Date): boolean {
+  if (!employeeId || request.employee_id !== employeeId || !["Pending", "Approved"].includes(request.status)) return false;
+  const start = new Date(startsAt);
+  const end = new Date(endsAt);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
+  const lastInstant = new Date(Math.max(start.getTime(), end.getTime() - 1));
+  const shiftStart = newYorkDateKey(start);
+  const shiftEnd = newYorkDateKey(lastInstant);
+  return timeOffKey(request.starts_on) <= shiftEnd && timeOffKey(request.ends_on) >= shiftStart;
+}
+
+function timeOffLabel(request: ScheduleTimeOff): string {
+  const start = dateFromKey(timeOffKey(request.starts_on));
+  const end = dateFromKey(timeOffKey(request.ends_on));
+  if (timeOffKey(request.starts_on) === timeOffKey(request.ends_on)) {
+    return start.toLocaleDateString([], { month: "short", day: "numeric" });
+  }
+  return `${start.toLocaleDateString([], { month: "short", day: "numeric" })}–${end.toLocaleDateString([], { month: "short", day: "numeric" })}`;
+}
+
 function cellKey(employeeId: string | null, dayKeyValue: string): string {
   return `${employeeId || UNASSIGNED_KEY}|${dayKeyValue}`;
 }
@@ -255,7 +292,7 @@ function TimeSelect({ value, onChange, required = false, allowBlank = false, opt
   </select>;
 }
 
-export default function ScheduleBoard({ business, employees, shifts, busy, runAction }: Props) {
+export default function ScheduleBoard({ business, employees, shifts, timeOff, busy, runAction }: Props) {
   const [weekStart, setWeekStart] = useState(() => startOfMonday(new Date()));
   const [copiedShift, setCopiedShift] = useState<ScheduleShift | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -327,6 +364,35 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
   const publishedCount = weekShifts.filter((shift) => shift.status === "Published" || shift.status === "Open").length;
   const missingEmailCount = activeEmployees.filter((employee) => !employee.email.trim()).length;
 
+  const assignmentTimeOff = (employeeId: string | null, startsAt: string | Date, endsAt: string | Date) =>
+    timeOff.filter((request) => timeOffOverlapsShift(request, employeeId, startsAt, endsAt));
+
+  const approvedTimeOffShiftConflicts = weekShifts.flatMap((shift) =>
+    assignmentTimeOff(shift.employeeId, shift.startsAt, shift.endsAt)
+      .filter((request) => request.status === "Approved")
+      .map((request) => ({ shift, request })),
+  );
+  const pendingTimeOffShiftConflicts = weekShifts.flatMap((shift) =>
+    assignmentTimeOff(shift.employeeId, shift.startsAt, shift.endsAt)
+      .filter((request) => request.status === "Pending")
+      .map((request) => ({ shift, request })),
+  );
+
+  function confirmTimeOffAssignment(employeeId: string | null, startsAt: string | Date, endsAt: string | Date) {
+    const conflicts = assignmentTimeOff(employeeId, startsAt, endsAt);
+    const approved = conflicts.find((request) => request.status === "Approved");
+    if (approved) {
+      window.alert(`${approved.employee_name} has APPROVED time off ${timeOffLabel(approved)}. Reassign the shift or leave it open.`);
+      return { allowed: false, acknowledgePendingTimeOff: false };
+    }
+    const pending = conflicts.find((request) => request.status === "Pending");
+    if (pending) {
+      const allowed = window.confirm(`${pending.employee_name} has a PENDING time-off request ${timeOffLabel(pending)}.\n\nAssign this shift anyway while the request is still pending?`);
+      return { allowed, acknowledgePendingTimeOff: allowed };
+    }
+    return { allowed: true, acknowledgePendingTimeOff: false };
+  }
+
   const shiftsByCell = useMemo(() => {
     const map = new Map<string, ScheduleShift[]>();
     for (const shift of weekShifts) {
@@ -372,6 +438,20 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       return null;
     }
   }, [editor, employeeById, loneWorkerApplies, weekEnd, weekShifts, weekStart]);
+
+  const editorTimeOff = useMemo(() => {
+    if (!editor?.employeeId) return { approved: [] as ScheduleTimeOff[], pending: [] as ScheduleTimeOff[] };
+    try {
+      const { start, end } = editorDates(editor);
+      const conflicts = timeOff.filter((request) => timeOffOverlapsShift(request, editor.employeeId, start, end));
+      return {
+        approved: conflicts.filter((request) => request.status === "Approved"),
+        pending: conflicts.filter((request) => request.status === "Pending"),
+      };
+    } catch {
+      return { approved: [] as ScheduleTimeOff[], pending: [] as ScheduleTimeOff[] };
+    }
+  }, [editor, timeOff]);
 
   const primaryMealTimeOptions = useMemo(
     () => editor ? mealStartOptions(editor, "primary") : [],
@@ -437,6 +517,8 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       return;
     }
     const { start, end, mealBreakStart, extraMealBreakStart } = editorDates(editor);
+    const timeOffCheck = confirmTimeOffAssignment(editor.employeeId, start, end);
+    if (!timeOffCheck.allowed) return;
     await runAction({
       action: editor.shift ? "shift-update" : "shift-create",
       id: editor.shift?.id,
@@ -450,12 +532,15 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       extraMealBreakMinutes: editor.extraMealBreakMinutes,
       status: "Draft",
       notes: editor.notes,
+      acknowledgePendingTimeOff: timeOffCheck.acknowledgePendingTimeOff,
     }, editor.shift ? "Shift updated and marked for publishing." : "Draft shift added.");
     setEditor(null);
   }
 
   async function moveShift(shift: ScheduleShift, targetDay: Date, employeeId: string | null) {
     const moved = moveShiftToCell(shift, targetDay, employeeId);
+    const timeOffCheck = confirmTimeOffAssignment(employeeId, moved.startsAt, moved.endsAt);
+    if (!timeOffCheck.allowed) return;
     await runAction({
       action: "shift-update",
       id: shift.id,
@@ -467,12 +552,15 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       extraMealBreakStart: moved.extraMealBreakStart || null,
       extraMealBreakMinutes: moved.extraMealBreakMinutes || 0,
       status: "Draft",
+      acknowledgePendingTimeOff: timeOffCheck.acknowledgePendingTimeOff,
     }, "Shift moved and marked for publishing.");
   }
 
   async function pasteShift(targetDay: Date, employeeId: string | null) {
     if (!copiedShift) return;
     const copied = moveShiftToCell(copiedShift, targetDay, employeeId);
+    const timeOffCheck = confirmTimeOffAssignment(employeeId, copied.startsAt, copied.endsAt);
+    if (!timeOffCheck.allowed) return;
     await runAction({
       action: "shift-create",
       employeeId,
@@ -484,10 +572,22 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
       extraMealBreakStart: copied.extraMealBreakStart || null,
       extraMealBreakMinutes: copied.extraMealBreakMinutes || 0,
       notes: copied.notes,
+      acknowledgePendingTimeOff: timeOffCheck.acknowledgePendingTimeOff,
     }, "Copied shift pasted as a draft.");
   }
 
   async function publishWeek() {
+    if (approvedTimeOffShiftConflicts.length) {
+      const details = approvedTimeOffShiftConflicts.slice(0, 10).map(({ shift, request }) =>
+        `${request.employee_name}: ${localDateTime(shift.startsAt)}–${localTime(shift.endsAt)} (${timeOffLabel(request)} approved off)`,
+      );
+      window.alert(`The schedule cannot be published/resend yet. Approved time off conflicts with assigned shifts:\n\n${details.join("\n")}\n\nReassign those shifts or make them open.`);
+      return;
+    }
+    if (pendingTimeOffShiftConflicts.length) {
+      const names = Array.from(new Set(pendingTimeOffShiftConflicts.map(({ request }) => `${request.employee_name} (${timeOffLabel(request)})`)));
+      if (!window.confirm(`There are pending time-off requests that overlap assigned shifts:\n\n${names.join("\n")}\n\nPublish anyway while those requests are pending?`)) return;
+    }
     if (!publishAnalysis.canPublish) {
       const details = [
         ...publishAnalysis.overForty.map((employee) => `${employee.employeeName}: ${employee.hours.toFixed(1)} paid hours`),
@@ -523,7 +623,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
   }
 
   const positionOptions = positionsForBusiness(business);
-  const issueCount = publishAnalysis.blockingIssueCount + publishAnalysis.overThirtyEight.length;
+  const issueCount = publishAnalysis.blockingIssueCount + publishAnalysis.overThirtyEight.length + approvedTimeOffShiftConflicts.length + pendingTimeOffShiftConflicts.length;
 
   return <section className="scheduleBoardPanel">
     <header className="scheduleToolbar">
@@ -541,7 +641,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
         <button type="button" onClick={() => setWeekStart(addDays(weekStart, -7))}>← Previous</button>
         <button type="button" onClick={() => setWeekStart(startOfMonday(new Date()))}>Today</button>
         <button type="button" onClick={() => setWeekStart(addDays(weekStart, 7))}>Next →</button>
-        <button type="button" className="schedulePrimary" disabled={busy || !weekShifts.length || !publishAnalysis.canPublish} onClick={() => void publishWeek()}>
+        <button type="button" className="schedulePrimary" disabled={busy || !weekShifts.length || !publishAnalysis.canPublish || approvedTimeOffShiftConflicts.length > 0} onClick={() => void publishWeek()}>
           {draftCount > 0 ? `Publish (${draftCount})` : "Resend"}
         </button>
         <button type="button" className="schedulePrimary" onClick={() => setEditor(defaultEditor(activeEmployees[0]?.id || null, weekStart, activeEmployees[0]))}>+ Shift</button>
@@ -557,6 +657,7 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
           <span className={publishAnalysis.overlaps.length ? "danger" : "clear"}>{publishAnalysis.overlaps.length} overlap</span>
           <span className={publishAnalysis.coverageGaps.length ? "danger" : "clear"}>{publishAnalysis.coverageGaps.length} gap</span>
           <span className={publishAnalysis.mealPeriodViolations.length ? "warning" : "clear"}>{publishAnalysis.mealPeriodViolations.length} meal</span>
+          <span className={approvedTimeOffShiftConflicts.length ? "danger" : pendingTimeOffShiftConflicts.length ? "warning" : "clear"}>{approvedTimeOffShiftConflicts.length ? `${approvedTimeOffShiftConflicts.length} time-off conflict` : pendingTimeOffShiftConflicts.length ? `${pendingTimeOffShiftConflicts.length} pending off` : "time off clear"}</span>
           {loneWorkerApplies && <span className={publishAnalysis.loneWorkerViolations.length ? "danger" : "clear"}>{publishAnalysis.loneWorkerViolations.length} alone</span>}
         </div>
       </div>
@@ -569,6 +670,8 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
           {publishAnalysis.coverageGaps.map((gap) => <div className="scheduleIssue danger" key={`${gap.dateKey}-${gap.startsAt}`}><strong>No employee coverage</strong><span>{localDateTime(gap.startsAt)}–{localTime(gap.endsAt)} ({gap.minutes} minutes).</span></div>)}
           {publishAnalysis.mealPeriodViolations.map((item) => <div className="scheduleIssue warning" key={`${item.shiftId}-${item.code}`}><strong>{item.employeeName}</strong><span>{item.message}</span></div>)}
           {publishAnalysis.loneWorkerViolations.map((item) => <div className="scheduleIssue danger" key={`${item.employeeId}-${item.startsAt}`}><strong>{item.employeeName}</strong><span>Alone {item.minutes} minutes starting {localDateTime(item.startsAt)}.</span></div>)}
+          {approvedTimeOffShiftConflicts.map(({ shift, request }) => <div className="scheduleIssue danger" key={`off-approved-${shift.id}-${request.id}`}><strong>{request.employee_name}</strong><span>Approved off {timeOffLabel(request)} but assigned {localDateTime(shift.startsAt)}–{localTime(shift.endsAt)}. Reassign or open this shift.</span></div>)}
+          {pendingTimeOffShiftConflicts.map(({ shift, request }) => <div className="scheduleIssue warning" key={`off-pending-${shift.id}-${request.id}`}><strong>{request.employee_name}</strong><span>Pending time-off request {timeOffLabel(request)} overlaps {localDateTime(shift.startsAt)}–{localTime(shift.endsAt)}.</span></div>)}
         </div>
       </details>}
     </section>
@@ -602,9 +705,12 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
             {weekDays.map((day) => {
               const dayKeyValue = dateKey(day);
               const shiftsInCell = shiftsByCell.get(cellKey(row.employeeId, dayKeyValue)) || [];
+              const dayTimeOff = row.employeeId ? timeOff.filter((request) => request.employee_id === row.employeeId && ["Pending", "Approved"].includes(request.status) && timeOffKey(request.starts_on) <= dayKeyValue && timeOffKey(request.ends_on) >= dayKeyValue) : [];
+              const approvedDayOff = dayTimeOff.find((request) => request.status === "Approved");
+              const pendingDayOff = dayTimeOff.find((request) => request.status === "Pending");
               const isTarget = dragTarget?.dayKey === dayKeyValue && dragTarget.employeeId === row.employeeId;
               return <div
-                className={`scheduleGridCell ${isTarget ? "dragTarget" : ""} ${draggingId ? "dragReady" : ""}`}
+                className={`scheduleGridCell ${isTarget ? "dragTarget" : ""} ${draggingId ? "dragReady" : ""} ${approvedDayOff ? "timeOffApproved" : pendingDayOff ? "timeOffPending" : ""}`}
                 role="gridcell"
                 key={`${row.key}-${dayKeyValue}`}
                 onDragOver={(event) => {
@@ -614,9 +720,11 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
                 }}
                 onDrop={(event) => void onDrop(event, day, row.employeeId)}
               >
+                {approvedDayOff && <div className="scheduleTimeOffCellBadge approved">Approved off</div>}
+                {!approvedDayOff && pendingDayOff && <div className="scheduleTimeOffCellBadge pending">Time off pending</div>}
                 <div className="scheduleCellActions">
-                  <button type="button" title={`Add ${row.name} shift`} onClick={() => setEditor(defaultEditor(row.employeeId, day, row.employee || undefined))}>+</button>
-                  {copiedShift && <button type="button" onClick={() => void pasteShift(day, row.employeeId)}>Paste</button>}
+                  <button type="button" disabled={Boolean(approvedDayOff)} title={approvedDayOff ? `${row.name} has approved time off` : `Add ${row.name} shift`} onClick={() => setEditor(defaultEditor(row.employeeId, day, row.employee || undefined))}>+</button>
+                  {copiedShift && <button type="button" disabled={Boolean(approvedDayOff)} onClick={() => void pasteShift(day, row.employeeId)}>Paste</button>}
                 </div>
                 <div className="scheduleCellShifts">
                   {shiftsInCell.map((shift) => {
@@ -626,6 +734,9 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
                     const hasOverlap = overlapShiftIds.has(shift.id);
                     const hasLoneWorker = loneShiftIds.has(shift.id);
                     const hasMealIssue = mealViolationShiftIds.has(shift.id);
+                    const shiftTimeOff = assignmentTimeOff(shift.employeeId, shift.startsAt, shift.endsAt);
+                    const approvedShiftOff = shiftTimeOff.find((request) => request.status === "Approved");
+                    const pendingShiftOff = shiftTimeOff.find((request) => request.status === "Pending");
                     const meal = analyzeShiftMealCompliance(shift);
                     return <div
                       className={`scheduleShiftCard compact ${shift.status.toLowerCase()} ${draggingId === shift.id ? "dragging" : ""} hours-${hourStatus?.risk || "normal"} ${hasOverlap ? "hasOverlap" : ""} ${hasLoneWorker ? "hasLoneWorker" : ""} ${hasMealIssue ? "hasMealIssue" : ""}`}
@@ -646,6 +757,8 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
                             {hasOverlap && <b className="safetyDanger">Overlap</b>}
                             {hasLoneWorker && <b className="safetyDanger">Alone</b>}
                             {hasMealIssue && <b className="scheduleMealBadge">Meal</b>}
+                            {approvedShiftOff && <b className="safetyDanger">TIME OFF</b>}
+                            {!approvedShiftOff && pendingShiftOff && <b className="hoursWarning">Off?</b>}
                             {shift.notes && <b className="noteBadge">Notes</b>}
                           </span>
                         </span>
@@ -676,6 +789,9 @@ export default function ScheduleBoard({ business, employees, shifts, busy, runAc
           <label>Position{business === "Corner Deli"
             ? <select value={editor.position} onChange={(event) => setEditor((current) => current ? { ...current, position: event.target.value } : current)} required><option value="">Choose position</option>{positionOptions.map((position) => <option key={position} value={position}>{position}</option>)}</select>
             : <input value={editor.position} onChange={(event) => setEditor((current) => current ? { ...current, position: event.target.value } : current)} required />}</label>
+
+          {editorTimeOff.approved.length > 0 && <div className="scheduleTimeOffEditorWarning approved"><strong>Cannot assign this shift</strong><span>{editorTimeOff.approved[0].employee_name} has approved time off {timeOffLabel(editorTimeOff.approved[0])}. Choose another employee, date, or leave the shift open.</span></div>}
+          {editorTimeOff.approved.length === 0 && editorTimeOff.pending.length > 0 && <div className="scheduleTimeOffEditorWarning pending"><strong>Pending time-off request</strong><span>{editorTimeOff.pending[0].employee_name} requested {timeOffLabel(editorTimeOff.pending[0])} off. You can still assign the shift, but you will be asked to confirm.</span></div>}
 
           {editorPreview && <section className="scheduleMealPlanner">
             <header><div><h3>Meal-period compliance</h3><p>Off-duty meals reduce paid hours and staffing coverage.</p></div>{editorPreview.meals.requirements.length > 0 && <button type="button" onClick={applyRequiredMeals}>Apply required meals</button>}</header>

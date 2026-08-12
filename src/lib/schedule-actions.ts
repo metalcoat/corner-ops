@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { ensureScheduleMealSchema, normalizeScheduledMealFields } from "@/lib/schedule-meal-storage";
 import { normalizeScheduleTimeRange } from "@/lib/schedule-time-range";
+import { enforceScheduleTimeOff } from "@/lib/schedule-time-off";
 import type { Business } from "@/lib/types";
 
 function clean(value: unknown, max = 500): string {
@@ -20,6 +21,7 @@ export async function updateScheduleShiftSafely(input: {
   extraMealBreakMinutes?: number;
   status?: "Draft" | "Published" | "Open" | "Cancelled";
   notes?: string;
+  acknowledgePendingTimeOff?: boolean;
 }) {
   await ensureScheduleMealSchema();
   const sql = getSql();
@@ -72,6 +74,13 @@ export async function updateScheduleShiftSafely(input: {
       LIMIT 1
     ` as unknown as Array<{ id: string }>;
     if (overlap[0]) throw new Error("That employee already has an overlapping shift.");
+    await enforceScheduleTimeOff({
+      business: input.business,
+      employeeId,
+      startsAt: start,
+      endsAt: end,
+      acknowledgePendingTimeOff: input.acknowledgePendingTimeOff,
+    });
   }
 
   await sql`
