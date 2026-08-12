@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 
 let orderingSchemaPromise: Promise<void> | null = null;
@@ -75,6 +76,31 @@ export function ensureOrderingSchema(): Promise<void> {
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS ordering_menu_categories_business_idx ON ordering_menu_categories (business, active, sort_order, name)`;
+      await sql`ALTER TABLE ordering_menu_categories ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES ordering_menu_categories(id) ON DELETE SET NULL`;
+      await sql`ALTER TABLE ordering_menu_categories ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE ordering_menu_categories ADD COLUMN IF NOT EXISTS presentation_only BOOLEAN NOT NULL DEFAULT FALSE`;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_menu_categories_parent_idx ON ordering_menu_categories (business, parent_id, active, sort_order, name)`;
+
+      // Rezku's authoritative category names contain paths separated by " / ".
+      // Materialize only those explicit paths; never guess relationships.
+      const categoryPaths = await sql`SELECT id, business, name, sort_order FROM ordering_menu_categories WHERE active = TRUE`;
+      for (const category of categoryPaths) {
+        const parts = String(category.name).split(" / ").map((part) => part.trim()).filter(Boolean);
+        if (parts.length < 2) {
+          await sql`UPDATE ordering_menu_categories SET display_name = ${parts[0] || String(category.name)}, parent_id = NULL,
+            presentation_only = CASE WHEN EXISTS (SELECT 1 FROM ordering_menu_items WHERE category_id = ${category.id}) THEN FALSE ELSE presentation_only END
+            WHERE id = ${category.id}`;
+          continue;
+        }
+        const parentName = parts.slice(0, -1).join(" / ");
+        const parents = await sql`
+          INSERT INTO ordering_menu_categories (id, business, name, display_name, sort_order, active, presentation_only)
+          VALUES (${randomUUID()}, ${category.business}, ${parentName}, ${parts[parts.length - 2]}, ${category.sort_order}, TRUE, TRUE)
+          ON CONFLICT (business, name) DO UPDATE SET active = TRUE, updated_at = NOW()
+          RETURNING id
+        `;
+        await sql`UPDATE ordering_menu_categories SET parent_id = ${parents[0].id}, display_name = ${parts[parts.length - 1]}, presentation_only = FALSE WHERE id = ${category.id}`;
+      }
 
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_menu_items (

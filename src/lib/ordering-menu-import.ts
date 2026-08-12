@@ -268,6 +268,18 @@ async function upsertCategory(input: {
   runId: string;
 }): Promise<string> {
   const sql = getSql();
+  const parts = clean(input.category.name).split(" / ").map((part) => part.trim()).filter(Boolean);
+  let parentId: string | null = null;
+  if (parts.length > 1) {
+    const parentName = parts.slice(0, -1).join(" / ");
+    const parents = await sql`
+      INSERT INTO ordering_menu_categories (id, business, name, display_name, sort_order, active, presentation_only)
+      VALUES (${randomUUID()}, ${input.snapshot.business}, ${parentName}, ${parts[parts.length - 2]}, ${Math.trunc(input.category.sortOrder ?? 0)}, TRUE, TRUE)
+      ON CONFLICT (business, name) DO UPDATE SET active = TRUE, updated_at = NOW()
+      RETURNING id
+    ` as IdRow[];
+    parentId = parents[0].id;
+  }
   const mapped = await mappedInternalId({
     business: input.snapshot.business,
     source: input.snapshot.source,
@@ -280,6 +292,9 @@ async function upsertCategory(input: {
     const updated = (await sql`
       UPDATE ordering_menu_categories
       SET name = ${clean(input.category.name)},
+          display_name = ${parts[parts.length - 1] || clean(input.category.name)},
+          parent_id = ${parentId},
+          presentation_only = FALSE,
           sort_order = ${Math.trunc(input.category.sortOrder ?? 0)},
           active = TRUE,
           updated_at = NOW()
@@ -291,9 +306,12 @@ async function upsertCategory(input: {
 
   if (!id) {
     const rows = (await sql`
-      INSERT INTO ordering_menu_categories (id, business, name, sort_order, active)
-      VALUES (${randomUUID()}, ${input.snapshot.business}, ${clean(input.category.name)}, ${Math.trunc(input.category.sortOrder ?? 0)}, TRUE)
+      INSERT INTO ordering_menu_categories (id, business, name, display_name, parent_id, presentation_only, sort_order, active)
+      VALUES (${randomUUID()}, ${input.snapshot.business}, ${clean(input.category.name)}, ${parts[parts.length - 1] || clean(input.category.name)}, ${parentId}, FALSE, ${Math.trunc(input.category.sortOrder ?? 0)}, TRUE)
       ON CONFLICT (business, name) DO UPDATE SET
+        display_name = EXCLUDED.display_name,
+        parent_id = EXCLUDED.parent_id,
+        presentation_only = FALSE,
         sort_order = EXCLUDED.sort_order,
         active = TRUE,
         updated_at = NOW()

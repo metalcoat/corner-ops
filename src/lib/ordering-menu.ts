@@ -2,7 +2,7 @@ import { getSql } from "@/lib/db";
 import { ensureOrderingChannelSchema } from "@/lib/ordering-channel-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 
-type CategoryRow = { id: string; name: string; sort_order: number };
+type CategoryRow = { id: string; name: string; display_name: string; parent_id: string | null; presentation_only: boolean; sort_order: number };
 type ItemRow = { id: string; category_id: string; name: string; description: string; sku: string; base_price_cents: number; taxable: boolean; available: boolean; sort_order: number };
 type ModifierRow = {
   item_id: string; group_id: string; group_name: string; prompt: string;
@@ -26,12 +26,12 @@ export type OrderingComboOptionView = { id: string; name: string; menuItemId: st
 export type OrderingComboGroupView = { id: string; name: string; prompt: string; minSelections: number; maxSelections: number; options: OrderingComboOptionView[] };
 export type OrderingComboView = { id: string; name: string; prompt: string; basePriceDeltaCents: number; groups: OrderingComboGroupView[] };
 export type OrderingMenuItemView = { id: string; categoryId: string; name: string; description: string; sku: string; basePriceCents: number; taxable: boolean; available: boolean; modifiers: OrderingModifierGroupView[]; combos: OrderingComboView[] };
-export type OrderingMenuCategoryView = { id: string; name: string; items: OrderingMenuItemView[] };
+export type OrderingMenuCategoryView = { id: string; name: string; displayName: string; parentId: string | null; presentationOnly: boolean; sortOrder: number; items: OrderingMenuItemView[] };
 
 export async function orderingMenu(business: OrderingBusiness): Promise<OrderingMenuCategoryView[]> {
   await ensureOrderingChannelSchema();
   const sql = getSql();
-  const categories = (await sql`SELECT id, name, sort_order FROM ordering_menu_categories WHERE business = ${business} AND active = TRUE ORDER BY sort_order, name`) as CategoryRow[];
+  const categories = (await sql`SELECT id, name, display_name, parent_id, presentation_only, sort_order FROM ordering_menu_categories WHERE business = ${business} AND active = TRUE ORDER BY sort_order, name`) as CategoryRow[];
   const items = (await sql`SELECT id, category_id, name, description, sku, base_price_cents, taxable, available, sort_order FROM ordering_menu_items WHERE business = ${business} AND active = TRUE ORDER BY sort_order, name`) as ItemRow[];
   const modifiers = (await sql`
     SELECT link.item_id, grp.id AS group_id, grp.name AS group_name, grp.prompt,
@@ -94,5 +94,13 @@ export async function orderingMenu(business: OrderingBusiness): Promise<Ordering
     if (row.option_id && row.option_name) group.options.push({ id: row.option_id, name: row.option_name, menuItemId: row.option_menu_item_id, priceDeltaCents: Number(row.option_price_delta_cents ?? 0), available: Boolean(row.option_available) });
   }
 
-  return categories.map((category) => ({ id: category.id, name: category.name, items: items.filter((item) => item.category_id === category.id).map((item) => itemMap.get(item.id)).filter((item): item is OrderingMenuItemView => Boolean(item)) }));
+  return categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+    displayName: category.display_name || category.name,
+    parentId: category.parent_id,
+    presentationOnly: Boolean(category.presentation_only),
+    sortOrder: Number(category.sort_order),
+    items: items.filter((item) => item.category_id === category.id).map((item) => itemMap.get(item.id)).filter((item): item is OrderingMenuItemView => Boolean(item)),
+  }));
 }

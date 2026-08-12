@@ -18,6 +18,7 @@
     "test:ordering:lifecycle": "tsx scripts/order-lifecycle-validate.ts",
     "test:pos:auth": "tsx scripts/pos-auth-validate.ts",
     "test:cookie-security": "tsx scripts/cookie-security-validate.ts",
+    "test:address": "tsx scripts/address-workflow-validate.ts",
     "test:auth:e2e": "playwright test tests/auth-cookie.spec.ts",
     "test:pos:e2e": "playwright test tests/pos-pin-auth.spec.ts tests/pos-deli.spec.ts tests/deli-order-lifecycle.spec.ts"
   },

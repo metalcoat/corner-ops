@@ -3,6 +3,7 @@ import { getSql, withTransaction } from "@/lib/db";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
+import { ensureOrderingAddressSchema } from "@/lib/ordering-address-schema";
 
 export type StoredOrderStatus = "draft" | "confirmed" | "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
 export type KitchenOrderStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -156,6 +157,7 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
 
 export async function submitDraftOrder(orderId: string, business: OrderingBusiness, actor: OrderingActor) {
   await ensureOrderingPosSchema();
+  await ensureOrderingAddressSchema();
   return withTransaction(async () => {
     const sql = getSql();
     const rows = await sql`
@@ -168,6 +170,10 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
     if (!order) throw new OrderConflictError("Draft order was not found.");
     if (order.status === "sent_to_kitchen") return { order, alreadySubmitted: true };
     if (order.status !== "draft") throw new OrderConflictError("Only a draft order can be submitted.");
+    if (order.service_type === "delivery") {
+      const addresses = await sql`SELECT validation_status FROM ordering_order_delivery_addresses WHERE order_id = ${orderId} LIMIT 1`;
+      if (addresses[0]?.validation_status !== "validated") throw new OrderConflictError("A validated delivery address is required before submission.");
+    }
     await revalidateDraft(order);
 
     const updated = await sql`

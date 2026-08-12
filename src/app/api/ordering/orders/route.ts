@@ -5,6 +5,8 @@ import { ensureOrderingDeliverySchema } from "@/lib/ordering-delivery-schema";
 import { createTimedDraftOrder } from "@/lib/ordering-timed-orders";
 import type { OrderTimingMode } from "@/lib/ordering-timing-core";
 import { orderingActor } from "@/lib/ordering-route-auth";
+import { addressForOrder, routeDeliveryAddress } from "@/lib/ordering-address";
+import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
 
 export const runtime = "nodejs";
 
@@ -74,10 +76,15 @@ export async function POST(request: Request) {
     });
 
     const timingMode = readTimingMode(body.timingMode);
+    const serviceType = readServiceType(body.serviceType);
+    const enteredAddress = String(body.deliveryAddress || "");
+    let validatedAddress = null;
+    try { validatedAddress = addressForOrder(serviceType, String(body.deliveryValidationToken || ""), enteredAddress); }
+    catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Validate the delivery address." }, { status: 409 }); }
     const order = await createTimedDraftOrder({
       business,
       source: "pos",
-      serviceType: readServiceType(body.serviceType),
+      serviceType,
       customerId: body.customerId ? String(body.customerId) : null,
       callerPhone: body.callerPhone ? String(body.callerPhone) : "",
       createdBy: actor.id,
@@ -86,6 +93,11 @@ export async function POST(request: Request) {
       timingMode,
       requestedFor: readRequestedFor(body.scheduledFor, timingMode),
     });
+    if (validatedAddress) {
+      let route = null;
+      try { route = await routeDeliveryAddress(validatedAddress); } catch { /* Routing remains optional until origin coordinates are configured. */ }
+      await saveOrderDeliveryAddress({ orderId: String(order.id), address: validatedAddress, line2: String(body.deliveryUnit || ""), route });
+    }
     return Response.json({ order }, { status: 201 });
   } catch (error) {
     return cashierOrderError(error) || apiError(error);

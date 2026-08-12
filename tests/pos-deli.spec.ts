@@ -24,7 +24,10 @@ test("cashier configures, edits, and saves a backend-priced pizza draft", async 
 
   const dialog = page.getByRole("dialog", { name: "Configure Pizza" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("button", { name: /choose size \/ form/i })).toBeDisabled();
+  await expect(dialog.getByText("Select a size", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "ADD TO ORDER" })).toHaveAttribute("aria-disabled", "true");
+  await dialog.getByRole("button", { name: "ADD TO ORDER" }).dispatchEvent("click");
+  await expect(dialog.getByText("Select a size", { exact: true })).toBeVisible();
 
   await dialog.getByText('Regular 14"', { exact: true }).click();
   await dialog.getByText("Pepperoni", { exact: true }).first().click();
@@ -62,4 +65,75 @@ test("Pizza Sub does not fabricate a Wrap variant", async ({ page }) => {
   await expect(dialog.getByText("Full Sub", { exact: true })).toBeVisible();
   await expect(dialog.getByText("1/2 Sub", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Wraps", { exact: true })).toHaveCount(0);
+});
+
+test("real subs and wings add, update, and explain incomplete choices", async ({ page }) => {
+  await signIn(page);
+  const search = page.getByLabel("Search menu");
+
+  await search.fill("Turkey Big Boss");
+  await page.getByRole("button", { name: /^Turkey Big Boss From / }).click();
+  let dialog = page.getByRole("dialog", { name: "Configure Turkey Big Boss" });
+  await dialog.getByText("Wraps", { exact: true }).click();
+  await dialog.getByLabel("Item notes").fill("Toast wrap");
+  await dialog.getByRole("button", { name: "ADD TO ORDER" }).click();
+  let line = page.getByRole("article").filter({ hasText: "Turkey Big Boss" });
+  await expect(line).toContainText("$10.25");
+  await expect(line).toContainText("Wraps");
+  await page.getByRole("button", { name: "Edit Turkey Big Boss" }).click();
+  dialog = page.getByRole("dialog", { name: "Configure Turkey Big Boss" });
+  await dialog.getByLabel("Item notes").fill("Updated wrap");
+  await dialog.getByRole("button", { name: "UPDATE ITEM" }).click();
+  await expect(line).toContainText("Updated wrap");
+
+  await search.fill("Turkey");
+  await page.getByRole("button", { name: /^Turkey From / }).click();
+  dialog = page.getByRole("dialog", { name: "Configure Turkey" });
+  await dialog.getByText("Wraps", { exact: true }).click();
+  await expect(dialog.getByText("Choose 1 Free Cheese", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "ADD TO ORDER" })).toHaveAttribute("aria-disabled", "true");
+  await dialog.getByRole("button", { name: "ADD TO ORDER" }).dispatchEvent("click");
+  await expect(dialog).toBeVisible();
+  await dialog.getByText("American", { exact: true }).click();
+  await dialog.getByRole("button", { name: "ADD TO ORDER" }).click();
+  await expect(page.getByRole("article").filter({ has: page.getByText("1× Turkey", { exact: true }) })).toContainText("$9.00");
+
+  await search.fill("Wings");
+  await page.getByRole("button", { name: /^Wings From / }).click();
+  dialog = page.getByRole("dialog", { name: "Configure Wings" });
+  await dialog.getByText("10 Wings", { exact: true }).click();
+  await dialog.getByText("Mild", { exact: true }).click();
+  await dialog.getByText("Flats/Wings", { exact: true }).click();
+  await dialog.getByRole("button", { name: "ADD TO ORDER" }).click();
+  await expect(page.getByRole("article").filter({ hasText: "1× Wings" })).toContainText("$13.50");
+});
+
+test("top categories, subcategories, and search use the imported hierarchy", async ({ page }) => {
+  await signIn(page);
+  const top = page.getByRole("navigation", { name: "Menu categories" });
+  await expect(top.getByRole("button", { name: "Appetizers and Sides", exact: true })).toBeVisible();
+  await top.getByRole("button", { name: "Appetizers and Sides", exact: true }).click();
+  await expect(page.getByLabel("Appetizers and Sides subcategories").getByRole("button", { name: "Appetizers" })).toBeVisible();
+  await page.getByRole("button", { name: "Side Dishes", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Side Dishes" })).toBeVisible();
+  await top.getByRole("button", { name: "Candy Bars", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Candy Bars" })).toBeVisible();
+  await page.getByLabel("Search menu").fill("Turkey Big Boss");
+  await expect(page.getByRole("button", { name: /^Turkey Big Boss From / })).toBeVisible();
+});
+
+test("Delivery preserves the cart and requires provider validation", async ({ page }) => {
+  await signIn(page);
+  await page.getByLabel("Search menu").fill("Pizza Logs");
+  await page.getByRole("button", { name: /^Pizza Logs / }).click();
+  await page.getByRole("dialog", { name: "Configure Pizza Logs" }).getByRole("button", { name: "ADD TO ORDER" }).click();
+  await page.getByRole("button", { name: "Delivery", exact: true }).click();
+  await page.getByLabel("Street address").fill("41");
+  await expect(page.getByText(/Delivery address validation is unavailable/)).toBeVisible();
+  await expect(page.getByRole("article").filter({ hasText: "Pizza Logs" })).toBeVisible();
+  await page.getByRole("button", { name: /Save ASAP Draft/i }).click();
+  await expect(page.getByText("Validate the delivery address before reviewing this Delivery order.")).toBeVisible();
+  const serverGuard = await page.request.post("/api/ordering/orders", { data: { business: "Corner Deli", serviceType: "delivery", timingMode: "asap", items: [] } });
+  expect(serverGuard.status()).toBe(409);
+  expect((await serverGuard.json()).error).toContain("Validate the delivery address");
 });

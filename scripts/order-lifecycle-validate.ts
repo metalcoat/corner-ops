@@ -88,7 +88,7 @@ async function main(): Promise<void> {
       if (completed.status !== "completed" || !completed.submitted_at || !completed.started_at || !completed.ready_at || !completed.completed_at) throw new Error("Lifecycle timestamps were not recorded.");
 
       const staleDraft = await createDraftOrderWithVariants({
-        business: "Corner Deli", source: "pos", serviceType: "delivery", createdBy: "order-lifecycle-test",
+        business: "Corner Deli", source: "pos", serviceType: "pickup", createdBy: "order-lifecycle-test",
         items: [{ itemId: pizza.itemId, variantId: pizza.variantId, modifierSelections: pizza.selections }],
       });
       await sql`UPDATE ordering_menu_item_variants SET base_price_cents = base_price_cents + 11 WHERE id = ${pizza.variantId}`;
