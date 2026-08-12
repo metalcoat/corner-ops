@@ -1,0 +1,11 @@
+[Unit]
+Description=Corner Ops Development Updater
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=chris
+WorkingDirectory=/opt/corner-ops
+ExecStart=/opt/corner-ops/deploy/update.sh
