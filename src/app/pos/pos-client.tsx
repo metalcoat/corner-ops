@@ -87,6 +87,15 @@ function cloneSelections(value: Record<string, string[]>): Record<string, string
   return Object.fromEntries(Object.entries(value).map(([key, ids]) => [key, [...ids]]));
 }
 
+function clientId(): string {
+  const bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function variantOptionPrice(
   variant: OrderingItemVariantView | null,
   option: OrderingModifierOptionView,
@@ -158,7 +167,7 @@ export default function PosClient({ business }: { business: Business }) {
   const [cartNotice, setCartNotice] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryUnit, setDeliveryUnit] = useState("");
-  const [addressSessionToken, setAddressSessionToken] = useState(() => crypto.randomUUID());
+  const [addressSessionToken, setAddressSessionToken] = useState("");
   const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
   const [addressLoading, setAddressLoading] = useState(false);
   const [addressError, setAddressError] = useState("");
@@ -178,6 +187,8 @@ export default function PosClient({ business }: { business: Business }) {
       .then((payload: SessionView | PosSessionView) => setSession(payload))
       .catch(() => setSession({ authenticated: false } as SessionView));
   }, [business]);
+
+  useEffect(() => { if (!addressSessionToken) setAddressSessionToken(clientId()); }, [addressSessionToken]);
 
   async function lockPos() {
     await fetch("/api/pos/session", { method: "DELETE" });
@@ -382,7 +393,7 @@ export default function PosClient({ business }: { business: Business }) {
       return;
     }
     const line: CartLine = {
-      id: editingLineId || crypto.randomUUID(),
+      id: editingLineId || clientId(),
       itemId: configuringItem.id,
       variantId: selectedVariant?.id || null,
       variantName: selectedVariant?.name || "",
@@ -420,7 +431,7 @@ export default function PosClient({ business }: { business: Business }) {
       const payload = await response.json() as { address?: ValidatedAddress; validationToken?: string; route?: DeliveryRoute | null; error?: string };
       if (!response.ok || !payload.address || !payload.validationToken) throw new Error(payload.error || "Could not validate this address.");
       setValidatedAddress(payload.address); setDeliveryValidationToken(payload.validationToken); setDeliveryValidatedInput(enteredAddress.trim().replace(/\s+/g, " ")); setDeliveryRoute(payload.route || null); setDeliveryAddress(payload.address.formattedAddress);
-      setAddressSessionToken(crypto.randomUUID()); setSavedDraft(null);
+      setAddressSessionToken(clientId()); setSavedDraft(null);
     } catch (error) { setValidatedAddress(null); setDeliveryValidationToken(""); setDeliveryValidatedInput(""); setDeliveryRoute(null); setAddressError(error instanceof Error ? error.message : "Could not validate this address."); }
     finally { setValidatingAddress(false); }
   }
