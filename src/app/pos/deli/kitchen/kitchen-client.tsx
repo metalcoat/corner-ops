@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PosPinGate, { type PosEmployeeSession, type PosSessionView } from "../../pos-pin-gate";
+import { usePosIdleLock } from "../../use-pos-idle-lock";
+import { formatOrderItemName, formatOrderModifier } from "@/lib/ordering-line-format";
+import type { PizzaToppingAmount, PizzaToppingPortion } from "@/lib/ordering-pizza-toppings";
 
 type KitchenStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
 type KitchenModifier = {
@@ -10,6 +13,8 @@ type KitchenModifier = {
   option_name_snapshot: string;
   quantity: number;
   selection_state: string;
+  pizza_topping_portion: PizzaToppingPortion | null;
+  pizza_topping_amount: PizzaToppingAmount | null;
 };
 type KitchenItem = {
   id: string;
@@ -50,7 +55,7 @@ function elapsed(submittedAt: string, serverNow: string, tick: number): string {
   return minutes < 60 ? `${minutes}:${String(seconds % 60).padStart(2, "0")}` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-export default function KitchenClient() {
+export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSeconds?: number }) {
   const [session, setSession] = useState<PosSessionView | null>(null);
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [error, setError] = useState("");
@@ -93,11 +98,10 @@ export default function KitchenClient() {
 
   const activeCount = useMemo(() => orders.filter((order) => order.status === "sent_to_kitchen" || order.status === "in_progress" || order.status === "ready").length, [orders]);
 
-  async function lockKitchen() {
-    await fetch("/api/pos/session", { method: "DELETE" });
-    setOrders([]);
+  function applyLock() {
     setSession({ authenticated: false });
   }
+  const { lock: lockKitchen } = usePosIdleLock({ authenticated: Boolean(session?.authenticated), seconds: idleLockSeconds, onLock: applyLock });
 
   async function transition(order: KitchenOrder, nextStatus: KitchenStatus) {
     if (busyOrderId) return;
@@ -132,7 +136,7 @@ export default function KitchenClient() {
   return <main className="kitchenPage">
     <header className="kitchenHeader">
       <div><span>LOCAL DEVELOPMENT</span><h1>Corner Deli Kitchen</h1><p>{activeCount} active order{activeCount === 1 ? "" : "s"}</p></div>
-      <nav><strong>{employee.name}</strong><a href="/pos/deli">Cashier POS</a><button type="button" onClick={() => { const next = !showRecent; setShowRecent(next); void loadOrders(next); }}>{showRecent ? "Active only" : "Recent history"}</button><button type="button" onClick={() => void loadOrders()}>Refresh</button><button type="button" onClick={() => void lockKitchen()}>LOCK / SWITCH EMPLOYEE</button></nav>
+      <nav><strong>{employee.name}</strong><a href="/pos/deli">Cashier POS</a><button type="button" onClick={() => { const next = !showRecent; setShowRecent(next); void loadOrders(next); }}>{showRecent ? "Active only" : "Recent history"}</button><button type="button" onClick={() => void loadOrders()}>Refresh</button><button type="button" onClick={() => lockKitchen()}>LOCK / SWITCH EMPLOYEE</button></nav>
     </header>
     {error && <div className="kitchenError" role="alert">{error}</div>}
     {loading && <div className="kitchenEmpty">Loading kitchen queue…</div>}
@@ -146,10 +150,9 @@ export default function KitchenClient() {
         <div className="kitchenItems">
           {order.items.map((item) => <section key={item.id} className="kitchenItem">
             <h2>{item.quantity}× {item.item_name_snapshot}</h2>
-            {item.variant_name_snapshot && <h3>{item.variant_name_snapshot}</h3>}
+            <h3>{formatOrderItemName(item.item_name_snapshot, item.variant_name_snapshot)}</h3>
             <ul>
-              {item.modifiers.filter((modifier) => modifier.selection_state !== "removed").map((modifier) => <li key={`${modifier.group_name_snapshot}-${modifier.option_id}`}>{modifier.quantity > 1 ? `${modifier.quantity}× ` : ""}{modifier.option_name_snapshot}</li>)}
-              {item.modifiers.filter((modifier) => modifier.selection_state === "removed").map((modifier) => <li className="removed" key={`removed-${modifier.option_id}`}>NO {modifier.option_name_snapshot.toUpperCase()}</li>)}
+              {item.modifiers.map((modifier, index) => <li className={modifier.selection_state === "removed" ? "removed" : modifier.pizza_topping_portion ? "pizzaTopping" : ""} key={`${modifier.group_name_snapshot}-${modifier.option_id}-${index}`}>{formatOrderModifier(modifier, modifier.pizza_topping_portion ? "ticket" : "display")}</li>)}
               {item.combo_selections.map((selection) => <li key={`${selection.group_name_snapshot}-${selection.option_id}`}>{selection.option_name_snapshot}</li>)}
             </ul>
             {item.special_instructions && <p className="kitchenNote">NOTE: {item.special_instructions}</p>}

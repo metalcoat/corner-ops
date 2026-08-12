@@ -244,6 +244,12 @@
 .posChoiceGrid button { min-width: 145px; min-height: 62px; padding: 9px 12px; display: grid; gap: 3px; text-align: left; flex: 1 1 145px; }
 .posModifierChoice { flex: 1 1 145px; min-width: 145px; display: grid; gap: 6px; }
 .posModifierChoice > button { width: 100%; }
+.posToppingChoice { flex-basis: 320px; border: 1px solid #334155; border-radius: 10px; padding: 8px; }
+.posToppingControls { display: grid; gap: 7px; margin-top: 8px; }
+.posToppingControls > span { color: #cbd5e1; font-size: .72rem; font-weight: 900; text-transform: uppercase; }
+.posSegmented { display: grid; grid-template-columns: repeat(3, minmax(82px, 1fr)); gap: 5px; }
+.posSegmented button, .posToppingControls > button { min-height: 48px; border: 1px solid #475569; border-radius: 8px; background: #172033; color: #fff; font-weight: 900; }
+.posSegmented button.selected { background: #2563eb; border-color: #93c5fd; }
 .posModifierQty { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; gap: 6px; }
 .posModifierQty button { min-width: 44px; min-height: 44px; padding: 0; display: grid; place-items: center; font-size: 1.2rem; }
 .posModifierQty strong { text-align: center; }

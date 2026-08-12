@@ -34,3 +34,19 @@ test("Deli POS uses PIN, prompts explicit clock-in, and locks without clock-out"
   await expect(page.getByText("You're not clocked in.")).toHaveCount(0);
   void request;
 });
+
+test("manual lock preserves the order and synchronizes POS and kitchen tabs",async({page,context})=>{
+  const active=process.env.POS_TEST_ACTIVE_PIN;
+  if(!active)throw new Error("POS fixture PIN environment is required");
+  await page.goto("/pos/deli"); await enterPin(page,active);
+  await page.getByLabel("Search menu").fill("Pizza Logs");
+  await page.getByRole("button",{name:/^Pizza Logs /}).click();
+  await page.getByRole("dialog",{name:"Configure Pizza Logs"}).getByRole("button",{name:"ADD TO ORDER"}).click();
+  const kitchen=await context.newPage(); await kitchen.goto("/pos/deli/kitchen");
+  await expect(kitchen.getByText("Corner Deli Kitchen",{exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"LOCK / SWITCH EMPLOYEE"}).click();
+  await expect(page.getByRole("region",{name:"Corner Deli employee PIN login"})).toBeVisible();
+  await expect(kitchen.getByRole("region",{name:"Corner Deli employee PIN login"})).toBeVisible();
+  await enterPin(page,active);
+  await expect(page.getByRole("article").filter({hasText:"Pizza Logs"})).toBeVisible();
+});

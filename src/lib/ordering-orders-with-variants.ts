@@ -2,6 +2,7 @@ import { getSql } from "@/lib/db";
 import type { OrderingBusiness, OrderSource, ServiceType } from "@/lib/ordering-core";
 import { createDraftOrder, type ConfiguredOrderItemInput } from "@/lib/ordering-orders";
 import { resolveItemVariantPricing } from "@/lib/ordering-variant-pricing";
+import { pizzaToppingPriceCents, type PizzaToppingAmount, type PizzaToppingPortion } from "@/lib/ordering-pizza-toppings";
 
 export type VariantConfiguredOrderItemInput = ConfiguredOrderItemInput & {
   variantId?: string | null;
@@ -24,7 +25,7 @@ type OrderItemRow = {
   quantity: number;
   combo_total_cents: number;
 };
-type ModifierRow = { id: string; option_id: string; selection_state: string; unit_price_delta_cents: number };
+type ModifierRow = { id: string; option_id: string; selection_state: string; unit_price_delta_cents: number; pizza_topping_portion: PizzaToppingPortion | null; pizza_topping_amount: PizzaToppingAmount | null };
 
 /**
  * Uses the existing validated draft-order writer, then deterministically applies
@@ -70,7 +71,7 @@ export async function createDraftOrderWithVariants(input: CreateVariantDraftOrde
       `;
 
       const modifiers = (await sql`
-        SELECT id, option_id, selection_state, unit_price_delta_cents
+        SELECT id, option_id, selection_state, unit_price_delta_cents, pizza_topping_portion, pizza_topping_amount
         FROM ordering_order_item_modifiers
         WHERE order_item_id = ${row.id}
       `) as ModifierRow[];
@@ -79,9 +80,12 @@ export async function createDraftOrderWithVariants(input: CreateVariantDraftOrde
         const override = variant.modifierPrices.get(modifier.option_id);
         if (!override) continue;
         if (!override.available) throw new Error("A selected modifier is not available for the chosen size or form.");
+        const charged = modifier.pizza_topping_portion && modifier.pizza_topping_amount
+          ? pizzaToppingPriceCents(override.priceDeltaCents, modifier.pizza_topping_portion, modifier.pizza_topping_amount)
+          : override.priceDeltaCents;
         await sql`
           UPDATE ordering_order_item_modifiers
-          SET unit_price_delta_cents = ${override.priceDeltaCents}
+          SET unit_price_delta_cents = ${charged}
           WHERE id = ${modifier.id}
         `;
       }

@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingChannelSchema } from "@/lib/ordering-channel-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
+import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
 
 type CategoryRow = { id: string; name: string; display_name: string; parent_id: string | null; presentation_only: boolean; sort_order: number };
 type ItemRow = { id: string; category_id: string; name: string; description: string; sku: string; base_price_cents: number; taxable: boolean; available: boolean; sort_order: number };
@@ -10,6 +11,9 @@ type ModifierRow = {
   group_sort: number; option_id: string | null; option_name: string | null;
   price_delta_cents: number | null; option_available: boolean | null; option_sort: number | null;
   default_selected: boolean | null; included_quantity: number | null;
+  presentation_context: "ordinary" | "combo_trigger" | "dependent" | "hidden";
+  presentation_behavior: "standard" | "pizza_topping";
+  parent_group_id: string | null; parent_option_ids: string[] | null;
 };
 type ComboRow = {
   item_id: string; combo_id: string; combo_name: string; combo_prompt: string;
@@ -21,7 +25,7 @@ type ComboRow = {
 };
 
 export type OrderingModifierOptionView = { id: string; name: string; priceDeltaCents: number; available: boolean; defaultSelected: boolean; includedQuantity: number };
-export type OrderingModifierGroupView = { id: string; name: string; prompt: string; minSelections: number; maxSelections: number; allowOptionQuantity: boolean; options: OrderingModifierOptionView[] };
+export type OrderingModifierGroupView = { id: string; name: string; prompt: string; minSelections: number; maxSelections: number; allowOptionQuantity: boolean; presentationContext: "ordinary" | "combo_trigger" | "dependent" | "hidden"; presentationBehavior: "standard" | "pizza_topping"; parentGroupId: string | null; parentOptionIds: string[]; options: OrderingModifierOptionView[] };
 export type OrderingComboOptionView = { id: string; name: string; menuItemId: string | null; priceDeltaCents: number; available: boolean };
 export type OrderingComboGroupView = { id: string; name: string; prompt: string; minSelections: number; maxSelections: number; options: OrderingComboOptionView[] };
 export type OrderingComboView = { id: string; name: string; prompt: string; basePriceDeltaCents: number; groups: OrderingComboGroupView[] };
@@ -30,9 +34,10 @@ export type OrderingMenuCategoryView = { id: string; name: string; displayName: 
 
 export async function orderingMenu(business: OrderingBusiness): Promise<OrderingMenuCategoryView[]> {
   await ensureOrderingChannelSchema();
+  await ensureOrderingMenuOverrideSchema();
   const sql = getSql();
-  const categories = (await sql`SELECT id, name, display_name, parent_id, presentation_only, sort_order FROM ordering_menu_categories WHERE business = ${business} AND active = TRUE ORDER BY sort_order, name`) as CategoryRow[];
-  const items = (await sql`SELECT id, category_id, name, description, sku, base_price_cents, taxable, available, sort_order FROM ordering_menu_items WHERE business = ${business} AND active = TRUE ORDER BY sort_order, name`) as ItemRow[];
+  const categories = (await sql`SELECT c.id,c.name,COALESCE(o.display_name,c.display_name) display_name,CASE WHEN o.parent_id_overridden THEN o.parent_id ELSE c.parent_id END parent_id,c.presentation_only,COALESCE(o.sort_order,c.sort_order) sort_order FROM ordering_menu_categories c LEFT JOIN ordering_category_overrides o ON o.category_id=c.id WHERE c.business=${business} AND c.active=TRUE AND COALESCE(o.visible,TRUE)=TRUE ORDER BY COALESCE(o.sort_order,c.sort_order),c.name`) as CategoryRow[];
+  const items = (await sql`SELECT i.id,COALESCE(o.category_id,i.category_id) category_id,COALESCE(o.display_name,i.name) name,i.description,i.sku,i.base_price_cents,i.taxable,i.available,COALESCE(o.sort_order,i.sort_order) sort_order FROM ordering_menu_items i LEFT JOIN ordering_item_overrides o ON o.item_id=i.id WHERE i.business=${business} AND i.active=TRUE AND COALESCE(o.visible,TRUE)=TRUE ORDER BY COALESCE(o.sort_order,i.sort_order),i.name`) as ItemRow[];
   const modifiers = (await sql`
     SELECT link.item_id, grp.id AS group_id, grp.name AS group_name, grp.prompt,
       grp.min_selections, grp.max_selections, grp.allow_option_quantity, link.sort_order AS group_sort,
@@ -41,13 +46,15 @@ export async function orderingMenu(business: OrderingBusiness): Promise<Ordering
       COALESCE(def.available_override, opt.available) AS option_available,
       opt.sort_order AS option_sort, COALESCE(def.default_selected, FALSE) AS default_selected,
       COALESCE(def.included_quantity, 0) AS included_quantity
+      ,COALESCE(p.context,'ordinary') AS presentation_context,COALESCE(p.behavior,'standard') AS presentation_behavior,p.parent_group_id,p.parent_option_ids
     FROM ordering_menu_item_modifier_groups link
     JOIN ordering_modifier_groups grp ON grp.id = link.group_id AND grp.active = TRUE
     LEFT JOIN ordering_modifier_options opt ON opt.group_id = grp.id AND opt.active = TRUE
     LEFT JOIN ordering_menu_item_modifier_defaults def ON def.item_id = link.item_id AND def.option_id = opt.id AND def.active = TRUE
     JOIN ordering_menu_items item ON item.id = link.item_id
+    LEFT JOIN ordering_modifier_presentation_overrides p ON p.item_id=link.item_id AND p.group_id=link.group_id
     WHERE item.business = ${business} AND item.active = TRUE
-    ORDER BY link.item_id, link.sort_order, grp.sort_order, opt.sort_order, opt.name
+    ORDER BY link.item_id, COALESCE(p.sort_order,link.sort_order), grp.sort_order, opt.sort_order, opt.name
   `) as ModifierRow[];
   const combos = (await sql`
     SELECT item_combo.item_id, combo.id AS combo_id, combo.name AS combo_name, combo.prompt AS combo_prompt,
@@ -74,7 +81,7 @@ export async function orderingMenu(business: OrderingBusiness): Promise<Ordering
     const key = `${row.item_id}:${row.group_id}`;
     let group = modifierGroupMap.get(key);
     if (!group) {
-      group = { id: row.group_id, name: row.group_name, prompt: row.prompt, minSelections: Number(row.min_selections), maxSelections: Number(row.max_selections), allowOptionQuantity: Boolean(row.allow_option_quantity), options: [] };
+      group = { id: row.group_id, name: row.group_name, prompt: row.prompt, minSelections: Number(row.min_selections), maxSelections: Number(row.max_selections), allowOptionQuantity: Boolean(row.allow_option_quantity), presentationContext: row.presentation_context, presentationBehavior: row.presentation_behavior, parentGroupId: row.parent_group_id, parentOptionIds: row.parent_option_ids || [], options: [] };
       modifierGroupMap.set(key, group); item.modifiers.push(group);
     }
     if (row.option_id && row.option_name) group.options.push({ id: row.option_id, name: row.option_name, priceDeltaCents: Number(row.price_delta_cents ?? 0), available: Boolean(row.option_available), defaultSelected: Boolean(row.default_selected), includedQuantity: Number(row.included_quantity ?? 0) });

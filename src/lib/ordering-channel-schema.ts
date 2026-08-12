@@ -52,6 +52,14 @@ export function ensureOrderingChannelSchema(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS ordering_item_modifier_defaults_idx ON ordering_menu_item_modifier_defaults (item_id, active)`;
 
       await sql`ALTER TABLE ordering_order_item_modifiers ADD COLUMN IF NOT EXISTS selection_state TEXT NOT NULL DEFAULT 'selected'`;
+      await sql`ALTER TABLE ordering_order_item_modifiers ADD COLUMN IF NOT EXISTS pizza_topping_portion TEXT`;
+      await sql`ALTER TABLE ordering_order_item_modifiers ADD COLUMN IF NOT EXISTS pizza_topping_amount TEXT`;
+      await sql`ALTER TABLE ordering_order_item_modifiers DROP CONSTRAINT IF EXISTS ordering_order_item_modifiers_order_item_id_group_id_option_id_key`;
+      await sql`ALTER TABLE ordering_order_item_modifiers DROP CONSTRAINT IF EXISTS ordering_order_item_modifiers_order_item_id_group_id_option_key`;
+      await sql`ALTER TABLE ordering_order_item_modifiers DROP CONSTRAINT IF EXISTS ordering_order_item_modifiers_pizza_topping_portion_check`;
+      await sql`ALTER TABLE ordering_order_item_modifiers ADD CONSTRAINT ordering_order_item_modifiers_pizza_topping_portion_check CHECK (pizza_topping_portion IS NULL OR pizza_topping_portion IN ('whole','left_half','right_half'))`;
+      await sql`ALTER TABLE ordering_order_item_modifiers DROP CONSTRAINT IF EXISTS ordering_order_item_modifiers_pizza_topping_amount_check`;
+      await sql`ALTER TABLE ordering_order_item_modifiers ADD CONSTRAINT ordering_order_item_modifiers_pizza_topping_amount_check CHECK (pizza_topping_amount IS NULL OR pizza_topping_amount IN ('regular','extra'))`;
       await sql`ALTER TABLE ordering_order_item_modifiers DROP CONSTRAINT IF EXISTS ordering_order_item_modifiers_selection_state_check`;
       await sql`
         ALTER TABLE ordering_order_item_modifiers

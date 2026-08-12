@@ -30,7 +30,7 @@ test("cashier configures, edits, and saves a backend-priced pizza draft", async 
   await expect(dialog.getByText("Select a size", { exact: true })).toBeVisible();
 
   await dialog.getByText('Regular 14"', { exact: true }).click();
-  await dialog.getByText("Pepperoni", { exact: true }).first().click();
+  await dialog.getByRole("button", { name: /PepperoniSelect topping/ }).click();
   await expect(dialog.getByText("$14.00", { exact: true })).toBeVisible();
   await dialog.getByLabel("Item notes").fill("Test note");
   await dialog.getByRole("button", { name: /add to order/i }).click();
@@ -54,6 +54,26 @@ test("cashier configures, edits, and saves a backend-priced pizza draft", async 
   await expect(page.getByText("$14.00", { exact: true }).last()).toBeVisible();
 
   await page.screenshot({ path: "/tmp/corner-ops-pos-deli.png", fullPage: true });
+});
+
+test("pizza topping controls use semantic portion and amount and restore on edit", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("button", { name: "Pizza and Wings", exact: true }).click();
+  await page.getByRole("button", { name: /^Pizza From / }).click();
+  const dialog = page.getByRole("dialog", { name: "Configure Pizza" });
+  await dialog.getByText('Regular 14"', { exact: true }).click();
+  await dialog.getByRole("button", { name: /PepperoniSelect topping/ }).click();
+  await dialog.getByRole("button", { name: "LEFT HALF", exact: true }).click();
+  await dialog.getByRole("button", { name: "EXTRA", exact: true }).click();
+  await expect(dialog.getByLabel("Pepperoni quantity")).toHaveCount(0);
+  await expect(dialog).not.toContainText("2× Pepperoni");
+  await dialog.getByRole("button", { name: "ADD TO ORDER" }).click();
+  const line = page.getByRole("article").filter({ has: page.getByText("1× Pizza", { exact: true }) });
+  await expect(line).toContainText("Left Half Extra Pepperoni");
+  await expect(line).not.toContainText("2× Pepperoni");
+  await page.getByRole("button", { name: "Edit Pizza" }).click();
+  await expect(page.getByRole("dialog", { name: "Configure Pizza" }).getByRole("button", { name: "LEFT HALF", exact: true })).toHaveClass(/selected/);
+  await expect(page.getByRole("dialog", { name: "Configure Pizza" }).getByRole("button", { name: "EXTRA", exact: true })).toHaveClass(/selected/);
 });
 
 test("Pizza Sub does not fabricate a Wrap variant", async ({ page }) => {

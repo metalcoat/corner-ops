@@ -49,7 +49,9 @@ async function main(): Promise<void> {
         selections[row.group_id].push(candidate.option_id);
       }
     }
-    return { menuItem, variant, selections, options };
+    const pizzaToppings = options.filter((option) => option.group_name === "Pizza Toppings" && requestedOptions.includes(option.option_name)).map((option) => ({ modifierOptionId: option.option_id, portion: "whole" as const, amount: "regular" as const }));
+    for (const option of options.filter((candidate) => candidate.group_name === "Pizza Toppings")) selections[option.group_id] = [];
+    return { menuItem, variant, selections, options, pizzaToppings };
   }
 
   const cases: Array<[string, string, string, string[]]> = [
@@ -87,7 +89,7 @@ async function main(): Promise<void> {
       await withTransaction(async () => {
         const order = await createDraftOrderWithVariants({
           business: "Corner Deli", source: "pos", serviceType: "pickup", createdBy: "rezku-pricing-smoke-test",
-          items: [{ itemId: configured.menuItem.id, variantId: configured.variant.id, modifierSelections: configured.selections }],
+          items: [{ itemId: configured.menuItem.id, variantId: configured.variant.id, modifierSelections: configured.selections, pizzaToppings: configured.pizzaToppings }],
         });
         const rows = await getSql()`
           SELECT variant_name_snapshot, unit_price_cents, modifier_total_cents, line_total_cents,
@@ -171,19 +173,21 @@ async function main(): Promise<void> {
           itemId: regularPizza.menuItem.id,
           variantId: regularPizza.variant.id,
           modifierSelections: regularPizza.selections,
-          modifierQuantities: { [pepperoni.option_id]: 2 },
+          pizzaToppings: [{ modifierOptionId: pepperoni.option_id, portion: "whole", amount: "extra" }],
           specialInstructions: "Automated rollback-only cashier test",
         }],
       });
       const rows = await getSql()`
-        SELECT item.modifier_total_cents, item.special_instructions, modifier.quantity, modifier.unit_price_delta_cents
+        SELECT item.modifier_total_cents, item.special_instructions, modifier.quantity, modifier.unit_price_delta_cents,
+               modifier.pizza_topping_portion, modifier.pizza_topping_amount
         FROM ordering_order_items item
         JOIN ordering_order_item_modifiers modifier ON modifier.order_item_id = item.id AND modifier.option_id = ${pepperoni.option_id}
         WHERE item.order_id = ${order.id}
       `;
       const row = rows[0];
-      modifierQuantityVerified = Number(row?.quantity) === 2
-        && Number(row?.modifier_total_cents) === Number(row?.unit_price_delta_cents) * 2
+      modifierQuantityVerified = Number(row?.quantity) === 1
+        && row?.pizza_topping_portion === "whole" && row?.pizza_topping_amount === "extra"
+        && Number(row?.modifier_total_cents) === Number(row?.unit_price_delta_cents)
         && row?.special_instructions === "Automated rollback-only cashier test";
       if (!modifierQuantityVerified) throw new Error(`Modifier quantity or item-note snapshot mismatch: ${JSON.stringify(row)}.`);
       throw new Error("rollback:modifier-quantity");

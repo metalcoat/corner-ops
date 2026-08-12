@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   const { OrderConflictError, submitDraftOrder, transitionKitchenOrder } = await import("../src/lib/ordering-order-lifecycle");
   await ensureOrderingPosSchema();
 
-  type MenuOption = { group_id: string; option_id: string; option_name: string; min_selections: number };
+  type MenuOption = { group_id: string; group_name: string; option_id: string; option_name: string; min_selections: number };
   async function configured(itemName: string, variantName: string, requested: string[]) {
     const sql = getSql();
     const items = await sql`SELECT id FROM ordering_menu_items WHERE business = 'Corner Deli' AND name = ${itemName} AND active = TRUE LIMIT 1`;
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     const variants = await sql`SELECT id FROM ordering_menu_item_variants WHERE item_id = ${items[0].id} AND name = ${variantName} AND active = TRUE LIMIT 1`;
     if (!variants[0]) throw new Error(`Missing ${itemName} variant ${variantName}.`);
     const options = await sql`
-      SELECT grp.id AS group_id, grp.min_selections, opt.id AS option_id, opt.name AS option_name
+      SELECT grp.id AS group_id, grp.name AS group_name, grp.min_selections, opt.id AS option_id, opt.name AS option_name
       FROM ordering_menu_item_modifier_groups link
       JOIN ordering_modifier_groups grp ON grp.id = link.group_id AND grp.active = TRUE
       JOIN ordering_modifier_options opt ON opt.group_id = grp.id AND opt.active = TRUE AND opt.available = TRUE
@@ -46,7 +46,9 @@ async function main(): Promise<void> {
         selections[option.group_id].push(candidate.option_id);
       }
     }
-    return { itemId: String(items[0].id), variantId: String(variants[0].id), selections };
+    const pizzaToppings = options.filter((option) => option.group_name === "Pizza Toppings" && requested.includes(option.option_name)).map((option) => ({ modifierOptionId: option.option_id, portion: "whole" as const, amount: "regular" as const }));
+    for (const option of options.filter((candidate) => candidate.group_name === "Pizza Toppings")) selections[option.group_id] = [];
+    return { itemId: String(items[0].id), variantId: String(variants[0].id), selections, pizzaToppings };
   }
 
   const results: Record<string, unknown> = {};
@@ -57,7 +59,7 @@ async function main(): Promise<void> {
       const pizza = await configured("Pizza", 'Jumbo Thin 16"', ["Pepperoni", "Mushrooms"]);
       const draft = await createDraftOrderWithVariants({
         business: "Corner Deli", source: "pos", serviceType: "pickup", createdBy: "order-lifecycle-test",
-        items: [{ itemId: pizza.itemId, variantId: pizza.variantId, modifierSelections: pizza.selections, specialInstructions: "Lifecycle pizza note" }],
+        items: [{ itemId: pizza.itemId, variantId: pizza.variantId, modifierSelections: pizza.selections, pizzaToppings: pizza.pizzaToppings, specialInstructions: "Lifecycle pizza note" }],
       });
       const before = (await sql`SELECT total_cents FROM ordering_orders WHERE id = ${draft.id}`)[0];
       const submitted = await submitDraftOrder(String(draft.id), "Corner Deli", lifecycleActor);

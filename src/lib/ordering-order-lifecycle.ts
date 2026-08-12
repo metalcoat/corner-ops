@@ -4,6 +4,8 @@ import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 import { ensureOrderingAddressSchema } from "@/lib/ordering-address-schema";
+import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
+import { pizzaToppingPriceCents } from "@/lib/ordering-pizza-toppings";
 
 export type StoredOrderStatus = "draft" | "confirmed" | "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
 export type KitchenOrderStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -40,6 +42,8 @@ type ModifierSnapshot = {
   quantity: number;
   unit_price_delta_cents: number;
   selection_state: string;
+  pizza_topping_portion: import("@/lib/ordering-pizza-toppings").PizzaToppingPortion | null;
+  pizza_topping_amount: import("@/lib/ordering-pizza-toppings").PizzaToppingAmount | null;
 };
 
 const transitions: Record<KitchenOrderStatus, readonly KitchenOrderStatus[]> = {
@@ -90,11 +94,12 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
     }
 
     const snapshots = await sql`
-      SELECT group_id, option_id, quantity, unit_price_delta_cents, selection_state
+      SELECT group_id, option_id, quantity, unit_price_delta_cents, selection_state, pizza_topping_portion, pizza_topping_amount
       FROM ordering_order_item_modifiers
       WHERE order_item_id = ${item.id}
     ` as ModifierSnapshot[];
     const selectedCounts = new Map<string, number>();
+    const selectedOptions = new Map<string, Set<string>>();
     let modifierTotal = 0;
     for (const snapshot of snapshots) {
       if (snapshot.selection_state !== "selected" && snapshot.selection_state !== "extra") continue;
@@ -119,21 +124,36 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
       }
       const quantity = option.allow_option_quantity ? number(snapshot.quantity) : 1;
       if (quantity < 1 || quantity > 99) throw new OrderConflictError(`A modifier quantity on ${item.item_name_snapshot} is invalid.`);
-      if (number(option.current_price_cents) !== number(snapshot.unit_price_delta_cents)) {
+      const currentCharge = snapshot.pizza_topping_portion && snapshot.pizza_topping_amount
+        ? pizzaToppingPriceCents(number(option.current_price_cents), snapshot.pizza_topping_portion, snapshot.pizza_topping_amount)
+        : number(option.current_price_cents);
+      if (currentCharge !== number(snapshot.unit_price_delta_cents)) {
         throw new OrderConflictError(`A modifier price on ${item.item_name_snapshot} changed. Review and rebuild the order before submitting.`);
       }
       selectedCounts.set(snapshot.group_id, (selectedCounts.get(snapshot.group_id) || 0) + 1);
+      if (!selectedOptions.has(snapshot.group_id)) selectedOptions.set(snapshot.group_id, new Set());
+      selectedOptions.get(snapshot.group_id)!.add(snapshot.option_id);
       modifierTotal += number(snapshot.unit_price_delta_cents) * quantity;
     }
 
     const groups = await sql`
-      SELECT grp.id, grp.name, grp.min_selections, grp.max_selections
+      SELECT grp.id, grp.name, grp.min_selections, grp.max_selections,
+             COALESCE(p.context,'ordinary') context,COALESCE(p.behavior,'standard') behavior,p.parent_group_id,p.parent_option_ids
       FROM ordering_menu_item_modifier_groups link
       JOIN ordering_modifier_groups grp ON grp.id = link.group_id AND grp.active = TRUE
+      LEFT JOIN ordering_modifier_presentation_overrides p ON p.item_id=link.item_id AND p.group_id=link.group_id
       WHERE link.item_id = ${item.item_id}
     `;
     for (const group of groups) {
       const count = selectedCounts.get(String(group.id)) || 0;
+      if (String(group.behavior) === "pizza_topping") continue;
+      const context=String(group.context);
+      const parentSelected=selectedOptions.get(String(group.parent_group_id||""))||new Set<string>();
+      const active=context==="ordinary" || (context==="combo_trigger" && count>0) || (context==="dependent" && (group.parent_option_ids||[]).some((id:string)=>parentSelected.has(id)));
+      if (!active) {
+        if (count) throw new OrderConflictError(`A modifier is no longer valid for the selected combo component on ${item.item_name_snapshot}.`);
+        continue;
+      }
       if (count < number(group.min_selections) || count > number(group.max_selections)) {
         throw new OrderConflictError(`Required modifier choices changed for ${item.item_name_snapshot}: ${group.name}. Review the order before submitting.`);
       }
@@ -158,6 +178,7 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
 export async function submitDraftOrder(orderId: string, business: OrderingBusiness, actor: OrderingActor) {
   await ensureOrderingPosSchema();
   await ensureOrderingAddressSchema();
+  await ensureOrderingMenuOverrideSchema();
   return withTransaction(async () => {
     const sql = getSql();
     const rows = await sql`
@@ -264,7 +285,7 @@ export async function listKitchenOrders(business: OrderingBusiness, includeRecen
     for (const item of items) {
       item.modifiers = await sql`
         SELECT group_id, option_id, group_name_snapshot, option_name_snapshot, quantity,
-               unit_price_delta_cents, selection_state
+               unit_price_delta_cents, selection_state, pizza_topping_portion, pizza_topping_amount
         FROM ordering_order_item_modifiers WHERE order_item_id = ${item.id}
         ORDER BY created_at, id
       `;

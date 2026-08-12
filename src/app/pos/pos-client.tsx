@@ -17,6 +17,9 @@ import type {
   OrderingMenuItemWithVariants,
 } from "@/lib/ordering-menu-variants";
 import "./pos.css";
+import { usePosIdleLock } from "./use-pos-idle-lock";
+import PizzaToppingSelector from "@/components/pizza-topping-selector";
+import { formatPizzaTopping, normalizePizzaToppings, pizzaToppingPriceCents, type PizzaToppingSelection } from "@/lib/ordering-pizza-toppings";
 
 type PosServiceType = Exclude<ServiceType, "undecided">;
 
@@ -32,6 +35,7 @@ type CartLine = {
   comboText: string[];
   modifierSelections: Record<string, string[]>;
   modifierQuantities: Record<string, number>;
+  pizzaToppings: PizzaToppingSelection[];
   comboId: string | null;
   comboSelections: Record<string, string[]>;
   specialInstructions: string;
@@ -136,7 +140,7 @@ function selectionsValid(group: OrderingModifierGroupView, selections: string[])
   return count >= group.minSelections && count <= group.maxSelections;
 }
 
-export default function PosClient({ business }: { business: Business }) {
+export default function PosClient({ business, idleLockSeconds = 60 }: { business: Business; idleLockSeconds?: number }) {
   const config = orderingBusinessConfig(business);
   const availableServices = config.serviceTypes.filter((value): value is PosServiceType => value !== "undecided" && (business !== "Corner Deli" || value === "pickup" || value === "delivery" || value === "dine_in"));
   const [session, setSession] = useState<SessionView | PosSessionView | null>(null);
@@ -154,8 +158,10 @@ export default function PosClient({ business }: { business: Business }) {
   const [selectedVariantId, setSelectedVariantId] = useState("");
   const [modifierSelections, setModifierSelections] = useState<Record<string, string[]>>({});
   const [modifierQuantities, setModifierQuantities] = useState<Record<string, number>>({});
+  const [pizzaToppings, setPizzaToppings] = useState<PizzaToppingSelection[]>([]);
   const [selectedComboId, setSelectedComboId] = useState("");
   const [comboSelections, setComboSelections] = useState<Record<string, string[]>>({});
+  const [presentationComboEnabled, setPresentationComboEnabled] = useState(false);
   const [specialInstructions, setSpecialInstructions] = useState("");
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
@@ -190,12 +196,10 @@ export default function PosClient({ business }: { business: Business }) {
 
   useEffect(() => { if (!addressSessionToken) setAddressSessionToken(clientId()); }, [addressSessionToken]);
 
-  async function lockPos() {
-    await fetch("/api/pos/session", { method: "DELETE" });
+  function applyLock() {
     setSession({ authenticated: false });
-    setCart([]);
-    setSavedDraft(null);
   }
+  const { lock: lockPos } = usePosIdleLock({ authenticated: Boolean(session?.authenticated && business === "Corner Deli"), seconds: idleLockSeconds, onLock: applyLock });
 
   useEffect(() => {
     if (!session?.authenticated) return;
@@ -255,6 +259,12 @@ export default function PosClient({ business }: { business: Business }) {
   const subtotalCents = cart.reduce((sum, line) => sum + line.unitPriceCents * line.quantity, 0);
   const selectedCombo = configuringItem?.combos.find((combo) => combo.id === selectedComboId) || null;
   const selectedVariant = configuringItem?.variants.find((variant) => variant.id === selectedVariantId) || null;
+  const modifierGroupVisible = (group: OrderingModifierGroupView) => {
+    if (group.presentationContext === "hidden") return false;
+    if (group.presentationContext === "combo_trigger") return presentationComboEnabled;
+    if (group.presentationContext !== "dependent") return true;
+    return (modifierSelections[group.parentGroupId || ""] || []).some((id) => group.parentOptionIds.includes(id));
+  };
 
   const configuration = useMemo(() => {
     if (!configuringItem) {
@@ -269,7 +279,8 @@ export default function PosClient({ business }: { business: Business }) {
     const missing: Array<{ id: string; message: string }> = [];
     if (variantRequired && !selectedVariant) missing.push({ id: "variant-choice", message: "Select a size" });
 
-    for (const group of configuringItem.modifiers) {
+    for (const group of configuringItem.modifiers.filter(modifierGroupVisible)) {
+      if (group.presentationBehavior === "pizza_topping") continue;
       const selected = modifierSelections[group.id] || [];
       if (!selectionsValid(group, selected)) {
         valid = false;
@@ -292,6 +303,14 @@ export default function PosClient({ business }: { business: Business }) {
       }
     }
 
+    for (const topping of normalizePizzaToppings(pizzaToppings)) {
+      const group = configuringItem.modifiers.find((candidate) => candidate.presentationBehavior === "pizza_topping" && candidate.options.some((option) => option.id === topping.modifierOptionId));
+      const option = group?.options.find((candidate) => candidate.id === topping.modifierOptionId);
+      if (!option || !variantOptionAvailable(selectedVariant, option)) { valid = false; continue; }
+      unitPriceCents += pizzaToppingPriceCents(variantOptionPrice(selectedVariant, option), topping.portion, topping.amount);
+      modifierText.push(formatPizzaTopping(option.name, topping.portion, topping.amount));
+    }
+
     if (selectedCombo) {
       unitPriceCents += selectedCombo.basePriceDeltaCents;
       comboText.push(selectedCombo.name);
@@ -306,7 +325,7 @@ export default function PosClient({ business }: { business: Business }) {
     }
 
     return { valid, unitPriceCents, modifierText, comboText, missing };
-  }, [configuringItem, selectedVariant, modifierSelections, modifierQuantities, selectedCombo, comboSelections]);
+  }, [configuringItem, selectedVariant, modifierSelections, modifierQuantities, pizzaToppings, selectedCombo, comboSelections, presentationComboEnabled]);
 
   function openItem(item: OrderingMenuItemWithVariants, line?: CartLine) {
     if (!item.available) return;
@@ -316,8 +335,10 @@ export default function PosClient({ business }: { business: Business }) {
     setSelectedVariantId(lineVariant?.id || "");
     setModifierSelections(line ? cloneSelections(line.modifierSelections) : initialModifierSelections(item, lineVariant));
     setModifierQuantities(line ? { ...line.modifierQuantities } : {});
+    setPizzaToppings(line ? line.pizzaToppings.map((topping) => ({ ...topping })) : []);
     setSelectedComboId(line?.comboId || "");
     setComboSelections(line ? cloneSelections(line.comboSelections) : {});
+    setPresentationComboEnabled(Boolean(line && item.modifiers.some((group) => group.presentationContext === "combo_trigger" && (line.modifierSelections[group.id] || []).length)));
     setSpecialInstructions(line?.specialInstructions || "");
     setEditingLineId(line?.id || null);
     setCheckoutError("");
@@ -341,19 +362,22 @@ export default function PosClient({ business }: { business: Business }) {
   }
 
   function toggleModifier(group: OrderingModifierGroupView, optionId: string) {
+    if (!configuringItem) return;
+    const itemModifiers = configuringItem.modifiers;
     const option = group.options.find((candidate) => candidate.id === optionId);
     if (!option || !variantOptionAvailable(selectedVariant, option)) return;
     setModifierSelections((current) => {
       const existing = current[group.id] || [];
-      if (group.maxSelections === 1) {
-        return { ...current, [group.id]: existing.includes(optionId) ? [] : [optionId] };
-      }
-      return {
+      const next = group.maxSelections === 1 ? { ...current, [group.id]: existing.includes(optionId) ? [] : [optionId] } : {
         ...current,
         [group.id]: existing.includes(optionId)
           ? existing.filter((id) => id !== optionId)
           : [...existing, optionId].slice(0, group.maxSelections),
       };
+      for (const dependent of itemModifiers.filter((candidate) => candidate.parentGroupId === group.id)) {
+        if (!(next[group.id] || []).some((id) => dependent.parentOptionIds.includes(id))) next[dependent.id] = [];
+      }
+      return next;
     });
     setModifierQuantities((current) => ({ ...current, [optionId]: current[optionId] || 1 }));
   }
@@ -404,6 +428,7 @@ export default function PosClient({ business }: { business: Business }) {
       comboText: configuration.comboText,
       modifierSelections: cloneSelections(modifierSelections),
       modifierQuantities: { ...modifierQuantities },
+      pizzaToppings: normalizePizzaToppings(pizzaToppings),
       comboId: selectedCombo?.id || null,
       comboSelections: cloneSelections(comboSelections),
       specialInstructions: specialInstructions.trim(),
@@ -479,6 +504,7 @@ export default function PosClient({ business }: { business: Business }) {
             quantity: line.quantity,
             modifierSelections: line.modifierSelections,
             modifierQuantities: line.modifierQuantities,
+            pizzaToppings: line.pizzaToppings,
             comboId: line.comboId,
             comboSelections: line.comboSelections,
             specialInstructions: line.specialInstructions,
@@ -559,11 +585,13 @@ export default function PosClient({ business }: { business: Business }) {
       </div>
       <nav className="posUtilityNav" aria-label={`${business} POS utilities`}>
         {posEmployee && <span className="posEmployeeName">{posEmployee.name}</span>}
-        {config.utilities.map((utility) => utility === "reports"
+        {config.utilities.map((utility) => business === "Corner Deli" && utility === "manager"
+          ? <a key={utility} href="/pos/deli/settings/menu">Menu Settings</a>
+          : utility === "reports"
           ? <a key={utility} href={config.reportsPath}>{utilityLabels[utility]}</a>
           : <button key={utility} type="button">{utilityLabels[utility]}</button>)}
         {business === "Corner Deli" && <a href="/pos/deli/kitchen">Kitchen</a>}
-        {business === "Corner Deli" && <button type="button" onClick={() => void lockPos()}>LOCK / SWITCH EMPLOYEE</button>}
+        {business === "Corner Deli" && <button type="button" onClick={() => lockPos()}>LOCK / SWITCH EMPLOYEE</button>}
         <a href="/pos">POS Dev Home</a>
       </nav>
     </header>
@@ -732,7 +760,13 @@ export default function PosClient({ business }: { business: Business }) {
             </div>
           </fieldset>}
 
-          {configuringItem.modifiers.map((group) => {
+          {configuringItem.modifiers.some((group) => group.presentationContext === "combo_trigger") && <fieldset>
+            <legend>Make It A Combo<small>Optional</small></legend>
+            <div className="posChoiceGrid"><button type="button" className={presentationComboEnabled ? "selected" : ""} onClick={() => { setPresentationComboEnabled((value) => !value); if (presentationComboEnabled) setModifierSelections((current) => Object.fromEntries(Object.entries(current).map(([id, selections]) => [id, configuringItem.modifiers.some((group) => group.id === id && (group.presentationContext === "combo_trigger" || group.presentationContext === "dependent")) ? [] : selections]))); }}><strong>{presentationComboEnabled ? "Combo selected" : "MAKE IT A COMBO"}</strong><span>{presentationComboEnabled ? "Choose a side below" : "Add a side"}</span></button></div>
+          </fieldset>}
+
+          {configuringItem.modifiers.filter(modifierGroupVisible).map((group) => {
+            if (group.presentationBehavior === "pizza_topping") return <PizzaToppingSelector key={group.id} group={group} variant={selectedVariant} selections={pizzaToppings} onChange={setPizzaToppings} />;
             const selected = modifierSelections[group.id] || [];
             const valid = selectionsValid(group, selected);
             return <fieldset id={`modifier-${group.id}`} key={group.id} className={!valid ? "needsSelection" : ""}>

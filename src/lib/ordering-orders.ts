@@ -3,12 +3,15 @@ import { getSql } from "@/lib/db";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
 import type { OrderingBusiness, OrderSource, ServiceType } from "@/lib/ordering-core";
 import { calculateLineTotalCents, validateModifierRequirements } from "@/lib/ordering-core";
+import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
+import { normalizePizzaToppings, pizzaToppingPriceCents, type PizzaToppingSelection } from "@/lib/ordering-pizza-toppings";
 
 export type ConfiguredOrderItemInput = {
   itemId: string;
   quantity?: number;
   modifierSelections?: Record<string, string[]>;
   modifierQuantities?: Record<string, number>;
+  pizzaToppings?: PizzaToppingSelection[];
   comboId?: string | null;
   comboSelections?: Record<string, string[]>;
   specialInstructions?: string;
@@ -43,6 +46,10 @@ type ModifierRow = {
   option_available: boolean | null;
   price_delta_cents: number | null;
   default_selected: boolean | null;
+  presentation_context: "ordinary" | "combo_trigger" | "dependent" | "hidden";
+  presentation_behavior: "standard" | "pizza_topping";
+  parent_group_id: string | null;
+  parent_option_ids: string[] | null;
 };
 type ComboRow = {
   combo_id: string;
@@ -94,6 +101,7 @@ async function nextOrderNumber(business: OrderingBusiness): Promise<string> {
 }
 
 async function addConfiguredItem(orderId: string, business: OrderingBusiness, input: ConfiguredOrderItemInput): Promise<void> {
+  await ensureOrderingMenuOverrideSchema();
   const sql = getSql();
   const quantity = positiveQuantity(input.quantity);
   const itemRows = (await sql`
@@ -118,16 +126,18 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
       opt.available AS option_available,
       COALESCE(def.price_delta_override_cents, opt.price_delta_cents) AS price_delta_cents,
       COALESCE(def.default_selected, FALSE) AS default_selected
+      ,COALESCE(p.context,'ordinary') AS presentation_context,COALESCE(p.behavior,'standard') AS presentation_behavior,p.parent_group_id,p.parent_option_ids
     FROM ordering_menu_item_modifier_groups link
     JOIN ordering_modifier_groups grp ON grp.id = link.group_id AND grp.active = TRUE
     LEFT JOIN ordering_modifier_options opt ON opt.group_id = grp.id AND opt.active = TRUE
     LEFT JOIN ordering_menu_item_modifier_defaults def
       ON def.item_id = link.item_id AND def.option_id = opt.id AND def.active = TRUE
+    LEFT JOIN ordering_modifier_presentation_overrides p ON p.item_id=link.item_id AND p.group_id=link.group_id
     WHERE link.item_id = ${item.id}
     ORDER BY link.sort_order, grp.sort_order, opt.sort_order, opt.name
   `) as ModifierRow[];
 
-  const groups = new Map<string, { name: string; min: number; max: number; allowQuantity: boolean; rows: ModifierRow[] }>();
+  const groups = new Map<string, { name: string; min: number; max: number; allowQuantity: boolean; context: ModifierRow["presentation_context"]; behavior: ModifierRow["presentation_behavior"]; parentGroupId: string | null; parentOptionIds: string[]; rows: ModifierRow[] }>();
   for (const row of modifierRows) {
     if (!groups.has(row.group_id)) {
       groups.set(row.group_id, {
@@ -135,6 +145,10 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
         min: Number(row.min_selections),
         max: Number(row.max_selections),
         allowQuantity: Boolean(row.allow_option_quantity),
+        context: row.presentation_context,
+        behavior: row.presentation_behavior,
+        parentGroupId: row.parent_group_id,
+        parentOptionIds: row.parent_option_ids || [],
         rows: [],
       });
     }
@@ -143,8 +157,15 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
 
   const modifierSelections = input.modifierSelections || {};
   const modifierQuantities = input.modifierQuantities || {};
+  const groupActive = (groupId: string, group: { context: ModifierRow["presentation_context"]; parentGroupId: string | null; parentOptionIds: string[] }) => {
+    if (group.context === "hidden") return false;
+    if (group.context === "combo_trigger") return Boolean((modifierSelections[groupId] || []).length);
+    if (group.context !== "dependent") return true;
+    const selected = modifierSelections[group.parentGroupId || ""] || [];
+    return selected.some((id) => group.parentOptionIds.includes(id));
+  };
   const modifierIssues = validateModifierRequirements(
-    Array.from(groups.entries()).map(([groupId, group]) => ({
+    Array.from(groups.entries()).filter(([groupId,group]) => group.behavior !== "pizza_topping" && groupActive(groupId,group)).map(([groupId, group]) => ({
       groupId,
       groupName: group.name,
       minSelections: group.min,
@@ -166,10 +187,17 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
     state: "selected" | "removed";
     priceDeltaCents: number;
     quantity: number;
+    pizzaToppingPortion: string | null;
+    pizzaToppingAmount: string | null;
   }> = [];
 
   for (const [groupId, group] of groups) {
+    if (group.behavior === "pizza_topping") continue;
     const selected = new Set(modifierSelections[groupId] || []);
+    if (!groupActive(groupId, group)) {
+      if (selected.size) throw new Error(`Modifier choices for ${group.name} are not valid in the selected combo context.`);
+      continue;
+    }
     const validOptionIds = new Set(group.rows.filter((row) => row.option_id).map((row) => row.option_id!));
     for (const selectedId of selected) {
       if (!validOptionIds.has(selectedId)) throw new Error(`An invalid modifier option was supplied for ${group.name}.`);
@@ -195,6 +223,8 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
           state: "selected",
           priceDeltaCents: delta,
           quantity: optionQuantity,
+          pizzaToppingPortion: null,
+          pizzaToppingAmount: null,
         });
       } else if (row.default_selected) {
         modifierSnapshots.push({
@@ -205,9 +235,22 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
           state: "removed",
           priceDeltaCents: 0,
           quantity: 1,
+          pizzaToppingPortion: null,
+          pizzaToppingAmount: null,
         });
       }
     }
+  }
+
+  const toppingGroups = Array.from(groups.entries()).filter(([, group]) => group.behavior === "pizza_topping");
+  const normalizedToppings = normalizePizzaToppings(input.pizzaToppings || []);
+  for (const topping of normalizedToppings) {
+    const match = toppingGroups.map(([groupId, group]) => ({ groupId, group, row: group.rows.find((row) => row.option_id === topping.modifierOptionId) })).find((candidate) => candidate.row);
+    if (!match?.row?.option_name) throw new Error("An invalid pizza topping was supplied.");
+    if (!match.row.option_available) throw new Error(`${match.row.option_name} is currently unavailable.`);
+    const delta = pizzaToppingPriceCents(Number(match.row.price_delta_cents ?? 0), topping.portion, topping.amount);
+    modifierUnitDeltaCents += delta;
+    modifierSnapshots.push({ groupId: match.groupId, optionId: topping.modifierOptionId, groupName: match.group.name, optionName: match.row.option_name, state: "selected", priceDeltaCents: delta, quantity: 1, pizzaToppingPortion: topping.portion, pizzaToppingAmount: topping.amount });
   }
 
   let comboUnitDeltaCents = 0;
@@ -313,10 +356,11 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
     await sql`
       INSERT INTO ordering_order_item_modifiers (
         id, order_item_id, group_id, option_id, group_name_snapshot, option_name_snapshot,
-        quantity, unit_price_delta_cents, selection_state
+        quantity, unit_price_delta_cents, selection_state, pizza_topping_portion, pizza_topping_amount
       ) VALUES (
         ${randomUUID()}, ${orderItemId}, ${modifier.groupId}, ${modifier.optionId},
-        ${modifier.groupName}, ${modifier.optionName}, ${modifier.quantity}, ${modifier.priceDeltaCents}, ${modifier.state}
+        ${modifier.groupName}, ${modifier.optionName}, ${modifier.quantity}, ${modifier.priceDeltaCents}, ${modifier.state},
+        ${modifier.pizzaToppingPortion}, ${modifier.pizzaToppingAmount}
       )
     `;
   }
