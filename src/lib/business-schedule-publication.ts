@@ -145,7 +145,10 @@ function employeeScheduleSignatures(shifts: ScheduleShiftRow[]): Record<string, 
 
   return Object.fromEntries(Array.from(byEmployee.entries()).map(([employeeId, employeeShifts]) => {
     const signature = employeeShifts
-      .sort((left, right) => left.starts_at.localeCompare(right.starts_at) || left.id.localeCompare(right.id))
+      .sort((left, right) => {
+        const startDifference = new Date(left.starts_at).getTime() - new Date(right.starts_at).getTime();
+        return startDifference || String(left.id).localeCompare(String(right.id));
+      })
       .map((shift) => JSON.stringify({
         id: shift.id,
         position: clean(shift.position, 100),

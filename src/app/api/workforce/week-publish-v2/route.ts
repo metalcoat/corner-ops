@@ -15,6 +15,7 @@ type DraftShiftRow = {
   id: string;
   employee_id: string | null;
   employee_name: string | null;
+  position: string;
   starts_at: string | Date;
   ends_at: string | Date;
 };
@@ -60,6 +61,23 @@ function mondayForDate(value: string | Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+function recoveredShiftLabel(shift: DraftShiftRow): string {
+  const start = new Date(shift.starts_at);
+  const end = new Date(shift.ends_at);
+  const day = new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  }).format(start);
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${day}: ${time.format(start)}–${time.format(end)} — ${String(shift.position || "Shift").trim() || "Shift"}`;
+}
+
 function isLegacyTimestampSortError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("starts_at") && message.includes("localeCompare is not a function");
@@ -91,7 +109,7 @@ async function installScheduleMessageCompatibility() {
 
 async function draftShiftsForWeek(business: Business, weekStart: string): Promise<DraftShiftRow[]> {
   return getSql()`
-    SELECT s.id, s.employee_id, e.name AS employee_name, s.starts_at, s.ends_at
+    SELECT s.id, s.employee_id, e.name AS employee_name, s.position, s.starts_at, s.ends_at
     FROM schedule_shifts s
     LEFT JOIN employees e ON e.id = s.employee_id
     WHERE s.business = ${business}
@@ -106,7 +124,7 @@ async function nearbyDraftShifts(business: Business, weekStart: string): Promise
   const nearbyStart = addDays(weekStart, -7);
   const nearbyEnd = addDays(weekStart, 14);
   return getSql()`
-    SELECT s.id, s.employee_id, e.name AS employee_name, s.starts_at, s.ends_at
+    SELECT s.id, s.employee_id, e.name AS employee_name, s.position, s.starts_at, s.ends_at
     FROM schedule_shifts s
     LEFT JOIN employees e ON e.id = s.employee_id
     WHERE s.business = ${business}
@@ -140,10 +158,22 @@ async function sendRecoveredPublishNotifications(input: {
   const employeeIds = Array.from(new Set(
     input.drafts.flatMap((shift) => shift.employee_id ? [shift.employee_id] : []),
   ));
-  const body = `Your ${input.business} schedule was updated for ${input.weekStart} through ${addDays(input.weekStart, 6)}. Review your current shifts in Employee Hub.`;
-
   const emailResults = [];
   for (const employeeId of employeeIds) {
+    const employeeShifts = input.drafts
+      .filter((shift) => shift.employee_id === employeeId)
+      .sort((left, right) => new Date(left.starts_at).getTime() - new Date(right.starts_at).getTime());
+    const scheduleLines = employeeShifts.length
+      ? employeeShifts.map((shift) => `- ${recoveredShiftLabel(shift)}`).join("\n")
+      : "- You are not currently scheduled for this week.";
+    const body = [
+      `Your ${input.business} schedule was updated for ${input.weekStart} through ${addDays(input.weekStart, 6)}.`,
+      "",
+      "Your current schedule:",
+      scheduleLines,
+      "",
+      "Open Employee Hub if you need to review changes, offer a shift, or claim an open shift.",
+    ].join("\n");
     emailResults.push(await sendStaffNotification({
       business: input.business,
       recipientEmployeeId: employeeId,
@@ -174,7 +204,13 @@ async function sendRecoveredPublishNotifications(input: {
     }));
   const sms = await deliverSms({
     recipients: smsRecipients,
-    text: () => `${body} Reply STOP to opt out.`,
+    text: (employee) => {
+      const employeeShifts = input.drafts
+        .filter((shift) => shift.employee_id === employee.id)
+        .sort((left, right) => new Date(left.starts_at).getTime() - new Date(right.starts_at).getTime());
+      const shifts = employeeShifts.map((shift) => recoveredShiftLabel(shift)).join("; ");
+      return `${employee.name}, your ${input.business} schedule was updated. ${shifts || "No assigned shifts this week."} Open Employee Hub for changes. Reply STOP to opt out.`;
+    },
   });
 
   return { employeeIds, emailResults, sms };
