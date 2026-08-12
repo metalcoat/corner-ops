@@ -67,8 +67,8 @@ export async function copyScheduleWeekToTarget(input: {
             WHERE t.business = source_shifts.business
               AND t.employee_id = source_shifts.employee_id
               AND t.status = 'Approved'
-              AND (t.starts_on::date AT TIME ZONE ${TIME_ZONE}) < source_shifts.target_ends_at
-              AND ((t.ends_on::date + 1) AT TIME ZONE ${TIME_ZONE}) > source_shifts.target_starts_at
+              AND t.starts_on <= ((source_shifts.target_ends_at - INTERVAL '1 millisecond') AT TIME ZONE ${TIME_ZONE})::date
+              AND t.ends_on >= (source_shifts.target_starts_at AT TIME ZONE ${TIME_ZONE})::date
           ) THEN employee_id
           ELSE NULL
         END AS target_employee_id

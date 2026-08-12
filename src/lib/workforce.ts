@@ -567,8 +567,8 @@ export async function reviewTimeOff(input: { id: string; business: Business; app
     WHERE business = ${input.business}
       AND employee_id = ${request.employee_id}
       AND status <> 'Cancelled'
-      AND starts_at < ((${request.ends_on}::date + 1) AT TIME ZONE ${TIME_ZONE})
-      AND ends_at > (${request.starts_on}::date AT TIME ZONE ${TIME_ZONE})
+      AND (starts_at AT TIME ZONE ${TIME_ZONE})::date <= ${request.ends_on}::date
+      AND ((ends_at - INTERVAL '1 millisecond') AT TIME ZONE ${TIME_ZONE})::date >= ${request.starts_on}::date
     ORDER BY starts_at
   ` as unknown as Array<{ id: string; starts_at: string; ends_at: string; position: string; status: string }> : [];
 

@@ -43,8 +43,8 @@ export async function scheduleTimeOffConflicts(input: {
     WHERE t.business = ${input.business}
       AND t.employee_id = ${input.employeeId}
       AND t.status IN ('Pending', 'Approved')
-      AND (t.starts_on::date AT TIME ZONE ${TIME_ZONE}) < ${end.toISOString()}
-      AND ((t.ends_on::date + 1) AT TIME ZONE ${TIME_ZONE}) > ${start.toISOString()}
+      AND t.starts_on <= ((${end.toISOString()}::timestamptz - INTERVAL '1 millisecond') AT TIME ZONE ${TIME_ZONE})::date
+      AND t.ends_on >= (${start.toISOString()}::timestamptz AT TIME ZONE ${TIME_ZONE})::date
     ORDER BY CASE WHEN t.status = 'Approved' THEN 0 ELSE 1 END, t.starts_on
   ` as unknown as Array<{
     id: string;

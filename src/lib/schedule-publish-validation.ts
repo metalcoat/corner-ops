@@ -88,8 +88,8 @@ export async function publishValidatedScheduleWeek(input: {
       AND s.starts_at < ((${weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
       AND s.status <> 'Cancelled'
       AND t.status = 'Approved'
-      AND (t.starts_on::date AT TIME ZONE ${TIME_ZONE}) < s.ends_at
-      AND ((t.ends_on::date + 1) AT TIME ZONE ${TIME_ZONE}) > s.starts_at
+      AND t.starts_on <= ((s.ends_at - INTERVAL '1 millisecond') AT TIME ZONE ${TIME_ZONE})::date
+      AND t.ends_on >= (s.starts_at AT TIME ZONE ${TIME_ZONE})::date
     ORDER BY s.starts_at, e.name
   ` as unknown as Array<{ shift_id: string; employee_name: string; starts_at: string }>;
 
