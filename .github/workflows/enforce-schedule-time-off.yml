@@ -16,7 +16,9 @@ jobs:
         with:
           ref: main
       - name: Apply patch
-        run: python scripts/enforce-schedule-time-off.py
+        run: |
+          python scripts/enforce-schedule-time-off.py
+          python scripts/fix-time-off-prop-target.py
       - name: Verify
         run: |
           npm install --no-audit --no-fund
