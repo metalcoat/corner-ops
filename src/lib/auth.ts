@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { assertConfigured } from "@/lib/config";
 import { businesses, type Business } from "@/lib/types";
 import { permissionsForRole, type AppRole, type AppUserIdentity } from "@/lib/users";
+import { secureCookies } from "@/lib/cookie-security";
 
 const COOKIE_NAME = "corner_ops_session";
 const SESSION_SECONDS = 60 * 60 * 12;
@@ -97,7 +98,7 @@ export async function createSession(identity?: AppUserIdentity): Promise<Session
   cookieStore.set(COOKIE_NAME, createToken(payload), {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: secureCookies(),
     path: "/",
     maxAge: SESSION_SECONDS,
   });
@@ -109,7 +110,7 @@ export async function clearSession(): Promise<void> {
   cookieStore.set(COOKIE_NAME, "", {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: secureCookies(),
     path: "/",
     maxAge: 0,
   });

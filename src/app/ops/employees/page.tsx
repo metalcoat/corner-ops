@@ -170,7 +170,7 @@ export default function EmployeesPage() {
   }
 
   if (!session) return <main className="workforceShell"><section className="workforcePanel"><h1>Loading employees</h1></section></main>;
-  if (!session.authenticated) return <main className="workforceShell"><section className="workforcePanel"><h1>Owner access required</h1><a className="wfPrimary" href="/">Return to sign-in</a></section></main>;
+  if (!session.authenticated) return <main className="workforceShell"><section className="workforcePanel"><h1>Owner access required</h1><a className="wfPrimary" href="/signin">Return to sign-in</a></section></main>;
 
   return <main className="workforceShell">
     <header className="workforceHero">

@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { ensureSchema, getSql } from "@/lib/db";
 import { validateEmployeePin } from "@/lib/employee-pin";
 import type { Business } from "@/lib/types";
+import { secureCookies } from "@/lib/cookie-security";
 
 const EMPLOYEE_COOKIE = "corner_ops_employee";
 const EMPLOYEE_SESSION_SECONDS = 60 * 60 * 24 * 14;
@@ -84,7 +85,7 @@ export async function createEmployeeSession(business: Business, suppliedPin: str
   store.set(EMPLOYEE_COOKIE, encode(payload), {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: secureCookies(),
     path: "/",
     maxAge: EMPLOYEE_SESSION_SECONDS,
   });
@@ -102,7 +103,7 @@ export async function clearEmployeeSession(): Promise<void> {
   store.set(EMPLOYEE_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: secureCookies(),
     path: "/",
     maxAge: 0,
   });

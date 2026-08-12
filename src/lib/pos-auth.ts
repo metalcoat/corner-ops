@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { ensureSchema, getSql, withTransaction } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import { validateEmployeePin } from "@/lib/employee-pin";
+import { secureCookies } from "@/lib/cookie-security";
 
 export const POS_COOKIE = "corner_ops_pos";
 export const POS_SESSION_SECONDS = 60 * 60 * 12;
@@ -158,7 +159,7 @@ export async function clockInDeliPosEmployee(session: PosSession) {
 
 export async function setPosSession(session: PosSession): Promise<void> {
   (await cookies()).set(POS_COOKIE, encodePosSession(session), {
-    httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production",
+    httpOnly: true, sameSite: "strict", secure: secureCookies(),
     path: "/", maxAge: POS_SESSION_SECONDS,
   });
 }
@@ -173,7 +174,7 @@ export async function getPosSession(requireClockedIn = true): Promise<PosSession
 
 export async function clearPosSession(): Promise<void> {
   (await cookies()).set(POS_COOKIE, "", {
-    httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production",
+    httpOnly: true, sameSite: "strict", secure: secureCookies(),
     path: "/", maxAge: 0,
   });
 }
