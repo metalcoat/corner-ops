@@ -1,11 +1,14 @@
 import { getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import { applyMenuImportRun } from "@/lib/ordering-menu-import";
+import { assertLocalRezkuImportAllowed, getDatabaseDriver } from "@/lib/config";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
+    assertLocalRezkuImportAllowed();
+    console.info(`[rezku/menu-import] apply requested; driver=${getDatabaseDriver()} environment=local-development`);
     const session = await getSession();
     if (!session) return unauthorized();
     if (session.role !== "Owner" && session.role !== "Co-Owner") {

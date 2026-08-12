@@ -62,7 +62,7 @@ for (const { node, path } of records) {
           sourceId: String(modifier.id),
           name: String(modifier.name || "").trim(),
           printLabel: modifier.print_label || null,
-          basePriceCents: cents(modifier.online_price ?? modifier.price),
+          priceDeltaCents: cents(modifier.online_price ?? modifier.price),
           availableOnline: modifier.available_online !== false,
           defaultSelected: false,
           sortOrder: Number(modifier.order ?? modifierIndex),

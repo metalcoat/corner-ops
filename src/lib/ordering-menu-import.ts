@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { getSql } from "@/lib/db";
+import { getSql, withTransaction } from "@/lib/db";
+import { assertLocalRezkuImportAllowed } from "@/lib/config";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { ensureOrderingMenuImportSchema } from "@/lib/ordering-menu-import-schema";
+import { applyRezkuVariantSnapshot, type RezkuNormalizedSnapshot } from "@/lib/ordering-rezku-variant-import";
 
 export type ImportedModifierOption = {
   sourceId: string;
@@ -52,7 +54,7 @@ export type ImportedMenuSnapshot = {
 };
 
 export type MenuImportWarning = {
-  code: "missing_source_id" | "duplicate_source_id" | "duplicate_name" | "invalid_price" | "invalid_modifier_range";
+  code: "missing_source_id" | "conflicting_source_id" | "duplicate_name" | "invalid_price" | "invalid_modifier_range";
   path: string;
   message: string;
 };
@@ -95,31 +97,32 @@ function hashSnapshot(snapshot: ImportedMenuSnapshot): string {
 
 export function previewImportedMenu(snapshot: ImportedMenuSnapshot): MenuImportPreview {
   const warnings: MenuImportWarning[] = [];
-  const idsByType = new Map<string, Set<string>>();
+  const definitionsByType = new Map<string, Map<string, string>>();
   const categoryNames = new Set<string>();
-  const modifierGroupNames = new Map<string, string>();
   let items = 0;
   let modifierGroups = 0;
   let modifierOptions = 0;
 
-  function checkId(entityType: string, sourceId: string, path: string) {
+  function checkId(entityType: string, sourceId: string, definition: unknown, path: string) {
     const id = clean(sourceId, 300);
     if (!id) {
       warnings.push({ code: "missing_source_id", path, message: "Imported entity has no stable source ID." });
       return;
     }
-    const ids = idsByType.get(entityType) || new Set<string>();
-    if (ids.has(id)) {
-      warnings.push({ code: "duplicate_source_id", path, message: `Duplicate ${entityType} source ID: ${id}` });
-      return;
+    const definitions = definitionsByType.get(entityType) || new Map<string, string>();
+    const canonical = hashValue(definition);
+    const previous = definitions.get(id);
+    if (previous && previous !== canonical) {
+      warnings.push({ code: "conflicting_source_id", path, message: `Conflicting ${entityType} definitions reuse source ID: ${id}` });
+    } else if (!previous) {
+      definitions.set(id, canonical);
     }
-    ids.add(id);
-    idsByType.set(entityType, ids);
+    definitionsByType.set(entityType, definitions);
   }
 
   snapshot.categories.forEach((category, categoryIndex) => {
     const categoryPath = `categories[${categoryIndex}]`;
-    checkId("category", category.sourceId, categoryPath);
+    checkId("category", category.sourceId, { name: clean(category.name) }, categoryPath);
     const categoryName = clean(category.name).toLowerCase();
     if (categoryNames.has(categoryName)) {
       warnings.push({ code: "duplicate_name", path: categoryPath, message: `Duplicate category name: ${category.name}` });
@@ -130,7 +133,7 @@ export function previewImportedMenu(snapshot: ImportedMenuSnapshot): MenuImportP
     category.items.forEach((item, itemIndex) => {
       items += 1;
       const itemPath = `${categoryPath}.items[${itemIndex}]`;
-      checkId("item", item.sourceId, itemPath);
+      checkId("item", item.sourceId, { name: clean(item.name), basePriceCents: item.basePriceCents }, itemPath);
       const itemName = clean(item.name).toLowerCase();
       if (itemNames.has(itemName)) {
         warnings.push({ code: "duplicate_name", path: itemPath, message: `Duplicate item name in category: ${item.name}` });
@@ -143,19 +146,11 @@ export function previewImportedMenu(snapshot: ImportedMenuSnapshot): MenuImportP
       (item.modifierGroups || []).forEach((group, groupIndex) => {
         modifierGroups += 1;
         const groupPath = `${itemPath}.modifierGroups[${groupIndex}]`;
-        checkId("modifier_group", group.sourceId, groupPath);
-        const groupName = clean(group.name).toLowerCase();
-        const previousGroupId = modifierGroupNames.get(groupName);
-        if (previousGroupId && previousGroupId !== clean(group.sourceId, 300)) {
-          warnings.push({
-            code: "duplicate_name",
-            path: groupPath,
-            message: `Modifier group name '${group.name}' is used by more than one source group. Review before merging them.`,
-          });
-        } else {
-          modifierGroupNames.set(groupName, clean(group.sourceId, 300));
-        }
-
+        checkId("modifier_group", group.sourceId, {
+          name: clean(group.name), minSelections: group.minSelections ?? 0,
+          maxSelections: group.maxSelections ?? 1, allowOptionQuantity: Boolean(group.allowOptionQuantity),
+          optionSourceIds: group.options.map((option) => clean(option.sourceId, 300)).sort(),
+        }, groupPath);
         const min = Math.max(0, Math.trunc(group.minSelections ?? 0));
         const max = Math.max(1, Math.trunc(group.maxSelections ?? 1));
         if (max < min) {
@@ -166,7 +161,9 @@ export function previewImportedMenu(snapshot: ImportedMenuSnapshot): MenuImportP
         group.options.forEach((option, optionIndex) => {
           modifierOptions += 1;
           const optionPath = `${groupPath}.options[${optionIndex}]`;
-          checkId("modifier_option", option.sourceId, optionPath);
+          checkId("modifier_option", option.sourceId, {
+            name: clean(option.name), priceDeltaCents: option.priceDeltaCents, available: option.available !== false,
+          }, optionPath);
           const optionName = clean(option.name).toLowerCase();
           if (optionNames.has(optionName)) {
             warnings.push({ code: "duplicate_name", path: optionPath, message: `Duplicate modifier option: ${option.name}` });
@@ -430,14 +427,6 @@ async function upsertModifierGroup(input: {
         ${randomUUID()}, ${input.snapshot.business}, ${clean(input.group.name)}, ${clean(input.group.prompt, 1000)},
         ${min}, ${max}, ${Boolean(input.group.allowOptionQuantity)}, TRUE, ${Math.trunc(input.group.sortOrder ?? 0)}
       )
-      ON CONFLICT (business, name) DO UPDATE SET
-        prompt = EXCLUDED.prompt,
-        min_selections = EXCLUDED.min_selections,
-        max_selections = EXCLUDED.max_selections,
-        allow_option_quantity = EXCLUDED.allow_option_quantity,
-        active = TRUE,
-        sort_order = EXCLUDED.sort_order,
-        updated_at = NOW()
       RETURNING id
     `) as IdRow[];
     id = rows[0].id;
@@ -528,6 +517,7 @@ export async function applyMenuImportRun(input: {
   approvedBy: string;
   allowWarnings?: boolean;
 }): Promise<{ runId: string; applied: true; counts: MenuImportPreview["counts"] }> {
+  assertLocalRezkuImportAllowed();
   await ensureOrderingMenuImportSchema();
   const sql = getSql();
   const rows = (await sql`
@@ -545,14 +535,15 @@ export async function applyMenuImportRun(input: {
 
   const snapshot = run.snapshot;
   const preview = snapshot.preview || previewImportedMenu(snapshot);
-  await sql`
-    UPDATE ordering_menu_import_runs
-    SET status = 'approved', approved_by = ${input.approvedBy}, approved_at = NOW(), error_message = ''
-    WHERE id = ${run.id}
-  `;
-
   try {
-    for (const category of snapshot.categories) {
+    await withTransaction(async () => {
+      const transactionSql = getSql();
+      await transactionSql`
+        UPDATE ordering_menu_import_runs
+        SET status = 'approved', approved_by = ${input.approvedBy}, approved_at = NOW(), error_message = ''
+        WHERE id = ${run.id}
+      `;
+      for (const category of snapshot.categories) {
       const categoryId = await upsertCategory({ snapshot, category, runId: run.id });
       for (const item of category.items) {
         const itemId = await upsertItem({ snapshot, categoryId, item, runId: run.id });
@@ -583,13 +574,16 @@ export async function applyMenuImportRun(input: {
           }
         }
       }
-    }
-
-    await sql`
-      UPDATE ordering_menu_import_runs
-      SET status = 'applied', applied_at = NOW(), error_message = ''
-      WHERE id = ${run.id}
-    `;
+      }
+      if (snapshot.source === "rezku") {
+        await applyRezkuVariantSnapshot({ snapshot: snapshot as unknown as RezkuNormalizedSnapshot, runId: run.id });
+      }
+      await transactionSql`
+        UPDATE ordering_menu_import_runs
+        SET status = 'applied', applied_at = NOW(), error_message = ''
+        WHERE id = ${run.id}
+      `;
+    });
     return { runId: run.id, applied: true, counts: preview.counts };
   } catch (error) {
     await sql`

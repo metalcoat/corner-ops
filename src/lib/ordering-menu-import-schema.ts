@@ -14,6 +14,11 @@ export function ensureOrderingMenuImportSchema(): Promise<void> {
       await ensureOrderingVariantSchema();
       const sql = getSql();
 
+      // Rezku can define materially different modifier groups with the same
+      // display name. Source mappings, not names, determine their identity.
+      await sql`ALTER TABLE ordering_modifier_groups DROP CONSTRAINT IF EXISTS ordering_modifier_groups_business_name_key`;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_modifier_groups_business_name_idx ON ordering_modifier_groups (business, name)`;
+
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_menu_import_runs (
           id UUID PRIMARY KEY,

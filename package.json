@@ -9,7 +9,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:bootstrap:local": "tsx scripts/local-db.ts bootstrap",
+    "db:status": "tsx scripts/local-db.ts status",
+    "menu:rezku:preview": "tsx scripts/rezku-menu-local.ts preview",
+    "menu:rezku:apply": "tsx scripts/rezku-menu-local.ts apply"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
@@ -26,6 +30,7 @@
     "@types/pg": "^8.21.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "tsx": "^4.23.12",
     "typescript": "^5.7.0"
   }
 }

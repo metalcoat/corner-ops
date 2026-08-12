@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool } from "pg";
 import { assertConfigured, getDatabaseDriver } from "@/lib/config";
 
@@ -11,22 +12,24 @@ export interface SqlClient {
 let queryClient: SqlClient | null = null;
 let postgresPool: Pool | null = null;
 let schemaPromise: Promise<void> | null = null;
+const transactionClient = new AsyncLocalStorage<SqlClient>();
+
+function taggedQuery(query: (text: string, values?: unknown[]) => Promise<{ rows: SqlRow[] }>): SqlClient {
+  return async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const text = strings.reduce(
+      (statement, part, index) => statement + part + (index < values.length ? `$${index + 1}` : ""),
+      "",
+    );
+    return (await query(text, values)).rows;
+  };
+}
 
 function getPostgresClient(): SqlClient {
   if (!postgresPool) {
     postgresPool = new Pool({ connectionString: process.env.DATABASE_URL });
   }
 
-  const query = async (strings: TemplateStringsArray, ...values: unknown[]) => {
-    const text = strings.reduce(
-      (statement, part, index) => statement + part + (index < values.length ? `$${index + 1}` : ""),
-      "",
-    );
-    const result = await postgresPool!.query(text, values);
-    return result.rows;
-  };
-
-  return query;
+  return taggedQuery((text, values) => postgresPool!.query(text, values));
 }
 
 function getNeonClient(): SqlClient {
@@ -36,12 +39,35 @@ function getNeonClient(): SqlClient {
 
 export function getSql(): SqlClient {
   assertConfigured("DATABASE_URL");
+  const activeTransaction = transactionClient.getStore();
+  if (activeTransaction) return activeTransaction;
   if (!queryClient) {
     queryClient = getDatabaseDriver() === "postgres"
       ? getPostgresClient()
       : getNeonClient();
   }
   return queryClient;
+}
+
+export async function withTransaction<T>(operation: () => Promise<T>): Promise<T> {
+  assertConfigured("DATABASE_URL");
+  if (getDatabaseDriver() !== "postgres") {
+    throw new Error("Interactive transactions are available only through the local PostgreSQL driver.");
+  }
+  if (transactionClient.getStore()) return operation();
+  if (!postgresPool) postgresPool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const client = await postgresPool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await transactionClient.run(taggedQuery((text, values) => client.query(text, values)), operation);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export function ensureSchema(): Promise<void> {
