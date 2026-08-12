@@ -34,6 +34,7 @@ type TimeOff = ScheduleTimeOff & {
   employee_name: string;
   starts_on: string;
   ends_on: string;
+  created_at: string;
 };
 type Message = {
   id: string;
@@ -323,7 +324,7 @@ export default function WorkforcePage() {
         <div className="wfPanelHeader"><div><p className="wfEyebrow">Requested days away</p><h2>Time off</h2></div></div>
         <div className="wfList">{(currentData?.timeOff || []).map((request) => {
           const conflicts = timeOffShiftConflicts(request, currentData?.shifts || []);
-          return <div className="wfRequest" key={request.id}><div><strong>{request.employee_name}</strong><span>{dateOnly(request.starts_on)} through {dateOnly(request.ends_on)}</span>{request.reason && <p>{request.reason}</p>}{conflicts.length > 0 && <p className="wfTimeOffConflict"><strong>Schedule conflict:</strong> already assigned to {conflicts.map((shift) => `${local(shift.startsAt)}–${new Date(shift.endsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`).join("; ")}. {request.status === "Pending" ? "Approving this request will require reassignment." : request.status === "Approved" ? "Reassign or open the conflicting shift." : ""}</p>}</div><div className="wfActions"><span className={`wfBadge ${request.status.toLowerCase()}`}>{request.status}</span>{request.status === "Pending" && <><button disabled={busy} onClick={() => void approveTimeOff(request)}>Approve</button><button disabled={busy} onClick={() => void action({ action: "time-off-review", id: request.id, approve: false }, "Time off rejected.").catch(() => undefined)}>Reject</button></>}</div></div>;
+          return <div className="wfRequest" key={request.id}><div><strong>{request.employee_name}</strong><span>{dateOnly(request.starts_on)} through {dateOnly(request.ends_on)}</span><small>Submitted {local(request.created_at)} via Employee Hub</small>{request.reason && <p>{request.reason}</p>}{conflicts.length > 0 && <p className="wfTimeOffConflict"><strong>Schedule conflict:</strong> already assigned to {conflicts.map((shift) => `${local(shift.startsAt)}–${new Date(shift.endsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`).join("; ")}. {request.status === "Pending" ? "Approving this request will require reassignment." : request.status === "Approved" ? "Reassign or open the conflicting shift." : ""}</p>}</div><div className="wfActions"><span className={`wfBadge ${request.status.toLowerCase()}`}>{request.status}</span>{request.status === "Pending" && <><button disabled={busy} onClick={() => void approveTimeOff(request)}>Approve</button><button disabled={busy} onClick={() => void action({ action: "time-off-review", id: request.id, approve: false }, "Time off rejected.").catch(() => undefined)}>Reject</button></>}</div></div>;
         })}{!currentData?.timeOff.length && <p className="wfEmpty">No time-off requests.</p>}</div>
       </article>
     </section>}
