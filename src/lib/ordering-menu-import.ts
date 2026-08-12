@@ -549,7 +549,7 @@ export async function applyMenuImportRun(input: {
         const itemId = await upsertItem({ snapshot, categoryId, item, runId: run.id });
         for (const group of item.modifierGroups || []) {
           const groupId = await upsertModifierGroup({ snapshot, group, runId: run.id });
-          await sql`
+          await transactionSql`
             INSERT INTO ordering_menu_item_modifier_groups (id, item_id, group_id, sort_order)
             VALUES (${randomUUID()}, ${itemId}, ${groupId}, ${Math.trunc(group.sortOrder ?? 0)})
             ON CONFLICT (item_id, group_id) DO UPDATE SET sort_order = EXCLUDED.sort_order
@@ -557,7 +557,7 @@ export async function applyMenuImportRun(input: {
 
           for (const option of group.options) {
             const optionId = await upsertModifierOption({ snapshot, groupId, option, runId: run.id });
-            await sql`
+            await transactionSql`
               INSERT INTO ordering_menu_item_modifier_defaults (
                 id, item_id, option_id, default_selected, included_quantity,
                 price_delta_override_cents, active
