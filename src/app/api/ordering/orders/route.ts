@@ -33,6 +33,15 @@ function readRequestedFor(value: unknown, mode: OrderTimingMode): Date | null {
   return date;
 }
 
+function cashierOrderError(error: unknown): Response | null {
+  if (!(error instanceof Error)) return null;
+  const message = error.message;
+  const safeOrderError = /^(Choose a size|The selected size|This (item|menu item)|Menu item|Item quantity|Required modifier choices|Required combo choice|An invalid (modifier|combo)|Invalid quantity|The selected combo|A selected modifier|A valid future order time|Unknown (business|fulfillment type|order timing mode)|Invalid order item)/.test(message)
+    || message.endsWith(" is currently unavailable.");
+  if (!safeOrderError) return null;
+  return Response.json({ error: message }, { status: 409 });
+}
+
 export async function POST(request: Request) {
   try {
     const session = await getSession();
@@ -56,6 +65,9 @@ export async function POST(request: Request) {
         modifierSelections: record.modifierSelections && typeof record.modifierSelections === "object"
           ? record.modifierSelections as Record<string, string[]>
           : {},
+        modifierQuantities: record.modifierQuantities && typeof record.modifierQuantities === "object"
+          ? record.modifierQuantities as Record<string, number>
+          : {},
         comboId: record.comboId ? String(record.comboId) : null,
         comboSelections: record.comboSelections && typeof record.comboSelections === "object"
           ? record.comboSelections as Record<string, string[]>
@@ -78,6 +90,6 @@ export async function POST(request: Request) {
     });
     return Response.json({ order }, { status: 201 });
   } catch (error) {
-    return apiError(error);
+    return cashierOrderError(error) || apiError(error);
   }
 }

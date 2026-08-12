@@ -30,8 +30,10 @@ type CartLine = {
   modifierText: string[];
   comboText: string[];
   modifierSelections: Record<string, string[]>;
+  modifierQuantities: Record<string, number>;
   comboId: string | null;
   comboSelections: Record<string, string[]>;
+  specialInstructions: string;
 };
 
 type MenuPayload = {
@@ -52,7 +54,7 @@ const serviceLabels: Record<PosServiceType, { label: string; paymentNote?: strin
   pickup: { label: "Pickup" },
   delivery: { label: "Delivery" },
   no_contact_delivery: { label: "No-contact", paymentNote: "Prepay online" },
-  dine_in: { label: "Eat in" },
+  dine_in: { label: "Dine In" },
   curbside: { label: "Curbside", paymentNote: "Prepay online" },
   bar: { label: "Bar / Tab" },
 };
@@ -117,7 +119,7 @@ function selectionsValid(group: OrderingModifierGroupView, selections: string[])
 
 export default function PosClient({ business }: { business: Business }) {
   const config = orderingBusinessConfig(business);
-  const availableServices = config.serviceTypes.filter((value): value is PosServiceType => value !== "undecided");
+  const availableServices = config.serviceTypes.filter((value): value is PosServiceType => value !== "undecided" && (business !== "Corner Deli" || value === "pickup" || value === "delivery" || value === "dine_in"));
   const [session, setSession] = useState<SessionView | null>(null);
   const [menu, setMenu] = useState<OrderingMenuCategoryWithVariants[]>([]);
   const [menuLoading, setMenuLoading] = useState(true);
@@ -130,8 +132,11 @@ export default function PosClient({ business }: { business: Business }) {
   const [configuringItem, setConfiguringItem] = useState<OrderingMenuItemWithVariants | null>(null);
   const [selectedVariantId, setSelectedVariantId] = useState("");
   const [modifierSelections, setModifierSelections] = useState<Record<string, string[]>>({});
+  const [modifierQuantities, setModifierQuantities] = useState<Record<string, number>>({});
   const [selectedComboId, setSelectedComboId] = useState("");
   const [comboSelections, setComboSelections] = useState<Record<string, string[]>>({});
+  const [specialInstructions, setSpecialInstructions] = useState("");
+  const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
   const [savedDraft, setSavedDraft] = useState<SavedDraft | null>(null);
@@ -197,9 +202,10 @@ export default function PosClient({ business }: { business: Business }) {
         const priceDeltaCents = variantOptionPrice(selectedVariant, option);
         if (chosen && !available) valid = false;
         if (chosen) {
-          unitPriceCents += priceDeltaCents;
+          const optionQuantity = group.allowOptionQuantity ? Math.max(1, modifierQuantities[option.id] || 1) : 1;
+          unitPriceCents += priceDeltaCents * optionQuantity;
           if (!option.defaultSelected || priceDeltaCents !== 0) {
-            modifierText.push(`${group.name}: ${option.name}`);
+            modifierText.push(`${group.name}: ${option.name}${optionQuantity > 1 ? ` ×${optionQuantity}` : ""}`);
           }
         } else if (option.defaultSelected) {
           modifierText.push(`${group.name}: NO ${option.name.toUpperCase()}`);
@@ -221,16 +227,21 @@ export default function PosClient({ business }: { business: Business }) {
     }
 
     return { valid, unitPriceCents, modifierText, comboText };
-  }, [configuringItem, selectedVariant, modifierSelections, selectedCombo, comboSelections]);
+  }, [configuringItem, selectedVariant, modifierSelections, modifierQuantities, selectedCombo, comboSelections]);
 
-  function openItem(item: OrderingMenuItemWithVariants) {
+  function openItem(item: OrderingMenuItemWithVariants, line?: CartLine) {
     if (!item.available) return;
     const variant = initialVariant(item);
     setConfiguringItem(item);
-    setSelectedVariantId(variant?.id || "");
-    setModifierSelections(initialModifierSelections(item, variant));
-    setSelectedComboId("");
-    setComboSelections({});
+    const lineVariant = line?.variantId ? item.variants.find((candidate) => candidate.id === line.variantId) || variant : variant;
+    setSelectedVariantId(lineVariant?.id || "");
+    setModifierSelections(line ? cloneSelections(line.modifierSelections) : initialModifierSelections(item, lineVariant));
+    setModifierQuantities(line ? { ...line.modifierQuantities } : {});
+    setSelectedComboId(line?.comboId || "");
+    setComboSelections(line ? cloneSelections(line.comboSelections) : {});
+    setSpecialInstructions(line?.specialInstructions || "");
+    setEditingLineId(line?.id || null);
+    setCheckoutError("");
   }
 
   function chooseVariant(variant: OrderingItemVariantView) {
@@ -264,6 +275,11 @@ export default function PosClient({ business }: { business: Business }) {
           : [...existing, optionId].slice(0, group.maxSelections),
       };
     });
+    setModifierQuantities((current) => ({ ...current, [optionId]: current[optionId] || 1 }));
+  }
+
+  function changeModifierQuantity(optionId: string, delta: number) {
+    setModifierQuantities((current) => ({ ...current, [optionId]: Math.max(1, Math.min(99, (current[optionId] || 1) + delta)) }));
   }
 
   function chooseCombo(combo: OrderingComboView | null) {
@@ -290,8 +306,8 @@ export default function PosClient({ business }: { business: Business }) {
 
   function addConfiguredItem() {
     if (!configuringItem || !configuration.valid) return;
-    setCart((current) => [...current, {
-      id: crypto.randomUUID(),
+    const line: CartLine = {
+      id: editingLineId || crypto.randomUUID(),
       itemId: configuringItem.id,
       variantId: selectedVariant?.id || null,
       variantName: selectedVariant?.name || "",
@@ -301,11 +317,20 @@ export default function PosClient({ business }: { business: Business }) {
       modifierText: configuration.modifierText,
       comboText: configuration.comboText,
       modifierSelections: cloneSelections(modifierSelections),
+      modifierQuantities: { ...modifierQuantities },
       comboId: selectedCombo?.id || null,
       comboSelections: cloneSelections(comboSelections),
-    }]);
+      specialInstructions: specialInstructions.trim(),
+    };
+    setCart((current) => editingLineId ? current.map((candidate) => candidate.id === editingLineId ? line : candidate) : [...current, line]);
     setConfiguringItem(null);
     setSelectedVariantId("");
+    setEditingLineId(null);
+    setSavedDraft(null);
+  }
+
+  function removeLine(lineId: string) {
+    setCart((current) => current.filter((line) => line.id !== lineId));
     setSavedDraft(null);
   }
 
@@ -339,8 +364,10 @@ export default function PosClient({ business }: { business: Business }) {
             variantId: line.variantId,
             quantity: line.quantity,
             modifierSelections: line.modifierSelections,
+            modifierQuantities: line.modifierQuantities,
             comboId: line.comboId,
             comboSelections: line.comboSelections,
+            specialInstructions: line.specialInstructions,
           })),
         }),
       });
@@ -364,6 +391,9 @@ export default function PosClient({ business }: { business: Business }) {
         kitchenTimingLabel: payload.order.kitchen_timing_label_snapshot || "",
         scheduledFor: payload.order.scheduled_for,
       });
+      if (Number(payload.order.total_cents) !== subtotalCents) {
+        setCheckoutError(`Menu pricing changed. Backend total is ${money(Number(payload.order.total_cents))}; review before continuing.`);
+      }
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : "Could not save draft order.");
     } finally {
@@ -463,20 +493,22 @@ export default function PosClient({ business }: { business: Business }) {
             <div className="posLineTop"><strong>{line.quantity}× {line.name}</strong><span>{money(line.unitPriceCents * line.quantity)}</span></div>
             {line.variantName && <small>Size / form: {line.variantName}</small>}
             {[...line.modifierText, ...line.comboText].map((text, index) => <small key={`${text}-${index}`}>{text}</small>)}
+            {line.specialInstructions && <small>Note: {line.specialInstructions}</small>}
             <div className="posQtyControls">
               <button type="button" onClick={() => changeQuantity(line.id, -1)}>−</button>
               <span>{line.quantity}</span>
               <button type="button" onClick={() => changeQuantity(line.id, 1)}>+</button>
+              <button type="button" aria-label={`Edit ${line.name}`} className="posLineAction" onClick={() => { const item = menu.flatMap((category) => category.items).find((candidate) => candidate.id === line.itemId); if (item) openItem(item, line); else setCheckoutError("This menu item changed and can no longer be edited."); }}>Edit</button>
+              <button type="button" aria-label={`Remove ${line.name}`} className="posLineAction danger" onClick={() => removeLine(line.id)}>Remove</button>
             </div>
           </article>)}
         </div>
         <div className="posTotals">
           <div><span>Subtotal</span><strong>{money(subtotalCents)}</strong></div>
           <div><span>Tax</span><strong>Included/configured at checkout</strong></div>
-          <div className="grand"><span>Current total</span><strong>{money(subtotalCents)}</strong></div>
+          <div className="grand"><span>{savedDraft ? "Backend total" : "Estimated total"}</span><strong>{money(savedDraft?.totalCents ?? subtotalCents)}</strong></div>
         </div>
         <div className="posCheckoutButtons">
-          <button type="button" className="secondary">Hold</button>
           <button type="button" className="primary" disabled={!cart.length || savingDraft || (timingMode === "future" && !scheduledFor)} onClick={() => void saveDraft()}>
             {savingDraft ? "Saving…" : timingMode === "future" ? "Save Future Draft / Review" : "Save ASAP Draft / Review"}
           </button>
@@ -516,14 +548,15 @@ export default function PosClient({ business }: { business: Business }) {
                 {group.options.map((option) => {
                   const available = variantOptionAvailable(selectedVariant, option);
                   const priceDeltaCents = variantOptionPrice(selectedVariant, option);
-                  return <button key={option.id} type="button" disabled={!available} className={selected.includes(option.id) ? "selected" : ""} onClick={() => toggleModifier(group, option.id)}>
+                  const selectedOption = selected.includes(option.id);
+                  return <div className="posModifierChoice" key={option.id}><button type="button" disabled={!available} className={selectedOption ? "selected" : ""} onClick={() => toggleModifier(group, option.id)}>
                     <strong>{option.name}</strong>
                     <span>{!available
                       ? "Unavailable for this size/form"
                       : priceDeltaCents
                         ? `${priceDeltaCents > 0 ? "+" : ""}${money(priceDeltaCents)}`
                         : option.defaultSelected ? "Default" : "Included"}</span>
-                  </button>;
+                  </button>{selectedOption && group.allowOptionQuantity && <div className="posModifierQty" aria-label={`${option.name} quantity`}><button type="button" onClick={() => changeModifierQuantity(option.id, -1)} aria-label={`Decrease ${option.name}`}>−</button><strong>{modifierQuantities[option.id] || 1}</strong><button type="button" onClick={() => changeModifierQuantity(option.id, 1)} aria-label={`Increase ${option.name}`}>+</button></div>}</div>;
                 })}
               </div>
             </fieldset>;
@@ -551,11 +584,12 @@ export default function PosClient({ business }: { business: Business }) {
               </div>
             </fieldset>;
           })}
+          <label className="posItemNotes">Item notes<textarea value={specialInstructions} maxLength={500} placeholder="Kitchen note (optional)" onChange={(event) => setSpecialInstructions(event.target.value)} /></label>
         </div>
         <footer>
           <div><span>Configured price</span><strong>{money(configuration.unitPriceCents)}</strong></div>
           <button type="button" className="primary" disabled={!configuration.valid} onClick={addConfiguredItem}>
-            {configuration.valid ? "Add to order" : configuringItem.variants.length && !selectedVariant ? "Choose size / form" : "Complete required choices"}
+            {configuration.valid ? editingLineId ? "Update item" : "Add to order" : configuringItem.variants.length && !selectedVariant ? "Choose size / form" : "Complete required choices"}
           </button>
         </footer>
       </section>

@@ -8,6 +8,7 @@ export type ConfiguredOrderItemInput = {
   itemId: string;
   quantity?: number;
   modifierSelections?: Record<string, string[]>;
+  modifierQuantities?: Record<string, number>;
   comboId?: string | null;
   comboSelections?: Record<string, string[]>;
   specialInstructions?: string;
@@ -35,6 +36,7 @@ type ModifierRow = {
   group_name: string;
   min_selections: number;
   max_selections: number;
+  allow_option_quantity: boolean;
   option_id: string | null;
   option_name: string | null;
   option_available: boolean | null;
@@ -109,6 +111,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
       grp.name AS group_name,
       grp.min_selections,
       grp.max_selections,
+      grp.allow_option_quantity,
       opt.id AS option_id,
       opt.name AS option_name,
       opt.available AS option_available,
@@ -123,13 +126,14 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
     ORDER BY link.sort_order, grp.sort_order, opt.sort_order, opt.name
   `) as ModifierRow[];
 
-  const groups = new Map<string, { name: string; min: number; max: number; rows: ModifierRow[] }>();
+  const groups = new Map<string, { name: string; min: number; max: number; allowQuantity: boolean; rows: ModifierRow[] }>();
   for (const row of modifierRows) {
     if (!groups.has(row.group_id)) {
       groups.set(row.group_id, {
         name: row.group_name,
         min: Number(row.min_selections),
         max: Number(row.max_selections),
+        allowQuantity: Boolean(row.allow_option_quantity),
         rows: [],
       });
     }
@@ -137,6 +141,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
   }
 
   const modifierSelections = input.modifierSelections || {};
+  const modifierQuantities = input.modifierQuantities || {};
   const modifierIssues = validateModifierRequirements(
     Array.from(groups.entries()).map(([groupId, group]) => ({
       groupId,
@@ -159,6 +164,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
     optionName: string;
     state: "selected" | "removed";
     priceDeltaCents: number;
+    quantity: number;
   }> = [];
 
   for (const [groupId, group] of groups) {
@@ -174,7 +180,12 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
       if (isSelected && !row.option_available) throw new Error(`${row.option_name} is currently unavailable.`);
       if (isSelected) {
         const delta = Number(row.price_delta_cents ?? 0);
-        modifierUnitDeltaCents += delta;
+        const requestedQuantity = Math.trunc(Number(modifierQuantities[row.option_id] ?? 1));
+        const optionQuantity = group.allowQuantity ? requestedQuantity : 1;
+        if (!Number.isSafeInteger(optionQuantity) || optionQuantity < 1 || optionQuantity > 99) {
+          throw new Error(`Invalid quantity for ${row.option_name}.`);
+        }
+        modifierUnitDeltaCents += delta * optionQuantity;
         modifierSnapshots.push({
           groupId,
           optionId: row.option_id,
@@ -182,6 +193,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
           optionName: row.option_name,
           state: "selected",
           priceDeltaCents: delta,
+          quantity: optionQuantity,
         });
       } else if (row.default_selected) {
         modifierSnapshots.push({
@@ -191,6 +203,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
           optionName: row.option_name,
           state: "removed",
           priceDeltaCents: 0,
+          quantity: 1,
         });
       }
     }
@@ -302,7 +315,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
         quantity, unit_price_delta_cents, selection_state
       ) VALUES (
         ${randomUUID()}, ${orderItemId}, ${modifier.groupId}, ${modifier.optionId},
-        ${modifier.groupName}, ${modifier.optionName}, 1, ${modifier.priceDeltaCents}, ${modifier.state}
+        ${modifier.groupName}, ${modifier.optionName}, ${modifier.quantity}, ${modifier.priceDeltaCents}, ${modifier.state}
       )
     `;
   }

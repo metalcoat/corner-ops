@@ -78,7 +78,7 @@ for (const { node, path } of records) {
       // Rezku uses null for effectively-unlimited groups. Our deterministic
       // model represents that as the count of currently available options.
       maxSelections: group.max == null ? options.length : Number(group.max),
-      quantityEnabled: Boolean(group.quantity_enabled),
+      allowOptionQuantity: Boolean(group.quantity_enabled),
       pizzaMode: Boolean(group.pizza_mode),
       sortOrder: groupIndex,
       options,

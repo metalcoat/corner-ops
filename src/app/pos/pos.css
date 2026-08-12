@@ -176,6 +176,8 @@
 .posCartLine small { display: block; margin-top: 4px; color: #cbd5e1; }
 .posQtyControls { align-items: center; margin-top: 10px; }
 .posQtyControls button { width: 36px; height: 34px; font-size: 1.2rem; }
+.posQtyControls .posLineAction { width: auto; min-width: 64px; padding: 0 10px; font-size: .82rem; }
+.posQtyControls .posLineAction.danger { border-color: #7f1d1d; color: #fecaca; }
 .posQtyControls span { min-width: 25px; text-align: center; font-weight: 800; }
 .posTotals { padding: 13px 14px; border-top: 1px solid #273449; display: grid; gap: 8px; }
 .posTotals span { color: #94a3b8; }
@@ -220,6 +222,11 @@
 .posConfigBody legend small { display: block; margin-top: 2px; color: #94a3b8; font-weight: 600; }
 .posChoiceGrid { flex-wrap: wrap; margin-top: 9px; }
 .posChoiceGrid button { min-width: 145px; min-height: 62px; padding: 9px 12px; display: grid; gap: 3px; text-align: left; flex: 1 1 145px; }
+.posModifierChoice { flex: 1 1 145px; min-width: 145px; display: grid; gap: 6px; }
+.posModifierChoice > button { width: 100%; }
+.posModifierQty { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; gap: 6px; }
+.posModifierQty button { min-width: 44px; min-height: 44px; padding: 0; display: grid; place-items: center; font-size: 1.2rem; }
+.posModifierQty strong { text-align: center; }
 .posChoiceGrid button span { color: #94a3b8; font-size: .78rem; }
 .posChoiceGrid button.selected { background: #1d4ed8; border-color: #60a5fa; color: white; }
 .posChoiceGrid button.selected span { color: #dbeafe; }
@@ -228,6 +235,8 @@
 .posConfigModal footer span { color: #94a3b8; font-size: .75rem; }
 .posConfigModal footer strong { font-size: 1.25rem; }
 .posConfigModal footer button { min-width: 220px; min-height: 50px; padding: 10px 16px; }
+.posItemNotes { display: grid; gap: 7px; font-weight: 800; }
+.posItemNotes textarea { min-height: 76px; resize: vertical; border: 1px solid #334155; border-radius: 10px; background: #172033; color: #f8fafc; padding: 10px; font: inherit; }
 
 @media (max-width: 1050px) {
   .posHeader { grid-template-columns: 1fr auto; }

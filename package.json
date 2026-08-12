@@ -14,7 +14,8 @@
     "db:status": "tsx scripts/local-db.ts status",
     "menu:rezku:preview": "tsx scripts/rezku-menu-local.ts preview",
     "menu:rezku:apply": "tsx scripts/rezku-menu-local.ts apply",
-    "menu:rezku:validate": "tsx scripts/rezku-menu-validate.ts"
+    "menu:rezku:validate": "tsx scripts/rezku-menu-validate.ts",
+    "test:pos:e2e": "playwright test tests/pos-deli.spec.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
@@ -27,6 +28,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.21.0",
     "@types/react": "^19.0.0",

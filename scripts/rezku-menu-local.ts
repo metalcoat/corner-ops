@@ -25,6 +25,7 @@ const snapshot = JSON.parse(await readFile(snapshotPath, "utf8"));
 for (const category of snapshot.categories || []) {
   for (const menuItem of category.items || []) {
     for (const group of menuItem.modifierGroups || []) {
+      if (group.allowOptionQuantity == null && group.quantityEnabled != null) group.allowOptionQuantity = group.quantityEnabled;
       for (const option of group.options || []) {
         if (option.priceDeltaCents == null && option.basePriceCents != null) option.priceDeltaCents = option.basePriceCents;
       }
