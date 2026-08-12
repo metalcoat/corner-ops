@@ -1,0 +1,32 @@
+name: Fix employee form success reset
+
+on:
+  push:
+    paths:
+      - .github/workflows/fix-employee-form-success-reset.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Apply patch
+        run: python scripts/fix-employee-form-success-reset.py
+      - name: Verify
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm run build
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/employee/page.tsx
+          git diff --cached --check
+          git commit -m "Keep failed employee forms populated"
+          git push origin HEAD:main
