@@ -95,6 +95,38 @@ repair_generated_artifact_ownership() {
     cleanup "${runtime_uid}:${runtime_gid}"
 }
 
+repair_buildx_config_ownership() {
+  local runtime_uid runtime_gid cleanup_image
+  runtime_uid="$(id -u)"
+  runtime_gid="$(id -g)"
+  cleanup_image="$(docker inspect corner-ops-app --format '{{.Image}}' 2>/dev/null || true)"
+
+  if [[ -z "$cleanup_image" ]]; then
+    log "Cannot repair Buildx config ownership: no existing application image is available."
+    return 1
+  fi
+
+  if [[ -L "$BUILDX_CONFIG" || ! -d "$BUILDX_CONFIG" ]]; then
+    log "Refusing Buildx ownership repair because the config path is not a real directory: ${BUILDX_CONFIG}"
+    return 1
+  fi
+
+  log "Repairing ownership only for generated Buildx config ${BUILDX_CONFIG}."
+  docker run --rm --user 0:0 \
+    --mount "type=bind,source=${BUILDX_CONFIG},target=/buildx" \
+    --entrypoint /bin/chown "$cleanup_image" \
+    -hR "${runtime_uid}:${runtime_gid}" /buildx
+}
+
+ensure_generated_paths_owned_by_updater() {
+  local runtime_uid
+  runtime_uid="$(id -u)"
+  if [[ -n "$(find "$BUILDX_CONFIG" -xdev ! -uid "$runtime_uid" -print -quit 2>/dev/null)" ]]; then
+    log "Generated Buildx config has foreign ownership: $(describe_generated_artifact "$BUILDX_CONFIG")"
+    repair_buildx_config_ownership
+  fi
+}
+
 clean_runtime_checkout() {
   local runtime_root runtime_uid artifact ownership_repair_needed=false
   runtime_root="$(git -C "$RUNTIME_DIR" rev-parse --show-toplevel)"
@@ -171,6 +203,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 require_updater_identity
+ensure_generated_paths_owned_by_updater
 
 if [[ ! -d "${RUNTIME_DIR}/.git" ]]; then
   if [[ -e "$RUNTIME_DIR" ]]; then
