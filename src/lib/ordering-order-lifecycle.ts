@@ -13,6 +13,7 @@ import { resolveOrderingAvailability } from "@/lib/ordering-availability";
 import { canManagePos } from "@/lib/ordering-route-auth";
 import { quoteDelivery, recordDeliveryMinimumResolution } from "@/lib/ordering-delivery";
 import { assertMenuTargetsAvailable } from "@/lib/ordering-menu-availability";
+import { applyPromotionsToOrder } from "@/lib/ordering-promotions";
 
 export type StoredOrderStatus = "draft" | "confirmed" | "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
 export type KitchenOrderStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -205,6 +206,8 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
   await ensureOrderingMenuOverrideSchema();
   await ensureOrderingAccountSchema();
   return withTransaction(async () => {
+    // Draft pricing follows current promotion configuration until Send locks it.
+    await applyPromotionsToOrder(orderId);
     const sql = getSql();
     const rows = await sql`
       SELECT id, business, source, display_number, status, payment_status, service_type, version,

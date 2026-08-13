@@ -57,6 +57,7 @@ type SavedDraft = {
   timingMessage: string;
   kitchenTimingLabel: string;
   scheduledFor: string | null;
+  promotions: Array<{ label: string; discountCents: number }>;
 };
 
 type SubmittedOrder = {
@@ -194,6 +195,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [checkoutError, setCheckoutError] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
   const [savedDraft, setSavedDraft] = useState<SavedDraft | null>(null);
+  const [quotedPromotions,setQuotedPromotions]=useState<Array<{label:string;discountCents:number}>>([]);
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [submittedOrder, setSubmittedOrder] = useState<SubmittedOrder | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -340,6 +342,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     return allItems.filter((item) => [item.name, item.description, ...item.variants.flatMap((variant) => [variant.name, ...variant.aliases])].some((value) => value.toLowerCase().includes(query)));
   }, [activeCategory, allItems, menuSearch]);
   const subtotalCents = cart.reduce((sum, line) => sum + line.unitPriceCents * line.quantity, 0);
+  useEffect(()=>{if(!cart.length){setQuotedPromotions([]);return}const controller=new AbortController(),timer=window.setTimeout(()=>{fetch("/api/ordering/promotions/quote",{method:"POST",headers:{"content-type":"application/json"},signal:controller.signal,body:JSON.stringify({serviceType,fulfillmentAt:timingMode==="future"&&scheduledFor?new Date(scheduledFor).toISOString():null,items:cart.map(line=>({lineId:line.id,itemId:line.itemId,variantId:line.variantId,quantity:line.quantity}))})}).then(response=>response.json()).then(payload=>setQuotedPromotions(payload.promotions||[])).catch(error=>{if(!(error instanceof DOMException&&error.name==="AbortError"))setQuotedPromotions([])})},180);return()=>{window.clearTimeout(timer);controller.abort()}},[cart,scheduledFor,serviceType,timingMode]);
+  const visiblePromotions=savedDraft?.promotions||quotedPromotions,promotionDiscountCents=visiblePromotions.reduce((sum,row)=>sum+row.discountCents,0);
   const selectedCombo = configuringItem?.combos.find((combo) => combo.id === selectedComboId) || null;
   const selectedVariant = configuringItem?.variants.find((variant) => variant.id === selectedVariantId) || null;
   const modifierGroupVisible = (group: OrderingModifierGroupView) => {
@@ -622,6 +626,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           timing_message_snapshot: string;
           kitchen_timing_label_snapshot: string;
         };
+        promotions?: Array<{ label: string; discount_cents: number }>;
         error?: string;
       };
       if (!response.ok || !payload.order) throw new Error(payload.error || "Could not save draft order.");
@@ -632,9 +637,11 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         timingMessage: payload.order.timing_message_snapshot || "",
         kitchenTimingLabel: payload.order.kitchen_timing_label_snapshot || "",
         scheduledFor: payload.order.scheduled_for,
+        promotions: (payload.promotions || []).map(row => ({ label: row.label, discountCents: Number(row.discount_cents) })),
       };
       setSavedDraft(draft);
-      if (Number(payload.order.total_cents) !== subtotalCents) {
+      const promotionDiscount = draft.promotions.reduce((sum, row) => sum + row.discountCents, 0);
+      if (Number(payload.order.total_cents) !== subtotalCents - promotionDiscount) {
         setCheckoutError(`Menu pricing changed. Backend total is ${money(Number(payload.order.total_cents))}; review before continuing.`);
       }
       return draft;
@@ -891,8 +898,9 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         </div>
         <div className="posTotals">
           <div><span>Subtotal</span><strong>{money(subtotalCents)}</strong></div>
+          {visiblePromotions.map((promotion,index)=><div key={`${promotion.label}-${index}`}><span>{promotion.label}</span><strong>−{money(promotion.discountCents)}</strong></div>)}
           <div><span>Tax</span><strong>Included/configured at checkout</strong></div>
-          <div className="grand"><span>{savedDraft ? "Backend total" : "Estimated total"}</span><strong>{money(savedDraft?.totalCents ?? subtotalCents)}</strong></div>
+          <div className="grand"><span>{savedDraft ? "Backend total" : "Estimated total"}</span><strong>{money(savedDraft?.totalCents ?? Math.max(0,subtotalCents-promotionDiscountCents))}</strong></div>
         </div>
         <div className="posCheckoutButtons">
           <button type="button" disabled={!cart.length || savingDraft || Boolean(savedDraft) || (timingMode === "future" && !scheduledFor)} onClick={() => void saveDraft()}>

@@ -128,7 +128,8 @@ export async function POST(request: Request) {
         order = rows[0] as typeof order;
       }
     }
-    return Response.json({ order }, { status: 201 });
+    const promotions = await getSql()`SELECT label_snapshot label,discount_cents FROM ordering_order_promotion_applications WHERE order_id=${order.id} ORDER BY application_sequence`;
+    return Response.json({ order, promotions }, { status: 201 });
   } catch (error) {
     return cashierOrderError(error) || apiError(error);
   }

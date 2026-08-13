@@ -5,6 +5,7 @@ import { createDraftOrderWithVariants, type VariantConfiguredOrderItemInput } fr
 import type { OrderTimingMode } from "@/lib/ordering-timing-core";
 import { quoteTimingForOrder } from "@/lib/ordering-timing";
 import { ensureOrderingTimingSchema } from "@/lib/ordering-timing-schema";
+import { applyPromotionsToOrder } from "@/lib/ordering-promotions";
 
 export type CreateTimedDraftOrderInput = {
   business: OrderingBusiness;
@@ -111,6 +112,9 @@ export async function createTimedDraftOrder(input: CreateTimedDraftOrderInput): 
     FROM ordering_orders
     WHERE id = ${base.id}
   `;
+
+  // Promotion schedules use the persisted fulfillment time, not entry time.
+  await applyPromotionsToOrder(String(base.id));
 
   const rows = (await sql`
     SELECT id, business, display_number, status, payment_status, service_type,

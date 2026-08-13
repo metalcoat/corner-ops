@@ -34,6 +34,7 @@
     "test:order-void": "tsx scripts/order-void-validate.ts",
     "test:split-checks": "tsx scripts/split-check-validate.ts",
     "test:print-description": "tsx scripts/print-description-validate.ts",
+    "test:promotions": "tsx scripts/promotion-pricing-validate.ts",
     "test:ordering-availability": "tsx scripts/ordering-availability-validate.ts",
     "test:customer-autocomplete": "tsx scripts/customer-autocomplete-validate.ts",
     "test:scheduled-menu-availability": "tsx scripts/scheduled-menu-availability-validate.ts",
