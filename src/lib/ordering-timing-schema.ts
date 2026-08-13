@@ -161,6 +161,29 @@ export function ensureOrderingTimingSchema(): Promise<void> {
       `;
 
       await sql`
+        CREATE TABLE IF NOT EXISTS ordering_menu_availability_rules (
+          id UUID PRIMARY KEY,
+          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
+          target_type TEXT NOT NULL CHECK (target_type IN ('item', 'variant', 'modifier_option')),
+          target_id UUID NOT NULL,
+          enabled BOOLEAN NOT NULL DEFAULT TRUE,
+          days_of_week SMALLINT[] NOT NULL DEFAULT '{}',
+          starts_at TIME,
+          ends_at TIME,
+          valid_from DATE,
+          valid_through DATE,
+          updated_by TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CHECK ((starts_at IS NULL) = (ends_at IS NULL)),
+          CHECK (starts_at IS NULL OR starts_at <> ends_at),
+          CHECK (valid_through IS NULL OR valid_from IS NULL OR valid_through >= valid_from),
+          UNIQUE (business, target_type, target_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_menu_availability_lookup_idx ON ordering_menu_availability_rules (business, target_type, target_id) WHERE enabled=TRUE`;
+
+      await sql`
         CREATE TABLE IF NOT EXISTS ordering_fulfillment_timing_settings (
           business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
           service_type TEXT NOT NULL CHECK (service_type IN ('pickup', 'delivery', 'no_contact_delivery', 'dine_in', 'curbside', 'bar')),
@@ -201,6 +224,8 @@ export function ensureOrderingTimingSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS timing_message_snapshot TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS kitchen_timing_label_snapshot TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS kitchen_release_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS operational_follow_up_reason TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS affected_by_closure_id UUID`;
       await sql`ALTER TABLE ordering_orders DROP CONSTRAINT IF EXISTS ordering_orders_timing_mode_check`;
       await sql`ALTER TABLE ordering_orders ADD CONSTRAINT ordering_orders_timing_mode_check CHECK (timing_mode IN ('asap', 'future'))`;
       await sql`ALTER TABLE ordering_orders DROP CONSTRAINT IF EXISTS ordering_orders_quoted_lead_check`;

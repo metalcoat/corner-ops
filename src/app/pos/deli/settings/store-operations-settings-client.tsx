@@ -4,14 +4,16 @@ import { useCallback, useEffect, useState } from "react";
 
 type WindowRow = { id: string; service_type: string; weekday: number; opens_at: string; closes_at: string; ordering_opens_at: string | null; ordering_cutoff_at: string | null; active: boolean };
 type Closure = { id: string; service_type: string; reason: string; customer_message: string; starts_at: string; ends_at: string | null };
-type Operations = { timezone: string; weekly: WindowRow[]; emergency: Closure[] };
+type Special = { id: string; business_date: string; service_type: string; status: string; opens_at: string | null; closes_at: string | null; label: string };
+type Operations = { timezone: string; weekly: WindowRow[]; specials: Special[]; emergency: Closure[] };
 const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export default function StoreOperationsSettingsClient() {
   const [data, setData] = useState<Operations | null>(null);
   const [message, setMessage] = useState("");
   const [form, setForm] = useState({ serviceType: "all", weekday: 1, opensAt: "09:00", closesAt: "21:30", orderingOpensAt: "", orderingCutoffAt: "" });
-  const [closure, setClosure] = useState({ reason: "", customerMessage: "" });
+  const [closure, setClosure] = useState({ reason: "", internalNote: "", customerMessage: "", startsAt: "", endsAt: "" });
+  const [special, setSpecial] = useState({ businessDate: "", serviceType: "all", status: "closed", opensAt: "09:00", closesAt: "17:00", label: "" });
 
   const load = useCallback(async () => {
     const response = await fetch("/api/ordering/settings/operations", { cache: "no-store" });
@@ -48,12 +50,25 @@ export default function StoreOperationsSettingsClient() {
     <div className="posBandTable">
       {data.weekly.length ? data.weekly.map((row) => <div className="posBandRow" key={row.id}><span>{row.service_type === "all" ? "All" : row.service_type}</span><span>{dayNames[row.weekday]}</span><span>{row.opens_at.slice(0, 5)}–{row.closes_at.slice(0, 5)}</span><span>{row.ordering_opens_at ? `Orders ${row.ordering_opens_at.slice(0, 5)}–${row.ordering_cutoff_at?.slice(0, 5)}` : "Ordering inherits"}</span></div>) : <p className="posSettingsWarning">No hours are configured. Availability resolves as unconfigured and new enforcement will remain disabled until hours are saved.</p>}
     </div>
+    <h2>Holiday / special hours</h2>
+    <div className="posTools">
+      <input aria-label="Special date" type="date" value={special.businessDate} onChange={(event) => setSpecial({ ...special, businessDate: event.target.value })} />
+      <select aria-label="Special service" value={special.serviceType} onChange={(event) => setSpecial({ ...special, serviceType: event.target.value })}>{["all", "pickup", "delivery", "dine_in", "online", "phone"].map((value) => <option key={value}>{value}</option>)}</select>
+      <select aria-label="Special status" value={special.status} onChange={(event) => setSpecial({ ...special, status: event.target.value })}><option value="closed">Closed all day</option><option value="custom_hours">Special hours</option></select>
+      {special.status === "custom_hours" ? <><input aria-label="Special opening time" type="time" value={special.opensAt} onChange={(event) => setSpecial({ ...special, opensAt: event.target.value })} /><input aria-label="Special closing time" type="time" value={special.closesAt} onChange={(event) => setSpecial({ ...special, closesAt: event.target.value })} /></> : null}
+      <input aria-label="Special hours label" placeholder="Holiday / reason" value={special.label} onChange={(event) => setSpecial({ ...special, label: event.target.value })} />
+      <button type="button" disabled={!special.businessDate} onClick={() => void update({ action: "upsert_special", ...special })}>Save special date</button>
+    </div>
+    {data.specials.map((item) => <p className="posSettingsHint" key={item.id}>{String(item.business_date).slice(0, 10)} · {item.service_type} · {item.status === "closed" ? "Closed" : `${item.opens_at?.slice(0, 5)}–${item.closes_at?.slice(0, 5)}`} {item.label ? `· ${item.label}` : ""}</p>)}
     <h2>Emergency status</h2>
     {data.emergency.map((item) => <div className="posSettingsWarning" key={item.id}><strong>EMERGENCY CLOSED · {item.service_type}</strong><p>{item.customer_message || item.reason}</p><button type="button" onClick={() => void update({ action: "reopen", id: item.id, reason: "Reopened from Store Operations" })}>Reopen now</button></div>)}
     {!data.emergency.length && <p className="posSettingsHint">No emergency closure is active.</p>}
     <label><span>Required internal reason</span><input value={closure.reason} onChange={(event) => setClosure({ ...closure, reason: event.target.value })} /></label>
+    <label><span>Internal note</span><input value={closure.internalNote} onChange={(event) => setClosure({ ...closure, internalNote: event.target.value })} /></label>
     <label><span>Customer-facing message</span><input value={closure.customerMessage} onChange={(event) => setClosure({ ...closure, customerMessage: event.target.value })} /></label>
-    <button type="button" disabled={!closure.reason.trim()} onClick={() => void update({ action: "emergency_close", serviceType: "all", ...closure })}>Emergency close now</button>
+    <label><span>Close at (blank means now)</span><input type="datetime-local" value={closure.startsAt} onChange={(event) => setClosure({ ...closure, startsAt: event.target.value })} /></label>
+    <label><span>Closed until (blank means manual reopen)</span><input type="datetime-local" value={closure.endsAt} onChange={(event) => setClosure({ ...closure, endsAt: event.target.value })} /></label>
+    <button type="button" disabled={!closure.reason.trim()} onClick={() => void update({ action: "emergency_close", serviceType: "all", ...closure, startsAt: closure.startsAt ? new Date(closure.startsAt).toISOString() : undefined, endsAt: closure.endsAt ? new Date(closure.endsAt).toISOString() : undefined })}>Emergency close</button>
     {message && <p role="status">{message}</p>}
   </section>;
 }

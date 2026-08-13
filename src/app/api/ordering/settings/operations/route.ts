@@ -108,6 +108,19 @@ export async function PATCH(request: Request) {
       await audit(actor, "special_hours_updated", "special_hours", id, label, { businessDate, serviceType, status });
       return NextResponse.json({ ok: true, id });
     }
+    if (action === "upsert_menu_availability") {
+      const id = String(body.id || randomUUID());
+      const targetType = String(body.targetType || "");
+      const targetId = String(body.targetId || "");
+      if (!new Set(["item", "variant", "modifier_option"]).has(targetType) || !/^[0-9a-f-]{36}$/i.test(targetId)) throw new Error("A stable menu target is required.");
+      const days = Array.isArray(body.daysOfWeek) ? body.daysOfWeek.map(Number) : [];
+      if (days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) throw new Error("Availability weekdays must be between 0 and 6.");
+      const startsAt = cleanTime(body.startsAt, true), endsAt = cleanTime(body.endsAt, true);
+      if (Boolean(startsAt) !== Boolean(endsAt)) throw new Error("Availability start and end must both be set or both be blank.");
+      await sql`INSERT INTO ordering_menu_availability_rules(id,business,target_type,target_id,enabled,days_of_week,starts_at,ends_at,valid_from,valid_through,updated_by) VALUES(${id},${business},${targetType},${targetId},${body.enabled !== false},${days},${startsAt}::time,${endsAt}::time,${body.validFrom ? String(body.validFrom) : null}::date,${body.validThrough ? String(body.validThrough) : null}::date,${actor.id}) ON CONFLICT(business,target_type,target_id) DO UPDATE SET enabled=EXCLUDED.enabled,days_of_week=EXCLUDED.days_of_week,starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,valid_from=EXCLUDED.valid_from,valid_through=EXCLUDED.valid_through,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+      await audit(actor, "menu_availability_updated", targetType, targetId, String(body.reason || "").trim(), { days, startsAt, endsAt });
+      return NextResponse.json({ ok: true, id });
+    }
     if (action === "emergency_close") {
       const id = randomUUID();
       const serviceType = service(body.serviceType);
@@ -117,6 +130,7 @@ export async function PATCH(request: Request) {
       const endsAt = body.endsAt ? new Date(String(body.endsAt)) : null;
       if (Number.isNaN(startsAt.getTime()) || (endsAt && (Number.isNaN(endsAt.getTime()) || endsAt <= startsAt))) throw new Error("Emergency closure times are invalid.");
       await sql`INSERT INTO ordering_emergency_closures(id,business,service_type,starts_at,ends_at,reason,internal_note,customer_message,created_by) VALUES(${id},${business},${serviceType},${startsAt},${endsAt},${reason},${String(body.internalNote || "").trim()},${String(body.customerMessage || "").trim()},${actor.id})`;
+      await sql`UPDATE ordering_orders SET affected_by_closure_id=${id},operational_follow_up_reason=${`Emergency closure: ${reason}`},updated_at=NOW() WHERE business=${business} AND timing_mode='future' AND scheduled_for>=${startsAt} AND (${endsAt}::timestamptz IS NULL OR scheduled_for<=${endsAt}) AND status NOT IN ('completed','cancelled') AND (${serviceType}='all' OR CASE WHEN service_type IN ('no_contact_delivery') THEN 'delivery' WHEN service_type IN ('bar') THEN 'dine_in' ELSE service_type END=${serviceType})`;
       await audit(actor, "emergency_closed", "emergency_closure", id, reason, { serviceType, startsAt, endsAt });
       return NextResponse.json({ ok: true, id });
     }

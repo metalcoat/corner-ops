@@ -114,7 +114,11 @@ export async function resolveOrderingAvailability(input: {
     source = choice.source;
   }
 
-  if (!selected.length) return { open: false, orderable: false, reason: "Ordering hours are not configured for this service and date.", opensAt: null, cutoffAt: null, nextAvailableAt: null, sourceRule: "unconfigured", timezone };
+  if (!selected.length) {
+    const configured = await sql`SELECT service_type FROM ordering_operating_windows WHERE business=${input.business} AND active=TRUE AND service_type IN ('all',${service}) LIMIT 1` as Array<{ service_type: OrderingService }>;
+    if (!configured.length) return { open: false, orderable: false, reason: "Ordering hours are not configured for this service and date.", opensAt: null, cutoffAt: null, nextAvailableAt: null, sourceRule: "unconfigured", timezone };
+    return { open: false, orderable: false, reason: "This service is closed on the selected date.", opensAt: null, cutoffAt: null, nextAvailableAt: null, sourceRule: configured[0].service_type === service ? "weekly_service" : "weekly_general", timezone };
+  }
   const currentMinute = local.hour * 60 + local.minute;
   const entry = input.orderEntryStartedAt ? localParts(input.orderEntryStartedAt, timezone) : null;
   let nextOpen: Date | null = null;

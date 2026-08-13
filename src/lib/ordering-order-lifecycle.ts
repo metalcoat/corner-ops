@@ -9,6 +9,10 @@ import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
 import { snapshotAndFormatOrder } from "@/lib/ordering-print-format";
 import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
 import { pizzaToppingPriceCents } from "@/lib/ordering-pizza-toppings";
+import { resolveOrderingAvailability } from "@/lib/ordering-availability";
+import { canManagePos } from "@/lib/ordering-route-auth";
+import { quoteDelivery, recordDeliveryMinimumResolution } from "@/lib/ordering-delivery";
+import { assertMenuTargetsAvailable } from "@/lib/ordering-menu-availability";
 
 export type StoredOrderStatus = "draft" | "confirmed" | "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
 export type KitchenOrderStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -27,6 +31,11 @@ type OrderRow = Record<string, unknown> & {
   first_name_snapshot: string;
   last_name_snapshot: string;
   phone_snapshot: string;
+  timing_mode: "asap" | "future";
+  scheduled_for: string | Date | null;
+  created_at: string | Date;
+  service_type: string;
+  delivery_fee_cents: number;
 };
 
 type ItemRow = {
@@ -78,7 +87,10 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
   if (!items.length) throw new OrderConflictError("This draft has no items. Review the order before submitting.");
 
   let subtotal = 0;
+  const availabilityTargets: Array<{ type: "item" | "variant" | "modifier_option"; id: string; label: string }> = [];
   for (const item of items) {
+    availabilityTargets.push({ type: "item", id: item.item_id, label: item.item_name_snapshot });
+    if (item.variant_id) availabilityTargets.push({ type: "variant", id: item.variant_id, label: item.variant_name_snapshot || item.item_name_snapshot });
     const currentItems = await sql`
       SELECT item.name, item.base_price_cents, item.available,
              variant.id AS variant_id, variant.name AS variant_name,
@@ -109,6 +121,7 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
     let modifierTotal = 0;
     for (const snapshot of snapshots) {
       if (snapshot.selection_state !== "selected" && snapshot.selection_state !== "extra") continue;
+      availabilityTargets.push({ type: "modifier_option", id: snapshot.option_id, label: `A modifier on ${item.item_name_snapshot}` });
       const options = await sql`
         SELECT grp.name AS group_name, grp.allow_option_quantity, opt.name AS option_name,
                opt.available AS option_available,
@@ -178,13 +191,15 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
     subtotal += lineTotal;
   }
 
-  const total = Math.max(0, subtotal - number(order.discount_cents) + number(order.tax_cents) + number(order.tip_cents));
+  await assertMenuTargetsAvailable({ business: order.business, at: order.timing_mode === "future" && order.scheduled_for ? new Date(order.scheduled_for) : new Date(), targets: availabilityTargets });
+
+  const total = Math.max(0, subtotal - number(order.discount_cents) + number(order.tax_cents) + number(order.tip_cents) + number(order.delivery_fee_cents));
   if (subtotal !== number(order.subtotal_cents) || total !== number(order.total_cents)) {
     throw new OrderConflictError("The order total changed. Review and rebuild the order before submitting.");
   }
 }
 
-export async function submitDraftOrder(orderId: string, business: OrderingBusiness, actor: OrderingActor) {
+export async function submitDraftOrder(orderId: string, business: OrderingBusiness, actor: OrderingActor, override?: { approved: boolean; reason: string }) {
   await ensureOrderingPosSchema();
   await ensureOrderingAddressSchema();
   await ensureOrderingMenuOverrideSchema();
@@ -195,13 +210,27 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
       SELECT id, business, source, display_number, status, payment_status, service_type, version,
              subtotal_cents, discount_cents, tax_cents, tip_cents, total_cents, paid_cents, amount_due_cents,
              first_name_snapshot, last_name_snapshot, phone_snapshot,
-             special_instructions, created_at, updated_at, submitted_at, started_at, ready_at, completed_at, cancelled_at
+             timing_mode, scheduled_for, delivery_fee_cents, special_instructions, created_at, updated_at, submitted_at, started_at, ready_at, completed_at, cancelled_at
       FROM ordering_orders WHERE id = ${orderId} AND business = ${business} FOR UPDATE
     ` as OrderRow[];
     const order = rows[0];
     if (!order) throw new OrderConflictError("Draft order was not found.");
     if (order.status === "sent_to_kitchen") return { order, alreadySubmitted: true };
     if (order.status !== "draft") throw new OrderConflictError("Only a draft order can be submitted.");
+    const availabilityAt = order.timing_mode === "future" && order.scheduled_for ? new Date(order.scheduled_for) : new Date();
+    const availability = await resolveOrderingAvailability({
+      business,
+      serviceType: order.service_type,
+      at: availabilityAt,
+      orderEntryStartedAt: order.timing_mode === "asap" ? new Date(order.created_at) : null,
+    });
+    if (availability.sourceRule !== "unconfigured" && !availability.orderable) {
+      const reason = String(override?.reason || "").trim();
+      if (!override?.approved || !canManagePos(actor) || !reason) {
+        throw new OrderConflictError(`${availability.reason} Manager or owner override with a reason is required.`);
+      }
+      await sql`INSERT INTO ordering_operations_audit(id,business,actor_id,actor_role,action,target_type,target_id,reason,details) VALUES(${randomUUID()},${business},${actor.id},${actor.role || "manager"},'ordering_hours_overridden','order',${orderId},${reason},${JSON.stringify({ sourceRule: availability.sourceRule, at: availabilityAt.toISOString() })}::jsonb)`;
+    }
     const customerName = `${order.first_name_snapshot || ""} ${order.last_name_snapshot || ""}`.trim();
     if (!customerName) throw new OrderConflictError("Customer name is required.");
     if ((order.service_type === "pickup" || order.service_type === "delivery" || order.service_type === "no_contact_delivery") && !String(order.phone_snapshot || "").trim()) {
@@ -210,8 +239,21 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
         : "Phone number is required for delivery orders.");
     }
     if (order.service_type === "delivery" || order.service_type === "no_contact_delivery") {
-      const addresses = await sql`SELECT validation_status FROM ordering_order_delivery_addresses WHERE order_id = ${orderId} LIMIT 1`;
+      const addresses = await sql`SELECT validation_status,route_distance_miles FROM ordering_order_delivery_addresses WHERE order_id = ${orderId} LIMIT 1`;
       if (addresses[0]?.validation_status !== "validated") throw new OrderConflictError("Delivery address is required.");
+      if (addresses[0]?.route_distance_miles == null) throw new OrderConflictError("Driving distance is required before this delivery order can be sent.");
+      const delivery = await quoteDelivery({ business, distanceMiles: Number(addresses[0].route_distance_miles), merchandiseSubtotalCents: number(order.subtotal_cents), managerBypassApproved: Boolean(override?.approved && canManagePos(actor)) });
+      if (delivery.minimum.shortfallCents > 0 && delivery.minimum.resolution !== "manager_bypass_approved") {
+        throw new OrderConflictError(`Delivery minimum is $${(delivery.minimum.minimumOrderCents / 100).toFixed(2)}. Order is $${(delivery.minimum.shortfallCents / 100).toFixed(2)} short.${delivery.settings.allowManagerBypass ? " Manager or owner override with a reason is required." : ""}`);
+      }
+      if (delivery.minimum.resolution === "manager_bypass_approved") {
+        const reason = String(override?.reason || "").trim();
+        if (!reason) throw new OrderConflictError("A manager reason is required to override the delivery minimum.");
+        await recordDeliveryMinimumResolution({ orderId, business, minimumOrderCents: delivery.minimum.minimumOrderCents, merchandiseSubtotalCents: delivery.minimum.merchandiseSubtotalCents, shortfallCents: delivery.minimum.shortfallCents, resolutionType: "bypass", adjustmentFeeCents: 0, upsellOffered: true, customerDeclinedUpsell: true, actorType: "employee", actorId: actor.id, approvedBy: actor.id, reason });
+      }
+      await sql`UPDATE ordering_orders SET delivery_fee_cents=${delivery.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${delivery.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${delivery.deliveryFeeCents}-paid_cents),updated_at=NOW() WHERE id=${orderId}`;
+      order.delivery_fee_cents = delivery.deliveryFeeCents;
+      order.total_cents = Math.max(0, number(order.subtotal_cents)-number(order.discount_cents)+number(order.tax_cents)+number(order.tip_cents)+delivery.deliveryFeeCents);
     }
     await revalidateDraft(order);
     const ticketLines = await snapshotAndFormatOrder(orderId);
@@ -223,7 +265,7 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
       WHERE id = ${orderId} AND business = ${business} AND status = 'draft' AND version = ${order.version}
       RETURNING id, business, source, display_number, status, payment_status, service_type, version,
                 subtotal_cents, discount_cents, tax_cents, tip_cents, total_cents, paid_cents, amount_due_cents,
-                special_instructions, created_at, updated_at, submitted_at, started_at, ready_at, completed_at, cancelled_at
+                delivery_fee_cents, special_instructions, created_at, updated_at, submitted_at, started_at, ready_at, completed_at, cancelled_at
     `;
     if (!updated.length) throw new OrderConflictError("This order changed while it was being submitted. Refresh and review it.");
     await sql`

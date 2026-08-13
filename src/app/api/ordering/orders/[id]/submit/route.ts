@@ -12,12 +12,12 @@ function businessFrom(value: unknown): OrderingBusiness {
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const body = await request.json() as { business?: unknown };
+    const body = await request.json() as { business?: unknown; managerOverride?: unknown; overrideReason?: unknown };
     const business = businessFrom(body.business);
     const actor = await orderingActor(business);
     if (!actor) return unauthorized();
     const { id } = await context.params;
-    const result = await submitDraftOrder(id, business, actor);
+    const result = await submitDraftOrder(id, business, actor, { approved: body.managerOverride === true, reason: String(body.overrideReason || "") });
     return Response.json(result);
   } catch (error) {
     if (error instanceof OrderConflictError) return Response.json({ error: error.message }, { status: 409 });

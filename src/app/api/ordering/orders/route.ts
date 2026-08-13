@@ -8,6 +8,7 @@ import { orderingActor } from "@/lib/ordering-route-auth";
 import { addressForOrder, routeDeliveryAddress } from "@/lib/ordering-address";
 import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
 import { getSql } from "@/lib/db";
+import { quoteDelivery } from "@/lib/ordering-delivery";
 
 export const runtime = "nodejs";
 
@@ -101,7 +102,7 @@ export async function POST(request: Request) {
       try { validatedAddress = addressForOrder(serviceType, String(body.deliveryValidationToken || ""), enteredAddress); }
       catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Validate the delivery address." }, { status: 409 }); }
     }
-    const order = await createTimedDraftOrder({
+    let order = await createTimedDraftOrder({
       business,
       source: "pos",
       serviceType,
@@ -121,6 +122,11 @@ export async function POST(request: Request) {
       let route = null;
       try { route = await routeDeliveryAddress(validatedAddress); } catch { /* Routing remains optional until origin coordinates are configured. */ }
       await saveOrderDeliveryAddress({ orderId: String(order.id), address: validatedAddress, line2: String(body.deliveryUnit || ""), customerAddressId, route });
+      if (route) {
+        const delivery = await quoteDelivery({ business, distanceMiles: route.distanceMiles, merchandiseSubtotalCents: Number(order.subtotal_cents) });
+        const rows = await getSql()`UPDATE ordering_orders SET delivery_fee_cents=${delivery.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${delivery.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${delivery.deliveryFeeCents}-paid_cents),updated_at=NOW() WHERE id=${order.id} RETURNING *`;
+        order = rows[0] as typeof order;
+      }
     }
     return Response.json({ order }, { status: 201 });
   } catch (error) {

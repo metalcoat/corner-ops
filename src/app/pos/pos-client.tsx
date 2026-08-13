@@ -77,6 +77,12 @@ type PosCustomerPhone={id:string;label:string;display_phone:string;normalized_ph
 type PosCustomerAddress={id:string;label:string;line1:string;line2:string;city:string;state:string;postal_code:string;standardized_address:string;provider:string;provider_reference_id:string;latitude:number|null;longitude:number|null;is_primary:boolean;last_used_at:string|null};
 type PosCustomer={id:string;first_name:string;last_name:string;display_name:string;display_phone:string;normalized_phone:string;last_order_at:string|null;phones:PosCustomerPhone[];addresses:PosCustomerAddress[]};
 
+function deliBusinessDate(): string {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 const serviceLabels: Record<PosServiceType, { label: string; paymentNote?: string }> = {
   pickup: { label: "Pickup" },
   delivery: { label: "Delivery" },
@@ -166,6 +172,9 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [serviceType, setServiceType] = useState<PosServiceType>(availableServices[0] || "pickup");
   const [timingMode, setTimingMode] = useState<OrderTimingMode>("asap");
   const [scheduledFor, setScheduledFor] = useState("");
+  const [futureDate, setFutureDate] = useState(() => deliBusinessDate());
+  const [futureSlots, setFutureSlots] = useState<string[]>([]);
+  const [futureSlotsLoading, setFutureSlotsLoading] = useState(false);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [configuringItem, setConfiguringItem] = useState<OrderingMenuItemWithVariants | null>(null);
   const [selectedVariantId, setSelectedVariantId] = useState("");
@@ -183,6 +192,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
   const [savedDraft, setSavedDraft] = useState<SavedDraft | null>(null);
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [submittedOrder, setSubmittedOrder] = useState<SubmittedOrder | null>(null);
@@ -225,6 +235,17 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
 
   useEffect(() => { if (!addressSessionToken) setAddressSessionToken(clientId()); }, [addressSessionToken]);
   useEffect(()=>{if(!customerOpen||customerQuery.trim().length<3){setCustomerMatches([]);return}const controller=new AbortController(),timer=window.setTimeout(()=>fetch(`/api/ordering/customers?q=${encodeURIComponent(customerQuery)}`,{signal:controller.signal}).then(r=>r.json()).then(b=>setCustomerMatches(b.customers||[])).catch(()=>undefined),150);return()=>{clearTimeout(timer);controller.abort()}},[customerOpen,customerQuery]);
+  useEffect(() => {
+    if (timingMode !== "future" || business !== "Corner Deli") return;
+    const controller = new AbortController();
+    setFutureSlotsLoading(true);
+    fetch(`/api/ordering/availability?serviceType=${encodeURIComponent(serviceType)}&date=${futureDate}`, { cache: "no-store", signal: controller.signal })
+      .then((response) => response.json())
+      .then((payload) => setFutureSlots(Array.isArray(payload.slots) ? payload.slots : []))
+      .catch(() => setFutureSlots([]))
+      .finally(() => setFutureSlotsLoading(false));
+    return () => controller.abort();
+  }, [business, futureDate, serviceType, timingMode]);
 
   function applyLock() {
     setSession({ authenticated: false });
@@ -267,7 +288,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     let cancelled = false;
     setMenuLoading(true);
     setMenuError("");
-    fetch(`/api/ordering/menu?business=${encodeURIComponent(business)}`, { cache: "no-store" })
+    const menuTime = timingMode === "future" && scheduledFor ? `&scheduledFor=${encodeURIComponent(scheduledFor)}` : "";
+    fetch(`/api/ordering/menu?business=${encodeURIComponent(business)}${menuTime}`, { cache: "no-store" })
       .then(async (response) => {
         const payload = await response.json() as MenuPayload & { error?: string };
         if (!response.ok) throw new Error(payload.error || "Could not load menu.");
@@ -289,7 +311,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         if (!cancelled) setMenuLoading(false);
       });
     return () => { cancelled = true; };
-  }, [business, session?.authenticated]);
+  }, [business, scheduledFor, session?.authenticated, timingMode]);
 
   useEffect(() => {
     if (serviceType !== "delivery") return;
@@ -624,7 +646,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     }
   }
 
-  async function submitOrder(draft: SavedDraft | null = savedDraft) {
+  async function submitOrder(draft: SavedDraft | null = savedDraft, managerOverride = false) {
     if (submittingOrder) return;
     if (!draft) draft = await saveDraft();
     if (!draft) return;
@@ -634,7 +656,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/submit`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ business }),
+        body: JSON.stringify({ business, managerOverride, overrideReason: managerOverride ? overrideReason : undefined }),
       });
       const payload = await response.json() as {
         order?: { display_number: string; total_cents: number };
@@ -646,6 +668,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       setSavedDraft(null);
       setScheduledFor("");
       setTimingMode("asap");
+      setOverrideReason("");
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : "Could not submit order.");
     } finally {
@@ -747,17 +770,17 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         <span>ASAP</span>
         <small>Use current quote</small>
       </button>
-      <button type="button" className={`futureOrderButton ${timingMode === "future" ? "active" : ""}`} onClick={() => { setTimingMode("future"); setSavedDraft(null); }}>
+      <button type="button" className={`futureOrderButton ${timingMode === "future" ? "active" : ""}`} onClick={() => { setTimingMode("future"); setFutureDate(deliBusinessDate()); setScheduledFor(""); setSavedDraft(null); }}>
         <span>Future</span>
         <small>Choose time</small>
       </button>
-      {timingMode === "future" && <input
-        className="posFutureTimeInput"
-        aria-label="Future order time"
-        type="datetime-local"
-        value={scheduledFor}
-        onChange={(event) => { setScheduledFor(event.target.value); setSavedDraft(null); }}
-      />}
+      {timingMode === "future" && <div className="posFuturePicker">
+        <input className="posFutureTimeInput" aria-label="Future order date" type="date" min={deliBusinessDate()} value={futureDate} onChange={(event) => { setFutureDate(event.target.value); setScheduledFor(""); setSavedDraft(null); }} />
+        <select aria-label="Future order time" value={scheduledFor} disabled={futureSlotsLoading || !futureSlots.length} onChange={(event) => { setScheduledFor(event.target.value); setSavedDraft(null); }}>
+          <option value="">{futureSlotsLoading ? "Loading times…" : futureSlots.length ? "Choose time" : "No valid times"}</option>
+          {futureSlots.map((slot) => <option key={slot} value={slot}>{new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(slot))}</option>)}
+        </select>
+      </div>}
     </section>
     <button type="button" className="posCustomerCompact" onClick={()=>setCustomerOpen(true)}>{customer?<><strong>{customer.display_name}</strong><span>{customer.phones?.find(phone=>phone.id===selectedCustomerPhoneId)?.display_phone||customer.display_phone}{serviceType==="delivery"&&validatedAddress?` · ${validatedAddress.formattedAddress}`:""}</span></>:<><strong>+ CUSTOMER</strong><span>{serviceType==="dine_in"?"Name required · phone optional":"Name and phone required"}</span></>}</button>
     {customer&&customer.phones?.length>1&&<div className="posCustomerChoices" aria-label="Contact number for this order"><strong>CONTACT NUMBER</strong>{customer.phones.map(phone=><button type="button" key={phone.id} className={selectedCustomerPhoneId===phone.id?"selected":""} onClick={()=>{setSelectedCustomerPhoneId(phone.id);setSavedDraft(null)}}>{phone.label||"Phone"} · {phone.display_phone}</button>)}</div>}
@@ -805,6 +828,10 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       Order #{submittedOrder.displayNumber} submitted to kitchen · {money(submittedOrder.totalCents)} · UNPAID
     </div>}
     {checkoutError && <div className="posSaveNotice error">{checkoutError}</div>}
+    {checkoutError.includes("Manager or owner override") && posEmployee && posEmployee.posRole !== "employee" && <div className="posSettingsWarning">
+      <label><span>Manager override reason</span><input value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} /></label>
+      <button type="button" disabled={!overrideReason.trim() || submittingOrder} onClick={() => void submitOrder(savedDraft, true)}>AUTHORIZE SEND OVERRIDE</button>
+    </div>}
     {cartNotice && <div className="posCartToast" aria-live="polite">{cartNotice}</div>}
 
     <section className="posWorkspace">

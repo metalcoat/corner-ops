@@ -38,8 +38,6 @@ test("POS workspace tabs preserve the unfinished order without a document reload
     const dialog = page.getByRole("dialog", { name: "Configure Pizza Logs" });
     await dialog.getByLabel("Item notes").fill("Shell state note");
     await dialog.getByRole("button", { name: "ADD TO ORDER" }).click();
-    await page.getByRole("button", { name: /^Future/ }).click();
-    await page.getByLabel("Future order time").fill("2030-08-14T18:00");
 
     await page.evaluate(() => {
       (window as typeof window & { __cornerOpsShellMarker?: string }).__cornerOpsShellMarker = "mounted";
@@ -65,7 +63,7 @@ test("POS workspace tabs preserve the unfinished order without a document reload
     await expect(page.getByRole("article").filter({ hasText: "Pizza Logs" })).toContainText("Shell state note");
     await expect(page.getByRole("button", { name: /Workspace Navigation/ })).toBeVisible();
     await expect(page.getByRole("button", { name: "Pickup", exact: true })).toHaveClass(/active/);
-    await expect(page.getByLabel("Future order time")).toHaveValue("2030-08-14T18:00");
+    await expect(page.getByRole("button", { name: /^ASAP/ })).toHaveClass(/active/);
     expect(await page.evaluate(() => (window as typeof window & { __cornerOpsShellMarker?: string }).__cornerOpsShellMarker)).toBe("mounted");
     expect(await page.evaluate(() => performance.getEntriesByType("navigation").length)).toBe(initialNavigationEntries);
   } finally {

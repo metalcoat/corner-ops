@@ -15,6 +15,8 @@ export async function findCustomers(business: OrderingBusiness, query = "") {
   const sql = getSql();
   const q = query.trim();
   const phone = normalizeCallerPhone(q);
+  const phoneDigits = q.replace(/\D/g, "");
+  const phonePrefix = phoneDigits ? `${phoneDigits.length <= 10 ? `+1${phoneDigits}` : `+${phoneDigits}`}%` : "";
   const like = `%${q}%`;
   return sql`
     SELECT c.id,c.first_name,c.last_name,c.display_name,c.email,c.notes,c.active,c.created_at,c.updated_at,c.last_order_at,
@@ -25,8 +27,8 @@ export async function findCustomers(business: OrderingBusiness, query = "") {
     LEFT JOIN LATERAL (SELECT normalized_phone,display_phone FROM ordering_customer_phones WHERE customer_id=c.id ORDER BY is_primary DESC,created_at LIMIT 1) p ON TRUE
     WHERE c.business=${business} AND c.active=TRUE AND c.merged_into_customer_id IS NULL
       AND (${q}='' OR c.first_name ILIKE ${like} OR c.last_name ILIKE ${like} OR c.display_name ILIKE ${like}
-        OR EXISTS (SELECT 1 FROM ordering_customer_phones match_phone WHERE match_phone.customer_id=c.id AND match_phone.normalized_phone=${phone}))
-    ORDER BY c.last_order_at DESC NULLS LAST,c.display_name LIMIT 100
+        OR EXISTS (SELECT 1 FROM ordering_customer_phones match_phone WHERE match_phone.customer_id=c.id AND (match_phone.normalized_phone=${phone} OR (${phonePrefix}<>'' AND match_phone.normalized_phone LIKE ${phonePrefix}))))
+    ORDER BY c.last_order_at DESC NULLS LAST,c.display_name LIMIT ${q ? 20 : 100}
   `;
 }
 
