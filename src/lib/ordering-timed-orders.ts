@@ -12,6 +12,9 @@ export type CreateTimedDraftOrderInput = {
   serviceType: ServiceType;
   customerId?: string | null;
   callerPhone?: string;
+  customerFirstName?: string;
+  customerLastName?: string;
+  orderOrigin?: "pos"|"phone"|"web"|"ai";
   createdBy: string;
   createdByName?: string;
   items?: VariantConfiguredOrderItemInput[];
@@ -62,6 +65,9 @@ export async function createTimedDraftOrder(input: CreateTimedDraftOrderInput): 
     serviceType: input.serviceType,
     customerId: input.customerId,
     callerPhone: input.callerPhone,
+    customerFirstName:input.customerFirstName,
+    customerLastName:input.customerLastName,
+    orderOrigin:input.orderOrigin,
     createdBy: input.createdBy,
     createdByName: input.createdByName,
     items: input.items,

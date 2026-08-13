@@ -67,6 +67,10 @@ export async function POST(request: Request) {
         modifierQuantities: record.modifierQuantities && typeof record.modifierQuantities === "object"
           ? record.modifierQuantities as Record<string, number>
           : {},
+        modifierAmounts: record.modifierAmounts && typeof record.modifierAmounts === "object"
+          ? record.modifierAmounts as Record<string, "light"|"normal"|"heavy">
+          : {},
+        modifierDeclines: Array.isArray(record.modifierDeclines) ? record.modifierDeclines.map(String) : [],
         comboId: record.comboId ? String(record.comboId) : null,
         comboSelections: record.comboSelections && typeof record.comboSelections === "object"
           ? record.comboSelections as Record<string, string[]>
@@ -87,6 +91,9 @@ export async function POST(request: Request) {
       serviceType,
       customerId: body.customerId ? String(body.customerId) : null,
       callerPhone: body.callerPhone ? String(body.callerPhone) : "",
+      customerFirstName: body.customerFirstName ? String(body.customerFirstName) : "",
+      customerLastName: body.customerLastName ? String(body.customerLastName) : "",
+      orderOrigin: body.orderOrigin === "phone" ? "phone" : "pos",
       createdBy: actor.id,
       createdByName: actor.name,
       items,

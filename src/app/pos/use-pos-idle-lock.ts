@@ -36,11 +36,11 @@ export function usePosIdleLock(input: {
 
   useEffect(() => {
     clearTimer();
-    if (!input.authenticated) return;
+    if (!input.authenticated || input.seconds === 0) return;
     const reset = (event?: Event) => {
       if (event && !event.isTrusted) return;
       clearTimer();
-      timer.current = window.setTimeout(() => lock(), Math.max(1, input.seconds) * 1000);
+      timer.current = window.setTimeout(() => lock(), input.seconds * 1000);
     };
     const events: Array<keyof WindowEventMap> = ["pointerdown", "pointermove", "touchstart", "keydown", "wheel", "scroll"];
     for (const event of events) window.addEventListener(event, reset, { capture: true, passive: true });

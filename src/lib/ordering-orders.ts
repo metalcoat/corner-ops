@@ -5,12 +5,14 @@ import type { OrderingBusiness, OrderSource, ServiceType } from "@/lib/ordering-
 import { calculateLineTotalCents, validateModifierRequirements } from "@/lib/ordering-core";
 import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
 import { normalizePizzaToppings, pizzaToppingPriceCents, type PizzaToppingSelection } from "@/lib/ordering-pizza-toppings";
+import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
 
 export type ConfiguredOrderItemInput = {
   itemId: string;
   quantity?: number;
   modifierSelections?: Record<string, string[]>;
   modifierQuantities?: Record<string, number>;
+  modifierAmounts?: Record<string, "light" | "normal" | "heavy">;
   modifierDeclines?:string[];
   pizzaToppings?: PizzaToppingSelection[];
   comboId?: string | null;
@@ -24,6 +26,9 @@ export type CreateDraftOrderInput = {
   serviceType: ServiceType;
   customerId?: string | null;
   callerPhone?: string;
+  customerFirstName?: string;
+  customerLastName?: string;
+  orderOrigin?: "pos" | "phone" | "web" | "ai";
   createdBy: string;
   createdByName?: string;
   items?: ConfiguredOrderItemInput[];
@@ -52,6 +57,7 @@ type ModifierRow = {
   parent_group_id: string | null;
   parent_option_ids: string[] | null;
   included_choice_count:number|null;
+  supports_intensity:boolean;
 };
 type ComboRow = {
   combo_id: string;
@@ -128,7 +134,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
       opt.available AS option_available,
       COALESCE(def.price_delta_override_cents, opt.price_delta_cents) AS price_delta_cents,
       COALESCE(def.default_selected, FALSE) AS default_selected
-      ,COALESCE(p.context,'ordinary') AS presentation_context,COALESCE(p.behavior,'standard') AS presentation_behavior,p.parent_group_id,p.parent_option_ids,p.included_choice_count
+      ,COALESCE(p.context,'ordinary') AS presentation_context,COALESCE(p.behavior,'standard') AS presentation_behavior,p.parent_group_id,p.parent_option_ids,p.included_choice_count,COALESCE(p.supports_intensity,FALSE) supports_intensity
     FROM ordering_menu_item_modifier_groups link
     JOIN ordering_modifier_groups grp ON grp.id = link.group_id AND grp.active = TRUE
     LEFT JOIN ordering_modifier_options opt ON opt.group_id = grp.id AND opt.active = TRUE
@@ -139,7 +145,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
     ORDER BY link.sort_order, grp.sort_order, opt.sort_order, opt.name
   `) as ModifierRow[];
 
-  const groups = new Map<string, { name: string; min: number; max: number; allowQuantity: boolean; includedChoiceCount:number; context: ModifierRow["presentation_context"]; behavior: ModifierRow["presentation_behavior"]; parentGroupId: string | null; parentOptionIds: string[]; rows: ModifierRow[] }>();
+  const groups = new Map<string, { name: string; min: number; max: number; allowQuantity: boolean; includedChoiceCount:number; supportsIntensity:boolean; context: ModifierRow["presentation_context"]; behavior: ModifierRow["presentation_behavior"]; parentGroupId: string | null; parentOptionIds: string[]; rows: ModifierRow[] }>();
   for (const row of modifierRows) {
     if (!groups.has(row.group_id)) {
       groups.set(row.group_id, {
@@ -148,6 +154,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
         max: Number(row.max_selections),
         allowQuantity: Boolean(row.allow_option_quantity),
         includedChoiceCount:Number(row.included_choice_count||0),
+        supportsIntensity:Boolean(row.supports_intensity),
         context: row.presentation_context,
         behavior: row.presentation_behavior,
         parentGroupId: row.parent_group_id,
@@ -192,11 +199,15 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
     quantity: number;
     pizzaToppingPortion: string | null;
     pizzaToppingAmount: string | null;
+    amount: "light"|"normal"|"heavy";
+    wasDefault: boolean;
+    printOnTicket: boolean;
   }> = [];
 
   for (const [groupId, group] of groups) {
     if (group.behavior === "pizza_topping") continue;
     const selected = new Set(modifierSelections[groupId] || []);
+    const hasDefault = group.rows.some((candidate) => candidate.default_selected);
     if (!groupActive(groupId, group)) {
       if (selected.size) throw new Error(`Modifier choices for ${group.name} are not valid in the selected combo context.`);
       continue;
@@ -218,6 +229,8 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
         const chargedDelta=selectedOrdinal<=allowance?0:delta;
         const requestedQuantity = Math.trunc(Number(modifierQuantities[row.option_id] ?? 1));
         const optionQuantity = group.allowQuantity ? requestedQuantity : 1;
+        const amount = input.modifierAmounts?.[row.option_id] || "normal";
+        if (!group.supportsIntensity && amount !== "normal") throw new Error(`Modifier intensity is not available for ${group.name}.`);
         if (!Number.isSafeInteger(optionQuantity) || optionQuantity < 1 || optionQuantity > 99) {
           throw new Error(`Invalid quantity for ${row.option_name}.`);
         }
@@ -232,8 +245,11 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
           quantity: optionQuantity,
           pizzaToppingPortion: null,
           pizzaToppingAmount: null,
+          amount,
+          wasDefault: Boolean(row.default_selected),
+          printOnTicket: !row.default_selected || amount !== "normal" || (group.max === 1 && hasDefault && !row.default_selected),
         });
-      } else if (row.default_selected) {
+      } else if (row.default_selected && !(group.max === 1 && selected.size === 1)) {
         modifierSnapshots.push({
           groupId,
           optionId: row.option_id,
@@ -244,10 +260,11 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
           quantity: 1,
           pizzaToppingPortion: null,
           pizzaToppingAmount: null,
+          amount: "normal", wasDefault: true, printOnTicket: true,
         });
       }
     }
-    if(group.includedChoiceCount>0&&(input.modifierDeclines||[]).includes(groupId)){const first=group.rows.find(row=>row.option_id);if(first)modifierSnapshots.push({groupId,optionId:first.option_id!,groupName:group.name,optionName:"Included choice",state:"declined_included",priceDeltaCents:0,quantity:1,pizzaToppingPortion:null,pizzaToppingAmount:null})}
+    if(group.includedChoiceCount>0&&(input.modifierDeclines||[]).includes(groupId)){const first=group.rows.find(row=>row.option_id);if(first)modifierSnapshots.push({groupId,optionId:first.option_id!,groupName:group.name,optionName:"Included choice",state:"declined_included",priceDeltaCents:0,quantity:1,pizzaToppingPortion:null,pizzaToppingAmount:null,amount:"normal",wasDefault:false,printOnTicket:true})}
   }
 
   const toppingGroups = Array.from(groups.entries()).filter(([, group]) => group.behavior === "pizza_topping");
@@ -258,7 +275,7 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
     if (!match.row.option_available) throw new Error(`${match.row.option_name} is currently unavailable.`);
     const delta = pizzaToppingPriceCents(Number(match.row.price_delta_cents ?? 0), topping.portion, topping.amount);
     modifierUnitDeltaCents += delta;
-    modifierSnapshots.push({ groupId: match.groupId, optionId: topping.modifierOptionId, groupName: match.group.name, optionName: match.row.option_name, state: "selected", priceDeltaCents: delta, quantity: 1, pizzaToppingPortion: topping.portion, pizzaToppingAmount: topping.amount });
+    modifierSnapshots.push({ groupId: match.groupId, optionId: topping.modifierOptionId, groupName: match.group.name, optionName: match.row.option_name, state: "selected", priceDeltaCents: delta, quantity: 1, pizzaToppingPortion: topping.portion, pizzaToppingAmount: topping.amount,amount:"normal",wasDefault:false,printOnTicket:true });
   }
 
   let comboUnitDeltaCents = 0;
@@ -364,11 +381,12 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
     await sql`
       INSERT INTO ordering_order_item_modifiers (
         id, order_item_id, group_id, option_id, group_name_snapshot, option_name_snapshot,
-        quantity, unit_price_delta_cents, selection_state, pizza_topping_portion, pizza_topping_amount
+        quantity, unit_price_delta_cents, selection_state, pizza_topping_portion, pizza_topping_amount,
+        amount,was_default_selected_snapshot,default_amount_snapshot,print_on_ticket
       ) VALUES (
         ${randomUUID()}, ${orderItemId}, ${modifier.groupId}, ${modifier.optionId},
         ${modifier.groupName}, ${modifier.optionName}, ${modifier.quantity}, ${modifier.priceDeltaCents}, ${modifier.state},
-        ${modifier.pizzaToppingPortion}, ${modifier.pizzaToppingAmount}
+        ${modifier.pizzaToppingPortion}, ${modifier.pizzaToppingAmount},${modifier.amount},${modifier.wasDefault},'normal',${modifier.printOnTicket}
       )
     `;
   }
@@ -406,6 +424,7 @@ async function recalculateOrder(orderId: string): Promise<void> {
 
 export async function createDraftOrder(input: CreateDraftOrderInput): Promise<OrderRow> {
   await ensureOrderingPosSchema();
+  await ensureOrderingCustomerSchema();
   const sql = getSql();
   const id = randomUUID();
   const displayNumber = await nextOrderNumber(input.business);
@@ -414,12 +433,19 @@ export async function createDraftOrder(input: CreateDraftOrderInput): Promise<Or
   await sql`
     INSERT INTO ordering_orders (
       id, business, source, customer_id, caller_phone, status, payment_status,
-      service_type, version, display_number, created_by
+      service_type, version, display_number, created_by,first_name_snapshot,last_name_snapshot,phone_snapshot,order_origin
     ) VALUES (
       ${id}, ${input.business}, ${input.source}, ${input.customerId || null}, ${String(input.callerPhone || "")},
-      'draft', 'unpaid', ${input.serviceType}, 1, ${displayNumber}, ${input.createdBy}
+      'draft', 'unpaid', ${input.serviceType}, 1, ${displayNumber}, ${input.createdBy},${String(input.customerFirstName||"").trim()},${String(input.customerLastName||"").trim()},${String(input.callerPhone||"")},${input.orderOrigin||"pos"}
     )
   `;
+
+  if (input.customerId) {
+    const customers=await sql`SELECT first_name,last_name FROM ordering_customers WHERE id=${input.customerId} AND business=${input.business} AND active=TRUE AND merged_into_customer_id IS NULL`;
+    if(!customers[0]) throw new Error("The selected customer is no longer active.");
+    await sql`UPDATE ordering_orders SET first_name_snapshot=${String(input.customerFirstName||customers[0].first_name)},last_name_snapshot=${String(input.customerLastName||customers[0].last_name)} WHERE id=${id}`;
+    await sql`UPDATE ordering_customers SET last_order_at=NOW(),updated_at=NOW() WHERE id=${input.customerId}`;
+  }
 
   try {
     for (const item of items) await addConfiguredItem(id, input.business, item);

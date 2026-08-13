@@ -14,6 +14,9 @@ export type CreateVariantDraftOrderInput = {
   serviceType: ServiceType;
   customerId?: string | null;
   callerPhone?: string;
+  customerFirstName?: string;
+  customerLastName?: string;
+  orderOrigin?: "pos"|"phone"|"web"|"ai";
   createdBy: string;
   createdByName?: string;
   items?: VariantConfiguredOrderItemInput[];

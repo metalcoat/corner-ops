@@ -34,6 +34,7 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
     )`;
     await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS behavior TEXT`;
     await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS included_choice_count INTEGER`;
+    await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS supports_intensity BOOLEAN NOT NULL DEFAULT FALSE`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_menu_override_audit (
       id UUID PRIMARY KEY, business TEXT NOT NULL, actor_id TEXT NOT NULL, target_type TEXT NOT NULL,
       target_id UUID NOT NULL, field_name TEXT NOT NULL, previous_value JSONB, new_value JSONB,
@@ -69,6 +70,45 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
       JOIN ordering_menu_items item ON item.id=link.item_id AND item.business='Corner Deli'
       JOIN ordering_menu_source_map source ON source.internal_id=link.group_id AND source.business='Corner Deli' AND source.source='rezku' AND source.entity_type='modifier_group' AND source.source_id='140346'
       ON CONFLICT(item_id,group_id) DO UPDATE SET behavior='pizza_topping'
+    `;
+    // Rezku group 144183 is the imported Light/Heavy capability marker. Attach
+    // that capability to the stable imported sub-topping groups on the same
+    // items, then hide the legacy standalone selector.
+    await sql`
+      INSERT INTO ordering_modifier_presentation_overrides(item_id,group_id,supports_intensity,updated_by)
+      SELECT topping.item_id,topping.group_id,TRUE,'rezku-sub-intensity-migration'
+      FROM ordering_menu_item_modifier_groups topping
+      JOIN ordering_menu_source_map topping_source ON topping_source.internal_id=topping.group_id
+        AND topping_source.business='Corner Deli' AND topping_source.source='rezku'
+        AND topping_source.entity_type='modifier_group' AND topping_source.source_id IN ('140351','140360')
+      WHERE EXISTS (
+        SELECT 1 FROM ordering_menu_item_modifier_groups marker
+        JOIN ordering_menu_source_map marker_source ON marker_source.internal_id=marker.group_id
+          AND marker_source.business='Corner Deli' AND marker_source.source='rezku'
+          AND marker_source.entity_type='modifier_group' AND marker_source.source_id='144183'
+        WHERE marker.item_id=topping.item_id
+      )
+      ON CONFLICT(item_id,group_id) DO UPDATE SET supports_intensity=TRUE,updated_by='rezku-sub-intensity-migration',updated_at=NOW()
+    `;
+    await sql`
+      INSERT INTO ordering_modifier_presentation_overrides(item_id,group_id,context,updated_by)
+      SELECT link.item_id,link.group_id,'hidden','rezku-sub-intensity-migration'
+      FROM ordering_menu_item_modifier_groups link
+      JOIN ordering_menu_source_map source ON source.internal_id=link.group_id AND source.business='Corner Deli'
+        AND source.source='rezku' AND source.entity_type='modifier_group' AND source.source_id='144183'
+      ON CONFLICT(item_id,group_id) DO UPDATE SET context='hidden',updated_by='rezku-sub-intensity-migration',updated_at=NOW()
+    `;
+    // Explicit milestone defaults recovered from the stable Rezku IDs for the
+    // real Pizza item. Source rows remain untouched; this additive presentation
+    // layer is snapshotted onto each order for deterministic ticket reprints.
+    await sql`
+      INSERT INTO ordering_menu_item_modifier_defaults(id,item_id,option_id,default_selected,included_quantity,active)
+      SELECT option.internal_id,item.internal_id,option.internal_id,TRUE,1,TRUE
+      FROM ordering_menu_source_map item
+      JOIN ordering_menu_source_map option ON option.business=item.business AND option.source=item.source
+        AND option.entity_type='modifier_option' AND option.source_id IN ('832472','832478')
+      WHERE item.business='Corner Deli' AND item.source='rezku' AND item.entity_type='item' AND item.source_id='873983'
+      ON CONFLICT(item_id,option_id) DO UPDATE SET default_selected=TRUE,included_quantity=1,active=TRUE,updated_at=NOW()
     `;
   })().catch((error) => { promise = null; throw error; });
   return promise;

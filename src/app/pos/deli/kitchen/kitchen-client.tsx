@@ -15,6 +15,8 @@ type KitchenModifier = {
   selection_state: string;
   pizza_topping_portion: PizzaToppingPortion | null;
   pizza_topping_amount: PizzaToppingAmount | null;
+  amount?: "light"|"normal"|"heavy";
+  print_on_ticket?: boolean;
 };
 type KitchenItem = {
   id: string;
@@ -152,7 +154,7 @@ export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSecond
             <h2>{item.quantity}× {item.item_name_snapshot}</h2>
             <h3>{formatOrderItemName(item.item_name_snapshot, item.variant_name_snapshot)}</h3>
             <ul>
-              {item.modifiers.map((modifier, index) => <li className={modifier.selection_state === "removed" ? "removed" : modifier.pizza_topping_portion ? "pizzaTopping" : ""} key={`${modifier.group_name_snapshot}-${modifier.option_id}-${index}`}>{formatOrderModifier(modifier, modifier.pizza_topping_portion ? "ticket" : "display")}</li>)}
+              {item.modifiers.filter((modifier)=>modifier.print_on_ticket!==false).map((modifier, index) => <li className={modifier.selection_state === "removed" ? "removed" : modifier.pizza_topping_portion ? "pizzaTopping" : ""} key={`${modifier.group_name_snapshot}-${modifier.option_id}-${index}`}>{formatOrderModifier(modifier, "ticket")}</li>)}
               {item.combo_selections.map((selection) => <li key={`${selection.group_name_snapshot}-${selection.option_id}`}>{selection.option_name_snapshot}</li>)}
             </ul>
             {item.special_instructions && <p className="kitchenNote">NOTE: {item.special_instructions}</p>}

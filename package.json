@@ -24,6 +24,12 @@
     "test:pos:auth": "tsx scripts/pos-auth-validate.ts",
     "test:cookie-security": "tsx scripts/cookie-security-validate.ts",
     "test:address": "tsx scripts/address-workflow-validate.ts",
+    "test:order-center": "tsx scripts/order-center-validate.ts",
+    "test:customers": "tsx scripts/customer-crm-validate.ts",
+    "test:phone": "tsx scripts/phone-normalization-validate.ts",
+    "test:idle-lock": "tsx scripts/configurable-idle-lock-validate.ts",
+    "test:modifier-intensity": "tsx scripts/modifier-intensity-validate.ts",
+    "test:ticket-defaults": "tsx scripts/default-ticket-suppression-validate.ts",
     "test:auth:e2e": "playwright test tests/auth-cookie.spec.ts",
     "test:pos:e2e": "playwright test tests/pos-pin-auth.spec.ts tests/pos-deli.spec.ts tests/deli-order-lifecycle.spec.ts"
   },

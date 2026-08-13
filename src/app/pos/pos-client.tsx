@@ -36,6 +36,7 @@ type CartLine = {
   comboText: string[];
   modifierSelections: Record<string, string[]>;
   modifierQuantities: Record<string, number>;
+  modifierAmounts: Record<string, "light"|"normal"|"heavy">;
   modifierDeclines:string[];
   pizzaToppings: PizzaToppingSelection[];
   comboId: string | null;
@@ -65,6 +66,7 @@ type SubmittedOrder = {
 type AddressSuggestion = { id: string; text: string; mainText: string; secondaryText: string; provider: "google" };
 type ValidatedAddress = { formattedAddress: string; city: string; state: string; postalCode: string };
 type DeliveryRoute = { distanceMiles: number; durationSeconds: number; provider: string; calculatedAt: string };
+type PosCustomer={id:string;first_name:string;last_name:string;display_name:string;display_phone:string;normalized_phone:string;last_order_at:string|null;addresses:Array<{id:string;label:string;line1:string;line2:string;city:string;state:string;postal_code:string;last_used_at:string|null}>};
 
 const serviceLabels: Record<PosServiceType, { label: string; paymentNote?: string }> = {
   pickup: { label: "Pickup" },
@@ -160,6 +162,9 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
   const [selectedVariantId, setSelectedVariantId] = useState("");
   const [modifierSelections, setModifierSelections] = useState<Record<string, string[]>>({});
   const [modifierQuantities, setModifierQuantities] = useState<Record<string, number>>({});
+  const [modifierAmounts,setModifierAmounts]=useState<Record<string,"light"|"normal"|"heavy">>({});
+  const [intensityChoice,setIntensityChoice]=useState<{group:OrderingModifierGroupView;option:OrderingModifierOptionView}|null>(null);
+  const holdTimer=useRef<number|null>(null),held=useRef(false);
   const[modifierDeclines,setModifierDeclines]=useState<string[]>([]);
   const [pizzaToppings, setPizzaToppings] = useState<PizzaToppingSelection[]>([]);
   const [selectedComboId, setSelectedComboId] = useState("");
@@ -188,6 +193,8 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
   const [deliveryValidationToken, setDeliveryValidationToken] = useState("");
   const [deliveryValidatedInput, setDeliveryValidatedInput] = useState("");
   const [deliveryRoute, setDeliveryRoute] = useState<DeliveryRoute | null>(null);
+  const [customer,setCustomer]=useState<PosCustomer|null>(null),[customerOpen,setCustomerOpen]=useState(false),[customerQuery,setCustomerQuery]=useState(""),[customerMatches,setCustomerMatches]=useState<PosCustomer[]>([]);
+  const [orderOrigin,setOrderOrigin]=useState<"pos"|"phone">("pos");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -200,6 +207,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
   }, [business]);
 
   useEffect(() => { if (!addressSessionToken) setAddressSessionToken(clientId()); }, [addressSessionToken]);
+  useEffect(()=>{if(!customerOpen||customerQuery.trim().length<3){setCustomerMatches([]);return}const controller=new AbortController(),timer=window.setTimeout(()=>fetch(`/api/ordering/customers?q=${encodeURIComponent(customerQuery)}`,{signal:controller.signal}).then(r=>r.json()).then(b=>setCustomerMatches(b.customers||[])).catch(()=>undefined),150);return()=>{clearTimeout(timer);controller.abort()}},[customerOpen,customerQuery]);
 
   function applyLock() {
     setSession({ authenticated: false });
@@ -301,8 +309,8 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
         if (chosen) {
           const optionQuantity = group.allowOptionQuantity ? Math.max(1, modifierQuantities[option.id] || 1) : 1;
           unitPriceCents += priceDeltaCents * optionQuantity;
-          if (!option.defaultSelected || priceDeltaCents !== 0) {
-            modifierText.push(`${group.name}: ${option.name}${optionQuantity > 1 ? ` ×${optionQuantity}` : ""}`);
+          if (!option.defaultSelected || priceDeltaCents !== 0 || modifierAmounts[option.id] && modifierAmounts[option.id]!=="normal") {
+            modifierText.push(`${group.name}: ${modifierAmounts[option.id]&&modifierAmounts[option.id]!=="normal"?`${modifierAmounts[option.id].toUpperCase()} `:""}${option.name}${optionQuantity > 1 ? ` ×${optionQuantity}` : ""}`);
           }
         } else if (option.defaultSelected) {
           modifierText.push(`${group.name}: NO ${option.name.toUpperCase()}`);
@@ -332,7 +340,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
     }
 
     return { valid, unitPriceCents, modifierText, comboText, missing };
-  }, [configuringItem, selectedVariant, modifierSelections, modifierQuantities, pizzaToppings, selectedCombo, comboSelections, presentationComboEnabled]);
+  }, [configuringItem, selectedVariant, modifierSelections, modifierQuantities,modifierAmounts, pizzaToppings, selectedCombo, comboSelections, presentationComboEnabled]);
 
   function openItem(item: OrderingMenuItemWithVariants, line?: CartLine) {
     if (!item.available) return;
@@ -342,6 +350,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
     setSelectedVariantId(lineVariant?.id || "");
     setModifierSelections(line ? cloneSelections(line.modifierSelections) : initialModifierSelections(item, lineVariant));
     setModifierQuantities(line ? { ...line.modifierQuantities } : {});setModifierDeclines(line?[...line.modifierDeclines]:[]);
+    setModifierAmounts(line?{...line.modifierAmounts}:{});
     setPizzaToppings(line ? line.pizzaToppings.map((topping) => ({ ...topping })) : []);
     setSelectedComboId(line?.comboId || "");
     setComboSelections(line ? cloneSelections(line.comboSelections) : {});
@@ -352,7 +361,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
     setConfigurationMessage("");
   }
 
-  function selectItem(item:OrderingMenuItemWithVariants){if(itemNeedsConfiguration(item)){openItem(item);return}const variant=initialVariant(item);const line:CartLine={id:clientId(),itemId:item.id,variantId:variant?.id||null,variantName:variant?.name||"",name:item.name,quantity:1,unitPriceCents:variant?.basePriceCents??item.basePriceCents,modifierText:[],comboText:[],modifierSelections:{},modifierQuantities:{},modifierDeclines:[],pizzaToppings:[],comboId:null,comboSelections:{},specialInstructions:""};setCart(current=>[...current,line]);setSavedDraft(null);setCartNotice(`Added ${item.name}`);window.setTimeout(()=>setCartNotice(""),1800)}
+  function selectItem(item:OrderingMenuItemWithVariants){if(itemNeedsConfiguration(item)){openItem(item);return}const variant=initialVariant(item);const line:CartLine={id:clientId(),itemId:item.id,variantId:variant?.id||null,variantName:variant?.name||"",name:item.name,quantity:1,unitPriceCents:variant?.basePriceCents??item.basePriceCents,modifierText:[],comboText:[],modifierSelections:{},modifierQuantities:{},modifierAmounts:{},modifierDeclines:[],pizzaToppings:[],comboId:null,comboSelections:{},specialInstructions:""};setCart(current=>[...current,line]);setSavedDraft(null);setCartNotice(`Added ${item.name}`);window.setTimeout(()=>setCartNotice(""),1800)}
 
   function chooseVariant(variant: OrderingItemVariantView) {
     if (!configuringItem || !variant.available) return;
@@ -394,6 +403,10 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
   function changeModifierQuantity(optionId: string, delta: number) {
     setModifierQuantities((current) => ({ ...current, [optionId]: Math.max(1, Math.min(99, (current[optionId] || 1) + delta)) }));
   }
+
+  function beginIntensityHold(group:OrderingModifierGroupView,option:OrderingModifierOptionView){if(!group.supportsIntensity)return;held.current=false;if(holdTimer.current)window.clearTimeout(holdTimer.current);holdTimer.current=window.setTimeout(()=>{held.current=true;setIntensityChoice({group,option})},450)}
+  function endIntensityHold(){if(holdTimer.current)window.clearTimeout(holdTimer.current);holdTimer.current=null}
+  function chooseIntensity(amount:"light"|"normal"|"heavy"){if(!intensityChoice)return;const{group,option}=intensityChoice;setModifierSelections(current=>({...current,[group.id]:group.maxSelections===1?[option.id]:Array.from(new Set([...(current[group.id]||[]),option.id])).slice(0,group.maxSelections)}));setModifierAmounts(current=>({...current,[option.id]:amount}));setIntensityChoice(null)}
 
   function chooseCombo(combo: OrderingComboView | null) {
     setSelectedComboId(combo?.id || "");
@@ -437,6 +450,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
       comboText: configuration.comboText,
       modifierSelections: cloneSelections(modifierSelections),
       modifierQuantities: { ...modifierQuantities },
+      modifierAmounts:{...modifierAmounts},
       modifierDeclines:[...modifierDeclines],
       pizzaToppings: normalizePizzaToppings(pizzaToppings),
       comboId: selectedCombo?.id || null,
@@ -489,6 +503,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
       setCheckoutError("Validate the delivery address before reviewing this Delivery order.");
       return;
     }
+    if ((serviceType === "delivery"||(serviceType==="pickup"&&orderOrigin==="phone"))&&!customer){setCheckoutError(`${serviceLabels[serviceType].label} ${orderOrigin==="phone"?"phone ":""}orders require a customer name and phone.`);return}
     if (timingMode === "future" && !scheduledFor) {
       setCheckoutError("Choose the future pickup/delivery time before saving the order.");
       return;
@@ -508,12 +523,18 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
           deliveryAddress: serviceType === "delivery" ? deliveryValidatedInput : undefined,
           deliveryUnit: serviceType === "delivery" ? deliveryUnit : undefined,
           deliveryValidationToken: serviceType === "delivery" ? deliveryValidationToken : undefined,
+          customerId:customer?.id,
+          customerFirstName:customer?.first_name,
+          customerLastName:customer?.last_name,
+          callerPhone:customer?.normalized_phone,
+          orderOrigin,
           items: cart.map((line) => ({
             itemId: line.itemId,
             variantId: line.variantId,
             quantity: line.quantity,
             modifierSelections: line.modifierSelections,
             modifierQuantities: line.modifierQuantities,
+            modifierAmounts:line.modifierAmounts,
             modifierDeclines:line.modifierDeclines,
             pizzaToppings: line.pizzaToppings,
             comboId: line.comboId,
@@ -596,8 +617,10 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
       </div>
       <nav className="posUtilityNav" aria-label={`${business} POS utilities`}>
         {posEmployee && <span className="posEmployeeName">{posEmployee.name}</span>}
-        {config.utilities.map((utility) => business === "Corner Deli" && utility === "manager"
-          ? <a key={utility} href="/pos/deli/settings/menu">Menu Settings</a>
+        {config.utilities.map((utility) => business === "Corner Deli" && utility === "orders"
+          ? <a key={utility} href="/pos/deli/orders">Orders</a>
+          : business === "Corner Deli" && utility === "manager"
+          ? <a key={utility} href="/pos/deli/settings">Settings</a>
           : utility === "reports"
           ? <a key={utility} href={config.reportsPath}>{utilityLabels[utility]}</a>
           : <button key={utility} type="button">{utilityLabels[utility]}</button>)}
@@ -628,6 +651,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
         onChange={(event) => { setScheduledFor(event.target.value); setSavedDraft(null); }}
       />}
     </section>
+    <button type="button" className="posCustomerCompact" onClick={()=>setCustomerOpen(true)}>{customer?<><strong>{customer.display_name}</strong><span>{customer.display_phone}{serviceType==="delivery"&&validatedAddress?` · ${validatedAddress.formattedAddress}`:""}</span></>:<><strong>+ CUSTOMER</strong><span>{serviceType==="dine_in"?"Guest optional":"Name and phone required"}</span></>}</button>
 
     {serviceType === "delivery" && <section className="posDelivery" aria-label="Customer and delivery address">
       <div className="posDeliveryHeading"><div><span>Customer / Delivery</span><h2>Delivery address</h2></div>{validatedAddress && <strong className="addressValid">VALIDATED</strong>}</div>
@@ -791,14 +815,14 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
                   const selectedOrdinal=group.options.filter(candidate=>selected.includes(candidate.id)).findIndex(candidate=>candidate.id===option.id);
                   const priceDeltaCents=group.includedChoiceCount>0&&!modifierDeclines.includes(group.id)&&(selected.length<group.includedChoiceCount||(selectedOrdinal>=0&&selectedOrdinal<group.includedChoiceCount))?0:baseDeltaCents;
                   const selectedOption = selected.includes(option.id);
-                  return <div className="posModifierChoice" key={option.id}><button type="button" disabled={!available} className={selectedOption ? "selected" : ""} onClick={() => toggleModifier(group, option.id)}>
+                  return <div className="posModifierChoice" key={option.id}><button type="button" disabled={!available} className={selectedOption ? "selected" : ""} onPointerDown={()=>beginIntensityHold(group,option)} onPointerUp={endIntensityHold} onPointerCancel={endIntensityHold} onPointerLeave={endIntensityHold} onContextMenu={event=>{if(group.supportsIntensity){event.preventDefault();setIntensityChoice({group,option})}}} onClick={() => {if(held.current){held.current=false;return}toggleModifier(group, option.id)}}>
                     <strong>{option.name}</strong>
                     <span>{!available
                       ? "Unavailable for this size/form"
                       : priceDeltaCents
                         ? `${priceDeltaCents > 0 ? "+" : ""}${money(priceDeltaCents)}`
                         : option.defaultSelected ? "FREE · Default" : "FREE"}</span>
-                  </button>{selectedOption && group.allowOptionQuantity && <div className="posModifierQty" aria-label={`${option.name} quantity`}><button type="button" onClick={() => changeModifierQuantity(option.id, -1)} aria-label={`Decrease ${option.name}`}>−</button><strong>{modifierQuantities[option.id] || 1}</strong><button type="button" onClick={() => changeModifierQuantity(option.id, 1)} aria-label={`Increase ${option.name}`}>+</button></div>}</div>;
+                  </button>{selectedOption&&group.supportsIntensity&&<button type="button" className="posAmountButton" aria-label={`Change ${option.name} amount, currently ${modifierAmounts[option.id]||"normal"}`} onClick={()=>setIntensityChoice({group,option})}>{(modifierAmounts[option.id]||"normal").toUpperCase()} ▾</button>}{selectedOption && group.allowOptionQuantity && <div className="posModifierQty" aria-label={`${option.name} quantity`}><button type="button" onClick={() => changeModifierQuantity(option.id, -1)} aria-label={`Decrease ${option.name}`}>−</button><strong>{modifierQuantities[option.id] || 1}</strong><button type="button" onClick={() => changeModifierQuantity(option.id, 1)} aria-label={`Increase ${option.name}`}>+</button></div>}</div>;
                 })}
               </div>
               {group.includedChoiceCount>0&&<button type="button" className={modifierDeclines.includes(group.id)?"selected":""} onClick={()=>{setModifierDeclines(current=>current.includes(group.id)?current.filter(id=>id!==group.id):[...current,group.id]);setModifierSelections(current=>({...current,[group.id]:[]}))}}>NO INCLUDED CHOICE</button>}
@@ -841,5 +865,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
         </footer>
       </section>
     </div>}
+    {intensityChoice&&<div className="posIntensityPopover" role="dialog" aria-label={`${intensityChoice.option.name} amount`}><strong>{intensityChoice.option.name}</strong><div>{(["light","normal","heavy"] as const).map(amount=><button key={amount} className={(modifierAmounts[intensityChoice.option.id]||"normal")===amount?"selected":""} onClick={()=>chooseIntensity(amount)}>{amount.toUpperCase()}</button>)}</div><button onClick={()=>setIntensityChoice(null)}>Cancel</button></div>}
+    {customerOpen&&<div className="posModalBackdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setCustomerOpen(false)}}><section className="posCustomerDialog" role="dialog" aria-modal="true"><header><div><span>CUSTOMER</span><h2>Find by phone or name</h2></div><button onClick={()=>setCustomerOpen(false)}>Close</button></header><input autoFocus type="search" value={customerQuery} onChange={e=>setCustomerQuery(e.target.value)} placeholder="3155551212 or Sarah Smith"/>{customerMatches.map(match=><button className="posCustomerMatch" key={match.id} onClick={()=>{setCustomer(match);setCustomerOpen(false);setSavedDraft(null)}}><strong>{match.display_name}</strong><span>{match.display_phone}</span>{match.addresses[0]&&<small>{match.addresses[0].line1} · Last order {match.last_order_at?new Date(match.last_order_at).toLocaleDateString():"never"}</small>}</button>)}{customer&&<button className="danger" onClick={()=>{setCustomer(null);setCustomerOpen(false);setSavedDraft(null)}}>Use Guest / Clear customer</button>}<a href="/pos/deli/customers">Open customer CRM</a></section></div>}
   </main>;
 }

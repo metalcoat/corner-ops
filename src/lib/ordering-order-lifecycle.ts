@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getSql, withTransaction } from "@/lib/db";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
+import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 import { ensureOrderingAddressSchema } from "@/lib/ordering-address-schema";
@@ -265,6 +266,7 @@ export async function transitionKitchenOrder(input: {
 
 export async function listKitchenOrders(business: OrderingBusiness, includeRecent = false) {
   await ensureOrderingPosSchema();
+  await ensureOrderingCustomerSchema();
   const sql = getSql();
   const rows = await sql`
     SELECT id, business, source, display_number, status, payment_status, service_type, version,
@@ -288,7 +290,8 @@ export async function listKitchenOrders(business: OrderingBusiness, includeRecen
     for (const item of items) {
       item.modifiers = await sql`
         SELECT group_id, option_id, group_name_snapshot, option_name_snapshot, quantity,
-               unit_price_delta_cents, selection_state, pizza_topping_portion, pizza_topping_amount
+               unit_price_delta_cents, selection_state, pizza_topping_portion, pizza_topping_amount,
+               amount,was_default_selected_snapshot,default_amount_snapshot,print_on_ticket
         FROM ordering_order_item_modifiers WHERE order_item_id = ${item.id}
         ORDER BY created_at, id
       `;

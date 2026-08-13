@@ -1,5 +1,6 @@
 import DeliverySettingsClient from "./delivery-settings-client";
+import PosSettingsClient from "./pos-settings-client";
 
 export default function DeliDeliverySettingsPage() {
-  return <DeliverySettingsClient />;
+  return <><PosSettingsClient /><DeliverySettingsClient /></>;
 }
