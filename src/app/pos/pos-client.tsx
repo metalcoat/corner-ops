@@ -21,6 +21,7 @@ import { usePosIdleLock } from "./use-pos-idle-lock";
 import PizzaToppingSelector from "@/components/pizza-topping-selector";
 import { formatPizzaTopping, normalizePizzaToppings, pizzaToppingPriceCents, type PizzaToppingSelection } from "@/lib/ordering-pizza-toppings";
 import{itemNeedsConfiguration}from"@/lib/ordering-menu-presentation";
+import Link from "next/link";
 
 type PosServiceType = Exclude<ServiceType, "undecided">;
 
@@ -144,7 +145,7 @@ function selectionsValid(group: OrderingModifierGroupView, selections: string[])
   return count >= group.minSelections && count <= group.maxSelections;
 }
 
-export default function PosClient({ business, idleLockSeconds = 60 }: { business: Business; idleLockSeconds?: number }) {
+export default function PosClient({ business, idleLockSeconds = 60, embedded = false }: { business: Business; idleLockSeconds?: number; embedded?: boolean }) {
   const config = orderingBusinessConfig(business);
   const availableServices = config.serviceTypes.filter((value): value is PosServiceType => value !== "undecided" && (business !== "Corner Deli" || value === "pickup" || value === "delivery" || value === "dine_in"));
   const [session, setSession] = useState<SessionView | PosSessionView | null>(null);
@@ -211,8 +212,33 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
 
   function applyLock() {
     setSession({ authenticated: false });
+    window.dispatchEvent(new Event("corner-ops-pos-locked"));
   }
   const { lock: lockPos } = usePosIdleLock({ authenticated: Boolean(session?.authenticated && business === "Corner Deli"), seconds: idleLockSeconds, onLock: applyLock });
+
+  useEffect(() => {
+    if (business !== "Corner Deli") return;
+    const requestLock = () => lockPos();
+    const authenticated = (event: Event) => {
+      const employee = (event as CustomEvent<PosEmployeeSession>).detail;
+      if (employee?.employeeId) setSession({ authenticated: true, session: employee });
+    };
+    const attachCustomer = (event: Event) => {
+      const selected = (event as CustomEvent<PosCustomer>).detail;
+      if (!selected?.id) return;
+      setCustomer(selected);
+      setSavedDraft(null);
+      setCartNotice(`${selected.display_name} attached to current order`);
+    };
+    window.addEventListener("corner-ops-pos-lock-request", requestLock);
+    window.addEventListener("corner-ops-pos-authenticated", authenticated);
+    window.addEventListener("corner-ops-pos-customer-selected", attachCustomer);
+    return () => {
+      window.removeEventListener("corner-ops-pos-lock-request", requestLock);
+      window.removeEventListener("corner-ops-pos-authenticated", authenticated);
+      window.removeEventListener("corner-ops-pos-customer-selected", attachCustomer);
+    };
+  }, [business, lockPos]);
 
   useEffect(() => {
     if (!session?.authenticated) return;
@@ -608,8 +634,8 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
   }
   const posEmployee = "session" in session ? session.session as PosEmployeeSession | undefined : undefined;
 
-  return <main className="posPage">
-    <header className="posHeader posHeaderFixedBusiness">
+  return <main className={`posPage ${embedded ? "posPageEmbedded" : ""}`}>
+    {!embedded && <header className="posHeader posHeaderFixedBusiness">
       <div className="posBrandBlock">
         <span className="posDevBadge">DEVELOPMENT · AUTO DEPLOY OFF</span>
         <strong>{business} POS</strong>
@@ -628,7 +654,7 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
         {business === "Corner Deli" && <button type="button" onClick={() => lockPos()}>LOCK / SWITCH EMPLOYEE</button>}
         <a href="/pos">POS Dev Home</a>
       </nav>
-    </header>
+    </header>}
 
     <section className="posServiceBar" aria-label="Fulfillment type and timing">
       {availableServices.map((service) => <button key={service} type="button" className={serviceType === service ? "active" : ""} onClick={() => { setServiceType(service); setSavedDraft(null); setCheckoutError(""); }}>
@@ -866,6 +892,6 @@ export default function PosClient({ business, idleLockSeconds = 60 }: { business
       </section>
     </div>}
     {intensityChoice&&<div className="posIntensityPopover" role="dialog" aria-label={`${intensityChoice.option.name} amount`}><strong>{intensityChoice.option.name}</strong><div>{(["light","normal","heavy"] as const).map(amount=><button key={amount} className={(modifierAmounts[intensityChoice.option.id]||"normal")===amount?"selected":""} onClick={()=>chooseIntensity(amount)}>{amount.toUpperCase()}</button>)}</div><button onClick={()=>setIntensityChoice(null)}>Cancel</button></div>}
-    {customerOpen&&<div className="posModalBackdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setCustomerOpen(false)}}><section className="posCustomerDialog" role="dialog" aria-modal="true"><header><div><span>CUSTOMER</span><h2>Find by phone or name</h2></div><button onClick={()=>setCustomerOpen(false)}>Close</button></header><input autoFocus type="search" value={customerQuery} onChange={e=>setCustomerQuery(e.target.value)} placeholder="3155551212 or Sarah Smith"/>{customerMatches.map(match=><button className="posCustomerMatch" key={match.id} onClick={()=>{setCustomer(match);setCustomerOpen(false);setSavedDraft(null)}}><strong>{match.display_name}</strong><span>{match.display_phone}</span>{match.addresses[0]&&<small>{match.addresses[0].line1} · Last order {match.last_order_at?new Date(match.last_order_at).toLocaleDateString():"never"}</small>}</button>)}{customer&&<button className="danger" onClick={()=>{setCustomer(null);setCustomerOpen(false);setSavedDraft(null)}}>Use Guest / Clear customer</button>}<a href="/pos/deli/customers">Open customer CRM</a></section></div>}
+    {customerOpen&&<div className="posModalBackdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setCustomerOpen(false)}}><section className="posCustomerDialog" role="dialog" aria-modal="true"><header><div><span>CUSTOMER</span><h2>Find by phone or name</h2></div><button onClick={()=>setCustomerOpen(false)}>Close</button></header><input autoFocus type="search" value={customerQuery} onChange={e=>setCustomerQuery(e.target.value)} placeholder="3155551212 or Sarah Smith"/>{customerMatches.map(match=><button className="posCustomerMatch" key={match.id} onClick={()=>{setCustomer(match);setCustomerOpen(false);setSavedDraft(null)}}><strong>{match.display_name}</strong><span>{match.display_phone}</span>{match.addresses[0]&&<small>{match.addresses[0].line1} · Last order {match.last_order_at?new Date(match.last_order_at).toLocaleDateString():"never"}</small>}</button>)}{customer&&<button className="danger" onClick={()=>{setCustomer(null);setCustomerOpen(false);setSavedDraft(null)}}>Use Guest / Clear customer</button>}<Link href="/pos/deli/customers" onClick={()=>setCustomerOpen(false)}>Open customer CRM</Link></section></div>}
   </main>;
 }

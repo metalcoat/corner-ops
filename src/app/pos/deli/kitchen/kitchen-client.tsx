@@ -102,8 +102,15 @@ export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSecond
 
   function applyLock() {
     setSession({ authenticated: false });
+    window.dispatchEvent(new Event("corner-ops-pos-locked"));
   }
   const { lock: lockKitchen } = usePosIdleLock({ authenticated: Boolean(session?.authenticated), seconds: idleLockSeconds, onLock: applyLock });
+
+  useEffect(() => {
+    const requestLock = () => lockKitchen();
+    window.addEventListener("corner-ops-pos-lock-request", requestLock);
+    return () => window.removeEventListener("corner-ops-pos-lock-request", requestLock);
+  }, [lockKitchen]);
 
   async function transition(order: KitchenOrder, nextStatus: KitchenStatus) {
     if (busyOrderId) return;
@@ -137,8 +144,8 @@ export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSecond
 
   return <main className="kitchenPage">
     <header className="kitchenHeader">
-      <div><span>LOCAL DEVELOPMENT</span><h1>Corner Deli Kitchen</h1><p>{activeCount} active order{activeCount === 1 ? "" : "s"}</p></div>
-      <nav><strong>{employee.name}</strong><a href="/pos/deli">Cashier POS</a><button type="button" onClick={() => { const next = !showRecent; setShowRecent(next); void loadOrders(next); }}>{showRecent ? "Active only" : "Recent history"}</button><button type="button" onClick={() => void loadOrders()}>Refresh</button><button type="button" onClick={() => lockKitchen()}>LOCK / SWITCH EMPLOYEE</button></nav>
+      <div><h1>Corner Deli Kitchen</h1><p>{activeCount} active order{activeCount === 1 ? "" : "s"} · {employee.name}</p></div>
+      <nav><button type="button" onClick={() => { const next = !showRecent; setShowRecent(next); void loadOrders(next); }}>{showRecent ? "Active only" : "Recent history"}</button><button type="button" onClick={() => void loadOrders()}>Refresh</button></nav>
     </header>
     {error && <div className="kitchenError" role="alert">{error}</div>}
     {loading && <div className="kitchenEmpty">Loading kitchen queue…</div>}

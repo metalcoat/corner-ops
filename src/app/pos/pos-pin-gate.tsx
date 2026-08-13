@@ -15,6 +15,11 @@ export type PosEmployeeSession = {
 
 export type PosSessionView = { authenticated: boolean; session?: PosEmployeeSession };
 
+function finishAuthentication(session: PosEmployeeSession, onAuthenticated: (session: PosEmployeeSession) => void) {
+  window.dispatchEvent(new CustomEvent("corner-ops-pos-authenticated", { detail: session }));
+  onAuthenticated(session);
+}
+
 export default function PosPinGate({ onAuthenticated }: { onAuthenticated: (session: PosEmployeeSession) => void }) {
   const [pin, setPin] = useState("");
   const [pending, setPending] = useState<PosEmployeeSession | null>(null);
@@ -34,7 +39,7 @@ export default function PosPinGate({ onAuthenticated }: { onAuthenticated: (sess
       const payload = await response.json() as { session?: PosEmployeeSession; error?: string };
       if (!response.ok || !payload.session) throw new Error(payload.error || "PIN login failed.");
       if (payload.session.clockInRequired) setPending(payload.session);
-      else onAuthenticated(payload.session);
+      else finishAuthentication(payload.session, onAuthenticated);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "PIN login failed.");
     } finally {
@@ -64,7 +69,7 @@ export default function PosPinGate({ onAuthenticated }: { onAuthenticated: (sess
       const response = await fetch("/api/pos/clock-in", { method: "POST" });
       const payload = await response.json() as { session?: PosEmployeeSession; error?: string };
       if (!response.ok || !payload.session) throw new Error(payload.error || "Clock-in failed.");
-      onAuthenticated(payload.session);
+      finishAuthentication(payload.session, onAuthenticated);
     } catch (clockError) {
       setError(clockError instanceof Error ? clockError.message : "Clock-in failed.");
     } finally { setBusy(false); }

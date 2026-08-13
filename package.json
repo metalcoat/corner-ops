@@ -31,7 +31,7 @@
     "test:modifier-intensity": "tsx scripts/modifier-intensity-validate.ts",
     "test:ticket-defaults": "tsx scripts/default-ticket-suppression-validate.ts",
     "test:auth:e2e": "playwright test tests/auth-cookie.spec.ts",
-    "test:pos:e2e": "playwright test tests/pos-pin-auth.spec.ts tests/pos-deli.spec.ts tests/deli-order-lifecycle.spec.ts"
+    "test:pos:e2e": "playwright test tests/pos-pin-auth.spec.ts tests/pos-deli.spec.ts tests/deli-order-lifecycle.spec.ts tests/pos-workspace-navigation.spec.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
