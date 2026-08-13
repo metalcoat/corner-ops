@@ -13,7 +13,7 @@ function cents(value: number, label: string): number {
   return value;
 }
 
-export async function checkoutState(orderId: string, business: OrderingBusiness) {
+export async function checkoutState(orderId: string, business: OrderingBusiness, checkId?: string | null) {
   await ensureOrderingAccountSchema();
   const sql = getSql();
   const orders = await sql`
@@ -25,10 +25,12 @@ export async function checkoutState(orderId: string, business: OrderingBusiness)
     SELECT id, tender_type, status, amount_cents, amount_tendered_cents, change_due_cents,
            brand, last4, created_by, created_at, approved_at
     FROM ordering_payment_transactions
-    WHERE order_id = ${orderId} AND business = ${business}
+    WHERE order_id = ${orderId} AND business = ${business} AND (${checkId || null}::uuid IS NULL OR check_id=${checkId || null})
     ORDER BY created_at, id
   `;
-  return { order: orders[0], tenders };
+  const check = checkId ? (await sql`SELECT id,display_sequence,status,total_cents,paid_cents,amount_due_cents FROM ordering_checks WHERE id=${checkId} AND order_id=${orderId}`)[0] : null;
+  if (checkId && !check) throw new PaymentConflictError("Check was not found.");
+  return { order: orders[0], check, tenders };
 }
 
 export async function commitTender(input: {
@@ -37,6 +39,7 @@ export async function commitTender(input: {
   tenderType: CheckoutTenderType;
   amountTenderedCents: number;
   clientMutationId: string;
+  checkId?: string | null;
   actor: OrderingActor;
 }) {
   await ensureOrderingAccountSchema();
@@ -49,7 +52,7 @@ export async function commitTender(input: {
       SELECT id FROM ordering_payment_transactions
       WHERE business = ${input.business} AND client_mutation_id = ${input.clientMutationId} LIMIT 1
     `;
-    if (duplicate[0]) return { ...(await checkoutState(input.orderId, input.business)), duplicate: true };
+    if (duplicate[0]) return { ...(await checkoutState(input.orderId, input.business, input.checkId)), duplicate: true };
 
     const rows = await sql`
       SELECT id, customer_id, display_number, status, payment_status, total_cents, paid_cents, amount_due_cents,
@@ -60,7 +63,9 @@ export async function commitTender(input: {
     `;
     const order = rows[0];
     if (!order) throw new PaymentConflictError("Order was not found.");
-    const due = Number(order.amount_due_cents);
+    const check = input.checkId ? (await sql`SELECT id,total_cents,paid_cents,amount_due_cents FROM ordering_checks WHERE id=${input.checkId} AND order_id=${input.orderId} FOR UPDATE`)[0] : null;
+    if (input.checkId && !check) throw new PaymentConflictError("Check was not found.");
+    const due = Number(check?.amount_due_cents ?? order.amount_due_cents);
     if (due <= 0) throw new PaymentConflictError("This order has no remaining balance.");
 
     const applied = Math.min(due, input.amountTenderedCents);
@@ -71,11 +76,11 @@ export async function commitTender(input: {
     const transactionId = randomUUID();
     await sql`
       INSERT INTO ordering_payment_transactions (
-        id, business, order_id, customer_id, tender_type, transaction_type, status,
+        id, business, order_id, check_id, customer_id, tender_type, transaction_type, status,
         amount_cents, amount_tendered_cents, change_due_cents, provider,
         client_mutation_id, created_by, approved_at, details
       ) VALUES (
-        ${transactionId}, ${input.business}, ${input.orderId}, ${order.customer_id || null}, ${input.tenderType},
+        ${transactionId}, ${input.business}, ${input.orderId}, ${input.checkId || null}, ${order.customer_id || null}, ${input.tenderType},
         'payment', 'approved', ${applied}, ${input.amountTenderedCents}, ${change},
         ${input.tenderType === "card" ? "manual_placeholder" : ""}, ${input.clientMutationId},
         ${input.actor.id}, NOW(),
@@ -83,6 +88,11 @@ export async function commitTender(input: {
       )
     `;
 
+    if (check) {
+      const checkPaid = Number(check.paid_cents) + applied;
+      const checkRemaining = Math.max(0, Number(check.total_cents) - checkPaid);
+      await sql`UPDATE ordering_checks SET paid_cents=${checkPaid},amount_due_cents=${checkRemaining},status=${checkRemaining === 0 ? "paid" : "partially_paid"},updated_at=NOW() WHERE id=${check.id}`;
+    }
     const newPaid = Number(order.paid_cents) + applied;
     const remaining = Math.max(0, Number(order.total_cents) - newPaid);
     const paymentStatus = remaining === 0 ? "paid" : "partially_paid";
@@ -105,10 +115,10 @@ export async function commitTender(input: {
     const purpose = alreadySent ? "payment_update" : "paid_receipt";
     await sql`
       INSERT INTO ordering_print_jobs (
-        id, business, order_id, payment_transaction_id, purpose, event_subtype, status,
+        id, business, order_id, check_id, payment_transaction_id, purpose, event_subtype, status,
         actor_type, actor_id, error_message, payload
       ) VALUES (
-        ${randomUUID()}, ${input.business}, ${input.orderId}, ${transactionId}, ${purpose},
+        ${randomUUID()}, ${input.business}, ${input.orderId}, ${input.checkId || null}, ${transactionId}, ${purpose},
         ${alreadySent ? "payment" : paymentStatus}, 'not_configured', ${input.actor.type}, ${input.actor.id},
         'Printer not configured.',
         CAST(${JSON.stringify({
@@ -120,6 +130,6 @@ export async function commitTender(input: {
         })} AS jsonb)
       )
     `;
-    return { ...(await checkoutState(input.orderId, input.business)), duplicate: false };
+    return { ...(await checkoutState(input.orderId, input.business, input.checkId)), duplicate: false };
   });
 }

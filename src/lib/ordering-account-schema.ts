@@ -74,6 +74,7 @@ export function ensureOrderingAccountSchema(): Promise<void> {
         CHECK (tender_type IN ('cash', 'card', 'gift_card', 'house_account', 'employee_meal', 'manager_comp', 'store_credit', 'other'))
       `;
       await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS client_mutation_id TEXT`;
+      await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS check_id UUID`;
       await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS amount_tendered_cents INTEGER NOT NULL DEFAULT 0`;
       await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS change_due_cents INTEGER NOT NULL DEFAULT 0`;
       await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ`;
@@ -111,6 +112,37 @@ export function ensureOrderingAccountSchema(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS ordering_print_jobs_order_idx ON ordering_print_jobs (order_id, created_at)`;
       await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_print_jobs_payment_once_idx ON ordering_print_jobs (payment_transaction_id, purpose) WHERE payment_transaction_id IS NOT NULL AND is_reprint = FALSE`;
       await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_print_jobs_kitchen_once_idx ON ordering_print_jobs (order_id, purpose) WHERE purpose = 'kitchen_production' AND is_reprint = FALSE`;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS ordering_checks (
+          id UUID PRIMARY KEY,
+          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
+          order_id UUID NOT NULL REFERENCES ordering_orders(id) ON DELETE CASCADE,
+          display_sequence INTEGER NOT NULL CHECK (display_sequence > 0),
+          status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','partially_paid','paid','voided')),
+          total_cents INTEGER NOT NULL DEFAULT 0 CHECK (total_cents >= 0),
+          paid_cents INTEGER NOT NULL DEFAULT 0 CHECK (paid_cents >= 0),
+          amount_due_cents INTEGER NOT NULL DEFAULT 0 CHECK (amount_due_cents >= 0),
+          created_by TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(order_id, display_sequence)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_checks_order_idx ON ordering_checks(order_id, display_sequence)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS ordering_check_line_assignments (
+          check_id UUID NOT NULL REFERENCES ordering_checks(id) ON DELETE CASCADE,
+          order_item_id UUID NOT NULL REFERENCES ordering_order_items(id) ON DELETE CASCADE,
+          quantity INTEGER NOT NULL CHECK (quantity > 0),
+          allocated_cents INTEGER NOT NULL CHECK (allocated_cents >= 0),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY(check_id, order_item_id)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_check_lines_item_idx ON ordering_check_line_assignments(order_item_id)`;
+      await sql`ALTER TABLE ordering_check_line_assignments DROP CONSTRAINT IF EXISTS ordering_check_line_assignments_order_item_id_fkey`;
+      await sql`ALTER TABLE ordering_check_line_assignments ADD CONSTRAINT ordering_check_line_assignments_order_item_id_fkey FOREIGN KEY(order_item_id) REFERENCES ordering_order_items(id) ON DELETE CASCADE`;
 
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_order_links (

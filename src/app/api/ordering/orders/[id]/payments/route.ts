@@ -21,7 +21,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const business = businessFrom(url.searchParams.get("business"));
     if (!await orderingActor(business)) return unauthorized();
     const { id } = await context.params;
-    return Response.json(await checkoutState(id, business));
+    return Response.json(await checkoutState(id, business, url.searchParams.get("checkId")));
   } catch (error) {
     if (error instanceof PaymentConflictError) return Response.json({ error: error.message }, { status: 409 });
     return apiError(error);
@@ -41,6 +41,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       tenderType: tenderFrom(body.tenderType),
       amountTenderedCents: Number(body.amountTenderedCents),
       clientMutationId: String(body.clientMutationId || ""),
+      checkId: body.checkId ? String(body.checkId) : null,
       actor,
     }), { status: 201 });
   } catch (error) {

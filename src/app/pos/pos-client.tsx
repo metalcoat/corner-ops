@@ -65,8 +65,10 @@ type SubmittedOrder = {
 };
 type CheckoutState = {
   order: { payment_status: string; total_cents: number; paid_cents: number; amount_due_cents: number };
+  check?: { id: string; display_sequence: number; status: string; total_cents: number; paid_cents: number; amount_due_cents: number } | null;
   tenders: Array<{ id: string; tender_type: string; amount_cents: number; amount_tendered_cents: number; change_due_cents: number; status: string }>;
 };
+type PayableCheck = { id: string; display_sequence: number; status: string; total_cents: number; paid_cents: number; amount_due_cents: number; lines: Array<{ order_item_id: string; quantity: number; allocated_cents: number; item_name_snapshot: string }> };
 
 type AddressSuggestion = { id: string; text: string; mainText: string; secondaryText: string; provider: "google" };
 type ValidatedAddress = { formattedAddress: string; city: string; state: string; postalCode: string };
@@ -186,6 +188,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [submittedOrder, setSubmittedOrder] = useState<SubmittedOrder | null>(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [checkoutState, setCheckoutState] = useState<CheckoutState | null>(null);
+  const [payableChecks, setPayableChecks] = useState<PayableCheck[]>([]);
+  const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
   const [cashTender, setCashTender] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [configurationMessage, setConfigurationMessage] = useState("");
@@ -652,27 +656,54 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   async function openCheckout() {
     const draft = savedDraft || await saveDraft();
     if (!draft) return;
-    const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments?business=${encodeURIComponent(business)}`);
+    const checksResponse = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/checks`);
+    const checksPayload = await checksResponse.json() as { checks?: PayableCheck[]; error?: string };
+    if (!checksResponse.ok || !checksPayload.checks?.length) { setCheckoutError(checksPayload.error || "Could not prepare checks."); return; }
+    const checkId = checksPayload.checks[0].id;
+    const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments?business=${encodeURIComponent(business)}&checkId=${encodeURIComponent(checkId)}`);
     const payload = await response.json() as CheckoutState & { error?: string };
     if (!response.ok) { setCheckoutError(payload.error || "Could not open checkout."); return; }
+    setPayableChecks(checksPayload.checks);
+    setSelectedCheckId(checkId);
     setCheckoutState(payload);
     setCheckoutOpen(true);
   }
 
+  async function selectCheck(checkId: string) {
+    if (!savedDraft) return;
+    const response = await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/payments?business=${encodeURIComponent(business)}&checkId=${encodeURIComponent(checkId)}`);
+    const payload = await response.json() as CheckoutState & { error?: string };
+    if (!response.ok) { setCheckoutError(payload.error || "Could not load check."); return; }
+    setSelectedCheckId(checkId); setCheckoutState(payload);
+  }
+
+  async function splitOne(checkId: string, orderItemId: string) {
+    if (!savedDraft || paymentBusy) return;
+    setPaymentBusy(true); setCheckoutError("");
+    try {
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/checks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fromCheckId: checkId, lines: [{ orderItemId, quantity: 1 }] }) });
+      const payload = await response.json() as { checks?: PayableCheck[]; newCheckId?: string; error?: string };
+      if (!response.ok || !payload.checks) throw new Error(payload.error || "Could not split check.");
+      setPayableChecks(payload.checks); await selectCheck(payload.newCheckId || payload.checks[0].id);
+    } catch (error) { setCheckoutError(error instanceof Error ? error.message : "Could not split check."); }
+    finally { setPaymentBusy(false); }
+  }
+
   async function commitPayment(tenderType: "cash" | "card") {
     if (!savedDraft || !checkoutState || paymentBusy) return;
-    const due = Number(checkoutState.order.amount_due_cents);
+    const due = Number(checkoutState.check?.amount_due_cents ?? checkoutState.order.amount_due_cents);
     const amountTenderedCents = tenderType === "card" ? due : Math.round(Number(cashTender) * 100);
     if (!Number.isSafeInteger(amountTenderedCents) || amountTenderedCents <= 0) { setCheckoutError("Enter a valid cash amount."); return; }
     setPaymentBusy(true); setCheckoutError("");
     try {
       const response = await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/payments`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ business, tenderType, amountTenderedCents, clientMutationId: clientId() }),
+        body: JSON.stringify({ business, checkId: selectedCheckId, tenderType, amountTenderedCents, clientMutationId: clientId() }),
       });
       const payload = await response.json() as CheckoutState & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Payment could not be committed.");
       setCheckoutState(payload); setCashTender("");
+      setPayableChecks((checks) => checks.map((check) => check.id === selectedCheckId && payload.check ? { ...check, ...payload.check } : check));
     } catch (error) { setCheckoutError(error instanceof Error ? error.message : "Payment could not be committed."); }
     finally { setPaymentBusy(false); }
   }
@@ -852,9 +883,11 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     {checkoutOpen && savedDraft && <div className="posModalBackdrop" role="presentation">
       <section className="posCustomerDialog" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
         <h2 id="checkout-title">Checkout · Order #{savedDraft.displayNumber}</h2>
-        <p>Amount due</p><strong>{money(Number(checkoutState?.order.amount_due_cents ?? savedDraft.totalCents))}</strong>
+        <nav aria-label="Payable checks">{payableChecks.map((check)=><button type="button" key={check.id} className={selectedCheckId===check.id?"selected":""} onClick={()=>void selectCheck(check.id)}>CHECK {check.display_sequence} · {money(Number(check.amount_due_cents))} DUE</button>)}</nav>
+        <p>Amount due</p><strong>{money(Number(checkoutState?.check?.amount_due_cents ?? checkoutState?.order.amount_due_cents ?? savedDraft.totalCents))}</strong>
+        {payableChecks.find((check)=>check.id===selectedCheckId)?.lines.map((line)=><div key={line.order_item_id}><span>{line.quantity}× {line.item_name_snapshot} · {money(Number(line.allocated_cents))}</span>{Number(checkoutState?.order.paid_cents||0)===0&&<button type="button" disabled={paymentBusy} onClick={()=>void splitOne(selectedCheckId!,line.order_item_id)}>MOVE ONE TO NEW CHECK</button>}</div>)}
         {checkoutState?.tenders.map((tender) => <div key={tender.id}><span>{tender.tender_type.toUpperCase()} · {money(Number(tender.amount_cents))}</span>{Number(tender.change_due_cents) > 0 && <small>Change {money(Number(tender.change_due_cents))}</small>}</div>)}
-        {Number(checkoutState?.order.amount_due_cents || 0) > 0 && <>
+        {Number(checkoutState?.check?.amount_due_cents ?? checkoutState?.order.amount_due_cents ?? 0) > 0 && <>
           <label>Cash tendered<input inputMode="decimal" placeholder="0.00" value={cashTender} onChange={(event) => setCashTender(event.target.value)} /></label>
           <button type="button" disabled={paymentBusy} onClick={() => void commitPayment("cash")}>COMMIT CASH</button>
           <button type="button" disabled={paymentBusy} onClick={() => void commitPayment("card")}>COMMIT REMAINING CREDIT (MANUAL)</button>
