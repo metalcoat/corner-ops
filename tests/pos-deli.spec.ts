@@ -62,8 +62,7 @@ test("pizza topping controls use semantic portion and amount and restore on edit
   await page.getByRole("button", { name: /^Pizza From / }).click();
   const dialog = page.getByRole("dialog", { name: "Configure Pizza" });
   await dialog.getByText('Regular 14"', { exact: true }).click();
-  await dialog.getByRole("button", { name: "LEFT HALF", exact: true }).click();
-  await dialog.getByRole("button", { name: "Increase Pepperoni" }).click();
+  await dialog.getByRole("button", { name: "LEFT", exact: true }).first().click();
   await dialog.getByRole("button", { name: "Increase Pepperoni" }).click();
   await expect(dialog.getByLabel("Pepperoni quantity")).toHaveCount(0);
   await expect(dialog).not.toContainText("2× Pepperoni");
@@ -73,7 +72,7 @@ test("pizza topping controls use semantic portion and amount and restore on edit
   await expect(line).not.toContainText("2× Pepperoni");
   await page.getByRole("button", { name: "Edit Pizza" }).click();
   const editDialog = page.getByRole("dialog", { name: "Configure Pizza" });
-  await editDialog.getByRole("button", { name: "LEFT HALF", exact: true }).click();
+  await expect(editDialog.getByRole("button", { name: "LEFT", exact: true }).first()).toHaveClass(/selected/);
   await expect(editDialog.getByRole("button", { name: "Decrease Pepperoni" }).locator("xpath=following-sibling::span")).toHaveText("EXTRA");
 });
 

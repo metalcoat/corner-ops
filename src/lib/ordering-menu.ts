@@ -16,6 +16,7 @@ type ModifierRow = {
   parent_group_id: string | null; parent_option_ids: string[] | null;
   included_choice_count:number|null;
   supports_intensity:boolean;
+  presentation_style:string; component_key:string; component_label:string; component_order:number|null; dependency_scope:string;
 };
 type ComboRow = {
   item_id: string; combo_id: string; combo_name: string; combo_prompt: string;
@@ -27,7 +28,7 @@ type ComboRow = {
 };
 
 export type OrderingModifierOptionView = { id: string; name: string; priceDeltaCents: number; available: boolean; defaultSelected: boolean; includedQuantity: number };
-export type OrderingModifierGroupView = { id: string; name: string; prompt: string; minSelections: number; maxSelections: number; allowOptionQuantity: boolean; includedChoiceCount:number; supportsIntensity:boolean; presentationContext: "ordinary" | "combo_trigger" | "dependent" | "hidden"; presentationBehavior: "standard" | "pizza_topping"; parentGroupId: string | null; parentOptionIds: string[]; options: OrderingModifierOptionView[] };
+export type OrderingModifierGroupView = { id: string; name: string; prompt: string; minSelections: number; maxSelections: number; allowOptionQuantity: boolean; includedChoiceCount:number; supportsIntensity:boolean; presentationContext: "ordinary" | "combo_trigger" | "dependent" | "hidden"; presentationBehavior: "standard" | "pizza_topping"; presentationStyle:string; componentKey:string; componentLabel:string; componentOrder:number; dependencyScope:string; parentGroupId: string | null; parentOptionIds: string[]; options: OrderingModifierOptionView[] };
 export type OrderingComboOptionView = { id: string; name: string; menuItemId: string | null; priceDeltaCents: number; available: boolean };
 export type OrderingComboGroupView = { id: string; name: string; prompt: string; minSelections: number; maxSelections: number; options: OrderingComboOptionView[] };
 export type OrderingComboView = { id: string; name: string; prompt: string; basePriceDeltaCents: number; groups: OrderingComboGroupView[] };
@@ -49,7 +50,7 @@ export async function orderingMenu(business: OrderingBusiness,channel:OrderingMe
       COALESCE(def.available_override, opt.available) AS option_available,
       opt.sort_order AS option_sort, COALESCE(def.default_selected, FALSE) AS default_selected,
       COALESCE(def.included_quantity, 0) AS included_quantity
-      ,COALESCE(p.context,'ordinary') AS presentation_context,COALESCE(p.behavior,'standard') AS presentation_behavior,p.parent_group_id,p.parent_option_ids,p.included_choice_count,COALESCE(p.supports_intensity,FALSE) supports_intensity
+      ,COALESCE(p.context,'ordinary') AS presentation_context,COALESCE(p.behavior,'standard') AS presentation_behavior,p.parent_group_id,p.parent_option_ids,p.included_choice_count,COALESCE(p.supports_intensity,FALSE) supports_intensity,COALESCE(p.presentation_style,'grid') presentation_style,COALESCE(p.component_key,'') component_key,COALESCE(p.component_label,'') component_label,p.component_order,COALESCE(p.dependency_scope,'item') dependency_scope
     FROM ordering_menu_item_modifier_groups link
     JOIN ordering_modifier_groups grp ON grp.id = link.group_id AND grp.active = TRUE
     LEFT JOIN ordering_modifier_options opt ON opt.group_id = grp.id AND opt.active = TRUE
@@ -84,7 +85,7 @@ export async function orderingMenu(business: OrderingBusiness,channel:OrderingMe
     const key = `${row.item_id}:${row.group_id}`;
     let group = modifierGroupMap.get(key);
     if (!group) {
-      group = { id: row.group_id, name: row.group_name, prompt: row.prompt, minSelections: Number(row.min_selections), maxSelections: Number(row.max_selections), allowOptionQuantity: Boolean(row.allow_option_quantity),includedChoiceCount:Number(row.included_choice_count||0),supportsIntensity:Boolean(row.supports_intensity), presentationContext: row.presentation_context, presentationBehavior: row.presentation_behavior, parentGroupId: row.parent_group_id, parentOptionIds: row.parent_option_ids || [], options: [] };
+      group = { id: row.group_id, name: row.group_name, prompt: row.prompt, minSelections: Number(row.min_selections), maxSelections: Number(row.max_selections), allowOptionQuantity: Boolean(row.allow_option_quantity),includedChoiceCount:Number(row.included_choice_count||0),supportsIntensity:Boolean(row.supports_intensity), presentationContext: row.presentation_context, presentationBehavior: row.presentation_behavior,presentationStyle:row.presentation_style,componentKey:row.component_key,componentLabel:row.component_label,componentOrder:Number(row.component_order||0),dependencyScope:row.dependency_scope, parentGroupId: row.parent_group_id, parentOptionIds: row.parent_option_ids || [], options: [] };
       modifierGroupMap.set(key, group); item.modifiers.push(group);
     }
     if (row.option_id && row.option_name) group.options.push({ id: row.option_id, name: row.option_name, priceDeltaCents: Number(row.price_delta_cents ?? 0), available: Boolean(row.option_available), defaultSelected: Boolean(row.default_selected), includedQuantity: Number(row.included_quantity ?? 0) });

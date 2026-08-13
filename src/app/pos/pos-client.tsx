@@ -951,12 +951,12 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
             <div className="posChoiceGrid"><button type="button" className={presentationComboEnabled ? "selected" : ""} onClick={() => { setPresentationComboEnabled((value) => !value); if (presentationComboEnabled) setModifierSelections((current) => Object.fromEntries(Object.entries(current).map(([id, selections]) => [id, configuringItem.modifiers.some((group) => group.id === id && (group.presentationContext === "combo_trigger" || group.presentationContext === "dependent")) ? [] : selections]))); }}><strong>{presentationComboEnabled ? "Combo selected" : "MAKE IT A COMBO"}</strong><span>{presentationComboEnabled ? "Choose a side below" : "Add a side"}</span></button></div>
           </fieldset>}
 
-          {configuringItem.modifiers.filter(modifierGroupVisible).map((group) => {
+          {configuringItem.modifiers.filter(modifierGroupVisible).toSorted((left,right)=>left.componentOrder-right.componentOrder).map((group) => {
             if (group.presentationBehavior === "pizza_topping") return <PizzaToppingSelector key={group.id} group={group} variant={selectedVariant} selections={pizzaToppings} onChange={setPizzaToppings} />;
             const selected = modifierSelections[group.id] || [];
             const valid = selectionsValid(group, selected);
-            return <fieldset id={`modifier-${group.id}`} key={group.id} className={!valid ? "needsSelection" : ""}>
-              <legend>{group.prompt || group.name}<small>{group.minSelections > 0 ? "Required" : "Optional"} · choose {group.minSelections === group.maxSelections ? group.maxSelections : `${group.minSelections}-${group.maxSelections}`}</small></legend>
+            return <fieldset id={`modifier-${group.id}`} key={group.id} data-component={group.componentKey||undefined} className={`${!valid ? "needsSelection " : ""}${group.presentationStyle==="component_columns"?"posMealComponent":group.presentationStyle==="universal"?"posMealUniversal":""}`}>
+              <legend>{group.componentLabel || group.prompt || group.name}<small>{group.minSelections > 0 ? "Required" : "Optional"} · choose {group.minSelections === group.maxSelections ? group.maxSelections : `${group.minSelections}-${group.maxSelections}`}{group.presentationContext==="dependent"?" · shown by its parent selection":""}</small></legend>
               <div className="posChoiceGrid">
                 {group.options.map((option) => {
                   const available = variantOptionAvailable(selectedVariant, option);

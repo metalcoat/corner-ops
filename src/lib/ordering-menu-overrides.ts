@@ -26,6 +26,8 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
     await sql`ALTER TABLE ordering_item_channel_overrides ADD COLUMN IF NOT EXISTS description TEXT`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_item_variant_print_overrides(variant_id UUID PRIMARY KEY REFERENCES ordering_menu_item_variants(id) ON DELETE CASCADE,print_name TEXT,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_by TEXT NOT NULL DEFAULT '')`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_modifier_option_print_overrides(option_id UUID PRIMARY KEY REFERENCES ordering_modifier_options(id) ON DELETE CASCADE,print_name TEXT,print_order INTEGER,print_section TEXT NOT NULL DEFAULT '',updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_by TEXT NOT NULL DEFAULT '')`;
+    await sql`ALTER TABLE ordering_modifier_option_print_overrides ADD COLUMN IF NOT EXISTS suppress_when_default BOOLEAN`;
+    await sql`ALTER TABLE ordering_modifier_option_print_overrides ADD COLUMN IF NOT EXISTS print_only_when_changed BOOLEAN`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_menu_media (id UUID PRIMARY KEY,target_type TEXT NOT NULL CHECK(target_type IN ('item','modifier_option')),target_id UUID NOT NULL,storage_reference TEXT NOT NULL,alt_text TEXT NOT NULL DEFAULT '',mime_type TEXT NOT NULL,width INTEGER NOT NULL,height INTEGER NOT NULL,size_bytes INTEGER NOT NULL,is_primary BOOLEAN NOT NULL DEFAULT TRUE,show_pos BOOLEAN NOT NULL DEFAULT TRUE,show_web BOOLEAN NOT NULL DEFAULT TRUE,uploaded_by TEXT NOT NULL,uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_modifier_presentation_overrides (
       item_id UUID NOT NULL REFERENCES ordering_menu_items(id) ON DELETE CASCADE,
@@ -43,6 +45,11 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
     await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS print_order INTEGER`;
     await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS header_modifier BOOLEAN NOT NULL DEFAULT FALSE`;
     await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS suppress_default_on_ticket BOOLEAN NOT NULL DEFAULT TRUE`;
+    await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS presentation_style TEXT NOT NULL DEFAULT 'grid'`;
+    await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS component_key TEXT NOT NULL DEFAULT ''`;
+    await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS component_label TEXT NOT NULL DEFAULT ''`;
+    await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS component_order INTEGER`;
+    await sql`ALTER TABLE ordering_modifier_presentation_overrides ADD COLUMN IF NOT EXISTS dependency_scope TEXT NOT NULL DEFAULT 'item'`;
     await sql`ALTER TABLE ordering_order_items ADD COLUMN IF NOT EXISTS item_print_name_snapshot TEXT NOT NULL DEFAULT ''`;
     await sql`ALTER TABLE ordering_order_item_modifiers ADD COLUMN IF NOT EXISTS option_print_name_snapshot TEXT NOT NULL DEFAULT ''`;
     await sql`ALTER TABLE ordering_order_item_modifiers ADD COLUMN IF NOT EXISTS print_order_snapshot INTEGER NOT NULL DEFAULT 0`;
