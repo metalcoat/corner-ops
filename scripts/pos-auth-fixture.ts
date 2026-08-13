@@ -15,13 +15,20 @@ async function main(){
   const sql=getSql();
   const mode=process.argv[2];
   const rows=await sql`SELECT id FROM employees WHERE business='Corner Deli' AND name LIKE 'Playwright POS Employee %'`;
+  async function removeFixtureEmployee(employeeId:string){
+    await sql`DELETE FROM ordering_print_jobs WHERE order_id IN (SELECT id FROM ordering_orders WHERE created_by=${employeeId})`;
+    await sql`DELETE FROM ordering_payment_transactions WHERE order_id IN (SELECT id FROM ordering_orders WHERE created_by=${employeeId})`;
+    await sql`DELETE FROM ordering_orders WHERE created_by=${employeeId}`;
+    await sql`DELETE FROM time_entries WHERE employee_id=${employeeId}`;
+    await sql`DELETE FROM employees WHERE id=${employeeId}`;
+  }
   if(mode==="cleanup"){
-    for(const row of rows){await sql`DELETE FROM ordering_orders WHERE created_by=${row.id}`;await sql`DELETE FROM time_entries WHERE employee_id=${row.id}`;await sql`DELETE FROM employees WHERE id=${row.id}`;}
+    for(const row of rows)await removeFixtureEmployee(String(row.id));
     return;
   }
   const activePin=process.env.POS_TEST_ACTIVE_PIN, idlePin=process.env.POS_TEST_IDLE_PIN;
   if(!/^\d{4}$/.test(activePin||"")||!/^\d{4}$/.test(idlePin||"")||activePin===idlePin) throw new Error("Two distinct four-digit fixture PINs are required.");
-  for(const row of rows){await sql`DELETE FROM ordering_orders WHERE created_by=${row.id}`;await sql`DELETE FROM time_entries WHERE employee_id=${row.id}`;await sql`DELETE FROM employees WHERE id=${row.id}`;}
+  for(const row of rows)await removeFixtureEmployee(String(row.id));
   const activeId=randomUUID(),idleId=randomUUID();
   await sql`INSERT INTO employees(id,business,name,pin_hash,pin_enabled,position,role_group,active) VALUES
     (${activeId},'Corner Deli','Playwright POS Employee Active',${hashEmployeePin("Corner Deli",activePin!)},TRUE,'Pizza','In-House',TRUE),

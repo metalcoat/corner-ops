@@ -92,7 +92,7 @@ test("persistent workspace navigation stays compact across POS viewports", async
     await expect(page.getByRole("link", { name: /orders/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /settings/i })).toBeVisible();
     await expect(page.getByText("DEV", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Save ASAP Draft/ })).toBeInViewport();
+    await expect(page.getByRole("button", { name: "HOLD", exact: true })).toBeInViewport();
     expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= document.scrollingElement!.clientHeight)).toBe(true);
   }
 

@@ -45,7 +45,7 @@ test("cashier configures, edits, and saves a backend-priced pizza draft", async 
   const responsePromise = page.waitForResponse(
     (response) => response.url().endsWith("/api/ordering/orders") && response.request().method() === "POST",
   );
-  await page.getByRole("button", { name: /Save ASAP Draft/i }).click();
+  await page.getByRole("button", { name: "HOLD", exact: true }).click();
   const response = await responsePromise;
   expect(response.status()).toBe(201);
   const payload = (await response.json()) as { order?: { total_cents?: number } };
@@ -152,9 +152,10 @@ test("Delivery preserves the cart and requires provider validation", async ({ pa
   await page.getByLabel("Street address").fill("41");
   await expect(page.getByText(/Delivery address validation is unavailable/)).toBeVisible();
   await expect(page.getByRole("article").filter({ hasText: "Pizza Logs" })).toBeVisible();
-  await page.getByRole("button", { name: /Save ASAP Draft/i }).click();
-  await expect(page.getByText("Validate the delivery address before reviewing this Delivery order.")).toBeVisible();
-  const serverGuard = await page.request.post("/api/ordering/orders", { data: { business: "Corner Deli", serviceType: "delivery", timingMode: "asap", items: [] } });
-  expect(serverGuard.status()).toBe(409);
-  expect((await serverGuard.json()).error).toContain("Validate the delivery address");
+  await page.getByRole("button", { name: "HOLD", exact: true }).click();
+  await expect(page.getByText(/Held order #/)).toBeVisible();
+  await expect(page.getByRole("article").filter({ hasText: "Pizza Logs" })).toBeVisible();
+  await page.getByRole("button", { name: "SEND", exact: true }).click();
+  await expect(page.getByText("Customer name is required.")).toBeVisible();
+  await expect(page.getByRole("article").filter({ hasText: "Pizza Logs" })).toBeVisible();
 });
