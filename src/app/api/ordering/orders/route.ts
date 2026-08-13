@@ -97,8 +97,10 @@ export async function POST(request: Request) {
     const customerAddressId=body.customerAddressId?String(body.customerAddressId):null;
     if(customerAddressId){const rows=await getSql()`SELECT address.id FROM ordering_customer_addresses address JOIN ordering_customers customer ON customer.id=address.customer_id WHERE address.id=${customerAddressId} AND address.customer_id=${body.customerId?String(body.customerId):null} AND address.active=TRUE AND customer.business=${business}`;if(!rows[0])return Response.json({error:"The selected customer address is no longer available."},{status:409})}
     let validatedAddress = null;
-    try { validatedAddress = addressForOrder(serviceType, String(body.deliveryValidationToken || ""), enteredAddress); }
-    catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Validate the delivery address." }, { status: 409 }); }
+    if (enteredAddress || body.deliveryValidationToken) {
+      try { validatedAddress = addressForOrder(serviceType, String(body.deliveryValidationToken || ""), enteredAddress); }
+      catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Validate the delivery address." }, { status: 409 }); }
+    }
     const order = await createTimedDraftOrder({
       business,
       source: "pos",

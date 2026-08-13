@@ -67,6 +67,50 @@ export function ensureOrderingAccountSchema(): Promise<void> {
       `;
       await sql`CREATE INDEX IF NOT EXISTS ordering_payment_transactions_order_idx ON ordering_payment_transactions (order_id, created_at)`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_payment_transactions_customer_idx ON ordering_payment_transactions (customer_id, created_at DESC)`;
+      await sql`ALTER TABLE ordering_payment_transactions DROP CONSTRAINT IF EXISTS ordering_payment_transactions_tender_type_check`;
+      await sql`
+        ALTER TABLE ordering_payment_transactions
+        ADD CONSTRAINT ordering_payment_transactions_tender_type_check
+        CHECK (tender_type IN ('cash', 'card', 'gift_card', 'house_account', 'employee_meal', 'manager_comp', 'store_credit', 'other'))
+      `;
+      await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS client_mutation_id TEXT`;
+      await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS amount_tendered_cents INTEGER NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS change_due_cents INTEGER NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_payment_transactions_idempotency_idx ON ordering_payment_transactions (business, client_mutation_id) WHERE client_mutation_id IS NOT NULL`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS paid_by TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS voided_by TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS void_reason TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS pre_void_status TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS pre_void_payment_status TEXT NOT NULL DEFAULT ''`;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS ordering_print_jobs (
+          id UUID PRIMARY KEY,
+          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
+          order_id UUID NOT NULL REFERENCES ordering_orders(id),
+          check_id UUID,
+          payment_transaction_id UUID REFERENCES ordering_payment_transactions(id),
+          purpose TEXT NOT NULL CHECK (purpose IN ('kitchen_production', 'order_update', 'payment_update', 'paid_receipt')),
+          event_subtype TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'not_configured' CHECK (status IN ('queued', 'attempting', 'succeeded', 'failed', 'not_configured')),
+          is_reprint BOOLEAN NOT NULL DEFAULT FALSE,
+          queued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          attempted_at TIMESTAMPTZ,
+          completed_at TIMESTAMPTZ,
+          retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+          error_message TEXT NOT NULL DEFAULT '',
+          actor_type TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_print_jobs_order_idx ON ordering_print_jobs (order_id, created_at)`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_print_jobs_payment_once_idx ON ordering_print_jobs (payment_transaction_id, purpose) WHERE payment_transaction_id IS NOT NULL AND is_reprint = FALSE`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_print_jobs_kitchen_once_idx ON ordering_print_jobs (order_id, purpose) WHERE purpose = 'kitchen_production' AND is_reprint = FALSE`;
 
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_order_links (

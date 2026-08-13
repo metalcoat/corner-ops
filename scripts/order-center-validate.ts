@@ -28,11 +28,13 @@ void (async () => {
     const todayRows = await listOrders({ business: "Corner Deli", date: today });
     const open = await listOrders({ business: "Corner Deli", allOpen: true });
     if (!todayRows.some((order) => order.delivery_address) || !todayRows.some((order) => order.scheduled_for)) throw new Error("Today address/future presentation data missing.");
+    const overdue = todayRows.filter((order) => order.overdue_unpaid);
+    if (overdue.length !== 1 || overdue[0].display_number !== "V7") throw new Error("Today's overdue unpaid reminder semantics failed.");
     if (open.some((order) => ["paid", "refunded"].includes(order.payment_status)) || !open.some((order) => order.display_number === "V7")) throw new Error("All Open semantics failed.");
     const firstPaid = todayRows.findIndex((order) => order.payment_status === "paid");
     const lastUnpaid = todayRows.map((order) => order.payment_status).lastIndexOf("unpaid");
     if (firstPaid >= 0 && firstPaid < lastUnpaid) throw new Error("Paid sorting failed.");
-    console.log(JSON.stringify({ todayFixtures: 6, yesterdayFixtures: 2, allOpenIncludesYesterday: true, paidSortedLower: true, deliveryAddress: true, futureTime: true }, null, 2));
+    console.log(JSON.stringify({ todayFixtures: 6, yesterdayFixtures: 2, overdueUnpaidSurfacedToday: true, yesterdayPaidExcludedFromReminder: true, allOpenIncludesYesterday: true, paidSortedLower: true, deliveryAddress: true, futureTime: true }, null, 2));
   } finally { for (const id of ids.reverse()) await sql`DELETE FROM ordering_orders WHERE id=${id}`; }
   process.exit();
 })().catch((error) => { console.error(error); process.exit(1); });

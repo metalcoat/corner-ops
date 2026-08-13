@@ -13,12 +13,13 @@ export type PosSession = {
   business: "Corner Deli";
   name: string;
   position: string;
+  posRole: "employee" | "manager" | "owner";
   issuedAt: number;
   expiresAt: number;
   clockInRequired: boolean;
 };
 
-type EmployeeRow = { id: string; business: "Corner Deli"; name: string; position: string };
+type EmployeeRow = { id: string; business: "Corner Deli"; name: string; position: string; pos_role: "employee" | "manager" | "owner" };
 
 function secret(): string {
   const value = process.env.SESSION_SECRET;
@@ -51,7 +52,7 @@ export function decodePosSession(token: string): PosSession | null {
   try {
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as PosSession;
     if (!payload.employeeId || !payload.name || payload.business !== "Corner Deli" || payload.expiresAt <= Date.now()) return null;
-    return payload;
+    return { ...payload, posRole: payload.posRole === "manager" || payload.posRole === "owner" ? payload.posRole : "employee" };
   } catch {
     return null;
   }
@@ -61,6 +62,9 @@ async function ensurePosAuthSchema(): Promise<void> {
   await ensureSchema();
   await ensureEmployeeDirectorySchema();
   const sql = getSql();
+  await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pos_role TEXT NOT NULL DEFAULT 'employee'`;
+  await sql`ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_pos_role_check`;
+  await sql`ALTER TABLE employees ADD CONSTRAINT employees_pos_role_check CHECK (pos_role IN ('employee','manager','owner'))`;
   await sql`
     CREATE TABLE IF NOT EXISTS pos_pin_attempts (
       attempt_key TEXT PRIMARY KEY,
@@ -104,7 +108,7 @@ export async function authenticateDeliPosPin(suppliedPin: unknown, attemptKey: s
     throw error;
   }
   const rows = await getSql()`
-    SELECT id, business, name, position
+    SELECT id, business, name, position, pos_role
     FROM employees
     WHERE business = 'Corner Deli' AND pin_hash = ${hashEmployeePin("Corner Deli", pin)}
       AND pin_enabled = TRUE AND active = TRUE
@@ -121,6 +125,7 @@ export async function authenticateDeliPosPin(suppliedPin: unknown, attemptKey: s
     business: "Corner Deli",
     name: rows[0].name,
     position: rows[0].position,
+    posRole: rows[0].pos_role,
     issuedAt,
     expiresAt: issuedAt + POS_SESSION_SECONDS * 1000,
     clockInRequired: !open[0],

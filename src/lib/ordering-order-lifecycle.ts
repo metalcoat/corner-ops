@@ -5,6 +5,7 @@ import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 import { ensureOrderingAddressSchema } from "@/lib/ordering-address-schema";
+import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
 import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
 import { pizzaToppingPriceCents } from "@/lib/ordering-pizza-toppings";
 
@@ -22,6 +23,9 @@ type OrderRow = Record<string, unknown> & {
   tip_cents: number;
   total_cents: number;
   paid_cents: number;
+  first_name_snapshot: string;
+  last_name_snapshot: string;
+  phone_snapshot: string;
 };
 
 type ItemRow = {
@@ -183,11 +187,13 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
   await ensureOrderingPosSchema();
   await ensureOrderingAddressSchema();
   await ensureOrderingMenuOverrideSchema();
+  await ensureOrderingAccountSchema();
   return withTransaction(async () => {
     const sql = getSql();
     const rows = await sql`
       SELECT id, business, source, display_number, status, payment_status, service_type, version,
              subtotal_cents, discount_cents, tax_cents, tip_cents, total_cents, paid_cents, amount_due_cents,
+             first_name_snapshot, last_name_snapshot, phone_snapshot,
              special_instructions, created_at, updated_at, submitted_at, started_at, ready_at, completed_at, cancelled_at
       FROM ordering_orders WHERE id = ${orderId} AND business = ${business} FOR UPDATE
     ` as OrderRow[];
@@ -195,9 +201,16 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
     if (!order) throw new OrderConflictError("Draft order was not found.");
     if (order.status === "sent_to_kitchen") return { order, alreadySubmitted: true };
     if (order.status !== "draft") throw new OrderConflictError("Only a draft order can be submitted.");
-    if (order.service_type === "delivery") {
+    const customerName = `${order.first_name_snapshot || ""} ${order.last_name_snapshot || ""}`.trim();
+    if (!customerName) throw new OrderConflictError("Customer name is required.");
+    if ((order.service_type === "pickup" || order.service_type === "delivery" || order.service_type === "no_contact_delivery") && !String(order.phone_snapshot || "").trim()) {
+      throw new OrderConflictError(order.service_type === "pickup"
+        ? "Phone number is required for pickup orders."
+        : "Phone number is required for delivery orders.");
+    }
+    if (order.service_type === "delivery" || order.service_type === "no_contact_delivery") {
       const addresses = await sql`SELECT validation_status FROM ordering_order_delivery_addresses WHERE order_id = ${orderId} LIMIT 1`;
-      if (addresses[0]?.validation_status !== "validated") throw new OrderConflictError("A validated delivery address is required before submission.");
+      if (addresses[0]?.validation_status !== "validated") throw new OrderConflictError("Delivery address is required.");
     }
     await revalidateDraft(order);
 
@@ -215,6 +228,16 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
       INSERT INTO ordering_order_events (id, order_id, order_version, event_type, actor_type, actor_id, details)
       VALUES (${randomUUID()}, ${orderId}, ${updated[0].version}, 'status_changed', ${actor.type}, ${actor.id},
               CAST(${JSON.stringify({ from: "draft", to: "sent_to_kitchen", actorName: actor.name })} AS jsonb))
+    `;
+    await sql`
+      INSERT INTO ordering_print_jobs (
+        id, business, order_id, purpose, event_subtype, status, actor_type, actor_id, error_message, payload
+      ) VALUES (
+        ${randomUUID()}, ${business}, ${orderId}, 'kitchen_production', 'initial_send', 'not_configured',
+        ${actor.type}, ${actor.id}, 'Kitchen printer not configured.',
+        CAST(${JSON.stringify({ heading: "KITCHEN ORDER", orderId, actorName: actor.name })} AS jsonb)
+      )
+      ON CONFLICT DO NOTHING
     `;
     return { order: updated[0], alreadySubmitted: false };
   });
@@ -266,12 +289,13 @@ export async function transitionKitchenOrder(input: {
 
 export async function listKitchenOrders(business: OrderingBusiness, includeRecent = false) {
   await ensureOrderingPosSchema();
+  await ensureOrderingAccountSchema();
   await ensureOrderingCustomerSchema();
   const sql = getSql();
   const rows = await sql`
     SELECT id, business, source, display_number, status, payment_status, service_type, version,
            subtotal_cents, total_cents, special_instructions, created_at, submitted_at, started_at,
-           ready_at, completed_at, cancelled_at, NOW() AS server_now
+           ready_at, completed_at, cancelled_at, voided_at, voided_by, void_reason, pre_void_status, pre_void_payment_status, NOW() AS server_now
     FROM ordering_orders
     WHERE business = ${business}
       AND (${includeRecent} OR status IN ('sent_to_kitchen', 'in_progress', 'ready'))

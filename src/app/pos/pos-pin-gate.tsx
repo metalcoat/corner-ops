@@ -8,6 +8,7 @@ export type PosEmployeeSession = {
   business: "Corner Deli";
   name: string;
   position: string;
+  posRole: "employee" | "manager" | "owner";
   clockInRequired: boolean;
   issuedAt: number;
   expiresAt: number;

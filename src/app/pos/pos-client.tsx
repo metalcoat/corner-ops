@@ -63,6 +63,10 @@ type SubmittedOrder = {
   displayNumber: string;
   totalCents: number;
 };
+type CheckoutState = {
+  order: { payment_status: string; total_cents: number; paid_cents: number; amount_due_cents: number };
+  tenders: Array<{ id: string; tender_type: string; amount_cents: number; amount_tendered_cents: number; change_due_cents: number; status: string }>;
+};
 
 type AddressSuggestion = { id: string; text: string; mainText: string; secondaryText: string; provider: "google" };
 type ValidatedAddress = { formattedAddress: string; city: string; state: string; postalCode: string };
@@ -180,6 +184,10 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [savedDraft, setSavedDraft] = useState<SavedDraft | null>(null);
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [submittedOrder, setSubmittedOrder] = useState<SubmittedOrder | null>(null);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [checkoutState, setCheckoutState] = useState<CheckoutState | null>(null);
+  const [cashTender, setCashTender] = useState("");
+  const [paymentBusy, setPaymentBusy] = useState(false);
   const [configurationMessage, setConfigurationMessage] = useState("");
   const [cartNotice, setCartNotice] = useState("");
   const [removedLine,setRemovedLine]=useState<CartLine|null>(null);
@@ -536,16 +544,11 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     setSavedDraft(null);
   }
 
-  async function saveDraft() {
-    if (!cart.length || savingDraft) return;
-    if (serviceType === "delivery" && (!validatedAddress || !deliveryValidationToken)) {
-      setCheckoutError("Validate the delivery address before reviewing this Delivery order.");
-      return;
-    }
-    if ((serviceType === "delivery"||(serviceType==="pickup"&&orderOrigin==="phone"))&&!customer){setCheckoutError(`${serviceLabels[serviceType].label} ${orderOrigin==="phone"?"phone ":""}orders require a customer name and phone.`);return}
+  async function saveDraft(): Promise<SavedDraft | null> {
+    if (!cart.length || savingDraft) return null;
     if (timingMode === "future" && !scheduledFor) {
       setCheckoutError("Choose the future pickup/delivery time before saving the order.");
-      return;
+      return null;
     }
     setSavingDraft(true);
     setCheckoutError("");
@@ -596,30 +599,35 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         error?: string;
       };
       if (!response.ok || !payload.order) throw new Error(payload.error || "Could not save draft order.");
-      setSavedDraft({
+      const draft = {
         id: payload.order.id,
         displayNumber: payload.order.display_number,
         totalCents: Number(payload.order.total_cents),
         timingMessage: payload.order.timing_message_snapshot || "",
         kitchenTimingLabel: payload.order.kitchen_timing_label_snapshot || "",
         scheduledFor: payload.order.scheduled_for,
-      });
+      };
+      setSavedDraft(draft);
       if (Number(payload.order.total_cents) !== subtotalCents) {
         setCheckoutError(`Menu pricing changed. Backend total is ${money(Number(payload.order.total_cents))}; review before continuing.`);
       }
+      return draft;
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : "Could not save draft order.");
+      return null;
     } finally {
       setSavingDraft(false);
     }
   }
 
-  async function submitOrder() {
-    if (!savedDraft || submittingOrder) return;
+  async function submitOrder(draft: SavedDraft | null = savedDraft) {
+    if (submittingOrder) return;
+    if (!draft) draft = await saveDraft();
+    if (!draft) return;
     setSubmittingOrder(true);
     setCheckoutError("");
     try {
-      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/submit`, {
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/submit`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ business }),
@@ -639,6 +647,34 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     } finally {
       setSubmittingOrder(false);
     }
+  }
+
+  async function openCheckout() {
+    const draft = savedDraft || await saveDraft();
+    if (!draft) return;
+    const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments?business=${encodeURIComponent(business)}`);
+    const payload = await response.json() as CheckoutState & { error?: string };
+    if (!response.ok) { setCheckoutError(payload.error || "Could not open checkout."); return; }
+    setCheckoutState(payload);
+    setCheckoutOpen(true);
+  }
+
+  async function commitPayment(tenderType: "cash" | "card") {
+    if (!savedDraft || !checkoutState || paymentBusy) return;
+    const due = Number(checkoutState.order.amount_due_cents);
+    const amountTenderedCents = tenderType === "card" ? due : Math.round(Number(cashTender) * 100);
+    if (!Number.isSafeInteger(amountTenderedCents) || amountTenderedCents <= 0) { setCheckoutError("Enter a valid cash amount."); return; }
+    setPaymentBusy(true); setCheckoutError("");
+    try {
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/payments`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ business, tenderType, amountTenderedCents, clientMutationId: clientId() }),
+      });
+      const payload = await response.json() as CheckoutState & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Payment could not be committed.");
+      setCheckoutState(payload); setCashTender("");
+    } catch (error) { setCheckoutError(error instanceof Error ? error.message : "Payment could not be committed."); }
+    finally { setPaymentBusy(false); }
   }
 
   if (!session) return <main className="posLoading">Loading {business} POS…</main>;
@@ -692,7 +728,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         onChange={(event) => { setScheduledFor(event.target.value); setSavedDraft(null); }}
       />}
     </section>
-    <button type="button" className="posCustomerCompact" onClick={()=>setCustomerOpen(true)}>{customer?<><strong>{customer.display_name}</strong><span>{customer.phones?.find(phone=>phone.id===selectedCustomerPhoneId)?.display_phone||customer.display_phone}{serviceType==="delivery"&&validatedAddress?` · ${validatedAddress.formattedAddress}`:""}</span></>:<><strong>+ CUSTOMER</strong><span>{serviceType==="dine_in"?"Guest optional":"Name and phone required"}</span></>}</button>
+    <button type="button" className="posCustomerCompact" onClick={()=>setCustomerOpen(true)}>{customer?<><strong>{customer.display_name}</strong><span>{customer.phones?.find(phone=>phone.id===selectedCustomerPhoneId)?.display_phone||customer.display_phone}{serviceType==="delivery"&&validatedAddress?` · ${validatedAddress.formattedAddress}`:""}</span></>:<><strong>+ CUSTOMER</strong><span>{serviceType==="dine_in"?"Name required · phone optional":"Name and phone required"}</span></>}</button>
     {customer&&customer.phones?.length>1&&<div className="posCustomerChoices" aria-label="Contact number for this order"><strong>CONTACT NUMBER</strong>{customer.phones.map(phone=><button type="button" key={phone.id} className={selectedCustomerPhoneId===phone.id?"selected":""} onClick={()=>{setSelectedCustomerPhoneId(phone.id);setSavedDraft(null)}}>{phone.label||"Phone"} · {phone.display_phone}</button>)}</div>}
 
     {serviceType === "delivery" && <section className="posDelivery" aria-label="Customer and delivery address">
@@ -730,7 +766,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     </section>}
 
     {savedDraft && <div className="posSaveNotice">
-      Draft #{savedDraft.displayNumber} ready for review · {money(savedDraft.totalCents)} · UNPAID
+      Held order #{savedDraft.displayNumber} · {money(savedDraft.totalCents)} · UNPAID
       {savedDraft.timingMessage ? ` · ${savedDraft.timingMessage}` : ""}
       {savedDraft.kitchenTimingLabel ? ` · Kitchen: ${savedDraft.kitchenTimingLabel.replace(/\n/g, " / ")}` : ""}
     </div>}
@@ -801,21 +837,32 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           <div className="grand"><span>{savedDraft ? "Backend total" : "Estimated total"}</span><strong>{money(savedDraft?.totalCents ?? subtotalCents)}</strong></div>
         </div>
         <div className="posCheckoutButtons">
-          <button type="button" className="primary" disabled={!cart.length || savingDraft || Boolean(savedDraft) || (timingMode === "future" && !scheduledFor)} onClick={() => void saveDraft()}>
-            {savingDraft ? "Saving…" : timingMode === "future" ? "Save Future Draft / Review" : "Save ASAP Draft / Review"}
+          <button type="button" disabled={!cart.length || savingDraft || Boolean(savedDraft) || (timingMode === "future" && !scheduledFor)} onClick={() => void saveDraft()}>
+            {savingDraft ? "HOLDING…" : "HOLD"}
           </button>
-          {savedDraft && <section className="posSubmitReview" aria-label={`Review draft ${savedDraft.displayNumber}`}>
-            <strong>Review order #{savedDraft.displayNumber}</strong>
-            <span>{serviceLabels[serviceType].label} · {cart.length} line{cart.length === 1 ? "" : "s"} · {money(savedDraft.totalCents)} · UNPAID</span>
-            <button type="button" className="submitOrder" disabled={submittingOrder || Boolean(checkoutError)} onClick={() => void submitOrder()}>
-              {submittingOrder ? "Submitting…" : "SUBMIT ORDER"}
-            </button>
-          </section>}
+          <button type="button" className="submitOrder" disabled={!cart.length || submittingOrder || savingDraft} onClick={() => void submitOrder()}>
+            {submittingOrder ? "SENDING…" : "SEND"}
+          </button>
+          <button type="button" className="primary" disabled={!cart.length || savingDraft} onClick={() => void openCheckout()}>CHECKOUT</button>
         </div>
       </aside>
     </section>
 
     {removedLine&&<div className="posUndo" role="status">Removed {removedLine.name}<button onClick={()=>{setCart(current=>[...current,removedLine]);setRemovedLine(null)}}>UNDO</button></div>}
+    {checkoutOpen && savedDraft && <div className="posModalBackdrop" role="presentation">
+      <section className="posCustomerDialog" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+        <h2 id="checkout-title">Checkout · Order #{savedDraft.displayNumber}</h2>
+        <p>Amount due</p><strong>{money(Number(checkoutState?.order.amount_due_cents ?? savedDraft.totalCents))}</strong>
+        {checkoutState?.tenders.map((tender) => <div key={tender.id}><span>{tender.tender_type.toUpperCase()} · {money(Number(tender.amount_cents))}</span>{Number(tender.change_due_cents) > 0 && <small>Change {money(Number(tender.change_due_cents))}</small>}</div>)}
+        {Number(checkoutState?.order.amount_due_cents || 0) > 0 && <>
+          <label>Cash tendered<input inputMode="decimal" placeholder="0.00" value={cashTender} onChange={(event) => setCashTender(event.target.value)} /></label>
+          <button type="button" disabled={paymentBusy} onClick={() => void commitPayment("cash")}>COMMIT CASH</button>
+          <button type="button" disabled={paymentBusy} onClick={() => void commitPayment("card")}>COMMIT REMAINING CREDIT (MANUAL)</button>
+        </>}
+        {checkoutState?.order.payment_status === "paid" && <strong>PAID</strong>}
+        <button type="button" onClick={() => setCheckoutOpen(false)}>BACK TO ORDER</button>
+      </section>
+    </div>}
     {configuringItem && <div className="posModalBackdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfiguringItem(null); }}>
       <section className="posConfigModal" role="dialog" aria-modal="true" aria-label={`Configure ${configuringItem.name}`}>
         <header>

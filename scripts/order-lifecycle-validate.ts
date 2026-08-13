@@ -57,8 +57,32 @@ async function main(): Promise<void> {
     await withTransaction(async () => {
       const sql = getSql();
       const pizza = await configured("Pizza", 'Jumbo Thin 16"', ["Pepperoni", "Mushrooms"]);
+      async function expectSubmissionError(
+        serviceType: "pickup" | "delivery" | "dine_in",
+        customerFirstName: string,
+        callerPhone: string,
+        expectedMessage: string,
+      ) {
+        const invalid = await createDraftOrderWithVariants({
+          business: "Corner Deli", source: "pos", serviceType, createdBy: "order-lifecycle-test",
+          customerFirstName, callerPhone,
+          items: [{ itemId: pizza.itemId, variantId: pizza.variantId, modifierSelections: pizza.selections, pizzaToppings: pizza.pizzaToppings }],
+        });
+        try { await submitDraftOrder(String(invalid.id), "Corner Deli", lifecycleActor); }
+        catch (error) {
+          if (error instanceof OrderConflictError && error.message === expectedMessage) return;
+          throw error;
+        }
+        throw new Error(`Expected submission to fail with: ${expectedMessage}`);
+      }
+      await expectSubmissionError("pickup", "", "3155550190", "Customer name is required.");
+      await expectSubmissionError("pickup", "Pickup", "", "Phone number is required for pickup orders.");
+      await expectSubmissionError("delivery", "Delivery", "3155550191", "Delivery address is required.");
+      await expectSubmissionError("dine_in", "", "", "Customer name is required.");
+      results.requiredCustomerFieldsEnforced = true;
       const draft = await createDraftOrderWithVariants({
         business: "Corner Deli", source: "pos", serviceType: "pickup", createdBy: "order-lifecycle-test",
+        customerFirstName: "Lifecycle", customerLastName: "Pickup", callerPhone: "3155550100",
         items: [{ itemId: pizza.itemId, variantId: pizza.variantId, modifierSelections: pizza.selections, pizzaToppings: pizza.pizzaToppings, specialInstructions: "Lifecycle pizza note" }],
       });
       const before = (await sql`SELECT total_cents FROM ordering_orders WHERE id = ${draft.id}`)[0];
@@ -91,6 +115,7 @@ async function main(): Promise<void> {
 
       const staleDraft = await createDraftOrderWithVariants({
         business: "Corner Deli", source: "pos", serviceType: "pickup", createdBy: "order-lifecycle-test",
+        customerFirstName: "Lifecycle", customerLastName: "Stale", callerPhone: "3155550101",
         items: [{ itemId: pizza.itemId, variantId: pizza.variantId, modifierSelections: pizza.selections }],
       });
       await sql`UPDATE ordering_menu_item_variants SET base_price_cents = base_price_cents + 11 WHERE id = ${pizza.variantId}`;
@@ -102,6 +127,7 @@ async function main(): Promise<void> {
       const wings = await configured("Wings", "10 Wings", ["Mild", "Flats/Wings"]);
       const wingDraft = await createDraftOrderWithVariants({
         business: "Corner Deli", source: "pos", serviceType: "dine_in", createdBy: "order-lifecycle-test",
+        customerFirstName: "Lifecycle", customerLastName: "Dine In",
         items: [{ itemId: wings.itemId, variantId: wings.variantId, modifierSelections: wings.selections, specialInstructions: "Lifecycle wing note" }],
       });
       if (String(wingDraft.display_number) === String(draft.display_number) || String(staleDraft.display_number) === String(draft.display_number)) {

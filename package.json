@@ -30,6 +30,8 @@
     "test:idle-lock": "tsx scripts/configurable-idle-lock-validate.ts",
     "test:modifier-intensity": "tsx scripts/modifier-intensity-validate.ts",
     "test:ticket-defaults": "tsx scripts/default-ticket-suppression-validate.ts",
+    "test:payments": "tsx scripts/payment-workflow-validate.ts",
+    "test:order-void": "tsx scripts/order-void-validate.ts",
     "test:auth:e2e": "playwright test tests/auth-cookie.spec.ts",
     "test:pos:e2e": "playwright test tests/pos-pin-auth.spec.ts tests/pos-deli.spec.ts tests/deli-order-lifecycle.spec.ts tests/pos-workspace-navigation.spec.ts"
   },
