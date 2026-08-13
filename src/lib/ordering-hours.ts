@@ -114,8 +114,8 @@ function localDateTimeToUtc(input: {
 }
 
 function intervalContainsMinute(openMinute: number, closeMinute: number, currentMinute: number): boolean {
-  if (openMinute < closeMinute) return currentMinute >= openMinute && currentMinute < closeMinute;
-  return currentMinute >= openMinute || currentMinute < closeMinute;
+  if (openMinute < closeMinute) return currentMinute >= openMinute && currentMinute <= closeMinute;
+  return currentMinute >= openMinute || currentMinute <= closeMinute;
 }
 
 function weekdayForDate(parts: { year: number; month: number; day: number }): number {
