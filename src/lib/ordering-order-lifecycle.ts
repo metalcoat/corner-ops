@@ -6,6 +6,7 @@ import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 import { ensureOrderingAddressSchema } from "@/lib/ordering-address-schema";
 import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
+import { snapshotAndFormatOrder } from "@/lib/ordering-print-format";
 import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
 import { pizzaToppingPriceCents } from "@/lib/ordering-pizza-toppings";
 
@@ -213,6 +214,7 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
       if (addresses[0]?.validation_status !== "validated") throw new OrderConflictError("Delivery address is required.");
     }
     await revalidateDraft(order);
+    const ticketLines = await snapshotAndFormatOrder(orderId);
 
     const updated = await sql`
       UPDATE ordering_orders
@@ -235,7 +237,7 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
       ) VALUES (
         ${randomUUID()}, ${business}, ${orderId}, 'kitchen_production', 'initial_send', 'not_configured',
         ${actor.type}, ${actor.id}, 'Kitchen printer not configured.',
-        CAST(${JSON.stringify({ heading: "KITCHEN ORDER", orderId, actorName: actor.name })} AS jsonb)
+        CAST(${JSON.stringify({ heading: "KITCHEN ORDER", orderId, actorName: actor.name, lines: ticketLines })} AS jsonb)
       )
       ON CONFLICT DO NOTHING
     `;
