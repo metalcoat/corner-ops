@@ -72,8 +72,9 @@ test("pizza topping controls use semantic portion and amount and restore on edit
   await expect(line).toContainText("Left Half Extra Pepperoni");
   await expect(line).not.toContainText("2× Pepperoni");
   await page.getByRole("button", { name: "Edit Pizza" }).click();
-  await expect(page.getByRole("dialog", { name: "Configure Pizza" }).getByText("EXTRA", { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "Configure Pizza" })).toContainText("Left Half");
+  const editDialog = page.getByRole("dialog", { name: "Configure Pizza" });
+  await editDialog.getByRole("button", { name: "LEFT HALF", exact: true }).click();
+  await expect(editDialog.getByRole("button", { name: "Decrease Pepperoni" }).locator("xpath=following-sibling::span")).toHaveText("EXTRA");
 });
 
 test("Pizza Sub does not fabricate a Wrap variant", async ({ page }) => {

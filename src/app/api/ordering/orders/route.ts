@@ -7,6 +7,7 @@ import type { OrderTimingMode } from "@/lib/ordering-timing-core";
 import { orderingActor } from "@/lib/ordering-route-auth";
 import { addressForOrder, routeDeliveryAddress } from "@/lib/ordering-address";
 import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
+import { getSql } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -71,6 +72,17 @@ export async function POST(request: Request) {
           ? record.modifierAmounts as Record<string, "light"|"normal"|"heavy">
           : {},
         modifierDeclines: Array.isArray(record.modifierDeclines) ? record.modifierDeclines.map(String) : [],
+        pizzaToppings: Array.isArray(record.pizzaToppings)
+          ? record.pizzaToppings.map((value) => {
+            if (!value || typeof value !== "object") throw new Error("An invalid pizza topping was submitted.");
+            const topping = value as Record<string, unknown>;
+            const portion = String(topping.portion || "");
+            const amount = String(topping.amount || "");
+            if (!(["whole", "left_half", "right_half"] as string[]).includes(portion)
+              || !(["regular", "extra", "double_extra", "triple_extra"] as string[]).includes(amount)) throw new Error("An invalid pizza topping was submitted.");
+            return { modifierOptionId: String(topping.modifierOptionId || ""), portion: portion as "whole" | "left_half" | "right_half", amount: amount as "regular" | "extra" | "double_extra" | "triple_extra" };
+          })
+          : [],
         comboId: record.comboId ? String(record.comboId) : null,
         comboSelections: record.comboSelections && typeof record.comboSelections === "object"
           ? record.comboSelections as Record<string, string[]>
@@ -82,6 +94,8 @@ export async function POST(request: Request) {
     const timingMode = readTimingMode(body.timingMode);
     const serviceType = readServiceType(body.serviceType);
     const enteredAddress = String(body.deliveryAddress || "");
+    const customerAddressId=body.customerAddressId?String(body.customerAddressId):null;
+    if(customerAddressId){const rows=await getSql()`SELECT address.id FROM ordering_customer_addresses address JOIN ordering_customers customer ON customer.id=address.customer_id WHERE address.id=${customerAddressId} AND address.customer_id=${body.customerId?String(body.customerId):null} AND address.active=TRUE AND customer.business=${business}`;if(!rows[0])return Response.json({error:"The selected customer address is no longer available."},{status:409})}
     let validatedAddress = null;
     try { validatedAddress = addressForOrder(serviceType, String(body.deliveryValidationToken || ""), enteredAddress); }
     catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Validate the delivery address." }, { status: 409 }); }
@@ -90,6 +104,7 @@ export async function POST(request: Request) {
       source: "pos",
       serviceType,
       customerId: body.customerId ? String(body.customerId) : null,
+      customerPhoneId: body.customerPhoneId ? String(body.customerPhoneId) : null,
       callerPhone: body.callerPhone ? String(body.callerPhone) : "",
       customerFirstName: body.customerFirstName ? String(body.customerFirstName) : "",
       customerLastName: body.customerLastName ? String(body.customerLastName) : "",
@@ -103,7 +118,7 @@ export async function POST(request: Request) {
     if (validatedAddress) {
       let route = null;
       try { route = await routeDeliveryAddress(validatedAddress); } catch { /* Routing remains optional until origin coordinates are configured. */ }
-      await saveOrderDeliveryAddress({ orderId: String(order.id), address: validatedAddress, line2: String(body.deliveryUnit || ""), route });
+      await saveOrderDeliveryAddress({ orderId: String(order.id), address: validatedAddress, line2: String(body.deliveryUnit || ""), customerAddressId, route });
     }
     return Response.json({ order }, { status: 201 });
   } catch (error) {

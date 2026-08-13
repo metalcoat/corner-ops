@@ -25,6 +25,7 @@ export type CreateDraftOrderInput = {
   source: OrderSource;
   serviceType: ServiceType;
   customerId?: string | null;
+  customerPhoneId?: string | null;
   callerPhone?: string;
   customerFirstName?: string;
   customerLastName?: string;
@@ -429,21 +430,32 @@ export async function createDraftOrder(input: CreateDraftOrderInput): Promise<Or
   const id = randomUUID();
   const displayNumber = await nextOrderNumber(input.business);
   const items = input.items || [];
+  let customer: { first_name: string; last_name: string } | null = null;
+  let selectedPhone = "";
+  if (input.customerId) {
+    const customers = await sql`SELECT first_name,last_name FROM ordering_customers WHERE id=${input.customerId} AND business=${input.business} AND active=TRUE AND merged_into_customer_id IS NULL`;
+    if (!customers[0]) throw new Error("The selected customer is no longer active.");
+    customer = customers[0] as { first_name: string; last_name: string };
+    if (input.customerPhoneId) {
+      const phones = await sql`SELECT normalized_phone FROM ordering_customer_phones WHERE id=${input.customerPhoneId} AND customer_id=${input.customerId}`;
+      if (!phones[0]) throw new Error("The selected customer phone is no longer available.");
+      selectedPhone = String(phones[0].normalized_phone);
+    }
+  }
+  const phoneSnapshot = selectedPhone || String(input.callerPhone || "");
 
   await sql`
     INSERT INTO ordering_orders (
       id, business, source, customer_id, caller_phone, status, payment_status,
-      service_type, version, display_number, created_by,first_name_snapshot,last_name_snapshot,phone_snapshot,order_origin
+      service_type, version, display_number, created_by,first_name_snapshot,last_name_snapshot,phone_snapshot,order_origin,customer_phone_id
     ) VALUES (
-      ${id}, ${input.business}, ${input.source}, ${input.customerId || null}, ${String(input.callerPhone || "")},
-      'draft', 'unpaid', ${input.serviceType}, 1, ${displayNumber}, ${input.createdBy},${String(input.customerFirstName||"").trim()},${String(input.customerLastName||"").trim()},${String(input.callerPhone||"")},${input.orderOrigin||"pos"}
+      ${id}, ${input.business}, ${input.source}, ${input.customerId || null}, ${phoneSnapshot},
+      'draft', 'unpaid', ${input.serviceType}, 1, ${displayNumber}, ${input.createdBy},${String(input.customerFirstName||customer?.first_name||"").trim()},${String(input.customerLastName||customer?.last_name||"").trim()},${phoneSnapshot},${input.orderOrigin||"pos"},${input.customerPhoneId||null}
     )
   `;
 
   if (input.customerId) {
-    const customers=await sql`SELECT first_name,last_name FROM ordering_customers WHERE id=${input.customerId} AND business=${input.business} AND active=TRUE AND merged_into_customer_id IS NULL`;
-    if(!customers[0]) throw new Error("The selected customer is no longer active.");
-    await sql`UPDATE ordering_orders SET first_name_snapshot=${String(input.customerFirstName||customers[0].first_name)},last_name_snapshot=${String(input.customerLastName||customers[0].last_name)} WHERE id=${id}`;
+    if(input.customerPhoneId) await sql`UPDATE ordering_customer_phones SET last_used_at=NOW(),updated_at=NOW() WHERE id=${input.customerPhoneId}`;
     await sql`UPDATE ordering_customers SET last_order_at=NOW(),updated_at=NOW() WHERE id=${input.customerId}`;
   }
 

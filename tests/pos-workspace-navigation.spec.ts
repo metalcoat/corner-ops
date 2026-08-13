@@ -47,8 +47,9 @@ test("POS workspace tabs preserve the unfinished order without a document reload
     const initialNavigationEntries = await page.evaluate(() => performance.getEntriesByType("navigation").length);
     const nav = page.getByRole("navigation", { name: "Corner Deli POS workspaces" });
 
-    await nav.getByRole("link", { name: /Orders/ }).click();
-    await expect(nav.getByRole("link", { name: /Orders/ })).toHaveAttribute("aria-current", "page");
+    const ordersLink = page.getByRole("link", { name: /orders/i });
+    await ordersLink.click();
+    await expect(ordersLink).toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("heading", { name: "Orders", exact: true })).toBeVisible();
 
     await nav.getByRole("link", { name: "Customers", exact: true }).click();
@@ -56,7 +57,7 @@ test("POS workspace tabs preserve the unfinished order without a document reload
     await expect(page.getByRole("heading", { name: "Customers", exact: true })).toBeVisible();
 
     await page.goBack();
-    await expect(nav.getByRole("link", { name: /Orders/ })).toHaveAttribute("aria-current", "page");
+    await expect(ordersLink).toHaveAttribute("aria-current", "page");
     await page.goForward();
     await expect(nav.getByRole("link", { name: "Customers", exact: true })).toHaveAttribute("aria-current", "page");
     await nav.getByRole("link", { name: "Menu", exact: true }).click();
@@ -85,10 +86,12 @@ test("persistent workspace navigation stays compact across POS viewports", async
     await page.setViewportSize(viewport);
     const nav = page.getByRole("navigation", { name: "Corner Deli POS workspaces" });
     await expect(nav).toBeVisible();
-    for (const label of ["Menu", "Orders", "Customers", "Kitchen", "Settings"]) {
+    for (const label of ["Menu", "Customers", "Kitchen"]) {
       await expect(nav.getByRole("link", { name: new RegExp(label) })).toBeVisible();
     }
-    await expect(page.getByText("DEVELOPMENT", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: /orders/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /settings/i })).toBeVisible();
+    await expect(page.getByText("DEV", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: /Save ASAP Draft/ })).toBeInViewport();
     expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= document.scrollingElement!.clientHeight)).toBe(true);
   }

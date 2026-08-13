@@ -24,20 +24,21 @@ export function ensureOrderingAddressSchema(): Promise<void> {
   return schemaPromise;
 }
 
-export async function saveOrderDeliveryAddress(input: { orderId: string; address: ValidatedDeliveryAddress; line2?: string; route?: { distanceMiles: number; durationSeconds: number; provider: string; calculatedAt: string } | null }) {
+export async function saveOrderDeliveryAddress(input: { orderId: string; address: ValidatedDeliveryAddress; line2?: string; customerAddressId?: string | null; route?: { distanceMiles: number; durationSeconds: number; provider: string; calculatedAt: string } | null }) {
   await ensureOrderingAddressSchema();
   const sql = getSql();
   await sql`
     INSERT INTO ordering_order_delivery_addresses (
       order_id, entered_address, formatted_address, line1, line2, city, state, postal_code,
       country, latitude, longitude, provider, provider_reference_id, validation_status,
-      validated_at, route_distance_miles, route_duration_seconds, route_provider, route_calculated_at
+      validated_at, route_distance_miles, route_duration_seconds, route_provider, route_calculated_at, customer_address_id
     ) VALUES (
       ${input.orderId}, ${input.address.enteredAddress}, ${input.address.formattedAddress}, ${input.address.line1}, ${String(input.line2 || "").trim().slice(0, 120)},
       ${input.address.city}, ${input.address.state}, ${input.address.postalCode}, ${input.address.country}, ${input.address.latitude}, ${input.address.longitude},
       ${input.address.provider}, ${input.address.providerReferenceId}, 'validated', ${input.address.validatedAt},
-      ${input.route?.distanceMiles ?? null}, ${input.route?.durationSeconds ?? null}, ${input.route?.provider || ""}, ${input.route?.calculatedAt || null}
+      ${input.route?.distanceMiles ?? null}, ${input.route?.durationSeconds ?? null}, ${input.route?.provider || ""}, ${input.route?.calculatedAt || null}, ${input.customerAddressId || null}
     )
   `;
+  if (input.customerAddressId) await sql`UPDATE ordering_customer_addresses SET last_used_at=NOW(),updated_at=NOW() WHERE id=${input.customerAddressId}`;
   if (input.route) await sql`UPDATE ordering_orders SET delivery_distance_miles = ${input.route.distanceMiles}, updated_at = NOW() WHERE id = ${input.orderId}`;
 }

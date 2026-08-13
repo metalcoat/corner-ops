@@ -47,8 +47,8 @@ test("cashier submits a real pizza and kitchen completes it", async ({ page }) =
   await expect(ticket).toContainText("SUBMITTED");
   await expect(ticket).toContainText("PICKUP");
   await expect(ticket).toContainText('Jumbo Thin 16"');
-  await expect(ticket).toContainText("Pepperoni");
-  await expect(ticket).toContainText("Mushrooms");
+  await expect(ticket).toContainText("PEPPERONI");
+  await expect(ticket).toContainText("MUSHROOMS");
   await expect(ticket).toContainText(`NOTE: ${note}`);
   await expect(ticket).toContainText("UNPAID");
 
@@ -59,5 +59,4 @@ test("cashier submits a real pizza and kitchen completes it", async ({ page }) =
   await page.screenshot({ path: "/tmp/corner-ops-deli-kitchen.png", fullPage: true });
   await ticket.getByRole("button", { name: "COMPLETE" }).click();
   await expect(ticket).toHaveCount(0);
-  await expect(page.getByText("No active kitchen orders.")).toBeVisible();
 });

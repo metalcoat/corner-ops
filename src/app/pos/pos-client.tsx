@@ -67,7 +67,9 @@ type SubmittedOrder = {
 type AddressSuggestion = { id: string; text: string; mainText: string; secondaryText: string; provider: "google" };
 type ValidatedAddress = { formattedAddress: string; city: string; state: string; postalCode: string };
 type DeliveryRoute = { distanceMiles: number; durationSeconds: number; provider: string; calculatedAt: string };
-type PosCustomer={id:string;first_name:string;last_name:string;display_name:string;display_phone:string;normalized_phone:string;last_order_at:string|null;addresses:Array<{id:string;label:string;line1:string;line2:string;city:string;state:string;postal_code:string;last_used_at:string|null}>};
+type PosCustomerPhone={id:string;label:string;display_phone:string;normalized_phone:string;is_primary:boolean;last_used_at:string|null};
+type PosCustomerAddress={id:string;label:string;line1:string;line2:string;city:string;state:string;postal_code:string;standardized_address:string;provider:string;provider_reference_id:string;latitude:number|null;longitude:number|null;is_primary:boolean;last_used_at:string|null};
+type PosCustomer={id:string;first_name:string;last_name:string;display_name:string;display_phone:string;normalized_phone:string;last_order_at:string|null;phones:PosCustomerPhone[];addresses:PosCustomerAddress[]};
 
 const serviceLabels: Record<PosServiceType, { label: string; paymentNote?: string }> = {
   pickup: { label: "Pickup" },
@@ -195,6 +197,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [deliveryValidatedInput, setDeliveryValidatedInput] = useState("");
   const [deliveryRoute, setDeliveryRoute] = useState<DeliveryRoute | null>(null);
   const [customer,setCustomer]=useState<PosCustomer|null>(null),[customerOpen,setCustomerOpen]=useState(false),[customerQuery,setCustomerQuery]=useState(""),[customerMatches,setCustomerMatches]=useState<PosCustomer[]>([]);
+  const [selectedCustomerPhoneId,setSelectedCustomerPhoneId]=useState("");
+  const [selectedCustomerAddressId,setSelectedCustomerAddressId]=useState("");
   const [orderOrigin,setOrderOrigin]=useState<"pos"|"phone">("pos");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -226,17 +230,23 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     const attachCustomer = (event: Event) => {
       const selected = (event as CustomEvent<PosCustomer>).detail;
       if (!selected?.id) return;
-      setCustomer(selected);
+      chooseCustomer(selected);
       setSavedDraft(null);
       setCartNotice(`${selected.display_name} attached to current order`);
+    };
+    const focusProductSearch = () => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
     };
     window.addEventListener("corner-ops-pos-lock-request", requestLock);
     window.addEventListener("corner-ops-pos-authenticated", authenticated);
     window.addEventListener("corner-ops-pos-customer-selected", attachCustomer);
+    window.addEventListener("corner-ops-pos-product-search", focusProductSearch);
     return () => {
       window.removeEventListener("corner-ops-pos-lock-request", requestLock);
       window.removeEventListener("corner-ops-pos-authenticated", authenticated);
       window.removeEventListener("corner-ops-pos-customer-selected", attachCustomer);
+      window.removeEventListener("corner-ops-pos-product-search", focusProductSearch);
     };
   }, [business, lockPos]);
 
@@ -494,11 +504,11 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   }
 
   function changeDeliveryAddress(value: string) {
-    setDeliveryAddress(value); setValidatedAddress(null); setDeliveryValidationToken(""); setDeliveryValidatedInput(""); setDeliveryRoute(null); setAddressError(""); setSavedDraft(null);
+    setDeliveryAddress(value); setSelectedCustomerAddressId(""); setValidatedAddress(null); setDeliveryValidationToken(""); setDeliveryValidatedInput(""); setDeliveryRoute(null); setAddressError(""); setSavedDraft(null);
   }
 
-  async function validateAddress(suggestion?: AddressSuggestion) {
-    const enteredAddress = suggestion?.text || deliveryAddress;
+  async function validateAddress(suggestion?: AddressSuggestion, explicitAddress?: string) {
+    const enteredAddress = explicitAddress || suggestion?.text || deliveryAddress;
     if (suggestion) setDeliveryAddress(suggestion.text);
     setValidatingAddress(true); setAddressError(""); setAddressSuggestions([]);
     try {
@@ -510,6 +520,9 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     } catch (error) { setValidatedAddress(null); setDeliveryValidationToken(""); setDeliveryValidatedInput(""); setDeliveryRoute(null); setAddressError(error instanceof Error ? error.message : "Could not validate this address."); }
     finally { setValidatingAddress(false); }
   }
+
+  function chooseCustomer(next:PosCustomer){setCustomer(next);const phone=next.phones?.find(candidate=>candidate.is_primary)||next.phones?.[0];setSelectedCustomerPhoneId(phone?.id||"");setSavedDraft(null)}
+  async function chooseSavedAddress(address:PosCustomerAddress){setSelectedCustomerAddressId(address.id);const entered=[address.line1,address.line2,address.city,address.state,address.postal_code].filter(Boolean).join(", ");setDeliveryAddress(entered);setDeliveryUnit(address.line2||"");await validateAddress(undefined,entered)}
 
   function removeLine(lineId: string) {
     setCart((current) => {setRemovedLine(current.find(line=>line.id===lineId)||null);return current.filter((line) => line.id !== lineId)});
@@ -550,9 +563,11 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           deliveryUnit: serviceType === "delivery" ? deliveryUnit : undefined,
           deliveryValidationToken: serviceType === "delivery" ? deliveryValidationToken : undefined,
           customerId:customer?.id,
+          customerPhoneId:selectedCustomerPhoneId||undefined,
+          customerAddressId:serviceType==="delivery"?selectedCustomerAddressId||undefined:undefined,
           customerFirstName:customer?.first_name,
           customerLastName:customer?.last_name,
-          callerPhone:customer?.normalized_phone,
+          callerPhone:customer?.phones?.find(phone=>phone.id===selectedCustomerPhoneId)?.normalized_phone||customer?.normalized_phone,
           orderOrigin,
           items: cart.map((line) => ({
             itemId: line.itemId,
@@ -677,7 +692,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         onChange={(event) => { setScheduledFor(event.target.value); setSavedDraft(null); }}
       />}
     </section>
-    <button type="button" className="posCustomerCompact" onClick={()=>setCustomerOpen(true)}>{customer?<><strong>{customer.display_name}</strong><span>{customer.display_phone}{serviceType==="delivery"&&validatedAddress?` · ${validatedAddress.formattedAddress}`:""}</span></>:<><strong>+ CUSTOMER</strong><span>{serviceType==="dine_in"?"Guest optional":"Name and phone required"}</span></>}</button>
+    <button type="button" className="posCustomerCompact" onClick={()=>setCustomerOpen(true)}>{customer?<><strong>{customer.display_name}</strong><span>{customer.phones?.find(phone=>phone.id===selectedCustomerPhoneId)?.display_phone||customer.display_phone}{serviceType==="delivery"&&validatedAddress?` · ${validatedAddress.formattedAddress}`:""}</span></>:<><strong>+ CUSTOMER</strong><span>{serviceType==="dine_in"?"Guest optional":"Name and phone required"}</span></>}</button>
+    {customer&&customer.phones?.length>1&&<div className="posCustomerChoices" aria-label="Contact number for this order"><strong>CONTACT NUMBER</strong>{customer.phones.map(phone=><button type="button" key={phone.id} className={selectedCustomerPhoneId===phone.id?"selected":""} onClick={()=>{setSelectedCustomerPhoneId(phone.id);setSavedDraft(null)}}>{phone.label||"Phone"} · {phone.display_phone}</button>)}</div>}
 
     {serviceType === "delivery" && <section className="posDelivery" aria-label="Customer and delivery address">
       <div className="posDeliveryHeading"><div><span>Customer / Delivery</span><h2>Delivery address</h2></div>{validatedAddress && <strong className="addressValid">VALIDATED</strong>}</div>
@@ -708,6 +724,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         <label>Apartment / unit<input value={deliveryUnit} maxLength={120} autoComplete="off" onChange={(event) => { setDeliveryUnit(event.target.value); setSavedDraft(null); }} /></label>
         <button type="button" className="validateAddressButton" disabled={validatingAddress || deliveryAddress.trim().length < 5 || Boolean(validatedAddress)} onClick={() => void validateAddress()}>{validatingAddress ? "Validating…" : validatedAddress ? "Validated" : "Validate address"}</button>
       </div>
+      {customer?.addresses?.length?<div className="posSavedAddresses" aria-label="Saved delivery addresses"><strong>DELIVER TO</strong>{customer.addresses.map(address=><button type="button" key={address.id} className={selectedCustomerAddressId===address.id?"selected":""} onClick={()=>void chooseSavedAddress(address)}><b>{address.label||"Address"}</b><span>{address.line1}{address.line2?` · ${address.line2}`:""}</span></button>)}<button type="button" onClick={()=>{setSelectedCustomerAddressId("");changeDeliveryAddress("")}}>+ NEW ADDRESS</button></div>:null}
       {validatedAddress && <p className="addressResult"><strong>{validatedAddress.formattedAddress}</strong>{deliveryRoute ? ` · ${deliveryRoute.distanceMiles.toFixed(1)} driving miles · about ${Math.max(1, Math.round(deliveryRoute.durationSeconds / 60))} min` : " · Driving distance unavailable until store origin is configured"}</p>}
       {addressError && <p className="addressError" role="alert">{addressError}</p>}
     </section>}
@@ -723,17 +740,16 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     {checkoutError && <div className="posSaveNotice error">{checkoutError}</div>}
     {cartNotice && <div className="posCartToast" aria-live="polite">{cartNotice}</div>}
 
-    <nav className="posMenuNavigation" aria-label="Menu categories">
-      <div className="posPrimaryCategories">
-        {primaryCategories.map((category) => <button type="button" key={category.id} className={activePrimary?.id === category.id && !menuSearch ? "active" : ""} onClick={() => { setMenuSearch(""); setPrimaryCategoryId(category.id); const children = menu.filter((child) => child.parentId === category.id); setCategoryId(category.presentationOnly ? children[0]?.id || "" : category.id); }}>{category.displayName}</button>)}
-      </div>
-      {subcategories.length > 0 && !menuSearch && <div className="posSubcategories" aria-label={`${activePrimary?.displayName} subcategories`}>
-        {subcategories.map((category) => <button type="button" key={category.id} className={activeCategory?.id === category.id ? "active" : ""} onClick={() => setCategoryId(category.id)}>{category.displayName}</button>)}
-      </div>}
-    </nav>
-
     <section className="posWorkspace">
       <section className="posMenuPanel">
+        <nav className="posMenuNavigation" aria-label="Menu categories">
+          <div className="posPrimaryCategories">
+            {primaryCategories.map((category) => <button type="button" key={category.id} className={activePrimary?.id === category.id && !menuSearch ? "active" : ""} onClick={() => { setMenuSearch(""); setPrimaryCategoryId(category.id); const children = menu.filter((child) => child.parentId === category.id); setCategoryId(category.presentationOnly ? children[0]?.id || "" : category.id); }}>{category.displayName}</button>)}
+          </div>
+          {subcategories.length > 0 && !menuSearch && <div className="posSubcategories" aria-label={`${activePrimary?.displayName} subcategories`}>
+            {subcategories.map((category) => <button type="button" key={category.id} className={activeCategory?.id === category.id ? "active" : ""} onClick={() => setCategoryId(category.id)}>{category.displayName}</button>)}
+          </div>}
+        </nav>
         <div className="posPanelHeading">
           <div><span>{menuSearch ? "Search results" : "Category"}</span><h1>{menuSearch ? `Results for “${menuSearch}”` : activeCategory?.displayName || "Menu"}</h1></div>
           <div className="posStatusPill">{serviceLabels[serviceType].label} · {timingMode === "asap" ? "ASAP" : "Future"}</div>
@@ -892,6 +908,6 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       </section>
     </div>}
     {intensityChoice&&<div className="posIntensityPopover" role="dialog" aria-label={`${intensityChoice.option.name} amount`}><strong>{intensityChoice.option.name}</strong><div>{(["light","normal","heavy"] as const).map(amount=><button key={amount} className={(modifierAmounts[intensityChoice.option.id]||"normal")===amount?"selected":""} onClick={()=>chooseIntensity(amount)}>{amount.toUpperCase()}</button>)}</div><button onClick={()=>setIntensityChoice(null)}>Cancel</button></div>}
-    {customerOpen&&<div className="posModalBackdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setCustomerOpen(false)}}><section className="posCustomerDialog" role="dialog" aria-modal="true"><header><div><span>CUSTOMER</span><h2>Find by phone or name</h2></div><button onClick={()=>setCustomerOpen(false)}>Close</button></header><input autoFocus type="search" value={customerQuery} onChange={e=>setCustomerQuery(e.target.value)} placeholder="3155551212 or Sarah Smith"/>{customerMatches.map(match=><button className="posCustomerMatch" key={match.id} onClick={()=>{setCustomer(match);setCustomerOpen(false);setSavedDraft(null)}}><strong>{match.display_name}</strong><span>{match.display_phone}</span>{match.addresses[0]&&<small>{match.addresses[0].line1} · Last order {match.last_order_at?new Date(match.last_order_at).toLocaleDateString():"never"}</small>}</button>)}{customer&&<button className="danger" onClick={()=>{setCustomer(null);setCustomerOpen(false);setSavedDraft(null)}}>Use Guest / Clear customer</button>}<Link href="/pos/deli/customers" onClick={()=>setCustomerOpen(false)}>Open customer CRM</Link></section></div>}
+    {customerOpen&&<div className="posModalBackdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setCustomerOpen(false)}}><section className="posCustomerDialog" role="dialog" aria-modal="true"><header><div><span>CUSTOMER</span><h2>Find by phone or name</h2></div><button onClick={()=>setCustomerOpen(false)}>Close</button></header><input autoFocus type="search" value={customerQuery} onChange={e=>setCustomerQuery(e.target.value)} placeholder="3155551212 or Sarah Smith"/>{customerMatches.map(match=><button className="posCustomerMatch" key={match.id} onClick={()=>{chooseCustomer(match);setCustomerOpen(false)}}><strong>{match.display_name}</strong><span>{match.phones?.map(phone=>phone.display_phone).join(" · ")||match.display_phone}</span>{match.addresses[0]&&<small>{match.addresses[0].line1} · Last order {match.last_order_at?new Date(match.last_order_at).toLocaleDateString():"never"}</small>}</button>)}{customer&&<button className="danger" onClick={()=>{setCustomer(null);setSelectedCustomerPhoneId("");setSelectedCustomerAddressId("");setCustomerOpen(false);setSavedDraft(null)}}>Use Guest / Clear customer</button>}<Link href="/pos/deli/customers" onClick={()=>setCustomerOpen(false)}>Open customer CRM</Link></section></div>}
   </main>;
 }

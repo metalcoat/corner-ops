@@ -13,6 +13,7 @@ export type CreateVariantDraftOrderInput = {
   source: OrderSource;
   serviceType: ServiceType;
   customerId?: string | null;
+  customerPhoneId?: string | null;
   callerPhone?: string;
   customerFirstName?: string;
   customerLastName?: string;
