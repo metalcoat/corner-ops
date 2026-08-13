@@ -12,6 +12,7 @@ readonly ENV_FILE="${ROOT_DIR}/.env"
 readonly LOCK_FILE="${DEPLOY_DIR}/update.lock"
 readonly COMPOSE_FILE="${RUNTIME_DIR}/docker-compose.local.yml"
 readonly PROJECT_NAME="corner-ops"
+readonly UPDATER_USER="chris"
 export BUILDX_CONFIG="${DEPLOY_DIR}/buildx"
 
 force=false
@@ -34,6 +35,16 @@ exec > >(tee -a "$RUN_LOG") 2>&1
 
 log() {
   printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"
+}
+
+require_updater_identity() {
+  local actual_user
+  actual_user="$(id -un)"
+  if [[ "$actual_user" != "$UPDATER_USER" ]]; then
+    log "Refusing update as ${actual_user}; runtime builds must run as ${UPDATER_USER}."
+    record_result configuration_error
+    exit 1
+  fi
 }
 
 read_state() {
@@ -59,11 +70,72 @@ record_result() {
   write_state deployment_timestamp "$(date -u +%FT%TZ)"
 }
 
+describe_generated_artifact() {
+  local artifact="$1"
+  [[ -e "$artifact" || -L "$artifact" ]] || return 0
+  stat -c 'path=%n owner=%U:%G uid=%u gid=%g mode=%a type=%F' -- "$artifact" || true
+}
+
+repair_generated_artifact_ownership() {
+  local runtime_uid runtime_gid cleanup_image
+  runtime_uid="$(id -u)"
+  runtime_gid="$(id -g)"
+  cleanup_image="$(docker inspect corner-ops-app --format '{{.Image}}' 2>/dev/null || true)"
+
+  if [[ -z "$cleanup_image" ]]; then
+    log "Cannot repair generated runtime ownership: no existing application image is available."
+    return 1
+  fi
+
+  log "Repairing ownership only for runtime .next and node_modules with existing image ${cleanup_image}."
+  docker run --rm --user 0:0 \
+    --mount "type=bind,source=${RUNTIME_DIR},target=/runtime" \
+    --entrypoint /bin/sh "$cleanup_image" \
+    -c 'for path in /runtime/.next /runtime/node_modules; do if [ -e "$path" ] || [ -L "$path" ]; then chown -hR "$1" "$path"; fi; done' \
+    cleanup "${runtime_uid}:${runtime_gid}"
+}
+
+clean_runtime_checkout() {
+  local runtime_root runtime_uid artifact ownership_repair_needed=false
+  runtime_root="$(git -C "$RUNTIME_DIR" rev-parse --show-toplevel)"
+  runtime_uid="$(id -u)"
+  if [[ "$runtime_root" != "$RUNTIME_DIR" ]]; then
+    log "Refusing cleanup because Git resolved an unexpected runtime root: ${runtime_root}"
+    return 1
+  fi
+
+  for artifact in "$RUNTIME_DIR/.next" "$RUNTIME_DIR/node_modules"; do
+    if [[ -d "$artifact" && ! -L "$artifact" ]] \
+      && [[ -n "$(find "$artifact" -xdev ! -uid "$runtime_uid" -print -quit 2>/dev/null)" ]]; then
+      log "Generated runtime artifact has foreign ownership: $(describe_generated_artifact "$artifact")"
+      ownership_repair_needed=true
+    fi
+  done
+
+  if [[ "$ownership_repair_needed" == true ]]; then
+    repair_generated_artifact_ownership || return 1
+  fi
+
+  # These are disposable build products inside the source checkout. Persistent
+  # PostgreSQL and upload data live in named Docker volumes and are never mounted
+  # into this cleanup helper.
+  git -C "$RUNTIME_DIR" clean -ffdqx -- .next node_modules
+  git -C "$RUNTIME_DIR" clean -ffdqx
+
+  for artifact in "$RUNTIME_DIR/.next" "$RUNTIME_DIR/node_modules"; do
+    if [[ -e "$artifact" || -L "$artifact" ]]; then
+      log "Generated runtime cleanup left an unexpected path: $(describe_generated_artifact "$artifact")"
+      return 1
+    fi
+  done
+}
+
 restore_runtime_checkout() {
   local sha="$1"
   [[ -n "$sha" ]] || return 0
+  clean_runtime_checkout
   git -C "$RUNTIME_DIR" checkout --force --detach "$sha"
-  git -C "$RUNTIME_DIR" clean -ffdqx
+  clean_runtime_checkout
 }
 
 record_candidate_failure() {
@@ -97,6 +169,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
   record_result configuration_error
   exit 1
 fi
+
+require_updater_identity
 
 if [[ ! -d "${RUNTIME_DIR}/.git" ]]; then
   if [[ -e "$RUNTIME_DIR" ]]; then
@@ -136,8 +210,12 @@ if [[ "$force" == false && -n "$failed_sha" && "$remote_sha" == "$failed_sha" ]]
 fi
 
 log "Preparing candidate ${remote_sha}."
+if ! clean_runtime_checkout; then
+  record_candidate_failure "$remote_sha" "runtime cleanup failed; inspect ownership diagnostics above" "$runtime_sha"
+  exit 1
+fi
 git -C "$RUNTIME_DIR" checkout --force --detach "$remote_sha"
-git -C "$RUNTIME_DIR" clean -ffdqx
+clean_runtime_checkout
 
 validation_failed=false
 (
