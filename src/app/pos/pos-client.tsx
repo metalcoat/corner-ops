@@ -931,8 +931,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         <button type="button" onClick={() => setCheckoutOpen(false)}>BACK TO ORDER</button>
       </section>
     </div>}
-    {configuringItem && <div className="posModalBackdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfiguringItem(null); }}>
-      <section className="posConfigModal" role="dialog" aria-modal="true" aria-label={`Configure ${configuringItem.name}`}>
+    {configuringItem && <div className={configuringItem.modifiers.some(group=>group.presentationBehavior==="pizza_topping")?"posInlineConfigHost":"posModalBackdrop"} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfiguringItem(null); }}>
+      <section className="posConfigModal" role="dialog" aria-modal={configuringItem.modifiers.some(group=>group.presentationBehavior==="pizza_topping")?undefined:"true"} aria-label={`Configure ${configuringItem.name}`}>
         <header>
           <div><span>Configure item</span><h2>{configuringItem.name}</h2><p>{configuringItem.description}</p></div>
           <button type="button" onClick={() => setConfiguringItem(null)}>Close</button>
