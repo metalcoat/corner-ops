@@ -5,6 +5,7 @@ import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 import { ensureOrderingGiftCardSchema } from "@/lib/ordering-gift-card-schema";
 import { GiftCardError, redeemGiftCard } from "@/lib/ordering-gift-cards";
+import { canManagePos } from "@/lib/ordering-route-auth";
 
 export type CheckoutTenderType = "cash" | "card" | "gift_card";
 
@@ -24,8 +25,8 @@ export async function checkoutState(orderId: string, business: OrderingBusiness,
   `;
   if (!orders[0]) throw new PaymentConflictError("Order was not found.");
   const tenders = await sql`
-    SELECT id, tender_type, status, amount_cents, amount_tendered_cents, change_due_cents,
-           brand, last4, created_by, created_at, approved_at
+    SELECT id, tender_type, transaction_type, status, amount_cents, amount_tendered_cents, change_due_cents,
+           brand, last4, related_transaction_id, reason, created_by, created_at, approved_at
     FROM ordering_payment_transactions
     WHERE order_id = ${orderId} AND business = ${business} AND (${checkId || null}::uuid IS NULL OR check_id=${checkId || null})
     ORDER BY created_at, id
@@ -33,6 +34,57 @@ export async function checkoutState(orderId: string, business: OrderingBusiness,
   const check = checkId ? (await sql`SELECT id,display_sequence,status,total_cents,paid_cents,amount_due_cents FROM ordering_checks WHERE id=${checkId} AND order_id=${orderId}`)[0] : null;
   if (checkId && !check) throw new PaymentConflictError("Check was not found.");
   return { order: orders[0], check, tenders };
+}
+
+function reason(value: string, action: string): string {
+  const cleaned = value.trim();
+  if (cleaned.length < 3) throw new PaymentConflictError(`A ${action} reason is required.`);
+  if (cleaned.length > 500) throw new PaymentConflictError(`${action[0].toUpperCase()}${action.slice(1)} reason must be 500 characters or fewer.`);
+  return cleaned;
+}
+
+export async function reverseTender(input: { orderId: string; business: OrderingBusiness; transactionId: string; amountCents: number; clientMutationId: string; reason: string; actor: OrderingActor }) {
+  if (!canManagePos(input.actor)) throw new PaymentConflictError("Manager or owner authorization is required to reverse a tender.");
+  const reversalReason = reason(input.reason, "reversal");
+  const amount = cents(input.amountCents, "Reversal amount");
+  if (!input.clientMutationId.trim() || input.clientMutationId.length > 160) throw new PaymentConflictError("A valid reversal request ID is required.");
+  await ensureOrderingGiftCardSchema();
+  return withTransaction(async () => {
+    const sql = getSql();
+    const duplicate = await sql`SELECT id,order_id,transaction_type,related_transaction_id FROM ordering_payment_transactions WHERE business=${input.business} AND client_mutation_id=${input.clientMutationId}`;
+    if (duplicate[0]) {
+      if (duplicate[0].order_id !== input.orderId || duplicate[0].transaction_type !== "void" || duplicate[0].related_transaction_id !== input.transactionId) throw new PaymentConflictError("That reversal request ID was already used for another operation.");
+      return { ...(await checkoutState(input.orderId, input.business)), duplicate: true };
+    }
+    const source = (await sql`SELECT * FROM ordering_payment_transactions WHERE id=${input.transactionId} AND order_id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
+    if (!source || source.transaction_type !== "payment" || source.status !== "approved") throw new PaymentConflictError("Approved payment tender was not found.");
+    const reversed = Number((await sql`SELECT COALESCE(SUM(amount_cents),0) amount FROM ordering_payment_transactions WHERE related_transaction_id=${source.id} AND transaction_type='void' AND status='approved'`)[0].amount);
+    if (amount > Number(source.amount_cents) - reversed) throw new PaymentConflictError("Reversal exceeds the tender's unreversed amount.");
+    const order = (await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
+    if (!order) throw new PaymentConflictError("Order was not found.");
+    const reversalId = randomUUID();
+    await sql`INSERT INTO ordering_payment_transactions(id,business,order_id,check_id,customer_id,tender_type,transaction_type,status,amount_cents,amount_tendered_cents,provider,related_transaction_id,client_mutation_id,created_by,approved_at,reason,details) VALUES(${reversalId},${input.business},${input.orderId},${source.check_id},${source.customer_id},${source.tender_type},'void','approved',${amount},${amount},${source.provider},${source.id},${input.clientMutationId},${input.actor.id},NOW(),${reversalReason},${JSON.stringify({actorName:input.actor.name,actorRole:input.actor.role,partial:amount<Number(source.amount_cents)-reversed})}::jsonb)`;
+    if (source.tender_type === "gift_card") {
+      const ledger = (await sql`SELECT ledger.*,card.current_balance_cents,card.status FROM ordering_gift_card_ledger ledger JOIN ordering_gift_cards card ON card.id=ledger.gift_card_id WHERE ledger.payment_transaction_id=${source.id} AND ledger.entry_type='redeem' FOR UPDATE OF card`)[0];
+      if (!ledger) throw new PaymentConflictError("Gift-card redemption ledger was not found.");
+      const balance = Number(ledger.current_balance_cents) + amount;
+      await sql`INSERT INTO ordering_gift_card_ledger(id,gift_card_id,business,order_id,entry_type,delta_balance_cents,balance_after_cents,payment_transaction_id,operation_key,related_entry_id,created_by,approved_by,note,metadata) VALUES(${randomUUID()},${ledger.gift_card_id},${input.business},${input.orderId},'reversal',${amount},${balance},${reversalId},${`payment-reversal:${input.clientMutationId}`},${ledger.id},${input.actor.id},${input.actor.id},${reversalReason},${JSON.stringify({sourcePaymentId:source.id,partial:amount<Number(source.amount_cents)-reversed})}::jsonb)`;
+      await sql`UPDATE ordering_gift_cards SET current_balance_cents=${balance},status=CASE WHEN status='depleted' THEN 'active' ELSE status END WHERE id=${ledger.gift_card_id}`;
+    }
+    const newPaid = Math.max(0, Number(order.paid_cents) - amount), remaining = Math.max(0, Number(order.total_cents) - newPaid);
+    const paymentStatus = newPaid === 0 ? "unpaid" : remaining === 0 ? "paid" : "partially_paid";
+    await sql`UPDATE ordering_orders SET paid_cents=${newPaid},amount_due_cents=${remaining},payment_status=${paymentStatus},paid_at=CASE WHEN ${remaining}=0 THEN paid_at ELSE NULL END,version=version+1,updated_at=NOW() WHERE id=${input.orderId}`;
+    if (source.check_id) await sql`UPDATE ordering_checks SET paid_cents=GREATEST(0,paid_cents-${amount}),amount_due_cents=LEAST(total_cents,amount_due_cents+${amount}),status=CASE WHEN paid_cents-${amount}<=0 THEN 'open' WHEN amount_due_cents+${amount}>0 THEN 'partially_paid' ELSE 'paid' END,updated_at=NOW() WHERE id=${source.check_id}`;
+    const version = Number(order.version)+1;
+    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) VALUES(${randomUUID()},${input.orderId},${version},'payment_reversed',${input.actor.type},${input.actor.id},${JSON.stringify({transactionId:reversalId,sourceTransactionId:source.id,tenderType:source.tender_type,amountCents:amount,reason:reversalReason,actorName:input.actor.name,actorRole:input.actor.role,totalPaidCents:newPaid,remainingDueCents:remaining})}::jsonb)`;
+    return { ...(await checkoutState(input.orderId,input.business,source.check_id)), duplicate: false };
+  });
+}
+
+export async function reprintPaymentReceipt(input:{orderId:string;business:OrderingBusiness;transactionId:string;reason:string;actor:OrderingActor}){
+  const printReason=reason(input.reason,"reprint");
+  await ensureOrderingAccountSchema();
+  return withTransaction(async()=>{const sql=getSql();const payment=(await sql`SELECT transaction.*,orders.display_number,orders.service_type FROM ordering_payment_transactions transaction JOIN ordering_orders orders ON orders.id=transaction.order_id WHERE transaction.id=${input.transactionId} AND transaction.order_id=${input.orderId} AND transaction.business=${input.business} AND transaction.transaction_type='payment' AND transaction.status='approved'`)[0];if(!payment)throw new PaymentConflictError("Approved payment tender was not found.");const id=randomUUID();await sql`INSERT INTO ordering_print_jobs(id,business,order_id,check_id,payment_transaction_id,purpose,event_subtype,status,is_reprint,actor_type,actor_id,error_message,payload) VALUES(${id},${input.business},${input.orderId},${payment.check_id},${payment.id},'paid_receipt','receipt_reprint','not_configured',TRUE,${input.actor.type},${input.actor.id},'Printer not configured.',${JSON.stringify({heading:'PAYMENT RECEIPT — REPRINT',orderNumber:String(payment.display_number),serviceType:payment.service_type,amountPaidCents:Number(payment.amount_cents),tenderType:payment.tender_type,reprintReason:printReason,cashier:input.actor.name})}::jsonb)`;await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) SELECT ${randomUUID()},id,version,'payment_receipt_reprinted',${input.actor.type},${input.actor.id},${JSON.stringify({printJobId:id,transactionId:payment.id,reason:printReason,actorName:input.actor.name,actorRole:input.actor.role})}::jsonb FROM ordering_orders WHERE id=${input.orderId}`;return {printJobId:id};});
 }
 
 export async function commitTender(input: {
@@ -53,10 +105,13 @@ export async function commitTender(input: {
   return withTransaction(async () => {
     const sql = getSql();
     const duplicate = await sql`
-      SELECT id FROM ordering_payment_transactions
+      SELECT id, order_id, transaction_type FROM ordering_payment_transactions
       WHERE business = ${input.business} AND client_mutation_id = ${input.clientMutationId} LIMIT 1
     `;
-    if (duplicate[0]) return { ...(await checkoutState(input.orderId, input.business, input.checkId)), duplicate: true };
+    if (duplicate[0]) {
+      if (duplicate[0].order_id !== input.orderId || duplicate[0].transaction_type !== "payment") throw new PaymentConflictError("That payment request ID was already used for another operation.");
+      return { ...(await checkoutState(input.orderId, input.business, input.checkId)), duplicate: true };
+    }
 
     const rows = await sql`
       SELECT id, customer_id, display_number, status, payment_status, total_cents, paid_cents, amount_due_cents,

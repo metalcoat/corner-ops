@@ -71,7 +71,7 @@ type SubmittedOrder = {
 type CheckoutState = {
   order: { payment_status: string; total_cents: number; paid_cents: number; amount_due_cents: number };
   check?: { id: string; display_sequence: number; status: string; total_cents: number; paid_cents: number; amount_due_cents: number } | null;
-  tenders: Array<{ id: string; tender_type: string; amount_cents: number; amount_tendered_cents: number; change_due_cents: number; status: string }>;
+  tenders: Array<{ id: string; tender_type: string; transaction_type: string; amount_cents: number; amount_tendered_cents: number; change_due_cents: number; status: string; related_transaction_id?: string|null; reason?: string }>;
 };
 type PayableCheck = { id: string; display_sequence: number; status: string; total_cents: number; paid_cents: number; amount_due_cents: number; lines: Array<{ order_item_id: string; quantity: number; allocated_cents: number; item_name_snapshot: string }> };
 
@@ -792,6 +792,22 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     finally { setPaymentBusy(false); }
   }
 
+  async function paymentOperation(action:"reverse"|"reprint",transactionId:string,maximumCents:number){
+    if(!savedDraft||paymentBusy)return;
+    const reason=window.prompt(action==="reverse"?"Manager reversal reason":"Receipt reprint reason","")?.trim();
+    if(!reason)return;
+    let amountCents=maximumCents;
+    if(action==="reverse"){
+      const entered=window.prompt(`Amount to reverse (maximum ${money(maximumCents)})`,(maximumCents/100).toFixed(2));
+      if(entered===null)return;
+      amountCents=Math.round(Number(entered)*100);
+      if(!Number.isSafeInteger(amountCents)||amountCents<=0||amountCents>maximumCents){setCheckoutError("Enter a valid reversal amount within the unreversed tender balance.");return}
+    }
+    setPaymentBusy(true);setCheckoutError("");
+    try{const response=await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/payments`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,business,transactionId,amountCents,reason,clientMutationId:clientId()})});const payload=await response.json() as CheckoutState&{error?:string};if(!response.ok)throw new Error(payload.error||"Payment operation failed.");if(action==="reverse"){setCheckoutState(payload);const checksResponse=await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/checks`);if(checksResponse.ok){const checksPayload=await checksResponse.json() as {checks?:PayableCheck[]};if(checksPayload.checks)setPayableChecks(checksPayload.checks)}}}
+    catch(error){setCheckoutError(error instanceof Error?error.message:"Payment operation failed.")}finally{setPaymentBusy(false)}
+  }
+
   if (!session) return <main className="posLoading">Loading {business} POS…</main>;
   if (!session.authenticated && business === "Corner Deli") return <PosPinGate onAuthenticated={(employee) => setSession({ authenticated: true, session: employee })} />;
   if (!session.authenticated) return <main className="posLoading"><a href="/signin">Sign in to Corner Ops</a></main>;
@@ -800,6 +816,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   }
   const posEmployee = "session" in session ? session.session as PosEmployeeSession | undefined : undefined;
   const canManageBarcodes=posEmployee?posEmployee.posRole!=="employee":("role" in session&&(session.role==="Owner"||session.role==="Co-Owner"||session.role==="Manager"));
+  const canManagePayments=canManageBarcodes;
 
   return <main className={`posPage ${embedded ? "posPageEmbedded" : ""}`}>
     {!embedded && <header className="posHeader posHeaderFixedBusiness">
@@ -979,7 +996,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         <nav aria-label="Payable checks">{payableChecks.map((check)=><button type="button" key={check.id} className={selectedCheckId===check.id?"selected":""} onClick={()=>void selectCheck(check.id)}>CHECK {check.display_sequence} · {money(Number(check.amount_due_cents))} DUE</button>)}</nav>
         <p>Amount due</p><strong>{money(Number(checkoutState?.check?.amount_due_cents ?? checkoutState?.order.amount_due_cents ?? savedDraft.totalCents))}</strong>
         {payableChecks.find((check)=>check.id===selectedCheckId)?.lines.map((line)=><div key={line.order_item_id}><span>{line.quantity}× {line.item_name_snapshot} · {money(Number(line.allocated_cents))}</span>{Number(checkoutState?.order.paid_cents||0)===0&&<button type="button" disabled={paymentBusy} onClick={()=>void splitOne(selectedCheckId!,line.order_item_id)}>MOVE ONE TO NEW CHECK</button>}</div>)}
-        {checkoutState?.tenders.map((tender) => <div key={tender.id}><span>{tender.tender_type.toUpperCase()} · {money(Number(tender.amount_cents))}</span>{Number(tender.change_due_cents) > 0 && <small>Change {money(Number(tender.change_due_cents))}</small>}</div>)}
+        {checkoutState?.tenders.map((tender) => {const reversed=checkoutState.tenders.filter(row=>row.transaction_type==="void"&&row.related_transaction_id===tender.id).reduce((sum,row)=>sum+Number(row.amount_cents),0),available=Number(tender.amount_cents)-reversed;return <div key={tender.id}><span>{tender.transaction_type==="void"?"REVERSAL":tender.tender_type.toUpperCase()} · {money(Number(tender.amount_cents))}</span>{tender.reason&&<small>{tender.reason}</small>}{Number(tender.change_due_cents)>0&&<small>Change {money(Number(tender.change_due_cents))}</small>}{tender.transaction_type==="payment"&&<><button type="button" disabled={paymentBusy} onClick={()=>void paymentOperation("reprint",tender.id,Number(tender.amount_cents))}>REPRINT RECEIPT</button>{canManagePayments&&available>0&&<button type="button" disabled={paymentBusy} onClick={()=>void paymentOperation("reverse",tender.id,available)}>VOID / REVERSE</button>}</>}</div>})}
         {Number(checkoutState?.check?.amount_due_cents ?? checkoutState?.order.amount_due_cents ?? 0) > 0 && <>
           <label>Cash tendered<input inputMode="decimal" placeholder="0.00" value={cashTender} onChange={(event) => setCashTender(event.target.value)} /></label>
           <button type="button" disabled={paymentBusy} onClick={() => void commitPayment("cash")}>COMMIT CASH</button>

@@ -1,6 +1,6 @@
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
-import { checkoutState, commitTender, PaymentConflictError, type CheckoutTenderType } from "@/lib/ordering-payments";
+import { checkoutState, commitTender, PaymentConflictError, reprintPaymentReceipt, reverseTender, type CheckoutTenderType } from "@/lib/ordering-payments";
 import { orderingActor } from "@/lib/ordering-route-auth";
 
 export const runtime = "nodejs";
@@ -35,6 +35,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const actor = await orderingActor(business);
     if (!actor) return unauthorized();
     const { id } = await context.params;
+    if (body.action === "reverse") return Response.json(await reverseTender({orderId:id,business,transactionId:String(body.transactionId||""),amountCents:Number(body.amountCents),clientMutationId:String(body.clientMutationId||""),reason:String(body.reason||""),actor}),{status:201});
+    if (body.action === "reprint") return Response.json(await reprintPaymentReceipt({orderId:id,business,transactionId:String(body.transactionId||""),reason:String(body.reason||""),actor}),{status:201});
     return Response.json(await commitTender({
       orderId: id,
       business,
