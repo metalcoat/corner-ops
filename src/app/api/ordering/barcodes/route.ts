@@ -1,0 +1,10 @@
+import { BarcodeError,listBarcodeMappings,resolveBarcode,saveBarcodeMapping } from "@/lib/ordering-barcodes";
+import type { OrderingBusiness } from "@/lib/ordering-core";
+import { orderingActor } from "@/lib/ordering-route-auth";
+import { apiError,unauthorized } from "@/lib/http";
+export const runtime="nodejs";
+function business(value:unknown):OrderingBusiness{if(value==="Corner Deli"||value==="Tiki")return value;throw new BarcodeError("Unknown business.")}
+function failure(error:unknown){return error instanceof BarcodeError?Response.json({error:error.message},{status:error.status}):apiError(error)}
+export async function GET(request:Request){try{const url=new URL(request.url),scope=business(url.searchParams.get("business")),actor=await orderingActor(scope);if(!actor)return unauthorized();const barcode=url.searchParams.get("barcode");return barcode!==null?Response.json({mapping:await resolveBarcode(scope,barcode)}):Response.json({mappings:await listBarcodeMappings(scope,url.searchParams.get("q")||"")})}catch(error){return failure(error)}}
+export async function POST(request:Request){try{const body=await request.json() as Record<string,unknown>,scope=business(body.business),actor=await orderingActor(scope);if(!actor)return unauthorized();return Response.json({mapping:await saveBarcodeMapping({business:scope,barcode:String(body.barcode||""),itemId:String(body.itemId||""),variantId:body.variantId?String(body.variantId):null,active:body.active!==false,actor})},{status:201})}catch(error){return failure(error)}}
+export async function PATCH(request:Request){try{const body=await request.json() as Record<string,unknown>,scope=business(body.business),actor=await orderingActor(scope);if(!actor)return unauthorized();return Response.json({mapping:await saveBarcodeMapping({business:scope,id:String(body.id||""),barcode:String(body.barcode||""),itemId:String(body.itemId||""),variantId:body.variantId?String(body.variantId):null,active:body.active!==false,actor})})}catch(error){return failure(error)}}

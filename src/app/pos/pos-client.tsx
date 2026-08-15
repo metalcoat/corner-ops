@@ -22,6 +22,7 @@ import PizzaToppingSelector from "@/components/pizza-topping-selector";
 import { formatPizzaTopping, normalizePizzaToppings, pizzaToppingPriceCents, type PizzaToppingSelection } from "@/lib/ordering-pizza-toppings";
 import{itemNeedsConfiguration}from"@/lib/ordering-menu-presentation";
 import Link from "next/link";
+import { isHumanTextEntry, KeyboardWedgeDetector } from "@/lib/barcode-scanner";
 
 type PosServiceType = Exclude<ServiceType, "undecided">;
 
@@ -80,6 +81,7 @@ type DeliveryRoute = { distanceMiles: number; durationSeconds: number; provider:
 type PosCustomerPhone={id:string;label:string;display_phone:string;normalized_phone:string;is_primary:boolean;last_used_at:string|null};
 type PosCustomerAddress={id:string;label:string;line1:string;line2:string;city:string;state:string;postal_code:string;standardized_address:string;provider:string;provider_reference_id:string;latitude:number|null;longitude:number|null;is_primary:boolean;last_used_at:string|null};
 type PosCustomer={id:string;first_name:string;last_name:string;display_name:string;display_phone:string;normalized_phone:string;last_order_at:string|null;phones:PosCustomerPhone[];addresses:PosCustomerAddress[]};
+type BarcodeMapping={id:string;barcode:string;itemId:string;variantId:string|null;itemName:string;variantName:string|null};
 
 function deliBusinessDate(): string {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -231,6 +233,11 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [orderOrigin,setOrderOrigin]=useState<"pos"|"phone">("pos");
   const[loyalty,setLoyalty]=useState<LoyaltyStatus[]>([]),[redeeming,setRedeeming]=useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [scanNotice,setScanNotice]=useState("");
+  const [unknownBarcode,setUnknownBarcode]=useState("");
+  const [mappingItemId,setMappingItemId]=useState("");
+  const [mappingVariantId,setMappingVariantId]=useState("");
+  const [mappingBusy,setMappingBusy]=useState(false);
 
   useEffect(() => {
     document.documentElement.dataset.businessTheme = business;
@@ -343,6 +350,41 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const subcategories = activePrimary ? menu.filter((category) => category.parentId === activePrimary.id) : [];
   const activeCategory = menu.find((category) => category.id === categoryId) || (activePrimary?.presentationOnly ? subcategories[0] : activePrimary);
   const allItems = useMemo(() => menu.flatMap((category) => category.items), [menu]);
+
+  async function handleScan(value:string){
+    if(!session?.authenticated)return;
+    if(checkoutOpen){setGiftCardNumber(value);setCheckoutError("");setScanNotice("Gift card scanned. Review the card and choose Apply Gift Card.");return}
+    try{
+      const response=await fetch(`/api/ordering/barcodes?business=${encodeURIComponent(business)}&barcode=${encodeURIComponent(value)}`,{cache:"no-store"});
+      const payload=await response.json() as {mapping?:BarcodeMapping|null;error?:string};
+      if(!response.ok)throw new Error(payload.error||"Barcode could not be read.");
+      if(!payload.mapping){setUnknownBarcode(value);setMappingItemId("");setMappingVariantId("");setScanNotice(`Unknown barcode: ${value}`);return}
+      const item=allItems.find(candidate=>candidate.id===payload.mapping!.itemId);
+      if(!item||!item.available){setScanNotice(`${payload.mapping.itemName} is currently unavailable.`);return}
+      if(itemNeedsConfiguration(item)){
+        openItem(item);if(payload.mapping.variantId)setSelectedVariantId(payload.mapping.variantId);
+        setScanNotice(`Scanned ${payload.mapping.itemName}${payload.mapping.variantName?` · ${payload.mapping.variantName}`:""}. Complete required choices.`);
+      }else{selectItem(item);setScanNotice(`Scanned and added ${payload.mapping.itemName}.`)}
+    }catch(error){setScanNotice(error instanceof Error?error.message:"Barcode could not be read.")}
+  }
+
+  useEffect(()=>{
+    if(!session?.authenticated)return;
+    const detector=new KeyboardWedgeDetector(capture=>void handleScan(capture.value));
+    const listener=(event:KeyboardEvent)=>{
+      const giftInput=(event.target as HTMLElement|null)?.dataset?.barcodeContext==="gift-card";
+      if(isHumanTextEntry(event.target)&&!giftInput){detector.reset();return}
+      if(detector.key(event.key,event.timeStamp)&&event.key==="Enter")event.preventDefault();
+    };
+    window.addEventListener("keydown",listener,true);return()=>window.removeEventListener("keydown",listener,true);
+  },[session?.authenticated,checkoutOpen,business,allItems]);
+
+  async function mapUnknownBarcode(){
+    const item=allItems.find(candidate=>candidate.id===mappingItemId);if(!item||!unknownBarcode)return;
+    setMappingBusy(true);
+    try{const response=await fetch("/api/ordering/barcodes",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({business,barcode:unknownBarcode,itemId:item.id,variantId:mappingVariantId||null})});const payload=await response.json() as {error?:string};if(!response.ok)throw new Error(payload.error||"Could not save barcode mapping.");setScanNotice(`Mapped ${unknownBarcode} to ${item.name}. Scan it again to add.`);setUnknownBarcode("")}
+    catch(error){setScanNotice(error instanceof Error?error.message:"Could not save barcode mapping.")}finally{setMappingBusy(false)}
+  }
   const visibleItems = useMemo(() => {
     const query = menuSearch.trim().toLowerCase();
     if (!query) return activeCategory?.items || [];
@@ -757,6 +799,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     return <main className="posLoading">Your account does not have access to {business}.</main>;
   }
   const posEmployee = "session" in session ? session.session as PosEmployeeSession | undefined : undefined;
+  const canManageBarcodes=posEmployee?posEmployee.posRole!=="employee":("role" in session&&(session.role==="Owner"||session.role==="Co-Owner"||session.role==="Manager"));
 
   return <main className={`posPage ${embedded ? "posPageEmbedded" : ""}`}>
     {!embedded && <header className="posHeader posHeaderFixedBusiness">
@@ -869,6 +912,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           <div className="posStatusPill">{serviceLabels[serviceType].label} · {timingMode === "asap" ? "ASAP" : "Future"}</div>
         </div>
         <label className="posMenuSearch">Search menu<input ref={searchInputRef} type="search" value={menuSearch} placeholder="Search items or sizes" onChange={(event) => setMenuSearch(event.target.value)} /></label>
+        {scanNotice&&<div className="posScanNotice" role="status">{scanNotice}<button type="button" aria-label="Dismiss scan message" onClick={()=>setScanNotice("")}>×</button></div>}
         {menuLoading && <div className="posEmpty">Loading menu…</div>}
         {menuError && <div className="posEmpty error">{menuError}</div>}
         {!menuLoading && !menuError && !visibleItems.length && <div className="posEmpty">{menuSearch ? "No matching menu items." : "No active items in this category yet."}</div>}
@@ -940,7 +984,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           <label>Cash tendered<input inputMode="decimal" placeholder="0.00" value={cashTender} onChange={(event) => setCashTender(event.target.value)} /></label>
           <button type="button" disabled={paymentBusy} onClick={() => void commitPayment("cash")}>COMMIT CASH</button>
           <button type="button" disabled={paymentBusy} onClick={() => void commitPayment("card")}>COMMIT REMAINING CREDIT (MANUAL)</button>
-          <label>Gift card number<input autoComplete="off" value={giftCardNumber} onChange={(event)=>setGiftCardNumber(event.target.value)} /></label>
+          <label>Gift card number<input data-barcode-context="gift-card" autoComplete="off" value={giftCardNumber} onChange={(event)=>setGiftCardNumber(event.target.value)} /></label>
           <label>Gift card PIN (if required)<input type="password" inputMode="numeric" autoComplete="off" value={giftCardPin} onChange={(event)=>setGiftCardPin(event.target.value)} /></label>
           <button type="button" disabled={paymentBusy} onClick={() => void commitPayment("gift_card")}>APPLY GIFT CARD</button>
         </>}
@@ -948,6 +992,15 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         <button type="button" onClick={() => setCheckoutOpen(false)}>BACK TO ORDER</button>
       </section>
     </div>}
+    {unknownBarcode&&<div className="posModalBackdrop" role="presentation"><section className="posCustomerDialog" role="dialog" aria-modal="true" aria-label="Unknown barcode">
+      <header><div><span>BARCODE</span><h2>Unknown barcode</h2></div><button type="button" onClick={()=>setUnknownBarcode("")}>Close</button></header>
+      <p><strong>{unknownBarcode}</strong> is not mapped to merchandise for {business}. No item or gift card action was taken.</p>
+      {!canManageBarcodes?<p>A manager or owner must create barcode mappings.</p>:<>
+        <label>Map to item<select value={mappingItemId} onChange={event=>{setMappingItemId(event.target.value);setMappingVariantId("")}}><option value="">Choose an item</option>{allItems.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        {allItems.find(item=>item.id===mappingItemId)?.variants.length?<label>Specific variant (optional)<select value={mappingVariantId} onChange={event=>setMappingVariantId(event.target.value)}><option value="">Item default / no variant</option>{allItems.find(item=>item.id===mappingItemId)!.variants.map(variant=><option key={variant.id} value={variant.id}>{variant.name}</option>)}</select></label>:null}
+        <button type="button" className="primary" disabled={!mappingItemId||mappingBusy} onClick={()=>void mapUnknownBarcode()}>{mappingBusy?"SAVING…":"SAVE MAPPING"}</button>
+      </>}
+    </section></div>}
     {configuringItem && <div className={configuringItem.modifiers.some(group=>group.presentationBehavior==="pizza_topping")?"posInlineConfigHost":"posModalBackdrop"} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfiguringItem(null); }}>
       <section className="posConfigModal" role="dialog" aria-modal={configuringItem.modifiers.some(group=>group.presentationBehavior==="pizza_topping")?undefined:"true"} aria-label={`Configure ${configuringItem.name}`}>
         <header>

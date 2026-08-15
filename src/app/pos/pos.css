@@ -278,6 +278,7 @@
 .posCartToast { position: fixed; z-index: 120; right: 24px; bottom: 24px; padding: 13px 18px; border-radius: 12px; background: #166534; color: #fff; font-weight: 900; box-shadow: 0 12px 35px rgba(0,0,0,.4); }
 .posItemNotes { display: grid; gap: 7px; font-weight: 800; }
 .posItemNotes textarea { min-height: 76px; resize: vertical; border: 1px solid #334155; border-radius: 10px; background: #172033; color: #f8fafc; padding: 10px; font: inherit; }
+.posScanNotice{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;padding:10px 12px;border:1px solid #60a5fa;border-radius:9px;background:#172554;color:#dbeafe;font-weight:800}.posScanNotice button{min-width:34px;font-size:1.2rem}
 
 @media (max-width: 1050px) {
   .posHeader { grid-template-columns: 1fr auto; }
