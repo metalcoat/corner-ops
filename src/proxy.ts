@@ -17,6 +17,7 @@ const publicPaths = [
   "/api/square/callback",
   "/api/square/webhook",
   "/api/cron/",
+  "/api/customer/",
 ];
 
 type Token = {
