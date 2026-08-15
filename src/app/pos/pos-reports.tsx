@@ -1,14 +1,30 @@
+"use client";
+import { useEffect, useState } from "react";
 import type { Business } from "@/lib/types";
 import "./pos.css";
-import "./pos-separation.css";
+
+type MoneyRow = { label?: string; tender_type?: string; entry_type?: string; sales_cents?: number; payments_cents?: number; reversals_cents?: number; amount_cents?: number; orders?: number; quantity?: number; count?: number };
+type Report = { summary: Record<string,number>; tenders: MoneyRow[]; giftCards: MoneyRow[]; salesByServiceType: MoneyRow[]; salesByChannel: MoneyRow[]; salesByCategory: MoneyRow[]; salesByItem: MoneyRow[]; voids: Record<string,number>; openOrderSummary:{count:number;overdueCount:number;amountDueCents:number}; openOrders:Array<{id:string;display_number:string;status:string;service_type:string;amount_due_cents:number;created_at:string;overdue:boolean}>; employeeActions:Array<{event_type:string;actor_id:string;count:number}>; notes:string[] };
+const cents=(value=0)=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(value/100);
+const dateKey=(date:Date)=>date.toISOString().slice(0,10);
+const label=(value:string)=>value.replaceAll("_"," ").replace(/\b\w/g,(character)=>character.toUpperCase());
+
+function Breakdown({title,rows,valueKey="sales_cents"}:{title:string;rows:MoneyRow[];valueKey?:keyof MoneyRow}) {
+  return <section className="posReportCard"><h2>{title}</h2>{rows.length?<div className="posReportRows">{rows.map((row,index)=><div key={`${row.label||row.tender_type||row.entry_type}-${index}`}><span>{label(String(row.label||row.tender_type||row.entry_type||"Other"))}<small>{row.orders!==undefined?`${row.orders} orders`:row.quantity!==undefined?`${row.quantity} sold`:row.count!==undefined?`${row.count} entries`:""}</small></span><strong>{cents(Number(row[valueKey]||0))}</strong></div>)}</div>:<p className="posReportEmpty">No activity in this range.</p>}</section>;
+}
 
 export default function PosReports({ business }: { business: Business }) {
-  return <main className="posReportPage">
-    <header className="posReportHeader"><div>
-      <span className="posDevBadge">DEVELOPMENT</span>
-      <p className="posDevEyebrow">{business} POS reports</p>
-      <h1>Reports are not implemented yet</h1>
-      <p>This workspace is reserved for the future authorized reporting workflow. No sales or tender figures are being estimated or displayed.</p>
-    </div></header>
+  const today=new Date(); const initialEnd=dateKey(today); const initialStart=dateKey(new Date(today.getTime()-6*86400000));
+  const [start,setStart]=useState(initialStart),[end,setEnd]=useState(initialEnd),[report,setReport]=useState<Report|null>(null),[error,setError]=useState(""),[loading,setLoading]=useState(true);
+  useEffect(()=>{const controller=new AbortController();setLoading(true);setError("");fetch(`/api/ordering/reports?${new URLSearchParams({business,start,end})}`,{cache:"no-store",signal:controller.signal}).then(async response=>{const payload=await response.json();if(!response.ok)throw new Error(payload.error||"Report could not be loaded.");setReport(payload)}).catch(reason=>{if(reason.name!=="AbortError"){setReport(null);setError(reason.message)}}).finally(()=>setLoading(false));return()=>controller.abort()},[business,start,end]);
+  const summary=report?.summary||{};
+  return <main className="posReportPage"><header className="posReportHeader"><div><span className="posDevBadge">DEVELOPMENT</span><p>{business} manager reporting</p><h1>Sales & operations</h1></div><div className="posReportDates"><label>From<input type="date" value={start} max={end} onChange={event=>setStart(event.target.value)}/></label><label>Through<input type="date" value={end} min={start} onChange={event=>setEnd(event.target.value)}/></label></div></header>
+    {loading?<div className="posReportState" role="status">Loading authoritative transaction data…</div>:error?<div className="posReportState error" role="alert"><strong>Report unavailable</strong><span>{error}</span></div>:report&&<>
+      <section className="posReportMetrics"><article><span>Gross merchandise</span><strong>{cents(summary.gross_merchandise_cents)}</strong></article><article><span>Modifier revenue</span><strong>{cents(summary.modifier_revenue_cents)}</strong></article><article><span>Promotion discounts</span><strong>-{cents(summary.promotion_discount_cents)}</strong></article><article><span>Loyalty discounts</span><strong>-{cents(summary.loyalty_discount_cents)}</strong></article><article><span>Delivery fees</span><strong>{cents(summary.delivery_fees_cents)}</strong></article><article><span>Order total</span><strong>{cents(summary.order_total_cents)}</strong><small>{summary.orders||0} finalized orders</small></article></section>
+      <section className="posReportAlerts"><article className={report.openOrderSummary.overdueCount?"warning":""}><strong>{report.openOrderSummary.count} open / unpaid</strong><span>{cents(report.openOrderSummary.amountDueCents)} due</span></article><article className={report.openOrderSummary.overdueCount?"danger":""}><strong>{report.openOrderSummary.overdueCount} overdue</strong><span>Open more than 30 minutes</span></article><article><strong>{report.voids.order_voids||0} voided orders</strong><span>{cents(report.voids.voided_order_cents)}</span></article></section>
+      <div className="posReportGrid"><Breakdown title="Tender breakdown" rows={report.tenders} valueKey="payments_cents"/><Breakdown title="Tender reversals" rows={report.tenders.filter(row=>Number(row.reversals_cents)>0)} valueKey="reversals_cents"/><Breakdown title="Gift-card loads & redemptions" rows={report.giftCards} valueKey="amount_cents"/><Breakdown title="Sales by service type" rows={report.salesByServiceType}/><Breakdown title="Sales by channel" rows={report.salesByChannel}/><Breakdown title="Sales by category" rows={report.salesByCategory}/><Breakdown title="Sales by item" rows={report.salesByItem}/>
+      <section className="posReportCard"><h2>Employee operational actions</h2>{report.employeeActions.length?<div className="posReportRows">{report.employeeActions.map((row,index)=><div key={`${row.actor_id}-${row.event_type}-${index}`}><span>{row.actor_id||"Unknown actor"}<small>{label(row.event_type)}</small></span><strong>{row.count}</strong></div>)}</div>:<p className="posReportEmpty">No employee actions in this range.</p>}</section></div>
+      {report.openOrders.length>0&&<section className="posReportCard posReportOpen"><h2>Open and unpaid orders</h2><div className="posReportRows">{report.openOrders.map(order=><div className={order.overdue?"overdue":""} key={order.id}><span>#{order.display_number||order.id.slice(0,8)} · {label(order.service_type)}<small>{label(order.status)} · {new Date(order.created_at).toLocaleString()}</small></span><strong>{cents(order.amount_due_cents)}</strong></div>)}</div></section>}
+      <footer className="posReportNotes">{report.notes.map(note=><span key={note}>{note}</span>)}</footer></>}
   </main>;
 }

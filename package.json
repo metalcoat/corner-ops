@@ -51,6 +51,7 @@
     "test:scheduled-menu-availability": "tsx scripts/scheduled-menu-availability-validate.ts",
     "test:delivery-pricing": "tsx scripts/delivery-pricing-validate.ts",
     "test:ai-ordering": "tsx scripts/ai-ordering-validate.ts",
+    "test:operational-reporting": "tsx scripts/operational-reporting-validate.ts",
     "test:auth:e2e": "playwright test tests/auth-cookie.spec.ts",
     "test:pos:e2e": "playwright test tests/pos-pin-auth.spec.ts tests/pos-deli.spec.ts tests/deli-order-lifecycle.spec.ts tests/pos-workspace-navigation.spec.ts",
     "test:customer-ordering:e2e": "playwright test tests/customer-ordering.spec.ts"

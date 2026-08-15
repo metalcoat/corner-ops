@@ -19,6 +19,7 @@ export function ensureOrderingPromotionSchema(): Promise<void> {
     await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS promotion_discount_cents INTEGER NOT NULL DEFAULT 0`;
     await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS loyalty_discount_cents INTEGER NOT NULL DEFAULT 0`;
     await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS net_merchandise_cents INTEGER NOT NULL DEFAULT 0`;
+    await sql`ALTER TABLE ordering_order_items ADD COLUMN IF NOT EXISTS category_name_snapshot TEXT NOT NULL DEFAULT ''`;
     await sql`
       CREATE TABLE IF NOT EXISTS ordering_order_promotion_applications (
         id UUID PRIMARY KEY,

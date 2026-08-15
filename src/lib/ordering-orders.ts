@@ -41,6 +41,7 @@ type ItemRow = {
   name: string;
   base_price_cents: number;
   available: boolean;
+  category_name_snapshot: string;
 };
 type ModifierRow = {
   group_id: string;
@@ -114,9 +115,11 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
   const sql = getSql();
   const quantity = positiveQuantity(input.quantity);
   const itemRows = (await sql`
-    SELECT id, name, base_price_cents, available
-    FROM ordering_menu_items
-    WHERE id = ${input.itemId} AND business = ${business} AND active = TRUE
+    SELECT item.id, item.name, item.base_price_cents, item.available,
+      COALESCE(NULLIF(category.display_name, ''), category.name) AS category_name_snapshot
+    FROM ordering_menu_items item
+    JOIN ordering_menu_categories category ON category.id = item.category_id AND category.business = item.business
+    WHERE item.id = ${input.itemId} AND item.business = ${business} AND item.active = TRUE
     LIMIT 1
   `) as ItemRow[];
   const item = itemRows[0];
@@ -367,11 +370,11 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
   const orderItemId = randomUUID();
   await sql`
     INSERT INTO ordering_order_items (
-      id, order_id, item_id, item_name_snapshot, quantity, unit_price_cents,
+      id, order_id, item_id, item_name_snapshot, category_name_snapshot, quantity, unit_price_cents,
       modifier_total_cents, combo_name_snapshot, combo_total_cents,
       line_total_cents, special_instructions, sort_order
     ) VALUES (
-      ${orderItemId}, ${orderId}, ${item.id}, ${item.name}, ${quantity}, ${Number(item.base_price_cents)},
+      ${orderItemId}, ${orderId}, ${item.id}, ${item.name}, ${item.category_name_snapshot}, ${quantity}, ${Number(item.base_price_cents)},
       ${modifierUnitDeltaCents}, ${comboNameSnapshot}, ${comboUnitDeltaCents},
       ${lineTotalCents}, ${String(input.specialInstructions || "")},
       (SELECT COUNT(*)::INTEGER FROM ordering_order_items WHERE order_id = ${orderId})
