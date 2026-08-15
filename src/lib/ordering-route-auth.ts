@@ -11,7 +11,10 @@ export async function orderingActor(business: OrderingBusiness): Promise<Orderin
   }
   const account = await getSession();
   if (!account || !canAccessBusiness(account, business)) return null;
-  return { id: account.email, name: account.displayName || account.email, type: "account", role: account.role === "Owner" || account.role === "Co-Owner" ? "owner" : account.role === "Manager" ? "manager" : "employee" };
+  // Ordering audit schemas use employee/web/system channel values. A signed-in
+  // operations account acting at a POS is recorded through the employee
+  // channel while retaining its stable account id, display name, and role.
+  return { id: account.email, name: account.displayName || account.email, type: "employee", role: account.role === "Owner" || account.role === "Co-Owner" ? "owner" : account.role === "Manager" ? "manager" : "employee" };
 }
 
 export function canManagePos(actor: OrderingActor): boolean {

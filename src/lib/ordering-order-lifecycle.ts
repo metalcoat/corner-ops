@@ -236,8 +236,8 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
       await sql`INSERT INTO ordering_operations_audit(id,business,actor_id,actor_role,action,target_type,target_id,reason,details) VALUES(${randomUUID()},${business},${actor.id},${actor.role || "manager"},'ordering_hours_overridden','order',${orderId},${reason},${JSON.stringify({ sourceRule: availability.sourceRule, at: availabilityAt.toISOString() })}::jsonb)`;
     }
     const customerName = `${order.first_name_snapshot || ""} ${order.last_name_snapshot || ""}`.trim();
-    if (!customerName) throw new OrderConflictError("Customer name is required.");
-    if ((order.service_type === "pickup" || order.service_type === "delivery" || order.service_type === "no_contact_delivery") && !String(order.phone_snapshot || "").trim()) {
+    if (business === "Corner Deli" && !customerName) throw new OrderConflictError("Customer name is required.");
+    if (business === "Corner Deli" && (order.service_type === "pickup" || order.service_type === "delivery" || order.service_type === "no_contact_delivery") && !String(order.phone_snapshot || "").trim()) {
       throw new OrderConflictError(order.service_type === "pickup"
         ? "Phone number is required for pickup orders."
         : "Phone number is required for delivery orders.");

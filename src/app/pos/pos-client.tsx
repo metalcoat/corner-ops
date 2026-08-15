@@ -62,6 +62,7 @@ type SavedDraft = {
   orderItemIds:string[];
   loyalty:Array<{label:string;discountCents:number}>;
 };
+type OpenTikiTab={id:string;display_number:string;tab_name:string;total_cents:number;paid_cents:number;amount_due_cents:number;item_count:number;updated_at:string};
 type LoyaltyStatus={programId:string;name:string;units:number;quantityRequired:number;progress:number;rewardsAvailable:number};
 
 type SubmittedOrder = {
@@ -238,6 +239,12 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [mappingItemId,setMappingItemId]=useState("");
   const [mappingVariantId,setMappingVariantId]=useState("");
   const [mappingBusy,setMappingBusy]=useState(false);
+  const [tabName,setTabName]=useState("");
+  const [openTabs,setOpenTabs]=useState<OpenTikiTab[]>([]);
+  const [tabsOpen,setTabsOpen]=useState(false);
+  const [tabsLoading,setTabsLoading]=useState(false);
+  const [activeTab,setActiveTab]=useState<SavedDraft|null>(null);
+  const [activeTabItems,setActiveTabItems]=useState<Array<{id:string;item_name_snapshot:string;variant_name_snapshot:string;quantity:number;line_total_cents:number}>>([]);
 
   useEffect(() => {
     document.documentElement.dataset.businessTheme = business;
@@ -633,6 +640,13 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     setCheckoutError("");
     setSavedDraft(null);
     try {
+      if(business==="Tiki"&&serviceType==="bar"&&activeTab){
+        const response=await fetch(`/api/ordering/tiki-tabs/${encodeURIComponent(activeTab.id)}/items`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({items:cart.map(line=>({itemId:line.itemId,variantId:line.variantId,quantity:line.quantity,modifierSelections:line.modifierSelections,modifierQuantities:line.modifierQuantities,modifierAmounts:line.modifierAmounts,modifierDeclines:line.modifierDeclines,pizzaToppings:line.pizzaToppings,comboId:line.comboId,comboSelections:line.comboSelections,specialInstructions:line.specialInstructions}))})});
+        const payload=await response.json() as {tab?:any;error?:string};
+        if(!response.ok||!payload.tab)throw new Error(payload.error||"Could not add items to the tab.");
+        const updated={...activeTab,totalCents:Number(payload.tab.total_cents)};
+        setActiveTab(updated);setSavedDraft(updated);setActiveTabItems(payload.tab.items||[]);setCart([]);setCartNotice(`Added items to tab ${tabName||`#${updated.displayNumber}`}.`);return updated;
+      }
       const response = await fetch("/api/ordering/orders", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -647,7 +661,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           customerId:customer?.id,
           customerPhoneId:selectedCustomerPhoneId||undefined,
           customerAddressId:serviceType==="delivery"?selectedCustomerAddressId||undefined:undefined,
-          customerFirstName:customer?.first_name,
+          customerFirstName:customer?.first_name||(business==="Tiki"&&serviceType==="bar"?tabName.trim():undefined),
           customerLastName:customer?.last_name,
           callerPhone:customer?.phones?.find(phone=>phone.id===selectedCustomerPhoneId)?.normalized_phone||customer?.normalized_phone,
           orderOrigin,
@@ -691,6 +705,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         orderItemIds:(payload.orderItems||[]).map(row=>row.id),loyalty:[],
       };
       setSavedDraft(draft);
+      if(business==="Tiki"&&serviceType==="bar"){setActiveTab(draft);setActiveTabItems(cart.map(line=>({id:line.id,item_name_snapshot:line.name,variant_name_snapshot:line.variantName,quantity:line.quantity,line_total_cents:line.unitPriceCents*line.quantity})));setCart([])}
       const promotionDiscount = draft.promotions.reduce((sum, row) => sum + row.discountCents, 0);
       if (Number(payload.order.total_cents) !== subtotalCents - promotionDiscount) {
         setCheckoutError(`Menu pricing changed. Backend total is ${money(Number(payload.order.total_cents))}; review before continuing.`);
@@ -708,7 +723,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
 
   async function submitOrder(draft: SavedDraft | null = savedDraft, managerOverride = false) {
     if (submittingOrder) return;
-    if (!draft) draft = await saveDraft();
+    if(business==="Tiki"&&activeTab&&cart.length)draft=await saveDraft();
+    if (!draft) draft = activeTab || await saveDraft();
     if (!draft) return;
     setSubmittingOrder(true);
     setCheckoutError("");
@@ -726,6 +742,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       setSubmittedOrder({ displayNumber: payload.order.display_number, totalCents: Number(payload.order.total_cents) });
       setCart([]);
       setSavedDraft(null);
+      setActiveTab(null);setActiveTabItems([]);setTabName("");
       setScheduledFor("");
       setTimingMode("asap");
       setOverrideReason("");
@@ -737,7 +754,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   }
 
   async function openCheckout() {
-    const draft = savedDraft || await saveDraft();
+    const draft = business==="Tiki"&&activeTab&&cart.length?await saveDraft():savedDraft || activeTab || await saveDraft();
     if (!draft) return;
     const checksResponse = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/checks`);
     const checksPayload = await checksResponse.json() as { checks?: PayableCheck[]; error?: string };
@@ -753,18 +770,18 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   }
 
   async function selectCheck(checkId: string) {
-    if (!savedDraft) return;
-    const response = await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/payments?business=${encodeURIComponent(business)}&checkId=${encodeURIComponent(checkId)}`);
+    const draft=savedDraft||activeTab;if (!draft) return;
+    const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments?business=${encodeURIComponent(business)}&checkId=${encodeURIComponent(checkId)}`);
     const payload = await response.json() as CheckoutState & { error?: string };
     if (!response.ok) { setCheckoutError(payload.error || "Could not load check."); return; }
     setSelectedCheckId(checkId); setCheckoutState(payload);
   }
 
   async function splitOne(checkId: string, orderItemId: string) {
-    if (!savedDraft || paymentBusy) return;
+    const draft=savedDraft||activeTab;if (!draft || paymentBusy) return;
     setPaymentBusy(true); setCheckoutError("");
     try {
-      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/checks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fromCheckId: checkId, lines: [{ orderItemId, quantity: 1 }] }) });
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/checks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fromCheckId: checkId, lines: [{ orderItemId, quantity: 1 }] }) });
       const payload = await response.json() as { checks?: PayableCheck[]; newCheckId?: string; error?: string };
       if (!response.ok || !payload.checks) throw new Error(payload.error || "Could not split check.");
       setPayableChecks(payload.checks); await selectCheck(payload.newCheckId || payload.checks[0].id);
@@ -773,14 +790,14 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   }
 
   async function commitPayment(tenderType: "cash" | "card" | "gift_card") {
-    if (!savedDraft || !checkoutState || paymentBusy) return;
+    const draft=savedDraft||activeTab;if (!draft || !checkoutState || paymentBusy) return;
     const due = Number(checkoutState.check?.amount_due_cents ?? checkoutState.order.amount_due_cents);
     const amountTenderedCents = tenderType === "cash" ? Math.round(Number(cashTender) * 100) : due;
     if (!Number.isSafeInteger(amountTenderedCents) || amountTenderedCents <= 0) { setCheckoutError("Enter a valid tender amount."); return; }
     if (tenderType === "gift_card" && giftCardNumber.replace(/[^A-Za-z0-9]/g, "").length < 8) { setCheckoutError("Enter a valid gift card number."); return; }
     setPaymentBusy(true); setCheckoutError("");
     try {
-      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/payments`, {
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ business, checkId: selectedCheckId, tenderType, amountTenderedCents, giftCardNumber, giftCardPin, clientMutationId: clientId() }),
       });
@@ -793,7 +810,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   }
 
   async function paymentOperation(action:"reverse"|"reprint",transactionId:string,maximumCents:number){
-    if(!savedDraft||paymentBusy)return;
+    const draft=savedDraft||activeTab;if(!draft||paymentBusy)return;
     const reason=window.prompt(action==="reverse"?"Manager reversal reason":"Receipt reprint reason","")?.trim();
     if(!reason)return;
     let amountCents=maximumCents;
@@ -804,7 +821,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       if(!Number.isSafeInteger(amountCents)||amountCents<=0||amountCents>maximumCents){setCheckoutError("Enter a valid reversal amount within the unreversed tender balance.");return}
     }
     setPaymentBusy(true);setCheckoutError("");
-    try{const response=await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/payments`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,business,transactionId,amountCents,reason,clientMutationId:clientId()})});const payload=await response.json() as CheckoutState&{error?:string};if(!response.ok)throw new Error(payload.error||"Payment operation failed.");if(action==="reverse"){setCheckoutState(payload);const checksResponse=await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/checks`);if(checksResponse.ok){const checksPayload=await checksResponse.json() as {checks?:PayableCheck[]};if(checksPayload.checks)setPayableChecks(checksPayload.checks)}}}
+    try{const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,business,transactionId,amountCents,reason,clientMutationId:clientId()})});const payload=await response.json() as CheckoutState&{error?:string};if(!response.ok)throw new Error(payload.error||"Payment operation failed.");if(action==="reverse"){setCheckoutState(payload);const checksResponse=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/checks`);if(checksResponse.ok){const checksPayload=await checksResponse.json() as {checks?:PayableCheck[]};if(checksPayload.checks)setPayableChecks(checksPayload.checks)}}}
     catch(error){setCheckoutError(error instanceof Error?error.message:"Payment operation failed.")}finally{setPaymentBusy(false)}
   }
 
@@ -817,6 +834,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const posEmployee = "session" in session ? session.session as PosEmployeeSession | undefined : undefined;
   const canManageBarcodes=posEmployee?posEmployee.posRole!=="employee":("role" in session&&(session.role==="Owner"||session.role==="Co-Owner"||session.role==="Manager"));
   const canManagePayments=canManageBarcodes;
+  async function showTabs(){setTabsOpen(true);setTabsLoading(true);setCheckoutError("");try{const response=await fetch("/api/ordering/tiki-tabs",{cache:"no-store"}),payload=await response.json();if(!response.ok)throw new Error(payload.error||"Could not load tabs.");setOpenTabs(payload.tabs||[])}catch(error){setCheckoutError(error instanceof Error?error.message:"Could not load tabs.")}finally{setTabsLoading(false)}}
+  async function chooseTab(tab:OpenTikiTab){const response=await fetch(`/api/ordering/tiki-tabs/${encodeURIComponent(tab.id)}`,{cache:"no-store"}),payload=await response.json();if(!response.ok){setCheckoutError(payload.error||"Could not open tab.");return}const detail=payload.tab;const draft:SavedDraft={id:detail.id,displayNumber:detail.display_number,totalCents:Number(detail.total_cents),timingMessage:"Open bar tab",kitchenTimingLabel:"BAR",scheduledFor:null,promotions:[],orderItemIds:(detail.items||[]).map((item:any)=>item.id),loyalty:[]};setServiceType("bar");setActiveTab(draft);setSavedDraft(draft);setActiveTabItems(detail.items||[]);setTabName(detail.first_name_snapshot||"");setCart([]);setTabsOpen(false)}
 
   return <main className={`posPage ${embedded ? "posPageEmbedded" : ""}`}>
     {!embedded && <header className="posHeader posHeaderFixedBusiness">
@@ -831,6 +850,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           ? <a key={utility} href="/pos/deli/orders">Orders</a>
           : business === "Corner Deli" && utility === "manager"
           ? <a key={utility} href="/pos/deli/settings">Settings</a>
+          : utility === "bar_tabs"
+          ? <button key={utility} type="button" onClick={()=>void showTabs()}>Bar Tabs</button>
           : utility === "reports"
           ? <a key={utility} href={config.reportsPath}>{utilityLabels[utility]}</a>
           : <button key={utility} type="button">{utilityLabels[utility]}</button>)}
@@ -841,11 +862,11 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     </header>}
 
     <section className="posServiceBar" aria-label="Fulfillment type and timing">
-      {availableServices.map((service) => <button key={service} type="button" className={serviceType === service ? "active" : ""} onClick={() => { setServiceType(service); setSavedDraft(null); setCheckoutError(""); }}>
+      {availableServices.map((service) => <button key={service} type="button" className={serviceType === service ? "active" : ""} onClick={() => { setServiceType(service); setSavedDraft(null); if(service!=="bar"){setActiveTab(null);setActiveTabItems([])} setCheckoutError(""); }}>
         <span>{serviceLabels[service].label}</span>
         {serviceLabels[service].paymentNote && <small>{serviceLabels[service].paymentNote}</small>}
       </button>)}
-      <button type="button" className={`futureOrderButton ${timingMode === "asap" ? "active" : ""}`} onClick={() => { setTimingMode("asap"); setSavedDraft(null); }}>
+      {business==="Corner Deli"&&<><button type="button" className={`futureOrderButton ${timingMode === "asap" ? "active" : ""}`} onClick={() => { setTimingMode("asap"); setSavedDraft(null); }}>
         <span>ASAP</span>
         <small>Use current quote</small>
       </button>
@@ -859,9 +880,10 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           <option value="">{futureSlotsLoading ? "Loading times…" : futureSlots.length ? "Choose time" : "No valid times"}</option>
           {futureSlots.map((slot) => <option key={slot} value={slot}>{new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(slot))}</option>)}
         </select>
-      </div>}
+      </div>}</>}
     </section>
-    <button type="button" className="posCustomerCompact" onClick={()=>setCustomerOpen(true)}>{customer?<><strong>{customer.display_name}</strong><span>{customer.phones?.find(phone=>phone.id===selectedCustomerPhoneId)?.display_phone||customer.display_phone}{serviceType==="delivery"&&validatedAddress?` · ${validatedAddress.formattedAddress}`:""}</span>{loyalty.map(program=><small key={program.programId}>{program.name}: {program.rewardsAvailable?`${program.rewardsAvailable} FREE REWARD${program.rewardsAvailable===1?"":"S"} AVAILABLE`:`${program.progress} / ${program.quantityRequired}`}</small>)}</>:<><strong>+ CUSTOMER</strong><span>{serviceType==="dine_in"?"Name required · phone optional":"Name and phone required"}</span></>}</button>
+    {business==="Tiki"&&serviceType==="bar"&&!activeTab&&<label className="posTabName">TAB NAME <input value={tabName} maxLength={80} placeholder="Guest name or seat (optional)" onChange={event=>setTabName(event.target.value)}/></label>}
+    <button type="button" className="posCustomerCompact" onClick={()=>setCustomerOpen(true)}>{customer?<><strong>{customer.display_name}</strong><span>{customer.phones?.find(phone=>phone.id===selectedCustomerPhoneId)?.display_phone||customer.display_phone}{serviceType==="delivery"&&validatedAddress?` · ${validatedAddress.formattedAddress}`:""}</span>{loyalty.map(program=><small key={program.programId}>{program.name}: {program.rewardsAvailable?`${program.rewardsAvailable} FREE REWARD${program.rewardsAvailable===1?"":"S"} AVAILABLE`:`${program.progress} / ${program.quantityRequired}`}</small>)}</>:<><strong>+ CUSTOMER</strong><span>{business==="Tiki"?"Optional":"Name and phone required"}</span></>}</button>
     {customer&&loyalty.some(program=>program.rewardsAvailable>0)&&cart.length>0&&<div className="posCustomerChoices" aria-label="Available loyalty rewards">{loyalty.filter(program=>program.rewardsAvailable>0).map(program=><div key={program.programId}><strong>{program.name}</strong>{cart.map(line=><button disabled={redeeming||Boolean(savedDraft?.loyalty.length)} key={line.id} onClick={()=>void redeemLoyalty(program.programId,line.id)}>REDEEM ON {line.name}</button>)}</div>)}</div>}
     {customer&&customer.phones?.length>1&&<div className="posCustomerChoices" aria-label="Contact number for this order"><strong>CONTACT NUMBER</strong>{customer.phones.map(phone=><button type="button" key={phone.id} className={selectedCustomerPhoneId===phone.id?"selected":""} onClick={()=>{setSelectedCustomerPhoneId(phone.id);setSavedDraft(null)}}>{phone.label||"Phone"} · {phone.display_phone}</button>)}</div>}
 
@@ -899,10 +921,10 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       {addressError && <p className="addressError" role="alert">{addressError}</p>}
     </section>}
 
-    {savedDraft && <div className="posSaveNotice">
-      Held order #{savedDraft.displayNumber} · {money(savedDraft.totalCents)} · UNPAID
-      {savedDraft.timingMessage ? ` · ${savedDraft.timingMessage}` : ""}
-      {savedDraft.kitchenTimingLabel ? ` · Kitchen: ${savedDraft.kitchenTimingLabel.replace(/\n/g, " / ")}` : ""}
+    {(savedDraft||activeTab) && <div className="posSaveNotice">
+      {activeTab?`Open tab ${tabName||`#${activeTab.displayNumber}`}`:`Held order #${savedDraft!.displayNumber}`} · {money((savedDraft||activeTab)!.totalCents)} · UNPAID
+      {(savedDraft||activeTab)!.timingMessage ? ` · ${(savedDraft||activeTab)!.timingMessage}` : ""}
+      {(savedDraft||activeTab)!.kitchenTimingLabel ? ` · Kitchen: ${(savedDraft||activeTab)!.kitchenTimingLabel.replace(/\n/g, " / ")}` : ""}
     </div>}
     {submittedOrder && <div className="posSaveNotice success" role="status">
       Order #{submittedOrder.displayNumber} submitted to kitchen · {money(submittedOrder.totalCents)} · UNPAID
@@ -951,10 +973,11 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
 
       <aside className="posCart">
         <div className="posCartHeading">
-          <div><span>Current order</span><h2>New {serviceLabels[serviceType].label} · {timingMode === "asap" ? "ASAP" : "Future"}</h2></div>
+          <div><span>{activeTab?"Add to open tab":"Current order"}</span><h2>{activeTab?(tabName||`Tab #${activeTab.displayNumber}`):`New ${serviceLabels[serviceType].label}`}</h2></div>
           <button type="button" onClick={() => { setCart([]); setSavedDraft(null); }} disabled={!cart.length}>Clear</button>
         </div>
         <div className="posCartLines">
+          {activeTabItems.map(line=><article className="posCartLine posPersistedTabLine" key={line.id}><div className="posLineTop"><strong>{line.quantity}× {line.item_name_snapshot}</strong><span>{money(Number(line.line_total_cents))}</span></div>{line.variant_name_snapshot&&<small>{line.variant_name_snapshot}</small>}<small>Already on tab</small></article>)}
           {!cart.length && <div className="posEmpty">Tap a menu item to start the order.</div>}
           {cart.map((line) => <article className="posCartLine" key={line.id} onTouchStart={e=>{const t=e.touches[0];swipeStart.current={id:line.id,x:t.clientX,y:t.clientY}}} onTouchEnd={e=>{const s=swipeStart.current,t=e.changedTouches[0];swipeStart.current=null;if(s?.id===line.id&&s.x-t.clientX>80&&Math.abs(s.y-t.clientY)<45)removeLine(line.id)}}>
             <div className="posLineTop"><strong>{line.quantity}× {line.name}</strong><span>{money(line.unitPriceCents * line.quantity)}</span></div>
@@ -978,23 +1001,23 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           <div className="grand"><span>{savedDraft ? "Backend total" : "Estimated total"}</span><strong>{money(savedDraft?.totalCents ?? Math.max(0,subtotalCents-promotionDiscountCents))}</strong></div>
         </div>
         <div className="posCheckoutButtons">
-          <button type="button" disabled={!cart.length || savingDraft || Boolean(savedDraft) || (timingMode === "future" && !scheduledFor)} onClick={() => void saveDraft()}>
-            {savingDraft ? "HOLDING…" : "HOLD"}
+          <button type="button" disabled={!cart.length || savingDraft || Boolean(savedDraft&&!activeTab) || (timingMode === "future" && !scheduledFor)} onClick={() => void saveDraft()}>
+            {savingDraft ? "SAVING…" : activeTab?"ADD TO TAB":business==="Tiki"&&serviceType==="bar"?"OPEN TAB":"HOLD"}
           </button>
           <button type="button" className="submitOrder" disabled={!cart.length || submittingOrder || savingDraft} onClick={() => void submitOrder()}>
             {submittingOrder ? "SENDING…" : "SEND"}
           </button>
-          <button type="button" className="primary" disabled={!cart.length || savingDraft} onClick={() => void openCheckout()}>CHECKOUT</button>
+          <button type="button" className="primary" disabled={(!cart.length&&!activeTab) || savingDraft} onClick={() => void openCheckout()}>CHECKOUT</button>
         </div>
       </aside>
     </section>
 
     {removedLine&&<div className="posUndo" role="status">Removed {removedLine.name}<button onClick={()=>{setCart(current=>[...current,removedLine]);setRemovedLine(null)}}>UNDO</button></div>}
-    {checkoutOpen && savedDraft && <div className="posModalBackdrop" role="presentation">
+    {checkoutOpen && (savedDraft||activeTab) && <div className="posModalBackdrop" role="presentation">
       <section className="posCustomerDialog" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
-        <h2 id="checkout-title">Checkout · Order #{savedDraft.displayNumber}</h2>
+        <h2 id="checkout-title">Checkout · Order #{(savedDraft||activeTab)!.displayNumber}</h2>
         <nav aria-label="Payable checks">{payableChecks.map((check)=><button type="button" key={check.id} className={selectedCheckId===check.id?"selected":""} onClick={()=>void selectCheck(check.id)}>CHECK {check.display_sequence} · {money(Number(check.amount_due_cents))} DUE</button>)}</nav>
-        <p>Amount due</p><strong>{money(Number(checkoutState?.check?.amount_due_cents ?? checkoutState?.order.amount_due_cents ?? savedDraft.totalCents))}</strong>
+        <p>Amount due</p><strong>{money(Number(checkoutState?.check?.amount_due_cents ?? checkoutState?.order.amount_due_cents ?? (savedDraft||activeTab)!.totalCents))}</strong>
         {payableChecks.find((check)=>check.id===selectedCheckId)?.lines.map((line)=><div key={line.order_item_id}><span>{line.quantity}× {line.item_name_snapshot} · {money(Number(line.allocated_cents))}</span>{Number(checkoutState?.order.paid_cents||0)===0&&<button type="button" disabled={paymentBusy} onClick={()=>void splitOne(selectedCheckId!,line.order_item_id)}>MOVE ONE TO NEW CHECK</button>}</div>)}
         {checkoutState?.tenders.map((tender) => {const reversed=checkoutState.tenders.filter(row=>row.transaction_type==="void"&&row.related_transaction_id===tender.id).reduce((sum,row)=>sum+Number(row.amount_cents),0),available=Number(tender.amount_cents)-reversed;return <div key={tender.id}><span>{tender.transaction_type==="void"?"REVERSAL":tender.tender_type.toUpperCase()} · {money(Number(tender.amount_cents))}</span>{tender.reason&&<small>{tender.reason}</small>}{Number(tender.change_due_cents)>0&&<small>Change {money(Number(tender.change_due_cents))}</small>}{tender.transaction_type==="payment"&&<><button type="button" disabled={paymentBusy} onClick={()=>void paymentOperation("reprint",tender.id,Number(tender.amount_cents))}>REPRINT RECEIPT</button>{canManagePayments&&available>0&&<button type="button" disabled={paymentBusy} onClick={()=>void paymentOperation("reverse",tender.id,available)}>VOID / REVERSE</button>}</>}</div>})}
         {Number(checkoutState?.check?.amount_due_cents ?? checkoutState?.order.amount_due_cents ?? 0) > 0 && <>
@@ -1005,10 +1028,11 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           <label>Gift card PIN (if required)<input type="password" inputMode="numeric" autoComplete="off" value={giftCardPin} onChange={(event)=>setGiftCardPin(event.target.value)} /></label>
           <button type="button" disabled={paymentBusy} onClick={() => void commitPayment("gift_card")}>APPLY GIFT CARD</button>
         </>}
-        {checkoutState?.order.payment_status === "paid" && <strong>PAID</strong>}
+        {checkoutState?.order.payment_status === "paid" && <><strong>PAID</strong>{business==="Tiki"&&activeTab&&<button type="button" className="primary" disabled={submittingOrder} onClick={()=>void submitOrder(activeTab)}>{submittingOrder?"CLOSING…":"CLOSE TAB"}</button>}</>}
         <button type="button" onClick={() => setCheckoutOpen(false)}>BACK TO ORDER</button>
       </section>
     </div>}
+    {tabsOpen&&<div className="posModalBackdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)setTabsOpen(false)}}><section className="posCustomerDialog posTabsDialog" role="dialog" aria-modal="true" aria-label="Open Tiki bar tabs"><header><div><span>TIKI</span><h2>Open bar tabs</h2></div><button type="button" onClick={()=>setTabsOpen(false)}>Close</button></header>{tabsLoading?<p>Loading tabs…</p>:openTabs.length?openTabs.map(tab=><button type="button" className="posTabChoice" key={tab.id} onClick={()=>void chooseTab(tab)}><strong>{tab.tab_name||`Tab #${tab.display_number}`}</strong><span>#{tab.display_number} · {tab.item_count} items · {money(Number(tab.amount_due_cents))} due</span></button>):<p>No open Tiki tabs.</p>}</section></div>}
     {unknownBarcode&&<div className="posModalBackdrop" role="presentation"><section className="posCustomerDialog" role="dialog" aria-modal="true" aria-label="Unknown barcode">
       <header><div><span>BARCODE</span><h2>Unknown barcode</h2></div><button type="button" onClick={()=>setUnknownBarcode("")}>Close</button></header>
       <p><strong>{unknownBarcode}</strong> is not mapped to merchandise for {business}. No item or gift card action was taken.</p>
@@ -1110,6 +1134,6 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       </section>
     </div>}
     {intensityChoice&&<div className="posIntensityPopover" role="dialog" aria-label={`${intensityChoice.option.name} amount`}><strong>{intensityChoice.option.name}</strong><div>{(["light","normal","heavy"] as const).map(amount=><button key={amount} className={(modifierAmounts[intensityChoice.option.id]||"normal")===amount?"selected":""} onClick={()=>chooseIntensity(amount)}>{amount.toUpperCase()}</button>)}</div><button onClick={()=>setIntensityChoice(null)}>Cancel</button></div>}
-    {customerOpen&&<div className="posModalBackdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setCustomerOpen(false)}}><section className="posCustomerDialog" role="dialog" aria-modal="true"><header><div><span>CUSTOMER</span><h2>Find by phone or name</h2></div><button onClick={()=>setCustomerOpen(false)}>Close</button></header><input autoFocus type="search" value={customerQuery} onChange={e=>setCustomerQuery(e.target.value)} placeholder="3155551212 or Sarah Smith"/>{customerMatches.map(match=><button className="posCustomerMatch" key={match.id} onClick={()=>{chooseCustomer(match);setCustomerOpen(false)}}><strong>{match.display_name}</strong><span>{match.phones?.map(phone=>phone.display_phone).join(" · ")||match.display_phone}</span>{match.addresses[0]&&<small>{match.addresses[0].line1} · Last order {match.last_order_at?new Date(match.last_order_at).toLocaleDateString():"never"}</small>}</button>)}{customer&&<button className="danger" onClick={()=>{setCustomer(null);setSelectedCustomerPhoneId("");setSelectedCustomerAddressId("");setCustomerOpen(false);setSavedDraft(null)}}>Use Guest / Clear customer</button>}<Link href="/pos/deli/customers" onClick={()=>setCustomerOpen(false)}>Open customer CRM</Link></section></div>}
+    {customerOpen&&<div className="posModalBackdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setCustomerOpen(false)}}><section className="posCustomerDialog" role="dialog" aria-modal="true"><header><div><span>CUSTOMER</span><h2>Find by phone or name</h2></div><button onClick={()=>setCustomerOpen(false)}>Close</button></header><input autoFocus type="search" value={customerQuery} onChange={e=>setCustomerQuery(e.target.value)} placeholder="3155551212 or Sarah Smith"/>{customerMatches.map(match=><button className="posCustomerMatch" key={match.id} onClick={()=>{chooseCustomer(match);setCustomerOpen(false)}}><strong>{match.display_name}</strong><span>{match.phones?.map(phone=>phone.display_phone).join(" · ")||match.display_phone}</span>{match.addresses[0]&&<small>{match.addresses[0].line1} · Last order {match.last_order_at?new Date(match.last_order_at).toLocaleDateString():"never"}</small>}</button>)}{customer&&<button className="danger" onClick={()=>{setCustomer(null);setSelectedCustomerPhoneId("");setSelectedCustomerAddressId("");setCustomerOpen(false);setSavedDraft(null)}}>Use Guest / Clear customer</button>}{business==="Corner Deli"&&<Link href="/pos/deli/customers" onClick={()=>setCustomerOpen(false)}>Open customer CRM</Link>}</section></div>}
   </main>;
 }

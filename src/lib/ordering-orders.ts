@@ -109,7 +109,7 @@ async function nextOrderNumber(business: OrderingBusiness): Promise<string> {
   return String(rows[0].value);
 }
 
-async function addConfiguredItem(orderId: string, business: OrderingBusiness, input: ConfiguredOrderItemInput): Promise<void> {
+export async function addConfiguredItem(orderId: string, business: OrderingBusiness, input: ConfiguredOrderItemInput): Promise<string> {
   await ensureOrderingMenuOverrideSchema();
   const sql = getSql();
   const quantity = positiveQuantity(input.quantity);
@@ -403,9 +403,10 @@ async function addConfiguredItem(orderId: string, business: OrderingBusiness, in
       )
     `;
   }
+  return orderItemId;
 }
 
-async function recalculateOrder(orderId: string): Promise<void> {
+export async function recalculateOrder(orderId: string): Promise<void> {
   const sql = getSql();
   await sql`
     UPDATE ordering_orders
