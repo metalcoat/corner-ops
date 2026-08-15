@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
+import { orderingLocalDateTime } from "@/lib/ordering-timing-core";
 
 export type PromotionComponent = { id: string; quantity: number; itemIds?: string[]; categoryIds?: string[]; variantIds?: string[] };
 export type PromotionRule = { components: PromotionComponent[]; repeatable?: boolean; daysOfWeek?: number[]; startDate?: string | null; endDate?: string | null; startTime?: string | null; endTime?: string | null; serviceTypes?: string[]; channels?: string[]; includedDates?: string[]; excludedDates?: string[] };
@@ -10,14 +11,8 @@ export type PromotionLine = { id:string; item_id:string; variant_id:string|null;
 type Allocation = { lineId:string; quantity:number; baseCents:number; discountCents:number };
 export type AppliedPromotion = { promotionId:string; label:string; normalBaseSubtotalCents:number; discountCents:number; resultingBaseSubtotalCents:number; allocations:Allocation[] };
 
-function nyParts(date: Date) {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone:"America/New_York", year:"numeric", month:"2-digit", day:"2-digit", weekday:"short", hour:"2-digit", minute:"2-digit", hourCycle:"h23" }).formatToParts(date);
-  const value=(type:string)=>parts.find(part=>part.type===type)?.value||"";
-  const weekday=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].indexOf(value("weekday"));
-  return { date:`${value("year")}-${value("month")}-${value("day")}`, time:`${value("hour")}:${value("minute")}`, weekday };
-}
 export function promotionScheduleMatches(rule: PromotionRule, fulfillmentAt: Date, serviceType:string, channel:string) {
-  const local=nyParts(fulfillmentAt);
+  const local=orderingLocalDateTime(fulfillmentAt);
   if (rule.includedDates?.length && !rule.includedDates.includes(local.date)) return false;
   if (rule.excludedDates?.includes(local.date)) return false;
   if (rule.startDate && local.date < rule.startDate) return false;

@@ -200,6 +200,31 @@ export type StoreAvailability = {
   nextOpenAt: Date | null;
 };
 
+const orderingWeekdays: Record<string, number> = {
+  Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+};
+
+/** Shared wall-clock resolver for ordering schedules and fulfillment rules. */
+export function orderingLocalDateTime(date: Date, timeZone = "America/New_York") {
+  if (!Number.isFinite(date.getTime())) throw new Error("A valid fulfillment time is required.");
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
+  return {
+    date: `${value("year")}-${value("month")}-${value("day")}`,
+    time: `${value("hour")}:${value("minute")}`,
+    weekday: orderingWeekdays[value("weekday")] ?? 0,
+  };
+}
+
 export function buildAfterHoursAiPrompt(input: StoreAvailability): string {
   if (input.openNow) return "";
   if (!input.nextOpenAt) {

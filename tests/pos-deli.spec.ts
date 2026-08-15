@@ -30,7 +30,7 @@ test("cashier configures, edits, and saves a backend-priced pizza draft", async 
   await expect(dialog.getByText("Select a size", { exact: true })).toBeVisible();
 
   await dialog.getByText('Regular 14"', { exact: true }).click();
-  await dialog.getByRole("button", { name: "Increase Pepperoni" }).click();
+  await dialog.locator(".pizzaToppingPalette").getByRole("button", { name: "Pepperoni" }).click();
   await expect(dialog.getByText("$14.00", { exact: true })).toBeVisible();
   await dialog.getByLabel("Item notes").fill("Test note");
   await dialog.getByRole("button", { name: /add to order/i }).click();

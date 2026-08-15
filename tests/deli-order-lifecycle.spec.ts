@@ -28,8 +28,8 @@ test("cashier submits a real pizza and kitchen completes it", async ({ page }) =
 
   const dialog = page.getByRole("dialog", { name: "Configure Pizza" });
   await dialog.getByText('Jumbo Thin 16"', { exact: true }).click();
-  await dialog.getByRole("button", { name: "Increase Pepperoni" }).click();
-  await dialog.getByRole("button", { name: "Increase Mushrooms" }).click();
+  await dialog.locator(".pizzaToppingPalette").getByRole("button", { name: "Pepperoni" }).click();
+  await dialog.locator(".pizzaToppingPalette").getByRole("button", { name: "Mushrooms" }).click();
   await dialog.getByLabel("Item notes").fill(note);
   await expect(dialog.getByText("$18.50", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: /add to order/i }).click();
