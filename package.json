@@ -19,6 +19,7 @@
     "test:pizza-toppings": "tsx scripts/pizza-topping-validate.ts",
     "test:combo-dependencies": "tsx scripts/combo-dependency-validate.ts",
     "test:menu-refinement": "tsx scripts/menu-refinement-validate.ts",
+    "test:menu-editor": "tsx scripts/menu-editor-validate.ts",
     "test:modifier-allowances": "tsx scripts/modifier-allowance-validate.ts",
     "test:external-host": "tsx scripts/external-host-validate.ts",
     "test:pos:auth": "tsx scripts/pos-auth-validate.ts",

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { ensureOrderingMenuImportSchema } from "@/lib/ordering-menu-import-schema";
+import { ensureOrderingMenuEditorSchema } from "@/lib/ordering-menu-editor-schema";
 
 export type RezkuNormalizedVariantModifierPrice = {
   modifierSourceId: string;
@@ -106,6 +107,7 @@ export async function applyRezkuVariantSnapshot(input: {
   runId?: string | null;
 }): Promise<{ variantsApplied: number; modifierPricesApplied: number; itemOverridesApplied: number }> {
   await ensureOrderingMenuImportSchema();
+  await ensureOrderingMenuEditorSchema();
   const sql = getSql();
   let variantsApplied = 0;
   let modifierPricesApplied = 0;
@@ -122,15 +124,15 @@ export async function applyRezkuVariantSnapshot(input: {
         let variantId = await mappedId({ business: input.snapshot.business, entityType: "variant", sourceId: compositeSourceId });
         if (variantId) {
           const rows = await sql`
-            UPDATE ordering_menu_item_variants
-            SET name = ${variant.name.trim()},
-                base_price_cents = ${Math.max(0, Math.trunc(variant.basePriceCents))},
-                available = ${variant.available !== false},
-                active = TRUE,
-                sort_order = ${Math.trunc(variant.sortOrder ?? 0)},
+            UPDATE ordering_menu_item_variants v
+            SET name = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='variant' AND entity_id=${variantId} AND field_name='name') THEN v.name ELSE ${variant.name.trim()} END,
+                base_price_cents = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='variant' AND entity_id=${variantId} AND field_name='base_price_cents') THEN v.base_price_cents ELSE ${Math.max(0, Math.trunc(variant.basePriceCents))} END,
+                available = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='variant' AND entity_id=${variantId} AND field_name='available') THEN v.available ELSE ${variant.available !== false} END,
+                active = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='variant' AND entity_id=${variantId} AND field_name='active') THEN v.active ELSE TRUE END,
+                sort_order = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='variant' AND entity_id=${variantId} AND field_name='sort_order') THEN v.sort_order ELSE ${Math.trunc(variant.sortOrder ?? 0)} END,
                 metadata = CAST(${JSON.stringify(variant.metadata || {})} AS jsonb),
                 updated_at = NOW()
-            WHERE id = ${variantId} AND item_id = ${itemId}
+            WHERE v.id = ${variantId} AND v.item_id = ${itemId}
             RETURNING id
           `;
           if (!rows.length) variantId = null;

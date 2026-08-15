@@ -4,6 +4,7 @@ import { assertLocalRezkuImportAllowed } from "@/lib/config";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { ensureOrderingMenuImportSchema } from "@/lib/ordering-menu-import-schema";
 import { applyRezkuVariantSnapshot, type RezkuNormalizedSnapshot } from "@/lib/ordering-rezku-variant-import";
+import { ensureOrderingMenuEditorSchema } from "@/lib/ordering-menu-editor-schema";
 
 export type ImportedModifierOption = {
   sourceId: string;
@@ -291,12 +292,12 @@ async function upsertCategory(input: {
   if (id) {
     const updated = (await sql`
       UPDATE ordering_menu_categories
-      SET name = ${clean(input.category.name)},
-          display_name = ${parts[parts.length - 1] || clean(input.category.name)},
-          parent_id = ${parentId},
+      SET name = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='category' AND entity_id=${id} AND field_name='name') THEN name ELSE ${clean(input.category.name)} END,
+          display_name = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='category' AND entity_id=${id} AND field_name='display_name') THEN display_name ELSE ${parts[parts.length - 1] || clean(input.category.name)} END,
+          parent_id = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='category' AND entity_id=${id} AND field_name='parent_id') THEN parent_id ELSE ${parentId} END,
           presentation_only = FALSE,
-          sort_order = ${Math.trunc(input.category.sortOrder ?? 0)},
-          active = TRUE,
+          sort_order = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='category' AND entity_id=${id} AND field_name='sort_order') THEN sort_order ELSE ${Math.trunc(input.category.sortOrder ?? 0)} END,
+          active = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='category' AND entity_id=${id} AND field_name='active') THEN active ELSE TRUE END,
           updated_at = NOW()
       WHERE id = ${id} AND business = ${input.snapshot.business}
       RETURNING id
@@ -351,15 +352,15 @@ async function upsertItem(input: {
   if (id) {
     const updated = (await sql`
       UPDATE ordering_menu_items
-      SET category_id = ${input.categoryId},
-          name = ${clean(input.item.name)},
-          description = ${clean(input.item.description, 5000)},
+      SET category_id = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='item' AND entity_id=${id} AND field_name='category_id') THEN category_id ELSE ${input.categoryId} END,
+          name = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='item' AND entity_id=${id} AND field_name='name') THEN name ELSE ${clean(input.item.name)} END,
+          description = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='item' AND entity_id=${id} AND field_name='description') THEN description ELSE ${clean(input.item.description, 5000)} END,
           sku = ${clean(input.item.sku, 200)},
-          base_price_cents = ${price},
+          base_price_cents = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='item' AND entity_id=${id} AND field_name='base_price_cents') THEN base_price_cents ELSE ${price} END,
           taxable = ${input.item.taxable !== false},
-          available = ${input.item.available !== false},
-          active = TRUE,
-          sort_order = ${Math.trunc(input.item.sortOrder ?? 0)},
+          available = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='item' AND entity_id=${id} AND field_name='available') THEN available ELSE ${input.item.available !== false} END,
+          active = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='item' AND entity_id=${id} AND field_name='active') THEN active ELSE TRUE END,
+          sort_order = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='item' AND entity_id=${id} AND field_name='sort_order') THEN sort_order ELSE ${Math.trunc(input.item.sortOrder ?? 0)} END,
           updated_at = NOW()
       WHERE id = ${id} AND business = ${input.snapshot.business}
       RETURNING id
@@ -422,13 +423,13 @@ async function upsertModifierGroup(input: {
   if (id) {
     const updated = (await sql`
       UPDATE ordering_modifier_groups
-      SET name = ${clean(input.group.name)},
-          prompt = ${clean(input.group.prompt, 1000)},
-          min_selections = ${min},
-          max_selections = ${max},
+      SET name = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='modifier_group' AND entity_id=${id} AND field_name='name') THEN name ELSE ${clean(input.group.name)} END,
+          prompt = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='modifier_group' AND entity_id=${id} AND field_name='prompt') THEN prompt ELSE ${clean(input.group.prompt, 1000)} END,
+          min_selections = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='modifier_group' AND entity_id=${id} AND field_name='min_selections') THEN min_selections ELSE ${min} END,
+          max_selections = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='modifier_group' AND entity_id=${id} AND field_name='max_selections') THEN max_selections ELSE ${max} END,
           allow_option_quantity = ${Boolean(input.group.allowOptionQuantity)},
-          active = TRUE,
-          sort_order = ${Math.trunc(input.group.sortOrder ?? 0)},
+          active = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='modifier_group' AND entity_id=${id} AND field_name='active') THEN active ELSE TRUE END,
+          sort_order = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='modifier_group' AND entity_id=${id} AND field_name='sort_order') THEN sort_order ELSE ${Math.trunc(input.group.sortOrder ?? 0)} END,
           updated_at = NOW()
       WHERE id = ${id} AND business = ${input.snapshot.business}
       RETURNING id
@@ -482,11 +483,11 @@ async function upsertModifierOption(input: {
     const updated = (await sql`
       UPDATE ordering_modifier_options
       SET group_id = ${input.groupId},
-          name = ${clean(input.option.name)},
-          price_delta_cents = ${delta},
-          available = ${input.option.available !== false},
-          active = TRUE,
-          sort_order = ${Math.trunc(input.option.sortOrder ?? 0)},
+          name = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='modifier_option' AND entity_id=${id} AND field_name='name') THEN name ELSE ${clean(input.option.name)} END,
+          price_delta_cents = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='modifier_option' AND entity_id=${id} AND field_name='price_delta_cents') THEN price_delta_cents ELSE ${delta} END,
+          available = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='modifier_option' AND entity_id=${id} AND field_name='available') THEN available ELSE ${input.option.available !== false} END,
+          active = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='modifier_option' AND entity_id=${id} AND field_name='active') THEN active ELSE TRUE END,
+          sort_order = CASE WHEN EXISTS(SELECT 1 FROM ordering_menu_local_fields WHERE entity_type='modifier_option' AND entity_id=${id} AND field_name='sort_order') THEN sort_order ELSE ${Math.trunc(input.option.sortOrder ?? 0)} END,
           updated_at = NOW()
       WHERE id = ${id}
       RETURNING id
@@ -537,6 +538,7 @@ export async function applyMenuImportRun(input: {
 }): Promise<{ runId: string; applied: true; counts: MenuImportPreview["counts"] }> {
   assertLocalRezkuImportAllowed();
   await ensureOrderingMenuImportSchema();
+  await ensureOrderingMenuEditorSchema();
   const sql = getSql();
   const rows = (await sql`
     SELECT id, business, source, status, warning_count, snapshot
