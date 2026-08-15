@@ -129,7 +129,8 @@ export async function POST(request: Request) {
       }
     }
     const promotions = await getSql()`SELECT label_snapshot label,discount_cents FROM ordering_order_promotion_applications WHERE order_id=${order.id} ORDER BY application_sequence`;
-    return Response.json({ order, promotions }, { status: 201 });
+    const orderItems=await getSql()`SELECT id,sort_order FROM ordering_order_items WHERE order_id=${order.id} ORDER BY sort_order,created_at,id`;
+    return Response.json({ order, promotions, orderItems }, { status: 201 });
   } catch (error) {
     return cashierOrderError(error) || apiError(error);
   }

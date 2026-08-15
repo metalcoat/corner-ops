@@ -14,6 +14,7 @@ import { canManagePos } from "@/lib/ordering-route-auth";
 import { quoteDelivery, recordDeliveryMinimumResolution } from "@/lib/ordering-delivery";
 import { assertMenuTargetsAvailable } from "@/lib/ordering-menu-availability";
 import { applyPromotionsToOrder } from "@/lib/ordering-promotions";
+import { earnLoyaltyForOrder, finalizeLoyaltyRedemptions } from "@/lib/ordering-loyalty";
 
 export type StoredOrderStatus = "draft" | "confirmed" | "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
 export type KitchenOrderStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -271,6 +272,7 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
                 delivery_fee_cents, special_instructions, created_at, updated_at, submitted_at, started_at, ready_at, completed_at, cancelled_at
     `;
     if (!updated.length) throw new OrderConflictError("This order changed while it was being submitted. Refresh and review it.");
+    await finalizeLoyaltyRedemptions(orderId);
     await sql`
       INSERT INTO ordering_order_events (id, order_id, order_version, event_type, actor_type, actor_id, details)
       VALUES (${randomUUID()}, ${orderId}, ${updated[0].version}, 'status_changed', ${actor.type}, ${actor.id},
@@ -330,6 +332,7 @@ export async function transitionKitchenOrder(input: {
       VALUES (${randomUUID()}, ${input.orderId}, ${rows[0].version}, 'status_changed', ${input.actor.type}, ${input.actor.id},
               CAST(${JSON.stringify({ from: input.expectedStatus, to: input.nextStatus, actorName: input.actor.name })} AS jsonb))
     `;
+    if(input.nextStatus==="completed")await earnLoyaltyForOrder(input.orderId,input.actor);
     return rows[0];
   });
 }

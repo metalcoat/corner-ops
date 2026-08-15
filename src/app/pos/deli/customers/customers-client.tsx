@@ -10,6 +10,7 @@ type Customer = {
   display_phone: string; email: string; notes: string; last_order_at: string | null; phones: Phone[]; addresses: Address[];
 };
 type DuplicateMatch = { customer_id: string; display_name: string; display_phone: string };
+type LoyaltyProgram={programId:string;name:string;progress:number;quantityRequired:number;rewardsAvailable:number};type LoyaltyEvent={id:string;entry_type:string;delta_units:number;reason:string;created_by:string;display_number:string|null;created_at:string};
 
 export default function CustomersClient() {
   const [session, setSession] = useState<PosSessionView | null>(null);
@@ -26,6 +27,7 @@ export default function CustomersClient() {
   const [address, setAddress] = useState({ label: "Home", line1: "", line2: "", city: "Ogdensburg", state: "NY", postalCode: "", isPrimary: false });
   const [message, setMessage] = useState("");
   const [merge, setMerge] = useState<string[]>([]);
+  const[loyalty,setLoyalty]=useState<LoyaltyProgram[]>([]),[loyaltyHistory,setLoyaltyHistory]=useState<LoyaltyEvent[]>([]),[adjustment,setAdjustment]=useState({programId:"",deltaUnits:1,reason:""});
 
   useEffect(() => { fetch("/api/pos/session").then((response) => response.json()).then(setSession); }, []);
   const load = useCallback(async () => {
@@ -42,6 +44,8 @@ export default function CustomersClient() {
   }, []);
 
   const selected = customers.find((customer) => customer.id === selectedId) || null;
+  useEffect(()=>{if(!selected){setLoyalty([]);setLoyaltyHistory([]);return}fetch(`/api/ordering/loyalty/status?customerId=${encodeURIComponent(selected.id)}`).then(response=>response.json()).then(body=>{setLoyalty(body.programs||[]);setLoyaltyHistory(body.history||[])}).catch(()=>undefined)},[selected]);
+  async function adjust(){if(!selected)return;const response=await fetch("/api/ordering/loyalty/adjust",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...adjustment,customerId:selected.id})}),body=await response.json();if(!response.ok){setMessage(body.error||"Adjustment failed.");return}setLoyalty(body.programs||[]);setAdjustment({...adjustment,reason:""});setMessage("Loyalty adjustment recorded.")}
 
   async function create() {
     const response = await fetch("/api/ordering/customers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ firstName: first, lastName: last, phone }) });
@@ -122,6 +126,9 @@ export default function CustomersClient() {
         {!selected && <div className="customerEmpty">Select a customer to see phones, addresses, and order history.</div>}
         {selected && <>
           <div className="customerDetailHead"><div><h2>{selected.display_name}</h2><small>{selected.email || "No email"}</small></div><button onClick={() => useForOrder(selected)}>USE FOR CURRENT ORDER</button></div>
+          <h3>LOYALTY</h3><div className="customerContactList">{loyalty.map(program=><div key={program.programId}><b>{program.name}</b><span>{program.rewardsAvailable?`${program.rewardsAvailable} FREE REWARD${program.rewardsAvailable===1?"":"S"} AVAILABLE`:`${program.progress} / ${program.quantityRequired} purchases`}</span></div>)}{!loyalty.length&&<p>No active loyalty programs.</p>}</div>
+          {session.session?.posRole!=="employee"&&loyalty.length>0&&<div className="customerFormRow"><select value={adjustment.programId} onChange={event=>setAdjustment({...adjustment,programId:event.target.value})}><option value="">Program</option>{loyalty.map(program=><option key={program.programId} value={program.programId}>{program.name}</option>)}</select><input type="number" value={adjustment.deltaUnits} onChange={event=>setAdjustment({...adjustment,deltaUnits:Number(event.target.value)})}/><input placeholder="Required adjustment reason" value={adjustment.reason} onChange={event=>setAdjustment({...adjustment,reason:event.target.value})}/><button onClick={()=>void adjust()}>ADJUST</button></div>}
+          <div className="customerHistory">{loyaltyHistory.slice(0,8).map(event=><p key={event.id}>{event.delta_units>0?"+":""}{event.delta_units} · {event.entry_type.replaceAll("_"," ")}{event.display_number?` · Order #${event.display_number}`:""}{event.reason?` · ${event.reason}`:""}</p>)}</div>
           <h3>PHONES</h3>
           <div className="customerContactList">{selected.phones.map((item) => <div key={item.id}><b>{item.label || "Other"}</b><span>{item.display_phone}</span>{item.is_primary && <em>Primary</em>}</div>)}</div>
           <div className="customerFormRow"><select value={phoneLabel} onChange={(event) => setPhoneLabel(event.target.value)}><option>Mobile</option><option>Home</option><option>Work</option><option>Other</option></select><input placeholder="Phone number" value={newPhone} onChange={(event) => { setNewPhone(event.target.value); setDuplicateMatches([]); }} /><label><input type="checkbox" checked={phonePrimary} onChange={(event) => setPhonePrimary(event.target.checked)} /> Primary</label><button onClick={() => void addPhone()}>+ PHONE</button></div>

@@ -58,7 +58,10 @@ type SavedDraft = {
   kitchenTimingLabel: string;
   scheduledFor: string | null;
   promotions: Array<{ label: string; discountCents: number }>;
+  orderItemIds:string[];
+  loyalty:Array<{label:string;discountCents:number}>;
 };
+type LoyaltyStatus={programId:string;name:string;units:number;quantityRequired:number;progress:number;rewardsAvailable:number};
 
 type SubmittedOrder = {
   displayNumber: string;
@@ -224,6 +227,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [selectedCustomerPhoneId,setSelectedCustomerPhoneId]=useState("");
   const [selectedCustomerAddressId,setSelectedCustomerAddressId]=useState("");
   const [orderOrigin,setOrderOrigin]=useState<"pos"|"phone">("pos");
+  const[loyalty,setLoyalty]=useState<LoyaltyStatus[]>([]),[redeeming,setRedeeming]=useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -237,6 +241,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
 
   useEffect(() => { if (!addressSessionToken) setAddressSessionToken(clientId()); }, [addressSessionToken]);
   useEffect(()=>{if(!customerOpen||customerQuery.trim().length<3){setCustomerMatches([]);return}const controller=new AbortController(),timer=window.setTimeout(()=>fetch(`/api/ordering/customers?q=${encodeURIComponent(customerQuery)}`,{signal:controller.signal}).then(r=>r.json()).then(b=>setCustomerMatches(b.customers||[])).catch(()=>undefined),150);return()=>{clearTimeout(timer);controller.abort()}},[customerOpen,customerQuery]);
+  useEffect(()=>{if(!customer){setLoyalty([]);return}const controller=new AbortController();fetch(`/api/ordering/loyalty/status?customerId=${encodeURIComponent(customer.id)}`,{signal:controller.signal}).then(r=>r.json()).then(body=>setLoyalty(body.programs||[])).catch(()=>setLoyalty([]));return()=>controller.abort()},[customer]);
   useEffect(() => {
     if (timingMode !== "future" || business !== "Corner Deli") return;
     const controller = new AbortController();
@@ -627,6 +632,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           kitchen_timing_label_snapshot: string;
         };
         promotions?: Array<{ label: string; discount_cents: number }>;
+        orderItems?:Array<{id:string}>;
         error?: string;
       };
       if (!response.ok || !payload.order) throw new Error(payload.error || "Could not save draft order.");
@@ -638,6 +644,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         kitchenTimingLabel: payload.order.kitchen_timing_label_snapshot || "",
         scheduledFor: payload.order.scheduled_for,
         promotions: (payload.promotions || []).map(row => ({ label: row.label, discountCents: Number(row.discount_cents) })),
+        orderItemIds:(payload.orderItems||[]).map(row=>row.id),loyalty:[],
       };
       setSavedDraft(draft);
       const promotionDiscount = draft.promotions.reduce((sum, row) => sum + row.discountCents, 0);
@@ -652,6 +659,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       setSavingDraft(false);
     }
   }
+
+  async function redeemLoyalty(programId:string,cartLineId:string){if(redeeming)return;setRedeeming(true);setCheckoutError("");try{let draft=savedDraft;if(!draft)draft=await saveDraft();if(!draft)throw new Error("Save the order before applying loyalty.");const index=cart.findIndex(line=>line.id===cartLineId),orderItemId=draft.orderItemIds[index];if(index<0||!orderItemId)throw new Error("The selected item changed. Review the order.");const response=await fetch("/api/ordering/loyalty/redeem",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({orderId:draft.id,orderItemId,programId})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Reward could not be applied.");setSavedDraft({...draft,totalCents:Number(body.order.total_cents),promotions:(body.promotions||[]).map((row:{label:string;discount_cents:number})=>({label:row.label,discountCents:Number(row.discount_cents)})),loyalty:(body.applications||[]).map((row:{label:string;discount_cents:number})=>({label:row.label,discountCents:Number(row.discount_cents)}))})}catch(error){setCheckoutError(error instanceof Error?error.message:"Reward could not be applied.")}finally{setRedeeming(false)}}
 
   async function submitOrder(draft: SavedDraft | null = savedDraft, managerOverride = false) {
     if (submittingOrder) return;
@@ -789,7 +798,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         </select>
       </div>}
     </section>
-    <button type="button" className="posCustomerCompact" onClick={()=>setCustomerOpen(true)}>{customer?<><strong>{customer.display_name}</strong><span>{customer.phones?.find(phone=>phone.id===selectedCustomerPhoneId)?.display_phone||customer.display_phone}{serviceType==="delivery"&&validatedAddress?` · ${validatedAddress.formattedAddress}`:""}</span></>:<><strong>+ CUSTOMER</strong><span>{serviceType==="dine_in"?"Name required · phone optional":"Name and phone required"}</span></>}</button>
+    <button type="button" className="posCustomerCompact" onClick={()=>setCustomerOpen(true)}>{customer?<><strong>{customer.display_name}</strong><span>{customer.phones?.find(phone=>phone.id===selectedCustomerPhoneId)?.display_phone||customer.display_phone}{serviceType==="delivery"&&validatedAddress?` · ${validatedAddress.formattedAddress}`:""}</span>{loyalty.map(program=><small key={program.programId}>{program.name}: {program.rewardsAvailable?`${program.rewardsAvailable} FREE REWARD${program.rewardsAvailable===1?"":"S"} AVAILABLE`:`${program.progress} / ${program.quantityRequired}`}</small>)}</>:<><strong>+ CUSTOMER</strong><span>{serviceType==="dine_in"?"Name required · phone optional":"Name and phone required"}</span></>}</button>
+    {customer&&loyalty.some(program=>program.rewardsAvailable>0)&&cart.length>0&&<div className="posCustomerChoices" aria-label="Available loyalty rewards">{loyalty.filter(program=>program.rewardsAvailable>0).map(program=><div key={program.programId}><strong>{program.name}</strong>{cart.map(line=><button disabled={redeeming||Boolean(savedDraft?.loyalty.length)} key={line.id} onClick={()=>void redeemLoyalty(program.programId,line.id)}>REDEEM ON {line.name}</button>)}</div>)}</div>}
     {customer&&customer.phones?.length>1&&<div className="posCustomerChoices" aria-label="Contact number for this order"><strong>CONTACT NUMBER</strong>{customer.phones.map(phone=><button type="button" key={phone.id} className={selectedCustomerPhoneId===phone.id?"selected":""} onClick={()=>{setSelectedCustomerPhoneId(phone.id);setSavedDraft(null)}}>{phone.label||"Phone"} · {phone.display_phone}</button>)}</div>}
 
     {serviceType === "delivery" && <section className="posDelivery" aria-label="Customer and delivery address">
@@ -899,6 +909,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         <div className="posTotals">
           <div><span>Subtotal</span><strong>{money(subtotalCents)}</strong></div>
           {visiblePromotions.map((promotion,index)=><div key={`${promotion.label}-${index}`}><span>{promotion.label}</span><strong>−{money(promotion.discountCents)}</strong></div>)}
+          {savedDraft?.loyalty.map((reward,index)=><div key={`${reward.label}-${index}`}><span>{reward.label} · Loyalty</span><strong>−{money(reward.discountCents)}</strong></div>)}
           <div><span>Tax</span><strong>Included/configured at checkout</strong></div>
           <div className="grand"><span>{savedDraft ? "Backend total" : "Estimated total"}</span><strong>{money(savedDraft?.totalCents ?? Math.max(0,subtotalCents-promotionDiscountCents))}</strong></div>
         </div>

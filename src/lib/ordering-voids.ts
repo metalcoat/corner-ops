@@ -3,6 +3,7 @@ import { getSql, withTransaction } from "@/lib/db";
 import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { canManagePos, type OrderingActor } from "@/lib/ordering-route-auth";
+import { reverseLoyaltyForOrder } from "@/lib/ordering-loyalty";
 
 export class OrderVoidError extends Error {}
 
@@ -32,6 +33,7 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
       RETURNING id,display_number,status,payment_status,version,voided_at,voided_by,void_reason,pre_void_status,pre_void_payment_status
     `;
     if (!updated[0]) throw new OrderVoidError("This order changed while the void was being recorded.");
+    await reverseLoyaltyForOrder(input.orderId,input.actor,reason);
     await sql`
       INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)
       VALUES(${randomUUID()},${input.orderId},${updated[0].version},'order_voided',${input.actor.type},${input.actor.id},
