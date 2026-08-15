@@ -79,6 +79,7 @@ async function main() {
       `)[0];
       const draft = await createDraftOrderWithVariants({
         business:"Corner Deli",source:"pos",serviceType:"pickup",createdBy:idleId,createdByName:idle.name,
+        customerFirstName:"POS",customerLastName:"Auth",callerPhone:"3155550100",
         items:[{itemId:String(menu.item_id),variantId:String(menu.variant_id),modifierSelections:{}}],
       });
       const actor = { id: idleId, name: idle.name, type: "employee" as const };

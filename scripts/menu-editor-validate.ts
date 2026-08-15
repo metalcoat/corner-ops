@@ -1,10 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { getSql } from "../src/lib/db";
-import { ensureOrderingMenuEditorSchema } from "../src/lib/ordering-menu-editor-schema";
-import { mutateMenu } from "../src/lib/ordering-menu-editor";
-import { applyMenuImportRun,createMenuImportPreview } from "../src/lib/ordering-menu-import";
+import { localValidationEnv } from "./validation-env";
+
+localValidationEnv();
 
 async function main(){
+ const [{ getSql }, { ensureOrderingMenuEditorSchema }, { mutateMenu }, { applyMenuImportRun, createMenuImportPreview }] = await Promise.all([
+  import("../src/lib/db"),
+  import("../src/lib/ordering-menu-editor-schema"),
+  import("../src/lib/ordering-menu-editor"),
+  import("../src/lib/ordering-menu-import"),
+ ]);
  await ensureOrderingMenuEditorSchema();const sql=getSql(),actor={id:"menu-editor-validator",business:"Corner Deli" as const},stamp=Date.now(),sourceId=`editor-${stamp}`,categoryName=`EDITOR TEST ${stamp}`,itemName=`TEST GARLIC KNOTS ${stamp}`;let categoryId="",importedId="",nativeId="",groupId="",optionId="",orderId="";
  try{
   const first={source:"json" as const,business:"Corner Deli" as const,categories:[{sourceId:`cat-${sourceId}`,name:categoryName,items:[{sourceId,name:`Jumbo Pizza ${stamp}`,basePriceCents:1650,modifierGroups:[]}]}]};
