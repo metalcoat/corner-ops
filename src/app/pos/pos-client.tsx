@@ -206,6 +206,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [payableChecks, setPayableChecks] = useState<PayableCheck[]>([]);
   const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
   const [cashTender, setCashTender] = useState("");
+  const [giftCardNumber, setGiftCardNumber] = useState("");
+  const [giftCardPin, setGiftCardPin] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [configurationMessage, setConfigurationMessage] = useState("");
   const [cartNotice, setCartNotice] = useState("");
@@ -728,20 +730,21 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     finally { setPaymentBusy(false); }
   }
 
-  async function commitPayment(tenderType: "cash" | "card") {
+  async function commitPayment(tenderType: "cash" | "card" | "gift_card") {
     if (!savedDraft || !checkoutState || paymentBusy) return;
     const due = Number(checkoutState.check?.amount_due_cents ?? checkoutState.order.amount_due_cents);
-    const amountTenderedCents = tenderType === "card" ? due : Math.round(Number(cashTender) * 100);
-    if (!Number.isSafeInteger(amountTenderedCents) || amountTenderedCents <= 0) { setCheckoutError("Enter a valid cash amount."); return; }
+    const amountTenderedCents = tenderType === "cash" ? Math.round(Number(cashTender) * 100) : due;
+    if (!Number.isSafeInteger(amountTenderedCents) || amountTenderedCents <= 0) { setCheckoutError("Enter a valid tender amount."); return; }
+    if (tenderType === "gift_card" && giftCardNumber.replace(/[^A-Za-z0-9]/g, "").length < 8) { setCheckoutError("Enter a valid gift card number."); return; }
     setPaymentBusy(true); setCheckoutError("");
     try {
       const response = await fetch(`/api/ordering/orders/${encodeURIComponent(savedDraft.id)}/payments`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ business, checkId: selectedCheckId, tenderType, amountTenderedCents, clientMutationId: clientId() }),
+        body: JSON.stringify({ business, checkId: selectedCheckId, tenderType, amountTenderedCents, giftCardNumber, giftCardPin, clientMutationId: clientId() }),
       });
       const payload = await response.json() as CheckoutState & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Payment could not be committed.");
-      setCheckoutState(payload); setCashTender("");
+      setCheckoutState(payload); setCashTender(""); if(tenderType==="gift_card"){setGiftCardNumber("");setGiftCardPin("")}
       setPayableChecks((checks) => checks.map((check) => check.id === selectedCheckId && payload.check ? { ...check, ...payload.check } : check));
     } catch (error) { setCheckoutError(error instanceof Error ? error.message : "Payment could not be committed."); }
     finally { setPaymentBusy(false); }
@@ -937,6 +940,9 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           <label>Cash tendered<input inputMode="decimal" placeholder="0.00" value={cashTender} onChange={(event) => setCashTender(event.target.value)} /></label>
           <button type="button" disabled={paymentBusy} onClick={() => void commitPayment("cash")}>COMMIT CASH</button>
           <button type="button" disabled={paymentBusy} onClick={() => void commitPayment("card")}>COMMIT REMAINING CREDIT (MANUAL)</button>
+          <label>Gift card number<input autoComplete="off" value={giftCardNumber} onChange={(event)=>setGiftCardNumber(event.target.value)} /></label>
+          <label>Gift card PIN (if required)<input type="password" inputMode="numeric" autoComplete="off" value={giftCardPin} onChange={(event)=>setGiftCardPin(event.target.value)} /></label>
+          <button type="button" disabled={paymentBusy} onClick={() => void commitPayment("gift_card")}>APPLY GIFT CARD</button>
         </>}
         {checkoutState?.order.payment_status === "paid" && <strong>PAID</strong>}
         <button type="button" onClick={() => setCheckoutOpen(false)}>BACK TO ORDER</button>

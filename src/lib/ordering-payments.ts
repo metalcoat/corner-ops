@@ -3,8 +3,10 @@ import { getSql, withTransaction } from "@/lib/db";
 import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
+import { ensureOrderingGiftCardSchema } from "@/lib/ordering-gift-card-schema";
+import { GiftCardError, redeemGiftCard } from "@/lib/ordering-gift-cards";
 
-export type CheckoutTenderType = "cash" | "card";
+export type CheckoutTenderType = "cash" | "card" | "gift_card";
 
 export class PaymentConflictError extends Error {}
 
@@ -41,8 +43,10 @@ export async function commitTender(input: {
   clientMutationId: string;
   checkId?: string | null;
   actor: OrderingActor;
+  giftCardNumber?: string;
+  giftCardPin?: string;
 }) {
-  await ensureOrderingAccountSchema();
+  if (input.tenderType === "gift_card") await ensureOrderingGiftCardSchema(); else await ensureOrderingAccountSchema();
   cents(input.amountTenderedCents, "Tender amount");
   if (!input.clientMutationId.trim() || input.clientMutationId.length > 160) throw new PaymentConflictError("A valid payment request ID is required.");
 
@@ -68,7 +72,7 @@ export async function commitTender(input: {
     const due = Number(check?.amount_due_cents ?? order.amount_due_cents);
     if (due <= 0) throw new PaymentConflictError("This order has no remaining balance.");
 
-    const applied = Math.min(due, input.amountTenderedCents);
+    let applied = Math.min(due, input.amountTenderedCents);
     const change = input.tenderType === "cash" ? Math.max(0, input.amountTenderedCents - applied) : 0;
     if (input.tenderType === "card" && input.amountTenderedCents > due) {
       throw new PaymentConflictError("Credit tender cannot exceed the remaining balance.");
@@ -82,11 +86,22 @@ export async function commitTender(input: {
       ) VALUES (
         ${transactionId}, ${input.business}, ${input.orderId}, ${input.checkId || null}, ${order.customer_id || null}, ${input.tenderType},
         'payment', 'approved', ${applied}, ${input.amountTenderedCents}, ${change},
-        ${input.tenderType === "card" ? "manual_placeholder" : ""}, ${input.clientMutationId},
+        ${input.tenderType === "card" ? "manual_placeholder" : input.tenderType === "gift_card" ? "corner_ops_gift_card" : ""}, ${input.clientMutationId},
         ${input.actor.id}, NOW(),
-        CAST(${JSON.stringify({ actorName: input.actor.name, actorType: input.actor.type, manualCard: input.tenderType === "card" })} AS jsonb)
+        CAST(${JSON.stringify({ actorName: input.actor.name, actorType: input.actor.type, manualCard: input.tenderType === "card", giftCard: input.tenderType === "gift_card" })} AS jsonb)
       )
     `;
+    if (input.tenderType === "gift_card") {
+      if (!input.giftCardNumber) throw new PaymentConflictError("Gift card number is required.");
+      try {
+        const card = await redeemGiftCard({ business: input.business, cardNumber: input.giftCardNumber, pin: input.giftCardPin, amountCents: applied, operationKey: `payment:${input.clientMutationId}`, actor: input.actor, orderId: input.orderId, paymentId: transactionId });
+        applied = Math.abs(Number(card.entry.delta_balance_cents));
+        await sql`UPDATE ordering_payment_transactions SET amount_cents=${applied},amount_tendered_cents=${applied} WHERE id=${transactionId}`;
+      } catch (error) {
+        if (error instanceof GiftCardError) throw new PaymentConflictError(error.message);
+        throw error;
+      }
+    }
 
     if (check) {
       const checkPaid = Number(check.paid_cents) + applied;

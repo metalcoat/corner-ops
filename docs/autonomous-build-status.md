@@ -1,0 +1,8 @@
+MILESTONE: Gift Card Accounts and Tender Integration
+RESULT: PASS
+SUMMARY: Implemented durable business-scoped gift-card accounts with stable UUIDs and hashed card lookup, masked display, optional scrypt PIN verification, activation/initial load, reload, partial redemption, manager adjustment, reversal, replacement/deactivation, non-negative transactional balances, immutable ledger enforcement, idempotent operation keys, mixed cash/manual-credit/gift-card tender checkout, payment-only print updates, operational settings UI, reporting foundations, and a fixture-only import framework with dry-run, duplicate detection, idempotency, and row reporting. Loads remain outside merchandise payment/revenue transactions; redemptions are linked payment tenders. Existing order, promotion, loyalty, split-check, and kitchen behavior is preserved.
+TESTS: PASS — npm run typecheck; npm run build; npm run test:gift-cards; npm run test:payments; npm run test:split-checks; npm run test:order-void; npm run test:promotions; npm run test:loyalty (loyalty validator and stacking validator run successfully); npm run test:ordering:lifecycle; full npm run test:pos:e2e (11/11 passed with temporary local fixture employees and generated fixture PINs, then cleanup). PostgreSQL container health is healthy; application /api/health is OK; PostgreSQL port 5432 remains unpublished.
+BLOCKERS: None.
+NEXT RECOMMENDATION: Have the outer controller review and commit this isolated milestone, then deploy only through its authorized development-branch workflow. Do not import production gift-card data until a separately authorized, reviewed migration run.
+
+AUTOBUILD_RESULT: PASS

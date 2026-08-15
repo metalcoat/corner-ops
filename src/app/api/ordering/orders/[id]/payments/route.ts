@@ -11,8 +11,8 @@ function businessFrom(value: unknown): OrderingBusiness {
 }
 
 function tenderFrom(value: unknown): CheckoutTenderType {
-  if (value === "cash" || value === "card") return value;
-  throw new PaymentConflictError("Only cash and manual credit are available.");
+  if (value === "cash" || value === "card" || value === "gift_card") return value;
+  throw new PaymentConflictError("Cash, manual credit, or gift card tender is required.");
 }
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -43,6 +43,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       clientMutationId: String(body.clientMutationId || ""),
       checkId: body.checkId ? String(body.checkId) : null,
       actor,
+      giftCardNumber: body.giftCardNumber ? String(body.giftCardNumber) : undefined,
+      giftCardPin: body.giftCardPin ? String(body.giftCardPin) : undefined,
     }), { status: 201 });
   } catch (error) {
     if (error instanceof PaymentConflictError) return Response.json({ error: error.message }, { status: 409 });
