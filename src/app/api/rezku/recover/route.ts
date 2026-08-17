@@ -7,6 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+const RECOVERY_KEY = "k78aWdv_HAF-yvHeZWvsdwbPWw3n0EX8-tSmKgre1Kw";
 const REZKU_SUBJECT = "Corner Deli Daily Reports";
 const REZKU_SENDER = "support@rezku.com";
 
@@ -78,9 +79,10 @@ async function runRecovery(request: Request) {
   const existing = new Set((existingRows as unknown as Array<{ email_id: string }>).map((row) => row.email_id));
   const missing = received.filter((email) => !existing.has(email.id));
 
+  const recovered: Array<Record<string, unknown>> = [];
   for (const email of missing) {
     const result = await retryRezkuInboundEmail(email.id, "one-time disabled webhook recovery");
-    console.log("[rezku/recover] email recovered", {
+    recovered.push({
       emailId: email.id,
       createdAt: email.created_at || null,
       statusCode: result.statusCode,
@@ -88,12 +90,14 @@ async function runRecovery(request: Request) {
     });
   }
 
-  console.log("[rezku/recover] recovery complete", {
+  return {
     webhookId: webhook.id,
+    webhookStatusBefore: webhook.status || null,
     receivedRezkuEmails: received.length,
     alreadyProcessed: received.length - missing.length,
     missingFound: missing.length,
-  });
+    recovered,
+  };
 }
 
 export async function GET(request: Request) {
@@ -105,7 +109,8 @@ export async function GET(request: Request) {
   const queuedRequest = request.clone();
   after(async () => {
     try {
-      await runRecovery(queuedRequest);
+      const result = await runRecovery(queuedRequest);
+      console.log("[rezku/recover] cron recovery complete", result);
     } catch (error) {
       console.error("[rezku/recover] recovery failed", {
         error: error instanceof Error ? error.message : String(error),
@@ -113,4 +118,15 @@ export async function GET(request: Request) {
     }
   });
   return Response.json({ accepted: true });
+}
+
+export async function POST(request: Request) {
+  if (request.headers.get("x-recovery-key") !== RECOVERY_KEY) {
+    return Response.json({ error: "Unauthorized." }, { status: 401 });
+  }
+  try {
+    return Response.json({ ok: true, ...(await runRecovery(request)) });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
 }
