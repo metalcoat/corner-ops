@@ -4,6 +4,8 @@ import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import { cornerOpsBaseUrl, sendTransactionalEmail } from "@/lib/transactional-email";
 import { ensureUserSchema } from "@/lib/users";
 import type { Business } from "@/lib/types";
+import { validateEmployeePin, employeePinLabel } from "@/lib/employee-pin";
+import { recordEmployeePinAudit } from "@/lib/employee-pin-audit";
 
 const RESET_MINUTES = 30;
 type ResetKind = "app-password" | "employee-pin";
@@ -40,10 +42,10 @@ function passwordRecord(password: string): { salt: string; hash: string } {
 }
 
 function employeePinHash(business: Business, pin: string): string {
-  if (!/^\d{5}$/.test(pin)) throw new Error("Employee PINs must contain exactly five digits.");
+  const validPin = validateEmployeePin(business, pin);
   const secret = process.env.SESSION_SECRET;
   if (!secret) throw new Error("SESSION_SECRET is required.");
-  return createHmac("sha256", secret).update(`${business}:${pin}`).digest("hex");
+  return createHmac("sha256", secret).update(`${business}:${validPin}`).digest("hex");
 }
 
 export function ensureCredentialResetSchema(): Promise<void> {
@@ -195,7 +197,7 @@ export async function requestEmployeePinReset(input: {
     text: [
       `Hi ${clean(employee.name, 120).split(/\s+/)[0] || "there"},`,
       "",
-      `A five-digit Employee Hub PIN reset was requested for ${employee.business}.`,
+      `A ${employeePinLabel(employee.business).toLowerCase()} reset was requested for ${employee.business}.`,
       "",
       `Choose a new PIN within ${RESET_MINUTES} minutes:`,
       link,
@@ -210,6 +212,8 @@ export async function completeEmployeePinReset(input: { token: string; pin: stri
   if (!reset.business) throw new Error("The employee reset record is incomplete.");
   const hash = employeePinHash(reset.business, String(input.pin || ""));
   const sql = getSql();
+  const duplicate = await sql`SELECT id FROM employees WHERE business=${reset.business} AND id<>${reset.subject_id} AND pin_hash=${hash} LIMIT 1`;
+  if(duplicate[0]) throw new Error("That PIN is already assigned at this location.");
   const updated = await sql`
     UPDATE employees
     SET pin_hash = ${hash}, pin_enabled = TRUE, updated_at = NOW()
@@ -217,5 +221,6 @@ export async function completeEmployeePinReset(input: { token: string; pin: stri
     RETURNING id
   ` as unknown as Array<{ id: string }>;
   if (!updated[0]) throw new Error("This employee account is no longer active.");
+  await recordEmployeePinAudit({employeeId:updated[0].id,business:reset.business,action:"pin_reset",actor:"employee-self-service"});
   await sql`UPDATE credential_reset_tokens SET used_at = NOW() WHERE id = ${reset.id}`;
 }

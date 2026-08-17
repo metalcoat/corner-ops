@@ -1,4 +1,4 @@
-import { get } from "@vercel/blob";
+import { get } from "@/lib/storage";
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { assertConfigured } from "@/lib/config";
 import { findDocument } from "@/lib/documents";

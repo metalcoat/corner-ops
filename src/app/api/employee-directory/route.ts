@@ -1,5 +1,5 @@
-import { del, put } from "@vercel/blob";
-import { canAccessBusiness, getSession } from "@/lib/auth";
+import { del, put } from "@/lib/storage";
+import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
   bulkUpdateDirectoryPins,
@@ -9,6 +9,7 @@ import {
 } from "@/lib/employee-directory-admin";
 import { setEmployeeProfilePhoto } from "@/lib/employee-profile";
 import type { Business } from "@/lib/types";
+import { recordEmployeePinAudit } from "@/lib/employee-pin-audit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -38,6 +39,7 @@ export async function GET(request: Request) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    requirePermission(session, "workforce.write");
     const business = businessFrom(new URL(request.url).searchParams.get("business"));
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
     return Response.json({ employees: await listDirectoryEmployees(business) });
@@ -51,6 +53,7 @@ export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    requirePermission(session, "workforce.write");
     const contentType = request.headers.get("content-type") || "";
 
     if (contentType.includes("multipart/form-data")) {
@@ -86,7 +89,7 @@ export async function POST(request: Request) {
 
     const action = String(body.action || "create");
     if (action === "create") {
-      return Response.json(await createDirectoryEmployee({
+      const employee = await createDirectoryEmployee({
         business,
         email: body.email ? String(body.email) : "",
         phone: body.phone ? String(body.phone) : "",
@@ -98,13 +101,16 @@ export async function POST(request: Request) {
         countsForTips: body.countsForTips !== false,
         hourlyRate: Number(body.hourlyRate || 0),
         tippedRate: Number(body.tippedRate || 0),
-      }), { status: 201 });
+      });
+      await recordEmployeePinAudit({employeeId:employee.id,business,action:"pin_assigned",actor:session.email});
+      return Response.json(employee, { status: 201 });
     }
 
     if (action === "bulk-pin-update") {
       return Response.json(await bulkUpdateDirectoryPins({
         business,
         lines: String(body.lines || ""),
+        actor: session.email,
       }));
     }
 
@@ -124,6 +130,7 @@ export async function POST(request: Request) {
         hourlyRate: body.hourlyRate === undefined ? undefined : Number(body.hourlyRate || 0),
         tippedRate: body.tippedRate === undefined ? undefined : Number(body.tippedRate || 0),
         scheduleColor: body.scheduleColor === undefined ? undefined : String(body.scheduleColor || ""),
+        actor: session.email,
       }));
     }
 

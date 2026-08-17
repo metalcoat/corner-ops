@@ -1,4 +1,4 @@
-import { del, put } from "@vercel/blob";
+import { del, put } from "@/lib/storage";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { assertConfigured } from "@/lib/config";
 import {

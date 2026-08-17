@@ -17,6 +17,7 @@ type NotificationSummary = {
 };
 
 const links: NavLink[] = [
+  { label: "POS", href: "/pos" },
   { label: "Reports", href: "/ops/reports", activePaths: ["/ops/reports", "/ops/weather"] },
   { label: "Banking", href: "/ops/banking", activePaths: ["/ops/banking", "/ops/accounting-control", "/ops/expense-control", "/ops/bank-accounts", "/ops/card-statements"] },
   { label: "Finance", href: "/ops/finance-operations", exact: true },
@@ -46,7 +47,7 @@ export default function GlobalNav() {
   const [currentBusiness, setCurrentBusiness] = useState<Business>("Corner Deli");
   const [open, setOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const navHidden = pathname === "/clock" || pathname === "/scan" || pathname.startsWith("/employee") || pathname === "/signin";
+  const navHidden = pathname.startsWith("/pos") || pathname.startsWith("/order") || pathname === "/clock" || pathname === "/scan" || pathname.startsWith("/employee") || pathname === "/signin";
 
   useEffect(() => setOpen(false), [pathname]);
 

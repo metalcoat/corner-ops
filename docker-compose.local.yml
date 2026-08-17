@@ -1,0 +1,62 @@
+name: corner-ops
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: corner-ops-app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_DRIVER: postgres
+      DATABASE_URL: postgresql://cornerops:${POSTGRES_PASSWORD}@postgres:5432/cornerops
+      STORAGE_DRIVER: local
+      LOCAL_STORAGE_PATH: /data/uploads
+      HEALTHCHECK_DATABASE: "true"
+      LOCAL_DEVELOPMENT: ${LOCAL_DEVELOPMENT:-false}
+      ALLOW_REZKU_MENU_IMPORT: ${ALLOW_REZKU_MENU_IMPORT:-false}
+      SESSION_SECRET: ${SESSION_SECRET}
+      APP_PASSWORD: ${APP_PASSWORD}
+      APP_EMAIL: ${APP_EMAIL:-}
+      APP_URL: ${APP_URL}
+    ports:
+      - "3000:3000"
+    volumes:
+      - cornerops_uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - cornerops
+
+  postgres:
+    image: postgres:17-bookworm
+    container_name: corner-ops-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cornerops
+      POSTGRES_USER: cornerops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - cornerops_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cornerops -d cornerops"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - cornerops
+
+volumes:
+  cornerops_postgres_data:
+  cornerops_uploads:
+
+networks:
+  cornerops:

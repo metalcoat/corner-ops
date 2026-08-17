@@ -4,6 +4,7 @@ import { ensureEmployeeDirectorySchema, upsertDirectoryEmployees, type Directory
 import { ensureEmployeeProfileSchema, scheduleColorFromId, validScheduleColor } from "@/lib/employee-profile";
 import { getSql } from "@/lib/db";
 import { employeePinLength, validateEmployeePin } from "@/lib/employee-pin";
+import { recordEmployeePinAudit } from "@/lib/employee-pin-audit";
 import { normalizeSmsPhone } from "@/lib/phone";
 import type { Business } from "@/lib/types";
 
@@ -57,11 +58,12 @@ export async function createDirectoryEmployee(input: DirectoryEmployeeInput) {
   return result.employees[0];
 }
 
-export async function bulkUpdateDirectoryPins(input: { business: Business; lines: string }) {
+export async function bulkUpdateDirectoryPins(input: { business: Business; lines: string; actor?: string }) {
   await ensureEmployeeDirectorySchema();
   const expectedLength = employeePinLength(input.business);
   const parsed: Array<{ name: string; pin: string }> = [];
   const seen = new Set<string>();
+  const seenPins = new Set<string>();
 
   for (const [index, rawLine] of String(input.lines || "").split(/\r?\n/).entries()) {
     const line = rawLine.trim();
@@ -73,7 +75,10 @@ export async function bulkUpdateDirectoryPins(input: { business: Business; lines
     const key = name.toLowerCase();
     if (!name) throw new Error(`Line ${index + 1} is missing an employee name.`);
     if (seen.has(key)) throw new Error(`${name} appears more than once in the PIN list.`);
+    const hashed = pinHash(input.business, pin);
+    if (seenPins.has(hashed)) throw new Error("Each employee must have a unique PIN at this location.");
     seen.add(key);
+    seenPins.add(hashed);
     parsed.push({ name, pin });
   }
 
@@ -82,15 +87,20 @@ export async function bulkUpdateDirectoryPins(input: { business: Business; lines
   const updated: string[] = [];
   const missing: string[] = [];
   for (const entry of parsed) {
+    const target = await sql`SELECT id FROM employees WHERE business=${input.business} AND LOWER(BTRIM(name))=LOWER(BTRIM(${entry.name})) LIMIT 1`;
+    if(target[0]){
+      const collision=await sql`SELECT id FROM employees WHERE business=${input.business} AND id<>${target[0].id} AND pin_hash=${pinHash(input.business,entry.pin)} LIMIT 1`;
+      if(collision[0]) throw new Error("A supplied PIN is already assigned at this location.");
+    }
     const rows = await sql`
       UPDATE employees
       SET pin_hash = ${pinHash(input.business, entry.pin)}, pin_enabled = TRUE,
         active = TRUE, updated_at = NOW()
       WHERE business = ${input.business}
         AND LOWER(BTRIM(name)) = LOWER(BTRIM(${entry.name}))
-      RETURNING name
-    ` as unknown as Array<{ name: string }>;
-    if (rows[0]) updated.push(rows[0].name);
+      RETURNING id,name
+    ` as unknown as Array<{ id:string;name: string }>;
+    if (rows[0]) { updated.push(rows[0].name); await recordEmployeePinAudit({employeeId:rows[0].id,business:input.business,action:"pin_changed",actor:input.actor||"system"}); }
     else missing.push(entry.name);
   }
   return { business: input.business, pinLength: expectedLength, requested: parsed.length, updated, missing };
@@ -111,6 +121,7 @@ export async function updateDirectoryEmployee(input: {
   hourlyRate?: number;
   tippedRate?: number;
   scheduleColor?: string;
+  actor?: string;
 }) {
   await ensureEmployeeProfileSchema();
   await ensureEmployeeDirectorySchema();
@@ -149,6 +160,14 @@ export async function updateDirectoryEmployee(input: {
   if (input.smsOptIn && !phone) throw new Error("Add a mobile phone number before enabling SMS notifications.");
   const pin = input.pin ? validateEmployeePin(input.business, input.pin, name) : "";
 
+  if (pin) {
+    const pinDuplicate = await sql`
+      SELECT id FROM employees
+      WHERE business = ${input.business} AND id <> ${input.id} AND pin_hash = ${pinHash(input.business, pin)} LIMIT 1
+    `;
+    if (pinDuplicate[0]) throw new Error("That PIN is already assigned at this location.");
+  }
+
   const duplicate = await sql`
     SELECT id FROM employees
     WHERE business = ${input.business} AND id <> ${input.id}
@@ -180,6 +199,9 @@ export async function updateDirectoryEmployee(input: {
   }
 
   const row = rows[0];
+  if (pin) {
+    await recordEmployeePinAudit({employeeId:input.id,business:input.business,action:"pin_changed",actor:input.actor||"system"});
+  }
   return {
     id: String(row.id), email: String(row.email || ""), phone: String(row.phone || ""),
     smsOptIn: Boolean(row.sms_opt_in), name: String(row.name), position: String(row.position),
