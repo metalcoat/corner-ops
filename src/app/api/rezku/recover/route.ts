@@ -36,11 +36,7 @@ function listItems<T>(value: unknown): T[] {
   return [];
 }
 
-export async function POST(request: Request) {
-  if (request.headers.get("x-recovery-key") !== RECOVERY_KEY) {
-    return Response.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
+async function runRecovery(request: Request) {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) return Response.json({ error: "RESEND_API_KEY is not configured." }, { status: 503 });
 
@@ -105,4 +101,18 @@ export async function POST(request: Request) {
     missingFound: missing.length,
     recovered,
   });
+}
+
+export async function GET(request: Request) {
+  if (new URL(request.url).searchParams.get("key") !== RECOVERY_KEY) {
+    return Response.json({ error: "Unauthorized." }, { status: 401 });
+  }
+  return runRecovery(request);
+}
+
+export async function POST(request: Request) {
+  if (request.headers.get("x-recovery-key") !== RECOVERY_KEY) {
+    return Response.json({ error: "Unauthorized." }, { status: 401 });
+  }
+  return runRecovery(request);
 }
