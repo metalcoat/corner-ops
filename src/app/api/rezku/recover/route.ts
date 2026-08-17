@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { Resend } from "resend";
 import { getSql } from "@/lib/db";
 import { retryRezkuInboundEmail } from "@/lib/rezku-inbound-handler";
@@ -38,7 +39,7 @@ function listItems<T>(value: unknown): T[] {
 
 async function runRecovery(request: Request) {
   const apiKey = process.env.RESEND_API_KEY?.trim();
-  if (!apiKey) return Response.json({ error: "RESEND_API_KEY is not configured." }, { status: 503 });
+  if (!apiKey) throw new Error("RESEND_API_KEY is not configured.");
 
   const resend = new Resend(apiKey);
   const origin = new URL(request.url).origin;
@@ -56,7 +57,6 @@ async function runRecovery(request: Request) {
   });
   if (!webhook) throw new Error("The Rezku Resend webhook could not be found.");
 
-  let webhookReenabled = false;
   if (webhook.status !== "enabled" || webhook.endpoint !== endpoint) {
     const updated = await resend.webhooks.update(webhook.id, {
       endpoint,
@@ -64,7 +64,6 @@ async function runRecovery(request: Request) {
       status: "enabled",
     });
     if (updated.error) throw new Error(updated.error.message);
-    webhookReenabled = true;
   }
 
   const receivingResult = await resend.emails.receiving.list();
@@ -80,10 +79,9 @@ async function runRecovery(request: Request) {
   const existing = new Set((existingRows as unknown as Array<{ email_id: string }>).map((row) => row.email_id));
   const missing = received.filter((email) => !existing.has(email.id));
 
-  const recovered: Array<Record<string, unknown>> = [];
   for (const email of missing) {
     const result = await retryRezkuInboundEmail(email.id, "one-time disabled webhook recovery");
-    recovered.push({
+    console.log("[rezku/recover] email recovered", {
       emailId: email.id,
       createdAt: email.created_at || null,
       statusCode: result.statusCode,
@@ -91,15 +89,11 @@ async function runRecovery(request: Request) {
     });
   }
 
-  return Response.json({
-    ok: true,
+  console.log("[rezku/recover] recovery complete", {
     webhookId: webhook.id,
-    webhookStatusBefore: webhook.status || null,
-    webhookReenabled,
     receivedRezkuEmails: received.length,
     alreadyProcessed: received.length - missing.length,
     missingFound: missing.length,
-    recovered,
   });
 }
 
@@ -107,12 +101,23 @@ export async function GET(request: Request) {
   if (new URL(request.url).searchParams.get("key") !== RECOVERY_KEY) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
-  return runRecovery(request);
+  const queuedRequest = request.clone();
+  after(async () => {
+    try {
+      await runRecovery(queuedRequest);
+    } catch (error) {
+      console.error("[rezku/recover] recovery failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+  return Response.json({ accepted: true });
 }
 
 export async function POST(request: Request) {
   if (request.headers.get("x-recovery-key") !== RECOVERY_KEY) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
-  return runRecovery(request);
+  await runRecovery(request);
+  return Response.json({ ok: true });
 }
