@@ -7,7 +7,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const RECOVERY_KEY = "seLte7J_-sKecMN1sBN-O6vJerEtrIfX9T3XgLTNPuo";
 const REZKU_SUBJECT = "Corner Deli Daily Reports";
 const REZKU_SENDER = "support@rezku.com";
 
@@ -98,9 +97,11 @@ async function runRecovery(request: Request) {
 }
 
 export async function GET(request: Request) {
-  if (new URL(request.url).searchParams.get("key") !== RECOVERY_KEY) {
+  const expected = process.env.CRON_SECRET?.trim();
+  if (!expected || request.headers.get("authorization") !== `Bearer ${expected}`) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
+
   const queuedRequest = request.clone();
   after(async () => {
     try {
@@ -112,12 +113,4 @@ export async function GET(request: Request) {
     }
   });
   return Response.json({ accepted: true });
-}
-
-export async function POST(request: Request) {
-  if (request.headers.get("x-recovery-key") !== RECOVERY_KEY) {
-    return Response.json({ error: "Unauthorized." }, { status: 401 });
-  }
-  await runRecovery(request);
-  return Response.json({ ok: true });
 }
