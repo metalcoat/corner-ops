@@ -412,7 +412,7 @@ export default function PayrollControlPage() {
           <label>Source transaction<input name="sourceTransactionId" /></label>
           <label>Employee<select name="employeeName" required><option value="">Choose employee</option>{data?.summary.rows.map((row) => <option key={row.employee}>{row.employee}</option>)}</select></label>
           <label>Amount<input name="amount" type="number" step="0.01" required /></label>
-          <label>Reason<input name="reason" required /></label>
+          <label>Reason<input name="reason" minLength={3} placeholder="Why this tip belongs to this employee" required /><small>Required for the payroll audit.</small></label>
           <button className="primary" disabled={busy}>Apply & recalculate</button>
         </form>
         <div className="list">{data?.summary.overrides.map((override) => {
