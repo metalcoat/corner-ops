@@ -261,6 +261,8 @@ async function repairShifts(batchId?: string) {
   let deduplicated = 0;
   for (const row of rows) {
     const raw = rawObject(row.raw);
+    // Payroll Control corrections are authoritative and must survive later Rezku repairs/imports.
+    if (raw.correctedAt) continue;
     const dateValue = rowLookup(raw, ["Date", "Shift Date", "Business Date", "Work Date"]);
     const inValue = rowLookup(raw, ["Clock In", "In", "Start", "Start Time", "Time In"]);
     const outValue = rowLookup(raw, ["Clock Out", "Out", "End", "End Time", "Time Out"]);
