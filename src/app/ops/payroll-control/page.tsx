@@ -324,7 +324,9 @@ export default function PayrollControlPage() {
           <div className="metric"><span>Net tips paid</span><strong>{dollars(totals.tips)}</strong></div>
           <div className="metric"><span>{business === "Corner Deli" ? "Days needing review" : "Unmatched tips"}</span><strong>{business === "Corner Deli" ? dailyTotals.review : data?.summary.unmatchedTips.length || 0}</strong></div>
         </div>
-        <p className="reportNote">Every saved shift correction and tip override is included the next time totals load. Corner Deli tips are reconciled by business day before the 3.5% deduction, so rounding cannot quietly create extra payroll.</p>
+        <p className="reportNote">{business === "Corner Deli"
+          ? "Every saved shift correction and tip override is included the next time totals load. Corner Deli tips are reconciled by business day before the 3.5% deduction, so rounding cannot quietly create extra payroll."
+          : "Square tips are split equally among tip-eligible Tiki employees clocked in when the payment was created. Payments without a matching punch stay below for review."}</p>
       </section>
 
       {business === "Corner Deli" && <section className="controlCard">
@@ -365,8 +367,8 @@ export default function PayrollControlPage() {
               return <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.pickupTipsBeforeFee || 0)}</td><td>{dollars(row.deliveryTipsBeforeFee || 0)}</td><td><strong>{dollars(gross)}</strong></td><td>{dollars(gross - automaticNet)}</td><td>{dollars(manual)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>;
             })}</tbody>
           </> : <>
-            <thead><tr><th>Employee</th><th>Total</th><th>Regular</th><th>OT</th><th>Tipped hours</th><th>Pickup tips</th><th>Delivery tips</th><th>Manual</th><th>Total tips</th></tr></thead>
-            <tbody>{data?.summary.rows.map((row) => <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.pickupTips)}</td><td>{dollars(row.deliveryTips)}</td><td>{dollars(row.manualTips || 0)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>)}</tbody>
+            <thead><tr><th>Employee</th><th>Total</th><th>Regular</th><th>OT</th><th>Tipped hours</th><th>Automatic tips</th><th>Manual</th><th>Total tips</th></tr></thead>
+            <tbody>{data?.summary.rows.map((row) => <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.tips - (row.manualTips || 0))}</td><td>{dollars(row.manualTips || 0)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>)}</tbody>
           </>}
         </table></div>
       </section>

@@ -1,5 +1,4 @@
 import { getSql } from "@/lib/db";
-import { payrollSummary as legacyPayrollSummary } from "@/lib/operations";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -29,6 +28,13 @@ type Transaction = {
   tip: number;
   orderType: string;
   orderMatched: boolean;
+};
+
+type TikiPayment = {
+  transactionId: string;
+  orderId: string;
+  time: Date;
+  tip: number;
 };
 
 type SummaryRow = {
@@ -560,6 +566,140 @@ function deduplicateTransactionRows(rows: Array<Record<string, unknown>>) {
   });
 }
 
+function allocateTikiTips(shifts: Shift[], payments: TikiPayment[], summary: Map<string, SummaryRow>) {
+  const details: Array<Record<string, unknown>> = [];
+
+  for (const payment of payments) {
+    const tipCents = Math.round(payment.tip * 100);
+    if (!tipCents) continue;
+
+    const eligible = uniqueEmployees(shifts.filter((shift) => isEligible(shift) && covers(shift, payment.time)));
+    if (!eligible.length) {
+      details.push({
+        transactionId: payment.transactionId,
+        sourceTransactionId: payment.transactionId,
+        time: payment.time.toISOString(),
+        orderOpenedAt: payment.time.toISOString(),
+        transactionTime: payment.time.toISOString(),
+        orderId: payment.orderId,
+        orderType: "Square payment",
+        originalTip: payment.tip,
+        allocatedTipBeforeFee: 0,
+        feeAmount: 0,
+        allocatedTip: 0,
+        employee: "Unallocated",
+        splitCount: 0,
+        rule: "Not allocated: no tip-eligible Tiki employee was clocked in at payment time",
+      });
+      continue;
+    }
+
+    const allocations = splitCents(tipCents, eligible.length);
+    eligible.forEach((shift, index) => {
+      const amount = allocations[index] / 100;
+      const row = rowFor(summary, shift.employeeName);
+      row.tipsBeforeFee = Math.round((row.tipsBeforeFee + amount) * 100) / 100;
+      row.pickupTipsBeforeFee = Math.round((row.pickupTipsBeforeFee + amount) * 100) / 100;
+      row.tips = Math.round((row.tips + amount) * 100) / 100;
+      row.pickupTips = Math.round((row.pickupTips + amount) * 100) / 100;
+      details.push({
+        transactionId: payment.transactionId,
+        sourceTransactionId: payment.transactionId,
+        time: payment.time.toISOString(),
+        orderOpenedAt: payment.time.toISOString(),
+        transactionTime: payment.time.toISOString(),
+        orderId: payment.orderId,
+        orderType: "Square payment",
+        originalTip: payment.tip,
+        allocatedTipBeforeFee: amount,
+        feeAmount: 0,
+        allocatedTip: amount,
+        employee: canonicalEmployeeName(shift.employeeName),
+        splitCount: eligible.length,
+        rule: "Square tip: equally split among tip-eligible Tiki employees clocked in",
+      });
+    });
+  }
+
+  return details;
+}
+
+async function tikiPayrollSummary(weekStart: string) {
+  const bounds = weekBounds(weekStart);
+  const [shiftRows, paymentRows] = await Promise.all([
+    getSql()`
+      SELECT id, employee_name, position, role_group, clock_in, clock_out
+      FROM time_entries
+      WHERE business = 'Tiki'
+        AND clock_in >= ${bounds.start.toISOString()}
+        AND clock_in < ${bounds.end.toISOString()}
+      ORDER BY clock_in
+    `,
+    getSql()`
+      SELECT external_payment_id, order_id, created_at_square, tip_amount
+      FROM square_payments
+      WHERE business = 'Tiki'
+        AND created_at_square >= ${bounds.start.toISOString()}
+        AND created_at_square < ${bounds.end.toISOString()}
+        AND status = 'COMPLETED'
+        AND tip_amount <> 0
+      ORDER BY created_at_square
+    `,
+  ]) as unknown as [Array<Record<string, unknown>>, Array<Record<string, unknown>>];
+
+  const shifts: Shift[] = shiftRows.map((row) => ({
+    id: String(row.id),
+    employeeName: canonicalEmployeeName(row.employee_name),
+    position: String(row.position || ""),
+    roleGroup: row.role_group as RoleGroup,
+    countsForTips: row.role_group !== "Ignore",
+    clockIn: dateValue(row.clock_in),
+    clockOut: dateValue(row.clock_out),
+    reportedHours: 0,
+  })).filter((shift) => shift.employeeName && !/^cover$/i.test(shift.employeeName));
+
+  const payments: TikiPayment[] = paymentRows.map((row) => ({
+    transactionId: String(row.external_payment_id || ""),
+    orderId: String(row.order_id || ""),
+    time: dateValue(row.created_at_square),
+    tip: numberValue(row.tip_amount),
+  })).filter((payment): payment is TikiPayment => Boolean(payment.transactionId && payment.time && payment.tip));
+
+  const summary = summarizeShifts(shifts);
+  const tipDetails = allocateTikiTips(shifts, payments, summary);
+  const tipEligibleEmployees = new Set(shifts.filter(isEligible).map((shift) => canonicalEmployeeName(shift.employeeName).toLowerCase()));
+  const rows = [...summary.values()].map((row) => {
+    const hours = Math.round(row.hours * 100) / 100;
+    const overtimeHours = Math.round(Math.max(0, hours - 40) * 100) / 100;
+    const straightTimeHours = Math.round(Math.max(0, hours - overtimeHours) * 100) / 100;
+    const tippedEmployee = tipEligibleEmployees.has(row.employee.toLowerCase());
+    return {
+      ...row,
+      hours,
+      regularHours: tippedEmployee ? 0 : straightTimeHours,
+      overtimeHours,
+      driverTipHours: tippedEmployee ? straightTimeHours : 0,
+      tipsBeforeFee: Math.round(row.tipsBeforeFee * 100) / 100,
+      pickupTipsBeforeFee: Math.round(row.pickupTipsBeforeFee * 100) / 100,
+      deliveryTipsBeforeFee: 0,
+      tips: Math.round(row.tips * 100) / 100,
+      pickupTips: Math.round(row.pickupTips * 100) / 100,
+      deliveryTips: 0,
+    };
+  }).sort((left, right) => left.employee.localeCompare(right.employee));
+
+  const tipJoinIssues = tipDetails.filter((detail) => detail.employee === "Unallocated");
+  return {
+    business: "Tiki" as const,
+    source: "Square tips · split equally among tip-eligible Tiki employees clocked in",
+    weekStart,
+    weekEnd: new Date(bounds.end.getTime() - 1).toISOString(),
+    rows,
+    tipDetails: tipDetails.reverse(),
+    tipJoinIssues: tipJoinIssues.reverse(),
+  };
+}
+
 async function scheduledDriversForWeek(business: Business, start: Date, end: Date): Promise<ScheduledDriver[]> {
   if (business !== "Corner Deli") return [];
   try {
@@ -651,7 +791,7 @@ function driverCoverageWarnings(
 }
 
 export async function payrollSummary(business: Business, weekStart: string) {
-  if (business === "Tiki") return legacyPayrollSummary(business, weekStart);
+  if (business === "Tiki") return tikiPayrollSummary(weekStart);
 
   const bounds = weekBounds(weekStart);
   const transactionSearchStart = new Date(bounds.start.getTime() - 24 * 60 * 60 * 1000);

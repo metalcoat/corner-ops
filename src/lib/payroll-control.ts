@@ -192,7 +192,12 @@ async function unmatchedTips(business: Business, weekStart: string, allocatedDet
     SELECT source_transaction_id FROM tip_overrides
     WHERE business = 'Tiki' AND week_start = ${weekStart} AND source_transaction_id <> ''
   ` as unknown as Array<{ source_transaction_id: string }>;
-  const assigned = new Set(overrides.map((row) => row.source_transaction_id));
+  const assigned = new Set([
+    ...overrides.map((row) => row.source_transaction_id),
+    ...allocatedDetails
+      .filter((detail) => String(detail.employee || "") !== "Unallocated" && numberValue(detail.allocatedTip) !== 0)
+      .map((detail) => String(detail.transactionId || detail.sourceTransactionId || "")),
+  ].filter(Boolean));
   return rows.filter((row) => !assigned.has(String(row.external_payment_id))).map((row) => ({
     id: row.id,
     source: "Square",
