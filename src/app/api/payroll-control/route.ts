@@ -19,6 +19,27 @@ function businessFrom(value: unknown): Business {
   throw new Error("Unknown business.");
 }
 
+function correctionTimes(body: Record<string, unknown>) {
+  const clockIn = String(body.clockIn || "");
+  const rawClockOut = body.clockOut ? String(body.clockOut) : null;
+  if (!rawClockOut) return { clockIn, clockOut: null as string | null };
+
+  const parsedIn = new Date(clockIn);
+  const parsedOut = new Date(rawClockOut);
+  if (Number.isNaN(parsedIn.getTime()) || Number.isNaN(parsedOut.getTime()) || parsedOut >= parsedIn) {
+    return { clockIn, clockOut: rawClockOut };
+  }
+
+  // Tiki and deli shifts commonly cross midnight. If an entered clock-out looks
+  // earlier than clock-in, treat it as the following day when that creates a
+  // sensible overnight shift instead of rejecting the correction outright.
+  const overnightOut = new Date(parsedOut.getTime() + 24 * 60 * 60 * 1000);
+  const hours = (overnightOut.getTime() - parsedIn.getTime()) / 3_600_000;
+  if (hours > 0 && hours <= 18) return { clockIn, clockOut: overnightOut.toISOString() };
+
+  return { clockIn, clockOut: rawClockOut };
+}
+
 export async function GET(request: Request) {
   try {
     const session = await getSession();
@@ -49,12 +70,15 @@ export async function POST(request: Request) {
     const action = String(body.action || "");
     const business = businessFrom(body.business);
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
-    if (action === "punch-correct") return Response.json(await correctPunch({
-      business, sourceType: body.sourceType === "Tiki" ? "Tiki" : "Rezku", sourceId: String(body.sourceId || ""),
-      employeeName: body.employeeName ? String(body.employeeName) : undefined, position: body.position ? String(body.position) : undefined,
-      clockIn: String(body.clockIn || ""), clockOut: body.clockOut ? String(body.clockOut) : null,
-      reason: String(body.reason || ""), actor: session.email,
-    }));
+    if (action === "punch-correct") {
+      const times = correctionTimes(body);
+      return Response.json(await correctPunch({
+        business, sourceType: body.sourceType === "Tiki" ? "Tiki" : "Rezku", sourceId: String(body.sourceId || ""),
+        employeeName: body.employeeName ? String(body.employeeName) : undefined, position: body.position ? String(body.position) : undefined,
+        clockIn: times.clockIn, clockOut: times.clockOut,
+        reason: String(body.reason || ""), actor: session.email,
+      }));
+    }
     if (action === "tip-override-create") return Response.json(await createTipOverride({
       business, weekStart: String(body.weekStart || ""), sourceTransactionId: String(body.sourceTransactionId || ""),
       employeeName: String(body.employeeName || ""), amount: Number(body.amount || 0), reason: String(body.reason || ""), actor: session.email,
