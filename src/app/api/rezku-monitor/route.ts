@@ -1,9 +1,11 @@
 import { getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
+import { repairRezkuFeed } from "@/lib/rezku-feed-repair";
 import { retryRezkuInboundEmail } from "@/lib/rezku-inbound-handler";
 import { cleanRezkuImportDashboard } from "@/lib/rezku-monitor-dashboard";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 export async function GET() {
   try {
@@ -22,11 +24,18 @@ export async function POST(request: Request) {
     if (!session) return unauthorized();
     requirePermission(session, "payroll.write");
     const body = await request.json() as Record<string, unknown>;
-    if (String(body.action || "") !== "retry-email") {
-      return Response.json({ error: "Unknown Rezku monitor action." }, { status: 400 });
+    const action = String(body.action || "");
+
+    if (action === "repair-feed") {
+      return Response.json(await repairRezkuFeed(session.email));
     }
-    const result = await retryRezkuInboundEmail(String(body.emailId || ""), session.email);
-    return Response.json(result.payload, { status: 200 });
+
+    if (action === "retry-email") {
+      const result = await retryRezkuInboundEmail(String(body.emailId || ""), session.email);
+      return Response.json(result.payload, { status: 200 });
+    }
+
+    return Response.json({ error: "Unknown Rezku monitor action." }, { status: 400 });
   } catch (error) {
     return apiError(error);
   }
