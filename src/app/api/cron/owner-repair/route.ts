@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const TOKEN_HASH = "1b8288ee42dd675ac4eabea656e0a98e642bb330e40193aa14aa378ead4ea254";
+const TOKEN_HASH = "fb4fcf20582814ec56cc55c43d5af3841c6c7879f6d66be87b745b0866163db5";
 
 function validToken(value: string) {
   const digest = createHash("sha256").update(value).digest("hex");
