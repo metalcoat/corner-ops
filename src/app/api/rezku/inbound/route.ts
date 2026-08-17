@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { rezkuInboundGet, rezkuInboundPost } from "@/lib/rezku-inbound-handler";
+import { tryOwnerRepairTrigger } from "@/lib/owner-repair-trigger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,9 @@ export async function POST(request: Request) {
   // and imports can take much longer, so finish them after the response is sent.
   after(async () => {
     try {
+      const ownerRepairRequest = queuedRequest.clone();
+      if (await tryOwnerRepairTrigger(ownerRepairRequest)) return;
+
       const response = await rezkuInboundPost(queuedRequest);
       if (!response.ok) {
         console.error("[rezku/inbound] background processing returned an error", {
