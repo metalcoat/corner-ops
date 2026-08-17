@@ -1,4 +1,4 @@
-import { getSession } from "@/lib/auth";
+import { isAuthorizationResponse, orderingManagerActor } from "@/lib/ordering-route-auth";
 import { getSql } from "@/lib/db";
 import { formatKitchenLines } from "@/lib/ordering-print-format";
 import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
@@ -6,8 +6,8 @@ import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides"
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const session = await getSession();
-  if (!session || !["Owner","Co-Owner","Manager"].includes(session.role) || !session.businesses.includes("Corner Deli")) return Response.json({error:"Manager access required."},{status:403});
+  const session = await orderingManagerActor("Corner Deli");
+  if (isAuthorizationResponse(session)) return session;
   await ensureOrderingMenuOverrideSchema();
   const body = await request.json() as { itemId?: unknown; variantId?: unknown; modifierOptionIds?: unknown[] };
   const sql = getSql();

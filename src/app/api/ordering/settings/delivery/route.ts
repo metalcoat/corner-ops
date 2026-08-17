@@ -1,6 +1,6 @@
-import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
+import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
 import { getDeliveryPricingSettings, saveDeliveryPricingSettings } from "@/lib/ordering-delivery";
 
 export const runtime = "nodejs";
@@ -10,21 +10,19 @@ function readBusiness(value: unknown): OrderingBusiness {
   throw new Error("Unknown business.");
 }
 
-function requirePricingOwner(role: string): void {
-  if (role !== "Owner" && role !== "Co-Owner") {
+function requirePricingOwner(role: string | undefined): void {
+  if (role !== "owner") {
     throw new Error("Only an owner or co-owner can change delivery pricing and tax settings.");
   }
 }
 
 export async function GET(request: Request) {
   try {
-    const session = await getSession();
-    if (!session) return unauthorized();
     const url = new URL(request.url);
     const business = readBusiness(url.searchParams.get("business"));
-    if (!canAccessBusiness(session, business)) {
-      return Response.json({ error: "Business access denied." }, { status: 403 });
-    }
+    const session = await orderingActor(business);
+    if (!session) return unauthorized();
+    if (!canManagePos(session)) return Response.json({ error: "Manager access required." }, { status: 403 });
     return Response.json({ settings: await getDeliveryPricingSettings(business) });
   } catch (error) {
     return apiError(error);
@@ -33,14 +31,11 @@ export async function GET(request: Request) {
 
 export async function PUT(request: Request) {
   try {
-    const session = await getSession();
-    if (!session) return unauthorized();
-    requirePricingOwner(session.role);
     const body = await request.json() as Record<string, unknown>;
     const business = readBusiness(body.business);
-    if (!canAccessBusiness(session, business)) {
-      return Response.json({ error: "Business access denied." }, { status: 403 });
-    }
+    const session = await orderingActor(business);
+    if (!session) return unauthorized();
+    requirePricingOwner(session.role);
 
     const rawBands = Array.isArray(body.feeBands) ? body.feeBands : [];
     const current = await getDeliveryPricingSettings(business);
@@ -75,7 +70,7 @@ export async function PUT(request: Request) {
             };
           })
         : current.feeBands,
-    }, session.email);
+    }, session.id);
 
     return Response.json({ settings });
   } catch (error) {

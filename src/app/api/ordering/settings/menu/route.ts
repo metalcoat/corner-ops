@@ -1,18 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { isAuthorizationResponse, orderingManagerActor } from "@/lib/ordering-route-auth";
 import { getSql } from "@/lib/db";
 import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
 
-const roles = new Set(["Owner", "Co-Owner", "Manager"]);
-async function manager() {
-  const session = await getSession();
-  return session && roles.has(session.role) && session.businesses.includes("Corner Deli") ? session : null;
-}
+const manager = () => orderingManagerActor("Corner Deli");
 
 export async function GET(request:Request) {
   const session = await manager();
-  if (!session) return NextResponse.json({ error: "Manager access required." }, { status: 403 });
+  if (isAuthorizationResponse(session)) return session;
   await ensureOrderingMenuOverrideSchema();
   const sql = getSql();
   const channel=new URL(request.url).searchParams.get("channel")==="web"?"web":"pos";
@@ -29,7 +25,7 @@ export async function GET(request:Request) {
 
 export async function PATCH(request: Request) {
   const session = await manager();
-  if (!session) return NextResponse.json({ error: "Manager access required." }, { status: 403 });
+  if (isAuthorizationResponse(session)) return session;
   await ensureOrderingMenuOverrideSchema();
   const body = await request.json() as { targetType?: string; targetId?: string; itemId?: string; field?: string; value?: unknown; reset?: boolean;channel?:string };
   const targetType = String(body.targetType || ""); const targetId = String(body.targetId || ""); const field = String(body.field || "");
@@ -107,4 +103,4 @@ export async function PATCH(request: Request) {
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Could not update menu override." }, { status: 400 }); }
 }
 
-export async function POST(){const session=await manager();if(!session)return NextResponse.json({error:"Manager access required."},{status:403});await ensureOrderingMenuOverrideSchema();const sql=getSql();await sql`INSERT INTO ordering_category_channel_overrides(category_id,channel,display_name,parent_id,parent_id_overridden,sort_order,visible,updated_by)SELECT c.id,'web',COALESCE(pos.display_name,shared.display_name),CASE WHEN pos.parent_id_overridden THEN pos.parent_id ELSE shared.parent_id END,pos.parent_id_overridden OR shared.parent_id_overridden,COALESCE(pos.sort_order,shared.sort_order,c.sort_order),COALESCE(pos.visible,shared.visible),${session.email} FROM ordering_menu_categories c LEFT JOIN ordering_category_overrides shared ON shared.category_id=c.id LEFT JOIN ordering_category_channel_overrides pos ON pos.category_id=c.id AND pos.channel='pos' WHERE c.business='Corner Deli' ON CONFLICT(category_id,channel)DO UPDATE SET display_name=EXCLUDED.display_name,parent_id=EXCLUDED.parent_id,parent_id_overridden=EXCLUDED.parent_id_overridden,sort_order=EXCLUDED.sort_order,visible=EXCLUDED.visible,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;await sql`INSERT INTO ordering_item_channel_overrides(item_id,channel,display_name,category_id,sort_order,visible,updated_by)SELECT i.id,'web',COALESCE(pos.display_name,shared.display_name),COALESCE(pos.category_id,shared.category_id,i.category_id),COALESCE(pos.sort_order,shared.sort_order,i.sort_order),COALESCE(pos.visible,shared.visible),${session.email} FROM ordering_menu_items i LEFT JOIN ordering_item_overrides shared ON shared.item_id=i.id LEFT JOIN ordering_item_channel_overrides pos ON pos.item_id=i.id AND pos.channel='pos' WHERE i.business='Corner Deli' ON CONFLICT(item_id,channel)DO UPDATE SET display_name=EXCLUDED.display_name,category_id=EXCLUDED.category_id,sort_order=EXCLUDED.sort_order,visible=EXCLUDED.visible,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;await sql`INSERT INTO ordering_menu_override_audit(id,business,actor_id,target_type,target_id,field_name,previous_value,new_value)VALUES(${randomUUID()},'Corner Deli',${session.email},'presentation_copy','00000000-0000-0000-0000-000000000000','pos_to_web','null'::jsonb,'true'::jsonb)`;return NextResponse.json({ok:true})}
+export async function POST(){const session=await manager();if(isAuthorizationResponse(session))return session;await ensureOrderingMenuOverrideSchema();const sql=getSql();await sql`INSERT INTO ordering_category_channel_overrides(category_id,channel,display_name,parent_id,parent_id_overridden,sort_order,visible,updated_by)SELECT c.id,'web',COALESCE(pos.display_name,shared.display_name),CASE WHEN pos.parent_id_overridden THEN pos.parent_id ELSE shared.parent_id END,pos.parent_id_overridden OR shared.parent_id_overridden,COALESCE(pos.sort_order,shared.sort_order,c.sort_order),COALESCE(pos.visible,shared.visible),${session.id} FROM ordering_menu_categories c LEFT JOIN ordering_category_overrides shared ON shared.category_id=c.id LEFT JOIN ordering_category_channel_overrides pos ON pos.category_id=c.id AND pos.channel='pos' WHERE c.business='Corner Deli' ON CONFLICT(category_id,channel)DO UPDATE SET display_name=EXCLUDED.display_name,parent_id=EXCLUDED.parent_id,parent_id_overridden=EXCLUDED.parent_id_overridden,sort_order=EXCLUDED.sort_order,visible=EXCLUDED.visible,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;await sql`INSERT INTO ordering_item_channel_overrides(item_id,channel,display_name,category_id,sort_order,visible,updated_by)SELECT i.id,'web',COALESCE(pos.display_name,shared.display_name),COALESCE(pos.category_id,shared.category_id,i.category_id),COALESCE(pos.sort_order,shared.sort_order,i.sort_order),COALESCE(pos.visible,shared.visible),${session.id} FROM ordering_menu_items i LEFT JOIN ordering_item_overrides shared ON shared.item_id=i.id LEFT JOIN ordering_item_channel_overrides pos ON pos.item_id=i.id AND pos.channel='pos' WHERE i.business='Corner Deli' ON CONFLICT(item_id,channel)DO UPDATE SET display_name=EXCLUDED.display_name,category_id=EXCLUDED.category_id,sort_order=EXCLUDED.sort_order,visible=EXCLUDED.visible,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;await sql`INSERT INTO ordering_menu_override_audit(id,business,actor_id,target_type,target_id,field_name,previous_value,new_value)VALUES(${randomUUID()},'Corner Deli',${session.id},'presentation_copy','00000000-0000-0000-0000-000000000000','pos_to_web','null'::jsonb,'true'::jsonb)`;return NextResponse.json({ok:true})}

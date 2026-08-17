@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { isAuthorizationResponse, orderingManagerActor } from "@/lib/ordering-route-auth";
 import { getSql } from "@/lib/db";
 import { ensureOrderingMenuEditorSchema } from "@/lib/ordering-menu-editor-schema";
 import { menuDependencies, mutateMenu } from "@/lib/ordering-menu-editor";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 
-const roles=new Set(["Owner","Co-Owner","Manager"]);
-async function authorize(request:Request){const session=await getSession(),business=(new URL(request.url).searchParams.get("business")||"Corner Deli") as OrderingBusiness;if(!session||!roles.has(session.role)||!session.businesses.includes(business))return null;return {session,business}}
+async function authorize(request:Request){const business=(new URL(request.url).searchParams.get("business")||"Corner Deli") as OrderingBusiness;const session=await orderingManagerActor(business);return isAuthorizationResponse(session)?session:{session,business}}
 
 export async function GET(request:Request){
-  const auth=await authorize(request);if(!auth)return NextResponse.json({error:"Manager access required."},{status:403});
+  const auth=await authorize(request);if(auth instanceof Response)return auth;
   await ensureOrderingMenuEditorSchema();const sql=getSql(),business=auth.business;
   const [categories,items,variants,groups,options,links,sources,localFields]=await Promise.all([
     sql`SELECT id,name,display_name,sort_order,active,parent_id,presentation_only FROM ordering_menu_categories WHERE business=${business} ORDER BY sort_order,name`,
@@ -25,7 +24,7 @@ export async function GET(request:Request){
 }
 
 export async function POST(request:Request){
-  const auth=await authorize(request);if(!auth)return NextResponse.json({error:"Manager access required."},{status:403});
-  try{const body=await request.json();const result=body.action==="dependencies"?await menuDependencies(auth.business,body.entity,body.id):await mutateMenu({id:auth.session.email,business:auth.business},body);return NextResponse.json(result)}
+  const auth=await authorize(request);if(auth instanceof Response)return auth;
+  try{const body=await request.json();const result=body.action==="dependencies"?await menuDependencies(auth.business,body.entity,body.id):await mutateMenu({id:auth.session.id,business:auth.business},body);return NextResponse.json(result)}
   catch(error){const message=error instanceof Error?error.message:"Menu update failed.";return NextResponse.json({error:message},{status:/duplicate key|unique/i.test(message)?409:400})}
 }

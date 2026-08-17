@@ -12,5 +12,5 @@ export async function GET(request: Request) {
       return Response.json({ date, slots: slots.map((slot) => slot.toISOString()) });
     }
     return Response.json({ availability: await resolveOrderingAvailability({ business: "Corner Deli", serviceType }) });
-  } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Availability unavailable." }, { status: 500 }); }
+  } catch (error) { console.error(error); return Response.json({ error: "Availability is temporarily unavailable." }, { status: 500 }); }
 }

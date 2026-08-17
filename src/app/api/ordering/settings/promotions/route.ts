@@ -1,15 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { getSession } from "@/lib/auth";
+import { isAuthorizationResponse, orderingManagerActor } from "@/lib/ordering-route-auth";
 import { getSql } from "@/lib/db";
 import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
 
-const roles=new Set(["Owner","Co-Owner","Manager"]);
-async function manager(){const session=await getSession();return session&&roles.has(session.role)&&session.businesses.includes("Corner Deli")?session:null}
+const manager=()=>orderingManagerActor("Corner Deli");
 function cents(value:unknown,label:string){const number=Math.trunc(Number(value||0));if(!Number.isSafeInteger(number)||number<0)throw new Error(`${label} must be non-negative integer cents.`);return number}
 function ids(value:unknown){return Array.isArray(value)?[...new Set(value.map(String).filter(Boolean))]:[]}
 
 export async function GET(){
-  const session=await manager();if(!session)return Response.json({error:"Manager access required."},{status:403});await ensureOrderingPromotionSchema();const sql=getSql();
+  const session=await manager();if(isAuthorizationResponse(session))return session;await ensureOrderingPromotionSchema();const sql=getSql();
   const [promotions,categories,items,variants,modifierGroups]=await Promise.all([
     sql`SELECT id,name,customer_label,internal_description,promotion_type,priority,rule,adjustment,active,automatic,stackable,stackable_with_loyalty,exclusive_group,version,updated_at FROM ordering_promotions WHERE business='Corner Deli' ORDER BY priority DESC,name`,
     sql`SELECT id,name FROM ordering_menu_categories WHERE business='Corner Deli' AND active=TRUE ORDER BY name`,
@@ -20,7 +19,7 @@ export async function GET(){
 }
 
 export async function PUT(request:Request){
-  const session=await manager();if(!session)return Response.json({error:"Manager access required."},{status:403});
+  const session=await manager();if(isAuthorizationResponse(session))return session;
   try{await ensureOrderingPromotionSchema();const body=await request.json() as Record<string,unknown>,sql=getSql(),id=String(body.id||randomUUID()),type=String(body.promotionType||"");if(!["bundle","amount_off","percent_off"].includes(type))throw new Error("Unsupported promotion type.");
     if(!String(body.name||"").trim())throw new Error("Promotion name is required.");if(type==="percent_off"&&Number(body.percentBasisPoints)>10000)throw new Error("Percentage cannot exceed 100 percent.");if(body.startDate&&body.endDate&&String(body.endDate)<String(body.startDate))throw new Error("Promotion end date must be on or after its start date.");if(body.startTime&&body.endTime&&String(body.endTime)<String(body.startTime))throw new Error("Promotion end time must be after its start time.");
     const components=(Array.isArray(body.components)?body.components:[]).map((raw,index)=>{const row=raw as Record<string,unknown>,quantity=Math.trunc(Number(row.quantity||1));if(quantity<1)throw new Error("Component quantity must be at least one.");const component={id:String(row.id||`component-${index+1}`),quantity,itemIds:ids(row.itemIds),categoryIds:ids(row.categoryIds),variantIds:ids(row.variantIds)};if(!component.itemIds.length&&!component.categoryIds.length&&!component.variantIds.length)throw new Error("Each component needs at least one eligible item, category, or variant.");return component});if(!components.length)throw new Error("At least one promotion component is required.");if(new Set(components.map(component=>component.id)).size!==components.length)throw new Error("Promotion component IDs must be unique.");

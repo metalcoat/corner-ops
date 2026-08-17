@@ -18,6 +18,13 @@ test("customer catalog is public, customer-safe, and browsable while ordering is
   await expect(page.getByLabel("Search menu")).toBeVisible();
   await expect(page.locator(".menuItem").first()).toBeVisible();
   await expect(page.getByText("Checkout and payments aren’t live yet.")).toHaveCount(0);
+
+  await page.goto("/menu");
+  await expect(page.getByRole("heading", { name: "What sounds good?" })).toBeVisible();
+
+  const quote = await request.post("/api/customer/delivery/quote", { data: { distanceMiles: 2, merchandiseSubtotalCents: 2500 } });
+  expect(quote.status()).toBe(200);
+  expect((await quote.json()).quote).toBeTruthy();
 });
 
 test("web cart pricing uses the authoritative backend and remains a non-payable draft", async ({ request }) => {

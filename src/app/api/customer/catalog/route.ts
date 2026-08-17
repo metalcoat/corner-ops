@@ -37,5 +37,5 @@ export async function GET(request: Request) {
     const response = Response.json({ business: "Corner Deli", serverTime: new Date().toISOString(), scheduledFor: at.toISOString(), availability, categories, promotions: promotions.map((row) => String(row.customer_label)), delivery: { enabled: delivery.enabled, minimumOrderCents: delivery.minimumOrderCents, maxDistanceMiles: delivery.maxDistanceMiles, feeBands: delivery.feeBands }, customer: { authenticated: Boolean(session.customerId && session.authenticatedAt), loyaltyAvailableAfterSignIn: true, giftCardsAcceptedAtPayment: true }, checkout: { paymentEnabled: false } });
     if (setCookie) response.headers.set("Set-Cookie", setCookie);
     return response;
-  } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Catalog unavailable." }, { status: 500 }); }
+  } catch (error) { console.error(error); return Response.json({ error: "The menu is temporarily unavailable." }, { status: 500 }); }
 }

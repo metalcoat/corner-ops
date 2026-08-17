@@ -76,6 +76,10 @@ function isDeliPosApi(path: string): boolean {
     || path === "/api/ordering/kitchen"
     || path.startsWith("/api/ordering/order-center")
     || path.startsWith("/api/ordering/customers")
+    || path.startsWith("/api/ordering/settings/")
+    || path.startsWith("/api/ordering/reports")
+    || path.startsWith("/api/ordering/barcodes")
+    || path.startsWith("/api/ordering/gift-cards")
     || path.startsWith("/api/ordering/address/")
     || /^\/api\/ordering\/orders\/[^/]+\/submit$/.test(path);
 }
