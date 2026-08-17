@@ -10,7 +10,6 @@ const publicPaths = [
   "/api/employee/session",
   "/api/employee/pin-reset/",
   "/api/rezku/inbound",
-  "/api/rezku/recover",
   "/api/3cx/inbound",
   "/api/square/callback",
   "/api/square/webhook",

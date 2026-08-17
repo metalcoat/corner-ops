@@ -7,10 +7,6 @@
   },
   "crons": [
     {
-      "path": "/api/cron/rezku-recover",
-      "schedule": "0 14 * * *"
-    },
-    {
       "path": "/api/cron/scheduler-0700",
       "schedule": "0 7 * * *"
     },
