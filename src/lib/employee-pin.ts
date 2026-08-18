@@ -1,11 +1,11 @@
 import type { Business } from "@/lib/types";
 
-export function employeePinLength(business: Business): 4 | 5 {
-  return business === "Corner Deli" ? 4 : 5;
+export function employeePinLength(_business: Business): 5 {
+  return 5;
 }
 
-export function employeePinLabel(business: Business): string {
-  return business === "Corner Deli" ? "Four-digit PIN" : "Five-digit PIN";
+export function employeePinLabel(_business: Business): string {
+  return "Five-digit PIN";
 }
 
 export function employeePinPattern(business: Business): string {
