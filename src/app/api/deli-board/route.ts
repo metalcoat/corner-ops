@@ -12,7 +12,20 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const BUSINESS = "Corner Deli" as const;
+const CALL_FEED_TTL_MS = 60_000;
+const CALL_FEED_ERROR_TTL_MS = 15_000;
 let boardSchemaPromise: Promise<void> | null = null;
+
+type CallFeed = {
+  workDate: string;
+  calls: unknown[];
+  callSummary: { unresolved: number; meaningful: number; issues: number; busy: number };
+  callError: string;
+  expiresAt: number;
+};
+
+let callFeedCache: CallFeed | null = null;
+let callFeedPromise: Promise<CallFeed> | null = null;
 
 const DEFAULT_TASKS = [
   ["Prep", "Make sub rolls"],
@@ -124,12 +137,56 @@ async function ensureBoardSchema() {
   return boardSchemaPromise;
 }
 
+async function loadCallFeed(today: string): Promise<CallFeed> {
+  const now = Date.now();
+  if (callFeedCache && callFeedCache.workDate === today && callFeedCache.expiresAt > now) {
+    return callFeedCache;
+  }
+
+  if (!callFeedPromise) {
+    callFeedPromise = (async () => {
+      try {
+        const report = correctThreeCxCallReport(await threeCxDeliCallReport(today, tomorrowDateKey()));
+        const feed: CallFeed = {
+          workDate: today,
+          calls: report.calls.filter((call) => !call.resolved).slice(0, 8),
+          callSummary: {
+            unresolved: Number(report.summary.unresolved || 0),
+            meaningful: Number(report.summary.meaningful || 0),
+            issues: Number(report.summary.issues || 0),
+            busy: Number(report.summary.busy || 0),
+          },
+          callError: "",
+          expiresAt: Date.now() + CALL_FEED_TTL_MS,
+        };
+        callFeedCache = feed;
+        return feed;
+      } catch (error) {
+        console.error("Deli board 3CX load failed", error);
+        const feed: CallFeed = {
+          workDate: today,
+          calls: [],
+          callSummary: { unresolved: 0, meaningful: 0, issues: 0, busy: 0 },
+          callError: "3CX call feed unavailable",
+          expiresAt: Date.now() + CALL_FEED_ERROR_TTL_MS,
+        };
+        callFeedCache = feed;
+        return feed;
+      }
+    })().finally(() => {
+      callFeedPromise = null;
+    });
+  }
+
+  return callFeedPromise;
+}
+
 async function loadBoard() {
   await ensureBoardSchema();
   const sql = getSql();
   const today = localDateKey();
 
-  const [tasks, messages, schedule] = await Promise.all([
+  const [tasks, messages, schedule, callFeed] = await Promise.all([
     sql`
       SELECT t.id, t.title, t.category, t.sort_order,
         COALESCE(c.completed, FALSE) AS completed,
@@ -161,25 +218,8 @@ async function loadBoard() {
       ORDER BY s.starts_at
       LIMIT 20
     `,
+    loadCallFeed(today),
   ]);
-
-  let calls: unknown[] = [];
-  let callSummary = { unresolved: 0, meaningful: 0, issues: 0, busy: 0 };
-  let callError = "";
-  try {
-    const report = correctThreeCxCallReport(await threeCxDeliCallReport(today, tomorrowDateKey()));
-    const unresolved = report.calls.filter((call) => !call.resolved).slice(0, 8);
-    calls = unresolved;
-    callSummary = {
-      unresolved: Number(report.summary.unresolved || 0),
-      meaningful: Number(report.summary.meaningful || 0),
-      issues: Number(report.summary.issues || 0),
-      busy: Number(report.summary.busy || 0),
-    };
-  } catch (error) {
-    console.error("Deli board 3CX load failed", error);
-    callError = "3CX call feed unavailable";
-  }
 
   const taskRows = tasks as unknown as Array<Record<string, unknown>>;
   const completed = taskRows.filter((task) => Boolean(task.completed)).length;
@@ -192,9 +232,9 @@ async function loadBoard() {
     taskSummary: { total: taskRows.length, completed, remaining: taskRows.length - completed },
     messages,
     schedule,
-    calls,
-    callSummary,
-    callError,
+    calls: callFeed.calls,
+    callSummary: callFeed.callSummary,
+    callError: callFeed.callError,
   };
 }
 
