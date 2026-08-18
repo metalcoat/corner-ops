@@ -1,7 +1,7 @@
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { getSql } from "@/lib/db";
 import { apiError, unauthorized } from "@/lib/http";
-import { deliverSms, type SmsRecipient } from "@/lib/sms-notifications";
+import { deliverSms, getSmsDeliveryStatus, type SmsRecipient } from "@/lib/sms-notifications";
 import type { Business } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -24,6 +24,12 @@ export async function GET(request: Request) {
     if (!session) return unauthorized();
 
     const url = new URL(request.url);
+    const messageId = String(url.searchParams.get("messageId") || "").trim();
+    if (messageId) {
+      const delivery = await getSmsDeliveryStatus(messageId);
+      return Response.json({ ok: true, delivery });
+    }
+
     const business = businessFrom(url.searchParams.get("business"));
     if (!canAccessBusiness(session, business)) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
