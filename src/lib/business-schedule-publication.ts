@@ -85,6 +85,25 @@ function shiftLabel(shift: ScheduleShiftRow): string {
   return `${date}, ${time.format(start)}–${time.format(end)} — ${clean(shift.position, 100) || "Shift"}${meals.length ? ` [${meals.join(", ")}]` : ""}${notes ? `\n  ${notes}` : ""}`;
 }
 
+function compactTimeLabel(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value))
+    .replace(":00", "")
+    .replace(" AM", "a")
+    .replace(" PM", "p");
+}
+
+function compactShiftLabel(shift: ScheduleShiftRow): string {
+  const day = new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    weekday: "short",
+  }).format(new Date(shift.starts_at));
+  return `${day} ${compactTimeLabel(shift.starts_at)}-${compactTimeLabel(shift.ends_at)}`;
+}
+
 function employeeHubUrl(business: Business): string {
   const configured = process.env.EMPLOYEE_APP_URL?.trim() || process.env.APP_URL?.trim();
   const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() || process.env.VERCEL_URL?.trim();
@@ -101,7 +120,7 @@ function employeeHubUrl(business: Business): string {
 function pinInstruction(business: Business): string {
   return business === "Tiki"
     ? "Sign in with the same 5-digit PIN you normally use to clock in at Tiki."
-    : "Sign in with your normal 4-digit Rezku PIN for Corner Deli.";
+    : "Sign in with your normal Corner Deli employee PIN.";
 }
 
 function emailConfiguration() {
@@ -352,12 +371,19 @@ export async function publishBusinessScheduleWeek(input: {
 
   const sms = await deliverSms({
     recipients: contacts,
-    text: (employee) => [
-      `${clean(employee.name, 120).split(/\s+/)[0] || "Your"}, your ${input.business} schedule was ${scheduleVerb} for ${dateLabel(input.weekStart)}-${dateLabel(weekEnd)}.`,
-      hubUrl ? `Portal: ${hubUrl}` : "Open Employee Hub to review.",
-      accessInstruction,
-      "Reply STOP to opt out.",
-    ].join(" "),
+    text: (employee) => {
+      const employeeShifts = shifts.filter((shift) => shift.employee_id === employee.id);
+      const schedule = employeeShifts.length
+        ? employeeShifts.map(compactShiftLabel).join("; ")
+        : "No shifts currently assigned.";
+      return [
+        `${clean(employee.name, 120).split(/\s+/)[0] || "Your"}, your ${input.business} schedule was ${scheduleVerb} for ${dateLabel(input.weekStart)}-${dateLabel(weekEnd)}.`,
+        `Shifts: ${schedule}`,
+        hubUrl ? `Portal: ${hubUrl}` : "Open Employee Hub to review.",
+        accessInstruction,
+        "Reply STOP to opt out.",
+      ].join(" ");
+    },
   });
 
   const publicationId = crypto.randomUUID();
