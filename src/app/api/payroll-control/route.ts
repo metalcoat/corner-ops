@@ -14,14 +14,52 @@ import type { Business } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+const TIME_ZONE = "America/New_York";
+
 function businessFrom(value: unknown): Business {
   if (value === "Corner Deli" || value === "Tiki") return value;
   throw new Error("Unknown business.");
 }
 
+function easternOffsetMilliseconds(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return Date.UTC(
+    Number(values.year), Number(values.month) - 1, Number(values.day),
+    Number(values.hour), Number(values.minute), Number(values.second),
+  ) - date.getTime();
+}
+
+function easternWallToIso(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) throw new Error("Enter a valid Eastern date and time.");
+  const wall = Date.UTC(
+    Number(match[1]), Number(match[2]) - 1, Number(match[3]),
+    Number(match[4]), Number(match[5]), Number(match[6] || 0),
+  );
+  let timestamp = wall;
+  for (let index = 0; index < 3; index += 1) {
+    timestamp = wall - easternOffsetMilliseconds(new Date(timestamp));
+  }
+  return new Date(timestamp).toISOString();
+}
+
 function correctionTimes(body: Record<string, unknown>) {
-  const clockIn = String(body.clockIn || "");
-  const rawClockOut = body.clockOut ? String(body.clockOut) : null;
+  const wallClockIn = String(body.clockInWall || "").trim();
+  const wallClockOut = String(body.clockOutWall || "").trim();
+  const clockIn = wallClockIn ? easternWallToIso(wallClockIn) : String(body.clockIn || "");
+  const rawClockOut = wallClockOut
+    ? easternWallToIso(wallClockOut)
+    : body.clockOut ? String(body.clockOut) : null;
   if (!rawClockOut) return { clockIn, clockOut: null as string | null };
 
   const parsedIn = new Date(clockIn);
