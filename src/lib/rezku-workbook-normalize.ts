@@ -66,6 +66,10 @@ function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
 
+function excelWallDateTime(value: Date): string {
+  return `${value.getUTCFullYear()}-${pad(value.getUTCMonth() + 1)}-${pad(value.getUTCDate())} ${pad(value.getUTCHours())}:${pad(value.getUTCMinutes())}:${pad(value.getUTCSeconds())}`;
+}
+
 function dateText(value: unknown): string {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     const year = value.getUTCFullYear();
@@ -240,6 +244,26 @@ function normalizeShiftSheet(sheetName: string, sheet: XLSX.WorkSheet): XLSX.Wor
   });
 }
 
+function normalizeDataSheetDateTimes(sheet: XLSX.WorkSheet): XLSX.WorkSheet {
+  // Rezku can format a true Excel datetime cell as date-only (for example 8/10/26).
+  // Reading the displayed value with raw:false discards the fractional-day time even though
+  // it is still present in the workbook. Read underlying typed values first, then turn Date
+  // objects into explicit wall-clock strings before the normal importer reads the workbook.
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    defval: "",
+    raw: true,
+    blankrows: false,
+  }) as Matrix;
+
+  const preserved = matrix.map((row) => row.map((value) => {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return excelWallDateTime(value);
+    return value;
+  }));
+
+  return XLSX.utils.aoa_to_sheet(preserved);
+}
+
 function bufferToArrayBuffer(buffer: Buffer): ArrayBuffer {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
 }
@@ -257,7 +281,11 @@ export function normalizeRezkuWorkbook(
     if (COVER_SHEET.test(sheetName.trim())) continue;
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) continue;
-    const nextSheet = kind === "shifts" ? normalizeShiftSheet(sheetName, sheet) : sheet;
+    const nextSheet = kind === "shifts"
+      ? normalizeShiftSheet(sheetName, sheet)
+      : kind === "orders" || kind === "transactions"
+        ? normalizeDataSheetDateTimes(sheet)
+        : sheet;
     if (!nextSheet) continue;
     XLSX.utils.book_append_sheet(output, nextSheet, sheetName.slice(0, 31));
   }
