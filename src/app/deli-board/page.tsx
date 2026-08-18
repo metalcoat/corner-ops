@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import "./wallboard.css";
 
 const DISPLAY_TOKEN_KEY = "corner_ops_deli_board_token";
+const REFRESH_MS = 60_000;
 
 type Task = {
   id: string;
@@ -105,25 +106,32 @@ export default function DeliBoardPage() {
   const [notice, setNotice] = useState("");
   const [busyTask, setBusyTask] = useState("");
   const [signedOut, setSignedOut] = useState(false);
+  const loadingRef = useRef(false);
 
   async function load() {
-    const response = await fetch("/api/deli-board", { cache: "no-store", headers: requestHeaders() });
-    if (response.status === 401) {
-      window.localStorage.removeItem(DISPLAY_TOKEN_KEY);
-      setSignedOut(true);
-      return;
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    try {
+      const response = await fetch("/api/deli-board", { cache: "no-store", headers: requestHeaders() });
+      if (response.status === 401) {
+        window.localStorage.removeItem(DISPLAY_TOKEN_KEY);
+        setSignedOut(true);
+        return;
+      }
+      if (!response.ok) throw new Error(await responseError(response));
+      setSignedOut(false);
+      setData(await response.json() as BoardPayload);
+      setNotice("");
+    } finally {
+      loadingRef.current = false;
     }
-    if (!response.ok) throw new Error(await responseError(response));
-    setSignedOut(false);
-    setData(await response.json() as BoardPayload);
-    setNotice("");
   }
 
   useEffect(() => {
     void load().catch((error) => setNotice(error instanceof Error ? error.message : "Dashboard unavailable."));
     const refresh = window.setInterval(() => {
       if (document.visibilityState === "visible") void load().catch(() => undefined);
-    }, 15_000);
+    }, REFRESH_MS);
     const clock = window.setInterval(() => setNow(new Date()), 1_000);
     return () => {
       window.clearInterval(refresh);
@@ -208,7 +216,7 @@ export default function DeliBoardPage() {
     <header className="boardHeader">
       <div className="boardBrand"><span className="boardDot" /><div><strong>Corner Deli</strong><small>Live Operations Board</small></div></div>
       <div className="boardClock"><strong>{now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</strong><span>{now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}</span></div>
-      <div className="boardHeaderActions"><span>Refreshes every 15s</span><button onClick={() => document.documentElement.requestFullscreen?.()}>Fullscreen</button></div>
+      <div className="boardHeaderActions"><span>Refreshes every 60s</span><button onClick={() => document.documentElement.requestFullscreen?.()}>Fullscreen</button></div>
     </header>
 
     {notice && <div className="boardNotice">{notice}</div>}
