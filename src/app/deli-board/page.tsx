@@ -164,7 +164,7 @@ export default function DeliBoardPage() {
 
   if (signedOut) {
     return <main className="deliBoard signedOut">
-      <section><h1>Deli Board</h1><p>This screen needs a Corner Ops sign-in once.</p><a href="/signin">Sign in</a></section>
+      <section><h1>Deli Board</h1><p>This display needs a Corner Deli employee PIN.</p><a href="/deli-board/login">Open PIN login</a></section>
     </main>;
   }
 
