@@ -177,7 +177,7 @@ export default function DeliBoardPage() {
   const completedTasks = data.tasks.filter((task) => task.completed);
   const visibleTasks = [...incompleteTasks, ...completedTasks].slice(0, 14);
   const currentStaff = schedule.filter((shift) => shift.current);
-  const upcomingStaff = schedule.filter((shift) => !shift.current && new Date(shift.starts_at) > now).slice(0, 5);
+  const upcomingStaff = schedule.filter((shift) => !shift.current && new Date(shift.starts_at).getTime() > now.getTime()).slice(0, 5);
 
   return <main className="deliBoard">
     <header className="boardHeader">
