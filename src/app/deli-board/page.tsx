@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import "./wallboard.css";
 
+const DISPLAY_TOKEN_KEY = "corner_ops_deli_board_token";
+
 type Task = {
   id: string;
   title: string;
@@ -80,6 +82,18 @@ function firstName(value: string) {
   return part.charAt(0).toUpperCase() + part.slice(1);
 }
 
+function displayToken() {
+  return typeof window === "undefined" ? "" : window.localStorage.getItem(DISPLAY_TOKEN_KEY) || "";
+}
+
+function requestHeaders(json = false): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const token = displayToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (json) headers["Content-Type"] = "application/json";
+  return headers;
+}
+
 async function responseError(response: Response) {
   const payload = await response.json().catch(() => null) as { error?: string } | null;
   return payload?.error || `Request failed (${response.status}).`;
@@ -93,8 +107,9 @@ export default function DeliBoardPage() {
   const [signedOut, setSignedOut] = useState(false);
 
   async function load() {
-    const response = await fetch("/api/deli-board", { cache: "no-store" });
+    const response = await fetch("/api/deli-board", { cache: "no-store", headers: requestHeaders() });
     if (response.status === 401) {
+      window.localStorage.removeItem(DISPLAY_TOKEN_KEY);
       setSignedOut(true);
       return;
     }
@@ -122,9 +137,14 @@ export default function DeliBoardPage() {
     try {
       const response = await fetch("/api/deli-board", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: requestHeaders(true),
         body: JSON.stringify({ action: "toggle-task", taskId: task.id, completed: !task.completed }),
       });
+      if (response.status === 401) {
+        window.localStorage.removeItem(DISPLAY_TOKEN_KEY);
+        setSignedOut(true);
+        return;
+      }
       if (!response.ok) throw new Error(await responseError(response));
       setData(await response.json() as BoardPayload);
     } catch (error) {
@@ -143,9 +163,14 @@ export default function DeliBoardPage() {
     try {
       const response = await fetch("/api/deli-board", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: requestHeaders(true),
         body: JSON.stringify({ action: "add-task", title, category: "Today" }),
       });
+      if (response.status === 401) {
+        window.localStorage.removeItem(DISPLAY_TOKEN_KEY);
+        setSignedOut(true);
+        return;
+      }
       if (!response.ok) throw new Error(await responseError(response));
       setData(await response.json() as BoardPayload);
       form.reset();
