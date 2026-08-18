@@ -1,5 +1,6 @@
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { getSql } from "@/lib/db";
+import { verifyDeliBoardToken } from "@/lib/deli-board-auth";
 import { getEmployeeSession } from "@/lib/employee-auth";
 import { apiError, unauthorized } from "@/lib/http";
 import { correctThreeCxCallReport } from "@/lib/three-cx-time-correction";
@@ -57,7 +58,16 @@ function tomorrowDateKey(): string {
   return localDateKey(new Date(Date.now() + 24 * 60 * 60 * 1000));
 }
 
-async function boardActor(): Promise<{ name: string; access: "owner" | "employee" } | null> {
+function bearerToken(request: Request): string | null {
+  const authorization = request.headers.get("authorization") || "";
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
+async function boardActor(request: Request): Promise<{ name: string; access: "owner" | "employee" | "display" } | null> {
+  const display = verifyDeliBoardToken(bearerToken(request));
+  if (display) return { name: "Deli Board", access: "display" };
+
   const owner = await getSession();
   if (owner && canAccessBusiness(owner, BUSINESS)) {
     return { name: owner.displayName, access: "owner" };
@@ -188,9 +198,9 @@ async function loadBoard() {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const actor = await boardActor();
+    const actor = await boardActor(request);
     if (!actor) return unauthorized();
     return Response.json({ ...(await loadBoard()), boardAccess: actor.access });
   } catch (error) {
@@ -200,7 +210,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const actor = await boardActor();
+    const actor = await boardActor(request);
     if (!actor) return unauthorized();
     await ensureBoardSchema();
 
