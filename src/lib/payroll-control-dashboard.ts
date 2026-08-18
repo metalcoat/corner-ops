@@ -86,15 +86,29 @@ export async function safePayrollControlDashboard(business: Business, weekStart:
         ORDER BY COALESCE(clock_in, clock_out)
       `
     : await getSql()`
-        SELECT id, employee_name, position, clock_in, clock_out,
-          CASE WHEN clock_in IS NULL OR clock_out IS NULL THEN 'Needs Review' ELSE 'Complete' END AS status,
-          raw->>'correctionReason' AS notes, 'Rezku' AS source
-        FROM rezku_shifts
+        SELECT r.id, r.employee_name,
+          COALESCE(NULLIF(BTRIM(r.position), ''), scheduled.position, '') AS position,
+          r.clock_in, r.clock_out,
+          CASE WHEN r.clock_in IS NULL OR r.clock_out IS NULL THEN 'Needs Review' ELSE 'Complete' END AS status,
+          r.raw->>'correctionReason' AS notes, 'Rezku' AS source
+        FROM rezku_shifts r
+        LEFT JOIN LATERAL (
+          SELECT s.position
+          FROM schedule_shifts s
+          JOIN employees e ON e.id = s.employee_id
+          WHERE s.business = 'Corner Deli'
+            AND s.status = 'Published'
+            AND LOWER(BTRIM(e.name)) = LOWER(BTRIM(r.employee_name))
+            AND s.starts_at < COALESCE(r.clock_out, r.clock_in + INTERVAL '18 hours')
+            AND s.ends_at > COALESCE(r.clock_in, r.clock_out - INTERVAL '18 hours')
+          ORDER BY ABS(EXTRACT(EPOCH FROM (s.starts_at - COALESCE(r.clock_in, r.clock_out))))
+          LIMIT 1
+        ) scheduled ON TRUE
         WHERE (
-          (clock_in >= ${bounds.start.toISOString()} AND clock_in < ${bounds.end.toISOString()})
-          OR (clock_in IS NULL AND clock_out >= ${bounds.start.toISOString()} AND clock_out < ${bounds.end.toISOString()})
+          (r.clock_in >= ${bounds.start.toISOString()} AND r.clock_in < ${bounds.end.toISOString()})
+          OR (r.clock_in IS NULL AND r.clock_out >= ${bounds.start.toISOString()} AND r.clock_out < ${bounds.end.toISOString()})
         )
-        ORDER BY COALESCE(clock_in, clock_out)
+        ORDER BY COALESCE(r.clock_in, r.clock_out)
       `;
   const versions = await getSql()`
     SELECT id, business, week_start, week_end, version, status, generated_by, generated_at,
