@@ -1,5 +1,6 @@
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { getSql } from "@/lib/db";
+import { getEmployeeSession } from "@/lib/employee-auth";
 import { apiError, unauthorized } from "@/lib/http";
 import { correctThreeCxCallReport } from "@/lib/three-cx-time-correction";
 import { threeCxDeliCallReport } from "@/lib/three-cx-calls-report";
@@ -53,7 +54,19 @@ function localDateKey(date = new Date()): string {
 }
 
 function tomorrowDateKey(): string {
-  return localDateKey(new Date(Date.now() + 36 * 60 * 60 * 1000));
+  return localDateKey(new Date(Date.now() + 24 * 60 * 60 * 1000));
+}
+
+async function boardActor(): Promise<{ name: string; access: "owner" | "employee" } | null> {
+  const owner = await getSession();
+  if (owner && canAccessBusiness(owner, BUSINESS)) {
+    return { name: owner.displayName, access: "owner" };
+  }
+  const employee = await getEmployeeSession();
+  if (employee?.business === BUSINESS) {
+    return { name: "Deli Board", access: "employee" };
+  }
+  return null;
 }
 
 async function ensureBoardSchema() {
@@ -177,10 +190,9 @@ async function loadBoard() {
 
 export async function GET() {
   try {
-    const session = await getSession();
-    if (!session) return unauthorized();
-    if (!canAccessBusiness(session, BUSINESS)) return Response.json({ error: "Corner Deli access denied." }, { status: 403 });
-    return Response.json(await loadBoard());
+    const actor = await boardActor();
+    if (!actor) return unauthorized();
+    return Response.json({ ...(await loadBoard()), boardAccess: actor.access });
   } catch (error) {
     return apiError(error);
   }
@@ -188,9 +200,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const session = await getSession();
-    if (!session) return unauthorized();
-    if (!canAccessBusiness(session, BUSINESS)) return Response.json({ error: "Corner Deli access denied." }, { status: 403 });
+    const actor = await boardActor();
+    if (!actor) return unauthorized();
     await ensureBoardSchema();
 
     const body = await request.json() as Record<string, unknown>;
@@ -205,13 +216,13 @@ export async function POST(request: Request) {
       if (!existing[0]) return Response.json({ error: "Task not found." }, { status: 404 });
       await sql`
         INSERT INTO deli_wallboard_task_checks (task_id, work_date, completed, completed_by, completed_at)
-        VALUES (${taskId}, ${today}::date, ${completed}, ${session.displayName}, ${completed ? new Date().toISOString() : null})
+        VALUES (${taskId}, ${today}::date, ${completed}, ${actor.name}, ${completed ? new Date().toISOString() : null})
         ON CONFLICT (task_id, work_date) DO UPDATE SET
           completed = EXCLUDED.completed,
           completed_by = EXCLUDED.completed_by,
           completed_at = EXCLUDED.completed_at
       `;
-      return Response.json(await loadBoard());
+      return Response.json({ ...(await loadBoard()), boardAccess: actor.access });
     }
 
     if (action === "add-task") {
@@ -221,10 +232,10 @@ export async function POST(request: Request) {
       const maxRows = await sql`SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM deli_wallboard_tasks` as unknown as Array<{ max_order: number | string }>;
       await sql`
         INSERT INTO deli_wallboard_tasks (id, title, category, sort_order, created_by)
-        VALUES (${crypto.randomUUID()}, ${title}, ${category}, ${Number(maxRows[0]?.max_order || 0) + 1}, ${session.displayName})
+        VALUES (${crypto.randomUUID()}, ${title}, ${category}, ${Number(maxRows[0]?.max_order || 0) + 1}, ${actor.name})
         ON CONFLICT (title) DO UPDATE SET active = TRUE, updated_at = NOW()
       `;
-      return Response.json(await loadBoard());
+      return Response.json({ ...(await loadBoard()), boardAccess: actor.access });
     }
 
     return Response.json({ error: "Unknown deli board action." }, { status: 400 });
