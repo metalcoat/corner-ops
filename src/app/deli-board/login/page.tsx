@@ -3,6 +3,8 @@
 import { FormEvent, useState } from "react";
 import "../wallboard.css";
 
+const DISPLAY_TOKEN_KEY = "corner_ops_deli_board_token";
+
 export default function DeliBoardLoginPage() {
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
@@ -13,16 +15,28 @@ export default function DeliBoardLoginPage() {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/employee/session", {
+      const response = await fetch("/api/deli-board/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ business: "Corner Deli", pin }),
+        body: JSON.stringify({ pin }),
       });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null) as { error?: string } | null;
+      const payload = await response.json().catch(() => null) as { error?: string; token?: string } | null;
+      if (!response.ok || !payload?.token) {
         throw new Error(payload?.error || "PIN not recognized.");
       }
-      window.location.href = "/deli-board";
+
+      window.localStorage.setItem(DISPLAY_TOKEN_KEY, payload.token);
+
+      const verify = await fetch("/api/deli-board", {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${payload.token}` },
+      });
+      if (!verify.ok) {
+        window.localStorage.removeItem(DISPLAY_TOKEN_KEY);
+        throw new Error("PIN was accepted, but the display session could not be activated.");
+      }
+
+      window.location.replace("/deli-board");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to sign in.");
       setBusy(false);
@@ -35,7 +49,7 @@ export default function DeliBoardLoginPage() {
     <section style={{ width: "min(92vw, 480px)" }}>
       <div className="boardBrand" style={{ justifyContent: "center", marginBottom: 22 }}><span className="boardDot" /><div><strong>Corner Deli</strong><small>Display access</small></div></div>
       <h1>Deli Board</h1>
-      <p>Enter a 4- or 5-digit Corner Deli employee PIN to activate this display. This uses the restricted employee session, not the owner account.</p>
+      <p>Enter a 4- or 5-digit Corner Deli employee PIN to activate this display. The resulting display token is limited to the Deli Board and does not unlock owner tools.</p>
       <form onSubmit={submit} style={{ display: "grid", gap: 12, marginTop: 22 }}>
         <input
           value={pin}
