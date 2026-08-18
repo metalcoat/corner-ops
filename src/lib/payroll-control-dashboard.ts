@@ -21,12 +21,8 @@ function getOffsetMilliseconds(date: Date, timeZone: string): number {
   }).formatToParts(date);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   const represented = Date.UTC(
-    Number(values.year),
-    Number(values.month) - 1,
-    Number(values.day),
-    Number(values.hour),
-    Number(values.minute),
-    Number(values.second),
+    Number(values.year), Number(values.month) - 1, Number(values.day),
+    Number(values.hour), Number(values.minute), Number(values.second),
   );
   return represented - date.getTime();
 }
@@ -78,21 +74,27 @@ export async function safePayrollControlDashboard(business: Business, weekStart:
   const summary = await controlledPayrollSummary(business, weekStart);
   const punches = business === "Tiki"
     ? await getSql()`
-        SELECT id, employee_name, position, clock_in, clock_out, status, notes, source
+        SELECT id, employee_name, position, clock_in, clock_out,
+          CASE WHEN clock_in IS NULL OR clock_out IS NULL THEN 'Needs Review' ELSE status END AS status,
+          notes, source
         FROM time_entries
         WHERE business = 'Tiki'
-          AND clock_in >= ${bounds.start.toISOString()}
-          AND clock_in < ${bounds.end.toISOString()}
-        ORDER BY clock_in
+          AND (
+            (clock_in >= ${bounds.start.toISOString()} AND clock_in < ${bounds.end.toISOString()})
+            OR (clock_in IS NULL AND clock_out >= ${bounds.start.toISOString()} AND clock_out < ${bounds.end.toISOString()})
+          )
+        ORDER BY COALESCE(clock_in, clock_out)
       `
     : await getSql()`
         SELECT id, employee_name, position, clock_in, clock_out,
-          CASE WHEN clock_out IS NULL THEN 'Needs Review' ELSE 'Complete' END AS status,
+          CASE WHEN clock_in IS NULL OR clock_out IS NULL THEN 'Needs Review' ELSE 'Complete' END AS status,
           raw->>'correctionReason' AS notes, 'Rezku' AS source
         FROM rezku_shifts
-        WHERE clock_in >= ${bounds.start.toISOString()}
-          AND clock_in < ${bounds.end.toISOString()}
-        ORDER BY clock_in
+        WHERE (
+          (clock_in >= ${bounds.start.toISOString()} AND clock_in < ${bounds.end.toISOString()})
+          OR (clock_in IS NULL AND clock_out >= ${bounds.start.toISOString()} AND clock_out < ${bounds.end.toISOString()})
+        )
+        ORDER BY COALESCE(clock_in, clock_out)
       `;
   const versions = await getSql()`
     SELECT id, business, week_start, week_end, version, status, generated_by, generated_at,
