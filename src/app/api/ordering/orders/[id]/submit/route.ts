@@ -2,6 +2,7 @@ import { apiError, unauthorized } from "@/lib/http";
 import { OrderConflictError, submitDraftOrder } from "@/lib/ordering-order-lifecycle";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { orderingActor } from "@/lib/ordering-route-auth";
+import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 
 export const runtime = "nodejs";
 
@@ -18,6 +19,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (!actor) return unauthorized();
     const { id } = await context.params;
     const result = await submitDraftOrder(id, business, actor, { approved: body.managerOverride === true, reason: String(body.overrideReason || "") });
+    await dispatchOrderPrintJobs(id,business);
     return Response.json(result);
   } catch (error) {
     if (error instanceof OrderConflictError) return Response.json({ error: error.message }, { status: 409 });
