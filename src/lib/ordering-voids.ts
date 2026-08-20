@@ -22,8 +22,8 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
     const order = rows[0];
     if (!order) throw new OrderVoidError("Order was not found.");
     if (order.voided_at) return { order, alreadyVoided: true };
-    if (!['sent_to_kitchen','in_progress','ready','completed'].includes(String(order.status))) {
-      throw new OrderVoidError("Only an order already sent to the kitchen can be voided.");
+    if (!['draft','sent_to_kitchen','in_progress','ready','completed'].includes(String(order.status))) {
+      throw new OrderVoidError("This order can no longer be cancelled or voided.");
     }
     const updated = await sql`
       UPDATE ordering_orders SET status='cancelled', cancelled_at=NOW(), closed_at=NOW(), voided_at=NOW(),

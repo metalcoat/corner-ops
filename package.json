@@ -52,6 +52,7 @@
     "test:delivery-pricing": "tsx scripts/delivery-pricing-validate.ts",
     "test:driver-delivery": "tsx scripts/driver-delivery-validate.ts",
     "test:store-dashboard": "tsx scripts/store-dashboard-validate.ts",
+    "test:order-void": "tsx scripts/order-void-validate.ts",
     "test:ai-ordering": "tsx scripts/ai-ordering-validate.ts",
     "test:operational-reporting": "tsx scripts/operational-reporting-validate.ts",
     "test:auth:e2e": "playwright test tests/auth-cookie.spec.ts",

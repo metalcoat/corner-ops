@@ -9,6 +9,7 @@ void (async () => {
   await ensureOrderingAccountSchema();
   const sql = getSql();
   const id = randomUUID();
+  const draftId = randomUUID();
   try {
     await sql`INSERT INTO ordering_orders(id,business,source,status,payment_status,service_type,display_number,total_cents,paid_cents,amount_due_cents,created_by) VALUES(${id},'Corner Deli','pos','sent_to_kitchen','partially_paid','pickup','VOID-V',1200,500,700,'void-validation')`;
     let employeeBlocked = false;
@@ -19,7 +20,11 @@ void (async () => {
     const order = (await sql`SELECT status,payment_status,paid_cents,amount_due_cents,void_reason,pre_void_status,pre_void_payment_status FROM ordering_orders WHERE id=${id}`)[0];
     const event = (await sql`SELECT details FROM ordering_order_events WHERE order_id=${id} AND event_type='order_voided'`)[0];
     if (result.alreadyVoided || order.status !== "cancelled" || order.payment_status !== "partially_paid" || Number(order.paid_cents) !== 500 || Number(order.amount_due_cents) !== 700 || order.pre_void_status !== "sent_to_kitchen" || order.pre_void_payment_status !== "partially_paid" || !event) throw new Error("Void audit/payment-state acceptance failed.");
-    console.log(JSON.stringify({ employeeBlocked, managerVoided: true, orderPreserved: true, paymentNotRefunded: true, reasonActorTimestampAudit: true }, null, 2));
-  } finally { await sql`DELETE FROM ordering_orders WHERE id=${id}`; }
+    await sql`INSERT INTO ordering_orders(id,business,source,status,payment_status,service_type,display_number,total_cents,paid_cents,amount_due_cents,created_by) VALUES(${draftId},'Corner Deli','pos','draft','unpaid','pickup','CANCEL-V',1200,0,1200,'void-validation')`;
+    await voidSentOrder({ orderId: draftId, business: "Corner Deli", reason: "Customer cancelled before kitchen", actor: { id: "manager", name: "Manager", type: "employee", role: "manager" } });
+    const draft = (await sql`SELECT status,voided_at,pre_void_status FROM ordering_orders WHERE id=${draftId}`)[0];
+    if (draft.status !== "cancelled" || !draft.voided_at || draft.pre_void_status !== "draft") throw new Error("Unpaid draft cancellation acceptance failed.");
+    console.log(JSON.stringify({ employeeBlocked, managerVoided: true, unpaidDraftCancelled: true, orderPreserved: true, paymentNotRefunded: true, reasonActorTimestampAudit: true }, null, 2));
+  } finally { await sql`DELETE FROM ordering_orders WHERE id IN(${id},${draftId})`; }
   process.exit();
 })().catch((error) => { console.error(error); process.exit(1); });
