@@ -19,3 +19,12 @@ test("customer tracking rejects random tokens without exposing order data",async
   await expect(page.getByText("Tracking link is invalid or expired.",{exact:true})).toBeVisible();
   await expect(page.getByText(/customer|address|driver/i)).toHaveCount(0);
 });
+
+test("store dashboard requires a POS employee session",async({page,request})=>{
+  const response=await request.get("/api/ordering/store-dashboard");
+  expect(response.status()).toBe(401);
+  expect(await response.json()).toEqual({error:"Employee sign-in required."});
+  await page.goto("/pos/deli/dashboard");
+  await expect(page.getByRole("link",{name:"Dashboard"})).toBeVisible();
+  await expect(page.getByText("Employee sign-in required.",{exact:true})).toBeVisible();
+});

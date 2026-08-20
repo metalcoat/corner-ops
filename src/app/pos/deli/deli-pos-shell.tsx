@@ -10,6 +10,7 @@ import "./deli-pos-shell-overrides.css";
 
 const centerWorkspaces = [
   { label: "Menu", href: "/pos/deli" },
+  { label: "Dashboard", href: "/pos/deli/dashboard" },
   { label: "Customers", href: "/pos/deli/customers" },
   { label: "Kitchen", href: "/pos/deli/kitchen" },
 ] as const;

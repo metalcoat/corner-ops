@@ -19,6 +19,7 @@ const publicPaths = [
   "/api/cron/",
   "/api/customer/",
   "/api/driver/",
+  "/api/ordering/store-dashboard",
 ];
 
 type Token = {
