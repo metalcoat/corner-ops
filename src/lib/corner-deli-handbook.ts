@@ -19,7 +19,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     title: "1. Customer service: the customer is always right (even when they are not)",
     bullets: [
       "Do not argue with a customer. Stay calm, clarify the problem, and make a reasonable effort to resolve it before transferring the customer to a manager.",
-      "If a customer becomes threatening, discriminatory, harassing, or unsafe, employees are not required to absorb the abuse. Step away and involve the manager on duty immediately.",
+      "If a customer becomes threatening, discriminatory, harassing, or unsafe, employees are not required to accept the conduct. Step away and involve the manager on duty immediately.",
       "Be polite when asking a customer to repeat information you did not hear. A correct order is faster than remaking a wrong one.",
       "Answer phones promptly and professionally. Use caller ID when available and verify delivery addresses and callback numbers before completing a delivery order.",
     ],
@@ -42,7 +42,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
     bullets: [
       "One meal from the approved employee menu is provided for each working day when the employee works a shift of at least 6 hours.",
-      "Employee meals are portioned the same way as a customer's meal. Employee status is not a license to invent a heroic sandwich.",
+      "Employee meals are portioned exactly the same way as a customer's meal.",
       "A food mistake may be taken as the employee's meal only when the item is on the employee menu and a manager approves it. If the employee has already taken a meal for the day, the manager on duty decides what happens to the mistake.",
       "All employee meals are prepared by the cooks. Delivery drivers may not prepare their own employee meals.",
       "Employees must ask permission before an employee meal is made or taken.",
@@ -65,7 +65,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     bullets: [
       "Employees who take orders must learn the menu, including the normal sides and condiments that come with menu items.",
       "Do not read every optional modifier to the customer. Optional modifiers exist for customers who request a special order. Follow the normal ordering script and move to the next necessary question.",
-      "For example, do not turn a simple chicken quesadilla order into a recital of salsa, jalapenos, buffalo sauce, and every other possible button on the screen unless the customer asks to customize it.",
+      "For example, do not list salsa, jalapenos, buffalo sauce, and every other optional modifier for a chicken quesadilla unless the customer asks to customize it.",
       "For subs and similar items, follow the established script instead of listing every condiment and topping in the system.",
       "Use caller ID information as a tool, but still confirm information that matters to the order. Delivery addresses must be verified before the order is sent to the kitchen or driver.",
       "Read back or confirm details when an order is unusual, unclear, expensive, or likely to create a costly mistake.",
@@ -75,11 +75,11 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     title: "6. Delivery drivers",
     bullets: [
       "The rear delivery cash drawer is set to $0 at the end of each night. Each delivery money bag is normally set to $60 at the beginning of the shift.",
-      "Count the delivery bag before beginning the shift and report any discrepancy immediately. Do not silently inherit someone else's mismatch.",
+      "Count the delivery bag before beginning the shift and report any discrepancy immediately so the starting balance is documented.",
       "The target $60 bag mix is $10 in tens (1 x $10), $25 in fives (5 x $5), $23 in ones (23 x $1), and $2 in quarters (8 x $0.25), subject to available change.",
       "Each delivery order must be properly cashed out and the drawer/bag totals must reconcile at the end of the shift. Cash shortages or overages must be reported to management. The company will not make unauthorized deductions from wages or tips for shortages; repeated or unexplained mismatches may still result in investigation and discipline.",
       "Drivers are part of a team. During busy periods, management may group deliveries by location and rotate grouped runs among drivers.",
-      "Drivers may not dis-group deliveries, skip the rotation, take another driver's turn, or manipulate routes in order to maximize personal tips or cherry-pick orders.",
+      "Drivers may not dis-group deliveries, skip the rotation, take another driver's turn, or manipulate routes in order to maximize personal tips or select only preferred orders.",
       "When management groups deliveries, credit-card tips may be divided among the assigned drivers under the company's tip procedures and applicable law.",
       "For delivery orders requiring items from the front of the store, obtain those items first, bring them to the rear for final bagging, and only then move the completed order to the delivery vehicle.",
       "Drivers must maintain any license, registration, and insurance required for their driving duties, obey traffic laws, wear seat belts, and never use a handheld phone while driving. Accidents, tickets affecting driving privileges, or vehicle safety problems must be reported promptly.",
