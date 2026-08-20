@@ -52,11 +52,11 @@ export async function orderingOperationalReport(input: { business: OrderingBusin
       FROM ordering_orders WHERE business=${input.business} AND created_at>=${start.toISOString()} AND created_at<${end.toISOString()} AND status NOT IN ('draft','cancelled') GROUP BY service_type ORDER BY sales_cents DESC`,
     sql`SELECT source label, COUNT(*)::int orders, COALESCE(SUM(total_cents),0)::bigint sales_cents
       FROM ordering_orders WHERE business=${input.business} AND created_at>=${start.toISOString()} AND created_at<${end.toISOString()} AND status NOT IN ('draft','cancelled') GROUP BY source ORDER BY sales_cents DESC`,
-    sql`SELECT item_name_snapshot label, SUM(quantity)::int quantity, COALESCE(SUM(line_total_cents),0)::bigint sales_cents
+    sql`SELECT item_name_snapshot label, SUM(quantity-cancelled_quantity)::int quantity, COALESCE(SUM(line_total_cents*(quantity-cancelled_quantity)/quantity),0)::bigint sales_cents
       FROM ordering_order_items item JOIN ordering_orders orders ON orders.id=item.order_id
       WHERE orders.business=${input.business} AND orders.created_at>=${start.toISOString()} AND orders.created_at<${end.toISOString()} AND orders.status NOT IN ('draft','cancelled')
       GROUP BY item_name_snapshot ORDER BY sales_cents DESC, label LIMIT 50`,
-    sql`SELECT COALESCE(NULLIF(category_name_snapshot,''),'Uncategorized (legacy)') label, SUM(quantity)::int quantity, COALESCE(SUM(line_total_cents),0)::bigint sales_cents
+    sql`SELECT COALESCE(NULLIF(category_name_snapshot,''),'Uncategorized (legacy)') label, SUM(quantity-cancelled_quantity)::int quantity, COALESCE(SUM(line_total_cents*(quantity-cancelled_quantity)/quantity),0)::bigint sales_cents
       FROM ordering_order_items item JOIN ordering_orders orders ON orders.id=item.order_id
       WHERE orders.business=${input.business} AND orders.created_at>=${start.toISOString()} AND orders.created_at<${end.toISOString()} AND orders.status NOT IN ('draft','cancelled')
       GROUP BY COALESCE(NULLIF(category_name_snapshot,''),'Uncategorized (legacy)') ORDER BY sales_cents DESC, label`,

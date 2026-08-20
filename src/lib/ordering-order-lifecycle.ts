@@ -357,9 +357,9 @@ export async function listKitchenOrders(business: OrderingBusiness, includeRecen
   for (const order of rows) {
     const items = await sql`
       SELECT id, item_id, item_name_snapshot, variant_id, variant_name_snapshot, variant_sku_snapshot,
-             quantity, unit_price_cents, modifier_total_cents, combo_name_snapshot, combo_total_cents,
+             quantity-cancelled_quantity quantity, cancelled_quantity, unit_price_cents, modifier_total_cents, combo_name_snapshot, combo_total_cents,
              line_total_cents, special_instructions, sort_order
-      FROM ordering_order_items WHERE order_id = ${order.id} ORDER BY sort_order, created_at, id
+      FROM ordering_order_items WHERE order_id = ${order.id} AND quantity>cancelled_quantity ORDER BY sort_order, created_at, id
     `;
     for (const item of items) {
       item.modifiers = await sql`

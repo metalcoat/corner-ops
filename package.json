@@ -37,6 +37,7 @@
     "test:hardware": "tsx scripts/hardware-validate.ts",
     "test:tiki-pos": "tsx scripts/tiki-pos-validate.ts",
     "test:order-void": "tsx scripts/order-void-validate.ts",
+    "test:item-cancellation": "tsx scripts/item-cancellation-validate.ts",
     "test:split-checks": "tsx scripts/split-check-validate.ts",
     "test:print-description": "tsx scripts/print-description-validate.ts",
     "test:promotions": "tsx scripts/promotion-pricing-validate.ts",

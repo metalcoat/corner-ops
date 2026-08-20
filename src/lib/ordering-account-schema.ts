@@ -87,6 +87,7 @@ export function ensureOrderingAccountSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS void_reason TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS pre_void_status TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS pre_void_payment_status TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE ordering_order_items ADD COLUMN IF NOT EXISTS cancelled_quantity INTEGER NOT NULL DEFAULT 0`;
 
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_print_jobs (
