@@ -1,0 +1,13 @@
+.managerSettingsWorkspace{min-height:calc(100dvh - 86px);padding-bottom:32px;background:#f4f1e9;color:#211d17}
+.managerSettingsWorkspace .posSettingsCard{background:#fff;color:#211d17;border-color:#cfc5b4;box-shadow:0 3px 12px #211d1712}
+.managerSettingsWorkspace .posSettingsCard h2,.managerSettingsWorkspace .posSettingsCard h3,.managerSettingsWorkspace .posSettingsCard strong,.managerSettingsWorkspace .posSettingsCard label{color:#211d17}
+.managerSettingsWorkspace .posSettingsCard p,.managerSettingsWorkspace .posSettingsCard span,.managerSettingsWorkspace .posSettingsCard small,.managerSettingsWorkspace .posSettingsCard article{color:#3f392f}
+.managerSettingsWorkspace .posSettingsCard input:not([type="checkbox"]),.managerSettingsWorkspace .posSettingsCard select,.managerSettingsWorkspace .posSettingsCard textarea,.managerSettingsWorkspace .posTools input{box-sizing:border-box;min-height:42px;border:1px solid #766b59;border-radius:8px;background:#fff;color:#17130f;padding:9px 10px;font:inherit}
+.managerSettingsWorkspace .posSettingsCard input::placeholder,.managerSettingsWorkspace .posTools input::placeholder{color:#686158;opacity:1}
+.managerSettingsWorkspace .posSettingsCard button,.managerSettingsWorkspace .posTools button{min-height:42px;border:1px solid #51493d;border-radius:8px;background:#29241d;color:#fff;padding:9px 13px;font:inherit;font-weight:800;cursor:pointer}
+.managerSettingsWorkspace .posSettingsCard button:disabled,.managerSettingsWorkspace .posTools button:disabled{background:#d8d3ca;color:#6b655d;border-color:#b9b2a7;cursor:not-allowed}
+.managerSettingsWorkspace .posSettingsCard article{margin:8px 0;padding:12px;border:1px solid #ddd6ca;border-radius:9px;background:#faf8f3}
+.managerSettingsWorkspace .posSettingsGrid{max-width:none;margin:12px 0;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.managerSettingsWorkspace .posSettingsCard label{grid-template-columns:1fr;gap:6px;border-bottom:0}
+.managerSettingsWorkspace .posTools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.managerSettingsWorkspace [role="status"]{color:#174d3a!important;font-weight:700}

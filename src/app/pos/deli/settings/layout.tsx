@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { getPosSession } from "@/lib/pos-auth";
 import ManagerAccessGate from "../manager-access-gate";
+import "./settings.css";
 
 const links = [
   ["Overview", "/pos/deli/settings"], ["Menu", "/pos/deli/settings/menu"],
