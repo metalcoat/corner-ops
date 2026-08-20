@@ -1,5 +1,6 @@
-.managerSettingsWorkspace{min-height:calc(100dvh - 86px);padding-bottom:32px;background:#f4f1e9;color:#211d17}
-.managerSettingsWorkspace .posSettingsCard{background:#fff;color:#211d17;border-color:#cfc5b4;box-shadow:0 3px 12px #211d1712}
+.managerSettingsWorkspace{width:100%;min-height:calc(100dvh - 86px);padding-bottom:32px;background:#f4f1e9;color:#211d17}
+.managerSettingsWorkspace>:not(nav){box-sizing:border-box;width:min(1100px,calc(100% - 32px));margin-left:auto;margin-right:auto}
+.managerSettingsWorkspace .posSettingsCard{max-width:none;margin-top:24px;background:#fff;color:#211d17;border-color:#cfc5b4;box-shadow:0 3px 12px #211d1712}
 .managerSettingsWorkspace .posSettingsCard h2,.managerSettingsWorkspace .posSettingsCard h3,.managerSettingsWorkspace .posSettingsCard strong,.managerSettingsWorkspace .posSettingsCard label{color:#211d17}
 .managerSettingsWorkspace .posSettingsCard p,.managerSettingsWorkspace .posSettingsCard span,.managerSettingsWorkspace .posSettingsCard small,.managerSettingsWorkspace .posSettingsCard article{color:#3f392f}
 .managerSettingsWorkspace .posSettingsCard input:not([type="checkbox"]),.managerSettingsWorkspace .posSettingsCard select,.managerSettingsWorkspace .posSettingsCard textarea,.managerSettingsWorkspace .posTools input{box-sizing:border-box;min-height:42px;border:1px solid #766b59;border-radius:8px;background:#fff;color:#17130f;padding:9px 10px;font:inherit}
@@ -11,3 +12,4 @@
 .managerSettingsWorkspace .posSettingsCard label{grid-template-columns:1fr;gap:6px;border-bottom:0}
 .managerSettingsWorkspace .posTools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .managerSettingsWorkspace [role="status"]{color:#174d3a!important;font-weight:700}
+@media(max-width:640px){.managerSettingsWorkspace>:not(nav){width:min(100% - 16px,1100px)}.managerSettingsWorkspace .posSettingsCard{margin-top:12px;padding:14px}}
