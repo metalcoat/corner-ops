@@ -49,11 +49,15 @@ export default function PeoplePage() {
     {
       eyebrow: "Hire, document, and acknowledge",
       title: "Employment forms",
-      description: "Assign onboarding packets, collect employee signatures, complete I-9 employer review, issue New York pay-rate notices, and securely collect voluntary direct-deposit elections.",
+      description: business === "Corner Deli"
+        ? "Assign onboarding forms, collect employee signatures, complete I-9 employer review, manage the Corner Deli handbook acknowledgments, issue New York pay-rate notices, and securely collect voluntary direct-deposit elections."
+        : "Assign onboarding forms, collect employee signatures, complete I-9 employer review, issue New York pay-rate notices, and securely collect voluntary direct-deposit elections.",
       links: [
         { label: "Manage employment forms", href: "/ops/employment-forms", primary: true },
+        ...(business === "Corner Deli" ? [{ label: "Handbook & signatures", href: "/ops/employee-handbook" }] : []),
         { label: "Direct deposit onboarding", href: "/ops/direct-deposit" },
-        { label: "Employee forms view", href: "/employee/forms" },
+        { label: "Employee-facing forms", href: "/employee/forms" },
+        ...(business === "Corner Deli" ? [{ label: "Employee-facing handbook", href: "/employee/handbook" }] : []),
       ],
     },
     {

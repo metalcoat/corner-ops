@@ -18,6 +18,7 @@ export default function EmployeeLayout({ children }: Readonly<{ children: ReactN
         <a href="/employee">Home</a>
         <a href="/scan">Scan document</a>
         <a href="/employee/forms">Forms</a>
+        <a href="/employee/handbook">Handbook</a>
         <a href="/employee/direct-deposit">Direct deposit</a>
         <EmployeeAttendanceBadge />
         <a href="/employee/forgot-pin">Forgot PIN</a>
