@@ -17,7 +17,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
-    const session = await createEmployeeSession(businessFrom(body.business), String(body.pin || ""));
+    const session = await createEmployeeSession(businessFrom(body.business), String(body.pin || ""), { label: String(body.deviceLabel || ""), userAgent: request.headers.get("user-agent") || "" });
     return Response.json({ authenticated: true, session });
   } catch (error) {
     return apiError(error);

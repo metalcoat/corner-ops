@@ -20,6 +20,7 @@ export function ensureOrderingAddressSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `;
+    await sql`ALTER TABLE ordering_order_delivery_addresses ADD COLUMN IF NOT EXISTS delivery_notes_snapshot TEXT NOT NULL DEFAULT ''`;
   })().catch((error) => { schemaPromise = null; throw error; });
   return schemaPromise;
 }
@@ -27,16 +28,17 @@ export function ensureOrderingAddressSchema(): Promise<void> {
 export async function saveOrderDeliveryAddress(input: { orderId: string; address: ValidatedDeliveryAddress; line2?: string; customerAddressId?: string | null; route?: { distanceMiles: number; durationSeconds: number; provider: string; calculatedAt: string } | null }) {
   await ensureOrderingAddressSchema();
   const sql = getSql();
+  const note = input.customerAddressId ? String((await sql`SELECT delivery_notes FROM ordering_customer_addresses WHERE id=${input.customerAddressId}`)[0]?.delivery_notes || "") : "";
   await sql`
     INSERT INTO ordering_order_delivery_addresses (
       order_id, entered_address, formatted_address, line1, line2, city, state, postal_code,
       country, latitude, longitude, provider, provider_reference_id, validation_status,
-      validated_at, route_distance_miles, route_duration_seconds, route_provider, route_calculated_at, customer_address_id
+      validated_at, route_distance_miles, route_duration_seconds, route_provider, route_calculated_at, customer_address_id, delivery_notes_snapshot
     ) VALUES (
       ${input.orderId}, ${input.address.enteredAddress}, ${input.address.formattedAddress}, ${input.address.line1}, ${String(input.line2 || "").trim().slice(0, 120)},
       ${input.address.city}, ${input.address.state}, ${input.address.postalCode}, ${input.address.country}, ${input.address.latitude}, ${input.address.longitude},
       ${input.address.provider}, ${input.address.providerReferenceId}, 'validated', ${input.address.validatedAt},
-      ${input.route?.distanceMiles ?? null}, ${input.route?.durationSeconds ?? null}, ${input.route?.provider || ""}, ${input.route?.calculatedAt || null}, ${input.customerAddressId || null}
+      ${input.route?.distanceMiles ?? null}, ${input.route?.durationSeconds ?? null}, ${input.route?.provider || ""}, ${input.route?.calculatedAt || null}, ${input.customerAddressId || null}, ${note}
     )
   `;
   if (input.customerAddressId) await sql`UPDATE ordering_customer_addresses SET last_used_at=NOW(),updated_at=NOW() WHERE id=${input.customerAddressId}`;

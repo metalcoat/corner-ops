@@ -1,0 +1,3 @@
+import { customerProof } from "@/lib/ordering-driver-delivery";
+export const runtime="nodejs";
+export async function GET(request:Request,{params}:{params:Promise<{token:string;proofId:string}>}){try{const{token,proofId}=await params,value=await customerProof(token,proofId);if(!value?.object)return new Response("Not found",{status:404});return new Response(value.object.stream,{status:value.object.statusCode,headers:{"content-type":value.mimeType,"cache-control":"private,no-store","x-content-type-options":"nosniff"}})}catch(error){console.error(error);return new Response("Unavailable",{status:500})}}

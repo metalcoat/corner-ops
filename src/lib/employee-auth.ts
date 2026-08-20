@@ -1,7 +1,8 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { ensureSchema, getSql } from "@/lib/db";
 import { validateEmployeePin } from "@/lib/employee-pin";
+import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import type { Business } from "@/lib/types";
 import { secureCookies } from "@/lib/cookie-security";
 
@@ -13,6 +14,9 @@ export type EmployeeSession = {
   business: Business;
   name: string;
   position: string;
+  roleGroup: "Driver" | "In-House" | "Ignore";
+  posRole: "employee" | "manager" | "owner";
+  deviceSessionId: string;
   expiresAt: number;
 };
 
@@ -21,6 +25,8 @@ type EmployeeRow = {
   business: Business;
   name: string;
   position: string;
+  role_group: "Driver" | "In-House" | "Ignore";
+  pos_role: "employee" | "manager" | "owner";
 };
 
 function secret(): string {
@@ -60,15 +66,17 @@ function decode(token: string): EmployeeSession | null {
   }
 }
 
-export async function createEmployeeSession(business: Business, suppliedPin: string): Promise<EmployeeSession> {
+export async function createEmployeeSession(business: Business, suppliedPin: string, device: { label?: string; userAgent?: string } = {}): Promise<EmployeeSession> {
   await ensureSchema();
+  await ensureEmployeeDirectorySchema();
+  await getSql()`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pos_role TEXT NOT NULL DEFAULT 'employee'`;
   const pin = validateEmployeePin(business, suppliedPin, business);
   const rows = await getSql()`
-    SELECT id, business, name, position
+    SELECT id, business, name, position, role_group, COALESCE(pos_role,'employee') pos_role
     FROM employees
     WHERE business = ${business}
       AND pin_hash = ${pinHash(business, pin)}
-      AND active = TRUE
+      AND pin_enabled = TRUE AND active = TRUE
     LIMIT 1
   ` as unknown as EmployeeRow[];
   const employee = rows[0];
@@ -79,6 +87,9 @@ export async function createEmployeeSession(business: Business, suppliedPin: str
     business: employee.business,
     name: employee.name,
     position: employee.position,
+    roleGroup: employee.role_group,
+    posRole: employee.pos_role,
+    deviceSessionId: randomUUID(),
     expiresAt: Date.now() + EMPLOYEE_SESSION_SECONDS * 1000,
   };
   const store = await cookies();
@@ -89,6 +100,14 @@ export async function createEmployeeSession(business: Business, suppliedPin: str
     path: "/",
     maxAge: EMPLOYEE_SESSION_SECONDS,
   });
+  await getSql()`
+    CREATE TABLE IF NOT EXISTS employee_app_sessions (
+      id UUID PRIMARY KEY, employee_id UUID NOT NULL REFERENCES employees(id), business TEXT NOT NULL,
+      device_label TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '',
+      authenticated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL, ended_at TIMESTAMPTZ
+    )`;
+  await getSql()`INSERT INTO employee_app_sessions(id,employee_id,business,device_label,user_agent,expires_at) VALUES(${payload.deviceSessionId},${payload.employeeId},${payload.business},${String(device.label||"").slice(0,120)},${String(device.userAgent||"").slice(0,500)},${new Date(payload.expiresAt)})`;
   return payload;
 }
 
@@ -100,6 +119,8 @@ export async function getEmployeeSession(): Promise<EmployeeSession | null> {
 
 export async function clearEmployeeSession(): Promise<void> {
   const store = await cookies();
+  const session = await getEmployeeSession();
+  if (session?.deviceSessionId) await getSql()`UPDATE employee_app_sessions SET ended_at=NOW(),last_seen_at=NOW() WHERE id=${session.deviceSessionId}`.catch(() => undefined);
   store.set(EMPLOYEE_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",

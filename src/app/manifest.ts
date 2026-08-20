@@ -41,6 +41,13 @@ export default function manifest(): MetadataRoute.Manifest {
         url: "/employee",
         icons: [{ src: "/corner-ops-icon.svg", sizes: "any", type: "image/svg+xml" }],
       },
+      {
+        name: "My deliveries",
+        short_name: "Deliveries",
+        description: "Open assigned Corner Deli deliveries.",
+        url: "/employee/deliveries",
+        icons: [{ src: "/corner-ops-icon.svg", sizes: "any", type: "image/svg+xml" }],
+      },
     ],
   };
 }

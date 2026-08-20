@@ -18,6 +18,7 @@ const publicPaths = [
   "/api/square/webhook",
   "/api/cron/",
   "/api/customer/",
+  "/api/driver/",
 ];
 
 type Token = {
@@ -117,7 +118,7 @@ export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const allowed=(process.env.ALLOWED_HOSTS||"").split(",").map(v=>v.trim().toLowerCase()).filter(Boolean),host=(request.headers.get("x-forwarded-host")||request.headers.get("host")||"").split(":")[0].toLowerCase();
   if(allowed.length&&!allowed.includes(host)&&host!=="localhost"&&!/^127\./.test(host)&&!/^192\.168\./.test(host))return NextResponse.json({error:"Host not allowed."},{status:421});
-  const response=NextResponse.next();response.headers.set("X-Robots-Tag","noindex, nofollow, noarchive");response.headers.set("X-Content-Type-Options","nosniff");response.headers.set("Referrer-Policy","same-origin");response.headers.set("Permissions-Policy","camera=(), microphone=(), geolocation=()");response.headers.set("Content-Security-Policy","frame-ancestors 'none'");
+  const response=NextResponse.next();response.headers.set("X-Robots-Tag","noindex, nofollow, noarchive");response.headers.set("X-Content-Type-Options","nosniff");response.headers.set("Referrer-Policy","same-origin");response.headers.set("Permissions-Policy","camera=(self), microphone=(), geolocation=(self)");response.headers.set("Content-Security-Policy","frame-ancestors 'none'");
   if(!path.startsWith("/api/"))return response;
   if (publicPaths.some((prefix) => path === prefix || path.startsWith(prefix))) return response;
   if (isDeliPosApi(path) && posToken(request)) return response;

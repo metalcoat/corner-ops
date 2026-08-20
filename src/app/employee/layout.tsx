@@ -16,6 +16,7 @@ export default function EmployeeLayout({ children }: Readonly<{ children: ReactN
       <EmployeeInstallPrompt />
       <nav className="employeePortalNav" aria-label="Employee Hub navigation">
         <a href="/employee">Home</a>
+        <a href="/employee/deliveries">My deliveries</a>
         <a href="/scan">Scan document</a>
         <a href="/employee/forms">Forms</a>
         <a href="/employee/direct-deposit">Direct deposit</a>
