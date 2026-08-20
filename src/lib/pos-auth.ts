@@ -178,7 +178,14 @@ export async function getPosSession(requireClockedIn = true): Promise<PosSession
   const raw = (await cookies()).get(POS_COOKIE)?.value;
   const session = raw ? decodePosSession(raw) : null;
   if (!session || (requireClockedIn && session.clockInRequired)) return null;
-  return session;
+  await ensurePosAuthSchema();
+  const employee = (await getSql()`
+    SELECT name,position,pos_role FROM employees
+    WHERE id=${session.employeeId} AND business='Corner Deli' AND active=TRUE AND pin_enabled=TRUE
+    LIMIT 1
+  `)[0] as Pick<EmployeeRow,"name"|"position"|"pos_role">|undefined;
+  if (!employee) return null;
+  return { ...session, name: employee.name, position: employee.position, posRole: employee.pos_role };
 }
 
 export async function clearPosSession(): Promise<void> {
