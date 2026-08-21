@@ -229,6 +229,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [deliveryValidatedInput, setDeliveryValidatedInput] = useState("");
   const [deliveryRoute, setDeliveryRoute] = useState<DeliveryRoute | null>(null);
   const [customer,setCustomer]=useState<PosCustomer|null>(null),[customerOpen,setCustomerOpen]=useState(false),[customerQuery,setCustomerQuery]=useState(""),[customerMatches,setCustomerMatches]=useState<PosCustomer[]>([]);
+  const [quickCustomer,setQuickCustomer]=useState({firstName:"",lastName:"",phone:""}),[quickCustomerBusy,setQuickCustomerBusy]=useState(false),[quickCustomerError,setQuickCustomerError]=useState("");
   const [selectedCustomerPhoneId,setSelectedCustomerPhoneId]=useState("");
   const [selectedCustomerAddressId,setSelectedCustomerAddressId]=useState("");
   const [orderOrigin,setOrderOrigin]=useState<"pos"|"phone">("pos");
@@ -616,6 +617,18 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   }
 
   function chooseCustomer(next:PosCustomer){setCustomer(next);const phone=next.phones?.find(candidate=>candidate.is_primary)||next.phones?.[0];setSelectedCustomerPhoneId(phone?.id||"");setSavedDraft(null)}
+  async function createQuickCustomer(event:React.FormEvent){
+    event.preventDefault();
+    if(quickCustomerBusy)return;
+    setQuickCustomerBusy(true);setQuickCustomerError("");
+    try{
+      const response=await fetch("/api/ordering/customers",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(quickCustomer)});
+      const payload=await response.json() as {customer?:PosCustomer;error?:string};
+      if((!response.ok&&response.status!==409)||!payload.customer)throw new Error(payload.error||"Could not save this customer.");
+      chooseCustomer(payload.customer);setQuickCustomer({firstName:"",lastName:"",phone:""});setCustomerQuery("");setCustomerOpen(false);
+    }catch(error){setQuickCustomerError(error instanceof Error?error.message:"Could not save this customer.")}
+    finally{setQuickCustomerBusy(false)}
+  }
   async function chooseSavedAddress(address:PosCustomerAddress){setSelectedCustomerAddressId(address.id);const entered=[address.line1,address.line2,address.city,address.state,address.postal_code].filter(Boolean).join(", ");setDeliveryAddress(entered);setDeliveryUnit(address.line2||"");await validateAddress(undefined,entered)}
 
   function removeLine(lineId: string) {
@@ -723,6 +736,9 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
 
   async function submitOrder(draft: SavedDraft | null = savedDraft, managerOverride = false) {
     if (submittingOrder) return;
+    if(business==="Corner Deli"&&!customer){setCheckoutError("Add the customer's name and phone number before sending this order.");setCustomerOpen(true);return}
+    if(business==="Corner Deli"&&!selectedCustomerPhoneId){setCheckoutError("Choose a phone number before sending this order.");setCustomerOpen(true);return}
+    if(business==="Corner Deli"&&serviceType==="delivery"&&!validatedAddress){setCheckoutError("Enter and validate the delivery address before sending this order.");return}
     if(business==="Tiki"&&activeTab&&cart.length)draft=await saveDraft();
     if (!draft) draft = activeTab || await saveDraft();
     if (!draft) return;
@@ -746,6 +762,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       setScheduledFor("");
       setTimingMode("asap");
       setOverrideReason("");
+      setCustomer(null);setSelectedCustomerPhoneId("");setSelectedCustomerAddressId("");setDeliveryAddress("");setDeliveryUnit("");setValidatedAddress(null);setDeliveryValidationToken("");setDeliveryValidatedInput("");setDeliveryRoute(null);
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : "Could not submit order.");
     } finally {
@@ -834,6 +851,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const posEmployee = "session" in session ? session.session as PosEmployeeSession | undefined : undefined;
   const canManageBarcodes=posEmployee?posEmployee.posRole!=="employee":("role" in session&&(session.role==="Owner"||session.role==="Co-Owner"||session.role==="Manager"));
   const canManagePayments=canManageBarcodes;
+  const sendRequirement=business==="Corner Deli"&&!customer?"Customer name and phone required":business==="Corner Deli"&&!selectedCustomerPhoneId?"Choose customer phone":business==="Corner Deli"&&serviceType==="delivery"&&!validatedAddress?"Validated delivery address required":"";
   async function showTabs(){setTabsOpen(true);setTabsLoading(true);setCheckoutError("");try{const response=await fetch("/api/ordering/tiki-tabs",{cache:"no-store"}),payload=await response.json();if(!response.ok)throw new Error(payload.error||"Could not load tabs.");setOpenTabs(payload.tabs||[])}catch(error){setCheckoutError(error instanceof Error?error.message:"Could not load tabs.")}finally{setTabsLoading(false)}}
   async function chooseTab(tab:OpenTikiTab){const response=await fetch(`/api/ordering/tiki-tabs/${encodeURIComponent(tab.id)}`,{cache:"no-store"}),payload=await response.json();if(!response.ok){setCheckoutError(payload.error||"Could not open tab.");return}const detail=payload.tab;const draft:SavedDraft={id:detail.id,displayNumber:detail.display_number,totalCents:Number(detail.total_cents),timingMessage:"Open bar tab",kitchenTimingLabel:"BAR",scheduledFor:null,promotions:[],orderItemIds:(detail.items||[]).map((item:any)=>item.id),loyalty:[]};setServiceType("bar");setActiveTab(draft);setSavedDraft(draft);setActiveTabItems(detail.items||[]);setTabName(detail.first_name_snapshot||"");setCart([]);setTabsOpen(false)}
 
@@ -1004,7 +1022,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           <button type="button" disabled={!cart.length || savingDraft || Boolean(savedDraft&&!activeTab) || (timingMode === "future" && !scheduledFor)} onClick={() => void saveDraft()}>
             {savingDraft ? "SAVING…" : activeTab?"ADD TO TAB":business==="Tiki"&&serviceType==="bar"?"OPEN TAB":"HOLD"}
           </button>
-          <button type="button" className="submitOrder" disabled={!cart.length || submittingOrder || savingDraft} onClick={() => void submitOrder()}>
+          {sendRequirement&&<p className="posSendRequirement" role="status">{sendRequirement}</p>}
+          <button type="button" className="submitOrder" aria-disabled={Boolean(sendRequirement)} disabled={!cart.length || submittingOrder || savingDraft} onClick={() => void submitOrder()}>
             {submittingOrder ? "SENDING…" : "SEND"}
           </button>
           <button type="button" className="primary" disabled={(!cart.length&&!activeTab) || savingDraft} onClick={() => void openCheckout()}>CHECKOUT</button>
@@ -1134,6 +1153,6 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       </section>
     </div>}
     {intensityChoice&&<div className="posIntensityPopover" role="dialog" aria-label={`${intensityChoice.option.name} amount`}><strong>{intensityChoice.option.name}</strong><div>{(["light","normal","heavy"] as const).map(amount=><button key={amount} className={(modifierAmounts[intensityChoice.option.id]||"normal")===amount?"selected":""} onClick={()=>chooseIntensity(amount)}>{amount.toUpperCase()}</button>)}</div><button onClick={()=>setIntensityChoice(null)}>Cancel</button></div>}
-    {customerOpen&&<div className="posModalBackdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setCustomerOpen(false)}}><section className="posCustomerDialog" role="dialog" aria-modal="true"><header><div><span>CUSTOMER</span><h2>Find by phone or name</h2></div><button onClick={()=>setCustomerOpen(false)}>Close</button></header><input autoFocus type="search" value={customerQuery} onChange={e=>setCustomerQuery(e.target.value)} placeholder="3155551212 or Sarah Smith"/>{customerMatches.map(match=><button className="posCustomerMatch" key={match.id} onClick={()=>{chooseCustomer(match);setCustomerOpen(false)}}><strong>{match.display_name}</strong><span>{match.phones?.map(phone=>phone.display_phone).join(" · ")||match.display_phone}</span>{match.addresses[0]&&<small>{match.addresses[0].line1} · Last order {match.last_order_at?new Date(match.last_order_at).toLocaleDateString():"never"}</small>}</button>)}{customer&&<button className="danger" onClick={()=>{setCustomer(null);setSelectedCustomerPhoneId("");setSelectedCustomerAddressId("");setCustomerOpen(false);setSavedDraft(null)}}>Use Guest / Clear customer</button>}{business==="Corner Deli"&&<Link href="/pos/deli/customers" onClick={()=>setCustomerOpen(false)}>Open customer CRM</Link>}</section></div>}
+    {customerOpen&&<div className="posModalBackdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setCustomerOpen(false)}}><section className="posCustomerDialog" role="dialog" aria-modal="true"><header><div><span>CUSTOMER</span><h2>Find or add customer</h2></div><button onClick={()=>setCustomerOpen(false)}>Close</button></header><label>Search existing customer<input autoFocus type="search" value={customerQuery} onChange={e=>setCustomerQuery(e.target.value)} placeholder="3155551212 or Sarah Smith"/></label>{customerMatches.map(match=><button className="posCustomerMatch" key={match.id} onClick={()=>{chooseCustomer(match);setCustomerOpen(false)}}><strong>{match.display_name}</strong><span>{match.phones?.map(phone=>phone.display_phone).join(" · ")||match.display_phone}</span>{match.addresses[0]&&<small>{match.addresses[0].line1} · Last order {match.last_order_at?new Date(match.last_order_at).toLocaleDateString():"never"}</small>}</button>)}{business==="Corner Deli"&&<form className="posQuickCustomer" onSubmit={createQuickCustomer}><h3>Quick add</h3><div><label>First name<input required maxLength={80} autoComplete="off" value={quickCustomer.firstName} onChange={e=>setQuickCustomer(current=>({...current,firstName:e.target.value}))}/></label><label>Last name<input maxLength={80} autoComplete="off" value={quickCustomer.lastName} onChange={e=>setQuickCustomer(current=>({...current,lastName:e.target.value}))}/></label></div><label>Phone number<input required inputMode="tel" autoComplete="tel" placeholder="315-555-1212" value={quickCustomer.phone} onChange={e=>setQuickCustomer(current=>({...current,phone:e.target.value}))}/></label>{quickCustomerError&&<p role="alert">{quickCustomerError}</p>}<button className="primary" disabled={quickCustomerBusy||!quickCustomer.firstName.trim()||quickCustomer.phone.replace(/\D/g,"").length!==10}>{quickCustomerBusy?"SAVING…":"ADD TO ORDER"}</button></form>}{customer&&<button className="danger" onClick={()=>{setCustomer(null);setSelectedCustomerPhoneId("");setSelectedCustomerAddressId("");setCustomerOpen(false);setSavedDraft(null)}}>Clear customer</button>}{business==="Corner Deli"&&<Link href="/pos/deli/customers" onClick={()=>setCustomerOpen(false)}>Open customer CRM</Link>}</section></div>}
   </main>;
 }

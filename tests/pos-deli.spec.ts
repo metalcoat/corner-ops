@@ -175,6 +175,7 @@ test("Delivery preserves the cart and requires provider validation", async ({ pa
   await expect(page.getByText(/Held order #/)).toBeVisible();
   await expect(page.getByRole("article").filter({ hasText: "Pizza Logs" })).toBeVisible();
   await page.getByRole("button", { name: "SEND", exact: true }).click();
-  await expect(page.getByText("Customer name is required.")).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Find or add customer" })).toBeVisible();
+  await expect(page.getByText("Add the customer's name and phone number before sending this order.")).toBeVisible();
   await expect(page.getByRole("article").filter({ hasText: "Pizza Logs" })).toBeVisible();
 });
