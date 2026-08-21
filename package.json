@@ -55,7 +55,6 @@
     "test:driver-delivery": "tsx scripts/driver-delivery-validate.ts",
     "test:store-dashboard": "tsx scripts/store-dashboard-validate.ts",
     "test:3cx-live": "tsx scripts/three-cx-live-call-validate.ts",
-    "test:order-void": "tsx scripts/order-void-validate.ts",
     "test:ai-ordering": "tsx scripts/ai-ordering-validate.ts",
     "test:operational-reporting": "tsx scripts/operational-reporting-validate.ts",
     "test:auth:e2e": "playwright test tests/auth-cookie.spec.ts",
@@ -65,12 +64,12 @@
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
     "@vercel/blob": "^2.3.0",
-    "next": "^16.0.0",
+    "next": "^16.3.1",
     "pg": "^8.23.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "resend": "^6.9.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

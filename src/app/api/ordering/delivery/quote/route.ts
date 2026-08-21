@@ -1,7 +1,7 @@
-import { canAccessBusiness, getSession } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { quoteDelivery } from "@/lib/ordering-delivery";
+import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
 
 export const runtime = "nodejs";
 
@@ -12,16 +12,13 @@ function readBusiness(value: unknown): OrderingBusiness {
 
 export async function POST(request: Request) {
   try {
-    const session = await getSession();
-    if (!session) return unauthorized();
     const body = await request.json() as Record<string, unknown>;
     const business = readBusiness(body.business);
-    if (!canAccessBusiness(session, business)) {
-      return Response.json({ error: "Business access denied." }, { status: 403 });
-    }
+    const actor=await orderingActor(business);
+    if(!actor)return unauthorized();
 
     const managerBypassApproved = Boolean(body.managerBypassApproved);
-    if (managerBypassApproved && !["Owner", "Co-Owner", "Manager"].includes(session.role)) {
+    if (managerBypassApproved && !canManagePos(actor)) {
       return Response.json({ error: "Manager authorization is required to bypass a delivery minimum." }, { status: 403 });
     }
 

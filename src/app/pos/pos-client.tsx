@@ -55,6 +55,7 @@ type SavedDraft = {
   id: string;
   displayNumber: string;
   totalCents: number;
+  deliveryFeeCents: number;
   timingMessage: string;
   kitchenTimingLabel: string;
   scheduledFor: string | null;
@@ -243,6 +244,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [deliveryValidationToken, setDeliveryValidationToken] = useState("");
   const [deliveryValidatedInput, setDeliveryValidatedInput] = useState("");
   const [deliveryRoute, setDeliveryRoute] = useState<DeliveryRoute | null>(null);
+  const [quotedDeliveryFeeCents,setQuotedDeliveryFeeCents]=useState<number|null>(null);
   const [deliveryEditorOpen,setDeliveryEditorOpen]=useState(false);
   const [customer,setCustomer]=useState<PosCustomer|null>(null),[customerOpen,setCustomerOpen]=useState(false),[customerQuery,setCustomerQuery]=useState(""),[customerMatches,setCustomerMatches]=useState<PosCustomer[]>([]);
   const [quickCustomer,setQuickCustomer]=useState({firstName:"",lastName:"",phone:""}),[quickCustomerBusy,setQuickCustomerBusy]=useState(false),[quickCustomerError,setQuickCustomerError]=useState("");
@@ -419,6 +421,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     return allItems.filter((item) => [item.name, item.description, ...item.variants.flatMap((variant) => [variant.name, ...variant.aliases])].some((value) => value.toLowerCase().includes(query)));
   }, [activeCategory, allItems, menuSearch]);
   const subtotalCents = cart.reduce((sum, line) => sum + line.unitPriceCents * line.quantity, 0);
+  useEffect(()=>{if(serviceType!=="delivery"||!deliveryRoute||!cart.length){setQuotedDeliveryFeeCents(null);return}const controller=new AbortController(),timer=window.setTimeout(()=>fetch("/api/ordering/delivery/quote",{method:"POST",headers:{"content-type":"application/json"},signal:controller.signal,body:JSON.stringify({business,distanceMiles:deliveryRoute.distanceMiles,merchandiseSubtotalCents:subtotalCents})}).then(async response=>{const payload=await response.json();if(!response.ok)throw new Error(payload.error||"Could not calculate the delivery fee.");setQuotedDeliveryFeeCents(Number(payload.quote.deliveryFeeCents))}).catch(error=>{if(!(error instanceof DOMException&&error.name==="AbortError")){setQuotedDeliveryFeeCents(null);setAddressError(error instanceof Error?error.message:"Could not calculate the delivery fee.")}}),150);return()=>{window.clearTimeout(timer);controller.abort()}},[business,deliveryRoute,serviceType,subtotalCents,cart.length]);
   useEffect(()=>{if(!cart.length){setQuotedPromotions([]);return}const controller=new AbortController(),timer=window.setTimeout(()=>{fetch("/api/ordering/promotions/quote",{method:"POST",headers:{"content-type":"application/json"},signal:controller.signal,body:JSON.stringify({serviceType,fulfillmentAt:timingMode==="future"&&scheduledFor?new Date(scheduledFor).toISOString():null,items:cart.map(line=>{const item=allItems.find(candidate=>candidate.id===line.itemId),variant=item?.variants.find(candidate=>candidate.id===line.variantId)||null;const modifiers=item?.modifiers.flatMap(group=>{if(group.presentationBehavior==="pizza_topping")return line.pizzaToppings.filter(topping=>group.options.some(option=>option.id===topping.modifierOptionId)).map(topping=>{const option=group.options.find(candidate=>candidate.id===topping.modifierOptionId)!;return{groupId:group.id,optionId:option.id,priceCents:pizzaToppingPriceCents(variantOptionPrice(variant,option),topping.portion,topping.amount),quantity:1,intensity:topping.amount}});const selected=line.modifierSelections[group.id]||[];return group.options.filter(option=>selected.includes(option.id)).map((option,index)=>({groupId:group.id,optionId:option.id,priceCents:group.includedChoiceCount>index&&!line.modifierDeclines.includes(group.id)?0:variantOptionPrice(variant,option),quantity:group.allowOptionQuantity?Math.max(1,line.modifierQuantities[option.id]||1):1,intensity:(line.modifierAmounts[option.id]||"normal")==="normal"?"regular":line.modifierAmounts[option.id]}))})||[];return{lineId:line.id,itemId:line.itemId,variantId:line.variantId,quantity:line.quantity,modifiers}})})}).then(response=>response.json()).then(payload=>setQuotedPromotions(payload.promotions||[])).catch(error=>{if(!(error instanceof DOMException&&error.name==="AbortError"))setQuotedPromotions([])})},180);return()=>{window.clearTimeout(timer);controller.abort()}},[allItems,cart,scheduledFor,serviceType,timingMode]);
   const visiblePromotions=savedDraft?.promotions||quotedPromotions,promotionDiscountCents=visiblePromotions.reduce((sum,row)=>sum+row.discountCents,0);
   const selectedCombo = configuringItem?.combos.find((combo) => combo.id === selectedComboId) || null;
@@ -719,6 +722,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           id: string;
           display_number: string;
           total_cents: number;
+          delivery_fee_cents: number;
           scheduled_for: string | null;
           timing_message_snapshot: string;
           kitchen_timing_label_snapshot: string;
@@ -732,6 +736,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
         id: payload.order.id,
         displayNumber: payload.order.display_number,
         totalCents: Number(payload.order.total_cents),
+        deliveryFeeCents:Number(payload.order.delivery_fee_cents||0),
         timingMessage: payload.order.timing_message_snapshot || "",
         kitchenTimingLabel: payload.order.kitchen_timing_label_snapshot || "",
         scheduledFor: payload.order.scheduled_for,
@@ -741,7 +746,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       setSavedDraft(draft);
       if(business==="Tiki"&&serviceType==="bar"){setActiveTab(draft);setActiveTabItems(cart.map(line=>({id:line.id,item_name_snapshot:line.name,variant_name_snapshot:line.variantName,quantity:line.quantity,line_total_cents:line.unitPriceCents*line.quantity})));setCart([])}
       const promotionDiscount = draft.promotions.reduce((sum, row) => sum + row.discountCents, 0);
-      if (Number(payload.order.total_cents) !== subtotalCents - promotionDiscount) {
+      if (Number(payload.order.total_cents) !== subtotalCents - promotionDiscount + draft.deliveryFeeCents) {
         setCheckoutError(`Menu pricing changed. Backend total is ${money(Number(payload.order.total_cents))}; review before continuing.`);
       }
       return draft;
@@ -876,7 +881,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const selectedDeliveryLocation=DELIVERY_LOCATIONS.find(location=>location.id===selectedDeliveryLocationId);
   const sendRequirement=business==="Corner Deli"&&!customer?"Customer name and phone required":business==="Corner Deli"&&!selectedCustomerPhoneId?"Choose customer phone":business==="Corner Deli"&&serviceType==="delivery"&&!validatedAddress?"Validated delivery address required":business==="Corner Deli"&&serviceType==="delivery"&&selectedDeliveryLocation&&!deliveryUnit?"Choose exact drop-off location":"";
   async function showTabs(){setTabsOpen(true);setTabsLoading(true);setCheckoutError("");try{const response=await fetch("/api/ordering/tiki-tabs",{cache:"no-store"}),payload=await response.json();if(!response.ok)throw new Error(payload.error||"Could not load tabs.");setOpenTabs(payload.tabs||[])}catch(error){setCheckoutError(error instanceof Error?error.message:"Could not load tabs.")}finally{setTabsLoading(false)}}
-  async function chooseTab(tab:OpenTikiTab){const response=await fetch(`/api/ordering/tiki-tabs/${encodeURIComponent(tab.id)}`,{cache:"no-store"}),payload=await response.json();if(!response.ok){setCheckoutError(payload.error||"Could not open tab.");return}const detail=payload.tab;const draft:SavedDraft={id:detail.id,displayNumber:detail.display_number,totalCents:Number(detail.total_cents),timingMessage:"Open bar tab",kitchenTimingLabel:"BAR",scheduledFor:null,promotions:[],orderItemIds:(detail.items||[]).map((item:any)=>item.id),loyalty:[]};setServiceType("bar");setActiveTab(draft);setSavedDraft(draft);setActiveTabItems(detail.items||[]);setTabName(detail.first_name_snapshot||"");setCart([]);setTabsOpen(false)}
+  async function chooseTab(tab:OpenTikiTab){const response=await fetch(`/api/ordering/tiki-tabs/${encodeURIComponent(tab.id)}`,{cache:"no-store"}),payload=await response.json();if(!response.ok){setCheckoutError(payload.error||"Could not open tab.");return}const detail=payload.tab;const draft:SavedDraft={id:detail.id,displayNumber:detail.display_number,totalCents:Number(detail.total_cents),deliveryFeeCents:0,timingMessage:"Open bar tab",kitchenTimingLabel:"BAR",scheduledFor:null,promotions:[],orderItemIds:(detail.items||[]).map((item:any)=>item.id),loyalty:[]};setServiceType("bar");setActiveTab(draft);setSavedDraft(draft);setActiveTabItems(detail.items||[]);setTabName(detail.first_name_snapshot||"");setCart([]);setTabsOpen(false)}
 
   return <main className={`posPage ${embedded ? "posPageEmbedded" : ""}`}>
     {!embedded && <header className="posHeader posHeaderFixedBusiness">
@@ -1039,7 +1044,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           <div><span>Subtotal</span><strong>{money(subtotalCents)}</strong></div>
           {visiblePromotions.map((promotion,index)=><div key={`${promotion.label}-${index}`}><span>{promotion.label}</span><strong>−{money(promotion.discountCents)}</strong></div>)}
           {savedDraft?.loyalty.map((reward,index)=><div key={`${reward.label}-${index}`}><span>{reward.label} · Loyalty</span><strong>−{money(reward.discountCents)}</strong></div>)}
-          <div className="grand"><span>{savedDraft ? "Backend total" : "Estimated total"}</span><strong>{money(savedDraft?.totalCents ?? Math.max(0,subtotalCents-promotionDiscountCents))}</strong></div>
+          {(savedDraft?.deliveryFeeCents||quotedDeliveryFeeCents)!=null&&serviceType==="delivery"&&<div><span>Delivery fee{deliveryRoute?` · ${deliveryRoute.distanceMiles.toFixed(1)} mi`:""}</span><strong>{money(savedDraft?.deliveryFeeCents??quotedDeliveryFeeCents??0)}</strong></div>}
+          <div className="grand"><span>{savedDraft ? "Backend total" : "Estimated total"}</span><strong>{money(savedDraft?.totalCents ?? Math.max(0,subtotalCents-promotionDiscountCents+(quotedDeliveryFeeCents||0)))}</strong></div>
         </div>
         <div className="posCheckoutButtons">
           <button type="button" disabled={!cart.length || savingDraft || Boolean(savedDraft&&!activeTab) || (timingMode === "future" && !scheduledFor)} onClick={() => void saveDraft()}>
