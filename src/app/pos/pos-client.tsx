@@ -76,13 +76,26 @@ type CheckoutState = {
 };
 type PayableCheck = { id: string; display_sequence: number; status: string; total_cents: number; paid_cents: number; amount_due_cents: number; lines: Array<{ order_item_id: string; quantity: number; allocated_cents: number; item_name_snapshot: string }> };
 
-type AddressSuggestion = { id: string; text: string; mainText: string; secondaryText: string; provider: "google" };
+type AddressSuggestion = { id: string; text: string; mainText: string; secondaryText: string; provider: "google" | "preset"; deliveryLocationId?: string };
 type ValidatedAddress = { formattedAddress: string; city: string; state: string; postalCode: string };
 type DeliveryRoute = { distanceMiles: number; durationSeconds: number; provider: string; calculatedAt: string };
 type PosCustomerPhone={id:string;label:string;display_phone:string;normalized_phone:string;is_primary:boolean;last_used_at:string|null};
 type PosCustomerAddress={id:string;label:string;line1:string;line2:string;city:string;state:string;postal_code:string;standardized_address:string;provider:string;provider_reference_id:string;latitude:number|null;longitude:number|null;is_primary:boolean;last_used_at:string|null};
 type PosCustomer={id:string;first_name:string;last_name:string;display_name:string;display_phone:string;normalized_phone:string;last_order_at:string|null;phones:PosCustomerPhone[];addresses:PosCustomerAddress[]};
 type BarcodeMapping={id:string;barcode:string;itemId:string;variantId:string|null;itemName:string;variantName:string|null};
+
+const DELIVERY_LOCATIONS = [
+  { id: "ogdensburg-bowl", name: "Ogdensburg Bowl", address: "1121 Paterson Street, Ogdensburg, NY 13669", aliases: ["ogdensburg bowl", "bowling alley", "1121 paterson", "1121 patterson"], dropoffs: [...Array.from({ length: 14 }, (_, index) => `Lane ${index + 1}`), "Bar"] },
+  { id: "claxton-hepburn", name: "Claxton-Hepburn Medical Center", address: "214 King Street, Ogdensburg, NY 13669", aliases: ["claxton", "claxton hepburn", "hospital", "214 king"], dropoffs: ["ICU", "ER", "Front Desk"] },
+  { id: "ansen", name: "Ansen Corporation", address: "100 Chimney Point Drive, Ogdensburg, NY 13669", aliases: ["ansen", "new ansen", "old ansen", "100 chimney point"], dropoffs: ["New Ansen", "Old Ansen"] },
+] as const;
+
+function deliveryLocationSuggestions(input: string): AddressSuggestion[] {
+  const query = input.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (query.length < 2) return [];
+  return DELIVERY_LOCATIONS.filter((location) => [location.name, location.address, ...location.aliases].some((value) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").includes(query)))
+    .map((location) => ({ id: `preset:${location.id}`, text: location.address, mainText: location.name, secondaryText: `${location.address} · Choose drop-off location`, provider: "preset", deliveryLocationId: location.id }));
+}
 
 function deliBusinessDate(): string {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -218,6 +231,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const swipeStart=useRef<{id:string;x:number;y:number}|null>(null);
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryUnit, setDeliveryUnit] = useState("");
+  const [selectedDeliveryLocationId, setSelectedDeliveryLocationId] = useState("");
   const [addressSessionToken, setAddressSessionToken] = useState("");
   const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
   const [addressLoading, setAddressLoading] = useState(false);
@@ -342,13 +356,15 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     if (serviceType !== "delivery") return;
     const input = deliveryAddress.trim();
     if (input.length < 2 || validatedAddress) { setAddressSuggestions([]); setAddressLoading(false); return; }
+    const presetSuggestions = deliveryLocationSuggestions(input);
+    setAddressSuggestions(presetSuggestions);
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setAddressLoading(true); setAddressError("");
       fetch("/api/ordering/address/suggest", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body: JSON.stringify({ input, sessionToken: addressSessionToken }) })
         .then(async (response) => { const payload = await response.json() as { suggestions?: AddressSuggestion[]; error?: string }; if (!response.ok) throw new Error(payload.error || "Address suggestions are unavailable."); return payload; })
-        .then((payload) => { setAddressSuggestions(payload.suggestions || []); setActiveSuggestion(-1); })
-        .catch((error) => { if (error instanceof DOMException && error.name === "AbortError") return; setAddressSuggestions([]); setAddressError(error instanceof Error ? error.message : "Address suggestions are unavailable."); })
+        .then((payload) => { setAddressSuggestions([...presetSuggestions, ...(payload.suggestions || [])]); setActiveSuggestion(-1); })
+        .catch((error) => { if (error instanceof DOMException && error.name === "AbortError") return; setAddressSuggestions(presetSuggestions); if (!presetSuggestions.length) setAddressError(error instanceof Error ? error.message : "Address suggestions are unavailable."); })
         .finally(() => setAddressLoading(false));
     }, 220);
     return () => { window.clearTimeout(timer); controller.abort(); };
@@ -600,15 +616,15 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   }
 
   function changeDeliveryAddress(value: string) {
-    setDeliveryAddress(value); setSelectedCustomerAddressId(""); setValidatedAddress(null); setDeliveryValidationToken(""); setDeliveryValidatedInput(""); setDeliveryRoute(null); setAddressError(""); setSavedDraft(null);
+    setDeliveryAddress(value); setDeliveryUnit(""); setSelectedDeliveryLocationId(""); setSelectedCustomerAddressId(""); setValidatedAddress(null); setDeliveryValidationToken(""); setDeliveryValidatedInput(""); setDeliveryRoute(null); setAddressError(""); setSavedDraft(null);
   }
 
   async function validateAddress(suggestion?: AddressSuggestion, explicitAddress?: string) {
     const enteredAddress = explicitAddress || suggestion?.text || deliveryAddress;
-    if (suggestion) setDeliveryAddress(suggestion.text);
+    if (suggestion) { setDeliveryAddress(suggestion.text); setSelectedDeliveryLocationId(suggestion.deliveryLocationId || ""); setDeliveryUnit(""); }
     setValidatingAddress(true); setAddressError(""); setAddressSuggestions([]);
     try {
-      const response = await fetch("/api/ordering/address/validate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enteredAddress, placeId: suggestion?.id, sessionToken: addressSessionToken }) });
+      const response = await fetch("/api/ordering/address/validate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enteredAddress, placeId: suggestion?.provider === "google" ? suggestion.id : undefined, sessionToken: addressSessionToken }) });
       const payload = await response.json() as { address?: ValidatedAddress; validationToken?: string; route?: DeliveryRoute | null; error?: string };
       if (!response.ok || !payload.address || !payload.validationToken) throw new Error(payload.error || "Could not validate this address.");
       setValidatedAddress(payload.address); setDeliveryValidationToken(payload.validationToken); setDeliveryValidatedInput(enteredAddress.trim().replace(/\s+/g, " ")); setDeliveryRoute(payload.route || null); setDeliveryAddress(payload.address.formattedAddress);setDeliveryEditorOpen(false);
@@ -740,6 +756,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     if(business==="Corner Deli"&&!customer){setCheckoutError("Add the customer's name and phone number before sending this order.");setCustomerOpen(true);return}
     if(business==="Corner Deli"&&!selectedCustomerPhoneId){setCheckoutError("Choose a phone number before sending this order.");setCustomerOpen(true);return}
     if(business==="Corner Deli"&&serviceType==="delivery"&&!validatedAddress){setCheckoutError("Enter and validate the delivery address before sending this order.");setDeliveryEditorOpen(true);return}
+    if(business==="Corner Deli"&&serviceType==="delivery"&&selectedDeliveryLocationId&&!deliveryUnit){setCheckoutError("Choose the exact drop-off location before sending this order.");return}
     if(business==="Tiki"&&activeTab&&cart.length)draft=await saveDraft();
     if (!draft) draft = activeTab || await saveDraft();
     if (!draft) return;
@@ -763,7 +780,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       setScheduledFor("");
       setTimingMode("asap");
       setOverrideReason("");
-      setCustomer(null);setSelectedCustomerPhoneId("");setSelectedCustomerAddressId("");setDeliveryAddress("");setDeliveryUnit("");setValidatedAddress(null);setDeliveryValidationToken("");setDeliveryValidatedInput("");setDeliveryRoute(null);
+      setCustomer(null);setSelectedCustomerPhoneId("");setSelectedCustomerAddressId("");setDeliveryAddress("");setDeliveryUnit("");setSelectedDeliveryLocationId("");setValidatedAddress(null);setDeliveryValidationToken("");setDeliveryValidatedInput("");setDeliveryRoute(null);
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : "Could not submit order.");
     } finally {
@@ -852,7 +869,8 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const posEmployee = "session" in session ? session.session as PosEmployeeSession | undefined : undefined;
   const canManageBarcodes=posEmployee?posEmployee.posRole!=="employee":("role" in session&&(session.role==="Owner"||session.role==="Co-Owner"||session.role==="Manager"));
   const canManagePayments=canManageBarcodes;
-  const sendRequirement=business==="Corner Deli"&&!customer?"Customer name and phone required":business==="Corner Deli"&&!selectedCustomerPhoneId?"Choose customer phone":business==="Corner Deli"&&serviceType==="delivery"&&!validatedAddress?"Validated delivery address required":"";
+  const selectedDeliveryLocation=DELIVERY_LOCATIONS.find(location=>location.id===selectedDeliveryLocationId);
+  const sendRequirement=business==="Corner Deli"&&!customer?"Customer name and phone required":business==="Corner Deli"&&!selectedCustomerPhoneId?"Choose customer phone":business==="Corner Deli"&&serviceType==="delivery"&&!validatedAddress?"Validated delivery address required":business==="Corner Deli"&&serviceType==="delivery"&&selectedDeliveryLocation&&!deliveryUnit?"Choose exact drop-off location":"";
   async function showTabs(){setTabsOpen(true);setTabsLoading(true);setCheckoutError("");try{const response=await fetch("/api/ordering/tiki-tabs",{cache:"no-store"}),payload=await response.json();if(!response.ok)throw new Error(payload.error||"Could not load tabs.");setOpenTabs(payload.tabs||[])}catch(error){setCheckoutError(error instanceof Error?error.message:"Could not load tabs.")}finally{setTabsLoading(false)}}
   async function chooseTab(tab:OpenTikiTab){const response=await fetch(`/api/ordering/tiki-tabs/${encodeURIComponent(tab.id)}`,{cache:"no-store"}),payload=await response.json();if(!response.ok){setCheckoutError(payload.error||"Could not open tab.");return}const detail=payload.tab;const draft:SavedDraft={id:detail.id,displayNumber:detail.display_number,totalCents:Number(detail.total_cents),timingMessage:"Open bar tab",kitchenTimingLabel:"BAR",scheduledFor:null,promotions:[],orderItemIds:(detail.items||[]).map((item:any)=>item.id),loyalty:[]};setServiceType("bar");setActiveTab(draft);setSavedDraft(draft);setActiveTabItems(detail.items||[]);setTabName(detail.first_name_snapshot||"");setCart([]);setTabsOpen(false)}
 
@@ -929,12 +947,13 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
             {addressLoading && <div className="addressState">Finding nearby addresses…</div>}
             {!addressLoading && addressSuggestions.map((suggestion, index) => <button key={suggestion.id} type="button" role="option" aria-selected={activeSuggestion === index} className={activeSuggestion === index ? "active" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => void validateAddress(suggestion)}><strong>{suggestion.mainText}</strong><span>{suggestion.secondaryText}</span></button>)}
             {!addressLoading && !addressSuggestions.length && <div className="addressState">No addresses found.</div>}
-            {addressSuggestions.length > 0 && <small>Powered by Google</small>}
+            {addressSuggestions.some(suggestion=>suggestion.provider==="google") && <small>Address results powered by Google</small>}
           </div>}
         </div>
-        <input className="posDeliveryUnit" aria-label="Apartment or unit" placeholder="Apt / unit" value={deliveryUnit} maxLength={120} autoComplete="off" onChange={(event) => { setDeliveryUnit(event.target.value); setSavedDraft(null); }} />
+        {!selectedDeliveryLocation&&<input className="posDeliveryUnit" aria-label="Apartment or unit" placeholder="Apt / unit" value={deliveryUnit} maxLength={120} autoComplete="off" onChange={(event) => { setDeliveryUnit(event.target.value); setSavedDraft(null); }} />}
         <button type="button" className="validateAddressButton" disabled={validatingAddress || deliveryAddress.trim().length < 5 || Boolean(validatedAddress)} onClick={() => void validateAddress()}>{validatingAddress ? "Validating…" : validatedAddress ? "✓ Validated" : "Validate"}</button>
       </div>
+      {selectedDeliveryLocation&&<div className="posDeliveryDropoffs" aria-label={`${selectedDeliveryLocation.name} drop-off location`}><strong>WHERE AT {selectedDeliveryLocation.name.toUpperCase()}?</strong>{selectedDeliveryLocation.dropoffs.map(dropoff=><button type="button" key={dropoff} className={deliveryUnit===dropoff?"selected":""} onClick={()=>{setDeliveryUnit(dropoff);setSavedDraft(null);setCheckoutError("")}}>{dropoff}</button>)}</div>}
       {customer?.addresses?.length?<div className="posSavedAddresses" aria-label="Saved delivery addresses"><strong>DELIVER TO</strong>{customer.addresses.map(address=><button type="button" key={address.id} className={selectedCustomerAddressId===address.id?"selected":""} onClick={()=>void chooseSavedAddress(address)}><b>{address.label||"Address"}</b><span>{address.line1}{address.line2?` · ${address.line2}`:""}</span></button>)}<button type="button" onClick={()=>{setSelectedCustomerAddressId("");changeDeliveryAddress("")}}>+ NEW ADDRESS</button></div>:null}
       {validatedAddress && <p className="addressResult"><strong>{validatedAddress.formattedAddress}</strong>{deliveryRoute ? ` · ${deliveryRoute.distanceMiles.toFixed(1)} driving miles · about ${Math.max(1, Math.round(deliveryRoute.durationSeconds / 60))} min` : " · Driving distance unavailable until store origin is configured"}</p>}
       {addressError && <p className="addressError" role="alert">{addressError}</p>}</div>
