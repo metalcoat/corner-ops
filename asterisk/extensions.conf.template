@@ -4,6 +4,7 @@ writeprotect=yes
 clearglobalvars=no
 
 [from-three-cx]
+exten => h,1,Hangup()
 exten => _.,1,NoOp(Bridging 3CX call ${CALLERID(num)} to OpenAI Realtime SIP)
  same => n,Dial(${PJSIP_DIAL_CONTACTS(openai,openai,${ASTERISK_OPENAI_PROJECT_ID})},60,b(add-openai-headers^s^1))
  same => n,Hangup()
