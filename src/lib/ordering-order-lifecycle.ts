@@ -15,6 +15,7 @@ import { quoteDelivery, recordDeliveryMinimumResolution } from "@/lib/ordering-d
 import { assertMenuTargetsAvailable } from "@/lib/ordering-menu-availability";
 import { applyPromotionsToOrder } from "@/lib/ordering-promotions";
 import { earnLoyaltyForOrder, finalizeLoyaltyRedemptions } from "@/lib/ordering-loyalty";
+import { kitchenTicketTimingLines } from "@/lib/ordering-kitchen-ticket";
 
 export type StoredOrderStatus = "draft" | "confirmed" | "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
 export type KitchenOrderStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -35,6 +36,10 @@ type OrderRow = Record<string, unknown> & {
   phone_snapshot: string;
   timing_mode: "asap" | "future";
   scheduled_for: string | Date | null;
+  promised_at: string | Date | null;
+  quoted_lead_min_minutes: number;
+  quoted_lead_max_minutes: number;
+  kitchen_timing_label_snapshot: string;
   created_at: string | Date;
   service_type: string;
   delivery_fee_cents: number;
@@ -214,7 +219,8 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
       SELECT id, business, source, display_number, status, payment_status, service_type, version,
              subtotal_cents, discount_cents, tax_cents, tip_cents, total_cents, paid_cents, amount_due_cents,
              first_name_snapshot, last_name_snapshot, phone_snapshot,
-             timing_mode, scheduled_for, delivery_fee_cents, special_instructions, created_at, updated_at, submitted_at, started_at, ready_at, completed_at, cancelled_at
+             timing_mode, scheduled_for, promised_at, quoted_lead_min_minutes, quoted_lead_max_minutes,
+             kitchen_timing_label_snapshot, delivery_fee_cents, special_instructions, created_at, updated_at, submitted_at, started_at, ready_at, completed_at, cancelled_at
       FROM ordering_orders WHERE id = ${orderId} AND business = ${business} FOR UPDATE
     ` as OrderRow[];
     const order = rows[0];
@@ -242,10 +248,14 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
         ? "Phone number is required for pickup orders."
         : "Phone number is required for delivery orders.");
     }
+    let deliveryAddress = "";
+    let deliveryUnit = "";
     if (order.service_type === "delivery" || order.service_type === "no_contact_delivery") {
-      const addresses = await sql`SELECT validation_status,route_distance_miles FROM ordering_order_delivery_addresses WHERE order_id = ${orderId} LIMIT 1`;
+      const addresses = await sql`SELECT validation_status,route_distance_miles,formatted_address,line1,city,state,postal_code,line2 FROM ordering_order_delivery_addresses WHERE order_id = ${orderId} LIMIT 1`;
       if (addresses[0]?.validation_status !== "validated") throw new OrderConflictError("Delivery address is required.");
       if (addresses[0]?.route_distance_miles == null) throw new OrderConflictError("Driving distance is required before this delivery order can be sent.");
+      deliveryAddress = String(addresses[0].formatted_address || [addresses[0].line1, addresses[0].city, addresses[0].state, addresses[0].postal_code].filter(Boolean).join(", "));
+      deliveryUnit = String(addresses[0].line2 || "");
       const delivery = await quoteDelivery({ business, distanceMiles: Number(addresses[0].route_distance_miles), merchandiseSubtotalCents: number(order.subtotal_cents), managerBypassApproved: Boolean(override?.approved && canManagePos(actor)) });
       if (delivery.minimum.shortfallCents > 0 && delivery.minimum.resolution !== "manager_bypass_approved") {
         throw new OrderConflictError(`Delivery minimum is $${(delivery.minimum.minimumOrderCents / 100).toFixed(2)}. Order is $${(delivery.minimum.shortfallCents / 100).toFixed(2)} short.${delivery.settings.allowManagerBypass ? " Manager or owner override with a reason is required." : ""}`);
@@ -284,7 +294,27 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
       ) VALUES (
         ${randomUUID()}, ${business}, ${orderId}, 'kitchen_production', 'initial_send', 'not_configured',
         ${actor.type}, ${actor.id}, 'Kitchen printer not configured.',
-        CAST(${JSON.stringify({ heading: "KITCHEN ORDER", orderId, actorName: actor.name, lines: ticketLines })} AS jsonb)
+        CAST(${JSON.stringify({
+          heading: "KITCHEN ORDER",
+          orderNumber: String(order.display_number),
+          customerName,
+          phone: String(order.phone_snapshot || ""),
+          serviceType: String(order.service_type),
+          deliveryAddress,
+          deliveryUnit,
+          timingLines: kitchenTicketTimingLines({
+            timingMode: order.timing_mode,
+            serviceType: order.service_type as import("@/lib/ordering-core").ServiceType,
+            scheduledFor: order.scheduled_for ? new Date(order.scheduled_for) : null,
+            promisedFor: order.promised_at ? new Date(order.promised_at) : null,
+            quotedLeadMinMinutes: number(order.quoted_lead_min_minutes),
+            quotedLeadMaxMinutes: number(order.quoted_lead_max_minutes),
+            snapshotLabel: order.kitchen_timing_label_snapshot,
+          }),
+          paymentLabel: number(updated[0].amount_due_cents) <= 0 ? "PAID" : `AMOUNT DUE: $${(number(updated[0].amount_due_cents) / 100).toFixed(2)}`,
+          cashier: actor.name,
+          lines: ticketLines,
+        })} AS jsonb)
       )
       ON CONFLICT DO NOTHING
     `;

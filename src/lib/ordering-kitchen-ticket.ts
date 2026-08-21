@@ -5,6 +5,7 @@ export type KitchenTicketTimingInput = {
   timingMode: OrderTimingMode;
   serviceType: ServiceType;
   scheduledFor?: Date | null;
+  promisedFor?: Date | null;
   quotedLeadMinMinutes?: number;
   quotedLeadMaxMinutes?: number;
   snapshotLabel?: string;
@@ -24,11 +25,19 @@ function serviceName(serviceType: ServiceType): string {
 
 function formatScheduled(value: Date): string {
   return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   }).format(value);
+}
+
+export function kitchenTicketTimingLines(input: KitchenTicketTimingInput): string[] {
+  const heading = kitchenTicketTimingHeader(input).split("\n").filter(Boolean);
+  const due = input.timingMode === "future" ? input.scheduledFor : input.promisedFor;
+  if (due && Number.isFinite(due.getTime())) return [...heading, `DUE: ${formatScheduled(due)}`];
+  return heading;
 }
 
 /**
