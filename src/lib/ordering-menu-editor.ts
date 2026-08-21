@@ -33,6 +33,18 @@ export async function mutateMenu(actor:Actor,input:any){
   await ensureOrderingMenuEditorSchema();
   return withTransaction(async()=>{
     const sql=getSql(), action=clean(input.action,40), entity=input.entity as Entity, id=clean(input.id,80);
+    if(action==="reorder"){
+      if(entity!=="category"&&entity!=="item")throw new Error("Only categories and items can be reordered here.");
+      const ids=Array.isArray(input.ids)?input.ids.map((value:unknown)=>clean(value,80)).filter(Boolean):[];if(!ids.length||new Set(ids).size!==ids.length)throw new Error("A unique ordered ID list is required.");
+      if(entity==="category"){
+        const rows=await sql`SELECT id FROM ordering_menu_categories WHERE business=${actor.business} AND id=ANY(${ids}::uuid[])`;if(rows.length!==ids.length)throw new Error("A category was not found for this business.");
+        for(const[index,targetId]of ids.entries())await sql`UPDATE ordering_menu_categories SET sort_order=${(index+1)*10},updated_at=NOW() WHERE id=${targetId} AND business=${actor.business}`;
+      }else{
+        const categoryId=clean(input.categoryId,80),rows=await sql`SELECT id FROM ordering_menu_items WHERE business=${actor.business} AND category_id=${categoryId} AND id=ANY(${ids}::uuid[])`;if(rows.length!==ids.length)throw new Error("An item was not found in this category.");
+        for(const[index,targetId]of ids.entries())await sql`UPDATE ordering_menu_items SET sort_order=${(index+1)*10},updated_at=NOW() WHERE id=${targetId} AND business=${actor.business} AND category_id=${categoryId}`;
+      }
+      await audit(actor,entity,ids[0],"reorder",null,{ids,categoryId:input.categoryId||null});return{reordered:ids.length};
+    }
     if(action==="create_category"){
       const name=clean(input.name);if(!name)throw new Error("Category name is required.");const newId=randomUUID();
       await sql`INSERT INTO ordering_menu_categories(id,business,name,display_name,sort_order,active,presentation_only) VALUES(${newId},${actor.business},${name},${clean(input.displayName)||name},${integer(input.sortOrder??0)},TRUE,FALSE)`;

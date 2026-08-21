@@ -14,6 +14,7 @@ const publicPaths = [
   "/api/pos/",
   "/api/rezku/inbound",
   "/api/3cx/inbound",
+  "/api/openai/",
   "/api/square/callback",
   "/api/square/webhook",
   "/api/cron/",
