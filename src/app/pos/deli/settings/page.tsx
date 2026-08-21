@@ -6,7 +6,8 @@ import LoyaltySettingsClient from "./loyalty-settings-client";
 import GiftCardSettingsClient from "./gift-card-settings-client";
 import BarcodeSettingsClient from "./barcode-settings-client";
 import HardwareSettingsClient from "./hardware-settings-client";
+import AiPhoneSettingsClient from "./ai-phone-settings-client";
 
 export default function DeliDeliverySettingsPage() {
-  return <><PosSettingsClient /><HardwareSettingsClient /><StoreOperationsSettingsClient /><DeliverySettingsClient /><PromotionsSettingsClient /><LoyaltySettingsClient /><GiftCardSettingsClient /><BarcodeSettingsClient /></>;
+  return <><AiPhoneSettingsClient /><PosSettingsClient /><HardwareSettingsClient /><StoreOperationsSettingsClient /><DeliverySettingsClient /><PromotionsSettingsClient /><LoyaltySettingsClient /><GiftCardSettingsClient /><BarcodeSettingsClient /></>;
 }

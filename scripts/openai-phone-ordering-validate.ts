@@ -32,16 +32,17 @@ async function main(){
     const listed=await(await invoke({jsonrpc:"2.0",id:3,method:"tools/list"})).json();
     const called=await(await invoke({jsonrpc:"2.0",id:4,method:"tools/call",params:{name:"describe_capabilities",arguments:{callId}}})).json();
     const blocked=await(await invoke({jsonrpc:"2.0",id:5,method:"tools/call",params:{name:"send",arguments:{callId,orderId:randomUUID(),customerConfirmed:false}}})).json();
+    const shadowed=await(await invoke({jsonrpc:"2.0",id:6,method:"tools/call",params:{name:"send",arguments:{callId,orderId:randomUUID(),customerConfirmed:true}}})).json();
     const result={
       callerNormalized:caller==="3155550188",
       calledDidRestricted:calledDid==="3155550200"&&phone.testDidAllowed(calledDid)&&!phone.testDidAllowed("3155550201"),
       lineMapped:phone.lineForDid(calledDid)==="TEST LINE",
-      englishGreeting:phone.OPENAI_PHONE_GREETING.includes("Corner Deli")&&phone.OPENAI_PHONE_GREETING.includes("pickup or delivery")&&phone.PHONE_INSTRUCTIONS.includes("Speak English"),
-      menuVocabularyDefaults:phone.PHONE_INSTRUCTIONS.includes("Jumbo Thin 16")&&phone.PHONE_INSTRUCTIONS.includes("Large French Fries")&&phone.PHONE_INSTRUCTIONS.includes("upbeat, welcoming"),
-      pizzaSizePolicy:phone.PHONE_INSTRUCTIONS.includes("6 slices")&&phone.PHONE_INSTRUCTIONS.includes("8 slices")&&phone.PHONE_INSTRUCTIONS.includes("12 slices")&&phone.PHONE_INSTRUCTIONS.includes("Thin exists only in large/jumbo")&&phone.PHONE_INSTRUCTIONS.includes("standard requested size or Jumbo Thin"),
-      wingWorkflow:phone.PHONE_INSTRUCTIONS.includes("bone-in Wings")&&phone.PHONE_INSTRUCTIONS.includes("What flavor?")&&phone.PHONE_INSTRUCTIONS.includes("Split flavors into separate lines")&&phone.PHONE_INSTRUCTIONS.includes("Blue cheese, ranch, or celery with those?")&&phone.PHONE_INSTRUCTIONS.includes("Mild and Medium are distinct"),
-      responsiveSpeech:phone.PHONE_INSTRUCTIONS.includes("Never leave dead air")&&phone.PHONE_INSTRUCTIONS.includes("before any tool call")&&phone.PHONE_INSTRUCTIONS.includes("before tool confirmation"),
-      conciseReadback:phone.PHONE_INSTRUCTIONS.includes("briefly read every item")&&phone.PHONE_INSTRUCTIONS.includes("Do not recite internal variant labels"),
+      englishGreeting:phone.OPENAI_PHONE_GREETING==="Corner Deli, what can I get you?"&&phone.PHONE_INSTRUCTIONS.includes("Default to 2–10 spoken words"),
+      menuVocabularyDefaults:phone.PHONE_INSTRUCTIONS.includes("Jumbo Thin 16 inch")&&phone.PHONE_INSTRUCTIONS.includes("Large French Fries")&&phone.PHONE_INSTRUCTIONS.includes("upbeat, attentive"),
+      pizzaSizePolicy:phone.PHONE_INSTRUCTIONS.includes("6 slices")&&phone.PHONE_INSTRUCTIONS.includes("8 slices")&&phone.PHONE_INSTRUCTIONS.includes("12 slices")&&phone.PHONE_INSTRUCTIONS.includes("Thin is only large/jumbo"),
+      wingWorkflow:phone.PHONE_INSTRUCTIONS.includes("bone-in")&&phone.PHONE_INSTRUCTIONS.includes("What sauce?")&&phone.PHONE_INSTRUCTIONS.includes("Split flavors into separate lines")&&phone.PHONE_INSTRUCTIONS.includes("Blue cheese, ranch, or celery?")&&phone.PHONE_INSTRUCTIONS.includes("Mild and Medium are distinct"),
+      responsiveSpeech:phone.PHONE_INSTRUCTIONS.includes("If interrupted, stop immediately")&&phone.PHONE_INSTRUCTIONS.includes("Ask one necessary question at a time"),
+      conciseReadback:phone.PHONE_INSTRUCTIONS.includes("Do not repeat the order after each item")&&phone.PHONE_INSTRUCTIONS.includes("one concise confirmation"),
       fastModelExperiment:phone.OPENAI_PHONE_FAST_MODEL==="gpt-realtime-2.1-mini"&&phone.OPENAI_PHONE_FAST_MODEL_PERCENT===100,
       unauthorized:unauthorized.status===401,
       protocol:initialized.result?.protocolVersion==="2025-06-18",
@@ -49,6 +50,7 @@ async function main(){
       handoffToolListed:listed.result?.tools?.some((tool:{name:string})=>tool.name==="request_human_handoff"),
       callBound:called.result?.content?.[0]?.text?.includes("pricingAuthority")||called.result?.content?.[0]?.text?.includes("serviceTypes"),
       unconfirmedSendBlocked:blocked.result?.isError===true,
+      shadowSendHeld:shadowed.result?.content?.[0]?.text?.includes("ORDER_REVIEW_PENDING")===true,
     };
     console.log(JSON.stringify(result,null,2));
     if(Object.values(result).some(value=>!value))throw new Error("OpenAI phone ordering validation failed.");

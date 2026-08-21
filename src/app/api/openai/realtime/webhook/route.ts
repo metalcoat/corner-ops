@@ -1,4 +1,7 @@
-import { calledDidFromSipHeaders,callerFromSipHeaders,lineForDid,modelForCall,openAiClient,openAiPhoneReadiness,PHONE_INSTRUCTIONS,registerOpenAiCall,startOpenAiSideband,testDidAllowed } from "@/lib/openai-phone-ordering";
+import { calledDidFromSipHeaders,callerFromSipHeaders,lineForDid,openAiClient,openAiPhoneReadiness,OPENAI_PHONE_GREETING,registerOpenAiCall,testDidAllowed } from "@/lib/openai-phone-ordering";
+import { getAiPhoneSettings,realtimeBusinessContext } from "@/lib/ordering-ai-phone-config";
+import { buildPhoneInstructions } from "@/lib/openai-phone-prompt";
+import { startOpenAiSideband } from "@/lib/openai-phone-sideband";
 
 export const runtime="nodejs";
 
@@ -14,17 +17,18 @@ export async function POST(request:Request){
     await client.realtime.calls.reject(callId,{status_code:480});
     return Response.json({received:true,accepted:false,reason:!readiness.ready?"phone_ordering_not_configured":"did_not_allow_test_ai"});
   }
-  const callerPhone=callerFromSipHeaders(headers),lineLabel=lineForDid(calledDid),model=modelForCall(callId);
-  await registerOpenAiCall(callId,callerPhone,calledDid,lineLabel,model);
+  const callerPhone=callerFromSipHeaders(headers),lineLabel=lineForDid(calledDid),[settings,business]=await Promise.all([getAiPhoneSettings(),realtimeBusinessContext()]),model=settings.model;
+  if(!settings.enabled){await client.realtime.calls.reject(callId,{status_code:480});return Response.json({received:true,accepted:false,reason:"ai_phone_disabled"})}
+  await registerOpenAiCall(callId,callerPhone,calledDid,lineLabel,model,settings.mode);
   try{
     await client.realtime.calls.accept(callId,{
-      type:"realtime",model,reasoning:{effort:"minimal"},output_modalities:["audio"],max_output_tokens:260,
-      audio:{input:{noise_reduction:{type:"near_field"},transcription:{model:"gpt-transcribe",language:"en",prompt:"Corner Deli menu order. Jumbo pizza, mild wings, medium wings, blue cheese, ranch, celery."},turn_detection:{type:"semantic_vad",eagerness:"high",create_response:true,interrupt_response:true}},output:{speed:1.08}},
-      instructions:`${PHONE_INSTRUCTIONS}\nCurrent callId: ${callId}. Caller phone: ${callerPhone||"unavailable"}. Test line: ${lineLabel}.`,
+      type:"realtime",model,reasoning:{effort:"minimal"},output_modalities:["audio"],max_output_tokens:Math.max(80,settings.maxResponseWords*6),
+      audio:{input:{noise_reduction:{type:"near_field"},transcription:{model:"gpt-transcribe",language:"en",prompt:"Corner Deli menu order. Ogdensburger, Big Boss, jumbo, sheet pizza, pep, mozz sticks, wings, medium, extra crispy, blue cheese, ranch, garlic parm, antipasta."},turn_detection:{type:"semantic_vad",eagerness:settings.vadEagerness,create_response:true,interrupt_response:true}},output:{speed:1.08}},
+      instructions:buildPhoneInstructions({callId,callerPhone,lineLabel,settings,business}),
       tools:[{type:"mcp",server_label:"corner_ops_ordering",server_url:process.env.OPENAI_ORDERING_MCP_URL!,headers:{Authorization:`Bearer ${process.env.OPENAI_ORDERING_MCP_TOKEN!}`},require_approval:"never"}],
       tool_choice:"auto",tracing:{workflow_name:"corner-deli-phone-ordering-test",group_id:callId,metadata:{business:"Corner Deli",line:lineLabel,model}},
     });
-    startOpenAiSideband(callId);
+    startOpenAiSideband(callId,OPENAI_PHONE_GREETING,model);
   }catch(error){console.error("OpenAI realtime call acceptance failed.",{callId,error:error instanceof Error?error.message:"unknown error"});throw error}
   return Response.json({received:true,accepted:true,testMode:true,line:lineLabel,model});
 }
