@@ -225,6 +225,14 @@ type AiDeliCall = IncomingDeliCall & {
   subtotal_cents: number | null;
   tax_cents: number | null;
   total_cents: number | null;
+  activities: Array<{
+    id: string;
+    createdAt: string;
+    role: "customer" | "assistant" | "tool" | "system" | "error";
+    label: string;
+    detail: string;
+    durationMs: number | null;
+  }>;
   order_items: Array<{
     id: string;
     name: string;
@@ -3246,6 +3254,14 @@ export default function PosClient({
                   </li>)}</ul> : <small>Waiting for the first item…</small>}
                   <footer><span>Subtotal {money(call.subtotal_cents || 0)} · Tax {money(call.tax_cents || 0)}</span><strong>Total {money(call.total_cents || 0)}</strong></footer>
                 </div>}
+                <div className="posAiActivity" aria-live="polite">
+                  <b>LIVE PROCESSING</b>
+                  {call.activities.length ? <ol>{call.activities.slice(-12).map(activity => <li className={activity.role} key={activity.id}>
+                    <time>{new Date(activity.createdAt).toLocaleTimeString([], {hour:"numeric",minute:"2-digit",second:"2-digit"})}</time>
+                    <span><strong>{activity.label}</strong>{activity.detail && <small>{activity.detail}</small>}</span>
+                    {activity.durationMs != null && <em>{activity.durationMs} ms</em>}
+                  </li>)}</ol> : <small>Connecting to live call telemetry…</small>}
+                </div>
               </div>
             ))}
         </aside>

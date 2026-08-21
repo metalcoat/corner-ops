@@ -29,6 +29,7 @@ export function ensureOrderingAiSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS line_label TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS claimed_by TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS selected_model TEXT NOT NULL DEFAULT ''`;
 
       await sql`CREATE INDEX IF NOT EXISTS ordering_call_sessions_fulfillment_state_idx ON ordering_call_sessions (business, fulfillment_question_state, updated_at DESC)`;
 
@@ -54,6 +55,22 @@ export function ensureOrderingAiSchema(): Promise<void> {
       await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_ai_tool_events_request_idx ON ordering_ai_tool_events (business, request_id)`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_ai_tool_events_order_idx ON ordering_ai_tool_events (order_id, created_at DESC)`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_ai_tool_events_conversation_idx ON ordering_ai_tool_events (business, conversation_id, created_at DESC)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS ordering_ai_call_events (
+          id UUID PRIMARY KEY,
+          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
+          call_id TEXT NOT NULL,
+          event_key TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'system',
+          label TEXT NOT NULL DEFAULT '',
+          detail TEXT NOT NULL DEFAULT '',
+          duration_ms INTEGER,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (business, event_key)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_ai_call_events_call_idx ON ordering_ai_call_events (business, call_id, created_at DESC)`;
     })().catch((error) => {
       aiSchemaPromise = null;
       throw error;
