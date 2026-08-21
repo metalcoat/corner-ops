@@ -214,6 +214,14 @@ type IncomingDeliCall = {
   open_order_number: string | null;
   open_order_status: string | null;
 };
+type AiDeliCall = IncomingDeliCall & {
+  called_did: string;
+  state: "ai" | "handoff_pending" | "human";
+  handoff_reason: string;
+  updated_at: string;
+  claimed_by: string;
+  claimed_at: string | null;
+};
 
 const DELIVERY_LOCATIONS = [
   {
@@ -526,6 +534,9 @@ export default function PosClient({
   const [incomingCall, setIncomingCall] = useState<IncomingDeliCall | null>(
     null,
   );
+  const [aiCalls, setAiCalls] = useState<AiDeliCall[]>([]);
+  const [posEmployeeId, setPosEmployeeId] = useState("");
+  const intervention = aiCalls.find((call) => call.state !== "ai") || null;
   const [mappingItemId, setMappingItemId] = useState("");
   const [mappingVariantId, setMappingVariantId] = useState("");
   const [mappingBusy, setMappingBusy] = useState(false);
@@ -566,7 +577,11 @@ export default function PosClient({
       fetch("/api/ordering/calls", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((body) => {
-          if (!stopped && body?.calls?.[0]) setIncomingCall(body.calls[0]);
+          if (!stopped) {
+            setIncomingCall(body?.calls?.[0] || null);
+            setAiCalls(body?.aiCalls || []);
+            setPosEmployeeId(body?.employeeId || "");
+          }
         })
         .catch(() => undefined);
     void load();
@@ -1588,6 +1603,33 @@ export default function PosClient({
       body: JSON.stringify({ id: call.id }),
     });
     setIncomingCall(null);
+  }
+  async function updateAiCall(call: AiDeliCall, action: "claim" | "release" | "complete") {
+    const response = await fetch("/api/ordering/calls", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: call.id, action }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      setMenuError(payload.error || "Could not update this call.");
+      return;
+    }
+    if (action === "claim" && call.open_order_id)
+      window.location.href = `/pos/deli/orders?orderId=${encodeURIComponent(call.open_order_id)}`;
+    setAiCalls((current) =>
+      action === "complete"
+        ? current.filter((row) => row.id !== call.id)
+        : current.map((row) =>
+            row.id === call.id
+              ? {
+                  ...row,
+                  state: action === "claim" ? "human" : "handoff_pending",
+                  claimed_by: action === "claim" ? posEmployeeId : "",
+                }
+              : row,
+          ),
+    );
   }
   async function createQuickCustomer(event: React.FormEvent) {
     event.preventDefault();
@@ -3172,6 +3214,40 @@ export default function PosClient({
           >
             UNDO
           </button>
+        </div>
+      )}
+      {aiCalls.some((call) => call.state === "ai") && (
+        <aside className="posAiCallStrip" aria-label="AI phone ordering activity">
+          {aiCalls
+            .filter((call) => call.state === "ai")
+            .map((call) => (
+              <div key={call.id}>
+                <strong>AI ORDERING · LINE {call.line_number || "TEST"}</strong>
+                <span>{call.display_name || call.caller_phone || "Unknown caller"}</span>
+                <span>{call.open_order_number ? `Order #${call.open_order_number}` : "Building order…"}</span>
+              </div>
+            ))}
+        </aside>
+      )}
+      {intervention && (
+        <div className="posModalBackdrop">
+          <section className="posCustomerDialog posIncomingCall" role="dialog" aria-modal="true" aria-label="Phone order intervention required">
+            <header><div><span>EMPLOYEE INTERVENTION · LINE {intervention.line_number || "TEST"}</span><h2>{intervention.display_name || intervention.caller_phone || "Unknown caller"}</h2></div></header>
+            <p>{intervention.handoff_reason || "The AI transferred this call to the physical deli phones."}</p>
+            {intervention.open_order_number && <p><strong>Order #{intervention.open_order_number}</strong> · {intervention.open_order_status?.replaceAll("_", " ")}</p>}
+            {intervention.claimed_by && intervention.claimed_by !== posEmployeeId ? (
+              <p><strong>Claimed on another POS.</strong> This screen is read-only.</p>
+            ) : intervention.claimed_by === posEmployeeId ? (
+              <>
+                {intervention.open_order_id && <a className="primary" href={`/pos/deli/orders?orderId=${encodeURIComponent(intervention.open_order_id)}`}>OPEN CURRENT ORDER</a>}
+                <button onClick={() => void updateAiCall(intervention, "release")}>RELEASE TO ANOTHER POS</button>
+                <button onClick={() => void updateAiCall(intervention, "complete")}>CALL FINISHED</button>
+              </>
+            ) : (
+              <button className="primary" onClick={() => void updateAiCall(intervention, "claim")}>CLAIM ORDER INTERVENTION</button>
+            )}
+            <small>Answer and speak on the physical cordless phone. This iPad never carries call audio.</small>
+          </section>
         </div>
       )}
       {incomingCall && (

@@ -25,6 +25,10 @@ export function ensureOrderingAiSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS last_customer_turn_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS last_ai_turn_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS last_natural_break_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS called_did TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS line_label TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS claimed_by TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ`;
 
       await sql`CREATE INDEX IF NOT EXISTS ordering_call_sessions_fulfillment_state_idx ON ordering_call_sessions (business, fulfillment_question_state, updated_at DESC)`;
 

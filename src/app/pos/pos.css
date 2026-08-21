@@ -242,6 +242,7 @@
   padding: 18px;
 }
 .posIncomingCall{border:2px solid #fbbf24;box-shadow:0 24px 80px #000a}.posIncomingCall header span{color:#fde68a;font-weight:900;letter-spacing:.05em}.posIncomingCall>strong{font-size:1.7rem}.posIncomingCall>a.primary,.posIncomingCall>button{min-height:52px;display:grid;place-items:center;text-align:center;border-radius:9px;font-weight:900}.posIncomingCall>small{color:#cbd5e1;text-align:center}
+.posAiCallStrip{position:fixed;z-index:75;right:12px;top:58px;width:min(370px,calc(100vw - 24px));display:grid;gap:6px;pointer-events:none}.posAiCallStrip>div{display:grid;grid-template-columns:1fr auto;gap:3px 12px;padding:9px 12px;border:1px solid #38bdf8;border-radius:9px;background:#082f49ee;color:#f0f9ff;box-shadow:0 8px 24px #0007}.posAiCallStrip strong{grid-column:1/-1;color:#7dd3fc;font-size:.76rem;letter-spacing:.05em}.posAiCallStrip span:last-child{color:#bae6fd;text-align:right}
 .posConfigModal {
   width: min(980px, 96vw);
   max-height: 92dvh;

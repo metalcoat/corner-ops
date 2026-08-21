@@ -3,7 +3,7 @@ import { AI_ORDERING_TOOL_NAMES,executeAiOrderingTool,type AiOrderingToolName } 
 import { getSql } from "@/lib/db";
 import { AiToolError,auditAiTool } from "@/lib/ordering-ai-tools";
 import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
-import { mcpAuthorized,OPENAI_PHONE_MODEL } from "@/lib/openai-phone-ordering";
+import { mcpAuthorized,OPENAI_PHONE_MODEL,requestOpenAiHandoff } from "@/lib/openai-phone-ordering";
 
 export const runtime="nodejs";
 type Rpc={jsonrpc?:string;id?:string|number|null;method?:string;params?:Record<string,unknown>};
@@ -25,7 +25,7 @@ const schemas:Record<AiOrderingToolName,Record<string,unknown>>={
   send:{type:"object",properties:{...properties,orderId:{type:"string"},customerConfirmed:{type:"boolean",description:"True only after an explicit spoken yes to the full readback and authoritative total."}},required:["callId","orderId","customerConfirmed"],additionalProperties:false},
 };
 const descriptions:Record<AiOrderingToolName,string>={describe_capabilities:"Get ordering capabilities and safety rules.",menu_browse:"Browse the current effective menu using stable IDs.",menu_search:"Search current menu items, variants, and modifiers.",ordering_availability:"Check whether ordering is available for a service and time.",future_slots:"List valid future fulfillment slots.",promotions:"List currently active promotion descriptions.",customer_lookup:"Find ordering-safe customer matches by name or phone.",create_draft:"Create a server-priced phone order draft.",update_draft:"Replace a draft using optimistic version control.",get_draft:"Read the authoritative current draft and total.",attach_delivery_address:"Attach a previously validated address and calculate routed delivery pricing.",validate_delivery:"Quote configured distance-based delivery pricing.",hold:"Validate required fields and prepare a full customer readback.",send:"Send a confirmed draft to the kitchen. Requires explicit customer confirmation."};
-const tools=AI_ORDERING_TOOL_NAMES.map(name=>({name,description:descriptions[name],inputSchema:schemas[name],annotations:{readOnlyHint:["describe_capabilities","menu_browse","menu_search","ordering_availability","future_slots","promotions","customer_lookup","get_draft","validate_delivery","hold"].includes(name)}}));
+const tools=[...AI_ORDERING_TOOL_NAMES.map(name=>({name,description:descriptions[name],inputSchema:schemas[name],annotations:{readOnlyHint:["describe_capabilities","menu_browse","menu_search","ordering_availability","future_slots","promotions","customer_lookup","get_draft","validate_delivery","hold"].includes(name)}})),{name:"request_human_handoff",description:"Transfer this active call to the configured 3CX human intervention destination while preserving its current order draft.",inputSchema:{type:"object",properties:{...properties,reason:{type:"string",description:"Concise operational reason an employee is needed."}},required:["callId","reason"],additionalProperties:false},annotations:{readOnlyHint:false}}];
 const reply=(id:Rpc["id"],result:unknown)=>Response.json({jsonrpc:"2.0",id,result});
 const failure=(id:Rpc["id"],code:number,message:string,data?:unknown)=>Response.json({jsonrpc:"2.0",id,error:{code,message,data}});
 
@@ -36,12 +36,13 @@ export async function POST(request:Request){
   if(rpc.method==="notifications/initialized")return new Response(null,{status:202});
   if(rpc.method==="tools/list")return reply(rpc.id,{tools});
   if(rpc.method!=="tools/call")return failure(rpc.id,-32601,"Method not found.");
-  const name=String(rpc.params?.name||"") as AiOrderingToolName,args={...((rpc.params?.arguments&&typeof rpc.params.arguments==="object"?rpc.params.arguments:{}) as Record<string,unknown>)};
-  if(!AI_ORDERING_TOOL_NAMES.includes(name))return failure(rpc.id,-32602,"Unknown ordering tool.");
+  const requestedName=String(rpc.params?.name||""),name=requestedName as AiOrderingToolName,args={...((rpc.params?.arguments&&typeof rpc.params.arguments==="object"?rpc.params.arguments:{}) as Record<string,unknown>)};
+  if(!AI_ORDERING_TOOL_NAMES.includes(name)&&requestedName!=="request_human_handoff")return failure(rpc.id,-32602,"Unknown ordering tool.");
   const callId=String(args.callId||"");delete args.callId;
   await ensureOrderingAiSchema();
   const call=(await getSql()`SELECT id,state,order_id FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} AND state IN('ai','handoff_pending') LIMIT 1`)[0];
   if(!call)return reply(rpc.id,{content:[{type:"text",text:JSON.stringify({error:{code:"NOT_AUTHORIZED",message:"This tool request is not linked to an active Corner Deli AI call."}})}],isError:true});
+  if(requestedName==="request_human_handoff"){try{const result=await requestOpenAiHandoff(callId,String(args.reason||"Employee assistance requested."));return reply(rpc.id,{content:[{type:"text",text:JSON.stringify(result)}]})}catch(error){return reply(rpc.id,{content:[{type:"text",text:JSON.stringify({error:{code:"HANDOFF_FAILED",message:"The call could not be transferred. Ask the caller to remain on the line and retry once."}})}],isError:true})}}
   if(name==="send"&&args.customerConfirmed!==true)return reply(rpc.id,{content:[{type:"text",text:JSON.stringify({error:{code:"SEND_BLOCKED",message:"Explicit customer confirmation is required after the complete readback."}})}],isError:true});
   delete args.customerConfirmed;
   const started=Date.now(),requestId=randomUUID(),actor={id:`openai:${callId}`,name:"Corner Deli AI Phone",type:"employee" as const,role:"employee" as const};
