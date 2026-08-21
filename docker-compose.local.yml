@@ -1,6 +1,24 @@
 name: corner-ops
 
 services:
+  asterisk:
+    build:
+      context: ./asterisk
+      dockerfile: Dockerfile
+    container_name: corner-ops-asterisk
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      ASTERISK_3CX_IP: ${ASTERISK_3CX_IP:-192.168.1.46}
+      ASTERISK_OPENAI_PROJECT_ID: ${ASTERISK_OPENAI_PROJECT_ID}
+      ASTERISK_OPENAI_DID: ${ASTERISK_OPENAI_DID:-+13156057291}
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show uptime' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   app:
     build:
       context: .
