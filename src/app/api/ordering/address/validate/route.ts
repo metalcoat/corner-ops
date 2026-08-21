@@ -12,11 +12,10 @@ export async function POST(request: Request) {
     const sessionToken = String(body.sessionToken || "");
     if (!/^[a-zA-Z0-9-]{20,80}$/.test(sessionToken)) return Response.json({ error: "A valid address session is required." }, { status: 400 });
     const address = await validateDeliveryAddress({ enteredAddress: String(body.enteredAddress || ""), placeId: body.placeId ? String(body.placeId) : undefined, sessionToken });
-    let route = null;
-    try { route = await routeDeliveryAddress(address); } catch { /* Origin coordinates are optional in this milestone. */ }
+    const route = await routeDeliveryAddress(address);
     return Response.json({ address, validationToken: createAddressValidationToken(address), route });
   } catch (error) {
-    if (error instanceof Error && (/^(Delivery address validation is unavailable|Enter a complete street address|This address is incomplete or ambiguous)/.test(error.message))) return Response.json({ error: error.message }, { status: 409 });
+    if (error instanceof Error && (/^(Delivery address validation is unavailable|Enter a complete street address|This address is incomplete or ambiguous|Delivery address is outside|No driving route was found)/.test(error.message))) return Response.json({ error: error.message }, { status: 409 });
     return apiError(error);
   }
 }

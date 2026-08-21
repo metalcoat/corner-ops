@@ -11,5 +11,8 @@ export async function POST(request: Request) {
     const address = readAddressValidationToken(String(body.validationToken || ""), String(body.enteredAddress || ""));
     if (!address) return Response.json({ error: "Revalidate the delivery address before calculating a route." }, { status: 409 });
     return Response.json({ route: await routeDeliveryAddress(address) });
-  } catch (error) { return apiError(error); }
+  } catch (error) {
+    if(error instanceof Error&&/^(Delivery address is outside|No driving route was found)/.test(error.message))return Response.json({error:error.message},{status:409});
+    return apiError(error);
+  }
 }

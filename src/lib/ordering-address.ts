@@ -25,9 +25,11 @@ function googleConfiguration(env: AddressEnvironment) {
   if (!status.configured) throw new Error("Delivery address validation is unavailable. Configure the address provider before submitting Delivery orders.");
   const latitude = Number(env.DELI_ORIGIN_LATITUDE);
   const longitude = Number(env.DELI_ORIGIN_LONGITUDE);
+  const configuredRadius = Number(env.DELI_DELIVERY_RADIUS_MILES || 12);
   return {
     key: env.GOOGLE_MAPS_API_KEY!.trim(),
     bias: Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : null,
+    radiusMiles: Number.isFinite(configuredRadius) && configuredRadius > 0 ? Math.min(configuredRadius, 50) : 12,
   };
 }
 
@@ -58,7 +60,7 @@ export async function suggestDeliveryAddresses(input: string, sessionToken: stri
     languageCode: "en-US",
     regionCode: "us",
   };
-  if (config.bias) body.locationBias = { circle: { center: config.bias, radius: 50_000 } };
+  if (config.bias) body.locationRestriction = { circle: { center: config.bias, radius: config.radiusMiles * 1609.344 } };
   const payload = await googleJson(
     "https://places.googleapis.com/v1/places:autocomplete",
     body,
@@ -142,5 +144,7 @@ export async function routeDeliveryAddress(address: ValidatedDeliveryAddress, op
   );
   const route = Array.isArray(payload.routes) ? payload.routes[0] : null;
   if (!route) throw new Error("No driving route was found for this address.");
-  return { distanceMiles: Number(route.distanceMeters) / 1609.344, durationSeconds: Number(String(route.duration || "0s").replace(/s$/, "")), provider: "google" as const, calculatedAt: new Date().toISOString() };
+  const distanceMiles = Number(route.distanceMeters) / 1609.344;
+  if (distanceMiles > config.radiusMiles) throw new Error(`Delivery address is outside the ${config.radiusMiles}-mile delivery area.`);
+  return { distanceMiles, durationSeconds: Number(String(route.duration || "0s").replace(/s$/, "")), provider: "google" as const, calculatedAt: new Date().toISOString() };
 }
