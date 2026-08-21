@@ -221,6 +221,18 @@ type AiDeliCall = IncomingDeliCall & {
   updated_at: string;
   claimed_by: string;
   claimed_at: string | null;
+  service_type: string | null;
+  subtotal_cents: number | null;
+  tax_cents: number | null;
+  total_cents: number | null;
+  order_items: Array<{
+    id: string;
+    name: string;
+    quantity: number;
+    lineTotalCents: number;
+    instructions: string;
+    modifiers: Array<{ name: string; quantity: number }>;
+  }>;
 };
 
 const DELIVERY_LOCATIONS = [
@@ -3225,6 +3237,15 @@ export default function PosClient({
                 <strong>AI ORDERING · LINE {call.line_number || "TEST"}</strong>
                 <span>{call.display_name || call.caller_phone || "Unknown caller"}</span>
                 <span>{call.open_order_number ? `Order #${call.open_order_number}` : "Building order…"}</span>
+                {call.open_order_id && <div className="posAiOrderPreview">
+                  <b>{(call.service_type || "order").replaceAll("_", " ").toUpperCase()}</b>
+                  {call.order_items.length ? <ul>{call.order_items.map(item => <li key={item.id}>
+                    <span>{item.quantity}× {item.name}</span><em>{money(item.lineTotalCents)}</em>
+                    {item.modifiers.length > 0 && <small>{item.modifiers.map(modifier => `${modifier.quantity > 1 ? `${modifier.quantity}× ` : ""}${modifier.name}`).join(", ")}</small>}
+                    {item.instructions && <small>{item.instructions}</small>}
+                  </li>)}</ul> : <small>Waiting for the first item…</small>}
+                  <footer><span>Subtotal {money(call.subtotal_cents || 0)} · Tax {money(call.tax_cents || 0)}</span><strong>Total {money(call.total_cents || 0)}</strong></footer>
+                </div>}
               </div>
             ))}
         </aside>
