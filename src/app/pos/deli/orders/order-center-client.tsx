@@ -13,6 +13,7 @@ export default function OrderCenterClient(){
  useEffect(()=>{const locked=()=>setSession({authenticated:false});window.addEventListener("corner-ops-pos-locked",locked);return()=>window.removeEventListener("corner-ops-pos-locked",locked)},[]);
  const load=useCallback(async()=>{if(!session?.authenticated)return;const p=new URLSearchParams({view:view==="open"?"open":"date",date,q:query});const r=await fetch(`/api/ordering/order-center?${p}`,{cache:"no-store"});const b=await r.json();if(!r.ok){setError(b.error||"Could not load orders.");return}setOrders(b.orders||[]);setError("")},[date,query,session?.authenticated,view]);
  useEffect(()=>{const t=setTimeout(()=>void load(),150);return()=>clearTimeout(t)},[load]);
+ useEffect(()=>{if(!session?.authenticated)return;const id=new URLSearchParams(window.location.search).get("orderId");if(id)void details({id} as Order)},[session?.authenticated]);
  const overdue=orders.filter(o=>o.overdue_unpaid),open=orders.filter(o=>!o.overdue_unpaid&&!["paid","refunded"].includes(o.payment_status)),paid=orders.filter(o=>["paid","refunded"].includes(o.payment_status));
  async function details(order:Order){const r=await fetch(`/api/ordering/order-center/${order.id}`);const b=await r.json();if(r.ok)setSelected(b.order)}
  async function advance(order:Order){

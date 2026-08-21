@@ -241,6 +241,7 @@
   place-items: center;
   padding: 18px;
 }
+.posIncomingCall{border:2px solid #fbbf24;box-shadow:0 24px 80px #000a}.posIncomingCall header span{color:#fde68a;font-weight:900;letter-spacing:.05em}.posIncomingCall>strong{font-size:1.7rem}.posIncomingCall>a.primary,.posIncomingCall>button{min-height:52px;display:grid;place-items:center;text-align:center;border-radius:9px;font-weight:900}.posIncomingCall>small{color:#cbd5e1;text-align:center}
 .posConfigModal {
   width: min(980px, 96vw);
   max-height: 92dvh;

@@ -83,6 +83,7 @@ type PosCustomerPhone={id:string;label:string;display_phone:string;normalized_ph
 type PosCustomerAddress={id:string;label:string;line1:string;line2:string;city:string;state:string;postal_code:string;standardized_address:string;provider:string;provider_reference_id:string;latitude:number|null;longitude:number|null;is_primary:boolean;last_used_at:string|null};
 type PosCustomer={id:string;first_name:string;last_name:string;display_name:string;display_phone:string;normalized_phone:string;last_order_at:string|null;phones:PosCustomerPhone[];addresses:PosCustomerAddress[]};
 type BarcodeMapping={id:string;barcode:string;itemId:string;variantId:string|null;itemName:string;variantName:string|null};
+type IncomingDeliCall={id:string;call_id:string;caller_phone:string;line_number:string;started_at:string;customer_id:string|null;display_name:string|null;open_order_id:string|null;open_order_number:string|null;open_order_status:string|null};
 
 const DELIVERY_LOCATIONS = [
   { id: "ogdensburg-bowl", name: "Ogdensburg Bowl", address: "1121 Paterson Street, Ogdensburg, NY 13669", aliases: ["ogdensburg bowl", "bowling alley", "1121 paterson", "1121 patterson"], dropoffs: [...Array.from({ length: 14 }, (_, index) => `Lane ${index + 1}`), "Bar"] },
@@ -252,6 +253,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [scanNotice,setScanNotice]=useState("");
   const [unknownBarcode,setUnknownBarcode]=useState("");
+  const [incomingCall,setIncomingCall]=useState<IncomingDeliCall|null>(null);
   const [mappingItemId,setMappingItemId]=useState("");
   const [mappingVariantId,setMappingVariantId]=useState("");
   const [mappingBusy,setMappingBusy]=useState(false);
@@ -272,6 +274,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   }, [business]);
 
   useEffect(() => { if (!addressSessionToken) setAddressSessionToken(clientId()); }, [addressSessionToken]);
+  useEffect(()=>{if(business!=="Corner Deli"||!session?.authenticated)return;let stopped=false;const load=()=>fetch("/api/ordering/calls",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(body=>{if(!stopped&&body?.calls?.[0])setIncomingCall(body.calls[0])}).catch(()=>undefined);void load();const timer=window.setInterval(load,2000);return()=>{stopped=true;window.clearInterval(timer)}},[business,session?.authenticated]);
   useEffect(()=>{if(!customerOpen||customerQuery.trim().length<3){setCustomerMatches([]);return}const controller=new AbortController(),timer=window.setTimeout(()=>fetch(`/api/ordering/customers?q=${encodeURIComponent(customerQuery)}`,{signal:controller.signal}).then(r=>r.json()).then(b=>setCustomerMatches(b.customers||[])).catch(()=>undefined),150);return()=>{clearTimeout(timer);controller.abort()}},[customerOpen,customerQuery]);
   useEffect(()=>{if(!customer){setLoyalty([]);return}const controller=new AbortController();fetch(`/api/ordering/loyalty/status?customerId=${encodeURIComponent(customer.id)}`,{signal:controller.signal}).then(r=>r.json()).then(body=>setLoyalty(body.programs||[])).catch(()=>setLoyalty([]));return()=>controller.abort()},[customer]);
   useEffect(() => {
@@ -634,6 +637,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   }
 
   function chooseCustomer(next:PosCustomer){setCustomer(next);const phone=next.phones?.find(candidate=>candidate.is_primary)||next.phones?.[0];setSelectedCustomerPhoneId(phone?.id||"");setSavedDraft(null)}
+  async function acknowledgeIncomingCall(useCaller=false){const call=incomingCall;if(!call)return;if(useCaller){const response=await fetch(`/api/ordering/customers?q=${encodeURIComponent(call.caller_phone)}`),body=await response.json() as {customers?:PosCustomer[]};if(body.customers?.[0])chooseCustomer(body.customers[0]);else{setQuickCustomer(current=>({...current,phone:call.caller_phone}));setCustomerOpen(true)}}await fetch("/api/ordering/calls",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({id:call.id})});setIncomingCall(null)}
   async function createQuickCustomer(event:React.FormEvent){
     event.preventDefault();
     if(quickCustomerBusy)return;
@@ -1051,6 +1055,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     </section>
 
     {removedLine&&<div className="posUndo" role="status">Removed {removedLine.name}<button onClick={()=>{setCart(current=>[...current,removedLine]);setRemovedLine(null)}}>UNDO</button></div>}
+    {incomingCall&&<div className="posModalBackdrop"><section className="posCustomerDialog posIncomingCall" role="dialog" aria-modal="true" aria-label="Incoming deli call"><header><div><span>INCOMING DELI CALL{incomingCall.line_number?` · LINE ${incomingCall.line_number}`:""}</span><h2>{incomingCall.display_name||incomingCall.caller_phone}</h2></div></header><strong>{incomingCall.caller_phone}</strong>{incomingCall.open_order_id?<><p>Existing order #{incomingCall.open_order_number} · {incomingCall.open_order_status?.replaceAll("_"," ")}</p><a className="primary" href={`/pos/deli/orders?orderId=${encodeURIComponent(incomingCall.open_order_id)}`} onClick={(event)=>{event.preventDefault();const href=event.currentTarget.href;void acknowledgeIncomingCall().then(()=>{window.location.href=href})}}>OPEN EXISTING ORDER</a></>:<button className="primary" onClick={()=>void acknowledgeIncomingCall(true)}>{incomingCall.customer_id?"USE CUSTOMER / START ORDER":"ADD CALLER / START ORDER"}</button>}<button onClick={()=>void acknowledgeIncomingCall()}>ANSWERED / DISMISS POPUP</button><small>Answer the call on the physical phone.</small></section></div>}
     {checkoutOpen && (savedDraft||activeTab) && <div className="posModalBackdrop" role="presentation">
       <section className="posCustomerDialog" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
         <h2 id="checkout-title">Checkout · Order #{(savedDraft||activeTab)!.displayNumber}</h2>
