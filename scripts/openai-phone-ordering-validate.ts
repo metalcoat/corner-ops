@@ -38,6 +38,7 @@ async function main(){
       lineMapped:phone.lineForDid(calledDid)==="TEST LINE",
       englishGreeting:phone.OPENAI_PHONE_GREETING.includes("Corner Deli")&&phone.OPENAI_PHONE_GREETING.includes("pickup or delivery")&&phone.PHONE_INSTRUCTIONS.includes("Always speak English"),
       menuVocabularyDefaults:phone.PHONE_INSTRUCTIONS.includes("Jumbo Thin 16")&&phone.PHONE_INSTRUCTIONS.includes("Large French Fries")&&phone.PHONE_INSTRUCTIONS.includes("genuinely welcoming"),
+      pizzaSizePolicy:phone.PHONE_INSTRUCTIONS.includes("6 slices")&&phone.PHONE_INSTRUCTIONS.includes("8 slices")&&phone.PHONE_INSTRUCTIONS.includes("12 slices")&&phone.PHONE_INSTRUCTIONS.includes("thin crust is only available in Large/Jumbo")&&phone.PHONE_INSTRUCTIONS.includes("standard crust or a Jumbo Thin"),
       unauthorized:unauthorized.status===401,
       protocol:initialized.result?.protocolVersion==="2025-06-18",
       toolsListed:listed.result?.tools?.some((tool:{name:string})=>tool.name==="create_draft"),
