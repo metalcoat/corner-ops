@@ -906,15 +906,15 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     {customer&&loyalty.some(program=>program.rewardsAvailable>0)&&cart.length>0&&<div className="posCustomerChoices" aria-label="Available loyalty rewards">{loyalty.filter(program=>program.rewardsAvailable>0).map(program=><div key={program.programId}><strong>{program.name}</strong>{cart.map(line=><button disabled={redeeming||Boolean(savedDraft?.loyalty.length)} key={line.id} onClick={()=>void redeemLoyalty(program.programId,line.id)}>REDEEM ON {line.name}</button>)}</div>)}</div>}
     {customer&&customer.phones?.length>1&&<div className="posCustomerChoices" aria-label="Contact number for this order"><strong>CONTACT NUMBER</strong>{customer.phones.map(phone=><button type="button" key={phone.id} className={selectedCustomerPhoneId===phone.id?"selected":""} onClick={()=>{setSelectedCustomerPhoneId(phone.id);setSavedDraft(null)}}>{phone.label||"Phone"} · {phone.display_phone}</button>)}</div>}
 
-    {serviceType === "delivery" && <section className={`posDelivery ${deliveryEditorOpen?"expanded":"collapsed"}`} aria-label="Customer and delivery address">
-      <button type="button" className="posDeliverySummary" aria-expanded={deliveryEditorOpen} onClick={()=>setDeliveryEditorOpen(value=>!value)}><span><b>{validatedAddress?"DELIVERY":"ADD DELIVERY ADDRESS"}</b><small>{validatedAddress?`${validatedAddress.formattedAddress}${deliveryUnit?` · ${deliveryUnit}`:""}`:"Name, phone and validated address required"}</small></span><strong className={validatedAddress?"addressValid":""}>{validatedAddress?"VALIDATED · CHANGE":deliveryEditorOpen?"CLOSE":"OPEN"}</strong></button>
-      {deliveryEditorOpen&&<div className="posDeliveryEditor"><div className="posAddressEntry">
+    {serviceType === "delivery" && <section className="posDelivery" aria-label="Customer and delivery address">
+      <div className="posDeliveryEditor"><div className="posAddressEntry">
         <div className="posAddressAutocomplete">
-          <label>Street address<input
+          <input
             value={deliveryAddress}
             autoComplete="off"
             spellCheck={false}
-            placeholder="Start typing an address"
+            aria-label="Delivery street address"
+            placeholder="Type delivery address"
             aria-expanded={addressSuggestions.length > 0}
             aria-controls="delivery-address-suggestions"
             onChange={(event) => changeDeliveryAddress(event.target.value)}
@@ -924,7 +924,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
               if (event.key === "Escape") setAddressSuggestions([]);
               if (event.key === "Enter") { event.preventDefault(); const suggestion = addressSuggestions[activeSuggestion]; if (suggestion) void validateAddress(suggestion); else void validateAddress(); }
             }}
-          /></label>
+          />
           {(addressLoading || addressSuggestions.length > 0 || (deliveryAddress.trim().length >= 2 && !addressLoading && !validatedAddress && !addressError)) && <div id="delivery-address-suggestions" className="posAddressSuggestions" role="listbox">
             {addressLoading && <div className="addressState">Finding nearby addresses…</div>}
             {!addressLoading && addressSuggestions.map((suggestion, index) => <button key={suggestion.id} type="button" role="option" aria-selected={activeSuggestion === index} className={activeSuggestion === index ? "active" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => void validateAddress(suggestion)}><strong>{suggestion.mainText}</strong><span>{suggestion.secondaryText}</span></button>)}
@@ -932,12 +932,12 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
             {addressSuggestions.length > 0 && <small>Powered by Google</small>}
           </div>}
         </div>
-        <label>Apartment / unit<input value={deliveryUnit} maxLength={120} autoComplete="off" onChange={(event) => { setDeliveryUnit(event.target.value); setSavedDraft(null); }} /></label>
-        <button type="button" className="validateAddressButton" disabled={validatingAddress || deliveryAddress.trim().length < 5 || Boolean(validatedAddress)} onClick={() => void validateAddress()}>{validatingAddress ? "Validating…" : validatedAddress ? "Validated" : "Validate address"}</button>
+        <input className="posDeliveryUnit" aria-label="Apartment or unit" placeholder="Apt / unit" value={deliveryUnit} maxLength={120} autoComplete="off" onChange={(event) => { setDeliveryUnit(event.target.value); setSavedDraft(null); }} />
+        <button type="button" className="validateAddressButton" disabled={validatingAddress || deliveryAddress.trim().length < 5 || Boolean(validatedAddress)} onClick={() => void validateAddress()}>{validatingAddress ? "Validating…" : validatedAddress ? "✓ Validated" : "Validate"}</button>
       </div>
       {customer?.addresses?.length?<div className="posSavedAddresses" aria-label="Saved delivery addresses"><strong>DELIVER TO</strong>{customer.addresses.map(address=><button type="button" key={address.id} className={selectedCustomerAddressId===address.id?"selected":""} onClick={()=>void chooseSavedAddress(address)}><b>{address.label||"Address"}</b><span>{address.line1}{address.line2?` · ${address.line2}`:""}</span></button>)}<button type="button" onClick={()=>{setSelectedCustomerAddressId("");changeDeliveryAddress("")}}>+ NEW ADDRESS</button></div>:null}
       {validatedAddress && <p className="addressResult"><strong>{validatedAddress.formattedAddress}</strong>{deliveryRoute ? ` · ${deliveryRoute.distanceMiles.toFixed(1)} driving miles · about ${Math.max(1, Math.round(deliveryRoute.durationSeconds / 60))} min` : " · Driving distance unavailable until store origin is configured"}</p>}
-      {addressError && <p className="addressError" role="alert">{addressError}</p>}</div>}
+      {addressError && <p className="addressError" role="alert">{addressError}</p>}</div>
     </section>}</div>
 
     {(savedDraft||activeTab) && <div className="posSaveNotice">
