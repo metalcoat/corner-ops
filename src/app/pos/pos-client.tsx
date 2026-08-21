@@ -918,7 +918,6 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           {futureSlots.map((slot) => <option key={slot} value={slot}>{new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(slot))}</option>)}
         </select>
       </div>}</>}
-    </section>
     {business==="Tiki"&&serviceType==="bar"&&!activeTab&&<label className="posTabName">TAB NAME <input value={tabName} maxLength={80} placeholder="Guest name or seat (optional)" onChange={event=>setTabName(event.target.value)}/></label>}
     <div className={`posCustomerDeliveryArea ${serviceType==="delivery"?"hasDelivery":""}`}><button type="button" className="posCustomerCompact" onClick={()=>setCustomerOpen(true)}>{customer?<><strong>{customer.display_name}</strong><span>{customer.phones?.find(phone=>phone.id===selectedCustomerPhoneId)?.display_phone||customer.display_phone}</span>{loyalty.map(program=><small key={program.programId}>{program.name}: {program.rewardsAvailable?`${program.rewardsAvailable} FREE REWARD${program.rewardsAvailable===1?"":"S"} AVAILABLE`:`${program.progress} / ${program.quantityRequired}`}</small>)}</>:<><strong>+ CUSTOMER</strong><span>{business==="Tiki"?"Optional":"Name and phone required"}</span></>}</button>
     {customer&&loyalty.some(program=>program.rewardsAvailable>0)&&cart.length>0&&<div className="posCustomerChoices" aria-label="Available loyalty rewards">{loyalty.filter(program=>program.rewardsAvailable>0).map(program=><div key={program.programId}><strong>{program.name}</strong>{cart.map(line=><button disabled={redeeming||Boolean(savedDraft?.loyalty.length)} key={line.id} onClick={()=>void redeemLoyalty(program.programId,line.id)}>REDEEM ON {line.name}</button>)}</div>)}</div>}
@@ -958,6 +957,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       {validatedAddress && <p className="addressResult"><strong>{validatedAddress.formattedAddress}</strong>{deliveryRoute ? ` · ${deliveryRoute.distanceMiles.toFixed(1)} driving miles · about ${Math.max(1, Math.round(deliveryRoute.durationSeconds / 60))} min` : " · Driving distance unavailable until store origin is configured"}</p>}
       {addressError && <p className="addressError" role="alert">{addressError}</p>}</div>
     </section>}</div>
+    </section>
 
     {(savedDraft||activeTab) && <div className="posSaveNotice">
       {activeTab?`Open tab ${tabName||`#${activeTab.displayNumber}`}`:`Held order #${savedDraft!.displayNumber}`} · {money((savedDraft||activeTab)!.totalCents)} · UNPAID
@@ -1010,9 +1010,9 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       </section>
 
       <aside className="posCart">
-        <div className="posCartHeading">
-          <div><span>{activeTab?"Add to open tab":"Current order"}</span><h2>{activeTab?(tabName||`Tab #${activeTab.displayNumber}`):`New ${serviceLabels[serviceType].label}`}</h2></div>
-          <button type="button" onClick={() => { setCart([]); setSavedDraft(null); }} disabled={!cart.length}>Clear</button>
+        <div className="posCartHeading posCartHeadingCompact">
+          <strong>ORDER ITEMS</strong>
+          <button type="button" onClick={() => { setCart([]); setSavedDraft(null); }} disabled={!cart.length}>CLEAR</button>
         </div>
         <div className="posCartLines">
           {activeTabItems.map(line=><article className="posCartLine posPersistedTabLine" key={line.id}><div className="posLineTop"><strong>{line.quantity}× {line.item_name_snapshot}</strong><span>{money(Number(line.line_total_cents))}</span></div>{line.variant_name_snapshot&&<small>{line.variant_name_snapshot}</small>}<small>Already on tab</small></article>)}
@@ -1035,7 +1035,6 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
           <div><span>Subtotal</span><strong>{money(subtotalCents)}</strong></div>
           {visiblePromotions.map((promotion,index)=><div key={`${promotion.label}-${index}`}><span>{promotion.label}</span><strong>−{money(promotion.discountCents)}</strong></div>)}
           {savedDraft?.loyalty.map((reward,index)=><div key={`${reward.label}-${index}`}><span>{reward.label} · Loyalty</span><strong>−{money(reward.discountCents)}</strong></div>)}
-          <div><span>Tax</span><strong>Included/configured at checkout</strong></div>
           <div className="grand"><span>{savedDraft ? "Backend total" : "Estimated total"}</span><strong>{money(savedDraft?.totalCents ?? Math.max(0,subtotalCents-promotionDiscountCents))}</strong></div>
         </div>
         <div className="posCheckoutButtons">
