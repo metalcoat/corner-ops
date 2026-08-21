@@ -184,10 +184,11 @@ record_candidate_failure() {
 wait_for_health() {
   local attempt
   for attempt in {1..30}; do
-    local app_health postgres_health
+    local app_health asterisk_health postgres_health
     app_health="$(docker inspect corner-ops-app --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || true)"
+    asterisk_health="$(docker inspect corner-ops-asterisk --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || true)"
     postgres_health="$(docker inspect corner-ops-postgres --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || true)"
-    if [[ "$app_health" == "healthy" && "$postgres_health" == "healthy" ]] \
+    if [[ "$app_health" == "healthy" && "$asterisk_health" == "healthy" && "$postgres_health" == "healthy" ]] \
       && curl -fsS --max-time 5 http://127.0.0.1:3000/api/health >/dev/null; then
       return 0
     fi
@@ -274,7 +275,7 @@ if [[ -n "$previous_image_id" ]]; then
 fi
 
 image_build_failed=false
-docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build app \
+docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build asterisk app \
   || image_build_failed=true
 if [[ "$image_build_failed" == true ]]; then
   record_candidate_failure "$remote_sha" "Docker image build failed" "$runtime_sha"
@@ -283,6 +284,7 @@ fi
 
 log "Starting candidate ${remote_sha}; persistent volumes are unchanged."
 docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build postgres
+docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --no-build --force-recreate asterisk
 docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --no-build --force-recreate app
 
 if ! wait_for_health; then
