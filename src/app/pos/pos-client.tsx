@@ -228,6 +228,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
   const [deliveryValidationToken, setDeliveryValidationToken] = useState("");
   const [deliveryValidatedInput, setDeliveryValidatedInput] = useState("");
   const [deliveryRoute, setDeliveryRoute] = useState<DeliveryRoute | null>(null);
+  const [deliveryEditorOpen,setDeliveryEditorOpen]=useState(false);
   const [customer,setCustomer]=useState<PosCustomer|null>(null),[customerOpen,setCustomerOpen]=useState(false),[customerQuery,setCustomerQuery]=useState(""),[customerMatches,setCustomerMatches]=useState<PosCustomer[]>([]);
   const [quickCustomer,setQuickCustomer]=useState({firstName:"",lastName:"",phone:""}),[quickCustomerBusy,setQuickCustomerBusy]=useState(false),[quickCustomerError,setQuickCustomerError]=useState("");
   const [selectedCustomerPhoneId,setSelectedCustomerPhoneId]=useState("");
@@ -610,7 +611,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       const response = await fetch("/api/ordering/address/validate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enteredAddress, placeId: suggestion?.id, sessionToken: addressSessionToken }) });
       const payload = await response.json() as { address?: ValidatedAddress; validationToken?: string; route?: DeliveryRoute | null; error?: string };
       if (!response.ok || !payload.address || !payload.validationToken) throw new Error(payload.error || "Could not validate this address.");
-      setValidatedAddress(payload.address); setDeliveryValidationToken(payload.validationToken); setDeliveryValidatedInput(enteredAddress.trim().replace(/\s+/g, " ")); setDeliveryRoute(payload.route || null); setDeliveryAddress(payload.address.formattedAddress);
+      setValidatedAddress(payload.address); setDeliveryValidationToken(payload.validationToken); setDeliveryValidatedInput(enteredAddress.trim().replace(/\s+/g, " ")); setDeliveryRoute(payload.route || null); setDeliveryAddress(payload.address.formattedAddress);setDeliveryEditorOpen(false);
       setAddressSessionToken(clientId()); setSavedDraft(null);
     } catch (error) { setValidatedAddress(null); setDeliveryValidationToken(""); setDeliveryValidatedInput(""); setDeliveryRoute(null); setAddressError(error instanceof Error ? error.message : "Could not validate this address."); }
     finally { setValidatingAddress(false); }
@@ -738,7 +739,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     if (submittingOrder) return;
     if(business==="Corner Deli"&&!customer){setCheckoutError("Add the customer's name and phone number before sending this order.");setCustomerOpen(true);return}
     if(business==="Corner Deli"&&!selectedCustomerPhoneId){setCheckoutError("Choose a phone number before sending this order.");setCustomerOpen(true);return}
-    if(business==="Corner Deli"&&serviceType==="delivery"&&!validatedAddress){setCheckoutError("Enter and validate the delivery address before sending this order.");return}
+    if(business==="Corner Deli"&&serviceType==="delivery"&&!validatedAddress){setCheckoutError("Enter and validate the delivery address before sending this order.");setDeliveryEditorOpen(true);return}
     if(business==="Tiki"&&activeTab&&cart.length)draft=await saveDraft();
     if (!draft) draft = activeTab || await saveDraft();
     if (!draft) return;
@@ -880,7 +881,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     </header>}
 
     <section className="posServiceBar" aria-label="Fulfillment type and timing">
-      {availableServices.map((service) => <button key={service} type="button" className={serviceType === service ? "active" : ""} onClick={() => { setServiceType(service); setSavedDraft(null); if(service!=="bar"){setActiveTab(null);setActiveTabItems([])} setCheckoutError(""); }}>
+      {availableServices.map((service) => <button key={service} type="button" className={serviceType === service ? "active" : ""} onClick={() => { setServiceType(service); setSavedDraft(null);setDeliveryEditorOpen(false); if(service!=="bar"){setActiveTab(null);setActiveTabItems([])} setCheckoutError(""); }}>
         <span>{serviceLabels[service].label}</span>
         {serviceLabels[service].paymentNote && <small>{serviceLabels[service].paymentNote}</small>}
       </button>)}
@@ -905,9 +906,9 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
     {customer&&loyalty.some(program=>program.rewardsAvailable>0)&&cart.length>0&&<div className="posCustomerChoices" aria-label="Available loyalty rewards">{loyalty.filter(program=>program.rewardsAvailable>0).map(program=><div key={program.programId}><strong>{program.name}</strong>{cart.map(line=><button disabled={redeeming||Boolean(savedDraft?.loyalty.length)} key={line.id} onClick={()=>void redeemLoyalty(program.programId,line.id)}>REDEEM ON {line.name}</button>)}</div>)}</div>}
     {customer&&customer.phones?.length>1&&<div className="posCustomerChoices" aria-label="Contact number for this order"><strong>CONTACT NUMBER</strong>{customer.phones.map(phone=><button type="button" key={phone.id} className={selectedCustomerPhoneId===phone.id?"selected":""} onClick={()=>{setSelectedCustomerPhoneId(phone.id);setSavedDraft(null)}}>{phone.label||"Phone"} · {phone.display_phone}</button>)}</div>}
 
-    {serviceType === "delivery" && <section className="posDelivery" aria-label="Customer and delivery address">
-      <div className="posDeliveryHeading"><div><span>Customer / Delivery</span><h2>Delivery address</h2></div>{validatedAddress && <strong className="addressValid">VALIDATED</strong>}</div>
-      <div className="posAddressEntry">
+    {serviceType === "delivery" && <section className={`posDelivery ${deliveryEditorOpen?"expanded":"collapsed"}`} aria-label="Customer and delivery address">
+      <button type="button" className="posDeliverySummary" aria-expanded={deliveryEditorOpen} onClick={()=>setDeliveryEditorOpen(value=>!value)}><span><b>{validatedAddress?"DELIVERY":"ADD DELIVERY ADDRESS"}</b><small>{validatedAddress?`${validatedAddress.formattedAddress}${deliveryUnit?` · ${deliveryUnit}`:""}`:"Name, phone and validated address required"}</small></span><strong className={validatedAddress?"addressValid":""}>{validatedAddress?"VALIDATED · CHANGE":deliveryEditorOpen?"CLOSE":"OPEN"}</strong></button>
+      {deliveryEditorOpen&&<div className="posDeliveryEditor"><div className="posAddressEntry">
         <div className="posAddressAutocomplete">
           <label>Street address<input
             value={deliveryAddress}
@@ -936,7 +937,7 @@ export default function PosClient({ business, idleLockSeconds = 60, embedded = f
       </div>
       {customer?.addresses?.length?<div className="posSavedAddresses" aria-label="Saved delivery addresses"><strong>DELIVER TO</strong>{customer.addresses.map(address=><button type="button" key={address.id} className={selectedCustomerAddressId===address.id?"selected":""} onClick={()=>void chooseSavedAddress(address)}><b>{address.label||"Address"}</b><span>{address.line1}{address.line2?` · ${address.line2}`:""}</span></button>)}<button type="button" onClick={()=>{setSelectedCustomerAddressId("");changeDeliveryAddress("")}}>+ NEW ADDRESS</button></div>:null}
       {validatedAddress && <p className="addressResult"><strong>{validatedAddress.formattedAddress}</strong>{deliveryRoute ? ` · ${deliveryRoute.distanceMiles.toFixed(1)} driving miles · about ${Math.max(1, Math.round(deliveryRoute.durationSeconds / 60))} min` : " · Driving distance unavailable until store origin is configured"}</p>}
-      {addressError && <p className="addressError" role="alert">{addressError}</p>}
+      {addressError && <p className="addressError" role="alert">{addressError}</p>}</div>}
     </section>}
 
     {(savedDraft||activeTab) && <div className="posSaveNotice">

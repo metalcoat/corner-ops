@@ -168,6 +168,8 @@ test("Delivery preserves the cart and requires provider validation", async ({ pa
   await page.getByRole("button", { name: /^Pizza Logs / }).click();
   await page.getByRole("dialog", { name: "Configure Pizza Logs" }).getByRole("button", { name: "ADD TO ORDER" }).click();
   await page.getByRole("button", { name: "Delivery", exact: true }).click();
+  await expect(page.getByLabel("Street address")).toHaveCount(0);
+  await page.getByRole("button", { name: /ADD DELIVERY ADDRESS/ }).click();
   await page.getByLabel("Street address").fill("41");
   await expect(page.getByText(/Delivery address validation is unavailable/)).toBeVisible();
   await expect(page.getByRole("article").filter({ hasText: "Pizza Logs" })).toBeVisible();

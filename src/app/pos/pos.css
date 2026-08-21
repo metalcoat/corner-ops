@@ -100,12 +100,13 @@
 .posServiceBar button.active small { color: #dbeafe; }
 .posServiceBar .futureOrderButton { margin-left: auto; border-color: #7c3aed; }
 
-.posDelivery { padding: 12px 16px; background: #122033; border-bottom: 1px solid #334155; }
+.posDelivery { padding: 6px 10px; background: #122033; border-bottom: 1px solid #334155; }
+.posDeliverySummary{width:100%;min-height:42px;padding:5px 9px;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #334155;border-radius:8px;background:#0f172a;color:#fff;text-align:left}.posDeliverySummary>span{min-width:0;display:flex;align-items:center;gap:10px}.posDeliverySummary b{white-space:nowrap;font-size:.75rem}.posDeliverySummary small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#94a3b8}.posDeliverySummary>strong{white-space:nowrap;font-size:.7rem;color:#93c5fd}.posDeliveryEditor{padding-top:7px}
 .posDeliveryHeading, .posAddressEntry { display: flex; align-items: end; gap: 12px; }
 .posDeliveryHeading { justify-content: space-between; align-items: center; }
 .posDeliveryHeading span { color: #94a3b8; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
 .posDeliveryHeading h2 { margin: 2px 0 8px; }
-.addressValid { color: #86efac; border: 1px solid #22c55e; border-radius: 999px; padding: 5px 10px; }
+.addressValid { color: #86efac!important; border: 1px solid #22c55e; border-radius: 999px; padding: 4px 8px; }
 .posAddressEntry label { display: grid; gap: 5px; color: #cbd5e1; font-weight: 800; }
 .posAddressEntry input, .posMenuSearch input { min-height: 48px; border: 1px solid #475569; border-radius: 10px; background: #0f172a; color: #fff; padding: 8px 11px; font: inherit; }
 .posAddressAutocomplete { flex: 1; position: relative; }
