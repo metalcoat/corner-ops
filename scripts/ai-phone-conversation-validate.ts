@@ -6,8 +6,8 @@ import { localValidationEnv } from "./validation-env";
 localValidationEnv();
 
 async function main(){
-  const [{compactAcknowledgement,requiredQuestion,buildPhoneInstructions},{getAiPhoneSettings,realtimeBusinessContext},{ensureOrderingAiSchema},{getSql}]=await Promise.all([
-    import("../src/lib/openai-phone-prompt"),import("../src/lib/ordering-ai-phone-config"),import("../src/lib/ordering-ai-schema"),import("../src/lib/db"),
+  const [{compactAcknowledgement,requiredQuestion,buildPhoneInstructions},{getAiPhoneSettings,realtimeBusinessContext},{ensureOrderingAiSchema},{getSql},{menuCatalog}]=await Promise.all([
+    import("../src/lib/openai-phone-prompt"),import("../src/lib/ordering-ai-phone-config"),import("../src/lib/ordering-ai-schema"),import("../src/lib/db"),import("../src/lib/ordering-ai-tools"),
   ]);
   await ensureOrderingAiSchema();
   const settings=await getAiPhoneSettings(),business=await realtimeBusinessContext();
@@ -20,6 +20,11 @@ async function main(){
   assert.equal(settings.model,"gpt-realtime-1.5","Test calls must use the proven full Realtime model.");
   const webhookSource=await readFile(new URL("../src/app/api/openai/realtime/webhook/route.ts",import.meta.url),"utf8");
   assert.ok(!webhookSource.includes("reasoning:{effort"),"GPT-Realtime 1.5 call acceptance must not send reasoning configuration.");
+  const jumbo=await menuCatalog("Corner Deli",new Date(),"jumbo thin");
+  assert.equal(jumbo[0]?.items[0]?.name,"Pizza","Jumbo Thin must resolve to the standard Pizza item first.");
+  assert.ok(jumbo[0].items[0].variants.some((variant:{name:string})=>variant.name.includes("Jumbo Thin")));
+  const toppedJumbo=await menuCatalog("Corner Deli",new Date(),"jumbo pepperoni pizza onion");
+  assert.equal(toppedJumbo[0]?.items[0]?.name,"Pizza","A topped jumbo pizza request must resolve in one search.");
   const schema=await getSql()`SELECT to_regclass('ordering_call_transcript_segments') transcript,to_regclass('ordering_ai_latency_samples') latency,to_regclass('ordering_ai_upsell_events') upsells,to_regclass('ordering_call_reviews') reviews`;
   assert.ok(schema[0].transcript&&schema[0].latency&&schema[0].upsells&&schema[0].reviews);
   console.log(JSON.stringify({mode:settings.mode,maxResponseWords:settings.maxResponseWords,maxUpsells:settings.maxUpsells,vadEagerness:settings.vadEagerness,pickupAvailable:business.pickupAvailable,deliveryAvailable:business.deliveryAvailable,policyChecks:"passed"},null,2));

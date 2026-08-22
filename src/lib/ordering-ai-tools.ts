@@ -43,8 +43,17 @@ function objectOfNumbers(value: unknown) { if (!value || typeof value!=="object"
 
 export async function menuCatalog(business: OrderingBusiness, at: Date, query = "") {
   const categories = await applyScheduledMenuAvailability(business, at, await orderingMenuWithVariants(business,"pos") as unknown as Array<Record<string,any>>);
-  const q=query.trim().toLocaleLowerCase();
-  return categories.map((category:any)=>({ id:category.id, name:category.displayName, items:category.items.filter((item:any)=>!q||[item.name,item.description,...(item.aliases||[])].join(" ").toLocaleLowerCase().includes(q)).map((item:any)=>({ id:item.id, name:item.name, description:item.description||"", available:Boolean(item.available), basePriceCents:Number(item.basePriceCents), variants:item.variants, modifiers:item.modifiers, combos:item.combos })) })).filter((category:any)=>category.items.length);
+  const q=query.trim().toLocaleLowerCase(),tokens=q.match(/[a-z0-9]+/g)||[];
+  if(!q)return categories.map((category:any)=>({id:category.id,name:category.displayName,items:category.items.map((item:any)=>({id:item.id,name:item.name,description:item.description||"",available:Boolean(item.available),basePriceCents:Number(item.basePriceCents),variants:item.variants,modifiers:item.modifiers,combos:item.combos}))}));
+  const ranked=categories.flatMap((category:any)=>category.items.map((item:any)=>{
+    const name=String(item.name||"").toLocaleLowerCase(),haystack=JSON.stringify(item).toLocaleLowerCase();
+    if(tokens.length&&!tokens.every(token=>haystack.includes(token)))return null;
+    const score=(name===q?1000:q.includes(name)?500:0)+Math.max(0,100-name.length);
+    return{categoryId:category.id,categoryName:category.displayName,score,item};
+  }).filter(Boolean)).sort((a:any,b:any)=>b.score-a.score).slice(0,5);
+  const grouped=new Map<string,{id:string;name:string;items:any[]}>();
+  for(const match of ranked as any[]){const category:{id:string;name:string;items:any[]}=grouped.get(match.categoryId)||{id:match.categoryId,name:match.categoryName,items:[]};category.items.push({id:match.item.id,name:match.item.name,description:match.item.description||"",available:Boolean(match.item.available),basePriceCents:Number(match.item.basePriceCents),variants:match.item.variants,modifiers:match.item.modifiers,combos:match.item.combos});grouped.set(match.categoryId,category)}
+  return[...grouped.values()];
 }
 
 export async function availabilityBundle(business: OrderingBusiness, service: ServiceType, at = new Date()) {
