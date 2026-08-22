@@ -22,8 +22,11 @@ async function main(){
   assert.ok(!webhookSource.includes("reasoning:{effort"),"GPT-Realtime 1.5 call acceptance must not send reasoning configuration.");
   assert.ok(webhookSource.includes("tools:[OPENAI_PRICE_ORDER_TOOL]"),"Realtime calls must use the direct atomic pricing function.");
   assert.ok(!webhookSource.includes('type:"mcp"'),"Realtime calls must not wait on hosted MCP discovery.");
+  assert.ok(webhookSource.includes("create_response:false"),"The sideband must debounce customer turns instead of interjecting on every VAD pause.");
   const sidebandSource=await readFile(new URL("../src/lib/openai-phone-sideband.ts",import.meta.url),"utf8");
   assert.ok(sidebandSource.includes('response.function_call_arguments.done')&&sidebandSource.includes('function_call_output'),"The sideband must execute and return native pricing calls.");
+  assert.ok(sidebandSource.includes("response.completion_retry")&&sidebandSource.includes("production_truncated_response"),"Truncated speech must retry and become a regression case.");
+  assert.ok(prompt.includes("Never interject while the caller is listing items")&&prompt.includes("Nacho cheese always means"),"Natural-pause and nacho-side rules must remain in the live prompt.");
   const jumbo=await menuCatalog("Corner Deli",new Date(),"jumbo thin");
   assert.equal(jumbo[0]?.items[0]?.name,"Pizza","Jumbo Thin must resolve to the standard Pizza item first.");
   assert.ok(jumbo[0].items[0].variants.some((variant:{name:string})=>variant.name.includes("Jumbo Thin")));

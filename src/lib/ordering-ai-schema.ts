@@ -126,6 +126,14 @@ export function ensureOrderingAiSchema(): Promise<void> {
           UNIQUE(business,call_id)
         )
       `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS ordering_ai_regression_cases (
+          id UUID PRIMARY KEY,business TEXT NOT NULL,case_key TEXT NOT NULL,case_type TEXT NOT NULL CHECK(case_type IN('order_resolution','speech_completion')),
+          source TEXT NOT NULL,call_id TEXT NOT NULL DEFAULT '',input JSONB NOT NULL DEFAULT '{}'::jsonb,expected JSONB NOT NULL DEFAULT '{}'::jsonb,
+          active BOOLEAN NOT NULL DEFAULT TRUE,first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(business,case_key)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_ai_regression_active_idx ON ordering_ai_regression_cases(business,active,case_type)`;
     })().catch((error) => {
       aiSchemaPromise = null;
       throw error;

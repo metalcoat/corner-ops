@@ -57,6 +57,7 @@
     "test:3cx-live": "tsx scripts/three-cx-live-call-validate.ts",
     "test:openai-phone": "tsx scripts/openai-phone-ordering-validate.ts",
     "test:ai-phone-conversation": "tsx scripts/ai-phone-conversation-validate.ts",
+    "test:ai-order-regressions": "tsx scripts/ai-order-regression-validate.ts",
     "test:ai-ordering": "tsx scripts/ai-ordering-validate.ts",
     "test:operational-reporting": "tsx scripts/operational-reporting-validate.ts",
     "test:auth:e2e": "playwright test tests/auth-cookie.spec.ts",

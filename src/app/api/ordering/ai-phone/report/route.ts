@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { orderingManagerActor,isAuthorizationResponse } from "@/lib/ordering-route-auth";
 import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
 import { getSql } from "@/lib/db";
+import { recordAiRegression } from "@/lib/ordering-ai-regressions";
 
 export const runtime="nodejs";
 
@@ -21,5 +22,6 @@ export async function PUT(request:Request){
   if(!callId||!allowed.includes(rating))return Response.json({error:"A call and valid review rating are required."},{status:400});
   const call=(await getSql()`SELECT order_id FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId}`)[0];if(!call)return Response.json({error:"Call not found."},{status:404});
   await getSql()`INSERT INTO ordering_call_reviews(id,business,call_id,order_id,rating,notes,expected_order,ai_order,differences,reviewed_by)VALUES(${randomUUID()},'Corner Deli',${callId},${call.order_id||null},${rating},${String(body.notes||"").slice(0,2000)},${JSON.stringify(body.expectedOrder||{})}::jsonb,${JSON.stringify(body.aiOrder||{})}::jsonb,${JSON.stringify(body.differences||[])}::jsonb,${actor.id})ON CONFLICT(business,call_id)DO UPDATE SET rating=EXCLUDED.rating,notes=EXCLUDED.notes,expected_order=EXCLUDED.expected_order,ai_order=EXCLUDED.ai_order,differences=EXCLUDED.differences,reviewed_by=EXCLUDED.reviewed_by,updated_at=NOW()`;
+  if(["ai_error","menu_rule_problem"].includes(rating)){const expected=body.expectedOrder&&typeof body.expectedOrder==="object"?body.expectedOrder:{};await recordAiRegression({business:"Corner Deli",caseType:Array.isArray(expected.items)?"order_resolution":"speech_completion",source:`review_${rating}`,callId,payload:Array.isArray(expected.items)?expected:{notes:String(body.notes||"").slice(0,500),differences:Array.isArray(body.differences)?body.differences:[]},expected:Array.isArray(expected.items)?expected:{mustNotRepeat:true}})}
   return Response.json({ok:true});
 }
