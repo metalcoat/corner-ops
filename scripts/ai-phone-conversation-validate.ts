@@ -20,6 +20,10 @@ async function main(){
   assert.equal(settings.model,"gpt-realtime-1.5","Test calls must use the proven full Realtime model.");
   const webhookSource=await readFile(new URL("../src/app/api/openai/realtime/webhook/route.ts",import.meta.url),"utf8");
   assert.ok(!webhookSource.includes("reasoning:{effort"),"GPT-Realtime 1.5 call acceptance must not send reasoning configuration.");
+  assert.ok(webhookSource.includes("tools:[OPENAI_PRICE_ORDER_TOOL]"),"Realtime calls must use the direct atomic pricing function.");
+  assert.ok(!webhookSource.includes('type:"mcp"'),"Realtime calls must not wait on hosted MCP discovery.");
+  const sidebandSource=await readFile(new URL("../src/lib/openai-phone-sideband.ts",import.meta.url),"utf8");
+  assert.ok(sidebandSource.includes('response.function_call_arguments.done')&&sidebandSource.includes('function_call_output'),"The sideband must execute and return native pricing calls.");
   const jumbo=await menuCatalog("Corner Deli",new Date(),"jumbo thin");
   assert.equal(jumbo[0]?.items[0]?.name,"Pizza","Jumbo Thin must resolve to the standard Pizza item first.");
   assert.ok(jumbo[0].items[0].variants.some((variant:{name:string})=>variant.name.includes("Jumbo Thin")));
