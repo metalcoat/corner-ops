@@ -19,6 +19,7 @@ export class AiToolError extends Error {
 }
 
 export type AiItemInput = VariantConfiguredOrderItemInput;
+export type SpokenOrderItem={name:string;variant?:string;quantity?:number;modifiers?:Array<{name:string;portion?:"whole"|"left_half"|"right_half";amount?:"regular"|"extra"|"double_extra"|"triple_extra"}>};
 const services: ServiceType[] = ["undecided","pickup","delivery","no_contact_delivery","dine_in","curbside","bar"];
 export function serviceType(value: unknown): ServiceType {
   if (services.includes(value as ServiceType)) return value as ServiceType;
@@ -78,6 +79,23 @@ export async function createAiDraft(input:{business:OrderingBusiness;actor:Order
   const timing=input.scheduledFor?"future":"asap";
   const order=await createTimedDraftOrder({business:input.business,source:"ai_phone",serviceType:input.service,customerId:input.customerId||null,callerPhone:input.callerPhone||"",customerFirstName:input.firstName||"",customerLastName:input.lastName||"",orderOrigin:"ai",createdBy:input.actor.id,createdByName:input.actor.name,items:input.items,timingMode:timing,requestedFor:input.scheduledFor||null});
   return pricedOrder(String(order.id),input.business);
+}
+
+const spokenKey=(value:string)=>value.toLocaleLowerCase().replace(/[^a-z0-9]+/g," ").trim().replace(/s\b/g,"");
+export async function priceSpokenOrder(input:{business:OrderingBusiness;actor:OrderingActor;service:ServiceType;items:SpokenOrderItem[];orderId?:string|null;callerPhone?:string;firstName?:string;lastName?:string}){
+  const catalog=await orderingMenuWithVariants(input.business,"pos"),allItems=catalog.flatMap(category=>category.items).filter(item=>item.available);
+  const resolved:AiItemInput[]=input.items.map(requested=>{
+    const wanted=spokenKey(requested.name),matches=allItems.filter(item=>{const name=spokenKey(item.name);return name===wanted||name.includes(wanted)||wanted.includes(name)}).sort((a,b)=>(spokenKey(a.name)===wanted?-1000:0)+a.name.length-((spokenKey(b.name)===wanted?-1000:0)+b.name.length));
+    if(!matches[0])throw new AiToolError("NOT_FOUND",`Menu item not found: ${requested.name}.`,"Use a canonical menu item name such as Pizza, Wings, or Large French Fries.",404);
+    const item=matches[0],rawVariant=spokenKey(requested.variant||""),variantWanted=item.name==="Pizza"&&["large","jumbo","jumbo thin"].includes(rawVariant)?"jumbo thin":rawVariant;
+    const variant=variantWanted?item.variants.find(row=>{const values=[row.name,...row.aliases].map(spokenKey);return values.some(value=>value===variantWanted||value.includes(variantWanted)||variantWanted.includes(value))}):item.variants.find(row=>row.defaultVariant)||item.variants[0];
+    if(variantWanted&&!variant)throw new AiToolError("NOT_FOUND",`Menu variant not found: ${requested.variant}.`,`Use a size/form returned for ${item.name}.`,404);
+    const modifierSelections:Record<string,string[]>={},pizzaToppings:NonNullable<AiItemInput["pizzaToppings"]>=[];
+    for(const requestedModifier of requested.modifiers||[]){const key=spokenKey(requestedModifier.name),choices=item.modifiers.flatMap(group=>group.options.map(option=>({group,option}))).filter(({option})=>option.available&&spokenKey(option.name)===key);if(choices.length!==1)throw new AiToolError("NOT_FOUND",`Modifier not found or ambiguous: ${requestedModifier.name}.`,`Use an exact modifier name for ${item.name}.`,404);const{group,option}=choices[0];if(group.presentationBehavior==="pizza_topping")pizzaToppings.push({modifierOptionId:option.id,portion:requestedModifier.portion||"whole",amount:requestedModifier.amount||"regular"});else modifierSelections[group.id]=[...(modifierSelections[group.id]||[]),option.id]}
+    return{itemId:item.id,variantId:variant?.id||null,quantity:Math.max(1,Math.trunc(Number(requested.quantity||1))),modifierSelections,pizzaToppings};
+  });
+  if(input.orderId){const current=(await getSql()`SELECT version FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business}`)[0];if(!current)throw new AiToolError("NOT_FOUND","The active draft was not found.","Create a new priced draft.",404);return replaceAiDraft({business:input.business,actor:input.actor,orderId:input.orderId,expectedVersion:Number(current.version),service:input.service,items:resolved,callerPhone:input.callerPhone,firstName:input.firstName,lastName:input.lastName})}
+  return createAiDraft({business:input.business,actor:input.actor,service:input.service,items:resolved,callerPhone:input.callerPhone,firstName:input.firstName,lastName:input.lastName});
 }
 
 export async function replaceAiDraft(input:{business:OrderingBusiness;actor:OrderingActor;orderId:string;expectedVersion:number;service:ServiceType;items:AiItemInput[];customerId?:string|null;callerPhone?:string;firstName?:string;lastName?:string;scheduledFor?:Date|null}) {

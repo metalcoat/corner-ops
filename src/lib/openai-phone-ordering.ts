@@ -8,7 +8,7 @@ export const OPENAI_PHONE_MODEL=process.env.OPENAI_REALTIME_MODEL||"gpt-realtime
 export const OPENAI_PHONE_FAST_MODEL=process.env.OPENAI_PHONE_FAST_MODEL||"gpt-realtime-2.1-mini";
 export const OPENAI_PHONE_FAST_MODEL_PERCENT=Math.max(0,Math.min(100,Number(process.env.OPENAI_PHONE_FAST_MODEL_PERCENT||"100")));
 export function modelForCall(callId:string){let bucket=0;for(const char of callId)bucket=(bucket*31+char.charCodeAt(0))%100;return bucket<OPENAI_PHONE_FAST_MODEL_PERCENT?OPENAI_PHONE_FAST_MODEL:OPENAI_PHONE_MODEL}
-export const OPENAI_PHONE_GREETING="Corner Deli, what can I get you?";
+export const OPENAI_PHONE_GREETING="Corner Deli, is this pickup or delivery?";
 const required=()=>({apiKey:Boolean(process.env.OPENAI_API_KEY),webhookSecret:Boolean(process.env.OPENAI_WEBHOOK_SECRET),mcpUrl:Boolean(process.env.OPENAI_ORDERING_MCP_URL),mcpToken:Boolean(process.env.OPENAI_ORDERING_MCP_TOKEN),testDids:testDids().length>0,handoffTarget:Boolean(process.env.OPENAI_PHONE_HANDOFF_TARGET)});
 const digits=(value:string)=>value.replace(/\D/g,"").replace(/^1(?=\d{10}$)/,"").slice(-10);
 export function testDids(){return (process.env.OPENAI_PHONE_TEST_DIDS||"").split(",").map(digits).filter(value=>value.length===10)}
