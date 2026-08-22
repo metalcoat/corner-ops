@@ -10,7 +10,7 @@ export type AiPhoneSettings={enabled:boolean;mode:AiPhoneMode;model:string;maxRe
 export async function getAiPhoneSettings():Promise<AiPhoneSettings>{
   await ensureOrderingAiSchema();
   const row=(await getSql()`SELECT enabled,mode,model,max_response_words,max_upsells,vad_eagerness,recording_enabled,transcript_retention_days FROM ordering_ai_phone_settings WHERE business='Corner Deli'`)[0];
-  return{enabled:row?.enabled!==false,mode:(row?.mode||"shadow") as AiPhoneMode,model:String(row?.model||"gpt-realtime-2.1-mini"),maxResponseWords:Number(row?.max_response_words||10),maxUpsells:Number(row?.max_upsells||2),vadEagerness:(row?.vad_eagerness||"high") as AiPhoneSettings["vadEagerness"],recordingEnabled:Boolean(row?.recording_enabled),transcriptRetentionDays:Number(row?.transcript_retention_days||30)};
+  return{enabled:row?.enabled!==false,mode:(row?.mode||"shadow") as AiPhoneMode,model:String(row?.model||"gpt-realtime-1.5"),maxResponseWords:Number(row?.max_response_words||10),maxUpsells:Number(row?.max_upsells||2),vadEagerness:(row?.vad_eagerness||"high") as AiPhoneSettings["vadEagerness"],recordingEnabled:Boolean(row?.recording_enabled),transcriptRetentionDays:Number(row?.transcript_retention_days||30)};
 }
 
 export async function saveAiPhoneSettings(input:Partial<AiPhoneSettings>,actorId:string):Promise<AiPhoneSettings>{

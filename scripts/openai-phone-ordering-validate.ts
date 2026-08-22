@@ -43,7 +43,7 @@ async function main(){
       wingWorkflow:phone.PHONE_INSTRUCTIONS.includes("bone-in")&&phone.PHONE_INSTRUCTIONS.includes("What sauce?")&&phone.PHONE_INSTRUCTIONS.includes("Split flavors into separate lines")&&phone.PHONE_INSTRUCTIONS.includes("Blue cheese, ranch, or celery?")&&phone.PHONE_INSTRUCTIONS.includes("Mild and Medium are distinct"),
       responsiveSpeech:phone.PHONE_INSTRUCTIONS.includes("If interrupted, stop immediately")&&phone.PHONE_INSTRUCTIONS.includes("Ask one necessary question at a time"),
       conciseReadback:phone.PHONE_INSTRUCTIONS.includes("Do not repeat the order after each item")&&phone.PHONE_INSTRUCTIONS.includes("one concise confirmation"),
-      fastModelExperiment:phone.OPENAI_PHONE_FAST_MODEL==="gpt-realtime-2.1-mini"&&phone.OPENAI_PHONE_FAST_MODEL_PERCENT===100,
+      fullRealtimeDefault:phone.OPENAI_PHONE_MODEL==="gpt-realtime-1.5",
       unauthorized:unauthorized.status===401,
       protocol:initialized.result?.protocolVersion==="2025-06-18",
       toolsListed:listed.result?.tools?.some((tool:{name:string})=>tool.name==="create_draft"),

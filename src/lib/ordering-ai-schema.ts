@@ -79,7 +79,7 @@ export function ensureOrderingAiSchema(): Promise<void> {
           business TEXT PRIMARY KEY CHECK (business IN ('Corner Deli','Tiki')),
           enabled BOOLEAN NOT NULL DEFAULT TRUE,
           mode TEXT NOT NULL DEFAULT 'shadow' CHECK (mode IN ('shadow','assisted','autonomous')),
-          model TEXT NOT NULL DEFAULT 'gpt-realtime-2.1-mini',
+          model TEXT NOT NULL DEFAULT 'gpt-realtime-1.5',
           max_response_words INTEGER NOT NULL DEFAULT 10 CHECK (max_response_words BETWEEN 2 AND 30),
           max_upsells INTEGER NOT NULL DEFAULT 2 CHECK (max_upsells BETWEEN 0 AND 3),
           vad_eagerness TEXT NOT NULL DEFAULT 'high' CHECK (vad_eagerness IN ('low','medium','high')),
@@ -89,6 +89,7 @@ export function ensureOrderingAiSchema(): Promise<void> {
         )
       `;
       await sql`INSERT INTO ordering_ai_phone_settings(business) VALUES('Corner Deli'),('Tiki') ON CONFLICT DO NOTHING`;
+      await sql`UPDATE ordering_ai_phone_settings SET model='gpt-realtime-1.5',updated_by='system:model-rollback',updated_at=NOW() WHERE business='Corner Deli' AND model='gpt-realtime-2.1-mini'`;
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_call_transcript_segments (
           id UUID PRIMARY KEY, business TEXT NOT NULL, call_id TEXT NOT NULL, event_key TEXT NOT NULL,
