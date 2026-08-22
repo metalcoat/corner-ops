@@ -24,7 +24,7 @@ export async function POST(request:Request){
     const acceptingAt=Date.now();
     console.info("OpenAI realtime call acceptance started.",{callId,model,toolChoice:"auto"});
     await client.realtime.calls.accept(callId,{
-      type:"realtime",model,reasoning:{effort:"minimal"},output_modalities:["audio"],max_output_tokens:Math.max(80,settings.maxResponseWords*6),
+      type:"realtime",model,output_modalities:["audio"],max_output_tokens:Math.max(80,settings.maxResponseWords*6),
       audio:{input:{noise_reduction:{type:"near_field"},transcription:{model:"gpt-transcribe",language:"en",prompt:"Corner Deli menu order. Ogdensburger, Big Boss, jumbo, sheet pizza, pep, mozz sticks, wings, medium, extra crispy, blue cheese, ranch, garlic parm, antipasta."},turn_detection:{type:"semantic_vad",eagerness:settings.vadEagerness,create_response:true,interrupt_response:true}},output:{speed:1.08}},
       instructions:buildPhoneInstructions({callId,callerPhone,lineLabel,settings,business}),
       tools:[{type:"mcp",server_label:"corner_ops_ordering",server_url:process.env.OPENAI_ORDERING_MCP_URL!,headers:{Authorization:`Bearer ${process.env.OPENAI_ORDERING_MCP_TOKEN!}`},require_approval:"never"}],
