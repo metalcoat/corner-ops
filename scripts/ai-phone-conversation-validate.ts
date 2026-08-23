@@ -26,6 +26,7 @@ async function main(){
   assert.ok(webhookSource.includes("create_response:false"),"The sideband must debounce customer turns instead of interjecting on every VAD pause.");
   assert.ok(webhookSource.includes("interrupt_response:false"),"Incidental VAD events must not cancel an active sentence.");
   const sidebandSource=await readFile(new URL("../src/lib/openai-phone-sideband.ts",import.meta.url),"utf8");
+  assert.ok(sidebandSource.includes("max_output_tokens:128"),"The mandatory opening must have enough audio-token budget to finish exactly.");
   assert.ok(sidebandSource.includes('response.function_call_arguments.done')&&sidebandSource.includes('function_call_output'),"The sideband must execute and return native pricing calls.");
   assert.ok(sidebandSource.includes("response.completion_retry")&&sidebandSource.includes("production_truncated_response"),"Truncated speech must retry and become a regression case.");
   assert.ok(sidebandSource.includes("conversation.sustained_barge_in")&&sidebandSource.includes("800"),"Only sustained caller speech may interrupt playback.");

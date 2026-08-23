@@ -33,7 +33,7 @@ export function startOpenAiSideband(callId:string,greeting:string,model:string){
   socket.once("open",()=>{
     void event(callId,`${callId}:sideband-open`,"sideband.connected","system","Realtime connection active");
     ping=setInterval(()=>{if(socket.readyState===WebSocket.OPEN)socket.ping()},20_000);
-    socket.send(JSON.stringify({type:"response.create",response:{instructions:`Say exactly: \"${greeting}\" Use upbeat, natural deli-counter energy.`,output_modalities:["audio"],max_output_tokens:50,tool_choice:"none"}}));
+    socket.send(JSON.stringify({type:"response.create",response:{instructions:`Say exactly: \"${greeting}\" Do not add, remove, or change any word. Then stop speaking.`,output_modalities:["audio"],max_output_tokens:128,tool_choice:"none"}}));
   });
   const executePriceOrder=async(row:Record<string,any>)=>{
     const started=Date.now(),requestId=randomUUID(),actor={id:`openai:${callId}`,name:"Corner Deli AI Phone",type:"employee" as const,role:"employee" as const};
