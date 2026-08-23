@@ -16,16 +16,19 @@ async function main(){
   assert.equal(requiredQuestion("address"),"What's the address?");
   assert.notEqual(compactAcknowledgement(0),compactAcknowledgement(1));
   const prompt=buildPhoneInstructions({callId:"rtc_validation",callerPhone:"3155550100",lineLabel:"TEST",settings,business});
-  for(const phrase of ["2–10 spoken words","Capture names, phones, addresses","If interrupted, stop immediately","ask pickup or delivery first","PRICE_ORDER is the primary phone tool","Do not call MENU_SEARCH first","Never say “adding,”","total_cents","Never collect items only in conversation memory","SHADOW","Never say the order is placed","Maximum"]){assert.ok(prompt.includes(phrase),`Missing prompt policy: ${phrase}`)}
+  for(const phrase of ["Hard rules override creativity","Ask exactly one question at a time","finish it","No menu ID means no item","Never invent, infer, substitute","ITEM_NOT_ON_MENU","INVALID_MODIFIER","CATALOG_UNAVAILABLE","total_cents","SHADOW","Maximum"]){assert.ok(prompt.includes(phrase),`Missing prompt policy: ${phrase}`)}
   assert.equal(settings.model,"gpt-realtime-1.5","Test calls must use the proven full Realtime model.");
   const webhookSource=await readFile(new URL("../src/app/api/openai/realtime/webhook/route.ts",import.meta.url),"utf8");
   assert.ok(!webhookSource.includes("reasoning:{effort"),"GPT-Realtime 1.5 call acceptance must not send reasoning configuration.");
+  assert.ok(webhookSource.includes("max_output_tokens:1024"),"Function arguments and complete questions must not be constrained by the old 80-token ceiling.");
   assert.ok(webhookSource.includes("tools:[OPENAI_PRICE_ORDER_TOOL]"),"Realtime calls must use the direct atomic pricing function.");
   assert.ok(!webhookSource.includes('type:"mcp"'),"Realtime calls must not wait on hosted MCP discovery.");
   assert.ok(webhookSource.includes("create_response:false"),"The sideband must debounce customer turns instead of interjecting on every VAD pause.");
+  assert.ok(webhookSource.includes("interrupt_response:false"),"Incidental VAD events must not cancel an active sentence.");
   const sidebandSource=await readFile(new URL("../src/lib/openai-phone-sideband.ts",import.meta.url),"utf8");
   assert.ok(sidebandSource.includes('response.function_call_arguments.done')&&sidebandSource.includes('function_call_output'),"The sideband must execute and return native pricing calls.");
   assert.ok(sidebandSource.includes("response.completion_retry")&&sidebandSource.includes("production_truncated_response"),"Truncated speech must retry and become a regression case.");
+  assert.ok(sidebandSource.includes("conversation.sustained_barge_in")&&sidebandSource.includes("800"),"Only sustained caller speech may interrupt playback.");
   assert.ok(prompt.includes("Never interject while the caller is listing items")&&prompt.includes("Nacho cheese always means"),"Natural-pause and nacho-side rules must remain in the live prompt.");
   const jumbo=await menuCatalog("Corner Deli",new Date(),"jumbo thin");
   assert.equal(jumbo[0]?.items[0]?.name,"Pizza","Jumbo Thin must resolve to the standard Pizza item first.");
