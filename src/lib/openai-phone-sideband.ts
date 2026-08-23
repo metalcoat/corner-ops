@@ -4,6 +4,7 @@ import { getSql } from "@/lib/db";
 import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
 import { AiToolError,auditAiTool,priceSpokenOrder,serviceType,type SpokenOrderItem } from "@/lib/ordering-ai-tools";
 import { recordAiRegression } from "@/lib/ordering-ai-regressions";
+import { openAiClient } from "@/lib/openai-phone-ordering";
 
 const sockets=new Map<string,WebSocket>();
 
@@ -28,7 +29,8 @@ export function startOpenAiSideband(callId:string,greeting:string,model:string){
   const socket=new WebSocket(`wss://api.openai.com/v1/realtime?call_id=${encodeURIComponent(callId)}`,{headers:{Authorization:`Bearer ${apiKey}`}});
   sockets.set(callId,socket);
   const openedAt=Date.now(),hardStop=setTimeout(()=>socket.close(),4*60*60*1000),firstAudio=new Set<string>();
-  let ping:ReturnType<typeof setInterval>|undefined,turnTimer:ReturnType<typeof setTimeout>|undefined,bargeInTimer:ReturnType<typeof setTimeout>|undefined,lastSpeechStoppedAt=0,lastTurnId="",responseActive=false,customerSpeaking=false,customerTurnPending=false,toolUsedForTurn=false,lastAssistantTranscript="",completionRetryUsed=false;
+  let ping:ReturnType<typeof setInterval>|undefined,turnTimer:ReturnType<typeof setTimeout>|undefined,bargeInTimer:ReturnType<typeof setTimeout>|undefined,lastSpeechStoppedAt=0,lastTurnId="",responseActive=false,customerSpeaking=false,customerTurnPending=false,toolUsedForTurn=false,lastAssistantTranscript="",completionRetryUsed=false,hangupAfterPlayback=false,hangupRequested=false;
+  const hangup=async()=>{if(hangupRequested)return;hangupRequested=true;try{await event(callId,`${callId}:hangup:${Date.now()}`,"call.hangup_requested","system","Final closing completed");await openAiClient().realtime.calls.hangup(callId);await getSql()`UPDATE ordering_call_sessions SET state='ended',ended_at=NOW(),updated_at=NOW() WHERE business='Corner Deli' AND three_cx_call_id=${callId}`}catch(error){hangupRequested=false;console.error("OpenAI realtime call hangup failed.",{callId,error:error instanceof Error?error.message:"unknown error"})}};
   const scheduleTurn=()=>{if(turnTimer)clearTimeout(turnTimer);turnTimer=setTimeout(()=>{turnTimer=undefined;if(socket.readyState===WebSocket.OPEN&&!customerSpeaking&&!responseActive)socket.send(JSON.stringify({type:"response.create",response:{output_modalities:["audio"],tool_choice:"auto"}}))},750)};
   socket.once("open",()=>{
     void event(callId,`${callId}:sideband-open`,"sideband.connected","system","Realtime connection active");
@@ -58,7 +60,7 @@ export function startOpenAiSideband(callId:string,greeting:string,model:string){
     const row=JSON.parse(String(data)) as Record<string,any>,type=String(row.type||""),eventId=String(row.event_id||`${type}:${Date.now()}`),key=`${callId}:${eventId}`;
     if(type==="input_audio_buffer.speech_started"){
       customerSpeaking=true;if(turnTimer){clearTimeout(turnTimer);turnTimer=undefined}
-      if(responseActive){if(bargeInTimer)clearTimeout(bargeInTimer);bargeInTimer=setTimeout(()=>{bargeInTimer=undefined;if(customerSpeaking&&responseActive&&socket.readyState===WebSocket.OPEN){socket.send(JSON.stringify({type:"response.cancel"}));socket.send(JSON.stringify({type:"output_audio_buffer.clear"}));void event(callId,key,"conversation.sustained_barge_in","system","Sustained caller speech interrupted AI")}},800)}
+      if(responseActive){if(bargeInTimer)clearTimeout(bargeInTimer);bargeInTimer=setTimeout(()=>{bargeInTimer=undefined;if(customerSpeaking&&responseActive&&socket.readyState===WebSocket.OPEN){socket.send(JSON.stringify({type:"response.cancel"}));socket.send(JSON.stringify({type:"output_audio_buffer.clear"}));void event(callId,key,"conversation.sustained_barge_in","system","Sustained caller speech interrupted AI")}},1800)}
       void event(callId,key,type,"customer","Customer speaking");
     }else if(type==="input_audio_buffer.speech_stopped"){
       customerSpeaking=false;if(bargeInTimer){clearTimeout(bargeInTimer);bargeInTimer=undefined}lastSpeechStoppedAt=Date.now();lastTurnId=eventId;customerTurnPending=true;toolUsedForTurn=false;void event(callId,key,type,"system","Processing customer request");
@@ -69,13 +71,14 @@ export function startOpenAiSideband(callId:string,greeting:string,model:string){
     }else if(type==="response.output_audio.delta"){
       const responseId=String(row.response_id||"");if(responseId&&!firstAudio.has(responseId)){firstAudio.add(responseId);const delay=lastSpeechStoppedAt?Date.now()-lastSpeechStoppedAt:0;void latency(callId,lastTurnId,"speech_generation_start",delay,model);void event(callId,key,type,"assistant","AI started speaking","",delay)}
     }else if(type==="response.output_audio_transcript.done"){
-      const value=text(row.transcript);lastAssistantTranscript=value;void transcript(callId,key,"assistant",value);void event(callId,key,type,"assistant","AI",value);
+      const value=text(row.transcript);lastAssistantTranscript=value;if(/thanks for calling[—-]see you then!?$/i.test(value))hangupAfterPlayback=true;void transcript(callId,key,"assistant",value);void event(callId,key,type,"assistant","AI",value);
       if(customerTurnPending&&!toolUsedForTurn)void event(callId,`${key}:missing-tool`,"ordering.turn_without_tool","error","No ordering tool used after customer turn",value);
       customerTurnPending=false;
     }else if(type==="response.output_item.added"&&(row.item?.type==="mcp_call"||row.item?.type==="function_call")){toolUsedForTurn=true;void event(callId,key,type,"tool",`Using ${row.item.name||"ordering tool"}`)}
     else if(type==="response.function_call_arguments.done"&&row.name==="price_order"){toolUsedForTurn=true;void executePriceOrder(row)}
     else if(type==="response.mcp_call.completed"){toolUsedForTurn=true;void event(callId,key,type,"tool","Ordering tool completed")}
     else if(type==="response.mcp_call.failed")void event(callId,key,type,"error","Ordering tool failed");
+    else if(type==="output_audio_buffer.stopped"&&hangupAfterPlayback){hangupAfterPlayback=false;void hangup()}
     else if(type==="response.done"){responseActive=false;const status=String(row.response?.status||""),unfinished=/[,;:\-–—]$/.test(lastAssistantTranscript)||/\b(and|or|with|for|to|the|a|do|does|would|could)$/.test(lastAssistantTranscript.toLowerCase()),truncated=status==="failed"||unfinished;if(truncated&&!customerSpeaking&&!completionRetryUsed){completionRetryUsed=true;void recordAiRegression({business:"Corner Deli",caseType:"speech_completion",source:"production_truncated_response",callId,payload:{status,transcript:lastAssistantTranscript},expected:{retry:true}});void event(callId,`${key}:completion-retry`,"response.completion_retry","system","Retrying truncated response",`${status}: ${lastAssistantTranscript}`);socket.send(JSON.stringify({type:"response.create",response:{instructions:"Complete only the unfinished sentence naturally. Do not restart or repeat completed words.",output_modalities:["audio"],max_output_tokens:80,tool_choice:"none"}}))}}
     else if(type==="error"){void event(callId,key,type,"error","Realtime error",text(row.error?.message));console.error("OpenAI realtime sideband error.",{callId,error:row.error?.message||"unknown error"})}
   }catch(error){console.warn("OpenAI realtime sideband event could not be parsed.",{callId,error:error instanceof Error?error.message:"unknown error"})}});

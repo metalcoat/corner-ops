@@ -25,7 +25,7 @@ export async function POST(request:Request){
     console.info("OpenAI realtime call acceptance started.",{callId,model,toolChoice:"auto"});
     await client.realtime.calls.accept(callId,{
       type:"realtime",model,output_modalities:["audio"],max_output_tokens:1024,
-      audio:{input:{noise_reduction:{type:"near_field"},transcription:{model:"gpt-transcribe",language:"en",prompt:"Corner Deli menu order. Ogdensburger, Big Boss, jumbo, sheet pizza, pep, mozz sticks, wings, medium, extra crispy, blue cheese, ranch, garlic parm, antipasta."},turn_detection:{type:"semantic_vad",eagerness:settings.vadEagerness,create_response:false,interrupt_response:false}},output:{voice:"marin",speed:1.04}},
+      audio:{input:{noise_reduction:{type:"far_field"},transcription:{model:"gpt-transcribe",language:"en",prompt:"Corner Deli menu order. Ogdensburger, Big Boss, jumbo, sheet pizza, pep, mozz sticks, wings, medium, extra crispy, blue cheese, ranch, garlic parm, antipasta."},turn_detection:{type:"semantic_vad",eagerness:settings.vadEagerness,create_response:false,interrupt_response:false}},output:{voice:"marin",speed:1.04}},
       instructions:buildPhoneInstructions({callId,callerPhone,lineLabel,settings,business}),
       tools:[OPENAI_PRICE_ORDER_TOOL],
       tool_choice:"auto",tracing:{workflow_name:"corner-deli-phone-ordering-test",group_id:callId,metadata:{business:"Corner Deli",line:lineLabel,model}},
