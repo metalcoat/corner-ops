@@ -23,6 +23,10 @@ async function main(){
     {key:"full-jumbo-thin-variant",items:[{name:"Pizza",variant:"jumbo thin 16 inch",quantity:1}],expectedItems:["Pizza"],expectedVariant:"Jumbo Thin 16\""},
     {key:"full-regular-variant",items:[{name:"Pizza",variant:"regular 14 inch",quantity:1}],expectedItems:["Pizza"],expectedVariant:"Regular 14\""},
     {key:"full-small-variant",items:[{name:"Pizza",variant:"small 12 inch",quantity:1}],expectedItems:["Pizza"],expectedVariant:"Small 12\""},
+    {key:"twelve-mild-wings-default",items:[{name:"Wings",quantity:12,modifiers:[{name:"Mild"}]}],expectedItems:["Wings"],expectedVariant:"12 Wings",expectedModifier:"Mild"},
+    {key:"spoken-twelve-mild-wings",items:[{name:"12 mild wings",quantity:1}],expectedItems:["Wings"],expectedVariant:"12 Wings",expectedModifier:"Mild"},
+    {key:"explicit-boneless-wings",items:[{name:"boneless wings",variant:"12 wings",quantity:1,modifiers:[{name:"Mild"}]}],expectedItems:["Boneless Wings"],expectedVariant:"12 Wings",expectedModifier:"Mild"},
+    {key:"two-liter-pepsi",items:[{name:"two liter Pepsi",quantity:1}],expectedItems:["2L Pepsi"]},
   ];
   for(const fixture of fixtures){await recordAiRegression({business:"Corner Deli",caseType:"order_resolution",source:"permanent_fixture",payload:{serviceType:"pickup",items:fixture.items},expected:{items:fixture.expectedItems||[],variant:fixture.expectedVariant||null,modifier:fixture.expectedModifier||null,errorCode:fixture.errorCode||null}})}
   const stored=await sql`SELECT case_key,input,expected,source FROM ordering_ai_regression_cases WHERE business='Corner Deli' AND active=TRUE AND case_type='order_resolution' ORDER BY first_seen_at`;

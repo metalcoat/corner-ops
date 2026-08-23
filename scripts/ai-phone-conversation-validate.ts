@@ -31,6 +31,8 @@ async function main(){
   assert.ok(sidebandSource.includes("response.completion_retry")&&sidebandSource.includes("production_truncated_response"),"Truncated speech must retry and become a regression case.");
   assert.ok(sidebandSource.includes("conversation.sustained_barge_in")&&sidebandSource.includes("800"),"Only sustained caller speech may interrupt playback.");
   assert.ok(prompt.includes("Never interject while the caller is listing items")&&prompt.includes("Nacho cheese always means"),"Natural-pause and nacho-side rules must remain in the live prompt.");
+  assert.ok(prompt.includes('ask exactly “Anything else?”')&&prompt.includes("final total is reserved for the end"),"Totals must remain hidden until the caller finishes ordering.");
+  assert.ok(prompt.includes("never ask bone-in or boneless")&&prompt.includes("Quantity plus flavor is complete")&&prompt.includes("real 2L Pepsi item"),"Wing defaults and drink aliases must remain explicit.");
   const jumbo=await menuCatalog("Corner Deli",new Date(),"jumbo thin");
   assert.equal(jumbo[0]?.items[0]?.name,"Pizza","Jumbo Thin must resolve to the standard Pizza item first.");
   assert.ok(jumbo[0].items[0].variants.some((variant:{name:string})=>variant.name.includes("Jumbo Thin")));
