@@ -27,6 +27,8 @@ async function main(){
     {key:"spoken-twelve-mild-wings",items:[{name:"12 mild wings",quantity:1}],expectedItems:["Wings"],expectedVariant:"12 Wings",expectedModifier:"Mild"},
     {key:"explicit-boneless-wings",items:[{name:"boneless wings",variant:"12 wings",quantity:1,modifiers:[{name:"Mild"}]}],expectedItems:["Boneless Wings"],expectedVariant:"12 Wings",expectedModifier:"Mild"},
     {key:"two-liter-pepsi",items:[{name:"two liter Pepsi",quantity:1}],expectedItems:["2L Pepsi"]},
+    {key:"plain-blue-cheese-wings",items:[{name:"Wings",variant:"30 Wings",quantity:1,modifiers:[{name:"Medium"},{name:"blue cheese"},{name:"celery"}]}],expectedItems:["Wings"],expectedVariant:"30 Wings",expectedModifier:"Blue Cheese (4oz)"},
+    {key:"saucy-medium-wings",items:[{name:"30 medium wings extra saucy",quantity:1}],expectedItems:["Wings"],expectedVariant:"30 Wings",expectedModifier:"Medium (4oz)"},
   ];
   for(const fixture of fixtures){await recordAiRegression({business:"Corner Deli",caseType:"order_resolution",source:"permanent_fixture",payload:{serviceType:"pickup",items:fixture.items},expected:{items:fixture.expectedItems||[],variant:fixture.expectedVariant||null,modifier:fixture.expectedModifier||null,errorCode:fixture.errorCode||null}})}
   const stored=await sql`SELECT case_key,input,expected,source FROM ordering_ai_regression_cases WHERE business='Corner Deli' AND active=TRUE AND case_type='order_resolution' ORDER BY first_seen_at`;

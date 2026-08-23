@@ -41,7 +41,8 @@ export function startOpenAiSideband(callId:string,greeting:string,model:string){
       args=JSON.parse(String(row.arguments||"{}")) as Record<string,unknown>;const sql=getSql();
       const call=(await sql`SELECT id,order_id,caller_phone FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} AND state IN('ai','handoff_pending') LIMIT 1`)[0];
       if(!call)throw new AiToolError("NOT_AUTHORIZED","The active phone call was not found.","Ask the caller to try again.",403);
-      const result=await priceSpokenOrder({business:"Corner Deli",actor,service:serviceType(args.serviceType),items:Array.isArray(args.items)?args.items as SpokenOrderItem[]:[],orderId:call.order_id||null,callerPhone:String(call.caller_phone||""),firstName:String(args.firstName||""),lastName:String(args.lastName||"")});
+      const callerPhone=String(call.caller_phone||args.callerPhone||"").replace(/\D/g,"").replace(/^1(?=\d{10}$)/,"").slice(-10);
+      const result=await priceSpokenOrder({business:"Corner Deli",actor,service:serviceType(args.serviceType),items:Array.isArray(args.items)?args.items as SpokenOrderItem[]:[],orderId:call.order_id||null,callerPhone,firstName:String(args.firstName||""),lastName:String(args.lastName||"")});
       await sql`UPDATE ordering_call_sessions SET order_id=${String(result.id)},updated_at=NOW() WHERE id=${call.id}`;
       await auditAiTool({business:"Corner Deli",requestId,conversationId:callId,tool:"price_order",actor,orderId:String(result.id),outcome:"success",inputSummary:{keys:Object.keys(args),source:"realtime_function"},resultSummary:{lineCount:result.lines.length,totalCents:result.total_cents},durationMs:Date.now()-started,model});
       socket.send(JSON.stringify({type:"conversation.item.create",item:{type:"function_call_output",call_id:row.call_id,output:JSON.stringify(result)}}));

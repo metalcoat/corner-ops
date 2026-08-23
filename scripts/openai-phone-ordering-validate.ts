@@ -38,7 +38,7 @@ async function main(){
       calledDidRestricted:calledDid==="3155550200"&&phone.testDidAllowed(calledDid)&&!phone.testDidAllowed("3155550201"),
       lineMapped:phone.lineForDid(calledDid)==="TEST LINE",
       englishGreeting:phone.OPENAI_PHONE_GREETING==="Thanks for calling Corner Deli, is this going to be pickup or delivery?"&&phone.PHONE_INSTRUCTIONS.includes("Ask exactly one question at a time"),
-      menuVocabularyDefaults:phone.PHONE_INSTRUCTIONS.includes("Jumbo Thin 16 inch")&&phone.PHONE_INSTRUCTIONS.includes("Large French Fries")&&phone.PHONE_INSTRUCTIONS.includes("friendly and upbeat"),
+      menuVocabularyDefaults:phone.PHONE_INSTRUCTIONS.includes("Jumbo Thin 16 inch")&&phone.PHONE_INSTRUCTIONS.includes("Large French Fries")&&phone.PHONE_INSTRUCTIONS.includes("warm, upbeat, enthusiastic"),
       pizzaSizePolicy:phone.PHONE_INSTRUCTIONS.includes("6 slices")&&phone.PHONE_INSTRUCTIONS.includes("8 slices")&&phone.PHONE_INSTRUCTIONS.includes("12 slices")&&phone.PHONE_INSTRUCTIONS.includes("Thin is only large/jumbo"),
       wingWorkflow:phone.PHONE_INSTRUCTIONS.includes("bone-in")&&phone.PHONE_INSTRUCTIONS.includes("What sauce?")&&phone.PHONE_INSTRUCTIONS.includes("Split flavors into separate lines")&&phone.PHONE_INSTRUCTIONS.includes("Blue cheese, ranch, or celery?")&&phone.PHONE_INSTRUCTIONS.includes("Mild and Medium are distinct"),
       responsiveSpeech:phone.PHONE_INSTRUCTIONS.includes("finish it")&&phone.PHONE_INSTRUCTIONS.includes("Incidental noise"),

@@ -21,6 +21,7 @@ async function main(){
   const webhookSource=await readFile(new URL("../src/app/api/openai/realtime/webhook/route.ts",import.meta.url),"utf8");
   assert.ok(!webhookSource.includes("reasoning:{effort"),"GPT-Realtime 1.5 call acceptance must not send reasoning configuration.");
   assert.ok(webhookSource.includes("max_output_tokens:1024"),"Function arguments and complete questions must not be constrained by the old 80-token ceiling.");
+  assert.ok(webhookSource.includes('voice:"marin"')&&webhookSource.includes("speed:1.04"),"The live voice must use the warm Marin delivery at a natural pace.");
   assert.ok(webhookSource.includes("tools:[OPENAI_PRICE_ORDER_TOOL]"),"Realtime calls must use the direct atomic pricing function.");
   assert.ok(!webhookSource.includes('type:"mcp"'),"Realtime calls must not wait on hosted MCP discovery.");
   assert.ok(webhookSource.includes("create_response:false"),"The sideband must debounce customer turns instead of interjecting on every VAD pause.");
@@ -33,6 +34,10 @@ async function main(){
   assert.ok(prompt.includes("Never interject while the caller is listing items")&&prompt.includes("Nacho cheese always means"),"Natural-pause and nacho-side rules must remain in the live prompt.");
   assert.ok(prompt.includes('ask exactly “Anything else?”')&&prompt.includes("final total is reserved for the end"),"Totals must remain hidden until the caller finishes ordering.");
   assert.ok(prompt.includes("never ask bone-in or boneless")&&prompt.includes("Quantity plus flavor is complete")&&prompt.includes("real 2L Pepsi item"),"Wing defaults and drink aliases must remain explicit.");
+  assert.ok(prompt.includes("natural smiling voice")&&prompt.includes("Never mention AI modes, drafts, staff review, approval"),"Customer speech must stay upbeat and hide internal workflow language.");
+  assert.ok(!prompt.includes("staff has the order for review")&&!prompt.includes("awaiting staff approval"),"Internal review status must not be spoken to callers.");
+  assert.ok(prompt.includes("Never finish an order without a phone number")&&prompt.includes("include it as callerPhone"),"Missing caller ID must trigger callback-number collection for the POS order.");
+  assert.ok(prompt.includes("silently add the real 4oz side cup")&&prompt.includes("do not explain or announce this conversion"),"Saucy wings must add the matching cup without narrating the rule.");
   const jumbo=await menuCatalog("Corner Deli",new Date(),"jumbo thin");
   assert.equal(jumbo[0]?.items[0]?.name,"Pizza","Jumbo Thin must resolve to the standard Pizza item first.");
   assert.ok(jumbo[0].items[0].variants.some((variant:{name:string})=>variant.name.includes("Jumbo Thin")));
