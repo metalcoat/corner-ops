@@ -20,6 +20,9 @@ async function main(){
     {key:"large-pizza-alias",items:[{name:"large pizza",quantity:1}],expectedItems:["Pizza"],expectedVariant:"Jumbo Thin 16\""},
     {key:"sixteen-inch-pizza-alias",items:[{name:'16" pizza',quantity:1}],expectedItems:["Pizza"],expectedVariant:"Jumbo Thin 16\""},
     {key:"standalone-jumbo-alias",items:[{name:"jumbo",quantity:1}],expectedItems:["Pizza"],expectedVariant:"Jumbo Thin 16\""},
+    {key:"full-jumbo-thin-variant",items:[{name:"Pizza",variant:"jumbo thin 16 inch",quantity:1}],expectedItems:["Pizza"],expectedVariant:"Jumbo Thin 16\""},
+    {key:"full-regular-variant",items:[{name:"Pizza",variant:"regular 14 inch",quantity:1}],expectedItems:["Pizza"],expectedVariant:"Regular 14\""},
+    {key:"full-small-variant",items:[{name:"Pizza",variant:"small 12 inch",quantity:1}],expectedItems:["Pizza"],expectedVariant:"Small 12\""},
   ];
   for(const fixture of fixtures){await recordAiRegression({business:"Corner Deli",caseType:"order_resolution",source:"permanent_fixture",payload:{serviceType:"pickup",items:fixture.items},expected:{items:fixture.expectedItems||[],variant:fixture.expectedVariant||null,modifier:fixture.expectedModifier||null,errorCode:fixture.errorCode||null}})}
   const stored=await sql`SELECT case_key,input,expected,source FROM ordering_ai_regression_cases WHERE business='Corner Deli' AND active=TRUE AND case_type='order_resolution' ORDER BY first_seen_at`;
