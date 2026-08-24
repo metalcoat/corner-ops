@@ -17,11 +17,14 @@ const CORNER_OPS_URL = String(process.env.CORNER_OPS_URL || "").replace(/\/$/, "
 const SECRET = process.env.CORNER_OPS_CDR_SECRET || "";
 const VERCEL_BYPASS = process.env.VERCEL_PROTECTION_BYPASS || "";
 const SPOOL = process.env.CDR_SPOOL_FILE || path.resolve("3cx-cdr-spool.jsonl");
+const INVALID_SPOOL = `${SPOOL}.invalid`;
 const RECONNECT_MS = Math.max(1000, Number(process.env.CDR_RECONNECT_MS || 5000));
 
 if (!CORNER_OPS_URL || !/^https:\/\//i.test(CORNER_OPS_URL)) throw new Error("CORNER_OPS_URL must be an HTTPS Corner Ops address.");
 if (!SECRET) throw new Error("CORNER_OPS_CDR_SECRET is required.");
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error("CDR_PORT is invalid.");
+if ([...DELIMITER].length !== 1) throw new Error("CDR_DELIMITER must resolve to exactly one character.");
+if (!FIELDS.length) throw new Error("CDR_FIELDS must contain at least one field.");
 
 function parseDelimitedLine(line) {
   const values = [];
@@ -37,8 +40,12 @@ function parseDelimitedLine(line) {
       value = "";
     } else value += char;
   }
+  if (quoted) throw new Error("CDR line ended inside a quoted field.");
   values.push(value);
-  return Object.fromEntries(FIELDS.map((field, index) => [field, values[index] ?? ""]));
+  if (values.length !== FIELDS.length) {
+    throw new Error(`CDR field count mismatch: expected ${FIELDS.length}, received ${values.length}.`);
+  }
+  return Object.fromEntries(FIELDS.map((field, index) => [field, values[index]]));
 }
 
 async function postRecord(record) {
@@ -56,11 +63,25 @@ function spool(record) {
   fs.appendFileSync(SPOOL, `${JSON.stringify(record)}\n`, "utf8");
 }
 
+function spoolInvalidLine(line, error) {
+  fs.appendFileSync(INVALID_SPOOL, `${JSON.stringify({
+    receivedAt: new Date().toISOString(),
+    error: error instanceof Error ? error.message : String(error),
+    line,
+  })}\n`, "utf8");
+}
 let chain = Promise.resolve();
 function acceptLine(raw) {
   const line = raw.replace(/\0/g, "").trim();
   if (!line) return;
-  const record = parseDelimitedLine(line);
+  let record;
+  try {
+    record = parseDelimitedLine(line);
+  } catch (error) {
+    console.error(new Date().toISOString(), "Rejected malformed CDR line:", error instanceof Error ? error.message : String(error));
+    spoolInvalidLine(line, error);
+    return;
+  }
   chain = chain.then(() => postRecord(record)).catch((error) => {
     console.error(new Date().toISOString(), "CDR forward failed:", error.message);
     spool(record);
