@@ -48,6 +48,15 @@ for path in code_files:
     if re.search(r"\.drawImage\s*\(", path.read_text(errors="replace")):
         errors.append(f"feature-specific Canvas drawImage implementation remains: {rel}")
 
+# Cancelled shifts remain in the database for audit/history but may not return as active
+# Workforce Admin schedule rows or meal metadata.
+workforce_text = (SRC / "lib/workforce.ts").read_text(errors="replace")
+if "WHERE s.business = ${business}\n        AND s.status <> 'Cancelled'\n        AND s.starts_at" not in workforce_text:
+    errors.append("workforceDashboard does not exclude cancelled schedule rows")
+workforce_route_text = (APP / "api/workforce/route.ts").read_text(errors="replace")
+if "WHERE business = ${business}\n      AND status <> 'Cancelled'\n      AND starts_at" not in workforce_route_text:
+    errors.append("workforce meal metadata query does not exclude cancelled shifts")
+
 # CSS literals belong in the generated palette, not feature sheets.
 hex_rx = re.compile(r"#[0-9a-fA-F]{3,8}\b")
 token_ref_rx = re.compile(r"var\(--([A-Za-z0-9_-]+)\)")
