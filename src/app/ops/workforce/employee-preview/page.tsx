@@ -8,6 +8,7 @@ import type { Business } from "@/lib/types";
 import "../workforce.css";
 
 const TIME_ZONE = "America/New_York";
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 type PreviewShift = {
@@ -39,7 +40,9 @@ function addDays(value: string, days: number): string {
 }
 
 function mondayKey(value: Date | string): string {
-  const key = newYorkDateKey(value);
+  // A YYYY-MM-DD value is already a calendar date, not an instant. Parsing it as
+  // midnight UTC can move it to the prior New York day and therefore prior week.
+  const key = typeof value === "string" && DATE_KEY_PATTERN.test(value) ? value : newYorkDateKey(value);
   const date = dateFromKey(key);
   const weekday = date.getUTCDay();
   return addDays(key, -((weekday + 6) % 7));
@@ -92,7 +95,7 @@ export default async function EmployeePreviewPage({ searchParams }: { searchPara
   const requestedEmployeeId = one(params.employeeId);
   const employee = directory.find((candidate) => candidate.id === requestedEmployeeId) || directory[0] || null;
   const requestedWeek = one(params.week);
-  const weekStart = /^\d{4}-\d{2}-\d{2}$/.test(requestedWeek) ? mondayKey(requestedWeek) : mondayKey(new Date());
+  const weekStart = DATE_KEY_PATTERN.test(requestedWeek) ? mondayKey(requestedWeek) : mondayKey(new Date());
   const weekEnd = addDays(weekStart, 7);
 
   const dashboard = employee
