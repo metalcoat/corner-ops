@@ -53,6 +53,10 @@ export default function GlobalNav() {
     || pathname.startsWith("/deli-board")
     || pathname === "/signin"
     || hiddenNavPaths.includes(pathname);
+  const themeEffectsHidden = pathname === "/clock"
+    || pathname.startsWith("/deli-board")
+    || pathname === "/signin"
+    || hiddenNavPaths.includes(pathname);
 
   useEffect(() => setOpen(false), [pathname]);
 
@@ -92,7 +96,7 @@ export default function GlobalNav() {
   }, [navHidden]);
 
   useEffect(() => {
-    if (navHidden) return;
+    if (themeEffectsHidden) return;
     let restored = false;
 
     const savedBusiness = (): Business | null => {
@@ -108,6 +112,16 @@ export default function GlobalNav() {
 
     function restore(): boolean {
       if (restored) return false;
+
+      if (pathname.startsWith("/employee")) {
+        const select = document.querySelector<HTMLSelectElement>('select[name="business"]');
+        const saved = savedBusiness();
+        if (!select) return false;
+        restored = true;
+        if (saved && select.value !== saved) select.value = saved;
+        if (saved) applyTheme(saved);
+        return false;
+      }
 
       const switcher = document.querySelector<HTMLElement>(
         ".businessSwitch, .wfBusinessSwitch, .businessPills",
@@ -166,7 +180,7 @@ export default function GlobalNav() {
       document.removeEventListener("click", interaction, true);
       document.removeEventListener("change", interaction, true);
     };
-  }, [navHidden]);
+  }, [pathname, themeEffectsHidden]);
 
   if (navHidden) return null;
 
