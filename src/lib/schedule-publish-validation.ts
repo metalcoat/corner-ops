@@ -109,7 +109,9 @@ export async function publishValidatedScheduleWeek(input: {
   if (input.business === "Corner Deli" && analysis.loneWorkerViolations.length) {
     problems.push(`Alone over 30 minutes: ${analysis.loneWorkerViolations.slice(0, 4).map((violation) => `${violation.employeeName}, ${localStamp(violation.startsAt)}–${localTime(violation.endsAt)} (${violation.minutes} min)`).join("; ")}`);
   }
-  if (analysis.mealPeriodViolations.length) {
+  // Tiki normally runs one bartender at a time, so an off-duty meal would leave the bar uncovered.
+  // Keep Corner Deli meal compliance intact, but do not require scheduled off-duty meals for Tiki.
+  if (input.business === "Corner Deli" && analysis.mealPeriodViolations.length) {
     problems.push(`Meal periods: ${analysis.mealPeriodViolations.slice(0, 6).map((violation) => `${violation.employeeName}, ${localStamp(violation.startsAt)}: ${violation.message}`).join("; ")}`);
   }
 
