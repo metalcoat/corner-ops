@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import { getSql } from "@/lib/db";
 import { retryRezkuInboundEmail } from "@/lib/rezku-inbound-handler";
+import { rezkuRecoveryCandidates } from "@/lib/rezku-recovery-policy";
 
 const REZKU_SUBJECT = "Corner Deli Daily Reports";
 const REZKU_SENDER = "support@rezku.com";
@@ -31,7 +32,7 @@ function listItems<T>(value: unknown): T[] {
   return [];
 }
 
-export async function repairRezkuFeed(actor: string) {
+export async function repairRezkuFeed(actor: string, options: { maxEmails?: number } = {}) {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) throw new Error("RESEND_API_KEY is not configured.");
 
@@ -67,11 +68,27 @@ export async function repairRezkuFeed(actor: string) {
     .sort((left, right) => String(left.created_at || "").localeCompare(String(right.created_at || "")));
 
   const ids = received.map((email) => email.id).filter(Boolean);
-  const existingRows = ids.length
-    ? await getSql()`SELECT email_id FROM rezku_inbound_emails WHERE email_id = ANY(${ids}::text[])`
+  const trackedRows = ids.length
+    ? await getSql()`
+        SELECT email_id, status, updated_at
+        FROM rezku_inbound_emails
+        WHERE email_id = ANY(${ids}::text[])
+      `
     : [];
-  const existing = new Set((existingRows as unknown as Array<{ email_id: string }>).map((row) => row.email_id));
-  const missing = received.filter((email) => !existing.has(email.id));
+  const tracked = (trackedRows as unknown as Array<{ email_id: string; status: string; updated_at: string }>).map((row) => ({
+    emailId: row.email_id,
+    status: row.status,
+    updatedAt: row.updated_at,
+  }));
+  const maximum = options.maxEmails === undefined
+    ? received.length
+    : Math.max(0, Math.min(10, Math.floor(options.maxEmails)));
+  const candidates = rezkuRecoveryCandidates({
+    received: received.map((email) => ({ id: email.id, createdAt: email.created_at || null })),
+    tracked,
+    maxEmails: maximum,
+  });
+  const byId = new Map(received.map((email) => [email.id, email]));
 
   const recovered: Array<{
     emailId: string;
@@ -82,7 +99,9 @@ export async function repairRezkuFeed(actor: string) {
     failures: number;
   }> = [];
 
-  for (const email of missing) {
+  for (const candidate of candidates) {
+    const email = byId.get(candidate.id);
+    if (!email) continue;
     const result = await retryRezkuInboundEmail(email.id, actor);
     const payload = result.payload as Record<string, unknown>;
     recovered.push({
@@ -95,12 +114,21 @@ export async function repairRezkuFeed(actor: string) {
     });
   }
 
+  const processedIds = new Set(
+    tracked.filter((row) => row.status === "Processed").map((row) => row.emailId),
+  );
   return {
     webhookId: webhook.id,
+    webhookStatus: webhook.status || "unknown",
     webhookReenabled,
     receivedRezkuEmails: received.length,
-    alreadyProcessed: received.length - missing.length,
-    missingFound: missing.length,
+    alreadyProcessed: received.filter((email) => processedIds.has(email.id)).length,
+    recoveryCandidates: rezkuRecoveryCandidates({
+      received: received.map((email) => ({ id: email.id, createdAt: email.created_at || null })),
+      tracked,
+      maxEmails: received.length,
+    }).length,
+    attempted: recovered.length,
     recovered,
   };
 }
