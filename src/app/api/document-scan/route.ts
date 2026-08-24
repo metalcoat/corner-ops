@@ -5,14 +5,16 @@ import { canAccessBusiness, getSession } from "@/lib/auth";
 import { assertConfigured } from "@/lib/config";
 import { insertDocument } from "@/lib/documents";
 import { getEmployeeSession } from "@/lib/employee-auth";
-import { apiError } from "@/lib/http";
-import { invoiceOcrConfiguration, processInvoiceDocument, type InvoiceOcrResult } from "@/lib/invoice-ocr";
+import { apiError, AuthenticationError } from "@/lib/http";
+import { invoiceOcrConfiguration, processInvoiceDocument, type InvoiceOcrField, type InvoiceOcrResult } from "@/lib/invoice-ocr";
+import { assertRateLimit, authRatePolicies, clearRateLimit, recordRateLimitFailure } from "@/lib/rate-limit";
 import type { Business, DocumentStatus } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
+const OCR_AUTO_ACCEPT_CONFIDENCE = 0.6;
 const documentTypes = ["Invoice", "Receipt", "Insurance", "Permit", "Contract", "Employee", "Inventory", "Other"] as const;
 type ScanDocumentType = (typeof documentTypes)[number];
 
@@ -107,20 +109,29 @@ function fileNameFor(input: {
   return `${pieces.join("-")}.jpg`;
 }
 
-async function resolveAccess(business: Business, suppliedPin: string): Promise<ScannerAccess> {
+async function resolveAccess(business: Business, suppliedPin: string, request: Request): Promise<ScannerAccess> {
   const [owner, employee] = await Promise.all([getSession(), getEmployeeSession()]);
   if (owner && canAccessBusiness(owner, business)) {
     return { mode: "owner", business, actor: owner.email, status: "Active" };
   }
   if (employee) {
-    if (employee.business !== business) throw new Error("Employee scanner access is limited to the employee's business.");
+    if (employee.business !== business) throw new AuthenticationError("Employee scanner access is limited to the employee's business.");
     return { mode: "employee", business, actor: `Employee: ${employee.name}`, status: "Needs Review" };
   }
+
+  const policies = authRatePolicies("document-upload-pin", request, business);
+  await assertRateLimit(policies);
   const expectedPin = guestPinFor(business);
   if (!expectedPin || !suppliedPin || !safeEqual(expectedPin, suppliedPin)) {
-    throw new Error("A valid employee session, owner session, or document upload PIN is required.");
+    await recordRateLimitFailure(policies);
+    throw new AuthenticationError("A valid employee session, owner session, or document upload PIN is required.");
   }
+  await clearRateLimit(policies);
   return { mode: "guest", business, actor: "External document uploader", status: "Needs Review" };
+}
+
+function confidentValue<T>(field: InvoiceOcrField<T> | undefined, fallback: T): T {
+  return field && field.confidence >= OCR_AUTO_ACCEPT_CONFIDENCE ? field.value : fallback;
 }
 
 function ocrNotes(result: InvoiceOcrResult | null): string[] {
@@ -181,7 +192,7 @@ export async function POST(request: Request) {
     assertConfigured("DATABASE_URL", "BLOB_READ_WRITE_TOKEN");
     const form = await request.formData();
     const business = businessFrom(form.get("business"));
-    const access = await resolveAccess(business, clean(form.get("uploadPin"), 120));
+    const access = await resolveAccess(business, clean(form.get("uploadPin"), 120), request);
     const type = documentTypeFrom(form.get("documentType"));
     const file = form.get("file");
     if (!(file instanceof File) || !file.size) {
@@ -207,10 +218,11 @@ export async function POST(request: Request) {
 
     const manualVendor = clean(form.get("vendor"), 180);
     const manualReference = clean(form.get("reference"), 100);
-    const vendor = manualVendor || ocr?.fields.vendor.value || "";
-    const reference = manualReference || ocr?.fields.invoiceNumber.value || "";
+    const vendor = manualVendor || confidentValue(ocr?.fields.vendor, "");
+    const reference = manualReference || confidentValue(ocr?.fields.invoiceNumber, "");
     const requestedDate = validDate(form.get("documentDate"));
-    const documentDate = requestedDate || ocr?.fields.invoiceDate.value || new Date().toISOString().slice(0, 10);
+    const ocrDate = confidentValue(ocr?.fields.invoiceDate, "");
+    const documentDate = requestedDate || ocrDate || new Date().toISOString().slice(0, 10);
     const title = titleFor({
       type,
       manualTitle: clean(form.get("title"), 180),
@@ -228,6 +240,9 @@ export async function POST(request: Request) {
         : "",
     ].filter(Boolean).join(" ").slice(0, 2_000);
 
+    const status: DocumentStatus = access.mode === "owner" && ocr && ocr.overallConfidence < OCR_AUTO_ACCEPT_CONFIDENCE
+      ? "Needs Review"
+      : access.status;
     const pathname = `${business === "Corner Deli" ? "corner-deli" : "tiki"}/scanned-documents/${Date.now()}-${generatedFileName}`;
     const blob = await put(pathname, file, {
       access: "private",
@@ -242,7 +257,7 @@ export async function POST(request: Request) {
       title,
       category: categoryFor(type),
       documentDate,
-      status: access.status,
+      status,
       notes,
       fileName: generatedFileName,
       contentType: "image/jpeg",
