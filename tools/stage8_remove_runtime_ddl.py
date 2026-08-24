@@ -76,3 +76,5 @@ for path in sorted(SRC.rglob("*")):
 print(f"Removed {removed} standalone runtime DDL statements across {len(changed_files) + 1} files (including db.ts core cutover).")
 for item in changed_files:
     print(item)
+
+# Stage 8 gated transformation entry point.
