@@ -528,11 +528,15 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       mealBreakMinutes: editor.mealBreakMinutes,
       extraMealBreakStart: extraMealBreakStart?.toISOString() || null,
       extraMealBreakMinutes: editor.extraMealBreakMinutes,
-      status: "Draft",
+      status: editor.shift
+        ? editor.shift.status === "Draft"
+          ? "Draft"
+          : editor.employeeId ? "Published" : "Open"
+        : "Draft",
       notes: editor.notes,
       acknowledgePendingTimeOff: timeOffCheck.acknowledgePendingTimeOff,
       expectedUpdatedAt: editor.shift?.updatedAt || null,
-    }, editor.shift ? "Shift updated and marked for publishing." : "Draft shift added.");
+    }, editor.shift ? "Shift changes saved." : "Draft shift added.");
     setEditor(null);
   }
 
@@ -808,7 +812,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
           <div className="scheduleModalActions">
             {editor.shift && <><button type="button" onClick={() => setCopiedShift(editor.shift)}>Copy shift</button><button type="button" className="danger" disabled={busy} onClick={() => void runAction({ action: "shift-update", id: editor.shift?.id, status: "Cancelled", expectedUpdatedAt: editor.shift?.updatedAt || null }, "Shift cancelled.").then(() => setEditor(null))}>Cancel shift</button></>}
             <button type="button" onClick={() => setEditor(null)}>Close</button>
-            <button type="submit" className="schedulePrimary" disabled={busy || Boolean(editorPreview?.overlap)}>Save draft</button>
+            <button type="submit" className="schedulePrimary" disabled={busy || Boolean(editorPreview?.overlap)}>{editor.shift ? "Save changes" : "Save draft"}</button>
           </div>
         </form>
       </section>
