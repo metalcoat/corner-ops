@@ -7,6 +7,7 @@ on:
     paths:
       - tools/stage9_cleanup.py
       - tools/stage9_finalize.py
+      - tools/stage9_type_fixes.py
       - tools/stage9_css_tokens.mjs
       - tools/stage9_metrics.py
       - tools/stage9_reconciliation.py
@@ -16,6 +17,7 @@ on:
     paths:
       - tools/stage9_cleanup.py
       - tools/stage9_finalize.py
+      - tools/stage9_type_fixes.py
       - tools/stage9_css_tokens.mjs
       - tools/stage9_metrics.py
       - tools/stage9_reconciliation.py
@@ -64,6 +66,7 @@ jobs:
           npm ci
           python3 tools/stage9_cleanup.py
           python3 tools/stage9_finalize.py
+          python3 tools/stage9_type_fixes.py
           node tools/stage9_css_tokens.mjs
           python3 tools/stage9_metrics.py
 
@@ -98,6 +101,7 @@ jobs:
           rm -f \
             tools/stage9_cleanup.py \
             tools/stage9_finalize.py \
+            tools/stage9_type_fixes.py \
             tools/stage9_css_tokens.mjs \
             tools/stage9_metrics.py \
             tools/stage9_reconciliation.py \
