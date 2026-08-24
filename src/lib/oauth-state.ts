@@ -13,7 +13,7 @@ function decode(value: string): Record<string, unknown> {
 }
 
 function signature(encoded: string): string {
-  return hmacSignature(encoded, "square-oauth-state", { envName: "SQUARE_OAUTH_STATE_SECRET" });
+  return hmacSignature(encoded, "square-oauth-state", { envName: "OAUTH_STATE_SECRET" });
 }
 
 function nonceHash(value: string): string {
