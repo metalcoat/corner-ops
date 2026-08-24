@@ -1,5 +1,5 @@
 from pathlib import Path
-# Triggered after the Stage 2 workflow was refined to disambiguate the two sync call sites.
+# Trigger Stage 2 again after correcting accounting-notation parsing.
 p=Path(__file__).resolve().parents[1]/'src/app/api/integrations/route.ts'
 t=p.read_text()
 old='''    if (action === "plaid-update-complete") {
