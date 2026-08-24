@@ -34,6 +34,8 @@ async function main(){
     const called=await(await invoke({jsonrpc:"2.0",id:4,method:"tools/call",params:{name:"describe_capabilities",arguments:{callId}}})).json();
     const blocked=await(await invoke({jsonrpc:"2.0",id:5,method:"tools/call",params:{name:"send",arguments:{callId,orderId:randomUUID(),customerConfirmed:false}}})).json();
     const shadowed=await(await invoke({jsonrpc:"2.0",id:6,method:"tools/call",params:{name:"send",arguments:{callId,orderId:randomUUID(),customerConfirmed:true}}})).json();
+    const genericPizza=await(await invoke({jsonrpc:"2.0",id:7,method:"tools/call",params:{name:"price_order",arguments:{callId,serviceType:"pickup",items:[{name:"Pizza",quantity:1}]}}})).json();
+    const pending=(await sql`SELECT pending_item,order_id FROM ordering_call_sessions WHERE three_cx_call_id=${callId}`)[0];
     const result={
       callerNormalized:caller==="3155550188"&&forwardedCaller==="3155550199",
       calledDidRestricted:calledDid==="3155550200"&&phone.testDidAllowed(calledDid)&&!phone.testDidAllowed("3155550201"),
@@ -52,6 +54,7 @@ async function main(){
       callBound:called.result?.content?.[0]?.text?.includes("pricingAuthority")||called.result?.content?.[0]?.text?.includes("serviceTypes"),
       unconfirmedSendBlocked:blocked.result?.isError===true,
       shadowSendHeld:shadowed.result?.content?.[0]?.text?.includes("ORDER_REVIEW_PENDING")===true,
+      genericPizzaPending:genericPizza.result?.isError===true&&genericPizza.result?.content?.[0]?.text?.includes("What size?")&&pending.pending_item?.missingRequiredFields?.[0]==="size"&&!pending.order_id,
     };
     console.log(JSON.stringify(result,null,2));
     if(Object.values(result).some(value=>!value))throw new Error("OpenAI phone ordering validation failed.");

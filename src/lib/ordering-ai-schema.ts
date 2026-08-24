@@ -22,6 +22,7 @@ export function ensureOrderingAiSchema(): Promise<void> {
         CHECK (fulfillment_question_state IN ('not_asked', 'asked_unanswered', 'deferred_while_ordering', 'resolved'))
       `;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS deferred_required_fields JSONB NOT NULL DEFAULT '[]'::jsonb`;
+      await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS pending_item JSONB`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS last_customer_turn_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS last_ai_turn_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS last_natural_break_at TIMESTAMPTZ`;
