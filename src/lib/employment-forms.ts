@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { requireStrongSecret } from "@/lib/secret-strength";
 import { ensureSchema, getSql } from "@/lib/db";
 import type { Business } from "@/lib/types";
 
@@ -150,8 +151,10 @@ export function ensureEmploymentFormsSchema(): Promise<void> {
 }
 
 function encryptionKey(): Buffer {
-  const secret = process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY;
-  if (!secret || secret.length < 32) throw new Error("EMPLOYMENT_FORMS_ENCRYPTION_KEY must be configured with at least 32 characters.");
+  const secret = requireStrongSecret(
+    process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY,
+    "EMPLOYMENT_FORMS_ENCRYPTION_KEY",
+  );
   return createHash("sha256").update(secret, "utf8").digest();
 }
 
