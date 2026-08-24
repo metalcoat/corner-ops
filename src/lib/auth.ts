@@ -1,8 +1,9 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { assertConfigured } from "@/lib/config";
+import { PermissionError } from "@/lib/http";
 import { businesses, type Business } from "@/lib/types";
-import { permissionsForRole, type AppRole, type AppUserIdentity } from "@/lib/users";
+import { appRoles, type AppRole, type AppUserIdentity } from "@/lib/users";
 import { secureCookies } from "@/lib/cookie-security";
 
 const COOKIE_NAME = "corner_ops_session";
@@ -36,17 +37,13 @@ function safeEqual(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function firstName(nameValue: unknown, emailValue: unknown): string {
+function displayName(nameValue: unknown, emailValue: unknown): string {
   const name = String(nameValue ?? "").trim();
+  if (name && !name.includes("@")) return name;
   const email = String(emailValue ?? "").trim().toLowerCase();
-  const ownerEmail = (process.env.APP_EMAIL || "crfrary@gmail.com").trim().toLowerCase();
-
-  if (name && name !== "Owner" && !name.includes("@")) return name.split(/\s+/)[0];
-  if (email === ownerEmail) return "Chris";
-
-  const localPart = email.split("@")[0] || name.split("@")[0] || "Owner";
-  const candidate = localPart.split(/[._-]/)[0] || "Owner";
-  return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+  const localPart = email.split("@")[0] || "User";
+  const candidate = localPart.split(/[._-]/).filter(Boolean).join(" ") || "User";
+  return candidate.replace(/\b\w/g, (value) => value.toUpperCase());
 }
 
 function createToken(payload: SessionPayload): string {
@@ -55,15 +52,17 @@ function createToken(payload: SessionPayload): string {
 }
 
 function normalizePayload(value: Partial<SessionPayload>): SessionPayload | null {
-  if (!value.email || !Array.isArray(value.businesses) || Number(value.expiresAt || 0) <= Date.now()) return null;
-  const role = value.role || "Owner";
+  if (!value.email || !value.role || !appRoles.includes(value.role as AppRole)) return null;
+  if (!Array.isArray(value.businesses) || !Array.isArray(value.permissions) || !value.permissions.length) return null;
+  if (Number(value.expiresAt || 0) <= Date.now()) return null;
   const validBusinesses = value.businesses.filter((business): business is Business => businesses.includes(business as Business));
+  if (!validBusinesses.length) return null;
   return {
     email: value.email,
-    displayName: firstName(value.displayName, value.email),
-    role,
+    displayName: displayName(value.displayName, value.email),
+    role: value.role as AppRole,
     businesses: validBusinesses,
-    permissions: Array.isArray(value.permissions) && value.permissions.length ? value.permissions : permissionsForRole(role),
+    permissions: value.permissions.filter((permission): permission is string => typeof permission === "string" && permission.length > 0),
     expiresAt: Number(value.expiresAt),
   };
 }
@@ -83,14 +82,13 @@ export function isValidPassword(candidate: string): boolean {
   return safeEqual(candidate, process.env.APP_PASSWORD!);
 }
 
-export async function createSession(identity?: AppUserIdentity): Promise<SessionPayload> {
-  const email = identity?.email || process.env.APP_EMAIL?.trim().toLowerCase() || "crfrary@gmail.com";
+export async function createSession(identity: AppUserIdentity): Promise<SessionPayload> {
   const payload: SessionPayload = {
-    email,
-    displayName: firstName(identity?.displayName, email),
-    role: identity?.role || "Owner",
-    businesses: identity?.businesses?.length ? [...identity.businesses] : [...businesses],
-    permissions: identity?.permissions?.length ? [...identity.permissions] : ["*"],
+    email: identity.email,
+    displayName: displayName(identity.displayName, identity.email),
+    role: identity.role,
+    businesses: [...identity.businesses],
+    permissions: [...identity.permissions],
     expiresAt: Date.now() + SESSION_SECONDS * 1000,
   };
 
@@ -131,5 +129,5 @@ export function hasPermission(session: SessionPayload, permission: string): bool
 }
 
 export function requirePermission(session: SessionPayload, permission: string): void {
-  if (!hasPermission(session, permission)) throw new Error("Your account does not have permission for this action.");
+  if (!hasPermission(session, permission)) throw new PermissionError();
 }
