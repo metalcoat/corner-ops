@@ -78,7 +78,7 @@ function bearerToken(request: Request): string | null {
 }
 
 async function boardActor(request: Request): Promise<{ name: string; access: "owner" | "employee" | "display" } | null> {
-  const display = verifyDeliBoardToken(bearerToken(request));
+  const display = await verifyDeliBoardToken(bearerToken(request));
   if (display) return { name: "Deli Board", access: "display" };
 
   const owner = await getSession();

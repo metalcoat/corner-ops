@@ -76,6 +76,7 @@ export async function adminUnreadMessageSummary(readerEmail: string, businesses:
     SELECT m.business, COUNT(*)::INTEGER AS unread_count
     FROM employee_messages m
     WHERE m.sender_employee_id IS NOT NULL
+      AND m.deleted_at IS NULL
       AND m.created_at >= ${startedAt}
       AND (
         (m.business = 'Corner Deli' AND ${canReadDeli})
@@ -105,6 +106,7 @@ export async function markAdminMessagesRead(readerEmail: string, business: Busin
     SELECT m.id, ${email}
     FROM employee_messages m
     WHERE m.business = ${business}
+      AND m.deleted_at IS NULL
       AND m.sender_employee_id IS NOT NULL
       AND m.created_at >= ${startedAt}
     ON CONFLICT (message_id, reader_email) DO NOTHING
@@ -119,6 +121,7 @@ export async function markEmployeeMessageSeen(session: EmployeeSession, messageI
     SELECT id, sender_employee_id
     FROM employee_messages
     WHERE id = ${messageId}
+      AND deleted_at IS NULL
       AND business = ${session.business}
       AND (
         message_type IN ('Team', 'Announcement')
@@ -181,6 +184,7 @@ export async function adminMessagesDashboard(business: Business) {
       LEFT JOIN employees sender ON sender.id = m.sender_employee_id
       LEFT JOIN employees recipient ON recipient.id = m.recipient_employee_id
       WHERE m.business = ${business}
+        AND m.deleted_at IS NULL
       ORDER BY m.created_at DESC
       LIMIT 250
     `,
@@ -190,6 +194,7 @@ export async function adminMessagesDashboard(business: Business) {
       JOIN employee_messages m ON m.id = r.message_id
       JOIN employees e ON e.id = r.employee_id
       WHERE m.business = ${business}
+        AND m.deleted_at IS NULL
       ORDER BY r.read_at
     `,
   ]);

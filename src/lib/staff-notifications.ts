@@ -425,6 +425,7 @@ export async function sendStaffNotification(input: {
   recipientEmployeeId?: string | null;
   body: string;
   actor: string;
+  sendSms?: boolean;
 }) {
   await ensureStaffNotificationSchema();
   const body = clean(input.body, 3000);
@@ -460,14 +461,16 @@ export async function sendStaffNotification(input: {
     ].filter(Boolean).join("\n"),
   });
 
-  const sms = await deliverSms({
-    recipients,
-    text: () => [
-      `${input.business}: ${body}`,
-      hubUrl ? `Open Employee Hub: ${hubUrl}` : "",
-      "Reply STOP to opt out.",
-    ].filter(Boolean).join(" "),
-  });
+  const sms = input.sendSms === true
+    ? await deliverSms({
+        recipients,
+        text: () => [
+          `${input.business}: ${body}`,
+          hubUrl ? `Open Employee Hub: ${hubUrl}` : "",
+          "Reply STOP to opt out.",
+        ].filter(Boolean).join(" "),
+      })
+    : { provider: "disabled" as const, configured: false, requested: false, sent: 0, failed: 0, missingPhone: 0, notOptedIn: recipients.filter((employee) => !employee.smsOptIn).length, skipped: recipients.length, failures: [], accepted: [] };
 
   return { sent: true, recipients: recipients.length, email, sms };
 }

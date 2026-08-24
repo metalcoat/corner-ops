@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { constantTimeEqual, hmacSignature, legacySessionHmac } from "@/lib/security-keys";
 import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "corner_ops_session";
@@ -16,6 +16,7 @@ const selfAuthorizedApiPaths = [
   "/api/3cx/inbound",
   "/api/square/callback",
   "/api/square/webhook",
+  "/api/telnyx/inbound",
   "/api/cron",
 ];
 
@@ -26,24 +27,21 @@ type Token = {
   expiresAt?: number;
 };
 
-function equal(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 function token(request: NextRequest): Token | null {
   const raw = request.cookies.get(COOKIE_NAME)?.value;
-  const secret = process.env.SESSION_SECRET;
-  if (!raw || !secret) return null;
+  if (!raw || (!process.env.OWNER_SESSION_SECRET && !process.env.SESSION_SECRET)) return null;
 
   const [encoded, supplied] = raw.split(".");
   if (!encoded || !supplied) return null;
 
-  const expected = createHmac("sha256", secret).update(encoded).digest("base64url");
-  if (!equal(expected, supplied)) return null;
-
   try {
+    const current = hmacSignature(encoded, "owner-session", { envName: "OWNER_SESSION_SECRET" });
+    const currentValid = constantTimeEqual(current, supplied);
+    const legacyValid = !currentValid && Boolean(process.env.SESSION_SECRET)
+      ? constantTimeEqual(legacySessionHmac(encoded), supplied)
+      : false;
+    if (!currentValid && !legacyValid) return null;
+
     const value = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as Token;
     if (Number(value.expiresAt || 0) <= Date.now()) return null;
     return value;

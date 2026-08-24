@@ -1,7 +1,6 @@
-import { createHmac } from "node:crypto";
 import { ensureSchema, getSql } from "@/lib/db";
 import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
-import { validateEmployeePin } from "@/lib/employee-pin";
+import { assertEmployeePinAvailable, createEmployeePinRecord } from "@/lib/employee-pin-security";
 import { normalizeSmsPhone } from "@/lib/phone";
 import type { Business } from "@/lib/types";
 
@@ -25,11 +24,6 @@ function clean(value: unknown, max = 255): string {
   return String(value ?? "").trim().slice(0, max);
 }
 
-function pinHash(business: Business, pin: string): string {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required.");
-  return createHmac("sha256", secret).update(`${business}:${pin}`).digest("hex");
-}
 
 export function ensureEmployeeDirectorySchema(): Promise<void> {
   if (!directorySchemaPromise) {
@@ -254,7 +248,8 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
     const email = clean(input.email, 255).toLowerCase();
     const phone = normalizeSmsPhone(input.phone);
     const smsOptIn = Boolean(input.smsOptIn && phone);
-    const pin = validateEmployeePin(business, input.pin, name || "Employee");
+    const pin = await assertEmployeePinAvailable({ business, pin: input.pin, employeeName: name || "Employee", excludeEmployeeId: undefined });
+    const pinRecord = createEmployeePinRecord(business, pin, name || "Employee");
     const position = normalizePosition(business, input.position || (business === "Tiki" ? "Bartender" : "Pizza"));
     const roleGroup = input.roleGroup === "Ignore" ? "Ignore" : roleGroupForPosition(business, position);
     const countsForTips = input.countsForTips ?? roleGroup !== "Ignore";
@@ -276,7 +271,8 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
       const rows = await sql`
         UPDATE employees SET
           email = ${email}, phone = ${phone}, sms_opt_in = ${smsOptIn}, name = ${name},
-          pin_hash = ${pinHash(business, pin)}, pin_enabled = TRUE,
+          pin_hash = ${pinRecord.hash}, pin_salt = ${pinRecord.salt}, pin_hash_version = ${pinRecord.version},
+          pin_fingerprint = ${pinRecord.fingerprint}, pin_enabled = TRUE, session_version = session_version + 1,
           position = ${position}, role_group = ${roleGroup}, counts_for_tips = ${countsForTips},
           hourly_rate = ${hourlyRate}, tipped_rate = ${tippedRate}, active = TRUE, updated_at = NOW()
         WHERE id = ${existing[0].id}
@@ -286,11 +282,11 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
     } else {
       const rows = await sql`
         INSERT INTO employees (
-          id, business, email, phone, sms_opt_in, name, pin_hash, pin_enabled, position,
-          role_group, counts_for_tips, hourly_rate, tipped_rate, active
+          id, business, email, phone, sms_opt_in, name, pin_hash, pin_salt, pin_hash_version, pin_fingerprint,
+          pin_enabled, position, role_group, counts_for_tips, hourly_rate, tipped_rate, active
         ) VALUES (
           ${crypto.randomUUID()}, ${business}, ${email}, ${phone}, ${smsOptIn}, ${name},
-          ${pinHash(business, pin)}, TRUE, ${position}, ${roleGroup}, ${countsForTips},
+          ${pinRecord.hash}, ${pinRecord.salt}, ${pinRecord.version}, ${pinRecord.fingerprint}, TRUE, ${position}, ${roleGroup}, ${countsForTips},
           ${hourlyRate}, ${tippedRate}, TRUE
         )
         RETURNING id, name, email, phone

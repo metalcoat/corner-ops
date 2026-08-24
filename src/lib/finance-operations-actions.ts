@@ -1,4 +1,5 @@
 import { getSql } from "@/lib/db";
+import { recordAuditEvent } from "@/lib/audit";
 import { ensureFinanceOperationsSchema } from "@/lib/finance-operations-schema";
 import type { Business } from "@/lib/types";
 
@@ -158,6 +159,7 @@ export async function updateVendorBillStatus(input: {
   billId: string;
   status: "Open" | "Paid" | "Void";
   bankTransactionId?: string | null;
+  actor: string;
 }) {
   await ensureFinanceOperationsSchema();
   const rows = await getSql()`
@@ -186,6 +188,7 @@ export async function updateVendorBillStatus(input: {
       status = ${input.status}, paid_bank_transaction_id = ${bankTransactionId}, updated_at = NOW()
     WHERE id = ${input.billId} AND business = ${input.business}
   `;
+  await recordAuditEvent({ business: input.business, entityType: "vendor_bill", entityId: input.billId, action: `status_${input.status.toLowerCase()}`, actor: input.actor, details: { priorStatus: bill.status, bankTransactionId } });
   return { updated: true, status: input.status };
 }
 
@@ -270,6 +273,7 @@ export async function adjustInventoryQuantity(input: {
   business: Business;
   inventoryItemId: string;
   currentQuantity: number;
+  actor: string;
 }) {
   await ensureFinanceOperationsSchema();
   const rows = await getSql()`
@@ -278,6 +282,7 @@ export async function adjustInventoryQuantity(input: {
     RETURNING id, name, current_quantity
   ` as unknown as Array<{ id: string; name: string; current_quantity: string | number }>;
   if (!rows[0]) throw new Error("Inventory item was not found.");
+  await recordAuditEvent({ business: input.business, entityType: "inventory_item", entityId: rows[0].id, action: "quantity_adjusted", actor: input.actor, details: { currentQuantity: Number(rows[0].current_quantity) } });
   return { id: rows[0].id, name: rows[0].name, currentQuantity: Number(rows[0].current_quantity) };
 }
 

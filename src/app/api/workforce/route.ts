@@ -250,6 +250,7 @@ export async function POST(request: Request) {
         recipientEmployeeId: body.recipientEmployeeId ? String(body.recipientEmployeeId) : null,
         body: String(body.body || ""),
         actor: session.displayName,
+        sendSms: body.sendSms === true,
       }));
     }
 
