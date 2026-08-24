@@ -113,7 +113,27 @@ jobs:
             exit 0
           fi
 
-          FAIL_LOG=$(tail -n 300 "$LOG")
+          {
+            echo
+            echo "=== dependency audit diagnostics ==="
+            node - <<'NODE'
+          const lock = require('./package-lock.json');
+          console.log('xlsx lock entry:', JSON.stringify(lock.packages?.['node_modules/xlsx'] || null));
+          NODE
+            if [ -f /tmp/npm-audit.json ]; then
+              python3 - <<'PY'
+          import json
+          from pathlib import Path
+          audit=json.loads(Path('/tmp/npm-audit.json').read_text())
+          print('high/critical audit packages:')
+          for name,finding in audit.get('vulnerabilities',{}).items():
+              if str(finding.get('severity','')).lower() in {'high','critical'}:
+                  print(name, finding.get('severity'), finding.get('via'))
+          PY
+            fi
+          } >>"$LOG" 2>&1
+
+          FAIL_LOG=$(tail -n 320 "$LOG")
           git reset --hard "$GITHUB_SHA"
           {
             echo "# Stage 7 cleanup status"
