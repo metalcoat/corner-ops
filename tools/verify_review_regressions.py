@@ -40,6 +40,14 @@ expect("module-local Deli call-feed caches", count(r"\bcallFeedCache\b|\bcallFee
 expect("window.fetch monkey patches", count(r"window\.fetch\s*="), 0)
 expect("dead publish recovery helpers", count(r"sendRecoveredPublishNotifications|SchedulePublishConfirmFix|overnight-shift-helper"), 0)
 
+# Published/open shift corrections must stay live instead of being silently demoted to Draft.
+schedule_board_text = (APP / "ops/workforce/schedule-board.tsx").read_text(errors="replace")
+workforce_route_text = (APP / "api/workforce/route.ts").read_text(errors="replace")
+if 'editor.shift.status === "Draft"' not in schedule_board_text or 'editor.employeeId ? "Published" : "Open"' not in schedule_board_text:
+    errors.append("existing shift edits no longer preserve live Published/Open status")
+if 'requestedStatus === "Published" || requestedStatus === "Open"' in workforce_route_text:
+    errors.append("workforce API reintroduced Published/Open to Draft demotion")
+
 # Both remaining drawImage calls must live in the shared helper, never feature code.
 for path in code_files:
     rel = path.relative_to(ROOT).as_posix()

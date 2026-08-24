@@ -199,9 +199,7 @@ export async function POST(request: Request) {
         if (requestedStatus && requestedStatus !== "Draft" && requestedStatus !== "Published" && requestedStatus !== "Open" && requestedStatus !== "Cancelled") {
           throw new Error("Invalid shift status.");
         }
-        const status = requestedStatus === "Published" || requestedStatus === "Open"
-          ? "Draft"
-          : requestedStatus;
+        const status = requestedStatus;
         return Response.json(await updateScheduleShiftSafely({
           id: String(body.id || ""),
           business,
@@ -213,7 +211,7 @@ export async function POST(request: Request) {
           mealBreakMinutes: body.mealBreakMinutes === undefined ? undefined : Number(body.mealBreakMinutes || 0),
           extraMealBreakStart: body.extraMealBreakStart === undefined ? undefined : body.extraMealBreakStart ? String(body.extraMealBreakStart) : null,
           extraMealBreakMinutes: body.extraMealBreakMinutes === undefined ? undefined : Number(body.extraMealBreakMinutes || 0),
-          status: status as "Draft" | "Cancelled" | undefined,
+          status: status as "Draft" | "Published" | "Open" | "Cancelled" | undefined,
           notes: body.notes === undefined ? undefined : String(body.notes || ""),
           acknowledgePendingTimeOff: body.acknowledgePendingTimeOff === true,
           expectedUpdatedAt: body.expectedUpdatedAt ? String(body.expectedUpdatedAt) : null,
