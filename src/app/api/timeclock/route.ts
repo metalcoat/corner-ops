@@ -1,21 +1,23 @@
-import { punchTiki } from "@/lib/operations";
+import { getEmployeeSession } from "@/lib/employee-auth";
 import { ensureWorkforceSchema } from "@/lib/workforce";
 import { getSql } from "@/lib/db";
-import { apiError } from "@/lib/http";
+import { apiError, AuthenticationError } from "@/lib/http";
 import { evaluateAndNotifyOvertimeRisk } from "@/lib/overtime-risk";
+import { punchAuthenticatedTikiEmployee } from "@/lib/tiki-timeclock";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
+    const session = await getEmployeeSession();
+    if (!session || session.business !== "Tiki") throw new AuthenticationError("Tiki employee sign-in required before punching the time clock.");
     const body = await request.json() as {
-      pin?: string;
       latitude?: number | null;
       longitude?: number | null;
       accuracy?: number | null;
     };
 
-    const result = await punchTiki(String(body.pin || ""), {
+    const result = await punchAuthenticatedTikiEmployee(session.employeeId, {
       latitude: body.latitude,
       longitude: body.longitude,
       accuracy: body.accuracy,
