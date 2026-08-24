@@ -8,9 +8,11 @@
 -- constraints, indexes, functions, triggers, and the public schema owner/ACL matched
 -- production exactly after reconstruction.
 --
--- Apply all 0001* baseline files in lexical order on a fresh database, then apply
--- subsequent numbered migrations in lexical order. Do not apply the 0001 baseline
--- to a database that already contains the Corner Ops schema.
+-- Fresh databases apply all 0001* baseline files in lexical order. This baseline
+-- already includes the historical effects of migrations 0002 through 0007, which
+-- remain in the repository for audit history and MUST NOT be replayed after 0001.
+-- New migrations for fresh databases begin at 0008 and are applied in lexical order.
+-- Do not apply the 0001 baseline to a database that already contains Corner Ops.
 
 CREATE SCHEMA IF NOT EXISTS public AUTHORIZATION pg_database_owner;
 ALTER SCHEMA public OWNER TO pg_database_owner;
