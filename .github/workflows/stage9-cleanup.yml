@@ -94,7 +94,6 @@ jobs:
           npm run typecheck
           npm run build
       - name: Commit clean verified product pass
-        if: github.event_name == 'push'
         shell: bash
         run: |
           set -euo pipefail
