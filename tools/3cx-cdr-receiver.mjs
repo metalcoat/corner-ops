@@ -17,11 +17,16 @@ const CORNER_OPS_URL = String(process.env.CORNER_OPS_URL || "").replace(/\/$/, "
 const SECRET = process.env.CORNER_OPS_CDR_SECRET || "";
 const VERCEL_BYPASS = process.env.VERCEL_PROTECTION_BYPASS || "";
 const SPOOL = process.env.CDR_SPOOL_FILE || path.resolve("3cx-cdr-spool.jsonl");
+const RETRY_SPOOL = `${SPOOL}.retry`;
 const RECONNECT_MS = Math.max(1000, Number(process.env.CDR_RECONNECT_MS || 5000));
+const BATCH_MAX = Math.max(1, Math.min(500, Number(process.env.CDR_BATCH_MAX || 50)));
+const BATCH_FLUSH_MS = Math.max(1000, Number(process.env.CDR_BATCH_FLUSH_MS || 10_000));
 
 if (!CORNER_OPS_URL || !/^https:\/\//i.test(CORNER_OPS_URL)) throw new Error("CORNER_OPS_URL must be an HTTPS Corner Ops address.");
 if (!SECRET) throw new Error("CORNER_OPS_CDR_SECRET is required.");
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error("CDR_PORT is invalid.");
+if (!Number.isInteger(BATCH_MAX)) throw new Error("CDR_BATCH_MAX must be an integer.");
+if (!Number.isFinite(BATCH_FLUSH_MS)) throw new Error("CDR_BATCH_FLUSH_MS is invalid.");
 
 function parseDelimitedLine(line) {
   const values = [];
@@ -41,30 +46,61 @@ function parseDelimitedLine(line) {
   return Object.fromEntries(FIELDS.map((field, index) => [field, values[index] ?? ""]));
 }
 
-async function postRecord(record) {
+async function postRecords(records) {
+  if (!records.length) return;
   const headers = { "content-type": "application/json", "x-corner-ops-cdr-secret": SECRET };
   if (VERCEL_BYPASS) headers["x-vercel-protection-bypass"] = VERCEL_BYPASS;
   const response = await fetch(`${CORNER_OPS_URL}/api/3cx/inbound`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ record }),
+    body: JSON.stringify({ records }),
   });
   if (!response.ok) throw new Error(`Corner Ops returned ${response.status}: ${await response.text()}`);
 }
 
-function spool(record) {
-  fs.appendFileSync(SPOOL, `${JSON.stringify(record)}\n`, "utf8");
+function spoolRecords(records) {
+  if (!records.length) return;
+  fs.appendFileSync(SPOOL, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
 }
 
+let pending = [];
+let flushTimer = null;
 let chain = Promise.resolve();
+
+function scheduleFlush() {
+  if (flushTimer || !pending.length) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    enqueueBatch();
+  }, BATCH_FLUSH_MS);
+  flushTimer.unref?.();
+}
+
+function enqueueBatch() {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (!pending.length) return;
+  const batch = pending.splice(0, BATCH_MAX);
+  chain = chain
+    .then(() => postRecords(batch))
+    .catch((error) => {
+      console.error(new Date().toISOString(), `CDR batch forward failed (${batch.length} records):`, error.message);
+      spoolRecords(batch);
+    })
+    .finally(() => {
+      if (pending.length >= BATCH_MAX) enqueueBatch();
+      else scheduleFlush();
+    });
+}
+
 function acceptLine(raw) {
   const line = raw.replace(/\0/g, "").trim();
   if (!line) return;
-  const record = parseDelimitedLine(line);
-  chain = chain.then(() => postRecord(record)).catch((error) => {
-    console.error(new Date().toISOString(), "CDR forward failed:", error.message);
-    spool(record);
-  });
+  pending.push(parseDelimitedLine(line));
+  if (pending.length >= BATCH_MAX) enqueueBatch();
+  else scheduleFlush();
 }
 
 function attach(socket) {
@@ -87,21 +123,66 @@ function connect() {
   attach(socket);
 }
 
+let retryInFlight = false;
 async function retrySpool() {
-  if (!fs.existsSync(SPOOL)) return;
-  const lines = fs.readFileSync(SPOOL, "utf8").split(/\r?\n/).filter(Boolean);
-  if (!lines.length) return;
-  const remaining = [];
-  for (const line of lines) {
-    try { await postRecord(JSON.parse(line)); }
-    catch { remaining.push(line); }
+  if (retryInFlight) return;
+  retryInFlight = true;
+  try {
+    if (!fs.existsSync(RETRY_SPOOL)) {
+      if (!fs.existsSync(SPOOL)) return;
+      fs.renameSync(SPOOL, RETRY_SPOOL);
+    }
+
+    const lines = fs.readFileSync(RETRY_SPOOL, "utf8").split(/\r?\n/).filter(Boolean);
+    if (!lines.length) {
+      fs.rmSync(RETRY_SPOOL, { force: true });
+      return;
+    }
+
+    const remaining = [];
+    for (let index = 0; index < lines.length; index += BATCH_MAX) {
+      const batchLines = lines.slice(index, index + BATCH_MAX);
+      let records;
+      try {
+        records = batchLines.map((line) => JSON.parse(line));
+      } catch (error) {
+        console.error(new Date().toISOString(), "CDR spool contains invalid JSON:", error.message);
+        remaining.push(...batchLines);
+        continue;
+      }
+      try {
+        await postRecords(records);
+      } catch {
+        remaining.push(...batchLines);
+      }
+    }
+
+    if (remaining.length) fs.writeFileSync(RETRY_SPOOL, `${remaining.join("\n")}\n`, "utf8");
+    else fs.rmSync(RETRY_SPOOL, { force: true });
+  } finally {
+    retryInFlight = false;
   }
-  if (remaining.length) fs.writeFileSync(SPOOL, `${remaining.join("\n")}\n`, "utf8");
-  else fs.rmSync(SPOOL, { force: true });
+}
+
+async function shutdown(signal) {
+  console.log(new Date().toISOString(), `Received ${signal}; flushing CDR buffer.`);
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  while (pending.length) {
+    const batch = pending.splice(0, BATCH_MAX);
+    try { await postRecords(batch); }
+    catch { spoolRecords(batch); }
+  }
+  await chain;
+  process.exit(0);
 }
 
 setInterval(() => retrySpool().catch((error) => console.error("Spool retry failed:", error.message)), 60_000).unref();
 retrySpool().catch(() => undefined);
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+process.once("SIGINT", () => void shutdown("SIGINT"));
 
 if (MODE === "listen") {
   const server = net.createServer(attach);
