@@ -36,6 +36,13 @@ if count != 1:
     raise RuntimeError("src/app/globals.css: expected the root token block once")
 write("src/app/globals.css", globals_css)
 
+# The owner layout still loads a patch-on-patch stylesheet. Fold its surviving rules into the canonical ops sheet.
+ops_css = read("src/app/ops/ops.css").rstrip()
+cleanup_css = read("src/app/ops/interface-cleanup.css").strip()
+write("src/app/ops/ops.css", f"{ops_css}\n\n/* Consolidated owner-layout rules from the former interface-cleanup patch sheet. */\n{cleanup_css}\n")
+replace_once("src/app/ops/layout.tsx", 'import "./interface-cleanup.css";\n', "")
+(ROOT / "src/app/ops/interface-cleanup.css").unlink()
+
 # CO-034: preserve the current hidden Time tab behavior without selecting it by DOM position.
 replace_once(
     "src/app/employee/page.tsx",
