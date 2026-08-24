@@ -30,6 +30,7 @@ async function main(){
     {key:"full-jumbo-thin-variant",items:[{name:"Pizza",variant:"jumbo thin 16 inch",quantity:1}],expectedItems:["Pizza"],expectedVariant:"Jumbo Thin 16\""},
     {key:"full-regular-variant",items:[{name:"Pizza",variant:"regular 14 inch",quantity:1}],expectedItems:["Pizza"],expectedVariant:"Regular 14\""},
     {key:"full-small-variant",items:[{name:"Pizza",variant:"small 12 inch",quantity:1}],expectedItems:["Pizza"],expectedVariant:"Small 12\""},
+    {key:"pizza-cheese-means-extra-cheese",items:[{name:"Pizza",variant:"Regular 14 inch",quantity:1,modifiers:[{name:"Cheese"}]}],expectedItems:["Pizza"],expectedVariant:"Regular 14\"",expectedModifier:"Extra Cheese"},
     {key:"twelve-mild-wings-default",items:[{name:"Wings",quantity:12,modifiers:[{name:"Mild"}]}],expectedItems:["Wings"],expectedVariant:"12 Wings",expectedModifier:"Mild"},
     {key:"spoken-twelve-mild-wings",items:[{name:"12 mild wings",quantity:1}],expectedItems:["Wings"],expectedVariant:"12 Wings",expectedModifier:"Mild"},
     {key:"explicit-boneless-wings",items:[{name:"boneless wings",variant:"12 wings",quantity:1,modifiers:[{name:"Mild"}]}],expectedItems:["Boneless Wings"],expectedVariant:"12 Wings",expectedModifier:"Mild"},

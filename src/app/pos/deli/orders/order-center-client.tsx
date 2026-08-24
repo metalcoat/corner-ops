@@ -1,32 +1,499 @@
 "use client";
-import {useCallback,useEffect,useMemo,useState} from "react";
-import PosPinGate,{type PosSessionView}from"../../pos-pin-gate";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import PosPinGate, { type PosSessionView } from "../../pos-pin-gate";
 import ItemCancellationPanel from "./item-cancellation-panel";
-type Order={id:string;display_number:string;status:string;payment_status:string;service_type:string;source:string;order_origin:string;total_cents:number;amount_due_cents:number;created_at:string;scheduled_for:string|null;customer_name:string;customer_phone:string;delivery_address:string|null;delivery_unit:string|null;overdue_unpaid?:boolean;voided_at?:string|null;void_reason?:string;items?:Array<Record<string,unknown>>;events?:Array<Record<string,unknown>>};
-const tz="America/New_York";
-const isoDate=(date:Date)=>new Intl.DateTimeFormat("en-CA",{timeZone:tz,year:"numeric",month:"2-digit",day:"2-digit"}).format(date);
-const money=(c:number)=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(c/100);
-const label=(v:string)=>v.replaceAll("_"," ").toUpperCase();
-export default function OrderCenterClient(){
- const[session,setSession]=useState<PosSessionView|null>(null),[date,setDate]=useState(isoDate(new Date())),[view,setView]=useState<"date"|"open">("date"),[query,setQuery]=useState(""),[orders,setOrders]=useState<Order[]>([]),[selected,setSelected]=useState<Order|null>(null),[error,setError]=useState(""),[voidReason,setVoidReason]=useState(""),[voiding,setVoiding]=useState(false),[voidBusy,setVoidBusy]=useState(false),[cancelItem,setCancelItem]=useState<any>(null);
- useEffect(()=>{fetch("/api/pos/session",{cache:"no-store"}).then(r=>r.json()).then(setSession)},[]);
- useEffect(()=>{const locked=()=>setSession({authenticated:false});window.addEventListener("corner-ops-pos-locked",locked);return()=>window.removeEventListener("corner-ops-pos-locked",locked)},[]);
- const load=useCallback(async()=>{if(!session?.authenticated)return;const p=new URLSearchParams({view:view==="open"?"open":"date",date,q:query});const r=await fetch(`/api/ordering/order-center?${p}`,{cache:"no-store"});const b=await r.json();if(!r.ok){setError(b.error||"Could not load orders.");return}setOrders(b.orders||[]);setError("")},[date,query,session?.authenticated,view]);
- useEffect(()=>{const t=setTimeout(()=>void load(),150);return()=>clearTimeout(t)},[load]);
- useEffect(()=>{if(!session?.authenticated)return;const id=new URLSearchParams(window.location.search).get("orderId");if(id)void details({id} as Order)},[session?.authenticated]);
- const overdue=orders.filter(o=>o.overdue_unpaid),open=orders.filter(o=>!o.overdue_unpaid&&!["paid","refunded"].includes(o.payment_status)),paid=orders.filter(o=>["paid","refunded"].includes(o.payment_status));
- async function details(order:Order){const r=await fetch(`/api/ordering/order-center/${order.id}`);const b=await r.json();if(r.ok)setSelected(b.order)}
- async function advance(order:Order){
-  const draft=order.status==="draft";
-  const next=order.status==="sent_to_kitchen"?"in_progress":order.status==="in_progress"?"ready":order.status==="ready"?"completed":null;
-  if(!draft&&!next)return;
-  const r=await fetch(draft?`/api/ordering/orders/${order.id}/submit`:"/api/ordering/kitchen",{method:draft?"POST":"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(draft?{business:"Corner Deli"}:{business:"Corner Deli",orderId:order.id,expectedStatus:order.status,nextStatus:next})});
-  const b=await r.json();if(!r.ok){setError(b.error||"Could not update order.");return}setError("");await load();await details(order);
- }
- async function voidOrder(order:Order){const reason=voidReason.trim();if(reason.length<3){setError("Enter a void reason of at least three characters.");return}setVoidBusy(true);try{const r=await fetch(`/api/ordering/order-center/${order.id}/void`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({reason})}),b=await r.json();if(!r.ok){if(r.status===401)window.dispatchEvent(new Event("corner-ops-pos-locked"));setError(b.error||"Could not void order.");return}setError("");setVoidReason("");setVoiding(false);setSelected(null);await load()}catch{setError("The void request could not reach Corner Ops. Check the connection and try again.")}finally{setVoidBusy(false)}}
- function move(days:number){const d=new Date(`${date}T12:00:00`);d.setDate(d.getDate()+days);setDate(isoDate(d));setView("date")}
- if(!session)return <main className="ocPage">Loading orders…</main>;
- if(!session.authenticated)return <PosPinGate onAuthenticated={s=>setSession({authenticated:true,session:s})}/>;
- const section=(title:string,list:Order[],closed=false)=><section className={closed?"ocSection closed":"ocSection"}><h2>{title}<span>{list.length}</span></h2>{list.length===0&&<p className="ocEmpty">No matching orders.</p>}{list.map(o=><button className="ocOrder" key={o.id} onClick={()=>void details(o)}>{o.overdue_unpaid&&<em>UNPAID FROM {new Intl.DateTimeFormat("en-US",{timeZone:tz,month:"short",day:"numeric"}).format(new Date(o.created_at))}</em>}<strong>#{o.display_number}</strong><b>{label(o.service_type)}</b><span className="customer">{o.customer_name}</span>{o.delivery_address&&<small className="address">{o.delivery_address}{o.delivery_unit?` · ${o.delivery_unit}`:""}</small>}<span>{o.voided_at?"VOIDED":label(o.status)}</span><span className="payment">{label(o.payment_status)} · {money(o.amount_due_cents)} DUE</span><time>{new Intl.DateTimeFormat("en-US",{timeZone:tz,hour:"numeric",minute:"2-digit"}).format(new Date(o.created_at))}</time>{o.scheduled_for&&<em>FOR {new Intl.DateTimeFormat("en-US",{timeZone:tz,weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}).format(new Date(o.scheduled_for))}</em>}<small className="source">{label(o.order_origin||o.source)} → {label(o.service_type)}</small></button>)}</section>;
- return <main className="ocPage"><header><div><h1>Orders</h1></div><nav><button onClick={()=>setView("date")} className={view==="date"?"active":""}>TODAY / DATE</button><button onClick={()=>setView("open")} className={view==="open"?"active":""}>ALL OPEN</button></nav></header><div className="ocTools"><button onClick={()=>move(-1)}>‹</button><button onClick={()=>{setDate(isoDate(new Date()));setView("date")}}>TODAY</button><input type="date" value={date} onChange={e=>{setDate(e.target.value);setView("date")}}/><button onClick={()=>move(1)}>›</button><input className="search" type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Order, customer, phone, address"/></div>{error&&!selected&&<p role="alert">{error}</p>}{view==="date"&&date===isoDate(new Date())&&section("OVERDUE UNPAID",overdue)}{section(view==="date"?"TODAY OPEN / UNPAID":"ALL OPEN / UNPAID",open)}{view==="date"&&section("TODAY PAID / CLOSED",paid,true)}{selected&&<div className="ocBackdrop" onMouseDown={e=>{if(e.target===e.currentTarget&&!voiding){setSelected(null);setError("")}}}><section className="ocDetail" role="dialog" aria-modal="true"><header><h2>Order #{selected.display_number}</h2><button disabled={voidBusy} onClick={()=>{setSelected(null);setVoiding(false);setVoidReason("");setError("")}}>Close</button></header>{error&&<p className="ocDialogError" role="alert">{error}</p>}{selected.voided_at&&<strong>VOIDED · {selected.void_reason}</strong>}<p><b>{selected.customer_name}</b> · {selected.customer_phone||"No phone"}</p><p>{label(selected.order_origin||selected.source)} · {label(selected.service_type)} · {selected.voided_at?"VOIDED":label(selected.status)} · {label(selected.payment_status)}</p>{selected.delivery_address&&<p>{selected.delivery_address} {selected.delivery_unit}</p>}<h3>Items</h3>{(selected.items||[]).map((i:any)=><article key={i.id}><b>{Math.max(0,Number(i.quantity)-Number(i.cancelled_quantity||0))}× {i.item_name_snapshot}</b>{Number(i.cancelled_quantity||0)>0&&<small className="cancelledLine">{i.cancelled_quantity} cancelled</small>}{session.session?.posRole!=="employee"&&Number(i.cancelled_quantity||0)<Number(i.quantity)&&<button className="cancelLine" onClick={()=>setCancelItem(i)}>CANCEL ITEM</button>}{(i.modifiers||[]).filter((m:any)=>m.print_on_ticket!==false).map((m:any)=><small key={m.id}>{m.selection_state==="removed"?"NO ":m.amount!=="normal"?`${m.amount.toUpperCase()} `:""}{m.option_name_snapshot}</small>)}</article>)}{cancelItem&&selected&&<ItemCancellationPanel orderId={selected.id} item={cancelItem} onClose={()=>setCancelItem(null)} onDone={async()=>{setCancelItem(null);await load();await details(selected)}}/>}<h3>History</h3>{(selected.events||[]).map((e:any,i)=><p key={i}><time>{new Date(e.created_at).toLocaleString()}</time> · {label(e.event_type)} · {e.actor_id}</p>)}{session.session?.posRole!=="employee"&&["draft","sent_to_kitchen","in_progress","ready","completed"].includes(selected.status)&&!selected.voided_at&&(voiding?<form className="ocVoidForm" onSubmit={e=>{e.preventDefault();void voidOrder(selected)}}><label>Reason for {selected.status==="draft"?"cancelling":"voiding"} order #{selected.display_number}<textarea autoFocus maxLength={500} value={voidReason} onChange={e=>setVoidReason(e.target.value)}/></label><div><button type="button" disabled={voidBusy} onClick={()=>{setVoiding(false);setVoidReason("");setError("")}}>BACK</button><button className="danger" disabled={voidBusy||voidReason.trim().length<3}>{voidBusy?"SAVING…":selected.status==="draft"?"CONFIRM CANCEL":"CONFIRM VOID"}</button></div></form>:<button className="danger" onClick={()=>{setError("");setVoiding(true)}}>{selected.status==="draft"?"CANCEL ORDER":"VOID ORDER"}</button>)}{session.session?.posRole==="employee"&&["draft","sent_to_kitchen","in_progress","ready","completed"].includes(selected.status)&&!selected.voided_at&&<strong className="locked">Manager or owner authorization is required to cancel or void this order.</strong>}{selected.status==="cancelled"&&<strong className="locked">Historical order — editing locked</strong>}</section></div>}</main>
+type Order = {
+  id: string;
+  display_number: string;
+  status: string;
+  payment_status: string;
+  service_type: string;
+  source: string;
+  order_origin: string;
+  total_cents: number;
+  amount_due_cents: number;
+  created_at: string;
+  scheduled_for: string | null;
+  customer_name: string;
+  customer_phone: string;
+  delivery_address: string | null;
+  delivery_unit: string | null;
+  overdue_unpaid?: boolean;
+  voided_at?: string | null;
+  void_reason?: string;
+  items?: Array<Record<string, unknown>>;
+  events?: Array<Record<string, unknown>>;
+};
+const tz = "America/New_York";
+const isoDate = (date: Date) =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+const money = (c: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
+    c / 100,
+  );
+const label = (v: string) => v.replaceAll("_", " ").toUpperCase();
+export default function OrderCenterClient() {
+  const [session, setSession] = useState<PosSessionView | null>(null),
+    [date, setDate] = useState(isoDate(new Date())),
+    [view, setView] = useState<"date" | "open">("date"),
+    [query, setQuery] = useState(""),
+    [orders, setOrders] = useState<Order[]>([]),
+    [selected, setSelected] = useState<Order | null>(null),
+    [error, setError] = useState(""),
+    [voidReason, setVoidReason] = useState(""),
+    [voiding, setVoiding] = useState(false),
+    [voidBusy, setVoidBusy] = useState(false),
+    [cancelItem, setCancelItem] = useState<any>(null);
+  useEffect(() => {
+    fetch("/api/pos/session", { cache: "no-store" })
+      .then((r) => r.json())
+      .then(setSession);
+  }, []);
+  useEffect(() => {
+    const locked = () => setSession({ authenticated: false });
+    window.addEventListener("corner-ops-pos-locked", locked);
+    return () => window.removeEventListener("corner-ops-pos-locked", locked);
+  }, []);
+  const load = useCallback(async () => {
+    if (!session?.authenticated) return;
+    const p = new URLSearchParams({
+      view: view === "open" ? "open" : "date",
+      date,
+      q: query,
+    });
+    const r = await fetch(`/api/ordering/order-center?${p}`, {
+      cache: "no-store",
+    });
+    const b = await r.json();
+    if (!r.ok) {
+      setError(b.error || "Could not load orders.");
+      return;
+    }
+    setOrders(b.orders || []);
+    setError("");
+  }, [date, query, session?.authenticated, view]);
+  useEffect(() => {
+    const t = setTimeout(() => void load(), 150);
+    return () => clearTimeout(t);
+  }, [load]);
+  useEffect(() => {
+    if (!session?.authenticated) return;
+    const id = new URLSearchParams(window.location.search).get("orderId");
+    if (id) void details({ id } as Order);
+  }, [session?.authenticated]);
+  const overdue = orders.filter((o) => o.overdue_unpaid),
+    open = orders.filter(
+      (o) =>
+        !o.overdue_unpaid && !["paid", "refunded"].includes(o.payment_status),
+    ),
+    paid = orders.filter((o) =>
+      ["paid", "refunded"].includes(o.payment_status),
+    );
+  async function details(order: Order) {
+    const r = await fetch(`/api/ordering/order-center/${order.id}`);
+    const b = await r.json();
+    if (r.ok) setSelected(b.order);
+  }
+  async function advance(order: Order) {
+    const draft = order.status === "draft";
+    const next =
+      order.status === "sent_to_kitchen"
+        ? "in_progress"
+        : order.status === "in_progress"
+          ? "ready"
+          : order.status === "ready"
+            ? "completed"
+            : null;
+    if (!draft && !next) return;
+    const r = await fetch(
+      draft
+        ? `/api/ordering/orders/${order.id}/submit`
+        : "/api/ordering/kitchen",
+      {
+        method: draft ? "POST" : "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          draft
+            ? { business: "Corner Deli" }
+            : {
+                business: "Corner Deli",
+                orderId: order.id,
+                expectedStatus: order.status,
+                nextStatus: next,
+              },
+        ),
+      },
+    );
+    const b = await r.json();
+    if (!r.ok) {
+      setError(b.error || "Could not update order.");
+      return;
+    }
+    setError("");
+    await load();
+    await details(order);
+  }
+  async function voidOrder(order: Order) {
+    const reason = voidReason.trim();
+    if (reason.length < 3) {
+      setError("Enter a void reason of at least three characters.");
+      return;
+    }
+    setVoidBusy(true);
+    try {
+      const r = await fetch(`/api/ordering/order-center/${order.id}/void`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ reason }),
+        }),
+        b = await r.json();
+      if (!r.ok) {
+        if (r.status === 401)
+          window.dispatchEvent(new Event("corner-ops-pos-locked"));
+        setError(b.error || "Could not void order.");
+        return;
+      }
+      setError("");
+      setVoidReason("");
+      setVoiding(false);
+      setSelected(null);
+      await load();
+    } catch {
+      setError(
+        "The void request could not reach Corner Ops. Check the connection and try again.",
+      );
+    } finally {
+      setVoidBusy(false);
+    }
+  }
+  function move(days: number) {
+    const d = new Date(`${date}T12:00:00`);
+    d.setDate(d.getDate() + days);
+    setDate(isoDate(d));
+    setView("date");
+  }
+  if (!session) return <main className="ocPage">Loading orders…</main>;
+  if (!session.authenticated)
+    return (
+      <PosPinGate
+        onAuthenticated={(s) => setSession({ authenticated: true, session: s })}
+      />
+    );
+  const section = (title: string, list: Order[], closed = false) => (
+    <section className={closed ? "ocSection closed" : "ocSection"}>
+      <h2>
+        {title}
+        <span>{list.length}</span>
+      </h2>
+      {list.length === 0 && <p className="ocEmpty">No matching orders.</p>}
+      {list.map((o) => (
+        <button className="ocOrder" key={o.id} onClick={() => void details(o)}>
+          {o.overdue_unpaid && (
+            <em>
+              UNPAID FROM{" "}
+              {new Intl.DateTimeFormat("en-US", {
+                timeZone: tz,
+                month: "short",
+                day: "numeric",
+              }).format(new Date(o.created_at))}
+            </em>
+          )}
+          <strong>#{o.display_number}</strong>
+          <b>{label(o.service_type)}</b>
+          <span className="customer">
+            {o.customer_name}{o.customer_phone ? ` · ${o.customer_phone}` : ""}
+          </span>
+          {o.delivery_address && (
+            <small className="address">
+              {o.delivery_address}
+              {o.delivery_unit ? ` · ${o.delivery_unit}` : ""}
+            </small>
+          )}
+          <span>{o.voided_at ? "VOIDED" : label(o.status)}</span>
+          <span className="payment">
+            {label(o.payment_status)} · {money(o.amount_due_cents)} DUE
+          </span>
+          <time>
+            {new Intl.DateTimeFormat("en-US", {
+              timeZone: tz,
+              hour: "numeric",
+              minute: "2-digit",
+            }).format(new Date(o.created_at))}
+          </time>
+          {o.scheduled_for && (
+            <em>
+              FOR{" "}
+              {new Intl.DateTimeFormat("en-US", {
+                timeZone: tz,
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              }).format(new Date(o.scheduled_for))}
+            </em>
+          )}
+          <small className="source">
+            {label(o.order_origin || o.source)} → {label(o.service_type)}
+          </small>
+        </button>
+      ))}
+    </section>
+  );
+  return (
+    <main className="ocPage">
+      <header>
+        <div>
+          <h1>Orders</h1>
+        </div>
+        <nav>
+          <button
+            onClick={() => setView("date")}
+            className={view === "date" ? "active" : ""}
+          >
+            TODAY / DATE
+          </button>
+          <button
+            onClick={() => setView("open")}
+            className={view === "open" ? "active" : ""}
+          >
+            ALL OPEN
+          </button>
+        </nav>
+      </header>
+      <div className="ocTools">
+        <button onClick={() => move(-1)}>‹</button>
+        <button
+          onClick={() => {
+            setDate(isoDate(new Date()));
+            setView("date");
+          }}
+        >
+          TODAY
+        </button>
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => {
+            setDate(e.target.value);
+            setView("date");
+          }}
+        />
+        <button onClick={() => move(1)}>›</button>
+        <input
+          className="search"
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Order, customer, phone, address"
+        />
+      </div>
+      {error && !selected && <p role="alert">{error}</p>}
+      {view === "date" &&
+        date === isoDate(new Date()) &&
+        section("OVERDUE UNPAID", overdue)}
+      {section(
+        view === "date" ? "TODAY OPEN / UNPAID" : "ALL OPEN / UNPAID",
+        open,
+      )}
+      {view === "date" && section("TODAY PAID / CLOSED", paid, true)}
+      {selected && (
+        <div
+          className="ocBackdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !voiding) {
+              setSelected(null);
+              setError("");
+            }
+          }}
+        >
+          <section className="ocDetail" role="dialog" aria-modal="true">
+            <header>
+              <h2>Order #{selected.display_number}</h2>
+              <button
+                disabled={voidBusy}
+                onClick={() => {
+                  setSelected(null);
+                  setVoiding(false);
+                  setVoidReason("");
+                  setError("");
+                }}
+              >
+                Close
+              </button>
+            </header>
+            {error && (
+              <p className="ocDialogError" role="alert">
+                {error}
+              </p>
+            )}
+            {selected.voided_at && (
+              <strong>VOIDED · {selected.void_reason}</strong>
+            )}
+            <p>
+              <b>{selected.customer_name}</b> ·{" "}
+              {selected.customer_phone || "No phone"}
+            </p>
+            <p>
+              {label(selected.order_origin || selected.source)} ·{" "}
+              {label(selected.service_type)} ·{" "}
+              {selected.voided_at ? "VOIDED" : label(selected.status)} ·{" "}
+              {label(selected.payment_status)}
+            </p>
+            {selected.delivery_address && (
+              <p>
+                {selected.delivery_address} {selected.delivery_unit}
+              </p>
+            )}
+            <h3>Items</h3>
+            {(selected.items || []).map((i: any) => (
+              <article key={i.id}>
+                <b>
+                  {Math.max(
+                    0,
+                    Number(i.quantity) - Number(i.cancelled_quantity || 0),
+                  )}
+                  × {i.variant_name_snapshot
+                    ? `${i.variant_name_snapshot} ${i.item_name_snapshot}`
+                    : i.item_name_snapshot}
+                </b>
+                {Number(i.cancelled_quantity || 0) > 0 && (
+                  <small className="cancelledLine">
+                    {i.cancelled_quantity} cancelled
+                  </small>
+                )}
+                {session.session?.posRole !== "employee" &&
+                  Number(i.cancelled_quantity || 0) < Number(i.quantity) && (
+                    <button
+                      className="cancelLine"
+                      onClick={() => setCancelItem(i)}
+                    >
+                      CANCEL ITEM
+                    </button>
+                  )}
+                {(i.modifiers || [])
+                  .filter((m: any) => m.print_on_ticket !== false)
+                  .map((m: any) => (
+                    <small key={m.id}>
+                      {m.selection_state === "removed"
+                        ? "NO "
+                        : m.amount !== "normal"
+                          ? `${m.amount.toUpperCase()} `
+                          : ""}
+                      {m.option_name_snapshot}
+                    </small>
+                  ))}
+              </article>
+            ))}
+            {cancelItem && selected && (
+              <ItemCancellationPanel
+                orderId={selected.id}
+                item={cancelItem}
+                onClose={() => setCancelItem(null)}
+                onDone={async () => {
+                  setCancelItem(null);
+                  await load();
+                  await details(selected);
+                }}
+              />
+            )}
+            <h3>History</h3>
+            {(selected.events || []).map((e: any, i) => (
+              <p key={i}>
+                <time>{new Date(e.created_at).toLocaleString()}</time> ·{" "}
+                {label(e.event_type)} · {e.actor_id}
+              </p>
+            ))}
+            {session.session?.posRole !== "employee" &&
+              [
+                "draft",
+                "sent_to_kitchen",
+                "in_progress",
+                "ready",
+                "completed",
+              ].includes(selected.status) &&
+              !selected.voided_at &&
+              (voiding ? (
+                <form
+                  className="ocVoidForm"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void voidOrder(selected);
+                  }}
+                >
+                  <label>
+                    Reason for{" "}
+                    {selected.status === "draft" ? "cancelling" : "voiding"}{" "}
+                    order #{selected.display_number}
+                    <textarea
+                      autoFocus
+                      maxLength={500}
+                      value={voidReason}
+                      onChange={(e) => setVoidReason(e.target.value)}
+                    />
+                  </label>
+                  <div>
+                    <button
+                      type="button"
+                      disabled={voidBusy}
+                      onClick={() => {
+                        setVoiding(false);
+                        setVoidReason("");
+                        setError("");
+                      }}
+                    >
+                      BACK
+                    </button>
+                    <button
+                      className="danger"
+                      disabled={voidBusy || voidReason.trim().length < 3}
+                    >
+                      {voidBusy
+                        ? "SAVING…"
+                        : selected.status === "draft"
+                          ? "CONFIRM CANCEL"
+                          : "CONFIRM VOID"}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button
+                  className="danger"
+                  onClick={() => {
+                    setError("");
+                    setVoiding(true);
+                  }}
+                >
+                  {selected.status === "draft" ? "CANCEL ORDER" : "VOID ORDER"}
+                </button>
+              ))}
+            {session.session?.posRole === "employee" &&
+              [
+                "draft",
+                "sent_to_kitchen",
+                "in_progress",
+                "ready",
+                "completed",
+              ].includes(selected.status) &&
+              !selected.voided_at && (
+                <strong className="locked">
+                  Manager or owner authorization is required to cancel or void
+                  this order.
+                </strong>
+              )}
+            {selected.status === "cancelled" && (
+              <strong className="locked">
+                Historical order — editing locked
+              </strong>
+            )}
+          </section>
+        </div>
+      )}
+    </main>
+  );
 }

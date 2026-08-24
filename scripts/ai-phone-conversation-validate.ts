@@ -54,12 +54,17 @@ async function main(){
   assert.ok(jumbo[0].items[0].variants.some((variant:{name:string})=>variant.name.includes("Jumbo Thin")));
   const toppedJumbo=await menuCatalog("Corner Deli",new Date(),"jumbo pepperoni pizza onion");
   assert.equal(toppedJumbo[0]?.items[0]?.name,"Pizza","A topped jumbo pizza request must resolve in one search.");
-  const priced=await priceSpokenOrder({business:"Corner Deli",actor:{id:"validation",name:"Validation",type:"employee",role:"employee"},service:"pickup",callerPhone:"3155550100",firstName:"Chris",items:[{name:"Pizza",variant:"Jumbo Thin",quantity:1,modifiers:[{name:"Pepperoni"},{name:"Onions",portion:"left_half"}]},{name:"Wings",variant:"20 Wings",quantity:1,modifiers:[{name:"Mild"}]}]});
+  const priced=await priceSpokenOrder({business:"Corner Deli",actor:{id:"validation",name:"Validation",type:"employee",role:"employee"},service:"pickup",callerPhone:"3155550100",firstName:"Chris",items:[{name:"Pizza",variant:"Jumbo Thin",quantity:1,modifiers:[{name:"Pepperoni"},{name:"Onions",portion:"left_half"},{name:"Cheese"}]},{name:"Wings",variant:"20 Wings",quantity:1,modifiers:[{name:"Mild"}]}]});
   try{
     assert.equal(priced.lines.length,2,"Atomic pricing must create both order lines.");
     assert.ok(priced.total_cents>0,"Atomic pricing must return an authoritative total.");
     assert.ok(priced.lines.some((line:Record<string,any>)=>line.item_name_snapshot==="Pizza"&&line.variant_name_snapshot?.includes("Jumbo Thin")));
     assert.ok(priced.lines.some((line:Record<string,any>)=>line.item_name_snapshot==="Wings"&&line.variant_name_snapshot?.includes("20 Wings")));
+    assert.equal(priced.phone_snapshot,"3155550100","Caller ID must persist on the priced order.");
+    const pizzaLine=priced.lines.find((line:Record<string,any>)=>line.item_name_snapshot==="Pizza");
+    const pizzaModifiers=await getSql()`SELECT option_name_snapshot,selection_state,print_on_ticket FROM ordering_order_item_modifiers WHERE order_item_id=${pizzaLine.id}`;
+    assert.ok(pizzaModifiers.some((row:Record<string,any>)=>row.option_name_snapshot==="Extra Cheese"&&row.selection_state==="selected"),"Spoken cheese must persist as Extra Cheese on pizza.");
+    for(const defaultName of ["Regular Cooked","Classic Sauce"]){const row=pizzaModifiers.find((candidate:Record<string,any>)=>candidate.option_name_snapshot===defaultName);assert.ok(row&&row.selection_state==="selected"&&!row.print_on_ticket,`${defaultName} must remain selected and hidden by default.`)}
   }finally{await getSql()`DELETE FROM ordering_orders WHERE id=${priced.id}`}
   const schema=await getSql()`SELECT to_regclass('ordering_call_transcript_segments') transcript,to_regclass('ordering_ai_latency_samples') latency,to_regclass('ordering_ai_upsell_events') upsells,to_regclass('ordering_call_reviews') reviews`;
   assert.ok(schema[0].transcript&&schema[0].latency&&schema[0].upsells&&schema[0].reviews);

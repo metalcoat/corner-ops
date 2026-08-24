@@ -3244,7 +3244,7 @@ export default function PosClient({
             .map((call) => (
               <div key={call.id}>
                 <strong>AI ORDERING · LINE {call.line_number || "TEST"}</strong>
-                <span>{call.display_name || call.caller_phone || "Unknown caller"}</span>
+                <span>{call.display_name || "Unknown caller"}{call.caller_phone ? ` · ${call.caller_phone}` : ""}</span>
                 <span>{call.open_order_number ? `Order #${call.open_order_number}` : "Building order…"}</span>
                 {call.open_order_id && <div className="posAiOrderPreview">
                   <b>{(call.service_type || "order").replaceAll("_", " ").toUpperCase()}</b>

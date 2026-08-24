@@ -46,7 +46,7 @@ export async function getOrderDetail(business: OrderingBusiness, id: string) {
   await ensureOrderingAccountSchema();
   await ensureOrderingCustomerSchema();
   const sql = getSql();
-  const rows = await sql`SELECT o.*,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,a.formatted_address delivery_address,a.line2 delivery_unit FROM ordering_orders o LEFT JOIN ordering_order_delivery_addresses a ON a.order_id=o.id WHERE o.business=${business} AND o.id=${id} LIMIT 1`;
+  const rows = await sql`SELECT o.*,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,COALESCE(NULLIF(o.phone_snapshot,''),o.caller_phone) customer_phone,a.formatted_address delivery_address,a.line2 delivery_unit FROM ordering_orders o LEFT JOIN ordering_order_delivery_addresses a ON a.order_id=o.id WHERE o.business=${business} AND o.id=${id} LIMIT 1`;
   if (!rows[0]) return null;
   const order = rows[0];
   order.items = await sql`SELECT * FROM ordering_order_items WHERE order_id=${id} ORDER BY sort_order,created_at`;
