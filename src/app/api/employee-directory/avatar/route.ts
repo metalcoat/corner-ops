@@ -1,5 +1,5 @@
 import { get } from "@/lib/storage";
-import { canAccessBusiness, getSession } from "@/lib/auth";
+import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { ownerEmployeeProfilePhoto } from "@/lib/employee-profile";
 import { apiError, unauthorized } from "@/lib/http";
 import type { Business } from "@/lib/types";
@@ -15,6 +15,7 @@ export async function GET(request: Request) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    requirePermission(session, "workforce.read");
     const url = new URL(request.url);
     const business = businessFrom(url.searchParams.get("business"));
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
