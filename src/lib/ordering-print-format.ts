@@ -48,7 +48,7 @@ export function formatKitchenLines(lines: PrintableLine[]): string[] {
   return output;
 }
 
-export async function snapshotAndFormatOrder(orderId: string): Promise<string[]> {
+export async function snapshotAndFormatOrder(orderId: string, onlyItemIds?: string[]): Promise<string[]> {
   await ensureOrderingMenuOverrideSchema();
   const sql = getSql();
   await sql`
@@ -65,7 +65,9 @@ export async function snapshotAndFormatOrder(orderId: string): Promise<string[]>
       header_modifier_snapshot=COALESCE((SELECT header_modifier FROM ordering_modifier_presentation_overrides WHERE item_id=(SELECT item_id FROM ordering_order_items WHERE id=modifier.order_item_id) AND group_id=modifier.group_id),FALSE)
     WHERE modifier.order_item_id IN (SELECT id FROM ordering_order_items WHERE order_id=${orderId})
   `;
-  const rows = await sql`SELECT line.id,line.quantity,line.item_name_snapshot,COALESCE(NULLIF(line.item_print_name_snapshot,''),line.item_name_snapshot) header,COALESCE(category.display_name,category.name,'') category_name FROM ordering_order_items line LEFT JOIN ordering_menu_items item ON item.id=line.item_id LEFT JOIN ordering_menu_categories category ON category.id=item.category_id WHERE line.order_id=${orderId} ORDER BY line.sort_order,line.created_at,line.id`;
+  const rows = onlyItemIds?.length
+    ? await sql`SELECT line.id,line.quantity,line.item_name_snapshot,COALESCE(NULLIF(line.item_print_name_snapshot,''),line.item_name_snapshot) header,COALESCE(category.display_name,category.name,'') category_name FROM ordering_order_items line LEFT JOIN ordering_menu_items item ON item.id=line.item_id LEFT JOIN ordering_menu_categories category ON category.id=item.category_id WHERE line.order_id=${orderId} AND line.id=ANY(${onlyItemIds}) ORDER BY line.sort_order,line.created_at,line.id`
+    : await sql`SELECT line.id,line.quantity,line.item_name_snapshot,COALESCE(NULLIF(line.item_print_name_snapshot,''),line.item_name_snapshot) header,COALESCE(category.display_name,category.name,'') category_name FROM ordering_order_items line LEFT JOIN ordering_menu_items item ON item.id=line.item_id LEFT JOIN ordering_menu_categories category ON category.id=item.category_id WHERE line.order_id=${orderId} ORDER BY line.sort_order,line.created_at,line.id`;
   const printable: PrintableLine[] = [];
   for (const row of rows) {
     const modifiers = await sql`SELECT COALESCE(NULLIF(option_print_name_snapshot,''),option_name_snapshot) name,group_name_snapshot,print_order_snapshot,header_modifier_snapshot,print_on_ticket FROM ordering_order_item_modifiers WHERE order_item_id=${row.id}`;

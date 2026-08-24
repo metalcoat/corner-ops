@@ -73,6 +73,7 @@ type SavedDraft = {
   promotions: Array<{ label: string; discountCents: number }>;
   orderItemIds: string[];
   loyalty: Array<{ label: string; discountCents: number }>;
+  reopened?: boolean;
 };
 type OpenTikiTab = {
   id: string;
@@ -488,6 +489,23 @@ export default function PosClient({
   const [checkoutError, setCheckoutError] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
   const [savedDraft, setSavedDraft] = useState<SavedDraft | null>(null);
+  useEffect(() => {
+    if (business !== "Corner Deli") return;
+    const load = () => {
+      try {
+        const raw = localStorage.getItem("corner-ops-reopened-order");
+        if (!raw) return;
+        const value = JSON.parse(raw);
+        setSavedDraft({ ...value, promotions: [], loyalty: [], reopened: true });
+        setServiceType(value.serviceType || "pickup");
+        setCart([]);
+        setCartNotice(`Order #${value.displayNumber} reopened. Add only the new items, then send the addition.`);
+      } catch { /* Ignore a damaged local handoff value. */ }
+    };
+    load();
+    window.addEventListener("corner-ops-order-reopened", load);
+    return () => window.removeEventListener("corner-ops-order-reopened", load);
+  }, [business]);
   const [quotedPromotions, setQuotedPromotions] = useState<
     Array<{ label: string; discountCents: number }>
   >([]);
@@ -1728,6 +1746,7 @@ export default function PosClient({
       );
       return null;
     }
+    const reopenedDraft = savedDraft?.reopened ? savedDraft : null;
     setSavingDraft(true);
     setCheckoutError("");
     setSavedDraft(null);
@@ -1774,7 +1793,7 @@ export default function PosClient({
         );
         return updated;
       }
-      const response = await fetch("/api/ordering/orders", {
+      const response = await fetch(reopenedDraft ? `/api/ordering/orders/${encodeURIComponent(reopenedDraft.id)}/additions` : "/api/ordering/orders", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1852,8 +1871,13 @@ export default function PosClient({
         })),
         orderItemIds: (payload.orderItems || []).map((row) => row.id),
         loyalty: [],
+        reopened: Boolean(reopenedDraft),
       };
       setSavedDraft(draft);
+      if (reopenedDraft) {
+        setCart([]);
+        setCartNotice(`Addition saved to order #${draft.displayNumber}. Send it when ready.`);
+      }
       if (business === "Tiki" && serviceType === "bar") {
         setActiveTab(draft);
         setActiveTabItems(
@@ -1940,14 +1964,14 @@ export default function PosClient({
     managerOverride = false,
   ) {
     if (submittingOrder) return;
-    if (business === "Corner Deli" && !customer) {
+    if (business === "Corner Deli" && !customer && !savedDraft?.reopened) {
       setCheckoutError(
         "Add the customer's name and phone number before sending this order.",
       );
       setCustomerOpen(true);
       return;
     }
-    if (business === "Corner Deli" && !selectedCustomerPhoneId) {
+    if (business === "Corner Deli" && !selectedCustomerPhoneId && !savedDraft?.reopened) {
       setCheckoutError("Choose a phone number before sending this order.");
       setCustomerOpen(true);
       return;
@@ -1955,7 +1979,7 @@ export default function PosClient({
     if (
       business === "Corner Deli" &&
       serviceType === "delivery" &&
-      !validatedAddress
+      !validatedAddress && !savedDraft?.reopened
     ) {
       setCheckoutError(
         "Enter and validate the delivery address before sending this order.",
@@ -2004,6 +2028,7 @@ export default function PosClient({
         totalCents: Number(payload.order.total_cents),
       });
       setCart([]);
+      localStorage.removeItem("corner-ops-reopened-order");
       setSavedDraft(null);
       setActiveTab(null);
       setActiveTabItems([]);

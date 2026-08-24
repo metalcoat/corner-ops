@@ -416,6 +416,11 @@ export async function recalculateOrder(orderId: string): Promise<void> {
     SET subtotal_cents = totals.subtotal_cents,
         total_cents = GREATEST(0, totals.subtotal_cents - discount_cents + tax_cents + tip_cents),
         amount_due_cents = GREATEST(0, totals.subtotal_cents - discount_cents + tax_cents + tip_cents - paid_cents),
+        payment_status = CASE
+          WHEN paid_cents <= 0 THEN 'unpaid'
+          WHEN paid_cents >= GREATEST(0, totals.subtotal_cents - discount_cents + tax_cents + tip_cents) THEN 'paid'
+          ELSE 'partially_paid'
+        END,
         version = version + 1,
         updated_at = NOW()
     FROM (

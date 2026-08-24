@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import PosPinGate, { type PosSessionView } from "../../pos-pin-gate";
 import ItemCancellationPanel from "./item-cancellation-panel";
 type Order = {
@@ -38,6 +39,7 @@ const money = (c: number) =>
   );
 const label = (v: string) => v.replaceAll("_", " ").toUpperCase();
 export default function OrderCenterClient() {
+  const router = useRouter();
   const [session, setSession] = useState<PosSessionView | null>(null),
     [date, setDate] = useState(isoDate(new Date())),
     [view, setView] = useState<"date" | "open">("date"),
@@ -48,6 +50,7 @@ export default function OrderCenterClient() {
     [voidReason, setVoidReason] = useState(""),
     [voiding, setVoiding] = useState(false),
     [voidBusy, setVoidBusy] = useState(false),
+    [reopenBusy, setReopenBusy] = useState(false),
     [cancelItem, setCancelItem] = useState<any>(null);
   useEffect(() => {
     fetch("/api/pos/session", { cache: "no-store" })
@@ -98,6 +101,21 @@ export default function OrderCenterClient() {
     const r = await fetch(`/api/ordering/order-center/${order.id}`);
     const b = await r.json();
     if (r.ok) setSelected(b.order);
+  }
+  async function reopen(order: Order) {
+    setReopenBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/ordering/order-center/${encodeURIComponent(order.id)}/reopen`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Could not reopen this order.");
+      localStorage.setItem("corner-ops-reopened-order", JSON.stringify({ id: order.id, displayNumber: order.display_number, totalCents: Number(body.order.total_cents), deliveryFeeCents: Number(body.order.delivery_fee_cents || 0), timingMessage: body.order.timing_message_snapshot || "", kitchenTimingLabel: body.order.kitchen_timing_label_snapshot || "", scheduledFor: body.order.scheduled_for, orderItemIds: body.orderItemIds || [], serviceType: body.order.service_type }));
+      setSelected(null);
+      router.push("/pos/deli");
+      window.dispatchEvent(new Event("corner-ops-order-reopened"));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not reopen this order.");
+    } finally { setReopenBusy(false); }
   }
   async function advance(order: Order) {
     const draft = order.status === "draft";
@@ -409,6 +427,9 @@ export default function OrderCenterClient() {
                 {label(e.event_type)} · {e.actor_id}
               </p>
             ))}
+            {["sent_to_kitchen", "in_progress", "ready", "completed"].includes(selected.status) && !selected.voided_at && (
+              <button disabled={reopenBusy} onClick={() => void reopen(selected)}>{reopenBusy ? "REOPENING…" : "REOPEN / ADD ITEMS"}</button>
+            )}
             {session.session?.posRole !== "employee" &&
               [
                 "draft",

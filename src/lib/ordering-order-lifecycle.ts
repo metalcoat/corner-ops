@@ -78,6 +78,22 @@ const transitions: Record<KitchenOrderStatus, readonly KitchenOrderStatus[]> = {
 
 export class OrderConflictError extends Error {}
 
+export async function reopenOrderForAdditions(orderId:string,business:OrderingBusiness,actor:OrderingActor){
+  await ensureOrderingPosSchema();
+  return withTransaction(async()=>{
+    const sql=getSql();
+    const rows=await sql`SELECT id,display_number,status,total_cents,paid_cents,amount_due_cents,service_type,timing_mode,scheduled_for,timing_message_snapshot,kitchen_timing_label_snapshot,delivery_fee_cents,version FROM ordering_orders WHERE id=${orderId} AND business=${business} FOR UPDATE`;
+    const order=rows[0];
+    if(!order)throw new OrderConflictError("Order was not found.");
+    if(order.status==="draft")throw new OrderConflictError("This order is already open for editing.");
+    if(!["sent_to_kitchen","in_progress","ready","completed"].includes(String(order.status)))throw new OrderConflictError("This order cannot be reopened.");
+    const existingItems=await sql`SELECT id FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`;
+    const updated=(await sql`UPDATE ordering_orders SET status='draft',locked_at=NULL,version=version+1,updated_at=NOW() WHERE id=${orderId} RETURNING *`)[0];
+    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${updated.version},'order_reopened_for_additions',${actor.type},${actor.id},${JSON.stringify({previousStatus:order.status,previousTotalCents:Number(order.total_cents),previousPaidCents:Number(order.paid_cents),existingItemIds:existingItems.map(row=>String(row.id)),actorName:actor.name})}::jsonb)`;
+    return{order:updated,orderItemIds:existingItems.map(row=>String(row.id))};
+  });
+}
+
 function number(value: unknown): number {
   return Number(value || 0);
 }
@@ -270,7 +286,13 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
       order.total_cents = Math.max(0, number(order.subtotal_cents)-number(order.discount_cents)+number(order.tax_cents)+number(order.tip_cents)+delivery.deliveryFeeCents);
     }
     await revalidateDraft(order);
-    const ticketLines = await snapshotAndFormatOrder(orderId);
+    const reopenRows=await sql`SELECT details FROM ordering_order_events WHERE order_id=${orderId} AND event_type='order_reopened_for_additions' AND NOT EXISTS(SELECT 1 FROM ordering_order_events later WHERE later.order_id=${orderId} AND later.event_type='order_addition_submitted' AND later.created_at>ordering_order_events.created_at) ORDER BY created_at DESC LIMIT 1`;
+    const reopenDetails=reopenRows[0]?.details as {existingItemIds?:string[];previousTotalCents?:number}|undefined;
+    const existingIds=new Set((reopenDetails?.existingItemIds||[]).map(String));
+    const currentIds=await sql`SELECT id FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`;
+    const addedItemIds=reopenDetails?currentIds.map(row=>String(row.id)).filter(id=>!existingIds.has(id)):[];
+    if(reopenDetails&&!addedItemIds.length)throw new OrderConflictError("Add at least one item before sending this order again.");
+    const ticketLines = await snapshotAndFormatOrder(orderId,reopenDetails?addedItemIds:undefined);
 
     const updated = await sql`
       UPDATE ordering_orders
@@ -290,12 +312,12 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
     `;
     await sql`
       INSERT INTO ordering_print_jobs (
-        id, business, order_id, purpose, event_subtype, status, actor_type, actor_id, error_message, payload
+        id, business, order_id, purpose, event_subtype, status, is_reprint, actor_type, actor_id, error_message, payload
       ) VALUES (
-        ${randomUUID()}, ${business}, ${orderId}, 'kitchen_production', 'initial_send', 'not_configured',
+        ${randomUUID()}, ${business}, ${orderId}, 'kitchen_production', ${reopenDetails ? "order_addition" : "initial_send"}, 'not_configured', ${Boolean(reopenDetails)},
         ${actor.type}, ${actor.id}, 'Kitchen printer not configured.',
         CAST(${JSON.stringify({
-          heading: "KITCHEN ORDER",
+          heading: reopenDetails ? "ORDER ADDITION" : "KITCHEN ORDER",
           orderNumber: String(order.display_number),
           customerName,
           phone: String(order.phone_snapshot || ""),
@@ -311,13 +333,14 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
             quotedLeadMaxMinutes: number(order.quoted_lead_max_minutes),
             snapshotLabel: order.kitchen_timing_label_snapshot,
           }),
-          paymentLabel: number(updated[0].amount_due_cents) <= 0 ? "PAID" : `AMOUNT DUE: $${(number(updated[0].amount_due_cents) / 100).toFixed(2)}`,
+          paymentLabel: reopenDetails ? `NEW ORDER TOTAL: $${(number(updated[0].total_cents)/100).toFixed(2)} · ${number(updated[0].amount_due_cents)<=0?"PAID":`AMOUNT DUE: $${(number(updated[0].amount_due_cents)/100).toFixed(2)}`}` : number(updated[0].amount_due_cents) <= 0 ? "PAID" : `AMOUNT DUE: $${(number(updated[0].amount_due_cents) / 100).toFixed(2)}`,
           cashier: actor.name,
           lines: ticketLines,
         })} AS jsonb)
       )
       ON CONFLICT DO NOTHING
     `;
+    if(reopenDetails)await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${updated[0].version},'order_addition_submitted',${actor.type},${actor.id},${JSON.stringify({addedItemIds,previousTotalCents:Number(reopenDetails.previousTotalCents||0),newTotalCents:Number(updated[0].total_cents),additionalAmountDueCents:Number(updated[0].amount_due_cents),actorName:actor.name})}::jsonb)`;
     return { order: updated[0], alreadySubmitted: false };
   });
 }
