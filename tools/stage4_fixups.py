@@ -3,14 +3,24 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# The compliance transformer intentionally uses strict matching, but two earlier generic regex
-# replacements lose their captures because its sub() helper emits replacement text literally.
-# Repair those generated sections deterministically before typecheck/build.
-
+# Repair two generated sections deterministically before typecheck/build.
 workforce = ROOT / 'src/app/api/workforce/route.ts'
 text = workforce.read_text()
-broken = r'\1\n        sendSms: body.sendSms === true,\n      }));'
-correct = '''    if (action === "message-send") {
+workforce_pattern = r'    if \(action === "week-copy"\) \{.*?    if \(action === "shift-request-review"\) \{'
+workforce_replacement = '''    if (action === "week-copy") {
+      try {
+        return Response.json(await copyScheduleWeekToTarget({
+          business,
+          sourceWeekStart: String(body.sourceWeekStart || ""),
+          targetWeekStart: String(body.targetWeekStart || ""),
+          actor: session.displayName,
+        }));
+      } catch (error) {
+        return actionError(error, "The schedule week could not be copied.");
+      }
+    }
+
+    if (action === "message-send") {
       return Response.json(await sendStaffNotification({
         business,
         recipientEmployeeId: body.recipientEmployeeId ? String(body.recipientEmployeeId) : null,
@@ -18,10 +28,13 @@ correct = '''    if (action === "message-send") {
         actor: session.displayName,
         sendSms: body.sendSms === true,
       }));
-    }'''
-if text.count(broken) != 1:
-    raise RuntimeError(f'workforce generated target expected once, found {text.count(broken)}')
-workforce.write_text(text.replace(broken, correct, 1))
+    }
+
+    if (action === "shift-request-review") {'''
+updated, count = re.subn(workforce_pattern, lambda _m: workforce_replacement, text, count=1, flags=re.S)
+if count != 1:
+    raise RuntimeError(f'workforce action block expected once, found {count}')
+workforce.write_text(updated)
 
 expense = ROOT / 'src/lib/expense-control.ts'
 text = expense.read_text()
