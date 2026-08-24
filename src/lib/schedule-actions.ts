@@ -1,4 +1,5 @@
 import { getSql } from "@/lib/db";
+import { ConflictError } from "@/lib/http";
 import { ensureScheduleMealSchema, normalizeScheduledMealFields } from "@/lib/schedule-meal-storage";
 import { normalizeScheduleTimeRange } from "@/lib/schedule-time-range";
 import { enforceScheduleTimeOff } from "@/lib/schedule-time-off";
@@ -22,6 +23,7 @@ export async function updateScheduleShiftSafely(input: {
   status?: "Draft" | "Published" | "Open" | "Cancelled";
   notes?: string;
   acknowledgePendingTimeOff?: boolean;
+  expectedUpdatedAt?: string | null;
 }) {
   await ensureScheduleMealSchema();
   const sql = getSql();
@@ -83,7 +85,10 @@ export async function updateScheduleShiftSafely(input: {
     });
   }
 
-  await sql`
+  const expectedUpdatedAt = input.expectedUpdatedAt
+    ? new Date(input.expectedUpdatedAt).toISOString()
+    : null;
+  const updated = await sql`
     UPDATE schedule_shifts SET
       employee_id = ${employeeId},
       position = ${clean(input.position ?? current.position, 100)},
@@ -101,8 +106,13 @@ export async function updateScheduleShiftSafely(input: {
         ELSE published_at
       END,
       updated_at = NOW()
-    WHERE id = ${input.id}
-  `;
+    WHERE id = ${input.id} AND business = ${input.business}
+      AND (${expectedUpdatedAt}::timestamptz IS NULL OR updated_at = ${expectedUpdatedAt}::timestamptz)
+    RETURNING id, updated_at
+  ` as unknown as Array<{ id: string; updated_at: string }>;
+  if (!updated[0]) {
+    throw new ConflictError("This shift changed after you opened it. Reload the schedule and apply your change again.");
+  }
 
-  return { id: input.id };
+  return { id: input.id, updatedAt: String(updated[0].updated_at) };
 }

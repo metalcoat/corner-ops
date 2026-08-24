@@ -167,6 +167,7 @@ function mapShift(row: Record<string, unknown>) {
     status: clean(row.status, 30),
     notes: clean(row.notes, 1000),
     publishedAt: row.published_at ? String(row.published_at) : null,
+    updatedAt: row.updated_at ? String(row.updated_at) : null,
   };
 }
 

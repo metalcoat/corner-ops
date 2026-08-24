@@ -12,7 +12,7 @@ import { legacySessionSecret, openApplicationSecret, sealApplicationSecret } fro
 import type { Business } from "@/lib/types";
 
 const P256_ORDER = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
-const PUSH_SUBJECT = process.env.PUSH_SUBJECT?.trim() || "mailto:crfrary@gmail.com";
+const PUSH_SUBJECT = process.env.PUSH_SUBJECT?.trim() || `mailto:${process.env.APP_EMAIL?.trim() || "admin@invalid.local"}`;
 const MAX_PAYLOAD_BYTES = 3000;
 const PUSH_CONCURRENCY = 6;
 let pushSchemaPromise: Promise<void> | null = null;
@@ -454,6 +454,24 @@ export async function notifyRecipientsOfEmployeeMessage(input: {
     delivered: ownerResult.delivered + employeeResult.delivered,
     failed: ownerResult.failed + employeeResult.failed,
   };
+}
+
+export async function notifyOwnersOfOperationalPush(input: {
+  business: Business;
+  title: string;
+  body: string;
+  url: string;
+  tag: string;
+}) {
+  const subscriptions = await ownerSubscriptions(input.business);
+  return deliver(subscriptions, {
+    title: clean(input.title, 180),
+    body: clean(input.body, 500),
+    url: clean(input.url, 1000),
+    tag: clean(input.tag, 180),
+    category: "overtime",
+    business: input.business,
+  });
 }
 
 export async function sendTestPush(actor: PushActor) {

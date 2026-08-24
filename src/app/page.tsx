@@ -318,8 +318,8 @@ export default function Home() {
           )}
 
           <div className="filters">
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, category, filename, or notes" />
-            <select value={status} onChange={(event) => setStatus(event.target.value as "All" | DocumentStatus)}>
+            <input aria-label="Search documents" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, category, filename, or notes" />
+            <select aria-label="Filter documents by status" value={status} onChange={(event) => setStatus(event.target.value as "All" | DocumentStatus)}>
               <option>All</option>{documentStatuses.map((name) => <option key={name}>{name}</option>)}
             </select>
           </div>
