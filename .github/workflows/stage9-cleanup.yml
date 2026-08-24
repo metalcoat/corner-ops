@@ -10,12 +10,21 @@ on:
       - tools/stage9_metrics.py
       - tools/stage9_reconciliation.py
       - .github/workflows/stage9-cleanup.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/stage9_cleanup.py
+      - tools/stage9_finalize.py
+      - tools/stage9_css_tokens.mjs
+      - tools/stage9_metrics.py
+      - tools/stage9_reconciliation.py
+      - .github/workflows/stage9-cleanup.yml
 
 permissions:
   contents: write
 
 concurrency:
-  group: corner-ops-stage9-cleanup
+  group: corner-ops-stage9-cleanup-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -81,6 +90,7 @@ jobs:
           npm run typecheck
           npm run build
       - name: Commit clean verified product pass
+        if: github.event_name == 'push'
         shell: bash
         run: |
           set -euo pipefail
