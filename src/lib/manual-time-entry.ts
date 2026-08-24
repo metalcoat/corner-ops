@@ -19,22 +19,6 @@ async function ensureManualTimeAuditSchema() {
     auditSchemaPromise = (async () => {
       await ensureSchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS manual_time_entry_audit (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          source_type TEXT NOT NULL CHECK (source_type IN ('Corner Ops', 'Rezku')),
-          source_id UUID NOT NULL,
-          employee_id UUID NOT NULL REFERENCES employees(id),
-          employee_name TEXT NOT NULL,
-          action TEXT NOT NULL DEFAULT 'Manager Added',
-          actor TEXT NOT NULL,
-          details JSONB NOT NULL DEFAULT '{}'::jsonb,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS manual_time_entry_audit_business_created_idx ON manual_time_entry_audit (business, created_at DESC)`;
-      await sql`CREATE INDEX IF NOT EXISTS manual_time_entry_audit_employee_idx ON manual_time_entry_audit (employee_id, created_at DESC)`;
     })().catch((error) => {
       auditSchemaPromise = null;
       throw error;

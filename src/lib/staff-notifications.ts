@@ -174,35 +174,6 @@ export function ensureStaffNotificationSchema(): Promise<void> {
       await ensureScheduleMealSchema();
       await ensureEmployeeDirectorySchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS schedule_publications (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          week_start DATE NOT NULL,
-          week_end DATE NOT NULL,
-          published_by TEXT NOT NULL,
-          shift_count INTEGER NOT NULL DEFAULT 0,
-          active_employee_count INTEGER NOT NULL DEFAULT 0,
-          email_sent_count INTEGER NOT NULL DEFAULT 0,
-          email_missing_count INTEGER NOT NULL DEFAULT 0,
-          email_failed_count INTEGER NOT NULL DEFAULT 0,
-          email_configured BOOLEAN NOT NULL DEFAULT FALSE,
-          sms_sent_count INTEGER NOT NULL DEFAULT 0,
-          sms_missing_count INTEGER NOT NULL DEFAULT 0,
-          sms_failed_count INTEGER NOT NULL DEFAULT 0,
-          sms_configured BOOLEAN NOT NULL DEFAULT FALSE,
-          details JSONB NOT NULL DEFAULT '{}'::jsonb,
-          published_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`ALTER TABLE schedule_publications ADD COLUMN IF NOT EXISTS sms_sent_count INTEGER NOT NULL DEFAULT 0`;
-      await sql`ALTER TABLE schedule_publications ADD COLUMN IF NOT EXISTS sms_missing_count INTEGER NOT NULL DEFAULT 0`;
-      await sql`ALTER TABLE schedule_publications ADD COLUMN IF NOT EXISTS sms_failed_count INTEGER NOT NULL DEFAULT 0`;
-      await sql`ALTER TABLE schedule_publications ADD COLUMN IF NOT EXISTS sms_configured BOOLEAN NOT NULL DEFAULT FALSE`;
-      await sql`
-        CREATE INDEX IF NOT EXISTS schedule_publications_business_week_idx
-        ON schedule_publications (business, week_start, published_at DESC)
-      `;
     })().catch((error) => {
       notificationSchemaPromise = null;
       throw error;

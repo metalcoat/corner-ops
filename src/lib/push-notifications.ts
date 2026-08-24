@@ -180,47 +180,6 @@ export async function ensurePushSchema(): Promise<void> {
     pushSchemaPromise = (async () => {
       await ensureSchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS push_subscriptions (
-          id UUID PRIMARY KEY,
-          endpoint TEXT NOT NULL UNIQUE,
-          audience_type TEXT NOT NULL CHECK (audience_type IN ('owner', 'employee')),
-          owner_email TEXT NOT NULL DEFAULT '',
-          employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
-          business TEXT CHECK (business IN ('Corner Deli', 'Tiki')),
-          p256dh TEXT NOT NULL,
-          auth TEXT NOT NULL,
-          expiration_time BIGINT,
-          user_agent TEXT NOT NULL DEFAULT '',
-          device_label TEXT NOT NULL DEFAULT '',
-          active BOOLEAN NOT NULL DEFAULT TRUE,
-          failure_count INTEGER NOT NULL DEFAULT 0,
-          last_error TEXT NOT NULL DEFAULT '',
-          last_used_at TIMESTAMPTZ,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          CHECK (
-            (audience_type = 'owner' AND owner_email <> '' AND employee_id IS NULL)
-            OR (audience_type = 'employee' AND employee_id IS NOT NULL AND business IS NOT NULL)
-          )
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS push_subscriptions_employee_idx ON push_subscriptions (business, employee_id, active)`;
-      await sql`CREATE INDEX IF NOT EXISTS push_subscriptions_owner_idx ON push_subscriptions (owner_email, active)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS push_delivery_log (
-          id UUID PRIMARY KEY,
-          subscription_id UUID REFERENCES push_subscriptions(id) ON DELETE SET NULL,
-          category TEXT NOT NULL DEFAULT 'message',
-          title TEXT NOT NULL,
-          destination_url TEXT NOT NULL DEFAULT '',
-          status TEXT NOT NULL CHECK (status IN ('Delivered', 'Failed', 'Expired')),
-          response_status INTEGER,
-          error TEXT NOT NULL DEFAULT '',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS push_delivery_log_created_idx ON push_delivery_log (created_at DESC)`;
     })().catch((error) => {
       pushSchemaPromise = null;
       throw error;

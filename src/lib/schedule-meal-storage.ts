@@ -16,10 +16,6 @@ export function ensureScheduleMealSchema(): Promise<void> {
     mealSchemaPromise = (async () => {
       await ensureWorkforceSchema();
       const sql = getSql();
-      await sql`ALTER TABLE schedule_shifts ADD COLUMN IF NOT EXISTS meal_break_start TIMESTAMPTZ`;
-      await sql`ALTER TABLE schedule_shifts ADD COLUMN IF NOT EXISTS meal_break_minutes INTEGER NOT NULL DEFAULT 0`;
-      await sql`ALTER TABLE schedule_shifts ADD COLUMN IF NOT EXISTS extra_meal_break_start TIMESTAMPTZ`;
-      await sql`ALTER TABLE schedule_shifts ADD COLUMN IF NOT EXISTS extra_meal_break_minutes INTEGER NOT NULL DEFAULT 0`;
     })().catch((error) => {
       mealSchemaPromise = null;
       throw error;

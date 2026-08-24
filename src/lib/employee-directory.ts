@@ -31,10 +31,6 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
       await ensureSchema();
       const sql = getSql();
 
-      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS sms_opt_in BOOLEAN NOT NULL DEFAULT FALSE`;
-      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin_enabled BOOLEAN NOT NULL DEFAULT TRUE`;
       await sql`
         CREATE UNIQUE INDEX IF NOT EXISTS employees_business_email_unique
         ON employees (business, LOWER(email))
@@ -64,25 +60,6 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
         $$
       `;
 
-      await sql`
-        DO $$
-        BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_trigger
-            WHERE tgname = 'rezku_employee_alias_normalization'
-              AND tgrelid = 'rezku_shifts'::regclass
-              AND NOT tgisinternal
-          ) THEN
-            CREATE TRIGGER rezku_employee_alias_normalization
-            BEFORE INSERT OR UPDATE OF employee_name
-            ON rezku_shifts
-            FOR EACH ROW
-            EXECUTE FUNCTION corner_ops_prepare_rezku_employee();
-          END IF;
-        EXCEPTION WHEN duplicate_object THEN NULL;
-        END;
-        $$
-      `;
 
       await sql`
         CREATE OR REPLACE FUNCTION corner_ops_sync_rezku_employee()
@@ -135,25 +112,6 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
         $$
       `;
 
-      await sql`
-        DO $$
-        BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_trigger
-            WHERE tgname = 'rezku_employee_directory_sync'
-              AND tgrelid = 'rezku_shifts'::regclass
-              AND NOT tgisinternal
-          ) THEN
-            CREATE TRIGGER rezku_employee_directory_sync
-            AFTER INSERT OR UPDATE OF employee_name, position, role_group
-            ON rezku_shifts
-            FOR EACH ROW
-            EXECUTE FUNCTION corner_ops_sync_rezku_employee();
-          END IF;
-        EXCEPTION WHEN duplicate_object THEN NULL;
-        END;
-        $$
-      `;
 
       await sql`
         DELETE FROM rezku_shifts

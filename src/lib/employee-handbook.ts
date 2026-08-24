@@ -48,22 +48,7 @@ export function ensureEmployeeHandbookSchema(): Promise<void> {
   if (!handbookSchemaPromise) {
     handbookSchemaPromise = (async () => {
       await ensureSchema();
-      await getSql()`
-        CREATE TABLE IF NOT EXISTS employee_handbook_acknowledgments (
-          id UUID PRIMARY KEY,
-          employee_id UUID NOT NULL REFERENCES employees(id),
-          employee_name TEXT NOT NULL,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          handbook_version TEXT NOT NULL,
-          content_hash TEXT NOT NULL,
-          signature_name TEXT NOT NULL,
-          ip_address TEXT NOT NULL DEFAULT '',
-          user_agent TEXT NOT NULL DEFAULT '',
-          acknowledged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        )
-      `;
       await getSql()`CREATE UNIQUE INDEX IF NOT EXISTS employee_handbook_ack_employee_hash_unique ON employee_handbook_acknowledgments (employee_id, handbook_version, content_hash)`;
-      await getSql()`CREATE INDEX IF NOT EXISTS employee_handbook_ack_business_idx ON employee_handbook_acknowledgments (business, handbook_version, content_hash, acknowledged_at DESC)`;
     })().catch((error) => {
       handbookSchemaPromise = null;
       throw error;

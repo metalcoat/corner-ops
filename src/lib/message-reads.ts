@@ -11,30 +11,6 @@ export function ensureMessageReadSchema(): Promise<void> {
     readSchemaPromise = (async () => {
       await Promise.all([ensureMessageAttachmentSchema(), ensureEmployeeProfileSchema()]);
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS employee_message_reads (
-          message_id UUID NOT NULL REFERENCES employee_messages(id) ON DELETE CASCADE,
-          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-          read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          PRIMARY KEY (message_id, employee_id)
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS employee_message_reads_employee_idx ON employee_message_reads (employee_id, read_at DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS owner_message_reads (
-          message_id UUID NOT NULL REFERENCES employee_messages(id) ON DELETE CASCADE,
-          reader_email TEXT NOT NULL,
-          read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          PRIMARY KEY (message_id, reader_email)
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS owner_message_reads_reader_idx ON owner_message_reads (reader_email, read_at DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS owner_message_notification_state (
-          reader_email TEXT PRIMARY KEY,
-          started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
     })().catch((error) => {
       readSchemaPromise = null;
       throw error;

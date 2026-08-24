@@ -126,66 +126,6 @@ export function ensureReceivablesSchema(): Promise<void> {
           (gen_random_uuid(), 'Tiki', '4200', 'Rental Income', 'Revenue')
         ON CONFLICT (business, code) DO NOTHING
       `;
-      await sql`
-        CREATE TABLE IF NOT EXISTS recurring_invoice_templates (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          name TEXT NOT NULL,
-          customer_name TEXT NOT NULL,
-          description TEXT NOT NULL DEFAULT '',
-          amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
-          revenue_account_code TEXT NOT NULL,
-          cadence TEXT NOT NULL CHECK (cadence IN ('Monthly', 'Quarterly', 'Annual')),
-          due_days INTEGER NOT NULL DEFAULT 0 CHECK (due_days BETWEEN 0 AND 365),
-          next_issue_date DATE NOT NULL,
-          label_template TEXT NOT NULL DEFAULT '{period}',
-          active BOOLEAN NOT NULL DEFAULT TRUE,
-          created_by TEXT NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS recurring_invoice_templates_due_idx ON recurring_invoice_templates (business, active, next_issue_date)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS invoices (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          template_id UUID NOT NULL REFERENCES recurring_invoice_templates(id) ON DELETE RESTRICT,
-          invoice_number TEXT NOT NULL,
-          customer_name TEXT NOT NULL,
-          invoice_date DATE NOT NULL,
-          due_date DATE NOT NULL,
-          period_key TEXT NOT NULL,
-          period_label TEXT NOT NULL,
-          description TEXT NOT NULL DEFAULT '',
-          amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
-          amount_paid NUMERIC(14,2) NOT NULL DEFAULT 0,
-          balance NUMERIC(14,2) NOT NULL CHECK (balance >= 0),
-          status TEXT NOT NULL DEFAULT 'Open' CHECK (status IN ('Open', 'Partially Paid', 'Paid', 'Void')),
-          revenue_account_code TEXT NOT NULL,
-          journal_entry_id UUID REFERENCES journal_entries(id) ON DELETE SET NULL,
-          created_by TEXT NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          UNIQUE (business, invoice_number),
-          UNIQUE (template_id, period_key)
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS invoices_business_status_idx ON invoices (business, status, due_date, invoice_date DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS invoice_payment_allocations (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE RESTRICT,
-          bank_transaction_id UUID NOT NULL REFERENCES bank_transactions(id) ON DELETE RESTRICT,
-          amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
-          created_by TEXT NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          UNIQUE (invoice_id, bank_transaction_id)
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS invoice_payment_allocations_transaction_idx ON invoice_payment_allocations (bank_transaction_id)`;
-      await sql`ALTER TABLE bank_transaction_splits ADD COLUMN IF NOT EXISTS invoice_id UUID`;
     })().catch((error) => {
       receivablesSchemaPromise = null;
       throw error;

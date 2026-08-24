@@ -14,11 +14,6 @@ export function ensureMessageAttachmentSchema(): Promise<void> {
     messageAttachmentSchemaPromise = (async () => {
       await ensureWorkforceSchema();
       const sql = getSql();
-      await sql`ALTER TABLE employee_messages ADD COLUMN IF NOT EXISTS attachment_url TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employee_messages ADD COLUMN IF NOT EXISTS attachment_pathname TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employee_messages ADD COLUMN IF NOT EXISTS attachment_name TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employee_messages ADD COLUMN IF NOT EXISTS attachment_type TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employee_messages ADD COLUMN IF NOT EXISTS attachment_size BIGINT NOT NULL DEFAULT 0`;
     })().catch((error) => {
       messageAttachmentSchemaPromise = null;
       throw error;

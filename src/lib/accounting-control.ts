@@ -46,107 +46,12 @@ export async function ensureAccountingControlSchema(): Promise<void> {
   await ensureIntegrationSchema();
   const sql = getSql();
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS square_orders (
-      id UUID PRIMARY KEY,
-      connection_id UUID NOT NULL REFERENCES integration_connections(id) ON DELETE CASCADE,
-      external_order_id TEXT NOT NULL UNIQUE,
-      location_id TEXT NOT NULL DEFAULT '',
-      state TEXT NOT NULL DEFAULT '',
-      source_name TEXT NOT NULL DEFAULT '',
-      created_at_square TIMESTAMPTZ,
-      updated_at_square TIMESTAMPTZ,
-      closed_at_square TIMESTAMPTZ,
-      total_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
-      tax_total NUMERIC(14,2) NOT NULL DEFAULT 0,
-      tip_total NUMERIC(14,2) NOT NULL DEFAULT 0,
-      raw JSONB NOT NULL DEFAULT '{}'::jsonb,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS bank_transaction_splits (
-      id UUID PRIMARY KEY,
-      bank_transaction_id UUID NOT NULL REFERENCES bank_transactions(id) ON DELETE CASCADE,
-      line_number INTEGER NOT NULL,
-      account_code TEXT NOT NULL,
-      amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
-      memo TEXT NOT NULL DEFAULT '',
-      created_by TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE (bank_transaction_id, line_number)
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS bank_transaction_splits_transaction_idx ON bank_transaction_splits (bank_transaction_id)`;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS bank_transaction_postings (
-      id UUID PRIMARY KEY,
-      bank_transaction_id UUID NOT NULL UNIQUE REFERENCES bank_transactions(id) ON DELETE RESTRICT,
-      journal_entry_id UUID NOT NULL UNIQUE REFERENCES journal_entries(id) ON DELETE RESTRICT,
-      posted_by TEXT NOT NULL,
-      posted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS bank_reconciliations (
-      id UUID PRIMARY KEY,
-      business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-      external_account_id TEXT NOT NULL,
-      statement_start_date DATE NOT NULL,
-      statement_end_date DATE NOT NULL,
-      statement_beginning_balance NUMERIC(14,2) NOT NULL,
-      statement_ending_balance NUMERIC(14,2) NOT NULL,
-      cleared_activity NUMERIC(14,2) NOT NULL DEFAULT 0,
-      difference NUMERIC(14,2) NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft', 'Finalized', 'Reopened')),
-      notes TEXT NOT NULL DEFAULT '',
-      created_by TEXT NOT NULL,
-      finalized_by TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      finalized_at TIMESTAMPTZ
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS bank_reconciliations_business_idx ON bank_reconciliations (business, statement_end_date DESC)`;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS bank_reconciliation_items (
-      reconciliation_id UUID NOT NULL REFERENCES bank_reconciliations(id) ON DELETE CASCADE,
-      bank_transaction_id UUID NOT NULL REFERENCES bank_transactions(id) ON DELETE RESTRICT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      PRIMARY KEY (reconciliation_id, bank_transaction_id)
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS bank_reconciliation_items_transaction_idx ON bank_reconciliation_items (bank_transaction_id)`;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS square_deposit_matches (
-      id UUID PRIMARY KEY,
-      bank_transaction_id UUID NOT NULL UNIQUE REFERENCES bank_transactions(id) ON DELETE CASCADE,
-      business TEXT NOT NULL DEFAULT 'Tiki' CHECK (business = 'Tiki'),
-      square_gross NUMERIC(14,2) NOT NULL DEFAULT 0,
-      square_fees NUMERIC(14,2) NOT NULL DEFAULT 0,
-      square_net NUMERIC(14,2) NOT NULL DEFAULT 0,
-      bank_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
-      variance NUMERIC(14,2) NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'Suggested' CHECK (status IN ('Suggested', 'Matched', 'Ignored')),
-      matched_by TEXT NOT NULL DEFAULT '',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      matched_at TIMESTAMPTZ
-    )
-  `;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS square_deposit_match_payments (
-      match_id UUID NOT NULL REFERENCES square_deposit_matches(id) ON DELETE CASCADE,
-      square_payment_id UUID NOT NULL UNIQUE REFERENCES square_payments(id) ON DELETE RESTRICT,
-      PRIMARY KEY (match_id, square_payment_id)
-    )
-  `;
 }
 
 async function accountId(business: Business, code: string): Promise<string> {

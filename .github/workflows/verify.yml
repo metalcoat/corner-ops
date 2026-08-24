@@ -29,6 +29,10 @@ jobs:
           echo "EMPLOYMENT_FORMS_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: npm ci
+      - name: Reject runtime schema DDL
+        run: python3 tools/verify_no_runtime_ddl.py
+      - name: Dependency security
+        run: python3 tools/verify_dependencies.py
       - name: Unit tests
         run: npm test
       - name: Type check

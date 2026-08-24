@@ -46,21 +46,6 @@ export function ensureCredentialResetSchema(): Promise<void> {
   if (!resetSchemaPromise) {
     resetSchemaPromise = (async () => {
       await ensureSchema();
-      await getSql()`
-        CREATE TABLE IF NOT EXISTS credential_reset_tokens (
-          id UUID PRIMARY KEY,
-          kind TEXT NOT NULL CHECK (kind IN ('app-password', 'employee-pin')),
-          subject_id UUID NOT NULL,
-          business TEXT CHECK (business IS NULL OR business IN ('Corner Deli', 'Tiki')),
-          email TEXT NOT NULL,
-          token_hash TEXT NOT NULL UNIQUE,
-          requested_ip TEXT NOT NULL DEFAULT '',
-          expires_at TIMESTAMPTZ NOT NULL,
-          used_at TIMESTAMPTZ,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await getSql()`CREATE INDEX IF NOT EXISTS credential_reset_active_idx ON credential_reset_tokens (kind, email, expires_at DESC) WHERE used_at IS NULL`;
     })().catch((error) => {
       resetSchemaPromise = null;
       throw error;

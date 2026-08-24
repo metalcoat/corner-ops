@@ -35,13 +35,6 @@ async function ensureAccountFilterTrigger(): Promise<void> {
     $$ LANGUAGE plpgsql
   `;
 
-  await sql`DROP TRIGGER IF EXISTS bank_transactions_active_account_filter ON bank_transactions`;
-  await sql`
-    CREATE TRIGGER bank_transactions_active_account_filter
-    BEFORE INSERT OR UPDATE ON bank_transactions
-    FOR EACH ROW
-    EXECUTE FUNCTION corner_ops_filter_inactive_bank_account()
-  `;
 }
 
 export async function GET(request: Request) {

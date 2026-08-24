@@ -75,45 +75,6 @@ export function ensureCardStatementSchema(): Promise<void> {
     statementSchemaPromise = (async () => {
       await ensureIntegrationSchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS credit_card_statements (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          issuer TEXT NOT NULL,
-          account_name TEXT NOT NULL DEFAULT '',
-          last_four TEXT NOT NULL DEFAULT '',
-          statement_end_date DATE NOT NULL,
-          statement_balance NUMERIC(14,2) NOT NULL DEFAULT 0,
-          payment_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
-          file_name TEXT NOT NULL,
-          content_type TEXT NOT NULL,
-          size_bytes BIGINT NOT NULL,
-          blob_url TEXT NOT NULL UNIQUE,
-          blob_pathname TEXT NOT NULL,
-          extraction_status TEXT NOT NULL CHECK (extraction_status IN ('Document Only', 'Extracted', 'No Rows')),
-          parsed_transaction_count INTEGER NOT NULL DEFAULT 0,
-          parsed_total NUMERIC(14,2) NOT NULL DEFAULT 0,
-          suggested_bank_transaction_id UUID REFERENCES bank_transactions(id) ON DELETE SET NULL,
-          matched_bank_transaction_id UUID REFERENCES bank_transactions(id) ON DELETE SET NULL,
-          match_status TEXT NOT NULL DEFAULT 'Unmatched' CHECK (match_status IN ('Unmatched', 'Suggested', 'Matched')),
-          created_by TEXT NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS credit_card_statements_business_date_idx ON credit_card_statements (business, statement_end_date DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS credit_card_statement_transactions (
-          id UUID PRIMARY KEY,
-          statement_id UUID NOT NULL REFERENCES credit_card_statements(id) ON DELETE CASCADE,
-          transaction_date DATE NOT NULL,
-          description TEXT NOT NULL,
-          amount NUMERIC(14,2) NOT NULL,
-          raw JSONB NOT NULL DEFAULT '{}'::jsonb,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS credit_card_statement_transactions_statement_idx ON credit_card_statement_transactions (statement_id, transaction_date)`;
     })().catch((error) => {
       statementSchemaPromise = null;
       throw error;

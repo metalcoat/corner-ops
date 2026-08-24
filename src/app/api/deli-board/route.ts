@@ -96,29 +96,6 @@ async function ensureBoardSchema() {
     boardSchemaPromise = (async () => {
       await ensureWorkforceSchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS deli_wallboard_tasks (
-          id UUID PRIMARY KEY,
-          title TEXT NOT NULL UNIQUE,
-          category TEXT NOT NULL DEFAULT 'Daily',
-          sort_order INTEGER NOT NULL DEFAULT 0,
-          active BOOLEAN NOT NULL DEFAULT TRUE,
-          created_by TEXT NOT NULL DEFAULT 'System',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`
-        CREATE TABLE IF NOT EXISTS deli_wallboard_task_checks (
-          task_id UUID NOT NULL REFERENCES deli_wallboard_tasks(id) ON DELETE CASCADE,
-          work_date DATE NOT NULL,
-          completed BOOLEAN NOT NULL DEFAULT TRUE,
-          completed_by TEXT NOT NULL DEFAULT '',
-          completed_at TIMESTAMPTZ,
-          PRIMARY KEY (task_id, work_date)
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS deli_wallboard_checks_date_idx ON deli_wallboard_task_checks (work_date, completed)`;
 
       for (let index = 0; index < DEFAULT_TASKS.length; index += 1) {
         const [category, title] = DEFAULT_TASKS[index];
