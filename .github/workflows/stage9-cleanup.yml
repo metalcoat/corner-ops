@@ -5,6 +5,7 @@ on:
     branches: [agent/codebase-review-stage-9]
     paths:
       - tools/stage9_cleanup.py
+      - tools/stage9_finalize.py
       - tools/stage9_css_tokens.mjs
       - tools/stage9_metrics.py
       - .github/workflows/stage9-cleanup.yml
@@ -45,12 +46,13 @@ jobs:
           echo "APP_PASSWORD=$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
           echo "DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder" >> "$GITHUB_ENV"
           echo "BLOB_READ_WRITE_TOKEN=vercel_blob_rw_placeholder" >> "$GITHUB_ENV"
-      - name: Apply and verify first cleanup pass
+      - name: Apply and verify final cleanup
         shell: bash
         run: |
           set -euo pipefail
           npm ci
           python3 tools/stage9_cleanup.py
+          python3 tools/stage9_finalize.py
           node tools/stage9_css_tokens.mjs
           python3 tools/stage9_metrics.py
 
@@ -63,6 +65,12 @@ jobs:
           grep -q '^## standalone_defs: 1$' .stage9-metrics.md
           grep -q '^## ios_defs: 1$' .stage9-metrics.md
           grep -q '^## install_prompt_types: 1$' .stage9-metrics.md
+          grep -q '^## money_defs: 0$' .stage9-metrics.md
+          grep -q '^## canvas_draws: 1$' .stage9-metrics.md
+          grep -q '^## legacy_square_crypto: 0$' .stage9-metrics.md
+          grep -q '^## module_call_feed_cache: 0$' .stage9-metrics.md
+          grep -q '^## window_fetch_assignment: 0$' .stage9-metrics.md
+          grep -q '^## old_publish_recovery: 0$' .stage9-metrics.md
 
           python3 tools/verify_no_runtime_ddl.py
           python3 tools/verify_dependencies.py
@@ -76,5 +84,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "Stage 9 consolidate client helpers and CSS tokens"
+          git commit -m "Stage 9 close residual codebase review findings"
           git push origin HEAD:agent/codebase-review-stage-9
