@@ -8,6 +8,7 @@ on:
       - tools/stage9_finalize.py
       - tools/stage9_css_tokens.mjs
       - tools/stage9_metrics.py
+      - tools/stage9_reconciliation.py
       - .github/workflows/stage9-cleanup.yml
 
 permissions:
@@ -72,17 +73,29 @@ jobs:
           grep -q '^## window_fetch_assignment: 0$' .stage9-metrics.md
           grep -q '^## old_publish_recovery: 0$' .stage9-metrics.md
 
+          python3 tools/stage9_reconciliation.py
           python3 tools/verify_no_runtime_ddl.py
           python3 tools/verify_dependencies.py
+          python3 tools/verify_review_regressions.py
           npm test
           npm run typecheck
           npm run build
-      - name: Commit verified pass
+      - name: Commit clean verified product pass
         shell: bash
         run: |
+          set -euo pipefail
+          rm -f \
+            tools/stage9_cleanup.py \
+            tools/stage9_finalize.py \
+            tools/stage9_css_tokens.mjs \
+            tools/stage9_metrics.py \
+            tools/stage9_reconciliation.py \
+            .stage9-metrics.md \
+            .github/workflows/stage9-cleanup.yml \
+            .github/workflows/stage9-metrics.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "Stage 9 close residual codebase review findings"
+          git commit -m "Stage 9 complete CODEBASEREVIEW remediation"
           git push origin HEAD:agent/codebase-review-stage-9
