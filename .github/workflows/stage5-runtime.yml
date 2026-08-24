@@ -6,6 +6,7 @@ on:
       - agent/codebase-review-stage-5-runtime
     paths:
       - tools/stage5_runtime.py
+      - tools/stage5_fixup.py
       - .github/workflows/stage5-runtime.yml
 
 permissions:
@@ -51,6 +52,7 @@ jobs:
           : > "$LOG"
           python3 tools/stage5_runtime.py >>"$LOG" 2>&1
           SCRIPT_RC=$?
+          if [ "$SCRIPT_RC" -eq 0 ]; then python3 tools/stage5_fixup.py >>"$LOG" 2>&1; SCRIPT_RC=$?; fi
           if [ "$SCRIPT_RC" -eq 0 ]; then npm ci >>"$LOG" 2>&1; INSTALL_RC=$?; else INSTALL_RC=99; fi
           if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ]; then npm test >>"$LOG" 2>&1; TEST_RC=$?; else TEST_RC=99; fi
           if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ]; then npm run typecheck >>"$LOG" 2>&1; TYPE_RC=$?; else TYPE_RC=99; fi
@@ -60,7 +62,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ] && [ "$TYPE_RC" -eq 0 ] && [ "$BUILD_RC" -eq 0 ]; then
-            rm -f tools/stage5_runtime.py .github/workflows/stage5-runtime.yml .stage5-runtime-status.md
+            rm -f tools/stage5_runtime.py tools/stage5_fixup.py .github/workflows/stage5-runtime.yml .stage5-runtime-status.md
             git add -A
             git diff --cached --check || exit 1
             git commit -m "Stage 5 fix residual runtime correctness and reliability"
