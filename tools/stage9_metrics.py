@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
+# Residual metrics are intentionally mechanical; Stage 9 fixes only what still exists on current main.
 
 code_files = [p for p in SRC.rglob("*") if p.suffix in {".ts", ".tsx", ".js", ".mjs"}]
 css_files = list(SRC.rglob("*.css"))
@@ -46,7 +47,6 @@ for p in css_files:
     hexes.update(x.lower() for x in hex_rx.findall(text))
     token_refs.update(token_ref_rx.findall(text))
     token_defs.update(token_def_rx.findall(text))
-    # Approximate selectors by text immediately before each block, excluding at-rules/keyframe steps.
     for m in re.finditer(r"(?:^|\})([^{}]+)\{", text, re.M):
         chunk = m.group(1).strip()
         if not chunk or chunk.startswith("@") or re.fullmatch(r"(?:from|to|\d+%)", chunk):
