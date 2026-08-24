@@ -7,12 +7,11 @@ const requiredVariables = [
 
 function isConfigured(name: (typeof requiredVariables)[number]): boolean {
   if (name === "BLOB_READ_WRITE_TOKEN") {
-    // New Blob connections on Vercel authenticate with short-lived OIDC
-    // credentials instead of exposing a long-lived read/write token.
+    // New Blob connections on Vercel may use short-lived OIDC credentials.
+    // The generic VERCEL marker alone does not prove Blob is connected.
     return Boolean(
       process.env.BLOB_READ_WRITE_TOKEN?.trim()
-      || process.env.VERCEL_OIDC_TOKEN?.trim()
-      || process.env.VERCEL,
+      || process.env.VERCEL_OIDC_TOKEN?.trim(),
     );
   }
 
