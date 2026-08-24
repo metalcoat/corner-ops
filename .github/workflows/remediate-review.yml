@@ -1,0 +1,61 @@
+name: Apply CODEBASEREVIEW remediation
+
+on:
+  push:
+    branches:
+      - agent/full-codebase-review-remediation
+    paths:
+      - tools/remediate_review.py
+      - .github/workflows/remediate-review.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: corner-ops-review-remediation
+  cancel-in-progress: false
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out remediation branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/full-codebase-review-remediation
+          fetch-depth: 0
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply deterministic source transformations
+        run: python3 tools/remediate_review.py
+      - name: Install dependencies
+        run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Type check
+        run: npm run typecheck
+      - name: Build application
+        run: npm run build
+        env:
+          SESSION_SECRET: github-actions-session-secret-with-more-than-64-bits-of-test-entropy
+          APP_EMAIL: owner@example.test
+          EMPLOYMENT_FORMS_ENCRYPTION_KEY: Y2ktb25seS0zMi1ieXRlLWVtcGxveW1lbnQta2V5ISE=
+          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+          BLOB_READ_WRITE_TOKEN: vercel_blob_rw_placeholder
+      - name: Commit transformed source
+        shell: bash
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No remediation changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git diff --cached --check
+          git commit -m "Stage 1 fix payroll and scheduling correctness"
+          git push origin HEAD:agent/full-codebase-review-remediation
