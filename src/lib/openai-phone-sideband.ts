@@ -71,7 +71,7 @@ export function startOpenAiSideband(callId:string,greeting:string,model:string){
     }else if(type==="response.output_audio.delta"){
       const responseId=String(row.response_id||"");if(responseId&&!firstAudio.has(responseId)){firstAudio.add(responseId);const delay=lastSpeechStoppedAt?Date.now()-lastSpeechStoppedAt:0;void latency(callId,lastTurnId,"speech_generation_start",delay,model);void event(callId,key,type,"assistant","AI started speaking","",delay)}
     }else if(type==="response.output_audio_transcript.done"){
-      const value=text(row.transcript);lastAssistantTranscript=value;if(/thanks for calling[—-]see you then!?$/i.test(value))hangupAfterPlayback=true;void transcript(callId,key,"assistant",value);void event(callId,key,type,"assistant","AI",value);
+      const value=text(row.transcript);lastAssistantTranscript=value;if(/thanks for calling[—-]see you then!?$/i.test(value)||/this line is only for corner deli orders and restaurant questions\. please call back if you need to place an order\. goodbye\.?$/i.test(value))hangupAfterPlayback=true;void transcript(callId,key,"assistant",value);void event(callId,key,type,"assistant","AI",value);
       if(customerTurnPending&&!toolUsedForTurn)void event(callId,`${key}:missing-tool`,"ordering.turn_without_tool","error","No ordering tool used after customer turn",value);
       customerTurnPending=false;
     }else if(type==="response.output_item.added"&&(row.item?.type==="mcp_call"||row.item?.type==="function_call")){toolUsedForTurn=true;void event(callId,key,type,"tool",`Using ${row.item.name||"ordering tool"}`)}
