@@ -1,11 +1,12 @@
 "use client";
 
+import { requestFailure } from "@/app/client-http";
 import { FormEvent, useState } from "react";
 import "../employee.css";
 
 async function message(response: Response): Promise<string> {
   const payload = await response.json().catch(() => null) as { error?: string; message?: string } | null;
-  return payload?.message || payload?.error || `Request failed (${response.status}).`;
+  return payload?.message || payload?.error || requestFailure(response);
 }
 
 export default function EmployeeForgotPinPage() {

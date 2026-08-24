@@ -1,5 +1,7 @@
 "use client";
 
+import { formatUsd } from "@/app/client-format";
+import { responseMessage } from "@/app/client-http";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Business } from "@/lib/types";
 import "./payroll-cost-banner.css";
@@ -49,14 +51,7 @@ function dateLabel(value: string): string {
   return new Date(`${value}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function money(value: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
-}
 
-async function errorMessage(response: Response): Promise<string> {
-  const body = await response.json().catch(() => null) as { error?: string } | null;
-  return body?.error || `Request failed (${response.status}).`;
-}
 
 function businessName(value: string | null | undefined): Business | null {
   const name = String(value || "").trim();
@@ -113,7 +108,7 @@ export default function PayrollCostBanner() {
     setNotice("");
     try {
       const response = await fetch(`/api/workforce/payroll-estimate?business=${encodeURIComponent(business)}&weekStart=${dateKey(weekStart)}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(await errorMessage(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       setEstimate(await response.json() as Estimate);
     } catch (error) {
       setEstimate(null);
@@ -149,9 +144,9 @@ export default function PayrollCostBanner() {
     {notice && <div className="payrollEstimateNotice">{notice}</div>}
     {estimate && <>
       <div className="payrollEstimateStats">
-        <article><span>Potential gross payroll</span><strong>{money(estimate.grossWages)}</strong><small>{estimate.employeeCount} scheduled employees</small></article>
+        <article><span>Potential gross payroll</span><strong>{formatUsd(estimate.grossWages)}</strong><small>{estimate.employeeCount} scheduled employees</small></article>
         <article><span>Paid hours</span><strong>{estimate.paidHours.toFixed(1)}</strong><small>{estimate.regularHours.toFixed(1)} regular · {estimate.overtimeHours.toFixed(1)} OT</small></article>
-        <article><span>{business === "Tiki" ? "Bartender tipped-rate work" : "Delivery-rate work"}</span><strong>{tippedHours.toFixed(1)} hrs</strong><small>{money(tippedWages)} at {business === "Tiki" ? "bartender tipped rates" : "delivery tipped rates"}</small></article>
+        <article><span>{business === "Tiki" ? "Bartender tipped-rate work" : "Delivery-rate work"}</span><strong>{tippedHours.toFixed(1)} hrs</strong><small>{formatUsd(tippedWages)} at {business === "Tiki" ? "bartender tipped rates" : "delivery tipped rates"}</small></article>
         <article><span>Schedule coverage</span><strong>{estimate.assignedShiftCount}/{estimate.shiftCount}</strong><small>{estimate.openShiftCount} open shift{estimate.openShiftCount === 1 ? "" : "s"}</small></article>
       </div>
       {(estimate.missingRateHours > 0 || estimate.openShiftCount > 0 || estimate.overtimeHours > 0) && <div className="payrollEstimateWarnings">

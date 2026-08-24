@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useState } from "react";
 import "../forms/forms.css";
 import "./handbook.css";
@@ -32,10 +33,6 @@ type Payload = {
   acknowledgment: Acknowledgment | null;
 };
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function dateTimeLabel(value: string) {
   const date = new Date(value);

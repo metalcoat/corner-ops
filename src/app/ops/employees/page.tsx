@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { CSSProperties, FormEvent, useEffect, useState } from "react";
 import { CORNER_DELI_POSITIONS } from "@/lib/business-positions";
 import { employeePinLabel, employeePinLength, employeePinPattern } from "@/lib/employee-pin";
@@ -27,10 +28,6 @@ type Employee = {
 type DirectoryData = { employees: Employee[] };
 type BulkPinResult = { updated: string[]; missing: string[]; requested: number; pinLength: number };
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function initials(value: string): string {
   return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";

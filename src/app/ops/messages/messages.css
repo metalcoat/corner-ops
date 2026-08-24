@@ -60,22 +60,22 @@
 }
 
 html[data-business-theme="Corner Deli"] .ownerMessageItem {
-  --message-business: #9a3412;
+  --message-business: var(--color-9a3412);
 }
 
 html[data-business-theme="Tiki"] .ownerMessageItem {
-  --message-business: #0f766e;
+  --message-business: var(--color-0f766e);
 }
 
 .ownerMessageItem {
-  --employee-color: #64748b;
-  --message-business: #334155;
+  --employee-color: var(--color-64748b);
+  --message-business: var(--color-334155);
   position: relative;
-  border: 2px solid #94a3b8;
+  border: 2px solid var(--color-94a3b8);
   border-left: 9px solid var(--message-business);
   border-radius: 12px;
-  background: #f8fafc;
-  color: #0f172a;
+  background: var(--color-f8fafc);
+  color: var(--color-0f172a);
   padding: 15px 16px;
   box-shadow: 0 8px 22px rgb(2 6 23 / 18%);
 }
@@ -86,7 +86,7 @@ html[data-business-theme="Tiki"] .ownerMessageItem {
   margin-bottom: 10px;
   border: 1px solid var(--message-business);
   border-radius: 5px;
-  background: #fff;
+  background: var(--color-ffffff);
   color: var(--message-business);
   padding: 3px 7px;
   font-size: .66rem;
@@ -107,7 +107,7 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 11px;
-  border-bottom: 1px solid #cbd5e1;
+  border-bottom: 1px solid var(--color-cbd5e1);
   padding-bottom: 11px;
 }
 
@@ -117,7 +117,7 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
 }
 
 .ownerMessageItem header strong {
-  color: #020617;
+  color: var(--color-020617);
   font-size: 1.02rem;
   font-weight: 950;
   line-height: 1.2;
@@ -128,11 +128,11 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
   place-items: center;
   width: 46px;
   height: 46px;
-  border: 3px solid #0f172a;
+  border: 3px solid var(--color-0f172a);
   border-radius: 50%;
   overflow: hidden;
-  background: color-mix(in srgb, var(--employee-color) 75%, #111827);
-  color: #fff;
+  background: color-mix(in srgb, var(--employee-color) 75%, var(--color-111827));
+  color: var(--color-ffffff);
   font-size: .7rem;
   font-weight: 950;
 }
@@ -147,7 +147,7 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
 .ownerMessageItem header span,
 .ownerMessageItem header small,
 .ownerMessageLegalName {
-  color: #334155 !important;
+  color: var(--color-334155) !important;
   font-size: .79rem;
   font-weight: 750;
 }
@@ -158,10 +158,10 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
 }
 
 .ownerMessageHeaderActions button {
-  border: 1px solid #b91c1c;
+  border: 1px solid var(--color-b91c1c);
   border-radius: 8px;
-  background: #fff;
-  color: #b91c1c;
+  background: var(--color-ffffff);
+  color: var(--color-b91c1c);
   padding: 5px 9px;
   font: inherit;
   font-size: .72rem;
@@ -170,7 +170,7 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
 }
 
 .ownerMessageHeaderActions button:hover {
-  background: #fee2e2;
+  background: var(--color-fee2e2);
 }
 
 .ownerMessageHeaderActions button:disabled {
@@ -180,10 +180,10 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
 
 .ownerMessageItem > p {
   margin: 13px 0 0;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--color-cbd5e1);
   border-radius: 9px;
-  background: #fff;
-  color: #0f172a;
+  background: var(--color-ffffff);
+  color: var(--color-0f172a);
   padding: 12px 13px;
   white-space: pre-wrap;
   font-size: 1rem;
@@ -196,7 +196,7 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
   gap: 7px;
   margin-top: 11px;
   text-decoration: none;
-  color: #0f172a;
+  color: var(--color-0f172a);
 }
 
 .ownerMessagePhoto img {
@@ -204,26 +204,26 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
   width: 100%;
   max-height: 420px;
   object-fit: contain;
-  border: 2px solid #64748b;
+  border: 2px solid var(--color-64748b);
   border-radius: 10px;
-  background: #020617;
+  background: var(--color-020617);
 }
 
 .ownerMessagePhoto span {
-  color: #0f172a;
+  color: var(--color-0f172a);
   font-weight: 900;
   text-decoration: underline;
 }
 
 .messageReadReceipt {
   margin-top: 12px;
-  border-top: 2px solid #cbd5e1;
+  border-top: 2px solid var(--color-cbd5e1);
   padding-top: 10px;
 }
 
 .messageReadReceipt summary {
   cursor: pointer;
-  color: #0f172a;
+  color: var(--color-0f172a);
   font-size: .84rem;
   font-weight: 950;
 }
@@ -239,14 +239,14 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
   display: grid;
   gap: 4px;
   padding: 10px;
-  border: 1px solid #94a3b8;
+  border: 1px solid var(--color-94a3b8);
   border-radius: 8px;
-  background: #e2e8f0;
-  color: #0f172a;
+  background: var(--color-e2e8f0);
+  color: var(--color-0f172a);
 }
 
 .messageReadReceipt section strong {
-  color: #020617;
+  color: var(--color-020617);
   font-size: .76rem;
   font-weight: 950;
   text-transform: uppercase;
@@ -255,14 +255,14 @@ html[data-business-theme="Tiki"] .ownerMessageItem::before {
 
 .messageReadReceipt section span {
   display: block;
-  color: #1e293b;
+  color: var(--color-1e293b);
   font-size: .8rem;
   font-weight: 700;
 }
 
 .messageReadReceipt p {
   margin: 0;
-  color: #334155;
+  color: var(--color-334155);
   font-size: .82rem;
 }
 

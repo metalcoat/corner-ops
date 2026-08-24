@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { useEffect, useMemo, useState } from "react";
 import type { SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -122,10 +123,6 @@ function dayLabel(value: string) {
   }).format(parsed);
 }
 
-async function responseError(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function PayrollTipAuditPage() {
   const [session, setSession] = useState<SessionView | null>(null);
@@ -141,7 +138,7 @@ export default function PayrollTipAuditPage() {
       cache: "no-store",
       headers: { "Cache-Control": "no-cache" },
     });
-    if (!response.ok) throw new Error(await responseError(response));
+    if (!response.ok) throw new Error(await responseMessage(response));
     setData(await response.json() as PayrollResponse);
   }
 
@@ -163,7 +160,7 @@ export default function PayrollTipAuditPage() {
     setNotice("Finding the original Rezku emails for this payroll week…");
     try {
       const monitorResponse = await fetch("/api/rezku-monitor", { cache: "no-store" });
-      if (!monitorResponse.ok) throw new Error(await responseError(monitorResponse));
+      if (!monitorResponse.ok) throw new Error(await responseMessage(monitorResponse));
       const monitor = await monitorResponse.json() as RezkuMonitorResponse;
       const weekEnd = plusDays(weekStart, 7);
       const emails = (monitor.emails || [])
@@ -182,7 +179,7 @@ export default function PayrollTipAuditPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ action: "retry-email", emailId: email.emailId }),
           });
-          if (!response.ok) throw new Error(await responseError(response));
+          if (!response.ok) throw new Error(await responseMessage(response));
           const result = await response.json() as RezkuRetryResponse;
           if (result.failures?.length) failures.push(`${email.reportDate}: ${result.failures.join("; ")}`);
         } catch (error) {

@@ -1,8 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import GlobalNav from "./global-nav";
 import PwaClient from "./pwa-client";
+import "./color-tokens.css";
 import "./globals.css";
-import "./operations.css";
 import "./business-theme.css";
 import "./pwa.css";
 

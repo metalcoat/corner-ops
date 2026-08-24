@@ -1,5 +1,8 @@
 "use client";
 
+import { canvasToJpegBlob, drawCanvasImage } from "@/app/client-image";
+import { firstName } from "@/app/client-text";
+import { responseMessage } from "@/app/client-http";
 import { ChangeEvent, CSSProperties, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import "./messages-dock.css";
 
@@ -58,10 +61,6 @@ const emptyStatus: MessageStatus = {
   preview: null,
 };
 
-async function responseMessage(response: Response): Promise<string> {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function local(value: string): string {
   return new Date(value).toLocaleString([], {
@@ -73,14 +72,6 @@ function local(value: string): string {
   });
 }
 
-function firstName(value: string | null): string {
-  const text = String(value || "").trim();
-  if (!text) return "Unknown";
-    const candidate = text.includes("@")
-    ? text.split("@")[0].split(/[._-]/)[0]
-    : text.split(/\s+/)[0];
-  return candidate.charAt(0).toUpperCase() + candidate.slice(1);
-}
 
 function initials(value: string): string {
   return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
@@ -113,14 +104,6 @@ function jpegName(fileName: string): string {
   return `${base}.jpg`;
 }
 
-async function canvasBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error("This photo could not be prepared for upload."));
-    }, "image/jpeg", quality);
-  });
-}
 
 async function prepareImageUpload(file: File): Promise<File> {
   if (file.size <= SAFE_FUNCTION_UPLOAD_BYTES) return file;
@@ -144,10 +127,10 @@ async function prepareImageUpload(file: File): Promise<File> {
       canvas.height = height;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("This browser could not prepare the photo.");
-      context.drawImage(image, 0, 0, width, height);
+      drawCanvasImage(context, image, null, { x: 0, y: 0, width, height });
 
       for (const quality of [0.84, 0.74, 0.64, 0.54]) {
-        const blob = await canvasBlob(canvas, quality);
+        const blob = await canvasToJpegBlob(canvas, quality, "This photo could not be prepared for upload.");
         if (blob.size <= SAFE_FUNCTION_UPLOAD_BYTES) {
           return new File([blob], jpegName(file.name), {
             type: "image/jpeg",

@@ -1,5 +1,7 @@
 "use client";
 
+import { BeforeInstallPromptEvent, isIos, isStandalone } from "@/app/pwa-platform";
+import { responseMessage } from "@/app/client-http";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type PushStatus = {
@@ -8,16 +10,7 @@ type PushStatus = {
   subscribedDevices: number;
 };
 
-type InstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-};
 
-function responseMessage(response: Response) {
-  return response.json().catch(() => null).then((payload: { error?: string } | null) => (
-    payload?.error || `Request failed (${response.status}).`
-  ));
-}
 
 function applicationServerKey(value: string): ArrayBuffer {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
@@ -27,14 +20,7 @@ function applicationServerKey(value: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-function isStandalone() {
-  const iosStandalone = Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
-  return iosStandalone || window.matchMedia("(display-mode: standalone)").matches;
-}
 
-function isIos() {
-  return /iphone|ipad|ipod/i.test(navigator.userAgent);
-}
 
 function currentAudience(): "owner" | "employee" {
   return window.location.pathname.startsWith("/employee") ? "employee" : "owner";
@@ -63,7 +49,7 @@ export default function PwaClient() {
   const [subscribed, setSubscribed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const syncedIdentity = useRef("");
 
   const refresh = useCallback(async () => {
@@ -104,7 +90,7 @@ export default function PwaClient() {
     setInstalled(isStandalone());
     const onInstallPrompt = (event: Event) => {
       event.preventDefault();
-      setInstallPrompt(event as InstallPromptEvent);
+      setInstallPrompt(event as BeforeInstallPromptEvent);
     };
     const onInstalled = () => {
       setInstalled(true);

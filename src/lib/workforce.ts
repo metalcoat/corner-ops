@@ -81,6 +81,7 @@ export async function workforceDashboard(business: Business) {
       FROM schedule_shifts s
       LEFT JOIN employees e ON e.id = s.employee_id
       WHERE s.business = ${business}
+        AND s.status <> 'Cancelled'
         AND s.starts_at >= NOW() - INTERVAL '21 days'
         AND s.starts_at < NOW() + INTERVAL '120 days'
       ORDER BY s.starts_at

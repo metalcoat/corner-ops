@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "./overtime.css";
@@ -80,10 +81,6 @@ type Dashboard = {
   notified?: Array<{ employeeId: string; delivered: number; failed: number }>;
 };
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function local(value: string | null | undefined) {
   if (!value) return "Unknown time";

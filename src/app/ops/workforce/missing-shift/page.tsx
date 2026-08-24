@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business } from "@/lib/types";
 import "../workforce.css";
@@ -35,10 +36,6 @@ function newYorkToday() {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
-async function errorMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function MissingShiftPage() {
   const [business, setBusiness] = useState<Business>("Corner Deli");
@@ -65,7 +62,7 @@ export default function MissingShiftPage() {
 
     fetch(`/api/workforce?business=${encodeURIComponent(business)}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
-        if (!response.ok) throw new Error(await errorMessage(response));
+        if (!response.ok) throw new Error(await responseMessage(response));
         return response.json() as Promise<WorkforcePayload>;
       })
       .then((payload) => setEmployees(payload.employees.filter((employee) => employee.active)))
@@ -112,7 +109,7 @@ export default function MissingShiftPage() {
           note,
         }),
       });
-      if (!response.ok) throw new Error(await errorMessage(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       const result = await response.json() as CreatedEntry;
       setCreated(result);
       setNotice(`${result.employeeName}: ${result.hours.toFixed(2)} hours added to ${result.source}.`);

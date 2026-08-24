@@ -1,36 +1,12 @@
 "use client";
 
+import { canvasToJpegBlob, drawCanvasImage, loadImageFile } from "@/app/client-image";
 import { useEffect } from "react";
 
 const ICON_SIZE = 512;
 const JPEG_QUALITY = 0.82;
 
-function loadImage(file: File): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const image = new Image();
-    image.decoding = "async";
-    image.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(image);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("This photo could not be opened on the device."));
-    };
-    image.src = url;
-  });
-}
 
-function canvasBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => blob ? resolve(blob) : reject(new Error("This photo could not be resized.")),
-      "image/jpeg",
-      JPEG_QUALITY,
-    );
-  });
-}
 
 function optimizedName(file: File): string {
   const base = file.name.replace(/\.[^.]+$/, "").trim() || "employee-profile";
@@ -42,7 +18,7 @@ async function optimizeProfilePhoto(file: File): Promise<File> {
     throw new Error("Choose an image file for the icon.");
   }
 
-  const image = await loadImage(file);
+  const image = await loadImageFile(file, "This photo could not be opened on the device.");
   const width = image.naturalWidth || image.width;
   const height = image.naturalHeight || image.height;
   if (!width || !height) throw new Error("This photo has no usable image dimensions.");
@@ -60,9 +36,9 @@ async function optimizeProfilePhoto(file: File): Promise<File> {
   context.fillRect(0, 0, ICON_SIZE, ICON_SIZE);
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
-  context.drawImage(image, sourceX, sourceY, crop, crop, 0, 0, ICON_SIZE, ICON_SIZE);
+  drawCanvasImage(context, image, { x: sourceX, y: sourceY, width: crop, height: crop }, { x: 0, y: 0, width: ICON_SIZE, height: ICON_SIZE });
 
-  const blob = await canvasBlob(canvas);
+  const blob = await canvasToJpegBlob(canvas, JPEG_QUALITY, "This photo could not be resized.");
   return new File([blob], optimizedName(file), {
     type: "image/jpeg",
     lastModified: Date.now(),

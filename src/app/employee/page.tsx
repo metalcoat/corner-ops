@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { newYorkDateKey } from "@/lib/schedule-meal-compliance";
 import type { Business } from "@/lib/types";
@@ -86,10 +87,6 @@ function validBusiness(value: string | null): value is Business {
   return businessNames.includes(value as Business);
 }
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function local(value: string | null) {
   if (!value) return "Missing";

@@ -216,18 +216,18 @@
 }
 
 .paceBadge.ahead {
-  background: #fff1c2;
-  color: #7a4c00;
+  background: var(--color-fff1c2);
+  color: var(--color-7a4c00);
 }
 
 .paceBadge.behind {
-  background: #e8eef8;
-  color: #314a72;
+  background: var(--color-e8eef8);
+  color: var(--color-314a72);
 }
 
 .paceBadge.on-pace {
-  background: #dcfce7;
-  color: #166534;
+  background: var(--color-dcfce7);
+  color: var(--color-166534);
 }
 
 .paceTable {

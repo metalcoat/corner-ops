@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { CORNER_DELI_POSITIONS } from "@/lib/business-positions";
 import type { Business } from "@/lib/types";
@@ -23,10 +24,6 @@ type Employee = {
   scheduleColor: string;
 };
 
-async function responseMessage(response: Response): Promise<string> {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function selectedBusiness(): Business {
   const text = document.querySelector<HTMLButtonElement>(".wfBusinessSwitch button.selected")?.textContent?.trim();

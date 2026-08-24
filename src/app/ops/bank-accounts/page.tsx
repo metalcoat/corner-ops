@@ -1,5 +1,7 @@
 "use client";
 
+import { formatUsdNullable } from "@/app/client-format";
+import { responseMessage } from "@/app/client-http";
 import { useEffect, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "./bank-accounts.css";
@@ -29,20 +31,12 @@ type Payload = {
   connections: Connection[];
 };
 
-function money(value: number | null) {
-  if (value === null) return "Balance unavailable";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
-}
 
 function requestedBusiness(): Business {
   if (typeof window === "undefined") return "Corner Deli";
   return new URLSearchParams(window.location.search).get("business") === "Tiki" ? "Tiki" : "Corner Deli";
 }
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function BankAccountsPage() {
   const [session, setSession] = useState<SessionView | null>(null);
@@ -166,8 +160,8 @@ export default function BankAccountsPage() {
                   <small>{isCard ? "Credit card" : account.type || "Bank account"}{account.subtype ? ` · ${account.subtype}` : ""}{account.mask ? ` · ending ${account.mask}` : ""}</small>
                 </span>
                 <span className="bankBalance">
-                  <strong>{money(account.currentBalance)}</strong>
-                  <small>{isCard ? "Current amount owed" : account.availableBalance === null ? "" : `${money(account.availableBalance)} available`}</small>
+                  <strong>{formatUsdNullable(account.currentBalance)}</strong>
+                  <small>{isCard ? "Current amount owed" : account.availableBalance === null ? "" : `${formatUsdNullable(account.availableBalance)} available`}</small>
                 </span>
               </label>;
             })}

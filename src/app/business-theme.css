@@ -6,25 +6,26 @@ html[data-business-theme="Corner Deli"] {
   --theme-accent-contrast: var(--accent-contrast);
   --background: var(--bg);
   --shadow: 0 18px 45px rgb(0 0 0 / 28%);
-  --bg: #170d0f;
-  --panel: #251619;
-  --panel-2: #342024;
-  --border: #5a3438;
-  --muted: #c3a5a0;
-  --text: #fff8ef;
-  --accent: #f4a261;
-  --accent-strong: #e4572e;
-  --accent-soft: #4a2020;
-  --accent-contrast: #2a0d08;
+  --bg: var(--color-170d0f);
+  --panel: var(--color-251619);
+  --panel-2: var(--color-342024);
+  --border: var(--color-5a3438);
+  --muted: var(--color-c3a5a0);
+  --text: var(--color-fff8ef);
+  --accent: var(--color-f4a261);
+  --accent-strong: var(--color-e4572e);
+  --accent-soft: var(--color-4a2020);
+  --danger: var(--color-dc2626);
+  --accent-contrast: var(--color-2a0d08);
   --theme-glow: rgb(228 87 46 / 24%);
   --theme-glow-secondary: rgb(244 162 97 / 12%);
-  --theme-panel-top: #2c191c;
-  --theme-panel-bottom: #180f12;
+  --theme-panel-top: var(--color-2c191c);
+  --theme-panel-bottom: var(--color-180f12);
   --theme-nav: rgb(25 12 14 / 95%);
-  --theme-input: #120a0c;
-  --theme-table-head: #2b181b;
-  --theme-chip: #4a292c;
-  --theme-chip-text: #ffe0c2;
+  --theme-input: var(--color-120a0c);
+  --theme-table-head: var(--color-2b181b);
+  --theme-chip: var(--color-4a292c);
+  --theme-chip-text: var(--color-ffe0c2);
 }
 
 html[data-business-theme="Tiki"] {
@@ -33,25 +34,26 @@ html[data-business-theme="Tiki"] {
   --theme-accent-contrast: var(--accent-contrast);
   --background: var(--bg);
   --shadow: 0 18px 45px rgb(0 0 0 / 28%);
-  --bg: #04151e;
-  --panel: #0a2530;
-  --panel-2: #103640;
-  --border: #23586a;
-  --muted: #91bcc5;
-  --text: #efffff;
-  --accent: #48dfc6;
-  --accent-strong: #20a9bd;
-  --accent-soft: #0b4149;
-  --accent-contrast: #03272b;
+  --bg: var(--color-04151e);
+  --panel: var(--color-0a2530);
+  --panel-2: var(--color-103640);
+  --border: var(--color-23586a);
+  --muted: var(--color-91bcc5);
+  --text: var(--color-efffff);
+  --accent: var(--color-48dfc6);
+  --accent-strong: var(--color-20a9bd);
+  --accent-soft: var(--color-0b4149);
+  --danger: var(--color-dc2626);
+  --accent-contrast: var(--color-03272b);
   --theme-glow: rgb(32 169 189 / 28%);
   --theme-glow-secondary: rgb(255 126 103 / 10%);
-  --theme-panel-top: #0d2c37;
-  --theme-panel-bottom: #061923;
+  --theme-panel-top: var(--color-0d2c37);
+  --theme-panel-bottom: var(--color-061923);
   --theme-nav: rgb(3 19 27 / 95%);
-  --theme-input: #03131b;
-  --theme-table-head: #0b2b35;
-  --theme-chip: #164956;
-  --theme-chip-text: #c4fff5;
+  --theme-input: var(--color-03131b);
+  --theme-table-head: var(--color-0b2b35);
+  --theme-chip: var(--color-164956);
+  --theme-chip-text: var(--color-c4fff5);
 }
 
 html[data-business-theme] body {

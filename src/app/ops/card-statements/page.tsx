@@ -1,5 +1,7 @@
 "use client";
 
+import { formatUsd } from "@/app/client-format";
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -42,14 +44,7 @@ function requestedBusiness(): Business {
   return new URLSearchParams(window.location.search).get("business") === "Tiki" ? "Tiki" : "Corner Deli";
 }
 
-function money(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0);
-}
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function CardStatementsPage() {
   const [session, setSession] = useState<SessionView | null>(null);
@@ -193,14 +188,14 @@ export default function CardStatementsPage() {
               <strong className="statementStatus">{statement.matchStatus}</strong>
             </header>
             <div className="statementAmounts">
-              <div><span>Statement balance</span><strong>{money(statement.statementBalance)}</strong></div>
-              <div><span>Payment to match</span><strong>{money(statement.paymentAmount)}</strong></div>
+              <div><span>Statement balance</span><strong>{formatUsd(statement.statementBalance)}</strong></div>
+              <div><span>Payment to match</span><strong>{formatUsd(statement.paymentAmount)}</strong></div>
               <div><span>Extracted lines</span><strong>{statement.parsedTransactionCount}</strong></div>
             </div>
             <div className="statementFileRow"><span>{statement.fileName} · {statement.extractionStatus}</span><a href={`/api/card-statements/${statement.id}/download`}>Download</a></div>
 
-            {statement.matchStatus === "Matched" && statement.bankTransaction ? <div className="matchedPayment"><strong>Matched bank withdrawal</strong><span>{statement.bankTransaction.date} · {statement.bankTransaction.merchantName || statement.bankTransaction.description} · {money(statement.bankTransaction.amount)}</span></div> : options.length ? <div className="matchChooser">
-              <label>Possible bank payment<select value={selected} onChange={(event) => setSelectedMatches((current) => ({ ...current, [statement.id]: event.target.value }))}>{options.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.date} · {money(candidate.amount)} · {candidate.merchantName || candidate.description}</option>)}</select></label>
+            {statement.matchStatus === "Matched" && statement.bankTransaction ? <div className="matchedPayment"><strong>Matched bank withdrawal</strong><span>{statement.bankTransaction.date} · {statement.bankTransaction.merchantName || statement.bankTransaction.description} · {formatUsd(statement.bankTransaction.amount)}</span></div> : options.length ? <div className="matchChooser">
+              <label>Possible bank payment<select value={selected} onChange={(event) => setSelectedMatches((current) => ({ ...current, [statement.id]: event.target.value }))}>{options.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.date} · {formatUsd(candidate.amount)} · {candidate.merchantName || candidate.description}</option>)}</select></label>
               <button type="button" disabled={busy || !selected} onClick={() => void confirmMatch(statement)}>Confirm payment match</button>
             </div> : <div className="unmatchedPayment"><strong>No exact bank withdrawal found.</strong><span>Import or sync the bank account, then reopen this page. The payment amount must match exactly.</span></div>}
           </article>;

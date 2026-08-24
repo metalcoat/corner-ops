@@ -460,8 +460,8 @@
 }
 
 .teamShiftTile.openShift {
-  border-left-color: #f5c542;
-  background: color-mix(in srgb, #f5c542 12%, var(--theme-input));
+  border-left-color: var(--color-f5c542);
+  background: color-mix(in srgb, var(--color-f5c542) 12%, var(--theme-input));
 }
 
 .teamShiftTile strong {
@@ -541,17 +541,17 @@
 }
 
 .employeeMessageDisclosure {
-  --message-rail: #8a351d;
-  border: 1px solid #cbd5e1;
+  --message-rail: var(--color-8a351d);
+  border: 1px solid var(--color-cbd5e1);
   border-left: 7px solid var(--message-rail);
   border-radius: 11px;
-  background: #ffffff;
-  color: #111827;
+  background: var(--color-ffffff);
+  color: var(--color-111827);
   overflow: hidden;
 }
 
 html[data-business-theme="Tiki"] .employeeMessageDisclosure {
-  --message-rail: #075968;
+  --message-rail: var(--color-075968);
 }
 
 .employeeMessageDisclosure > summary {
@@ -568,7 +568,7 @@ html[data-business-theme="Tiki"] .employeeMessageDisclosure {
 .employeeMessageDisclosure > summary::after {
   content: "›";
   grid-column: 3;
-  color: #111827;
+  color: var(--color-111827);
   font-size: 1.2rem;
   font-weight: 950;
   transition: transform .16s ease;
@@ -585,14 +585,14 @@ html[data-business-theme="Tiki"] .employeeMessageDisclosure {
 }
 
 .employeeMessageSummaryMain strong {
-  color: #0f172a;
+  color: var(--color-0f172a);
   font-size: .93rem;
   font-weight: 950;
 }
 
 .employeeMessageSummaryMain > span {
   overflow: hidden;
-  color: #334155;
+  color: var(--color-334155);
   font-size: .82rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -602,26 +602,26 @@ html[data-business-theme="Tiki"] .employeeMessageDisclosure {
   display: grid;
   justify-items: end;
   gap: 3px;
-  color: #334155;
+  color: var(--color-334155);
   font-size: .7rem;
   white-space: nowrap;
 }
 
 .employeeMessageSummaryMeta small,
 .employeeMessageSummaryMeta time {
-  color: #334155;
+  color: var(--color-334155);
   font-weight: 800;
 }
 
 .employeeMessageBody {
-  border-top: 1px solid #cbd5e1;
-  background: #f8fafc;
+  border-top: 1px solid var(--color-cbd5e1);
+  background: var(--color-f8fafc);
   padding: 10px 12px 12px;
 }
 
 .employeeMessageBody p {
   margin: 0;
-  color: #111827;
+  color: var(--color-111827);
   line-height: 1.48;
   white-space: pre-wrap;
 }
@@ -817,5 +817,79 @@ html[data-business-theme="Tiki"] .employeeMessageDisclosure {
     align-items: flex-start;
     flex-direction: column;
     gap: 3px;
+  }
+}
+
+/* Employee portal responsive/layout rules consolidated from the former patch sheet. */
+/* Attendance history should be reviewed before starting a new correction request. */
+.attendanceTimeGrid > .attendanceEmployeeCard {
+  grid-column: 1 / -1;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.attendanceTimeGrid > .attendanceRecentTimeCard {
+  order: 1;
+}
+
+.attendanceTimeGrid > .attendanceTimeWide {
+  order: 2;
+}
+
+.attendanceTimeGrid > .attendanceCorrectionRequestCard {
+  order: 3;
+}
+
+/* Keep schedule cards inside the mobile viewport while allowing the weekly grid itself to scroll. */
+.employeePortalFrame,
+.employeePortalContent,
+.employeeShell,
+.employeeGrid,
+.employeeGrid > .employeeCard,
+.teamWeekCard,
+.teamWeekScroll {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.employeePortalFrame,
+.employeePortalContent,
+.employeeGrid,
+.employeeGrid > .employeeCard,
+.teamWeekCard {
+  width: 100%;
+  max-width: 100%;
+}
+
+.employeeShell {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+.employeeGrid > .employeeCard {
+  justify-self: stretch;
+}
+
+.teamWeekScroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.employeeShift > div,
+.employeeRequest > div,
+.employeeCardHeader > div {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .employeeGrid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

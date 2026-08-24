@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   businesses,
@@ -10,6 +11,7 @@ import {
   type DocumentStatus,
   type SessionView,
 } from "@/lib/types";
+import "./operations.css";
 
 const categories = ["Operations", "Inventory", "Financial", "Compliance", "Employee", "Vendor", "General"];
 
@@ -31,10 +33,6 @@ function formatEvent(event: AuditEvent): string {
   return `${title} was ${verbs[event.action]}.`;
 }
 
-async function responseMessage(response: Response): Promise<string> {
-  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function Home() {
   const [session, setSession] = useState<SessionView | null>(null);

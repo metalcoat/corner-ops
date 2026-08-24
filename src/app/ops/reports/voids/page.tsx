@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import "../../control-center.css";
 import "./voids.css";
@@ -83,10 +84,6 @@ function reportLabel(value: string) {
   return value === "product_voids" ? "Product Voids" : value === "transaction_voids" ? "Transaction Voids" : value;
 }
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function VoidReportPage() {
   const today = useMemo(todayKey, []);

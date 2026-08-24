@@ -4,7 +4,6 @@ import { verifyDeliBoardToken } from "@/lib/deli-board-auth";
 import { getEmployeeSession } from "@/lib/employee-auth";
 import { apiError, unauthorized } from "@/lib/http";
 import { threeCxDeliCallReport } from "@/lib/three-cx-calls-report";
-import { ensureWorkforceSchema } from "@/lib/workforce";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +12,6 @@ export const maxDuration = 60;
 const BUSINESS = "Corner Deli" as const;
 const CALL_FEED_TTL_MS = 60_000;
 const CALL_FEED_ERROR_TTL_MS = 15_000;
-let boardSchemaPromise: Promise<void> | null = null;
 
 type CallFeed = {
   workDate: string;
@@ -23,37 +21,7 @@ type CallFeed = {
   expiresAt: number;
 };
 
-let callFeedCache: CallFeed | null = null;
-let callFeedPromise: Promise<CallFeed> | null = null;
 
-const DEFAULT_TASKS = [
-  ["Prep", "Make sub rolls"],
-  ["Prep", "Make hamburger buns"],
-  ["Prep", "Thaw meats for antipasta"],
-  ["Prep", "Thaw pizza sausage"],
-  ["Prep", "Thaw ground beef"],
-  ["Prep", "Portion chili"],
-  ["Prep", "Prepare nacho cheese / chips"],
-  ["Line", "Fill wing sauce bottles"],
-  ["Line", "Fill pizza prep table"],
-  ["Line", "Fill dressing bottles"],
-  ["Produce", "Prep sub tomatoes"],
-  ["Produce", "Julienne tomatoes"],
-  ["Produce", "Prep salad vegetables"],
-  ["Produce", "Prep celery for wings"],
-  ["Produce", "Prep salad lettuce"],
-  ["Stock", "Check olives"],
-  ["Stock", "Cook / stock bacon"],
-  ["Salads", "Check and stir front salads"],
-  ["Salads", "Boil macaroni"],
-  ["Salads", "Boil pasta"],
-  ["Salads", "Prepare antipasta"],
-  ["Salads", "Prepare coleslaw"],
-  ["Sides", "Prepare brown beans"],
-  ["Sides", "Prepare green beans"],
-  ["Cleaning", "Clean steam table"],
-  ["Cleaning", "Empty freezer tray / cooler water"],
-] as const;
 
 function localDateKey(date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -91,74 +59,62 @@ async function boardActor(request: Request): Promise<{ name: string; access: "ow
   return null;
 }
 
-async function ensureBoardSchema() {
-  if (!boardSchemaPromise) {
-    boardSchemaPromise = (async () => {
-      await ensureWorkforceSchema();
-      const sql = getSql();
-
-      for (let index = 0; index < DEFAULT_TASKS.length; index += 1) {
-        const [category, title] = DEFAULT_TASKS[index];
-        await sql`
-          INSERT INTO deli_wallboard_tasks (id, title, category, sort_order, created_by)
-          VALUES (${crypto.randomUUID()}, ${title}, ${category}, ${index + 1}, 'System')
-          ON CONFLICT (title) DO NOTHING
-        `;
-      }
-    })().catch((error) => {
-      boardSchemaPromise = null;
-      throw error;
-    });
-  }
-  return boardSchemaPromise;
-}
-
 async function loadCallFeed(today: string): Promise<CallFeed> {
-  const now = Date.now();
-  if (callFeedCache && callFeedCache.workDate === today && callFeedCache.expiresAt > now) {
-    return callFeedCache;
+  const sql = getSql();
+  const cached = await sql`
+    SELECT payload, expires_at
+    FROM deli_board_call_cache
+    WHERE work_date = ${today}::date AND expires_at > NOW()
+  ` as unknown as Array<{ payload: Omit<CallFeed, "expiresAt">; expires_at: string }>;
+  if (cached[0]?.payload) {
+    return { ...cached[0].payload, expiresAt: new Date(cached[0].expires_at).getTime() };
   }
 
-  if (!callFeedPromise) {
-    callFeedPromise = (async () => {
-      try {
-        const report = await threeCxDeliCallReport(today, tomorrowDateKey());
-        const feed: CallFeed = {
-          workDate: today,
-          calls: report.calls.filter((call) => !call.resolved).slice(0, 8),
-          callSummary: {
-            unresolved: Number(report.summary.unresolved || 0),
-            meaningful: Number(report.summary.meaningful || 0),
-            issues: Number(report.summary.issues || 0),
-            busy: Number(report.summary.busy || 0),
-          },
-          callError: "",
-          expiresAt: Date.now() + CALL_FEED_TTL_MS,
-        };
-        callFeedCache = feed;
-        return feed;
-      } catch (error) {
-        console.error("Deli board 3CX load failed", error);
-        const feed: CallFeed = {
-          workDate: today,
-          calls: [],
-          callSummary: { unresolved: 0, meaningful: 0, issues: 0, busy: 0 },
-          callError: "3CX call feed unavailable",
-          expiresAt: Date.now() + CALL_FEED_ERROR_TTL_MS,
-        };
-        callFeedCache = feed;
-        return feed;
-      }
-    })().finally(() => {
-      callFeedPromise = null;
-    });
+  try {
+    const report = await threeCxDeliCallReport(today, tomorrowDateKey());
+    const payload: Omit<CallFeed, "expiresAt"> = {
+      workDate: today,
+      calls: report.calls.filter((call) => !call.resolved).slice(0, 8),
+      callSummary: {
+        unresolved: Number(report.summary.unresolved || 0),
+        meaningful: Number(report.summary.meaningful || 0),
+        issues: Number(report.summary.issues || 0),
+        busy: Number(report.summary.busy || 0),
+      },
+      callError: "",
+    };
+    await sql`
+      INSERT INTO deli_board_call_cache (work_date, payload, expires_at, updated_at)
+      VALUES (${today}::date, ${JSON.stringify(payload)}::jsonb,
+        NOW() + (${CALL_FEED_TTL_MS} * INTERVAL '1 millisecond'), NOW())
+      ON CONFLICT (work_date) DO UPDATE SET
+        payload = EXCLUDED.payload,
+        expires_at = EXCLUDED.expires_at,
+        updated_at = NOW()
+    `;
+    return { ...payload, expiresAt: Date.now() + CALL_FEED_TTL_MS };
+  } catch (error) {
+    console.error("Deli board 3CX load failed", error);
+    const payload: Omit<CallFeed, "expiresAt"> = {
+      workDate: today,
+      calls: [],
+      callSummary: { unresolved: 0, meaningful: 0, issues: 0, busy: 0 },
+      callError: "3CX call feed unavailable",
+    };
+    await sql`
+      INSERT INTO deli_board_call_cache (work_date, payload, expires_at, updated_at)
+      VALUES (${today}::date, ${JSON.stringify(payload)}::jsonb,
+        NOW() + (${CALL_FEED_ERROR_TTL_MS} * INTERVAL '1 millisecond'), NOW())
+      ON CONFLICT (work_date) DO UPDATE SET
+        payload = EXCLUDED.payload,
+        expires_at = EXCLUDED.expires_at,
+        updated_at = NOW()
+    `;
+    return { ...payload, expiresAt: Date.now() + CALL_FEED_ERROR_TTL_MS };
   }
-
-  return callFeedPromise;
 }
 
 async function loadBoard() {
-  await ensureBoardSchema();
   const sql = getSql();
   const today = localDateKey();
 
@@ -228,7 +184,6 @@ export async function POST(request: Request) {
   try {
     const actor = await boardActor(request);
     if (!actor) return unauthorized();
-    await ensureBoardSchema();
 
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action || "");
