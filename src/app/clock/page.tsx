@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useState } from "react";
 import "./clock.css";
 
@@ -18,10 +19,6 @@ type ScheduledShift = {
   instructions: string;
 };
 
-async function responseError(response: Response, fallback: string): Promise<Error> {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return new Error(payload?.error || fallback);
-}
 
 export default function TikiClockPage() {
   const [pin, setPin] = useState("");
@@ -72,7 +69,7 @@ export default function TikiClockPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ business: "Tiki", pin }),
       });
-      if (!login.ok) throw await responseError(login, "PIN not recognized.");
+      if (!login.ok) throw new Error(await responseMessage(login, "PIN not recognized."));
       authenticated = true;
 
       const response = await fetch("/api/timeclock", {

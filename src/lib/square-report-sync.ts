@@ -1,9 +1,5 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-} from "node:crypto";
+import { decryptIntegrationSecret as decryptSecret, encryptIntegrationSecret as encryptSecret } from "@/lib/integration-crypto";
+import { squareMoneyToDollars } from "@/lib/square-money";
 import { getSql } from "@/lib/db";
 import { ensureSquareControlSchema } from "@/lib/square-control";
 
@@ -28,9 +24,6 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function money(value: SquareMoney): number {
-  return Math.round(numberValue(value?.amount)) / 100;
-}
 
 function squareEnvironment(): "sandbox" | "production" {
   return process.env.SQUARE_ENV?.toLowerCase() === "production" ? "production" : "sandbox";
@@ -42,37 +35,8 @@ function squareBase(): string {
     : "https://connect.squareupsandbox.com";
 }
 
-function integrationKey(): Buffer {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required before Square can store credentials.");
-  return createHash("sha256").update(`corner-ops-integrations:${secret}`).digest();
-}
 
-function encryptSecret(value: string): string {
-  if (!value) return "";
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", integrationKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  return [iv, cipher.getAuthTag(), encrypted]
-    .map((part) => part.toString("base64url"))
-    .join(".");
-}
 
-function decryptSecret(value: string): string {
-  if (!value) return "";
-  const [ivText, tagText, encryptedText] = value.split(".");
-  if (!ivText || !tagText || !encryptedText) throw new Error("Stored Square credential is invalid.");
-  const decipher = createDecipheriv(
-    "aes-256-gcm",
-    integrationKey(),
-    Buffer.from(ivText, "base64url"),
-  );
-  decipher.setAuthTag(Buffer.from(tagText, "base64url"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(encryptedText, "base64url")),
-    decipher.final(),
-  ]).toString("utf8");
-}
 
 async function activeConnection(): Promise<ConnectionRow | null> {
   const rows = await getSql()`
@@ -170,9 +134,9 @@ async function upsertOrder(connectionId: string, order: SquareObject): Promise<v
       ${order.created_at ? String(order.created_at) : null},
       ${order.updated_at ? String(order.updated_at) : null},
       ${order.closed_at ? String(order.closed_at) : null},
-      ${money(order.total_money as SquareMoney)},
-      ${money(order.total_tax_money as SquareMoney)},
-      ${money(order.total_tip_money as SquareMoney)},
+      ${squareMoneyToDollars(order.total_money as SquareMoney)},
+      ${squareMoneyToDollars(order.total_tax_money as SquareMoney)},
+      ${squareMoneyToDollars(order.total_tip_money as SquareMoney)},
       ${JSON.stringify(order)}::jsonb
     )
     ON CONFLICT (external_order_id) DO UPDATE SET
@@ -206,10 +170,10 @@ async function upsertOrder(connectionId: string, order: SquareObject): Promise<v
         ${crypto.randomUUID()}, ${squareOrderId}, ${externalLineId},
         ${clean(line.catalog_object_id, 180)}, ${clean(line.name, 240)},
         ${clean(line.variation_name, 240)}, ${numberValue(line.quantity)},
-        ${money(line.gross_sales_money as SquareMoney)},
-        ${money(line.total_tax_money as SquareMoney)},
-        ${money(line.total_discount_money as SquareMoney)},
-        ${money(line.total_money as SquareMoney)},
+        ${squareMoneyToDollars(line.gross_sales_money as SquareMoney)},
+        ${squareMoneyToDollars(line.total_tax_money as SquareMoney)},
+        ${squareMoneyToDollars(line.total_discount_money as SquareMoney)},
+        ${squareMoneyToDollars(line.total_money as SquareMoney)},
         ${JSON.stringify(modifiers)}::jsonb,
         ${JSON.stringify(line)}::jsonb
       )

@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business } from "@/lib/types";
 import "./attendance.css";
@@ -42,10 +43,6 @@ type EmployeePayload = {
   corrections: Correction[];
 };
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function inputDateTime(value: string | null) {
   if (!value) return "";
@@ -317,7 +314,7 @@ export default function EmployeeAttendancePage() {
     </section>
 
     <section className="attendanceTimeGrid">
-      <article className="attendanceEmployeeCard">
+      <article className="attendanceEmployeeCard attendanceCorrectionRequestCard">
         <div className="attendanceCardTitle"><p className="attendanceEyebrow">Fix a punch</p><h2>Request a time correction</h2></div>
         <form className="attendanceTimeForm" onSubmit={requestTimeCorrection}>
           <label>Time record<select name="sourceId" required><option value="">Choose record</option>{(employeeData?.recentTime || []).map((record) => <option key={record.id} value={record.id}>{local(record.clock_in || record.clock_out)} · {record.position}</option>)}</select></label>
@@ -328,7 +325,7 @@ export default function EmployeeAttendancePage() {
         </form>
       </article>
 
-      <article className="attendanceEmployeeCard">
+      <article className="attendanceEmployeeCard attendanceRecentTimeCard">
         <div className="attendanceCardTitle"><p className="attendanceEyebrow">Recent</p><h2>Time records</h2></div>
         <div className="attendanceHistoryList">
           {(employeeData?.recentTime || []).map((record) => <div className="attendanceHistoryItem" key={record.id}>

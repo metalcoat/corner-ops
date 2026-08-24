@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { useEffect, useMemo, useState } from "react";
 import "../control-center.css";
 import "./employee-handbook.css";
@@ -25,10 +26,6 @@ type EmployeeStatus = {
 };
 type Payload = { business: string; handbook: Handbook; employees: EmployeeStatus[] };
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function dateTimeLabel(value: string | null) {
   if (!value) return "Not signed";

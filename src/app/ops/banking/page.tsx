@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -215,10 +216,6 @@ function changeClass(value: number | null, inverse = false) {
   return favorable ? "good" : "bad";
 }
 
-async function errorMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function MetricCard({ label, value, detail, change, changeTone = "neutral", tone = "" }: {
   label: string;
@@ -351,7 +348,7 @@ export default function BankingPage() {
         interval: activeInterval,
       });
       const response = await fetch(`/api/banking?${params.toString()}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(await errorMessage(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       const payload = await response.json() as Payload;
       setData(payload);
       setSelected(payload.suggestions.filter((item) => !item.pending && item.accountCode && item.confidence >= minimumConfidence).map((item) => item.id));
@@ -404,7 +401,7 @@ export default function BankingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "apply-suggestions", business, minimumConfidence, transactionIds }),
       });
-      if (!response.ok) throw new Error(await errorMessage(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       const result = await response.json() as { coded: number; failed: number };
       await load(business);
       setNotice(`Coded and posted ${result.coded} transaction${result.coded === 1 ? "" : "s"}${result.failed ? `; ${result.failed} need manual review` : ""}.`);

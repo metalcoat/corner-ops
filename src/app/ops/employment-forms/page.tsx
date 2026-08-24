@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -42,10 +43,6 @@ type PageData = { business: Business; employees: Employee[]; forms: FormSummary[
 type FormDetail = FormSummary & { payload: Record<string, unknown>; events: FormAuditEvent[] };
 type PreviewRow = { label: string; value: string };
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function dateLabel(value: string | null) {
   return value ? new Date(`${value}T12:00:00`).toLocaleDateString() : "Not specified";

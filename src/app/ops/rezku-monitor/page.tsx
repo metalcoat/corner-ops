@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import "../control-center.css";
 import "./rezku-monitor.css";
@@ -55,10 +56,6 @@ type Dashboard = { emails: EmailReceipt[]; imports: ImportBatch[]; punchExceptio
 type ImportResult = { fileName?: string; reportType: string; rowsRead: number; imported: number };
 type RetryResult = { processed?: boolean; reports?: Array<Record<string, unknown>>; failures?: string[] };
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function eastern(value: string | null | undefined) {
   if (!value) return "Not recorded";

@@ -1,29 +1,19 @@
 "use client";
 
+import { BeforeInstallPromptEvent, isIos, isStandalone } from "@/app/pwa-platform";
 import { useEffect, useState } from "react";
 import { useModalFocus } from "@/app/use-modal-focus";
 import "./install-prompt.css";
 
-type InstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-};
 
 const DISMISS_KEY = "corner-ops-employee-install-dismissed-at";
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
 
-function isStandalone() {
-  const iosStandalone = Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
-  return iosStandalone || window.matchMedia("(display-mode: standalone)").matches;
-}
 
-function isIos() {
-  return /iphone|ipad|ipod/i.test(navigator.userAgent);
-}
 
 export default function EmployeeInstallPrompt() {
   const [authenticated, setAuthenticated] = useState(false);
-  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [visible, setVisible] = useState(false);
   const [notice, setNotice] = useState("");
   const installModalRef = useModalFocus<HTMLDivElement>(visible, () => dismiss());
@@ -58,7 +48,7 @@ export default function EmployeeInstallPrompt() {
   useEffect(() => {
     const onInstallPrompt = (event: Event) => {
       event.preventDefault();
-      setInstallPrompt(event as InstallPromptEvent);
+      setInstallPrompt(event as BeforeInstallPromptEvent);
     };
     const onInstalled = () => {
       setVisible(false);

@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -169,10 +170,6 @@ function easternInputToIso(value: string) {
   return new Date(timestamp).toISOString();
 }
 
-async function errorMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function PayrollControlPage() {
   const [session, setSession] = useState<SessionView | null>(null);
@@ -195,7 +192,7 @@ export default function PayrollControlPage() {
       `/api/payroll-control?business=${encodeURIComponent(activeBusiness)}&weekStart=${encodeURIComponent(activeWeek)}&displayVersion=20260804-3`,
       { cache: "no-store", headers: { "Cache-Control": "no-cache" } },
     );
-    if (!response.ok) throw new Error(await errorMessage(response));
+    if (!response.ok) throw new Error(await responseMessage(response));
     setData(await response.json() as Dashboard);
   }
 
@@ -215,7 +212,7 @@ export default function PayrollControlPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!response.ok) throw new Error(await errorMessage(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       const result = await response.json();
       await load(business, weekStart);
       return result;

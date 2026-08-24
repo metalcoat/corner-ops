@@ -1,5 +1,7 @@
 "use client";
 
+import { canvasToJpegBlob, drawCanvasImage } from "@/app/client-image";
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, DocumentRecord } from "@/lib/types";
 import "./scan.css";
@@ -53,16 +55,7 @@ function requestedBusiness(): Business {
   return saved === "Tiki" ? "Tiki" : "Corner Deli";
 }
 
-async function responseMessage(response: Response): Promise<string> {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
-function canvasBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("The processed image could not be created.")), "image/jpeg", 0.92);
-  });
-}
 
 async function blackAndWhiteFile(source: File, threshold: number, rotation: number): Promise<{ file: File; url: string; width: number; height: number }> {
   const bitmap = await createImageBitmap(source);
@@ -83,7 +76,7 @@ async function blackAndWhiteFile(source: File, threshold: number, rotation: numb
     context.save();
     context.translate(canvas.width / 2, canvas.height / 2);
     context.rotate(rotation * Math.PI / 180);
-    context.drawImage(bitmap, -sourceWidth / 2, -sourceHeight / 2, sourceWidth, sourceHeight);
+    drawCanvasImage(context, bitmap, null, { x: -sourceWidth / 2, y: -sourceHeight / 2, width: sourceWidth, height: sourceHeight });
     context.restore();
 
     const image = context.getImageData(0, 0, canvas.width, canvas.height);
@@ -97,7 +90,7 @@ async function blackAndWhiteFile(source: File, threshold: number, rotation: numb
       pixels[index + 3] = 255;
     }
     context.putImageData(image, 0, 0);
-    const blob = await canvasBlob(canvas);
+    const blob = await canvasToJpegBlob(canvas, 0.92, "The processed image could not be created.");
     return {
       file: new File([blob], "corner-ops-scan.jpg", { type: "image/jpeg", lastModified: Date.now() }),
       url: URL.createObjectURL(blob),

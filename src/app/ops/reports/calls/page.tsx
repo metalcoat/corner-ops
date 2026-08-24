@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { useEffect, useMemo, useState } from "react";
 import "../../control-center.css";
 import "./calls.css";
@@ -51,10 +52,6 @@ function phone(value: string): string {
   return value || "Unknown";
 }
 
-async function errorMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function DeliCallsPage() {
   const today = useMemo(() => dateKey(new Date()), []);
@@ -73,7 +70,7 @@ export default function DeliCallsPage() {
     const query = new URLSearchParams({ start, end });
     fetch(`/api/3cx/calls?${query}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
-        if (!response.ok) throw new Error(await errorMessage(response));
+        if (!response.ok) throw new Error(await responseMessage(response));
         return response.json() as Promise<Payload>;
       })
       .then(setPayload)

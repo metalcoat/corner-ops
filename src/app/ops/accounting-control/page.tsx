@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -76,10 +77,6 @@ const localDate = () => {
   const offset = now.getTimezoneOffset();
   return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10);
 };
-async function errorMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function AccountingControlPage() {
   const [session, setSession] = useState<SessionView | null>(null);
@@ -103,7 +100,7 @@ export default function AccountingControlPage() {
       fetch(`/api/accounting-control?business=${encodeURIComponent(active)}`, { cache: "no-store" }),
       fetch("/api/accounting-control?area=square", { cache: "no-store" }),
     ]);
-    if (!accountingResponse.ok) throw new Error(await errorMessage(accountingResponse));
+    if (!accountingResponse.ok) throw new Error(await responseMessage(accountingResponse));
     setData(await accountingResponse.json() as Dashboard);
     if (squareResponse.ok) setSquare(await squareResponse.json() as SquareDash);
   }
@@ -122,7 +119,7 @@ export default function AccountingControlPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!response.ok) throw new Error(await errorMessage(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       const result = await response.json();
       await load();
       return result;
@@ -239,7 +236,7 @@ export default function AccountingControlPage() {
       form.set("business", business);
       form.set("postApproved", String(form.get("postApproved") === "on"));
       const response = await fetch("/api/accounting-control", { method: "POST", body: form });
-      if (!response.ok) throw new Error(await errorMessage(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       const result = await response.json();
       await load();
       setNotice(`Imported ${result.imported} coded transactions; posted ${result.posted}.`);

@@ -1,67 +1,67 @@
 .employeePortalFrame{min-height:100vh}
 .employeePortalContent{min-width:0}
-.employeeMessagesDock{background:linear-gradient(180deg,#111827,#0a101c)!important;border:1px solid #334155;border-radius:18px;box-shadow:0 18px 46px rgba(0,0,0,.28);color:#f8fafc;padding:16px}
+.employeeMessagesDock{background:linear-gradient(180deg,var(--color-111827),var(--color-0a101c))!important;border:1px solid var(--color-334155);border-radius:18px;box-shadow:0 18px 46px rgba(0,0,0,.28);color:var(--color-f8fafc);padding:16px}
 .employeeMessagesMobileHeader{display:none}
 .employeeMessagesPanel{display:flex;flex:1;min-height:0;flex-direction:column}
 .employeeMessagesHeader{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px}
 .employeeMessagesHeader h2{margin:.1rem 0 0}
-.employeeMessagesHeader button,.employeeProfilePhotoForm button,.employeeNicknameForm button{border:1px solid #475569;border-radius:9px;background:#172033;color:#f1f5f9;padding:8px 10px;cursor:pointer}
+.employeeMessagesHeader button,.employeeProfilePhotoForm button,.employeeNicknameForm button{border:1px solid var(--color-475569);border-radius:9px;background:var(--color-172033);color:var(--color-f1f5f9);padding:8px 10px;cursor:pointer}
 .employeeMessagesHeader button:disabled,.employeeProfilePhotoForm button:disabled,.employeeNicknameForm button:disabled{opacity:.55}
-.employeeMessagesIdentity{--employee-color:#64748b;display:flex;align-items:center;gap:10px}
+.employeeMessagesIdentity{--employee-color:var(--color-64748b);display:flex;align-items:center;gap:10px}
 .employeeMessagesIdentity>div{display:grid;gap:1px}
-.employeeMessagesIdentity small{color:#a8b3c4;font-size:.72rem}
-.employeeMessagesEyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:.7rem;font-weight:850;color:#fbbf24;margin:0}
-.employeeMessageAvatar{--employee-color:#64748b;display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;border:2px solid var(--employee-color);border-radius:50%;overflow:hidden;background:#1e293b;color:#fff;font-size:.62rem;font-weight:900}
+.employeeMessagesIdentity small{color:var(--color-a8b3c4);font-size:.72rem}
+.employeeMessagesEyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:.7rem;font-weight:850;color:var(--color-fbbf24);margin:0}
+.employeeMessageAvatar{--employee-color:var(--color-64748b);display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;border:2px solid var(--employee-color);border-radius:50%;overflow:hidden;background:var(--color-1e293b);color:var(--color-ffffff);font-size:.62rem;font-weight:900}
 .employeeMessageAvatar.large{width:48px;height:48px;flex-basis:48px;font-size:.72rem}
 .employeeMessageAvatar img{width:100%;height:100%;object-fit:cover;display:block}
-.employeeMessageOptions{border:1px solid #334155;border-radius:11px;background:#0d1524;margin:0 0 10px}
-.employeeMessageOptions summary{cursor:pointer;list-style:none;padding:9px 11px;color:#d8e0eb;font-size:.76rem;font-weight:850;display:flex;align-items:center;justify-content:space-between}
+.employeeMessageOptions{border:1px solid var(--color-334155);border-radius:11px;background:var(--color-0d1524);margin:0 0 10px}
+.employeeMessageOptions summary{cursor:pointer;list-style:none;padding:9px 11px;color:var(--color-d8e0eb);font-size:.76rem;font-weight:850;display:flex;align-items:center;justify-content:space-between}
 .employeeMessageOptions summary::-webkit-details-marker{display:none}
-.employeeMessageOptions summary:after{content:"＋";color:#fbbf24}
+.employeeMessageOptions summary:after{content:"＋";color:var(--color-fbbf24)}
 .employeeMessageOptions[open] summary:after{content:"−"}
-.employeeMessageOptionsBody{padding:0 10px 10px;border-top:1px solid #334155}
+.employeeMessageOptionsBody{padding:0 10px 10px;border-top:1px solid var(--color-334155)}
 .employeeNicknameForm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;padding:10px 0}
-.employeeNicknameForm label{display:grid;gap:4px;color:#d8e0eb;font-size:.72rem}
-.employeeNicknameForm input{box-sizing:border-box;width:100%;border:1px solid #475569;border-radius:9px;background:#070d17;color:#f8fafc;padding:8px 9px}
+.employeeNicknameForm label{display:grid;gap:4px;color:var(--color-d8e0eb);font-size:.72rem}
+.employeeNicknameForm input{box-sizing:border-box;width:100%;border:1px solid var(--color-475569);border-radius:9px;background:var(--color-070d17);color:var(--color-f8fafc);padding:8px 9px}
 .employeeNicknameForm button{align-self:end}
-.employeeNicknameForm small{grid-column:1/-1;color:#9eabba;font-size:.68rem}
-.employeeProfilePhotoForm{display:grid;grid-template-columns:1fr 1fr auto;gap:7px;padding:9px 0 0;border-top:1px solid #334155}
-.employeeProfilePhotoForm label{display:flex;align-items:center;justify-content:center;border:1px solid #53657b;border-radius:9px;background:#172033;color:#f1f5f9;font-size:.72rem;font-weight:800;padding:8px;text-align:center;cursor:pointer}
+.employeeNicknameForm small{grid-column:1/-1;color:var(--color-9eabba);font-size:.68rem}
+.employeeProfilePhotoForm{display:grid;grid-template-columns:1fr 1fr auto;gap:7px;padding:9px 0 0;border-top:1px solid var(--color-334155)}
+.employeeProfilePhotoForm label{display:flex;align-items:center;justify-content:center;border:1px solid var(--color-53657b);border-radius:9px;background:var(--color-172033);color:var(--color-f1f5f9);font-size:.72rem;font-weight:800;padding:8px;text-align:center;cursor:pointer}
 .employeeProfilePhotoForm input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
-.employeeMessagesComposer{display:grid;gap:9px;padding:10px 0 13px;border-bottom:1px solid #334155}
-.employeeMessagesComposer label{display:grid;gap:5px;color:#d8e0eb;font-size:.8rem}
-.employeeMessagesComposer select,.employeeMessagesComposer textarea{box-sizing:border-box;width:100%;border:1px solid #475569;border-radius:10px;background:#070d17;color:#f8fafc;padding:10px}
+.employeeMessagesComposer{display:grid;gap:9px;padding:10px 0 13px;border-bottom:1px solid var(--color-334155)}
+.employeeMessagesComposer label{display:grid;gap:5px;color:var(--color-d8e0eb);font-size:.8rem}
+.employeeMessagesComposer select,.employeeMessagesComposer textarea{box-sizing:border-box;width:100%;border:1px solid var(--color-475569);border-radius:10px;background:var(--color-070d17);color:var(--color-f8fafc);padding:10px}
 .employeeMessagesPhotoControls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.employeeMessagesPhotoButton{display:flex!important;align-items:center;justify-content:center;border:1px solid #64748b;border-radius:10px;background:#1e293b;color:#f8fafc!important;font-weight:850;padding:9px 8px;cursor:pointer;text-align:center}
-.employeeMessagesPhotoButton.secondary{border-color:#475569;background:#111827;color:#dbe4ef!important}
+.employeeMessagesPhotoButton{display:flex!important;align-items:center;justify-content:center;border:1px solid var(--color-64748b);border-radius:10px;background:var(--color-1e293b);color:var(--color-f8fafc)!important;font-weight:850;padding:9px 8px;cursor:pointer;text-align:center}
+.employeeMessagesPhotoButton.secondary{border-color:var(--color-475569);background:var(--color-111827);color:var(--color-dbe4ef)!important}
 .employeeMessagesPhotoButton input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
-.employeeMessagesAttachmentPreview{display:grid;grid-template-columns:68px minmax(0,1fr) auto;align-items:center;gap:10px;border:1px solid #53657b;border-radius:11px;background:#111827;padding:8px}
-.employeeMessagesAttachmentThumb{width:68px;height:68px;border-radius:9px;overflow:hidden;border:1px solid #475569;background:#020617;display:grid;place-items:center}
+.employeeMessagesAttachmentPreview{display:grid;grid-template-columns:68px minmax(0,1fr) auto;align-items:center;gap:10px;border:1px solid var(--color-53657b);border-radius:11px;background:var(--color-111827);padding:8px}
+.employeeMessagesAttachmentThumb{width:68px;height:68px;border-radius:9px;overflow:hidden;border:1px solid var(--color-475569);background:var(--color-020617);display:grid;place-items:center}
 .employeeMessagesAttachmentThumb img{display:block;width:100%;height:100%;object-fit:cover}
 .employeeMessagesAttachmentInfo{display:grid;gap:2px;min-width:0}
-.employeeMessagesAttachmentInfo strong{font-size:.78rem;color:#f8fafc}
-.employeeMessagesAttachmentInfo span{overflow:hidden;color:#d8e0eb;font-size:.72rem;text-overflow:ellipsis;white-space:nowrap}
-.employeeMessagesAttachmentInfo small{color:#94a3b8;font-size:.64rem}
-.employeeMessagesAttachmentPreview button{border:1px solid #7f1d1d;border-radius:9px;background:#2a1116;color:#fecaca;padding:8px 9px;font-size:.7rem;font-weight:900;cursor:pointer}
+.employeeMessagesAttachmentInfo strong{font-size:.78rem;color:var(--color-f8fafc)}
+.employeeMessagesAttachmentInfo span{overflow:hidden;color:var(--color-d8e0eb);font-size:.72rem;text-overflow:ellipsis;white-space:nowrap}
+.employeeMessagesAttachmentInfo small{color:var(--color-94a3b8);font-size:.64rem}
+.employeeMessagesAttachmentPreview button{border:1px solid var(--color-7f1d1d);border-radius:9px;background:var(--color-2a1116);color:var(--color-fecaca);padding:8px 9px;font-size:.7rem;font-weight:900;cursor:pointer}
 .employeeMessagesAttachmentPreview button:disabled{cursor:wait;opacity:.55}
-.employeeMessagesSend{border:0;border-radius:10px;background:#f8fafc;color:#111827;font-weight:900;padding:10px 12px;cursor:pointer}
+.employeeMessagesSend{border:0;border-radius:10px;background:var(--color-f8fafc);color:var(--color-111827);font-weight:900;padding:10px 12px;cursor:pointer}
 .employeeMessagesSend:disabled{opacity:.55}
-.employeeMessagesNotice{margin:10px 0 0;border:1px solid #64748b;border-radius:10px;background:#172033;padding:9px 10px;font-size:.82rem}
+.employeeMessagesNotice{margin:10px 0 0;border:1px solid var(--color-64748b);border-radius:10px;background:var(--color-172033);padding:9px 10px;font-size:.82rem}
 .employeeMessagesFeed{display:grid;gap:8px;overflow:auto;padding-top:12px}
-.employeeMessagesItem{--employee-color:#64748b;background:#101827;border:1px solid #334155;border-left:4px solid #475569;border-radius:12px;padding:11px;transition:border-color .18s ease,background .18s ease,box-shadow .18s ease}
-.employeeMessagesItem.isUnread{background:linear-gradient(135deg,rgba(251,191,36,.14),#111827 58%);border-color:#b8891f;border-left-color:#fbbf24;box-shadow:0 0 0 1px rgba(251,191,36,.08)}
+.employeeMessagesItem{--employee-color:var(--color-64748b);background:var(--color-101827);border:1px solid var(--color-334155);border-left:4px solid var(--color-475569);border-radius:12px;padding:11px;transition:border-color .18s ease,background .18s ease,box-shadow .18s ease}
+.employeeMessagesItem.isUnread{background:linear-gradient(135deg,rgba(251,191,36,.14),var(--color-111827) 58%);border-color:var(--color-b8891f);border-left-color:var(--color-fbbf24);box-shadow:0 0 0 1px rgba(251,191,36,.08)}
 .employeeMessageMeta{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px}
 .employeeMessageMeta>div{display:grid;gap:1px}
 .employeeMessageStatus{justify-items:end;align-content:center}
-.employeeMessagesItem span,.employeeMessagesItem small{color:#a8b3c4;font-size:.76rem}
-.employeeMessagesUnreadMark{display:inline-flex!important;align-items:center;justify-content:center;width:max-content;border:1px solid #fbbf24;border-radius:999px;background:#fbbf24;color:#251a03!important;font-size:.62rem!important;font-weight:950!important;letter-spacing:.04em;padding:2px 7px;text-transform:uppercase}
-.employeeMessageDelete{border:0;background:transparent;color:#fca5a5;padding:2px 0;font:inherit;font-size:.68rem;font-weight:900;text-decoration:underline;cursor:pointer}
-.employeeMessageDelete:hover{color:#fecaca}
+.employeeMessagesItem span,.employeeMessagesItem small{color:var(--color-a8b3c4);font-size:.76rem}
+.employeeMessagesUnreadMark{display:inline-flex!important;align-items:center;justify-content:center;width:max-content;border:1px solid var(--color-fbbf24);border-radius:999px;background:var(--color-fbbf24);color:var(--color-251a03)!important;font-size:.62rem!important;font-weight:950!important;letter-spacing:.04em;padding:2px 7px;text-transform:uppercase}
+.employeeMessageDelete{border:0;background:transparent;color:var(--color-fca5a5);padding:2px 0;font:inherit;font-size:.68rem;font-weight:900;text-decoration:underline;cursor:pointer}
+.employeeMessageDelete:hover{color:var(--color-fecaca)}
 .employeeMessageDelete:disabled{cursor:wait;opacity:.55}
 .employeeMessagesItem p{margin:.55rem 0;white-space:pre-wrap;line-height:1.35}
-.employeeMessagesPhoto{display:block;margin:.55rem 0;border-radius:10px;overflow:hidden;border:1px solid #334155;background:#020617}
+.employeeMessagesPhoto{display:block;margin:.55rem 0;border-radius:10px;overflow:hidden;border:1px solid var(--color-334155);background:var(--color-020617)}
 .employeeMessagesPhoto img{display:block;width:100%;max-height:280px;object-fit:cover}
-.employeeMessagesEmpty{color:#94a3b8}
+.employeeMessagesEmpty{color:var(--color-94a3b8)}
 .employeeTabs button:nth-child(2){display:none}
 
 @media(min-width:1101px){
@@ -74,17 +74,17 @@
   .employeeMessagesDock{position:sticky;top:max(6px,env(safe-area-inset-top));z-index:80;margin:8px 10px 0;padding:0;max-height:none;border-radius:14px;overflow:hidden;box-shadow:0 10px 30px rgba(2,6,23,.34)}
   .employeeMessagesMobileHeader{display:block}
   .employeeMessagesHeader{display:none}
-  .employeeMessagesToggle{appearance:none;-webkit-appearance:none;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;min-height:58px;border:0;background:transparent;color:#f8fafc;padding:8px 11px;text-align:left;cursor:pointer}
+  .employeeMessagesToggle{appearance:none;-webkit-appearance:none;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;min-height:58px;border:0;background:transparent;color:var(--color-f8fafc);padding:8px 11px;text-align:left;cursor:pointer}
   .employeeMessagesToggle:focus-visible{outline:3px solid rgba(251,191,36,.55);outline-offset:-3px}
-  .employeeMessagesBell{display:grid;place-items:center;width:38px;height:38px;border:1px solid #475569;border-radius:12px;background:#1e293b;color:#e2e8f0;font-size:1rem;box-shadow:inset 0 1px rgba(255,255,255,.05)}
-  .employeeMessagesDock.hasUnread .employeeMessagesBell{border-color:#fbbf24;background:#fbbf24;color:#211704;box-shadow:0 0 0 4px rgba(251,191,36,.12)}
+  .employeeMessagesBell{display:grid;place-items:center;width:38px;height:38px;border:1px solid var(--color-475569);border-radius:12px;background:var(--color-1e293b);color:var(--color-e2e8f0);font-size:1rem;box-shadow:inset 0 1px rgba(255,255,255,.05)}
+  .employeeMessagesDock.hasUnread .employeeMessagesBell{border-color:var(--color-fbbf24);background:var(--color-fbbf24);color:var(--color-211704);box-shadow:0 0 0 4px rgba(251,191,36,.12)}
   .employeeMessagesCompactCopy{display:grid;gap:2px;min-width:0}
-  .employeeMessagesCompactTitle{display:flex;align-items:center;gap:7px;color:#f8fafc;font-size:.88rem;font-weight:900;line-height:1.1}
-  .employeeMessagesUnreadCount{display:inline-grid;place-items:center;min-width:20px;height:20px;box-sizing:border-box;border-radius:999px;background:#fbbf24;color:#211704;font-size:.68rem;font-weight:950;padding:0 6px}
-  .employeeMessagesPreview{display:block;overflow:hidden;color:#a8b3c4;font-size:.74rem;line-height:1.2;text-overflow:ellipsis;white-space:nowrap}
-  .employeeMessagesDock.hasUnread .employeeMessagesPreview{color:#fde7a5;font-weight:750}
-  .employeeMessagesChevron{border:1px solid #475569;border-radius:999px;color:#cbd5e1;font-size:.66rem;font-weight:850;padding:5px 8px;text-transform:uppercase}
-  .employeeMessagesPanel{display:none;border-top:1px solid #334155;padding:0 11px 11px;background:#0a101c}
+  .employeeMessagesCompactTitle{display:flex;align-items:center;gap:7px;color:var(--color-f8fafc);font-size:.88rem;font-weight:900;line-height:1.1}
+  .employeeMessagesUnreadCount{display:inline-grid;place-items:center;min-width:20px;height:20px;box-sizing:border-box;border-radius:999px;background:var(--color-fbbf24);color:var(--color-211704);font-size:.68rem;font-weight:950;padding:0 6px}
+  .employeeMessagesPreview{display:block;overflow:hidden;color:var(--color-a8b3c4);font-size:.74rem;line-height:1.2;text-overflow:ellipsis;white-space:nowrap}
+  .employeeMessagesDock.hasUnread .employeeMessagesPreview{color:var(--color-fde7a5);font-weight:750}
+  .employeeMessagesChevron{border:1px solid var(--color-475569);border-radius:999px;color:var(--color-cbd5e1);font-size:.66rem;font-weight:850;padding:5px 8px;text-transform:uppercase}
+  .employeeMessagesPanel{display:none;border-top:1px solid var(--color-334155);padding:0 11px 11px;background:var(--color-0a101c)}
   .employeeMessagesDock.isOpen .employeeMessagesPanel{display:flex;max-height:min(74vh,680px)}
   .employeeMessagesFeed{flex:1;min-height:120px;max-height:none;padding-right:2px}
   .employeePortalContent{padding-top:0}

@@ -1,5 +1,7 @@
 "use client";
 
+import { firstName } from "@/app/client-text";
+import { requestFailure, responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import ScheduleBoard, { type ScheduleEmployee, type ScheduleShift, type ScheduleTimeOff } from "./schedule-board";
@@ -67,10 +69,6 @@ type Tab = "schedule" | "messages" | "requests" | "corrections" | "availability"
 
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function local(value: string | null) {
   if (!value) return "Missing";
@@ -112,14 +110,6 @@ function timeOffShiftConflicts(request: TimeOff, shifts: ScheduleShift[]) {
   });
 }
 
-function firstName(value: string | null) {
-  const text = String(value || "").trim();
-  if (!text) return "Unknown";
-    const candidate = text.includes("@")
-    ? text.split("@")[0].split(/[._-]/)[0]
-    : text.split(/\s+/)[0];
-  return candidate.charAt(0).toUpperCase() + candidate.slice(1);
-}
 
 export default function WorkforcePage() {
   const [session, setSession] = useState<SessionView | null>(null);
@@ -180,7 +170,7 @@ export default function WorkforcePage() {
         body: JSON.stringify({ ...body, business: actionBusiness }),
       });
       const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-      if (!response.ok) throw new Error(String(payload?.error || `Request failed (${response.status}).`));
+      if (!response.ok) throw new Error(String(payload?.error || requestFailure(response)));
       if (businessRef.current === actionBusiness) {
         await load(actionBusiness);
         if (businessRef.current === actionBusiness) {
@@ -217,7 +207,7 @@ export default function WorkforcePage() {
         body: JSON.stringify({ action: "time-off-review", business: actionBusiness, id: request.id, approve: true }),
       });
       const payload = await response.json().catch(() => null) as { error?: string; requiresReassignment?: boolean; conflictingShifts?: unknown[]; employeeName?: string } | null;
-      if (!response.ok) throw new Error(payload?.error || `Request failed (${response.status}).`);
+      if (!response.ok) throw new Error(payload?.error || requestFailure(response));
       if (businessRef.current === actionBusiness) {
         await load(actionBusiness);
         if (businessRef.current === actionBusiness) {

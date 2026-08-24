@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -21,10 +22,6 @@ type Summary = {
 type Detail = Summary & { payload: Record<string, unknown> };
 type PageData = { business: Business; employees: Employee[]; elections: Summary[] };
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function record(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value ? value as Record<string, unknown> : {};

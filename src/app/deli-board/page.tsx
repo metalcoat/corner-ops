@@ -1,5 +1,7 @@
 "use client";
 
+import { firstName } from "@/app/client-text";
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import "./wallboard.css";
 
@@ -75,12 +77,6 @@ function phone(value: string) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
-function firstName(value: string) {
-  const text = String(value || "").trim();
-  if (!text) return "Unknown";
-    const part = text.includes("@") ? text.split("@")[0].split(/[._-]/)[0] : text.split(/\s+/)[0];
-  return part.charAt(0).toUpperCase() + part.slice(1);
-}
 
 function displayToken() {
   return typeof window === "undefined" ? "" : window.localStorage.getItem(DISPLAY_TOKEN_KEY) || "";
@@ -94,10 +90,6 @@ function requestHeaders(json = false): Record<string, string> {
   return headers;
 }
 
-async function responseError(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function DeliBoardPage() {
   const [data, setData] = useState<BoardPayload | null>(null);
@@ -117,7 +109,7 @@ export default function DeliBoardPage() {
         setSignedOut(true);
         return;
       }
-      if (!response.ok) throw new Error(await responseError(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       setSignedOut(false);
       setData(await response.json() as BoardPayload);
       setNotice("");
@@ -152,7 +144,7 @@ export default function DeliBoardPage() {
         setSignedOut(true);
         return;
       }
-      if (!response.ok) throw new Error(await responseError(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       setData(await response.json() as BoardPayload);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Task could not be updated.");
@@ -178,7 +170,7 @@ export default function DeliBoardPage() {
         setSignedOut(true);
         return;
       }
-      if (!response.ok) throw new Error(await responseError(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       setData(await response.json() as BoardPayload);
       form.reset();
     } catch (error) {

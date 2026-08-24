@@ -13,14 +13,14 @@
 .connectionActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .connectionActions button { white-space: nowrap; }
 .miniStats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.miniStats div { padding: 13px; border: 1px solid var(--border); border-radius: 9px; background: #101620; }
+.miniStats div { padding: 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--color-101620); }
 .miniStats span, .miniStats strong { display: block; }
 .miniStats span { color: var(--muted); font-size: 11px; }
 .miniStats strong { margin-top: 6px; }
 .integrationSection { margin-top: 22px; }
 .lowerGrid { margin-bottom: 30px; }
-.positiveAmount { color: #8fe2c2; }
-.negativeAmount { color: #ffb0b0; }
+.positiveAmount { color: var(--color-8fe2c2); }
+.negativeAmount { color: var(--color-ffb0b0); }
 .approveButton { white-space: nowrap; }
 .disabledLink { pointer-events: none; opacity: .45; }
 .opsUtilityNav { position: fixed; top: 14px; right: 18px; z-index: 100; display: flex; gap: 8px; padding: 5px; border: 1px solid var(--border); border-radius: 11px; background: rgb(16 22 32 / 92%); backdrop-filter: blur(10px); }

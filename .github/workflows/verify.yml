@@ -33,6 +33,8 @@ jobs:
         run: python3 tools/verify_no_runtime_ddl.py
       - name: Dependency security
         run: python3 tools/verify_dependencies.py
+      - name: CODEBASEREVIEW regression guard
+        run: python3 tools/verify_review_regressions.py
       - name: Unit tests
         run: npm test
       - name: Type check

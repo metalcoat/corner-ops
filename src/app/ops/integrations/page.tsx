@@ -1,5 +1,7 @@
 "use client";
 
+import { formatUsd } from "@/app/client-format";
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "./integrations.css";
@@ -99,19 +101,12 @@ declare global {
   }
 }
 
-function money(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0);
-}
 
 function requestedBusiness(): Business {
   if (typeof window === "undefined") return "Corner Deli";
   return new URLSearchParams(window.location.search).get("business") === "Tiki" ? "Tiki" : "Corner Deli";
 }
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function loadPlaidScript(): Promise<void> {
   if (window.Plaid) return Promise.resolve();
@@ -370,7 +365,7 @@ export default function IntegrationsPage() {
 
     <section className="stats fourStats integrationStats">
       <article><span>Connected institutions</span><strong>{plaidConnections.length}</strong></article>
-      <article><span>Combined balance</span><strong>{money(totalBalance)}</strong></article>
+      <article><span>Combined balance</span><strong>{formatUsd(totalBalance)}</strong></article>
       <article><span>Needs review</span><strong>{reviewTransactions.length}</strong></article>
       <article><span>Open issues</span><strong>{dashboard?.issues.filter((issue) => issue.business === business).length || 0}</strong></article>
     </section>
@@ -392,7 +387,7 @@ export default function IntegrationsPage() {
         <div className="integrationBody">
           {business === "Tiki" ? <>
             <p>Square supplies Tiki payment and tip activity. Corner Ops time remains the employee time-clock source.</p>
-            <div className="miniStats"><div><span>30-day payments</span><strong>{dashboard?.squareSummary.payments || 0}</strong></div><div><span>Sales</span><strong>{money(dashboard?.squareSummary.sales || 0)}</strong></div><div><span>Tips</span><strong>{money(dashboard?.squareSummary.tips || 0)}</strong></div></div>
+            <div className="miniStats"><div><span>30-day payments</span><strong>{dashboard?.squareSummary.payments || 0}</strong></div><div><span>Sales</span><strong>{formatUsd(dashboard?.squareSummary.sales || 0)}</strong></div><div><span>Tips</span><strong>{formatUsd(dashboard?.squareSummary.tips || 0)}</strong></div></div>
             {!squareConnection && <a className={`primary ${!dashboard?.configuration.square ? "disabledLink" : ""}`} href={dashboard?.configuration.square ? "/api/square/connect" : undefined}>Connect Square</a>}
             {squareConnection && <button className="secondary" disabled={busy} onClick={() => void runAction({ action: "square-sync", connectionId: squareConnection.id }, "Square synchronized.")}>Sync Square now</button>}
           </> : <p>Square belongs to Tiki. Switch to Tiki to connect or review it.</p>}
@@ -426,7 +421,7 @@ export default function IntegrationsPage() {
         {(dashboard?.transactions || []).map((transaction) => {
           const selected = accountSelections[transaction.id] || transaction.accountCode;
           const account = dashboard?.accountingAccounts.find((candidate) => candidate.code === selected);
-          return <tr key={transaction.id}><td>{transaction.transactionDate}</td><td><strong>{transaction.merchantName || transaction.description}</strong><small>{transaction.description}</small><small>{transaction.classificationSource} · {Math.round(transaction.confidence * 100)}%</small></td><td className={transaction.signedAmount < 0 ? "negativeAmount" : "positiveAmount"}>{money(transaction.signedAmount)}</td><td>{transaction.category || "Uncategorized"}</td><td><select value={selected} onChange={(event: { target: { value: string } }) => setAccountSelections((current) => ({ ...current, [transaction.id]: event.target.value }))}>{(dashboard?.accountingAccounts || []).map((candidate) => <option key={candidate.code} value={candidate.code}>{candidate.code} · {candidate.name}</option>)}</select></td><td>{transaction.reviewStatus === "Approved" ? <span className="badge active">Approved</span> : <button className="textButton neutral approveButton" disabled={busy || !account} onClick={() => void runAction({ action: "transaction-approve", id: transaction.id, business, category: account?.name || transaction.category, accountCode: selected, teach: true }, "Transaction approved and future matching transactions will learn from it.")}>Approve & teach</button>}</td></tr>;
+          return <tr key={transaction.id}><td>{transaction.transactionDate}</td><td><strong>{transaction.merchantName || transaction.description}</strong><small>{transaction.description}</small><small>{transaction.classificationSource} · {Math.round(transaction.confidence * 100)}%</small></td><td className={transaction.signedAmount < 0 ? "negativeAmount" : "positiveAmount"}>{formatUsd(transaction.signedAmount)}</td><td>{transaction.category || "Uncategorized"}</td><td><select value={selected} onChange={(event: { target: { value: string } }) => setAccountSelections((current) => ({ ...current, [transaction.id]: event.target.value }))}>{(dashboard?.accountingAccounts || []).map((candidate) => <option key={candidate.code} value={candidate.code}>{candidate.code} · {candidate.name}</option>)}</select></td><td>{transaction.reviewStatus === "Approved" ? <span className="badge active">Approved</span> : <button className="textButton neutral approveButton" disabled={busy || !account} onClick={() => void runAction({ action: "transaction-approve", id: transaction.id, business, category: account?.name || transaction.category, accountCode: selected, teach: true }, "Transaction approved and future matching transactions will learn from it.")}>Approve & teach</button>}</td></tr>;
         })}
         {!dashboard?.transactions.length && <tr><td colSpan={6}>No bank or credit-card transactions have been imported yet.</td></tr>}
       </tbody></table></div>

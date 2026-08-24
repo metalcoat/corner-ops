@@ -53,6 +53,7 @@ async function buildWorkforcePayload(business: Business) {
       extra_meal_break_start, extra_meal_break_minutes
     FROM schedule_shifts
     WHERE business = ${business}
+      AND status <> 'Cancelled'
       AND starts_at >= NOW() - INTERVAL '21 days'
       AND starts_at < NOW() + INTERVAL '120 days'
   ` as unknown as Array<{
