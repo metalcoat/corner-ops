@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 # Residual metrics are intentionally mechanical; Stage 9 fixes only what still exists on current main.
 
-code_files = [p for p in SRC.rglob("*") if p.suffix in {".ts", ".tsx", ".js", ".mjs"]
+code_files = [p for p in SRC.rglob("*") if p.suffix in {".ts", ".tsx", ".js", ".mjs"}]
 css_files = list(SRC.rglob("*.css"))
 palette_file = SRC / "app/color-tokens.css"
 
