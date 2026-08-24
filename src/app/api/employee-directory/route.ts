@@ -1,5 +1,5 @@
 import { del, put } from "@vercel/blob";
-import { canAccessBusiness, getSession } from "@/lib/auth";
+import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
   bulkUpdateDirectoryPins,
@@ -38,6 +38,7 @@ export async function GET(request: Request) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    requirePermission(session, "workforce.read");
     const business = businessFrom(new URL(request.url).searchParams.get("business"));
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
     return Response.json({ employees: await listDirectoryEmployees(business) });
@@ -51,6 +52,7 @@ export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    requirePermission(session, "workforce.write");
     const contentType = request.headers.get("content-type") || "";
 
     if (contentType.includes("multipart/form-data")) {
