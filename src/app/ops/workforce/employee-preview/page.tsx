@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { canAccessBusiness, getSession } from "@/lib/auth";
+import { getSql } from "@/lib/db";
 import { listDirectoryEmployees } from "@/lib/employee-directory-admin";
 import { employeePortalDashboard } from "@/lib/employee-portal-dashboard";
 import { newYorkDateKey } from "@/lib/schedule-meal-compliance";
@@ -9,6 +10,15 @@ import "../workforce.css";
 const TIME_ZONE = "America/New_York";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+type PreviewShift = {
+  id: string;
+  employeeId: string | null;
+  position: string;
+  startsAt: string;
+  endsAt: string;
+  status: string;
+  notes: string;
+};
 
 function one(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] || "" : value || "";
@@ -52,6 +62,24 @@ function dayLabel(key: string): string {
   }).format(dateFromKey(key));
 }
 
+function ShiftWeek({ title, eyebrow, days, shifts }: { title: string; eyebrow: string; days: string[]; shifts: PreviewShift[] }) {
+  return <section className="workforcePanel">
+    <div className="wfPanelHeader"><div><p className="wfEyebrow">{eyebrow}</p><h2>{title}</h2></div></div>
+    <div className="wfList">
+      {days.map((day) => {
+        const dayShifts = shifts.filter((shift) => newYorkDateKey(shift.startsAt) === day);
+        return <div className="wfRequest" key={day}>
+          <div>
+            <strong>{dayLabel(day)}</strong>
+            {dayShifts.map((shift) => <span key={shift.id}>{timeLabel(shift.startsAt)}–{timeLabel(shift.endsAt)} · {shift.position}{shift.status === "Draft" ? " · DRAFT" : ""}{shift.notes ? ` · ${shift.notes}` : ""}</span>)}
+            {!dayShifts.length && <span>Not scheduled</span>}
+          </div>
+        </div>;
+      })}
+    </div>
+  </section>;
+}
+
 export default async function EmployeePreviewPage({ searchParams }: { searchParams: SearchParams }) {
   const owner = await getSession();
   if (!owner) redirect("/");
@@ -78,20 +106,57 @@ export default async function EmployeePreviewPage({ searchParams }: { searchPara
       })
     : null;
 
+  const stagedRows = employee ? await getSql()`
+    SELECT id, employee_id, position, starts_at, ends_at, status, notes
+    FROM schedule_shifts
+    WHERE business = ${business}
+      AND employee_id = ${employee.id}
+      AND status <> 'Cancelled'
+      AND starts_at >= (${weekStart}::date AT TIME ZONE ${TIME_ZONE})
+      AND starts_at < ((${weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+    ORDER BY starts_at
+  ` as unknown as Array<{
+    id: string;
+    employee_id: string | null;
+    position: string;
+    starts_at: string;
+    ends_at: string;
+    status: string;
+    notes: string;
+  }> : [];
+
   if (employee) {
     console.info(`[employee-preview] ${owner.email} viewed ${business} Employee Hub as ${employee.id}`);
   }
 
-  const myShifts = (dashboard?.teamShifts || []).filter((shift) => {
+  const currentlyVisible: PreviewShift[] = (dashboard?.teamShifts || []).filter((shift) => {
     const key = newYorkDateKey(shift.startsAt);
     return shift.employeeId === employee?.id && key >= weekStart && key < weekEnd;
-  });
+  }).map((shift) => ({
+    id: shift.id,
+    employeeId: shift.employeeId,
+    position: shift.position,
+    startsAt: shift.startsAt,
+    endsAt: shift.endsAt,
+    status: shift.status,
+    notes: shift.notes,
+  }));
+
+  const afterPublish: PreviewShift[] = stagedRows.map((shift) => ({
+    id: String(shift.id),
+    employeeId: shift.employee_id ? String(shift.employee_id) : null,
+    position: String(shift.position || ""),
+    startsAt: String(shift.starts_at),
+    endsAt: String(shift.ends_at),
+    status: String(shift.status || ""),
+    notes: String(shift.notes || ""),
+  }));
+
   const openShifts = (dashboard?.teamShifts || []).filter((shift) => {
     const key = newYorkDateKey(shift.startsAt);
     return !shift.employeeId && shift.status === "Open" && key >= weekStart && key < weekEnd;
   });
   const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
-
   const base = `/ops/workforce/employee-preview?business=${encodeURIComponent(business)}${employee ? `&employeeId=${encodeURIComponent(employee.id)}` : ""}`;
 
   return <main className="workforceShell">
@@ -99,7 +164,7 @@ export default async function EmployeePreviewPage({ searchParams }: { searchPara
       <div>
         <p className="wfEyebrow">Read-only impersonation</p>
         <h1>Employee Hub Preview</h1>
-        <p>This preview uses the same Employee Hub dashboard data as the employee. Actions are intentionally unavailable here.</p>
+        <p>Compare what the employee can see now with what they will see after the next schedule publish. No employee actions are available here.</p>
       </div>
       <a className="wfPrimary" href={`/ops/workforce?business=${encodeURIComponent(business)}`}>← Back to Workforce</a>
     </header>
@@ -120,26 +185,17 @@ export default async function EmployeePreviewPage({ searchParams }: { searchPara
     {employee && <>
       <section className="workforcePanel">
         <div className="wfPanelHeader">
-          <div><p className="wfEyebrow">Employee schedule</p><h2>{dayLabel(weekStart)} – {dayLabel(addDays(weekStart, 6))}</h2></div>
+          <div><p className="wfEyebrow">Schedule week</p><h2>{dayLabel(weekStart)} – {dayLabel(addDays(weekStart, 6))}</h2></div>
           <div className="wfActions">
             <a href={`${base}&week=${addDays(weekStart, -7)}`}>← Previous</a>
             <a href={`${base}&week=${mondayKey(new Date())}`}>Current</a>
             <a href={`${base}&week=${addDays(weekStart, 7)}`}>Next →</a>
           </div>
         </div>
-        <div className="wfList">
-          {days.map((day) => {
-            const shifts = myShifts.filter((shift) => newYorkDateKey(shift.startsAt) === day);
-            return <div className="wfRequest" key={day}>
-              <div>
-                <strong>{dayLabel(day)}</strong>
-                {shifts.map((shift) => <span key={shift.id}>{timeLabel(shift.startsAt)}–{timeLabel(shift.endsAt)} · {shift.position}{shift.notes ? ` · ${shift.notes}` : ""}</span>)}
-                {!shifts.length && <span>Not scheduled</span>}
-              </div>
-            </div>;
-          })}
-        </div>
       </section>
+
+      <ShiftWeek title="After next Publish" eyebrow="Preview before notifying" days={days} shifts={afterPublish} />
+      <ShiftWeek title="Currently visible in Employee Hub" eyebrow="What they see right now" days={days} shifts={currentlyVisible} />
 
       <section className="workforcePanel">
         <div className="wfPanelHeader"><div><p className="wfEyebrow">What they can see</p><h2>Open shifts this week</h2></div></div>
