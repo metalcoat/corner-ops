@@ -8,6 +8,8 @@ SRC = ROOT / "src"
 
 code_files = [p for p in SRC.rglob("*") if p.suffix in {".ts", ".tsx", ".js", ".mjs"}]
 css_files = list(SRC.rglob("*.css"))
+palette_file = SRC / "app/color-tokens.css"
+feature_css_files = [p for p in css_files if p != palette_file]
 
 def count_code(pattern: str):
     rx = re.compile(pattern, re.M)
@@ -38,15 +40,17 @@ hexes = Counter()
 token_refs = Counter()
 token_defs = Counter()
 selector_files = defaultdict(set)
-css_bytes = 0
+css_bytes = sum(len(p.read_bytes()) for p in css_files)
 for p in css_files:
     rel = p.relative_to(ROOT).as_posix()
     text = p.read_text(errors="replace")
-    css_bytes += len(text.encode())
     important += text.count("!important")
-    hexes.update(x.lower() for x in hex_rx.findall(text))
+    if p != palette_file:
+        hexes.update(x.lower() for x in hex_rx.findall(text))
     token_refs.update(token_ref_rx.findall(text))
     token_defs.update(token_def_rx.findall(text))
+    if p == palette_file:
+        continue
     for m in re.finditer(r"(?:^|\})([^{}]+)\{", text, re.M):
         chunk = m.group(1).strip()
         if not chunk or chunk.startswith("@") or re.fullmatch(r"(?:from|to|\d+%)", chunk):
@@ -67,8 +71,8 @@ out = [
     f"CSS files: {len(css_files)}",
     f"CSS bytes: {css_bytes}",
     f"CSS !important: {important}",
-    f"Hard-coded hex occurrences: {sum(hexes.values())}",
-    f"Unique hard-coded hex values: {len(hexes)}",
+    f"Distributed hard-coded hex occurrences: {sum(hexes.values())}",
+    f"Unique distributed hard-coded hex values: {len(hexes)}",
     f"Token references: {sum(token_refs.values())}",
     f"Token definitions: {sum(token_defs.values())}",
     f"Missing referenced tokens: {len(missing_tokens)}",
@@ -85,7 +89,7 @@ out += ["## Missing CSS tokens"]
 out += [f"- `--{name}`" for name in missing_tokens] or ["- none"]
 out += ["", "## Patch-named CSS files"]
 out += [f"- `{name}`" for name in patch_css] or ["- none"]
-out += ["", "## Top hard-coded colours"]
+out += ["", "## Top distributed hard-coded colours"]
 for value, n in hexes.most_common(40):
     out.append(f"- `{value}` ×{n}")
 out += ["", "## Duplicate selectors (first 100)"]
