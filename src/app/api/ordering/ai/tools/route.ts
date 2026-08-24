@@ -6,6 +6,7 @@ import { addressForOrder, routeDeliveryAddress } from "@/lib/ordering-address";
 import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
 import { quoteDelivery } from "@/lib/ordering-delivery";
 import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
+import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
 import {
   AiToolError, auditAiTool, availabilityBundle, createAiDraft, customerLookup,
   deliveryQuote, futureSlots, holdDraft, itemInputs, menuCatalog, promotions,
@@ -37,7 +38,7 @@ export async function executeAiOrderingTool(tool:AiOrderingToolName,args:Record<
     case "attach_delivery_address": { const orderId=String(args.orderId||""); const order=await orderForActor(orderId,businessValue); if(order.status!=="draft") throw new AiToolError("VALIDATION_REQUIRED","Addresses can only be attached to drafts.","Historical sent orders are immutable."); const entered=String(args.address||""); let address; try { address=addressForOrder(String(order.service_type) as any,String(args.validationToken||""),entered); } catch(error) { throw new AiToolError("VALIDATION_REQUIRED",error instanceof Error?error.message:"Validate the address.","Call the address validation interface, present any candidates to the customer, then attach its token."); } if(!address) throw new AiToolError("VALIDATION_REQUIRED","A validated delivery address is required.","Validate an address and attach its token."); const route=await routeDeliveryAddress(address); await saveOrderDeliveryAddress({orderId,address,line2:String(args.unit||""),customerAddressId:args.customerAddressId?String(args.customerAddressId):null,route}); const quote=await quoteDelivery({business:businessValue,distanceMiles:route.distanceMiles,merchandiseSubtotalCents:Number(order.subtotal_cents)}); await getSql()`UPDATE ordering_orders SET delivery_fee_cents=${quote.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}-paid_cents),version=version+1,updated_at=NOW() WHERE id=${orderId}`; return {order:await orderForActor(orderId,businessValue),delivery:quote,route:{distanceMiles:route.distanceMiles,durationSeconds:route.durationSeconds}}; }
     case "validate_delivery": return deliveryQuote(businessValue,Number(args.distanceMiles),Number(args.merchandiseSubtotalCents));
     case "hold": return holdDraft(String(args.orderId||""),businessValue);
-    case "send": return sendDraft(String(args.orderId||""),businessValue,actor);
+    case "send": { const orderId=String(args.orderId||"");const result=await sendDraft(orderId,businessValue,actor);await dispatchSubmittedOrderPrintJobs(orderId,businessValue);return result; }
   }
 }
 
