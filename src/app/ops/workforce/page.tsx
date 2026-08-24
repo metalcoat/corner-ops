@@ -180,11 +180,24 @@ export default function WorkforcePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...body, business: actionBusiness }),
       });
-      if (!response.ok) throw new Error(await responseMessage(response));
+      const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if (!response.ok) throw new Error(String(payload?.error || `Request failed (${response.status}).`));
       if (businessRef.current === actionBusiness) {
         await load(actionBusiness);
-        if (businessRef.current === actionBusiness) setNotice(success);
+        if (businessRef.current === actionBusiness) {
+          const email = payload?.email as { configured?: boolean; sent?: number; failed?: number; missingEmail?: number } | undefined;
+          const sms = payload?.sms as { configured?: boolean; sent?: number; failed?: number; missingPhone?: number; notOptedIn?: number } | undefined;
+          const duplicate = Boolean(payload?.duplicate);
+          const delivery = email || sms
+            ? [
+                email ? `Email ${email.configured === false ? "not configured" : `${email.sent || 0} sent, ${email.failed || 0} failed, ${email.missingEmail || 0} missing`}` : "",
+                sms ? `SMS ${sms.configured === false ? "not configured" : `${sms.sent || 0} sent, ${sms.failed || 0} failed, ${sms.missingPhone || 0} missing, ${sms.notOptedIn || 0} opted out`}` : "",
+              ].filter(Boolean).join(" · ")
+            : "";
+          setNotice(`${duplicate ? "Schedule publish already processed." : success}${delivery ? ` ${delivery}.` : ""}`);
+        }
       }
+      return payload;
     } catch (error) {
       const message = error instanceof Error ? error.message : "The operation failed.";
       if (businessRef.current === actionBusiness) setNotice(message);

@@ -115,116 +115,143 @@ async function emailIssueDigest(details: Record<string, unknown>) {
   return { sent: true, id: result.data?.id };
 }
 
+type SchedulerFailure = { step: string; message: string };
+
+async function runSchedulerStep<T>(input: {
+  localDate: string;
+  step: string;
+  details: Record<string, unknown>;
+  failures: SchedulerFailure[];
+  run: () => Promise<T>;
+}): Promise<T | null> {
+  try {
+    const result = await input.run();
+    input.details[input.step] = result;
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    input.failures.push({ step: input.step, message });
+    input.details[input.step] = { error: message };
+    try {
+      await createOperationIssue({
+        issueKey: `scheduler:${input.localDate}:${input.step}`,
+        business: "Corner Deli",
+        issueType: "Scheduler",
+        severity: "Error",
+        title: `Nightly step failed: ${input.step}`,
+        details: message,
+        reference: input.localDate,
+      });
+    } catch (issueError) {
+      input.details[`${input.step}IssueError`] = issueError instanceof Error ? issueError.message : String(issueError);
+    }
+    return null;
+  }
+}
+
 export async function runScheduledOperations(input: { force?: boolean; source?: string } = {}) {
   await ensureIntegrationSchema();
   const local = localDateParts();
-  const runKey = `nightly:${local.date}`;
+  const baseRunKey = `nightly:${local.date}`;
 
   if (!input.force && local.hour !== 3) {
     return { skipped: true, reason: `Local hour is ${local.hour}; scheduler runs at 3 AM America/New_York.` };
   }
 
+  await getSql()`
+    UPDATE scheduler_runs SET status = 'Failed', completed_at = NOW(),
+      details = COALESCE(details, '{}'::jsonb) || jsonb_build_object('reaped', TRUE, 'reapedAt', NOW(), 'error', 'Stale running scheduler invocation was reaped.')
+    WHERE status = 'Running' AND started_at < NOW() - INTERVAL '45 minutes'
+  `;
+
+  const priorRuns = input.force ? [] : await getSql()`
+    SELECT id, status, run_key, started_at
+    FROM scheduler_runs
+    WHERE local_date = ${local.date} AND run_key LIKE ${`${baseRunKey}%`}
+    ORDER BY started_at
+  ` as unknown as Array<{ id: string; status: string; run_key: string; started_at: string }>;
+  if (!input.force && priorRuns.some((run) => run.status === 'Success')) {
+    return { skipped: true, reason: "This local-date scheduler already completed successfully." };
+  }
+  if (!input.force && priorRuns.length >= 3) {
+    return { skipped: true, reason: "This local-date scheduler reached its three-attempt retry limit." };
+  }
+
+  const attempt = input.force ? 0 : priorRuns.length + 1;
+  const runKey = input.force ? `${baseRunKey}:manual:${Date.now()}` : `${baseRunKey}:attempt:${attempt}`;
   const inserted = await getSql()`
     INSERT INTO scheduler_runs (id, run_key, local_date, local_hour, status, details)
     VALUES (
-      ${crypto.randomUUID()}, ${input.force ? `${runKey}:manual:${Date.now()}` : runKey},
-      ${local.date}, ${local.hour}, 'Running', ${JSON.stringify({ source: input.source || "cron" })}::jsonb
+      ${crypto.randomUUID()}, ${runKey}, ${local.date}, ${local.hour}, 'Running',
+      ${JSON.stringify({ source: input.source || "cron", attempt: input.force ? "manual" : attempt })}::jsonb
     )
     ON CONFLICT (run_key) DO NOTHING
     RETURNING id
   ` as unknown as Array<{ id: string }>;
-  if (!inserted[0]) return { skipped: true, reason: "This local-date scheduler run already completed or is running." };
+  if (!inserted[0]) return { skipped: true, reason: "This scheduler attempt is already running." };
 
   const runId = inserted[0].id;
-  const details: Record<string, unknown> = {};
-  try {
-    details.openTikiPunches = await flagOpenTikiPunches(local.date);
-    details.rezkuFresh = await checkRezkuFreshness(local.date);
+  const details: Record<string, unknown> = { attempt: input.force ? "manual" : attempt };
+  const failures: SchedulerFailure[] = [];
 
-    try {
-      details.weather = await syncOperationalWeather();
-    } catch (error) {
-      details.weather = { error: error instanceof Error ? error.message : String(error) };
-    }
-
-    try {
-      details.missedShifts = await detectMissedShifts();
-    } catch (error) {
-      details.missedShifts = { error: error instanceof Error ? error.message : String(error) };
-    }
-
-    try {
-      const [cornerDeli, tiki] = await Promise.all([
-        evaluateAndNotifyOvertimeRisk({
-          business: "Corner Deli",
-          source: "Nightly scheduler",
-          notify: true,
-        }),
-        evaluateAndNotifyOvertimeRisk({
-          business: "Tiki",
-          source: "Nightly scheduler",
-          notify: true,
-        }),
-      ]);
-      details.overtimeRisk = {
-        cornerDeli: cornerDeli.summary,
-        tiki: tiki.summary,
-      };
-    } catch (error) {
-      details.overtimeRisk = { error: error instanceof Error ? error.message : String(error) };
-    }
-
-    details.bankSync = await syncAllBankConnections();
-    try {
-      details.expenses = await runExpenseAutomation();
-    } catch (error) {
-      details.expenses = { error: error instanceof Error ? error.message : String(error) };
-    }
-
-    try {
-      details.recurringInvoices = await generateDueRecurringInvoices({
-        throughDate: local.date,
-        actor: "Nightly recurring invoice scheduler",
-      });
-    } catch (error) {
-      details.recurringInvoices = { error: error instanceof Error ? error.message : String(error) };
-    }
-
-    try {
-      details.squareSync = await syncSquareConnection();
-    } catch (error) {
-      details.squareSync = { error: error instanceof Error ? error.message : String(error) };
-    }
-
-    if (local.weekday === "Mon") {
-      const weekStart = previousWeekStart(local.date);
-      details.payrollRuns = {
-        cornerDeliRows: await capturePayrollRun("Corner Deli", weekStart),
-        tikiRows: await capturePayrollRun("Tiki", weekStart),
-        weekStart,
-      };
-    }
-
-    try {
-      details.alertEmail = await emailIssueDigest(details);
-    } catch (error) {
-      details.alertEmail = { error: error instanceof Error ? error.message : String(error) };
-    }
-
-    await getSql()`
-      UPDATE scheduler_runs SET status = 'Success', details = ${JSON.stringify(details)}::jsonb, completed_at = NOW()
-      WHERE id = ${runId}
-    `;
-    return { ok: true, runId, local, details };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    details.error = message;
-    await getSql()`
-      UPDATE scheduler_runs SET status = 'Failed', details = ${JSON.stringify(details)}::jsonb, completed_at = NOW()
-      WHERE id = ${runId}
-    `;
-    throw error;
+  if (local.weekday === "Mon") {
+    const weekStart = previousWeekStart(local.date);
+    details.payrollWeekStart = weekStart;
+    await runSchedulerStep({ localDate: local.date, step: "payrollCornerDeli", details, failures, run: () => capturePayrollRun("Corner Deli", weekStart) });
+    await runSchedulerStep({ localDate: local.date, step: "payrollTiki", details, failures, run: () => capturePayrollRun("Tiki", weekStart) });
   }
+
+  await runSchedulerStep({ localDate: local.date, step: "openTikiPunches", details, failures, run: () => flagOpenTikiPunches(local.date) });
+  await runSchedulerStep({ localDate: local.date, step: "rezkuFresh", details, failures, run: () => checkRezkuFreshness(local.date) });
+  await runSchedulerStep({ localDate: local.date, step: "weather", details, failures, run: () => syncOperationalWeather() });
+  await runSchedulerStep({ localDate: local.date, step: "missedShifts", details, failures, run: () => detectMissedShifts() });
+  await runSchedulerStep({
+    localDate: local.date,
+    step: "overtimeRisk",
+    details,
+    failures,
+    run: async () => {
+      const [cornerDeli, tiki] = await Promise.all([
+        evaluateAndNotifyOvertimeRisk({ business: "Corner Deli", source: "Nightly scheduler", notify: true }),
+        evaluateAndNotifyOvertimeRisk({ business: "Tiki", source: "Nightly scheduler", notify: true }),
+      ]);
+      return { cornerDeli: cornerDeli.summary, tiki: tiki.summary };
+    },
+  });
+  const bankSync = await runSchedulerStep({ localDate: local.date, step: "bankSync", details, failures, run: () => syncAllBankConnections() });
+  if (bankSync?.some((item) => !item.ok)) failures.push({ step: "bankSync", message: `${bankSync.filter((item) => !item.ok).length} bank connection sync(s) failed.` });
+  await runSchedulerStep({ localDate: local.date, step: "expenses", details, failures, run: () => runExpenseAutomation() });
+  const recurring = await runSchedulerStep({
+    localDate: local.date,
+    step: "recurringInvoices",
+    details,
+    failures,
+    run: () => generateDueRecurringInvoices({ throughDate: local.date, actor: "Nightly recurring invoice scheduler" }),
+  });
+  if (recurring?.failures?.length) {
+    failures.push({ step: "recurringInvoices", message: `${recurring.failures.length} recurring invoice template(s) failed.` });
+    for (const failure of recurring.failures) {
+      await createOperationIssue({
+        issueKey: `recurring-invoice:${failure.templateId}:${failure.issueDate}`,
+        business: failure.business,
+        issueType: "Recurring Invoice",
+        severity: "Error",
+        title: `Recurring invoice failed: ${failure.name}`,
+        details: failure.error,
+        reference: failure.templateId,
+      }).catch(() => undefined);
+    }
+  }
+  await runSchedulerStep({ localDate: local.date, step: "squareSync", details, failures, run: () => syncSquareConnection() });
+  await runSchedulerStep({ localDate: local.date, step: "alertEmail", details, failures, run: () => emailIssueDigest({ ...details, failures }) });
+
+  details.failures = failures;
+  const status = failures.length ? 'Failed' : 'Success';
+  await getSql()`
+    UPDATE scheduler_runs SET status = ${status}, details = ${JSON.stringify(details)}::jsonb, completed_at = NOW()
+    WHERE id = ${runId}
+  `;
+  return { ok: failures.length === 0, partial: failures.length > 0, runId, local, failures, details };
 }
 
 export async function handleCronRequest(request: Request) {

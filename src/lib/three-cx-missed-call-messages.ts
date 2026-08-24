@@ -130,7 +130,7 @@ export async function notifyClockedInDeliEmployeesOfMissedCalls() {
           id, business, sender_name, recipient_employee_id, message_type, body
         ) VALUES (
           ${crypto.randomUUID()}, 'Corner Deli', 'Corner Ops Call Monitor',
-          ${employee.id}, 'Announcement', ${message}
+          ${employee.id}, 'Direct', ${message}
         )
       `;
       recipients.add(employee.id);

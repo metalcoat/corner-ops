@@ -449,8 +449,7 @@ export async function exchangePlaidPublicToken(input: {
   ` as unknown as Array<{ id: string }>;
   const connectionId = rows[0].id;
   await upsertBankAccounts(connectionId, input.business, institution, accountsResult.accounts || []);
-  await syncBankConnection(connectionId);
-  return { connectionId, institution };
+  return { connectionId, institution, syncPending: true };
 }
 
 function fallbackClassification(business: Business, transaction: PlaidTransaction) {
@@ -521,7 +520,7 @@ async function rulesForBusiness(business: Business): Promise<ClassificationRule[
     SELECT id, business, priority, direction, field, match_type, pattern, category, account_code, confidence
     FROM classification_rules
     WHERE business = ${business} AND active = TRUE
-    ORDER BY priority ASC, created_at ASC
+    ORDER BY priority ASC, created_at DESC
   ` as unknown as ClassificationRule[];
 }
 
@@ -542,6 +541,13 @@ async function loadConnection(connectionId: string, expectedBusiness?: Business)
 }
 
 async function startSync(connection: ConnectionRow) {
+  await getSql()`
+    UPDATE integration_sync_runs SET status = 'Failed',
+      message = CASE WHEN message = '' THEN 'Stale running sync was reaped before retry.' ELSE message END,
+      completed_at = NOW()
+    WHERE connection_id = ${connection.id} AND status = 'Running'
+      AND started_at < NOW() - INTERVAL '20 minutes'
+  `;
   const id = crypto.randomUUID();
   await getSql()`
     INSERT INTO integration_sync_runs (id, connection_id, provider, business, status)
@@ -631,9 +637,11 @@ export async function syncBankConnection(connectionId: string, expectedBusiness?
         next_cursor: string;
         has_more: boolean;
       }>("/transactions/sync", { access_token: accessToken, cursor });
-      for (const transaction of page.added || []) {
-        await upsertPlaidTransaction(connection, transaction, rules);
-        added += 1;
+      const addedRows = page.added || [];
+      for (let offset = 0; offset < addedRows.length; offset += 20) {
+        const chunk = addedRows.slice(offset, offset + 20);
+        await Promise.all(chunk.map((transaction) => upsertPlaidTransaction(connection, transaction, rules)));
+        added += chunk.length;
       }
       for (const transaction of page.modified || []) {
         const current = await getSql()`
@@ -685,6 +693,10 @@ export async function syncBankConnection(connectionId: string, expectedBusiness?
         removed += 1;
       }
       cursor = page.next_cursor;
+      await getSql()`
+        UPDATE integration_connections SET cursor = ${cursor || ''}, updated_at = NOW()
+        WHERE id = ${connection.id} AND business = ${connection.business}
+      `;
       hasMore = Boolean(page.has_more);
     }
 

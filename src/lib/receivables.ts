@@ -335,20 +335,35 @@ export async function generateDueRecurringInvoices(input: {
       ` as unknown as TemplateRow[];
 
   const generated: Array<Record<string, unknown>> = [];
+  const failures: Array<{ templateId: string; business: Business; name: string; issueDate: string; error: string }> = [];
   for (const template of templates) {
     let nextDate = String(template.next_issue_date).slice(0, 10);
     let safety = 0;
-    while (nextDate <= throughDate && safety < 24) {
-      generated.push({ templateId: template.id, business: template.business, ...(await postInvoice(template, nextDate, input.actor || "Recurring invoice scheduler")) });
-      nextDate = advanceIssueDate(nextDate, template.cadence);
-      safety += 1;
+    try {
+      while (nextDate <= throughDate && safety < 24) {
+        generated.push({ templateId: template.id, business: template.business, ...(await postInvoice(template, nextDate, input.actor || "Recurring invoice scheduler")) });
+        nextDate = advanceIssueDate(nextDate, template.cadence);
+        safety += 1;
+      }
+      await getSql()`
+        UPDATE recurring_invoice_templates SET next_issue_date = ${nextDate}, updated_at = NOW()
+        WHERE id = ${template.id} AND business = ${template.business}
+      `;
+    } catch (error) {
+      failures.push({
+        templateId: template.id,
+        business: template.business,
+        name: template.name,
+        issueDate: nextDate,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await getSql()`
+        UPDATE recurring_invoice_templates SET next_issue_date = ${nextDate}, updated_at = NOW()
+        WHERE id = ${template.id} AND business = ${template.business}
+      `;
     }
-    await getSql()`
-      UPDATE recurring_invoice_templates SET next_issue_date = ${nextDate}, updated_at = NOW()
-      WHERE id = ${template.id}
-    `;
   }
-  return { throughDate, templates: templates.length, created: generated.filter((row) => row.created).length, generated };
+  return { throughDate, templates: templates.length, created: generated.filter((row) => row.created).length, failed: failures.length, failures, generated };
 }
 
 async function recalculateInvoice(invoiceId: string) {

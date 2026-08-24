@@ -5,7 +5,8 @@
       "agent/rebuild-corner-ops": false,
       "agent/vercel-cost-stabilization": false,
       "agent/full-codebase-review-remediation": false,
-      "agent/codebase-review-stage-2": false
+      "agent/codebase-review-stage-2": false,
+      "agent/codebase-review-stage-3": false
     }
   },
   "crons": [

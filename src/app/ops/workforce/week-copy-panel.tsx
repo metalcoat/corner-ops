@@ -9,7 +9,7 @@ type Props = {
   business: Business;
   shifts: ScheduleShift[];
   busy: boolean;
-  runAction: (body: Record<string, unknown>, success: string) => Promise<void>;
+  runAction: (body: Record<string, unknown>, success: string) => Promise<Record<string, unknown> | null>;
 };
 
 function dateKey(date: Date): string {

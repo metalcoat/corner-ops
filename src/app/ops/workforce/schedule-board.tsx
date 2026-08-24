@@ -59,7 +59,7 @@ type Props = {
   shifts: ScheduleShift[];
   timeOff: ScheduleTimeOff[];
   busy: boolean;
-  runAction: (body: Record<string, unknown>, success: string) => Promise<void>;
+  runAction: (body: Record<string, unknown>, success: string) => Promise<Record<string, unknown> | null>;
 };
 
 type EditorState = {
@@ -595,7 +595,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       return;
     }
     const actionLabel = draftCount > 0 ? "Publish week" : "Resend schedule";
-    if (!window.confirm(`${actionLabel} for ${business}? This will notify all active employees.`)) return;
+    if (!window.confirm(`${actionLabel} for ${business}? Only employees whose schedule changed will be notified; an explicit resend notifies currently assigned employees again.`)) return;
     await runAction(
       { action: "week-publish", weekStart: dateKey(weekStart) },
       "Schedule published. Employee Hub and configured notifications were updated.",
