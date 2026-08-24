@@ -23,6 +23,7 @@ export type OrderingItemVariantView = {
 };
 
 export type OrderingMenuItemWithVariants = OrderingMenuItemView & {
+  aliases: string[];
   variants: OrderingItemVariantView[];
 };
 
@@ -42,6 +43,7 @@ type VariantRow = {
   metadata: Record<string, unknown> | null;
 };
 type AliasRow = { variant_id: string; alias: string };
+type ItemAliasRow = { item_id: string; alias: string };
 type ModifierPriceRow = { variant_id: string; option_id: string; price_delta_cents: number; available: boolean };
 
 export async function orderingMenuWithVariants(business: OrderingBusiness,channel:import("@/lib/ordering-menu").OrderingMenuChannel="pos"): Promise<OrderingMenuCategoryWithVariants[]> {
@@ -58,6 +60,7 @@ export async function orderingMenuWithVariants(business: OrderingBusiness,channe
     ORDER BY variant.item_id, variant.sort_order, variant.name
   `) as VariantRow[];
   const variantIds = variants.map((variant) => variant.id);
+  const itemAliases=(await sql`SELECT alias.item_id,alias.alias FROM ordering_menu_item_aliases alias JOIN ordering_menu_items item ON item.id=alias.item_id WHERE item.business=${business} AND item.active=TRUE AND alias.active=TRUE ORDER BY alias.item_id,alias.alias`) as ItemAliasRow[];
 
   const aliases = variantIds.length
     ? (await sql`
@@ -114,11 +117,13 @@ export async function orderingMenuWithVariants(business: OrderingBusiness,channe
     });
     variantsByItem.set(row.item_id, list);
   }
+  const aliasesByItem=new Map<string,string[]>();for(const row of itemAliases)aliasesByItem.set(row.item_id,[...(aliasesByItem.get(row.item_id)||[]),row.alias]);
 
   return categories.map((category) => ({
     ...category,
     items: category.items.map((item) => ({
       ...item,
+      aliases: aliasesByItem.get(item.id)||[],
       variants: variantsByItem.get(item.id) || [],
     })),
   }));

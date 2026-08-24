@@ -15,6 +15,7 @@
     "menu:rezku:preview": "tsx scripts/rezku-menu-local.ts preview",
     "menu:rezku:apply": "tsx scripts/rezku-menu-local.ts apply",
     "menu:rezku:validate": "tsx scripts/rezku-menu-validate.ts",
+    "menu:ai-workbook": "tsx scripts/corner-deli-ai-menu-workbook.ts",
     "test:ordering:lifecycle": "tsx scripts/order-lifecycle-validate.ts",
     "test:pizza-toppings": "tsx scripts/pizza-topping-validate.ts",
     "test:combo-dependencies": "tsx scripts/combo-dependency-validate.ts",

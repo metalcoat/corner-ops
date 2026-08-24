@@ -56,6 +56,18 @@ export function ensureOrderingVariantSchema(): Promise<void> {
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS ordering_menu_variant_aliases_lookup_idx ON ordering_menu_variant_aliases (normalized_alias, active)`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS ordering_menu_item_aliases (
+          id UUID PRIMARY KEY,
+          item_id UUID NOT NULL REFERENCES ordering_menu_items(id) ON DELETE CASCADE,
+          alias TEXT NOT NULL,
+          normalized_alias TEXT NOT NULL,
+          active BOOLEAN NOT NULL DEFAULT TRUE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (item_id, normalized_alias)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_menu_item_aliases_lookup_idx ON ordering_menu_item_aliases (normalized_alias, active)`;
 
       // A modifier can cost differently by variant. The base modifier option
       // remains the fallback, while these rows override it for one item/variant.
