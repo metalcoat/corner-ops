@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { ensureSchema, getSql } from "@/lib/db";
+import { parseThreeCxTimestamp } from "@/lib/three-cx-time";
 
 const TIME_ZONE = "America/New_York";
 
@@ -113,15 +114,7 @@ function localPartsToUtc(year: number, month: number, day: number, hour: number,
 }
 
 function parseDate(value: unknown): Date | null {
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
-  const text = clean(value, 100);
-  if (!text || /^0{4}[-/]0{2}[-/]0{2}/.test(text)) return null;
-  const local = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/);
-  if (local && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)) {
-    return localPartsToUtc(Number(local[1]), Number(local[2]), Number(local[3]), Number(local[4]), Number(local[5]), Number(local[6] || 0));
-  }
-  const direct = new Date(text);
-  return Number.isNaN(direct.getTime()) ? null : direct;
+  return parseThreeCxTimestamp(value);
 }
 
 function dateBoundary(value: string): Date {

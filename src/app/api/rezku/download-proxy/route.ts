@@ -1,36 +1,36 @@
+import { fetchTrustedRezkuWorkbook, trustedRezkuWorkbookUrl } from "@/lib/rezku-trusted-fetch";
+
+const BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
-
-const REZKU_FILE_HOST = "files.reporting.rezkupos.com";
-const BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 function clean(value: unknown, max = 240): string {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-function trustedRawUrl(value: unknown): string {
-  const rawUrl = String(value || "");
-  const url = new URL(rawUrl);
-  if (url.protocol !== "https:" || url.hostname !== REZKU_FILE_HOST || !/\.(xlsx|xls)$/i.test(url.pathname)) {
-    throw new Error("Untrusted Rezku workbook URL.");
+function safeEqual(left: string, right: string): boolean {
+  let difference = left.length ^ right.length;
+  const maximum = Math.max(left.length, right.length);
+  for (let index = 0; index < maximum; index += 1) {
+    difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
   }
-  return rawUrl;
+  return difference === 0;
 }
 
 export async function POST(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
   const authorization = request.headers.get("authorization") || "";
-  if (!secret || authorization !== `Bearer ${secret}`) {
+  if (!secret || !safeEqual(authorization, `Bearer ${secret}`)) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   try {
     const body = await request.json() as { url?: string; fileName?: string };
-    const rawUrl = trustedRawUrl(body.url);
+    const rawUrl = trustedRezkuWorkbookUrl(String(body.url || ""));
     const fileName = clean(body.fileName, 255) || "rezku-report.xlsx";
-    const response = await fetch(rawUrl, {
+    const response = await fetchTrustedRezkuWorkbook(rawUrl, {
       method: "GET",
-      redirect: "follow",
       cache: "no-store",
       headers: {
         "User-Agent": BROWSER_USER_AGENT,

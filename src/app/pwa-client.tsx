@@ -70,7 +70,8 @@ export default function PwaClient() {
     if (document.visibilityState === "hidden") return;
     const audience = currentAudience();
     const response = await fetch(`/api/push?audience=${audience}`, { cache: "no-store" }).catch(() => null);
-    if (!response?.ok) {
+    if (!response) return;
+    if (!response.ok) {
       setStatus(null);
       return;
     }

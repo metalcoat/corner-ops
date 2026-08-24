@@ -18,6 +18,7 @@ const SECRET = process.env.CORNER_OPS_CDR_SECRET || "";
 const VERCEL_BYPASS = process.env.VERCEL_PROTECTION_BYPASS || "";
 const SPOOL = process.env.CDR_SPOOL_FILE || path.resolve("3cx-cdr-spool.jsonl");
 const RETRY_SPOOL = `${SPOOL}.retry`;
+const INVALID_SPOOL = `${SPOOL}.invalid`;
 const RECONNECT_MS = Math.max(1000, Number(process.env.CDR_RECONNECT_MS || 5000));
 const BATCH_MAX = Math.max(1, Math.min(500, Number(process.env.CDR_BATCH_MAX || 50)));
 const BATCH_FLUSH_MS = Math.max(1000, Number(process.env.CDR_BATCH_FLUSH_MS || 10_000));
@@ -27,6 +28,8 @@ if (!SECRET) throw new Error("CORNER_OPS_CDR_SECRET is required.");
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error("CDR_PORT is invalid.");
 if (!Number.isInteger(BATCH_MAX)) throw new Error("CDR_BATCH_MAX must be an integer.");
 if (!Number.isFinite(BATCH_FLUSH_MS)) throw new Error("CDR_BATCH_FLUSH_MS is invalid.");
+if ([...DELIMITER].length !== 1) throw new Error("CDR_DELIMITER must resolve to exactly one character.");
+if (!FIELDS.length) throw new Error("CDR_FIELDS must contain at least one field.");
 
 function parseDelimitedLine(line) {
   const values = [];
@@ -42,8 +45,12 @@ function parseDelimitedLine(line) {
       value = "";
     } else value += char;
   }
+  if (quoted) throw new Error("CDR line ended inside a quoted field.");
   values.push(value);
-  return Object.fromEntries(FIELDS.map((field, index) => [field, values[index] ?? ""]));
+  if (values.length !== FIELDS.length) {
+    throw new Error(`CDR field count mismatch: expected ${FIELDS.length}, received ${values.length}.`);
+  }
+  return Object.fromEntries(FIELDS.map((field, index) => [field, values[index]]));
 }
 
 async function postRecords(records) {
@@ -61,6 +68,14 @@ async function postRecords(records) {
 function spoolRecords(records) {
   if (!records.length) return;
   fs.appendFileSync(SPOOL, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
+}
+
+function spoolInvalidLine(line, error) {
+  fs.appendFileSync(INVALID_SPOOL, `${JSON.stringify({
+    receivedAt: new Date().toISOString(),
+    error: error instanceof Error ? error.message : String(error),
+    line,
+  })}\n`, "utf8");
 }
 
 let pending = [];
@@ -98,7 +113,13 @@ function enqueueBatch() {
 function acceptLine(raw) {
   const line = raw.replace(/\0/g, "").trim();
   if (!line) return;
-  pending.push(parseDelimitedLine(line));
+  try {
+    pending.push(parseDelimitedLine(line));
+  } catch (error) {
+    console.error(new Date().toISOString(), "Rejected malformed CDR line:", error instanceof Error ? error.message : String(error));
+    spoolInvalidLine(line, error);
+    return;
+  }
   if (pending.length >= BATCH_MAX) enqueueBatch();
   else scheduleFlush();
 }

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { Resend } from "resend";
 import { detectMissedShifts } from "@/lib/attendance";
 import { getSql } from "@/lib/db";
@@ -254,10 +255,16 @@ export async function runScheduledOperations(input: { force?: boolean; source?: 
   return { ok: failures.length === 0, partial: failures.length > 0, runId, local, failures, details };
 }
 
+function safeBearer(left: string, right: string): boolean {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export async function handleCronRequest(request: Request) {
   const expected = process.env.CRON_SECRET?.trim();
   if (!expected) return Response.json({ error: "CRON_SECRET is not configured." }, { status: 503 });
-  if (request.headers.get("authorization") !== `Bearer ${expected}`) {
+  if (!safeBearer(request.headers.get("authorization") || "", `Bearer ${expected}`)) {
     return Response.json({ error: "Unauthorized scheduler request." }, { status: 401 });
   }
   return Response.json(await runScheduledOperations({ source: "Vercel Cron" }));

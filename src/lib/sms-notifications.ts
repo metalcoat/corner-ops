@@ -24,10 +24,24 @@ type TelnyxMessagePayload = {
   errors?: Array<{ code?: string; title?: string; detail?: string }>;
 };
 
+const SMS_CONCURRENCY = 6;
+
 function configuration() {
   const apiKey = process.env.TELNYX_API_KEY?.trim();
   const from = process.env.TELNYX_FROM_NUMBER?.trim();
-  return apiKey && from ? { apiKey, from: normalizeSmsPhone(from) } : null;
+  if (!apiKey || !from) return null;
+  try {
+    const normalizedFrom = normalizeSmsPhone(from);
+    return normalizedFrom ? { apiKey, from: normalizedFrom } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function inBatches<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>) {
+  for (let index = 0; index < items.length; index += concurrency) {
+    await Promise.all(items.slice(index, index + concurrency).map(worker));
+  }
 }
 
 export async function getSmsDeliveryStatus(messageId: string) {
@@ -100,7 +114,7 @@ export async function deliverSms(input: {
   }
 
   let sent = 0;
-  for (const employee of deliverable) {
+  await inBatches(deliverable, SMS_CONCURRENCY, async (employee) => {
     try {
       const response = await fetch("https://api.telnyx.com/v2/messages", {
         method: "POST",
@@ -132,7 +146,7 @@ export async function deliverSms(input: {
         message: error instanceof Error ? error.message : String(error),
       });
     }
-  }
+  });
 
   return {
     provider: "telnyx" as const,
