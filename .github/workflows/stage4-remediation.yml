@@ -8,6 +8,7 @@ on:
       - tools/stage4_auth.py
       - tools/stage4_crypto.py
       - tools/stage4_compliance_audit.py
+      - tools/stage4_proxy.py
       - .github/workflows/stage4-remediation.yml
 
 permissions:
@@ -37,10 +38,10 @@ jobs:
           echo "OWNER_SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
           echo "EMPLOYEE_SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
           echo "DELI_BOARD_SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
-          echo "EMPLOYEE_PIN_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "EMPLOYEE_PIN_PEPPER=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
           echo "INTEGRATION_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
           echo "OAUTH_STATE_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
-          echo "APPLICATION_DATA_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "KEY_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
           echo "EMPLOYMENT_FORMS_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
           echo "APP_EMAIL=owner@example.test" >> "$GITHUB_ENV"
           echo "DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder" >> "$GITHUB_ENV"
@@ -65,7 +66,7 @@ jobs:
           PREP_RC=$?
           if [ "$PREP_RC" -ne 0 ]; then SCRIPT_RC=$PREP_RC; fi
           if [ "$SCRIPT_RC" -eq 0 ]; then
-            for script in tools/stage4_auth.py tools/stage4_crypto.py tools/stage4_compliance_audit.py; do
+            for script in tools/stage4_auth.py tools/stage4_crypto.py tools/stage4_compliance_audit.py tools/stage4_proxy.py; do
               python3 "$script" >>"$LOG" 2>&1 || { SCRIPT_RC=$?; break; }
             done
           fi
@@ -78,7 +79,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ] && [ "$TYPE_RC" -eq 0 ] && [ "$BUILD_RC" -eq 0 ]; then
-            rm -f tools/stage4_auth.py tools/stage4_crypto.py tools/stage4_compliance_audit.py .github/workflows/stage4-remediation.yml .stage4-remediation-status.md
+            rm -f tools/stage4_auth.py tools/stage4_crypto.py tools/stage4_compliance_audit.py tools/stage4_proxy.py .github/workflows/stage4-remediation.yml .stage4-remediation-status.md
             git add -A
             git diff --cached --check || exit 1
             git commit -m "Stage 4 harden credentials sessions consent and audit"
@@ -86,7 +87,7 @@ jobs:
             exit 0
           fi
 
-          FAIL_LOG=$(tail -n 220 "$LOG")
+          FAIL_LOG=$(tail -n 240 "$LOG")
           git reset --hard "$GITHUB_SHA"
           {
             echo "# Stage 4 remediation status"
