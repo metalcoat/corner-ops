@@ -1,5 +1,5 @@
 import { get } from "@/lib/storage";
-import { canAccessBusiness, getSession } from "@/lib/auth";
+import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { findCardStatementFile } from "@/lib/card-statements";
 import { assertConfigured } from "@/lib/config";
 import { apiError, unauthorized } from "@/lib/http";
@@ -17,6 +17,7 @@ export async function GET(request: Request, context: RouteContext) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    requirePermission(session, "accounting.read");
     assertConfigured("DATABASE_URL", "BLOB_READ_WRITE_TOKEN");
     const { id } = await context.params;
     const statement = await findCardStatementFile(id);
