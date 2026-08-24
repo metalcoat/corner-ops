@@ -22,6 +22,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Generate CI-only secrets
+        shell: bash
+        run: |
+          echo "SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "EMPLOYMENT_FORMS_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: npm ci
       - name: Unit tests
@@ -31,8 +36,6 @@ jobs:
       - name: Build application
         run: npm run build
         env:
-          SESSION_SECRET: github-actions-session-secret-with-more-than-64-bits-of-test-entropy
           APP_EMAIL: owner@example.test
-          EMPLOYMENT_FORMS_ENCRYPTION_KEY: Y2ktb25seS0zMi1ieXRlLWVtcGxveW1lbnQta2V5ISE=
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
           BLOB_READ_WRITE_TOKEN: vercel_blob_rw_placeholder
