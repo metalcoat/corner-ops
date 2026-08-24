@@ -18,6 +18,11 @@ type ScheduledShift = {
   instructions: string;
 };
 
+async function responseError(response: Response, fallback: string): Promise<Error> {
+  const payload = await response.json().catch(() => null) as { error?: string } | null;
+  return new Error(payload?.error || fallback);
+}
+
 export default function TikiClockPage() {
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,11 +47,11 @@ export default function TikiClockPage() {
           latitude: result.coords.latitude,
           longitude: result.coords.longitude,
           accuracy: result.coords.accuracy,
-          status: `Location captured within about ${Math.round(result.coords.accuracy)} feet/meters.`,
+          status: `Location captured within about ${Math.round(result.coords.accuracy)} meters.`,
         }),
         () => setPosition((current) => ({
           ...current,
-          status: "Location permission was not granted. The punch can still be submitted and will be flagged by its missing location.",
+          status: "Location permission was not granted. The punch can still be submitted and will be flagged for review.",
         })),
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
       );
@@ -60,12 +65,20 @@ export default function TikiClockPage() {
     setMessage("");
     setInstructions(null);
     setTone("");
+    let authenticated = false;
     try {
+      const login = await fetch("/api/employee/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business: "Tiki", pin }),
+      });
+      if (!login.ok) throw await responseError(login, "PIN not recognized.");
+      authenticated = true;
+
       const response = await fetch("/api/timeclock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pin,
           latitude: position.latitude,
           longitude: position.longitude,
           accuracy: position.accuracy,
@@ -75,11 +88,12 @@ export default function TikiClockPage() {
         error?: string;
         action?: "clocked-in" | "clocked-out";
         employee?: string;
+        locationReview?: string | null;
         scheduledShift?: ScheduledShift | null;
       };
       if (!response.ok) throw new Error(payload.error || "Punch failed.");
       const action = payload.action === "clocked-out" ? "clocked out" : "clocked in";
-      setMessage(`${payload.employee} ${action} successfully.`);
+      setMessage(`${payload.employee} ${action} successfully.${payload.locationReview ? " Location flagged for manager review." : ""}`);
       setInstructions(payload.action === "clocked-in" ? payload.scheduledShift || null : null);
       setTone("good");
       setPin("");
@@ -87,6 +101,9 @@ export default function TikiClockPage() {
       setMessage(error instanceof Error ? error.message : "Punch failed.");
       setTone("bad");
     } finally {
+      if (authenticated) {
+        await fetch("/api/employee/session", { method: "DELETE" }).catch(() => undefined);
+      }
       setBusy(false);
     }
   }
