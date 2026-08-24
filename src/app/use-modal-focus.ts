@@ -11,15 +11,16 @@ const FOCUSABLE = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
-export function useModalFocus(active: boolean, onClose: () => void) {
-  const dialogRef = useRef<HTMLElement | null>(null);
+export function useModalFocus<T extends HTMLElement>(active: boolean, onClose: () => void) {
+  const dialogRef = useRef<T | null>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
   useEffect(() => {
     if (!active) return;
-    const dialog = dialogRef.current;
-    if (!dialog) return;
+    const current = dialogRef.current;
+    if (!current) return;
+    const dialog = current;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE))
       .filter((element) => !element.hasAttribute("hidden") && element.getAttribute("aria-hidden") !== "true");
