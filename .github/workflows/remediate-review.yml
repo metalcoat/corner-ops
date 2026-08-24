@@ -6,6 +6,7 @@ on:
       - agent/full-codebase-review-remediation
     paths:
       - tools/remediate_review.py
+      - tools/remediate_review_fixups.py
       - .github/workflows/remediate-review.yml
 
 permissions:
@@ -45,15 +46,16 @@ jobs:
 
           python3 tools/remediate_review.py >>"$LOG" 2>&1
           SCRIPT_RC=$?
-          if [ "$SCRIPT_RC" -eq 0 ]; then npm ci >>"$LOG" 2>&1; INSTALL_RC=$?; else INSTALL_RC=99; fi
-          if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ]; then npm test >>"$LOG" 2>&1; TEST_RC=$?; else TEST_RC=99; fi
-          if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ]; then npm run typecheck >>"$LOG" 2>&1; TYPE_RC=$?; else TYPE_RC=99; fi
-          if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ] && [ "$TYPE_RC" -eq 0 ]; then npm run build >>"$LOG" 2>&1; BUILD_RC=$?; else BUILD_RC=99; fi
+          if [ "$SCRIPT_RC" -eq 0 ]; then python3 tools/remediate_review_fixups.py >>"$LOG" 2>&1; FIXUP_RC=$?; else FIXUP_RC=99; fi
+          if [ "$SCRIPT_RC" -eq 0 ] && [ "$FIXUP_RC" -eq 0 ]; then npm ci >>"$LOG" 2>&1; INSTALL_RC=$?; else INSTALL_RC=99; fi
+          if [ "$SCRIPT_RC" -eq 0 ] && [ "$FIXUP_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ]; then npm test >>"$LOG" 2>&1; TEST_RC=$?; else TEST_RC=99; fi
+          if [ "$SCRIPT_RC" -eq 0 ] && [ "$FIXUP_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ]; then npm run typecheck >>"$LOG" 2>&1; TYPE_RC=$?; else TYPE_RC=99; fi
+          if [ "$SCRIPT_RC" -eq 0 ] && [ "$FIXUP_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ] && [ "$TYPE_RC" -eq 0 ]; then npm run build >>"$LOG" 2>&1; BUILD_RC=$?; else BUILD_RC=99; fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ] && [ "$TYPE_RC" -eq 0 ] && [ "$BUILD_RC" -eq 0 ]; then
+          if [ "$SCRIPT_RC" -eq 0 ] && [ "$FIXUP_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ] && [ "$TYPE_RC" -eq 0 ] && [ "$BUILD_RC" -eq 0 ]; then
             {
               echo "# CODEBASEREVIEW remediation status"
               echo
@@ -80,7 +82,7 @@ jobs:
             echo "Result: FAILED"
             echo "Batch: Stage 1 payroll and scheduling"
             echo "Source commit: $GITHUB_SHA"
-            echo "Exit codes: transform=$SCRIPT_RC install=$INSTALL_RC test=$TEST_RC typecheck=$TYPE_RC build=$BUILD_RC"
+            echo "Exit codes: transform=$SCRIPT_RC fixups=$FIXUP_RC install=$INSTALL_RC test=$TEST_RC typecheck=$TYPE_RC build=$BUILD_RC"
             echo
             echo '```text'
             printf '%s\n' "$FAIL_LOG"
