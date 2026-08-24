@@ -8,6 +8,12 @@ on:
       - tools/stage8_remove_runtime_ddl.py
       - tools/stage8_ddl_scan.py
       - .github/workflows/stage8-cutover.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/stage8_remove_runtime_ddl.py
+      - tools/stage8_ddl_scan.py
+      - .github/workflows/stage8-cutover.yml
 
 permissions:
   contents: write
