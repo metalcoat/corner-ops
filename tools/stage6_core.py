@@ -173,4 +173,5 @@ rep('src/lib/employment-forms.ts','  const secret = process.env.EMPLOYMENT_FORMS
 rep('src/lib/direct-deposit.ts','import { ensureSchema, getSql } from "@/lib/db";\n','import { ensureSchema, getSql } from "@/lib/db";\nimport { requireStrongSecret } from "@/lib/secret-strength";\n')
 rep('src/lib/direct-deposit.ts','  const secret = process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY;\n  if (!secret || secret.length < 32) throw new Error("EMPLOYMENT_FORMS_ENCRYPTION_KEY must be configured with at least 32 characters.");\n  return createHash("sha256").update(secret, "utf8").digest();','  const secret = requireStrongSecret(process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY, "EMPLOYMENT_FORMS_ENCRYPTION_KEY");\n  return createHash("sha256").update(secret, "utf8").digest();')
 
+# Gate trigger: keep this transformer intentionally deterministic.
 print('Stage 6 core correctness transformations applied')
