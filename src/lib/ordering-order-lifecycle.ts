@@ -16,6 +16,7 @@ import { assertMenuTargetsAvailable } from "@/lib/ordering-menu-availability";
 import { applyPromotionsToOrder } from "@/lib/ordering-promotions";
 import { earnLoyaltyForOrder, finalizeLoyaltyRedemptions } from "@/lib/ordering-loyalty";
 import { kitchenTicketTimingLines } from "@/lib/ordering-kitchen-ticket";
+import { ensureRestaurantPlatformSchema } from "@/lib/restaurant-platform";
 
 export type StoredOrderStatus = "draft" | "confirmed" | "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
 export type KitchenOrderStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -227,6 +228,7 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
   await ensureOrderingAddressSchema();
   await ensureOrderingMenuOverrideSchema();
   await ensureOrderingAccountSchema();
+  await ensureRestaurantPlatformSchema();
   return withTransaction(async () => {
     // Draft pricing follows current promotion configuration until Send locks it.
     await applyPromotionsToOrder(orderId);
@@ -304,6 +306,7 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
                 delivery_fee_cents, special_instructions, created_at, updated_at, submitted_at, started_at, ready_at, completed_at, cancelled_at
     `;
     if (!updated.length) throw new OrderConflictError("This order changed while it was being submitted. Refresh and review it.");
+    await sql`UPDATE restaurant_table_sessions SET status='sent',updated_at=NOW() WHERE order_id=${orderId} AND status IN('open','ordering')`;
     await finalizeLoyaltyRedemptions(orderId);
     await sql`
       INSERT INTO ordering_order_events (id, order_id, order_version, event_type, actor_type, actor_id, details)

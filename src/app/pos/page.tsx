@@ -25,6 +25,18 @@ export default function PosDevelopmentHome() {
           <strong>Tiki POS</strong>
           <span>Bar service, tabs, Tiki inventory, and Tiki-only reporting. No deli driver workflow.</span>
         </a>
+        <a href="/pos/restaurant">
+          <strong>New Restaurant · Table Service</strong>
+          <span>Floor plan, server table sessions, seat counts, and Tiki-based menu ordering.</span>
+        </a>
+        <a href="/kiosk/deli">
+          <strong>Corner Deli Kiosk</strong>
+          <span>Touch-first self-service menu using the authoritative deli catalog and modifiers.</span>
+        </a>
+        <a href="/display/deli" target="_blank" rel="noreferrer">
+          <strong>Corner Deli Customer Display</strong>
+          <span>Open full-screen on the customer-facing monitor to mirror the active register cart.</span>
+        </a>
         <a href="/pos/deli/settings">
           <strong>Deli delivery & tax settings</strong>
           <span>Edit the delivery minimum, mileage bands, fees, tax-inclusive mode, and current tax rate.</span>

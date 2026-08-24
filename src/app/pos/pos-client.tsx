@@ -423,10 +423,14 @@ export default function PosClient({
   business,
   idleLockSeconds = 60,
   embedded = false,
+  initialServiceType,
+  tableSessionId,
 }: {
   business: Business;
   idleLockSeconds?: number;
   embedded?: boolean;
+  initialServiceType?: PosServiceType;
+  tableSessionId?: string;
 }) {
   const config = orderingBusinessConfig(business);
   const availableServices = config.serviceTypes.filter(
@@ -447,7 +451,9 @@ export default function PosClient({
   const [primaryCategoryId, setPrimaryCategoryId] = useState("");
   const [menuSearch, setMenuSearch] = useState("");
   const [serviceType, setServiceType] = useState<PosServiceType>(
-    availableServices[0] || "pickup",
+    initialServiceType && availableServices.includes(initialServiceType)
+      ? initialServiceType
+      : availableServices[0] || "pickup",
   );
   const [timingMode, setTimingMode] = useState<OrderTimingMode>("asap");
   const [scheduledFor, setScheduledFor] = useState("");
@@ -496,11 +502,20 @@ export default function PosClient({
         const raw = localStorage.getItem("corner-ops-reopened-order");
         if (!raw) return;
         const value = JSON.parse(raw);
-        setSavedDraft({ ...value, promotions: [], loyalty: [], reopened: true });
+        setSavedDraft({
+          ...value,
+          promotions: [],
+          loyalty: [],
+          reopened: true,
+        });
         setServiceType(value.serviceType || "pickup");
         setCart([]);
-        setCartNotice(`Order #${value.displayNumber} reopened. Add only the new items, then send the addition.`);
-      } catch { /* Ignore a damaged local handoff value. */ }
+        setCartNotice(
+          `Order #${value.displayNumber} reopened. Add only the new items, then send the addition.`,
+        );
+      } catch {
+        /* Ignore a damaged local handoff value. */
+      }
     };
     load();
     window.addEventListener("corner-ops-order-reopened", load);
@@ -1003,6 +1018,47 @@ export default function PosClient({
     0,
   );
   useEffect(() => {
+    if (business !== "Corner Deli") return;
+    const payload = {
+      schemaVersion: 1,
+      updatedAt: new Date().toISOString(),
+      serviceType,
+      lines: cart.map((line) => ({
+        id: line.id,
+        name: line.name,
+        variantName: line.variantName,
+        quantity: line.quantity,
+        modifiers: [...line.modifierText, ...line.comboText],
+        lineTotalCents: line.unitPriceCents * line.quantity,
+      })),
+      subtotalCents,
+      totalCents: savedDraft?.totalCents ?? subtotalCents,
+      status: submittedOrder
+        ? "submitted"
+        : checkoutOpen
+          ? "checkout"
+          : "building",
+      orderNumber:
+        submittedOrder?.displayNumber || savedDraft?.displayNumber || "",
+    };
+    localStorage.setItem(
+      "corner-ops-customer-display",
+      JSON.stringify(payload),
+    );
+    const channel = new BroadcastChannel("corner-ops-customer-display");
+    channel.postMessage(payload);
+    channel.close();
+  }, [
+    business,
+    cart,
+    checkoutOpen,
+    savedDraft?.displayNumber,
+    savedDraft?.totalCents,
+    serviceType,
+    submittedOrder,
+    subtotalCents,
+  ]);
+  useEffect(() => {
     if (serviceType !== "delivery" || !deliveryRoute || !cart.length) {
       setQuotedDeliveryFeeCents(null);
       return;
@@ -1036,9 +1092,9 @@ export default function PosClient({
               setAddressError("");
             })
             .catch((error) => {
-              if (
-                !(error instanceof DOMException && error.name === "AbortError")
-              ) {
+              if (!(
+                error instanceof DOMException && error.name === "AbortError"
+              )) {
                 setQuotedDeliveryFeeCents(null);
                 setAddressError(
                   error instanceof Error
@@ -1326,11 +1382,11 @@ export default function PosClient({
     setPresentationComboEnabled(
       Boolean(
         line &&
-          item.modifiers.some(
-            (group) =>
-              group.presentationContext === "combo_trigger" &&
-              (line.modifierSelections[group.id] || []).length,
-          ),
+        item.modifiers.some(
+          (group) =>
+            group.presentationContext === "combo_trigger" &&
+            (line.modifierSelections[group.id] || []).length,
+        ),
       ),
     );
     setSpecialInstructions(line?.specialInstructions || "");
@@ -1643,7 +1699,10 @@ export default function PosClient({
     });
     setIncomingCall(null);
   }
-  async function updateAiCall(call: AiDeliCall, action: "claim" | "release" | "complete") {
+  async function updateAiCall(
+    call: AiDeliCall,
+    action: "claim" | "release" | "complete",
+  ) {
     const response = await fetch("/api/ordering/calls", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -1793,54 +1852,60 @@ export default function PosClient({
         );
         return updated;
       }
-      const response = await fetch(reopenedDraft ? `/api/ordering/orders/${encodeURIComponent(reopenedDraft.id)}/additions` : "/api/ordering/orders", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          business,
-          serviceType,
-          timingMode,
-          scheduledFor:
-            timingMode === "future"
-              ? new Date(scheduledFor).toISOString()
-              : null,
-          deliveryAddress:
-            serviceType === "delivery" ? deliveryValidatedInput : undefined,
-          deliveryUnit: serviceType === "delivery" ? deliveryUnit : undefined,
-          deliveryValidationToken:
-            serviceType === "delivery" ? deliveryValidationToken : undefined,
-          customerId: customer?.id,
-          customerPhoneId: selectedCustomerPhoneId || undefined,
-          customerAddressId:
-            serviceType === "delivery"
-              ? selectedCustomerAddressId || undefined
-              : undefined,
-          customerFirstName:
-            customer?.first_name ||
-            (business === "Tiki" && serviceType === "bar"
-              ? tabName.trim()
-              : undefined),
-          customerLastName: customer?.last_name,
-          callerPhone:
-            customer?.phones?.find(
-              (phone) => phone.id === selectedCustomerPhoneId,
-            )?.normalized_phone || customer?.normalized_phone,
-          orderOrigin,
-          items: cart.map((line) => ({
-            itemId: line.itemId,
-            variantId: line.variantId,
-            quantity: line.quantity,
-            modifierSelections: line.modifierSelections,
-            modifierQuantities: line.modifierQuantities,
-            modifierAmounts: line.modifierAmounts,
-            modifierDeclines: line.modifierDeclines,
-            pizzaToppings: line.pizzaToppings,
-            comboId: line.comboId,
-            comboSelections: line.comboSelections,
-            specialInstructions: line.specialInstructions,
-          })),
-        }),
-      });
+      const response = await fetch(
+        reopenedDraft
+          ? `/api/ordering/orders/${encodeURIComponent(reopenedDraft.id)}/additions`
+          : "/api/ordering/orders",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            business,
+            serviceType,
+            timingMode,
+            scheduledFor:
+              timingMode === "future"
+                ? new Date(scheduledFor).toISOString()
+                : null,
+            deliveryAddress:
+              serviceType === "delivery" ? deliveryValidatedInput : undefined,
+            deliveryUnit: serviceType === "delivery" ? deliveryUnit : undefined,
+            deliveryValidationToken:
+              serviceType === "delivery" ? deliveryValidationToken : undefined,
+            customerId: customer?.id,
+            customerPhoneId: selectedCustomerPhoneId || undefined,
+            customerAddressId:
+              serviceType === "delivery"
+                ? selectedCustomerAddressId || undefined
+                : undefined,
+            customerFirstName:
+              customer?.first_name ||
+              (business === "Tiki" && serviceType === "bar"
+                ? tabName.trim()
+                : undefined),
+            customerLastName: customer?.last_name,
+            callerPhone:
+              customer?.phones?.find(
+                (phone) => phone.id === selectedCustomerPhoneId,
+              )?.normalized_phone || customer?.normalized_phone,
+            orderOrigin,
+            tableSessionId,
+            items: cart.map((line) => ({
+              itemId: line.itemId,
+              variantId: line.variantId,
+              quantity: line.quantity,
+              modifierSelections: line.modifierSelections,
+              modifierQuantities: line.modifierQuantities,
+              modifierAmounts: line.modifierAmounts,
+              modifierDeclines: line.modifierDeclines,
+              pizzaToppings: line.pizzaToppings,
+              comboId: line.comboId,
+              comboSelections: line.comboSelections,
+              specialInstructions: line.specialInstructions,
+            })),
+          }),
+        },
+      );
       const payload = (await response.json()) as {
         order?: {
           id: string;
@@ -1876,7 +1941,9 @@ export default function PosClient({
       setSavedDraft(draft);
       if (reopenedDraft) {
         setCart([]);
-        setCartNotice(`Addition saved to order #${draft.displayNumber}. Send it when ready.`);
+        setCartNotice(
+          `Addition saved to order #${draft.displayNumber}. Send it when ready.`,
+        );
       }
       if (business === "Tiki" && serviceType === "bar") {
         setActiveTab(draft);
@@ -1971,7 +2038,11 @@ export default function PosClient({
       setCustomerOpen(true);
       return;
     }
-    if (business === "Corner Deli" && !selectedCustomerPhoneId && !savedDraft?.reopened) {
+    if (
+      business === "Corner Deli" &&
+      !selectedCustomerPhoneId &&
+      !savedDraft?.reopened
+    ) {
       setCheckoutError("Choose a phone number before sending this order.");
       setCustomerOpen(true);
       return;
@@ -1979,7 +2050,8 @@ export default function PosClient({
     if (
       business === "Corner Deli" &&
       serviceType === "delivery" &&
-      !validatedAddress && !savedDraft?.reopened
+      !validatedAddress &&
+      !savedDraft?.reopened
     ) {
       setCheckoutError(
         "Enter and validate the delivery address before sending this order.",
@@ -3263,30 +3335,99 @@ export default function PosClient({
         </div>
       )}
       {aiCalls.some((call) => call.state === "ai") && (
-        <aside className="posAiCallStrip" aria-label="AI phone ordering activity">
+        <aside
+          className="posAiCallStrip"
+          aria-label="AI phone ordering activity"
+        >
           {aiCalls
             .filter((call) => call.state === "ai")
             .map((call) => (
               <div key={call.id}>
                 <strong>AI ORDERING · LINE {call.line_number || "TEST"}</strong>
-                <span>{call.display_name || "Unknown caller"}{call.caller_phone ? ` · ${call.caller_phone}` : ""}</span>
-                <span>{call.open_order_number ? `Order #${call.open_order_number}` : "Building order…"}</span>
-                {call.open_order_id && <div className="posAiOrderPreview">
-                  <b>{(call.service_type || "order").replaceAll("_", " ").toUpperCase()}</b>
-                  {call.order_items.length ? <ul>{call.order_items.map(item => <li key={item.id}>
-                    <span>{item.quantity}× {item.name}{item.variant ? ` · ${item.variant}` : ""}</span><em>{money(item.lineTotalCents)}</em>
-                    {item.modifiers.length > 0 && <small>{item.modifiers.map(modifier => `${modifier.quantity > 1 ? `${modifier.quantity}× ` : ""}${modifier.name}`).join(", ")}</small>}
-                    {item.instructions && <small>{item.instructions}</small>}
-                  </li>)}</ul> : <small>Waiting for the first item…</small>}
-                  <footer><span>Subtotal {money(call.subtotal_cents || 0)} · Tax {money(call.tax_cents || 0)}</span><strong>Total {money(call.total_cents || 0)}</strong></footer>
-                </div>}
+                <span>
+                  {call.display_name || "Unknown caller"}
+                  {call.caller_phone ? ` · ${call.caller_phone}` : ""}
+                </span>
+                <span>
+                  {call.open_order_number
+                    ? `Order #${call.open_order_number}`
+                    : "Building order…"}
+                </span>
+                {call.open_order_id && (
+                  <div className="posAiOrderPreview">
+                    <b>
+                      {(call.service_type || "order")
+                        .replaceAll("_", " ")
+                        .toUpperCase()}
+                    </b>
+                    {call.order_items.length ? (
+                      <ul>
+                        {call.order_items.map((item) => (
+                          <li key={item.id}>
+                            <span>
+                              {item.quantity}× {item.name}
+                              {item.variant ? ` · ${item.variant}` : ""}
+                            </span>
+                            <em>{money(item.lineTotalCents)}</em>
+                            {item.modifiers.length > 0 && (
+                              <small>
+                                {item.modifiers
+                                  .map(
+                                    (modifier) =>
+                                      `${modifier.quantity > 1 ? `${modifier.quantity}× ` : ""}${modifier.name}`,
+                                  )
+                                  .join(", ")}
+                              </small>
+                            )}
+                            {item.instructions && (
+                              <small>{item.instructions}</small>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <small>Waiting for the first item…</small>
+                    )}
+                    <footer>
+                      <span>
+                        Subtotal {money(call.subtotal_cents || 0)} · Tax{" "}
+                        {money(call.tax_cents || 0)}
+                      </span>
+                      <strong>Total {money(call.total_cents || 0)}</strong>
+                    </footer>
+                  </div>
+                )}
                 <div className="posAiActivity" aria-live="polite">
                   <b>LIVE PROCESSING</b>
-                  {call.activities.length ? <ol>{call.activities.slice(-12).map(activity => <li className={activity.role} key={activity.id}>
-                    <time>{new Date(activity.createdAt).toLocaleTimeString([], {hour:"numeric",minute:"2-digit",second:"2-digit"})}</time>
-                    <span><strong>{activity.label}</strong>{activity.detail && <small>{activity.detail}</small>}</span>
-                    {activity.durationMs != null && <em>{activity.durationMs} ms</em>}
-                  </li>)}</ol> : <small>Connecting to live call telemetry…</small>}
+                  {call.activities.length ? (
+                    <ol>
+                      {call.activities.slice(-12).map((activity) => (
+                        <li className={activity.role} key={activity.id}>
+                          <time>
+                            {new Date(activity.createdAt).toLocaleTimeString(
+                              [],
+                              {
+                                hour: "numeric",
+                                minute: "2-digit",
+                                second: "2-digit",
+                              },
+                            )}
+                          </time>
+                          <span>
+                            <strong>{activity.label}</strong>
+                            {activity.detail && (
+                              <small>{activity.detail}</small>
+                            )}
+                          </span>
+                          {activity.durationMs != null && (
+                            <em>{activity.durationMs} ms</em>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <small>Connecting to live call telemetry…</small>
+                  )}
                 </div>
               </div>
             ))}
@@ -3294,22 +3435,74 @@ export default function PosClient({
       )}
       {intervention && (
         <div className="posModalBackdrop">
-          <section className="posCustomerDialog posIncomingCall" role="dialog" aria-modal="true" aria-label="Phone order intervention required">
-            <header><div><span>EMPLOYEE INTERVENTION · LINE {intervention.line_number || "TEST"}</span><h2>{intervention.display_name || intervention.caller_phone || "Unknown caller"}</h2></div></header>
-            <p>{intervention.handoff_reason || "The AI transferred this call to the physical deli phones."}</p>
-            {intervention.open_order_number && <p><strong>Order #{intervention.open_order_number}</strong> · {intervention.open_order_status?.replaceAll("_", " ")}</p>}
-            {intervention.claimed_by && intervention.claimed_by !== posEmployeeId ? (
-              <p><strong>Claimed on another POS.</strong> This screen is read-only.</p>
+          <section
+            className="posCustomerDialog posIncomingCall"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Phone order intervention required"
+          >
+            <header>
+              <div>
+                <span>
+                  EMPLOYEE INTERVENTION · LINE{" "}
+                  {intervention.line_number || "TEST"}
+                </span>
+                <h2>
+                  {intervention.display_name ||
+                    intervention.caller_phone ||
+                    "Unknown caller"}
+                </h2>
+              </div>
+            </header>
+            <p>
+              {intervention.handoff_reason ||
+                "The AI transferred this call to the physical deli phones."}
+            </p>
+            {intervention.open_order_number && (
+              <p>
+                <strong>Order #{intervention.open_order_number}</strong> ·{" "}
+                {intervention.open_order_status?.replaceAll("_", " ")}
+              </p>
+            )}
+            {intervention.claimed_by &&
+            intervention.claimed_by !== posEmployeeId ? (
+              <p>
+                <strong>Claimed on another POS.</strong> This screen is
+                read-only.
+              </p>
             ) : intervention.claimed_by === posEmployeeId ? (
               <>
-                {intervention.open_order_id && <a className="primary" href={`/pos/deli/orders?orderId=${encodeURIComponent(intervention.open_order_id)}`}>OPEN CURRENT ORDER</a>}
-                <button onClick={() => void updateAiCall(intervention, "release")}>RELEASE TO ANOTHER POS</button>
-                <button onClick={() => void updateAiCall(intervention, "complete")}>CALL FINISHED</button>
+                {intervention.open_order_id && (
+                  <a
+                    className="primary"
+                    href={`/pos/deli/orders?orderId=${encodeURIComponent(intervention.open_order_id)}`}
+                  >
+                    OPEN CURRENT ORDER
+                  </a>
+                )}
+                <button
+                  onClick={() => void updateAiCall(intervention, "release")}
+                >
+                  RELEASE TO ANOTHER POS
+                </button>
+                <button
+                  onClick={() => void updateAiCall(intervention, "complete")}
+                >
+                  CALL FINISHED
+                </button>
               </>
             ) : (
-              <button className="primary" onClick={() => void updateAiCall(intervention, "claim")}>CLAIM ORDER INTERVENTION</button>
+              <button
+                className="primary"
+                onClick={() => void updateAiCall(intervention, "claim")}
+              >
+                CLAIM ORDER INTERVENTION
+              </button>
             )}
-            <small>Answer and speak on the physical cordless phone. This iPad never carries call audio.</small>
+            <small>
+              Answer and speak on the physical cordless phone. This iPad never
+              carries call audio.
+            </small>
           </section>
         </div>
       )}
