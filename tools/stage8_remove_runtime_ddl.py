@@ -77,4 +77,4 @@ print(f"Removed {removed} standalone runtime DDL statements across {len(changed_
 for item in changed_files:
     print(item)
 
-# Stage 8 gated transformation entry point.
+# Stage 8 gated transformation entry point. Re-run after every targeted residual fix.
