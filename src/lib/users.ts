@@ -12,6 +12,7 @@ export type AppUserIdentity = {
   role: AppRole;
   businesses: Business[];
   permissions: string[];
+  sessionVersion: number;
 };
 
 type UserRow = {
@@ -27,6 +28,7 @@ type UserRow = {
   created_by: string;
   created_at: string;
   updated_at: string;
+  session_version: number;
 };
 
 const rolePermissions: Record<AppRole, string[]> = {
@@ -169,6 +171,7 @@ function mapUser(row: UserRow): AppUserIdentity & {
     role: row.role,
     businesses: normalizeBusinesses(row.businesses),
     permissions: permissionsForRole(row.role),
+    sessionVersion: Number(row.session_version || 1),
     active: row.active,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -181,7 +184,7 @@ function mapUser(row: UserRow): AppUserIdentity & {
 async function rowByEmail(email: string): Promise<UserRow | null> {
   const rows = await getSql()`
     SELECT id, email, display_name, role, businesses, password_salt, password_hash,
-      legacy_owner, active, created_by, created_at, updated_at
+      legacy_owner, active, created_by, created_at, updated_at, session_version
     FROM app_users
     WHERE email = ${normalizedEmail(email)}
     LIMIT 1
@@ -210,7 +213,7 @@ export async function listAppUsers() {
   await ensureUserSchema();
   const rows = await getSql()`
     SELECT id, email, display_name, role, businesses, password_salt, password_hash,
-      legacy_owner, active, created_by, created_at, updated_at
+      legacy_owner, active, created_by, created_at, updated_at, session_version
     FROM app_users
     ORDER BY active DESC,
       CASE role WHEN 'Owner' THEN 1 WHEN 'Co-Owner' THEN 2 WHEN 'Accountant' THEN 3 WHEN 'Manager' THEN 4 ELSE 5 END,
@@ -260,7 +263,7 @@ export async function saveAppUser(input: {
         password_hash = CASE WHEN ${password?.hash || ""} = '' THEN password_hash ELSE ${password?.hash || ""} END,
         legacy_owner = CASE WHEN ${password?.hash || ""} = '' THEN legacy_owner ELSE FALSE END,
         active = ${input.active ?? true},
-        updated_at = NOW()
+        session_version = session_version + 1, updated_at = NOW()
       WHERE id = ${input.id}
     `;
     return mapUser((await rowByEmail(email))!);
@@ -290,6 +293,6 @@ export async function setUserActive(id: string, active: boolean) {
   const rows = await getSql()`SELECT role FROM app_users WHERE id = ${id} LIMIT 1` as unknown as Array<{ role: AppRole }>;
   if (!rows[0]) throw new Error("User was not found.");
   if (rows[0].role === "Owner" && !active) throw new Error("The primary owner cannot be deactivated.");
-  await getSql()`UPDATE app_users SET active = ${active}, updated_at = NOW() WHERE id = ${id}`;
+  await getSql()`UPDATE app_users SET active = ${active}, session_version = session_version + 1, updated_at = NOW() WHERE id = ${id}`;
   return { updated: true };
 }

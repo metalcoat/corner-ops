@@ -1,6 +1,9 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { ensureIntegrationSchema } from "@/lib/integrations";
 import { getSql } from "@/lib/db";
+import { decryptIntegrationSecret as decryptSecret, encryptIntegrationSecret as encryptSecret } from "@/lib/integration-crypto";
+import { createOAuthState } from "@/lib/oauth-state";
+import { constantTimeEqual } from "@/lib/security-keys";
 
 const SQUARE_VERSION = process.env.SQUARE_API_VERSION?.trim() || "2026-07-15";
 
@@ -29,32 +32,6 @@ function money(value: SquareMoney): number {
   return Math.round(numberValue(value?.amount)) / 100;
 }
 
-function integrationKey(): Buffer {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required before Square can store credentials.");
-  return createHash("sha256").update(`corner-ops-integrations:${secret}`).digest();
-}
-
-function encryptSecret(value: string): string {
-  if (!value) return "";
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", integrationKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  return [iv, cipher.getAuthTag(), encrypted].map((part) => part.toString("base64url")).join(".");
-}
-
-function decryptSecret(value: string): string {
-  if (!value) return "";
-  const [ivText, tagText, encryptedText] = value.split(".");
-  if (!ivText || !tagText || !encryptedText) throw new Error("Stored Square credential is invalid.");
-  const decipher = createDecipheriv("aes-256-gcm", integrationKey(), Buffer.from(ivText, "base64url"));
-  decipher.setAuthTag(Buffer.from(tagText, "base64url"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(encryptedText, "base64url")),
-    decipher.final(),
-  ]).toString("utf8");
-}
-
 function squareEnvironment(): "sandbox" | "production" {
   return process.env.SQUARE_ENV?.toLowerCase() === "production" ? "production" : "sandbox";
 }
@@ -63,11 +40,6 @@ function squareBase(): string {
   return squareEnvironment() === "production" ? "https://connect.squareup.com" : "https://connect.squareupsandbox.com";
 }
 
-function safeEqual(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
 
 function allowedOrigin(origin: string): string {
   const url = new URL(origin);
@@ -75,13 +47,6 @@ function allowedOrigin(origin: string): string {
   return url.origin;
 }
 
-function signedState(payload: Record<string, unknown>): string {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required.");
-  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-  const signature = createHmac("sha256", secret).update(encoded).digest("base64url");
-  return `${encoded}.${signature}`;
-}
 
 async function squareRequest<T>(path: string, accessToken: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${squareBase()}${path}`, {
@@ -240,12 +205,12 @@ async function activeToken(connection: ConnectionRow): Promise<string> {
   return accessToken;
 }
 
-export function squareFullAuthorizationUrl(origin: string): string {
+export async function squareFullAuthorizationUrl(origin: string): Promise<string> {
   const applicationId = process.env.SQUARE_APPLICATION_ID?.trim();
   if (!applicationId || !process.env.SQUARE_APPLICATION_SECRET?.trim()) throw new Error("Square is not configured.");
   const safeOrigin = allowedOrigin(origin);
   const redirectUri = `${safeOrigin}/api/square/callback`;
-  const state = signedState({ origin: safeOrigin, redirectUri, business: "Tiki", expiresAt: Date.now() + 10 * 60_000 });
+  const state = await createOAuthState({ origin: safeOrigin, redirectUri, business: "Tiki", expiresAt: Date.now() + 10 * 60_000 });
   const url = new URL(`${squareBase()}/oauth2/authorize`);
   url.searchParams.set("client_id", applicationId);
   url.searchParams.set("scope", "MERCHANT_PROFILE_READ PAYMENTS_READ ORDERS_READ ITEMS_READ INVENTORY_READ");
@@ -453,7 +418,7 @@ export function verifySquareWebhookSignature(rawBody: string, suppliedSignature:
   const url = notificationUrl || process.env.SQUARE_WEBHOOK_NOTIFICATION_URL?.trim();
   if (!key || !url || !suppliedSignature) return false;
   const expected = createHmac("sha256", key).update(`${url}${rawBody}`).digest("base64");
-  return safeEqual(expected, suppliedSignature);
+  return constantTimeEqual(expected, suppliedSignature);
 }
 
 export async function processSquareWebhook(rawBody: string) {

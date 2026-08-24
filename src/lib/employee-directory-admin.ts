@@ -1,9 +1,9 @@
-import { createHmac } from "node:crypto";
 import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
 import { ensureEmployeeDirectorySchema, upsertDirectoryEmployees, type DirectoryEmployeeInput } from "@/lib/employee-directory";
 import { ensureEmployeeProfileSchema, scheduleColorFromId, validScheduleColor } from "@/lib/employee-profile";
 import { getSql } from "@/lib/db";
 import { employeePinLength, validateEmployeePin } from "@/lib/employee-pin";
+import { assertEmployeePinAvailable, createEmployeePinRecord, isEmployeePinUniqueViolation } from "@/lib/employee-pin-security";
 import { normalizeSmsPhone } from "@/lib/phone";
 import type { Business } from "@/lib/types";
 
@@ -11,11 +11,6 @@ function clean(value: unknown, max = 255): string {
   return String(value ?? "").trim().slice(0, max);
 }
 
-function pinHash(business: Business, pin: string): string {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required.");
-  return createHmac("sha256", secret).update(`${business}:${pin}`).digest("hex");
-}
 
 export async function listDirectoryEmployees(business: Business) {
   await ensureEmployeeProfileSchema();
@@ -82,10 +77,13 @@ export async function bulkUpdateDirectoryPins(input: { business: Business; lines
   const updated: string[] = [];
   const missing: string[] = [];
   for (const entry of parsed) {
+    await assertEmployeePinAvailable({ business: input.business, pin: entry.pin, employeeName: entry.name });
+    const record = createEmployeePinRecord(input.business, entry.pin, entry.name);
     const rows = await sql`
       UPDATE employees
-      SET pin_hash = ${pinHash(input.business, entry.pin)}, pin_enabled = TRUE,
-        active = TRUE, updated_at = NOW()
+      SET pin_hash = ${record.hash}, pin_salt = ${record.salt}, pin_hash_version = ${record.version},
+        pin_fingerprint = ${record.fingerprint}, pin_enabled = TRUE,
+        active = TRUE, session_version = session_version + 1, updated_at = NOW()
       WHERE business = ${input.business}
         AND LOWER(BTRIM(name)) = LOWER(BTRIM(${entry.name}))
       RETURNING name
@@ -147,7 +145,8 @@ export async function updateDirectoryEmployee(input: {
   if (!position) throw new Error("Employee position is required.");
   if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new Error("Employee email is invalid.");
   if (input.smsOptIn && !phone) throw new Error("Add a mobile phone number before enabling SMS notifications.");
-  const pin = input.pin ? validateEmployeePin(input.business, input.pin, name) : "";
+  const pin = input.pin ? await assertEmployeePinAvailable({ business: input.business, pin: validateEmployeePin(input.business, input.pin, name), employeeName: name, excludeEmployeeId: input.id }) : "";
+  const pinRecord = pin ? createEmployeePinRecord(input.business, pin, name) : null;
 
   const duplicate = await sql`
     SELECT id FROM employees
@@ -162,8 +161,13 @@ export async function updateDirectoryEmployee(input: {
       name = ${name}, position = ${position}, role_group = ${roleGroup},
       counts_for_tips = ${countsForTips}, hourly_rate = ${hourlyRate}, tipped_rate = ${tippedRate},
       active = ${active}, schedule_color = ${scheduleColor},
-      pin_hash = CASE WHEN ${pin} <> '' THEN ${pin ? pinHash(input.business, pin) : ""} ELSE pin_hash END,
-      pin_enabled = CASE WHEN ${pin} <> '' THEN TRUE ELSE pin_enabled END, updated_at = NOW()
+      pin_hash = CASE WHEN ${pin} <> '' THEN ${pinRecord?.hash || ""} ELSE pin_hash END,
+      pin_salt = CASE WHEN ${pin} <> '' THEN ${pinRecord?.salt || ""} ELSE pin_salt END,
+      pin_hash_version = CASE WHEN ${pin} <> '' THEN ${pinRecord?.version || 1} ELSE pin_hash_version END,
+      pin_fingerprint = CASE WHEN ${pin} <> '' THEN ${pinRecord?.fingerprint || ""} ELSE pin_fingerprint END,
+      pin_enabled = CASE WHEN ${pin} <> '' THEN TRUE ELSE pin_enabled END,
+      session_version = CASE WHEN ${pin} <> '' OR active <> ${active} THEN session_version + 1 ELSE session_version END,
+      updated_at = NOW()
     WHERE id = ${input.id} AND business = ${input.business}
     RETURNING id, email, phone, sms_opt_in, name, position, role_group, counts_for_tips,
       hourly_rate, tipped_rate, pin_enabled, active, schedule_color, profile_photo_pathname, chat_nickname

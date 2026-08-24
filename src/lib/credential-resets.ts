@@ -1,6 +1,8 @@
-import { createHash, createHmac, randomBytes, randomUUID, scryptSync } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ensureSchema, getSql } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
+import { assertEmployeePinAvailable, createEmployeePinRecord, isEmployeePinUniqueViolation } from "@/lib/employee-pin-security";
+import { employeePinLabel } from "@/lib/employee-pin";
 import { cornerOpsBaseUrl, sendTransactionalEmail } from "@/lib/transactional-email";
 import { ensureUserSchema } from "@/lib/users";
 import type { Business } from "@/lib/types";
@@ -39,12 +41,6 @@ function passwordRecord(password: string): { salt: string; hash: string } {
   return { salt, hash: scryptSync(password, salt, 64).toString("base64url") };
 }
 
-function employeePinHash(business: Business, pin: string): string {
-  if (!/^\d{5}$/.test(pin)) throw new Error("Employee PINs must contain exactly five digits.");
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required.");
-  return createHmac("sha256", secret).update(`${business}:${pin}`).digest("hex");
-}
 
 export function ensureCredentialResetSchema(): Promise<void> {
   if (!resetSchemaPromise) {
@@ -155,7 +151,7 @@ export async function completeAppPasswordReset(input: { token: string; password:
   const updated = await sql`
     UPDATE app_users
     SET password_salt = ${password.salt}, password_hash = ${password.hash},
-        legacy_owner = FALSE, updated_at = NOW()
+        legacy_owner = FALSE, session_version = session_version + 1, updated_at = NOW()
     WHERE id = ${reset.subject_id} AND active = TRUE
     RETURNING id
   ` as unknown as Array<{ id: string }>;
@@ -195,7 +191,7 @@ export async function requestEmployeePinReset(input: {
     text: [
       `Hi ${clean(employee.name, 120).split(/\s+/)[0] || "there"},`,
       "",
-      `A five-digit Employee Hub PIN reset was requested for ${employee.business}.`,
+      `A ${employeePinLabel(employee.business).toLowerCase()} reset was requested for ${employee.business}.`,
       "",
       `Choose a new PIN within ${RESET_MINUTES} minutes:`,
       link,
@@ -208,14 +204,22 @@ export async function requestEmployeePinReset(input: {
 export async function completeEmployeePinReset(input: { token: string; pin: string }): Promise<void> {
   const reset = await activeReset("employee-pin", clean(input.token, 500));
   if (!reset.business) throw new Error("The employee reset record is incomplete.");
-  const hash = employeePinHash(reset.business, String(input.pin || ""));
+  const pin = await assertEmployeePinAvailable({ business: reset.business, pin: input.pin, employeeName: "Employee", excludeEmployeeId: reset.subject_id });
+  const record = createEmployeePinRecord(reset.business, pin, "Employee");
   const sql = getSql();
-  const updated = await sql`
-    UPDATE employees
-    SET pin_hash = ${hash}, pin_enabled = TRUE, updated_at = NOW()
-    WHERE id = ${reset.subject_id} AND business = ${reset.business} AND active = TRUE
-    RETURNING id
-  ` as unknown as Array<{ id: string }>;
-  if (!updated[0]) throw new Error("This employee account is no longer active.");
+  try {
+    const updated = await sql`
+      UPDATE employees
+      SET pin_hash = ${record.hash}, pin_salt = ${record.salt}, pin_hash_version = ${record.version},
+          pin_fingerprint = ${record.fingerprint}, pin_enabled = TRUE,
+          session_version = session_version + 1, updated_at = NOW()
+      WHERE id = ${reset.subject_id} AND business = ${reset.business} AND active = TRUE
+      RETURNING id
+    ` as unknown as Array<{ id: string }>;
+    if (!updated[0]) throw new Error("This employee account is no longer active.");
+  } catch (error) {
+    if (isEmployeePinUniqueViolation(error)) throw new Error("That PIN is already in use at this location.");
+    throw error;
+  }
   await sql`UPDATE credential_reset_tokens SET used_at = NOW() WHERE id = ${reset.id}`;
 }

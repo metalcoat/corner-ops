@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import { getSql } from "@/lib/db";
+import { recordAuditEvent } from "@/lib/audit";
 import { ensureIntegrationSchema } from "@/lib/integrations";
 import type { Business } from "@/lib/types";
 
@@ -279,6 +280,7 @@ export async function confirmCardStatementMatch(input: {
   business: Business;
   statementId: string;
   bankTransactionId: string;
+  actor: string;
 }) {
   await ensureCardStatementSchema();
   const rows = await getSql()`
@@ -299,6 +301,7 @@ export async function confirmCardStatementMatch(input: {
       updated_at = NOW()
     WHERE id = ${input.statementId} AND business = ${input.business}
   `;
+  await recordAuditEvent({ business: input.business, entityType: "credit_card_statement", entityId: input.statementId, action: "payment_matched", actor: input.actor, details: { bankTransactionId: input.bankTransactionId } });
   return { matched: true };
 }
 

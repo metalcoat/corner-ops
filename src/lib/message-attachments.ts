@@ -89,6 +89,7 @@ export async function employeeMessageAttachment(session: EmployeeSession, messag
     SELECT attachment_pathname, attachment_name, attachment_type, attachment_size
     FROM employee_messages
     WHERE id = ${messageId}
+      AND deleted_at IS NULL
       AND business = ${session.business}
       AND attachment_pathname <> ''
       AND (
@@ -106,7 +107,7 @@ export async function ownerMessageAttachment(business: Business, messageId: stri
   const rows = await getSql()`
     SELECT attachment_pathname, attachment_name, attachment_type, attachment_size
     FROM employee_messages
-    WHERE id = ${messageId} AND business = ${business} AND attachment_pathname <> ''
+    WHERE id = ${messageId} AND business = ${business} AND deleted_at IS NULL AND attachment_pathname <> ''
     LIMIT 1
   ` as unknown as Array<Record<string, unknown>>;
   return rows[0] ? mapAttachment(rows[0]) : null;

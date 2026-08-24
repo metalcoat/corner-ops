@@ -111,6 +111,7 @@ export async function POST(request: Request) {
       business,
       statementId: String(body.statementId || ""),
       bankTransactionId: String(body.bankTransactionId || ""),
+      actor: session.email,
     }));
   } catch (error) {
     if (uploadedUrl) await del(uploadedUrl).catch(() => undefined);

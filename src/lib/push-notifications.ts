@@ -8,6 +8,7 @@ import {
   sign,
 } from "node:crypto";
 import { ensureSchema, getSql } from "@/lib/db";
+import { legacySessionSecret, openApplicationSecret, sealApplicationSecret } from "@/lib/security-keys";
 import type { Business } from "@/lib/types";
 
 const P256_ORDER = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
@@ -61,16 +62,47 @@ function requestBody(value: Buffer): ArrayBuffer {
   return copy.buffer;
 }
 
-function pushKeys() {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required before push notifications can be used.");
-  const digest = createHash("sha256").update(`corner-ops-web-push-v1:${secret}`).digest();
+async function pushKeys() {
+  const configuredPrivate = process.env.PUSH_VAPID_PRIVATE_KEY?.trim();
+  const configuredPublic = process.env.PUSH_VAPID_PUBLIC_KEY?.trim();
+  if (configuredPrivate && configuredPublic) {
+    return { privateKey: decodeBase64url(configuredPrivate), publicKey: decodeBase64url(configuredPublic) };
+  }
+
+  const rows = await getSql()`
+    SELECT encrypted_private_value, public_value
+    FROM application_key_material WHERE purpose = 'web-push-vapid-v1' LIMIT 1
+  ` as unknown as Array<{ encrypted_private_value: string; public_value: string }>;
+  if (rows[0]) {
+    return {
+      privateKey: decodeBase64url(openApplicationSecret(rows[0].encrypted_private_value)),
+      publicKey: decodeBase64url(rows[0].public_value),
+    };
+  }
+
+  const digest = createHash("sha256").update(`corner-ops-web-push-v1:${legacySessionSecret()}`).digest();
   let scalar = BigInt(`0x${digest.toString("hex")}`);
   scalar = (scalar % (P256_ORDER - 1n)) + 1n;
   const privateKey = Buffer.from(scalar.toString(16).padStart(64, "0"), "hex");
   const ecdh = createECDH("prime256v1");
   ecdh.setPrivateKey(privateKey);
-  return { privateKey, publicKey: ecdh.getPublicKey(undefined, "uncompressed") };
+  const publicKey = ecdh.getPublicKey(undefined, "uncompressed");
+  await getSql()`
+    INSERT INTO application_key_material (purpose, encrypted_private_value, public_value)
+    VALUES ('web-push-vapid-v1', ${sealApplicationSecret(base64url(privateKey))}, ${base64url(publicKey)})
+    ON CONFLICT (purpose) DO NOTHING
+  `;
+  const persisted = await getSql()`
+    SELECT encrypted_private_value, public_value
+    FROM application_key_material WHERE purpose = 'web-push-vapid-v1' LIMIT 1
+  ` as unknown as Array<{ encrypted_private_value: string; public_value: string }>;
+  if (persisted[0]) {
+    return {
+      privateKey: decodeBase64url(openApplicationSecret(persisted[0].encrypted_private_value)),
+      publicKey: decodeBase64url(persisted[0].public_value),
+    };
+  }
+  return { privateKey, publicKey };
 }
 
 function hmac(key: Buffer, value: Buffer): Buffer {
@@ -89,8 +121,8 @@ function hkdfExpand(prk: Buffer, info: Buffer, length: number): Buffer {
   return Buffer.concat(parts).subarray(0, length);
 }
 
-function vapidAuthorization(endpoint: string) {
-  const { privateKey, publicKey } = pushKeys();
+async function vapidAuthorization(endpoint: string) {
+  const { privateKey, publicKey } = await pushKeys();
   const audience = new URL(endpoint).origin;
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(Buffer.from(JSON.stringify({ typ: "JWT", alg: "ES256" })));
@@ -202,8 +234,8 @@ function actorClause(actor: PushActor) {
     : { audienceType: "employee", ownerEmail: "", employeeId: actor.employeeId, business: actor.business };
 }
 
-export function pushPublicKey(): string {
-  return base64url(pushKeys().publicKey);
+export async function pushPublicKey(): Promise<string> {
+  return base64url((await pushKeys()).publicKey);
 }
 
 export async function pushStatus(actor: PushActor) {
@@ -213,7 +245,7 @@ export async function pushStatus(actor: PushActor) {
     ? await getSql()`SELECT COUNT(*)::int AS count FROM push_subscriptions WHERE audience_type = 'owner' AND LOWER(owner_email) = LOWER(${identity.ownerEmail}) AND active = TRUE`
     : await getSql()`SELECT COUNT(*)::int AS count FROM push_subscriptions WHERE audience_type = 'employee' AND employee_id = ${identity.employeeId} AND business = ${identity.business} AND active = TRUE`;
   const count = Number((rows as unknown as Array<{ count: number }>)[0]?.count || 0);
-  return { actorType: actor.type, publicKey: pushPublicKey(), subscribedDevices: count };
+  return { actorType: actor.type, publicKey: await pushPublicKey(), subscribedDevices: count };
 }
 
 export async function savePushSubscription(actor: PushActor, input: PushSubscriptionInput) {
@@ -264,7 +296,7 @@ export async function removePushSubscription(actor: PushActor, endpoint: string)
 
 async function sendToSubscription(subscription: StoredSubscription, message: PushMessage) {
   const body = encryptedPayload(subscription, message);
-  const { authorization } = vapidAuthorization(subscription.endpoint);
+  const { authorization } = await vapidAuthorization(subscription.endpoint);
   const response = await fetch(subscription.endpoint, {
     method: "POST",
     headers: {

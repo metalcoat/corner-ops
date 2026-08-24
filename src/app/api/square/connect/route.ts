@@ -7,7 +7,7 @@ export async function GET(request: Request) {
     const session = await getSession();
     if (!session) return unauthorized();
     requirePermission(session, "integrations.write");
-    return Response.redirect(squareFullAuthorizationUrl(new URL(request.url).origin), 302);
+    return Response.redirect(await squareFullAuthorizationUrl(new URL(request.url).origin), 302);
   } catch (error) {
     return apiError(error);
   }

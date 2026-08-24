@@ -1,7 +1,9 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import * as XLSX from "xlsx";
 import { ensureSchema, getSql } from "@/lib/db";
 import { ValidationError } from "@/lib/http";
+import { decryptIntegrationSecret as decryptSecret, encryptIntegrationSecret as encryptSecret } from "@/lib/integration-crypto";
+import { consumeOAuthState, createOAuthState } from "@/lib/oauth-state";
 import { reversePostedBankTransaction } from "@/lib/journal-reversal";
 import type { Business } from "@/lib/types";
 
@@ -62,59 +64,6 @@ function clean(value: unknown, max = 255): string {
 function numberValue(value: unknown): number {
   const parsed = Number(String(value ?? "").replace(/[$,%\s,]/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function integrationKey(): Buffer {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required before integrations can store credentials.");
-  return createHash("sha256").update(`corner-ops-integrations:${secret}`).digest();
-}
-
-function encryptSecret(value: string): string {
-  if (!value) return "";
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", integrationKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return [iv, tag, encrypted].map((part) => part.toString("base64url")).join(".");
-}
-
-function decryptSecret(value: string): string {
-  if (!value) return "";
-  const [ivText, tagText, encryptedText] = value.split(".");
-  if (!ivText || !tagText || !encryptedText) throw new Error("Stored integration credential is invalid.");
-  const decipher = createDecipheriv("aes-256-gcm", integrationKey(), Buffer.from(ivText, "base64url"));
-  decipher.setAuthTag(Buffer.from(tagText, "base64url"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(encryptedText, "base64url")),
-    decipher.final(),
-  ]).toString("utf8");
-}
-
-function safeEqual(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-function signedState(payload: Record<string, unknown>): string {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required.");
-  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-  const signature = createHmac("sha256", secret).update(encoded).digest("base64url");
-  return `${encoded}.${signature}`;
-}
-
-function readSignedState(value: string): Record<string, unknown> {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required.");
-  const [encoded, supplied] = value.split(".");
-  if (!encoded || !supplied) throw new Error("Integration authorization state is invalid.");
-  const expected = createHmac("sha256", secret).update(encoded).digest("base64url");
-  if (!safeEqual(expected, supplied)) throw new Error("Integration authorization state is invalid.");
-  const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as Record<string, unknown>;
-  if (Number(payload.expiresAt || 0) < Date.now()) throw new Error("Integration authorization state expired.");
-  return payload;
 }
 
 function allowedOrigin(origin: string): string {
@@ -773,12 +722,12 @@ async function squareRequest<T>(path: string, accessToken: string, init?: Reques
   return payload as T;
 }
 
-export function squareAuthorizationUrl(origin: string): string {
+export async function squareAuthorizationUrl(origin: string): Promise<string> {
   const applicationId = process.env.SQUARE_APPLICATION_ID?.trim();
   if (!applicationId || !process.env.SQUARE_APPLICATION_SECRET?.trim()) throw new Error("Square is not configured.");
   const safeOrigin = allowedOrigin(origin);
   const redirectUri = `${safeOrigin}/api/square/callback`;
-  const state = signedState({ origin: safeOrigin, redirectUri, business: "Tiki", expiresAt: Date.now() + 10 * 60_000 });
+  const state = await createOAuthState({ origin: safeOrigin, redirectUri, business: "Tiki", expiresAt: Date.now() + 10 * 60_000 });
   const url = new URL(`${squareConnectBase()}/oauth2/authorize`);
   url.searchParams.set("client_id", applicationId);
   url.searchParams.set("scope", "MERCHANT_PROFILE_READ PAYMENTS_READ ORDERS_READ ITEMS_READ");
@@ -790,7 +739,7 @@ export function squareAuthorizationUrl(origin: string): string {
 
 export async function exchangeSquareAuthorization(code: string, state: string) {
   await ensureIntegrationSchema();
-  const payload = readSignedState(state);
+  const payload = await consumeOAuthState(state);
   const origin = allowedOrigin(String(payload.origin || ""));
   const redirectUri = String(payload.redirectUri || `${origin}/api/square/callback`);
   const applicationId = process.env.SQUARE_APPLICATION_ID?.trim();
