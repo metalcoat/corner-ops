@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { scheduleSmsText } from "../src/lib/schedule-publication-sms.js";
+import { scheduleSmsText } from "../src/lib/schedule-sms-text.js";
 
 const shifts = [
   {
