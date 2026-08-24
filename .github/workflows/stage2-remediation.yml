@@ -7,6 +7,7 @@ on:
     paths:
       - tools/stage2_accounting.py
       - tools/stage2_integrations.py
+      - tools/stage2_integrations_postfix.py
       - tools/stage2_posting.py
       - tools/stage2_reversal.py
       - .github/workflows/stage2-remediation.yml
@@ -43,10 +44,24 @@ jobs:
           set +e
           LOG=/tmp/stage2.log
           : > "$LOG"
-          for script in tools/stage2_accounting.py tools/stage2_integrations.py tools/stage2_posting.py tools/stage2_reversal.py; do
-            python3 "$script" >>"$LOG" 2>&1 || { SCRIPT_RC=$?; break; }
-          done
-          SCRIPT_RC=${SCRIPT_RC:-0}
+
+          python3 - <<'PY' >>"$LOG" 2>&1
+          from pathlib import Path
+          p=Path('tools/stage2_integrations.py')
+          t=p.read_text()
+          bad="rep('src/app/api/integrations/route.ts','return Response.json(await syncBankConnection(String(body.connectionId || \"\")));','return Response.json(await syncBankConnection(String(body.connectionId || \"\"), business));')\n"
+          if bad not in t:
+              raise RuntimeError('ambiguous syncBankConnection transformer line not found')
+          p.write_text(t.replace(bad,'',1))
+          PY
+          PREP_RC=$?
+
+          SCRIPT_RC=$PREP_RC
+          if [ "$SCRIPT_RC" -eq 0 ]; then
+            for script in tools/stage2_accounting.py tools/stage2_integrations.py tools/stage2_integrations_postfix.py tools/stage2_posting.py tools/stage2_reversal.py; do
+              python3 "$script" >>"$LOG" 2>&1 || { SCRIPT_RC=$?; break; }
+            done
+          fi
           if [ "$SCRIPT_RC" -eq 0 ]; then npm ci >>"$LOG" 2>&1; INSTALL_RC=$?; else INSTALL_RC=99; fi
           if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ]; then npm test >>"$LOG" 2>&1; TEST_RC=$?; else TEST_RC=99; fi
           if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ]; then npm run typecheck >>"$LOG" 2>&1; TYPE_RC=$?; else TYPE_RC=99; fi
@@ -56,7 +71,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ] && [ "$TYPE_RC" -eq 0 ] && [ "$BUILD_RC" -eq 0 ]; then
-            rm -f tools/stage2_accounting.py tools/stage2_integrations.py tools/stage2_posting.py tools/stage2_reversal.py .github/workflows/stage2-remediation.yml .stage2-remediation-status.md
+            rm -f tools/stage2_accounting.py tools/stage2_integrations.py tools/stage2_integrations_postfix.py tools/stage2_posting.py tools/stage2_reversal.py .github/workflows/stage2-remediation.yml .stage2-remediation-status.md
             git add -A
             git diff --cached --check || exit 1
             git commit -m "Stage 2 stop accounting ledger drift"
