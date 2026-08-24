@@ -61,28 +61,32 @@ def remove_function(text: str, name: str) -> tuple[str, int]:
 
 # 1) Canonical responseMessage helper across client components.
 client_files = [p for p in APP.rglob('*') if p.suffix in {'.ts', '.tsx'}]
-response_names = ['responseMessage', 'responseError', 'responseErrorMessage']
+response_names = ['responseMessage', 'responseError', 'responseErrorMessage', 'errorMessage']
 for path in client_files:
+    if path.as_posix().endswith('/client-http.ts'):
+        continue
     text = path.read_text()
-    removed = 0
+    removed_names = []
     for name in response_names:
         text, n = remove_function(text, name)
-        removed += n
-    if removed:
+        if n:
+            removed_names.append(name)
+    if removed_names:
         text = add_import(text, '@/app/client-http', ['responseMessage'])
-        text = text.replace('responseErrorMessage(', 'responseMessage(').replace('responseError(', 'responseMessage(')
+        for name in removed_names:
+            if name != 'responseMessage':
+                text = re.sub(rf'\b{re.escape(name)}\(', 'responseMessage(', text)
         path.write_text(text)
 
-# Catch literal-only copies that do not have a helper function.
+# Catch direct fallback literals without introducing async into synchronous callbacks.
 for path in client_files:
     text = path.read_text()
     if 'Request failed (${response.status}).' not in text:
         continue
-    # The canonical module is allowed to own the literal.
     if path.as_posix().endswith('/client-http.ts'):
         continue
-    text = text.replace('`Request failed (${response.status}).`', 'await responseMessage(response)')
-    text = add_import(text, '@/app/client-http', ['responseMessage'])
+    text = text.replace('`Request failed (${response.status}).`', 'requestFailure(response)')
+    text = add_import(text, '@/app/client-http', ['requestFailure'])
     path.write_text(text)
 
 # 2) Canonical display first-name helper.
@@ -119,7 +123,6 @@ if 'import "./operations.css";' not in home_text:
     if marker in home_text:
         home_text = home_text.replace(marker, marker + 'import "./operations.css";\n')
     else:
-        # page imports types using a grouped import, put CSS after that import block.
         anchor = '} from "@/lib/types";\n'
         home_text = home_text.replace(anchor, anchor + 'import "./operations.css";\n', 1)
 home.write_text(home_text)
@@ -156,9 +159,7 @@ canonical.write_text(employee_css)
 theme = APP / 'business-theme.css'
 theme_text = theme.read_text()
 if '--danger:' not in theme_text:
-    # Define once in both business theme blocks next to existing accent semantics.
     theme_text = theme_text.replace('--accent-contrast:', '--danger: #dc2626;\n  --accent-contrast:', 1)
-    # A second block exists for Tiki; keep the same semantic danger color.
     second = theme_text.find('--accent-contrast:', theme_text.find('--accent-contrast:') + 1)
     if second >= 0:
         theme_text = theme_text[:second] + '--danger: #dc2626;\n  ' + theme_text[second:]
