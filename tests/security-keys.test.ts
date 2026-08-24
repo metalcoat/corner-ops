@@ -3,8 +3,13 @@ import test from "node:test";
 
 process.env.SESSION_SECRET = "legacy-session-secret-for-tests-only-not-a-production-value";
 process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY = "test-employment-key-for-purpose-separation";
+process.env.EMPLOYEE_PIN_PEPPER = "test-employee-pin-pepper-for-purpose-separation";
 
-import { createEmployeePinRecord, employeePinFingerprint, legacyEmployeePinHash } from "../src/lib/employee-pin-security";
+import {
+  createEmployeePinCryptoRecord,
+  employeePinFingerprint,
+  legacyEmployeePinHash,
+} from "../src/lib/employee-pin-crypto";
 import { hmacSignature, legacySessionHmac, openApplicationSecret, sealApplicationSecret } from "../src/lib/security-keys";
 
 test("purpose-specific session signatures differ from legacy SESSION_SECRET signatures", () => {
@@ -23,8 +28,8 @@ test("application secret sealing round trips without SESSION_SECRET as the encry
 });
 
 test("employee PIN v2 uses per-row salt while preserving a stable uniqueness fingerprint", () => {
-  const first = createEmployeePinRecord("Corner Deli", "1234", "Test Employee");
-  const second = createEmployeePinRecord("Corner Deli", "1234", "Test Employee");
+  const first = createEmployeePinCryptoRecord("Corner Deli", "1234");
+  const second = createEmployeePinCryptoRecord("Corner Deli", "1234");
   assert.notEqual(first.salt, second.salt);
   assert.notEqual(first.hash, second.hash);
   assert.equal(first.fingerprint, second.fingerprint);
