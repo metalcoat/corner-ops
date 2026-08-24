@@ -23,7 +23,7 @@
     },
     {
       "path": "/api/cron/rezku-repair",
-      "schedule": "15 * * * *"
+      "schedule": "*/15 * * * *"
     }
   ]
 }
