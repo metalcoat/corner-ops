@@ -60,10 +60,10 @@ export function ensureEmployeeHandbookSchema(): Promise<void> {
           ip_address TEXT NOT NULL DEFAULT '',
           user_agent TEXT NOT NULL DEFAULT '',
           acknowledged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          UNIQUE (employee_id, handbook_version)
         )
       `;
-      await getSql()`CREATE INDEX IF NOT EXISTS employee_handbook_ack_business_idx ON employee_handbook_acknowledgments (business, handbook_version, acknowledged_at DESC)`;
+      await getSql()`CREATE UNIQUE INDEX IF NOT EXISTS employee_handbook_ack_employee_hash_unique ON employee_handbook_acknowledgments (employee_id, handbook_version, content_hash)`;
+      await getSql()`CREATE INDEX IF NOT EXISTS employee_handbook_ack_business_idx ON employee_handbook_acknowledgments (business, handbook_version, content_hash, acknowledged_at DESC)`;
     })().catch((error) => {
       handbookSchemaPromise = null;
       throw error;
@@ -98,10 +98,12 @@ function isoDateTime(value: string | Date | null): string | null {
 
 export async function getEmployeeHandbookAcknowledgment(employeeId: string, business: Business): Promise<HandbookAcknowledgment | null> {
   await ensureEmployeeHandbookSchema();
+  const handbook = getCornerDeliHandbook();
   const rows = await getSql()`
     SELECT id, employee_id, employee_name, business, handbook_version, content_hash, signature_name, acknowledged_at
     FROM employee_handbook_acknowledgments
-    WHERE employee_id = ${employeeId} AND business = ${business} AND handbook_version = ${CORNER_DELI_HANDBOOK_VERSION}
+    WHERE employee_id = ${employeeId} AND business = ${business}
+      AND handbook_version = ${handbook.version} AND content_hash = ${handbook.contentHash}
     LIMIT 1
   ` as unknown as Array<{
     id: string;
@@ -179,6 +181,7 @@ export async function acknowledgeEmployeeHandbook(input: {
 
 export async function listHandbookEmployeeStatus(business: Business): Promise<HandbookEmployeeStatus[]> {
   await ensureEmployeeHandbookSchema();
+  const handbook = getCornerDeliHandbook();
   const rows = await getSql()`
     SELECT
       e.id AS employee_id,
@@ -190,7 +193,8 @@ export async function listHandbookEmployeeStatus(business: Business): Promise<Ha
     FROM employees e
     LEFT JOIN employee_handbook_acknowledgments a
       ON a.employee_id = e.id
-     AND a.handbook_version = ${CORNER_DELI_HANDBOOK_VERSION}
+     AND a.handbook_version = ${handbook.version}
+     AND a.content_hash = ${handbook.contentHash}
     WHERE e.business = ${business}
     ORDER BY e.active DESC, e.name
   ` as unknown as Array<{
@@ -210,6 +214,6 @@ export async function listHandbookEmployeeStatus(business: Business): Promise<Ha
     acknowledged: Boolean(row.acknowledged_at),
     acknowledgedAt: isoDateTime(row.acknowledged_at),
     signatureName: row.signature_name || null,
-    handbookVersion: CORNER_DELI_HANDBOOK_VERSION,
+    handbookVersion: handbook.version,
   }));
 }

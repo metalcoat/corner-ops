@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getEmployeeSession } from "@/lib/employee-auth";
+import { employeeI9ValidationErrors } from "@/lib/i9-validation";
 import {
   getEmploymentForm,
   listEmploymentForms,
@@ -37,6 +38,8 @@ function validateSubmission(type: EmploymentFormType, payload: Record<string, un
     if (payload.preparerTranslator === "used") {
       throw new Error("A preparer or translator requires Form I-9 Supplement A. Complete that supplement with management before signing electronically.");
     }
+    const i9Errors = employeeI9ValidationErrors(payload);
+    if (i9Errors.length) throw new Error(i9Errors[0]);
   }
 }
 

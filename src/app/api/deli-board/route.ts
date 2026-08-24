@@ -3,7 +3,6 @@ import { getSql } from "@/lib/db";
 import { verifyDeliBoardToken } from "@/lib/deli-board-auth";
 import { getEmployeeSession } from "@/lib/employee-auth";
 import { apiError, unauthorized } from "@/lib/http";
-import { correctThreeCxCallReport } from "@/lib/three-cx-time-correction";
 import { threeCxDeliCallReport } from "@/lib/three-cx-calls-report";
 import { ensureWorkforceSchema } from "@/lib/workforce";
 
@@ -146,7 +145,7 @@ async function loadCallFeed(today: string): Promise<CallFeed> {
   if (!callFeedPromise) {
     callFeedPromise = (async () => {
       try {
-        const report = correctThreeCxCallReport(await threeCxDeliCallReport(today, tomorrowDateKey()));
+        const report = await threeCxDeliCallReport(today, tomorrowDateKey());
         const feed: CallFeed = {
           workDate: today,
           calls: report.calls.filter((call) => !call.resolved).slice(0, 8),

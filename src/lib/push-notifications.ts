@@ -14,6 +14,7 @@ import type { Business } from "@/lib/types";
 const P256_ORDER = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
 const PUSH_SUBJECT = process.env.PUSH_SUBJECT?.trim() || "mailto:crfrary@gmail.com";
 const MAX_PAYLOAD_BYTES = 3000;
+const PUSH_CONCURRENCY = 6;
 let pushSchemaPromise: Promise<void> | null = null;
 
 type PushActor =
@@ -321,41 +322,46 @@ async function deliver(subscriptions: StoredSubscription[], message: PushMessage
   await ensurePushSchema();
   let delivered = 0;
   let failed = 0;
-  for (const subscription of subscriptions) {
-    let status: "Delivered" | "Failed" | "Expired" = "Delivered";
-    let responseStatus: number | null = null;
-    let errorText = "";
-    try {
-      await sendToSubscription(subscription, message);
-      delivered += 1;
-      await getSql()`UPDATE push_subscriptions SET last_used_at = NOW(), failure_count = 0, last_error = '', updated_at = NOW() WHERE id = ${subscription.id}`;
-    } catch (error) {
-      failed += 1;
-      responseStatus = Number((error as { status?: number }).status || 0) || null;
-      errorText = clean(error instanceof Error ? error.message : error, 500);
-      status = responseStatus === 404 || responseStatus === 410 ? "Expired" : "Failed";
+  for (let index = 0; index < subscriptions.length; index += PUSH_CONCURRENCY) {
+    await Promise.all(subscriptions.slice(index, index + PUSH_CONCURRENCY).map(async (subscription) => {
+      let status: "Delivered" | "Failed" | "Expired" = "Delivered";
+      let responseStatus: number | null = null;
+      let errorText = "";
+      try {
+        await sendToSubscription(subscription, message);
+        delivered += 1;
+        await getSql()`UPDATE push_subscriptions SET last_used_at = NOW(), failure_count = 0, last_error = '', updated_at = NOW() WHERE id = ${subscription.id}`;
+      } catch (error) {
+        failed += 1;
+        responseStatus = Number((error as { status?: number }).status || 0) || null;
+        errorText = clean(error instanceof Error ? error.message : error, 500);
+        status = responseStatus === 404 || responseStatus === 410 ? "Expired" : "Failed";
+        await getSql()`
+          UPDATE push_subscriptions SET
+            active = CASE WHEN ${status} = 'Expired' THEN FALSE ELSE active END,
+            failure_count = failure_count + 1,
+            last_error = ${errorText}, updated_at = NOW()
+          WHERE id = ${subscription.id}
+        `;
+      }
       await getSql()`
-        UPDATE push_subscriptions SET
-          active = CASE WHEN ${status} = 'Expired' THEN FALSE ELSE active END,
-          failure_count = failure_count + 1,
-          last_error = ${errorText}, updated_at = NOW()
-        WHERE id = ${subscription.id}
+        INSERT INTO push_delivery_log (id, subscription_id, category, title, destination_url, status, response_status, error)
+        VALUES (${crypto.randomUUID()}, ${subscription.id}, ${clean(message.category || "message", 60)}, ${clean(message.title, 200)}, ${clean(message.url, 1000)}, ${status}, ${responseStatus}, ${errorText})
       `;
-    }
-    await getSql()`
-      INSERT INTO push_delivery_log (id, subscription_id, category, title, destination_url, status, response_status, error)
-      VALUES (${crypto.randomUUID()}, ${subscription.id}, ${clean(message.category || "message", 60)}, ${clean(message.title, 200)}, ${clean(message.url, 1000)}, ${status}, ${responseStatus}, ${errorText})
-    `;
+    }));
   }
   return { attempted: subscriptions.length, delivered, failed };
 }
 
-async function ownerSubscriptions(): Promise<StoredSubscription[]> {
+async function ownerSubscriptions(business: Business): Promise<StoredSubscription[]> {
   await ensurePushSchema();
   return await getSql()`
-    SELECT id, endpoint, p256dh, auth FROM push_subscriptions
-    WHERE audience_type = 'owner' AND active = TRUE
-    ORDER BY updated_at DESC
+    SELECT p.id, p.endpoint, p.p256dh, p.auth
+    FROM push_subscriptions p
+    JOIN app_users u ON LOWER(u.email) = LOWER(p.owner_email) AND u.active = TRUE
+    WHERE p.audience_type = 'owner' AND p.active = TRUE
+      AND ${business} = ANY(u.businesses)
+    ORDER BY p.updated_at DESC
   ` as unknown as StoredSubscription[];
 }
 
@@ -420,7 +426,7 @@ export async function notifyRecipientsOfEmployeeMessage(input: {
   const sender = senderRows[0]?.name || "Employee";
   const body = clean(input.body, 220) || (input.hasPhoto ? "Sent a photo." : "Sent a new message.");
   const [owners, employees] = await Promise.all([
-    ownerSubscriptions(),
+    ownerSubscriptions(input.business),
     employeeSubscriptions({
       business: input.business,
       recipientEmployeeId: input.recipientEmployeeId,

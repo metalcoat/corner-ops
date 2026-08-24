@@ -1,4 +1,4 @@
-const REZKU_FILE_HOST = "files.reporting.rezkupos.com";
+import { fetchTrustedRezkuWorkbook, trustedRezkuWorkbookUrl } from "@/lib/rezku-trusted-fetch";
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const XLS_MIME = "application/vnd.ms-excel";
 const BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
@@ -21,18 +21,6 @@ type DownloadResult = {
 
 function clean(value: unknown, max = 300): string {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
-}
-
-function safeRezkuUrl(rawUrl: string): string {
-  const normalized = rawUrl.trim().replace(/[)\]}>.,;]+$/g, "");
-  const url = new URL(normalized);
-  if (url.protocol !== "https:" || url.hostname !== REZKU_FILE_HOST) {
-    throw new Error("Rezku workbook URL was rejected because the host was not trusted.");
-  }
-  if (!/\.(xlsx|xls)$/i.test(url.pathname)) {
-    throw new Error("Rezku workbook URL did not point to an Excel file.");
-  }
-  return normalized;
 }
 
 function responseAttempt(method: string, response: Response, body = ""): DownloadAttempt {
@@ -90,9 +78,8 @@ async function failedBody(response: Response): Promise<string> {
 }
 
 async function directAttempt(rawUrl: string, fileName: string, method: string, headers: HeadersInit): Promise<DownloadResult | DownloadAttempt> {
-  const response = await fetch(rawUrl, {
+  const response = await fetchTrustedRezkuWorkbook(rawUrl, {
     method: "GET",
-    redirect: "follow",
     cache: "no-store",
     signal: AbortSignal.timeout(25_000),
     headers,
@@ -139,7 +126,7 @@ async function edgeAttempt(rawUrl: string, fileName: string): Promise<DownloadRe
 }
 
 export async function downloadRezkuWorkbook(rawUrl: string, fileName: string): Promise<DownloadResult> {
-  const normalizedUrl = safeRezkuUrl(rawUrl);
+  const normalizedUrl = trustedRezkuWorkbookUrl(rawUrl);
   const attempts: DownloadAttempt[] = [];
   const accept = /\.xls$/i.test(fileName) ? XLS_MIME : XLSX_MIME;
   const profiles: Array<{ method: string; headers: HeadersInit }> = [

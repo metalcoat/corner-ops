@@ -140,19 +140,22 @@ async function deliverEmails(input: {
 
   let sent = 0;
   const failures: Array<{ employeeId: string; message: string }> = [];
-  for (const employee of deliverable) {
-    try {
-      const result = await configured.resend.emails.send({
-        from: configured.from,
-        to: clean(employee.email, 255),
-        subject: input.subject(employee),
-        text: input.text(employee),
-      });
-      if (result.error) throw new Error(result.error.message);
-      sent += 1;
-    } catch (error) {
-      failures.push({ employeeId: employee.id, message: error instanceof Error ? error.message : String(error) });
-    }
+  const concurrency = 6;
+  for (let index = 0; index < deliverable.length; index += concurrency) {
+    await Promise.all(deliverable.slice(index, index + concurrency).map(async (employee) => {
+      try {
+        const result = await configured.resend.emails.send({
+          from: configured.from,
+          to: clean(employee.email, 255),
+          subject: input.subject(employee),
+          text: input.text(employee),
+        });
+        if (result.error) throw new Error(result.error.message);
+        sent += 1;
+      } catch (error) {
+        failures.push({ employeeId: employee.id, message: error instanceof Error ? error.message : String(error) });
+      }
+    }));
   }
 
   return {
