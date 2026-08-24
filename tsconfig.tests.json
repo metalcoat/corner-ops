@@ -12,6 +12,8 @@
   },
   "include": [
     "src/lib/payroll-week.ts",
+    "src/lib/accounting-import-utils.ts",
+    "src/lib/journal-integrity.ts",
     "tests/**/*.ts"
   ]
 }
