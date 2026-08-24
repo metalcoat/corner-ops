@@ -34,11 +34,19 @@ expect("isStandalone helpers", count(r"\bfunction\s+isStandalone\s*\("), 1)
 expect("isIos helpers", count(r"\bfunction\s+isIos\s*\("), 1)
 expect("install prompt types", count(r"\b(?:type|interface)\s+(?:InstallPromptEvent|BeforeInstallPromptEvent)\b"), 1)
 expect("generic money() helpers", count(r"\bfunction\s+money\s*\("), 0)
-expect("Canvas drawImage implementations", count(r"\.drawImage\s*\("), 1)
-expect("legacy Square SESSION_SECRET crypto", count(r"corner-ops-integrations:|SESSION_SECRET is required before Square can store credentials", exclude={"src/lib/integration-crypto.ts"}), 0)
+expect("Canvas drawImage calls in shared implementation", count(r"\.drawImage\s*\("), 2)
+expect("legacy integration SESSION_SECRET crypto", count(r"corner-ops-integrations:|SESSION_SECRET is required before (?:Square can store credentials|bank connections can be managed)", exclude={"src/lib/integration-crypto.ts"}), 0)
 expect("module-local Deli call-feed caches", count(r"\bcallFeedCache\b|\bcallFeedPromise\b"), 0)
 expect("window.fetch monkey patches", count(r"window\.fetch\s*="), 0)
 expect("dead publish recovery helpers", count(r"sendRecoveredPublishNotifications|SchedulePublishConfirmFix|overnight-shift-helper"), 0)
+
+# Both remaining drawImage calls must live in the shared helper, never feature code.
+for path in code_files:
+    rel = path.relative_to(ROOT).as_posix()
+    if rel == "src/app/client-image.ts":
+        continue
+    if re.search(r"\.drawImage\s*\(", path.read_text(errors="replace")):
+        errors.append(f"feature-specific Canvas drawImage implementation remains: {rel}")
 
 # CSS literals belong in the generated palette, not feature sheets.
 hex_rx = re.compile(r"#[0-9a-fA-F]{3,8}\b")
