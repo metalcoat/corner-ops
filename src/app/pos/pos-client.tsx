@@ -236,6 +236,7 @@ type AiDeliCall = IncomingDeliCall & {
   order_items: Array<{
     id: string;
     name: string;
+    variant: string;
     quantity: number;
     lineTotalCents: number;
     instructions: string;
@@ -3248,7 +3249,7 @@ export default function PosClient({
                 {call.open_order_id && <div className="posAiOrderPreview">
                   <b>{(call.service_type || "order").replaceAll("_", " ").toUpperCase()}</b>
                   {call.order_items.length ? <ul>{call.order_items.map(item => <li key={item.id}>
-                    <span>{item.quantity}× {item.name}</span><em>{money(item.lineTotalCents)}</em>
+                    <span>{item.quantity}× {item.name}{item.variant ? ` · ${item.variant}` : ""}</span><em>{money(item.lineTotalCents)}</em>
                     {item.modifiers.length > 0 && <small>{item.modifiers.map(modifier => `${modifier.quantity > 1 ? `${modifier.quantity}× ` : ""}${modifier.name}`).join(", ")}</small>}
                     {item.instructions && <small>{item.instructions}</small>}
                   </li>)}</ul> : <small>Waiting for the first item…</small>}

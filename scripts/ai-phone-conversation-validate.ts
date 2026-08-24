@@ -27,6 +27,8 @@ async function main(){
   assert.ok(webhookSource.includes("create_response:false"),"The sideband must debounce customer turns instead of interjecting on every VAD pause.");
   assert.ok(webhookSource.includes("interrupt_response:false"),"Incidental VAD events must not cancel an active sentence.");
   const sidebandSource=await readFile(new URL("../src/lib/openai-phone-sideband.ts",import.meta.url),"utf8");
+  const [callsSource,posSource]=await Promise.all([readFile(new URL("../src/app/api/ordering/calls/route.ts",import.meta.url),"utf8"),readFile(new URL("../src/app/pos/pos-client.tsx",import.meta.url),"utf8")]);
+  assert.ok(callsSource.includes("variant_name_snapshot variant")&&posSource.includes("item.variant"),"The live POS panel must display pizza sizes and wing-count variants.");
   assert.ok(sidebandSource.includes('row.name==="menu_search"')&&sidebandSource.includes("menuCatalog"),"Menu descriptions must be retrieved on the actual realtime sideband.");
   assert.ok(sidebandSource.includes("max_output_tokens:128"),"The mandatory opening must have enough audio-token budget to finish exactly.");
   assert.ok(sidebandSource.includes('response.function_call_arguments.done')&&sidebandSource.includes('function_call_output'),"The sideband must execute and return native pricing calls.");
