@@ -2,7 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
     "deploymentEnabled": {
-      "agent/rebuild-corner-ops": false
+      "agent/rebuild-corner-ops": false,
+      "agent/vercel-cost-stabilization": false
     }
   },
   "crons": [

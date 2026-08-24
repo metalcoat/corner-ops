@@ -29,6 +29,7 @@ export default function EmployeeInstallPrompt() {
   useEffect(() => {
     let cancelled = false;
     const checkSession = async () => {
+      if (document.visibilityState === "hidden") return;
       try {
         const response = await fetch("/api/employee/session", { cache: "no-store" });
         const payload = await response.json() as { session?: unknown };
@@ -37,13 +38,18 @@ export default function EmployeeInstallPrompt() {
         if (!cancelled) setAuthenticated(false);
       }
     };
+    const onFocus = () => void checkSession();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void checkSession();
+    };
+
     void checkSession();
-    const interval = window.setInterval(checkSession, 5_000);
-    window.addEventListener("focus", checkSession);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", checkSession);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 

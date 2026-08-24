@@ -167,7 +167,10 @@ export async function importSafeRezkuReport(
   }
 
   const repaired = await repairRezkuBatchTimes(result.batchId);
-  const globalRepair = await forceGlobalRezkuTimeRepair();
+  // Historical wall-time repair is a migration, not per-import work. Production has
+  // already completed v3; every new import is repaired by batch above. Keeping the
+  // full-table repair out of this request path prevents repeated historical scans.
+  const globalRepair = { skipped: true, reason: "Historical Rezku wall-time repair is not run during imports." };
   if (result.reportType === "shifts") {
     // Time repair can reveal duplicates that originally had null or incorrectly zoned timestamps.
     await cleanRezkuShifts(result.batchId);
