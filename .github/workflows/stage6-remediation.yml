@@ -6,6 +6,7 @@ on:
       - agent/codebase-review-stage-6
     paths:
       - tools/stage6_core.py
+      - tools/stage6_identity.py
       - tools/stage6_weather.py
       - tools/stage6_ux.py
       - tools/stage6_schedule_delivery.py
@@ -54,7 +55,7 @@ jobs:
           LOG=/tmp/stage6.log
           : > "$LOG"
           SCRIPT_RC=0
-          for script in tools/stage6_core.py tools/stage6_weather.py tools/stage6_ux.py tools/stage6_schedule_delivery.py; do
+          for script in tools/stage6_core.py tools/stage6_identity.py tools/stage6_weather.py tools/stage6_ux.py tools/stage6_schedule_delivery.py; do
             python3 "$script" >>"$LOG" 2>&1 || { SCRIPT_RC=$?; break; }
           done
           if [ "$SCRIPT_RC" -eq 0 ]; then npm ci >>"$LOG" 2>&1; INSTALL_RC=$?; else INSTALL_RC=99; fi
@@ -66,7 +67,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ] && [ "$TYPE_RC" -eq 0 ] && [ "$BUILD_RC" -eq 0 ]; then
-            rm -f tools/stage6_core.py tools/stage6_weather.py tools/stage6_ux.py tools/stage6_schedule_delivery.py .github/workflows/stage6-remediation.yml .stage6-remediation-status.md
+            rm -f tools/stage6_core.py tools/stage6_identity.py tools/stage6_weather.py tools/stage6_ux.py tools/stage6_schedule_delivery.py .github/workflows/stage6-remediation.yml .stage6-remediation-status.md docs/stage6-note.tmp docs/stage6-note2.tmp
             git add -A
             git diff --cached --check || exit 1
             git commit -m "Stage 6 close residual runtime reliability and UX findings"
@@ -74,7 +75,7 @@ jobs:
             exit 0
           fi
 
-          FAIL_LOG=$(tail -n 320 "$LOG")
+          FAIL_LOG=$(tail -n 360 "$LOG")
           git reset --hard "$GITHUB_SHA"
           {
             echo "# Stage 6 remediation status"
