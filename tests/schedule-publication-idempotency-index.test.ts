@@ -1,10 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const root = process.cwd();
 
 test("schedule publication conflict target matches the partial idempotency index", () => {
   const source = readFileSync(join(root, "src/lib/business-schedule-publication.ts"), "utf8");
