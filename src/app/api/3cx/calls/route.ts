@@ -1,7 +1,6 @@
 import { getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import { threeCxDeliCallReport } from "@/lib/three-cx-calls-report";
-import { correctThreeCxCallReport } from "@/lib/three-cx-time-correction";
 
 export const runtime = "nodejs";
 
@@ -21,7 +20,7 @@ export async function GET(request: Request) {
     startDefault.setUTCDate(startDefault.getUTCDate() - 7);
     const start = url.searchParams.get("start") || dateKey(startDefault);
     const end = url.searchParams.get("end") || dateKey(endDefault);
-    return Response.json(correctThreeCxCallReport(await threeCxDeliCallReport(start, end)));
+    return Response.json(await threeCxDeliCallReport(start, end));
   } catch (error) {
     return apiError(error);
   }
