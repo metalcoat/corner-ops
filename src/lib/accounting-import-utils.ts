@@ -7,8 +7,8 @@ export function parseAccountingMoney(value: unknown): number {
     || /-\s*$/.test(source)
     || /\bDR\b/i.test(source);
   const numeric = Number(source
-    .replace(/[,$()%\s]/g, "")
     .replace(/\b(?:CR|DR)\b/gi, "")
+    .replace(/[,$()%\s]/g, "")
     .replace(/-+$/g, ""));
   if (!Number.isFinite(numeric)) return 0;
   return Math.round((negative ? -Math.abs(numeric) : numeric) * 100) / 100;
