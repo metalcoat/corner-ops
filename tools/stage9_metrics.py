@@ -5,32 +5,39 @@ from collections import Counter, defaultdict
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 # Residual metrics are intentionally mechanical; Stage 9 fixes only what still exists on current main.
-# This comment also gives the branch workflow a watched-path push after workflow creation.
 
-code_files = [p for p in SRC.rglob("*") if p.suffix in {".ts", ".tsx", ".js", ".mjs"}]
+code_files = [p for p in SRC.rglob("*") if p.suffix in {".ts", ".tsx", ".js", ".mjs"]
 css_files = list(SRC.rglob("*.css"))
 palette_file = SRC / "app/color-tokens.css"
-feature_css_files = [p for p in css_files if p != palette_file]
 
-def count_code(pattern: str):
+
+def count_code(pattern: str, exclude: set[str] | None = None):
     rx = re.compile(pattern, re.M)
     rows = []
+    exclude = exclude or set()
     for p in code_files:
+        rel = p.relative_to(ROOT).as_posix()
+        if rel in exclude:
+            continue
         text = p.read_text(errors="replace")
         matches = list(rx.finditer(text))
         if matches:
-            rows.append((p.relative_to(ROOT).as_posix(), len(matches)))
+            rows.append((rel, len(matches)))
     return rows
 
 metrics = {
-    "response_helper_defs": count_code(r"\b(?:async\s+)?function\s+(?:responseMessage|responseError|responseErrorMessage)\s*\("),
+    "response_helper_defs": count_code(r"\b(?:async\s+)?function\s+(?:responseMessage|responseError|responseErrorMessage|errorMessage)\s*\("),
     "request_failed_literals": count_code(r"Request failed\s*\("),
     "first_name_defs": count_code(r"\bfunction\s+firstName\s*\("),
     "standalone_defs": count_code(r"\bfunction\s+isStandalone\s*\("),
     "ios_defs": count_code(r"\bfunction\s+isIos\s*\("),
-    "install_prompt_types": count_code(r"\btype\s+InstallPromptEvent\b"),
+    "install_prompt_types": count_code(r"\b(?:type|interface)\s+(?:InstallPromptEvent|BeforeInstallPromptEvent)\b"),
     "money_defs": count_code(r"\bfunction\s+money\s*\("),
     "canvas_draws": count_code(r"\.drawImage\s*\("),
+    "legacy_square_crypto": count_code(r"corner-ops-integrations:|SESSION_SECRET is required before Square can store credentials", {"src/lib/integration-crypto.ts"}),
+    "module_call_feed_cache": count_code(r"\bcallFeedCache\b|\bcallFeedPromise\b"),
+    "window_fetch_assignment": count_code(r"window\.fetch\s*="),
+    "old_publish_recovery": count_code(r"sendRecoveredPublishNotifications|SchedulePublishConfirmFix|overnight-shift-helper"),
 }
 
 hex_rx = re.compile(r"#[0-9a-fA-F]{3,8}\b")
@@ -99,4 +106,4 @@ for selector, files in sorted(dup_selectors, key=lambda item: (-len(item[1]), it
 out.append("")
 
 (ROOT / ".stage9-metrics.md").write_text("\n".join(out))
-print("\n".join(out[:20]))
+print("\n".join(out[:40]))
