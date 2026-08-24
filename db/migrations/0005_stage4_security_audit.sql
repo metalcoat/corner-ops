@@ -58,6 +58,9 @@ CREATE TABLE IF NOT EXISTS sms_consent_events (
 );
 CREATE INDEX IF NOT EXISTS sms_consent_events_phone_idx
   ON sms_consent_events (phone, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS sms_consent_events_provider_message_unique
+  ON sms_consent_events (provider_message_id)
+  WHERE provider_message_id <> '';
 
 CREATE TABLE IF NOT EXISTS oauth_state_nonces (
   nonce_hash TEXT PRIMARY KEY,
