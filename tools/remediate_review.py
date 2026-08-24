@@ -22,7 +22,7 @@ def replace_once(path: str, old: str, new: str) -> None:
 
 def sub_once(path: str, pattern: str, repl: str, flags: int = 0) -> None:
     text = read(path)
-    next_text, count = re.subn(pattern, repl, text, count=1, flags=flags)
+    next_text, count = re.subn(pattern, lambda _match: repl, text, count=1, flags=flags)
     if count != 1:
         raise RuntimeError(f"{path}: expected one regex match, found {count}: {pattern[:100]!r}")
     write(path, next_text)
@@ -132,7 +132,6 @@ new_rollover = '''      if (clockIn && clockOut && clockOut.getTime() < clockIn.
 if old_rollover not in text:
     raise RuntimeError("operations.ts: Rezku shift rollover block not found")
 text = text.replace(old_rollover, new_rollover, 1)
-# combineDateAndTime is no longer a live source of imported times.
 text, count = re.subn(r'\nfunction combineDateAndTime\(dateValue: unknown, timeValue: unknown\): Date \| null \{.*?\n\}\n\nfunction roleFromPosition', '\nfunction roleFromPosition', text, count=1, flags=re.S)
 if count != 1:
     raise RuntimeError("operations.ts: combineDateAndTime block not removed")
@@ -157,7 +156,6 @@ replace_once(
     '''function dateFromParts(day: string, time: string): Date {\n  return newYorkDateTime(day, time);\n}\n\nfunction editorDates(editor: EditorState) {\n  const start = dateFromParts(editor.date, editor.startTime);\n  let end = dateFromParts(editor.date, editor.endTime);\n  if (end <= start) end = dateFromParts(dateKey(addDays(dateFromKey(editor.date), 1)), editor.endTime);''',
 )
 
-# Server-side normalization gets the same calendar-day rollover.
 write("src/lib/schedule-time-range.ts", '''import { newYorkDateKey, newYorkDateTime, newYorkTimeValue } from "@/lib/schedule-meal-compliance";\n\nfunction dateValue(value: unknown, label: string): Date {\n  const result = new Date(String(value || ""));\n  if (Number.isNaN(result.getTime())) throw new Error(`${label} is invalid.`);\n  return result;\n}\n\nfunction addDateKeyDays(value: string, days: number): string {\n  const date = new Date(`${value}T12:00:00Z`);\n  date.setUTCDate(date.getUTCDate() + days);\n  return date.toISOString().slice(0, 10);\n}\n\nexport function normalizeScheduleTimeRange(startsAt: unknown, endsAt: unknown) {\n  const start = dateValue(startsAt, "Shift start");\n  let end = dateValue(endsAt, "Shift end");\n\n  if (end <= start) {\n    end = newYorkDateTime(\n      addDateKeyDays(newYorkDateKey(start), 1),\n      newYorkTimeValue(end),\n    );\n  }\n\n  if (end <= start) throw new Error("Shift end must be after the start.");\n  const localStartKey = newYorkDateKey(start);\n  const maximumEnd = newYorkDateTime(addDateKeyDays(localStartKey, 1), newYorkTimeValue(start));\n  if (end > maximumEnd) throw new Error("A scheduled shift cannot exceed 24 wall-clock hours.");\n\n  return { start, end };\n}\n''')
 
 # CO-039: any >6-hour shift overlapping the noon period gets its meal inside the overlap.
