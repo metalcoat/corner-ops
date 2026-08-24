@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { ensureScheduleMealSchema } from "@/lib/schedule-meal-storage";
+import { deliverSchedulePublicationSms } from "@/lib/schedule-publication-sms";
 import { analyzeSchedule } from "@/lib/schedule-validation";
 import { publishBusinessScheduleWeek } from "@/lib/business-schedule-publication";
 import type { Business } from "@/lib/types";
@@ -119,5 +120,41 @@ export async function publishValidatedScheduleWeek(input: {
     throw new Error(`Schedule cannot be published. ${problems.join(" | ")}`);
   }
 
-  return publishBusinessScheduleWeek({ ...input, weekStart });
+  const publication = await publishBusinessScheduleWeek({ ...input, weekStart });
+  const duplicate = "duplicate" in publication && publication.duplicate === true;
+  const employeeIds = "affectedEmployeeIds" in publication && Array.isArray(publication.affectedEmployeeIds)
+    ? publication.affectedEmployeeIds.filter((value): value is string => typeof value === "string" && Boolean(value))
+    : [];
+  const mode = publication.mode === "initial" || publication.mode === "changes" || publication.mode === "resend"
+    ? publication.mode
+    : "changes";
+
+  if (duplicate || !publication.publicationId) return publication;
+
+  try {
+    const sms = await deliverSchedulePublicationSms({
+      business: input.business,
+      weekStart,
+      publicationId: String(publication.publicationId),
+      employeeIds,
+      mode,
+    });
+    return { ...publication, sms };
+  } catch (error) {
+    console.error("[schedule-sms] schedule published but SMS delivery failed", error);
+    return {
+      ...publication,
+      sms: {
+        provider: "telnyx" as const,
+        configured: true,
+        sent: 0,
+        failed: 1,
+        missingPhone: 0,
+        notOptedIn: 0,
+        skipped: employeeIds.length,
+        failures: [{ employeeId: "", message: error instanceof Error ? error.message : String(error) }],
+        accepted: [],
+      },
+    };
+  }
 }
