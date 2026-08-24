@@ -13,6 +13,12 @@ rep('src/lib/transactional-email.ts','    process.env.APP_EMAIL || "crfrary@gmai
 rep('src/lib/users.ts','  const email = normalizedEmail(emailValue || process.env.APP_EMAIL || "crfrary@gmail.com");','  const email = normalizedEmail(emailValue || process.env.APP_EMAIL || "");')
 rep('src/lib/users.ts','  } else if (row.legacy_owner && email === normalizedEmail(process.env.APP_EMAIL || "crfrary@gmail.com")) {','  } else if (row.legacy_owner && Boolean(process.env.APP_EMAIL?.trim()) && email === normalizedEmail(process.env.APP_EMAIL)) {')
 
+# Remove the four copy-pasted client email -> first-name mappings before asserting the tree is clean.
+client_mapping='if (text.toLowerCase() === "crfrary@gmail.com") return "Chris";\n'
+for path in ROOT.joinpath('src').rglob('*.tsx'):
+    text=path.read_text()
+    if client_mapping in text: path.write_text(text.replace(client_mapping,''))
+
 # Finish collapsing the duplicate operational Web Push implementation into the hardened shared module.
 anchor='export async function sendTestPush(actor: PushActor) {'
 insert='''export async function notifyOwnersOfOperationalPush(input: {
