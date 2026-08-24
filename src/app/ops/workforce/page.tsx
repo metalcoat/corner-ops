@@ -115,8 +115,7 @@ function timeOffShiftConflicts(request: TimeOff, shifts: ScheduleShift[]) {
 function firstName(value: string | null) {
   const text = String(value || "").trim();
   if (!text) return "Unknown";
-  if (text.toLowerCase() === "crfrary@gmail.com") return "Chris";
-  const candidate = text.includes("@")
+    const candidate = text.includes("@")
     ? text.split("@")[0].split(/[._-]/)[0]
     : text.split(/\s+/)[0];
   return candidate.charAt(0).toUpperCase() + candidate.slice(1);
@@ -185,12 +184,12 @@ export default function WorkforcePage() {
       if (businessRef.current === actionBusiness) {
         await load(actionBusiness);
         if (businessRef.current === actionBusiness) {
-          const email = payload?.email as { configured?: boolean; sent?: number; failed?: number; missingEmail?: number } | undefined;
+          const email = payload?.email as { configured?: boolean; sent?: number; failed?: number; missingEmail?: number; queued?: number } | undefined;
           const sms = payload?.sms as { configured?: boolean; sent?: number; failed?: number; missingPhone?: number; notOptedIn?: number } | undefined;
           const duplicate = Boolean(payload?.duplicate);
           const delivery = email || sms
             ? [
-                email ? `Email ${email.configured === false ? "not configured" : `${email.sent || 0} sent, ${email.failed || 0} failed, ${email.missingEmail || 0} missing`}` : "",
+                email ? `Email ${email.queued ? `${email.queued} queued` : email.configured === false ? "not configured" : `${email.sent || 0} sent, ${email.failed || 0} failed, ${email.missingEmail || 0} missing`}` : "",
                 sms ? `SMS ${sms.configured === false ? "not configured" : `${sms.sent || 0} sent, ${sms.failed || 0} failed, ${sms.missingPhone || 0} missing, ${sms.notOptedIn || 0} opted out`}` : "",
               ].filter(Boolean).join(" · ")
             : "";

@@ -78,8 +78,7 @@ function phone(value: string) {
 function firstName(value: string) {
   const text = String(value || "").trim();
   if (!text) return "Unknown";
-  if (text.toLowerCase() === "crfrary@gmail.com") return "Chris";
-  const part = text.includes("@") ? text.split("@")[0].split(/[._-]/)[0] : text.split(/\s+/)[0];
+    const part = text.includes("@") ? text.split("@")[0].split(/[._-]/)[0] : text.split(/\s+/)[0];
   return part.charAt(0).toUpperCase() + part.slice(1);
 }
 
@@ -242,7 +241,7 @@ export default function DeliBoardPage() {
             <span className="taskText"><strong>{task.title}</strong><small>{task.category}{task.completed_by ? ` · ${firstName(task.completed_by)}` : ""}</small></span>
           </button>)}
         </div>
-        <form className="quickTask" onSubmit={addTask}><input name="title" placeholder="Add quick task…" autoComplete="off" /><button>Add</button></form>
+        <form className="quickTask" onSubmit={addTask}><input aria-label="Quick task title" name="title" placeholder="Add quick task…" autoComplete="off" /><button>Add</button></form>
       </article>
 
       <article className="boardPanel messagesPanel">

@@ -76,8 +76,7 @@ function local(value: string): string {
 function firstName(value: string | null): string {
   const text = String(value || "").trim();
   if (!text) return "Unknown";
-  if (text.toLowerCase() === "crfrary@gmail.com") return "Chris";
-  const candidate = text.includes("@")
+    const candidate = text.includes("@")
     ? text.split("@")[0].split(/[._-]/)[0]
     : text.split(/\s+/)[0];
   return candidate.charAt(0).toUpperCase() + candidate.slice(1);

@@ -116,12 +116,15 @@ export async function ensureUserSchema(): Promise<void> {
       active BOOLEAN NOT NULL DEFAULT TRUE,
       created_by TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      session_version INTEGER NOT NULL DEFAULT 1
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS app_users_active_idx ON app_users (active, role, email)`;
 
-  const ownerEmail = normalizedEmail(process.env.APP_EMAIL || "crfrary@gmail.com");
+  const configuredOwnerEmail = process.env.APP_EMAIL?.trim();
+  if (!configuredOwnerEmail) throw new Error("APP_EMAIL is required before user accounts can be initialized.");
+  const ownerEmail = normalizedEmail(configuredOwnerEmail);
   await sql`
     INSERT INTO app_users (
       id, email, display_name, role, businesses, legacy_owner, created_by
@@ -129,30 +132,7 @@ export async function ensureUserSchema(): Promise<void> {
       ${crypto.randomUUID()}, ${ownerEmail}, 'Owner', 'Owner',
       ARRAY['Corner Deli', 'Tiki']::TEXT[], TRUE, 'System bootstrap'
     )
-    ON CONFLICT (email) DO UPDATE SET
-      role = 'Owner',
-      businesses = ARRAY['Corner Deli', 'Tiki']::TEXT[],
-      active = TRUE,
-      legacy_owner = CASE
-        WHEN app_users.password_hash = '' THEN TRUE
-        ELSE app_users.legacy_owner
-      END,
-      updated_at = NOW()
-  `;
-
-  // Create Michael's requested Tiki-only report account without committing a
-  // password to source control. The owner sets the first password in Users.
-  await sql`
-    INSERT INTO app_users (
-      id, email, display_name, role, businesses, legacy_owner, active, created_by
-    ) VALUES (
-      ${crypto.randomUUID()}, 'mike@fraryfuneralhome.com', 'Michael Frary', 'Viewer',
-      ARRAY['Tiki']::TEXT[], FALSE, TRUE, 'System bootstrap'
-    )
-    ON CONFLICT (email) DO UPDATE SET
-      display_name = 'Michael Frary',
-      businesses = ARRAY['Tiki']::TEXT[],
-      updated_at = NOW()
+    ON CONFLICT (email) DO NOTHING
   `;
 }
 
@@ -194,7 +174,7 @@ async function rowByEmail(email: string): Promise<UserRow | null> {
 
 export async function authenticateAppUser(emailValue: unknown, passwordValue: unknown): Promise<AppUserIdentity | null> {
   await ensureUserSchema();
-  const email = normalizedEmail(emailValue || process.env.APP_EMAIL || "crfrary@gmail.com");
+  const email = normalizedEmail(emailValue || process.env.APP_EMAIL || "");
   const password = String(passwordValue ?? "");
   const row = await rowByEmail(email);
   if (!row || !row.active) return null;
@@ -202,7 +182,7 @@ export async function authenticateAppUser(emailValue: unknown, passwordValue: un
   let valid = false;
   if (row.password_hash && row.password_salt) {
     valid = safeEqual(passwordDigest(password, row.password_salt), row.password_hash);
-  } else if (row.legacy_owner && email === normalizedEmail(process.env.APP_EMAIL || "crfrary@gmail.com")) {
+  } else if (row.legacy_owner && Boolean(process.env.APP_EMAIL?.trim()) && email === normalizedEmail(process.env.APP_EMAIL)) {
     const legacyPassword = process.env.APP_PASSWORD || "";
     valid = Boolean(legacyPassword) && safeEqual(password, legacyPassword);
   }

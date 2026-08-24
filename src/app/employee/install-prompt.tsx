@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useModalFocus } from "@/app/use-modal-focus";
 import "./install-prompt.css";
 
 type InstallPromptEvent = Event & {
@@ -25,6 +26,7 @@ export default function EmployeeInstallPrompt() {
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [visible, setVisible] = useState(false);
   const [notice, setNotice] = useState("");
+  const installModalRef = useModalFocus<HTMLDivElement>(visible, () => dismiss());
 
   useEffect(() => {
     let cancelled = false;
@@ -104,7 +106,7 @@ export default function EmployeeInstallPrompt() {
   if (!visible) return null;
 
   const ios = isIos();
-  return <div className="employeeInstallOverlay" role="dialog" aria-modal="true" aria-labelledby="employee-install-title">
+  return <div ref={installModalRef} tabIndex={-1} className="employeeInstallOverlay" role="dialog" aria-modal="true" aria-labelledby="employee-install-title">
     <section className="employeeInstallCard">
       <img src="/corner-ops-icon.svg" alt="" />
       <div className="employeeInstallCopy">

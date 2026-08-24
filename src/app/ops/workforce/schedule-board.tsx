@@ -12,6 +12,7 @@ import {
 } from "@/lib/schedule-meal-compliance";
 import { analyzeSchedule } from "@/lib/schedule-validation";
 import type { Business } from "@/lib/types";
+import { useModalFocus } from "@/app/use-modal-focus";
 import "./schedule-board.css";
 import "./schedule-compliance.css";
 
@@ -51,6 +52,7 @@ export type ScheduleShift = {
   employeeColor?: string;
   employeeAvatarSet?: boolean;
   publishedAt?: string | null;
+  updatedAt?: string | null;
 };
 
 type Props = {
@@ -293,6 +295,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget>(null);
+  const scheduleModalRef = useModalFocus<HTMLElement>(Boolean(editor), () => setEditor(null));
 
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)),
@@ -528,6 +531,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       status: "Draft",
       notes: editor.notes,
       acknowledgePendingTimeOff: timeOffCheck.acknowledgePendingTimeOff,
+      expectedUpdatedAt: editor.shift?.updatedAt || null,
     }, editor.shift ? "Shift updated and marked for publishing." : "Draft shift added.");
     setEditor(null);
   }
@@ -548,6 +552,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       extraMealBreakMinutes: moved.extraMealBreakMinutes || 0,
       status: "Draft",
       acknowledgePendingTimeOff: timeOffCheck.acknowledgePendingTimeOff,
+      expectedUpdatedAt: shift.updatedAt || null,
     }, "Shift moved and marked for publishing.");
   }
 
@@ -770,7 +775,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
     </div>
 
     {editor && <div className="scheduleModalBackdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setEditor(null); }}>
-      <section className="scheduleModal" role="dialog" aria-modal="true" aria-labelledby="shift-editor-heading">
+      <section ref={scheduleModalRef} tabIndex={-1} className="scheduleModal" role="dialog" aria-modal="true" aria-labelledby="shift-editor-heading">
         <header><div><p className="wfEyebrow">{editor.shift ? "Edit shift" : "New shift"}</p><h2 id="shift-editor-heading">Shift details</h2></div><button type="button" aria-label="Close" onClick={() => setEditor(null)}>×</button></header>
         <form onSubmit={saveShift} className="scheduleEditForm">
           <label>Employee<select value={editor.employeeId || ""} onChange={(event) => {
@@ -801,7 +806,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
           {editor.employeeId && editorPreview && <div className={`scheduleEditorCheck ${editorPreview.overlap ? "danger" : editorPreview.risk}`}><strong>Projected paid week: {editorPreview.hours.toFixed(1)} hours</strong><span>{editorPreview.overlap ? "This shift overlaps another assignment and cannot be saved." : editorPreview.risk === "overtime" ? "Over 40 paid hours will block publication." : editorPreview.risk === "warning" ? "This employee will exceed 38 paid hours." : "No employee overlap or hour warning."}</span></div>}
           <label className="scheduleNotes">Shift instructions<textarea rows={4} value={editor.notes} onChange={(event) => setEditor((current) => current ? { ...current, notes: event.target.value } : current)} /></label>
           <div className="scheduleModalActions">
-            {editor.shift && <><button type="button" onClick={() => setCopiedShift(editor.shift)}>Copy shift</button><button type="button" className="danger" disabled={busy} onClick={() => void runAction({ action: "shift-update", id: editor.shift?.id, status: "Cancelled" }, "Shift cancelled.").then(() => setEditor(null))}>Cancel shift</button></>}
+            {editor.shift && <><button type="button" onClick={() => setCopiedShift(editor.shift)}>Copy shift</button><button type="button" className="danger" disabled={busy} onClick={() => void runAction({ action: "shift-update", id: editor.shift?.id, status: "Cancelled", expectedUpdatedAt: editor.shift?.updatedAt || null }, "Shift cancelled.").then(() => setEditor(null))}>Cancel shift</button></>}
             <button type="button" onClick={() => setEditor(null)}>Close</button>
             <button type="submit" className="schedulePrimary" disabled={busy || Boolean(editorPreview?.overlap)}>Save draft</button>
           </div>

@@ -3,7 +3,7 @@ import { schedulePublicationIdempotencyKey, scheduleStateHash } from "@/lib/sche
 import { getSql } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import { ensureStaffNotificationSchema } from "@/lib/staff-notifications";
-import { deliverSms, type SmsRecipient } from "@/lib/sms-notifications";
+import type { SmsRecipient } from "@/lib/sms-notifications";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -358,6 +358,25 @@ export async function publishBusinessScheduleWeek(input: {
     mode,
   });
   const publicationId = crypto.randomUUID();
+  const emailConfigured = Boolean(emailConfiguration());
+  const emailMissingCount = contacts.filter((employee) => !clean(employee.email, 255)).length;
+  const emailContacts = contacts.filter((employee) => clean(employee.email, 255));
+  const emailSubject = `${input.business} schedule ${scheduleVerb}: ${dateLabel(input.weekStart)}–${dateLabel(weekEnd)}`;
+  const emailBody = (employee: EmployeeContact) => {
+    const employeeShifts = shifts.filter((shift) => shift.employee_id === employee.id);
+    const schedule = employeeShifts.length
+      ? employeeShifts.map((shift) => `- ${shiftLabel(shift)}`).join("\n")
+      : "- You are not currently scheduled for this week.";
+    return [
+      `Hi ${clean(employee.name, 120).split(/\s+/)[0] || "there"},`,
+      "",
+      `Your ${input.business} schedule for ${rangeLabel} was ${scheduleVerb}.`,
+      "",
+      "Your current schedule:", schedule,
+      hubUrl ? `\nOpen the ${input.business} Employee Portal: ${hubUrl}` : "",
+      accessInstruction, "", "This email was sent by Corner Ops.",
+    ].filter(Boolean).join("\n");
+  };
   const baseDetails = {
     scheduleHash: stateHash,
     employeeSchedules: currentSchedules,
@@ -377,7 +396,7 @@ export async function publishBusinessScheduleWeek(input: {
       sms_failed_count, sms_configured, details, idempotency_key, delivery_status
     ) VALUES (
       ${publicationId}, ${input.business}, ${input.weekStart}, ${weekEnd}, ${input.actor}, ${shifts.length},
-      ${contacts.length}, 0, 0, 0, FALSE, 0, 0, 0, FALSE,
+      ${contacts.length}, 0, ${emailMissingCount}, 0, ${emailConfigured}, 0, 0, 0, FALSE,
       ${JSON.stringify(baseDetails)}::jsonb, ${idempotencyKey}, 'Pending'
     )
     ON CONFLICT (idempotency_key) DO NOTHING
@@ -415,6 +434,15 @@ export async function publishBusinessScheduleWeek(input: {
       ${`Your ${input.business} schedule was ${scheduleVerb} for ${rangeLabel}.${hubUrl ? ` Review it in the Employee Portal: ${hubUrl}` : " Review it in the Employee Hub."}`}
     )
   `);
+  const emailJobQueries = emailContacts.map((employee) => sql`
+    INSERT INTO schedule_publication_deliveries (
+      id, publication_id, employee_id, channel, destination, subject, body, idempotency_key
+    ) VALUES (
+      ${crypto.randomUUID()}, ${publicationId}, ${employee.id}, 'Email', ${clean(employee.email, 255)},
+      ${emailSubject}, ${emailBody(employee)}, ${`schedule/${publicationId}/${employee.id}/email`}
+    )
+    ON CONFLICT (publication_id, employee_id, channel) DO NOTHING
+  `);
 
   try {
     await sql.transaction([
@@ -428,7 +456,8 @@ export async function publishBusinessScheduleWeek(input: {
           AND status <> 'Cancelled'
       `,
       ...messageQueries,
-      sql`UPDATE schedule_publications SET delivery_status = 'Sending' WHERE id = ${publicationId}`,
+      ...emailJobQueries,
+      sql`UPDATE schedule_publications SET delivery_status = 'Queued' WHERE id = ${publicationId}`,
     ]);
   } catch (error) {
     await sql`
@@ -440,63 +469,6 @@ export async function publishBusinessScheduleWeek(input: {
     throw error;
   }
 
-  const email = await deliverEmails({
-    recipients: contacts,
-    subject: `${input.business} schedule ${scheduleVerb}: ${dateLabel(input.weekStart)}–${dateLabel(weekEnd)}`,
-    text: (employee) => {
-      const employeeShifts = shifts.filter((shift) => shift.employee_id === employee.id);
-      const schedule = employeeShifts.length
-        ? employeeShifts.map((shift) => `- ${shiftLabel(shift)}`).join("\n")
-        : "- You are not currently scheduled for this week.";
-      return [
-        `Hi ${clean(employee.name, 120).split(/\s+/)[0] || "there"},`,
-        "",
-        `Your ${input.business} schedule for ${rangeLabel} was ${scheduleVerb}.`,
-        "",
-        "Your current schedule:",
-        schedule,
-        hubUrl ? `\nOpen the ${input.business} Employee Portal: ${hubUrl}` : "",
-        accessInstruction,
-        "",
-        "This email was sent by Corner Ops.",
-      ].filter(Boolean).join("\n");
-    },
-  });
-  const sms = await deliverSms({
-    recipients: contacts,
-    text: (employee) => {
-      const employeeShifts = shifts.filter((shift) => shift.employee_id === employee.id);
-      const schedule = employeeShifts.length ? employeeShifts.map(compactShiftLabel).join("; ") : "No shifts currently assigned.";
-      return [
-        `${clean(employee.name, 120).split(/\s+/)[0] || "Your"}, your ${input.business} schedule was ${scheduleVerb} for ${dateLabel(input.weekStart)}-${dateLabel(weekEnd)}.`,
-        `Shifts: ${schedule}`,
-        hubUrl ? `Portal: ${hubUrl}` : "Open Employee Hub to review.",
-        accessInstruction,
-        "Reply STOP to opt out.",
-      ].join(" ");
-    },
-  });
-
-  const deliveryStatus = email.failed || sms.failed || !email.configured || !sms.configured ? "CompletedWithWarnings" : "Completed";
-  const finalDetails = {
-    ...baseDetails,
-    emailFailures: email.failures,
-    emailSkipped: email.skipped,
-    smsFailures: sms.failures,
-    smsNotOptedIn: sms.notOptedIn,
-    smsSkipped: sms.skipped,
-  };
-  await sql`
-    UPDATE schedule_publications SET
-      email_sent_count = ${email.sent}, email_missing_count = ${email.missingEmail},
-      email_failed_count = ${email.failed}, email_configured = ${email.configured},
-      sms_sent_count = ${sms.sent}, sms_missing_count = ${sms.missingPhone},
-      sms_failed_count = ${sms.failed}, sms_configured = ${sms.configured},
-      details = ${JSON.stringify(finalDetails)}::jsonb,
-      delivery_status = ${deliveryStatus}, delivery_completed_at = NOW()
-    WHERE id = ${publicationId}
-  `;
-
   return {
     publicationId,
     weekStart: input.weekStart,
@@ -506,10 +478,23 @@ export async function publishBusinessScheduleWeek(input: {
     affectedEmployees: contacts.length,
     affectedEmployeeIds: contacts.map((employee) => employee.id),
     openShifts: openShifts.length,
-    email,
-    sms,
+    email: {
+      configured: emailConfigured,
+      sent: 0,
+      failed: 0,
+      missingEmail: emailMissingCount,
+      queued: emailContacts.length,
+    },
+    sms: {
+      configured: false,
+      sent: 0,
+      failed: 0,
+      missingPhone: 0,
+      notOptedIn: contacts.filter((employee) => !employee.smsOptIn).length,
+      skipped: contacts.length,
+    },
     hubUrl,
     mode,
-    deliveryStatus,
+    deliveryStatus: "Queued",
   };
 }

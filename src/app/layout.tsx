@@ -6,6 +6,8 @@ import "./operations.css";
 import "./business-theme.css";
 import "./pwa.css";
 
+const THEME_BOOTSTRAP = `try{var b=localStorage.getItem("corner-ops-business-theme");if(b==="Corner Deli"||b==="Tiki")document.documentElement.dataset.businessTheme=b}catch(e){}`;
+
 export const metadata: Metadata = {
   title: "Corner Ops",
   description: "Internal operations for Corner Deli and Tiki",
@@ -29,7 +31,8 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" data-business-theme="Corner Deli">
+    <html lang="en" data-business-theme="Corner Deli" suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} /></head>
       <body>
         <GlobalNav />
         {children}
