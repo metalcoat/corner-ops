@@ -3,10 +3,10 @@ import { analyzeShiftMealCompliance } from "@/lib/schedule-meal-compliance";
 import { ensureSchema, getSql } from "@/lib/db";
 import { createOperationIssue, ensureIntegrationSchema } from "@/lib/integrations";
 import { notifyOwnersOfOperationalAlert } from "@/lib/owner-operational-alerts";
+import { addDateKeyDays as addDays, currentPayrollWeekStart, payrollWeekBounds } from "@/lib/payroll-week";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
-const WORKWEEK_START_HOUR = 0;
 const WARNING_HOURS = 38;
 const OVERTIME_HOURS = 40;
 const PROJECTION_ALERT_WEEK_PROGRESS = 0.75;
@@ -163,61 +163,15 @@ function localDateString(value: Date | string): string {
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
 }
 
-function getOffsetMilliseconds(date: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const represented = Date.UTC(
-    Number(values.year),
-    Number(values.month) - 1,
-    Number(values.day),
-    Number(values.hour),
-    Number(values.minute),
-    Number(values.second),
-  );
-  return represented - date.getTime();
-}
-
-function zonedDateToUtc(dateText: string, hour: number): Date {
-  const [year, month, day] = dateText.split("-").map(Number);
-  let timestamp = Date.UTC(year, month - 1, day, hour, 0, 0);
-  for (let index = 0; index < 2; index += 1) {
-    timestamp = Date.UTC(year, month - 1, day, hour, 0, 0)
-      - getOffsetMilliseconds(new Date(timestamp), TIME_ZONE);
-  }
-  return new Date(timestamp);
-}
-
 export function currentOvertimeWeekStart(value = new Date()): string {
-  const local = localDateParts(value);
-  const date = new Date(Date.UTC(local.year, local.month - 1, local.day, 12));
-  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(local.weekday);
-  const daysSinceMonday = (Math.max(0, weekday) + 6) % 7;
-  date.setUTCDate(date.getUTCDate() - daysSinceMonday);
-  if (daysSinceMonday === 0 && local.hour < WORKWEEK_START_HOUR) date.setUTCDate(date.getUTCDate() - 7);
-  return dateKey(date);
-}
-
-function addDays(value: string, days: number): string {
-  const date = new Date(`${value}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return dateKey(date);
+  return currentPayrollWeekStart(value);
 }
 
 function workweekBounds(requestedWeekStart?: string) {
   const weekStart = requestedWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(requestedWeekStart)
     ? requestedWeekStart
     : currentOvertimeWeekStart();
-  const start = zonedDateToUtc(weekStart, WORKWEEK_START_HOUR);
-  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const { start, end } = payrollWeekBounds(weekStart);
   return { weekStart, start, end };
 }
 

@@ -228,7 +228,7 @@ function explicitInstant(value: unknown): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function rezkuDateTime(dateValue: unknown, timeValue: unknown): Date | null {
+export function rezkuDateTime(dateValue: unknown, timeValue: unknown): Date | null {
   const direct = explicitInstant(timeValue);
   if (direct) return direct;
 
@@ -239,6 +239,20 @@ function rezkuDateTime(dateValue: unknown, timeValue: unknown): Date | null {
   const date = dateParts(dateValue) || fullDate;
   if (!date) return null;
   return easternDate(date, fullTime || { hour: 0, minute: 0, second: 0 });
+}
+
+export function rezkuNextDayDateTime(dateValue: unknown, timeValue: unknown): Date | null {
+  if (explicitInstant(timeValue)) return null;
+  const date = dateParts(dateValue) || dateParts(timeValue);
+  const time = timeParts(timeValue);
+  if (!date || !time) return null;
+  const next = new Date(Date.UTC(date.year, date.month - 1, date.day, 12));
+  next.setUTCDate(next.getUTCDate() + 1);
+  return easternDate({
+    year: next.getUTCFullYear(),
+    month: next.getUTCMonth() + 1,
+    day: next.getUTCDate(),
+  }, time);
 }
 
 function repairedRaw(raw: RawRow): string {

@@ -6,6 +6,7 @@ import {
   analyzeShiftMealCompliance,
   mealRequirements,
   newYorkDateKey,
+  newYorkDateTime,
   newYorkTimeValue,
   shiftTimeForSelectedDay,
 } from "@/lib/schedule-meal-compliance";
@@ -87,7 +88,6 @@ type GridRow = {
 type DragTarget = { dayKey: string; employeeId: string | null } | null;
 type TimeOption = { value: string; label: string };
 
-const DAY_MS = 86_400_000;
 const MINUTE_MS = 60_000;
 const UNASSIGNED_KEY = "__unassigned__";
 const TIME_OPTIONS: TimeOption[] = Array.from({ length: 96 }, (_, index) => {
@@ -102,28 +102,25 @@ const TIME_OPTIONS: TimeOption[] = Array.from({ length: 96 }, (_, index) => {
 });
 const BREAK_DURATION_OPTIONS = [0, 20, 30, 45, 60];
 
-function startOfMonday(date: Date): Date {
-  const result = new Date(date);
-  result.setHours(0, 0, 0, 0);
-  result.setDate(result.getDate() - ((result.getDay() + 6) % 7));
-  return result;
+function dateFromKey(value: string): Date {
+  return new Date(`${value}T12:00:00Z`);
 }
 
 function addDays(date: Date, days: number): Date {
   const result = new Date(date);
-  result.setDate(result.getDate() + days);
+  result.setUTCDate(result.getUTCDate() + days);
   return result;
 }
 
 function dateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return date.toISOString().slice(0, 10);
 }
 
-function dateFromKey(value: string): Date {
-  return new Date(`${value}T12:00:00`);
+function startOfMonday(date: Date): Date {
+  const localKey = newYorkDateKey(date);
+  const localNoon = dateFromKey(localKey);
+  const daysSinceMonday = (localNoon.getUTCDay() + 6) % 7;
+  return addDays(localNoon, -daysSinceMonday);
 }
 
 function localTime(value: string): string {
@@ -152,15 +149,13 @@ function nearestQuarter(value: string): string {
 }
 
 function dateFromParts(day: string, time: string): Date {
-  const result = new Date(`${day}T${time}:00`);
-  if (Number.isNaN(result.getTime())) throw new Error("Shift date or time is invalid.");
-  return result;
+  return newYorkDateTime(day, time);
 }
 
 function editorDates(editor: EditorState) {
   const start = dateFromParts(editor.date, editor.startTime);
   let end = dateFromParts(editor.date, editor.endTime);
-  if (end <= start) end = new Date(end.getTime() + DAY_MS);
+  if (end <= start) end = dateFromParts(dateKey(addDays(dateFromKey(editor.date), 1)), editor.endTime);
   const mealBreakStart = editor.mealBreakTime && editor.mealBreakMinutes
     ? shiftTimeForSelectedDay(editor.date, editor.startTime, editor.mealBreakTime)
     : null;

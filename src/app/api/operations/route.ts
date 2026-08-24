@@ -8,9 +8,10 @@ import {
   listEmployees,
   listRecentTimeEntries,
   listRezkuImports,
-  payrollSummary,
   updateEmployee,
 } from "@/lib/operations";
+import { payrollSummary } from "@/lib/payroll-summary-rules";
+import { addDateKeyDays, currentPayrollWeekStart } from "@/lib/payroll-week";
 import { repairExistingRezkuTimesOnce } from "@/lib/rezku-eastern-time";
 import {
   detectRezkuProductSalesReportType,
@@ -52,7 +53,8 @@ export async function GET(request: Request) {
     }
     if (area === "time") return Response.json({ entries: await listRecentTimeEntries(business) });
     if (area === "payroll") {
-      return Response.json(await payrollSummary(business, url.searchParams.get("weekStart") || undefined));
+      const weekStart = url.searchParams.get("weekStart") || addDateKeyDays(currentPayrollWeekStart(), -7);
+      return Response.json(await payrollSummary(business, weekStart));
     }
     if (area === "imports") return Response.json({ imports: await listRezkuImports() });
     if (area === "accounting") return Response.json(await accountingSnapshot(business));

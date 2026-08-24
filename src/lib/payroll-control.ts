@@ -1,5 +1,6 @@
 import { ensureSchema, getSql } from "@/lib/db";
 import { payrollSummary } from "@/lib/payroll-summary-rules";
+import { payrollWeekBounds as weekBounds } from "@/lib/payroll-week";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -38,41 +39,6 @@ function numberValue(value: unknown): number {
 
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-function getOffsetMilliseconds(date: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const represented = Date.UTC(
-    Number(values.year), Number(values.month) - 1, Number(values.day),
-    Number(values.hour), Number(values.minute), Number(values.second),
-  );
-  return represented - date.getTime();
-}
-
-function zonedDateToUtc(dateText: string, hour: number): Date {
-  const [year, month, day] = dateText.split("-").map(Number);
-  let timestamp = Date.UTC(year, month - 1, day, hour, 0, 0);
-  for (let index = 0; index < 2; index += 1) {
-    timestamp = Date.UTC(year, month - 1, day, hour, 0, 0) - getOffsetMilliseconds(new Date(timestamp), TIME_ZONE);
-  }
-  return new Date(timestamp);
-}
-
-function weekBounds(weekStart: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw new Error("Choose a valid payroll week.");
-  const start = zonedDateToUtc(weekStart, 0);
-  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
-  return { start, end };
 }
 
 export async function ensurePayrollControlSchema(): Promise<void> {
