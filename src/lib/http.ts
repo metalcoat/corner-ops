@@ -7,6 +7,13 @@ export class ValidationError extends Error {
   }
 }
 
+export class AuthenticationError extends Error {
+  constructor(message = "Authentication required.") {
+    super(message);
+    this.name = "AuthenticationError";
+  }
+}
+
 export class PermissionError extends Error {
   constructor(message = "Your account does not have permission for this action.") {
     super(message);
@@ -34,6 +41,9 @@ export function apiError(error: unknown): Response {
       { error: error.message, retryAfterSeconds: error.retryAfterSeconds },
       { status: 429, headers: { "Retry-After": String(error.retryAfterSeconds) } },
     );
+  }
+  if (error instanceof AuthenticationError) {
+    return Response.json({ error: error.message }, { status: 401 });
   }
   if (error instanceof PermissionError) {
     return Response.json({ error: error.message }, { status: 403 });
