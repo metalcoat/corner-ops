@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           for file in $(find db/migrations -maxdepth 1 -type f -name '0001*.sql' | sort); do
-            echo "Applying $file"
+            echo "Applying baseline $file"
             psql -v ON_ERROR_STOP=1 -f "$file"
           done
       - name: Verify baseline inventory
@@ -57,3 +57,21 @@ jobs:
           test "$triggers" = "5"
           test "$accounts" = "28"
           echo "Baseline verified: $tables tables, $functions functions, $triggers triggers, $accounts seeded accounts."
+      - name: Apply post-baseline migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r file; do
+            name=$(basename "$file")
+            if [[ "$name" > "0007_schedule_delivery_queue.sql" ]]; then
+              echo "Applying post-baseline migration $file"
+              psql -v ON_ERROR_STOP=1 -f "$file"
+            fi
+          done < <(find db/migrations -maxdepth 1 -type f -name '*.sql' | sort)
+      - name: Verify current schema migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(psql -Atc "SELECT to_regclass('public.deli_board_call_cache') IS NOT NULL")" = "t"
+          test "$(psql -Atc "SELECT count(*) FROM deli_wallboard_tasks WHERE created_by='System'")" = "26"
+          echo "Post-baseline migrations verified."
