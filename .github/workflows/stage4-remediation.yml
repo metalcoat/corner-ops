@@ -52,9 +52,23 @@ jobs:
           LOG=/tmp/stage4.log
           : > "$LOG"
           SCRIPT_RC=0
-          for script in tools/stage4_auth.py tools/stage4_crypto.py tools/stage4_compliance_audit.py; do
-            python3 "$script" >>"$LOG" 2>&1 || { SCRIPT_RC=$?; break; }
-          done
+          python3 - <<'PY' >>"$LOG" 2>&1
+          from pathlib import Path
+          path = Path('tools/stage4_compliance_audit.py')
+          text = path.read_text()
+          old = "rep('src/app/api/workforce/route.ts','        actor: session.displayName,\\n      }));','        actor: session.displayName,\\n        sendSms: body.sendSms === true,\\n      }));')"
+          new = "sub('src/app/api/workforce/route.ts',r'(if \\(action === \\\"message-send\\\"\\) \\{.*?actor: session\\.displayName,)\\n      \\}\\)\\);',r'\\1\\n        sendSms: body.sendSms === true,\\n      }));')"
+          if old not in text:
+              raise SystemExit('stage4 transformer target not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          PREP_RC=$?
+          if [ "$PREP_RC" -ne 0 ]; then SCRIPT_RC=$PREP_RC; fi
+          if [ "$SCRIPT_RC" -eq 0 ]; then
+            for script in tools/stage4_auth.py tools/stage4_crypto.py tools/stage4_compliance_audit.py; do
+              python3 "$script" >>"$LOG" 2>&1 || { SCRIPT_RC=$?; break; }
+            done
+          fi
           if [ "$SCRIPT_RC" -eq 0 ]; then npm ci >>"$LOG" 2>&1; INSTALL_RC=$?; else INSTALL_RC=99; fi
           if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ]; then npm test >>"$LOG" 2>&1; TEST_RC=$?; else TEST_RC=99; fi
           if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ]; then npm run typecheck >>"$LOG" 2>&1; TYPE_RC=$?; else TYPE_RC=99; fi
