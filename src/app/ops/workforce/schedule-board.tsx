@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, DragEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { CSSProperties, DragEvent, FormEvent, useMemo, useState } from "react";
 import { positionsForBusiness } from "@/lib/business-positions";
 import {
   analyzeShiftMealCompliance,
@@ -25,7 +25,6 @@ export type ScheduleEmployee = {
   scheduleColor: string;
   avatarSet: boolean;
 };
-
 
 export type ScheduleTimeOff = {
   id: string;
@@ -90,19 +89,21 @@ type GridRow = {
 type DragTarget = { dayKey: string; employeeId: string | null } | null;
 type TimeOption = { value: string; label: string };
 
+const TIME_ZONE = "America/New_York";
 const MINUTE_MS = 60_000;
 const UNASSIGNED_KEY = "__unassigned__";
+const BREAK_DURATION_OPTIONS = [0, 20, 30, 45, 60];
 const TIME_OPTIONS: TimeOption[] = Array.from({ length: 96 }, (_, index) => {
   const hour = Math.floor(index / 4);
   const minute = (index % 4) * 15;
   const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  const label = new Date(`2000-01-01T${value}:00`).toLocaleTimeString([], {
+  const label = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
     hour: "numeric",
     minute: "2-digit",
-  });
+  }).format(new Date(`2000-01-01T${value}:00Z`));
   return { value, label };
 });
-const BREAK_DURATION_OPTIONS = [0, 20, 30, 45, 60];
 
 function dateFromKey(value: string): Date {
   return new Date(`${value}T12:00:00Z`);
@@ -114,7 +115,13 @@ function addDays(date: Date, days: number): Date {
   return result;
 }
 
-function dateKey(date: Date): string {
+function dateKey(value: Date | string): string {
+  return newYorkDateKey(value);
+}
+
+function addDateKeyDays(value: string, days: number): string {
+  const date = dateFromKey(value);
+  date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
 
@@ -125,18 +132,28 @@ function startOfMonday(date: Date): Date {
   return addDays(localNoon, -daysSinceMonday);
 }
 
+function dayLabel(value: Date | string, options: Intl.DateTimeFormatOptions): string {
+  const key = value instanceof Date ? newYorkDateKey(value) : /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : newYorkDateKey(value);
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", ...options }).format(dateFromKey(key));
+}
+
 function localTime(value: string): string {
-  return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function localDateTime(value: string): string {
-  return new Date(value).toLocaleString([], {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
     weekday: "short",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+  }).format(new Date(value));
 }
 
 function inputTime(value: string | null | undefined): string {
@@ -150,14 +167,10 @@ function nearestQuarter(value: string): string {
   return `${String(Math.floor((total % 1440) / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
-function dateFromParts(day: string, time: string): Date {
-  return newYorkDateTime(day, time);
-}
-
 function editorDates(editor: EditorState) {
-  const start = dateFromParts(editor.date, editor.startTime);
-  let end = dateFromParts(editor.date, editor.endTime);
-  if (end <= start) end = dateFromParts(dateKey(addDays(dateFromKey(editor.date), 1)), editor.endTime);
+  const start = newYorkDateTime(editor.date, editor.startTime);
+  let end = newYorkDateTime(editor.date, editor.endTime);
+  if (end <= start) end = newYorkDateTime(addDateKeyDays(editor.date, 1), editor.endTime);
   const mealBreakStart = editor.mealBreakTime && editor.mealBreakMinutes
     ? shiftTimeForSelectedDay(editor.date, editor.startTime, editor.mealBreakTime)
     : null;
@@ -167,19 +180,22 @@ function editorDates(editor: EditorState) {
   return { start, end, mealBreakStart, extraMealBreakStart };
 }
 
-function mealStartOptions(editor: EditorState, slot: "primary" | "extra"): TimeOption[] {
+function mealStartOptions(editor: EditorState, business: Business, slot: "primary" | "extra"): TimeOption[] {
   try {
     const { start, end } = editorDates(editor);
-    const requirements = mealRequirements({ startsAt: start.toISOString(), endsAt: end.toISOString() });
+    const requirements = mealRequirements({
+      startsAt: start.toISOString(),
+      endsAt: end.toISOString(),
+      business,
+      position: editor.position,
+    });
     const requirement = requirements.find((candidate) => candidate.slot === slot);
     const selectedMinutes = slot === "primary" ? editor.mealBreakMinutes : editor.extraMealBreakMinutes;
     const durationMinutes = selectedMinutes || requirement?.minimumMinutes || 0;
     if (!durationMinutes) return [];
-
     const allowedStart = requirement?.windowStart ? new Date(requirement.windowStart) : start;
     const allowedEnd = requirement?.windowEnd ? new Date(requirement.windowEnd) : end;
     const midpoint = requirement?.midpoint ? new Date(requirement.midpoint) : null;
-
     return TIME_OPTIONS.filter((option) => {
       const candidateStart = shiftTimeForSelectedDay(editor.date, editor.startTime, option.value);
       const candidateEnd = new Date(candidateStart.getTime() + durationMinutes * MINUTE_MS);
@@ -233,8 +249,9 @@ function moveShiftToCell(
 ): ScheduleShift {
   const originalStart = new Date(shift.startsAt);
   const originalEnd = new Date(shift.endsAt);
-  const start = new Date(targetDay);
-  start.setHours(originalStart.getHours(), originalStart.getMinutes(), 0, 0);
+  const targetDate = newYorkDateKey(targetDay);
+  const originalLocalTime = newYorkTimeValue(originalStart);
+  const start = newYorkDateTime(targetDate, originalLocalTime);
   const differenceMs = start.getTime() - originalStart.getTime();
   return {
     ...shift,
@@ -264,12 +281,10 @@ function timeOffOverlapsShift(request: ScheduleTimeOff, employeeId: string | nul
 }
 
 function timeOffLabel(request: ScheduleTimeOff): string {
-  const start = dateFromKey(timeOffKey(request.starts_on));
-  const end = dateFromKey(timeOffKey(request.ends_on));
-  if (timeOffKey(request.starts_on) === timeOffKey(request.ends_on)) {
-    return start.toLocaleDateString([], { month: "short", day: "numeric" });
-  }
-  return `${start.toLocaleDateString([], { month: "short", day: "numeric" })}–${end.toLocaleDateString([], { month: "short", day: "numeric" })}`;
+  const start = timeOffKey(request.starts_on);
+  const end = timeOffKey(request.ends_on);
+  if (start === end) return dayLabel(start, { month: "short", day: "numeric" });
+  return `${dayLabel(start, { month: "short", day: "numeric" })}–${dayLabel(end, { month: "short", day: "numeric" })}`;
 }
 
 function cellKey(employeeId: string | null, dayKeyValue: string): string {
@@ -297,20 +312,15 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
   const [dragTarget, setDragTarget] = useState<DragTarget>(null);
   const scheduleModalRef = useModalFocus<HTMLElement>(Boolean(editor), () => setEditor(null));
 
-  const weekDays = useMemo(
-    () => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)),
-    [weekStart],
-  );
-  const weekEnd = addDays(weekStart, 7);
+  const weekDays = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
+  const weekStartKey = dateKey(weekStart);
+  const weekEndKey = addDateKeyDays(weekStartKey, 7);
   const activeEmployees = employees.filter((employee) => employee.active);
-  const employeeById = useMemo(
-    () => new Map(activeEmployees.map((employee) => [employee.id, employee])),
-    [activeEmployees],
-  );
+  const employeeById = useMemo(() => new Map(activeEmployees.map((employee) => [employee.id, employee])), [activeEmployees]);
   const weekShifts = useMemo(() => shifts.filter((shift) => {
-    const start = new Date(shift.startsAt);
-    return start >= weekStart && start < weekEnd && shift.status !== "Cancelled";
-  }), [shifts, weekEnd, weekStart]);
+    const key = newYorkDateKey(shift.startsAt);
+    return key >= weekStartKey && key < weekEndKey && shift.status !== "Cancelled";
+  }), [shifts, weekEndKey, weekStartKey]);
 
   const rows = useMemo<GridRow[]>(() => [
     ...activeEmployees.map((employee) => ({
@@ -394,7 +404,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
   const shiftsByCell = useMemo(() => {
     const map = new Map<string, ScheduleShift[]>();
     for (const shift of weekShifts) {
-      const key = cellKey(shift.employeeId, dateKey(new Date(shift.startsAt)));
+      const key = cellKey(shift.employeeId, newYorkDateKey(shift.startsAt));
       const list = map.get(key) || [];
       list.push(shift);
       map.set(key, list);
@@ -416,15 +426,16 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
         position: editor.position,
         startsAt: start.toISOString(),
         endsAt: end.toISOString(),
-        mealBreakStart: mealBreakStart?.toISOString() || null,
-        mealBreakMinutes: editor.mealBreakMinutes,
-        extraMealBreakStart: extraMealBreakStart?.toISOString() || null,
-        extraMealBreakMinutes: editor.extraMealBreakMinutes,
+        mealBreakStart: business === "Tiki" ? null : mealBreakStart?.toISOString() || null,
+        mealBreakMinutes: business === "Tiki" ? 0 : editor.mealBreakMinutes,
+        extraMealBreakStart: business === "Tiki" ? null : extraMealBreakStart?.toISOString() || null,
+        extraMealBreakMinutes: business === "Tiki" ? 0 : editor.extraMealBreakMinutes,
         status: "Draft",
         notes: editor.notes,
       };
       const candidates = weekShifts.filter((shift) => shift.id !== editor.shift?.id);
-      if (start >= weekStart && start < weekEnd) candidates.push(previewShift);
+      const localStartKey = newYorkDateKey(start);
+      if (localStartKey >= weekStartKey && localStartKey < weekEndKey) candidates.push(previewShift);
       const analysis = analyzeSchedule(candidates, { enforceLoneWorker: loneWorkerApplies });
       return {
         hours: editor.employeeId ? analysis.employeeHours[editor.employeeId]?.hours || 0 : 0,
@@ -435,7 +446,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
     } catch {
       return null;
     }
-  }, [editor, employeeById, loneWorkerApplies, weekEnd, weekShifts, weekStart]);
+  }, [business, editor, employeeById, loneWorkerApplies, weekEndKey, weekShifts, weekStartKey]);
 
   const editorTimeOff = useMemo(() => {
     if (!editor?.employeeId) return { approved: [] as ScheduleTimeOff[], pending: [] as ScheduleTimeOff[] };
@@ -452,33 +463,19 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
   }, [editor, timeOff]);
 
   const primaryMealTimeOptions = useMemo(
-    () => editor ? mealStartOptions(editor, "primary") : [],
-    [editor],
+    () => editor ? mealStartOptions(editor, business, "primary") : [],
+    [business, editor],
   );
   const extraMealTimeOptions = useMemo(
-    () => editor ? mealStartOptions(editor, "extra") : [],
-    [editor],
+    () => editor ? mealStartOptions(editor, business, "extra") : [],
+    [business, editor],
   );
-
-  useEffect(() => {
-    if (!editor) return;
-    const primaryValid = !editor.mealBreakTime || primaryMealTimeOptions.some((option) => option.value === editor.mealBreakTime);
-    const extraValid = !editor.extraMealBreakTime || extraMealTimeOptions.some((option) => option.value === editor.extraMealBreakTime);
-    if (primaryValid && extraValid) return;
-    setEditor((current) => current ? {
-      ...current,
-      mealBreakTime: primaryValid ? current.mealBreakTime : "",
-      mealBreakMinutes: primaryValid ? current.mealBreakMinutes : 0,
-      extraMealBreakTime: extraValid ? current.extraMealBreakTime : "",
-      extraMealBreakMinutes: extraValid ? current.extraMealBreakMinutes : 0,
-    } : current);
-  }, [editor, extraMealTimeOptions, primaryMealTimeOptions]);
 
   function openExisting(shift: ScheduleShift) {
     setEditor({
       shift,
       employeeId: shift.employeeId,
-      date: dateKey(new Date(shift.startsAt)),
+      date: newYorkDateKey(shift.startsAt),
       startTime: nearestQuarter(inputTime(shift.startsAt)),
       endTime: nearestQuarter(inputTime(shift.endsAt)),
       mealBreakTime: nearestQuarter(inputTime(shift.mealBreakStart)),
@@ -494,7 +491,12 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
     setEditor((current) => {
       if (!current) return current;
       const { start, end } = editorDates(current);
-      const requirements = mealRequirements({ startsAt: start.toISOString(), endsAt: end.toISOString() });
+      const requirements = mealRequirements({
+        startsAt: start.toISOString(),
+        endsAt: end.toISOString(),
+        business,
+        position: current.position,
+      });
       const primary = requirements.find((requirement) => requirement.slot === "primary");
       const extra = requirements.find((requirement) => requirement.slot === "extra");
       return {
@@ -524,10 +526,10 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       position: editor.position,
       startsAt: start.toISOString(),
       endsAt: end.toISOString(),
-      mealBreakStart: mealBreakStart?.toISOString() || null,
-      mealBreakMinutes: editor.mealBreakMinutes,
-      extraMealBreakStart: extraMealBreakStart?.toISOString() || null,
-      extraMealBreakMinutes: editor.extraMealBreakMinutes,
+      mealBreakStart: business === "Tiki" ? null : mealBreakStart?.toISOString() || null,
+      mealBreakMinutes: business === "Tiki" ? 0 : editor.mealBreakMinutes,
+      extraMealBreakStart: business === "Tiki" ? null : extraMealBreakStart?.toISOString() || null,
+      extraMealBreakMinutes: business === "Tiki" ? 0 : editor.extraMealBreakMinutes,
       status: editor.shift
         ? editor.shift.status === "Draft"
           ? "Draft"
@@ -550,10 +552,10 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       employeeId,
       startsAt: moved.startsAt,
       endsAt: moved.endsAt,
-      mealBreakStart: moved.mealBreakStart || null,
-      mealBreakMinutes: moved.mealBreakMinutes || 0,
-      extraMealBreakStart: moved.extraMealBreakStart || null,
-      extraMealBreakMinutes: moved.extraMealBreakMinutes || 0,
+      mealBreakStart: business === "Tiki" ? null : moved.mealBreakStart || null,
+      mealBreakMinutes: business === "Tiki" ? 0 : moved.mealBreakMinutes || 0,
+      extraMealBreakStart: business === "Tiki" ? null : moved.extraMealBreakStart || null,
+      extraMealBreakMinutes: business === "Tiki" ? 0 : moved.extraMealBreakMinutes || 0,
       status: "Draft",
       acknowledgePendingTimeOff: timeOffCheck.acknowledgePendingTimeOff,
       expectedUpdatedAt: shift.updatedAt || null,
@@ -571,10 +573,10 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       position: copied.position,
       startsAt: copied.startsAt,
       endsAt: copied.endsAt,
-      mealBreakStart: copied.mealBreakStart || null,
-      mealBreakMinutes: copied.mealBreakMinutes || 0,
-      extraMealBreakStart: copied.extraMealBreakStart || null,
-      extraMealBreakMinutes: copied.extraMealBreakMinutes || 0,
+      mealBreakStart: business === "Tiki" ? null : copied.mealBreakStart || null,
+      mealBreakMinutes: business === "Tiki" ? 0 : copied.mealBreakMinutes || 0,
+      extraMealBreakStart: business === "Tiki" ? null : copied.extraMealBreakStart || null,
+      extraMealBreakMinutes: business === "Tiki" ? 0 : copied.extraMealBreakMinutes || 0,
       notes: copied.notes,
       acknowledgePendingTimeOff: timeOffCheck.acknowledgePendingTimeOff,
     }, "Copied shift pasted as a draft.");
@@ -606,7 +608,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
     const actionLabel = draftCount > 0 ? "Publish week" : "Resend schedule";
     if (!window.confirm(`${actionLabel} for ${business}? Only employees whose schedule changed will be notified; an explicit resend notifies currently assigned employees again.`)) return;
     await runAction(
-      { action: "week-publish", weekStart: dateKey(weekStart) },
+      { action: "week-publish", weekStart: weekStartKey },
       "Schedule published. Employee Hub and configured notifications were updated.",
     );
   }
@@ -633,8 +635,8 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
     <header className="scheduleToolbar">
       <div>
         <p className="wfEyebrow">Weekly employee grid</p>
-        <h2>{weekStart.toLocaleDateString([], { month: "long", day: "numeric" })} – {addDays(weekStart, 6).toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" })}</h2>
-        <span className="scheduleSubline">No uncovered gaps are allowed from the first scheduled start through the last scheduled finish. Meals count as off-duty coverage time.</span>
+        <h2>{dayLabel(weekStartKey, { month: "long", day: "numeric" })} – {dayLabel(addDateKeyDays(weekStartKey, 6), { month: "long", day: "numeric", year: "numeric" })}</h2>
+        <span className="scheduleSubline">Calendar days and shift times use America/New_York, matching Employee Hub and notifications.</span>
       </div>
       <div className="scheduleToolbarActions">
         <span className="scheduleClipboard">
@@ -685,11 +687,11 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
         <div className="scheduleGridCorner" role="columnheader"><strong>Employee</strong><span>Paid total</span></div>
         {weekDays.map((day) => {
           const key = dateKey(day);
-          const dayShifts = weekShifts.filter((shift) => dateKey(new Date(shift.startsAt)) === key);
+          const dayShifts = weekShifts.filter((shift) => newYorkDateKey(shift.startsAt) === key);
           const dayHours = dayShifts.reduce((total, shift) => total + shiftHours(shift), 0);
-          return <div className={`scheduleDayHeader ${dateKey(new Date()) === key ? "today" : ""} ${gapDayKeys.has(key) ? "hasCoverageGap" : ""}`} role="columnheader" key={key}>
-            <strong>{day.toLocaleDateString([], { weekday: "short" })}</strong>
-            <span>{day.toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+          return <div className={`scheduleDayHeader ${newYorkDateKey(new Date()) === key ? "today" : ""} ${gapDayKeys.has(key) ? "hasCoverageGap" : ""}`} role="columnheader" key={key}>
+            <strong>{dayLabel(key, { weekday: "short" })}</strong>
+            <span>{dayLabel(key, { month: "short", day: "numeric" })}</span>
             <small>{dayShifts.length} shifts · {dayHours.toFixed(1)} hrs{gapDayKeys.has(key) ? " · GAP" : ""}</small>
           </div>;
         })}
@@ -703,7 +705,12 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
           return <div className="scheduleGridRow" role="row" key={row.key}>
             <div className={`scheduleEmployeeCell hours-${risk} ${!row.employee ? "unassigned" : ""}`} role="rowheader" style={{ "--employee-color": row.color } as CSSProperties}>
               <span className="scheduleAvatar small">{row.employee?.avatarSet ? <img src={avatarUrl(business, row.employee.id)} alt="" loading="lazy" /> : initials(row.name)}</span>
-              <div><strong>{row.name}</strong><span>{row.position}</span><b>{totalHours.toFixed(1)} hrs</b></div>
+              <div>
+                <strong>{row.name}</strong>
+                <span>{row.position}</span>
+                <b>{totalHours.toFixed(1)} hrs</b>
+                {row.employee && <a href={`/ops/workforce/employee-preview?business=${encodeURIComponent(business)}&employeeId=${encodeURIComponent(row.employee.id)}`}>View as employee</a>}
+              </div>
             </div>
 
             {weekDays.map((day) => {
@@ -797,7 +804,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
           {editorTimeOff.approved.length > 0 && <div className="scheduleTimeOffEditorWarning approved"><strong>Cannot assign this shift</strong><span>{editorTimeOff.approved[0].employee_name} has approved time off {timeOffLabel(editorTimeOff.approved[0])}. Choose another employee, date, or leave the shift open.</span></div>}
           {editorTimeOff.approved.length === 0 && editorTimeOff.pending.length > 0 && <div className="scheduleTimeOffEditorWarning pending"><strong>Pending time-off request</strong><span>{editorTimeOff.pending[0].employee_name} requested {timeOffLabel(editorTimeOff.pending[0])} off. You can still assign the shift, but you will be asked to confirm.</span></div>}
 
-          {editorPreview && <section className="scheduleMealPlanner">
+          {business === "Corner Deli" && editorPreview && <section className="scheduleMealPlanner">
             <header><div><h3>Meal-period compliance</h3><p>Off-duty meals reduce paid hours and staffing coverage.</p></div>{editorPreview.meals.requirements.length > 0 && <button type="button" onClick={applyRequiredMeals}>Apply required meals</button>}</header>
             {editorPreview.meals.requirements.length > 0 ? <div className="scheduleMealRequirements">{editorPreview.meals.requirements.map((requirement) => <div className="scheduleMealRequirement" key={requirement.code}><strong>{requirement.label}</strong><span>{requirement.detail}</span></div>)}</div> : <div className="scheduleMealClear">No required meal period for this shift.</div>}
             <div className="scheduleMealGrid">
