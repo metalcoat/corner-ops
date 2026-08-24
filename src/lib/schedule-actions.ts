@@ -107,7 +107,13 @@ export async function updateScheduleShiftSafely(input: {
       END,
       updated_at = NOW()
     WHERE id = ${input.id} AND business = ${input.business}
-      AND (${expectedUpdatedAt}::timestamptz IS NULL OR updated_at = ${expectedUpdatedAt}::timestamptz)
+      -- PostgreSQL keeps microseconds while JavaScript Date only keeps milliseconds.
+      -- Compare at the precision the client can faithfully round-trip so an unchanged
+      -- shift is not rejected by its own optimistic-lock check.
+      AND (
+        ${expectedUpdatedAt}::timestamptz IS NULL
+        OR date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', ${expectedUpdatedAt}::timestamptz)
+      )
     RETURNING id, updated_at
   ` as unknown as Array<{ id: string; updated_at: string }>;
   if (!updated[0]) {
