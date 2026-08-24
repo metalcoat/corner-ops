@@ -1,0 +1,80 @@
+name: Apply CODEBASEREVIEW Stage 9 Cleanup
+
+on:
+  push:
+    branches: [agent/codebase-review-stage-9]
+    paths:
+      - tools/stage9_cleanup.py
+      - tools/stage9_css_tokens.mjs
+      - tools/stage9_metrics.py
+      - .github/workflows/stage9-cleanup.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: corner-ops-stage9-cleanup
+  cancel-in-progress: true
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/codebase-review-stage-9
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Generate CI-only secrets
+        shell: bash
+        run: |
+          echo "SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "OWNER_SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "EMPLOYEE_SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "DELI_BOARD_SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "EMPLOYEE_PIN_PEPPER=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "INTEGRATION_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "SQUARE_OAUTH_STATE_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "KEY_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "EMPLOYMENT_FORMS_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
+          echo "APP_EMAIL=owner@example.test" >> "$GITHUB_ENV"
+          echo "APP_PASSWORD=$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
+          echo "DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder" >> "$GITHUB_ENV"
+          echo "BLOB_READ_WRITE_TOKEN=vercel_blob_rw_placeholder" >> "$GITHUB_ENV"
+      - name: Apply and verify first cleanup pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          python3 tools/stage9_cleanup.py
+          node tools/stage9_css_tokens.mjs
+          python3 tools/stage9_metrics.py
+
+          grep -q '^Distributed hard-coded hex occurrences: 0$' .stage9-metrics.md
+          grep -q '^Missing referenced tokens: 0$' .stage9-metrics.md
+          grep -A1 '^## Patch-named CSS files$' .stage9-metrics.md | grep -q -- '- none'
+          grep -q '^## response_helper_defs: 1$' .stage9-metrics.md
+          grep -q '^## request_failed_literals: 1$' .stage9-metrics.md
+          grep -q '^## first_name_defs: 1$' .stage9-metrics.md
+          grep -q '^## standalone_defs: 1$' .stage9-metrics.md
+          grep -q '^## ios_defs: 1$' .stage9-metrics.md
+          grep -q '^## install_prompt_types: 1$' .stage9-metrics.md
+
+          python3 tools/verify_no_runtime_ddl.py
+          python3 tools/verify_dependencies.py
+          npm test
+          npm run typecheck
+          npm run build
+      - name: Commit verified pass
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Stage 9 consolidate client helpers and CSS tokens"
+          git push origin HEAD:agent/codebase-review-stage-9
