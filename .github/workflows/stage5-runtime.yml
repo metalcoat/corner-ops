@@ -1,0 +1,87 @@
+name: Apply CODEBASEREVIEW Stage 5 Runtime
+
+on:
+  push:
+    branches:
+      - agent/codebase-review-stage-5-runtime
+    paths:
+      - tools/stage5_runtime.py
+      - .github/workflows/stage5-runtime.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: corner-ops-stage5-runtime
+  cancel-in-progress: false
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/codebase-review-stage-5-runtime
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Generate CI-only secrets
+        shell: bash
+        run: |
+          echo "SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "OWNER_SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "EMPLOYEE_SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "DELI_BOARD_SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "EMPLOYEE_PIN_PEPPER=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "INTEGRATION_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "OAUTH_STATE_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "KEY_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "EMPLOYMENT_FORMS_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
+          echo "APP_EMAIL=owner@example.test" >> "$GITHUB_ENV"
+          echo "DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder" >> "$GITHUB_ENV"
+          echo "BLOB_READ_WRITE_TOKEN=vercel_blob_rw_placeholder" >> "$GITHUB_ENV"
+      - name: Apply and verify Stage 5 runtime
+        shell: bash
+        run: |
+          set +e
+          LOG=/tmp/stage5-runtime.log
+          : > "$LOG"
+          python3 tools/stage5_runtime.py >>"$LOG" 2>&1
+          SCRIPT_RC=$?
+          if [ "$SCRIPT_RC" -eq 0 ]; then npm ci >>"$LOG" 2>&1; INSTALL_RC=$?; else INSTALL_RC=99; fi
+          if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ]; then npm test >>"$LOG" 2>&1; TEST_RC=$?; else TEST_RC=99; fi
+          if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ]; then npm run typecheck >>"$LOG" 2>&1; TYPE_RC=$?; else TYPE_RC=99; fi
+          if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ] && [ "$TYPE_RC" -eq 0 ]; then npm run build >>"$LOG" 2>&1; BUILD_RC=$?; else BUILD_RC=99; fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ] && [ "$TYPE_RC" -eq 0 ] && [ "$BUILD_RC" -eq 0 ]; then
+            rm -f tools/stage5_runtime.py .github/workflows/stage5-runtime.yml .stage5-runtime-status.md
+            git add -A
+            git diff --cached --check || exit 1
+            git commit -m "Stage 5 fix residual runtime correctness and reliability"
+            git push origin HEAD:agent/codebase-review-stage-5-runtime
+            exit 0
+          fi
+
+          FAIL_LOG=$(tail -n 260 "$LOG")
+          git reset --hard "$GITHUB_SHA"
+          {
+            echo "# Stage 5 runtime remediation status"
+            echo
+            echo "Result: FAILED"
+            echo "Source commit: $GITHUB_SHA"
+            echo "Exit codes: transform=$SCRIPT_RC install=$INSTALL_RC test=$TEST_RC typecheck=$TYPE_RC build=$BUILD_RC"
+            echo
+            echo '```text'
+            printf '%s\n' "$FAIL_LOG"
+            echo '```'
+          } > .stage5-runtime-status.md
+          git add .stage5-runtime-status.md
+          git commit -m "Record Stage 5 runtime remediation failure"
+          git push origin HEAD:agent/codebase-review-stage-5-runtime
+          exit 1
