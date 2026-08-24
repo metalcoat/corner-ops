@@ -39,7 +39,7 @@ export async function GET(request: Request) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
-    requirePermission(session, "workforce.write");
+    requirePermission(session, "workforce.read");
     const business = businessFrom(new URL(request.url).searchParams.get("business"));
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
     return Response.json({ employees: await listDirectoryEmployees(business) });
