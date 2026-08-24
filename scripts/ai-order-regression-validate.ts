@@ -38,6 +38,9 @@ async function main(){
     {key:"saucy-medium-wings",items:[{name:"30 medium wings extra saucy",quantity:1}],expectedItems:["Wings"],expectedVariant:"30 Wings",expectedModifier:"Medium (4oz)"},
     {key:"turkey-sub-needs-cheese",items:[{name:"Turkey Sub",quantity:1}],errorCode:"INVALID_MODIFIER"},
     {key:"turkey-sub-alias",items:[{name:"Turkey Sub",quantity:1,modifiers:[{name:"American"},{name:"mayo"},{name:"ranch"}]}],expectedItems:["Turkey"],expectedVariant:"Full Sub",expectedModifier:"Mayonnaise"},
+    {key:"turkey-sub-russian-dressing",items:[{name:"Turkey Sub",quantity:1,modifiers:[{name:"American"},{name:"russian dressing"}]}],expectedItems:["Turkey"],expectedVariant:"Full Sub",expectedModifier:"Russian"},
+    {key:"turkey-sub-shakers",items:[{name:"Turkey Sub",quantity:1,modifiers:[{name:"American"},{name:"shakers"}]}],expectedItems:["Turkey"],expectedVariant:"Full Sub",expectedModifier:"Parm Shakers"},
+    {key:"hot-roast-beef-sandwich",items:[{name:"hot roast beef sandwich",quantity:1}],expectedItems:["Roast Beef Sandwich"]},
     {key:"turkey-big-boss-alias",items:[{name:"Turkey Big Boss sub",quantity:1}],expectedItems:["Turkey Big Boss"],expectedVariant:"Full Sub"},
     {key:"turkey-big-boss-whole",items:[{name:"Turkey Big Boss",variant:"Whole",quantity:1}],expectedItems:["Turkey Big Boss"],expectedVariant:"Full Sub"},
   ];
