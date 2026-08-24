@@ -165,39 +165,6 @@ export function ensureRezkuVoidSchema(): Promise<void> {
     voidSchemaPromise = (async () => {
       await ensureSchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS rezku_void_import_batches (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL DEFAULT 'Corner Deli' CHECK (business = 'Corner Deli'),
-          report_type TEXT NOT NULL CHECK (report_type IN ('product_voids', 'transaction_voids')),
-          file_name TEXT NOT NULL,
-          row_count INTEGER NOT NULL DEFAULT 0,
-          imported_by TEXT NOT NULL,
-          imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS rezku_void_import_batches_created_idx ON rezku_void_import_batches (imported_at DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS rezku_void_events (
-          id UUID PRIMARY KEY,
-          source_key TEXT NOT NULL UNIQUE,
-          batch_id UUID NOT NULL REFERENCES rezku_void_import_batches(id) ON DELETE CASCADE,
-          void_type TEXT NOT NULL CHECK (void_type IN ('Product', 'Transaction')),
-          order_id TEXT NOT NULL DEFAULT '',
-          transaction_id TEXT NOT NULL DEFAULT '',
-          voided_at TIMESTAMPTZ,
-          employee_name TEXT NOT NULL DEFAULT '',
-          voided_by TEXT NOT NULL DEFAULT '',
-          reason TEXT NOT NULL DEFAULT '',
-          item_name TEXT NOT NULL DEFAULT '',
-          quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
-          amount NUMERIC(14,2) NOT NULL DEFAULT 0,
-          raw JSONB NOT NULL DEFAULT '{}'::jsonb
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS rezku_void_events_time_idx ON rezku_void_events (voided_at DESC)`;
-      await sql`CREATE INDEX IF NOT EXISTS rezku_void_events_order_idx ON rezku_void_events (order_id, transaction_id)`;
-      await sql`CREATE INDEX IF NOT EXISTS rezku_void_events_type_idx ON rezku_void_events (void_type, voided_at DESC)`;
     })().catch((error) => {
       voidSchemaPromise = null;
       throw error;

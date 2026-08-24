@@ -27,115 +27,11 @@ export function ensureWorkforceSchema(): Promise<void> {
       await ensureSchema();
       const sql = getSql();
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS schedule_shifts (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          employee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
-          position TEXT NOT NULL DEFAULT '',
-          starts_at TIMESTAMPTZ NOT NULL,
-          ends_at TIMESTAMPTZ NOT NULL,
-          status TEXT NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft', 'Published', 'Open', 'Cancelled')),
-          notes TEXT NOT NULL DEFAULT '',
-          created_by TEXT NOT NULL,
-          published_at TIMESTAMPTZ,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          CHECK (ends_at > starts_at)
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS schedule_shifts_business_start_idx ON schedule_shifts (business, starts_at, status)`;
-      await sql`CREATE INDEX IF NOT EXISTS schedule_shifts_employee_idx ON schedule_shifts (employee_id, starts_at)`;
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS employee_availability (
-          id UUID PRIMARY KEY,
-          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          weekday INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),
-          available BOOLEAN NOT NULL DEFAULT TRUE,
-          available_from TEXT NOT NULL DEFAULT '',
-          available_to TEXT NOT NULL DEFAULT '',
-          notes TEXT NOT NULL DEFAULT '',
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          UNIQUE (employee_id, weekday)
-        )
-      `;
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS time_off_requests (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-          starts_on DATE NOT NULL,
-          ends_on DATE NOT NULL,
-          reason TEXT NOT NULL DEFAULT '',
-          status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending', 'Approved', 'Rejected', 'Cancelled')),
-          manager_note TEXT NOT NULL DEFAULT '',
-          reviewed_by TEXT NOT NULL DEFAULT '',
-          reviewed_at TIMESTAMPTZ,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          CHECK (ends_on >= starts_on)
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS time_off_business_status_idx ON time_off_requests (business, status, starts_on)`;
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS shift_requests (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          request_type TEXT NOT NULL CHECK (request_type IN ('Claim', 'Offer', 'Swap')),
-          shift_id UUID NOT NULL REFERENCES schedule_shifts(id) ON DELETE CASCADE,
-          offered_shift_id UUID REFERENCES schedule_shifts(id) ON DELETE SET NULL,
-          requester_employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-          target_employee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
-          employee_response TEXT NOT NULL DEFAULT 'Pending' CHECK (employee_response IN ('Pending', 'Accepted', 'Declined', 'Not Required')),
-          status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending', 'Approved', 'Rejected', 'Cancelled')),
-          note TEXT NOT NULL DEFAULT '',
-          manager_note TEXT NOT NULL DEFAULT '',
-          reviewed_by TEXT NOT NULL DEFAULT '',
-          reviewed_at TIMESTAMPTZ,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS shift_requests_business_status_idx ON shift_requests (business, status, created_at DESC)`;
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS employee_messages (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          sender_employee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
-          sender_name TEXT NOT NULL,
-          recipient_employee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
-          message_type TEXT NOT NULL DEFAULT 'Team' CHECK (message_type IN ('Team', 'Direct', 'Announcement')),
-          body TEXT NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS employee_messages_business_created_idx ON employee_messages (business, created_at DESC)`;
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS time_correction_requests (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-          source_type TEXT NOT NULL CHECK (source_type IN ('Corner Ops', 'Rezku')),
-          source_id UUID NOT NULL,
-          original_clock_in TIMESTAMPTZ,
-          original_clock_out TIMESTAMPTZ,
-          requested_clock_in TIMESTAMPTZ,
-          requested_clock_out TIMESTAMPTZ,
-          original_reported_hours NUMERIC(10,4) NOT NULL DEFAULT 0,
-          requested_reported_hours NUMERIC(10,4),
-          reason TEXT NOT NULL,
-          status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending', 'Approved', 'Rejected', 'Cancelled')),
-          manager_note TEXT NOT NULL DEFAULT '',
-          reviewed_by TEXT NOT NULL DEFAULT '',
-          reviewed_at TIMESTAMPTZ,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS correction_business_status_idx ON time_correction_requests (business, status, created_at DESC)`;
     })().catch((error) => {
       workforceSchemaPromise = null;
       throw error;

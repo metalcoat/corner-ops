@@ -109,12 +109,6 @@ export async function POST(request: Request) {
         return Response.json({ error: "Business access denied." }, { status: 403 });
       }
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS rezku_data_migrations (
-          migration_key TEXT PRIMARY KEY,
-          completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
       await sql`DELETE FROM rezku_data_migrations WHERE migration_key LIKE 'rezku-wall-times-america-new-york-%'`;
       return Response.json(await repairExistingRezkuTimesOnce());
     }

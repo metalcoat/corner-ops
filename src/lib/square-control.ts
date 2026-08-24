@@ -70,96 +70,10 @@ async function squareRequest<T>(path: string, accessToken: string, init?: Reques
 export async function ensureSquareControlSchema(): Promise<void> {
   await ensureIntegrationSchema();
   const sql = getSql();
-  await sql`
-    CREATE TABLE IF NOT EXISTS square_orders (
-      id UUID PRIMARY KEY,
-      connection_id UUID NOT NULL REFERENCES integration_connections(id) ON DELETE CASCADE,
-      external_order_id TEXT NOT NULL UNIQUE,
-      location_id TEXT NOT NULL DEFAULT '',
-      state TEXT NOT NULL DEFAULT '',
-      source_name TEXT NOT NULL DEFAULT '',
-      created_at_square TIMESTAMPTZ,
-      updated_at_square TIMESTAMPTZ,
-      closed_at_square TIMESTAMPTZ,
-      total_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
-      tax_total NUMERIC(14,2) NOT NULL DEFAULT 0,
-      tip_total NUMERIC(14,2) NOT NULL DEFAULT 0,
-      raw JSONB NOT NULL DEFAULT '{}'::jsonb,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS square_orders_date_idx ON square_orders (created_at_square DESC, state)`;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS square_order_lines (
-      id UUID PRIMARY KEY,
-      square_order_id UUID NOT NULL REFERENCES square_orders(id) ON DELETE CASCADE,
-      external_line_id TEXT NOT NULL,
-      catalog_object_id TEXT NOT NULL DEFAULT '',
-      item_name TEXT NOT NULL DEFAULT '',
-      variation_name TEXT NOT NULL DEFAULT '',
-      quantity NUMERIC(14,4) NOT NULL DEFAULT 0,
-      gross_sales NUMERIC(14,2) NOT NULL DEFAULT 0,
-      total_tax NUMERIC(14,2) NOT NULL DEFAULT 0,
-      total_discount NUMERIC(14,2) NOT NULL DEFAULT 0,
-      total_money NUMERIC(14,2) NOT NULL DEFAULT 0,
-      modifiers JSONB NOT NULL DEFAULT '[]'::jsonb,
-      raw JSONB NOT NULL DEFAULT '{}'::jsonb,
-      UNIQUE (square_order_id, external_line_id)
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS square_order_lines_catalog_idx ON square_order_lines (catalog_object_id)`;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS square_catalog_objects (
-      id UUID PRIMARY KEY,
-      connection_id UUID NOT NULL REFERENCES integration_connections(id) ON DELETE CASCADE,
-      external_object_id TEXT NOT NULL UNIQUE,
-      object_type TEXT NOT NULL,
-      name TEXT NOT NULL DEFAULT '',
-      parent_catalog_id TEXT NOT NULL DEFAULT '',
-      variation_of_id TEXT NOT NULL DEFAULT '',
-      sku TEXT NOT NULL DEFAULT '',
-      price NUMERIC(14,2) NOT NULL DEFAULT 0,
-      active BOOLEAN NOT NULL DEFAULT TRUE,
-      updated_at_square TIMESTAMPTZ,
-      version BIGINT,
-      raw JSONB NOT NULL DEFAULT '{}'::jsonb,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS square_catalog_type_idx ON square_catalog_objects (object_type, active, name)`;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS square_inventory_counts (
-      id UUID PRIMARY KEY,
-      connection_id UUID NOT NULL REFERENCES integration_connections(id) ON DELETE CASCADE,
-      catalog_object_id TEXT NOT NULL,
-      location_id TEXT NOT NULL,
-      state TEXT NOT NULL DEFAULT 'IN_STOCK',
-      quantity NUMERIC(14,4) NOT NULL DEFAULT 0,
-      calculated_at TIMESTAMPTZ,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE (catalog_object_id, location_id, state)
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS square_inventory_location_idx ON square_inventory_counts (location_id, state, quantity)`;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS square_webhook_events (
-      id UUID PRIMARY KEY,
-      event_id TEXT NOT NULL UNIQUE,
-      event_type TEXT NOT NULL,
-      merchant_id TEXT NOT NULL DEFAULT '',
-      location_id TEXT NOT NULL DEFAULT '',
-      payload JSONB NOT NULL,
-      status TEXT NOT NULL DEFAULT 'Received' CHECK (status IN ('Received', 'Processed', 'Ignored', 'Failed')),
-      error TEXT NOT NULL DEFAULT '',
-      received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      processed_at TIMESTAMPTZ
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS square_webhook_events_received_idx ON square_webhook_events (received_at DESC, status)`;
 }
 
 async function activeConnection(merchantId?: string): Promise<ConnectionRow | null> {

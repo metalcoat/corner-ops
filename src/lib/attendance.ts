@@ -99,40 +99,7 @@ export function ensureAttendanceSchema(): Promise<void> {
       await ensureEmployeeDirectorySchema();
       await ensureWorkforceSchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS missed_shift_cases (
-          id UUID PRIMARY KEY,
-          shift_id UUID NOT NULL UNIQUE REFERENCES schedule_shifts(id) ON DELETE CASCADE,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-          employee_name TEXT NOT NULL,
-          employee_email TEXT NOT NULL DEFAULT '',
-          position TEXT NOT NULL DEFAULT '',
-          scheduled_start TIMESTAMPTZ NOT NULL,
-          scheduled_end TIMESTAMPTZ NOT NULL,
-          correction_start TIMESTAMPTZ,
-          correction_end TIMESTAMPTZ,
-          employee_note TEXT NOT NULL DEFAULT '',
-          submission_channel TEXT NOT NULL DEFAULT '',
-          status TEXT NOT NULL DEFAULT 'Awaiting Correction' CHECK (status IN ('Awaiting Correction', 'Submitted', 'Approved', 'Rejected', 'Resolved')),
-          notified_at TIMESTAMPTZ,
-          notification_error TEXT NOT NULL DEFAULT '',
-          detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          reviewed_by TEXT NOT NULL DEFAULT '',
-          reviewed_at TIMESTAMPTZ,
-          manager_note TEXT NOT NULL DEFAULT ''
-        )
-      `;
-      await sql`ALTER TABLE missed_shift_cases DROP CONSTRAINT IF EXISTS missed_shift_cases_status_check`;
       await sql`UPDATE missed_shift_cases SET status = 'Awaiting Correction' WHERE status = 'Awaiting Reply'`;
-      await sql`
-        ALTER TABLE missed_shift_cases
-        ADD CONSTRAINT missed_shift_cases_status_check
-        CHECK (status IN ('Awaiting Correction', 'Submitted', 'Approved', 'Rejected', 'Resolved'))
-      `;
-      await sql`ALTER TABLE missed_shift_cases DROP COLUMN IF EXISTS reply_token`;
-      await sql`CREATE INDEX IF NOT EXISTS missed_shift_business_status_idx ON missed_shift_cases (business, status, scheduled_start DESC)`;
-      await sql`CREATE INDEX IF NOT EXISTS missed_shift_employee_idx ON missed_shift_cases (employee_id, scheduled_start DESC)`;
     })().catch((error) => {
       attendanceSchemaPromise = null;
       throw error;

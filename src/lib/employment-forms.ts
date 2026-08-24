@@ -99,49 +99,6 @@ export function ensureEmploymentFormsSchema(): Promise<void> {
     employmentSchemaPromise = (async () => {
       await ensureSchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS employment_form_profiles (
-          business TEXT PRIMARY KEY CHECK (business IN ('Corner Deli', 'Tiki')),
-          profile JSONB NOT NULL DEFAULT '{}'::jsonb,
-          updated_by TEXT NOT NULL DEFAULT '',
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`
-        CREATE TABLE IF NOT EXISTS employment_forms (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          employee_id UUID NOT NULL REFERENCES employees(id),
-          employee_name TEXT NOT NULL,
-          form_type TEXT NOT NULL CHECK (form_type IN ('W4', 'IT2104', 'I9', 'PAY_NOTICE', 'MEAL_POLICY')),
-          title TEXT NOT NULL,
-          template_version TEXT NOT NULL,
-          source_url TEXT NOT NULL,
-          status TEXT NOT NULL CHECK (status IN ('Assigned', 'Employee Signed', 'Employer Review', 'Completed', 'Superseded')),
-          effective_date DATE,
-          encrypted_payload TEXT NOT NULL,
-          assigned_by TEXT NOT NULL,
-          assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          employee_signature_name TEXT NOT NULL DEFAULT '',
-          employee_signed_at TIMESTAMPTZ,
-          employer_signature_name TEXT NOT NULL DEFAULT '',
-          employer_signed_at TIMESTAMPTZ,
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS employment_forms_employee_idx ON employment_forms (employee_id, assigned_at DESC)`;
-      await sql`CREATE INDEX IF NOT EXISTS employment_forms_business_status_idx ON employment_forms (business, status, assigned_at DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS employment_form_events (
-          id UUID PRIMARY KEY,
-          form_id UUID NOT NULL REFERENCES employment_forms(id) ON DELETE CASCADE,
-          action TEXT NOT NULL,
-          actor TEXT NOT NULL,
-          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS employment_form_events_form_idx ON employment_form_events (form_id, created_at)`;
     })().catch((error) => {
       employmentSchemaPromise = null;
       throw error;

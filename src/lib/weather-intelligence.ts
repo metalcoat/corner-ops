@@ -142,26 +142,6 @@ export function ensureWeatherSchema(): Promise<void> {
     weatherSchemaPromise = (async () => {
       await ensureSchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS weather_daily (
-          weather_date DATE PRIMARY KEY,
-          source_kind TEXT NOT NULL CHECK (source_kind IN ('Historical', 'Forecast')),
-          weather_code INTEGER NOT NULL DEFAULT 0,
-          temperature_max_f NUMERIC(8,2) NOT NULL DEFAULT 0,
-          temperature_min_f NUMERIC(8,2) NOT NULL DEFAULT 0,
-          temperature_mean_f NUMERIC(8,2) NOT NULL DEFAULT 0,
-          apparent_temperature_max_f NUMERIC(8,2) NOT NULL DEFAULT 0,
-          precipitation_in NUMERIC(10,3) NOT NULL DEFAULT 0,
-          rain_in NUMERIC(10,3) NOT NULL DEFAULT 0,
-          snowfall_in NUMERIC(10,3) NOT NULL DEFAULT 0,
-          precipitation_probability INTEGER NOT NULL DEFAULT 0,
-          wind_max_mph NUMERIC(8,2) NOT NULL DEFAULT 0,
-          wind_gust_mph NUMERIC(8,2) NOT NULL DEFAULT 0,
-          sunshine_hours NUMERIC(8,2) NOT NULL DEFAULT 0,
-          fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS weather_daily_source_idx ON weather_daily (source_kind, weather_date)`;
     })().catch((error) => {
       weatherSchemaPromise = null;
       throw error;

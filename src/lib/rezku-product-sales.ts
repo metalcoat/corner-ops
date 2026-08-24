@@ -120,42 +120,6 @@ export function ensureRezkuProductSalesSchema(): Promise<void> {
     productSalesSchemaPromise = (async () => {
       await ensureSchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS rezku_product_sales_import_batches (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL DEFAULT 'Corner Deli' CHECK (business = 'Corner Deli'),
-          report_type TEXT NOT NULL DEFAULT 'sales_by_product' CHECK (report_type = 'sales_by_product'),
-          business_date DATE NOT NULL,
-          file_name TEXT NOT NULL,
-          row_count INTEGER NOT NULL DEFAULT 0,
-          imported_by TEXT NOT NULL,
-          imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS rezku_product_sales_batches_date_idx ON rezku_product_sales_import_batches (business_date DESC, imported_at DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS rezku_product_sales (
-          id UUID PRIMARY KEY,
-          source_key TEXT NOT NULL UNIQUE,
-          batch_id UUID NOT NULL REFERENCES rezku_product_sales_import_batches(id) ON DELETE CASCADE,
-          business_date DATE NOT NULL,
-          category TEXT NOT NULL DEFAULT '',
-          product TEXT NOT NULL,
-          list_price NUMERIC(14,4) NOT NULL DEFAULT 0,
-          average_price NUMERIC(14,4) NOT NULL DEFAULT 0,
-          quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
-          sales NUMERIC(14,2) NOT NULL DEFAULT 0,
-          percent_sales NUMERIC(14,8) NOT NULL DEFAULT 0,
-          average_profit NUMERIC(14,4) NOT NULL DEFAULT 0,
-          profit NUMERIC(14,2) NOT NULL DEFAULT 0,
-          percent_profit NUMERIC(14,8) NOT NULL DEFAULT 0,
-          raw JSONB NOT NULL DEFAULT '{}'::jsonb,
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS rezku_product_sales_date_idx ON rezku_product_sales (business_date DESC)`;
-      await sql`CREATE INDEX IF NOT EXISTS rezku_product_sales_product_idx ON rezku_product_sales (product, business_date DESC)`;
-      await sql`CREATE INDEX IF NOT EXISTS rezku_product_sales_category_idx ON rezku_product_sales (category, business_date DESC)`;
     })().catch((error) => {
       productSalesSchemaPromise = null;
       throw error;

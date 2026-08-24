@@ -44,67 +44,9 @@ function roundMoney(value: number): number {
 export async function ensurePayrollControlSchema(): Promise<void> {
   await ensureSchema();
   const sql = getSql();
-  await sql`
-    CREATE TABLE IF NOT EXISTS time_entry_adjustments (
-      id UUID PRIMARY KEY,
-      business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-      source_type TEXT NOT NULL CHECK (source_type IN ('Tiki', 'Rezku')),
-      source_id UUID NOT NULL,
-      before_state JSONB NOT NULL,
-      after_state JSONB NOT NULL,
-      reason TEXT NOT NULL,
-      actor TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS time_entry_adjustments_source_idx ON time_entry_adjustments (source_type, source_id, created_at DESC)`;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS tip_overrides (
-      id UUID PRIMARY KEY,
-      business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-      week_start DATE NOT NULL,
-      source_transaction_id TEXT NOT NULL DEFAULT '',
-      employee_name TEXT NOT NULL,
-      amount NUMERIC(12,2) NOT NULL,
-      reason TEXT NOT NULL,
-      actor TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS tip_overrides_week_idx ON tip_overrides (business, week_start, created_at)`;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS payroll_run_versions (
-      id UUID PRIMARY KEY,
-      business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-      week_start DATE NOT NULL,
-      week_end TIMESTAMPTZ NOT NULL,
-      version INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft', 'Locked')),
-      payload JSONB NOT NULL,
-      generated_by TEXT NOT NULL,
-      generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      locked_by TEXT,
-      locked_at TIMESTAMPTZ,
-      reopened_from_id UUID REFERENCES payroll_run_versions(id),
-      UNIQUE (business, week_start, version)
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS payroll_run_versions_week_idx ON payroll_run_versions (business, week_start DESC, version DESC)`;
 
-  await sql`
-    CREATE TABLE IF NOT EXISTS payroll_audit_events (
-      id UUID PRIMARY KEY,
-      business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-      event_type TEXT NOT NULL,
-      reference_id TEXT NOT NULL DEFAULT '',
-      details JSONB NOT NULL DEFAULT '{}'::jsonb,
-      actor TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS payroll_audit_events_business_idx ON payroll_audit_events (business, created_at DESC)`;
 }
 
 async function listTipOverrides(business: Business, weekStart: string) {

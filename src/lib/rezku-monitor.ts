@@ -22,40 +22,6 @@ export function ensureRezkuMonitorSchema(): Promise<void> {
     monitorSchemaPromise = (async () => {
       await ensureSchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS rezku_inbound_emails (
-          email_id TEXT PRIMARY KEY,
-          webhook_id TEXT NOT NULL DEFAULT '',
-          sender TEXT NOT NULL DEFAULT '',
-          subject TEXT NOT NULL DEFAULT '',
-          report_date DATE,
-          received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          status TEXT NOT NULL DEFAULT 'Received'
-            CHECK (status IN ('Received', 'Processing', 'Processed', 'Partial', 'Failed')),
-          reports_found INTEGER NOT NULL DEFAULT 0,
-          reports_processed INTEGER NOT NULL DEFAULT 0,
-          error_text TEXT NOT NULL DEFAULT '',
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS rezku_inbound_emails_received_idx ON rezku_inbound_emails (received_at DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS rezku_inbound_reports (
-          id UUID PRIMARY KEY,
-          email_id TEXT NOT NULL REFERENCES rezku_inbound_emails(email_id) ON DELETE CASCADE,
-          file_name TEXT NOT NULL,
-          report_type TEXT NOT NULL DEFAULT '',
-          status TEXT NOT NULL DEFAULT 'Processing'
-            CHECK (status IN ('Processing', 'Processed', 'Failed')),
-          batch_id UUID,
-          rows_read INTEGER NOT NULL DEFAULT 0,
-          rows_imported INTEGER NOT NULL DEFAULT 0,
-          error_text TEXT NOT NULL DEFAULT '',
-          processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          UNIQUE (email_id, file_name)
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS rezku_inbound_reports_email_idx ON rezku_inbound_reports (email_id, processed_at)`;
     })().catch((error) => {
       monitorSchemaPromise = null;
       throw error;

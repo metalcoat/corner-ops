@@ -171,40 +171,6 @@ function settings() {
 async function createSchema(): Promise<void> {
   await ensureSchema();
   const sql = getSql();
-  await sql`
-    CREATE TABLE IF NOT EXISTS three_cx_cdr_records (
-      id UUID PRIMARY KEY,
-      record_key TEXT NOT NULL UNIQUE,
-      history_id TEXT NOT NULL DEFAULT '',
-      call_id TEXT NOT NULL DEFAULT '',
-      duration_seconds NUMERIC(14,3) NOT NULL DEFAULT 0,
-      started_at TIMESTAMPTZ,
-      answered_at TIMESTAMPTZ,
-      ended_at TIMESTAMPTZ,
-      termination_reason TEXT NOT NULL DEFAULT '',
-      from_no TEXT NOT NULL DEFAULT '',
-      to_no TEXT NOT NULL DEFAULT '',
-      from_dn TEXT NOT NULL DEFAULT '',
-      to_dn TEXT NOT NULL DEFAULT '',
-      dial_no TEXT NOT NULL DEFAULT '',
-      reason_changed TEXT NOT NULL DEFAULT '',
-      final_number TEXT NOT NULL DEFAULT '',
-      final_dn TEXT NOT NULL DEFAULT '',
-      chain TEXT NOT NULL DEFAULT '',
-      from_type TEXT NOT NULL DEFAULT '',
-      to_type TEXT NOT NULL DEFAULT '',
-      final_type TEXT NOT NULL DEFAULT '',
-      from_display_name TEXT NOT NULL DEFAULT '',
-      to_display_name TEXT NOT NULL DEFAULT '',
-      final_display_name TEXT NOT NULL DEFAULT '',
-      missed_queue_calls TEXT NOT NULL DEFAULT '',
-      raw JSONB NOT NULL DEFAULT '{}'::jsonb,
-      received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS three_cx_cdr_ended_idx ON three_cx_cdr_records (ended_at DESC)`;
-  await sql`CREATE INDEX IF NOT EXISTS three_cx_cdr_history_idx ON three_cx_cdr_records (history_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS three_cx_cdr_phone_idx ON three_cx_cdr_records (from_no, to_no)`;
 }
 
 export async function ensureThreeCxCdrSchema(): Promise<void> {

@@ -103,24 +103,6 @@ export function roleHasPermission(role: AppRole, permission: string): boolean {
 export async function ensureUserSchema(): Promise<void> {
   await ensureSchema();
   const sql = getSql();
-  await sql`
-    CREATE TABLE IF NOT EXISTS app_users (
-      id UUID PRIMARY KEY,
-      email TEXT NOT NULL UNIQUE,
-      display_name TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('Owner', 'Co-Owner', 'Accountant', 'Manager', 'Viewer')),
-      businesses TEXT[] NOT NULL DEFAULT ARRAY['Corner Deli', 'Tiki']::TEXT[],
-      password_salt TEXT NOT NULL DEFAULT '',
-      password_hash TEXT NOT NULL DEFAULT '',
-      legacy_owner BOOLEAN NOT NULL DEFAULT FALSE,
-      active BOOLEAN NOT NULL DEFAULT TRUE,
-      created_by TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      session_version INTEGER NOT NULL DEFAULT 1
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS app_users_active_idx ON app_users (active, role, email)`;
 
   const configuredOwnerEmail = process.env.APP_EMAIL?.trim();
   if (!configuredOwnerEmail) throw new Error("APP_EMAIL is required before user accounts can be initialized.");

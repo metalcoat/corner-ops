@@ -476,12 +476,6 @@ export async function repairRezkuBatchTimes(batchId: string) {
 export async function repairExistingRezkuTimesOnce() {
   await ensureSchema();
   const sql = getSql();
-  await sql`
-    CREATE TABLE IF NOT EXISTS rezku_data_migrations (
-      migration_key TEXT PRIMARY KEY,
-      completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
   const completed = await sql`SELECT migration_key FROM rezku_data_migrations WHERE migration_key = ${MIGRATION_KEY} LIMIT 1` as unknown as Array<{ migration_key: string }>;
   if (completed[0]) return { migrated: false };
 

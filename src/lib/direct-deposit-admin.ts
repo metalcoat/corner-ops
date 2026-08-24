@@ -25,9 +25,6 @@ export function ensureDirectDepositAdminSchema(): Promise<void> {
     schemaPromise = (async () => {
       await ensureDirectDepositSchema();
       const sql = getSql();
-      await sql`ALTER TABLE direct_deposit_elections ADD COLUMN IF NOT EXISTS rescinded_by TEXT`;
-      await sql`ALTER TABLE direct_deposit_elections ADD COLUMN IF NOT EXISTS rescinded_at TIMESTAMPTZ`;
-      await sql`ALTER TABLE direct_deposit_elections ADD COLUMN IF NOT EXISTS rescind_reason TEXT NOT NULL DEFAULT ''`;
     })().catch((error) => {
       schemaPromise = null;
       throw error;

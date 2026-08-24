@@ -199,23 +199,6 @@ export function ensureExpenseControlSchema(): Promise<void> {
       await ensureAccountingControlSchema();
       const sql = getSql();
       await sql`
-        CREATE TABLE IF NOT EXISTS credit_card_transfer_matches (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          bank_transaction_id UUID NOT NULL REFERENCES bank_transactions(id) ON DELETE CASCADE,
-          card_transaction_id UUID NOT NULL REFERENCES bank_transactions(id) ON DELETE CASCADE,
-          amount NUMERIC(14,2) NOT NULL,
-          date_difference INTEGER NOT NULL DEFAULT 0,
-          confidence NUMERIC(5,4) NOT NULL DEFAULT 0,
-          status TEXT NOT NULL DEFAULT 'Suggested' CHECK (status IN ('Suggested', 'Matched', 'Ignored')),
-          matched_by TEXT NOT NULL DEFAULT '',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          matched_at TIMESTAMPTZ,
-          UNIQUE (bank_transaction_id, card_transaction_id)
-        )
-      `;
-      await sql`
         CREATE UNIQUE INDEX IF NOT EXISTS card_transfer_active_bank_unique
         ON credit_card_transfer_matches (bank_transaction_id)
         WHERE status <> 'Ignored'
@@ -226,55 +209,7 @@ export function ensureExpenseControlSchema(): Promise<void> {
         WHERE status <> 'Ignored'
       `;
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS receipt_documents (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          source TEXT NOT NULL CHECK (source IN ('Upload', 'Google Drive')),
-          source_key TEXT NOT NULL UNIQUE,
-          external_file_id TEXT NOT NULL DEFAULT '',
-          file_name TEXT NOT NULL,
-          mime_type TEXT NOT NULL,
-          size_bytes BIGINT NOT NULL DEFAULT 0,
-          source_url TEXT NOT NULL DEFAULT '',
-          storage_url TEXT NOT NULL DEFAULT '',
-          storage_pathname TEXT NOT NULL DEFAULT '',
-          modified_at_source TIMESTAMPTZ,
-          ocr_status TEXT NOT NULL DEFAULT 'Pending' CHECK (ocr_status IN ('Pending', 'Processed', 'Failed', 'Needs Configuration', 'Unsupported')),
-          merchant_name TEXT NOT NULL DEFAULT '',
-          receipt_date DATE,
-          total_amount NUMERIC(14,2),
-          tax_amount NUMERIC(14,2),
-          currency TEXT NOT NULL DEFAULT 'USD',
-          raw_text TEXT NOT NULL DEFAULT '',
-          entities JSONB NOT NULL DEFAULT '{}'::jsonb,
-          ocr_error TEXT NOT NULL DEFAULT '',
-          created_by TEXT NOT NULL DEFAULT '',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS receipt_documents_business_idx ON receipt_documents (business, receipt_date DESC, created_at DESC)`;
-      await sql`CREATE INDEX IF NOT EXISTS receipt_documents_status_idx ON receipt_documents (business, ocr_status, created_at DESC)`;
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS receipt_transaction_matches (
-          id UUID PRIMARY KEY,
-          receipt_id UUID NOT NULL REFERENCES receipt_documents(id) ON DELETE CASCADE,
-          bank_transaction_id UUID NOT NULL REFERENCES bank_transactions(id) ON DELETE CASCADE,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          confidence NUMERIC(5,4) NOT NULL DEFAULT 0,
-          amount_variance NUMERIC(14,2) NOT NULL DEFAULT 0,
-          date_difference INTEGER NOT NULL DEFAULT 0,
-          merchant_score NUMERIC(5,4) NOT NULL DEFAULT 0,
-          status TEXT NOT NULL DEFAULT 'Suggested' CHECK (status IN ('Suggested', 'Matched', 'Ignored')),
-          matched_by TEXT NOT NULL DEFAULT '',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          matched_at TIMESTAMPTZ,
-          UNIQUE (receipt_id, bank_transaction_id)
-        )
-      `;
       await sql`
         CREATE UNIQUE INDEX IF NOT EXISTS receipt_active_document_unique
         ON receipt_transaction_matches (receipt_id)

@@ -328,41 +328,6 @@ export async function ensureOvertimeRiskSchema(): Promise<void> {
       await ensureIntegrationSchema();
       const sql = getSql();
       await sql`
-        CREATE TABLE IF NOT EXISTS shift_change_log (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          shift_id UUID REFERENCES schedule_shifts(id) ON DELETE SET NULL,
-          change_type TEXT NOT NULL,
-          prior_employee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
-          prior_employee_name TEXT NOT NULL DEFAULT '',
-          new_employee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
-          new_employee_name TEXT NOT NULL DEFAULT '',
-          starts_at TIMESTAMPTZ,
-          ends_at TIMESTAMPTZ,
-          details JSONB NOT NULL DEFAULT '{}'::jsonb,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS shift_change_log_business_created_idx ON shift_change_log (business, created_at DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS overtime_risk_alerts (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-          week_start DATE NOT NULL,
-          risk_level TEXT NOT NULL CHECK (risk_level IN ('warning', 'overtime')),
-          signature TEXT NOT NULL,
-          details JSONB NOT NULL DEFAULT '{}'::jsonb,
-          status TEXT NOT NULL DEFAULT 'Open' CHECK (status IN ('Open', 'Resolved')),
-          first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          last_notified_at TIMESTAMPTZ,
-          resolved_at TIMESTAMPTZ,
-          UNIQUE (business, employee_id, week_start)
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS overtime_risk_alerts_open_idx ON overtime_risk_alerts (business, status, week_start)`;
-      await sql`
         CREATE OR REPLACE FUNCTION corner_ops_log_schedule_shift_change()
         RETURNS trigger
         LANGUAGE plpgsql
@@ -426,20 +391,6 @@ export async function ensureOvertimeRiskSchema(): Promise<void> {
             )
           );
           RETURN NEW;
-        END;
-        $$;
-      `;
-      await sql`
-        DO $$
-        BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_trigger
-            WHERE tgname = 'corner_ops_schedule_shift_change' AND NOT tgisinternal
-          ) THEN
-            CREATE TRIGGER corner_ops_schedule_shift_change
-            AFTER INSERT OR UPDATE OF employee_id, starts_at, ends_at, status ON schedule_shifts
-            FOR EACH ROW EXECUTE FUNCTION corner_ops_log_schedule_shift_change();
-          END IF;
         END;
         $$;
       `;
