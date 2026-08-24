@@ -3,228 +3,137 @@ import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "corner_ops_session";
 const POS_COOKIE_NAME = "corner_ops_pos";
-const publicPaths = [
-  "/api/health",
-  "/api/auth/session",
-  "/api/auth/password-reset/",
-  "/api/timeclock",
-  "/api/employee",
-  "/api/employee/session",
-  "/api/employee/pin-reset/",
-  "/api/pos/",
-  "/api/rezku/inbound",
-  "/api/3cx/inbound",
-  "/api/openai/",
-  "/api/square/callback",
-  "/api/square/webhook",
-  "/api/cron/",
-  "/api/customer/",
-  "/api/driver/",
+const selfAuthorizedApiPaths = [
+  "/api/health", "/api/auth/session", "/api/auth/password-reset",
+  "/api/timeclock", "/api/employee", "/api/employee/session",
+  "/api/employee/pin-reset", "/api/pos", "/api/deli-board",
+  "/api/document-scan", "/api/push", "/api/rezku/inbound",
+  "/api/3cx/inbound", "/api/openai", "/api/square/callback",
+  "/api/square/webhook", "/api/cron", "/api/customer", "/api/driver",
   "/api/ordering/store-dashboard",
 ];
 
-type Token = {
-  email?: string;
-  role?: string;
-  permissions?: string[];
-  expiresAt?: number;
-};
-
-type PosToken = {
-  employeeId?: string;
-  business?: string;
-  expiresAt?: number;
-  clockInRequired?: boolean;
-};
+type Token = { email?: string; role?: string; permissions?: string[]; expiresAt?: number };
+type PosToken = { employeeId?: string; business?: string; expiresAt?: number; clockInRequired?: boolean };
 
 function equal(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
+  const a = Buffer.from(left), b = Buffer.from(right);
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function token(request: NextRequest): Token | null {
-  const raw = request.cookies.get(COOKIE_NAME)?.value;
+function signedValue<T>(request: NextRequest, cookieName: string): T | null {
+  const raw = request.cookies.get(cookieName)?.value;
   const secret = process.env.SESSION_SECRET;
   if (!raw || !secret) return null;
-
   const [encoded, supplied] = raw.split(".");
   if (!encoded || !supplied) return null;
-
-  const expected = createHmac("sha256", secret)
-    .update(encoded)
-    .digest("base64url");
+  const expected = createHmac("sha256", secret).update(encoded).digest("base64url");
   if (!equal(expected, supplied)) return null;
-
   try {
-    const value = JSON.parse(
-      Buffer.from(encoded, "base64url").toString("utf8"),
-    ) as Token;
-    if (Number(value.expiresAt || 0) <= Date.now()) return null;
-    return value;
+    return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as T;
   } catch {
     return null;
   }
+}
+
+function token(request: NextRequest): Token | null {
+  const value = signedValue<Token>(request, COOKIE_NAME);
+  return value && Number(value.expiresAt || 0) > Date.now() ? value : null;
 }
 
 function posToken(request: NextRequest): PosToken | null {
-  const raw = request.cookies.get(POS_COOKIE_NAME)?.value;
-  const secret = process.env.SESSION_SECRET;
-  if (!raw || !secret) return null;
-  const [encoded, supplied] = raw.split(".");
-  if (!encoded || !supplied) return null;
-  const expected = createHmac("sha256", secret)
-    .update(encoded)
-    .digest("base64url");
-  if (!equal(expected, supplied)) return null;
-  try {
-    const value = JSON.parse(
-      Buffer.from(encoded, "base64url").toString("utf8"),
-    ) as PosToken;
-    if (
-      !value.employeeId ||
-      value.business !== "Corner Deli" ||
-      Number(value.expiresAt || 0) <= Date.now() ||
-      value.clockInRequired
-    )
-      return null;
-    return value;
-  } catch {
-    return null;
-  }
+  const value = signedValue<PosToken>(request, POS_COOKIE_NAME);
+  if (!value || !value.employeeId || value.business !== "Corner Deli" ||
+      Number(value.expiresAt || 0) <= Date.now() || value.clockInRequired) return null;
+  return value;
+}
+
+function matchesPath(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}/`);
 }
 
 function isDeliPosApi(path: string): boolean {
-  return (
-    path === "/api/ordering/menu" ||
-    path === "/api/ordering/orders" ||
+  return path === "/api/ordering/menu" || path === "/api/ordering/orders" ||
     path === "/api/ordering/kitchen" ||
-    path.startsWith("/api/ordering/order-center") ||
-    path.startsWith("/api/ordering/customers") ||
-    path.startsWith("/api/ordering/settings/") ||
-    path.startsWith("/api/ordering/reports") ||
-    path.startsWith("/api/ordering/barcodes") ||
-    path.startsWith("/api/ordering/gift-cards") ||
-    path.startsWith("/api/ordering/address/") ||
+    ["order-center", "customers", "settings", "reports", "barcodes", "gift-cards", "address"]
+      .some((part) => matchesPath(path, `/api/ordering/${part}`)) ||
     path === "/api/ordering/delivery/quote" ||
     path === "/api/ordering/hardware/status" ||
-    /^\/api\/ordering\/orders\/[^/]+\/submit$/.test(path)
-  );
+    /^\/api\/ordering\/orders\/[^/]+\/submit$/.test(path);
+}
+
+function anyPath(path: string, prefixes: string[]): boolean {
+  return prefixes.some((prefix) => matchesPath(path, prefix));
 }
 
 function needed(path: string, method: string): string | null {
   const write = method !== "GET" && method !== "HEAD";
-  if (
-    path.startsWith("/api/reports") ||
-    path.startsWith("/api/weather") ||
-    path.startsWith("/api/3cx/calls")
-  )
-    return "reports.read";
-  if (
-    path.startsWith("/api/banking") ||
-    path.startsWith("/api/accounting-control") ||
-    path.startsWith("/api/expense-control")
-  ) {
+  if (anyPath(path, ["/api/reports", "/api/weather", "/api/3cx/calls"])) return "reports.read";
+  if (anyPath(path, ["/api/banking", "/api/accounting-control", "/api/expense-control",
+    "/api/card-statements", "/api/finance-operations"])) {
     return write ? "accounting.write" : "accounting.read";
   }
-  if (
-    path.startsWith("/api/payroll-control") ||
-    path.startsWith("/api/rezku-monitor")
-  ) {
+  if (anyPath(path, ["/api/payroll-control", "/api/rezku-monitor", "/api/overtime-risk", "/api/operations"])) {
     return write ? "payroll.write" : "payroll.read";
   }
-  if (path.startsWith("/api/users")) return "users.manage";
-  if (
-    path.startsWith("/api/integrations") ||
-    path.startsWith("/api/bank-accounts") ||
-    path.startsWith("/api/square/connect")
-  ) {
+  if (matchesPath(path, "/api/users")) return "users.manage";
+  if (anyPath(path, ["/api/integrations", "/api/bank-accounts", "/api/square/connect"])) {
     return write ? "integrations.write" : "integrations.read";
   }
-  if (
-    path.startsWith("/api/messages") ||
-    path.startsWith("/api/workforce") ||
-    path.startsWith("/api/employee-directory") ||
-    path.startsWith("/api/attendance") ||
-    path.startsWith("/api/employment-forms") ||
-    path.startsWith("/api/direct-deposit")
-  ) {
+  if (anyPath(path, ["/api/messages", "/api/workforce", "/api/employee-directory",
+    "/api/attendance", "/api/employment-forms", "/api/direct-deposit"])) {
     return write ? "workforce.write" : "workforce.read";
   }
-  if (path.startsWith("/api/documents") || path.startsWith("/api/audit")) {
+  if (anyPath(path, ["/api/documents", "/api/audit"])) {
     return write ? "documents.write" : "documents.read";
   }
-  if (path.startsWith("/api/operations"))
-    return write ? "payroll.write" : "payroll.read";
   return null;
 }
 
-function isOwnerSession(session: Token): boolean {
-  if (session.role === "Owner" || session.role === "Co-Owner") return true;
-  const configuredOwner = (process.env.APP_EMAIL || "crfrary@gmail.com")
-    .trim()
-    .toLowerCase();
-  return (
-    !session.role &&
-    Boolean(session.email) &&
-    session.email!.trim().toLowerCase() === configuredOwner
-  );
-}
-
-export function proxy(request: NextRequest) {
-  const path = request.nextUrl.pathname;
-  const allowed = (process.env.ALLOWED_HOSTS || "")
-      .split(",")
-      .map((v) => v.trim().toLowerCase())
-      .filter(Boolean),
-    host = (
-      request.headers.get("x-forwarded-host") ||
-      request.headers.get("host") ||
-      ""
-    )
-      .split(":")[0]
-      .toLowerCase();
-  if (
-    allowed.length &&
-    !allowed.includes(host) &&
-    host !== "localhost" &&
-    !/^127\./.test(host) &&
-    !/^192\.168\./.test(host)
-  )
+function securedResponse(request: NextRequest): NextResponse {
+  const allowed = (process.env.ALLOWED_HOSTS || "").split(",").map((v) => v.trim().toLowerCase()).filter(Boolean);
+  const host = (request.headers.get("x-forwarded-host") || request.headers.get("host") || "")
+    .split(":")[0].toLowerCase();
+  if (allowed.length && !allowed.includes(host) && host !== "localhost" &&
+      !/^127\./.test(host) && !/^192\.168\./.test(host)) {
     return NextResponse.json({ error: "Host not allowed." }, { status: 421 });
+  }
   const response = NextResponse.next();
   response.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "same-origin");
-  response.headers.set(
-    "Permissions-Policy",
-    "camera=(self), microphone=(), geolocation=(self)",
-  );
+  response.headers.set("Permissions-Policy", "camera=(self), microphone=(), geolocation=(self)");
   response.headers.set("Content-Security-Policy", "frame-ancestors 'none'");
-  if (!path.startsWith("/api/")) return response;
-  if (publicPaths.some((prefix) => path === prefix || path.startsWith(prefix)))
+  return response;
+}
+
+export function proxy(request: NextRequest) {
+  const path = request.nextUrl.pathname;
+  const response = securedResponse(request);
+  if (response.status === 421) return response;
+
+  if (path.startsWith("/api/")) {
+    if (selfAuthorizedApiPaths.some((prefix) => matchesPath(path, prefix))) return response;
+    if (isDeliPosApi(path) && posToken(request)) return response;
+    const session = token(request);
+    if (!session) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    if (session.role === "Owner" || session.role === "Co-Owner") return response;
+    const permission = needed(path, request.method);
+    if (!permission) {
+      return NextResponse.json({ error: "This API route is not assigned an authorization policy." }, { status: 403 });
+    }
+    const permissions = session.permissions || [];
+    if (!permissions.includes("*") && !permissions.includes(permission)) {
+      return NextResponse.json({ error: "Your account does not have permission for this action." }, { status: 403 });
+    }
     return response;
-  if (isDeliPosApi(path) && posToken(request)) return response;
+  }
 
-  const session = token(request);
-  if (!session)
-    return NextResponse.json(
-      { error: "Authentication required." },
-      { status: 401 },
-    );
-  if (isOwnerSession(session)) return response;
-
-  const permission = needed(path, request.method);
-  const permissions = session.permissions || [];
-  if (
-    permission &&
-    !permissions.includes("*") &&
-    !permissions.includes(permission)
-  ) {
-    return NextResponse.json(
-      { error: "Your account does not have permission for this action." },
-      { status: 403 },
-    );
+  if (matchesPath(path, "/ops")) {
+    if (token(request)) return response;
+    const signin = new URL("/signin", request.url);
+    signin.searchParams.set("returnTo", `${path}${request.nextUrl.search}`);
+    return NextResponse.redirect(signin);
   }
   return response;
 }
