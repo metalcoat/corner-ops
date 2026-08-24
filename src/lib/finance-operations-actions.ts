@@ -90,63 +90,65 @@ export async function createVendorBill(input: {
     }
   }
 
-  const id = crypto.randomUUID();
-  await getSql()`
-    INSERT INTO vendor_bills (
-      id, business, vendor, invoice_number, invoice_date, due_date, subtotal, tax_amount,
-      total_amount, category, account_code, status, notes, file_name, content_type,
-      blob_url, blob_pathname, created_by
-    ) VALUES (
-      ${id}, ${input.business}, ${vendor}, ${invoiceNumber}, ${invoiceDate}, ${dueDate},
-      ${subtotal}, ${taxAmount}, ${totalAmount}, ${clean(input.category, 120) || "Other Expense"},
-      ${clean(input.accountCode, 20) || "5900"}, 'Open', ${clean(input.notes, 1500)},
-      ${clean(input.fileName, 255)}, ${clean(input.contentType, 160)}, ${clean(input.blobUrl, 1000)},
-      ${clean(input.blobPathname, 1000)}, ${clean(input.actor, 240)}
-    )
-  `;
+  const inventoryChecks = await Promise.all(lines.map(async (line, index) => {
+    if (!line.inventoryItemId) return null;
+    const item = await getSql()`
+      SELECT id FROM inventory_items
+      WHERE id = ${line.inventoryItemId} AND business = ${input.business} AND active = TRUE
+      LIMIT 1
+    ` as unknown as Array<{ id: string }>;
+    if (!item[0]) throw new Error(`Inventory item on line ${index + 1} was not found for ${input.business}.`);
+    return item[0].id;
+  }));
+  void inventoryChecks;
 
-  try {
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index];
-      if (line.inventoryItemId) {
-        const item = await getSql()`
-          SELECT id FROM inventory_items
-          WHERE id = ${line.inventoryItemId} AND business = ${input.business} AND active = TRUE
-          LIMIT 1
-        ` as unknown as Array<{ id: string }>;
-        if (!item[0]) throw new Error(`Inventory item on line ${index + 1} was not found for ${input.business}.`);
-      }
-      await getSql()`
-        INSERT INTO vendor_bill_lines (
-          id, bill_id, line_number, inventory_item_id, description, quantity, unit, unit_price, line_total
+  const id = crypto.randomUUID();
+  const sql = getSql();
+  const queries = [
+    sql`
+      INSERT INTO vendor_bills (
+        id, business, vendor, invoice_number, invoice_date, due_date, subtotal, tax_amount,
+        total_amount, category, account_code, status, notes, file_name, content_type,
+        blob_url, blob_pathname, created_by
+      ) VALUES (
+        ${id}, ${input.business}, ${vendor}, ${invoiceNumber}, ${invoiceDate}, ${dueDate},
+        ${subtotal}, ${taxAmount}, ${totalAmount}, ${clean(input.category, 120) || "Other Expense"},
+        ${clean(input.accountCode, 20) || "5900"}, 'Open', ${clean(input.notes, 1500)},
+        ${clean(input.fileName, 255)}, ${clean(input.contentType, 160)}, ${clean(input.blobUrl, 1000)},
+        ${clean(input.blobPathname, 1000)}, ${clean(input.actor, 240)}
+      )
+    `,
+  ];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    queries.push(sql`
+      INSERT INTO vendor_bill_lines (
+        id, bill_id, line_number, inventory_item_id, description, quantity, unit, unit_price, line_total
+      ) VALUES (
+        ${crypto.randomUUID()}, ${id}, ${index + 1}, ${line.inventoryItemId}, ${line.description},
+        ${line.quantity}, ${line.unit}, ${line.unitPrice}, ${line.lineTotal}
+      )
+    `);
+    if (line.inventoryItemId && line.unitPrice > 0) {
+      queries.push(sql`
+        INSERT INTO inventory_purchases (
+          id, business, inventory_item_id, vendor, purchase_date, quantity, unit,
+          unit_price, total_amount, bill_id, source
         ) VALUES (
-          ${crypto.randomUUID()}, ${id}, ${index + 1}, ${line.inventoryItemId}, ${line.description},
-          ${line.quantity}, ${line.unit}, ${line.unitPrice}, ${line.lineTotal}
+          ${crypto.randomUUID()}, ${input.business}, ${line.inventoryItemId}, ${vendor}, ${invoiceDate},
+          ${line.quantity}, ${line.unit}, ${line.unitPrice}, ${line.lineTotal}, ${id}, 'Vendor bill'
         )
-      `;
-      if (line.inventoryItemId && line.unitPrice > 0) {
-        await getSql()`
-          INSERT INTO inventory_purchases (
-            id, business, inventory_item_id, vendor, purchase_date, quantity, unit,
-            unit_price, total_amount, bill_id, source
-          ) VALUES (
-            ${crypto.randomUUID()}, ${input.business}, ${line.inventoryItemId}, ${vendor}, ${invoiceDate},
-            ${line.quantity}, ${line.unit}, ${line.unitPrice}, ${line.lineTotal}, ${id}, 'Vendor bill'
-          )
-        `;
-        await getSql()`
-          UPDATE inventory_items SET
-            current_quantity = current_quantity + ${line.quantity},
-            preferred_vendor = CASE WHEN preferred_vendor = '' THEN ${vendor} ELSE preferred_vendor END,
-            updated_at = NOW()
-          WHERE id = ${line.inventoryItemId} AND business = ${input.business}
-        `;
-      }
+      `);
+      queries.push(sql`
+        UPDATE inventory_items SET
+          current_quantity = current_quantity + ${line.quantity},
+          preferred_vendor = CASE WHEN preferred_vendor = '' THEN ${vendor} ELSE preferred_vendor END,
+          updated_at = NOW()
+        WHERE id = ${line.inventoryItemId} AND business = ${input.business}
+      `);
     }
-  } catch (error) {
-    await getSql()`DELETE FROM vendor_bills WHERE id = ${id}`;
-    throw error;
   }
+  await sql.transaction(queries);
 
   return { id, created: true, lines: lines.length, totalAmount };
 }

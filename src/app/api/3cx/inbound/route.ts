@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { after } from "next/server";
 import { apiError } from "@/lib/http";
 import { ingestThreeCxCdr, type ThreeCxCdrInput } from "@/lib/three-cx-cdr";
 import { notifyClockedInDeliEmployeesOfMissedCalls } from "@/lib/three-cx-missed-call-messages";
@@ -64,10 +65,17 @@ export async function POST(request: Request) {
     const body = await request.json() as { records?: ThreeCxCdrInput[]; record?: ThreeCxCdrInput } | ThreeCxCdrInput[];
     const records = Array.isArray(body) ? body : Array.isArray(body.records) ? body.records : body.record ? [body.record] : [];
     const ingestion = await ingestThreeCxCdr(records);
-    const missedCallMessages = records.some(mightNeedMissedCallCheck)
-      ? await notifyClockedInDeliEmployeesOfMissedCalls()
-      : { skipped: true, reason: "No unanswered Corner Deli queue leg in this CDR batch." };
-    return Response.json({ ...ingestion, missedCallMessages }, { status: 202 });
+    const notificationScheduled = records.some(mightNeedMissedCallCheck);
+    if (notificationScheduled) {
+      after(async () => {
+        try {
+          await notifyClockedInDeliEmployeesOfMissedCalls();
+        } catch (error) {
+          console.error("3CX missed-call notification failed after ingestion", error);
+        }
+      });
+    }
+    return Response.json({ ...ingestion, missedCallMessages: notificationScheduled ? { scheduled: true } : { skipped: true, reason: "No unanswered Corner Deli queue leg in this CDR batch." } }, { status: 202 });
   } catch (error) {
     return apiError(error);
   }

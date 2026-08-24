@@ -1,6 +1,11 @@
 /* Business identity themes. Layout remains shared; only visual tokens change. */
 :root,
 html[data-business-theme="Corner Deli"] {
+  --theme-accent: var(--accent);
+  --theme-accent-text: var(--accent-contrast);
+  --theme-accent-contrast: var(--accent-contrast);
+  --background: var(--bg);
+  --shadow: 0 18px 45px rgb(0 0 0 / 28%);
   --bg: #170d0f;
   --panel: #251619;
   --panel-2: #342024;
@@ -23,6 +28,11 @@ html[data-business-theme="Corner Deli"] {
 }
 
 html[data-business-theme="Tiki"] {
+  --theme-accent: var(--accent);
+  --theme-accent-text: var(--accent-contrast);
+  --theme-accent-contrast: var(--accent-contrast);
+  --background: var(--bg);
+  --shadow: 0 18px 45px rgb(0 0 0 / 28%);
   --bg: #04151e;
   --panel: #0a2530;
   --panel-2: #103640;

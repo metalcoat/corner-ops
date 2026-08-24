@@ -69,11 +69,6 @@
   height: 100%;
 }
 
-/* Square is a Tiki-only source. Do not show the card while Corner Deli is selected. */
-html[data-business-theme="Corner Deli"] .integrationGrid > .integrationCard:nth-child(2) {
-  display: none !important;
-}
-
 /* Rezku monitor: keep every panel inside the viewport and make wide data intentionally scrollable. */
 .rezkuMonitorPage {
   width: min(100%, 1500px);

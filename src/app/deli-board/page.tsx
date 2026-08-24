@@ -211,6 +211,9 @@ export default function DeliBoardPage() {
   const visibleTasks = [...incompleteTasks, ...completedTasks].slice(0, 14);
   const currentStaff = schedule.filter((shift) => shift.current);
   const upcomingStaff = schedule.filter((shift) => !shift.current && new Date(shift.starts_at).getTime() > now.getTime()).slice(0, 5);
+  const generatedAt = new Date(data.generatedAt).getTime();
+  const staleMinutes = Number.isFinite(generatedAt) ? Math.max(0, Math.floor((now.getTime() - generatedAt) / 60_000)) : 999;
+  const stale = staleMinutes >= 3;
 
   return <main className="deliBoard">
     <header className="boardHeader">
@@ -220,6 +223,7 @@ export default function DeliBoardPage() {
     </header>
 
     {notice && <div className="boardNotice">{notice}</div>}
+    {stale && <div className="boardNotice">Live data is stale: the last successful board refresh was {staleMinutes} minute{staleMinutes === 1 ? "" : "s"} ago.</div>}
 
     <section className="boardStats">
       <article><span>Tasks remaining</span><strong>{data.taskSummary.remaining}</strong><small>{progress}% complete</small></article>
