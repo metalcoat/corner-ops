@@ -4,6 +4,14 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
   applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS application_key_material (
+  purpose TEXT PRIMARY KEY,
+  encrypted_private_value TEXT NOT NULL,
+  public_value TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 ALTER TABLE app_users
   ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1;
 
