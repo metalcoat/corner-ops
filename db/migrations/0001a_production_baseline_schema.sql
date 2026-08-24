@@ -8,7 +8,7 @@
 -- constraints, indexes, functions, triggers, and the public schema owner/ACL matched
 -- production exactly after reconstruction.
 --
--- Apply all 0001[a-i] files in lexical order on a fresh database, then apply
+-- Apply all 0001* baseline files in lexical order on a fresh database, then apply
 -- subsequent numbered migrations in lexical order. Do not apply the 0001 baseline
 -- to a database that already contains the Corner Ops schema.
 
