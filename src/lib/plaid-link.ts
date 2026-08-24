@@ -1,5 +1,5 @@
-import { createDecipheriv, createHash } from "node:crypto";
 import { getSql } from "@/lib/db";
+import { decryptIntegrationSecret as decryptSecret } from "@/lib/integration-crypto";
 import type { Business } from "@/lib/types";
 
 const PLAID_PRODUCTS = ["transactions"];
@@ -128,23 +128,6 @@ async function resilientToken(baseRequest: Record<string, unknown>, redirectUri:
     oauthCallbackToRegister: redirectUri,
     oauthWarning,
   };
-}
-
-function integrationKey(): Buffer {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required before bank connections can be managed.");
-  return createHash("sha256").update(`corner-ops-integrations:${secret}`).digest();
-}
-
-function decryptSecret(value: string): string {
-  const [ivText, tagText, encryptedText] = value.split(".");
-  if (!ivText || !tagText || !encryptedText) throw new Error("Stored Plaid credentials are invalid.");
-  const decipher = createDecipheriv("aes-256-gcm", integrationKey(), Buffer.from(ivText, "base64url"));
-  decipher.setAuthTag(Buffer.from(tagText, "base64url"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(encryptedText, "base64url")),
-    decipher.final(),
-  ]).toString("utf8");
 }
 
 export async function createResilientPlaidLinkToken(input: { business: Business; origin: string }) {
