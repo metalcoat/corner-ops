@@ -44,4 +44,18 @@ if meal_replacement not in text:
     text = text.replace(meal_needle, meal_replacement, 1)
 workforce_route.write_text(text)
 
+# Generated transforms must also satisfy git diff --check. Normalize trailing spaces
+# without otherwise reformatting source files.
+for path in [
+    APP / "api/deli-board/route.ts",
+    workforce,
+    workforce_route,
+    finance_page,
+    clock,
+]:
+    source = path.read_text()
+    had_newline = source.endswith("\n")
+    normalized = "\n".join(line.rstrip() for line in source.splitlines())
+    path.write_text(normalized + ("\n" if had_newline else ""))
+
 print("Stage 9 type-preservation and cancelled-shift visibility fixes applied")
