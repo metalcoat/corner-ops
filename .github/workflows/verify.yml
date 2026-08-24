@@ -24,12 +24,15 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Unit tests
+        run: npm test
       - name: Type check
         run: npm run typecheck
       - name: Build application
         run: npm run build
         env:
-          SESSION_SECRET: github-actions-build-placeholder-with-sufficient-length
-          EMPLOYMENT_FORMS_ENCRYPTION_KEY: github-actions-employment-key-placeholder-1234567890
+          SESSION_SECRET: github-actions-session-secret-with-more-than-64-bits-of-test-entropy
+          APP_EMAIL: owner@example.test
+          EMPLOYMENT_FORMS_ENCRYPTION_KEY: Y2ktb25seS0zMi1ieXRlLWVtcGxveW1lbnQta2V5ISE=
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
           BLOB_READ_WRITE_TOKEN: vercel_blob_rw_placeholder

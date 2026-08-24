@@ -64,7 +64,9 @@ export async function GET(request: NextRequest) {
       if (!election || election.employeeId !== session.employeeId || election.business !== session.business || election.status === "Superseded") {
         return NextResponse.json({ error: "Direct-deposit form was not found." }, { status: 404 });
       }
-      return NextResponse.json({ election });
+      return NextResponse.json({
+        election: election.status === "Assigned" ? election : { ...election, payload: undefined },
+      });
     }
 
     const elections = await listDirectDepositElections(session.business, session.employeeId);

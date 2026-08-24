@@ -1,4 +1,4 @@
-const DAY_MS = 24 * 60 * 60 * 1000;
+import { newYorkDateKey, newYorkDateTime, newYorkTimeValue } from "@/lib/schedule-meal-compliance";
 
 function dateValue(value: unknown, label: string): Date {
   const result = new Date(String(value || ""));
@@ -6,18 +6,27 @@ function dateValue(value: unknown, label: string): Date {
   return result;
 }
 
+function addDateKeyDays(value: string, days: number): string {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 export function normalizeScheduleTimeRange(startsAt: unknown, endsAt: unknown) {
   const start = dateValue(startsAt, "Shift start");
   let end = dateValue(endsAt, "Shift end");
 
-  // Scheduling forms commonly submit an overnight end time against the selected
-  // start date. Treat an end at or before the start as the following calendar day.
-  if (end <= start) end = new Date(end.getTime() + DAY_MS);
+  if (end <= start) {
+    end = newYorkDateTime(
+      addDateKeyDays(newYorkDateKey(start), 1),
+      newYorkTimeValue(end),
+    );
+  }
 
   if (end <= start) throw new Error("Shift end must be after the start.");
-  if (end.getTime() - start.getTime() > DAY_MS) {
-    throw new Error("A scheduled shift cannot exceed 24 hours.");
-  }
+  const localStartKey = newYorkDateKey(start);
+  const maximumEnd = newYorkDateTime(addDateKeyDays(localStartKey, 1), newYorkTimeValue(start));
+  if (end > maximumEnd) throw new Error("A scheduled shift cannot exceed 24 wall-clock hours.");
 
   return { start, end };
 }

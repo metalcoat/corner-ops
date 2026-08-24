@@ -2,7 +2,7 @@ import { Resend } from "resend";
 import { detectMissedShifts } from "@/lib/attendance";
 import { getSql } from "@/lib/db";
 import { runExpenseAutomation } from "@/lib/expense-control";
-import { payrollSummary } from "@/lib/operations";
+import { payrollSummary } from "@/lib/payroll-summary-rules";
 import { evaluateAndNotifyOvertimeRisk } from "@/lib/overtime-risk";
 import { generateDueRecurringInvoices } from "@/lib/receivables";
 import {

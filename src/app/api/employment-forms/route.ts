@@ -13,6 +13,7 @@ import {
   saveEmploymentFormProfile,
   type EmploymentFormProfile,
 } from "@/lib/employment-forms";
+import { redactEmploymentSensitiveData } from "@/lib/sensitive-redaction";
 import type { Business } from "@/lib/types";
 
 function businessValue(value: unknown): Business {
@@ -153,7 +154,7 @@ export async function GET(request: NextRequest) {
       const form = await getEmploymentForm(id);
       if (!form || form.business !== business) return NextResponse.json({ error: "Employment form was not found." }, { status: 404 });
       const audit = await formAudit(id);
-      return NextResponse.json({ form: { ...form, ...audit } });
+      return NextResponse.json({ form: redactEmploymentSensitiveData({ ...form, ...audit }) });
     }
     const [forms, employees, profile, actors] = await Promise.all([
       listEmploymentForms(business),

@@ -1,4 +1,5 @@
 import { getSql } from "@/lib/db";
+import { newYorkDateTime, payrollWeekBounds as weekBounds } from "@/lib/payroll-week";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -146,41 +147,6 @@ function dateValue(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function getOffsetMilliseconds(date: Date): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return Date.UTC(
-    Number(values.year), Number(values.month) - 1, Number(values.day),
-    Number(values.hour), Number(values.minute), Number(values.second),
-  ) - date.getTime();
-}
-
-function zonedDateToUtc(dateText: string, hour: number): Date {
-  const [year, month, day] = dateText.split("-").map(Number);
-  const wallTime = Date.UTC(year, month - 1, day, hour, 0, 0);
-  let timestamp = wallTime;
-  for (let index = 0; index < 3; index += 1) {
-    timestamp = wallTime - getOffsetMilliseconds(new Date(timestamp));
-  }
-  return new Date(timestamp);
-}
-
-function weekBounds(weekStart: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw new Error("Choose a valid payroll week.");
-  const start = zonedDateToUtc(weekStart, 0);
-  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
-  return { start, end };
-}
-
 function localHour(date: Date): number {
   return Number(new Intl.DateTimeFormat("en-US", {
     timeZone: TIME_ZONE,
@@ -225,7 +191,7 @@ function durationHours(shift: Shift): number {
 
 function driverHoursAfterThree(shift: Shift): number {
   if (!isDriver(shift) || !shift.clockIn || !shift.clockOut) return 0;
-  const cutoff = zonedDateToUtc(localDayKey(shift.clockIn), CUTOFF_HOUR);
+  const cutoff = newYorkDateTime(localDayKey(shift.clockIn), CUTOFF_HOUR);
   return Math.max(0, (shift.clockOut.getTime() - Math.max(shift.clockIn.getTime(), cutoff.getTime())) / 3_600_000);
 }
 

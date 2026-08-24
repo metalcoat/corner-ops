@@ -1,5 +1,6 @@
 import { clearEmployeeSession, createEmployeeSession, getEmployeeSession } from "@/lib/employee-auth";
-import { apiError } from "@/lib/http";
+import { apiError, RateLimitError } from "@/lib/http";
+import { assertRateLimit, authRatePolicies, clearRateLimit, recordRateLimitFailure, type RateLimitPolicy } from "@/lib/rate-limit";
 import type { Business } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -15,11 +16,19 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  let policies: RateLimitPolicy[] = [];
   try {
     const body = await request.json() as Record<string, unknown>;
-    const session = await createEmployeeSession(businessFrom(body.business), String(body.pin || ""));
+    const business = businessFrom(body.business);
+    policies = authRatePolicies("employee-session", request, business);
+    await assertRateLimit(policies);
+    const session = await createEmployeeSession(business, String(body.pin || ""));
+    await clearRateLimit(policies);
     return Response.json({ authenticated: true, session });
   } catch (error) {
+    if (policies.length && !(error instanceof RateLimitError)) {
+      await recordRateLimitFailure(policies).catch((failure) => console.error("[employee/session] rate-limit record failed", failure));
+    }
     return apiError(error);
   }
 }
