@@ -8,6 +8,7 @@ on:
     paths:
       - tools/stage3_publish.py
       - tools/stage3_reliability.py
+      - tools/stage3_fixups.py
       - .github/workflows/stage3-remediation.yml
 
 permissions:
@@ -45,7 +46,7 @@ jobs:
           LOG=/tmp/stage3.log
           : > "$LOG"
           SCRIPT_RC=0
-          for script in tools/stage3_publish.py tools/stage3_reliability.py; do
+          for script in tools/stage3_publish.py tools/stage3_reliability.py tools/stage3_fixups.py; do
             python3 "$script" >>"$LOG" 2>&1 || { SCRIPT_RC=$?; break; }
           done
           if [ "$SCRIPT_RC" -eq 0 ]; then npm ci >>"$LOG" 2>&1; INSTALL_RC=$?; else INSTALL_RC=99; fi
@@ -57,7 +58,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if [ "$SCRIPT_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ] && [ "$TYPE_RC" -eq 0 ] && [ "$BUILD_RC" -eq 0 ]; then
-            rm -f tools/stage3_publish.py tools/stage3_reliability.py .github/workflows/stage3-remediation.yml .stage3-remediation-status.md
+            rm -f tools/stage3_publish.py tools/stage3_reliability.py tools/stage3_fixups.py .github/workflows/stage3-remediation.yml .stage3-remediation-status.md
             git add -A
             git diff --cached --check || exit 1
             git commit -m "Stage 3 stop silent operational failures"
