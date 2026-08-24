@@ -4,7 +4,8 @@
     "deploymentEnabled": {
       "agent/rebuild-corner-ops": false,
       "agent/vercel-cost-stabilization": false,
-      "agent/full-codebase-review-remediation": false
+      "agent/full-codebase-review-remediation": false,
+      "agent/codebase-review-stage-2": false
     }
   },
   "crons": [
