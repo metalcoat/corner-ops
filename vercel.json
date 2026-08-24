@@ -1,17 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "git": {
-    "deploymentEnabled": {
-      "agent/rebuild-corner-ops": false,
-      "agent/vercel-cost-stabilization": false,
-      "agent/full-codebase-review-remediation": false,
-      "agent/codebase-review-stage-2": false,
-      "agent/codebase-review-stage-3": false,
-      "agent/codebase-review-stage-4": false,
-      "agent/rezku-reliability-hotfix": false,
-      "agent/codebase-review-stage-5-runtime": false
-    }
-  },
   "crons": [
     {
       "path": "/api/cron/scheduler-0700",

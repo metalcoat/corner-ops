@@ -4,7 +4,7 @@ Corner Ops is the owner and employee operations system for Corner Deli and Tiki.
 
 ## Development status
 
-Production deployments are intentionally paused. Current work remains on the deployment-disabled `agent/rebuild-corner-ops` branch and draft pull request #3 until the owner explicitly authorizes deployment.
+Production deploys from `main` through Vercel. Remediation branches are allowed to create preview deployments, and changes are tested before they are merged to production.
 
 ## Banking and historical imports
 
@@ -75,9 +75,10 @@ Corner Ops includes an installable PWA shell, owner and employee messaging, push
 Core deployment variables include:
 
 - `DATABASE_URL`
-- `SESSION_SECRET`
-- `BLOB_READ_WRITE_TOKEN`
-- `EMPLOYMENT_FORMS_ENCRYPTION_KEY` with at least 32 characters
+- `SESSION_SECRET` as the legacy transition key, plus purpose-specific owner/employee/wallboard session secrets
+- `EMPLOYEE_PIN_PEPPER`, `INTEGRATION_ENCRYPTION_KEY`, `SQUARE_OAUTH_STATE_SECRET`, and `KEY_ENCRYPTION_KEY` for independent credential rotation
+- `BLOB_READ_WRITE_TOKEN` (or Vercel Blob OIDC configuration)
+- `EMPLOYMENT_FORMS_ENCRYPTION_KEY` with strong random key material
 - `CRON_SECRET`
 - Plaid credentials and optional `PLAID_LINK_CUSTOMIZATION_NAME`
 - Azure Document Intelligence endpoint and key
