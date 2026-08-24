@@ -1,14 +1,4 @@
-:root {
-  color-scheme: dark;
-  --bg: #0c1017;
-  --panel: #151b25;
-  --panel-2: #1b2330;
-  --border: #2b3546;
-  --muted: #93a0b4;
-  --text: #f3f6fb;
-  --accent: #f0a23a;
-  --danger: #ff9b9b;
-}
+:root { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: Arial, Helvetica, sans-serif; }

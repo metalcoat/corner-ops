@@ -478,7 +478,7 @@ export default function EmployeePage() {
 
     <nav className="employeeTabs" aria-label="Employee Hub sections">
       {(["schedule", "messages", "requests", "time", "availability"] as Tab[]).map((name) => (
-        <button key={name} className={tab === name ? "active" : ""} onClick={() => setTab(name)}>
+        <button key={name} className={`${tab === name ? "active" : ""}${name === "time" ? " employeeTimeTab" : ""}`.trim()} onClick={() => setTab(name)}>
           {name === "time" ? "Time & corrections" : name[0].toUpperCase() + name.slice(1)}
         </button>
       ))}
