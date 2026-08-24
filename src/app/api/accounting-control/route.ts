@@ -1,5 +1,6 @@
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
+import { reverseJournalEntry } from "@/lib/journal-reversal";
 import {
   accountingControlDashboard,
   buildSquareDepositSuggestions,
@@ -76,6 +77,7 @@ export async function POST(request: Request) {
         institutionName: String(form.get("institutionName") || "Historical workbook"),
         fileName: file.name,
         bytes: await file.arrayBuffer(),
+        accountType: form.get("accountType") === "credit" ? "credit" : "depository",
         postApproved: String(form.get("postApproved") || "") === "true",
         actor: session.email,
       }), { status: 201 });
@@ -87,10 +89,11 @@ export async function POST(request: Request) {
       if (!canAccessBusiness(session, "Tiki")) return Response.json({ error: "Business access denied." }, { status: 403 });
       return Response.json(await syncSquareOperations());
     }
+    if (["square-match-build", "square-match-status", "square-day-post"].includes(action) && !canAccessBusiness(session, "Tiki")) {
+      return Response.json({ error: "Business access denied." }, { status: 403 });
+    }
     if (action === "square-match-build") return Response.json(await buildSquareDepositSuggestions(session.email));
-    if (action === "square-match-status") return Response.json(await setSquareDepositMatchStatus({
-      id: String(body.id || ""), status: body.status === "Ignored" ? "Ignored" : "Matched", actor: session.email,
-    }));
+    if (action === "square-match-status") return Response.json(await setSquareDepositMatchStatus({ id: String(body.id || ""), status: body.status === "Ignored" ? "Ignored" : "Matched", actor: session.email }));
     if (action === "square-day-post") return Response.json(await postSquareDay({ businessDate: String(body.businessDate || ""), actor: session.email }));
 
     const business = businessFrom(body.business);
@@ -144,7 +147,10 @@ export async function POST(request: Request) {
       transactionIds: Array.isArray(body.transactionIds) ? body.transactionIds.map(String) : [], notes: String(body.notes || ""),
       finalize: Boolean(body.finalize), actor: session.email,
     }));
-    if (action === "reconciliation-reopen") return Response.json(await reopenBankReconciliation(String(body.id || ""), session.email));
+    if (action === "reconciliation-reopen") return Response.json(await reopenBankReconciliation(String(body.id || ""), business, session.email));
+    if (action === "journal-reverse") return Response.json(await reverseJournalEntry({
+      entryId: String(body.entryId || ""), business, actor: session.email, reason: String(body.reason || "Manual accounting correction"),
+    }));
     return Response.json({ error: "Unknown accounting action." }, { status: 400 });
   } catch (error) {
     return apiError(error);

@@ -126,8 +126,10 @@ async function paymentCandidates(business: Business, statementEndDate: string, p
   return await getSql()`
     SELECT id, transaction_date, merchant_name, description, signed_amount,
       ABS(transaction_date - ${statementEndDate}::date) AS date_distance
-    FROM bank_transactions
-    WHERE business = ${business}
+    FROM bank_transactions t
+    JOIN bank_accounts a ON a.external_account_id = t.external_account_id
+    WHERE t.business = ${business}
+      AND a.account_type <> 'credit'
       AND removed = FALSE
       AND signed_amount = ${-Math.abs(paymentAmount)}
       AND transaction_date >= ${statementEndDate}::date - 10
@@ -283,6 +285,7 @@ export async function confirmCardStatementMatch(input: {
     SELECT s.id
     FROM credit_card_statements s
     JOIN bank_transactions t ON t.id = ${input.bankTransactionId} AND t.business = s.business
+    JOIN bank_accounts a ON a.external_account_id = t.external_account_id AND a.account_type <> 'credit'
     WHERE s.id = ${input.statementId} AND s.business = ${input.business}
       AND t.signed_amount = -ABS(s.payment_amount)
     LIMIT 1

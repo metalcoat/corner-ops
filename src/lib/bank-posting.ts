@@ -1,5 +1,7 @@
 import { ensureAccountingControlSchema } from "@/lib/accounting-control";
 import { getSql } from "@/lib/db";
+import { ValidationError } from "@/lib/http";
+import { assertBalancedJournalLines } from "@/lib/journal-integrity";
 import type { Business } from "@/lib/types";
 
 function clean(value: unknown, max = 255): string {
@@ -41,92 +43,28 @@ async function loadTransaction(id: string, business: Business) {
 }
 
 export async function postFinancialTransaction(input: {
-  transactionId: string;
-  business: Business;
-  actor: string;
+  transactionId: string; business: Business; actor: string;
 }) {
   await ensureAccountingControlSchema();
-  await getSql()`ALTER TABLE bank_transaction_splits ADD COLUMN IF NOT EXISTS invoice_id UUID`;
   const transaction = await loadTransaction(input.transactionId, input.business);
-  if (transaction.pending) throw new Error("Pending transactions cannot be posted.");
-  if (transaction.removed) throw new Error("Removed transactions cannot be posted.");
-  if (transaction.review_status !== "Approved") throw new Error("Approve the transaction before posting it.");
-
-  const existing = await getSql()`
-    SELECT journal_entry_id FROM bank_transaction_postings
-    WHERE bank_transaction_id = ${input.transactionId}
-    LIMIT 1
-  ` as unknown as Array<{ journal_entry_id: string }>;
-  if (existing[0]) return { posted: false, journalEntryId: existing[0].journal_entry_id, duplicate: true };
-
-  const splitRows = await getSql()`
-    SELECT account_code, amount, memo, invoice_id FROM bank_transaction_splits
-    WHERE bank_transaction_id = ${input.transactionId}
-    ORDER BY line_number
-  ` as unknown as Array<{ account_code: string; amount: string | number; memo: string; invoice_id: string | null }>;
-  const amount = roundMoney(Math.abs(numberValue(transaction.signed_amount)));
-  const categoryLines = splitRows.length
-    ? splitRows.map((row) => ({
-        code: row.invoice_id ? "1200" : clean(row.account_code, 20),
-        amount: roundMoney(numberValue(row.amount)),
-        memo: row.memo,
-      }))
-    : [{ code: clean(transaction.account_code, 20), amount, memo: "" }];
-  if (!categoryLines[0].code) throw new Error("Choose an accounting account before posting.");
-  if (Math.abs(categoryLines.reduce((sum, line) => sum + line.amount, 0) - amount) > 0.005) {
-    throw new Error("Transaction splits no longer equal the imported amount.");
-  }
-
-  const controlCode = transaction.account_type === "credit" ? "2100" : "1000";
-  const controlId = await accountId(input.business, controlCode);
-  const categoryIds = new Map<string, string>();
-  for (const line of categoryLines) categoryIds.set(line.code, await accountId(input.business, line.code));
-
-  const entryId = crypto.randomUUID();
-  const description = clean(transaction.merchant_name || transaction.description, 240)
-    || (transaction.account_type === "credit" ? "Credit-card transaction" : "Bank transaction");
-  const source = transaction.account_type === "credit" ? "Credit Card Import" : "Bank Import";
-  await getSql()`
-    INSERT INTO journal_entries (id, business, entry_date, description, source, reference, created_by)
-    VALUES (
-      ${entryId}, ${input.business}, ${String(transaction.transaction_date)}, ${description},
-      ${source}, ${`financial:${transaction.external_transaction_id}`}, ${input.actor}
-    )
-  `;
-
-  try {
-    if (numberValue(transaction.signed_amount) > 0) {
-      await getSql()`
-        INSERT INTO journal_lines (id, entry_id, account_id, debit, credit)
-        VALUES (${crypto.randomUUID()}, ${entryId}, ${controlId}, ${amount}, 0)
-      `;
-      for (const line of categoryLines) {
-        await getSql()`
-          INSERT INTO journal_lines (id, entry_id, account_id, debit, credit)
-          VALUES (${crypto.randomUUID()}, ${entryId}, ${categoryIds.get(line.code)!}, 0, ${line.amount})
-        `;
-      }
-    } else {
-      for (const line of categoryLines) {
-        await getSql()`
-          INSERT INTO journal_lines (id, entry_id, account_id, debit, credit)
-          VALUES (${crypto.randomUUID()}, ${entryId}, ${categoryIds.get(line.code)!}, ${line.amount}, 0)
-        `;
-      }
-      await getSql()`
-        INSERT INTO journal_lines (id, entry_id, account_id, debit, credit)
-        VALUES (${crypto.randomUUID()}, ${entryId}, ${controlId}, 0, ${amount})
-      `;
-    }
-    await getSql()`
-      INSERT INTO bank_transaction_postings (id, bank_transaction_id, journal_entry_id, posted_by)
-      VALUES (${crypto.randomUUID()}, ${input.transactionId}, ${entryId}, ${input.actor})
-    `;
-  } catch (error) {
-    await getSql()`DELETE FROM journal_entries WHERE id = ${entryId}`;
-    throw error;
-  }
-  return { posted: true, journalEntryId: entryId, controlAccount: controlCode };
+  if (transaction.pending) throw new ValidationError("Pending transactions cannot be posted.");
+  if (transaction.removed) throw new ValidationError("Removed transactions cannot be posted.");
+  if (transaction.review_status !== "Approved") throw new ValidationError("Approve the transaction before posting it.");
+  const sql=getSql();
+  const existing=await sql`SELECT journal_entry_id FROM bank_transaction_postings WHERE bank_transaction_id=${input.transactionId} LIMIT 1` as unknown as Array<{journal_entry_id:string}>;
+  if(existing[0]) return {posted:false,journalEntryId:existing[0].journal_entry_id,duplicate:true};
+  const splitRows=await sql`SELECT account_code,amount,memo,invoice_id FROM bank_transaction_splits WHERE bank_transaction_id=${input.transactionId} ORDER BY line_number` as unknown as Array<{account_code:string;amount:string|number;memo:string;invoice_id:string|null}>;
+  const amount=roundMoney(Math.abs(numberValue(transaction.signed_amount)));
+  const categoryLines=splitRows.length?splitRows.map((row)=>({code:row.invoice_id?"1200":clean(row.account_code,20),amount:roundMoney(numberValue(row.amount))})):[{code:clean(transaction.account_code,20),amount}];
+  if(!categoryLines[0].code) throw new ValidationError("Choose an accounting account before posting.");
+  if(Math.abs(categoryLines.reduce((s,l)=>s+l.amount,0)-amount)>0.005) throw new ValidationError("Transaction splits no longer equal the imported amount.");
+  const controlCode=transaction.account_type==="credit"?"2100":"1000"; const controlId=await accountId(input.business,controlCode); const categoryIds=new Map<string,string>(); for(const l of categoryLines) categoryIds.set(l.code,await accountId(input.business,l.code));
+  const positive=numberValue(transaction.signed_amount)>0;
+  const journalLines=positive?[{accountId:controlId,debit:amount,credit:0},...categoryLines.map((l)=>({accountId:categoryIds.get(l.code)!,debit:0,credit:l.amount}))]:[...categoryLines.map((l)=>({accountId:categoryIds.get(l.code)!,debit:l.amount,credit:0})),{accountId:controlId,debit:0,credit:amount}];
+  assertBalancedJournalLines(journalLines);
+  const entryId=crypto.randomUUID(); const description=clean(transaction.merchant_name||transaction.description,240)||(transaction.account_type==="credit"?"Credit-card transaction":"Bank transaction"); const source=transaction.account_type==="credit"?"Credit Card Import":"Bank Import";
+  await sql.transaction([sql`INSERT INTO journal_entries (id,business,entry_date,description,source,reference,created_by) VALUES (${entryId},${input.business},${String(transaction.transaction_date)},${description},${source},${`financial:${transaction.external_transaction_id}`},${input.actor})`,...journalLines.map((l)=>sql`INSERT INTO journal_lines (id,entry_id,account_id,debit,credit) VALUES (${crypto.randomUUID()},${entryId},${l.accountId},${l.debit},${l.credit})`),sql`INSERT INTO bank_transaction_postings (id,bank_transaction_id,journal_entry_id,posted_by) VALUES (${crypto.randomUUID()},${input.transactionId},${entryId},${input.actor})`]);
+  return {posted:true,journalEntryId:entryId,controlAccount:controlCode};
 }
 
 export async function postAllApprovedFinancialTransactions(input: { business: Business; actor: string }) {

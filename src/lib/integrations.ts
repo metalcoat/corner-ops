@@ -1,6 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import * as XLSX from "xlsx";
 import { ensureSchema, getSql } from "@/lib/db";
+import { ValidationError } from "@/lib/http";
+import { reversePostedBankTransaction } from "@/lib/journal-reversal";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -396,7 +398,7 @@ async function upsertBankAccounts(connectionId: string, business: Business, inst
         current_balance = EXCLUDED.current_balance,
         available_balance = EXCLUDED.available_balance,
         currency = EXCLUDED.currency,
-        active = TRUE,
+        active = bank_accounts.active,
         updated_at = NOW()
     `;
   }
@@ -420,6 +422,14 @@ export async function exchangePlaidPublicToken(input: {
   });
   const institution = clean(input.institutionName, 120)
     || await institutionName(item.item?.institution_id || "");
+  const existingItem = await getSql()`
+    SELECT business FROM integration_connections
+    WHERE provider = 'Plaid' AND external_item_id = ${exchanged.item_id}
+    LIMIT 1
+  ` as unknown as Array<{ business: Business }>;
+  if (existingItem[0] && existingItem[0].business !== input.business) {
+    throw new ValidationError(`This Plaid item is already assigned to ${existingItem[0].business}. Disconnect it there before moving it.`);
+  }
 
   const rows = await getSql()`
     INSERT INTO integration_connections (
@@ -515,15 +525,19 @@ async function rulesForBusiness(business: Business): Promise<ClassificationRule[
   ` as unknown as ClassificationRule[];
 }
 
-async function loadConnection(connectionId: string): Promise<ConnectionRow> {
-  const rows = await getSql()`
-    SELECT id, provider, business, institution_name, external_item_id, encrypted_access_token,
-      encrypted_refresh_token, token_expires_at, cursor, status, metadata, last_sync_at, created_at, updated_at
-    FROM integration_connections
-    WHERE id = ${connectionId}
-    LIMIT 1
-  ` as unknown as ConnectionRow[];
-  if (!rows[0]) throw new Error("Integration connection was not found.");
+async function loadConnection(connectionId: string, expectedBusiness?: Business): Promise<ConnectionRow> {
+  const rows = expectedBusiness
+    ? await getSql()`
+        SELECT id, provider, business, institution_name, external_item_id, encrypted_access_token,
+          encrypted_refresh_token, token_expires_at, cursor, status, metadata, last_sync_at, created_at, updated_at
+        FROM integration_connections WHERE id = ${connectionId} AND business = ${expectedBusiness} LIMIT 1
+      ` as unknown as ConnectionRow[]
+    : await getSql()`
+        SELECT id, provider, business, institution_name, external_item_id, encrypted_access_token,
+          encrypted_refresh_token, token_expires_at, cursor, status, metadata, last_sync_at, created_at, updated_at
+        FROM integration_connections WHERE id = ${connectionId} LIMIT 1
+      ` as unknown as ConnectionRow[];
+  if (!rows[0]) throw new ValidationError("Integration connection was not found for this business.");
   return rows[0];
 }
 
@@ -595,9 +609,9 @@ async function upsertPlaidTransaction(connection: ConnectionRow, transaction: Pl
   return modified;
 }
 
-export async function syncBankConnection(connectionId: string) {
+export async function syncBankConnection(connectionId: string, expectedBusiness?: Business) {
   await ensureIntegrationSchema();
-  const connection = await loadConnection(connectionId);
+  const connection = await loadConnection(connectionId, expectedBusiness);
   if (connection.provider !== "Plaid") throw new Error("This connection is not a Plaid bank connection.");
   const syncId = await startSync(connection);
   try {
@@ -622,14 +636,52 @@ export async function syncBankConnection(connectionId: string) {
         added += 1;
       }
       for (const transaction of page.modified || []) {
+        const current = await getSql()`
+          SELECT id, signed_amount FROM bank_transactions
+          WHERE external_transaction_id = ${transaction.transaction_id} AND business = ${connection.business}
+          LIMIT 1
+        ` as unknown as Array<{ id: string; signed_amount: string | number }>;
+        const nextAmount = Math.round(-numberValue(transaction.amount) * 100) / 100;
+        const amountChanged = current[0] && Math.abs(numberValue(current[0].signed_amount) - nextAmount) > 0.005;
+        let reversal = null;
+        if (current[0] && amountChanged) {
+          reversal = await reversePostedBankTransaction({
+            transactionId: current[0].id,
+            business: connection.business,
+            actor: "Plaid sync",
+            reason: `Plaid changed amount to ${nextAmount.toFixed(2)}`,
+          });
+        }
         await upsertPlaidTransaction(connection, transaction, rules, true);
+        if (current[0] && amountChanged) {
+          await getSql()`UPDATE bank_transactions SET review_status = 'Needs Review', updated_at = NOW() WHERE id = ${current[0].id} AND business = ${connection.business}`;
+          if (reversal?.reversed) await createOperationIssue({
+            issueKey: `plaid-posted-modified:${current[0].id}`,
+            business: connection.business,
+            issueType: "Ledger Feed Change",
+            severity: "Warning",
+            title: "Posted bank transaction changed in Plaid",
+            details: `The prior journal entry was reversed because Plaid changed the transaction amount to ${nextAmount.toFixed(2)}. Review and repost the updated transaction.`,
+            reference: current[0].id,
+          });
+        }
         modified += 1;
       }
       for (const transaction of page.removed || []) {
-        await getSql()`
-          UPDATE bank_transactions SET removed = TRUE, updated_at = NOW()
-          WHERE external_transaction_id = ${transaction.transaction_id}
-        `;
+        const current = await getSql()`SELECT id FROM bank_transactions WHERE external_transaction_id = ${transaction.transaction_id} AND business = ${connection.business} LIMIT 1` as unknown as Array<{ id: string }>;
+        if (current[0]) {
+          const reversal = await reversePostedBankTransaction({ transactionId: current[0].id, business: connection.business, actor: "Plaid sync", reason: "Plaid removed the transaction" });
+          await getSql()`UPDATE bank_transactions SET removed = TRUE, review_status = 'Needs Review', updated_at = NOW() WHERE id = ${current[0].id} AND business = ${connection.business}`;
+          if (reversal.reversed) await createOperationIssue({
+            issueKey: `plaid-posted-removed:${current[0].id}`,
+            business: connection.business,
+            issueType: "Ledger Feed Change",
+            severity: "Warning",
+            title: "Posted bank transaction was removed by Plaid",
+            details: "The prior journal entry was reversed and the bank transaction was hidden from normal posting until reviewed.",
+            reference: current[0].id,
+          });
+        }
         removed += 1;
       }
       cursor = page.next_cursor;
@@ -1040,67 +1092,17 @@ export async function createOperationIssue(input: {
   `;
 }
 
-export async function integrationDashboard(business?: Business) {
+export async function integrationDashboard(business: Business, includeGlobal = false) {
   await ensureIntegrationSchema();
-  const connections = business
-    ? await getSql()`
-        SELECT id, provider, business, institution_name, status, metadata, last_sync_at, created_at, updated_at
-        FROM integration_connections WHERE business = ${business} ORDER BY provider, created_at
-      ` as unknown as Array<Record<string, unknown>>
-    : await getSql()`
-        SELECT id, provider, business, institution_name, status, metadata, last_sync_at, created_at, updated_at
-        FROM integration_connections ORDER BY business, provider, created_at
-      ` as unknown as Array<Record<string, unknown>>;
-  const accounts = business
-    ? await getSql()`
-        SELECT id, business, institution_name, name, official_name, mask, account_type, account_subtype,
-          current_balance, available_balance, currency, active, updated_at
-        FROM bank_accounts WHERE business = ${business} ORDER BY institution_name, name
-      ` as unknown as Array<Record<string, unknown>>
-    : [];
-  const transactions = business
-    ? await getSql()`
-        SELECT id, transaction_date, merchant_name, description, signed_amount, direction, pending,
-          category, account_code, classification_source, confidence, review_status, user_override
-        FROM bank_transactions
-        WHERE business = ${business} AND removed = FALSE
-        ORDER BY transaction_date DESC, created_at DESC
-        LIMIT 150
-      ` as unknown as Array<Record<string, unknown>>
-    : [];
-  const accountingAccounts = business
-    ? await getSql()`
-        SELECT code, name, account_type FROM accounting_accounts
-        WHERE business = ${business} AND active = TRUE
-        ORDER BY code
-      ` as unknown as Array<Record<string, unknown>>
-    : [];
-  const syncRuns = await getSql()`
-    SELECT id, connection_id, provider, business, status, records_added, records_modified,
-      records_removed, message, started_at, completed_at
-    FROM integration_sync_runs ORDER BY started_at DESC LIMIT 40
-  ` as unknown as Array<Record<string, unknown>>;
-  const issues = await getSql()`
-    SELECT id, business, issue_type, severity, title, details, reference, status, first_seen_at, last_seen_at
-    FROM operation_issues WHERE status = 'Open' ORDER BY severity DESC, last_seen_at DESC LIMIT 50
-  ` as unknown as Array<Record<string, unknown>>;
-  const schedulerRuns = await getSql()`
-    SELECT id, run_key, local_date, local_hour, status, details, started_at, completed_at
-    FROM scheduler_runs ORDER BY started_at DESC LIMIT 20
-  ` as unknown as Array<Record<string, unknown>>;
-  const payrollRuns = business
-    ? await getSql()`
-        SELECT id, business, week_start, week_end, status, generated_by, generated_at, updated_at
-        FROM payroll_runs WHERE business = ${business} ORDER BY week_start DESC LIMIT 20
-      ` as unknown as Array<Record<string, unknown>>
-    : [];
-  const squareSummary = business === "Tiki"
-    ? await getSql()`
-        SELECT COALESCE(SUM(amount), 0) AS sales, COALESCE(SUM(tip_amount), 0) AS tips, COUNT(*) AS payments
-        FROM square_payments
-        WHERE status = 'COMPLETED' AND created_at_square >= NOW() - INTERVAL '30 days'
-      ` as unknown as Array<Record<string, unknown>>
-    : [];
+  const connections = await getSql()`SELECT id, provider, business, institution_name, status, metadata, last_sync_at, created_at, updated_at FROM integration_connections WHERE business = ${business} ORDER BY provider, created_at` as unknown as Array<Record<string, unknown>>;
+  const accounts = await getSql()`SELECT id, business, institution_name, name, official_name, mask, account_type, account_subtype, current_balance, available_balance, currency, active, updated_at FROM bank_accounts WHERE business = ${business} ORDER BY institution_name, name` as unknown as Array<Record<string, unknown>>;
+  const transactions = await getSql()`SELECT id, transaction_date, merchant_name, description, signed_amount, direction, pending, category, account_code, classification_source, confidence, review_status, user_override FROM bank_transactions WHERE business = ${business} AND removed = FALSE ORDER BY transaction_date DESC, created_at DESC LIMIT 150` as unknown as Array<Record<string, unknown>>;
+  const accountingAccounts = await getSql()`SELECT code, name, account_type FROM accounting_accounts WHERE business = ${business} AND active = TRUE ORDER BY code` as unknown as Array<Record<string, unknown>>;
+  const syncRuns = await getSql()`SELECT id, connection_id, provider, business, status, records_added, records_modified, records_removed, message, started_at, completed_at FROM integration_sync_runs WHERE business = ${business} ORDER BY started_at DESC LIMIT 40` as unknown as Array<Record<string, unknown>>;
+  const issues = await getSql()`SELECT id, business, issue_type, severity, title, details, reference, status, first_seen_at, last_seen_at FROM operation_issues WHERE business = ${business} AND status = 'Open' ORDER BY severity DESC, last_seen_at DESC LIMIT 50` as unknown as Array<Record<string, unknown>>;
+  const schedulerRuns = includeGlobal ? await getSql()`SELECT id, run_key, local_date, local_hour, status, details, started_at, completed_at FROM scheduler_runs ORDER BY started_at DESC LIMIT 20` as unknown as Array<Record<string, unknown>> : [];
+  const payrollRuns = await getSql()`SELECT id, business, week_start, week_end, status, generated_by, generated_at, updated_at FROM payroll_runs WHERE business = ${business} ORDER BY week_start DESC LIMIT 20` as unknown as Array<Record<string, unknown>>;
+  const squareSummary = business === "Tiki" ? await getSql()`SELECT COALESCE(SUM(amount), 0) AS sales, COALESCE(SUM(tip_amount), 0) AS tips, COUNT(*) AS payments FROM square_payments WHERE status = 'COMPLETED' AND created_at_square >= NOW() - INTERVAL '30 days'` as unknown as Array<Record<string, unknown>> : [];
 
   return {
     configuration: {
