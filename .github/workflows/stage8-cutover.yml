@@ -19,7 +19,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: corner-ops-stage8-cutover
+  group: corner-ops-stage8-cutover-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
