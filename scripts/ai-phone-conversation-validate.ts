@@ -22,11 +22,12 @@ async function main(){
   assert.ok(!webhookSource.includes("reasoning:{effort"),"GPT-Realtime 1.5 call acceptance must not send reasoning configuration.");
   assert.ok(webhookSource.includes("max_output_tokens:1024"),"Function arguments and complete questions must not be constrained by the old 80-token ceiling.");
   assert.ok(webhookSource.includes('voice:"marin"')&&webhookSource.includes("speed:1.04")&&webhookSource.includes('noise_reduction:{type:"far_field"}'),"The live voice must use warm Marin delivery and speakerphone-oriented noise reduction.");
-  assert.ok(webhookSource.includes("tools:[OPENAI_PRICE_ORDER_TOOL]"),"Realtime calls must use the direct atomic pricing function.");
+  assert.ok(webhookSource.includes("tools:[OPENAI_PRICE_ORDER_TOOL,OPENAI_MENU_SEARCH_TOOL]"),"Realtime calls must use direct atomic pricing and current-menu lookup functions.");
   assert.ok(!webhookSource.includes('type:"mcp"'),"Realtime calls must not wait on hosted MCP discovery.");
   assert.ok(webhookSource.includes("create_response:false"),"The sideband must debounce customer turns instead of interjecting on every VAD pause.");
   assert.ok(webhookSource.includes("interrupt_response:false"),"Incidental VAD events must not cancel an active sentence.");
   const sidebandSource=await readFile(new URL("../src/lib/openai-phone-sideband.ts",import.meta.url),"utf8");
+  assert.ok(sidebandSource.includes('row.name==="menu_search"')&&sidebandSource.includes("menuCatalog"),"Menu descriptions must be retrieved on the actual realtime sideband.");
   assert.ok(sidebandSource.includes("max_output_tokens:128"),"The mandatory opening must have enough audio-token budget to finish exactly.");
   assert.ok(sidebandSource.includes('response.function_call_arguments.done')&&sidebandSource.includes('function_call_output'),"The sideband must execute and return native pricing calls.");
   assert.ok(sidebandSource.includes("response.completion_retry")&&sidebandSource.includes("production_truncated_response"),"Truncated speech must retry and become a regression case.");

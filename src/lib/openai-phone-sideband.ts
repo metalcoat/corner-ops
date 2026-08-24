@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { getSql } from "@/lib/db";
 import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
-import { AiToolError,auditAiTool,priceSpokenOrder,serviceType,type SpokenOrderItem } from "@/lib/ordering-ai-tools";
+import { AiToolError,auditAiTool,menuCatalog,priceSpokenOrder,serviceType,type SpokenOrderItem } from "@/lib/ordering-ai-tools";
 import { recordAiRegression } from "@/lib/ordering-ai-regressions";
 import { openAiClient } from "@/lib/openai-phone-ordering";
 
@@ -56,6 +56,7 @@ export function startOpenAiSideband(callId:string,greeting:string,model:string){
     }
     socket.send(JSON.stringify({type:"response.create",response:{output_modalities:["audio"],tool_choice:"auto"}}));
   };
+  const executeMenuSearch=async(row:Record<string,any>)=>{let result:unknown;try{const args=JSON.parse(String(row.arguments||"{}")) as Record<string,unknown>;result=await menuCatalog("Corner Deli",new Date(),String(args.query||""))}catch{result={error:{code:"CATALOG_UNAVAILABLE",message:"I can't verify that item right now."}}}socket.send(JSON.stringify({type:"conversation.item.create",item:{type:"function_call_output",call_id:row.call_id,output:JSON.stringify(result)}}));socket.send(JSON.stringify({type:"response.create",response:{output_modalities:["audio"],tool_choice:"auto"}}))};
   socket.on("message",data=>{try{
     const row=JSON.parse(String(data)) as Record<string,any>,type=String(row.type||""),eventId=String(row.event_id||`${type}:${Date.now()}`),key=`${callId}:${eventId}`;
     if(type==="input_audio_buffer.speech_started"){
@@ -76,6 +77,7 @@ export function startOpenAiSideband(callId:string,greeting:string,model:string){
       customerTurnPending=false;
     }else if(type==="response.output_item.added"&&(row.item?.type==="mcp_call"||row.item?.type==="function_call")){toolUsedForTurn=true;void event(callId,key,type,"tool",`Using ${row.item.name||"ordering tool"}`)}
     else if(type==="response.function_call_arguments.done"&&row.name==="price_order"){toolUsedForTurn=true;void executePriceOrder(row)}
+    else if(type==="response.function_call_arguments.done"&&row.name==="menu_search"){toolUsedForTurn=true;void executeMenuSearch(row)}
     else if(type==="response.mcp_call.completed"){toolUsedForTurn=true;void event(callId,key,type,"tool","Ordering tool completed")}
     else if(type==="response.mcp_call.failed")void event(callId,key,type,"error","Ordering tool failed");
     else if(type==="output_audio_buffer.stopped"&&hangupAfterPlayback){hangupAfterPlayback=false;void hangup()}
