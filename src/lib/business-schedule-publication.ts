@@ -399,7 +399,7 @@ export async function publishBusinessScheduleWeek(input: {
       ${contacts.length}, 0, ${emailMissingCount}, 0, ${emailConfigured}, 0, 0, 0, FALSE,
       ${JSON.stringify(baseDetails)}::jsonb, ${idempotencyKey}, 'Pending'
     )
-    ON CONFLICT (idempotency_key) DO NOTHING
+    ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
     RETURNING id
   ` as unknown as Array<{ id: string }>;
 
