@@ -58,7 +58,45 @@ jobs:
           else
             INSTALL_RC=99
           fi
-          if [ "$TRANSFORM_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ]; then npm audit --audit-level=high >>"$LOG" 2>&1; AUDIT_RC=$?; else AUDIT_RC=99; fi
+
+          # npm's registry advisory cannot model maintained SheetJS releases distributed from
+          # the project's CDN. Verify that exact fixed artifact, then fail on every other
+          # high/critical advisory instead of globally suppressing audit failures.
+          if [ "$TRANSFORM_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ]; then
+            npm audit --json >/tmp/npm-audit.json 2>>"$LOG"
+            python3 - <<'PY' >>"$LOG" 2>&1
+          import json, sys
+          from pathlib import Path
+
+          lock = json.loads(Path('package-lock.json').read_text())
+          xlsx = lock.get('packages', {}).get('node_modules/xlsx', {})
+          expected = 'https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz'
+          if xlsx.get('version') != '0.20.3' or xlsx.get('resolved') != expected:
+              print('SheetJS provenance check failed:', xlsx)
+              sys.exit(1)
+
+          audit = json.loads(Path('/tmp/npm-audit.json').read_text())
+          remaining = []
+          for name, finding in audit.get('vulnerabilities', {}).items():
+              severity = str(finding.get('severity', '')).lower()
+              if severity not in {'high', 'critical'}:
+                  continue
+              if name == 'xlsx':
+                  print('Ignoring stale npm-registry xlsx advisory after verified official SheetJS 0.20.3 CDN install.')
+                  continue
+              remaining.append((name, severity, finding.get('via')))
+          if remaining:
+              print('Unsuppressed high/critical npm audit findings:')
+              for item in remaining:
+                  print(item)
+              sys.exit(1)
+          print('Dependency audit passed: official SheetJS 0.20.3 verified; no other high/critical findings.')
+          PY
+            AUDIT_RC=$?
+          else
+            AUDIT_RC=99
+          fi
+
           if [ "$TRANSFORM_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ]; then npm test >>"$LOG" 2>&1; TEST_RC=$?; else TEST_RC=99; fi
           if [ "$TRANSFORM_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ]; then npm run typecheck >>"$LOG" 2>&1; TYPE_RC=$?; else TYPE_RC=99; fi
           if [ "$TRANSFORM_RC" -eq 0 ] && [ "$INSTALL_RC" -eq 0 ] && [ "$TEST_RC" -eq 0 ] && [ "$TYPE_RC" -eq 0 ]; then npm run build >>"$LOG" 2>&1; BUILD_RC=$?; else BUILD_RC=99; fi
@@ -75,7 +113,7 @@ jobs:
             exit 0
           fi
 
-          FAIL_LOG=$(tail -n 260 "$LOG")
+          FAIL_LOG=$(tail -n 300 "$LOG")
           git reset --hard "$GITHUB_SHA"
           {
             echo "# Stage 7 cleanup status"
