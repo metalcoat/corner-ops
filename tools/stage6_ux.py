@@ -14,15 +14,15 @@ rep('src/app/layout.tsx','    <html lang="en" data-business-theme="Corner Deli">
 
 # CO-073: shared modal focus trap / Escape / focus restoration.
 rep('src/app/ops/workforce/schedule-board.tsx','import type { Business } from "@/lib/types";\n','import type { Business } from "@/lib/types";\nimport { useModalFocus } from "@/app/use-modal-focus";\n')
-rep('src/app/ops/workforce/schedule-board.tsx','  const [dragTarget, setDragTarget] = useState<DragTarget>(null);\n','  const [dragTarget, setDragTarget] = useState<DragTarget>(null);\n  const scheduleModalRef = useModalFocus(Boolean(editor), () => setEditor(null));\n')
+rep('src/app/ops/workforce/schedule-board.tsx','  const [dragTarget, setDragTarget] = useState<DragTarget>(null);\n','  const [dragTarget, setDragTarget] = useState<DragTarget>(null);\n  const scheduleModalRef = useModalFocus<HTMLElement>(Boolean(editor), () => setEditor(null));\n')
 rep('src/app/ops/workforce/schedule-board.tsx','      <section className="scheduleModal" role="dialog" aria-modal="true" aria-labelledby="shift-editor-heading">','      <section ref={scheduleModalRef} tabIndex={-1} className="scheduleModal" role="dialog" aria-modal="true" aria-labelledby="shift-editor-heading">')
 
 rep('src/app/ops/employees/employee-editor-overlay.tsx','import type { Business } from "@/lib/types";\n','import type { Business } from "@/lib/types";\nimport { useModalFocus } from "@/app/use-modal-focus";\n')
-rep('src/app/ops/employees/employee-editor-overlay.tsx','  const businessRef = useRef<Business>(business);\n','  const businessRef = useRef<Business>(business);\n  const employeeModalRef = useModalFocus(Boolean(selected), () => { if (!busy) setSelected(null); });\n')
+rep('src/app/ops/employees/employee-editor-overlay.tsx','  const businessRef = useRef<Business>(business);\n','  const businessRef = useRef<Business>(business);\n  const employeeModalRef = useModalFocus<HTMLElement>(Boolean(selected), () => { if (!busy) setSelected(null); });\n')
 rep('src/app/ops/employees/employee-editor-overlay.tsx','      <section className="employeeEditorModal" role="dialog" aria-modal="true" aria-labelledby="employee-editor-title">','      <section ref={employeeModalRef} tabIndex={-1} className="employeeEditorModal" role="dialog" aria-modal="true" aria-labelledby="employee-editor-title">')
 
 rep('src/app/employee/install-prompt.tsx','import { useEffect, useState } from "react";\n','import { useEffect, useState } from "react";\nimport { useModalFocus } from "@/app/use-modal-focus";\n')
-rep('src/app/employee/install-prompt.tsx','  const [notice, setNotice] = useState("");\n','  const [notice, setNotice] = useState("");\n  const installModalRef = useModalFocus(visible, () => dismiss());\n')
+rep('src/app/employee/install-prompt.tsx','  const [notice, setNotice] = useState("");\n','  const [notice, setNotice] = useState("");\n  const installModalRef = useModalFocus<HTMLDivElement>(visible, () => dismiss());\n')
 rep('src/app/employee/install-prompt.tsx','  return <div className="employeeInstallOverlay" role="dialog" aria-modal="true" aria-labelledby="employee-install-title">\n    <section className="employeeInstallCard">','  return <div ref={installModalRef} tabIndex={-1} className="employeeInstallOverlay" role="dialog" aria-modal="true" aria-labelledby="employee-install-title">\n    <section className="employeeInstallCard">')
 
 # CO-081: exactly the five unnamed inline controls documented by the review.
