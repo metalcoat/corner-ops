@@ -166,8 +166,8 @@ replace_once(
 )
 replace_once(
     "src/lib/schedule-meal-compliance.ts",
-    '        windowStart: windowStart.toISOString(),\n        windowEnd: windowEnd.toISOString(),\n',
-    '        windowStart: new Date(overlapStart).toISOString(),\n        windowEnd: new Date(overlapEnd).toISOString(),\n',
+    '''        label: "30-minute noon meal",\n        detail: "A shift over six hours extending through New York's 11 AM–2 PM noon meal period requires at least 30 off-duty minutes inside that window.",\n        suggestedStart: new Date(suggestedMs).toISOString(),\n        windowStart: windowStart.toISOString(),\n        windowEnd: windowEnd.toISOString(),''',
+    '''        label: "30-minute noon meal",\n        detail: "A shift over six hours extending through New York's 11 AM–2 PM noon meal period requires at least 30 off-duty minutes inside that window.",\n        suggestedStart: new Date(suggestedMs).toISOString(),\n        windowStart: new Date(overlapStart).toISOString(),\n        windowEnd: new Date(overlapEnd).toISOString(),''',
 )
 
 print("Stage 1 CODEBASEREVIEW transformations applied.")
