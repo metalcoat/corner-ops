@@ -1,10 +1,16 @@
-import { createHmac, randomBytes, scryptSync } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { validateEmployeePin } from "@/lib/employee-pin";
-import { constantTimeEqual, legacySessionSecret, purposeSecret } from "@/lib/security-keys";
+import {
+  createEmployeePinCryptoRecord,
+  employeePinDigest,
+  employeePinFingerprint,
+  EMPLOYEE_PIN_HASH_VERSION,
+  legacyEmployeePinHash,
+} from "@/lib/employee-pin-crypto";
+import { constantTimeEqual } from "@/lib/security-keys";
 import type { Business } from "@/lib/types";
 
-export const EMPLOYEE_PIN_HASH_VERSION = 2;
+export { employeePinFingerprint, EMPLOYEE_PIN_HASH_VERSION, legacyEmployeePinHash };
 
 type EmployeePinRow = {
   id: string;
@@ -18,35 +24,9 @@ type EmployeePinRow = {
   session_version: number;
 };
 
-function pepper(): string {
-  return purposeSecret("employee-pin-pepper", {
-    envName: "EMPLOYEE_PIN_PEPPER",
-    fallbackEnvName: "EMPLOYMENT_FORMS_ENCRYPTION_KEY",
-  });
-}
-
-export function legacyEmployeePinHash(business: Business, pin: string): string {
-  return createHmac("sha256", legacySessionSecret()).update(`${business}:${pin}`).digest("hex");
-}
-
-export function employeePinFingerprint(business: Business, pin: string): string {
-  return createHmac("sha256", pepper()).update(`${business}:${pin}`).digest("hex");
-}
-
-function digest(business: Business, pin: string, salt: string): string {
-  return scryptSync(`${business}:${pin}:${pepper()}`, salt, 32).toString("base64url");
-}
-
 export function createEmployeePinRecord(business: Business, suppliedPin: unknown, employeeName = "Employee") {
   const pin = validateEmployeePin(business, suppliedPin, employeeName);
-  const salt = randomBytes(18).toString("base64url");
-  return {
-    pin,
-    hash: digest(business, pin, salt),
-    salt,
-    version: EMPLOYEE_PIN_HASH_VERSION,
-    fingerprint: employeePinFingerprint(business, pin),
-  };
+  return { pin, ...createEmployeePinCryptoRecord(business, pin) };
 }
 
 export function isEmployeePinUniqueViolation(error: unknown): boolean {
@@ -82,7 +62,7 @@ export async function assertEmployeePinAvailable(input: {
 
 function matches(row: EmployeePinRow, pin: string): boolean {
   if (Number(row.pin_hash_version || 1) >= EMPLOYEE_PIN_HASH_VERSION && row.pin_salt) {
-    return constantTimeEqual(digest(row.business, pin, row.pin_salt), row.pin_hash);
+    return constantTimeEqual(employeePinDigest(row.business, pin, row.pin_salt), row.pin_hash);
   }
   return constantTimeEqual(legacyEmployeePinHash(row.business, pin), row.pin_hash);
 }
