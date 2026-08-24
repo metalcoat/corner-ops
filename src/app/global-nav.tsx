@@ -30,6 +30,7 @@ const links: NavLink[] = [
 ];
 
 const businessNames: Business[] = ["Corner Deli", "Tiki"];
+const hiddenNavPaths = ["/privacy", "/terms", "/sms-help", "/app"];
 
 function validBusiness(value: string | null | undefined): value is Business {
   return businessNames.includes(value as Business);
@@ -46,7 +47,12 @@ export default function GlobalNav() {
   const [currentBusiness, setCurrentBusiness] = useState<Business>("Corner Deli");
   const [open, setOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const navHidden = pathname === "/clock" || pathname === "/scan" || pathname.startsWith("/employee") || pathname === "/signin";
+  const navHidden = pathname === "/clock"
+    || pathname === "/scan"
+    || pathname.startsWith("/employee")
+    || pathname.startsWith("/deli-board")
+    || pathname === "/signin"
+    || hiddenNavPaths.includes(pathname);
 
   useEffect(() => setOpen(false), [pathname]);
 
@@ -86,6 +92,7 @@ export default function GlobalNav() {
   }, [navHidden]);
 
   useEffect(() => {
+    if (navHidden) return;
     let restored = false;
 
     const savedBusiness = (): Business | null => {
@@ -100,17 +107,7 @@ export default function GlobalNav() {
     };
 
     function restore(): boolean {
-      if (restored || pathname === "/clock") return false;
-
-      if (pathname.startsWith("/employee")) {
-        const select = document.querySelector<HTMLSelectElement>('select[name="business"]');
-        const saved = savedBusiness();
-        if (!select) return false;
-        restored = true;
-        if (saved && select.value !== saved) select.value = saved;
-        if (saved) applyTheme(saved);
-        return false;
-      }
+      if (restored) return false;
 
       const switcher = document.querySelector<HTMLElement>(
         ".businessSwitch, .wfBusinessSwitch, .businessPills",
@@ -135,7 +132,6 @@ export default function GlobalNav() {
     }
 
     function detect(): Business {
-      if (pathname === "/clock") return "Tiki";
       const selected = document
         .querySelector<HTMLElement>(".businessSwitch .selected, .wfBusinessSwitch .selected, .businessPills .active")
         ?.textContent?.trim();
@@ -170,7 +166,7 @@ export default function GlobalNav() {
       document.removeEventListener("click", interaction, true);
       document.removeEventListener("change", interaction, true);
     };
-  }, [pathname]);
+  }, [navHidden]);
 
   if (navHidden) return null;
 
