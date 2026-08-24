@@ -6,12 +6,13 @@ clearglobalvars=no
 [from-three-cx]
 exten => h,1,Hangup()
 exten => _.,1,NoOp(Bridging 3CX call ${CALLERID(num)} to OpenAI Realtime SIP)
- same => n,Dial(${PJSIP_DIAL_CONTACTS(openai,openai,${ASTERISK_OPENAI_PROJECT_ID})},60,b(add-openai-headers^s^1))
+ same => n,Dial(${PJSIP_DIAL_CONTACTS(openai,openai,${ASTERISK_OPENAI_PROJECT_ID})},60,b(add-openai-headers^s^1(${CALLERID(num)})))
  same => n,Hangup()
 
 [add-openai-headers]
 exten => s,1,Set(PJSIP_HEADER(add,X-Corner-Ops-DID)=${ASTERISK_OPENAI_DID})
  same => n,Set(PJSIP_HEADER(add,P-Called-Party-ID)=<sip:${ASTERISK_OPENAI_DID}>)
+ same => n,Set(PJSIP_HEADER(add,X-Corner-Ops-Caller)=${ARG1})
  same => n,Return()
 
 [from-openai]

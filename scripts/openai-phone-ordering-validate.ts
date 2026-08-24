@@ -21,6 +21,7 @@ async function main(){
   const sql=getSql(),callId=`rtc_${randomUUID()}`,authorization=`Bearer ${process.env.OPENAI_ORDERING_MCP_TOKEN}`;
   try{
     const caller=phone.callerFromSipHeaders([{name:"From",value:'"Customer" <sip:+13155550188@example.test>'}]);
+    const forwardedCaller=phone.callerFromSipHeaders([{name:"X-Corner-Ops-Caller",value:"+1 (315) 555-0199"},{name:"From",value:'<sip:asterisk@example.test>'}]);
     const calledDid=phone.calledDidFromSipHeaders([
       {name:"To",value:'<sip:proj_example@sip.api.openai.com>'},
       {name:"P-Called-Party-ID",value:'<sip:+13155550200@example.test>'},
@@ -34,7 +35,7 @@ async function main(){
     const blocked=await(await invoke({jsonrpc:"2.0",id:5,method:"tools/call",params:{name:"send",arguments:{callId,orderId:randomUUID(),customerConfirmed:false}}})).json();
     const shadowed=await(await invoke({jsonrpc:"2.0",id:6,method:"tools/call",params:{name:"send",arguments:{callId,orderId:randomUUID(),customerConfirmed:true}}})).json();
     const result={
-      callerNormalized:caller==="3155550188",
+      callerNormalized:caller==="3155550188"&&forwardedCaller==="3155550199",
       calledDidRestricted:calledDid==="3155550200"&&phone.testDidAllowed(calledDid)&&!phone.testDidAllowed("3155550201"),
       lineMapped:phone.lineForDid(calledDid)==="TEST LINE",
       englishGreeting:phone.OPENAI_PHONE_GREETING==="Thanks for calling Corner Deli, is this going to be pickup or delivery?"&&phone.PHONE_INSTRUCTIONS.includes("Ask exactly one question at a time"),

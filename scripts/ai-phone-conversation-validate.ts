@@ -40,6 +40,7 @@ async function main(){
   assert.ok(prompt.includes("Never finish an order without a phone number")&&prompt.includes("include it as callerPhone"),"Missing caller ID must trigger callback-number collection for the POS order.");
   assert.ok(prompt.includes("silently add the real 4oz side cup")&&prompt.includes("do not explain or announce this conversion"),"Saucy wings must add the matching cup without narrating the rule.");
   assert.ok(prompt.includes("Turkey Big Boss item with Full Sub")&&prompt.includes("never reject them or substitute a turkey sandwich"),"Turkey sub business aliases must remain authoritative.");
+  assert.ok(prompt.includes("Mayo, Russian dressing, or oil?")&&prompt.includes("Lettuce, tomato, onions, or hot peppers?")&&prompt.includes("American, Swiss, or provolone?")&&prompt.includes("Do not run this checklist for any Big Boss item"),"Regular sub build questions and the Big Boss exclusion must remain authoritative.");
   assert.ok(prompt.includes("Thanks for calling—see you then!")&&prompt.includes("hang up only after that complete closing audio finishes"),"The completed order must end with the deterministic hangup phrase.");
   const jumbo=await menuCatalog("Corner Deli",new Date(),"jumbo thin");
   assert.equal(jumbo[0]?.items[0]?.name,"Pizza","Jumbo Thin must resolve to the standard Pizza item first.");
