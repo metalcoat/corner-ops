@@ -387,6 +387,7 @@ const modifierAliases = (name: string) => {
   for (const value of [...aliases]) {
     aliases.push(value.replace(/\bparmesan\b/gi, "parm"));
     aliases.push(value.replace(/\bsauce\b/gi, ""));
+    if (/^mayo$/i.test(value)) aliases.push("mayonnaise");
   }
   return [...new Set(aliases.map((value) => value.replace(/\s+/g, " ").trim()))];
 };
@@ -1038,6 +1039,10 @@ export async function priceSpokenOrder(input: {
             row.option.name
               .replace(/^add\s+/i, "")
               .replace(/^mayonnaise$/i, "mayo"),
+            row.group.name === "Burger Toppings" &&
+            /^raw onions$/i.test(row.option.name)
+              ? "onion"
+              : row.option.name,
           ],
           "INVALID_MODIFIER",
           "Modifier",

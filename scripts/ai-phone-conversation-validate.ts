@@ -174,6 +174,15 @@ async function main() {
     "Wing accompaniments and the natural-pause fry upsell must remain explicit.",
   );
   assert.ok(
+    prompt.includes("What flavor would you like it dipped in?") &&
+      prompt.includes("Would you like any cheese on top?") &&
+      prompt.includes(
+        "Would you like any toppings, like lettuce, tomato, onion, ketchup, mayo, or mustard?",
+      ) &&
+      prompt.includes("come plain"),
+    "Buffalo chicken and plain-burger question flows must remain explicit.",
+  );
+  assert.ok(
     business.pickupWait === "Give us 30 minutes for pickup." &&
       business.deliveryWait.includes("40 to 45 minutes"),
     "Live normal timing must be 30-minute pickup and 40-to-45-minute delivery.",

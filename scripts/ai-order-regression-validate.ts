@@ -353,6 +353,31 @@ async function main() {
       expectedModifier: "Ranch (2oz)",
     },
     {
+      key: "buffalo-chicken-burger-build",
+      items: [
+        {
+          name: "Buffalo Chicken Burger",
+          quantity: 1,
+          modifiers: [
+            { name: "Garlic Parm" },
+            { name: "American" },
+            { name: "lettuce" },
+            { name: "mayonnaise" },
+            { name: "onion" },
+            { name: "No Side" },
+          ],
+        },
+      ],
+      expectedItems: ["Buffalo Chicken Burger"],
+      expectedModifiers: [
+        "Garlic Parmesan",
+        "American",
+        "Lettuce",
+        "Mayo",
+        "Raw Onions",
+      ],
+    },
+    {
       key: "saucy-medium-wings",
       items: [{ name: "30 medium wings extra saucy", quantity: 1 }],
       expectedItems: ["Wings"],
