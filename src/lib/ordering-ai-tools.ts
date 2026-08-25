@@ -942,7 +942,11 @@ export async function priceSpokenOrder(input: {
         explicitOnItem = /\b(on (it|the|top)|over|melted)\b/i.test(
           requestedModifier.name,
         ),
+        mealWithIncludedSalad = item.modifiers.some(
+          (group) => group.name === "Choose a Salad (Dinner)",
+        ),
         choices = item.modifiers
+          .filter((group) => group.presentationContext !== "hidden")
           .flatMap((group) =>
             group.options.map((option) => ({ group, option })),
           )
@@ -970,6 +974,9 @@ export async function priceSpokenOrder(input: {
               : row.option.name,
             row.option.name.replace(/\bon side\b/i, "side cup"),
             row.option.name.replace(/^xtra\b/i, "extra"),
+            mealWithIncludedSalad
+              ? row.option.name.replace(/\s*\(on salad\)\s*$/i, "")
+              : row.option.name,
             row.option.name
               .replace(/^add\s+/i, "")
               .replace(/^mayonnaise$/i, "mayo"),
@@ -1004,9 +1011,12 @@ export async function priceSpokenOrder(input: {
       const choices = missingRequired.options
           .filter((option) => option.available)
           .map((option) => option.name),
-        question = spokenKey(missingRequired.name).includes("cheese")
-          ? `What cheese: ${choices.join(", ")}?`
-          : `Choose ${missingRequired.name}: ${choices.join(", ")}?`;
+        question =
+          missingRequired.name === "Choose Dressing"
+            ? "What kind of dressing do you want for your salad?"
+            : spokenKey(missingRequired.name).includes("cheese")
+              ? `What cheese: ${choices.join(", ")}?`
+              : `Choose ${missingRequired.name}: ${choices.join(", ")}?`;
       throw new AiToolError("INVALID_MODIFIER", question, question, 409, {
         group: missingRequired.name,
         options: choices,

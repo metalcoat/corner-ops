@@ -203,9 +203,8 @@ export function ensureOrderingTimingSchema(): Promise<void> {
         )
       `;
 
-      // Stated Corner Deli guest-facing timing. Busy threshold remains NULL
-      // until the owner chooses how many orders in what rolling period should
-      // trigger the one-hour quote.
+      // Stated Corner Deli timing. Eight active orders in the rolling
+      // 15-minute window is the initial automatic surge threshold.
       await sql`
         INSERT INTO ordering_fulfillment_timing_settings (
           business, service_type, normal_min_minutes, normal_max_minutes,
@@ -216,6 +215,13 @@ export function ensureOrderingTimingSchema(): Promise<void> {
           ('Corner Deli', 'delivery', 40, 45, 60, 60, 15),
           ('Corner Deli', 'no_contact_delivery', 40, 45, 60, 60, 15)
         ON CONFLICT (business, service_type) DO NOTHING
+      `;
+      await sql`
+        UPDATE ordering_fulfillment_timing_settings
+        SET busy_order_threshold=8,updated_by='corner-deli-surge-default',updated_at=NOW()
+        WHERE business='Corner Deli'
+          AND service_type IN ('pickup','curbside','delivery','no_contact_delivery')
+          AND busy_order_threshold IS NULL
       `;
 
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS timing_mode TEXT NOT NULL DEFAULT 'asap'`;

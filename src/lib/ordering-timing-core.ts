@@ -68,7 +68,8 @@ export function buildAsapCustomerMessage(input: {
     return `We're saying about ${min} to ${max} minutes for delivery, but we'll get it to you as fast as we can.`;
   }
 
-  if (min === max) return `Pickup is usually about ${max} minutes.`;
+  if (min === max && max === 30) return "Give us 30 minutes for pickup.";
+  if (min === max) return `Give us ${max} minutes for pickup.`;
   return `Pickup is usually about ${min} to ${max} minutes.`;
 }
 
@@ -86,7 +87,8 @@ export function quoteOrderTiming(input: {
 }): TimingQuote {
   const settings = input.settings;
   const nowMs = input.now.getTime();
-  if (!Number.isFinite(nowMs)) throw new Error("A valid current time is required.");
+  if (!Number.isFinite(nowMs))
+    throw new Error("A valid current time is required.");
 
   if (input.mode === "future") {
     if (!settings.allowFuture) {
@@ -98,14 +100,19 @@ export function quoteOrderTiming(input: {
         promisedFor: null,
         minMinutes: 0,
         maxMinutes: 0,
-        customerMessage: "Future orders are not available for this fulfillment type.",
+        customerMessage:
+          "Future orders are not available for this fulfillment type.",
         kitchenLabel: "",
         reason: "future_orders_disabled",
       };
     }
 
     const requestedFor = input.requestedFor ?? null;
-    if (!requestedFor || !Number.isFinite(requestedFor.getTime()) || requestedFor.getTime() <= nowMs) {
+    if (
+      !requestedFor ||
+      !Number.isFinite(requestedFor.getTime()) ||
+      requestedFor.getTime() <= nowMs
+    ) {
       return {
         mode: "future",
         accepted: false,
@@ -130,13 +137,16 @@ export function quoteOrderTiming(input: {
         promisedFor: null,
         minMinutes: 0,
         maxMinutes: 0,
-        customerMessage: "That time is farther out than the restaurant currently accepts orders.",
+        customerMessage:
+          "That time is farther out than the restaurant currently accepts orders.",
         kitchenLabel: "",
         reason: "future_time_too_far",
       };
     }
 
-    const timingName = isDeliveryTimingService(settings.serviceType) ? "DELIVERY" : "PICKUP";
+    const timingName = isDeliveryTimingService(settings.serviceType)
+      ? "DELIVERY"
+      : "PICKUP";
     return {
       mode: "future",
       accepted: true,
@@ -166,11 +176,18 @@ export function quoteOrderTiming(input: {
     };
   }
 
-  const busy = settings.busyOrderThreshold != null
-    && settings.busyOrderThreshold >= 0
-    && Math.max(0, Math.trunc(input.currentOrdersInBusyWindow)) >= settings.busyOrderThreshold;
-  const minMinutes = positiveMinutes(busy ? settings.busyMinMinutes : settings.normalMinMinutes);
-  const maxMinutes = Math.max(minMinutes, positiveMinutes(busy ? settings.busyMaxMinutes : settings.normalMaxMinutes));
+  const busy =
+    settings.busyOrderThreshold != null &&
+    settings.busyOrderThreshold >= 0 &&
+    Math.max(0, Math.trunc(input.currentOrdersInBusyWindow)) >=
+      settings.busyOrderThreshold;
+  const minMinutes = positiveMinutes(
+    busy ? settings.busyMinMinutes : settings.normalMinMinutes,
+  );
+  const maxMinutes = Math.max(
+    minMinutes,
+    positiveMinutes(busy ? settings.busyMaxMinutes : settings.normalMaxMinutes),
+  );
   const promisedFor = new Date(nowMs + maxMinutes * 60_000);
   const customerMessage = buildAsapCustomerMessage({
     serviceType: settings.serviceType,
@@ -178,8 +195,13 @@ export function quoteOrderTiming(input: {
     maxMinutes,
     busy,
   });
-  const timingName = isDeliveryTimingService(settings.serviceType) ? "DELIVERY" : "PICKUP";
-  const range = minMinutes === maxMinutes ? `${maxMinutes} MIN` : `${minMinutes}-${maxMinutes} MIN`;
+  const timingName = isDeliveryTimingService(settings.serviceType)
+    ? "DELIVERY"
+    : "PICKUP";
+  const range =
+    minMinutes === maxMinutes
+      ? `${maxMinutes} MIN`
+      : `${minMinutes}-${maxMinutes} MIN`;
 
   return {
     mode: "asap",
@@ -201,12 +223,22 @@ export type StoreAvailability = {
 };
 
 const orderingWeekdays: Record<string, number> = {
-  Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
 };
 
 /** Shared wall-clock resolver for ordering schedules and fulfillment rules. */
-export function orderingLocalDateTime(date: Date, timeZone = "America/New_York") {
-  if (!Number.isFinite(date.getTime())) throw new Error("A valid fulfillment time is required.");
+export function orderingLocalDateTime(
+  date: Date,
+  timeZone = "America/New_York",
+) {
+  if (!Number.isFinite(date.getTime()))
+    throw new Error("A valid fulfillment time is required.");
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -217,7 +249,8 @@ export function orderingLocalDateTime(date: Date, timeZone = "America/New_York")
     minute: "2-digit",
     hourCycle: "h23",
   }).formatToParts(date);
-  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value || "";
   return {
     date: `${value("year")}-${value("month")}-${value("day")}`,
     time: `${value("hour")}:${value("minute")}`,
