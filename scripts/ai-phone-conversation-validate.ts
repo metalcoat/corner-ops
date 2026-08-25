@@ -150,6 +150,12 @@ async function main() {
     "Requested totals must not prematurely end the order.",
   );
   assert.ok(
+    prompt.includes("read the entire authoritative order back once") &&
+      prompt.includes("Does that sound right?") &&
+      prompt.includes("Only after the caller confirms the readback is correct"),
+    "Every completed phone order must receive one confirmed full readback.",
+  );
+  assert.ok(
     prompt.includes("What kind of dressing do you want for your salad?") &&
       prompt.includes("Would you like fries with that?") &&
       prompt.includes("SM Tossed Sal"),
