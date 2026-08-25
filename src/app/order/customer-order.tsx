@@ -127,7 +127,7 @@ function cartDetails(line: CartLine) {
   for (const group of line.item.modifiers) {
     if (group.presentationBehavior === "pizza_topping") continue;
     const names = group.options
-      .filter((option) => selectedIds.has(option.id))
+      .filter((option) => selectedIds.has(option.id) && !option.defaultSelected)
       .map((option) => option.name);
     if (names.length) details.push(`${group.name}: ${names.join(", ")}`);
   }

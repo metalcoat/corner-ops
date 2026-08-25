@@ -86,86 +86,122 @@ test("web cart pricing uses the authoritative backend and remains a non-payable 
 test("customer can choose and review a half-pizza topping", async ({
   page,
 }) => {
-  await page.route("**/api/customer/catalog*", async (route) =>
-    await route.fulfill({
-      contentType: "application/json",
-      json: {
-        availability: {
-          open: true,
-          orderable: true,
-          reason: "",
-          nextAvailableAt: null,
-          timezone: "America/New_York",
-        },
-        categories: [
-          {
-            id: "pizza",
-            displayName: "Pizza",
-            items: [
-              {
-                id: "pizza-item",
-                displayName: "Pizza",
-                description: "Build your pizza.",
-                basePriceCents: 1000,
-                available: true,
-                imageUrl: null,
-                imageAlt: "",
-                variants: [
-                  {
-                    id: "small",
-                    name: 'Small 12"',
-                    basePriceCents: 1000,
-                    defaultVariant: true,
-                    available: true,
-                    modifierPrices: [
-                      {
-                        optionId: "pepperoni",
-                        priceDeltaCents: 200,
-                        available: true,
-                      },
-                    ],
-                  },
-                ],
-                modifiers: [
-                  {
-                    id: "toppings",
-                    name: "Pizza Toppings",
-                    prompt: "Pizza Toppings",
-                    minSelections: 0,
-                    maxSelections: 20,
-                    presentationBehavior: "pizza_topping",
-                    options: [
-                      {
-                        id: "pepperoni",
-                        name: "Pepperoni",
-                        priceDeltaCents: 200,
-                        available: true,
-                        defaultSelected: false,
-                      },
-                    ],
-                  },
-                ],
-                combos: [],
-              },
-            ],
+  await page.route(
+    "**/api/customer/catalog*",
+    async (route) =>
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          availability: {
+            open: true,
+            orderable: true,
+            reason: "",
+            nextAvailableAt: null,
+            timezone: "America/New_York",
           },
-        ],
-        featuredItems: [],
-        promotions: [],
-        delivery: {
-          enabled: false,
-          minimumOrderCents: 0,
-          maxDistanceMiles: null,
-          feeBands: [],
+          categories: [
+            {
+              id: "pizza",
+              displayName: "Pizza",
+              items: [
+                {
+                  id: "pizza-item",
+                  displayName: "Pizza",
+                  description: "Build your pizza.",
+                  basePriceCents: 1000,
+                  available: true,
+                  imageUrl: null,
+                  imageAlt: "",
+                  variants: [
+                    {
+                      id: "small",
+                      name: 'Small 12"',
+                      basePriceCents: 1000,
+                      defaultVariant: true,
+                      available: true,
+                      modifierPrices: [
+                        {
+                          optionId: "pepperoni",
+                          priceDeltaCents: 200,
+                          available: true,
+                        },
+                      ],
+                    },
+                  ],
+                  modifiers: [
+                    {
+                      id: "cook",
+                      name: "Pizza Duration Cooked",
+                      prompt: "Pizza Duration Cooked",
+                      minSelections: 1,
+                      maxSelections: 1,
+                      presentationBehavior: "standard",
+                      options: [
+                        {
+                          id: "regular-cook",
+                          name: "Regular Cook",
+                          priceDeltaCents: 0,
+                          available: true,
+                          defaultSelected: true,
+                        },
+                      ],
+                    },
+                    {
+                      id: "sauce",
+                      name: "Pizza Sauce",
+                      prompt: "Pizza Sauce",
+                      minSelections: 1,
+                      maxSelections: 1,
+                      presentationBehavior: "standard",
+                      options: [
+                        {
+                          id: "classic-sauce",
+                          name: "Classic Sauce",
+                          priceDeltaCents: 0,
+                          available: true,
+                          defaultSelected: true,
+                        },
+                      ],
+                    },
+                    {
+                      id: "toppings",
+                      name: "Pizza Toppings",
+                      prompt: "Pizza Toppings",
+                      minSelections: 0,
+                      maxSelections: 20,
+                      presentationBehavior: "pizza_topping",
+                      options: [
+                        {
+                          id: "pepperoni",
+                          name: "Pepperoni",
+                          priceDeltaCents: 200,
+                          available: true,
+                          defaultSelected: false,
+                        },
+                      ],
+                    },
+                  ],
+                  combos: [],
+                },
+              ],
+            },
+          ],
+          featuredItems: [],
+          promotions: [],
+          delivery: {
+            enabled: false,
+            minimumOrderCents: 0,
+            maxDistanceMiles: null,
+            feeBands: [],
+          },
+          customer: {
+            authenticated: false,
+            loyaltyAvailableAfterSignIn: true,
+            giftCardsAcceptedAtPayment: true,
+          },
+          checkout: { paymentEnabled: false },
         },
-        customer: {
-          authenticated: false,
-          loyaltyAvailableAfterSignIn: true,
-          giftCardsAcceptedAtPayment: true,
-        },
-        checkout: { paymentEnabled: false },
-      },
-    }),
+      }),
   );
 
   await page.goto("/order");
@@ -183,4 +219,6 @@ test("customer can choose and review a half-pizza topping", async ({
   await dialog.getByRole("button", { name: "Add to order" }).click();
 
   await expect(page.locator(".orderCart")).toContainText("Left Half Pepperoni");
+  await expect(page.locator(".orderCart")).not.toContainText("Regular Cook");
+  await expect(page.locator(".orderCart")).not.toContainText("Classic Sauce");
 });
