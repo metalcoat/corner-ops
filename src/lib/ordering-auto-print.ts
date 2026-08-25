@@ -28,15 +28,12 @@ export async function saveExternalPrintSettings(business: OrderingBusiness, enab
 
 export async function dispatchSubmittedOrderPrintJobs(orderId: string, business: OrderingBusiness) {
   await ensureSchema();
-  const order = (await getSql()`SELECT source,order_origin FROM ordering_orders WHERE id=${orderId} AND business=${business}`)[0];
+  const order = (await getSql()`SELECT id FROM ordering_orders WHERE id=${orderId} AND business=${business}`)[0];
   if (!order) return { dispatched: false, reason: "order_not_found" };
-  const external = ["web", "ai_phone"].includes(String(order.source)) || ["web", "ai", "phone"].includes(String(order.order_origin));
-  if (external) {
-    const settings = await externalPrintSettings(business);
-    if (!settings.externalKitchenAutoPrint) {
-      await getSql()`UPDATE ordering_print_jobs SET status='not_configured',error_message='Automatic kitchen printing is paused in POS hardware settings.' WHERE order_id=${orderId} AND business=${business} AND purpose='kitchen_production' AND status IN ('not_configured','queued')`;
-      return { dispatched: false, paused: true };
-    }
+  const settings = await externalPrintSettings(business);
+  if (!settings.externalKitchenAutoPrint) {
+    await getSql()`UPDATE ordering_print_jobs SET status='not_configured',error_message='Automatic kitchen printing is paused in POS hardware settings.' WHERE order_id=${orderId} AND business=${business} AND purpose='kitchen_production' AND status IN ('not_configured','queued')`;
+    return { dispatched: false, paused: true };
   }
   await dispatchOrderPrintJobs(orderId, business);
   return { dispatched: true, paused: false };

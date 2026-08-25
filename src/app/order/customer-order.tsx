@@ -10,6 +10,27 @@ type Catalog={availability:{open:boolean;orderable:boolean;reason:string;nextAva
 type CartLine={key:string;item:Item;variantId:string|null;quantity:number;modifierSelections:Record<string,string[]>;modifierDeclines:string[];comboId:string|null;comboSelections:Record<string,string[]>;specialInstructions:string};
 const money=(c:number)=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(c/100);
 async function failure(response:Response){const body=await response.json().catch(()=>({}));return body.error||"Something went wrong."}
+function cartDetails(line:CartLine){
+  const details:string[]=[];
+  const variant=line.item.variants.find(value=>value.id===line.variantId)?.name;
+  if(variant)details.push(variant);
+  const selectedIds=new Set(Object.values(line.modifierSelections).flat());
+  for(const group of line.item.modifiers){
+    const names=group.options.filter(option=>selectedIds.has(option.id)).map(option=>option.name);
+    if(names.length)details.push(`${group.name}: ${names.join(", ")}`);
+  }
+  const combo=line.item.combos.find(value=>value.id===line.comboId);
+  if(combo){
+    details.push(combo.name);
+    const comboIds=new Set(Object.values(line.comboSelections).flat());
+    for(const group of combo.groups){
+      const names=group.options.filter(option=>comboIds.has(option.id)).map(option=>option.name);
+      if(names.length)details.push(`${group.name}: ${names.join(", ")}`);
+    }
+  }
+  if(line.specialInstructions.trim())details.push(`Note: ${line.specialInstructions.trim()}`);
+  return details;
+}
 
 export default function CustomerOrder(){
   const[serviceType,setServiceType]=useState<"pickup"|"delivery">("pickup"),[catalog,setCatalog]=useState<Catalog|null>(null),[loading,setLoading]=useState(true),[message,setMessage]=useState(""),[query,setQuery]=useState(""),[active,setActive]=useState<Item|null>(null),[cart,setCart]=useState<CartLine[]>([]),[timing,setTiming]=useState<"asap"|"future">("asap"),[date,setDate]=useState(""),[slots,setSlots]=useState<string[]>([]),[scheduledFor,setScheduledFor]=useState(""),[review,setReview]=useState<any>(null),[busy,setBusy]=useState(false);
@@ -25,7 +46,7 @@ export default function CustomerOrder(){
     {catalog&&!catalog.availability.orderable&&<aside className="closedNotice"><strong>We’re not taking ASAP {serviceType} orders right now.</strong><span>{catalog.availability.reason} You can still browse and choose an available future time.</span></aside>}
     {catalog?.promotions.length?<div className="promotions">{catalog.promotions.map(label=><span key={label}>✦ {label}</span>)}</div>:null}
     <div className="orderLayout"><section className="menu"><div className="menuTools"><input aria-label="Search menu" placeholder="Search sandwiches, pizza, sides…" value={query} onChange={e=>setQuery(e.target.value)}/></div>{loading?<p className="loading">Loading today’s menu…</p>:visible.map(category=><section className="menuCategory" key={category.id}><h2>{category.displayName}</h2><div className="itemGrid">{category.items.map(item=><button className="menuItem" key={item.id} disabled={!item.available} onClick={()=>setActive(item)}>{item.imageUrl&&<img src={item.imageUrl} alt={item.imageAlt}/>}<span className="itemCopy"><strong>{item.displayName}</strong>{item.description&&<small>{item.description}</small>}<em>{item.available?`From ${money(Math.min(item.basePriceCents,...item.variants.filter(v=>v.available).map(v=>v.basePriceCents)))}`:"Unavailable"}</em></span></button>)}</div></section>)}</section>
-      <aside className="orderCart"><h2>Your order</h2>{!cart.length?<p className="empty">Your cart is ready when you are.</p>:cart.map(line=><div className="cartLine" key={line.key}><div><strong>{line.quantity}× {line.item.displayName}</strong><small>{line.item.variants.find(v=>v.id===line.variantId)?.name}</small></div><button aria-label={`Remove ${line.item.displayName}`} onClick={()=>{setCart(rows=>rows.filter(r=>r.key!==line.key));setReview(null)}}>Remove</button></div>)}<div className="cartEstimate"><span>Estimated menu subtotal</span><strong>{money(estimated)}</strong></div>
+      <aside className="orderCart"><h2>Your order</h2>{!cart.length?<p className="empty">Your cart is ready when you are.</p>:cart.map(line=><div className="cartLine" key={line.key}><div><strong>{line.quantity}× {line.item.displayName}</strong>{cartDetails(line).map((detail,index)=><small key={`${line.key}-${index}`}>{detail}</small>)}</div><button aria-label={`Remove ${line.item.displayName}`} onClick={()=>{setCart(rows=>rows.filter(r=>r.key!==line.key));setReview(null)}}>Remove</button></div>)}<div className="cartEstimate"><span>Estimated menu subtotal</span><strong>{money(estimated)}</strong></div>
         <fieldset><legend>When?</legend><label><input type="radio" checked={timing==="asap"} onChange={()=>setTiming("asap")}/> ASAP</label><label><input type="radio" checked={timing==="future"} onChange={()=>setTiming("future")}/> Future</label>{timing==="future"&&<><input aria-label="Future order date" type="date" value={date} min={new Date().toISOString().slice(0,10)} onChange={e=>{setDate(e.target.value);setScheduledFor("")}}/><select aria-label="Future order time" value={scheduledFor} onChange={e=>setScheduledFor(e.target.value)}><option value="">Choose a time</option>{slots.map(slot=><option key={slot} value={slot}>{new Date(slot).toLocaleString([],{weekday:"short",hour:"numeric",minute:"2-digit"})}</option>)}</select>{date&&!slots.length&&<small>No available times on this date.</small>}</> }</fieldset>
         {serviceType==="delivery"&&catalog&&<p className="deliveryNote">{money(catalog.delivery.minimumOrderCents)} merchandise minimum · fees based on distance · up to {catalog.delivery.maxDistanceMiles} miles. Address validation comes at checkout.</p>}
         <button className="reviewButton" disabled={!cart.length||busy||(timing==="future"&&!scheduledFor)||(!catalog?.availability.orderable&&timing==="asap")} onClick={price}>{busy?"Checking…":"Review authoritative total"}</button>{message&&<p className="orderError" role="alert">{message}</p>}

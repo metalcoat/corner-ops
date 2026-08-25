@@ -140,11 +140,11 @@ export default function HardwareSettingsClient() {
       <h3>Automatic kitchen tickets</h3>
       <div className="autoPrintControl">
         <div>
-          <strong>ONLINE + AI ORDER AUTO-PRINT</strong>
+          <strong>AUTOMATIC KITCHEN PRINTING</strong>
           <p>
             {data?.printSettings.externalKitchenAutoPrint
-              ? "Enabled — submitted online and AI orders print immediately."
-              : "Paused — testing orders still reach the POS and kitchen screen without using paper."}
+              ? "Enabled — submitted POS, kiosk, online, and AI orders print immediately."
+              : "Paused — all orders still reach the POS and kitchen screen without automatically using paper. Explicit test prints and manager reprints remain available."}
           </p>
         </div>
         <button
@@ -334,7 +334,6 @@ export default function HardwareSettingsClient() {
             <strong>{device.name}</strong> · {device.role.replaceAll("_", " ")}{" "}
             · <b>{device.effective_status.toUpperCase()}</b> ·{" "}
             {device.adapter_key}
-            {!device.active && <span> · REMOVED</span>}
             {device.adapter_key === "network-printer" && (
               <span>
                 {" "}
