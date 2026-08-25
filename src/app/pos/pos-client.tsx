@@ -563,9 +563,18 @@ export default function PosClient({
   const [payableChecks, setPayableChecks] = useState<PayableCheck[]>([]);
   const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
   const [cashTender, setCashTender] = useState("");
-  const [receiptPrinters, setReceiptPrinters] = useState<Array<{id:string;name:string;tillKey:string;cashDrawerEnabled:boolean}>>([]);
+  const [receiptPrinters, setReceiptPrinters] = useState<
+    Array<{
+      id: string;
+      name: string;
+      tillKey: string;
+      cashDrawerEnabled: boolean;
+    }>
+  >([]);
   const [receiptPrinterId, setReceiptPrinterId] = useState("");
-  const [lastChangeDueCents, setLastChangeDueCents] = useState<number | null>(null);
+  const [lastChangeDueCents, setLastChangeDueCents] = useState<number | null>(
+    null,
+  );
   const [giftCardNumber, setGiftCardNumber] = useState("");
   const [giftCardPin, setGiftCardPin] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
@@ -574,10 +583,16 @@ export default function PosClient({
     fetch("/api/ordering/hardware/status", { cache: "no-store" })
       .then((response) => response.json())
       .then((body) => {
-        const printers = Array.isArray(body.receiptPrinters) ? body.receiptPrinters : [];
+        const printers = Array.isArray(body.receiptPrinters)
+          ? body.receiptPrinters
+          : [];
         setReceiptPrinters(printers);
         const stored = localStorage.getItem("corner-ops-receipt-printer") || "";
-        setReceiptPrinterId(printers.some((printer: any) => printer.id === stored) ? stored : printers[0]?.id || "");
+        setReceiptPrinterId(
+          printers.some((printer: any) => printer.id === stored)
+            ? stored
+            : printers[0]?.id || "",
+        );
       })
       .catch(() => setReceiptPrinters([]));
   }, [business]);
@@ -2173,7 +2188,8 @@ export default function PosClient({
   async function openCheckout(draftOverride?: SavedDraft) {
     setLastChangeDueCents(null);
     const draft =
-      draftOverride || (business === "Tiki" && activeTab && cart.length
+      draftOverride ||
+      (business === "Tiki" && activeTab && cart.length
         ? await saveDraft()
         : savedDraft || activeTab || (await saveDraft()));
     if (!draft) return;
@@ -2317,7 +2333,13 @@ export default function PosClient({
         throw new Error(payload.error || "Payment could not be committed.");
       setCheckoutState(payload);
       if (tenderType === "cash") {
-        const latest = [...payload.tenders].reverse().find((tender) => tender.transaction_type === "payment" && tender.tender_type === "cash");
+        const latest = [...payload.tenders]
+          .reverse()
+          .find(
+            (tender) =>
+              tender.transaction_type === "payment" &&
+              tender.tender_type === "cash",
+          );
         setLastChangeDueCents(Number(latest?.change_due_cents || 0));
       }
       setCashTender("");
@@ -2558,7 +2580,9 @@ export default function PosClient({
                   Settings
                 </a>
               ) : business === "Corner Deli" && utility === "drivers" ? (
-                <a key={utility} href="/pos/deli/drivers">Drivers</a>
+                <a key={utility} href="/pos/deli/drivers">
+                  Drivers
+                </a>
               ) : utility === "bar_tabs" ? (
                 <button
                   key={utility}
@@ -3740,7 +3764,9 @@ export default function PosClient({
               );
             })}
             {lastChangeDueCents !== null && (
-              <p role="status"><strong>CHANGE DUE: {money(lastChangeDueCents)}</strong></p>
+              <p role="status">
+                <strong>CHANGE DUE: {money(lastChangeDueCents)}</strong>
+              </p>
             )}
             {Number(
               checkoutState?.check?.amount_due_cents ??
@@ -3755,12 +3781,16 @@ export default function PosClient({
                       value={receiptPrinterId}
                       onChange={(event) => {
                         setReceiptPrinterId(event.target.value);
-                        localStorage.setItem("corner-ops-receipt-printer", event.target.value);
+                        localStorage.setItem(
+                          "corner-ops-receipt-printer",
+                          event.target.value,
+                        );
                       }}
                     >
                       {receiptPrinters.map((printer) => (
                         <option key={printer.id} value={printer.id}>
-                          {printer.tillKey || printer.name}{printer.cashDrawerEnabled ? " · drawer" : ""}
+                          {printer.tillKey || printer.name}
+                          {printer.cashDrawerEnabled ? " · drawer" : ""}
                         </option>
                       ))}
                     </select>
@@ -4097,6 +4127,7 @@ export default function PosClient({
                         variant={selectedVariant}
                         selections={pizzaToppings}
                         onChange={setPizzaToppings}
+                        interaction="portion_first"
                       />
                     );
                   const selected = modifierSelections[group.id] || [];
