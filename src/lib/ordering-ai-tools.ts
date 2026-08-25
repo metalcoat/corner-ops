@@ -380,6 +380,16 @@ const similarity = (a: string, b: string) => {
     );
   return 1 - editDistance(a, b) / Math.max(a.length, b.length, 1);
 };
+const modifierAliases = (name: string) => {
+  const withoutPortion = name.replace(/\s*\(\s*\d+(?:\.\d+)?\s*oz\s*\)\s*$/i, ""),
+    withoutPlacement = name.replace(/\s*\(\s*on salad\s*\)\s*$/i, ""),
+    aliases = [name, withoutPortion, withoutPlacement];
+  for (const value of [...aliases]) {
+    aliases.push(value.replace(/\bparmesan\b/gi, "parm"));
+    aliases.push(value.replace(/\bsauce\b/gi, ""));
+  }
+  return [...new Set(aliases.map((value) => value.replace(/\s+/g, " ").trim()))];
+};
 function pizzaVariantAlias(value: string) {
   const key = spokenKey(value);
   if (!key) return undefined;
@@ -854,6 +864,17 @@ export async function priceSpokenOrder(input: {
           { name: "Oregano Shakers" },
         );
       }
+      if (
+        key === "all" &&
+        (item.name === "Wings" || item.name === "Boneless Wings")
+      )
+        spokenModifiers.splice(
+          index,
+          1,
+          { name: "Blue Cheese" },
+          { name: "Ranch" },
+          { name: "Celery" },
+        );
     }
     const extraWingSauce =
       (item.name === "Wings" || item.name === "Boneless Wings") &&
@@ -951,18 +972,55 @@ export async function priceSpokenOrder(input: {
             group.options.map((option) => ({ group, option })),
           )
           .filter(({ option }) => option.available),
+        requiredDressingChoices = mealWithIncludedSalad
+          ? choices.filter(
+              ({ group }) =>
+                group.name === "Choose Dressing" &&
+                group.minSelections > 0 &&
+                !(modifierSelections[group.id]?.length || 0),
+            )
+          : [],
+        explicitSideSauce = /^(side of|side)\b|\b(cup|\d+\s*oz)\b/.test(raw),
+        sideSauceKey = raw
+          .replace(/^(side of|side)\s+/, "")
+          .replace(/\s+(cup|\d+\s*oz)$/, ""),
+        wingSauceChoices = choices.filter(
+          ({ group }) => group.name === "Wing Sauce",
+        ),
+        portionedChoices = choices.filter(({ option }) =>
+          /\(\s*\d+(?:\.\d+)?\s*oz\s*\)\s*$/i.test(option.name),
+        ),
+        matchingChoices =
+          requiredDressingChoices.length &&
+          requiredDressingChoices.some(({ option }) =>
+            modifierAliases(option.name).some(
+              (alias) => spokenKey(alias) === raw,
+            ),
+          )
+            ? requiredDressingChoices
+            : explicitSideSauce && portionedChoices.length
+              ? portionedChoices
+              : wingSauceChoices.some(({ option }) =>
+                    modifierAliases(option.name).some(
+                      (alias) => spokenKey(alias) === raw,
+                    ),
+                  )
+                ? wingSauceChoices
+            : choices,
         hasSideNacho = choices.some(
           ({ option }) => spokenKey(option.name) === "nacho cheese on side",
         ),
         key =
           raw === "nacho cheese" && !explicitOnItem && hasSideNacho
             ? "nacho cheese on side"
-            : raw,
+            : explicitSideSauce
+              ? sideSauceKey
+              : raw,
         { group, option } = strictMatch(
           key,
-          choices,
+          matchingChoices,
           (row) => [
-            row.option.name,
+            ...modifierAliases(row.option.name),
             /^russian$/i.test(row.option.name)
               ? "russian dressing"
               : row.option.name,

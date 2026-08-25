@@ -290,6 +290,69 @@ async function main() {
       expectedModifier: "Blue Cheese (4oz)",
     },
     {
+      key: "wing-flavor-aliases",
+      items: [
+        {
+          name: "Wings",
+          variant: "20 Wings",
+          quantity: 1,
+          modifiers: [{ name: "garlic parm" }],
+        },
+      ],
+      expectedItems: ["Wings"],
+      expectedModifier: "Garlic Parmesan",
+    },
+    {
+      key: "all-wing-accompaniments",
+      items: [
+        {
+          name: "Wings",
+          variant: "20 Wings",
+          quantity: 1,
+          modifiers: [{ name: "BBQ" }, { name: "all" }],
+        },
+      ],
+      expectedItems: ["Wings"],
+      expectedModifiers: ["BBQ", "Blue Cheese (4oz)", "Ranch (4oz)", "Celery"],
+    },
+    {
+      key: "wing-side-sauce-defaults-four-ounce",
+      items: [
+        {
+          name: "Wings",
+          variant: "20 Wings",
+          quantity: 1,
+          modifiers: [{ name: "Mild" }, { name: "side of garlic parm" }],
+        },
+      ],
+      expectedItems: ["Wings"],
+      expectedModifier: "Garlic Parmesan (4oz)",
+    },
+    {
+      key: "small-side-salad-dressing-alias",
+      items: [
+        {
+          name: "SM Tossed Sal",
+          quantity: 1,
+          modifiers: [{ name: "Italian" }],
+        },
+      ],
+      expectedItems: ["SM Tossed Sal"],
+      expectedModifier: "Italian (On Salad)",
+    },
+    {
+      key: "two-ounce-dipping-context",
+      items: [
+        {
+          name: "Breaded Mushrooms",
+          quantity: 1,
+          modifiers: [{ name: "Ranch" }],
+        },
+      ],
+      expectedItems: ["Breaded Mushrooms"],
+      expectedModifier: "Ranch (2oz)",
+    },
+    {
       key: "saucy-medium-wings",
       items: [{ name: "30 medium wings extra saucy", quantity: 1 }],
       expectedItems: ["Wings"],
@@ -380,6 +443,7 @@ async function main() {
         items: fixture.expectedItems || [],
         variant: fixture.expectedVariant || null,
         modifier: fixture.expectedModifier || null,
+        modifiers: fixture.expectedModifiers || [],
         errorCode: fixture.errorCode || null,
       },
     });
@@ -428,6 +492,18 @@ async function main() {
           ),
           `${row.source}: missing ${row.expected.modifier}`,
         );
+      }
+      if (row.expected?.modifiers?.length) {
+        const modifiers =
+          await sql`SELECT option_name_snapshot FROM ordering_order_item_modifiers WHERE order_item_id IN(SELECT id FROM ordering_order_items WHERE order_id=${priced.id})`;
+        for (const expected of row.expected.modifiers)
+          assert.ok(
+            modifiers.some(
+              (modifier: Record<string, any>) =>
+                modifier.option_name_snapshot === expected,
+            ),
+            `${row.source}: missing ${expected}`,
+          );
       }
     } catch (error) {
       if (!row.expected?.errorCode) throw error;
