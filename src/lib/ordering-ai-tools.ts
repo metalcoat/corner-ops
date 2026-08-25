@@ -333,6 +333,10 @@ export const BUSINESS_ITEM_ALIASES: Record<string, string[]> = {
     "big boss turkey sub",
   ],
   "hot roast beef": ["hot roast beef sandwich", "hot roast beef sandwhich"],
+  "double cheeseburger 1 2lb": [
+    "double cheeseburger",
+    "half pound double cheeseburger",
+  ],
   wing: ["wing", "bone in wing", "bone in wings", "chicken wings"],
   "boneles wing": ["boneless wing", "boneless wings"],
   "2l pepsi": [
@@ -388,6 +392,7 @@ const modifierAliases = (name: string) => {
     aliases.push(value.replace(/\bparmesan\b/gi, "parm"));
     aliases.push(value.replace(/\bsauce\b/gi, ""));
     if (/^mayo$/i.test(value)) aliases.push("mayonnaise");
+    if (/^extra cheese$/i.test(value)) aliases.push("cheese");
   }
   return [...new Set(aliases.map((value) => value.replace(/\s+/g, " ").trim()))];
 };
@@ -1042,6 +1047,10 @@ export async function priceSpokenOrder(input: {
             row.group.name === "Burger Toppings" &&
             /^raw onions$/i.test(row.option.name)
               ? "onion"
+              : row.option.name,
+            row.group.name === "Burger Toppings" &&
+            /^tomatoes$/i.test(row.option.name)
+              ? "tomato"
               : row.option.name,
           ],
           "INVALID_MODIFIER",

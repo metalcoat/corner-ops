@@ -66,9 +66,18 @@ test("POS workspace tabs preserve the unfinished order without a document reload
     await expect(page.getByRole("button", { name: /^ASAP/ })).toHaveClass(/active/);
     expect(await page.evaluate(() => (window as typeof window & { __cornerOpsShellMarker?: string }).__cornerOpsShellMarker)).toBe("mounted");
     expect(await page.evaluate(() => performance.getEntriesByType("navigation").length)).toBe(initialNavigationEntries);
+
+    await page.getByRole("button", { name: "HOLD", exact: true }).click();
+    await expect(page.getByText(/Held order #/)).toBeVisible();
+    await ordersLink.click();
+    await page.locator(".ocOrder").filter({ hasText: "Workspace Navigation" }).first().click();
+    await page.getByRole("button", { name: "OPEN CHECKOUT / PAY" }).click();
+    await expect(page.getByRole("heading", { name: /Checkout · Order #/ })).toBeVisible();
+    await page.getByRole("button", { name: "BACK TO ORDERS" }).click();
+    await expect(page.getByRole("heading", { name: "Orders", exact: true })).toBeVisible();
   } finally {
     if (/^[0-9a-f-]{36}$/i.test(customer.customer.id)) {
-      execFileSync("docker", ["exec", "corner-ops-postgres", "psql", "-U", "cornerops", "-d", "cornerops", "-v", "ON_ERROR_STOP=1", "-c", `DELETE FROM ordering_customers WHERE id='${customer.customer.id}' AND first_name='Workspace' AND last_name='Navigation'`]);
+      execFileSync("docker", ["exec", "corner-ops-postgres", "psql", "-U", "cornerops", "-d", "cornerops", "-v", "ON_ERROR_STOP=1", "-c", `UPDATE ordering_orders SET customer_id=NULL WHERE customer_id='${customer.customer.id}'; DELETE FROM ordering_customers WHERE id='${customer.customer.id}' AND first_name='Workspace' AND last_name='Navigation'`]);
     }
   }
 });

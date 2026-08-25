@@ -117,6 +117,26 @@ export default function OrderCenterClient() {
       setError(cause instanceof Error ? cause.message : "Could not reopen this order.");
     } finally { setReopenBusy(false); }
   }
+  function openCheckout(order: Order) {
+    const itemIds = (order.items || [])
+      .map((item) => String(item.id || ""))
+      .filter(Boolean);
+    localStorage.setItem("corner-ops-checkout-order", JSON.stringify({
+      id: order.id,
+      displayNumber: order.display_number,
+      totalCents: Number(order.total_cents),
+      deliveryFeeCents: Number((order as any).delivery_fee_cents || 0),
+      timingMessage: String((order as any).timing_message_snapshot || ""),
+      kitchenTimingLabel: String((order as any).kitchen_timing_label_snapshot || ""),
+      scheduledFor: order.scheduled_for,
+      promotions: [],
+      loyalty: [],
+      orderItemIds: itemIds,
+      checkoutOnly: true,
+    }));
+    setSelected(null);
+    window.location.assign("/pos/deli");
+  }
   async function advance(order: Order) {
     const draft = order.status === "draft";
     const next =
@@ -427,8 +447,13 @@ export default function OrderCenterClient() {
                 {label(e.event_type)} · {e.actor_id}
               </p>
             ))}
-            {["sent_to_kitchen", "in_progress", "ready", "completed"].includes(selected.status) && !selected.voided_at && (
-              <button disabled={reopenBusy} onClick={() => void reopen(selected)}>{reopenBusy ? "REOPENING…" : "REOPEN / ADD ITEMS"}</button>
+            {!selected.voided_at && (
+              <div className="ocDetailActions">
+                <button onClick={() => openCheckout(selected)}>OPEN CHECKOUT / PAY</button>
+                {["sent_to_kitchen", "in_progress", "ready", "completed"].includes(selected.status) && (
+                  <button disabled={reopenBusy} onClick={() => void reopen(selected)}>{reopenBusy ? "REOPENING…" : "REOPEN / ADD ITEMS"}</button>
+                )}
+              </div>
             )}
             {session.session?.posRole !== "employee" &&
               [

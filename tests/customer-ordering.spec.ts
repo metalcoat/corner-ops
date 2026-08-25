@@ -36,7 +36,7 @@ test("web cart pricing uses the authoritative backend and remains a non-payable 
   expect(item).toBeTruthy();
   const variant = item.variants.find((candidate: any) => candidate.available);
   const response = await request.post("/api/customer/cart", { data: {
-    serviceType: "pickup", timingMode: "future", scheduledFor: "2026-08-17T16:00:00.000Z",
+    serviceType: "pickup", timingMode: "asap", scheduledFor: null,
     items: [{ itemId: item.id, variantId: variant?.id || null, quantity: 1, modifierSelections: {}, modifierDeclines: item.modifiers.map((group: any) => group.id), comboSelections: {} }],
   } });
   expect(response.status()).toBe(201);

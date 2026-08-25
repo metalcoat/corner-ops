@@ -322,6 +322,22 @@ export function ensureOrderingSchema(): Promise<void> {
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS ordering_order_events_order_idx ON ordering_order_events (order_id, order_version, created_at)`;
+
+      // Egg already exists as a priced deli modifier. Recorded burger orders
+      // require the same choice to be visible through every ordering channel.
+      await sql`
+        INSERT INTO ordering_modifier_options (
+          id, group_id, name, price_delta_cents, available, active, sort_order
+        )
+        SELECT gen_random_uuid(), burger.id, 'Egg', egg.price_delta_cents, TRUE, TRUE,
+               COALESCE((SELECT MAX(option.sort_order) + 1 FROM ordering_modifier_options option WHERE option.group_id = burger.id), 1)
+        FROM ordering_modifier_groups burger
+        JOIN ordering_modifier_groups salad ON salad.business = burger.business AND salad.name = 'Salad Egg Mod'
+        JOIN ordering_modifier_options egg ON egg.group_id = salad.id AND egg.name = 'Egg' AND egg.active = TRUE
+        WHERE burger.business = 'Corner Deli' AND burger.name = 'Burger Toppings'
+        ON CONFLICT (group_id, name) DO UPDATE
+        SET price_delta_cents = EXCLUDED.price_delta_cents, available = TRUE, active = TRUE, updated_at = NOW()
+      `;
     })().catch((error) => {
       orderingSchemaPromise = null;
       throw error;

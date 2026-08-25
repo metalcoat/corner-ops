@@ -53,13 +53,12 @@ function matchesPath(path: string, prefix: string): boolean {
 }
 
 function isDeliPosApi(path: string): boolean {
-  return path === "/api/ordering/menu" || path === "/api/ordering/orders" ||
+  return path === "/api/ordering/menu" || matchesPath(path, "/api/ordering/orders") ||
     path === "/api/ordering/kitchen" ||
     ["order-center", "customers", "settings", "reports", "barcodes", "gift-cards", "address"]
       .some((part) => matchesPath(path, `/api/ordering/${part}`)) ||
     path === "/api/ordering/delivery/quote" ||
-    path === "/api/ordering/hardware/status" ||
-    /^\/api\/ordering\/orders\/[^/]+\/submit$/.test(path);
+    path === "/api/ordering/hardware/status";
 }
 
 function anyPath(path: string, prefixes: string[]): boolean {

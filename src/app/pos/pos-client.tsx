@@ -74,6 +74,7 @@ type SavedDraft = {
   orderItemIds: string[];
   loyalty: Array<{ label: string; discountCents: number }>;
   reopened?: boolean;
+  checkoutOnly?: boolean;
 };
 type OpenTikiTab = {
   id: string;
@@ -520,6 +521,33 @@ export default function PosClient({
     load();
     window.addEventListener("corner-ops-order-reopened", load);
     return () => window.removeEventListener("corner-ops-order-reopened", load);
+  }, [business]);
+  useEffect(() => {
+    if (business !== "Corner Deli") return;
+    const load = () => {
+      try {
+        const raw = localStorage.getItem("corner-ops-checkout-order");
+        if (!raw) return;
+        const value = JSON.parse(raw) as SavedDraft;
+        if (!value.id || !value.displayNumber) return;
+        localStorage.removeItem("corner-ops-checkout-order");
+        const checkoutDraft: SavedDraft = {
+          ...value,
+          promotions: value.promotions || [],
+          loyalty: value.loyalty || [],
+          orderItemIds: value.orderItemIds || [],
+          checkoutOnly: true,
+        };
+        setSavedDraft(checkoutDraft);
+        setCart([]);
+        void openCheckout(checkoutDraft);
+      } catch {
+        localStorage.removeItem("corner-ops-checkout-order");
+      }
+    };
+    load();
+    window.addEventListener("corner-ops-checkout-order", load);
+    return () => window.removeEventListener("corner-ops-checkout-order", load);
   }, [business]);
   const [quotedPromotions, setQuotedPromotions] = useState<
     Array<{ label: string; discountCents: number }>
@@ -2127,11 +2155,11 @@ export default function PosClient({
     }
   }
 
-  async function openCheckout() {
+  async function openCheckout(draftOverride?: SavedDraft) {
     const draft =
-      business === "Tiki" && activeTab && cart.length
+      draftOverride || (business === "Tiki" && activeTab && cart.length
         ? await saveDraft()
-        : savedDraft || activeTab || (await saveDraft());
+        : savedDraft || activeTab || (await saveDraft()));
     if (!draft) return;
     const checksResponse = await fetch(
       `/api/ordering/orders/${encodeURIComponent(draft.id)}/checks`,
@@ -2159,6 +2187,16 @@ export default function PosClient({
     setSelectedCheckId(checkId);
     setCheckoutState(payload);
     setCheckoutOpen(true);
+  }
+
+  function closeCheckout() {
+    setCheckoutOpen(false);
+    if (!savedDraft?.checkoutOnly) return;
+    setCheckoutState(null);
+    setPayableChecks([]);
+    setSelectedCheckId(null);
+    setSavedDraft(null);
+    window.location.assign("/pos/deli/orders");
   }
 
   async function selectCheck(checkId: string) {
@@ -3750,8 +3788,8 @@ export default function PosClient({
                 )}
               </>
             )}
-            <button type="button" onClick={() => setCheckoutOpen(false)}>
-              BACK TO ORDER
+            <button type="button" onClick={closeCheckout}>
+              {savedDraft?.checkoutOnly ? "BACK TO ORDERS" : "BACK TO ORDER"}
             </button>
           </section>
         </div>

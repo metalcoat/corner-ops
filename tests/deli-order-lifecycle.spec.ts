@@ -47,7 +47,7 @@ test("cashier submits a real pizza and kitchen completes it", async ({ page }) =
   const payload = await response.json() as { order: { display_number: string; total_cents: number } };
   const orderNumber = payload.order.display_number;
   expect(payload.order.total_cents).toBe(1850);
-  await expect(page.getByRole("status")).toContainText(`Order #${orderNumber} submitted to kitchen`);
+  await expect(page.getByRole("status").filter({ hasText: `Order #${orderNumber}` })).toContainText(`submitted to kitchen`);
   await expect(page.getByText("Tap a menu item to start the order.")).toBeVisible();
 
   await page.goto("/pos/deli/kitchen");
