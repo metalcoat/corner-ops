@@ -17,8 +17,16 @@ export async function orderingStoreDashboard(){
     sql`SELECT id,display_number,status,payment_status,service_type,created_at,scheduled_for,amount_due_cents,COALESCE(NULLIF(trim(first_name_snapshot||' '||last_name_snapshot),''),'Guest') customer_name
       FROM ordering_orders WHERE business='Corner Deli' AND created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York') AND amount_due_cents>0 AND status<>'cancelled' ORDER BY COALESCE(scheduled_for,created_at),created_at LIMIT 60`,
     sql`SELECT d.id delivery_id,d.status,d.driver_employee_id,d.assigned_at,d.picked_up_at,d.en_route_at,d.arrived_at,d.delivered_at,d.failed_at,d.updated_at,
-      o.display_number,o.status order_status,o.scheduled_for,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,e.name driver_name
+      o.display_number,o.status order_status,o.scheduled_for,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,e.name driver_name,
+      location.latitude::double precision driver_latitude,location.longitude::double precision driver_longitude,location.accuracy_meters::double precision driver_accuracy_meters,location.captured_at driver_location_captured_at
       FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id LEFT JOIN employees e ON e.id=d.driver_employee_id
+      LEFT JOIN LATERAL(
+        SELECT l.latitude,l.longitude,l.accuracy_meters,l.captured_at
+        FROM ordering_delivery_locations l
+        WHERE l.delivery_id=d.id AND d.status IN('EN_ROUTE','ARRIVED','NO_CONTACT')
+          AND EXISTS(SELECT 1 FROM ordering_delivery_tracking_sessions s WHERE s.id=l.tracking_session_id AND s.stopped_at IS NULL)
+        ORDER BY l.captured_at DESC LIMIT 1
+      )location ON TRUE
       WHERE d.business='Corner Deli' AND (d.status NOT IN('DELIVERED','RETURNED','CANCELLED') OR d.updated_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York'))
       ORDER BY CASE d.status WHEN 'DELIVERY_FAILED' THEN 0 WHEN 'NO_CONTACT' THEN 1 WHEN 'EN_ROUTE' THEN 2 WHEN 'READY_FOR_DRIVER' THEN 3 ELSE 4 END,COALESCE(o.scheduled_for,o.created_at) LIMIT 60`,
     sql`SELECT a.id,a.action,a.new_status,a.created_at,o.display_number,e.name employee_name
