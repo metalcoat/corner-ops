@@ -26,6 +26,10 @@ import "./pos.css";
 import { usePosIdleLock } from "./use-pos-idle-lock";
 import PizzaToppingSelector from "@/components/pizza-topping-selector";
 import {
+  formatModifierIntensity,
+  supportsSubModifierIntensity,
+} from "@/lib/ordering-modifier-intensity";
+import {
   formatPizzaTopping,
   normalizePizzaToppings,
   pizzaToppingPriceCents,
@@ -1344,7 +1348,7 @@ export default function PosClient({
               modifierAmounts[option.id] !== "normal")
           ) {
             modifierText.push(
-              `${group.name}: ${modifierAmounts[option.id] && modifierAmounts[option.id] !== "normal" ? `${modifierAmounts[option.id].toUpperCase()} ` : ""}${option.name}${optionQuantity > 1 ? ` ×${optionQuantity}` : ""}`,
+              `${group.name}: ${formatModifierIntensity(option.name, modifierAmounts[option.id] || "normal")}${optionQuantity > 1 ? ` ×${optionQuantity}` : ""}`,
             );
           }
         } else if (option.defaultSelected) {
@@ -1548,7 +1552,7 @@ export default function PosClient({
     group: OrderingModifierGroupView,
     option: OrderingModifierOptionView,
   ) {
-    if (!group.supportsIntensity) return;
+    if (!supportsSubModifierIntensity(group.supportsIntensity, option.name)) return;
     held.current = false;
     if (holdTimer.current) window.clearTimeout(holdTimer.current);
     holdTimer.current = window.setTimeout(() => {
@@ -4191,7 +4195,7 @@ export default function PosClient({
                                 onPointerCancel={endIntensityHold}
                                 onPointerLeave={endIntensityHold}
                                 onContextMenu={(event) => {
-                                  if (group.supportsIntensity) {
+                                  if (supportsSubModifierIntensity(group.supportsIntensity, option.name)) {
                                     event.preventDefault();
                                     setIntensityChoice({ group, option });
                                   }
@@ -4215,7 +4219,7 @@ export default function PosClient({
                                         : "FREE"}
                                 </span>
                               </button>
-                              {selectedOption && group.supportsIntensity && (
+                              {selectedOption && supportsSubModifierIntensity(group.supportsIntensity, option.name) && (
                                 <button
                                   type="button"
                                   className="posAmountButton"

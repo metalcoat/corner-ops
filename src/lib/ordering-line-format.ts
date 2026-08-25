@@ -1,4 +1,5 @@
 import { formatPizzaTopping, type PizzaToppingAmount, type PizzaToppingPortion } from "@/lib/ordering-pizza-toppings";
+import { formatModifierIntensity } from "@/lib/ordering-modifier-intensity";
 
 export type OrderModifierPresentation = {
   option_name_snapshot: string;
@@ -18,7 +19,7 @@ export function formatOrderModifier(modifier: OrderModifierPresentation, style: 
   const value = modifier.selection_state === "removed"
     ? `NO ${modifier.option_name_snapshot}`
     : modifier.selection_state === "declined_included" ? "NO INCLUDED CHOICE"
-    : `${modifier.amount && modifier.amount !== "normal" ? `${modifier.amount.toUpperCase()} ` : ""}${modifier.quantity > 1 ? `${modifier.quantity}× ` : ""}${modifier.option_name_snapshot}`;
+    : `${modifier.quantity > 1 ? `${modifier.quantity}× ` : ""}${formatModifierIntensity(modifier.option_name_snapshot, modifier.amount || "normal")}`;
   return style === "ticket" ? value.toUpperCase() : value;
 }
 

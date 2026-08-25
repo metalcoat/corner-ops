@@ -1,11 +1,16 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import PizzaToppingSelector from "@/components/pizza-topping-selector";
 import {
   formatPizzaTopping,
   pizzaToppingPriceCents,
   type PizzaToppingSelection,
 } from "@/lib/ordering-pizza-toppings";
+import {
+  formatModifierIntensity,
+  supportsSubModifierIntensity,
+  type ModifierIntensity,
+} from "@/lib/ordering-modifier-intensity";
 
 type Option = {
   id: string;
@@ -21,6 +26,7 @@ type Group = {
   minSelections: number;
   maxSelections: number;
   presentationBehavior: "standard" | "pizza_topping";
+  supportsIntensity?: boolean;
   presentationContext?: "ordinary" | "combo_trigger" | "dependent";
   parentGroupId?: string | null;
   parentOptionIds?: string[];
@@ -104,6 +110,7 @@ type CartLine = {
   quantity: number;
   modifierSelections: Record<string, string[]>;
   modifierDeclines: string[];
+  modifierAmounts: Record<string, ModifierIntensity>;
   pizzaToppings: PizzaToppingSelection[];
   comboId: string | null;
   comboSelections: Record<string, string[]>;
@@ -127,8 +134,18 @@ function cartDetails(line: CartLine) {
   for (const group of line.item.modifiers) {
     if (group.presentationBehavior === "pizza_topping") continue;
     const names = group.options
-      .filter((option) => selectedIds.has(option.id) && !option.defaultSelected)
-      .map((option) => option.name);
+      .filter(
+        (option) =>
+          selectedIds.has(option.id) &&
+          (!option.defaultSelected ||
+            (line.modifierAmounts[option.id] || "normal") !== "normal"),
+      )
+      .map((option) =>
+        formatModifierIntensity(
+          option.name,
+          line.modifierAmounts[option.id] || "normal",
+        ),
+      );
     if (names.length) details.push(`${group.name}: ${names.join(", ")}`);
   }
   for (const topping of line.pizzaToppings) {
@@ -269,6 +286,7 @@ export default function CustomerOrder() {
             quantity: line.quantity,
             modifierSelections: line.modifierSelections,
             modifierDeclines: line.modifierDeclines,
+            modifierAmounts: line.modifierAmounts,
             pizzaToppings: line.pizzaToppings,
             comboId: line.comboId,
             comboSelections: line.comboSelections,
@@ -641,8 +659,17 @@ function ItemDialog({
     [comboSelections, setComboSelections] = useState<Record<string, string[]>>(
       {},
     ),
+    [modifierAmounts, setModifierAmounts] = useState<
+      Record<string, ModifierIntensity>
+    >({}),
+    [intensityChoice, setIntensityChoice] = useState<{
+      group: Group;
+      option: Option;
+    } | null>(null),
     [quantity, setQuantity] = useState(1),
     [notes, setNotes] = useState("");
+  const holdTimer = useRef<number | null>(null),
+    held = useRef(false);
   const visibleModifiers = item.modifiers.filter(
     (group) =>
       group.presentationContext !== "dependent" ||
@@ -663,6 +690,43 @@ function ItemDialog({
               : values;
       return { ...current, [group.id]: next };
     });
+  const beginIntensityHold = (group: Group, option: Option) => {
+    if (
+      !supportsSubModifierIntensity(
+        Boolean(group.supportsIntensity),
+        option.name,
+      )
+    )
+      return;
+    held.current = false;
+    holdTimer.current = window.setTimeout(() => {
+      held.current = true;
+      setSelected((current) => ({
+        ...current,
+        [group.id]: (current[group.id] || []).includes(option.id)
+          ? current[group.id]
+          : group.maxSelections === 1
+            ? [option.id]
+            : [...(current[group.id] || []), option.id].slice(
+                0,
+                group.maxSelections,
+              ),
+      }));
+      setIntensityChoice({ group, option });
+    }, 450);
+  };
+  const endIntensityHold = () => {
+    if (holdTimer.current !== null) window.clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+  };
+  const chooseIntensity = (amount: ModifierIntensity) => {
+    if (!intensityChoice) return;
+    setModifierAmounts((current) => ({
+      ...current,
+      [intensityChoice.option.id]: amount,
+    }));
+    setIntensityChoice(null);
+  };
   const valid =
     visibleModifiers
       .filter((g) => g.presentationBehavior !== "pizza_topping")
@@ -731,23 +795,90 @@ function ItemDialog({
               </legend>
               {group.options
                 .filter((o) => o.available)
-                .map((option) => (
-                  <label key={option.id}>
-                    <input
-                      type={group.maxSelections === 1 ? "radio" : "checkbox"}
-                      checked={(selected[group.id] || []).includes(option.id)}
-                      onChange={() => toggle(group, option.id)}
-                    />
-                    <span>{option.name}</span>
-                    <b>
-                      {option.priceDeltaCents
-                        ? `+${money(option.priceDeltaCents)}`
-                        : ""}
-                    </b>
-                  </label>
-                ))}
+                .map((option) => {
+                  const isSelected = (selected[group.id] || []).includes(
+                    option.id,
+                  );
+                  const supportsIntensity = supportsSubModifierIntensity(
+                    Boolean(group.supportsIntensity),
+                    option.name,
+                  );
+                  return (
+                    <div className="customerModifierChoice" key={option.id}>
+                      <button
+                        type="button"
+                        className={isSelected ? "selected" : ""}
+                        aria-pressed={isSelected}
+                        onPointerDown={() => beginIntensityHold(group, option)}
+                        onPointerUp={endIntensityHold}
+                        onPointerCancel={endIntensityHold}
+                        onPointerLeave={endIntensityHold}
+                        onContextMenu={(event) => {
+                          if (!supportsIntensity) return;
+                          event.preventDefault();
+                          setIntensityChoice({ group, option });
+                        }}
+                        onClick={() => {
+                          if (held.current) {
+                            held.current = false;
+                            return;
+                          }
+                          toggle(group, option.id);
+                        }}
+                      >
+                        <span>{isSelected ? "✓" : ""}</span>
+                        <strong>{option.name}</strong>
+                        <b>
+                          {option.priceDeltaCents
+                            ? `+${money(option.priceDeltaCents)}`
+                            : ""}
+                        </b>
+                      </button>
+                      {isSelected && supportsIntensity && (
+                        <button
+                          type="button"
+                          className="customerAmountButton"
+                          aria-label={`Change ${option.name} amount, currently ${modifierAmounts[option.id] || "normal"}`}
+                          onClick={() => setIntensityChoice({ group, option })}
+                        >
+                          {(modifierAmounts[option.id] || "normal").toUpperCase()} ▾
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
             </fieldset>
           ),
+        )}
+        {intensityChoice && (
+          <div
+            className="customerIntensityPopover"
+            role="group"
+            aria-label={`${intensityChoice.option.name} amount`}
+          >
+            <strong>{intensityChoice.option.name}</strong>
+            <small>Choose how much</small>
+            <div>
+              {(["light", "normal", "heavy"] as const).map((amount) => (
+                <button
+                  type="button"
+                  key={amount}
+                  className={
+                    (modifierAmounts[intensityChoice.option.id] || "normal") ===
+                    amount
+                      ? "selected"
+                      : ""
+                  }
+                  onClick={() => chooseIntensity(amount)}
+                >
+                  {amount.toUpperCase()}
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={() => setIntensityChoice(null)}>
+              Cancel
+            </button>
+          </div>
         )}
         {item.combos.length > 0 && (
           <fieldset>
@@ -837,6 +968,7 @@ function ItemDialog({
                 variantId,
                 quantity,
                 modifierSelections: selected,
+                modifierAmounts,
                 modifierDeclines: item.modifiers
                   .filter(
                     (g) =>

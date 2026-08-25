@@ -463,6 +463,68 @@
   padding: 9px 0;
   align-items: center;
 }
+.customerModifierChoice {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 4px 0;
+}
+.customerModifierChoice > button:first-child {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 7px;
+  align-items: center;
+  min-height: 42px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.customerModifierChoice > button:first-child.selected {
+  border-color: var(--green);
+  background: #f2f7eb;
+}
+.customerAmountButton {
+  border: 1px solid var(--green);
+  border-radius: 10px;
+  background: white;
+  color: var(--green);
+  font-weight: 800;
+  cursor: pointer;
+}
+.customerIntensityPopover {
+  position: sticky;
+  bottom: 12px;
+  z-index: 2;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--green);
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 10px 30px #17211b33;
+}
+.customerIntensityPopover > div {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+.customerIntensityPopover button {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  font-weight: 800;
+  cursor: pointer;
+}
+.customerIntensityPopover button.selected {
+  border-color: var(--green);
+  background: var(--green);
+  color: white;
+}
 .itemDialog legend em {
   font: 700 10px ui-sans-serif;
   text-transform: uppercase;

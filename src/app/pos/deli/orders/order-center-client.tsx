@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import PosPinGate, { type PosSessionView } from "../../pos-pin-gate";
 import ItemCancellationPanel from "./item-cancellation-panel";
+import { formatOrderModifier } from "@/lib/ordering-line-format";
 type Order = {
   id: string;
   display_number: string;
@@ -418,12 +419,7 @@ export default function OrderCenterClient() {
                   .filter((m: any) => m.print_on_ticket !== false)
                   .map((m: any) => (
                     <small key={m.id}>
-                      {m.selection_state === "removed"
-                        ? "NO "
-                        : m.amount !== "normal"
-                          ? `${m.amount.toUpperCase()} `
-                          : ""}
-                      {m.option_name_snapshot}
+                      {formatOrderModifier(m)}
                     </small>
                   ))}
               </article>
