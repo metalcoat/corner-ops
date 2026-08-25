@@ -55,7 +55,7 @@ function matchesPath(path: string, prefix: string): boolean {
 function isDeliPosApi(path: string): boolean {
   return path === "/api/ordering/menu" || matchesPath(path, "/api/ordering/orders") ||
     path === "/api/ordering/kitchen" ||
-    ["order-center", "customers", "settings", "reports", "barcodes", "gift-cards", "address"]
+    ["order-center", "customers", "settings", "reports", "barcodes", "gift-cards", "address", "driver-cash"]
       .some((part) => matchesPath(path, `/api/ordering/${part}`)) ||
     path === "/api/ordering/delivery/quote" ||
     path === "/api/ordering/hardware/status";

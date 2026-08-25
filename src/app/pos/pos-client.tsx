@@ -563,9 +563,24 @@ export default function PosClient({
   const [payableChecks, setPayableChecks] = useState<PayableCheck[]>([]);
   const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
   const [cashTender, setCashTender] = useState("");
+  const [receiptPrinters, setReceiptPrinters] = useState<Array<{id:string;name:string;tillKey:string;cashDrawerEnabled:boolean}>>([]);
+  const [receiptPrinterId, setReceiptPrinterId] = useState("");
+  const [lastChangeDueCents, setLastChangeDueCents] = useState<number | null>(null);
   const [giftCardNumber, setGiftCardNumber] = useState("");
   const [giftCardPin, setGiftCardPin] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
+  useEffect(() => {
+    if (business !== "Corner Deli") return;
+    fetch("/api/ordering/hardware/status", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((body) => {
+        const printers = Array.isArray(body.receiptPrinters) ? body.receiptPrinters : [];
+        setReceiptPrinters(printers);
+        const stored = localStorage.getItem("corner-ops-receipt-printer") || "";
+        setReceiptPrinterId(printers.some((printer: any) => printer.id === stored) ? stored : printers[0]?.id || "");
+      })
+      .catch(() => setReceiptPrinters([]));
+  }, [business]);
   const [configurationMessage, setConfigurationMessage] = useState("");
   const [cartNotice, setCartNotice] = useState("");
   const [removedLine, setRemovedLine] = useState<CartLine | null>(null);
@@ -2156,6 +2171,7 @@ export default function PosClient({
   }
 
   async function openCheckout(draftOverride?: SavedDraft) {
+    setLastChangeDueCents(null);
     const draft =
       draftOverride || (business === "Tiki" && activeTab && cart.length
         ? await saveDraft()
@@ -2290,6 +2306,7 @@ export default function PosClient({
             giftCardNumber,
             giftCardPin,
             clientMutationId: clientId(),
+            receiptPrinterId: receiptPrinterId || undefined,
           }),
         },
       );
@@ -2299,6 +2316,10 @@ export default function PosClient({
       if (!response.ok)
         throw new Error(payload.error || "Payment could not be committed.");
       setCheckoutState(payload);
+      if (tenderType === "cash") {
+        const latest = [...payload.tenders].reverse().find((tender) => tender.transaction_type === "payment" && tender.tender_type === "cash");
+        setLastChangeDueCents(Number(latest?.change_due_cents || 0));
+      }
       setCashTender("");
       if (tenderType === "gift_card") {
         setGiftCardNumber("");
@@ -2536,6 +2557,8 @@ export default function PosClient({
                 <a key={utility} href="/pos/deli/settings">
                   Settings
                 </a>
+              ) : business === "Corner Deli" && utility === "drivers" ? (
+                <a key={utility} href="/pos/deli/drivers">Drivers</a>
               ) : utility === "bar_tabs" ? (
                 <button
                   key={utility}
@@ -3716,12 +3739,33 @@ export default function PosClient({
                 </div>
               );
             })}
+            {lastChangeDueCents !== null && (
+              <p role="status"><strong>CHANGE DUE: {money(lastChangeDueCents)}</strong></p>
+            )}
             {Number(
               checkoutState?.check?.amount_due_cents ??
                 checkoutState?.order.amount_due_cents ??
                 0,
             ) > 0 && (
               <>
+                {receiptPrinters.length > 0 && (
+                  <label>
+                    Till / receipt printer
+                    <select
+                      value={receiptPrinterId}
+                      onChange={(event) => {
+                        setReceiptPrinterId(event.target.value);
+                        localStorage.setItem("corner-ops-receipt-printer", event.target.value);
+                      }}
+                    >
+                      {receiptPrinters.map((printer) => (
+                        <option key={printer.id} value={printer.id}>
+                          {printer.tillKey || printer.name}{printer.cashDrawerEnabled ? " · drawer" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label>
                   Cash tendered
                   <input

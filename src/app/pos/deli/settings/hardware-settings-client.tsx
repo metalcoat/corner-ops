@@ -14,6 +14,8 @@ type Device = {
     port?: number;
     ticketTextSize?: string;
     ticketHeaderSize?: string;
+    tillKey?: string;
+    cashDrawerEnabled?: boolean;
   };
   active: boolean;
   effective_status: string;
@@ -53,6 +55,8 @@ export default function HardwareSettingsClient() {
     [printerPort, setPrinterPort] = useState(9100),
     [ticketTextSize, setTicketTextSize] = useState("normal"),
     [ticketHeaderSize, setTicketHeaderSize] = useState("large"),
+    [tillKey, setTillKey] = useState(""),
+    [cashDrawerEnabled, setCashDrawerEnabled] = useState(false),
     [locationId, setLocationId] = useState(""),
     [routePrinterId, setRoutePrinterId] = useState(""),
     [targetType, setTargetType] = useState("all"),
@@ -117,6 +121,8 @@ export default function HardwareSettingsClient() {
     setPrinterPort(Number(device.adapter_config?.port || 9100));
     setTicketTextSize(device.adapter_config?.ticketTextSize || "normal");
     setTicketHeaderSize(device.adapter_config?.ticketHeaderSize || "large");
+    setTillKey(device.adapter_config?.tillKey || "");
+    setCashDrawerEnabled(Boolean(device.adapter_config?.cashDrawerEnabled));
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
   function clearDevice() {
@@ -127,6 +133,8 @@ export default function HardwareSettingsClient() {
     setPrinterPort(9100);
     setTicketTextSize("normal");
     setTicketHeaderSize("large");
+    setTillKey("");
+    setCashDrawerEnabled(false);
   }
   return (
     <section className="posSettingsCard">
@@ -284,6 +292,26 @@ export default function HardwareSettingsClient() {
                 <option value="extra_large">Extra large (3×)</option>
               </select>
             </label>
+            {role === "receipt_printer" && (
+              <>
+                <label>
+                  TILL / REGISTER
+                  <input
+                    value={tillKey}
+                    onChange={(e) => setTillKey(e.target.value)}
+                    placeholder="Front Till"
+                  />
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={cashDrawerEnabled}
+                    onChange={(e) => setCashDrawerEnabled(e.target.checked)}
+                  />
+                  Cash drawer connected to this receipt printer
+                </label>
+              </>
+            )}
           </>
         )}
         <button
@@ -311,6 +339,8 @@ export default function HardwareSettingsClient() {
                         port: printerPort,
                         ticketTextSize,
                         ticketHeaderSize,
+                        tillKey,
+                        cashDrawerEnabled,
                       }
                     : {},
               },

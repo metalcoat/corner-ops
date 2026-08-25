@@ -46,6 +46,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       clientMutationId: String(body.clientMutationId || ""),
       checkId: body.checkId ? String(body.checkId) : null,
       actor,
+      receiptPrinterId: body.receiptPrinterId ? String(body.receiptPrinterId) : undefined,
+      cashControlMode: "till",
       giftCardNumber: body.giftCardNumber ? String(body.giftCardNumber) : undefined,
       giftCardPin: body.giftCardPin ? String(body.giftCardPin) : undefined,
     });await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});return Response.json(result,{status:201});

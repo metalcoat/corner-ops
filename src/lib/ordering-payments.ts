@@ -95,6 +95,8 @@ export async function commitTender(input: {
   clientMutationId: string;
   checkId?: string | null;
   actor: OrderingActor;
+  receiptPrinterId?: string;
+  cashControlMode?: "till" | "driver_settlement";
   giftCardNumber?: string;
   giftCardPin?: string;
 }) {
@@ -104,6 +106,13 @@ export async function commitTender(input: {
 
   return withTransaction(async () => {
     const sql = getSql();
+    if (input.receiptPrinterId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.receiptPrinterId)) throw new PaymentConflictError("Choose a valid receipt printer / till.");
+    const tillCash = input.tenderType === "cash" && input.cashControlMode === "till";
+    const receiptPrinters = tillCash || input.receiptPrinterId
+      ? await sql`SELECT id FROM ordering_hardware_devices WHERE business=${input.business} AND role='receipt_printer' AND active=TRUE AND adapter_key='network-printer'`
+      : [];
+    if (receiptPrinters.length && !input.receiptPrinterId) throw new PaymentConflictError("Choose the receipt printer / till for this cash payment.");
+    if (input.receiptPrinterId && !receiptPrinters.some((printer) => String(printer.id) === input.receiptPrinterId)) throw new PaymentConflictError("The selected receipt printer / till is not active.");
     const duplicate = await sql`
       SELECT id, order_id, transaction_type FROM ordering_payment_transactions
       WHERE business = ${input.business} AND client_mutation_id = ${input.clientMutationId} LIMIT 1
@@ -143,7 +152,7 @@ export async function commitTender(input: {
         'payment', 'approved', ${applied}, ${input.amountTenderedCents}, ${change},
         ${input.tenderType === "card" ? "manual_placeholder" : input.tenderType === "gift_card" ? "corner_ops_gift_card" : ""}, ${input.clientMutationId},
         ${input.actor.id}, NOW(),
-        CAST(${JSON.stringify({ actorName: input.actor.name, actorType: input.actor.type, manualCard: input.tenderType === "card", giftCard: input.tenderType === "gift_card" })} AS jsonb)
+        CAST(${JSON.stringify({ actorName: input.actor.name, actorType: input.actor.type, manualCard: input.tenderType === "card", giftCard: input.tenderType === "gift_card", receiptPrinterId: input.receiptPrinterId || null })} AS jsonb)
       )
     `;
     if (input.tenderType === "gift_card") {
@@ -197,6 +206,9 @@ export async function commitTender(input: {
           serviceType: order.service_type, phone: order.phone_snapshot || "", paidThisUpdateCents: applied,
           totalPaidCents: newPaid, remainingDueCents: remaining, paid: remaining === 0,
           cashier: input.actor.name,
+          receiptPrinterId: input.receiptPrinterId || "",
+          openCashDrawer: tillCash,
+          changeDueCents: change,
         })} AS jsonb)
       )
     `;

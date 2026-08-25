@@ -13,6 +13,7 @@ const centerWorkspaces = [
   { label: "Dashboard", href: "/pos/deli/dashboard" },
   { label: "Customers", href: "/pos/deli/customers" },
   { label: "Kitchen", href: "/pos/deli/kitchen" },
+  { label: "Drivers", href: "/pos/deli/drivers" },
 ] as const;
 
 function activeWorkspace(pathname: string, href: string) {
