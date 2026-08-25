@@ -41,12 +41,16 @@ export default function PizzaToppingSelector({
   variant,
   selections,
   onChange,
+  interaction = "topping_first",
 }: {
   group: PizzaToppingGroup;
   variant: PizzaToppingVariant | null;
   selections: PizzaToppingSelection[];
   onChange: (value: PizzaToppingSelection[]) => void;
+  interaction?: "topping_first" | "portion_first";
 }) {
+  const [activePortion, setActivePortion] =
+    useState<PizzaToppingPortion>("whole");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingPortion, setEditingPortion] =
     useState<PizzaToppingPortion>("whole");
@@ -70,6 +74,59 @@ export default function PizzaToppingSelector({
         { modifierOptionId: optionId, portion: "whole", amount: "regular" },
       ]),
     );
+  }
+  function coversPortion(optionId: string, portion: PizzaToppingPortion) {
+    const current = entries(optionId);
+    return current.some(
+      (entry) => entry.portion === "whole" || entry.portion === portion,
+    );
+  }
+  function toggleForActivePortion(optionId: string) {
+    const current = entries(optionId);
+    const other = selections.filter(
+      (entry) => entry.modifierOptionId !== optionId,
+    );
+    if (activePortion === "whole") {
+      onChange(
+        current.length
+          ? other
+          : [
+              ...other,
+              {
+                modifierOptionId: optionId,
+                portion: "whole",
+                amount: "regular",
+              },
+            ],
+      );
+      return;
+    }
+    const whole = current.find((entry) => entry.portion === "whole");
+    if (whole) {
+      const oppositePortion =
+        activePortion === "left_half" ? "right_half" : "left_half";
+      onChange([
+        ...other,
+        {
+          modifierOptionId: optionId,
+          portion: oppositePortion,
+          amount: whole.amount,
+        },
+      ]);
+      return;
+    }
+    const target = current.find((entry) => entry.portion === activePortion);
+    const next = target
+      ? current.filter((entry) => entry !== target)
+      : [
+          ...current,
+          {
+            modifierOptionId: optionId,
+            portion: activePortion,
+            amount: "regular" as PizzaToppingAmount,
+          },
+        ];
+    onChange(normalizePizzaToppings([...other, ...next]));
   }
   function choosePortion(optionId: string, portion: PizzaToppingPortion) {
     const current = entries(optionId),
@@ -145,20 +202,62 @@ export default function PizzaToppingSelector({
       <legend>
         {group.name}
         <small>
-          Tap once for Whole · Regular. Edit only when a half or extra amount is
-          needed.
+          {interaction === "portion_first"
+            ? "Choose a pizza section, then tap the toppings you want there."
+            : "Tap once for Whole · Regular. Edit only when a half or extra amount is needed."}
         </small>
       </legend>
+      {interaction === "portion_first" && (
+        <div className="pizzaPortionPicker" aria-label="Apply toppings to">
+          {(["whole", "left_half", "right_half"] as PizzaToppingPortion[]).map(
+            (portion) => (
+              <button
+                type="button"
+                key={portion}
+                className={activePortion === portion ? "selected" : ""}
+                aria-pressed={activePortion === portion}
+                onClick={() => {
+                  setActivePortion(portion);
+                  setEditingPortion(portion);
+                }}
+              >
+                {portionLabels[portion]}
+              </button>
+            ),
+          )}
+        </div>
+      )}
       <div className="pizzaToppingPalette" aria-label="Toppings">
         {group.options.filter(available).map((option) => (
           <button
             type="button"
             key={option.id}
-            className={entries(option.id).length ? "selected" : ""}
-            onClick={() => add(option.id)}
+            className={
+              (
+                interaction === "portion_first"
+                  ? coversPortion(option.id, activePortion)
+                  : entries(option.id).length
+              )
+                ? "selected"
+                : ""
+            }
+            aria-pressed={
+              interaction === "portion_first"
+                ? coversPortion(option.id, activePortion)
+                : Boolean(entries(option.id).length)
+            }
+            onClick={() =>
+              interaction === "portion_first"
+                ? toggleForActivePortion(option.id)
+                : add(option.id)
+            }
           >
             <strong>{option.name}</strong>
-            {entries(option.id).length && <span>Added</span>}
+            {(interaction === "portion_first"
+              ? coversPortion(option.id, activePortion)
+              : entries(option.id).length) && (
+              <span>Added to {portionLabels[activePortion]}</span>
+            )}
           </button>
         ))}
       </div>
@@ -178,7 +277,12 @@ export default function PizzaToppingSelector({
                 className="pizzaSelectedSummary"
                 onClick={() => {
                   setEditingId(editingId === option.id ? null : option.id);
-                  setEditingPortion(current[0].portion);
+                  setEditingPortion(
+                    interaction === "portion_first" &&
+                      coversPortion(option.id, activePortion)
+                      ? activePortion
+                      : current[0].portion,
+                  );
                 }}
               >
                 <strong>{option.name}</strong>
@@ -218,25 +322,31 @@ export default function PizzaToppingSelector({
               </div>
               {editingId === option.id && (
                 <div className="pizzaInlineEditor">
-                  <strong>PORTION</strong>
-                  <div>
-                    {(
-                      [
-                        "left_half",
-                        "whole",
-                        "right_half",
-                      ] as PizzaToppingPortion[]
-                    ).map((portion) => (
-                      <button
-                        type="button"
-                        key={portion}
-                        className={editingPortion === portion ? "selected" : ""}
-                        onClick={() => choosePortion(option.id, portion)}
-                      >
-                        {portionLabels[portion].toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
+                  {interaction === "topping_first" && (
+                    <>
+                      <strong>PORTION</strong>
+                      <div>
+                        {(
+                          [
+                            "left_half",
+                            "whole",
+                            "right_half",
+                          ] as PizzaToppingPortion[]
+                        ).map((portion) => (
+                          <button
+                            type="button"
+                            key={portion}
+                            className={
+                              editingPortion === portion ? "selected" : ""
+                            }
+                            onClick={() => choosePortion(option.id, portion)}
+                          >
+                            {portionLabels[portion].toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                   <strong>AMOUNT</strong>
                   <div>
                     {amounts.map((amount) => (

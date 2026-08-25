@@ -208,14 +208,13 @@ test("customer can choose and review a half-pizza topping", async ({
   await page.locator(".menuItem").click();
   const dialog = page.getByRole("dialog");
   await dialog
+    .locator(".pizzaPortionPicker")
+    .getByRole("button", { name: "Left Half" })
+    .click();
+  await dialog
     .locator(".pizzaToppingPalette")
     .getByRole("button", { name: "Pepperoni" })
     .click();
-  await dialog
-    .locator(".pizzaSelectedSummary")
-    .filter({ hasText: "Pepperoni" })
-    .click();
-  await dialog.getByRole("button", { name: "LEFT HALF" }).click();
   await dialog.getByRole("button", { name: "Add to order" }).click();
 
   await expect(page.locator(".orderCart")).toContainText("Left Half Pepperoni");

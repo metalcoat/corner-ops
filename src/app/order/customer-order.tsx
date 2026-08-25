@@ -721,6 +721,7 @@ function ItemDialog({
               variant={item.variants.find((v) => v.id === variantId) || null}
               selections={pizzaToppings}
               onChange={setPizzaToppings}
+              interaction="portion_first"
             />
           ) : (
             <fieldset key={group.id}>

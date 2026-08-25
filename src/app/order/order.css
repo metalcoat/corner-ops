@@ -530,6 +530,30 @@
   font-weight: 500;
   color: var(--muted);
 }
+.itemDialog .pizzaPortionPicker {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 12px 0 4px;
+  padding: 5px;
+  border-radius: 14px;
+  background: #eef1e9;
+}
+.itemDialog .pizzaPortionPicker button {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  padding: 12px 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.itemDialog .pizzaPortionPicker button.selected {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+  box-shadow: 0 3px 10px #174f3625;
+}
 .itemDialog .pizzaToppingPalette {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
