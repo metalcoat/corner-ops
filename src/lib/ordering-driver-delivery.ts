@@ -5,6 +5,11 @@ import { ensureOrderingAddressSchema } from "@/lib/ordering-address-schema";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
 import { cornerOpsBaseUrl } from "@/lib/transactional-email";
 import { get, put } from "@/lib/storage";
+import {
+  deliveryOrigin,
+  planDeliveryRoute,
+  type DeliveryRoutePlan,
+} from "@/lib/ordering-delivery-route";
 
 export const DELIVERY_STATUSES = ["ASSIGNED","READY_FOR_DRIVER","PICKED_UP","EN_ROUTE","ARRIVED","DELIVERED","NO_CONTACT","DELIVERY_FAILED","RETURNED","CANCELLED"] as const;
 export type DriverDeliveryStatus = typeof DELIVERY_STATUSES[number];
@@ -90,13 +95,85 @@ export async function listDriverDeliveries(actor:DriverActor,input:{query?:strin
     o.id order_id,o.display_number,o.status order_status,o.payment_status,o.service_type,o.timing_mode,o.scheduled_for,o.created_at,
     COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,o.phone_snapshot delivery_phone,
     a.formatted_address delivery_address,a.line2 delivery_unit,a.delivery_notes_snapshot delivery_notes,a.latitude destination_latitude,a.longitude destination_longitude,
-    e.name driver_name,e.position driver_position
+    e.name driver_name,e.position driver_position,
+    location.latitude::double precision driver_latitude,location.longitude::double precision driver_longitude,location.captured_at driver_location_captured_at
     FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id JOIN ordering_order_delivery_addresses a ON a.order_id=o.id
     LEFT JOIN employees e ON e.id=d.driver_employee_id
+    LEFT JOIN LATERAL(SELECT latitude,longitude,captured_at FROM ordering_delivery_locations WHERE driver_id=d.driver_employee_id ORDER BY captured_at DESC LIMIT 1)location ON TRUE
     WHERE d.business=${actor.business} AND o.service_type IN('delivery','no_contact_delivery')
       AND (${actor.manager&&Boolean(input.dispatch)} OR d.driver_employee_id=${actor.employeeId})
       AND (${q}='' OR o.display_number ILIKE ${like} OR o.first_name_snapshot ILIKE ${like} OR o.last_name_snapshot ILIKE ${like} OR trim(o.first_name_snapshot||' '||o.last_name_snapshot) ILIKE ${like} OR regexp_replace(o.phone_snapshot,'[^0-9]','','g') LIKE ${digitLike} OR a.formatted_address ILIKE ${like})
       AND (d.status NOT IN('DELIVERED','RETURNED','CANCELLED') OR d.updated_at>NOW()-INTERVAL '24 hours') ORDER BY COALESCE(o.scheduled_for,o.created_at),o.created_at`;
+}
+
+export function deliveryRoutePlans(
+  deliveries: Array<Record<string, unknown>>,
+  now = new Date(),
+): Array<{ driverEmployeeId: string; driverName: string; plan: DeliveryRoutePlan }> {
+  const active = deliveries.filter(
+    (delivery) =>
+      delivery.assigned_employee_id &&
+      !["DELIVERED", "RETURNED", "CANCELLED"].includes(
+        String(delivery.delivery_status || delivery.status),
+      ),
+  );
+  const groups = Map.groupBy(active, (delivery) =>
+    String(delivery.assigned_employee_id),
+  );
+  const storeOrigin = deliveryOrigin();
+  return [...groups.entries()].flatMap(([driverEmployeeId, rows]) => {
+    const latestLocation = rows
+      .filter(
+        (row) =>
+          row.driver_latitude !== null &&
+          row.driver_latitude !== undefined &&
+          row.driver_longitude !== null &&
+          row.driver_longitude !== undefined &&
+          Number.isFinite(Number(row.driver_latitude)) &&
+          Number.isFinite(Number(row.driver_longitude)),
+      )
+      .toSorted(
+        (left, right) =>
+          new Date(String(right.driver_location_captured_at || 0)).getTime() -
+          new Date(String(left.driver_location_captured_at || 0)).getTime(),
+      )[0];
+    const origin = latestLocation
+      ? {
+          latitude: Number(latestLocation.driver_latitude),
+          longitude: Number(latestLocation.driver_longitude),
+        }
+      : storeOrigin;
+    if (!origin) return [];
+    const stops = rows.flatMap((row) => {
+      if (
+        row.destination_latitude === null ||
+        row.destination_latitude === undefined ||
+        row.destination_longitude === null ||
+        row.destination_longitude === undefined
+      )
+        return [];
+      const latitude = Number(row.destination_latitude);
+      const longitude = Number(row.destination_longitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
+      return [{
+        deliveryId: String(row.delivery_id),
+        displayNumber: String(row.display_number),
+        customerName: String(row.customer_name),
+        address: String(row.delivery_address),
+        latitude,
+        longitude,
+        timingMode: String(row.timing_mode || "asap"),
+        scheduledFor: row.scheduled_for ? String(row.scheduled_for) : null,
+        createdAt: String(row.created_at),
+      }];
+    });
+    if (!stops.length) return [];
+    return [{
+      driverEmployeeId,
+      driverName: String(rows[0].driver_name || "Driver"),
+      plan: planDeliveryRoute(stops, origin, now),
+    }];
+  });
 }
 
 export async function syncDeliveryAssignments(business:"Corner Deli"|"Tiki"){await ensureDriverDeliverySchema();const sql=getSql();await sql`INSERT INTO ordering_delivery_assignments(id,order_id,business,status,assigned_by) SELECT gen_random_uuid(),o.id,o.business,CASE WHEN o.status='ready' THEN 'READY_FOR_DRIVER' ELSE 'ASSIGNED' END,'driver-pwa' FROM ordering_orders o JOIN ordering_order_delivery_addresses a ON a.order_id=o.id WHERE o.business=${business} AND o.service_type IN('delivery','no_contact_delivery') AND o.status NOT IN('draft','completed','cancelled') AND NOT EXISTS(SELECT 1 FROM ordering_delivery_assignments d WHERE d.order_id=o.id AND d.status NOT IN('DELIVERED','RETURNED','CANCELLED'))`;await sql`UPDATE ordering_delivery_assignments d SET status='READY_FOR_DRIVER',updated_at=NOW() FROM ordering_orders o WHERE o.id=d.order_id AND d.business=${business} AND o.status='ready' AND d.status='ASSIGNED'`}

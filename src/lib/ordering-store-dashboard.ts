@@ -1,5 +1,5 @@
 import { getSql } from "@/lib/db";
-import { syncDeliveryAssignments } from "@/lib/ordering-driver-delivery";
+import { deliveryRoutePlans, syncDeliveryAssignments } from "@/lib/ordering-driver-delivery";
 
 export async function orderingStoreDashboard(){
   await syncDeliveryAssignments("Corner Deli");
@@ -16,10 +16,11 @@ export async function orderingStoreDashboard(){
       FROM ordering_orders WHERE business='Corner Deli' AND timing_mode='future' AND scheduled_for>=NOW()-INTERVAL '30 minutes' AND scheduled_for<NOW()+INTERVAL '8 hours' AND status NOT IN('completed','cancelled') ORDER BY scheduled_for LIMIT 30`,
     sql`SELECT id,display_number,status,payment_status,service_type,created_at,scheduled_for,amount_due_cents,COALESCE(NULLIF(trim(first_name_snapshot||' '||last_name_snapshot),''),'Guest') customer_name
       FROM ordering_orders WHERE business='Corner Deli' AND created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York') AND amount_due_cents>0 AND status<>'cancelled' ORDER BY COALESCE(scheduled_for,created_at),created_at LIMIT 60`,
-    sql`SELECT d.id delivery_id,d.status,d.driver_employee_id,d.assigned_at,d.picked_up_at,d.en_route_at,d.arrived_at,d.delivered_at,d.failed_at,d.updated_at,
-      o.display_number,o.status order_status,o.scheduled_for,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,e.name driver_name,
+    sql`SELECT d.id delivery_id,d.status,d.status delivery_status,d.driver_employee_id,d.driver_employee_id assigned_employee_id,d.assigned_at,d.picked_up_at,d.en_route_at,d.arrived_at,d.delivered_at,d.failed_at,d.updated_at,
+      o.display_number,o.status order_status,o.timing_mode,o.scheduled_for,o.created_at,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,e.name driver_name,
+      address.formatted_address delivery_address,address.latitude::double precision destination_latitude,address.longitude::double precision destination_longitude,
       location.latitude::double precision driver_latitude,location.longitude::double precision driver_longitude,location.accuracy_meters::double precision driver_accuracy_meters,location.captured_at driver_location_captured_at
-      FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id LEFT JOIN employees e ON e.id=d.driver_employee_id
+      FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id JOIN ordering_order_delivery_addresses address ON address.order_id=o.id LEFT JOIN employees e ON e.id=d.driver_employee_id
       LEFT JOIN LATERAL(
         SELECT l.latitude,l.longitude,l.accuracy_meters,l.captured_at
         FROM ordering_delivery_locations l
@@ -41,5 +42,5 @@ export async function orderingStoreDashboard(){
     {key:"timed",label:"Timed orders due within four hours",count:Number(summary[0]?.timed_upcoming||0),href:"/pos/deli/orders"},
     {key:"unpaid",label:"Open orders with a balance",count:Number(summary[0]?.unpaid_open||0),href:"/pos/deli/orders"}
   ];
-  return{generatedAt:new Date().toISOString(),summary:summary[0],tasks,timedOrders,unpaidOrders,deliveries,activity};
+  return{generatedAt:new Date().toISOString(),summary:summary[0],tasks,timedOrders,unpaidOrders,deliveries,routePlans:deliveryRoutePlans(deliveryRows),activity};
 }

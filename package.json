@@ -59,6 +59,7 @@
     "test:delivery-pricing": "tsx scripts/delivery-pricing-validate.ts",
     "test:driver-delivery": "tsx scripts/driver-delivery-validate.ts",
     "test:store-dashboard": "tsx scripts/store-dashboard-validate.ts",
+    "test:delivery-route": "tsx scripts/delivery-route-validate.ts",
     "test:3cx-live": "tsx scripts/three-cx-live-call-validate.ts",
     "test:openai-phone": "tsx scripts/openai-phone-ordering-validate.ts",
     "test:ai-phone-conversation": "tsx scripts/ai-phone-conversation-validate.ts",
