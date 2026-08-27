@@ -11,6 +11,7 @@ import {
   supportsSubModifierIntensity,
   type ModifierIntensity,
 } from "@/lib/ordering-modifier-intensity";
+import { unwrapHelcimPayResponse } from "@/lib/helcim-pay-response";
 
 function localDateValue(value = new Date()) {
   const year = value.getFullYear();
@@ -497,10 +498,7 @@ export default function CustomerOrder() {
           if (event.data.eventStatus !== "SUCCESS") return;
           window.removeEventListener("message", listener);
           try {
-            const message =
-              typeof event.data.eventMessage === "string"
-                ? JSON.parse(event.data.eventMessage)
-                : event.data.eventMessage;
+            const message = unwrapHelcimPayResponse(event.data.eventMessage);
             const confirmed = await fetch(endpoint, {
               method: "POST",
               headers: { "content-type": "application/json" },
@@ -508,9 +506,8 @@ export default function CustomerOrder() {
                 action: "confirm",
                 checkoutToken,
                 secretToken,
-                data: message?.data,
-                rawDataResponse: JSON.stringify(message?.data),
-                hash: message?.hash,
+                data: message.data,
+                hash: message.hash,
               }),
             });
             const payload = await confirmed.json();

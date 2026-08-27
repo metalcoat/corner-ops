@@ -1,4 +1,26 @@
 import { expect, test } from "@playwright/test";
+import { unwrapHelcimPayResponse } from "@/lib/helcim-pay-response";
+
+test("Helcim approval callbacks unwrap both documented response shapes", () => {
+  const transaction = {
+    status: "APPROVED",
+    transactionId: "123",
+    amount: "7.50",
+  };
+  expect(
+    unwrapHelcimPayResponse(
+      JSON.stringify({ data: transaction, hash: "direct" }),
+    ),
+  ).toEqual({ data: transaction, hash: "direct" });
+  expect(
+    unwrapHelcimPayResponse(
+      JSON.stringify({
+        status: 200,
+        data: { data: transaction, hash: "nested" },
+      }),
+    ),
+  ).toEqual({ data: transaction, hash: "nested" });
+});
 
 test("customer catalog is public, customer-safe, and browsable while ordering is closed", async ({
   page,

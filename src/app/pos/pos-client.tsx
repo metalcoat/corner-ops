@@ -29,6 +29,7 @@ import {
   formatModifierIntensity,
   supportsSubModifierIntensity,
 } from "@/lib/ordering-modifier-intensity";
+import { unwrapHelcimPayResponse } from "@/lib/helcim-pay-response";
 import {
   formatPizzaTopping,
   normalizePizzaToppings,
@@ -2481,10 +2482,7 @@ export default function PosClient({
           if (event.data.eventStatus !== "SUCCESS") return;
           window.removeEventListener("message", listener);
           try {
-            const message =
-              typeof event.data.eventMessage === "string"
-                ? JSON.parse(event.data.eventMessage)
-                : event.data.eventMessage;
+            const message = unwrapHelcimPayResponse(event.data.eventMessage);
             const confirmation = await fetch(
               `/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/helcim`,
               {
@@ -2494,9 +2492,8 @@ export default function PosClient({
                   action: "confirm",
                   checkoutToken,
                   secretToken,
-                  data: message?.data,
-                  rawDataResponse: JSON.stringify(message?.data),
-                  hash: message?.hash,
+                  data: message.data,
+                  hash: message.hash,
                 }),
               },
             );
