@@ -844,9 +844,37 @@ export default function CustomerOrder() {
               </div>
             ))
           )}
-          <div className="cartEstimate">
-            <span>Estimated menu subtotal</span>
-            <strong>{money(estimated)}</strong>
+          <div className="cartSummary" aria-label="Order total">
+            <div>
+              <span>{review ? "Merchandise" : "Estimated merchandise"}</span>
+              <strong>
+                {money(Number(review?.subtotalCents ?? estimated))}
+              </strong>
+            </div>
+            {review && Number(review.discountCents) > 0 && (
+              <div className="discount">
+                <span>Discounts</span>
+                <strong>−{money(Number(review.discountCents))}</strong>
+              </div>
+            )}
+            {serviceType === "delivery" && (
+              <div>
+                <span>Delivery fee</span>
+                <strong>
+                  {review && !review.delivery?.feePendingAddress
+                    ? money(Number(review.deliveryFeeCents || 0))
+                    : "Calculated after address"}
+                </strong>
+              </div>
+            )}
+            {review &&
+              (serviceType !== "delivery" ||
+                !review.delivery?.feePendingAddress) && (
+                <div className="cartTotal">
+                  <span>Total</span>
+                  <strong>{money(Number(review.totalCents))}</strong>
+                </div>
+              )}
           </div>
           <fieldset>
             <legend>When?</legend>
@@ -912,9 +940,10 @@ export default function CustomerOrder() {
           </fieldset>
           {serviceType === "delivery" && catalog && (
             <p className="deliveryNote">
-              {money(catalog.delivery.minimumOrderCents)} merchandise minimum ·
-              fees based on distance · up to {catalog.delivery.maxDistanceMiles}{" "}
-              miles. Address validation comes at checkout.
+              <strong>About 1 hour</strong> — we’ll get it there as fast as we
+              can. {money(catalog.delivery.minimumOrderCents)} merchandise
+              minimum · delivery fee based on distance · up to{" "}
+              {catalog.delivery.maxDistanceMiles} miles.
             </p>
           )}
           {serviceType === "delivery" && (
@@ -1146,30 +1175,16 @@ export default function CustomerOrder() {
           )}
           {review && (
             <div className="serverReview">
-              <p>Checkout</p>
-              {review.lines.map((line: any, index: number) => (
-                <span key={index}>
-                  {line.quantity}× {line.name}
-                  <b>{money(line.lineTotalCents)}</b>
-                </span>
-              ))}
-              {review.promotions.map((promo: any, index: number) => (
-                <span className="discount" key={index}>
-                  {promo.label}
-                  <b>−{money(Number(promo.discount_cents))}</b>
-                </span>
-              ))}
-              <span className="total">
-                Current total<b>{money(review.totalCents)}</b>
-              </span>
-              <small>{review.timingMessage}</small>
-              {review.delivery && (
-                <small>
-                  {review.delivery.feePendingAddress
-                    ? "Validate the address to calculate the delivery fee."
-                    : `Delivery fee: ${money(Number(review.deliveryFeeCents || 0))}`}
-                </small>
-              )}
+              <p>
+                {serviceType === "delivery" && !validatedDelivery
+                  ? "Finish delivery details"
+                  : "Choose payment"}
+              </p>
+              <small>
+                {serviceType === "delivery"
+                  ? "About 1 hour — we’ll get it there as fast as we can."
+                  : review.timingMessage}
+              </small>
               {serviceType === "delivery" && !validatedDelivery ? (
                 <button
                   className="reviewButton"
@@ -1217,7 +1232,7 @@ export default function CustomerOrder() {
                     {busy
                       ? "Please wait…"
                       : paymentChoice === "card"
-                        ? `Pay ${money(Number(review.totalCents))}`
+                        ? "Pay securely"
                         : paymentChoice === "pickup"
                           ? `Place order — pay at ${serviceType === "delivery" ? "delivery" : "pickup"}`
                           : "Choose a payment method"}

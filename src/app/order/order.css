@@ -459,6 +459,31 @@
   justify-content: space-between;
   padding: 13px 0;
 }
+.cartSummary {
+  display: grid;
+  gap: 8px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.cartSummary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  font-size: 13px;
+}
+.cartSummary > div strong {
+  text-align: right;
+}
+.cartSummary .discount {
+  color: var(--green);
+}
+.cartSummary .cartTotal {
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  font-size: 17px;
+  font-weight: 850;
+}
 .orderCart fieldset,
 .itemDialog fieldset {
   border: 0;
