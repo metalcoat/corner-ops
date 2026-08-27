@@ -185,9 +185,11 @@
 }
 @media (min-width: 760px) {
   #helcimPayIframe {
-    inset: -62px auto auto 50% !important;
-    height: calc(100dvh + 54px) !important;
-    transform: translateX(-50%) !important;
+    inset: -66px auto auto 50% !important;
+    width: 720px !important;
+    height: 850px !important;
+    transform: translateX(-50%) scale(0.82) !important;
+    transform-origin: top center !important;
   }
 }
 .orderIntro {
