@@ -46,11 +46,7 @@ export async function customerOrderConfirmation(orderId: string): Promise<any> {
 
 export async function sendCustomerOrderConfirmation(orderId: string) {
   const order = await customerOrderConfirmation(orderId);
-  if (
-    !order ||
-    order.confirmation_email_sent_at ||
-    order.payment_status !== "paid"
-  )
+  if (!order || order.confirmation_email_sent_at || order.status === "draft")
     return { configured: true, sent: 0, failures: [] };
   const name =
     `${order.first_name_snapshot} ${order.last_name_snapshot}`.trim();
@@ -73,7 +69,9 @@ export async function sendCustomerOrderConfirmation(orderId: string) {
       ...(order.discount_cents
         ? [`Discount: -${money(order.discount_cents)}`]
         : []),
-      `Total paid: ${money(order.paid_cents)}`,
+      order.payment_status === "paid"
+        ? `Total paid: ${money(order.paid_cents)}`
+        : `Total due at pickup: ${money(order.total_cents)}`,
       "",
       "Corner Deli",
     ].join("\n"),

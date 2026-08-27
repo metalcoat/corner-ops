@@ -47,7 +47,9 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
             <p className="eyebrow">Order confirmed</p>
             <h1>Thank you, {order.first_name_snapshot}!</h1>
             <p>
-              Your payment was approved and order{" "}
+              {order.payment_status === "paid"
+                ? "Your payment was approved and order "
+                : "Your order "}
               <strong>#{order.display_number}</strong> was sent to Corner Deli.
             </p>
             <div className="confirmationTiming">
@@ -68,8 +70,18 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
                 </div>
               ))}
               <div className="confirmationTotal">
-                <span>Total paid</span>
-                <strong>{money(order.paid_cents)}</strong>
+                <span>
+                  {order.payment_status === "paid"
+                    ? "Total paid"
+                    : "Due at pickup"}
+                </span>
+                <strong>
+                  {money(
+                    order.payment_status === "paid"
+                      ? order.paid_cents
+                      : order.total_cents,
+                  )}
+                </strong>
               </div>
             </div>
             <p className="confirmationEmail">

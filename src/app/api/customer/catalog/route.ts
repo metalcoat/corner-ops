@@ -6,6 +6,7 @@ import { getSql } from "@/lib/db";
 import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
 import { customerOrderingSession } from "@/lib/customer-ordering-session";
 import { helcimStatus } from "@/lib/helcim";
+import { loyaltyStatus } from "@/lib/ordering-loyalty";
 
 export const runtime = "nodejs";
 
@@ -87,6 +88,16 @@ export async function GET(request: Request) {
       )
       .slice(0, 6);
     const { session, setCookie } = customerOrderingSession(request);
+    const profile =
+      session.customerId && session.authenticatedAt
+        ? (
+            await getSql()`SELECT first_name,last_name,email FROM ordering_customers WHERE id=${session.customerId} AND active=TRUE LIMIT 1`
+          )[0]
+        : null;
+    const loyalty =
+      session.customerId && session.authenticatedAt
+        ? await loyaltyStatus(session.customerId)
+        : [];
     const response = Response.json({
       business: "Corner Deli",
       serverTime: new Date().toISOString(),
@@ -103,6 +114,14 @@ export async function GET(request: Request) {
       },
       customer: {
         authenticated: Boolean(session.customerId && session.authenticatedAt),
+        profile: profile
+          ? {
+              firstName: profile.first_name,
+              lastName: profile.last_name,
+              email: profile.email,
+            }
+          : null,
+        loyalty,
         loyaltyAvailableAfterSignIn: true,
         giftCardsAcceptedAtPayment: true,
       },

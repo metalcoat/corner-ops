@@ -56,6 +56,26 @@ export async function POST(
         "Online Helcim testing is currently available for pickup orders.",
       );
     const body = (await request.json()) as Record<string, unknown>;
+    const actor = {
+      id: `web:${owner.hash.slice(0, 16)}`,
+      name: "Online customer",
+      type: "web" as const,
+    };
+    if (body.action === "pay_later") {
+      if (owner.row.status !== "draft")
+        throw new OrderConflictError(
+          "This order is no longer awaiting submission.",
+        );
+      const submitted = await submitDraftOrder(orderId, business, actor);
+      await dispatchSubmittedOrderPrintJobs(orderId, business);
+      after(async () => {
+        await sendCustomerOrderConfirmation(orderId);
+      });
+      return Response.json(
+        { order: submitted.order, paymentStatus: "unpaid", payAtPickup: true },
+        { status: 201 },
+      );
+    }
     await ensureOrderingHelcimSchema();
     const sql = getSql();
     if (body.action === "initialize") {
@@ -115,11 +135,6 @@ export async function POST(
     if (!reference)
       throw new HelcimError("Helcim did not return a transaction reference.");
     const digits = String(data.cardNumber || "").replace(/\D/g, "");
-    const actor = {
-      id: `web:${owner.hash.slice(0, 16)}`,
-      name: "Online customer",
-      type: "web" as const,
-    };
     const payment = await commitTender({
       orderId,
       business,

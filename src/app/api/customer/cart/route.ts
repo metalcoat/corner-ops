@@ -7,6 +7,7 @@ import {
 import { ensureCustomerOrderingSchema } from "@/lib/customer-ordering-schema";
 import { getSql } from "@/lib/db";
 import { getDeliveryPricingSettings } from "@/lib/ordering-delivery";
+import { createCustomer } from "@/lib/ordering-customers";
 
 export const runtime = "nodejs";
 
@@ -96,11 +97,23 @@ export async function POST(request: Request) {
     const sql = getSql();
     const sessionHash = customerSessionHash(session.sessionId);
     await sql`INSERT INTO ordering_customer_web_sessions(session_hash,customer_id,authenticated_at,last_seen_at,expires_at) VALUES(${sessionHash},${session.customerId},${session.authenticatedAt ? new Date(session.authenticatedAt).toISOString() : null},NOW(),${new Date(session.expiresAt).toISOString()}) ON CONFLICT(session_hash) DO UPDATE SET last_seen_at=NOW(),expires_at=EXCLUDED.expires_at`;
+    let customerId = session.customerId;
+    if (!customerId) {
+      const created = await createCustomer({
+        business: "Corner Deli",
+        firstName,
+        lastName,
+        phone,
+        email,
+      });
+      customerId = String(created.customer.id);
+      await sql`UPDATE ordering_customers SET email=CASE WHEN email='' THEN ${email} ELSE email END WHERE id=${customerId}`;
+    }
     const order = await createTimedDraftOrder({
       business: "Corner Deli",
       source: "web",
       serviceType,
-      customerId: session.customerId,
+      customerId,
       callerPhone: phone,
       customerFirstName: firstName,
       customerLastName: lastName,

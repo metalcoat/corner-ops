@@ -105,6 +105,14 @@ type Catalog = {
   };
   customer: {
     authenticated: boolean;
+    profile?: { firstName: string; lastName: string; email: string } | null;
+    loyalty?: Array<{
+      programId: string;
+      name: string;
+      progress: number;
+      quantityRequired: number;
+      rewardsAvailable: number;
+    }>;
     loyaltyAvailableAfterSignIn: boolean;
     giftCardsAcceptedAtPayment: boolean;
   };
@@ -204,6 +212,7 @@ export default function CustomerOrder() {
     [email, setEmail] = useState(""),
     [review, setReview] = useState<any>(null),
     [completedOrder, setCompletedOrder] = useState<any>(null),
+    [paymentChoice, setPaymentChoice] = useState<"card" | "pickup">("card"),
     [busy, setBusy] = useState(false);
   useEffect(() => {
     setLoading(true);
@@ -214,7 +223,14 @@ export default function CustomerOrder() {
         if (!r.ok) throw new Error(await failure(r));
         return r.json();
       })
-      .then(setCatalog)
+      .then((value) => {
+        setCatalog(value);
+        if (value.customer?.profile) {
+          setFirstName(value.customer.profile.firstName || "");
+          setLastName(value.customer.profile.lastName || "");
+          setEmail(value.customer.profile.email || "");
+        }
+      })
       .catch((e) => setMessage(e.message))
       .finally(() => setLoading(false));
   }, [serviceType]);
@@ -447,6 +463,33 @@ export default function CustomerOrder() {
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Secure checkout failed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function submitPayLater() {
+    if (!review?.id || busy) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch(
+        `/api/customer/orders/${encodeURIComponent(review.id)}/payments/helcim`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "pay_later" }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Could not submit the order.");
+      window.location.assign(
+        `/order/confirmation?orderId=${encodeURIComponent(result.order.id)}`,
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Could not submit the order.",
       );
     } finally {
       setBusy(false);
@@ -796,15 +839,41 @@ export default function CustomerOrder() {
                 </small>
               )}
               {catalog?.checkout.paymentEnabled && serviceType === "pickup" ? (
-                <button
-                  className="reviewButton"
-                  disabled={busy}
-                  onClick={() => void payWithHelcim()}
-                >
-                  {busy
-                    ? "Opening secure checkout…"
-                    : `Pay ${money(Number(review.totalCents))}`}
-                </button>
+                <div className="paymentChoices">
+                  <label>
+                    <input
+                      type="radio"
+                      name="paymentChoice"
+                      checked={paymentChoice === "card"}
+                      onChange={() => setPaymentChoice("card")}
+                    />{" "}
+                    Credit or debit card
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="paymentChoice"
+                      checked={paymentChoice === "pickup"}
+                      onChange={() => setPaymentChoice("pickup")}
+                    />{" "}
+                    Pay at pickup
+                  </label>
+                  <button
+                    className="reviewButton"
+                    disabled={busy}
+                    onClick={() =>
+                      void (paymentChoice === "card"
+                        ? payWithHelcim()
+                        : submitPayLater())
+                    }
+                  >
+                    {busy
+                      ? "Please wait…"
+                      : paymentChoice === "card"
+                        ? `Pay ${money(Number(review.totalCents))}`
+                        : "Place order — pay at pickup"}
+                  </button>
+                </div>
               ) : (
                 <div className="notLive">
                   {serviceType === "delivery"
@@ -826,8 +895,16 @@ export default function CustomerOrder() {
           <div className="tenderNote">
             <span>Loyalty</span>
             <small>
-              Secure customer sign-in will establish the loyalty account on the
-              server.
+              {catalog?.customer.authenticated
+                ? catalog.customer.loyalty?.length
+                  ? catalog.customer.loyalty
+                      .map(
+                        (program) =>
+                          `${program.progress} of ${program.quantityRequired} toward your next free ${program.name}${program.rewardsAvailable ? ` · ${program.rewardsAvailable} available now` : ""}`,
+                      )
+                      .join(" · ")
+                  : "Your jumbo pizza purchases will appear here."
+                : "Sign in to track progress toward a free jumbo pizza."}
             </small>
             <span>Gift cards</span>
             <small>
