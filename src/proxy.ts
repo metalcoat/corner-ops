@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "corner_ops_session";
 const POS_COOKIE_NAME = "corner_ops_pos";
+const POS_NETWORK_COOKIE_NAME = "corner_ops_pos_network";
 const selfAuthorizedApiPaths = [
   "/api/health", "/api/auth/session", "/api/auth/password-reset",
   "/api/timeclock", "/api/employee", "/api/employee/session",
@@ -15,6 +16,7 @@ const selfAuthorizedApiPaths = [
 
 type Token = { email?: string; role?: string; permissions?: string[]; expiresAt?: number };
 type PosToken = { employeeId?: string; business?: string; expiresAt?: number; clockInRequired?: boolean };
+type PosNetworkToken = { ip?: string; expiresAt?: number };
 
 function equal(left: string, right: string): boolean {
   const a = Buffer.from(left), b = Buffer.from(right);
@@ -48,6 +50,21 @@ function posToken(request: NextRequest): PosToken | null {
   return value;
 }
 
+function clientIp(request: NextRequest): string {
+  return (request.headers.get("x-real-ip") || request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0] || "").trim().replace(/^::ffff:/, "");
+}
+
+function localNetwork(ip: string): boolean {
+  return ip === "127.0.0.1" || ip === "::1" || ip.startsWith("10.") || ip.startsWith("192.168.") || /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+}
+
+function posNetworkAllowed(request: NextRequest): boolean {
+  const ip = clientIp(request);
+  if (localNetwork(ip)) return true;
+  const value = signedValue<PosNetworkToken>(request, POS_NETWORK_COOKIE_NAME);
+  return Boolean(value?.ip === ip && Number(value.expiresAt || 0) > Date.now());
+}
+
 function matchesPath(path: string, prefix: string): boolean {
   return path === prefix || path.startsWith(`${prefix}/`);
 }
@@ -58,7 +75,8 @@ function isDeliPosApi(path: string): boolean {
     ["order-center", "customers", "settings", "reports", "barcodes", "gift-cards", "address", "driver-cash"]
       .some((part) => matchesPath(path, `/api/ordering/${part}`)) ||
     path === "/api/ordering/delivery/quote" ||
-    path === "/api/ordering/hardware/status";
+    path === "/api/ordering/hardware/status" ||
+    path === "/api/ordering/store-dashboard";
 }
 
 function anyPath(path: string, prefixes: string[]): boolean {
@@ -110,6 +128,14 @@ export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const response = securedResponse(request);
   if (response.status === 421) return response;
+
+  const posAccessRoute = matchesPath(path, "/api/pos/access") || path === "/pos/access";
+  const posPage = matchesPath(path, "/pos");
+  const posApi = matchesPath(path, "/api/pos") || isDeliPosApi(path);
+  if (!posAccessRoute && (posPage || posApi) && !posNetworkAllowed(request)) {
+    if (path.startsWith("/api/")) return NextResponse.json({ error: "This network is not approved for POS access." }, { status: 403 });
+    return NextResponse.redirect(new URL("/pos/access", request.url));
+  }
 
   if (path.startsWith("/api/")) {
     if (selfAuthorizedApiPaths.some((prefix) => matchesPath(path, prefix))) return response;
