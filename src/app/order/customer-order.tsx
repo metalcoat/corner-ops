@@ -456,7 +456,7 @@ export default function CustomerOrder() {
     <main className="customerOrder">
       <header className="orderHero">
         <a className="orderBrand" href="/order">
-          Corner Deli <span>Online ordering preview</span>
+          Corner Deli <span>Order online</span>
         </a>
         <button
           className="cartJump"

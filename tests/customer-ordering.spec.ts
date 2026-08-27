@@ -145,6 +145,7 @@ test("successful online payment redirects to a dedicated confirmation", async ({
           display_number: 417,
           first_name_snapshot: "Jamie",
           email_snapshot: "jamie@example.com",
+          email_delivery_configured: true,
           timing_message_snapshot: "Pickup today at 5:30 PM",
           paid_cents: 1899,
           lines: [

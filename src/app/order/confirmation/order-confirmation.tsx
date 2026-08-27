@@ -73,8 +73,17 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
               </div>
             </div>
             <p className="confirmationEmail">
-              A copy of these order details will be sent to{" "}
-              <strong>{order.email_snapshot}</strong>.
+              {order.email_delivery_configured ? (
+                <>
+                  A copy of these order details will be sent to{" "}
+                  <strong>{order.email_snapshot}</strong>.
+                </>
+              ) : (
+                <>
+                  Please save this confirmation. Email receipts are temporarily
+                  unavailable.
+                </>
+              )}
             </p>
             <a className="reviewButton confirmationButton" href="/order">
               Start another order
