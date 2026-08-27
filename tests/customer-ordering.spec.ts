@@ -148,6 +148,8 @@ test("successful online payment redirects to a dedicated confirmation", async ({
           email_delivery_configured: true,
           timing_message_snapshot: "Pickup today at 5:30 PM",
           paid_cents: 1899,
+          total_cents: 1899,
+          payment_status: "paid",
           lines: [
             {
               quantity: 1,
