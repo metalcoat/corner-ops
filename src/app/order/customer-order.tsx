@@ -257,6 +257,7 @@ export default function CustomerOrder() {
     [validatedDelivery, setValidatedDelivery] = useState<{
       formattedAddress: string;
     } | null>(null),
+    [rewardApplied, setRewardApplied] = useState(false),
     [busy, setBusy] = useState(false);
   useEffect(() => {
     setAddressPortal(document.getElementById("delivery-address-top"));
@@ -454,9 +455,37 @@ export default function CustomerOrder() {
         };
       }
       setReview(priced);
+      setRewardApplied(false);
       setPaymentChoice(null);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Could not price the order.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function applyLoyaltyReward(programId: string) {
+    if (!review?.id || busy) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch(
+        `/api/customer/orders/${encodeURIComponent(review.id)}/loyalty`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ programId }),
+        },
+      );
+      if (!response.ok) throw new Error(await failure(response));
+      const result = await response.json();
+      setReview((current: any) => ({
+        ...current,
+        discountCents: Number(result.order.discount_cents),
+        totalCents: Number(result.order.total_cents),
+      }));
+      setRewardApplied(true);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Reward could not be applied.");
     } finally {
       setBusy(false);
     }
@@ -1235,6 +1264,24 @@ export default function CustomerOrder() {
               </small>
               {catalog?.checkout.paymentEnabled ? (
                 <div className="paymentChoices">
+                  {catalog.customer.loyalty
+                    ?.filter((program) => program.rewardsAvailable > 0)
+                    .map((program) => (
+                      <div className="loyaltyRewardOffer" key={program.programId}>
+                        <div>
+                          <strong>Free plain Jumbo Thin available</strong>
+                          <small>Base pizza is free. Added toppings are charged normally.</small>
+                        </div>
+                        <button
+                          type="button"
+                          className="choiceButton"
+                          disabled={busy || rewardApplied}
+                          onClick={() => void applyLoyaltyReward(program.programId)}
+                        >
+                          {rewardApplied ? "Applied — redeemed when placed" : "Apply free pizza"}
+                        </button>
+                      </div>
+                    ))}
                   <div
                     className="paymentOptionRow"
                     role="group"

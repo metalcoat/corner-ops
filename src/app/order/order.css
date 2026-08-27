@@ -188,6 +188,23 @@
   gap: 12px;
   margin-top: 16px;
 }
+.loyaltyRewardOffer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--green);
+  border-radius: 12px;
+  background: #eef5ea;
+}
+.loyaltyRewardOffer > div {
+  display: grid;
+  gap: 3px;
+}
+.loyaltyRewardOffer small {
+  color: var(--muted);
+}
 .choiceRow,
 .paymentOptionRow {
   display: grid;
