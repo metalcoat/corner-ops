@@ -70,9 +70,16 @@ export async function POST(request: Request) {
       .trim()
       .slice(0, 80);
     const phone = String(body.phone || "").replace(/\D/g, "");
-    if (!firstName || phone.length !== 10)
+    const email = String(body.email || "")
+      .trim()
+      .toLowerCase()
+      .slice(0, 320);
+    if (!firstName || phone.length !== 10 || !/^\S+@\S+\.\S+$/.test(email))
       return Response.json(
-        { error: "Enter your name and a 10-digit phone number." },
+        {
+          error:
+            "Enter your name, a 10-digit phone number, and a valid email address.",
+        },
         { status: 400 },
       );
     const requestedFor =
@@ -104,6 +111,7 @@ export async function POST(request: Request) {
       timingMode,
       requestedFor,
     });
+    await sql`UPDATE ordering_orders SET email_snapshot=${email},updated_at=NOW() WHERE id=${order.id}`;
     await sql`UPDATE ordering_customer_web_carts SET replaced_at=NOW() WHERE session_hash=${sessionHash} AND replaced_at IS NULL`;
     await sql`INSERT INTO ordering_customer_web_carts(order_id,session_hash) VALUES(${order.id},${sessionHash})`;
     const lines =

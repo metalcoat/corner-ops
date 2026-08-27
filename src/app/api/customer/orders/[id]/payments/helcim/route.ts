@@ -25,6 +25,8 @@ import {
 } from "@/lib/ordering-order-lifecycle";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
+import { sendCustomerOrderConfirmation } from "@/lib/customer-order-confirmation";
+import { after } from "next/server";
 
 export const runtime = "nodejs";
 const business = "Corner Deli" as const;
@@ -140,10 +142,19 @@ export async function POST(
     try {
       const submitted = await submitDraftOrder(orderId, business, actor);
       await dispatchSubmittedOrderPrintJobs(orderId, business);
+      after(async () => {
+        const email = await sendCustomerOrderConfirmation(orderId);
+        if (email.failures.length)
+          console.error("[customer-order] confirmation email failed", {
+            orderId,
+            failures: email.failures,
+          });
+      });
       return Response.json(
         {
           payment,
           order: submitted.order,
+          confirmationEmail: { queued: true },
           alreadySubmitted: submitted.alreadySubmitted,
         },
         { status: 201 },
@@ -170,7 +181,10 @@ export async function POST(
       error instanceof PaymentConflictError ||
       error instanceof OrderConflictError
     )
-      return Response.json({ error: error.message }, { status: 409 });
+      return Response.json(
+        { error: error.message.replaceAll("Helcim", "secure payment") },
+        { status: 409 },
+      );
     return apiError(error);
   }
 }

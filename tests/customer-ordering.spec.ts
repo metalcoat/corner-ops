@@ -94,6 +94,7 @@ test("web cart pricing uses the authoritative backend and initializes secure Hel
       firstName: "Web",
       lastName: "Customer",
       phone: "3155551212",
+      email: "web.customer@example.com",
       items: [
         {
           itemId: item.id,
@@ -112,6 +113,7 @@ test("web cart pricing uses the authoritative backend and initializes secure Hel
   expect(body.cart.lines).toHaveLength(1);
   expect(body.cart.subtotalCents).toBeGreaterThan(0);
   expect(body.cart.paymentStatus).toBe("unpaid");
+  expect(body.cart).not.toHaveProperty("email");
   if (catalog.checkout.paymentEnabled) {
     // Production marks the customer session Secure. Playwright will not retain
     // that cookie when this suite targets the local HTTP container, so forward
@@ -129,6 +131,43 @@ test("web cart pricing uses the authoritative backend and initializes secure Hel
     expect(initialized.checkoutToken).toBeTruthy();
     expect(initialized.secretToken).toBeTruthy();
   }
+});
+
+test("successful online payment redirects to a dedicated confirmation", async ({
+  page,
+}) => {
+  await page.route("**/api/customer/orders/order-123", async (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      json: {
+        order: {
+          id: "order-123",
+          display_number: 417,
+          first_name_snapshot: "Jamie",
+          email_snapshot: "jamie@example.com",
+          timing_message_snapshot: "Pickup today at 5:30 PM",
+          paid_cents: 1899,
+          lines: [
+            {
+              quantity: 1,
+              variant_name: "Large",
+              name: "Cheese Pizza",
+              line_total_cents: 1899,
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.goto("/order/confirmation?orderId=order-123");
+  await expect(
+    page.getByRole("heading", { name: "Thank you, Jamie!" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Order confirmed", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("jamie@example.com")).toBeVisible();
+  await expect(page.getByText("Total paid")).toBeVisible();
 });
 
 test("customer can choose and review a half-pizza topping", async ({

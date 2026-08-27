@@ -201,6 +201,7 @@ export default function CustomerOrder() {
     [firstName, setFirstName] = useState(""),
     [lastName, setLastName] = useState(""),
     [phone, setPhone] = useState(""),
+    [email, setEmail] = useState(""),
     [review, setReview] = useState<any>(null),
     [completedOrder, setCompletedOrder] = useState<any>(null),
     [busy, setBusy] = useState(false);
@@ -298,6 +299,7 @@ export default function CustomerOrder() {
           firstName,
           lastName,
           phone,
+          email,
           items: cart.map((line) => ({
             itemId: line.item.id,
             variantId: line.variantId,
@@ -334,7 +336,7 @@ export default function CustomerOrder() {
             existing.addEventListener("load", () => resolve(), { once: true });
             existing.addEventListener(
               "error",
-              () => reject(new Error("Could not load Helcim checkout.")),
+              () => reject(new Error("Could not load secure checkout.")),
               { once: true },
             );
             return;
@@ -345,7 +347,7 @@ export default function CustomerOrder() {
           script.dataset.helcimPay = "true";
           script.onload = () => resolve();
           script.onerror = () =>
-            reject(new Error("Could not load Helcim checkout."));
+            reject(new Error("Could not load secure checkout."));
           document.head.appendChild(script);
         });
       }
@@ -366,7 +368,7 @@ export default function CustomerOrder() {
         !initialized.secretToken
       )
         throw new Error(
-          initialized.error || "Could not start Helcim checkout.",
+          initialized.error || "Could not start secure checkout.",
         );
       const checkoutToken = initialized.checkoutToken,
         secretToken = initialized.secretToken;
@@ -385,8 +387,8 @@ export default function CustomerOrder() {
             reject(
               new Error(
                 event.data.eventStatus === "ABORTED"
-                  ? "Helcim declined the payment."
-                  : "Helcim checkout was closed.",
+                  ? "The payment was declined."
+                  : "Secure checkout was closed.",
               ),
             );
             return;
@@ -423,7 +425,7 @@ export default function CustomerOrder() {
         window.addEventListener("message", listener);
         if (!window.appendHelcimPayIframe) {
           window.removeEventListener("message", listener);
-          reject(new Error("Helcim checkout did not load."));
+          reject(new Error("Secure checkout did not load."));
           return;
         }
         window.appendHelcimPayIframe(checkoutToken);
@@ -433,12 +435,18 @@ export default function CustomerOrder() {
           `Payment was approved, but the order needs staff review: ${result.submissionError || "please call Corner Deli."}`,
         );
       }
-      setCompletedOrder(result.order);
+      const submittedOrder = result.order;
+      setCompletedOrder(submittedOrder);
       setReview(null);
       setCart([]);
+      if (!result.needsAssistance && submittedOrder?.id) {
+        window.location.assign(
+          `/order/confirmation?orderId=${encodeURIComponent(submittedOrder.id)}`,
+        );
+      }
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "Helcim checkout failed.",
+        error instanceof Error ? error.message : "Secure checkout failed.",
       );
     } finally {
       setBusy(false);
@@ -729,6 +737,15 @@ export default function CustomerOrder() {
               value={phone}
               onChange={(event) => setPhone(event.target.value)}
             />
+            <input
+              aria-label="Email address"
+              autoComplete="email"
+              inputMode="email"
+              type="email"
+              placeholder="Email for order confirmation"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
           </fieldset>
           <button
             className="reviewButton"
@@ -737,12 +754,13 @@ export default function CustomerOrder() {
               busy ||
               !firstName.trim() ||
               phone.replace(/\D/g, "").length !== 10 ||
+              !/^\S+@\S+\.\S+$/.test(email.trim()) ||
               (timing === "future" && !scheduledFor) ||
               (!catalog?.availability.orderable && timing === "asap")
             }
             onClick={price}
           >
-            {busy ? "Checking…" : "Review authoritative total"}
+            {busy ? "Preparing checkout…" : "Continue to checkout"}
           </button>
           {message && (
             <p className="orderError" role="alert">
@@ -751,7 +769,7 @@ export default function CustomerOrder() {
           )}
           {review && (
             <div className="serverReview">
-              <p>Verified by Corner Ops</p>
+              <p>Checkout</p>
               {review.lines.map((line: any, index: number) => (
                 <span key={index}>
                   {line.quantity}× {line.name}
@@ -782,13 +800,13 @@ export default function CustomerOrder() {
                 >
                   {busy
                     ? "Opening secure checkout…"
-                    : `Pay ${money(Number(review.totalCents))} with Helcim`}
+                    : `Pay ${money(Number(review.totalCents))}`}
                 </button>
               ) : (
                 <div className="notLive">
                   {serviceType === "delivery"
                     ? "Delivery payment testing will be enabled after address validation is connected."
-                    : "Helcim checkout is not configured."}
+                    : "Secure checkout is not available right now."}
                 </div>
               )}
             </div>
