@@ -24,6 +24,23 @@ test("customer catalog is public, customer-safe, and browsable while ordering is
   ).toBeVisible();
   await expect(page.getByLabel("Search menu")).toBeVisible();
   await expect(page.locator(".menuItem").first()).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(HTMLInputElement.prototype, "showPicker", {
+      configurable: true,
+      value() {
+        (window as typeof window & { futureCalendarOpened?: boolean }).futureCalendarOpened = true;
+      },
+    });
+  });
+  await page.getByLabel("Future").check();
+  const futureDate = page.getByLabel("Future order date");
+  const today = await page.evaluate(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  });
+  await expect(futureDate).toHaveValue(today);
+  await futureDate.click();
+  await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { futureCalendarOpened?: boolean }).futureCalendarOpened))).toBe(true);
   await expect(
     page.getByText("Checkout and payments aren’t live yet."),
   ).toHaveCount(0);

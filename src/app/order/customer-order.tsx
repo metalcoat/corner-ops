@@ -12,6 +12,13 @@ import {
   type ModifierIntensity,
 } from "@/lib/ordering-modifier-intensity";
 
+function localDateValue(value = new Date()) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 type Option = {
   id: string;
   name: string;
@@ -184,7 +191,7 @@ export default function CustomerOrder() {
     [active, setActive] = useState<Item | null>(null),
     [cart, setCart] = useState<CartLine[]>([]),
     [timing, setTiming] = useState<"asap" | "future">("asap"),
-    [date, setDate] = useState(""),
+    [date, setDate] = useState(() => localDateValue()),
     [slots, setSlots] = useState<string[]>([]),
     [scheduledFor, setScheduledFor] = useState(""),
     [review, setReview] = useState<any>(null),
@@ -513,7 +520,10 @@ export default function CustomerOrder() {
               <input
                 type="radio"
                 checked={timing === "future"}
-                onChange={() => setTiming("future")}
+                onChange={() => {
+                  setTiming("future");
+                  setDate((current) => current || localDateValue());
+                }}
               />{" "}
               Future
             </label>
@@ -523,7 +533,9 @@ export default function CustomerOrder() {
                   aria-label="Future order date"
                   type="date"
                   value={date}
-                  min={new Date().toISOString().slice(0, 10)}
+                  min={localDateValue()}
+                  inputMode="none"
+                  onClick={(event) => event.currentTarget.showPicker?.()}
                   onChange={(e) => {
                     setDate(e.target.value);
                     setScheduledFor("");
