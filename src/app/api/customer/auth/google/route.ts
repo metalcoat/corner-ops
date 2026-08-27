@@ -28,10 +28,11 @@ export async function GET(request: Request) {
     state,
     prompt: "select_account",
   }).toString();
-  const response = Response.redirect(url);
-  response.headers.append(
-    "Set-Cookie",
-    `corner_google_state=${state}; Path=/api/customer/auth/google/callback; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
-  );
-  return response;
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: url.toString(),
+      "Set-Cookie": `corner_google_state=${state}; Path=/api/customer/auth/google/callback; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+    },
+  });
 }

@@ -55,23 +55,21 @@ export async function GET(request: Request) {
     if (!profileResponse.ok)
       throw new Error("Google profile could not be verified.");
     const customerId = await linkGoogleCustomer(profile);
-    const response = Response.redirect(
-      new URL("/account", publicOrigin(request)),
-    );
-    response.headers.append(
-      "Set-Cookie",
-      customerSessionCookie({
-        sessionId: crypto.randomUUID(),
-        customerId,
-        authenticatedAt: Date.now(),
-        expiresAt: Date.now() + 30 * 86400000,
-      }),
-    );
-    response.headers.append(
+    const sessionCookie = customerSessionCookie({
+      sessionId: crypto.randomUUID(),
+      customerId,
+      authenticatedAt: Date.now(),
+      expiresAt: Date.now() + 30 * 86400000,
+    });
+    const headers = new Headers({
+      Location: new URL("/account", publicOrigin(request)).toString(),
+    });
+    headers.append("Set-Cookie", sessionCookie);
+    headers.append(
       "Set-Cookie",
       "corner_google_state=; Path=/api/customer/auth/google/callback; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
     );
-    return response;
+    return new Response(null, { status: 302, headers });
   } catch (error) {
     return Response.redirect(
       new URL(
