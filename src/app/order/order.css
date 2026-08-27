@@ -1051,7 +1051,15 @@
 }
 .deliveryAddress > input {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   margin-top: 8px;
+}
+.validatedAddress,
+.validatedAddress strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .addressSuggestions {
   display: grid;

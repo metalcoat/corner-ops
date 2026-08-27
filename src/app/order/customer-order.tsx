@@ -252,6 +252,8 @@ export default function CustomerOrder() {
     ),
     [selectedPlaceId, setSelectedPlaceId] = useState(""),
     [addressValidationToken, setAddressValidationToken] = useState(""),
+    [deliveryDistanceMiles, setDeliveryDistanceMiles] = useState<number | null>(null),
+    [deliveryQuoteCents, setDeliveryQuoteCents] = useState<number | null>(null),
     [addressBusy, setAddressBusy] = useState(false),
     [addressPortal, setAddressPortal] = useState<HTMLElement | null>(null),
     [validatedDelivery, setValidatedDelivery] = useState<{
@@ -389,6 +391,32 @@ export default function CustomerOrder() {
           (combo?.basePriceDeltaCents || 0))
     );
   }, 0);
+  useEffect(() => {
+    if (serviceType !== "delivery" || deliveryDistanceMiles == null) {
+      setDeliveryQuoteCents(null);
+      return;
+    }
+    const controller = new AbortController();
+    fetch("/api/customer/delivery/quote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        distanceMiles: deliveryDistanceMiles,
+        merchandiseSubtotalCents: estimated,
+      }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await failure(response));
+        return response.json();
+      })
+      .then((body) => setDeliveryQuoteCents(Number(body.quote.deliveryFeeCents)))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setDeliveryQuoteCents(null);
+      });
+    return () => controller.abort();
+  }, [deliveryDistanceMiles, estimated, serviceType]);
   function add(line: Omit<CartLine, "key">) {
     setCart((rows) => [...rows, { ...line, key: crypto.randomUUID() }]);
     setActive(null);
@@ -457,11 +485,20 @@ export default function CustomerOrder() {
       setReview(priced);
       setRewardApplied(false);
       setPaymentChoice(null);
+      return priced;
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Could not price the order.");
+      return null;
     } finally {
       setBusy(false);
     }
+  }
+  async function placeOrder() {
+    if (!paymentChoice || busy) return;
+    const priced = review || (await price());
+    if (!priced) return;
+    if (paymentChoice === "card") await payWithHelcim(priced);
+    if (paymentChoice === "pickup") await submitPayLater(priced);
   }
   async function applyLoyaltyReward(programId: string) {
     if (!review?.id || busy) return;
@@ -490,8 +527,8 @@ export default function CustomerOrder() {
       setBusy(false);
     }
   }
-  async function payWithHelcim() {
-    if (!review?.id || busy) return;
+  async function payWithHelcim(order = review) {
+    if (!order?.id || busy) return;
     setBusy(true);
     setMessage("");
     try {
@@ -519,7 +556,7 @@ export default function CustomerOrder() {
           document.head.appendChild(script);
         });
       }
-      const endpoint = `/api/customer/orders/${encodeURIComponent(review.id)}/payments/helcim`;
+      const endpoint = `/api/customer/orders/${encodeURIComponent(order.id)}/payments/helcim`;
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -640,10 +677,13 @@ export default function CustomerOrder() {
       const validated = await response.json();
       setAddressValidationToken(validated.validationToken);
       setValidatedDelivery(validated.address);
+      setDeliveryDistanceMiles(Number(validated.route.distanceMiles));
       setAddressSuggestions([]);
     } catch (error) {
       setAddressValidationToken("");
       setValidatedDelivery(null);
+      setDeliveryDistanceMiles(null);
+      setDeliveryQuoteCents(null);
       setMessage(
         error instanceof Error
           ? error.message
@@ -653,13 +693,13 @@ export default function CustomerOrder() {
       setAddressBusy(false);
     }
   }
-  async function submitPayLater() {
-    if (!review?.id || busy) return;
+  async function submitPayLater(order = review) {
+    if (!order?.id || busy) return;
     setBusy(true);
     setMessage("");
     try {
       const response = await fetch(
-        `/api/customer/orders/${encodeURIComponent(review.id)}/payments/helcim`,
+        `/api/customer/orders/${encodeURIComponent(order.id)}/payments/helcim`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -908,7 +948,11 @@ export default function CustomerOrder() {
                 <strong>
                   {review && !review.delivery?.feePendingAddress
                     ? money(Number(review.deliveryFeeCents || 0))
-                    : "Calculated after address"}
+                    : deliveryQuoteCents != null
+                      ? money(deliveryQuoteCents)
+                      : validatedDelivery
+                        ? "Calculating…"
+                        : "Choose address"}
                 </strong>
               </div>
             )}
@@ -1004,6 +1048,8 @@ export default function CustomerOrder() {
                       onClick={() => {
                         setValidatedDelivery(null);
                         setAddressValidationToken("");
+                        setDeliveryDistanceMiles(null);
+                        setDeliveryQuoteCents(null);
                         setSavedAddressId("");
                         setReview(null);
                       }}
@@ -1038,6 +1084,7 @@ export default function CustomerOrder() {
                                 setValidatedDelivery({
                                   formattedAddress: address.formattedAddress,
                                 });
+                                void validateDeliveryAddressNow(address.formattedAddress, "");
                               }}
                             >
                               <strong>
@@ -1086,6 +1133,7 @@ export default function CustomerOrder() {
                                 setValidatedDelivery({
                                   formattedAddress: address.formattedAddress,
                                 });
+                                void validateDeliveryAddressNow(address.formattedAddress, "");
                               }
                             }}
                           >
@@ -1224,9 +1272,34 @@ export default function CustomerOrder() {
               )}
             </fieldset>
           )}
+          {catalog?.checkout.paymentEnabled && (
+            <div
+              className="paymentOptionRow"
+              role="group"
+              aria-label="Payment method"
+            >
+              <button
+                type="button"
+                className="choiceButton"
+                aria-pressed={paymentChoice === "card"}
+                onClick={() => setPaymentChoice("card")}
+              >
+                Credit or debit
+              </button>
+              <button
+                type="button"
+                className="choiceButton"
+                aria-pressed={paymentChoice === "pickup"}
+                onClick={() => setPaymentChoice("pickup")}
+              >
+                {serviceType === "delivery" ? "Pay at delivery" : "Pay at pickup"}
+              </button>
+            </div>
+          )}
           <button
             className="reviewButton"
             disabled={
+              !paymentChoice ||
               !cart.length ||
               busy ||
               !firstName.trim() ||
@@ -1241,9 +1314,15 @@ export default function CustomerOrder() {
                 !addressValidationToken) ||
               addressBusy
             }
-            onClick={price}
+            onClick={() => void placeOrder()}
           >
-            {busy ? "Preparing checkout…" : "Continue to checkout"}
+            {busy
+              ? "Placing order…"
+              : !paymentChoice
+                ? "Choose a payment method"
+                : paymentChoice === "card"
+                  ? "Place order and pay"
+                  : `Place order — pay at ${serviceType === "delivery" ? "delivery" : "pickup"}`}
           </button>
           {message && (
             <p className="orderError" role="alert">
@@ -1282,46 +1361,6 @@ export default function CustomerOrder() {
                         </button>
                       </div>
                     ))}
-                  <div
-                    className="paymentOptionRow"
-                    role="group"
-                    aria-label="Payment method"
-                  >
-                    <button
-                      type="button"
-                      className="choiceButton"
-                      aria-pressed={paymentChoice === "card"}
-                      onClick={() => setPaymentChoice("card")}
-                    >
-                      Credit or debit
-                    </button>
-                    <button
-                      type="button"
-                      className="choiceButton"
-                      aria-pressed={paymentChoice === "pickup"}
-                      onClick={() => setPaymentChoice("pickup")}
-                    >
-                      {serviceType === "delivery"
-                        ? "Pay at delivery"
-                        : "Pay at pickup"}
-                    </button>
-                  </div>
-                  <button
-                    className="reviewButton"
-                    disabled={busy || !paymentChoice}
-                    onClick={() => {
-                      if (paymentChoice === "card") void payWithHelcim();
-                      if (paymentChoice === "pickup") void submitPayLater();
-                    }}
-                  >
-                    {busy
-                      ? "Please wait…"
-                      : paymentChoice === "card"
-                        ? "Pay securely"
-                        : paymentChoice === "pickup"
-                          ? `Place order — pay at ${serviceType === "delivery" ? "delivery" : "pickup"}`
-                          : "Choose a payment method"}
-                  </button>
                   {paymentChoice === "card" && (
                     <small>
                       Secure card entry opens over this page. Your order stays
