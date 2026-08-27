@@ -183,6 +183,13 @@
   box-shadow: 0 24px 80px rgb(0 0 0 / 38%) !important;
   overflow: hidden !important;
 }
+@media (min-width: 760px) {
+  #helcimPayIframe {
+    inset: -62px auto auto 50% !important;
+    height: calc(100dvh + 54px) !important;
+    transform: translateX(-50%) !important;
+  }
+}
 .orderIntro {
   padding: 52px clamp(18px, 5vw, 80px) 36px;
   display: flex;
