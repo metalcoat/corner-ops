@@ -69,9 +69,15 @@
     "test:operational-reporting": "tsx scripts/operational-reporting-validate.ts",
     "test:auth:e2e": "playwright test tests/auth-cookie.spec.ts",
     "test:pos:e2e": "playwright test tests/pos-pin-auth.spec.ts tests/pos-deli.spec.ts tests/deli-order-lifecycle.spec.ts tests/pos-workspace-navigation.spec.ts",
-    "test:customer-ordering:e2e": "playwright test tests/customer-ordering.spec.ts"
+    "test:customer-ordering:e2e": "playwright test tests/customer-ordering.spec.ts",
+    "mobile:sync": "cap sync",
+    "mobile:android": "cap sync android && cd android && ./gradlew assembleDebug",
+    "mobile:ios": "cap sync ios"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
     "@neondatabase/serverless": "^1.0.2",
     "@types/ws": "^8.18.1",
     "@vercel/blob": "^2.3.0",
@@ -86,6 +92,7 @@
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "@playwright/test": "^1.62.1",
     "@types/node": "^22.0.0",
     "@types/nodemailer": "^8.0.1",
