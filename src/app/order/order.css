@@ -245,6 +245,13 @@
   align-items: end;
   background: linear-gradient(125deg, #eef2df, #f9e9d2);
 }
+.fulfillmentControls {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 1 1 680px;
+}
 .orderIntro .topDeliveryAddress {
   flex: 1 1 390px;
   min-width: 300px;
@@ -1121,17 +1128,20 @@
     align-items: start;
     flex-direction: column;
   }
+  .fulfillmentControls {
+    width: 100%;
+    flex: none;
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 10px;
+  }
   .servicePicker {
     width: 100%;
   }
   .orderIntro .topDeliveryAddress {
-    order: 2;
     min-width: 0;
     max-width: none;
     width: 100%;
-  }
-  .orderIntro .servicePicker {
-    order: 1;
   }
   .servicePicker button {
     flex: 1;

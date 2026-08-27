@@ -683,28 +683,30 @@ export default function CustomerOrder() {
             the same system used in-store.
           </p>
         </div>
-        <section
-          id="delivery-address-top"
-          className={
-            serviceType === "delivery"
-              ? "topDeliveryAddress active"
-              : "topDeliveryAddress"
-          }
-        />
-        <div className="servicePicker" aria-label="Fulfillment type">
-          <button
-            className={serviceType === "pickup" ? "selected" : ""}
-            onClick={() => setServiceType("pickup")}
-          >
-            Pickup
-          </button>
-          <button
-            disabled={!catalog?.delivery.enabled}
-            className={serviceType === "delivery" ? "selected" : ""}
-            onClick={() => setServiceType("delivery")}
-          >
-            Delivery
-          </button>
+        <div className="fulfillmentControls">
+          <section
+            id="delivery-address-top"
+            className={
+              serviceType === "delivery"
+                ? "topDeliveryAddress active"
+                : "topDeliveryAddress"
+            }
+          />
+          <div className="servicePicker" aria-label="Fulfillment type">
+            <button
+              className={serviceType === "pickup" ? "selected" : ""}
+              onClick={() => setServiceType("pickup")}
+            >
+              Pickup
+            </button>
+            <button
+              disabled={!catalog?.delivery.enabled}
+              className={serviceType === "delivery" ? "selected" : ""}
+              onClick={() => setServiceType("delivery")}
+            >
+              Delivery
+            </button>
+          </div>
         </div>
       </section>
       {catalog && !catalog.availability.orderable && (
