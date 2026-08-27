@@ -128,6 +128,13 @@ export async function GET(request: Request) {
       session.customerId && session.authenticatedAt
         ? await loyaltyStatus(session.customerId)
         : [];
+    const savedAddresses =
+      session.customerId && session.authenticatedAt
+        ? await getSql()`SELECT id,label,line1,line2,city,state,postal_code,standardized_address,provider,provider_reference_id,latitude,longitude,is_primary
+            FROM ordering_customer_addresses
+            WHERE customer_id=${session.customerId} AND active=TRUE AND latitude IS NOT NULL AND longitude IS NOT NULL
+            ORDER BY is_primary DESC,last_used_at DESC NULLS LAST,created_at DESC`
+        : [];
     const response = Response.json({
       business: "Corner Deli",
       serverTime: new Date().toISOString(),
@@ -153,6 +160,22 @@ export async function GET(request: Request) {
             }
           : null,
         loyalty,
+        addresses: savedAddresses.map((address) => ({
+          id: String(address.id),
+          label: String(address.label || "Address"),
+          line1: String(address.line1),
+          line2: String(address.line2 || ""),
+          city: String(address.city),
+          state: String(address.state),
+          postalCode: String(address.postal_code),
+          formattedAddress: String(
+            address.standardized_address ||
+              [address.line1, address.city, address.state, address.postal_code]
+                .filter(Boolean)
+                .join(", "),
+          ),
+          primary: Boolean(address.is_primary),
+        })),
         loyaltyAvailableAfterSignIn: true,
         giftCardsAcceptedAtPayment: true,
       },

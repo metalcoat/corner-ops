@@ -118,6 +118,17 @@ type Catalog = {
       quantityRequired: number;
       rewardsAvailable: number;
     }>;
+    addresses?: Array<{
+      id: string;
+      label: string;
+      line1: string;
+      line2: string;
+      city: string;
+      state: string;
+      postalCode: string;
+      formattedAddress: string;
+      primary: boolean;
+    }>;
     loyaltyAvailableAfterSignIn: boolean;
     giftCardsAcceptedAtPayment: boolean;
   };
@@ -229,6 +240,10 @@ export default function CustomerOrder() {
     [paymentOpen, setPaymentOpen] = useState(false),
     [deliveryAddress, setDeliveryAddress] = useState(""),
     [deliveryUnit, setDeliveryUnit] = useState(""),
+    [savedAddressId, setSavedAddressId] = useState(""),
+    [addingAddress, setAddingAddress] = useState(false),
+    [addressLabel, setAddressLabel] = useState("Home"),
+    [makeDefaultAddress, setMakeDefaultAddress] = useState(true),
     [addressSessionToken] = useState(() => crypto.randomUUID()),
     [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>(
       [],
@@ -255,6 +270,15 @@ export default function CustomerOrder() {
           setEmail(value.customer.profile.email || "");
           setPhone(value.customer.profile.phone || "");
         }
+        const defaultAddress =
+          value.customer?.addresses?.find((address: any) => address.primary) ||
+          value.customer?.addresses?.[0];
+        if (serviceType === "delivery" && defaultAddress) {
+          setSavedAddressId(defaultAddress.id);
+          setDeliveryAddress(defaultAddress.formattedAddress);
+          setDeliveryUnit(defaultAddress.line2 || "");
+          setAddingAddress(false);
+        }
       })
       .catch((e) => setMessage(e.message))
       .finally(() => setLoading(false));
@@ -275,6 +299,7 @@ export default function CustomerOrder() {
   useEffect(() => {
     if (
       serviceType !== "delivery" ||
+      Boolean(savedAddressId) ||
       deliveryAddress.trim().length < 2 ||
       validatedDelivery
     ) {
@@ -299,7 +324,13 @@ export default function CustomerOrder() {
         .catch(() => setAddressSuggestions([]));
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [addressSessionToken, deliveryAddress, serviceType, validatedDelivery]);
+  }, [
+    addressSessionToken,
+    deliveryAddress,
+    savedAddressId,
+    serviceType,
+    validatedDelivery,
+  ]);
   const visible = useMemo(
     () =>
       catalog?.categories
@@ -531,21 +562,24 @@ export default function CustomerOrder() {
     setBusy(true);
     setMessage("");
     try {
-      const validatedResponse = await fetch(
-        "/api/customer/delivery/address/validate",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            enteredAddress: deliveryAddress,
-            placeId: selectedPlaceId || undefined,
-            sessionToken: addressSessionToken,
-          }),
-        },
-      );
-      if (!validatedResponse.ok)
-        throw new Error(await failure(validatedResponse));
-      const validated = await validatedResponse.json();
+      let validationToken = "";
+      if (!savedAddressId) {
+        const validatedResponse = await fetch(
+          "/api/customer/delivery/address/validate",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              enteredAddress: deliveryAddress,
+              placeId: selectedPlaceId || undefined,
+              sessionToken: addressSessionToken,
+            }),
+          },
+        );
+        if (!validatedResponse.ok)
+          throw new Error(await failure(validatedResponse));
+        validationToken = (await validatedResponse.json()).validationToken;
+      }
       const attachedResponse = await fetch(
         `/api/customer/orders/${encodeURIComponent(review.id)}/delivery`,
         {
@@ -553,8 +587,11 @@ export default function CustomerOrder() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             enteredAddress: deliveryAddress,
-            validationToken: validated.validationToken,
+            validationToken,
             line2: deliveryUnit,
+            customerAddressId: savedAddressId || undefined,
+            label: addressLabel,
+            makeDefault: makeDefaultAddress,
           }),
         },
       );
@@ -562,6 +599,8 @@ export default function CustomerOrder() {
         throw new Error(await failure(attachedResponse));
       const attached = await attachedResponse.json();
       setValidatedDelivery(attached.address);
+      if (attached.customerAddressId)
+        setSavedAddressId(attached.customerAddressId);
       setAddressSuggestions([]);
       setReview((current: any) => ({
         ...current,
@@ -896,40 +935,131 @@ export default function CustomerOrder() {
                 </div>
               ) : (
                 <>
-                  <input
-                    aria-label="Delivery address"
-                    autoComplete="street-address"
-                    placeholder="Start typing your street address"
-                    value={deliveryAddress}
-                    onChange={(event) => {
-                      setDeliveryAddress(event.target.value);
-                      setSelectedPlaceId("");
-                    }}
-                  />
-                  {addressSuggestions.length > 0 && (
-                    <div className="addressSuggestions">
-                      {addressSuggestions.map((suggestion) => (
+                  {(catalog?.customer.addresses?.length || 0) > 0 &&
+                    !addingAddress && (
+                      <div className="savedAddressChoices">
+                        {catalog!.customer.addresses!.map((address) => (
+                          <button
+                            type="button"
+                            key={address.id}
+                            className={
+                              savedAddressId === address.id ? "selected" : ""
+                            }
+                            onClick={() => {
+                              setSavedAddressId(address.id);
+                              setDeliveryAddress(address.formattedAddress);
+                              setDeliveryUnit(address.line2);
+                              setSelectedPlaceId("");
+                            }}
+                          >
+                            <strong>
+                              {address.label}
+                              {address.primary ? " · Default" : ""}
+                            </strong>
+                            <small>
+                              {address.formattedAddress}
+                              {address.line2 ? ` · ${address.line2}` : ""}
+                            </small>
+                          </button>
+                        ))}
                         <button
                           type="button"
-                          key={suggestion.id}
                           onClick={() => {
-                            setDeliveryAddress(suggestion.text);
-                            setSelectedPlaceId(suggestion.id);
-                            setAddressSuggestions([]);
+                            setAddingAddress(true);
+                            setSavedAddressId("");
+                            setDeliveryAddress("");
+                            setDeliveryUnit("");
+                            setMakeDefaultAddress(false);
                           }}
                         >
-                          <strong>{suggestion.mainText}</strong>
-                          <small>{suggestion.secondaryText}</small>
+                          + Add another address
                         </button>
-                      ))}
-                    </div>
+                      </div>
+                    )}
+                  {((catalog?.customer.addresses?.length || 0) === 0 ||
+                    addingAddress) && (
+                    <>
+                      {addingAddress && (
+                        <button
+                          type="button"
+                          className="useSavedAddress"
+                          onClick={() => {
+                            const address =
+                              catalog?.customer.addresses?.find(
+                                (row) => row.primary,
+                              ) || catalog?.customer.addresses?.[0];
+                            if (address) {
+                              setAddingAddress(false);
+                              setSavedAddressId(address.id);
+                              setDeliveryAddress(address.formattedAddress);
+                              setDeliveryUnit(address.line2);
+                            }
+                          }}
+                        >
+                          Use a saved address
+                        </button>
+                      )}
+                      <input
+                        aria-label="Delivery address"
+                        autoComplete="street-address"
+                        placeholder="Start typing your street address"
+                        value={deliveryAddress}
+                        onChange={(event) => {
+                          setDeliveryAddress(event.target.value);
+                          setSavedAddressId("");
+                          setSelectedPlaceId("");
+                        }}
+                      />
+                      {addressSuggestions.length > 0 && (
+                        <div className="addressSuggestions">
+                          {addressSuggestions.map((suggestion) => (
+                            <button
+                              type="button"
+                              key={suggestion.id}
+                              onClick={() => {
+                                setDeliveryAddress(suggestion.text);
+                                setSelectedPlaceId(suggestion.id);
+                                setAddressSuggestions([]);
+                              }}
+                            >
+                              <strong>{suggestion.mainText}</strong>
+                              <small>{suggestion.secondaryText}</small>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <input
+                        aria-label="Apartment, suite, or delivery note"
+                        placeholder="Apartment, suite, or location note (optional)"
+                        value={deliveryUnit}
+                        onChange={(event) =>
+                          setDeliveryUnit(event.target.value)
+                        }
+                      />
+                      {catalog?.customer.authenticated && (
+                        <>
+                          <input
+                            aria-label="Address label"
+                            placeholder="Address label, such as Home or Work"
+                            value={addressLabel}
+                            onChange={(event) =>
+                              setAddressLabel(event.target.value)
+                            }
+                          />
+                          <label className="defaultAddressCheck">
+                            <input
+                              type="checkbox"
+                              checked={makeDefaultAddress}
+                              onChange={(event) =>
+                                setMakeDefaultAddress(event.target.checked)
+                              }
+                            />{" "}
+                            Make this my default delivery address
+                          </label>
+                        </>
+                      )}
+                    </>
                   )}
-                  <input
-                    aria-label="Apartment, suite, or delivery note"
-                    placeholder="Apartment, suite, or location note (optional)"
-                    value={deliveryUnit}
-                    onChange={(event) => setDeliveryUnit(event.target.value)}
-                  />
                 </>
               )}
             </fieldset>

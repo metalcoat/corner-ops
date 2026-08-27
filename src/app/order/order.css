@@ -966,6 +966,36 @@
   gap: 10px;
   color: var(--green);
 }
+.savedAddressChoices {
+  display: grid;
+  gap: 8px;
+}
+.savedAddressChoices button {
+  display: grid;
+  gap: 3px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  text-align: left;
+}
+.savedAddressChoices button.selected {
+  border-color: var(--green);
+  background: #eef5ea;
+}
+.savedAddressChoices small {
+  color: var(--muted);
+}
+.useSavedAddress {
+  margin-bottom: 6px;
+}
+.defaultAddressCheck {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  font-size: 13px;
+}
 @media (max-width: 900px) {
   .featuredGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
