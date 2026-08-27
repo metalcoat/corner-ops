@@ -796,6 +796,9 @@ export default function CustomerOrder() {
       ) : null}
       {catalog && (
         <nav className="categoryNav" aria-label="Menu categories">
+          <span className="categorySwipeHint" aria-hidden="true">
+            Swipe →
+          </span>
           {featuredItems.length > 0 && (
             <button
               onClick={() =>
