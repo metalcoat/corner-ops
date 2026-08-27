@@ -468,6 +468,9 @@ export default function CustomerOrder() {
         >
           Cart · {cart.length} · {money(estimated)}
         </button>
+        <a className="accountLink" href="/account">
+          Account
+        </a>
       </header>
       <section className="orderIntro">
         <div>

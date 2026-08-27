@@ -25,9 +25,10 @@ export async function customerOrderConfirmation(orderId: string): Promise<any> {
   return {
     ...order,
     email_delivery_configured: Boolean(
-      process.env.RESEND_API_KEY?.trim() &&
-      (process.env.EMPLOYEE_NOTIFICATION_FROM_EMAIL?.trim() ||
-        process.env.ALERT_FROM_EMAIL?.trim()),
+      (process.env.RESEND_API_KEY?.trim() &&
+        (process.env.EMPLOYEE_NOTIFICATION_FROM_EMAIL?.trim() ||
+          process.env.ALERT_FROM_EMAIL?.trim())) ||
+      (process.env.SMTP_USER?.trim() && process.env.SMTP_PASSWORD?.trim()),
     ),
     subtotal_cents: Number(order.subtotal_cents),
     discount_cents: Number(order.discount_cents),

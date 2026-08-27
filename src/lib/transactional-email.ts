@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import nodemailer from "nodemailer";
 
 function clean(value: unknown, max = 500): string {
   return String(value ?? "")
@@ -34,6 +35,22 @@ function configuration() {
   return apiKey && from ? { resend: new Resend(apiKey), from } : null;
 }
 
+function smtpConfiguration() {
+  const user = process.env.SMTP_USER?.trim();
+  const pass = process.env.SMTP_PASSWORD?.trim();
+  const from = process.env.CUSTOMER_EMAIL_FROM?.trim() || user;
+  if (!user || !pass || !from) return null;
+  return {
+    from,
+    transport: nodemailer.createTransport({
+      host: process.env.SMTP_HOST?.trim() || "smtp.hostinger.com",
+      port: Number(process.env.SMTP_PORT || 465),
+      secure: process.env.SMTP_SECURE !== "false",
+      auth: { user, pass },
+    }),
+  };
+}
+
 export async function sendTransactionalEmail(input: {
   to: string | string[];
   subject: string;
@@ -45,7 +62,8 @@ export async function sendTransactionalEmail(input: {
     .filter((value) => /^\S+@\S+\.\S+$/.test(value));
   const unique = [...new Set(recipients)];
   const configured = configuration();
-  if (!configured)
+  const smtp = smtpConfiguration();
+  if (!configured && !smtp)
     return {
       configured: false,
       sent: 0,
@@ -56,6 +74,17 @@ export async function sendTransactionalEmail(input: {
   const failures: string[] = [];
   for (const to of unique) {
     try {
+      if (smtp) {
+        await smtp.transport.sendMail({
+          from: smtp.from,
+          to,
+          subject: clean(input.subject, 240),
+          text: input.text,
+        });
+        sent += 1;
+        continue;
+      }
+      if (!configured) throw new Error("Outbound email is not configured.");
       const result = await configured.resend.emails.send(
         {
           from: configured.from,

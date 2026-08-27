@@ -24,6 +24,13 @@ export function ensureCustomerOrderingSchema(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS ordering_customer_web_carts_session_idx ON ordering_customer_web_carts(session_hash,created_at DESC)`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS confirmation_email_sent_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS confirmation_email_error TEXT NOT NULL DEFAULT ''`;
+      await sql`CREATE TABLE IF NOT EXISTS ordering_customer_identities (
+        id UUID PRIMARY KEY, customer_id UUID NOT NULL REFERENCES ordering_customers(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL, provider_subject TEXT NOT NULL, email TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_login_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(provider,provider_subject)
+      )`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_customer_identity_email_idx ON ordering_customer_identities(provider,email)`;
     })().catch((error) => {
       schemaPromise = null;
       throw error;
