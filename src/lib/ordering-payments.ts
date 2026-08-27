@@ -58,6 +58,7 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     }
     const source = (await sql`SELECT * FROM ordering_payment_transactions WHERE id=${input.transactionId} AND order_id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
     if (!source || source.transaction_type !== "payment" || source.status !== "approved") throw new PaymentConflictError("Approved payment tender was not found.");
+    if (source.provider === "helcim") throw new PaymentConflictError("Helcim card reversals must be processed through Helcim before the local payment record is updated.");
     const reversed = Number((await sql`SELECT COALESCE(SUM(amount_cents),0) amount FROM ordering_payment_transactions WHERE related_transaction_id=${source.id} AND transaction_type='void' AND status='approved'`)[0].amount);
     if (amount > Number(source.amount_cents) - reversed) throw new PaymentConflictError("Reversal exceeds the tender's unreversed amount.");
     const order = (await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
@@ -99,6 +100,13 @@ export async function commitTender(input: {
   cashControlMode?: "till" | "driver_settlement";
   giftCardNumber?: string;
   giftCardPin?: string;
+  providerApproval?: {
+    provider: "helcim";
+    transactionReference: string;
+    brand?: string;
+    last4?: string;
+    details?: Record<string, unknown>;
+  };
 }) {
   if (input.tenderType === "gift_card") await ensureOrderingGiftCardSchema(); else await ensureOrderingAccountSchema();
   cents(input.amountTenderedCents, "Tender amount");
@@ -141,18 +149,22 @@ export async function commitTender(input: {
     if (input.tenderType === "card" && input.amountTenderedCents > due) {
       throw new PaymentConflictError("Credit tender cannot exceed the remaining balance.");
     }
+    if (input.tenderType === "card" && !input.providerApproval) {
+      throw new PaymentConflictError("Credit payments must be approved by Helcim before they are recorded.");
+    }
     const transactionId = randomUUID();
     await sql`
       INSERT INTO ordering_payment_transactions (
         id, business, order_id, check_id, customer_id, tender_type, transaction_type, status,
-        amount_cents, amount_tendered_cents, change_due_cents, provider,
+        amount_cents, amount_tendered_cents, change_due_cents, provider, provider_transaction_reference, brand, last4,
         client_mutation_id, created_by, approved_at, details
       ) VALUES (
         ${transactionId}, ${input.business}, ${input.orderId}, ${input.checkId || null}, ${order.customer_id || null}, ${input.tenderType},
         'payment', 'approved', ${applied}, ${input.amountTenderedCents}, ${change},
-        ${input.tenderType === "card" ? "manual_placeholder" : input.tenderType === "gift_card" ? "corner_ops_gift_card" : ""}, ${input.clientMutationId},
+        ${input.providerApproval?.provider || (input.tenderType === "gift_card" ? "corner_ops_gift_card" : "")},
+        ${input.providerApproval?.transactionReference || ""}, ${input.providerApproval?.brand || ""}, ${input.providerApproval?.last4 || ""}, ${input.clientMutationId},
         ${input.actor.id}, NOW(),
-        CAST(${JSON.stringify({ actorName: input.actor.name, actorType: input.actor.type, manualCard: input.tenderType === "card", giftCard: input.tenderType === "gift_card", receiptPrinterId: input.receiptPrinterId || null })} AS jsonb)
+        CAST(${JSON.stringify({ actorName: input.actor.name, actorType: input.actor.type, giftCard: input.tenderType === "gift_card", receiptPrinterId: input.receiptPrinterId || null, ...(input.providerApproval?.details || {}) })} AS jsonb)
       )
     `;
     if (input.tenderType === "gift_card") {

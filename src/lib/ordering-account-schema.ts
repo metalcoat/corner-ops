@@ -80,6 +80,7 @@ export function ensureOrderingAccountSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL DEFAULT ''`;
       await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_payment_transactions_idempotency_idx ON ordering_payment_transactions (business, client_mutation_id) WHERE client_mutation_id IS NOT NULL`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_payment_transactions_provider_reference_idx ON ordering_payment_transactions (provider, provider_transaction_reference) WHERE provider <> '' AND provider_transaction_reference <> ''`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS paid_by TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ`;

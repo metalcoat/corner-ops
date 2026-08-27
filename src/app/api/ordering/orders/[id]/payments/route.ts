@@ -13,7 +13,7 @@ function businessFrom(value: unknown): OrderingBusiness {
 
 function tenderFrom(value: unknown): CheckoutTenderType {
   if (value === "cash" || value === "card" || value === "gift_card") return value;
-  throw new PaymentConflictError("Cash, manual credit, or gift card tender is required.");
+  throw new PaymentConflictError("Cash, Helcim credit, or gift card tender is required.");
 }
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {

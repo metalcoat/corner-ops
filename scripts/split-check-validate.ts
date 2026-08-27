@@ -25,7 +25,7 @@ void (async () => {
     const assigned = result.checks.flatMap((check) => check.lines as Array<Record<string, unknown>>).filter((line: Record<string, unknown>) => line.order_item_id === firstLine).reduce((sum, line) => sum + Number(line.quantity), 0);
     if (result.checks.length !== 2 || total !== 1501 || assigned !== 2 || !result.checks.every((check) => (check.lines as Array<Record<string, unknown>>).every((line) => line.order_item_id === firstLine || line.order_item_id === secondLine))) throw new Error("Split-check allocation acceptance failed.");
     const payable = result.checks[0];
-    const paid = await commitTender({ orderId, business: "Corner Deli", checkId: payable.id, tenderType: "card", amountTenderedCents: Number(payable.amount_due_cents), clientMutationId: `split-${randomUUID()}`, actor });
+    const paid = await commitTender({ orderId, business: "Corner Deli", checkId: payable.id, tenderType: "card", amountTenderedCents: Number(payable.amount_due_cents), clientMutationId: `split-${randomUUID()}`, actor, providerApproval: { provider: "helcim", transactionReference: `split-${randomUUID()}` } });
     if (paid.check?.status !== "paid" || paid.order.payment_status !== "partially_paid") throw new Error("Per-check payment state was not reflected in the overall order balance.");
     let rearrangeBlocked = false;
     try { await splitCheck({ orderId, business: "Corner Deli", fromCheckId: result.checks[1].id, lines: [{ orderItemId: firstLine, quantity: 1 }], actor }); }

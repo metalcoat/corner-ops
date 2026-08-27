@@ -130,6 +130,7 @@ type CheckoutState = {
     reason?: string;
   }>;
 };
+type HelcimStatus = { checkoutEnabled: boolean; apiTokenConfigured: boolean };
 type PayableCheck = {
   id: string;
   display_sequence: number;
@@ -582,6 +583,7 @@ export default function PosClient({
   const [giftCardNumber, setGiftCardNumber] = useState("");
   const [giftCardPin, setGiftCardPin] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
+  const [helcimStatus, setHelcimStatus] = useState<HelcimStatus | null>(null);
   useEffect(() => {
     if (business !== "Corner Deli") return;
     fetch("/api/ordering/hardware/status", { cache: "no-store" })
@@ -599,6 +601,10 @@ export default function PosClient({
         );
       })
       .catch(() => setReceiptPrinters([]));
+    fetch("/api/ordering/orders/status/payments/helcim", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((body) => setHelcimStatus(body as HelcimStatus))
+      .catch(() => setHelcimStatus({ checkoutEnabled: false, apiTokenConfigured: false }));
   }, [business]);
   const [configurationMessage, setConfigurationMessage] = useState("");
   const [cartNotice, setCartNotice] = useState("");
@@ -2369,6 +2375,79 @@ export default function PosClient({
     }
   }
 
+  async function startHelcimPayment() {
+    const draft = savedDraft || activeTab;
+    if (!draft || !checkoutState || paymentBusy) return;
+    setPaymentBusy(true);
+    setCheckoutError("");
+    try {
+      if (!window.appendHelcimPayIframe) {
+        await new Promise<void>((resolve, reject) => {
+          const existing = document.querySelector<HTMLScriptElement>('script[data-helcim-pay="true"]');
+          if (existing) {
+            existing.addEventListener("load", () => resolve(), { once: true });
+            existing.addEventListener("error", () => reject(new Error("Could not load Helcim checkout.")), { once: true });
+            return;
+          }
+          const script = document.createElement("script");
+          script.src = "https://secure.helcim.app/helcim-pay/services/start.js";
+          script.async = true;
+          script.dataset.helcimPay = "true";
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error("Could not load Helcim checkout."));
+          document.head.appendChild(script);
+        });
+      }
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/helcim`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "initialize", checkId: selectedCheckId }),
+      });
+      const initialized = await response.json() as { checkoutToken?: string; secretToken?: string; error?: string };
+      if (!response.ok || !initialized.checkoutToken || !initialized.secretToken) throw new Error(initialized.error || "Could not start Helcim checkout.");
+      const checkoutToken = initialized.checkoutToken;
+      const secretToken = initialized.secretToken;
+      const eventName = `helcim-pay-js-${checkoutToken}`;
+      const result = await new Promise<CheckoutState>((resolve, reject) => {
+        const listener = async (event: MessageEvent) => {
+          if (event.origin !== "https://secure.helcim.app" || event.data?.eventName !== eventName) return;
+          if (event.data.eventStatus === "HIDE") {
+            window.removeEventListener("message", listener);
+            reject(new Error("Helcim checkout was closed."));
+            return;
+          }
+          if (event.data.eventStatus === "ABORTED") {
+            window.removeEventListener("message", listener);
+            reject(new Error(typeof event.data.eventMessage === "string" ? event.data.eventMessage : "Helcim declined the payment."));
+            return;
+          }
+          if (event.data.eventStatus !== "SUCCESS") return;
+          window.removeEventListener("message", listener);
+          try {
+            const message = typeof event.data.eventMessage === "string" ? JSON.parse(event.data.eventMessage) : event.data.eventMessage;
+            const confirmation = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/helcim`, {
+              method: "POST", headers: { "content-type": "application/json" },
+              body: JSON.stringify({ action: "confirm", checkoutToken, secretToken, data: message?.data, hash: message?.hash }),
+            });
+            const payload = await confirmation.json() as CheckoutState & { error?: string };
+            if (!confirmation.ok) throw new Error(payload.error || "Helcim payment could not be verified.");
+            resolve(payload);
+          } catch (error) { reject(error); }
+        };
+        window.addEventListener("message", listener);
+        if (!window.appendHelcimPayIframe) {
+          window.removeEventListener("message", listener);
+          reject(new Error("Helcim checkout did not load."));
+          return;
+        }
+        window.appendHelcimPayIframe(checkoutToken);
+      });
+      setCheckoutState(result);
+      setPayableChecks((checks) => checks.map((check) => check.id === selectedCheckId && result.check ? { ...check, ...result.check } : check));
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "Helcim payment failed.");
+    } finally { setPaymentBusy(false); }
+  }
+
   async function paymentOperation(
     action: "reverse" | "reprint",
     transactionId: string,
@@ -3818,10 +3897,10 @@ export default function PosClient({
                 </button>
                 <button
                   type="button"
-                  disabled={paymentBusy}
-                  onClick={() => void commitPayment("card")}
+                  disabled={paymentBusy || !helcimStatus?.checkoutEnabled}
+                  onClick={() => void startHelcimPayment()}
                 >
-                  COMMIT REMAINING CREDIT (MANUAL)
+                  {helcimStatus?.checkoutEnabled ? "PAY REMAINING BY HELCIM" : "HELCIM SETUP REQUIRED"}
                 </button>
                 <label>
                   Gift card number

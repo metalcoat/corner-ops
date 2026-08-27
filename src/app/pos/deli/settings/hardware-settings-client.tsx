@@ -60,16 +60,20 @@ export default function HardwareSettingsClient() {
     [locationId, setLocationId] = useState(""),
     [routePrinterId, setRoutePrinterId] = useState(""),
     [targetType, setTargetType] = useState("all"),
-    [targetId, setTargetId] = useState("");
+    [targetId, setTargetId] = useState(""),
+    [helcim, setHelcim] = useState<{ apiTokenConfigured: boolean; terminalIdConfigured: boolean; deviceCodeConfigured: boolean } | null>(null),
+    [helcimBusy, setHelcimBusy] = useState(false);
   async function load() {
-    const response = await fetch("/api/ordering/settings/hardware", {
-        cache: "no-store",
-      }),
-      body = await response.json();
+    const [response, helcimResponse] = await Promise.all([
+      fetch("/api/ordering/settings/hardware", { cache: "no-store" }),
+      fetch("/api/ordering/orders/status/payments/helcim", { cache: "no-store" }),
+    ]),
+      [body, helcimBody] = await Promise.all([response.json(), helcimResponse.json()]);
     if (!response.ok)
       throw new Error(body.error || "Could not load hardware configuration.");
     setData(body);
     if (!locationId && body.locations[0]) setLocationId(body.locations[0].id);
+    if (helcimResponse.ok) setHelcim(helcimBody);
   }
   useEffect(() => {
     void load().catch((error) => setMessage(error.message));
@@ -145,6 +149,23 @@ export default function HardwareSettingsClient() {
         unknown. No live credentials are stored here.
       </p>
       {message && <p role="status">{message}</p>}
+      <h3>Helcim payments</h3>
+      <div className="autoPrintControl">
+        <div>
+          <strong>{helcim?.apiTokenConfigured ? "HELCIM CHECKOUT READY" : "HELCIM SETUP REQUIRED"}</strong>
+          <p>
+            API token: {helcim?.apiTokenConfigured ? "configured" : "missing"} · Terminal ID: {helcim?.terminalIdConfigured ? "configured" : "optional / missing"} · Hardware device: {helcim?.deviceCodeConfigured ? "paired" : "not paired"}
+          </p>
+          <small>Credentials are read from the server environment and are never shown or stored in this page.</small>
+        </div>
+        <button type="button" disabled={!helcim?.apiTokenConfigured || helcimBusy} onClick={() => {
+          setHelcimBusy(true); setMessage("");
+          void fetch("/api/ordering/orders/status/payments/helcim", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "test" }) })
+            .then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body.error || "Helcim connection failed."); setMessage("Helcim connection verified."); })
+            .catch((error) => setMessage(error instanceof Error ? error.message : "Helcim connection failed."))
+            .finally(() => setHelcimBusy(false));
+        }}>TEST HELCIM</button>
+      </div>
       <h3>Automatic kitchen tickets</h3>
       <div className="autoPrintControl">
         <div>
