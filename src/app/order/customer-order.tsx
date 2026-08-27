@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import PizzaToppingSelector from "@/components/pizza-topping-selector";
 import {
   formatPizzaTopping,
@@ -250,10 +251,16 @@ export default function CustomerOrder() {
       [],
     ),
     [selectedPlaceId, setSelectedPlaceId] = useState(""),
+    [addressValidationToken, setAddressValidationToken] = useState(""),
+    [addressBusy, setAddressBusy] = useState(false),
+    [addressPortal, setAddressPortal] = useState<HTMLElement | null>(null),
     [validatedDelivery, setValidatedDelivery] = useState<{
       formattedAddress: string;
     } | null>(null),
     [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setAddressPortal(document.getElementById("delivery-address-top"));
+  }, []);
   useEffect(() => {
     setLoading(true);
     fetch(`/api/customer/catalog?serviceType=${serviceType}`, {
@@ -416,7 +423,37 @@ export default function CustomerOrder() {
         }),
       });
       if (!response.ok) throw new Error(await failure(response));
-      setReview((await response.json()).cart);
+      let priced = (await response.json()).cart;
+      if (serviceType === "delivery") {
+        const attachedResponse = await fetch(
+          `/api/customer/orders/${encodeURIComponent(priced.id)}/delivery`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              enteredAddress: deliveryAddress,
+              validationToken: addressValidationToken,
+              line2: deliveryUnit,
+              customerAddressId: savedAddressId || undefined,
+              label: addressLabel,
+              makeDefault: makeDefaultAddress,
+            }),
+          },
+        );
+        if (!attachedResponse.ok)
+          throw new Error(await failure(attachedResponse));
+        const attached = await attachedResponse.json();
+        setValidatedDelivery(attached.address);
+        if (attached.customerAddressId)
+          setSavedAddressId(attached.customerAddressId);
+        priced = {
+          ...priced,
+          totalCents: attached.totalCents,
+          deliveryFeeCents: attached.deliveryFeeCents,
+          delivery: { ...priced.delivery, feePendingAddress: false },
+        };
+      }
+      setReview(priced);
       setPaymentChoice(null);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Could not price the order.");
@@ -554,65 +591,37 @@ export default function CustomerOrder() {
       setBusy(false);
     }
   }
-  async function validateAndAttachDelivery() {
-    if (!review?.id || busy) return;
-    setBusy(true);
+  async function validateDeliveryAddressNow(
+    enteredAddress: string,
+    placeId: string,
+  ) {
+    setAddressBusy(true);
     setMessage("");
     try {
-      let validationToken = "";
-      if (!savedAddressId) {
-        const validatedResponse = await fetch(
-          "/api/customer/delivery/address/validate",
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              enteredAddress: deliveryAddress,
-              placeId: selectedPlaceId || undefined,
-              sessionToken: addressSessionToken,
-            }),
-          },
-        );
-        if (!validatedResponse.ok)
-          throw new Error(await failure(validatedResponse));
-        validationToken = (await validatedResponse.json()).validationToken;
-      }
-      const attachedResponse = await fetch(
-        `/api/customer/orders/${encodeURIComponent(review.id)}/delivery`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            enteredAddress: deliveryAddress,
-            validationToken,
-            line2: deliveryUnit,
-            customerAddressId: savedAddressId || undefined,
-            label: addressLabel,
-            makeDefault: makeDefaultAddress,
-          }),
-        },
-      );
-      if (!attachedResponse.ok)
-        throw new Error(await failure(attachedResponse));
-      const attached = await attachedResponse.json();
-      setValidatedDelivery(attached.address);
-      if (attached.customerAddressId)
-        setSavedAddressId(attached.customerAddressId);
+      const response = await fetch("/api/customer/delivery/address/validate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          enteredAddress,
+          placeId,
+          sessionToken: addressSessionToken,
+        }),
+      });
+      if (!response.ok) throw new Error(await failure(response));
+      const validated = await response.json();
+      setAddressValidationToken(validated.validationToken);
+      setValidatedDelivery(validated.address);
       setAddressSuggestions([]);
-      setReview((current: any) => ({
-        ...current,
-        totalCents: attached.totalCents,
-        deliveryFeeCents: attached.deliveryFeeCents,
-        delivery: { ...current.delivery, feePendingAddress: false },
-      }));
     } catch (error) {
+      setAddressValidationToken("");
+      setValidatedDelivery(null);
       setMessage(
         error instanceof Error
           ? error.message
           : "Could not validate the delivery address.",
       );
     } finally {
-      setBusy(false);
+      setAddressBusy(false);
     }
   }
   async function submitPayLater() {
@@ -690,6 +699,14 @@ export default function CustomerOrder() {
           </button>
         </div>
       </section>
+      <section
+        id="delivery-address-top"
+        className={
+          serviceType === "delivery"
+            ? "topDeliveryAddress active"
+            : "topDeliveryAddress"
+        }
+      />
       {catalog && !catalog.availability.orderable && (
         <aside className="closedNotice">
           <strong>We’re not taking ASAP {serviceType} orders right now.</strong>
@@ -843,7 +860,7 @@ export default function CustomerOrder() {
           )}
           <div className="cartSummary" aria-label="Order total">
             <div>
-              <span>{review ? "Merchandise" : "Estimated merchandise"}</span>
+              <span>{review ? "Food order" : "Estimated food order"}</span>
               <strong>
                 {money(Number(review?.subtotalCents ?? estimated))}
               </strong>
@@ -938,158 +955,185 @@ export default function CustomerOrder() {
           {serviceType === "delivery" && catalog && (
             <p className="deliveryNote">
               <strong>About 1 hour</strong> — we’ll get it there as fast as we
-              can. {money(catalog.delivery.minimumOrderCents)} merchandise
+              can. {money(catalog.delivery.minimumOrderCents)} food order
               minimum · delivery fee based on distance · up to{" "}
               {catalog.delivery.maxDistanceMiles} miles.
             </p>
           )}
-          {serviceType === "delivery" && (
-            <fieldset className="deliveryAddress">
-              <legend>Delivery address</legend>
-              {validatedDelivery ? (
-                <div className="validatedAddress">
-                  <strong>✓ {validatedDelivery.formattedAddress}</strong>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setValidatedDelivery(null);
-                      setReview(null);
-                    }}
-                  >
-                    Change
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {(catalog?.customer.addresses?.length || 0) > 0 &&
-                    !addingAddress && (
-                      <div className="savedAddressChoices">
-                        {catalog!.customer.addresses!.map((address) => (
-                          <button
-                            type="button"
-                            key={address.id}
-                            className={
-                              savedAddressId === address.id ? "selected" : ""
-                            }
-                            onClick={() => {
-                              setSavedAddressId(address.id);
-                              setDeliveryAddress(address.formattedAddress);
-                              setDeliveryUnit(address.line2);
-                              setSelectedPlaceId("");
-                            }}
-                          >
-                            <strong>
-                              {address.label}
-                              {address.primary ? " · Default" : ""}
-                            </strong>
-                            <small>
-                              {address.formattedAddress}
-                              {address.line2 ? ` · ${address.line2}` : ""}
-                            </small>
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAddingAddress(true);
-                            setSavedAddressId("");
-                            setDeliveryAddress("");
-                            setDeliveryUnit("");
-                            setMakeDefaultAddress(false);
-                          }}
-                        >
-                          + Add another address
-                        </button>
-                      </div>
-                    )}
-                  {((catalog?.customer.addresses?.length || 0) === 0 ||
-                    addingAddress) && (
-                    <>
-                      {addingAddress && (
-                        <button
-                          type="button"
-                          className="useSavedAddress"
-                          onClick={() => {
-                            const address =
-                              catalog?.customer.addresses?.find(
-                                (row) => row.primary,
-                              ) || catalog?.customer.addresses?.[0];
-                            if (address) {
-                              setAddingAddress(false);
-                              setSavedAddressId(address.id);
-                              setDeliveryAddress(address.formattedAddress);
-                              setDeliveryUnit(address.line2);
-                            }
-                          }}
-                        >
-                          Use a saved address
-                        </button>
-                      )}
-                      <input
-                        aria-label="Delivery address"
-                        autoComplete="street-address"
-                        placeholder="Start typing your street address"
-                        value={deliveryAddress}
-                        onChange={(event) => {
-                          setDeliveryAddress(event.target.value);
-                          setSavedAddressId("");
-                          setSelectedPlaceId("");
-                        }}
-                      />
-                      {addressSuggestions.length > 0 && (
-                        <div className="addressSuggestions">
-                          {addressSuggestions.map((suggestion) => (
+          {serviceType === "delivery" &&
+            addressPortal &&
+            createPortal(
+              <fieldset className="deliveryAddress">
+                <legend>Delivery address</legend>
+                {validatedDelivery ? (
+                  <div className="validatedAddress">
+                    <strong>✓ {validatedDelivery.formattedAddress}</strong>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setValidatedDelivery(null);
+                        setAddressValidationToken("");
+                        setSavedAddressId("");
+                        setReview(null);
+                      }}
+                    >
+                      Change
+                    </button>
+                    <input
+                      aria-label="Apartment, suite, or delivery note"
+                      placeholder="Apartment, suite, or delivery note (optional)"
+                      value={deliveryUnit}
+                      onChange={(event) => setDeliveryUnit(event.target.value)}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    {(catalog?.customer.addresses?.length || 0) > 0 &&
+                      !addingAddress && (
+                        <div className="savedAddressChoices">
+                          {catalog!.customer.addresses!.map((address) => (
                             <button
                               type="button"
-                              key={suggestion.id}
+                              key={address.id}
+                              className={
+                                savedAddressId === address.id ? "selected" : ""
+                              }
                               onClick={() => {
-                                setDeliveryAddress(suggestion.text);
-                                setSelectedPlaceId(suggestion.id);
-                                setAddressSuggestions([]);
+                                setSavedAddressId(address.id);
+                                setDeliveryAddress(address.formattedAddress);
+                                setDeliveryUnit(address.line2);
+                                setSelectedPlaceId("");
+                                setAddressValidationToken("");
+                                setValidatedDelivery({
+                                  formattedAddress: address.formattedAddress,
+                                });
                               }}
                             >
-                              <strong>{suggestion.mainText}</strong>
-                              <small>{suggestion.secondaryText}</small>
+                              <strong>
+                                {address.label}
+                                {address.primary ? " · Default" : ""}
+                              </strong>
+                              <small>
+                                {address.formattedAddress}
+                                {address.line2 ? ` · ${address.line2}` : ""}
+                              </small>
                             </button>
                           ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddingAddress(true);
+                              setSavedAddressId("");
+                              setDeliveryAddress("");
+                              setDeliveryUnit("");
+                              setMakeDefaultAddress(false);
+                              setValidatedDelivery(null);
+                              setAddressValidationToken("");
+                            }}
+                          >
+                            + Add another address
+                          </button>
                         </div>
                       )}
-                      <input
-                        aria-label="Apartment, suite, or delivery note"
-                        placeholder="Apartment, suite, or location note (optional)"
-                        value={deliveryUnit}
-                        onChange={(event) =>
-                          setDeliveryUnit(event.target.value)
-                        }
-                      />
-                      {catalog?.customer.authenticated && (
-                        <>
-                          <input
-                            aria-label="Address label"
-                            placeholder="Address label, such as Home or Work"
-                            value={addressLabel}
-                            onChange={(event) =>
-                              setAddressLabel(event.target.value)
-                            }
-                          />
-                          <label className="defaultAddressCheck">
-                            <input
-                              type="checkbox"
-                              checked={makeDefaultAddress}
-                              onChange={(event) =>
-                                setMakeDefaultAddress(event.target.checked)
+                    {((catalog?.customer.addresses?.length || 0) === 0 ||
+                      addingAddress) && (
+                      <>
+                        {addingAddress && (
+                          <button
+                            type="button"
+                            className="useSavedAddress"
+                            onClick={() => {
+                              const address =
+                                catalog?.customer.addresses?.find(
+                                  (row) => row.primary,
+                                ) || catalog?.customer.addresses?.[0];
+                              if (address) {
+                                setAddingAddress(false);
+                                setSavedAddressId(address.id);
+                                setDeliveryAddress(address.formattedAddress);
+                                setDeliveryUnit(address.line2);
+                                setValidatedDelivery({
+                                  formattedAddress: address.formattedAddress,
+                                });
                               }
-                            />{" "}
-                            Make this my default delivery address
-                          </label>
-                        </>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-            </fieldset>
-          )}
+                            }}
+                          >
+                            Use a saved address
+                          </button>
+                        )}
+                        <input
+                          aria-label="Delivery address"
+                          autoComplete="street-address"
+                          placeholder="Start typing your street address"
+                          value={deliveryAddress}
+                          onChange={(event) => {
+                            setDeliveryAddress(event.target.value);
+                            setSavedAddressId("");
+                            setSelectedPlaceId("");
+                            setAddressValidationToken("");
+                            setValidatedDelivery(null);
+                          }}
+                        />
+                        {addressSuggestions.length > 0 && (
+                          <div className="addressSuggestions">
+                            {addressSuggestions.map((suggestion) => (
+                              <button
+                                type="button"
+                                key={suggestion.id}
+                                onClick={() => {
+                                  setDeliveryAddress(suggestion.text);
+                                  setSelectedPlaceId(suggestion.id);
+                                  setAddressSuggestions([]);
+                                  void validateDeliveryAddressNow(
+                                    suggestion.text,
+                                    suggestion.id,
+                                  );
+                                }}
+                              >
+                                <strong>{suggestion.mainText}</strong>
+                                <small>{suggestion.secondaryText}</small>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <input
+                          aria-label="Apartment, suite, or delivery note"
+                          placeholder="Apartment, suite, or location note (optional)"
+                          value={deliveryUnit}
+                          onChange={(event) =>
+                            setDeliveryUnit(event.target.value)
+                          }
+                        />
+                        {addressBusy && <small>Validating address…</small>}
+                        {catalog?.customer.authenticated && (
+                          <>
+                            <input
+                              aria-label="Address label"
+                              placeholder="Address label, such as Home or Work"
+                              value={addressLabel}
+                              onChange={(event) =>
+                                setAddressLabel(event.target.value)
+                              }
+                            />
+                            <label className="defaultAddressCheck">
+                              <input
+                                type="checkbox"
+                                checked={makeDefaultAddress}
+                                onChange={(event) =>
+                                  setMakeDefaultAddress(event.target.checked)
+                                }
+                              />{" "}
+                              Make this my default delivery address
+                            </label>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </fieldset>,
+              addressPortal,
+            )}
           {catalog?.customer.authenticated &&
           phone.replace(/\D/g, "").length === 10 ? (
             <section className="savedContact" aria-label="Saved contact">
@@ -1159,7 +1203,12 @@ export default function CustomerOrder() {
               !/^\S+@\S+\.\S+$/.test(email.trim()) ||
               (timing === "future" && !scheduledFor) ||
               (!catalog?.availability.orderable && timing === "asap") ||
-              (serviceType === "delivery" && deliveryAddress.trim().length < 5)
+              (serviceType === "delivery" &&
+                deliveryAddress.trim().length < 5) ||
+              (serviceType === "delivery" &&
+                !savedAddressId &&
+                !addressValidationToken) ||
+              addressBusy
             }
             onClick={price}
           >
@@ -1182,17 +1231,7 @@ export default function CustomerOrder() {
                   ? "About 1 hour — we’ll get it there as fast as we can."
                   : review.timingMessage}
               </small>
-              {serviceType === "delivery" && !validatedDelivery ? (
-                <button
-                  className="reviewButton"
-                  disabled={busy}
-                  onClick={() => void validateAndAttachDelivery()}
-                >
-                  {busy
-                    ? "Validating…"
-                    : "Validate address & calculate delivery"}
-                </button>
-              ) : catalog?.checkout.paymentEnabled ? (
+              {catalog?.checkout.paymentEnabled ? (
                 <div className="paymentChoices">
                   <div
                     className="paymentOptionRow"

@@ -952,6 +952,22 @@
 .deliveryAddress {
   position: relative;
 }
+.topDeliveryAddress {
+  display: none;
+  max-width: 1180px;
+  margin: -18px auto 24px;
+  padding: 0 24px;
+}
+.topDeliveryAddress.active {
+  display: block;
+}
+.topDeliveryAddress .deliveryAddress {
+  margin: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
 .deliveryAddress > input {
   width: 100%;
   margin-top: 8px;
@@ -989,11 +1005,16 @@
   color: var(--muted);
 }
 .validatedAddress {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   color: var(--green);
+}
+.validatedAddress > input {
+  grid-column: 1 / -1;
+  width: 100%;
 }
 .savedAddressChoices {
   display: grid;
