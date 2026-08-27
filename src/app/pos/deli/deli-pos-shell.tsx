@@ -7,6 +7,7 @@ import PosClient from "../pos-client";
 import type { PosEmployeeSession, PosSessionView } from "../pos-pin-gate";
 import "./deli-pos-shell.css";
 import "./deli-pos-shell-overrides.css";
+import "./deli-safe-area.css";
 
 const centerWorkspaces = [
   { label: "Menu", href: "/pos/deli" },

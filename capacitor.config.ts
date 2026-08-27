@@ -21,6 +21,13 @@ const config: CapacitorConfig = {
     contentInset: "automatic",
     preferredContentMode: "mobile",
   },
+  plugins: {
+    SystemBars: {
+      insetsHandling: "css",
+      style: "DARK",
+      hidden: false,
+    },
+  },
 };
 
 export default config;
