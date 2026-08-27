@@ -52,10 +52,20 @@ export async function POST(
     const { id: orderId } = await context.params;
     const owner = await ownedCart(request, orderId);
     if (!owner) return unauthorized();
-    if (owner.row.source !== "web" || owner.row.service_type !== "pickup")
+    if (
+      owner.row.source !== "web" ||
+      !["pickup", "delivery"].includes(String(owner.row.service_type))
+    )
       throw new HelcimError(
-        "Online Helcim testing is currently available for pickup orders.",
+        "Online secure payment is unavailable for this order.",
       );
+    if (owner.row.service_type === "delivery") {
+      const address = (
+        await getSql()`SELECT 1 FROM ordering_order_delivery_addresses WHERE order_id=${orderId} AND validation_status='validated' LIMIT 1`
+      )[0];
+      if (!address)
+        throw new HelcimError("Validate the delivery address before payment.");
+    }
     const body = (await request.json()) as Record<string, unknown>;
     const actor = {
       id: `web:${owner.hash.slice(0, 16)}`,
@@ -73,7 +83,7 @@ export async function POST(
         await sendCustomerOrderConfirmation(orderId);
       });
       return Response.json(
-        { order: submitted.order, paymentStatus: "unpaid", payAtPickup: true },
+        { order: submitted.order, paymentStatus: "unpaid", payLater: true },
         { status: 201 },
       );
     }

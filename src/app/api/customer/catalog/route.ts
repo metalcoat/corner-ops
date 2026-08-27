@@ -66,12 +66,33 @@ export async function GET(request: Request) {
           .filter((group: any) => group.presentationContext !== "hidden")
           .map((group: any) => ({
             ...group,
+            minSelections:
+              /wings?/i.test(item.name) &&
+              /wing sauce|flavou?r/i.test(group.name)
+                ? 1
+                : group.minSelections,
+          }))
+          .toSorted((left: any, right: any) => {
+            if (!/wings?/i.test(item.name)) return 0;
+            const rank = (group: any) =>
+              /wing sauce|flavou?r/i.test(group.name)
+                ? 0
+                : /add.?ons?|sides?/i.test(group.name)
+                  ? 1
+                  : 2;
+            return rank(left) - rank(right);
+          })
+          .map((group: any) => ({
+            ...group,
             options: group.options.map((option: any) => ({
               id: option.id,
               name: option.name,
               priceDeltaCents: option.priceDeltaCents,
               available: Boolean(option.available),
-              defaultSelected: Boolean(option.defaultSelected),
+              defaultSelected:
+                Boolean(option.defaultSelected) ||
+                (/wings?/i.test(item.name) &&
+                  /^(blue cheese(?: \(4oz\))?|celery)$/i.test(option.name)),
               includedQuantity: option.includedQuantity,
             })),
           })),
@@ -139,7 +160,7 @@ export async function GET(request: Request) {
         paymentEnabled: helcimStatus().checkoutEnabled,
         provider: "helcim",
         pickupEnabled: true,
-        deliveryEnabled: false,
+        deliveryEnabled: delivery.enabled,
       },
     });
     if (setCookie) response.headers.set("Set-Cookie", setCookie);

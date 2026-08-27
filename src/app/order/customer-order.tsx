@@ -127,6 +127,12 @@ type Catalog = {
     deliveryEnabled?: boolean;
   };
 };
+type AddressSuggestion = {
+  id: string;
+  text: string;
+  mainText: string;
+  secondaryText: string;
+};
 type CartLine = {
   key: string;
   item: Item;
@@ -221,6 +227,16 @@ export default function CustomerOrder() {
       null,
     ),
     [paymentOpen, setPaymentOpen] = useState(false),
+    [deliveryAddress, setDeliveryAddress] = useState(""),
+    [deliveryUnit, setDeliveryUnit] = useState(""),
+    [addressSessionToken] = useState(() => crypto.randomUUID()),
+    [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>(
+      [],
+    ),
+    [selectedPlaceId, setSelectedPlaceId] = useState(""),
+    [validatedDelivery, setValidatedDelivery] = useState<{
+      formattedAddress: string;
+    } | null>(null),
     [busy, setBusy] = useState(false);
   useEffect(() => {
     setLoading(true);
@@ -256,6 +272,34 @@ export default function CustomerOrder() {
       .then((body) => setSlots(body.slots || []))
       .catch(() => setSlots([]));
   }, [date, serviceType, timing]);
+  useEffect(() => {
+    if (
+      serviceType !== "delivery" ||
+      deliveryAddress.trim().length < 2 ||
+      validatedDelivery
+    ) {
+      setAddressSuggestions([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      fetch("/api/customer/delivery/address/suggest", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          input: deliveryAddress,
+          sessionToken: addressSessionToken,
+        }),
+      })
+        .then(async (response) =>
+          response.ok
+            ? response.json()
+            : Promise.reject(new Error(await failure(response))),
+        )
+        .then((body) => setAddressSuggestions(body.suggestions || []))
+        .catch(() => setAddressSuggestions([]));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [addressSessionToken, deliveryAddress, serviceType, validatedDelivery]);
   const visible = useMemo(
     () =>
       catalog?.categories
@@ -479,6 +523,59 @@ export default function CustomerOrder() {
     } finally {
       window.removeHelcimPayIframe?.();
       setPaymentOpen(false);
+      setBusy(false);
+    }
+  }
+  async function validateAndAttachDelivery() {
+    if (!review?.id || busy) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const validatedResponse = await fetch(
+        "/api/customer/delivery/address/validate",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            enteredAddress: deliveryAddress,
+            placeId: selectedPlaceId || undefined,
+            sessionToken: addressSessionToken,
+          }),
+        },
+      );
+      if (!validatedResponse.ok)
+        throw new Error(await failure(validatedResponse));
+      const validated = await validatedResponse.json();
+      const attachedResponse = await fetch(
+        `/api/customer/orders/${encodeURIComponent(review.id)}/delivery`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            enteredAddress: deliveryAddress,
+            validationToken: validated.validationToken,
+            line2: deliveryUnit,
+          }),
+        },
+      );
+      if (!attachedResponse.ok)
+        throw new Error(await failure(attachedResponse));
+      const attached = await attachedResponse.json();
+      setValidatedDelivery(attached.address);
+      setAddressSuggestions([]);
+      setReview((current: any) => ({
+        ...current,
+        totalCents: attached.totalCents,
+        deliveryFeeCents: attached.deliveryFeeCents,
+        delivery: { ...current.delivery, feePendingAddress: false },
+      }));
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not validate the delivery address.",
+      );
+    } finally {
       setBusy(false);
     }
   }
@@ -781,6 +878,62 @@ export default function CustomerOrder() {
               miles. Address validation comes at checkout.
             </p>
           )}
+          {serviceType === "delivery" && (
+            <fieldset className="deliveryAddress">
+              <legend>Delivery address</legend>
+              {validatedDelivery ? (
+                <div className="validatedAddress">
+                  <strong>✓ {validatedDelivery.formattedAddress}</strong>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setValidatedDelivery(null);
+                      setReview(null);
+                    }}
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    aria-label="Delivery address"
+                    autoComplete="street-address"
+                    placeholder="Start typing your street address"
+                    value={deliveryAddress}
+                    onChange={(event) => {
+                      setDeliveryAddress(event.target.value);
+                      setSelectedPlaceId("");
+                    }}
+                  />
+                  {addressSuggestions.length > 0 && (
+                    <div className="addressSuggestions">
+                      {addressSuggestions.map((suggestion) => (
+                        <button
+                          type="button"
+                          key={suggestion.id}
+                          onClick={() => {
+                            setDeliveryAddress(suggestion.text);
+                            setSelectedPlaceId(suggestion.id);
+                            setAddressSuggestions([]);
+                          }}
+                        >
+                          <strong>{suggestion.mainText}</strong>
+                          <small>{suggestion.secondaryText}</small>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <input
+                    aria-label="Apartment, suite, or delivery note"
+                    placeholder="Apartment, suite, or location note (optional)"
+                    value={deliveryUnit}
+                    onChange={(event) => setDeliveryUnit(event.target.value)}
+                  />
+                </>
+              )}
+            </fieldset>
+          )}
           {catalog?.customer.authenticated &&
           phone.replace(/\D/g, "").length === 10 ? (
             <section className="savedContact" aria-label="Saved contact">
@@ -849,7 +1002,8 @@ export default function CustomerOrder() {
               phone.replace(/\D/g, "").length !== 10 ||
               !/^\S+@\S+\.\S+$/.test(email.trim()) ||
               (timing === "future" && !scheduledFor) ||
-              (!catalog?.availability.orderable && timing === "asap")
+              (!catalog?.availability.orderable && timing === "asap") ||
+              (serviceType === "delivery" && deliveryAddress.trim().length < 5)
             }
             onClick={price}
           >
@@ -881,11 +1035,22 @@ export default function CustomerOrder() {
               <small>{review.timingMessage}</small>
               {review.delivery && (
                 <small>
-                  Delivery fee is added after the address and distance are
-                  validated.
+                  {review.delivery.feePendingAddress
+                    ? "Validate the address to calculate the delivery fee."
+                    : `Delivery fee: ${money(Number(review.deliveryFeeCents || 0))}`}
                 </small>
               )}
-              {catalog?.checkout.paymentEnabled && serviceType === "pickup" ? (
+              {serviceType === "delivery" && !validatedDelivery ? (
+                <button
+                  className="reviewButton"
+                  disabled={busy}
+                  onClick={() => void validateAndAttachDelivery()}
+                >
+                  {busy
+                    ? "Validating…"
+                    : "Validate address & calculate delivery"}
+                </button>
+              ) : catalog?.checkout.paymentEnabled ? (
                 <div className="paymentChoices">
                   <div
                     className="paymentOptionRow"
@@ -906,7 +1071,9 @@ export default function CustomerOrder() {
                       aria-pressed={paymentChoice === "pickup"}
                       onClick={() => setPaymentChoice("pickup")}
                     >
-                      Pay at pickup
+                      {serviceType === "delivery"
+                        ? "Pay at delivery"
+                        : "Pay at pickup"}
                     </button>
                   </div>
                   <button
@@ -922,7 +1089,7 @@ export default function CustomerOrder() {
                       : paymentChoice === "card"
                         ? `Pay ${money(Number(review.totalCents))}`
                         : paymentChoice === "pickup"
-                          ? "Place order — pay at pickup"
+                          ? `Place order — pay at ${serviceType === "delivery" ? "delivery" : "pickup"}`
                           : "Choose a payment method"}
                   </button>
                   {paymentChoice === "card" && (
@@ -934,9 +1101,7 @@ export default function CustomerOrder() {
                 </div>
               ) : (
                 <div className="notLive">
-                  {serviceType === "delivery"
-                    ? "Delivery payment testing will be enabled after address validation is connected."
-                    : "Secure checkout is not available right now."}
+                  Secure checkout is not available right now.
                 </div>
               )}
             </div>

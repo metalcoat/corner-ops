@@ -110,12 +110,12 @@ async function main() {
     "The live POS panel must display pizza sizes and wing-count variants.",
   );
   assert.ok(
-    sidebandSource.includes('row.name==="menu_search"') &&
+    /row\.name\s*===\s*["']menu_search["']/.test(sidebandSource) &&
       sidebandSource.includes("menuCatalog"),
     "Menu descriptions must be retrieved on the actual realtime sideband.",
   );
   assert.ok(
-    sidebandSource.includes("max_output_tokens:128"),
+    /max_output_tokens:\s*128/.test(sidebandSource),
     "The mandatory opening must have enough audio-token budget to finish exactly.",
   );
   assert.ok(
@@ -232,7 +232,7 @@ async function main() {
   assert.ok(
     sidebandSource.includes(
       "this line is only for corner deli orders and restaurant questions",
-    ) && sidebandSource.includes("hangupAfterPlayback=true"),
+    ) && /hangupAfterPlayback\s*=\s*true/.test(sidebandSource),
     "Off-topic warning playback must trigger a deterministic hangup.",
   );
   assert.ok(
