@@ -434,6 +434,7 @@ export default function CustomerOrder() {
                 checkoutToken,
                 secretToken,
                 data: message?.data,
+                rawDataResponse: JSON.stringify(message?.data),
                 hash: message?.hash,
               }),
             });

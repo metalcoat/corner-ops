@@ -7,6 +7,7 @@ import {
   safeEqual,
   sha256,
   validateHelcimPayResponse,
+  validateHelcimPayRawResponse,
 } from "@/lib/helcim";
 import { ensureCustomerOrderingSchema } from "@/lib/customer-ordering-schema";
 import {
@@ -114,11 +115,18 @@ export async function POST(
       throw new HelcimError("This Helcim checkout session expired.");
     if (!safeEqual(String(session.secret_hash), sha256(secretToken)))
       throw new HelcimError("Helcim checkout verification failed.");
-    const data = validateHelcimPayResponse(
-      body.data,
-      String(body.hash || ""),
-      secretToken,
-    );
+    const rawDataResponse = String(body.rawDataResponse || "");
+    const data = rawDataResponse
+      ? validateHelcimPayRawResponse(
+          rawDataResponse,
+          String(body.hash || ""),
+          secretToken,
+        )
+      : validateHelcimPayResponse(
+          body.data,
+          String(body.hash || ""),
+          secretToken,
+        );
     const status = String(data.status || "").toLowerCase();
     if (!status.includes("approve"))
       throw new HelcimError("Helcim did not approve this payment.");

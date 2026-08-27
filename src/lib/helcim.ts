@@ -108,3 +108,24 @@ export function validateHelcimPayResponse(
     throw new HelcimError("Helcim payment verification failed.");
   return data as Record<string, unknown>;
 }
+
+export function validateHelcimPayRawResponse(
+  rawDataResponse: string,
+  responseHash: string,
+  secretToken: string,
+) {
+  if (!rawDataResponse || rawDataResponse.length > 100_000)
+    throw new HelcimError("Helcim returned an invalid payment response.");
+  const expected = sha256(rawDataResponse + secretToken);
+  if (!safeEqual(expected, responseHash))
+    throw new HelcimError("Helcim payment verification failed.");
+  let data: unknown;
+  try {
+    data = JSON.parse(rawDataResponse);
+  } catch {
+    throw new HelcimError("Helcim returned an invalid payment response.");
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data))
+    throw new HelcimError("Helcim returned an invalid payment response.");
+  return data as Record<string, unknown>;
+}

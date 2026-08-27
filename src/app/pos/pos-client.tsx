@@ -2495,6 +2495,7 @@ export default function PosClient({
                   checkoutToken,
                   secretToken,
                   data: message?.data,
+                  rawDataResponse: JSON.stringify(message?.data),
                   hash: message?.hash,
                 }),
               },
