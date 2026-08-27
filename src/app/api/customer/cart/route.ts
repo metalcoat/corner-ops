@@ -63,6 +63,18 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     const timingMode = body.timingMode === "future" ? "future" : "asap";
+    const firstName = String(body.firstName || "")
+      .trim()
+      .slice(0, 80);
+    const lastName = String(body.lastName || "")
+      .trim()
+      .slice(0, 80);
+    const phone = String(body.phone || "").replace(/\D/g, "");
+    if (!firstName || phone.length !== 10)
+      return Response.json(
+        { error: "Enter your name and a 10-digit phone number." },
+        { status: 400 },
+      );
     const requestedFor =
       timingMode === "future"
         ? new Date(String(body.scheduledFor || ""))
@@ -82,6 +94,9 @@ export async function POST(request: Request) {
       source: "web",
       serviceType,
       customerId: session.customerId,
+      callerPhone: phone,
+      customerFirstName: firstName,
+      customerLastName: lastName,
       createdBy: `web:${sessionHash.slice(0, 16)}`,
       createdByName: "Website guest",
       orderOrigin: "web",
@@ -128,10 +143,12 @@ export async function POST(request: Request) {
                 maxDistanceMiles: delivery.maxDistanceMiles,
               }
             : null,
-          paymentStatus: "unavailable",
+          paymentStatus: "unpaid",
         },
         nextStep:
-          "Customer payment and final submission are intentionally not enabled yet.",
+          serviceType === "pickup"
+            ? "Pay securely with Helcim to submit this order."
+            : "Delivery checkout requires address validation before payment.",
       },
       { status: 201 },
     );

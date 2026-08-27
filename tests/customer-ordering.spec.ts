@@ -16,7 +16,7 @@ test("customer catalog is public, customer-safe, and browsable while ordering is
   expect(item).not.toHaveProperty("sku");
   expect(item).not.toHaveProperty("taxable");
   expect(catalog.customer.authenticated).toBe(false);
-  expect(catalog.checkout.paymentEnabled).toBe(false);
+  expect(typeof catalog.checkout.paymentEnabled).toBe("boolean");
 
   await page.goto("/order");
   await expect(
@@ -28,7 +28,9 @@ test("customer catalog is public, customer-safe, and browsable while ordering is
     Object.defineProperty(HTMLInputElement.prototype, "showPicker", {
       configurable: true,
       value() {
-        (window as typeof window & { futureCalendarOpened?: boolean }).futureCalendarOpened = true;
+        (
+          window as typeof window & { futureCalendarOpened?: boolean }
+        ).futureCalendarOpened = true;
       },
     });
   });
@@ -40,7 +42,16 @@ test("customer catalog is public, customer-safe, and browsable while ordering is
   });
   await expect(futureDate).toHaveValue(today);
   await futureDate.click();
-  await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { futureCalendarOpened?: boolean }).futureCalendarOpened))).toBe(true);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Boolean(
+          (window as typeof window & { futureCalendarOpened?: boolean })
+            .futureCalendarOpened,
+        ),
+      ),
+    )
+    .toBe(true);
   await expect(
     page.getByText("Checkout and payments aren’t live yet."),
   ).toHaveCount(0);
@@ -57,7 +68,7 @@ test("customer catalog is public, customer-safe, and browsable while ordering is
   expect((await quote.json()).quote).toBeTruthy();
 });
 
-test("web cart pricing uses the authoritative backend and remains a non-payable draft", async ({
+test("web cart pricing uses the authoritative backend and initializes secure Helcim checkout", async ({
   request,
 }) => {
   const catalogResponse = await request.get(
@@ -80,6 +91,9 @@ test("web cart pricing uses the authoritative backend and remains a non-payable 
       serviceType: "pickup",
       timingMode: "asap",
       scheduledFor: null,
+      firstName: "Web",
+      lastName: "Customer",
+      phone: "3155551212",
       items: [
         {
           itemId: item.id,
@@ -97,7 +111,17 @@ test("web cart pricing uses the authoritative backend and remains a non-payable 
   expect(body.cart.status).toBe("draft");
   expect(body.cart.lines).toHaveLength(1);
   expect(body.cart.subtotalCents).toBeGreaterThan(0);
-  expect(body.cart.paymentStatus).toBe("unavailable");
+  expect(body.cart.paymentStatus).toBe("unpaid");
+  if (catalog.checkout.paymentEnabled) {
+    const payment = await request.post(
+      `/api/customer/orders/${body.cart.id}/payments/helcim`,
+      { data: { action: "initialize" } },
+    );
+    expect(payment.status()).toBe(200);
+    const initialized = await payment.json();
+    expect(initialized.checkoutToken).toBeTruthy();
+    expect(initialized.secretToken).toBeTruthy();
+  }
 });
 
 test("customer can choose and review a half-pizza topping", async ({

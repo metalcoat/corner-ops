@@ -5,6 +5,7 @@ import { getDeliveryPricingSettings } from "@/lib/ordering-delivery";
 import { getSql } from "@/lib/db";
 import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
 import { customerOrderingSession } from "@/lib/customer-ordering-session";
+import { helcimStatus } from "@/lib/helcim";
 
 export const runtime = "nodejs";
 
@@ -105,7 +106,12 @@ export async function GET(request: Request) {
         loyaltyAvailableAfterSignIn: true,
         giftCardsAcceptedAtPayment: true,
       },
-      checkout: { paymentEnabled: false },
+      checkout: {
+        paymentEnabled: helcimStatus().checkoutEnabled,
+        provider: "helcim",
+        pickupEnabled: true,
+        deliveryEnabled: false,
+      },
     });
     if (setCookie) response.headers.set("Set-Cookie", setCookie);
     return response;

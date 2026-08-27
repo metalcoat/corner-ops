@@ -108,7 +108,11 @@ type Catalog = {
     loyaltyAvailableAfterSignIn: boolean;
     giftCardsAcceptedAtPayment: boolean;
   };
-  checkout: { paymentEnabled: boolean };
+  checkout: {
+    paymentEnabled: boolean;
+    pickupEnabled?: boolean;
+    deliveryEnabled?: boolean;
+  };
 };
 type CartLine = {
   key: string;
@@ -194,7 +198,11 @@ export default function CustomerOrder() {
     [date, setDate] = useState(() => localDateValue()),
     [slots, setSlots] = useState<string[]>([]),
     [scheduledFor, setScheduledFor] = useState(""),
+    [firstName, setFirstName] = useState(""),
+    [lastName, setLastName] = useState(""),
+    [phone, setPhone] = useState(""),
     [review, setReview] = useState<any>(null),
+    [completedOrder, setCompletedOrder] = useState<any>(null),
     [busy, setBusy] = useState(false);
   useEffect(() => {
     setLoading(true);
@@ -287,6 +295,9 @@ export default function CustomerOrder() {
           serviceType,
           timingMode: timing,
           scheduledFor,
+          firstName,
+          lastName,
+          phone,
           items: cart.map((line) => ({
             itemId: line.item.id,
             variantId: line.variantId,
@@ -305,6 +316,130 @@ export default function CustomerOrder() {
       setReview((await response.json()).cart);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Could not price the order.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function payWithHelcim() {
+    if (!review?.id || busy) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      if (!window.appendHelcimPayIframe) {
+        await new Promise<void>((resolve, reject) => {
+          const existing = document.querySelector<HTMLScriptElement>(
+            'script[data-helcim-pay="true"]',
+          );
+          if (existing) {
+            existing.addEventListener("load", () => resolve(), { once: true });
+            existing.addEventListener(
+              "error",
+              () => reject(new Error("Could not load Helcim checkout.")),
+              { once: true },
+            );
+            return;
+          }
+          const script = document.createElement("script");
+          script.src = "https://secure.helcim.app/helcim-pay/services/start.js";
+          script.async = true;
+          script.dataset.helcimPay = "true";
+          script.onload = () => resolve();
+          script.onerror = () =>
+            reject(new Error("Could not load Helcim checkout."));
+          document.head.appendChild(script);
+        });
+      }
+      const endpoint = `/api/customer/orders/${encodeURIComponent(review.id)}/payments/helcim`;
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "initialize" }),
+      });
+      const initialized = (await response.json()) as {
+        checkoutToken?: string;
+        secretToken?: string;
+        error?: string;
+      };
+      if (
+        !response.ok ||
+        !initialized.checkoutToken ||
+        !initialized.secretToken
+      )
+        throw new Error(
+          initialized.error || "Could not start Helcim checkout.",
+        );
+      const checkoutToken = initialized.checkoutToken,
+        secretToken = initialized.secretToken;
+      const result = await new Promise<any>((resolve, reject) => {
+        const listener = async (event: MessageEvent) => {
+          if (
+            event.origin !== "https://secure.helcim.app" ||
+            event.data?.eventName !== `helcim-pay-js-${checkoutToken}`
+          )
+            return;
+          if (
+            event.data.eventStatus === "HIDE" ||
+            event.data.eventStatus === "ABORTED"
+          ) {
+            window.removeEventListener("message", listener);
+            reject(
+              new Error(
+                event.data.eventStatus === "ABORTED"
+                  ? "Helcim declined the payment."
+                  : "Helcim checkout was closed.",
+              ),
+            );
+            return;
+          }
+          if (event.data.eventStatus !== "SUCCESS") return;
+          window.removeEventListener("message", listener);
+          try {
+            const message =
+              typeof event.data.eventMessage === "string"
+                ? JSON.parse(event.data.eventMessage)
+                : event.data.eventMessage;
+            const confirmed = await fetch(endpoint, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                action: "confirm",
+                checkoutToken,
+                secretToken,
+                data: message?.data,
+                hash: message?.hash,
+              }),
+            });
+            const payload = await confirmed.json();
+            if (!confirmed.ok)
+              throw new Error(
+                payload.error ||
+                  "Payment was approved but the order could not be submitted. Please call the deli before retrying.",
+              );
+            resolve(payload);
+          } catch (error) {
+            reject(error);
+          }
+        };
+        window.addEventListener("message", listener);
+        if (!window.appendHelcimPayIframe) {
+          window.removeEventListener("message", listener);
+          reject(new Error("Helcim checkout did not load."));
+          return;
+        }
+        window.appendHelcimPayIframe(checkoutToken);
+      });
+      if (result.needsAssistance) {
+        setMessage(
+          `Payment was approved, but the order needs staff review: ${result.submissionError || "please call Corner Deli."}`,
+        );
+      }
+      setCompletedOrder(result.order);
+      setReview(null);
+      setCart([]);
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Helcim checkout failed.",
+      );
     } finally {
       setBusy(false);
     }
@@ -570,11 +705,38 @@ export default function CustomerOrder() {
               miles. Address validation comes at checkout.
             </p>
           )}
+          <fieldset className="customerContact">
+            <legend>Contact</legend>
+            <input
+              aria-label="First name"
+              autoComplete="given-name"
+              placeholder="First name"
+              value={firstName}
+              onChange={(event) => setFirstName(event.target.value)}
+            />
+            <input
+              aria-label="Last name"
+              autoComplete="family-name"
+              placeholder="Last name"
+              value={lastName}
+              onChange={(event) => setLastName(event.target.value)}
+            />
+            <input
+              aria-label="Phone number"
+              autoComplete="tel"
+              inputMode="tel"
+              placeholder="10-digit phone"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+            />
+          </fieldset>
           <button
             className="reviewButton"
             disabled={
               !cart.length ||
               busy ||
+              !firstName.trim() ||
+              phone.replace(/\D/g, "").length !== 10 ||
               (timing === "future" && !scheduledFor) ||
               (!catalog?.availability.orderable && timing === "asap")
             }
@@ -612,10 +774,32 @@ export default function CustomerOrder() {
                   validated.
                 </small>
               )}
-              <div className="notLive">
-                Checkout and payments aren’t live yet. This preview won’t send
-                an order to the kitchen.
-              </div>
+              {catalog?.checkout.paymentEnabled && serviceType === "pickup" ? (
+                <button
+                  className="reviewButton"
+                  disabled={busy}
+                  onClick={() => void payWithHelcim()}
+                >
+                  {busy
+                    ? "Opening secure checkout…"
+                    : `Pay ${money(Number(review.totalCents))} with Helcim`}
+                </button>
+              ) : (
+                <div className="notLive">
+                  {serviceType === "delivery"
+                    ? "Delivery payment testing will be enabled after address validation is connected."
+                    : "Helcim checkout is not configured."}
+                </div>
+              )}
+            </div>
+          )}
+          {completedOrder && (
+            <div className="serverReview" role="status">
+              <p>Order submitted</p>
+              <strong>
+                Thank you! Order #{completedOrder.display_number} was paid and
+                sent to Corner Deli.
+              </strong>
             </div>
           )}
           <div className="tenderNote">
@@ -853,7 +1037,10 @@ function ItemDialog({
                           aria-label={`Change ${option.name} amount, currently ${modifierAmounts[option.id] || "normal"}`}
                           onClick={() => setIntensityChoice({ group, option })}
                         >
-                          {(modifierAmounts[option.id] || "normal").toUpperCase()} ▾
+                          {(
+                            modifierAmounts[option.id] || "normal"
+                          ).toUpperCase()}{" "}
+                          ▾
                         </button>
                       )}
                     </div>

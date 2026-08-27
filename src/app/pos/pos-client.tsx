@@ -581,7 +581,6 @@ export default function PosClient({
     null,
   );
   const [giftCardNumber, setGiftCardNumber] = useState("");
-  const [giftCardPin, setGiftCardPin] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [helcimStatus, setHelcimStatus] = useState<HelcimStatus | null>(null);
   useEffect(() => {
@@ -604,7 +603,9 @@ export default function PosClient({
     fetch("/api/ordering/orders/status/payments/helcim", { cache: "no-store" })
       .then((response) => response.json())
       .then((body) => setHelcimStatus(body as HelcimStatus))
-      .catch(() => setHelcimStatus({ checkoutEnabled: false, apiTokenConfigured: false }));
+      .catch(() =>
+        setHelcimStatus({ checkoutEnabled: false, apiTokenConfigured: false }),
+      );
   }, [business]);
   const [configurationMessage, setConfigurationMessage] = useState("");
   const [cartNotice, setCartNotice] = useState("");
@@ -1558,7 +1559,8 @@ export default function PosClient({
     group: OrderingModifierGroupView,
     option: OrderingModifierOptionView,
   ) {
-    if (!supportsSubModifierIntensity(group.supportsIntensity, option.name)) return;
+    if (!supportsSubModifierIntensity(group.supportsIntensity, option.name))
+      return;
     held.current = false;
     if (holdTimer.current) window.clearTimeout(holdTimer.current);
     holdTimer.current = window.setTimeout(() => {
@@ -2293,6 +2295,29 @@ export default function PosClient({
     }
   }
 
+  const checkoutDueCents = Number(
+    checkoutState?.check?.amount_due_cents ??
+      checkoutState?.order.amount_due_cents ??
+      0,
+  );
+
+  function cashNumpad(key: string) {
+    setCashTender((current) => {
+      if (key === "clear") return "";
+      if (key === "backspace") return current.slice(0, -1);
+      if (key === ".")
+        return current.includes(".") ? current : `${current || "0"}.`;
+      const decimals = current.split(".")[1];
+      if (decimals?.length >= 2) return current;
+      if (current === "0" && key !== ".") return key;
+      return `${current}${key}`;
+    });
+  }
+
+  function setQuickCash(amountCents: number) {
+    setCashTender((amountCents / 100).toFixed(2));
+  }
+
   async function commitPayment(tenderType: "cash" | "card" | "gift_card") {
     const draft = savedDraft || activeTab;
     if (!draft || !checkoutState || paymentBusy) return;
@@ -2330,7 +2355,6 @@ export default function PosClient({
             tenderType,
             amountTenderedCents,
             giftCardNumber,
-            giftCardPin,
             clientMutationId: clientId(),
             receiptPrinterId: receiptPrinterId || undefined,
           }),
@@ -2355,7 +2379,6 @@ export default function PosClient({
       setCashTender("");
       if (tenderType === "gift_card") {
         setGiftCardNumber("");
-        setGiftCardPin("");
       }
       setPayableChecks((checks) =>
         checks.map((check) =>
@@ -2383,10 +2406,16 @@ export default function PosClient({
     try {
       if (!window.appendHelcimPayIframe) {
         await new Promise<void>((resolve, reject) => {
-          const existing = document.querySelector<HTMLScriptElement>('script[data-helcim-pay="true"]');
+          const existing = document.querySelector<HTMLScriptElement>(
+            'script[data-helcim-pay="true"]',
+          );
           if (existing) {
             existing.addEventListener("load", () => resolve(), { once: true });
-            existing.addEventListener("error", () => reject(new Error("Could not load Helcim checkout.")), { once: true });
+            existing.addEventListener(
+              "error",
+              () => reject(new Error("Could not load Helcim checkout.")),
+              { once: true },
+            );
             return;
           }
           const script = document.createElement("script");
@@ -2394,22 +2423,45 @@ export default function PosClient({
           script.async = true;
           script.dataset.helcimPay = "true";
           script.onload = () => resolve();
-          script.onerror = () => reject(new Error("Could not load Helcim checkout."));
+          script.onerror = () =>
+            reject(new Error("Could not load Helcim checkout."));
           document.head.appendChild(script);
         });
       }
-      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/helcim`, {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "initialize", checkId: selectedCheckId }),
-      });
-      const initialized = await response.json() as { checkoutToken?: string; secretToken?: string; error?: string };
-      if (!response.ok || !initialized.checkoutToken || !initialized.secretToken) throw new Error(initialized.error || "Could not start Helcim checkout.");
+      const response = await fetch(
+        `/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/helcim`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "initialize",
+            checkId: selectedCheckId,
+          }),
+        },
+      );
+      const initialized = (await response.json()) as {
+        checkoutToken?: string;
+        secretToken?: string;
+        error?: string;
+      };
+      if (
+        !response.ok ||
+        !initialized.checkoutToken ||
+        !initialized.secretToken
+      )
+        throw new Error(
+          initialized.error || "Could not start Helcim checkout.",
+        );
       const checkoutToken = initialized.checkoutToken;
       const secretToken = initialized.secretToken;
       const eventName = `helcim-pay-js-${checkoutToken}`;
       const result = await new Promise<CheckoutState>((resolve, reject) => {
         const listener = async (event: MessageEvent) => {
-          if (event.origin !== "https://secure.helcim.app" || event.data?.eventName !== eventName) return;
+          if (
+            event.origin !== "https://secure.helcim.app" ||
+            event.data?.eventName !== eventName
+          )
+            return;
           if (event.data.eventStatus === "HIDE") {
             window.removeEventListener("message", listener);
             reject(new Error("Helcim checkout was closed."));
@@ -2417,21 +2469,47 @@ export default function PosClient({
           }
           if (event.data.eventStatus === "ABORTED") {
             window.removeEventListener("message", listener);
-            reject(new Error(typeof event.data.eventMessage === "string" ? event.data.eventMessage : "Helcim declined the payment."));
+            reject(
+              new Error(
+                typeof event.data.eventMessage === "string"
+                  ? event.data.eventMessage
+                  : "Helcim declined the payment.",
+              ),
+            );
             return;
           }
           if (event.data.eventStatus !== "SUCCESS") return;
           window.removeEventListener("message", listener);
           try {
-            const message = typeof event.data.eventMessage === "string" ? JSON.parse(event.data.eventMessage) : event.data.eventMessage;
-            const confirmation = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/helcim`, {
-              method: "POST", headers: { "content-type": "application/json" },
-              body: JSON.stringify({ action: "confirm", checkoutToken, secretToken, data: message?.data, hash: message?.hash }),
-            });
-            const payload = await confirmation.json() as CheckoutState & { error?: string };
-            if (!confirmation.ok) throw new Error(payload.error || "Helcim payment could not be verified.");
+            const message =
+              typeof event.data.eventMessage === "string"
+                ? JSON.parse(event.data.eventMessage)
+                : event.data.eventMessage;
+            const confirmation = await fetch(
+              `/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/helcim`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  action: "confirm",
+                  checkoutToken,
+                  secretToken,
+                  data: message?.data,
+                  hash: message?.hash,
+                }),
+              },
+            );
+            const payload = (await confirmation.json()) as CheckoutState & {
+              error?: string;
+            };
+            if (!confirmation.ok)
+              throw new Error(
+                payload.error || "Helcim payment could not be verified.",
+              );
             resolve(payload);
-          } catch (error) { reject(error); }
+          } catch (error) {
+            reject(error);
+          }
         };
         window.addEventListener("message", listener);
         if (!window.appendHelcimPayIframe) {
@@ -2442,10 +2520,20 @@ export default function PosClient({
         window.appendHelcimPayIframe(checkoutToken);
       });
       setCheckoutState(result);
-      setPayableChecks((checks) => checks.map((check) => check.id === selectedCheckId && result.check ? { ...check, ...result.check } : check));
+      setPayableChecks((checks) =>
+        checks.map((check) =>
+          check.id === selectedCheckId && result.check
+            ? { ...check, ...result.check }
+            : check,
+        ),
+      );
     } catch (error) {
-      setCheckoutError(error instanceof Error ? error.message : "Helcim payment failed.");
-    } finally { setPaymentBusy(false); }
+      setCheckoutError(
+        error instanceof Error ? error.message : "Helcim payment failed.",
+      );
+    } finally {
+      setPaymentBusy(false);
+    }
   }
 
   async function paymentOperation(
@@ -3847,9 +3935,27 @@ export default function PosClient({
               );
             })}
             {lastChangeDueCents !== null && (
-              <p role="status">
-                <strong>CHANGE DUE: {money(lastChangeDueCents)}</strong>
-              </p>
+              <div className="posChangeBackdrop">
+                <section
+                  className="posChangeWindow"
+                  role="alertdialog"
+                  aria-modal="true"
+                  aria-labelledby="change-due-title"
+                >
+                  <small id="change-due-title">CHANGE TO GIVE BACK</small>
+                  <strong>{money(lastChangeDueCents)}</strong>
+                  {lastChangeDueCents === 0 && (
+                    <span>Exact cash received — no change.</span>
+                  )}
+                  <button
+                    type="button"
+                    autoFocus
+                    onClick={() => setLastChangeDueCents(null)}
+                  >
+                    DONE
+                  </button>
+                </section>
+              </div>
             )}
             {Number(
               checkoutState?.check?.amount_due_cents ??
@@ -3879,55 +3985,123 @@ export default function PosClient({
                     </select>
                   </label>
                 )}
-                <label>
-                  Cash tendered
-                  <input
-                    inputMode="decimal"
-                    placeholder="0.00"
-                    value={cashTender}
-                    onChange={(event) => setCashTender(event.target.value)}
-                  />
-                </label>
-                <button
-                  type="button"
-                  disabled={paymentBusy}
-                  onClick={() => void commitPayment("cash")}
-                >
-                  COMMIT CASH
-                </button>
-                <button
-                  type="button"
-                  disabled={paymentBusy || !helcimStatus?.checkoutEnabled}
-                  onClick={() => void startHelcimPayment()}
-                >
-                  {helcimStatus?.checkoutEnabled ? "PAY REMAINING BY HELCIM" : "HELCIM SETUP REQUIRED"}
-                </button>
-                <label>
-                  Gift card number
-                  <input
-                    data-barcode-context="gift-card"
-                    autoComplete="off"
-                    value={giftCardNumber}
-                    onChange={(event) => setGiftCardNumber(event.target.value)}
-                  />
-                </label>
-                <label>
-                  Gift card PIN (if required)
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    value={giftCardPin}
-                    onChange={(event) => setGiftCardPin(event.target.value)}
-                  />
-                </label>
-                <button
-                  type="button"
-                  disabled={paymentBusy}
-                  onClick={() => void commitPayment("gift_card")}
-                >
-                  APPLY GIFT CARD
-                </button>
+                <div className="posCheckoutPaymentGrid">
+                  <section
+                    className="posCashPanel"
+                    aria-labelledby="cash-panel-title"
+                  >
+                    <h3 id="cash-panel-title">Cash received</h3>
+                    <output aria-live="polite">
+                      {cashTender
+                        ? money(Math.round(Number(cashTender) * 100) || 0)
+                        : "$0.00"}
+                    </output>
+                    <div
+                      className="posCashQuick"
+                      aria-label="Quick cash amounts"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setQuickCash(checkoutDueCents)}
+                      >
+                        EXACT
+                      </button>
+                      {[2000, 5000, 10000].map((amount) => (
+                        <button
+                          type="button"
+                          key={amount}
+                          onClick={() => setQuickCash(amount)}
+                        >
+                          {money(amount)}
+                        </button>
+                      ))}
+                    </div>
+                    <div
+                      className="posCashNumpad"
+                      aria-label="Cash amount keypad"
+                    >
+                      {[
+                        "1",
+                        "2",
+                        "3",
+                        "4",
+                        "5",
+                        "6",
+                        "7",
+                        "8",
+                        "9",
+                        "clear",
+                        "0",
+                        ".",
+                        "backspace",
+                      ].map((key) => (
+                        <button
+                          type="button"
+                          key={key}
+                          className={key === "0" ? "zero" : ""}
+                          aria-label={
+                            key === "backspace"
+                              ? "Backspace"
+                              : key === "clear"
+                                ? "Clear cash amount"
+                                : key
+                          }
+                          onClick={() => cashNumpad(key)}
+                        >
+                          {key === "backspace"
+                            ? "⌫"
+                            : key === "clear"
+                              ? "CLEAR"
+                              : key}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      className="posTakeCash"
+                      type="button"
+                      disabled={paymentBusy || !cashTender}
+                      onClick={() => void commitPayment("cash")}
+                    >
+                      {paymentBusy ? "PROCESSING…" : "TAKE CASH"}
+                    </button>
+                  </section>
+                  <section
+                    className="posOtherTenders"
+                    aria-labelledby="other-tenders-title"
+                  >
+                    <h3 id="other-tenders-title">Other payment</h3>
+                    <button
+                      type="button"
+                      disabled={paymentBusy || !helcimStatus?.checkoutEnabled}
+                      onClick={() => void startHelcimPayment()}
+                    >
+                      {helcimStatus?.checkoutEnabled
+                        ? "CREDIT / DEBIT · HELCIM"
+                        : "HELCIM SETUP REQUIRED"}
+                    </button>
+                    <label>
+                      Gift card number
+                      <input
+                        data-barcode-context="gift-card"
+                        autoComplete="off"
+                        value={giftCardNumber}
+                        onChange={(event) =>
+                          setGiftCardNumber(event.target.value)
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={
+                        paymentBusy ||
+                        giftCardNumber.replace(/[^A-Za-z0-9]/g, "").length < 8
+                      }
+                      onClick={() => void commitPayment("gift_card")}
+                    >
+                      APPLY GIFT CARD
+                    </button>
+                  </section>
+                </div>
               </>
             )}
             {checkoutState?.order.payment_status === "paid" && (
@@ -4274,7 +4448,12 @@ export default function PosClient({
                                 onPointerCancel={endIntensityHold}
                                 onPointerLeave={endIntensityHold}
                                 onContextMenu={(event) => {
-                                  if (supportsSubModifierIntensity(group.supportsIntensity, option.name)) {
+                                  if (
+                                    supportsSubModifierIntensity(
+                                      group.supportsIntensity,
+                                      option.name,
+                                    )
+                                  ) {
                                     event.preventDefault();
                                     setIntensityChoice({ group, option });
                                   }
@@ -4298,21 +4477,25 @@ export default function PosClient({
                                         : "FREE"}
                                 </span>
                               </button>
-                              {selectedOption && supportsSubModifierIntensity(group.supportsIntensity, option.name) && (
-                                <button
-                                  type="button"
-                                  className="posAmountButton"
-                                  aria-label={`Change ${option.name} amount, currently ${modifierAmounts[option.id] || "normal"}`}
-                                  onClick={() =>
-                                    setIntensityChoice({ group, option })
-                                  }
-                                >
-                                  {(
-                                    modifierAmounts[option.id] || "normal"
-                                  ).toUpperCase()}{" "}
-                                  ▾
-                                </button>
-                              )}
+                              {selectedOption &&
+                                supportsSubModifierIntensity(
+                                  group.supportsIntensity,
+                                  option.name,
+                                ) && (
+                                  <button
+                                    type="button"
+                                    className="posAmountButton"
+                                    aria-label={`Change ${option.name} amount, currently ${modifierAmounts[option.id] || "normal"}`}
+                                    onClick={() =>
+                                      setIntensityChoice({ group, option })
+                                    }
+                                  >
+                                    {(
+                                      modifierAmounts[option.id] || "normal"
+                                    ).toUpperCase()}{" "}
+                                    ▾
+                                  </button>
+                                )}
                               {selectedOption && group.allowOptionQuantity && (
                                 <div
                                   className="posModifierQty"

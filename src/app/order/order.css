@@ -326,6 +326,7 @@
   padding: 16px 0;
   margin: 5px 0;
 }
+.customerContact{display:grid!important;grid-template-columns:1fr 1fr;gap:8px!important}.customerContact input:last-child{grid-column:1/-1}@media(max-width:560px){.customerContact{grid-template-columns:1fr}.customerContact input:last-child{grid-column:auto}}
 .orderCart legend,
 .itemDialog legend {
   font-weight: 800;
