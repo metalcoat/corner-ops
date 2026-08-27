@@ -569,6 +569,7 @@ export default function PosClient({
   const [payableChecks, setPayableChecks] = useState<PayableCheck[]>([]);
   const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
   const [cashTender, setCashTender] = useState("");
+  const [cardTender, setCardTender] = useState("");
   const [receiptPrinters, setReceiptPrinters] = useState<
     Array<{
       id: string;
@@ -602,7 +603,11 @@ export default function PosClient({
       })
       .catch(() => setReceiptPrinters([]));
     fetch("/api/ordering/orders/status/payments/helcim", { cache: "no-store" })
-      .then((response) => response.json())
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "Helcim status unavailable.");
+        return body;
+      })
       .then((body) => setHelcimStatus(body as HelcimStatus))
       .catch(() =>
         setHelcimStatus({ checkoutEnabled: false, apiTokenConfigured: false }),
@@ -2405,6 +2410,10 @@ export default function PosClient({
     setPaymentBusy(true);
     setCheckoutError("");
     try {
+      const due = Number(checkoutState.check?.amount_due_cents ?? checkoutState.order.amount_due_cents);
+      const requestedCents = cardTender.trim() ? Math.round(Number(cardTender) * 100) : due;
+      if (!Number.isSafeInteger(requestedCents) || requestedCents <= 0 || requestedCents > due)
+        throw new Error("Enter a card amount between $0.01 and the remaining balance.");
       if (!window.appendHelcimPayIframe) {
         await new Promise<void>((resolve, reject) => {
           const existing = document.querySelector<HTMLScriptElement>(
@@ -2437,6 +2446,7 @@ export default function PosClient({
           body: JSON.stringify({
             action: "initialize",
             checkId: selectedCheckId,
+            amountCents: requestedCents,
           }),
         },
       );
@@ -2518,6 +2528,7 @@ export default function PosClient({
         window.appendHelcimPayIframe(checkoutToken);
       });
       setCheckoutState(result);
+      setCardTender("");
       setPayableChecks((checks) =>
         checks.map((check) =>
           check.id === selectedCheckId && result.check
@@ -3853,6 +3864,7 @@ export default function PosClient({
                 ),
               )}
             </strong>
+            {checkoutError && <div className="posCheckoutInlineError" role="alert">{checkoutError}</div>}
             {payableChecks
               .find((check) => check.id === selectedCheckId)
               ?.lines.map((line) => (
@@ -4068,6 +4080,19 @@ export default function PosClient({
                     aria-labelledby="other-tenders-title"
                   >
                     <h3 id="other-tenders-title">Other payment</h3>
+                    <label>
+                      Card amount
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0.01"
+                        step="0.01"
+                        max={(checkoutDueCents / 100).toFixed(2)}
+                        placeholder={`Remaining ${money(checkoutDueCents)}`}
+                        value={cardTender}
+                        onChange={(event) => setCardTender(event.target.value)}
+                      />
+                    </label>
                     <button
                       type="button"
                       disabled={paymentBusy || !helcimStatus?.checkoutEnabled}
@@ -4075,7 +4100,9 @@ export default function PosClient({
                     >
                       {helcimStatus?.checkoutEnabled
                         ? "CREDIT / DEBIT · HELCIM"
-                        : "HELCIM SETUP REQUIRED"}
+                        : helcimStatus
+                          ? "HELCIM SETUP REQUIRED"
+                          : "PAYMENT ACCESS UNAVAILABLE"}
                     </button>
                     <label>
                       Gift card number

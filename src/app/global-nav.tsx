@@ -47,7 +47,7 @@ export default function GlobalNav() {
   const [currentBusiness, setCurrentBusiness] = useState<Business>("Corner Deli");
   const [open, setOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const navHidden = pathname.startsWith("/pos") || pathname.startsWith("/order") || pathname === "/clock" || pathname === "/scan" || pathname.startsWith("/employee") || pathname === "/signin";
+  const navHidden = pathname.startsWith("/pos") || pathname.startsWith("/order") || pathname.startsWith("/account") || pathname.startsWith("/track") || pathname === "/menu" || pathname.startsWith("/kiosk") || pathname.startsWith("/display") || pathname === "/clock" || pathname === "/scan" || pathname.startsWith("/employee") || pathname === "/signin";
 
   useEffect(() => setOpen(false), [pathname]);
 

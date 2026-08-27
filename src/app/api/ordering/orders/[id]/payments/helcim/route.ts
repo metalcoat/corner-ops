@@ -47,11 +47,14 @@ export async function POST(
     if (body.action === "initialize") {
       const checkId = body.checkId ? String(body.checkId) : null;
       const state = await checkoutState(orderId, business, checkId);
-      const amountCents = Number(
+      const remainingCents = Number(
         state.check?.amount_due_cents ?? state.order.amount_due_cents,
       );
+      const amountCents = body.amountCents == null ? remainingCents : Math.trunc(Number(body.amountCents));
       if (amountCents <= 0)
         throw new PaymentConflictError("This order has no remaining balance.");
+      if (!Number.isSafeInteger(amountCents) || amountCents > remainingCents)
+        throw new PaymentConflictError("Card amount must not exceed the remaining balance.");
       const initialized = await initializeHelcimPay(amountCents);
       const sessionId = randomUUID(),
         clientMutationId = randomUUID();
