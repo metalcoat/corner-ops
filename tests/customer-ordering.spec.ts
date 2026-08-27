@@ -34,7 +34,12 @@ test("customer catalog is public, customer-safe, and browsable while ordering is
       },
     });
   });
-  await page.getByLabel("Future").check();
+  const asap = page.getByRole("button", { name: "ASAP" });
+  const future = page.getByRole("button", { name: "Future" });
+  await expect(asap).toHaveAttribute("aria-pressed", "true");
+  await expect(future).toHaveAttribute("aria-pressed", "false");
+  await future.click();
+  await expect(future).toHaveAttribute("aria-pressed", "true");
   const futureDate = page.getByLabel("Future order date");
   const today = await page.evaluate(() => {
     const now = new Date();
@@ -176,6 +181,22 @@ test("successful online payment redirects to a dedicated confirmation", async ({
 test("customer can choose and review a half-pizza topping", async ({
   page,
 }) => {
+  await page.route("**/api/customer/cart", async (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      status: 201,
+      json: {
+        cart: {
+          id: "test-cart",
+          lines: [{ quantity: 1, name: "Pizza", lineTotalCents: 1100 }],
+          promotions: [],
+          totalCents: 1100,
+          timingMessage: "Pickup as soon as possible",
+          delivery: null,
+        },
+      },
+    }),
+  );
   await page.route(
     "**/api/customer/catalog*",
     async (route) =>
@@ -295,12 +316,16 @@ test("customer can choose and review a half-pizza topping", async ({
             loyaltyAvailableAfterSignIn: true,
             giftCardsAcceptedAtPayment: true,
           },
-          checkout: { paymentEnabled: false },
+          checkout: { paymentEnabled: true },
         },
       }),
   );
 
   await page.goto("/order");
+  await expect(page.getByRole("button", { name: "ASAP" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await page.locator(".menuItem").click();
   const dialog = page.getByRole("dialog");
   await dialog
@@ -320,4 +345,17 @@ test("customer can choose and review a half-pizza topping", async ({
   await expect(page.locator(".orderCart")).toContainText("Left Half Pepperoni");
   await expect(page.locator(".orderCart")).not.toContainText("Regular Cook");
   await expect(page.locator(".orderCart")).not.toContainText("Classic Sauce");
+  await page.getByRole("button", { name: "Continue to checkout" }).click();
+  const card = page.getByRole("button", { name: "Credit or debit" });
+  const pickup = page.getByRole("button", { name: "Pay at pickup" });
+  await expect(card).toHaveAttribute("aria-pressed", "false");
+  await expect(pickup).toHaveAttribute("aria-pressed", "false");
+  await expect(
+    page.getByRole("button", { name: "Choose a payment method" }),
+  ).toBeDisabled();
+  const [cardBox, pickupBox] = await Promise.all([
+    card.boundingBox(),
+    pickup.boundingBox(),
+  ]);
+  expect(cardBox?.y).toBe(pickupBox?.y);
 });

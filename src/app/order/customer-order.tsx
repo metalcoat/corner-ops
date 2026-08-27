@@ -217,7 +217,10 @@ export default function CustomerOrder() {
     [email, setEmail] = useState(""),
     [review, setReview] = useState<any>(null),
     [completedOrder, setCompletedOrder] = useState<any>(null),
-    [paymentChoice, setPaymentChoice] = useState<"card" | "pickup">("card"),
+    [paymentChoice, setPaymentChoice] = useState<"card" | "pickup" | null>(
+      null,
+    ),
+    [paymentOpen, setPaymentOpen] = useState(false),
     [busy, setBusy] = useState(false);
   useEffect(() => {
     setLoading(true);
@@ -338,6 +341,7 @@ export default function CustomerOrder() {
       });
       if (!response.ok) throw new Error(await failure(response));
       setReview((await response.json()).cart);
+      setPaymentChoice(null);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Could not price the order.");
     } finally {
@@ -450,6 +454,7 @@ export default function CustomerOrder() {
           reject(new Error("Secure checkout did not load."));
           return;
         }
+        setPaymentOpen(true);
         window.appendHelcimPayIframe(checkoutToken);
       });
       if (result.needsAssistance) {
@@ -471,6 +476,8 @@ export default function CustomerOrder() {
         error instanceof Error ? error.message : "Secure checkout failed.",
       );
     } finally {
+      window.removeHelcimPayIframe?.();
+      setPaymentOpen(false);
       setBusy(false);
     }
   }
@@ -503,6 +510,9 @@ export default function CustomerOrder() {
   }
   return (
     <main className="customerOrder">
+      {paymentOpen ? (
+        <div className="securePaymentBackdrop" aria-hidden="true" />
+      ) : null}
       <header className="orderHero">
         <a className="orderBrand" href="/order">
           Corner Deli <span>Order online</span>
@@ -703,25 +713,30 @@ export default function CustomerOrder() {
           </div>
           <fieldset>
             <legend>When?</legend>
-            <label>
-              <input
-                type="radio"
-                checked={timing === "asap"}
-                onChange={() => setTiming("asap")}
-              />{" "}
-              ASAP
-            </label>
-            <label>
-              <input
-                type="radio"
-                checked={timing === "future"}
-                onChange={() => {
+            <div className="choiceRow" role="group" aria-label="Order timing">
+              <button
+                type="button"
+                className="choiceButton"
+                aria-pressed={timing === "asap"}
+                onClick={() => {
+                  setTiming("asap");
+                  setScheduledFor("");
+                }}
+              >
+                ASAP
+              </button>
+              <button
+                type="button"
+                className="choiceButton"
+                aria-pressed={timing === "future"}
+                onClick={() => {
                   setTiming("future");
                   setDate((current) => current || localDateValue());
                 }}
-              />{" "}
-              Future
-            </label>
+              >
+                Future
+              </button>
+            </div>
             {timing === "future" && (
               <>
                 <input
@@ -871,38 +886,43 @@ export default function CustomerOrder() {
               )}
               {catalog?.checkout.paymentEnabled && serviceType === "pickup" ? (
                 <div className="paymentChoices">
-                  <label>
-                    <input
-                      type="radio"
-                      name="paymentChoice"
-                      checked={paymentChoice === "card"}
-                      onChange={() => setPaymentChoice("card")}
-                    />{" "}
-                    Credit or debit card
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="paymentChoice"
-                      checked={paymentChoice === "pickup"}
-                      onChange={() => setPaymentChoice("pickup")}
-                    />{" "}
-                    Pay at pickup
-                  </label>
+                  <div
+                    className="paymentOptionRow"
+                    role="group"
+                    aria-label="Payment method"
+                  >
+                    <button
+                      type="button"
+                      className="choiceButton"
+                      aria-pressed={paymentChoice === "card"}
+                      onClick={() => setPaymentChoice("card")}
+                    >
+                      Credit or debit
+                    </button>
+                    <button
+                      type="button"
+                      className="choiceButton"
+                      aria-pressed={paymentChoice === "pickup"}
+                      onClick={() => setPaymentChoice("pickup")}
+                    >
+                      Pay at pickup
+                    </button>
+                  </div>
                   <button
                     className="reviewButton"
-                    disabled={busy}
-                    onClick={() =>
-                      void (paymentChoice === "card"
-                        ? payWithHelcim()
-                        : submitPayLater())
-                    }
+                    disabled={busy || !paymentChoice}
+                    onClick={() => {
+                      if (paymentChoice === "card") void payWithHelcim();
+                      if (paymentChoice === "pickup") void submitPayLater();
+                    }}
                   >
                     {busy
                       ? "Please wait…"
                       : paymentChoice === "card"
                         ? `Pay ${money(Number(review.totalCents))}`
-                        : "Place order — pay at pickup"}
+                        : paymentChoice === "pickup"
+                          ? "Place order — pay at pickup"
+                          : "Choose a payment method"}
                   </button>
                   {paymentChoice === "card" && (
                     <small>
