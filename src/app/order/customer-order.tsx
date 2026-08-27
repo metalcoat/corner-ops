@@ -683,6 +683,14 @@ export default function CustomerOrder() {
             the same system used in-store.
           </p>
         </div>
+        <section
+          id="delivery-address-top"
+          className={
+            serviceType === "delivery"
+              ? "topDeliveryAddress active"
+              : "topDeliveryAddress"
+          }
+        />
         <div className="servicePicker" aria-label="Fulfillment type">
           <button
             className={serviceType === "pickup" ? "selected" : ""}
@@ -699,14 +707,6 @@ export default function CustomerOrder() {
           </button>
         </div>
       </section>
-      <section
-        id="delivery-address-top"
-        className={
-          serviceType === "delivery"
-            ? "topDeliveryAddress active"
-            : "topDeliveryAddress"
-        }
-      />
       {catalog && !catalog.availability.orderable && (
         <aside className="closedNotice">
           <strong>We’re not taking ASAP {serviceType} orders right now.</strong>

@@ -388,7 +388,7 @@ export async function transitionKitchenOrder(input: {
       VALUES (${randomUUID()}, ${input.orderId}, ${rows[0].version}, 'status_changed', ${input.actor.type}, ${input.actor.id},
               CAST(${JSON.stringify({ from: input.expectedStatus, to: input.nextStatus, actorName: input.actor.name })} AS jsonb))
     `;
-    if(input.nextStatus==="completed")await earnLoyaltyForOrder(input.orderId,input.actor);
+    if(input.nextStatus==="sent_to_kitchen"||input.nextStatus==="completed")await earnLoyaltyForOrder(input.orderId,input.actor);
     return rows[0];
   });
 }

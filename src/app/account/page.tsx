@@ -4,9 +4,10 @@ import "../order/order.css";
 const money = (c: number) => `$${(c / 100).toFixed(2)}`;
 export default function Account() {
   const [data, setData] = useState<any>(null),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [range, setRange] = useState("180");
   useEffect(() => {
-    fetch("/api/customer/account", { cache: "no-store" })
+    fetch(`/api/customer/account?range=${range}`, { cache: "no-store" })
       .then(async (r) => {
         const b = await r.json();
         if (r.status === 401) {
@@ -17,7 +18,7 @@ export default function Account() {
         setData(b);
       })
       .catch((e) => setError(e.message));
-  }, []);
+  }, [range]);
   async function signOut() {
     await fetch("/api/customer/auth/session", { method: "DELETE" });
     location.href = "/order";
@@ -46,18 +47,39 @@ export default function Account() {
             ) : (
               <p>No loyalty activity yet.</p>
             )}
-            <h2>Past orders</h2>
+            <div className="accountOrderHeading">
+              <h2>Past orders</h2>
+              <label>
+                Show
+                <select value={range} onChange={(event) => setRange(event.target.value)}>
+                  <option value="30">Last 30 days</option>
+                  <option value="180">Last 6 months</option>
+                  <option value="365">Last year</option>
+                  <option value="all">All orders</option>
+                </select>
+              </label>
+            </div>
             {data.orders.length ? (
               data.orders.map((o: any) => (
-                <div className="confirmationLines" key={o.id}>
-                  <div>
+                <details className="accountOrder" key={o.id}>
+                  <summary>
                     <span>
                       Order #{o.display_number} ·{" "}
                       {new Date(o.created_at).toLocaleDateString()}
                     </span>
                     <strong>{money(o.total_cents)}</strong>
+                  </summary>
+                  <div className="accountOrderDetails">
+                    <small>{String(o.service_type).replaceAll("_", " ")} · {String(o.status).replaceAll("_", " ")}</small>
+                    {o.items.map((item: any) => (
+                      <div key={item.id}>
+                        <span><strong>{item.quantity}× {item.name}</strong>{item.variant ? ` · ${item.variant}` : ""}</span>
+                        <span>{money(item.lineTotalCents)}</span>
+                        {item.modifiers.length ? <small>{item.modifiers.join(" · ")}</small> : null}
+                      </div>
+                    ))}
                   </div>
-                </div>
+                </details>
               ))
             ) : (
               <p>No past orders yet.</p>
