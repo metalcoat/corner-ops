@@ -113,9 +113,16 @@ test("web cart pricing uses the authoritative backend and initializes secure Hel
   expect(body.cart.subtotalCents).toBeGreaterThan(0);
   expect(body.cart.paymentStatus).toBe("unpaid");
   if (catalog.checkout.paymentEnabled) {
+    // Production marks the customer session Secure. Playwright will not retain
+    // that cookie when this suite targets the local HTTP container, so forward
+    // the signed cookie explicitly while preserving the production policy.
+    const sessionCookie = response.headers()["set-cookie"]?.split(";", 1)[0];
     const payment = await request.post(
       `/api/customer/orders/${body.cart.id}/payments/helcim`,
-      { data: { action: "initialize" } },
+      {
+        data: { action: "initialize" },
+        headers: sessionCookie ? { cookie: sessionCookie } : undefined,
+      },
     );
     expect(payment.status()).toBe(200);
     const initialized = await payment.json();
