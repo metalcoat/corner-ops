@@ -175,8 +175,8 @@
   position: fixed !important;
   inset: 50% auto auto 50% !important;
   z-index: 2147483646 !important;
-  width: min(620px, calc(100vw - 32px)) !important;
-  height: min(780px, calc(100dvh - 32px)) !important;
+  width: min(720px, calc(100vw - 16px)) !important;
+  height: calc(100dvh - 16px) !important;
   transform: translate(-50%, -50%) !important;
   border: 0 !important;
   border-radius: 18px !important;
@@ -528,7 +528,14 @@
 }
 .orderError {
   color: var(--red);
-  font-size: 13px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--red) 8%, white);
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.4;
 }
 .serverReview {
   margin-top: 17px;
