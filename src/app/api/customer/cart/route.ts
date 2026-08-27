@@ -7,7 +7,7 @@ import {
 import { ensureCustomerOrderingSchema } from "@/lib/customer-ordering-schema";
 import { getSql } from "@/lib/db";
 import { getDeliveryPricingSettings } from "@/lib/ordering-delivery";
-import { createCustomer } from "@/lib/ordering-customers";
+import { addCustomerPhone, createCustomer } from "@/lib/ordering-customers";
 
 export const runtime = "nodejs";
 
@@ -64,17 +64,49 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     const timingMode = body.timingMode === "future" ? "future" : "asap";
-    const firstName = String(body.firstName || "")
+    let firstName = String(body.firstName || "")
       .trim()
       .slice(0, 80);
-    const lastName = String(body.lastName || "")
+    let lastName = String(body.lastName || "")
       .trim()
       .slice(0, 80);
-    const phone = String(body.phone || "").replace(/\D/g, "");
-    const email = String(body.email || "")
+    let phone = String(body.phone || "").replace(/\D/g, "");
+    let email = String(body.email || "")
       .trim()
       .toLowerCase()
       .slice(0, 320);
+    const { session, setCookie } = customerOrderingSession(request);
+    await ensureCustomerOrderingSchema();
+    const sql = getSql();
+    let needsSavedPhone = false;
+    if (session.customerId && session.authenticatedAt) {
+      const saved = (
+        await sql`SELECT c.first_name,c.last_name,c.email,p.phone
+        FROM ordering_customers c
+        LEFT JOIN LATERAL (
+          SELECT normalized_phone phone FROM ordering_customer_phones
+          WHERE customer_id=c.id ORDER BY is_primary DESC,last_used_at DESC NULLS LAST,created_at ASC LIMIT 1
+        ) p ON TRUE
+        WHERE c.id=${session.customerId} AND c.active=TRUE LIMIT 1`
+      )[0];
+      if (saved) {
+        firstName = String(saved.first_name || firstName)
+          .trim()
+          .slice(0, 80);
+        lastName = String(saved.last_name || lastName)
+          .trim()
+          .slice(0, 80);
+        email = String(saved.email || email)
+          .trim()
+          .toLowerCase()
+          .slice(0, 320);
+        const savedPhone = String(saved.phone || "")
+          .replace(/^\+1/, "")
+          .replace(/\D/g, "");
+        if (savedPhone.length === 10) phone = savedPhone;
+        else needsSavedPhone = true;
+      }
+    }
     if (!firstName || phone.length !== 10 || !/^\S+@\S+\.\S+$/.test(email))
       return Response.json(
         {
@@ -92,12 +124,18 @@ export async function POST(request: Request) {
         { error: "Choose a valid future time." },
         { status: 400 },
       );
-    const { session, setCookie } = customerOrderingSession(request);
-    await ensureCustomerOrderingSchema();
-    const sql = getSql();
     const sessionHash = customerSessionHash(session.sessionId);
     await sql`INSERT INTO ordering_customer_web_sessions(session_hash,customer_id,authenticated_at,last_seen_at,expires_at) VALUES(${sessionHash},${session.customerId},${session.authenticatedAt ? new Date(session.authenticatedAt).toISOString() : null},NOW(),${new Date(session.expiresAt).toISOString()}) ON CONFLICT(session_hash) DO UPDATE SET last_seen_at=NOW(),expires_at=EXCLUDED.expires_at`;
     let customerId = session.customerId;
+    if (customerId && needsSavedPhone) {
+      await addCustomerPhone({
+        business: "Corner Deli",
+        customerId,
+        phone,
+        isPrimary: true,
+        allowShared: true,
+      });
+    }
     if (!customerId) {
       const created = await createCustomer({
         business: "Corner Deli",

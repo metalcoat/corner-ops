@@ -285,7 +285,13 @@ test("customer can choose and review a half-pizza topping", async ({
             feeBands: [],
           },
           customer: {
-            authenticated: false,
+            authenticated: true,
+            profile: {
+              firstName: "Chris",
+              lastName: "Customer",
+              email: "chris@example.com",
+              phone: "5705550199",
+            },
             loyaltyAvailableAfterSignIn: true,
             giftCardsAcceptedAtPayment: true,
           },
@@ -307,6 +313,10 @@ test("customer can choose and review a half-pizza topping", async ({
     .click();
   await dialog.getByRole("button", { name: "Add to order" }).click();
 
+  await expect(page.getByLabel("Saved contact")).toContainText(
+    "Chris Customer",
+  );
+  await expect(page.getByLabel("Phone number")).toHaveCount(0);
   await expect(page.locator(".orderCart")).toContainText("Left Half Pepperoni");
   await expect(page.locator(".orderCart")).not.toContainText("Regular Cook");
   await expect(page.locator(".orderCart")).not.toContainText("Classic Sauce");

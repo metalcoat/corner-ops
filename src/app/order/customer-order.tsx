@@ -105,7 +105,12 @@ type Catalog = {
   };
   customer: {
     authenticated: boolean;
-    profile?: { firstName: string; lastName: string; email: string } | null;
+    profile?: {
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone: string;
+    } | null;
     loyalty?: Array<{
       programId: string;
       name: string;
@@ -229,6 +234,7 @@ export default function CustomerOrder() {
           setFirstName(value.customer.profile.firstName || "");
           setLastName(value.customer.profile.lastName || "");
           setEmail(value.customer.profile.email || "");
+          setPhone(value.customer.profile.phone || "");
         }
       })
       .catch((e) => setMessage(e.message))
@@ -759,40 +765,65 @@ export default function CustomerOrder() {
               miles. Address validation comes at checkout.
             </p>
           )}
-          <fieldset className="customerContact">
-            <legend>Contact</legend>
-            <input
-              aria-label="First name"
-              autoComplete="given-name"
-              placeholder="First name"
-              value={firstName}
-              onChange={(event) => setFirstName(event.target.value)}
-            />
-            <input
-              aria-label="Last name"
-              autoComplete="family-name"
-              placeholder="Last name"
-              value={lastName}
-              onChange={(event) => setLastName(event.target.value)}
-            />
-            <input
-              aria-label="Phone number"
-              autoComplete="tel"
-              inputMode="tel"
-              placeholder="10-digit phone"
-              value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-            />
-            <input
-              aria-label="Email address"
-              autoComplete="email"
-              inputMode="email"
-              type="email"
-              placeholder="Email for order confirmation"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-          </fieldset>
+          {catalog?.customer.authenticated &&
+          phone.replace(/\D/g, "").length === 10 ? (
+            <section className="savedContact" aria-label="Saved contact">
+              <small>Ordering as</small>
+              <strong>{`${firstName} ${lastName}`.trim()}</strong>
+              <span>
+                {phone} · {email}
+              </span>
+              <small>
+                Using the contact information saved to your account.
+              </small>
+            </section>
+          ) : (
+            <fieldset className="customerContact">
+              <legend>Contact</legend>
+              {!catalog?.customer.authenticated && (
+                <>
+                  <input
+                    aria-label="First name"
+                    autoComplete="given-name"
+                    placeholder="First name"
+                    value={firstName}
+                    onChange={(event) => setFirstName(event.target.value)}
+                  />
+                  <input
+                    aria-label="Last name"
+                    autoComplete="family-name"
+                    placeholder="Last name"
+                    value={lastName}
+                    onChange={(event) => setLastName(event.target.value)}
+                  />
+                </>
+              )}
+              <input
+                aria-label="Phone number"
+                autoComplete="tel"
+                inputMode="tel"
+                placeholder="10-digit phone"
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+              />
+              {!catalog?.customer.authenticated && (
+                <input
+                  aria-label="Email address"
+                  autoComplete="email"
+                  inputMode="email"
+                  type="email"
+                  placeholder="Email for order confirmation"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+              )}
+              {catalog?.customer.authenticated && (
+                <small className="contactHint">
+                  Add your phone once; we’ll save it for future orders.
+                </small>
+              )}
+            </fieldset>
+          )}
           <button
             className="reviewButton"
             disabled={
@@ -873,6 +904,12 @@ export default function CustomerOrder() {
                         ? `Pay ${money(Number(review.totalCents))}`
                         : "Place order — pay at pickup"}
                   </button>
+                  {paymentChoice === "card" && (
+                    <small>
+                      Secure card entry opens over this page. Your order stays
+                      underneath.
+                    </small>
+                  )}
                 </div>
               ) : (
                 <div className="notLive">

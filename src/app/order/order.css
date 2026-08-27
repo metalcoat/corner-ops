@@ -435,6 +435,25 @@
 .customerContact input:last-child {
   grid-column: 1/-1;
 }
+.savedContact {
+  display: grid;
+  gap: 3px;
+  margin: 12px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+}
+.savedContact strong {
+  font-size: 1.05rem;
+}
+.savedContact small {
+  color: var(--muted);
+}
+.contactHint {
+  grid-column: 1/-1;
+  color: var(--muted);
+}
 @media (max-width: 560px) {
   .customerContact {
     grid-template-columns: 1fr;

@@ -91,7 +91,16 @@ export async function GET(request: Request) {
     const profile =
       session.customerId && session.authenticatedAt
         ? (
-            await getSql()`SELECT first_name,last_name,email FROM ordering_customers WHERE id=${session.customerId} AND active=TRUE LIMIT 1`
+            await getSql()`SELECT c.first_name,c.last_name,c.email,p.phone
+              FROM ordering_customers c
+              LEFT JOIN LATERAL (
+                SELECT COALESCE(NULLIF(display_phone,''),normalized_phone) phone
+                FROM ordering_customer_phones
+                WHERE customer_id=c.id
+                ORDER BY is_primary DESC,last_used_at DESC NULLS LAST,created_at ASC
+                LIMIT 1
+              ) p ON TRUE
+              WHERE c.id=${session.customerId} AND c.active=TRUE LIMIT 1`
           )[0]
         : null;
     const loyalty =
@@ -119,6 +128,7 @@ export async function GET(request: Request) {
               firstName: profile.first_name,
               lastName: profile.last_name,
               email: profile.email,
+              phone: String(profile.phone || "").replace(/^\+1/, ""),
             }
           : null,
         loyalty,
