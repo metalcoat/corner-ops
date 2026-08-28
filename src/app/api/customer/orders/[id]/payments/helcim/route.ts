@@ -27,6 +27,7 @@ import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
 import { sendCustomerOrderConfirmation } from "@/lib/customer-order-confirmation";
 import { after } from "next/server";
+import { helcimCustomerForOrder } from "@/lib/ordering-helcim-customer";
 
 export const runtime = "nodejs";
 const business = "Corner Deli" as const;
@@ -103,7 +104,7 @@ export async function POST(
       const amountCents = Number(state.order.amount_due_cents);
       if (amountCents <= 0)
         throw new PaymentConflictError("This order has no remaining balance.");
-      const initialized = await initializeHelcimPay(amountCents);
+      const initialized = await initializeHelcimPay(amountCents, await helcimCustomerForOrder(orderId, business));
       const id = randomUUID(),
         mutationId = randomUUID();
       await sql`INSERT INTO ordering_helcim_checkout_sessions(id,business,order_id,amount_cents,checkout_token,secret_hash,client_mutation_id,created_by,expires_at) VALUES(${id},${business},${orderId},${amountCents},${initialized.checkoutToken},${sha256(initialized.secretToken)},${mutationId},${`web:${owner.hash.slice(0, 16)}`},NOW()+INTERVAL '60 minutes')`;

@@ -50,7 +50,23 @@ export async function testHelcimConnection() {
   return { connected: true };
 }
 
-export async function initializeHelcimPay(amountCents: number) {
+export type HelcimCheckoutCustomer = {
+  contactName: string;
+  cellPhone?: string;
+  billingAddress: {
+    name: string;
+    street1: string;
+    street2?: string;
+    city?: string;
+    province?: string;
+    country?: string;
+    postalCode: string;
+    phone?: string;
+  };
+  shippingAddress?: HelcimCheckoutCustomer["billingAddress"];
+};
+
+export async function initializeHelcimPay(amountCents: number, customerRequest?: HelcimCheckoutCustomer) {
   if (!Number.isSafeInteger(amountCents) || amountCents <= 0)
     throw new HelcimError("A valid payment amount is required.");
   const terminalId = process.env.HELCIM_TERMINAL_ID?.trim();
@@ -62,6 +78,7 @@ export async function initializeHelcimPay(amountCents: number) {
       amount: Number((amountCents / 100).toFixed(2)),
       currency: "USD",
       displayContactFields: 0,
+      ...(customerRequest ? { customerRequest } : {}),
       confirmationScreen: false,
       customStyling: {
         appearance: "light",

@@ -18,6 +18,7 @@ import {
 } from "@/lib/ordering-payments";
 import { orderingActor } from "@/lib/ordering-route-auth";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
+import { helcimCustomerForOrder } from "@/lib/ordering-helcim-customer";
 
 export const runtime = "nodejs";
 const business = "Corner Deli" as const;
@@ -55,7 +56,7 @@ export async function POST(
         throw new PaymentConflictError("This order has no remaining balance.");
       if (!Number.isSafeInteger(amountCents) || amountCents > remainingCents)
         throw new PaymentConflictError("Card amount must not exceed the remaining balance.");
-      const initialized = await initializeHelcimPay(amountCents);
+      const initialized = await initializeHelcimPay(amountCents, await helcimCustomerForOrder(orderId, business));
       const sessionId = randomUUID(),
         clientMutationId = randomUUID();
       await sql`INSERT INTO ordering_helcim_checkout_sessions(id,business,order_id,check_id,amount_cents,checkout_token,secret_hash,client_mutation_id,created_by,expires_at)
