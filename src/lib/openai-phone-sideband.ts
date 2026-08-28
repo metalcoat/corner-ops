@@ -7,6 +7,7 @@ import {
   auditAiTool,
   menuCatalog,
   priceSpokenOrder,
+  setAiPaymentDetails,
   serviceType,
   type SpokenOrderItem,
 } from "@/lib/ordering-ai-tools";
@@ -203,6 +204,17 @@ export function startOpenAiSideband(
           amount_due_cents: Number(updated.amount_due_cents),
           delivery_fee_cents: Number(updated.delivery_fee_cents),
         });
+      }
+      if (args.paymentMethod === "cash" || args.paymentMethod === "card") {
+        const paymentResult = await setAiPaymentDetails({
+          orderId: String(result.id),
+          business: "Corner Deli",
+          service: serviceType(args.serviceType),
+          paymentMethod: args.paymentMethod,
+          tipCents: Number(args.tipCents || 0),
+          actor,
+        });
+        Object.assign(result, paymentResult);
       }
       await sql`UPDATE ordering_call_sessions SET order_id=${String(result.id)},updated_at=NOW() WHERE id=${call.id}`;
       await auditAiTool({

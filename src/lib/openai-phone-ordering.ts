@@ -87,6 +87,17 @@ export const OPENAI_PRICE_ORDER_TOOL = {
       },
       firstName: { type: "string" },
       lastName: { type: "string" },
+      paymentMethod: {
+        type: "string",
+        enum: ["cash", "card"],
+        description: "Customer's confirmed payment choice, collected only after the final order readback is confirmed.",
+      },
+      tipCents: {
+        type: "integer",
+        minimum: 0,
+        maximum: 100000,
+        description: "Confirmed driver tip in cents. Use 0 when a delivery card customer declines. Never add a driver tip to cash or pickup orders.",
+      },
     },
     required: ["serviceType", "items"],
     additionalProperties: false,

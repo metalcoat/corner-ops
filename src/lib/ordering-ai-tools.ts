@@ -23,6 +23,7 @@ import {
   OrderConflictError,
 } from "@/lib/ordering-order-lifecycle";
 import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
+import { setCheckoutTip } from "@/lib/ordering-payments";
 
 export type AiToolErrorCode =
   | "INVALID_INPUT"
@@ -267,7 +268,7 @@ export async function futureSlots(
 async function pricedOrder(orderId: string, business: OrderingBusiness) {
   const sql = getSql();
   const rows =
-    await sql`SELECT id,business,display_number,status,payment_status,service_type,timing_mode,scheduled_for,version,customer_id,first_name_snapshot,last_name_snapshot,phone_snapshot,subtotal_cents,discount_cents,tax_cents,tip_cents,delivery_fee_cents,total_cents,paid_cents,amount_due_cents,timing_message_snapshot FROM ordering_orders WHERE id=${orderId} AND business=${business}`;
+    await sql`SELECT id,business,display_number,status,payment_status,payment_preference,service_type,timing_mode,scheduled_for,version,customer_id,first_name_snapshot,last_name_snapshot,phone_snapshot,subtotal_cents,discount_cents,tax_cents,tip_cents,delivery_fee_cents,total_cents,paid_cents,amount_due_cents,timing_message_snapshot FROM ordering_orders WHERE id=${orderId} AND business=${business}`;
   if (!rows[0])
     throw new AiToolError(
       "NOT_FOUND",
@@ -288,6 +289,30 @@ async function pricedOrder(orderId: string, business: OrderingBusiness) {
     pricingAuthority: "corner_ops_server",
     currency: "USD",
   } as Record<string, any>;
+}
+
+export async function setAiPaymentDetails(input: {
+  orderId: string;
+  business: OrderingBusiness;
+  service: ServiceType;
+  paymentMethod: "cash" | "card";
+  tipCents: number;
+  actor: OrderingActor;
+}) {
+  if (!Number.isSafeInteger(input.tipCents) || input.tipCents < 0 || input.tipCents > 100000)
+    throw new AiToolError("INVALID_INPUT", "The tip amount is invalid.", "Confirm a non-negative driver tip in cents.", 400);
+  if (input.tipCents > 0 && (input.paymentMethod !== "card" || input.service !== "delivery"))
+    throw new AiToolError("INVALID_INPUT", "Driver tips can only be added to delivery orders paid by card.", "Use tipCents 0 for pickup or cash orders.", 400);
+  await setCheckoutTip({
+    orderId: input.orderId,
+    business: input.business,
+    tipCents: input.tipCents,
+    actor: input.actor,
+  });
+  const sql = getSql();
+  await sql`UPDATE ordering_orders SET payment_preference=${input.paymentMethod},updated_at=NOW() WHERE id=${input.orderId} AND business=${input.business}`;
+  await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) SELECT ${randomUUID()},id,version,'payment_preference_updated',${input.actor.type},${input.actor.id},${JSON.stringify({ paymentMethod: input.paymentMethod })}::jsonb FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business}`;
+  return pricedOrder(input.orderId, input.business);
 }
 
 export async function createAiDraft(input: {

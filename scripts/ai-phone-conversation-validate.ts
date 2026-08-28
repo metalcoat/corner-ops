@@ -158,6 +158,14 @@ async function main() {
     "Every completed phone order must receive one confirmed full readback.",
   );
   assert.ok(
+    prompt.includes("Will you be paying with cash or card?") &&
+      prompt.includes("Would you like to leave a tip for the driver on the card?") &&
+      prompt.includes("How much would you like to tip?") &&
+      prompt.includes("Never ask for a driver tip on pickup or cash orders") &&
+      prompt.includes("confirmed paymentMethod and tipCents"),
+    "Card delivery checkout must collect and authoritatively price the driver tip.",
+  );
+  assert.ok(
     prompt.includes("What kind of dressing do you want for your salad?") &&
       prompt.includes("Would you like fries with that?") &&
       prompt.includes("SM Tossed Sal"),

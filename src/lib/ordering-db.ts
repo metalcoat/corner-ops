@@ -193,6 +193,7 @@ export function ensureOrderingSchema(): Promise<void> {
           three_cx_call_id TEXT NOT NULL DEFAULT '',
           status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'confirmed', 'sent_to_kitchen', 'in_progress', 'ready', 'completed', 'cancelled')),
           payment_status TEXT NOT NULL DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid', 'pending', 'partially_paid', 'paid', 'partially_refunded', 'refunded', 'failed')),
+          payment_preference TEXT NOT NULL DEFAULT 'unspecified' CHECK (payment_preference IN ('unspecified', 'cash', 'card')),
           service_type TEXT NOT NULL DEFAULT 'pickup' CHECK (service_type IN ('pickup', 'delivery', 'dine_in', 'bar')),
           version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
           subtotal_cents INTEGER NOT NULL DEFAULT 0,

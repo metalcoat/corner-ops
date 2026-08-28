@@ -32,6 +32,21 @@ export function ensureOrderingPosSchema(): Promise<void> {
       `;
 
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS display_number TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS payment_preference TEXT NOT NULL DEFAULT 'unspecified'`;
+      await sql`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'ordering_orders_payment_preference_check'
+          ) THEN
+            ALTER TABLE ordering_orders
+            ADD CONSTRAINT ordering_orders_payment_preference_check
+            CHECK (payment_preference IN ('unspecified', 'cash', 'card'));
+          END IF;
+        END
+        $$
+      `;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS held_until TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS table_label TEXT NOT NULL DEFAULT ''`;
