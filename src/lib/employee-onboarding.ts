@@ -40,6 +40,7 @@ export async function sendEmployeeOnboardingSms(input: EmployeeOnboardingSmsInpu
       `${input.business}: Welcome, ${employeeGivenName(input.name)}!`,
       `Sign in to Corner Ops Employee Hub: ${employeeHubUrl}`,
       `Your PIN is ${input.pin}.`,
+      "Corner Ops will ask you for any missing onboarding information, including your email address.",
       `Complete your new-hire paperwork here after signing in: ${formsUrl}`,
       "Questions? Send a message in Corner Ops. Do not reply to this text; replies are not monitored.",
     ].join("\n"),
