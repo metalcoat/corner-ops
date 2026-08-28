@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import EmployeeAttendanceBadge from "./attendance-badge";
+import EmployeeEmailPrompt from "./email-prompt";
 import EmployeeInstallPrompt from "./install-prompt";
 import EmployeeMessagesDock from "./messages-dock";
 import EmployeePinController from "./pin-controller";
@@ -22,7 +23,7 @@ export default function EmployeeLayout({ children }: Readonly<{ children: ReactN
         <EmployeeAttendanceBadge />
         <a href="/employee/forgot-pin">Forgot PIN</a>
       </nav>
-      <div className="employeePortalContent">{children}</div>
+      <div className="employeePortalContent"><EmployeeEmailPrompt />{children}</div>
     </div>
   );
 }

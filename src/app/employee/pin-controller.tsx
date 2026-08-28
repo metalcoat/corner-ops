@@ -35,10 +35,12 @@ export default function EmployeePinController() {
         const business = businessSelect.value;
         const minLength = business === "Corner Deli" ? 4 : 5;
         const maxLength = 5;
-        pinInput.pattern = employeePinPattern(business);
+        // New Corner Deli employees are issued four-digit PINs, but Employee Hub keeps accepting
+        // legacy five-digit Deli PINs until those employees are changed over.
+        pinInput.pattern = business === "Corner Deli" ? "\\d{4,5}" : employeePinPattern(business);
         pinInput.maxLength = maxLength;
         pinInput.minLength = minLength;
-        pinInput.placeholder = business === "Corner Deli" ? "4 or 5 digits" : "5 digits";
+        pinInput.placeholder = business === "Corner Deli" ? "4 digits" : "5 digits";
         pinInput.setAttribute("aria-label", employeePinLabel(business));
 
         const label = pinInput.closest("label");
