@@ -38,38 +38,51 @@ export async function POST(request: Request) {
       return Response.json({ ...result, overtimeRisk });
     }
 
-    await ensureWorkforceSchema();
-    const instructions = await getSql()`
-      SELECT s.id, s.position, s.starts_at, s.ends_at, s.notes
-      FROM time_entries t
-      JOIN schedule_shifts s
-        ON s.employee_id = t.employee_id
-       AND s.business = 'Tiki'
-       AND s.status = 'Published'
-      WHERE t.id = ${result.entry.id}
-        AND NOW() >= s.starts_at - INTERVAL '4 hours'
-        AND NOW() <= s.ends_at + INTERVAL '4 hours'
-      ORDER BY ABS(EXTRACT(EPOCH FROM (s.starts_at - NOW())))
-      LIMIT 1
-    ` as unknown as Array<{
+    let scheduledShift: {
       id: string;
       position: string;
-      starts_at: string;
-      ends_at: string;
-      notes: string;
-    }>;
+      startsAt: string;
+      endsAt: string;
+      instructions: string;
+    } | null = null;
 
-    const shift = instructions[0];
-    return Response.json({
-      ...result,
-      scheduledShift: shift ? {
+    try {
+      await ensureWorkforceSchema();
+      const instructions = await getSql()`
+        SELECT s.id, s.position, s.starts_at, s.ends_at, s.notes
+        FROM time_entries t
+        JOIN schedule_shifts s
+          ON s.employee_id = t.employee_id
+         AND s.business = 'Tiki'
+         AND s.status = 'Published'
+        WHERE t.id = ${result.entry.id}
+          AND NOW() >= s.starts_at - INTERVAL '4 hours'
+          AND NOW() <= s.ends_at + INTERVAL '4 hours'
+        ORDER BY ABS(EXTRACT(EPOCH FROM (s.starts_at - NOW())))
+        LIMIT 1
+      ` as unknown as Array<{
+        id: string;
+        position: string;
+        starts_at: string;
+        ends_at: string;
+        notes: string;
+      }>;
+
+      const shift = instructions[0];
+      scheduledShift = shift ? {
         id: shift.id,
         position: shift.position,
         startsAt: shift.starts_at,
         endsAt: shift.ends_at,
         instructions: shift.notes,
-      } : null,
-    });
+      } : null;
+    } catch (error) {
+      // The punch has already been saved. Optional schedule instructions must never
+      // make the employee think the clock-in itself failed or encourage a second punch.
+      console.error("[timeclock] punch saved but scheduled-shift lookup failed", error);
+    }
+
+    return Response.json({ ...result, scheduledShift });
   } catch (error) {
     return apiError(error);
   }
