@@ -2,6 +2,7 @@ import { apiError } from "@/lib/http";
 import { getSql } from "@/lib/db";
 import { isAuthorizationResponse, orderingManagerActor } from "@/lib/ordering-route-auth";
 import { OrderVoidError, voidSentOrder } from "@/lib/ordering-voids";
+import { cancelPaymentQueueEntries } from "@/lib/ordering-payment-stations";
 
 export const runtime = "nodejs";
 
@@ -24,7 +25,7 @@ export async function POST() {
     for (const candidate of candidates) {
       try {
         await voidSentOrder({ orderId: String(candidate.id), business: "Corner Deli", reason: "Cleared from local test environment", actor });
-        await getSql()`UPDATE ordering_payment_station_queue SET status='cancelled',updated_at=NOW() WHERE business='Corner Deli' AND order_id=${candidate.id} AND status='waiting'`;
+        await cancelPaymentQueueEntries("Corner Deli", String(candidate.id));
         cleared += 1;
       } catch (error) {
         if (error instanceof OrderVoidError) skipped.push(String(candidate.id));

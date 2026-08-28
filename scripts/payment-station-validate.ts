@@ -14,7 +14,7 @@ async function main() {
   const { getSql, withTransaction } = await import("../src/lib/db");
   const { ensureOrderingHardwareSchema } = await import("../src/lib/ordering-hardware-schema");
   const { ensureOrderingGiftCardSchema } = await import("../src/lib/ordering-gift-card-schema");
-  const { queueForPayment, paymentStationProfile } = await import("../src/lib/ordering-payment-stations");
+  const { cancelPaymentQueueEntries, queueForPayment, paymentStationProfile } = await import("../src/lib/ordering-payment-stations");
   const { commitTender, reverseTender } = await import("../src/lib/ordering-payments");
   await ensureOrderingHardwareSchema();
   await ensureOrderingGiftCardSchema();
@@ -29,6 +29,9 @@ async function main() {
       await sql`INSERT INTO ordering_payment_stations(id,business,name,station_key,station_mode,receipt_printer_id,created_by,updated_by) VALUES(${stationId},'Tiki',${`Payment ${suffix}`},${stationKey},'payment',${printerId},${actor.id},${actor.id}),(${orderStationId},'Tiki',${`Kitchen ${suffix}`},${`kitchen-${suffix}`},'order_taker',NULL,${actor.id},${actor.id})`;
       await sql`INSERT INTO ordering_orders(id,business,source,status,payment_status,service_type,display_number,created_by,first_name_snapshot,last_name_snapshot,phone_snapshot,total_cents,amount_due_cents) VALUES(${orderId},'Tiki','pos','sent_to_kitchen','unpaid','pickup',${`ST-${suffix}`},${actor.id},'Station','Test','+13155550199',3000,3000)`;
       await queueForPayment({ business: "Tiki", orderId, sourceStationKey: `kitchen-${suffix}`, actor });
+      const cancelled = await cancelPaymentQueueEntries("Tiki", orderId);
+      if (cancelled.length !== 1) throw new Error("Payment queue cancellation did not clear the active request.");
+      await queueForPayment({ business: "Tiki", orderId, sourceStationKey: `kitchen-${suffix}`, actor });
       const duplicate = await queueForPayment({ business: "Tiki", orderId, sourceStationKey: `kitchen-${suffix}`, actor });
       if (!duplicate.duplicate) throw new Error("Payment queue retry duplicated the request.");
       const cash = await commitTender({ orderId, business: "Tiki", tenderType: "cash", amountTenderedCents: 2000, clientMutationId: `cash-${suffix}`, actor, receiptPrinterId: printerId, cashControlMode: "till", stationKey });
@@ -37,10 +40,10 @@ async function main() {
       if (!cashPayment) throw new Error("Cash tender was not recorded.");
       await reverseTender({ orderId, business: "Tiki", transactionId: String(cashPayment.id), amountCents: 500, clientMutationId: `refund-${suffix}`, reason: "Station validation refund", actor });
       const profile = await paymentStationProfile("Tiki", stationKey);
-      const queue = (await sql`SELECT status FROM ordering_payment_station_queue WHERE order_id=${orderId}`)[0];
+      const queueStatuses = (await sql`SELECT status FROM ordering_payment_station_queue WHERE order_id=${orderId}`).map((row) => String(row.status));
       const movements = await sql`SELECT delta_cash_cents FROM ordering_cash_drawer_movements WHERE order_id=${orderId} ORDER BY created_at`;
-      if (profile?.station_mode !== "payment" || queue.status !== "completed" || card.order.payment_status !== "paid" || movements.length !== 2 || Number(movements[0].delta_cash_cents) !== 2000 || Number(movements[1].delta_cash_cents) !== -500) throw new Error("Payment station routing or cash ledger validation failed.");
-      Object.assign(result, { singlePaymentStation: true, orderTakerQueue: true, queueIdempotency: true, mxProviderLedger: true, cashRegisterLedger: true, cashRefundLedger: true });
+      if (profile?.station_mode !== "payment" || !queueStatuses.includes("cancelled") || !queueStatuses.includes("completed") || card.order.payment_status !== "paid" || movements.length !== 2 || Number(movements[0].delta_cash_cents) !== 2000 || Number(movements[1].delta_cash_cents) !== -500) throw new Error("Payment station routing or cash ledger validation failed.");
+      Object.assign(result, { singlePaymentStation: true, orderTakerQueue: true, queueCancellation: true, queueIdempotency: true, mxProviderLedger: true, cashRegisterLedger: true, cashRefundLedger: true });
       throw new Error(ROLLBACK);
     });
   } catch (error) {

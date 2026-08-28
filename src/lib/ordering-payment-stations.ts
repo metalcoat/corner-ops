@@ -42,3 +42,8 @@ export async function completePaidPaymentQueue(business:OrderingBusiness,orderId
   await ensureOrderingHardwareSchema();
   await getSql()`UPDATE ordering_payment_station_queue SET status='completed',completed_at=NOW() WHERE business=${business} AND order_id=${orderId} AND (${checkId||null}::uuid IS NULL OR check_id=${checkId||null}::uuid) AND status IN ('queued','claimed')`;
 }
+
+export async function cancelPaymentQueueEntries(business: OrderingBusiness, orderId: string) {
+  await ensureOrderingHardwareSchema();
+  return getSql()`UPDATE ordering_payment_station_queue SET status='cancelled',cancelled_at=NOW() WHERE business=${business} AND order_id=${orderId} AND status IN ('queued','claimed') RETURNING id`;
+}
