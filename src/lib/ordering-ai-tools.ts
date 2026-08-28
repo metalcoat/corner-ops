@@ -385,6 +385,16 @@ export const BUSINESS_ITEM_ALIASES: Record<string, string[]> = {
   "large french frie": ["large fry", "large fries", "large regular fries"],
   "small french frie": ["small fry", "small fries"],
   "buffalo chip": ["buffalo chip", "chips"],
+  "breaded mushroom": [
+    "fried mushroom",
+    "fried mushrooms",
+    "battered mushroom",
+    "battered mushrooms",
+  ],
+  "breaded cauliflower": [
+    "fried cauliflower",
+    "battered cauliflower",
+  ],
 };
 const itemAliases = BUSINESS_ITEM_ALIASES;
 const editDistance = (a: string, b: string) => {

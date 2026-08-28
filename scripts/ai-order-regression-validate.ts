@@ -355,6 +355,26 @@ async function main() {
       expectedModifier: "Ranch (2oz)",
     },
     {
+      key: "fried-mushrooms-item-alias",
+      items: [{ name: "fried mushrooms", quantity: 1 }],
+      expectedItems: ["Breaded Mushrooms"],
+    },
+    {
+      key: "battered-mushroom-item-alias",
+      items: [{ name: "battered mushroom", quantity: 1 }],
+      expectedItems: ["Breaded Mushrooms"],
+    },
+    {
+      key: "fried-cauliflower-item-alias",
+      items: [{ name: "fried cauliflower", quantity: 1 }],
+      expectedItems: ["Breaded Cauliflower"],
+    },
+    {
+      key: "battered-cauliflower-item-alias",
+      items: [{ name: "battered cauliflower", quantity: 1 }],
+      expectedItems: ["Breaded Cauliflower"],
+    },
+    {
       key: "buffalo-chicken-burger-build",
       items: [
         {
