@@ -405,7 +405,14 @@ export async function listKitchenOrders(business: OrderingBusiness, includeRecen
            ready_at, completed_at, cancelled_at, voided_at, voided_by, void_reason, pre_void_status, pre_void_payment_status, NOW() AS server_now
     FROM ordering_orders
     WHERE business = ${business}
-      AND (${includeRecent} OR status IN ('sent_to_kitchen', 'in_progress', 'ready'))
+      AND (${includeRecent} OR (
+        status IN ('sent_to_kitchen', 'in_progress', 'ready')
+        AND payment_status <> 'paid'
+        AND NOT EXISTS (
+          SELECT 1 FROM ordering_delivery_assignments delivery
+          WHERE delivery.order_id=ordering_orders.id AND delivery.status='DELIVERED'
+        )
+      ))
       AND (status IN ('sent_to_kitchen', 'in_progress', 'ready') OR COALESCE(completed_at, cancelled_at, updated_at) > NOW() - INTERVAL '8 hours')
     ORDER BY CASE status WHEN 'ready' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'sent_to_kitchen' THEN 3 ELSE 4 END,
              submitted_at, created_at

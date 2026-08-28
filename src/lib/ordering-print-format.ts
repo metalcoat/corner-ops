@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
 import { formatModifierIntensity } from "@/lib/ordering-modifier-intensity";
+import { kitchenPortionName } from "@/lib/ordering-line-format";
 
 export type PrintableModifier = { name: string; printOrder: number; header: boolean; print: boolean; group?: string };
 export type PrintableLine = { quantity: number; header: string; modifiers: PrintableModifier[]; family?: string; sequence?: number };
@@ -72,7 +73,7 @@ export async function snapshotAndFormatOrder(orderId: string, onlyItemIds?: stri
   const printable: PrintableLine[] = [];
   for (const row of rows) {
     const modifiers = await sql`SELECT COALESCE(NULLIF(option_print_name_snapshot,''),option_name_snapshot) name,group_name_snapshot,print_order_snapshot,header_modifier_snapshot,print_on_ticket,amount FROM ordering_order_item_modifiers WHERE order_item_id=${row.id}`;
-    printable.push({ quantity:Number(row.quantity),header:String(row.header),family:kitchenItemFamily(String(row.item_name_snapshot),String(row.category_name)),sequence:printable.length,modifiers:modifiers.map((modifier)=>({name:formatModifierIntensity(String(modifier.name),modifier.amount === "light" || modifier.amount === "heavy" ? modifier.amount : "normal"),group:String(modifier.group_name_snapshot),printOrder:Number(modifier.print_order_snapshot),header:Boolean(modifier.header_modifier_snapshot),print:Boolean(modifier.print_on_ticket)})) });
+    printable.push({ quantity:Number(row.quantity),header:kitchenPortionName(String(row.header)),family:kitchenItemFamily(String(row.item_name_snapshot),String(row.category_name)),sequence:printable.length,modifiers:modifiers.map((modifier)=>({name:formatModifierIntensity(String(modifier.name),modifier.amount === "light" || modifier.amount === "heavy" ? modifier.amount : "normal"),group:String(modifier.group_name_snapshot),printOrder:Number(modifier.print_order_snapshot),header:Boolean(modifier.header_modifier_snapshot),print:Boolean(modifier.print_on_ticket)})) });
   }
   return formatKitchenLines(printable);
 }

@@ -6,6 +6,7 @@ void (async () => {
   const { ensureOrderingMenuOverrideSchema } = await import("../src/lib/ordering-menu-overrides");
   const { ensureOrderingAccountSchema } = await import("../src/lib/ordering-account-schema");
   const { formatKitchenLines, snapshotAndFormatOrder, kitchenItemFamily } = await import("../src/lib/ordering-print-format");
+  const { kitchenPortionName } = await import("../src/lib/ordering-line-format");
   const { getSql } = await import("../src/lib/db");
   await ensureOrderingMenuOverrideSchema(); await ensureOrderingAccountSchema();
   const sql = getSql();
@@ -35,7 +36,9 @@ void (async () => {
     if(headers.join("|")!=="Jumbo Thin Pizza A|Regular Pizza B|30 Wings|Turkey Sub")throw new Error(`Kitchen item grouping failed: ${headers.join("|")}`);
     if(pizzaModifiers.join("|")!=="  BUFFALO SAUCE|  EXTRA SAUCE|  PEPPERONI|  MUSHROOMS|  PEPPERS|  ONIONS|  EXTRA CHEESE|  SAUSAGE")throw new Error(`Pizza make-line order failed: ${pizzaModifiers.join("|")}`);
     if(subModifiers.join("|")!=="  MAYONNAISE|  RUSSIAN|  OIL|  LETTUCE|  TOMATO|  ONION|  HOT PEPPERS")throw new Error(`Sub make-line order failed: ${subModifiers.join("|")}`);
-    console.log(JSON.stringify({posNameUnchanged:item.name,configuredPrintName:lines[0],descriptionInheritanceModel:true,channelDescriptionOverride:true,headerModifier:true,historicalSnapshotImmutable:true,sharedFormatter:true,kitchenItemGrouping:true,pizzaMakeLineOrder:true,subMakeLineOrder:true},null,2));
+    const portions=["Small French Fries (7oz)","Large French Fries (11oz)","Small Curly Fries (6oz)","Large Curly Fries (9oz)","Small Tater Tots (7oz)","Large Tater Tots (11oz)","Onion Rings (7oz)","Small Waffle Fries (6oz)","Large Waffle Fries (9oz)"];
+    if(portions.some(value=>kitchenPortionName(value.replace(/ \([^)]*\)$/,""))!==value))throw new Error("Kitchen portion labels failed.");
+    console.log(JSON.stringify({posNameUnchanged:item.name,configuredPrintName:lines[0],descriptionInheritanceModel:true,channelDescriptionOverride:true,headerModifier:true,historicalSnapshotImmutable:true,sharedFormatter:true,kitchenItemGrouping:true,kitchenPortionLabels:true,pizzaMakeLineOrder:true,subMakeLineOrder:true},null,2));
   } finally {
     await sql`DELETE FROM ordering_orders WHERE id=${orderId}`;
     await sql`DELETE FROM ordering_item_channel_overrides WHERE item_id=${item.id} AND channel='pos' AND updated_by='validation'`;

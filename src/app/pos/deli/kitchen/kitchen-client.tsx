@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PosPinGate, { type PosEmployeeSession, type PosSessionView } from "../../pos-pin-gate";
 import { usePosIdleLock } from "../../use-pos-idle-lock";
-import { formatOrderItemName, formatOrderModifier } from "@/lib/ordering-line-format";
+import { formatOrderItemName, formatOrderModifier, kitchenPortionName } from "@/lib/ordering-line-format";
 import type { PizzaToppingAmount, PizzaToppingPortion } from "@/lib/ordering-pizza-toppings";
 
 type KitchenStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -158,8 +158,7 @@ export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSecond
         </header>
         <div className="kitchenItems">
           {order.items.map((item) => <section key={item.id} className="kitchenItem">
-            <h2>{item.quantity}× {item.item_name_snapshot}</h2>
-            <h3>{formatOrderItemName(item.item_name_snapshot, item.variant_name_snapshot)}</h3>
+            <h2>{item.quantity}× {kitchenPortionName(formatOrderItemName(item.item_name_snapshot, item.variant_name_snapshot))}</h2>
             <ul>
               {item.modifiers.filter((modifier)=>modifier.print_on_ticket!==false).map((modifier, index) => <li className={modifier.selection_state === "removed" ? "removed" : modifier.pizza_topping_portion ? "pizzaTopping" : ""} key={`${modifier.group_name_snapshot}-${modifier.option_id}-${index}`}>{formatOrderModifier(modifier, "ticket")}</li>)}
               {item.combo_selections.map((selection) => <li key={`${selection.group_name_snapshot}-${selection.option_id}`}>{selection.option_name_snapshot}</li>)}

@@ -1,6 +1,19 @@
 import { formatPizzaTopping, type PizzaToppingAmount, type PizzaToppingPortion } from "@/lib/ordering-pizza-toppings";
 import { formatModifierIntensity } from "@/lib/ordering-modifier-intensity";
 
+const kitchenPortions: Record<string, string> = {
+  "small french fries": "7oz", "large french fries": "11oz",
+  "small curly fries": "6oz", "large curly fries": "9oz",
+  "small tater tots": "7oz", "large tater tots": "11oz",
+  "onion rings": "7oz", "small waffle fries": "6oz", "large waffle fries": "9oz",
+};
+
+export function kitchenPortionName(itemName: string) {
+  const key = itemName.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const portion = kitchenPortions[key];
+  return portion && !itemName.toLocaleLowerCase().includes(portion) ? `${itemName} (${portion})` : itemName;
+}
+
 export type OrderModifierPresentation = {
   option_name_snapshot: string;
   quantity: number;
