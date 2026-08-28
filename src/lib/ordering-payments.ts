@@ -18,6 +18,34 @@ function cents(value: number, label: string): number {
   return value;
 }
 
+export async function setCheckoutTip(input: {
+  orderId: string;
+  business: OrderingBusiness;
+  checkId?: string | null;
+  tipCents: number;
+  actor: OrderingActor;
+}) {
+  if (!Number.isSafeInteger(input.tipCents) || input.tipCents < 0)
+    throw new PaymentConflictError("Tip must be a non-negative amount in cents.");
+  await ensureOrderingAccountSchema();
+  return withTransaction(async () => {
+    const sql = getSql();
+    const order = (await sql`SELECT id,tip_cents,total_cents,paid_cents FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
+    if (!order) throw new PaymentConflictError("Order was not found.");
+    const delta = input.tipCents - Number(order.tip_cents);
+    if (input.checkId) {
+      const check = (await sql`SELECT id FROM ordering_checks WHERE id=${input.checkId} AND order_id=${input.orderId} FOR UPDATE`)[0];
+      if (!check) throw new PaymentConflictError("Check was not found.");
+      await sql`UPDATE ordering_checks SET total_cents=GREATEST(0,total_cents+${delta}),amount_due_cents=GREATEST(0,total_cents+${delta}-paid_cents),status=CASE WHEN total_cents+${delta}-paid_cents<=0 THEN 'paid' WHEN paid_cents>0 THEN 'partially_paid' ELSE 'open' END,updated_at=NOW() WHERE id=${input.checkId}`;
+    }
+    const total = Math.max(0, Number(order.total_cents) + delta);
+    const due = Math.max(0, total - Number(order.paid_cents));
+    await sql`UPDATE ordering_orders SET tip_cents=${input.tipCents},total_cents=${total},amount_due_cents=${due},payment_status=CASE WHEN ${due}=0 THEN 'paid' WHEN paid_cents>0 THEN 'partially_paid' ELSE 'unpaid' END,version=version+1,updated_at=NOW() WHERE id=${input.orderId}`;
+    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) SELECT ${randomUUID()},id,version,'tip_updated',${input.actor.type},${input.actor.id},${JSON.stringify({ tipCents: input.tipCents })}::jsonb FROM ordering_orders WHERE id=${input.orderId}`;
+    return checkoutState(input.orderId, input.business, input.checkId);
+  });
+}
+
 export async function checkoutState(orderId: string, business: OrderingBusiness, checkId?: string | null) {
   await ensureOrderingAccountSchema();
   const sql = getSql();

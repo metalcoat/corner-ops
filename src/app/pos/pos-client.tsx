@@ -135,7 +135,7 @@ type CheckoutState = {
   }>;
 };
 type HelcimStatus = { checkoutEnabled: boolean; apiTokenConfigured: boolean; localDevelopment?: boolean };
-type PosStationProfile = { name:string;station_key:string;station_mode:"payment"|"order_taker";receipt_printer_id?:string|null };
+type PosStationProfile = { name:string;station_key:string;station_mode:"payment"|"order_taker";receipt_printer_id?:string|null;payment_terminal_id?:string|null };
 type PayableCheck = {
   id: string;
   display_sequence: number;
@@ -573,7 +573,6 @@ export default function PosClient({
   const [payableChecks, setPayableChecks] = useState<PayableCheck[]>([]);
   const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
   const [cashTender, setCashTender] = useState("");
-  const [cardTender, setCardTender] = useState("");
   const [receiptPrinters, setReceiptPrinters] = useState<
     Array<{
       id: string;
@@ -587,6 +586,9 @@ export default function PosClient({
     null,
   );
   const [giftCardNumber, setGiftCardNumber] = useState("");
+  const giftCardInputRef = useRef<HTMLInputElement>(null);
+  const [tipPromptOpen, setTipPromptOpen] = useState(false);
+  const [customTip, setCustomTip] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [helcimOpen, setHelcimOpen] = useState(false);
   const [helcimStatus, setHelcimStatus] = useState<HelcimStatus | null>(null);
@@ -2244,6 +2246,7 @@ export default function PosClient({
     setPayableChecks(checksPayload.checks);
     setSelectedCheckId(checkId);
     setCheckoutState(payload);
+    setCashTender((Number(payload.check?.amount_due_cents ?? payload.order.amount_due_cents) / 100).toFixed(2));
     setCheckoutOpen(true);
   }
 
@@ -2272,6 +2275,7 @@ export default function PosClient({
     }
     setSelectedCheckId(checkId);
     setCheckoutState(payload);
+    setCashTender((Number(payload.check?.amount_due_cents ?? payload.order.amount_due_cents) / 100).toFixed(2));
   }
 
   async function splitOne(checkId: string, orderItemId: string) {
@@ -2339,8 +2343,8 @@ export default function PosClient({
       checkoutState.check?.amount_due_cents ??
         checkoutState.order.amount_due_cents,
     );
-    const amountTenderedCents =
-      tenderType === "cash" ? Math.round(Number(cashTender) * 100) : due;
+    const enteredCents = Math.round(Number(cashTender) * 100);
+    const amountTenderedCents = tenderType === "cash" ? enteredCents : Math.min(due, enteredCents);
     if (
       !Number.isSafeInteger(amountTenderedCents) ||
       amountTenderedCents <= 0
@@ -2417,7 +2421,7 @@ export default function PosClient({
     const draft = savedDraft || activeTab;
     if (!draft || !checkoutState || paymentBusy) return;
     const due = Number(checkoutState.check?.amount_due_cents ?? checkoutState.order.amount_due_cents);
-    const amountTenderedCents = cardTender ? Math.round(Number(cardTender) * 100) : due;
+    const amountTenderedCents = cashTender ? Math.round(Number(cashTender) * 100) : due;
     if (!Number.isSafeInteger(amountTenderedCents) || amountTenderedCents <= 0 || amountTenderedCents > due) {
       setCheckoutError("Enter a valid test-card amount no greater than the balance due.");
       return;
@@ -2433,7 +2437,7 @@ export default function PosClient({
       const payload = await response.json() as CheckoutState & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Test card could not be committed.");
       setCheckoutState(payload);
-      setCardTender("");
+      setCashTender((Number(payload.check?.amount_due_cents ?? payload.order.amount_due_cents) / 100).toFixed(2));
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : "Test card could not be committed.");
     } finally {
@@ -2447,15 +2451,16 @@ export default function PosClient({
     catch(error){setCheckoutError(error instanceof Error?error.message:"Could not send this check to the payment station.")}finally{setPaymentBusy(false)}
   }
 
-  async function startHelcimPayment() {
+  async function startHelcimPayment(requestedOverride?: number, stateOverride?: CheckoutState) {
     const draft = savedDraft || activeTab;
-    if (!draft || !checkoutState || paymentBusy) return;
+    const activeCheckout = stateOverride || checkoutState;
+    if (!draft || !activeCheckout || paymentBusy) return;
     setPaymentBusy(true);
     setHelcimOpen(true);
     setCheckoutError("");
     try {
-      const due = Number(checkoutState.check?.amount_due_cents ?? checkoutState.order.amount_due_cents);
-      const requestedCents = cardTender.trim() ? Math.round(Number(cardTender) * 100) : due;
+      const due = Number(activeCheckout.check?.amount_due_cents ?? activeCheckout.order.amount_due_cents);
+      const requestedCents = requestedOverride ?? (cashTender.trim() ? Math.round(Number(cashTender) * 100) : due);
       if (!Number.isSafeInteger(requestedCents) || requestedCents <= 0 || requestedCents > due)
         throw new Error("Enter a card amount between $0.01 and the remaining balance.");
       if (!window.appendHelcimPayIframe) {
@@ -2572,7 +2577,7 @@ export default function PosClient({
         window.appendHelcimPayIframe(checkoutToken);
       });
       setCheckoutState(result);
-      setCardTender("");
+      setCashTender((Number(result.check?.amount_due_cents ?? result.order.amount_due_cents) / 100).toFixed(2));
       setPayableChecks((checks) =>
         checks.map((check) =>
           check.id === selectedCheckId && result.check
@@ -2589,6 +2594,48 @@ export default function PosClient({
       setHelcimOpen(false);
       setPaymentBusy(false);
     }
+  }
+
+  async function applyTipAndStartCard(tipCents: number) {
+    const draft = savedDraft || activeTab;
+    if (!draft || paymentBusy) return;
+    setTipPromptOpen(false);
+    const enteredCents = Math.round(Number(cashTender) * 100);
+    setPaymentBusy(true);
+    setCheckoutError("");
+    try {
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ business, action: "set_tip", checkId: selectedCheckId, tipCents }),
+      });
+      const payload = await response.json() as CheckoutState & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Tip could not be added.");
+      setCheckoutState(payload);
+      const due = Number(payload.check?.amount_due_cents ?? payload.order.amount_due_cents);
+      const cardAmount = Math.min(due, enteredCents + tipCents);
+      setCashTender((cardAmount / 100).toFixed(2));
+      setPaymentBusy(false);
+      setCustomTip("");
+      window.setTimeout(() => void startHelcimPayment(cardAmount, payload), 0);
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "Tip could not be added.");
+      setPaymentBusy(false);
+      return;
+    }
+  }
+
+  function chooseCredit() {
+    const enteredCents = Math.round(Number(cashTender) * 100);
+    if (!Number.isSafeInteger(enteredCents) || enteredCents <= 0 || enteredCents > checkoutDueCents) {
+      setCheckoutError("Enter a credit amount between $0.01 and the remaining balance.");
+      return;
+    }
+    if (stationProfile?.payment_terminal_id) {
+      void startHelcimPayment();
+      return;
+    }
+    setTipPromptOpen(true);
   }
 
   async function paymentOperation(
@@ -4051,34 +4098,12 @@ export default function PosClient({
                     </button>
                   </section>
                 )}
-                {receiptPrinters.length > 0 && (
-                  <label>
-                    Till / receipt printer
-                    <select
-                      value={receiptPrinterId}
-                      onChange={(event) => {
-                        setReceiptPrinterId(event.target.value);
-                        localStorage.setItem(
-                          "corner-ops-receipt-printer",
-                          event.target.value,
-                        );
-                      }}
-                    >
-                      {receiptPrinters.map((printer) => (
-                        <option key={printer.id} value={printer.id}>
-                          {printer.tillKey || printer.name}
-                          {printer.cashDrawerEnabled ? " · drawer" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
                 <div className="posCheckoutPaymentGrid">
                   <section
                     className="posCashPanel"
                     aria-labelledby="cash-panel-title"
                   >
-                    <h3 id="cash-panel-title">Cash received</h3>
+                    <h3 id="cash-panel-title">Payment amount</h3>
                     <output aria-live="polite">
                       {cashTender
                         ? money(Math.round(Number(cashTender) * 100) || 0)
@@ -4086,7 +4111,7 @@ export default function PosClient({
                     </output>
                     <div
                       className="posCashQuick"
-                      aria-label="Quick cash amounts"
+                      aria-label="Quick payment amounts"
                     >
                       <button
                         type="button"
@@ -4106,7 +4131,7 @@ export default function PosClient({
                     </div>
                     <div
                       className="posCashNumpad"
-                      aria-label="Cash amount keypad"
+                      aria-label="Payment amount keypad"
                     >
                       {[
                         "1",
@@ -4131,7 +4156,7 @@ export default function PosClient({
                             key === "backspace"
                               ? "Backspace"
                               : key === "clear"
-                                ? "Clear cash amount"
+                                ? "Clear payment amount"
                                 : key
                           }
                           onClick={() => cashNumpad(key)}
@@ -4144,52 +4169,16 @@ export default function PosClient({
                         </button>
                       ))}
                     </div>
-                    <button
-                      className="posTakeCash"
-                      type="button"
-                      disabled={paymentBusy || !cashTender || stationProfile?.station_mode === "order_taker"}
-                      onClick={() => void commitPayment("cash")}
-                    >
-                      {paymentBusy ? "PROCESSING…" : "TAKE CASH"}
-                    </button>
                   </section>
                   <section
                     className="posOtherTenders"
                     aria-labelledby="other-tenders-title"
                   >
-                    <h3 id="other-tenders-title">Other payment</h3>
-                    <label>
-                      Card amount
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        min="0.01"
-                        step="0.01"
-                        max={(checkoutDueCents / 100).toFixed(2)}
-                        placeholder={`Remaining ${money(checkoutDueCents)}`}
-                        value={cardTender}
-                        onChange={(event) => setCardTender(event.target.value)}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      disabled={paymentBusy || !helcimStatus?.checkoutEnabled || stationProfile?.station_mode === "order_taker"}
-                      onClick={() => void startHelcimPayment()}
-                    >
-                      {helcimStatus?.checkoutEnabled
-                        ? "CREDIT / DEBIT · HELCIM"
-                        : helcimStatus
-                          ? "HELCIM SETUP REQUIRED"
-                          : "PAYMENT ACCESS UNAVAILABLE"}
-                    </button>
-                    {helcimStatus?.localDevelopment && canManagePayments && (
-                      <button type="button" disabled={paymentBusy || stationProfile?.station_mode === "order_taker"} onClick={() => void commitTestCard()}>
-                        {paymentBusy ? "PROCESSING…" : "APPROVE TEST CARD"}
-                      </button>
-                    )}
+                    <h3 id="other-tenders-title">Gift card</h3>
                     <label>
                       Gift card number
                       <input
+                        ref={giftCardInputRef}
                         data-barcode-context="gift-card"
                         autoComplete="off"
                         value={giftCardNumber}
@@ -4198,19 +4187,36 @@ export default function PosClient({
                         }
                       />
                     </label>
-                    <button
-                      type="button"
-                      disabled={
-                        paymentBusy ||
-                        stationProfile?.station_mode === "order_taker" ||
-                        !validGiftCardInput(giftCardNumber)
-                      }
-                      onClick={() => void commitPayment("gift_card")}
-                    >
-                      APPLY GIFT CARD
-                    </button>
+                    <p>The card will apply up to the selected amount or its available balance, whichever is less.</p>
                   </section>
                 </div>
+                <div className="posTenderButtons" aria-label="Choose payment type">
+                  <button type="button" disabled={paymentBusy || !cashTender || stationProfile?.station_mode === "order_taker"} onClick={() => void commitPayment("cash")}>CASH</button>
+                  <button type="button" disabled={paymentBusy || !helcimStatus?.checkoutEnabled || stationProfile?.station_mode === "order_taker"} onClick={chooseCredit}>
+                    {helcimStatus?.checkoutEnabled ? "CREDIT" : "CREDIT SETUP REQUIRED"}
+                  </button>
+                  <button type="button" disabled={paymentBusy || stationProfile?.station_mode === "order_taker"} onClick={() => validGiftCardInput(giftCardNumber) ? void commitPayment("gift_card") : giftCardInputRef.current?.focus()}>GIFT CARD</button>
+                </div>
+                {helcimStatus?.localDevelopment && canManagePayments && (
+                  <button type="button" disabled={paymentBusy || stationProfile?.station_mode === "order_taker"} onClick={() => void commitTestCard()}>
+                    {paymentBusy ? "PROCESSING…" : "APPROVE TEST CARD"}
+                  </button>
+                )}
+                {tipPromptOpen && (
+                  <div className="posChangeBackdrop">
+                    <section className="posTipWindow" role="dialog" aria-modal="true" aria-labelledby="tip-title">
+                      <small>MANUAL CARD ENTRY</small>
+                      <h2 id="tip-title">Add a tip?</h2>
+                      <div className="posTipChoices">
+                        {[15,18,20].map(percent => <button type="button" key={percent} onClick={() => void applyTipAndStartCard(Math.round(checkoutDueCents * percent / 100))}>{percent}%<span>{money(Math.round(checkoutDueCents * percent / 100))}</span></button>)}
+                        <button type="button" onClick={() => void applyTipAndStartCard(0)}>NO TIP</button>
+                      </div>
+                      <label>Custom tip<input autoFocus type="number" inputMode="decimal" min="0" step="0.01" value={customTip} onChange={event=>setCustomTip(event.target.value)}/></label>
+                      <button type="button" disabled={!customTip || Number(customTip)<0} onClick={() => void applyTipAndStartCard(Math.round(Number(customTip)*100))}>ADD CUSTOM TIP</button>
+                      <button type="button" onClick={() => setTipPromptOpen(false)}>CANCEL</button>
+                    </section>
+                  </div>
+                )}
               </>
             )}
             {checkoutState?.order.payment_status === "paid" && (
@@ -4429,6 +4435,19 @@ export default function PosClient({
                 </fieldset>
               )}
 
+              {configuringItem.modifiers
+                .filter((group) => group.presentationBehavior === "pizza_topping" && modifierGroupVisible(group))
+                .map((group) => (
+                  <PizzaToppingSelector
+                    key={group.id}
+                    group={group}
+                    variant={selectedVariant}
+                    selections={pizzaToppings}
+                    onChange={setPizzaToppings}
+                    interaction="portion_first"
+                  />
+                ))}
+
               {configuringItem.modifiers.some(
                 (group) => group.presentationContext === "combo_trigger",
               ) && (
@@ -4480,22 +4499,12 @@ export default function PosClient({
               )}
 
               {configuringItem.modifiers
+                .filter((group) => group.presentationBehavior !== "pizza_topping")
                 .filter(modifierGroupVisible)
                 .toSorted(
                   (left, right) => left.componentOrder - right.componentOrder,
                 )
                 .map((group) => {
-                  if (group.presentationBehavior === "pizza_topping")
-                    return (
-                      <PizzaToppingSelector
-                        key={group.id}
-                        group={group}
-                        variant={selectedVariant}
-                        selections={pizzaToppings}
-                        onChange={setPizzaToppings}
-                        interaction="portion_first"
-                      />
-                    );
                   const selected = modifierSelections[group.id] || [];
                   const valid = selectionsValid(group, selected);
                   return (
