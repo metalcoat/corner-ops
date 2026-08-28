@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PosPinGate, { type PosEmployeeSession, type PosSessionView } from "../../pos-pin-gate";
 import { usePosIdleLock } from "../../use-pos-idle-lock";
-import { comparePizzaKitchenModifiers, formatOrderItemName, formatOrderModifier, hasSplitPizzaToppings, kitchenPortionName, pizzaToppingColumns } from "@/lib/ordering-line-format";
+import { formatOrderModifier, hasSplitPizzaToppings, kitchenModifierOrder, kitchenPortionName, pizzaToppingColumns } from "@/lib/ordering-line-format";
 import type { PizzaToppingAmount, PizzaToppingPortion } from "@/lib/ordering-pizza-toppings";
 
 type KitchenStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -18,10 +18,13 @@ type KitchenModifier = {
   amount?: "light"|"normal"|"heavy";
   print_on_ticket?: boolean;
   print_order_snapshot?: number;
+  header_modifier_snapshot?: boolean;
 };
 type KitchenItem = {
   id: string;
   item_name_snapshot: string;
+  item_print_name_snapshot?: string;
+  category_name?: string;
   variant_name_snapshot: string;
   quantity: number;
   line_total_cents: number;
@@ -158,19 +161,23 @@ export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSecond
           <div><b>{serviceLabels[order.service_type]}</b><time>{elapsed(order.submitted_at, order.server_now, tick)}</time></div>
         </header>
         <div className="kitchenItems">
-          {order.items.map((item) => <section key={item.id} className="kitchenItem">
-            <h2>{item.quantity}× {kitchenPortionName(formatOrderItemName(item.item_name_snapshot, item.variant_name_snapshot))}</h2>
+          {order.items.map((item) => {
+            const orderedModifiers=item.modifiers.filter(modifier=>modifier.print_on_ticket!==false).toSorted((left,right)=>kitchenModifierOrder(item,left)-kitchenModifierOrder(item,right)||left.option_name_snapshot.localeCompare(right.option_name_snapshot));
+            const headerModifiers=orderedModifiers.filter(modifier=>modifier.header_modifier_snapshot).map(modifier=>formatOrderModifier(modifier,"ticket"));
+            const itemHeader=kitchenPortionName(item.item_print_name_snapshot||item.variant_name_snapshot||item.item_name_snapshot);
+            return <section key={item.id} className="kitchenItem">
+            <h2>{item.quantity}× {itemHeader}{headerModifiers.length ? ` - ${headerModifiers.join(" - ")}` : ""}</h2>
             {hasSplitPizzaToppings(item.modifiers) ? <>
               <div className="kitchenPizzaColumns" aria-label="Pizza toppings by portion">
                 {(["left_half","whole","right_half"] as const).map(portion => <section key={portion}><h4>{portion === "left_half" ? "LEFT" : portion === "right_half" ? "RIGHT" : "WHOLE"}</h4>{pizzaToppingColumns(item.modifiers)[portion].length ? <ul>{pizzaToppingColumns(item.modifiers)[portion].map((name,index)=><li key={`${name}-${index}`}>{name}</li>)}</ul> : <span>—</span>}</section>)}
               </div>
-              <ul>{item.modifiers.filter(modifier=>modifier.print_on_ticket!==false&&!modifier.pizza_topping_portion).map((modifier,index)=><li className={modifier.selection_state === "removed" ? "removed" : ""} key={`${modifier.group_name_snapshot}-${modifier.option_id}-${index}`}>{formatOrderModifier(modifier,"ticket")}</li>)}{item.combo_selections.map((selection) => <li key={`${selection.group_name_snapshot}-${selection.option_id}`}>{selection.option_name_snapshot}</li>)}</ul>
+              <ul>{orderedModifiers.filter(modifier=>!modifier.header_modifier_snapshot&&!modifier.pizza_topping_portion).map((modifier,index)=><li className={modifier.selection_state === "removed" ? "removed" : ""} key={`${modifier.group_name_snapshot}-${modifier.option_id}-${index}`}>{formatOrderModifier(modifier,"ticket")}</li>)}{item.combo_selections.map((selection) => <li key={`${selection.group_name_snapshot}-${selection.option_id}`}>{selection.option_name_snapshot}</li>)}</ul>
             </> : <ul>
-              {item.modifiers.filter((modifier)=>modifier.print_on_ticket!==false).toSorted(comparePizzaKitchenModifiers).map((modifier, index) => <li className={modifier.selection_state === "removed" ? "removed" : modifier.pizza_topping_portion ? "pizzaTopping" : ""} key={`${modifier.group_name_snapshot}-${modifier.option_id}-${index}`}>{formatOrderModifier(modifier, "ticket")}</li>)}
+              {orderedModifiers.filter(modifier=>!modifier.header_modifier_snapshot).map((modifier, index) => <li className={modifier.selection_state === "removed" ? "removed" : modifier.pizza_topping_portion ? "pizzaTopping" : ""} key={`${modifier.group_name_snapshot}-${modifier.option_id}-${index}`}>{formatOrderModifier(modifier, "ticket")}</li>)}
               {item.combo_selections.map((selection) => <li key={`${selection.group_name_snapshot}-${selection.option_id}`}>{selection.option_name_snapshot}</li>)}
             </ul>}
             {item.special_instructions && <p className="kitchenNote">NOTE: {item.special_instructions}</p>}
-          </section>)}
+          </section>})}
         </div>
         {order.special_instructions && <p className="kitchenOrderNote">ORDER NOTE: {order.special_instructions}</p>}
         <footer>

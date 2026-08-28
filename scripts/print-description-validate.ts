@@ -6,7 +6,7 @@ void (async () => {
   const { ensureOrderingMenuOverrideSchema } = await import("../src/lib/ordering-menu-overrides");
   const { ensureOrderingAccountSchema } = await import("../src/lib/ordering-account-schema");
   const { formatKitchenLines, snapshotAndFormatOrder, kitchenItemFamily } = await import("../src/lib/ordering-print-format");
-  const { kitchenPortionName } = await import("../src/lib/ordering-line-format");
+  const { compareKitchenItems, kitchenPortionName } = await import("../src/lib/ordering-line-format");
   const { getSql } = await import("../src/lib/db");
   await ensureOrderingMenuOverrideSchema(); await ensureOrderingAccountSchema();
   const sql = getSql();
@@ -34,6 +34,8 @@ void (async () => {
     const subModifiers=workflow.slice(workflow.indexOf("Turkey Sub")+1).filter(value=>value.startsWith("  "));
     if(lines[0]!=="Small Fries (7oz)"||snapshot!=="Small Fries (7oz)"||headerExample[0]!==`Jumbo Thin 16" - Dark Cooked`||headerExample[1]!=="  PEPPERONI")throw new Error("Print configuration acceptance failed.");
     if(headers.join("|")!=="Jumbo Thin Pizza A|Regular Pizza B|30 Wings|Turkey Sub")throw new Error(`Kitchen item grouping failed: ${headers.join("|")}`);
+    const kdsItems=[{item_name_snapshot:"Turkey Sub",category_name:"Subs",sort_order:0},{item_name_snapshot:"20 Wings",category_name:"Pizza and Wings",sort_order:1},{item_name_snapshot:"Pizza",category_name:"Pizza and Wings",sort_order:2},{item_name_snapshot:"10 Wings",category_name:"Pizza and Wings",sort_order:3},{item_name_snapshot:"Breakfast Pizza",category_name:"Breakfast",sort_order:4}].sort(compareKitchenItems);
+    if(kdsItems.map(item=>item.item_name_snapshot).join("|")!=="Pizza|Breakfast Pizza|20 Wings|10 Wings|Turkey Sub")throw new Error(`KDS item grouping failed: ${kdsItems.map(item=>item.item_name_snapshot).join("|")}`);
     if(pizzaModifiers.join("|")!=="  BUFFALO SAUCE|  EXTRA SAUCE|  PEPPERONI|  MUSHROOMS|  PEPPERS|  ONIONS|  EXTRA CHEESE|  SAUSAGE")throw new Error(`Pizza make-line order failed: ${pizzaModifiers.join("|")}`);
     if(subModifiers.join("|")!=="  MAYONNAISE|  RUSSIAN|  OIL|  LETTUCE|  TOMATO|  ONION|  HOT PEPPERS")throw new Error(`Sub make-line order failed: ${subModifiers.join("|")}`);
     const splitPizza=formatKitchenLines([{quantity:1,header:"Split Pizza",family:"00-pizza",modifiers:[

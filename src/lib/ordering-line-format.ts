@@ -27,6 +27,30 @@ export type OrderModifierPresentation = {
 
 const kitchenKey = (value: string) => value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
+export function kitchenItemFamily(itemName: string, categoryName = "") {
+  const item = kitchenKey(itemName);
+  const category = kitchenKey(categoryName);
+  if (/^\d\d-/.test(categoryName)) return categoryName;
+  if (item.includes("pizza") && !item.startsWith("pizza log")) return "00-pizza";
+  if (item.includes("wing")) return "10-wings";
+  if (category.includes("pizza and wing")) return "15-pizza-sides";
+  if (category.includes("sub") || item.includes("big boss")) return "20-subs";
+  if (category.includes("burger") || category.includes("sandwich") || category.includes("tender") || category.includes("kid")) return "30-grill";
+  if (category.includes("appetizer") || category.includes("side dish")) return "40-apps-sides";
+  if (category.includes("meal") || category.includes("fish") || category.includes("italian") || category.includes("mexican")) return "50-meals";
+  if (category.includes("salad")) return "60-salads";
+  if (category.includes("drink") || category.includes("soda") || category.includes("liter") || category.includes("chip") || category.includes("arizona")) return "90-drinks";
+  return `70-${category || "other"}`;
+}
+
+export function compareKitchenItems(
+  left: { item_name_snapshot: string; category_name?: string; sort_order?: number },
+  right: { item_name_snapshot: string; category_name?: string; sort_order?: number },
+) {
+  return kitchenItemFamily(left.item_name_snapshot, left.category_name).localeCompare(kitchenItemFamily(right.item_name_snapshot, right.category_name))
+    || Number(left.sort_order || 0) - Number(right.sort_order || 0);
+}
+
 export function pizzaKitchenModifierOrder(modifier: Pick<OrderModifierPresentation, "option_name_snapshot" | "print_order_snapshot"> & { group_name_snapshot?: string }) {
   const configured = Number(modifier.print_order_snapshot || 0);
   if (configured) return configured;
@@ -41,6 +65,23 @@ export function pizzaKitchenModifierOrder(modifier: Pick<OrderModifierPresentati
   if (name.includes("extra cheese")) return 900;
   if (name.includes("sausage")) return 910;
   return 800;
+}
+
+export function kitchenModifierOrder(
+  item: { item_name_snapshot: string; category_name?: string },
+  modifier: Pick<OrderModifierPresentation, "option_name_snapshot" | "print_order_snapshot"> & { group_name_snapshot?: string },
+) {
+  const configured = Number(modifier.print_order_snapshot || 0);
+  if (configured) return configured;
+  const family = kitchenItemFamily(item.item_name_snapshot, item.category_name);
+  if (family === "00-pizza") return pizzaKitchenModifierOrder(modifier);
+  if (family === "20-subs") {
+    const name = kitchenKey(modifier.option_name_snapshot);
+    const names = ["mayonnaise", "mayo", "russian", "oil", "lettuce", "tomato", "onion", "hot pepper", "ranch", "bacon", "a1 sauce", "parm shaker", "oregano shaker", "jalapeno", "pickle", "mustard", "mushroom", "black olive", "not toasted", "extra sauce", "double cheese", "double meat"];
+    const rank = names.findIndex((candidate) => name.includes(candidate));
+    if (rank >= 0) return (rank + 1) * 10;
+  }
+  return configured;
 }
 
 export function comparePizzaKitchenModifiers(left: OrderModifierPresentation & { group_name_snapshot?: string }, right: OrderModifierPresentation & { group_name_snapshot?: string }) {

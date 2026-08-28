@@ -1,37 +1,14 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
 import { formatModifierIntensity } from "@/lib/ordering-modifier-intensity";
-import { kitchenPortionName, pizzaKitchenModifierOrder } from "@/lib/ordering-line-format";
+import { kitchenItemFamily, kitchenModifierOrder as sharedKitchenModifierOrder, kitchenPortionName } from "@/lib/ordering-line-format";
+export { kitchenItemFamily } from "@/lib/ordering-line-format";
 
 export type PrintableModifier = { name: string; printOrder: number; header: boolean; print: boolean; group?: string; pizzaPortion?: "left_half"|"whole"|"right_half"|null; pizzaAmount?: string|null };
 export type PrintableLine = { quantity: number; header: string; modifiers: PrintableModifier[]; family?: string; sequence?: number };
 
-const key=(value:string)=>value.toLocaleLowerCase().replace(/[^a-z0-9]+/g," ").trim();
-export function kitchenItemFamily(itemName:string,categoryName=""){
-  const item=key(itemName),category=key(categoryName);
-  if(category.includes("sub")||item.includes("big boss"))return"20-subs";
-  if(item.includes("pizza")&&!item.startsWith("pizza log"))return"00-pizza";
-  if(item.includes("wing"))return"10-wings";
-  if(category.includes("pizza and wing"))return"15-pizza-sides";
-  if(category.includes("burger")||category.includes("sandwich")||category.includes("tender")||category.includes("kid"))return"30-grill";
-  if(category.includes("appetizer")||category.includes("side dish"))return"40-apps-sides";
-  if(category.includes("meal")||category.includes("fish")||category.includes("italian")||category.includes("mexican"))return"50-meals";
-  if(category.includes("salad"))return"60-salads";
-  if(category.includes("drink")||category.includes("soda")||category.includes("liter")||category.includes("chip")||category.includes("arizona"))return"90-drinks";
-  return`70-${category||"other"}`;
-}
-function namedRank(name:string,names:string[]){const value=key(name);for(let index=0;index<names.length;index++)if(value.includes(names[index]))return(index+1)*10;return undefined}
 export function kitchenModifierOrder(line:PrintableLine,modifier:PrintableModifier){
-  const family=line.family||kitchenItemFamily(line.header),name=key(modifier.name),group=key(modifier.group||"");
-  if(Number.isFinite(modifier.printOrder)&&modifier.printOrder!==0)return modifier.printOrder;
-  if(family==="00-pizza"){
-    return pizzaKitchenModifierOrder({option_name_snapshot:modifier.name,print_order_snapshot:modifier.printOrder,group_name_snapshot:modifier.group});
-  }
-  if(family==="20-subs"){
-    const rank=namedRank(name,["mayonnaise","mayo","russian","oil","lettuce","tomato","onion","hot pepper","ranch","bacon","a1 sauce","parm shaker","oregano shaker","jalapeno","pickle","mustard","mushroom","black olive","not toasted","extra sauce","double cheese","double meat"]);
-    if(rank!==undefined)return rank;
-  }
-  return modifier.printOrder;
+  return sharedKitchenModifierOrder({item_name_snapshot:line.header,category_name:line.family},{option_name_snapshot:modifier.name,print_order_snapshot:modifier.printOrder,group_name_snapshot:modifier.group});
 }
 
 function wrapCell(value:string,width:number){const words=value.split(/\s+/),rows:string[]=[];let row="";for(const word of words){if(!row){row=word.slice(0,width);continue}if(`${row} ${word}`.length<=width)row+=` ${word}`;else{rows.push(row);row=word.slice(0,width)}}if(row)rows.push(row);return rows.length?rows:[""]}

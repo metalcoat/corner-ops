@@ -16,6 +16,7 @@ import { assertMenuTargetsAvailable } from "@/lib/ordering-menu-availability";
 import { applyPromotionsToOrder } from "@/lib/ordering-promotions";
 import { earnLoyaltyForOrder, finalizeLoyaltyRedemptions } from "@/lib/ordering-loyalty";
 import { kitchenTicketTimingLines } from "@/lib/ordering-kitchen-ticket";
+import { compareKitchenItems } from "@/lib/ordering-line-format";
 import { ensureRestaurantPlatformSchema } from "@/lib/restaurant-platform";
 
 export type StoredOrderStatus = "draft" | "confirmed" | "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -420,16 +421,21 @@ export async function listKitchenOrders(business: OrderingBusiness, includeRecen
   const result = [];
   for (const order of rows) {
     const items = await sql`
-      SELECT id, item_id, item_name_snapshot, variant_id, variant_name_snapshot, variant_sku_snapshot,
+      SELECT line.id, line.item_id, line.item_name_snapshot, line.item_print_name_snapshot, line.variant_id, line.variant_name_snapshot, line.variant_sku_snapshot,
              quantity-cancelled_quantity quantity, cancelled_quantity, unit_price_cents, modifier_total_cents, combo_name_snapshot, combo_total_cents,
-             line_total_cents, special_instructions, sort_order
-      FROM ordering_order_items WHERE order_id = ${order.id} AND quantity>cancelled_quantity ORDER BY sort_order, created_at, id
+             line_total_cents, special_instructions, line.sort_order,COALESCE(category.display_name,category.name,'') category_name
+      FROM ordering_order_items line
+      LEFT JOIN ordering_menu_items menu ON menu.id=line.item_id
+      LEFT JOIN ordering_menu_categories category ON category.id=menu.category_id
+      WHERE line.order_id = ${order.id} AND line.quantity>line.cancelled_quantity
+      ORDER BY line.sort_order, line.created_at, line.id
     `;
+    items.sort((left,right)=>compareKitchenItems(left as {item_name_snapshot:string;category_name?:string;sort_order?:number},right as {item_name_snapshot:string;category_name?:string;sort_order?:number}));
     for (const item of items) {
       item.modifiers = await sql`
         SELECT group_id, option_id, group_name_snapshot, option_name_snapshot, quantity,
                unit_price_delta_cents, selection_state, pizza_topping_portion, pizza_topping_amount,
-               amount,was_default_selected_snapshot,default_amount_snapshot,print_on_ticket,print_order_snapshot
+               amount,was_default_selected_snapshot,default_amount_snapshot,print_on_ticket,print_order_snapshot,header_modifier_snapshot
         FROM ordering_order_item_modifiers WHERE order_item_id = ${item.id}
         ORDER BY created_at, id
       `;
