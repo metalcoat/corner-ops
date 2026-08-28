@@ -7,7 +7,7 @@ const rollback="rollback:driver-cash";
 async function main(){
   const[{getSql,withTransaction},{ensureDriverDeliverySchema},{driverCashDashboard,postDriverCashSettlement}]=await Promise.all([import("../src/lib/db"),import("../src/lib/ordering-driver-delivery"),import("../src/lib/ordering-driver-cash")]);
   await ensureDriverDeliverySchema();
-  const actor={business:"Corner Deli",employeeId:"driver-cash-manager",name:"Cash Manager",manager:true,driver:false} as any;
+  const actor={business:"Corner Deli",employeeId:"driver-cash-cashier",name:"Cashier Employee",manager:false,driver:false} as any;
   const result:Record<string,boolean>={};
   try{await withTransaction(async()=>{
     const sql=getSql(),driverId=randomUUID(),orderId=randomUUID(),deliveryId=randomUUID(),suffix=randomUUID().slice(0,6);
@@ -17,9 +17,10 @@ async function main(){
     const dashboard=await driverCashDashboard(actor);assert.ok(dashboard.orders.some(row=>row.order_id===orderId));result.eligibleOrderListed=true;
     const posted=await postDriverCashSettlement(actor,{driverId,orderIds:[orderId],turnedInCashCents:2600,businessDate:"2026-08-25"});
     assert.equal(posted.expectedCashCents,2500);assert.equal(posted.overShortCents,100);
-    const order=(await sql`SELECT payment_status,amount_due_cents FROM ordering_orders WHERE id=${orderId}`)[0],settlement=(await sql`SELECT status,order_count,expected_cash_cents,turned_in_cash_cents,over_short_cents FROM ordering_driver_cash_settlements WHERE id=${posted.id}`)[0];
+    const order=(await sql`SELECT payment_status,amount_due_cents FROM ordering_orders WHERE id=${orderId}`)[0],settlement=(await sql`SELECT status,order_count,expected_cash_cents,turned_in_cash_cents,over_short_cents,created_by,approved_by FROM ordering_driver_cash_settlements WHERE id=${posted.id}`)[0];
     assert.equal(order.payment_status,"paid");assert.equal(Number(order.amount_due_cents),0);assert.deepEqual([settlement.status,Number(settlement.order_count),Number(settlement.expected_cash_cents),Number(settlement.turned_in_cash_cents),Number(settlement.over_short_cents)],["posted",1,2500,2600,100]);
-    result.bulkSettlementPostsPayments=true;result.overShortAudited=true;
+    assert.equal(settlement.created_by,actor.employeeId);assert.equal(settlement.approved_by,actor.employeeId);
+    result.anyLoggedInEmployeeCanSettle=true;result.loggedInEmployeeAudited=true;result.bulkSettlementPostsPayments=true;result.overShortAudited=true;
     throw new Error(rollback);
   })}catch(error){if(!(error instanceof Error)||error.message!==rollback)throw error}
   console.log(JSON.stringify(result,null,2));

@@ -87,7 +87,7 @@ export default function DriverCashClient() {
         <h1>Driver bulk cash-out</h1>
         <p>
           Select each delivered cash order once. The system totals the orders
-          and posts one audited end-of-shift settlement.
+          and posts one audited end-of-shift settlement under the employee currently signed into this POS.
         </p>
       </header>
       {message && <p role="status">{message}</p>}

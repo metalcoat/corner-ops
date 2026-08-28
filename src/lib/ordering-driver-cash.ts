@@ -6,12 +6,7 @@ import {
   type DriverActor,
 } from "@/lib/ordering-driver-delivery";
 
-function manager(actor: DriverActor) {
-  if (!actor.manager) throw new Error("Manager or owner access is required.");
-}
-
 export async function driverCashDashboard(actor: DriverActor) {
-  manager(actor);
   await ensureDriverDeliverySchema();
   const sql = getSql();
   const [drivers, orders, settlements] = await Promise.all([
@@ -31,7 +26,6 @@ export async function postDriverCashSettlement(
     businessDate: string;
   },
 ) {
-  manager(actor);
   await ensureDriverDeliverySchema();
   const orderIds = [...new Set(input.orderIds.map(String))];
   if (!orderIds.length) throw new Error("Select at least one delivered order.");
@@ -73,7 +67,7 @@ export async function postDriverCashSettlement(
           id: actor.employeeId,
           name: actor.name,
           type: "employee",
-          role: "manager",
+          role: actor.manager ? "manager" : "employee",
         },
       });
       const payment = (
