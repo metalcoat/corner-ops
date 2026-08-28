@@ -7,6 +7,7 @@
   --line: #dedfd7;
   --red: #a33b2b;
 }
+.itemDialog .pizzaSelectedToppings > .pizzaToppingWarning{padding:.7rem;border:1px solid #d97706;border-radius:.6rem;background:#fffbeb;color:#92400e;font-weight:700;line-height:1.35}
 .customerOrder {
   min-height: 100vh;
   background: var(--cream);

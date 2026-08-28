@@ -11,6 +11,8 @@ const SOURCE_SIDE = "5fabc564-7c33-480b-96ef-28a018ca0e60";
 const SOURCE_FRY = "59061047-6e99-4c58-a34e-7412214bf059";
 const SOURCE_MASHED = "ccab5488-c060-46a8-bb82-e603a791b788";
 const TARTAR = "8a4c0187-ae48-4e0c-8387-751c26cb5ce5";
+const SMALL_CRUMBLY = "ffe07150-85f5-4f6c-9c24-019de8a1f562";
+const LARGE_CRUMBLY = "2d69bb22-8f82-40c8-b278-3feeb13d1e66";
 const ON_TOP = "f1500000-0000-4000-8000-000000000001";
 const FOUR_OZ = "f1500000-0000-4000-8000-000000000002";
 const SIDE_ONE = "f1500000-0000-4000-8000-000000000003";
@@ -57,7 +59,7 @@ async function main() {
       await sql`INSERT INTO ordering_modifier_options(id,group_id,name,price_delta_cents,available,active,sort_order) SELECT gen_random_uuid(),${target},name,price_delta_cents,available,active,sort_order FROM ordering_modifier_options WHERE group_id=${source} ON CONFLICT(group_id,name) DO UPDATE SET price_delta_cents=EXCLUDED.price_delta_cents,available=EXCLUDED.available,active=EXCLUDED.active,sort_order=EXCLUDED.sort_order`;
 
     await sql`INSERT INTO ordering_modifier_presentation_overrides(item_id,group_id,context,updated_by) SELECT item_id,group_id,'hidden','fish-fry-staged-flow' FROM ordering_menu_item_modifier_groups WHERE item_id=${ITEM} ON CONFLICT(item_id,group_id) DO UPDATE SET context='hidden',updated_by='fish-fry-staged-flow',updated_at=NOW()`;
-    for (const [groupId,order] of [[SALAD,10],[ON_TOP,20],[FOUR_OZ,21],[SIDE_ONE,30],[SIDE_ONE_FRY,40],[SIDE_ONE_MASHED,41],[SIDE_TWO,50],[SIDE_TWO_FRY,60],[SIDE_TWO_MASHED,61],[TARTAR,90]] as const) {
+    for (const [groupId,order] of [[SALAD,10],[ON_TOP,20],[FOUR_OZ,21],[SMALL_CRUMBLY,22],[LARGE_CRUMBLY,23],[SIDE_ONE,30],[SIDE_ONE_FRY,40],[SIDE_ONE_MASHED,41],[SIDE_TWO,50],[SIDE_TWO_FRY,60],[SIDE_TWO_MASHED,61],[TARTAR,90]] as const) {
       await sql`INSERT INTO ordering_menu_item_modifier_groups(id,item_id,group_id,sort_order) VALUES(gen_random_uuid(),${ITEM},${groupId},${order}) ON CONFLICT(item_id,group_id) DO UPDATE SET sort_order=EXCLUDED.sort_order`;
       await sql`INSERT INTO ordering_modifier_presentation_overrides(item_id,group_id,context,presentation_style,component_order,updated_by) VALUES(${ITEM},${groupId},'ordinary','staged',${order},'fish-fry-staged-flow') ON CONFLICT(item_id,group_id) DO UPDATE SET context='ordinary',presentation_style='staged',component_order=${order},updated_by='fish-fry-staged-flow',updated_at=NOW()`;
     }
@@ -70,6 +72,8 @@ async function main() {
     };
     await sql`UPDATE ordering_modifier_presentation_overrides SET context='dependent',parent_group_id=${SALAD},parent_option_ids=${[small]},updated_at=NOW() WHERE item_id=${ITEM} AND group_id=${ON_TOP}`;
     await sql`UPDATE ordering_modifier_presentation_overrides SET context='dependent',parent_group_id=${SALAD},parent_option_ids=${largeSalads},updated_at=NOW() WHERE item_id=${ITEM} AND group_id=${FOUR_OZ}`;
+    await sql`UPDATE ordering_modifier_presentation_overrides SET context='dependent',parent_group_id=${SALAD},parent_option_ids=${[small]},updated_at=NOW() WHERE item_id=${ITEM} AND group_id=${SMALL_CRUMBLY}`;
+    await sql`UPDATE ordering_modifier_presentation_overrides SET context='dependent',parent_group_id=${SALAD},parent_option_ids=${largeSalads},updated_at=NOW() WHERE item_id=${ITEM} AND group_id=${LARGE_CRUMBLY}`;
     await sql`UPDATE ordering_modifier_presentation_overrides SET included_choice_count=1,updated_at=NOW() WHERE item_id=${ITEM} AND group_id IN (${ON_TOP},${FOUR_OZ})`;
     const fried=/French Fries|Waffle Fries|Curly Fries|Tater Tots/i,mashed=/Mashed/i;
     await sideDependency(SIDE_ONE_FRY,SIDE_ONE,fried); await sideDependency(SIDE_ONE_MASHED,SIDE_ONE,mashed);

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import {
   normalizePizzaToppings,
+  pizzaToppingCount,
+  PIZZA_TOPPING_COOK_WARNING,
   type PizzaToppingAmount,
   type PizzaToppingPortion,
   type PizzaToppingSelection,
@@ -263,6 +265,7 @@ export default function PizzaToppingSelector({
       </div>
       <section className="pizzaSelectedToppings" aria-label="Selected toppings">
         <h3>Selected toppings</h3>
+        {pizzaToppingCount(selections)>6&&<p className="pizzaToppingWarning" role="status">{PIZZA_TOPPING_COOK_WARNING}</p>}
         {!selectedOptions.length && <p>No toppings selected.</p>}
         {selectedOptions.map((option) => {
           const current = entries(option.id),

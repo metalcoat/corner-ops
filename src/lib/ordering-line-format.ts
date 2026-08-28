@@ -72,6 +72,13 @@ export function kitchenModifierOrder(
   modifier: Pick<OrderModifierPresentation, "option_name_snapshot" | "print_order_snapshot"> & { group_name_snapshot?: string },
 ) {
   const configured = Number(modifier.print_order_snapshot || 0);
+  const group = kitchenKey(modifier.group_name_snapshot || "");
+  if (group === "choose included side") return 500;
+  if (group === "first side fry options" || group === "first side mashed options") return 501;
+  if (group.startsWith("add a second side")) return 510;
+  if (group === "second side fry options" || group === "second side mashed options") return 511;
+  if (group === "choose a side" || group === "meal fry choice") return 500;
+  if (group === "fry option" || group === "mashed mods") return 501;
   if (configured) return configured;
   const family = kitchenItemFamily(item.item_name_snapshot, item.category_name);
   if (family === "00-pizza") return pizzaKitchenModifierOrder(modifier);

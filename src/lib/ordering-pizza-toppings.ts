@@ -7,6 +7,9 @@ export type PizzaToppingSelection = {
   amount: PizzaToppingAmount;
 };
 
+export const PIZZA_TOPPING_COOK_WARNING = "A quick heads-up: pizzas with more than six toppings can cook less evenly and may leave the crust softer than usual. We’re happy to make it that way if you’d still like to continue.";
+export function pizzaToppingCount(selections:PizzaToppingSelection[]){return new Set(selections.map(selection=>selection.modifierOptionId)).size}
+
 export function pizzaToppingPriceCents(basePriceCents: number, portion: PizzaToppingPortion, amount: PizzaToppingAmount): number {
   if (!Number.isSafeInteger(basePriceCents) || basePriceCents < 0) throw new Error("Pizza topping price must be non-negative integer cents.");
   const amountMultiplier = amount === "triple_extra" ? 4 : amount === "double_extra" ? 3 : amount === "extra" ? 2 : 1;

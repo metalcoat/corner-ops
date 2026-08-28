@@ -33,6 +33,19 @@ export type OrderingComboOptionView = { id: string; name: string; menuItemId: st
 export type OrderingComboGroupView = { id: string; name: string; prompt: string; minSelections: number; maxSelections: number; options: OrderingComboOptionView[] };
 export type OrderingComboView = { id: string; name: string; prompt: string; basePriceDeltaCents: number; groups: OrderingComboGroupView[] };
 export type OrderingMenuItemView = { id: string; categoryId: string; name: string; description: string; sku: string; basePriceCents: number; taxable: boolean; available: boolean; imageUrl:string|null; imageAlt:string; modifiers: OrderingModifierGroupView[]; combos: OrderingComboView[] };
+
+export function groupDependentModifiers(groups:OrderingModifierGroupView[]){
+  const children=new Map<string,OrderingModifierGroupView[]>(),visited=new Set<string>(),ordered:OrderingModifierGroupView[]=[];
+  for(const group of groups)if(group.presentationContext==="dependent"&&group.parentGroupId)children.set(group.parentGroupId,[...(children.get(group.parentGroupId)||[]),group]);
+  const visit=(group:OrderingModifierGroupView)=>{if(visited.has(group.id))return;visited.add(group.id);ordered.push(group);for(const child of children.get(group.id)||[])visit(child)};
+  for(const group of groups)if(group.presentationContext!=="dependent"||!group.parentGroupId)visit(group);
+  for(const group of groups)visit(group);
+  const crumbly=ordered.filter(group=>/crumbly blue/i.test(group.name));
+  if(!crumbly.length)return ordered;
+  const without=ordered.filter(group=>!/crumbly blue/i.test(group.name)),dressingIndex=without.findLastIndex(group=>/dressing/i.test(group.name));
+  without.splice(dressingIndex<0?without.length:dressingIndex+1,0,...crumbly);
+  return without;
+}
 export type OrderingMenuCategoryView = { id: string; name: string; displayName: string; parentId: string | null; presentationOnly: boolean; sortOrder: number; items: OrderingMenuItemView[] };
 
 export type OrderingMenuChannel="pos"|"web";
@@ -90,6 +103,7 @@ export async function orderingMenu(business: OrderingBusiness,channel:OrderingMe
     }
     if (row.option_id && row.option_name) group.options.push({ id: row.option_id, name: row.option_name, priceDeltaCents: Number(row.price_delta_cents ?? 0), available: Boolean(row.option_available), defaultSelected: Boolean(row.default_selected), includedQuantity: Number(row.included_quantity ?? 0) });
   }
+  for(const item of itemMap.values())item.modifiers=groupDependentModifiers(item.modifiers);
 
   const comboMap = new Map<string, OrderingComboView>();
   const comboGroupMap = new Map<string, OrderingComboGroupView>();

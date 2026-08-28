@@ -6,6 +6,7 @@ import type { VariantConfiguredOrderItemInput } from "@/lib/ordering-orders-with
 import { createTimedDraftOrder } from "@/lib/ordering-timed-orders";
 import { orderingMenuWithVariants } from "@/lib/ordering-menu-variants";
 import { consolidateQuantities } from "@/lib/cart-line-consolidation";
+import { PIZZA_TOPPING_COOK_WARNING } from "@/lib/ordering-pizza-toppings";
 import { applyScheduledMenuAvailability } from "@/lib/ordering-menu-availability";
 import {
   resolveOrderingAvailability,
@@ -278,10 +279,12 @@ async function pricedOrder(orderId: string, business: OrderingBusiness) {
     await sql`SELECT id,item_id,item_name_snapshot,variant_id,variant_name_snapshot,quantity,unit_price_cents,modifier_total_cents,combo_total_cents,line_total_cents,special_instructions FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`;
   const promotions =
     await sql`SELECT promotion_id,label_snapshot,discount_cents FROM ordering_order_promotion_applications WHERE order_id=${orderId} ORDER BY application_sequence`;
+  const heavyPizzas=await sql`SELECT item.item_name_snapshot,COUNT(DISTINCT modifier.option_id)::integer topping_count FROM ordering_order_items item JOIN ordering_order_item_modifiers modifier ON modifier.order_item_id=item.id AND modifier.pizza_topping_portion IS NOT NULL WHERE item.order_id=${orderId} GROUP BY item.id,item.item_name_snapshot HAVING COUNT(DISTINCT modifier.option_id)>6`;
   return {
     ...(rows[0] as Record<string, unknown>),
     lines,
     promotions,
+    warnings:heavyPizzas.map(item=>`${item.item_name_snapshot}: ${PIZZA_TOPPING_COOK_WARNING}`),
     pricingAuthority: "corner_ops_server",
     currency: "USD",
   } as Record<string, any>;
