@@ -10,6 +10,8 @@ type Order = {
   amount_due_cents: number;
   driver_employee_id: string;
   customer_name: string;
+  delivery_address: string;
+  delivery_unit: string;
   delivered_at: string;
 };
 export default function DriverCashClient() {
@@ -134,8 +136,8 @@ export default function DriverCashClient() {
                   )
                 }
               />{" "}
-              #{order.display_number} · {order.customer_name} ·{" "}
-              {money(Number(order.amount_due_cents))}
+              #{order.display_number} · {order.customer_name} · {money(Number(order.amount_due_cents))}
+              <small>{order.delivery_address}{order.delivery_unit ? ` · ${order.delivery_unit}` : ""}</small>
             </label>
           </article>
         ))}
