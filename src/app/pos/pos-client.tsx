@@ -41,6 +41,7 @@ import { itemNeedsConfiguration } from "@/lib/ordering-menu-presentation";
 import Link from "next/link";
 import { isHumanTextEntry, KeyboardWedgeDetector } from "@/lib/barcode-scanner";
 import { giftCardNumberFromInput, validGiftCardInput } from "@/lib/gift-card-input";
+import { consolidateQuantities } from "@/lib/cart-line-consolidation";
 
 type PosServiceType = Exclude<ServiceType, "undecided">;
 
@@ -63,6 +64,9 @@ type CartLine = {
   comboSelections: Record<string, string[]>;
   specialInstructions: string;
 };
+
+function cartLineConfiguration(line:CartLine){const {id:_id,quantity:_quantity,modifierText:_modifierText,comboText:_comboText,...configuration}=line;return configuration}
+function appendOrIncrementCartLine(current:CartLine[],line:CartLine){return consolidateQuantities([...current,line],cartLineConfiguration)}
 
 type MenuPayload = {
   business: Business;
@@ -1535,7 +1539,7 @@ export default function PosClient({
       comboSelections: {},
       specialInstructions: "",
     };
-    setCart((current) => [...current, line]);
+    setCart((current) => appendOrIncrementCartLine(current,line));
     invalidateEditableDraft();
     setCartNotice(`Added ${item.name}`);
     window.setTimeout(() => setCartNotice(""), 1800);
@@ -1701,7 +1705,7 @@ export default function PosClient({
         ? current.map((candidate) =>
             candidate.id === editingLineId ? line : candidate,
           )
-        : [...current, line],
+        : appendOrIncrementCartLine(current,line),
     );
     setConfiguringItem(null);
     setSelectedVariantId("");

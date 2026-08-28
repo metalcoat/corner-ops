@@ -5,6 +5,7 @@ import type { OrderingBusiness, ServiceType } from "@/lib/ordering-core";
 import type { VariantConfiguredOrderItemInput } from "@/lib/ordering-orders-with-variants";
 import { createTimedDraftOrder } from "@/lib/ordering-timed-orders";
 import { orderingMenuWithVariants } from "@/lib/ordering-menu-variants";
+import { consolidateQuantities } from "@/lib/cart-line-consolidation";
 import { applyScheduledMenuAvailability } from "@/lib/ordering-menu-availability";
 import {
   resolveOrderingAvailability,
@@ -664,7 +665,7 @@ export async function priceSpokenOrder(input: {
     allItems = catalog
       .flatMap((category) => category.items)
       .filter((item) => item.available);
-  const resolved: AiItemInput[] = input.items.map((requested) => {
+  const resolved: AiItemInput[] = consolidateQuantities(input.items.map((requested) => {
     const initialName = spokenKey(requested.name),
       initialVariant = spokenKey(requested.variant || ""),
       poutineRequested = /\b(poutine|pountine|protein)\b/.test(
@@ -1114,7 +1115,7 @@ export async function priceSpokenOrder(input: {
       modifierSelections,
       pizzaToppings,
     };
-  });
+  }), ({ quantity: _quantity, ...configuration }) => configuration);
   if (input.orderId) {
     const current = (
       await getSql()`SELECT version FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business}`

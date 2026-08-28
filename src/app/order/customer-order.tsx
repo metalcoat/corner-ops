@@ -13,6 +13,7 @@ import {
   type ModifierIntensity,
 } from "@/lib/ordering-modifier-intensity";
 import { unwrapHelcimPayResponse } from "@/lib/helcim-pay-response";
+import { consolidateQuantities } from "@/lib/cart-line-consolidation";
 
 function localDateValue(value = new Date()) {
   const year = value.getFullYear();
@@ -418,7 +419,10 @@ export default function CustomerOrder() {
     return () => controller.abort();
   }, [deliveryDistanceMiles, estimated, serviceType]);
   function add(line: Omit<CartLine, "key">) {
-    setCart((rows) => [...rows, { ...line, key: crypto.randomUUID() }]);
+    setCart((rows) => {
+      const next = { ...line, key: crypto.randomUUID() };
+      return consolidateQuantities([...rows, next], ({ key: _key, quantity: _quantity, ...configuration }) => configuration);
+    });
     setActive(null);
     setReview(null);
   }
