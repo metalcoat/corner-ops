@@ -4484,7 +4484,7 @@ export default function PosClient({
               </button>
             </header>
             <div className="posConfigBody">
-              {configuringItem.variants.length > 0 && (
+              {configuringItem.variants.filter((variant) => variant.available).length > 1 && (
                 <fieldset
                   id="variant-choice"
                   className={!selectedVariant ? "needsSelection" : ""}
@@ -4496,7 +4496,7 @@ export default function PosClient({
                     </small>
                   </legend>
                   <div className="posChoiceGrid">
-                    {configuringItem.variants.map((variant) => (
+                    {configuringItem.variants.filter((variant) => variant.available).map((variant) => (
                       <button
                         key={variant.id}
                         type="button"

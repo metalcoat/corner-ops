@@ -18,9 +18,11 @@ async function main(){
     if(triggers.length!==1)throw new Error(`${item.name} has duplicate combo triggers.`);
     if(dependents.length!==2)throw new Error(`${item.name} does not have the two expected fry dependencies.`);
     if(dependents.some(group=>group.parentGroupId!==triggers[0].id||!group.parentOptionIds.length))throw new Error(`${item.name} has an invalid fry dependency link.`);
+    const onionIds=triggers[0].options.filter(option=>/^Onion Rings?$/i.test(option.name)).map(option=>option.id);
+    if(dependents.some(group=>onionIds.some(id=>group.parentOptionIds.includes(id))))throw new Error(`${item.name} incorrectly offers fry options for onion rings.`);
     const optionIds=dependents.flatMap(group=>group.options.map(option=>option.id));
     if(new Set(optionIds).size!==optionIds.length)throw new Error(`${item.name} has duplicated fry options/charges.`);
   }
-  console.log(JSON.stringify({realImportedMealItems:meals.length,comboTriggerFirst:true,fryGroupsHiddenUntilMatchingSize:true,noDuplicateFryOptions:true},null,2));
+  console.log(JSON.stringify({realImportedMealItems:meals.length,comboTriggerFirst:true,fryGroupsHiddenUntilMatchingSize:true,onionRingsHaveNoOptions:true,noDuplicateFryOptions:true},null,2));
 }
 void main().catch(error=>{console.error(error);process.exitCode=1;});

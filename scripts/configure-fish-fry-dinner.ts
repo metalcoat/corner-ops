@@ -34,8 +34,8 @@ async function main() {
     await sql`UPDATE ordering_menu_items SET base_price_cents=1350 WHERE id=${ITEM}`;
 
     const groups = [
-      [ON_TOP,"Choose Dressing (On Salad)","Choose one dressing for the small tossed salad",1,1],
-      [FOUR_OZ,"Choose 4oz Dressing","Choose one 4oz dressing",1,1],
+      [ON_TOP,"Choose Dressing (On Salad)","First dressing included; additional dressings are $0.75 each",1,6],
+      [FOUR_OZ,"Choose 4oz Dressing","First dressing included; additional 4oz dressings are $1.75 each",1,5],
       [SIDE_ONE,"Choose Included Side","Choose one included side",1,1],
       [SIDE_ONE_FRY,"First Side Fry Options","Customize the first fried side",0,10],
       [SIDE_ONE_MASHED,"First Side Mashed Options","Customize the first mashed side",0,3],
@@ -46,8 +46,8 @@ async function main() {
     for (const [id,name,prompt,min,max] of groups)
       await sql`INSERT INTO ordering_modifier_groups(id,business,name,prompt,min_selections,max_selections,active) VALUES(${id},'Corner Deli',${name},${prompt},${min},${max},TRUE) ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,prompt=EXCLUDED.prompt,min_selections=EXCLUDED.min_selections,max_selections=EXCLUDED.max_selections,active=TRUE,updated_at=NOW()`;
 
-    await sql`INSERT INTO ordering_modifier_options(id,group_id,name,price_delta_cents,available,active,sort_order) SELECT gen_random_uuid(),${ON_TOP},regexp_replace(name,' \\(On Salad\\)$',''),0,available,active,sort_order FROM ordering_modifier_options WHERE group_id=${SOURCE_DRESSING} AND name NOT IN ('No Tomato','No Salad') ON CONFLICT(group_id,name) DO UPDATE SET price_delta_cents=0,available=EXCLUDED.available,active=EXCLUDED.active,sort_order=EXCLUDED.sort_order`;
-    await sql`INSERT INTO ordering_modifier_options(id,group_id,name,price_delta_cents,available,active,sort_order) SELECT gen_random_uuid(),${FOUR_OZ},name||' 4oz',0,available,active,sort_order FROM ordering_modifier_options WHERE group_id='a18f597f-41ba-458f-a9df-f2cb112d8235' ON CONFLICT(group_id,name) DO UPDATE SET price_delta_cents=0,available=EXCLUDED.available,active=EXCLUDED.active,sort_order=EXCLUDED.sort_order`;
+    await sql`INSERT INTO ordering_modifier_options(id,group_id,name,price_delta_cents,available,active,sort_order) SELECT gen_random_uuid(),${ON_TOP},regexp_replace(name,' \\(On Salad\\)$',''),75,available,active,sort_order FROM ordering_modifier_options WHERE group_id=${SOURCE_DRESSING} AND name NOT IN ('No Tomato','No Salad') ON CONFLICT(group_id,name) DO UPDATE SET price_delta_cents=75,available=EXCLUDED.available,active=EXCLUDED.active,sort_order=EXCLUDED.sort_order`;
+    await sql`INSERT INTO ordering_modifier_options(id,group_id,name,price_delta_cents,available,active,sort_order) SELECT gen_random_uuid(),${FOUR_OZ},name||' 4oz',175,available,active,sort_order FROM ordering_modifier_options WHERE group_id='a18f597f-41ba-458f-a9df-f2cb112d8235' ON CONFLICT(group_id,name) DO UPDATE SET price_delta_cents=175,available=EXCLUDED.available,active=EXCLUDED.active,sort_order=EXCLUDED.sort_order`;
     for (const target of [SIDE_ONE,SIDE_TWO]) {
       const surcharge=target===SIDE_TWO?300:0;
       await sql`INSERT INTO ordering_modifier_options(id,group_id,name,price_delta_cents,available,active,sort_order) SELECT gen_random_uuid(),${target},name,price_delta_cents+${surcharge},available,active,sort_order FROM ordering_modifier_options WHERE group_id=${SOURCE_SIDE} ON CONFLICT(group_id,name) DO UPDATE SET price_delta_cents=EXCLUDED.price_delta_cents,available=EXCLUDED.available,active=EXCLUDED.active,sort_order=EXCLUDED.sort_order`;
@@ -70,9 +70,15 @@ async function main() {
     };
     await sql`UPDATE ordering_modifier_presentation_overrides SET context='dependent',parent_group_id=${SALAD},parent_option_ids=${[small]},updated_at=NOW() WHERE item_id=${ITEM} AND group_id=${ON_TOP}`;
     await sql`UPDATE ordering_modifier_presentation_overrides SET context='dependent',parent_group_id=${SALAD},parent_option_ids=${largeSalads},updated_at=NOW() WHERE item_id=${ITEM} AND group_id=${FOUR_OZ}`;
-    const fried=/French Fries|Waffle Fries|Curly Fries|Tater Tots|Onion Rings/i,mashed=/Mashed/i;
+    await sql`UPDATE ordering_modifier_presentation_overrides SET included_choice_count=1,updated_at=NOW() WHERE item_id=${ITEM} AND group_id IN (${ON_TOP},${FOUR_OZ})`;
+    const fried=/French Fries|Waffle Fries|Curly Fries|Tater Tots/i,mashed=/Mashed/i;
     await sideDependency(SIDE_ONE_FRY,SIDE_ONE,fried); await sideDependency(SIDE_ONE_MASHED,SIDE_ONE,mashed);
     await sideDependency(SIDE_TWO_FRY,SIDE_TWO,fried); await sideDependency(SIDE_TWO_MASHED,SIDE_TWO,mashed);
+    const mealSide=(await sql`SELECT id FROM ordering_modifier_groups WHERE business='Corner Deli' AND name='Meal Fry Choice' AND active=TRUE LIMIT 1`)[0]?.id;
+    if(mealSide){
+      const onionIds=(await sql`SELECT id FROM ordering_modifier_options WHERE group_id=${mealSide} AND active=TRUE AND name ILIKE 'Onion Ring%'`).map(row=>row.id);
+      for(const onionId of onionIds)await sql`UPDATE ordering_modifier_presentation_overrides SET parent_option_ids=array_remove(parent_option_ids,${onionId}::uuid),updated_by='fish-fry-staged-flow',updated_at=NOW() WHERE parent_group_id=${mealSide} AND context='dependent' AND group_id IN (SELECT id FROM ordering_modifier_groups WHERE name='Fry Option')`;
+    }
   });
   console.log(JSON.stringify({configured:true,item:"Fish Fry Dinner",basePriceCents:1350,optionalSecondSideCents:300},null,2));
 }
