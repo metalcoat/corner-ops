@@ -22,7 +22,24 @@ export type OrderModifierPresentation = {
   pizza_topping_amount?: PizzaToppingAmount | null;
   amount?: "light" | "normal" | "heavy" | null;
   print_on_ticket?: boolean;
+  print_order_snapshot?: number;
 };
+
+export function pizzaToppingColumns(modifiers: OrderModifierPresentation[]) {
+  const columns: Record<PizzaToppingPortion, string[]> = { left_half: [], whole: [], right_half: [] };
+  modifiers
+    .filter((modifier) => modifier.print_on_ticket !== false && modifier.pizza_topping_portion && modifier.pizza_topping_amount)
+    .toSorted((left, right) => Number(left.print_order_snapshot || 0) - Number(right.print_order_snapshot || 0) || left.option_name_snapshot.localeCompare(right.option_name_snapshot))
+    .forEach((modifier) => {
+      const portion = modifier.pizza_topping_portion as PizzaToppingPortion;
+      columns[portion].push(formatPizzaTopping(modifier.option_name_snapshot, "whole", modifier.pizza_topping_amount as PizzaToppingAmount, "ticket"));
+    });
+  return columns;
+}
+
+export function hasSplitPizzaToppings(modifiers: OrderModifierPresentation[]) {
+  return modifiers.some((modifier) => modifier.print_on_ticket !== false && (modifier.pizza_topping_portion === "left_half" || modifier.pizza_topping_portion === "right_half"));
+}
 
 export function formatOrderModifier(modifier: OrderModifierPresentation, style: "display" | "ticket" = "display"): string {
   if (style === "ticket" && modifier.print_on_ticket === false) return "";

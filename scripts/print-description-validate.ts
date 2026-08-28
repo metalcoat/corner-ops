@@ -36,9 +36,17 @@ void (async () => {
     if(headers.join("|")!=="Jumbo Thin Pizza A|Regular Pizza B|30 Wings|Turkey Sub")throw new Error(`Kitchen item grouping failed: ${headers.join("|")}`);
     if(pizzaModifiers.join("|")!=="  BUFFALO SAUCE|  EXTRA SAUCE|  PEPPERONI|  MUSHROOMS|  PEPPERS|  ONIONS|  EXTRA CHEESE|  SAUSAGE")throw new Error(`Pizza make-line order failed: ${pizzaModifiers.join("|")}`);
     if(subModifiers.join("|")!=="  MAYONNAISE|  RUSSIAN|  OIL|  LETTUCE|  TOMATO|  ONION|  HOT PEPPERS")throw new Error(`Sub make-line order failed: ${subModifiers.join("|")}`);
+    const splitPizza=formatKitchenLines([{quantity:1,header:"Split Pizza",family:"00-pizza",modifiers:[
+      {name:"Mushrooms",group:"Pizza Toppings",printOrder:30,header:false,print:true,pizzaPortion:"right_half",pizzaAmount:"regular"},
+      {name:"Pepperoni",group:"Pizza Toppings",printOrder:20,header:false,print:true,pizzaPortion:"left_half",pizzaAmount:"regular"},
+      {name:"Cheese",group:"Pizza Toppings",printOrder:10,header:false,print:true,pizzaPortion:"whole",pizzaAmount:"extra"},
+    ]}]);
+    if(splitPizza[1]!=="LEFT        |WHOLE       |RIGHT"||!splitPizza.some(line=>line.includes("PEPPERONI")&&line.includes("EXTRA CHEESE")&&line.includes("MUSHROOMS")))throw new Error(`Split pizza columns failed: ${splitPizza.join(" / ")}`);
+    const wholePizza=formatKitchenLines([{quantity:1,header:"Whole Pizza",family:"00-pizza",modifiers:[{name:"Pepperoni",group:"Pizza Toppings",printOrder:10,header:false,print:true,pizzaPortion:"whole",pizzaAmount:"regular"}]}]);
+    if(wholePizza.join("|")!=="Whole Pizza|  PEPPERONI")throw new Error(`Whole pizza should use the normal ticket list: ${wholePizza.join("|")}`);
     const portions=["Small French Fries (7oz)","Large French Fries (11oz)","Small Curly Fries (6oz)","Large Curly Fries (9oz)","Small Tater Tots (7oz)","Large Tater Tots (11oz)","Onion Rings (7oz)","Small Waffle Fries (6oz)","Large Waffle Fries (9oz)"];
     if(portions.some(value=>kitchenPortionName(value.replace(/ \([^)]*\)$/,""))!==value))throw new Error("Kitchen portion labels failed.");
-    console.log(JSON.stringify({posNameUnchanged:item.name,configuredPrintName:lines[0],descriptionInheritanceModel:true,channelDescriptionOverride:true,headerModifier:true,historicalSnapshotImmutable:true,sharedFormatter:true,kitchenItemGrouping:true,kitchenPortionLabels:true,pizzaMakeLineOrder:true,subMakeLineOrder:true},null,2));
+    console.log(JSON.stringify({posNameUnchanged:item.name,configuredPrintName:lines[0],descriptionInheritanceModel:true,channelDescriptionOverride:true,headerModifier:true,historicalSnapshotImmutable:true,sharedFormatter:true,kitchenItemGrouping:true,kitchenPortionLabels:true,pizzaMakeLineOrder:true,splitPizzaColumns:true,wholePizzaCompact:true,subMakeLineOrder:true},null,2));
   } finally {
     await sql`DELETE FROM ordering_orders WHERE id=${orderId}`;
     await sql`DELETE FROM ordering_item_channel_overrides WHERE item_id=${item.id} AND channel='pos' AND updated_by='validation'`;

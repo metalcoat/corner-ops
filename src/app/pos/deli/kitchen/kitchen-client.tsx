@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PosPinGate, { type PosEmployeeSession, type PosSessionView } from "../../pos-pin-gate";
 import { usePosIdleLock } from "../../use-pos-idle-lock";
-import { formatOrderItemName, formatOrderModifier, kitchenPortionName } from "@/lib/ordering-line-format";
+import { formatOrderItemName, formatOrderModifier, hasSplitPizzaToppings, kitchenPortionName, pizzaToppingColumns } from "@/lib/ordering-line-format";
 import type { PizzaToppingAmount, PizzaToppingPortion } from "@/lib/ordering-pizza-toppings";
 
 type KitchenStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -17,6 +17,7 @@ type KitchenModifier = {
   pizza_topping_amount: PizzaToppingAmount | null;
   amount?: "light"|"normal"|"heavy";
   print_on_ticket?: boolean;
+  print_order_snapshot?: number;
 };
 type KitchenItem = {
   id: string;
@@ -159,10 +160,15 @@ export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSecond
         <div className="kitchenItems">
           {order.items.map((item) => <section key={item.id} className="kitchenItem">
             <h2>{item.quantity}× {kitchenPortionName(formatOrderItemName(item.item_name_snapshot, item.variant_name_snapshot))}</h2>
-            <ul>
-              {item.modifiers.filter((modifier)=>modifier.print_on_ticket!==false).map((modifier, index) => <li className={modifier.selection_state === "removed" ? "removed" : modifier.pizza_topping_portion ? "pizzaTopping" : ""} key={`${modifier.group_name_snapshot}-${modifier.option_id}-${index}`}>{formatOrderModifier(modifier, "ticket")}</li>)}
+            {hasSplitPizzaToppings(item.modifiers) ? <>
+              <div className="kitchenPizzaColumns" aria-label="Pizza toppings by portion">
+                {(["left_half","whole","right_half"] as const).map(portion => <section key={portion}><h4>{portion === "left_half" ? "LEFT" : portion === "right_half" ? "RIGHT" : "WHOLE"}</h4>{pizzaToppingColumns(item.modifiers)[portion].length ? <ul>{pizzaToppingColumns(item.modifiers)[portion].map((name,index)=><li key={`${name}-${index}`}>{name}</li>)}</ul> : <span>—</span>}</section>)}
+              </div>
+              <ul>{item.modifiers.filter(modifier=>modifier.print_on_ticket!==false&&!modifier.pizza_topping_portion).map((modifier,index)=><li className={modifier.selection_state === "removed" ? "removed" : ""} key={`${modifier.group_name_snapshot}-${modifier.option_id}-${index}`}>{formatOrderModifier(modifier,"ticket")}</li>)}{item.combo_selections.map((selection) => <li key={`${selection.group_name_snapshot}-${selection.option_id}`}>{selection.option_name_snapshot}</li>)}</ul>
+            </> : <ul>
+              {item.modifiers.filter((modifier)=>modifier.print_on_ticket!==false).toSorted((left,right)=>Number(left.print_order_snapshot||0)-Number(right.print_order_snapshot||0)).map((modifier, index) => <li className={modifier.selection_state === "removed" ? "removed" : modifier.pizza_topping_portion ? "pizzaTopping" : ""} key={`${modifier.group_name_snapshot}-${modifier.option_id}-${index}`}>{formatOrderModifier(modifier, "ticket")}</li>)}
               {item.combo_selections.map((selection) => <li key={`${selection.group_name_snapshot}-${selection.option_id}`}>{selection.option_name_snapshot}</li>)}
-            </ul>
+            </ul>}
             {item.special_instructions && <p className="kitchenNote">NOTE: {item.special_instructions}</p>}
           </section>)}
         </div>

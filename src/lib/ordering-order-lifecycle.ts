@@ -429,7 +429,7 @@ export async function listKitchenOrders(business: OrderingBusiness, includeRecen
       item.modifiers = await sql`
         SELECT group_id, option_id, group_name_snapshot, option_name_snapshot, quantity,
                unit_price_delta_cents, selection_state, pizza_topping_portion, pizza_topping_amount,
-               amount,was_default_selected_snapshot,default_amount_snapshot,print_on_ticket
+               amount,was_default_selected_snapshot,default_amount_snapshot,print_on_ticket,print_order_snapshot
         FROM ordering_order_item_modifiers WHERE order_item_id = ${item.id}
         ORDER BY created_at, id
       `;
