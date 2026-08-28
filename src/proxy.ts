@@ -11,7 +11,7 @@ const selfAuthorizedApiPaths = [
   "/api/document-scan", "/api/push", "/api/rezku/inbound",
   "/api/3cx/inbound", "/api/openai", "/api/square/callback",
   "/api/square/webhook", "/api/cron", "/api/customer", "/api/driver",
-  "/api/ordering/store-dashboard",
+  "/api/ordering/store-dashboard", "/api/mobile/android/version",
 ];
 
 type Token = { email?: string; role?: string; permissions?: string[]; expiresAt?: number };
