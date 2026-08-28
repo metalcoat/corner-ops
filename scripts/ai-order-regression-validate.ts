@@ -375,6 +375,21 @@ async function main() {
       expectedItems: ["Breaded Cauliflower"],
     },
     {
+      key: "variety-basket-for-two-item-alias",
+      items: [{ name: "variety basket for 2", quantity: 1 }],
+      expectedItems: ["Variety for TWO"],
+    },
+    {
+      key: "sampler-platter-for-four-item-alias",
+      items: [{ name: "sampler platter for four", quantity: 1 }],
+      expectedItems: ["Variety for Four"],
+    },
+    {
+      key: "sampler-platter-requires-size",
+      items: [{ name: "sampler platter", quantity: 1 }],
+      errorCode: "INVALID_VARIANT",
+    },
+    {
       key: "buffalo-chicken-burger-build",
       items: [
         {

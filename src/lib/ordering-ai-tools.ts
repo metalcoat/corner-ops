@@ -788,12 +788,33 @@ export async function priceSpokenOrder(input: {
       pizzaPhrase =
         spokenName.includes("pizza") ||
         ["jumbo", "large", "16 inch", "16 in", "16"].includes(spokenName),
-      itemQuery = wingPhrase
+      varietyPhrase =
+        spokenName.includes("variety") ||
+        spokenName.includes("sampler platter") ||
+        spokenName.includes("appetizer sampler"),
+      varietySize = /\b(?:4|four)\b/.test(spokenName)
+        ? "four"
+        : /\b(?:2|two)\b/.test(spokenName)
+          ? "two"
+          : "";
+    if (varietyPhrase && !varietySize)
+      throw new AiToolError(
+        "INVALID_VARIANT",
+        "The variety basket requires a size.",
+        "Ask: Variety for two or four?",
+        409,
+        { options: ["Variety for TWO", "Variety for Four"] },
+      );
+    const itemQuery = wingPhrase
         ? bonelessRequested
           ? "Boneless Wings"
           : "Wings"
         : pizzaPhrase
           ? "Pizza"
+          : varietyPhrase && varietySize === "four"
+            ? "Variety for Four"
+            : varietyPhrase && varietySize === "two"
+              ? "Variety for TWO"
           : requested.name,
       item = strictMatch(
         itemQuery,
