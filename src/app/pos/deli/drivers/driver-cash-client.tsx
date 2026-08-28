@@ -16,7 +16,6 @@ type Order = {
 };
 export default function DriverCashClient() {
   const [data, setData] = useState<any>(null),
-    [driverId, setDriverId] = useState(""),
     [selected, setSelected] = useState<string[]>([]),
     [turnedIn, setTurnedIn] = useState(""),
     [message, setMessage] = useState(""),
@@ -29,18 +28,11 @@ export default function DriverCashClient() {
     if (!response.ok)
       throw new Error(body.error || "Could not load driver cash-out.");
     setData(body);
-    if (!driverId && body.drivers[0]) setDriverId(body.drivers[0].id);
   }
   useEffect(() => {
     void load().catch((error) => setMessage(error.message));
   }, []);
-  useEffect(() => {
-    setSelected([]);
-    setTurnedIn("");
-  }, [driverId]);
-  const orders: Order[] = (data?.orders || []).filter(
-      (order: Order) => order.driver_employee_id === driverId,
-    ),
+  const orders: Order[] = data?.orders || [],
     chosen = orders.filter((order) => selected.includes(order.order_id)),
     expected = chosen.reduce(
       (sum, order) => sum + Number(order.amount_due_cents),
@@ -57,7 +49,6 @@ export default function DriverCashClient() {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            driverId,
             orderIds: selected,
             turnedInCashCents: Math.round(Number(turnedIn) * 100),
             businessDate: new Intl.DateTimeFormat("en-CA", {
@@ -69,7 +60,7 @@ export default function DriverCashClient() {
       if (!response.ok)
         throw new Error(body.error || "Could not post cash-out.");
       setMessage(
-        `${body.driverName}: ${body.orderCount} orders posted · ${money(body.expectedCashCents)} expected · ${money(body.overShortCents)} over/short.`,
+        `${body.handledByName}: ${body.orderCount} orders posted · ${money(body.expectedCashCents)} expected · ${money(body.overShortCents)} over/short.`,
       );
       setSelected([]);
       setTurnedIn("");
@@ -93,20 +84,7 @@ export default function DriverCashClient() {
         </p>
       </header>
       {message && <p role="status">{message}</p>}
-      <label>
-        DRIVER
-        <select
-          value={driverId}
-          onChange={(event) => setDriverId(event.target.value)}
-        >
-          <option value="">Choose driver</option>
-          {data?.drivers.map((driver: any) => (
-            <option key={driver.id} value={driver.id}>
-              {driver.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {data?.handledBy && <p><strong>CASHING OUT AS: {data.handledBy}</strong></p>}
       <div>
         <label>
           <input
@@ -141,8 +119,8 @@ export default function DriverCashClient() {
             </label>
           </article>
         ))}
-        {driverId && !orders.length && (
-          <p>No delivered unpaid orders are eligible for this driver.</p>
+        {!orders.length && (
+          <p>No delivered unpaid orders are eligible for cash-out.</p>
         )}
       </div>
       <h2>Expected cash: {money(expected)}</h2>
@@ -172,7 +150,7 @@ export default function DriverCashClient() {
           <h2>Recent settlements</h2>
           {data.settlements.map((row: any) => (
             <p key={row.id}>
-              {row.driver_name} · {row.business_date} · {row.order_count} orders
+              {row.handled_by_name} · {row.business_date} · {row.order_count} orders
               · {money(Number(row.expected_cash_cents))} expected ·{" "}
               {money(Number(row.over_short_cents))} over/short
             </p>

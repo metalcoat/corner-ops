@@ -36,7 +36,6 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     return Response.json(
       await postDriverCashSettlement(actor, {
-        driverId: String(body.driverId || ""),
         orderIds: Array.isArray(body.orderIds) ? body.orderIds.map(String) : [],
         turnedInCashCents: Number(body.turnedInCashCents),
         businessDate: String(body.businessDate || ""),

@@ -9,18 +9,16 @@ import {
 export async function driverCashDashboard(actor: DriverActor) {
   await ensureDriverDeliverySchema();
   const sql = getSql();
-  const [drivers, orders, settlements] = await Promise.all([
-    sql`SELECT id,name FROM employees WHERE business=${actor.business} AND active=TRUE AND role_group='Driver' ORDER BY name`,
-    sql`SELECT o.id order_id,o.display_number,o.amount_due_cents,o.total_cents,d.driver_employee_id,d.delivered_at,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,COALESCE(address.formatted_address,address.line1,'') delivery_address,COALESCE(address.line2,'') delivery_unit FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=o.id WHERE d.business=${actor.business} AND d.status='DELIVERED' AND d.driver_employee_id IS NOT NULL AND o.amount_due_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_driver_cash_settlement_orders so JOIN ordering_driver_cash_settlements s ON s.id=so.settlement_id WHERE so.order_id=o.id AND s.status='posted') ORDER BY d.delivered_at,o.display_number`,
-    sql`SELECT s.id,s.business_date,s.order_count,s.expected_cash_cents,s.turned_in_cash_cents,s.over_short_cents,s.posted_at,e.name driver_name FROM ordering_driver_cash_settlements s JOIN employees e ON e.id=s.driver_employee_id WHERE s.business=${actor.business} AND s.status='posted' ORDER BY s.posted_at DESC LIMIT 30`,
+  const [orders, settlements] = await Promise.all([
+    sql`SELECT o.id order_id,o.display_number,o.amount_due_cents,o.total_cents,d.driver_employee_id,d.delivered_at,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,COALESCE(address.formatted_address,address.line1,'') delivery_address,COALESCE(address.line2,'') delivery_unit FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=o.id WHERE d.business=${actor.business} AND d.status='DELIVERED' AND o.amount_due_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_driver_cash_settlement_orders so JOIN ordering_driver_cash_settlements s ON s.id=so.settlement_id WHERE so.order_id=o.id AND s.status='posted') ORDER BY d.delivered_at,o.display_number`,
+    sql`SELECT s.id,s.business_date,s.order_count,s.expected_cash_cents,s.turned_in_cash_cents,s.over_short_cents,s.posted_at,e.name handled_by_name FROM ordering_driver_cash_settlements s JOIN employees e ON e.id=s.driver_employee_id WHERE s.business=${actor.business} AND s.status='posted' ORDER BY s.posted_at DESC LIMIT 30`,
   ]);
-  return { drivers, orders, settlements };
+  return { orders, settlements, handledBy: actor.name };
 }
 
 export async function postDriverCashSettlement(
   actor: DriverActor,
   input: {
-    driverId: string;
     orderIds: string[];
     turnedInCashCents: number;
     businessDate: string;
@@ -38,12 +36,8 @@ export async function postDriverCashSettlement(
     throw new Error("Choose a valid business date.");
   return withTransaction(async () => {
     const sql = getSql();
-    const driver = (
-      await sql`SELECT id,name FROM employees WHERE id=${input.driverId} AND business=${actor.business} AND active=TRUE AND role_group='Driver' FOR UPDATE`
-    )[0];
-    if (!driver) throw new Error("Choose an active driver.");
     const orders =
-      await sql`SELECT o.id,o.display_number,o.amount_due_cents FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id WHERE d.business=${actor.business} AND d.driver_employee_id=${input.driverId} AND d.status='DELIVERED' AND o.id=ANY(${orderIds}::uuid[]) AND o.amount_due_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_driver_cash_settlement_orders so JOIN ordering_driver_cash_settlements s ON s.id=so.settlement_id WHERE so.order_id=o.id AND s.status='posted') FOR UPDATE OF o,d`;
+      await sql`SELECT o.id,o.display_number,o.amount_due_cents FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id WHERE d.business=${actor.business} AND d.status='DELIVERED' AND o.id=ANY(${orderIds}::uuid[]) AND o.amount_due_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_driver_cash_settlement_orders so JOIN ordering_driver_cash_settlements s ON s.id=so.settlement_id WHERE so.order_id=o.id AND s.status='posted') FOR UPDATE OF o,d`;
     if (orders.length !== orderIds.length)
       throw new Error(
         "One or more orders are no longer eligible. Refresh and review the cash-out.",
@@ -53,7 +47,7 @@ export async function postDriverCashSettlement(
       0,
     );
     const settlementId = randomUUID();
-    await sql`INSERT INTO ordering_driver_cash_settlements(id,business,driver_employee_id,business_date,status,order_count,expected_cash_cents,turned_in_cash_cents,over_short_cents,created_by,approved_by,posted_at) VALUES(${settlementId},${actor.business},${input.driverId},${input.businessDate},'posted',${orders.length},${expected},${input.turnedInCashCents},${input.turnedInCashCents - expected},${actor.employeeId},${actor.employeeId},NOW())`;
+    await sql`INSERT INTO ordering_driver_cash_settlements(id,business,driver_employee_id,business_date,status,order_count,expected_cash_cents,turned_in_cash_cents,over_short_cents,created_by,approved_by,posted_at) VALUES(${settlementId},${actor.business},${actor.employeeId},${input.businessDate},'posted',${orders.length},${expected},${input.turnedInCashCents},${input.turnedInCashCents - expected},${actor.employeeId},${actor.employeeId},NOW())`;
     for (const order of orders) {
       const mutationId = `driver-settlement:${settlementId}:${order.id}`;
       await commitTender({
@@ -77,7 +71,7 @@ export async function postDriverCashSettlement(
     }
     return {
       id: settlementId,
-      driverName: String(driver.name),
+      handledByName: actor.name,
       orderCount: orders.length,
       expectedCashCents: expected,
       turnedInCashCents: input.turnedInCashCents,
