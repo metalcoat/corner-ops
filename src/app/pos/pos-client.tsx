@@ -30,6 +30,7 @@ import {
   supportsSubModifierIntensity,
 } from "@/lib/ordering-modifier-intensity";
 import { unwrapHelcimPayResponse } from "@/lib/helcim-pay-response";
+import ItemCancellationPanel from "./deli/orders/item-cancellation-panel";
 import {
   formatPizzaTopping,
   normalizePizzaToppings,
@@ -83,6 +84,16 @@ type SavedDraft = {
   checkoutOnly?: boolean;
   checkId?: string | null;
   paymentQueue?: boolean;
+};
+type ReopenedOrderItem = {
+  id: string;
+  item_name_snapshot: string;
+  variant_name_snapshot?: string | null;
+  quantity: number;
+  cancelled_quantity?: number;
+  line_total_cents: number;
+  special_instructions?: string | null;
+  modifiers?: Array<{ id: string; option_name_snapshot?: string | null; name_snapshot?: string | null; print_on_ticket?: boolean }>;
 };
 type OpenTikiTab = {
   id: string;
@@ -506,6 +517,22 @@ export default function PosClient({
   const [checkoutError, setCheckoutError] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
   const [savedDraft, setSavedDraft] = useState<SavedDraft | null>(null);
+  const [reopenedItems, setReopenedItems] = useState<ReopenedOrderItem[]>([]);
+  const [reopenedCancelItem, setReopenedCancelItem] = useState<ReopenedOrderItem | null>(null);
+  async function refreshReopenedOrder(orderId: string) {
+    const response = await fetch(`/api/ordering/order-center/${encodeURIComponent(orderId)}`, { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok || !payload.order) throw new Error(payload.error || "Could not load the reopened order.");
+    setReopenedItems(payload.order.items || []);
+    setSavedDraft((current) => current?.id === orderId ? {
+      ...current,
+      totalCents: Number(payload.order.total_cents),
+      deliveryFeeCents: Number(payload.order.delivery_fee_cents || 0),
+    } : current);
+  }
+  function invalidateEditableDraft() {
+    setSavedDraft((current) => current?.reopened ? current : null);
+  }
   useEffect(() => {
     if (business !== "Corner Deli") return;
     const load = () => {
@@ -521,8 +548,11 @@ export default function PosClient({
         });
         setServiceType(value.serviceType || "pickup");
         setCart([]);
+        void refreshReopenedOrder(value.id).catch((error) =>
+          setCheckoutError(error instanceof Error ? error.message : "Could not load the reopened order."),
+        );
         setCartNotice(
-          `Order #${value.displayNumber} reopened. Add only the new items, then send the addition.`,
+          `Order #${value.displayNumber} reopened. Existing items are locked; swipe or tap VOID to cancel one.`,
         );
       } catch {
         /* Ignore a damaged local handoff value. */
@@ -1506,7 +1536,7 @@ export default function PosClient({
       specialInstructions: "",
     };
     setCart((current) => [...current, line]);
-    setSavedDraft(null);
+    invalidateEditableDraft();
     setCartNotice(`Added ${item.name}`);
     window.setTimeout(() => setCartNotice(""), 1800);
   }
@@ -1676,7 +1706,7 @@ export default function PosClient({
     setConfiguringItem(null);
     setSelectedVariantId("");
     setEditingLineId(null);
-    setSavedDraft(null);
+    invalidateEditableDraft();
     setCartNotice(
       `${editingLineId ? "Updated" : "Added"} ${configuringItem.name}`,
     );
@@ -1867,7 +1897,7 @@ export default function PosClient({
       setRemovedLine(current.find((line) => line.id === lineId) || null);
       return current.filter((line) => line.id !== lineId);
     });
-    setSavedDraft(null);
+    invalidateEditableDraft();
   }
 
   function changeQuantity(lineId: string, delta: number) {
@@ -1880,7 +1910,7 @@ export default function PosClient({
         )
         .filter((line) => line.quantity > 0),
     );
-    setSavedDraft(null);
+    invalidateEditableDraft();
   }
 
   async function saveDraft(): Promise<SavedDraft | null> {
@@ -1894,7 +1924,7 @@ export default function PosClient({
     const reopenedDraft = savedDraft?.reopened ? savedDraft : null;
     setSavingDraft(true);
     setCheckoutError("");
-    setSavedDraft(null);
+    setSavedDraft(reopenedDraft);
     try {
       if (business === "Tiki" && serviceType === "bar" && activeTab) {
         const response = await fetch(
@@ -2188,6 +2218,8 @@ export default function PosClient({
       setCart([]);
       localStorage.removeItem("corner-ops-reopened-order");
       setSavedDraft(null);
+      setReopenedItems([]);
+      setReopenedCancelItem(null);
       setActiveTab(null);
       setActiveTabItems([]);
       setTabName("");
@@ -3470,7 +3502,7 @@ export default function PosClient({
               type="button"
               onClick={() => {
                 setCart([]);
-                setSavedDraft(null);
+                invalidateEditableDraft();
               }}
               disabled={!cart.length}
             >
@@ -3478,6 +3510,41 @@ export default function PosClient({
             </button>
           </div>
           <div className="posCartLines">
+            {reopenedItems
+              .filter((line) => Number(line.quantity) > Number(line.cancelled_quantity || 0))
+              .map((line) => {
+                const remaining = Number(line.quantity) - Number(line.cancelled_quantity || 0);
+                return (
+                  <article
+                    className="posCartLine posPersistedTabLine posReopenedLine"
+                    key={line.id}
+                    onTouchStart={(event) => {
+                      const touch = event.touches[0];
+                      swipeStart.current = { id: line.id, x: touch.clientX, y: touch.clientY };
+                    }}
+                    onTouchEnd={(event) => {
+                      const start = swipeStart.current, touch = event.changedTouches[0];
+                      swipeStart.current = null;
+                      if (start?.id === line.id && start.x - touch.clientX > 80 && Math.abs(start.y - touch.clientY) < 45)
+                        setReopenedCancelItem(line);
+                    }}
+                  >
+                    <div className="posLineTop">
+                      <strong>{remaining}× {line.item_name_snapshot}</strong>
+                      <span>{money(Number(line.line_total_cents))}</span>
+                    </div>
+                    {line.variant_name_snapshot && <small>Size / form: {line.variant_name_snapshot}</small>}
+                    {(line.modifiers || []).filter((modifier) => modifier.print_on_ticket !== false).map((modifier) => (
+                      <small key={modifier.id}>{modifier.option_name_snapshot || modifier.name_snapshot}</small>
+                    ))}
+                    {line.special_instructions && <small>Note: {line.special_instructions}</small>}
+                    <div className="posReopenedLineFooter">
+                      <small>EXISTING ITEM · LOCKED</small>
+                      <button type="button" onClick={() => setReopenedCancelItem(line)}>VOID</button>
+                    </div>
+                  </article>
+                );
+              })}
             {activeTabItems.map((line) => (
               <article
                 className="posCartLine posPersistedTabLine"
@@ -3495,7 +3562,7 @@ export default function PosClient({
                 <small>Already on tab</small>
               </article>
             ))}
-            {!cart.length && (
+            {!cart.length && !activeTabItems.length && !reopenedItems.some((line) => Number(line.quantity) > Number(line.cancelled_quantity || 0)) && (
               <div className="posEmpty">
                 Tap a menu item to start the order.
               </div>
@@ -3879,6 +3946,22 @@ export default function PosClient({
               Answer and speak on the physical cordless phone. This iPad never
               carries call audio.
             </small>
+          </section>
+        </div>
+      )}
+      {reopenedCancelItem && savedDraft?.reopened && (
+        <div className="posModalBackdrop" role="presentation">
+          <section className="posCustomerDialog posReopenedVoidDialog" role="dialog" aria-modal="true" aria-label="Void existing order item">
+            <ItemCancellationPanel
+              orderId={savedDraft.id}
+              item={reopenedCancelItem}
+              onClose={() => setReopenedCancelItem(null)}
+              onDone={async () => {
+                setReopenedCancelItem(null);
+                await refreshReopenedOrder(savedDraft.id);
+                setCartNotice(`Item voided from order #${savedDraft.displayNumber}.`);
+              }}
+            />
           </section>
         </div>
       )}

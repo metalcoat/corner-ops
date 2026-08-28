@@ -210,6 +210,21 @@
 .posCartHeading button:disabled { opacity: .4; cursor: not-allowed; }
 .posCartLines { padding: 10px 14px; overflow-y: auto; }
 .posCartLine { padding: 12px 0; border-bottom: 1px solid #263349; }
+.posReopenedLine{background:#17203380;filter:saturate(.65)}
+.posReopenedLineFooter{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
+.posReopenedLineFooter small{color:#94a3b8;font-weight:900}
+.posReopenedLineFooter button{min-height:36px;padding:5px 14px;border-color:#ef4444;background:#3f161d;color:#fecaca;font-weight:900}
+.posReopenedVoidDialog{width:min(520px,96vw)}
+.posReopenedVoidDialog .ocItemCancel{margin:0}
+.ocItemCancel{display:grid;gap:12px;padding:14px;border:1px solid #ef4444;border-radius:10px;background:#25141b}
+.ocItemCancel label{display:grid;gap:7px;font-weight:800}
+.ocItemCancel textarea,.ocItemCancel select{border:1px solid #64748b;border-radius:8px;background:#0f172a;color:#fff;padding:10px;font:inherit}
+.ocItemCancel textarea{min-height:80px}
+.ocItemCancel>div:last-child{display:flex;justify-content:flex-end;gap:8px}
+.ocItemCancel button.danger{border-color:#ef4444;background:#991b1b;color:#fff}
+.cancelQuote{display:grid;gap:5px;padding:10px;background:#101c30;border-radius:8px}
+.cancelQuote span{display:flex;justify-content:space-between}
+.ocDialogError{color:#fecaca}
 .posCartLine small { display: block; margin-top: 4px; color: #cbd5e1; }
 .posUndo{position:fixed;z-index:130;left:50%;bottom:18px;transform:translateX(-50%);background:#111827;color:#fff;padding:12px 18px;border-radius:10px;box-shadow:0 8px 30px #0008}.posUndo button{margin-left:18px;min-height:42px;color:#93c5fd;background:transparent;border:1px solid #60a5fa;border-radius:7px}
 .posQtyControls { align-items: center; margin-top: 10px; }
