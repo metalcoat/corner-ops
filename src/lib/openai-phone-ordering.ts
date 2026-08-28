@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
 import { getSql } from "@/lib/db";
 import {
+  HUMAN_HANDOFF_POLICY,
   MENU_SHORTHAND,
   ORDERING_POLICY,
   PHONE_BEHAVIOR,
@@ -102,6 +103,19 @@ export const OPENAI_MENU_SEARCH_TOOL = {
       query: { type: "string", description: "Customer's exact menu wording." },
     },
     required: ["query"],
+    additionalProperties: false,
+  },
+};
+export const OPENAI_HUMAN_HANDOFF_TOOL = {
+  type: "function" as const,
+  name: "request_human_handoff",
+  description: "Transfer the active call to the configured Corner Deli staff destination while preserving and displaying the current order draft.",
+  parameters: {
+    type: "object",
+    properties: {
+      reason: { type: "string", description: "Concise operational reason staff assistance is needed." },
+    },
+    required: ["reason"],
     additionalProperties: false,
   },
 };
@@ -233,4 +247,5 @@ export const PHONE_INSTRUCTIONS = [
   PHONE_BEHAVIOR,
   ORDERING_POLICY,
   MENU_SHORTHAND,
+  HUMAN_HANDOFF_POLICY,
 ].join("\n\n");

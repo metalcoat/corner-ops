@@ -1,7 +1,7 @@
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { checkoutState, commitTender, PaymentConflictError, reprintPaymentReceipt, reverseTender, type CheckoutTenderType } from "@/lib/ordering-payments";
-import { orderingActor } from "@/lib/ordering-route-auth";
+import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { paymentStationProfile, PaymentStationError } from "@/lib/ordering-payment-stations";
 
@@ -55,6 +55,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       stationKey,
       giftCardNumber: body.giftCardNumber ? String(body.giftCardNumber) : undefined,
       giftCardPin: body.giftCardPin ? String(body.giftCardPin) : undefined,
+      providerApproval: body.testCard === true && process.env.LOCAL_DEVELOPMENT === "true" && canManagePos(actor) ? {
+        provider: "test",
+        transactionReference: `local-test-${String(body.clientMutationId || "")}`,
+        brand: "TEST",
+        last4: "4242",
+        details: { simulated: true, localDevelopment: true },
+      } : undefined,
     });await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});return Response.json(result,{status:201});
   } catch (error) {
     if (error instanceof PaymentConflictError || error instanceof PaymentStationError) return Response.json({ error: error.message }, { status: 409 });

@@ -134,7 +134,7 @@ type CheckoutState = {
     reason?: string;
   }>;
 };
-type HelcimStatus = { checkoutEnabled: boolean; apiTokenConfigured: boolean };
+type HelcimStatus = { checkoutEnabled: boolean; apiTokenConfigured: boolean; localDevelopment?: boolean };
 type PosStationProfile = { name:string;station_key:string;station_mode:"payment"|"order_taker";receipt_printer_id?:string|null };
 type PayableCheck = {
   id: string;
@@ -588,6 +588,7 @@ export default function PosClient({
   );
   const [giftCardNumber, setGiftCardNumber] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
+  const [helcimOpen, setHelcimOpen] = useState(false);
   const [helcimStatus, setHelcimStatus] = useState<HelcimStatus | null>(null);
   const [stationProfile,setStationProfile]=useState<PosStationProfile|null>(null);
   useEffect(() => {
@@ -2412,6 +2413,34 @@ export default function PosClient({
     }
   }
 
+  async function commitTestCard() {
+    const draft = savedDraft || activeTab;
+    if (!draft || !checkoutState || paymentBusy) return;
+    const due = Number(checkoutState.check?.amount_due_cents ?? checkoutState.order.amount_due_cents);
+    const amountTenderedCents = cardTender ? Math.round(Number(cardTender) * 100) : due;
+    if (!Number.isSafeInteger(amountTenderedCents) || amountTenderedCents <= 0 || amountTenderedCents > due) {
+      setCheckoutError("Enter a valid test-card amount no greater than the balance due.");
+      return;
+    }
+    setPaymentBusy(true);
+    setCheckoutError("");
+    try {
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ business, checkId: selectedCheckId, tenderType: "card", testCard: true, amountTenderedCents, clientMutationId: clientId(), receiptPrinterId: receiptPrinterId || undefined, stationKey: stationProfile?.station_key || "" }),
+      });
+      const payload = await response.json() as CheckoutState & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Test card could not be committed.");
+      setCheckoutState(payload);
+      setCardTender("");
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "Test card could not be committed.");
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
   async function sendToPaymentStation(){
     const draft=savedDraft||activeTab;if(!draft||paymentBusy)return;setPaymentBusy(true);setCheckoutError("");
     try{const response=await fetch("/api/ordering/payment-stations",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"queue",orderId:draft.id,checkId:selectedCheckId,stationKey:stationProfile?.station_key||"",note:`Order #${draft.displayNumber}`})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not send this check to the payment station.");setCheckoutError(body.duplicate?"This check is already waiting at the payment station.":"Sent to the payment station.")}
@@ -2422,6 +2451,7 @@ export default function PosClient({
     const draft = savedDraft || activeTab;
     if (!draft || !checkoutState || paymentBusy) return;
     setPaymentBusy(true);
+    setHelcimOpen(true);
     setCheckoutError("");
     try {
       const due = Number(checkoutState.check?.amount_due_cents ?? checkoutState.order.amount_due_cents);
@@ -2555,6 +2585,8 @@ export default function PosClient({
         error instanceof Error ? error.message : "Helcim payment failed.",
       );
     } finally {
+      window.removeHelcimPayIframe?.();
+      setHelcimOpen(false);
       setPaymentBusy(false);
     }
   }
@@ -3743,6 +3775,24 @@ export default function PosClient({
                 {intervention.open_order_status?.replaceAll("_", " ")}
               </p>
             )}
+            {intervention.open_order_id && (
+              <div className="posAiOrderPreview posHandoffOrderPreview">
+                <b>{(intervention.service_type || "order").replaceAll("_", " ").toUpperCase()} · ORDER SO FAR</b>
+                {intervention.order_items.length ? (
+                  <ul>
+                    {intervention.order_items.map((item) => (
+                      <li key={item.id}>
+                        <span>{item.quantity}× {item.name}{item.variant ? ` · ${item.variant}` : ""}</span>
+                        <em>{money(item.lineTotalCents)}</em>
+                        {item.modifiers.length > 0 && <small>{item.modifiers.map((modifier) => `${modifier.quantity > 1 ? `${modifier.quantity}× ` : ""}${modifier.name}`).join(", ")}</small>}
+                        {item.instructions && <small>{item.instructions}</small>}
+                      </li>
+                    ))}
+                  </ul>
+                ) : <small>No items have been captured yet.</small>}
+                <footer><span>Subtotal {money(intervention.subtotal_cents || 0)} · Tax {money(intervention.tax_cents || 0)}</span><strong>Total {money(intervention.total_cents || 0)}</strong></footer>
+              </div>
+            )}
             {intervention.claimed_by &&
             intervention.claimed_by !== posEmployeeId ? (
               <p>
@@ -3842,6 +3892,11 @@ export default function PosClient({
             </button>
             <small>Answer the call on the physical phone.</small>
           </section>
+        </div>
+      )}
+      {helcimOpen && (
+        <div className="posSecurePaymentBackdrop" role="status" aria-live="polite">
+          <div><span>SECURE CARD PAYMENT</span><strong>Loading Helcim…</strong></div>
         </div>
       )}
       {checkoutOpen && (savedDraft || activeTab) && (
@@ -4127,6 +4182,11 @@ export default function PosClient({
                           ? "HELCIM SETUP REQUIRED"
                           : "PAYMENT ACCESS UNAVAILABLE"}
                     </button>
+                    {helcimStatus?.localDevelopment && canManagePayments && (
+                      <button type="button" disabled={paymentBusy || stationProfile?.station_mode === "order_taker"} onClick={() => void commitTestCard()}>
+                        {paymentBusy ? "PROCESSING…" : "APPROVE TEST CARD"}
+                      </button>
+                    )}
                     <label>
                       Gift card number
                       <input

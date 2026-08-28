@@ -25,7 +25,7 @@ const business = "Corner Deli" as const;
 export async function GET(_request: Request) {
   try {
     if (!(await orderingActor(business))) return unauthorized();
-    return Response.json(helcimStatus());
+    return Response.json({ ...helcimStatus(), localDevelopment: process.env.LOCAL_DEVELOPMENT === "true" });
   } catch (error) {
     return apiError(error);
   }

@@ -46,6 +46,8 @@ async function main() {
     "ITEM_NOT_ON_MENU",
     "INVALID_MODIFIER",
     "CATALOG_UNAVAILABLE",
+    "after two failed clarification attempts",
+    "REQUEST_HUMAN_HANDOFF",
     "total_cents",
     "SHADOW",
     "Maximum",
@@ -77,7 +79,7 @@ async function main() {
   );
   assert.ok(
     webhookSource.includes(
-      "tools:[OPENAI_PRICE_ORDER_TOOL,OPENAI_MENU_SEARCH_TOOL]",
+      "tools:[OPENAI_PRICE_ORDER_TOOL,OPENAI_MENU_SEARCH_TOOL,OPENAI_HUMAN_HANDOFF_TOOL]",
     ),
     "Realtime calls must use direct atomic pricing and current-menu lookup functions.",
   );

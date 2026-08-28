@@ -52,6 +52,7 @@ async function main(){
       protocol:initialized.result?.protocolVersion==="2025-06-18",
       toolsListed:listed.result?.tools?.some((tool:{name:string})=>tool.name==="price_order")&&listed.result?.tools?.some((tool:{name:string})=>tool.name==="menu_search"),
       handoffToolListed:listed.result?.tools?.some((tool:{name:string})=>tool.name==="request_human_handoff"),
+      handoffPolicy:phone.PHONE_INSTRUCTIONS.includes("after two failed clarification attempts")&&phone.PHONE_INSTRUCTIONS.includes("asks for a person"),
       callBound:called.result?.content?.[0]?.text?.includes("pricingAuthority")||called.result?.content?.[0]?.text?.includes("serviceTypes"),
       unconfirmedSendBlocked:blocked.result?.isError===true,
       shadowSendHeld:shadowed.result?.content?.[0]?.text?.includes("ORDER_REVIEW_PENDING")===true,

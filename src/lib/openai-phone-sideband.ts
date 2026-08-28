@@ -11,7 +11,7 @@ import {
   type SpokenOrderItem,
 } from "@/lib/ordering-ai-tools";
 import { recordAiRegression } from "@/lib/ordering-ai-regressions";
-import { openAiClient } from "@/lib/openai-phone-ordering";
+import { openAiClient, requestOpenAiHandoff } from "@/lib/openai-phone-ordering";
 import { attachSpokenDeliveryAddress } from "@/lib/ordering-delivery-landmarks";
 
 const sockets = new Map<string, WebSocket>();
@@ -323,6 +323,17 @@ export function startOpenAiSideband(
       }),
     );
   };
+  const executeHumanHandoff = async (row: Record<string, any>) => {
+    try {
+      const args = JSON.parse(String(row.arguments || "{}")) as Record<string, unknown>;
+      const reason = String(args.reason || "Customer requested store assistance.");
+      await event(callId, `${callId}:handoff:${row.call_id}`, "ordering.human_handoff", "system", "Transferring call to store", reason);
+      await requestOpenAiHandoff(callId, reason);
+    } catch (error) {
+      socket.send(JSON.stringify({ type: "conversation.item.create", item: { type: "function_call_output", call_id: row.call_id, output: JSON.stringify({ error: { code: "HANDOFF_FAILED", message: "The call could not be transferred. Ask the caller to stay on the line and retry once." } }) } }));
+      socket.send(JSON.stringify({ type: "response.create", response: { output_modalities: ["audio"], tool_choice: "auto" } }));
+    }
+  };
   socket.on("message", (data) => {
     try {
       const row = JSON.parse(String(data)) as Record<string, any>,
@@ -460,6 +471,12 @@ export function startOpenAiSideband(
       ) {
         toolUsedForTurn = true;
         void executeMenuSearch(row);
+      } else if (
+        type === "response.function_call_arguments.done" &&
+        row.name === "request_human_handoff"
+      ) {
+        toolUsedForTurn = true;
+        void executeHumanHandoff(row);
       } else if (type === "response.mcp_call.completed") {
         toolUsedForTurn = true;
         void event(callId, key, type, "tool", "Ordering tool completed");

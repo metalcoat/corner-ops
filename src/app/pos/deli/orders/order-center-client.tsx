@@ -52,6 +52,8 @@ export default function OrderCenterClient() {
     [voiding, setVoiding] = useState(false),
     [voidBusy, setVoidBusy] = useState(false),
     [reopenBusy, setReopenBusy] = useState(false),
+    [clearEnabled, setClearEnabled] = useState(false),
+    [clearBusy, setClearBusy] = useState(false),
     [cancelItem, setCancelItem] = useState<any>(null);
   useEffect(() => {
     fetch("/api/pos/session", { cache: "no-store" })
@@ -79,6 +81,7 @@ export default function OrderCenterClient() {
       return;
     }
     setOrders(b.orders || []);
+    setClearEnabled(b.testOrderClearEnabled === true);
     setError("");
   }, [date, query, session?.authenticated, view]);
   useEffect(() => {
@@ -93,10 +96,10 @@ export default function OrderCenterClient() {
   const overdue = orders.filter((o) => o.overdue_unpaid),
     open = orders.filter(
       (o) =>
-        !o.overdue_unpaid && !["paid", "refunded"].includes(o.payment_status),
+        !o.overdue_unpaid && o.status !== "cancelled" && !["paid", "refunded"].includes(o.payment_status),
     ),
     paid = orders.filter((o) =>
-      ["paid", "refunded"].includes(o.payment_status),
+      o.status === "cancelled" || ["paid", "refunded"].includes(o.payment_status),
     );
   async function details(order: Order) {
     const r = await fetch(`/api/ordering/order-center/${order.id}`);
@@ -208,6 +211,23 @@ export default function OrderCenterClient() {
       );
     } finally {
       setVoidBusy(false);
+    }
+  }
+  async function clearTestOrders() {
+    if (!window.confirm("Clear every active unpaid Corner Deli test order? This will mark them voided and remove them from active queues.")) return;
+    setClearBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/ordering/order-center/clear-test", { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Could not clear test orders.");
+      setSelected(null);
+      await load();
+      setError(`${body.cleared} test order${body.cleared === 1 ? "" : "s"} cleared.${body.skipped ? ` ${body.skipped} changed during clearing and were skipped.` : ""}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not clear test orders.");
+    } finally {
+      setClearBusy(false);
     }
   }
   function move(days: number) {
@@ -331,6 +351,11 @@ export default function OrderCenterClient() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Order, customer, phone, address"
         />
+        {clearEnabled && session.session?.posRole !== "employee" && (
+          <button className="danger clearTestOrders" disabled={clearBusy} onClick={() => void clearTestOrders()}>
+            {clearBusy ? "CLEARING…" : "CLEAR ACTIVE TEST ORDERS"}
+          </button>
+        )}
       </div>
       {error && !selected && <p role="alert">{error}</p>}
       {view === "date" &&

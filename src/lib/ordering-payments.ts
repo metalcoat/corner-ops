@@ -60,7 +60,7 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     }
     const source = (await sql`SELECT * FROM ordering_payment_transactions WHERE id=${input.transactionId} AND order_id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
     if (!source || source.transaction_type !== "payment" || source.status !== "approved") throw new PaymentConflictError("Approved payment tender was not found.");
-    if (source.tender_type === "card" && source.provider) throw new PaymentConflictError(`${source.provider === "mx_merchant" ? "Dharma / MX Merchant" : "Helcim"} card reversals must be approved by the processor before the local payment record is updated.`);
+    if (source.tender_type === "card" && source.provider && source.provider !== "test") throw new PaymentConflictError(`${source.provider === "mx_merchant" ? "Dharma / MX Merchant" : "Helcim"} card reversals must be approved by the processor before the local payment record is updated.`);
     const reversed = Number((await sql`SELECT COALESCE(SUM(amount_cents),0) amount FROM ordering_payment_transactions WHERE related_transaction_id=${source.id} AND transaction_type='void' AND status='approved'`)[0].amount);
     if (amount > Number(source.amount_cents) - reversed) throw new PaymentConflictError("Reversal exceeds the tender's unreversed amount.");
     const order = (await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
@@ -109,7 +109,7 @@ export async function commitTender(input: {
   giftCardNumber?: string;
   giftCardPin?: string;
   providerApproval?: {
-    provider: PaymentProviderKey;
+    provider: PaymentProviderKey | "test";
     transactionReference: string;
     brand?: string;
     last4?: string;
