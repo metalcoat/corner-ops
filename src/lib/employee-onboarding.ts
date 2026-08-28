@@ -11,7 +11,7 @@ export type EmployeeOnboardingSmsInput = {
   pin: string;
 };
 
-function firstName(value: string): string {
+function employeeGivenName(value: string): string {
   return value.trim().split(/\s+/)[0] || "there";
 }
 
@@ -37,7 +37,7 @@ export async function sendEmployeeOnboardingSms(input: EmployeeOnboardingSmsInpu
   return deliverSms({
     recipients: [{ id: input.id, name: input.name, phone: input.phone, smsOptIn: input.smsOptIn }],
     text: () => [
-      `${input.business}: Welcome, ${firstName(input.name)}!`,
+      `${input.business}: Welcome, ${employeeGivenName(input.name)}!`,
       `Sign in to Corner Ops Employee Hub: ${employeeHubUrl}`,
       `Your PIN is ${input.pin}.`,
       `Complete your new-hire paperwork here after signing in: ${formsUrl}`,
