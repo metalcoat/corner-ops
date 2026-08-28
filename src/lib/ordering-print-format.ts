@@ -1,7 +1,7 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
 import { formatModifierIntensity } from "@/lib/ordering-modifier-intensity";
-import { kitchenPortionName } from "@/lib/ordering-line-format";
+import { kitchenPortionName, pizzaKitchenModifierOrder } from "@/lib/ordering-line-format";
 
 export type PrintableModifier = { name: string; printOrder: number; header: boolean; print: boolean; group?: string; pizzaPortion?: "left_half"|"whole"|"right_half"|null; pizzaAmount?: string|null };
 export type PrintableLine = { quantity: number; header: string; modifiers: PrintableModifier[]; family?: string; sequence?: number };
@@ -25,13 +25,7 @@ export function kitchenModifierOrder(line:PrintableLine,modifier:PrintableModifi
   const family=line.family||kitchenItemFamily(line.header),name=key(modifier.name),group=key(modifier.group||"");
   if(Number.isFinite(modifier.printOrder)&&modifier.printOrder!==0)return modifier.printOrder;
   if(family==="00-pizza"){
-    if(group.includes("pizza sauce"))return 10;
-    if(name.includes("light sauce"))return 15;
-    if(name.includes("extra sauce"))return 20;
-    const rank=namedRank(name,["pepperoni","mushroom","pepper","onion","ham","bacon","tomato","black olive","jalapeno","chicken","broccoli","hot pepper","meatball"]);
-    if(rank!==undefined)return 20+rank;
-    if(name.includes("extra cheese"))return 900;
-    if(name.includes("sausage"))return 910;
+    return pizzaKitchenModifierOrder({option_name_snapshot:modifier.name,print_order_snapshot:modifier.printOrder,group_name_snapshot:modifier.group});
   }
   if(family==="20-subs"){
     const rank=namedRank(name,["mayonnaise","mayo","russian","oil","lettuce","tomato","onion","hot pepper","ranch","bacon","a1 sauce","parm shaker","oregano shaker","jalapeno","pickle","mustard","mushroom","black olive","not toasted","extra sauce","double cheese","double meat"]);
@@ -44,7 +38,7 @@ function wrapCell(value:string,width:number){const words=value.split(/\s+/),rows
 function pizzaColumnLines(modifiers:PrintableModifier[]){
   const portions=["left_half","whole","right_half"] as const,width=12;
   if(!modifiers.some(modifier=>modifier.print&&(modifier.pizzaPortion==="left_half"||modifier.pizzaPortion==="right_half")))return[];
-  const columns=portions.map(portion=>modifiers.filter(modifier=>modifier.print&&modifier.pizzaPortion===portion).sort((a,b)=>a.printOrder-b.printOrder||a.name.localeCompare(b.name)).flatMap(modifier=>wrapCell(`${modifier.pizzaAmount&&modifier.pizzaAmount!=="regular"?`${modifier.pizzaAmount==="extra"?"EXTRA":modifier.pizzaAmount==="double_extra"?"2X EXTRA":"3X EXTRA"} `:""}${modifier.name.toUpperCase()}`,width)));
+  const columns=portions.map(portion=>modifiers.filter(modifier=>modifier.print&&modifier.pizzaPortion===portion).sort((a,b)=>kitchenModifierOrder({quantity:1,header:"Pizza",family:"00-pizza",modifiers},a)-kitchenModifierOrder({quantity:1,header:"Pizza",family:"00-pizza",modifiers},b)||a.name.localeCompare(b.name)).flatMap(modifier=>wrapCell(`${modifier.pizzaAmount&&modifier.pizzaAmount!=="regular"?`${modifier.pizzaAmount==="extra"?"EXTRA":modifier.pizzaAmount==="double_extra"?"2X EXTRA":"3X EXTRA"} `:""}${modifier.name.toUpperCase()}`,width)));
   if(!columns.some(column=>column.length))return[];
   const output=[`${"LEFT".padEnd(width)}|${"WHOLE".padEnd(width)}|RIGHT`,`${"-".repeat(width)}+${"-".repeat(width)}+${"-".repeat(width)}`],height=Math.max(...columns.map(column=>column.length));
   for(let index=0;index<height;index++)output.push(`${(columns[0][index]||"").padEnd(width)}|${(columns[1][index]||"").padEnd(width)}|${columns[2][index]||""}`);

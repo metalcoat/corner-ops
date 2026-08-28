@@ -25,11 +25,34 @@ export type OrderModifierPresentation = {
   print_order_snapshot?: number;
 };
 
+const kitchenKey = (value: string) => value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+export function pizzaKitchenModifierOrder(modifier: Pick<OrderModifierPresentation, "option_name_snapshot" | "print_order_snapshot"> & { group_name_snapshot?: string }) {
+  const configured = Number(modifier.print_order_snapshot || 0);
+  if (configured) return configured;
+  const name = kitchenKey(modifier.option_name_snapshot);
+  const group = kitchenKey(modifier.group_name_snapshot || "");
+  if (group.includes("pizza sauce")) return 10;
+  if (name.includes("light sauce")) return 15;
+  if (name.includes("extra sauce")) return 20;
+  const names = ["pepperoni", "mushroom", "pepper", "onion", "ham", "bacon", "tomato", "black olive", "jalapeno", "chicken", "broccoli", "hot pepper", "meatball"];
+  const rank = names.findIndex((candidate) => name.includes(candidate));
+  if (rank >= 0) return 30 + rank * 10;
+  if (name.includes("extra cheese")) return 900;
+  if (name.includes("sausage")) return 910;
+  return 800;
+}
+
+export function comparePizzaKitchenModifiers(left: OrderModifierPresentation & { group_name_snapshot?: string }, right: OrderModifierPresentation & { group_name_snapshot?: string }) {
+  return pizzaKitchenModifierOrder(left) - pizzaKitchenModifierOrder(right)
+    || left.option_name_snapshot.localeCompare(right.option_name_snapshot);
+}
+
 export function pizzaToppingColumns(modifiers: OrderModifierPresentation[]) {
   const columns: Record<PizzaToppingPortion, string[]> = { left_half: [], whole: [], right_half: [] };
   modifiers
     .filter((modifier) => modifier.print_on_ticket !== false && modifier.pizza_topping_portion && modifier.pizza_topping_amount)
-    .toSorted((left, right) => Number(left.print_order_snapshot || 0) - Number(right.print_order_snapshot || 0) || left.option_name_snapshot.localeCompare(right.option_name_snapshot))
+    .toSorted(comparePizzaKitchenModifiers)
     .forEach((modifier) => {
       const portion = modifier.pizza_topping_portion as PizzaToppingPortion;
       columns[portion].push(formatPizzaTopping(modifier.option_name_snapshot, "whole", modifier.pizza_topping_amount as PizzaToppingAmount, "ticket"));

@@ -42,6 +42,13 @@ void (async () => {
       {name:"Cheese",group:"Pizza Toppings",printOrder:10,header:false,print:true,pizzaPortion:"whole",pizzaAmount:"extra"},
     ]}]);
     if(splitPizza[1]!=="LEFT        |WHOLE       |RIGHT"||!splitPizza.some(line=>line.includes("PEPPERONI")&&line.includes("EXTRA CHEESE")&&line.includes("MUSHROOMS")))throw new Error(`Split pizza columns failed: ${splitPizza.join(" / ")}`);
+    const orderedSplit=formatKitchenLines([{quantity:1,header:"Ordered Split Pizza",family:"00-pizza",modifiers:[
+      {name:"Sausage",group:"Pizza Toppings",printOrder:0,header:false,print:true,pizzaPortion:"left_half",pizzaAmount:"regular"},
+      {name:"Pepperoni",group:"Pizza Toppings",printOrder:0,header:false,print:true,pizzaPortion:"left_half",pizzaAmount:"regular"},
+      {name:"Extra Cheese",group:"Pizza Toppings",printOrder:0,header:false,print:true,pizzaPortion:"whole",pizzaAmount:"regular"},
+      {name:"Mushrooms",group:"Pizza Toppings",printOrder:0,header:false,print:true,pizzaPortion:"right_half",pizzaAmount:"regular"},
+    ]}]);
+    if(orderedSplit.findIndex(line=>line.includes("PEPPERONI"))>orderedSplit.findIndex(line=>line.includes("SAUSAGE")))throw new Error(`Split pizza make-line order failed: ${orderedSplit.join(" / ")}`);
     const wholePizza=formatKitchenLines([{quantity:1,header:"Whole Pizza",family:"00-pizza",modifiers:[{name:"Pepperoni",group:"Pizza Toppings",printOrder:10,header:false,print:true,pizzaPortion:"whole",pizzaAmount:"regular"}]}]);
     if(wholePizza.join("|")!=="Whole Pizza|  PEPPERONI")throw new Error(`Whole pizza should use the normal ticket list: ${wholePizza.join("|")}`);
     const portions=["Small French Fries (7oz)","Large French Fries (11oz)","Small Curly Fries (6oz)","Large Curly Fries (9oz)","Small Tater Tots (7oz)","Large Tater Tots (11oz)","Onion Rings (7oz)","Small Waffle Fries (6oz)","Large Waffle Fries (9oz)"];
