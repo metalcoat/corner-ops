@@ -139,6 +139,11 @@ export class PaymentTerminalPlaceholderAdapter extends UnconfiguredAdapter {
     super("payment_terminal");
   }
 }
+export class KeyboardWedgeAdapter extends UnconfiguredAdapter {
+  readonly key = "keyboard-wedge";
+  constructor() { super("barcode_scanner"); }
+  async probe(){return {status:"unknown" as const,message:"Keyboard-wedge reader is configured locally; swipe a test gift card at checkout to verify it."}}
+}
 export function hardwareAdapter(
   key: string,
   kind: HardwareAdapter["kind"],
@@ -148,6 +153,7 @@ export function hardwareAdapter(
   if (key === "mock") return new MockDeviceAdapter(kind);
   if (key === "payment-placeholder" && kind === "payment_terminal")
     return new PaymentTerminalPlaceholderAdapter();
+  if (key === "keyboard-wedge" && kind === "barcode_scanner") return new KeyboardWedgeAdapter();
   return new UnconfiguredAdapter(kind);
 }
 
@@ -212,11 +218,12 @@ export function effectiveDeviceStatus(row: {
 export async function hardwareDashboard(business: OrderingBusiness) {
   await ensureOrderingHardwareSchema();
   const sql = getSql();
-  const [locations, devices, routes, jobs] = await Promise.all([
+  const [locations, devices, routes, jobs, paymentStations] = await Promise.all([
     sql`SELECT * FROM ordering_hardware_locations WHERE business=${business} AND active=TRUE ORDER BY name`,
     sql`SELECT device.*,location.name location_name FROM ordering_hardware_devices device JOIN ordering_hardware_locations location ON location.id=device.location_id WHERE device.business=${business} AND device.active=TRUE AND location.active=TRUE ORDER BY location.name,device.name`,
     sql`SELECT route.*,device.name printer_name,location.name location_name FROM ordering_printer_routes route JOIN ordering_hardware_devices device ON device.id=route.printer_id JOIN ordering_hardware_locations location ON location.id=route.location_id WHERE route.business=${business} AND route.active=TRUE AND device.active=TRUE AND location.active=TRUE ORDER BY route.priority DESC,route.created_at`,
     sql`SELECT job.id,job.order_id,job.purpose,job.event_subtype,job.status,job.is_reprint,job.retry_count,job.error_message,job.queued_at,job.attempted_at,job.completed_at,job.device_id,device.name device_name FROM ordering_print_jobs job LEFT JOIN ordering_hardware_devices device ON device.id=job.device_id WHERE job.business=${business} ORDER BY job.created_at DESC LIMIT 100`,
+    sql`SELECT station.*,receipt.name receipt_printer_name,terminal.name payment_terminal_name,reader.name gift_card_reader_name FROM ordering_payment_stations station LEFT JOIN ordering_hardware_devices receipt ON receipt.id=station.receipt_printer_id LEFT JOIN ordering_hardware_devices terminal ON terminal.id=station.payment_terminal_id LEFT JOIN ordering_hardware_devices reader ON reader.id=station.gift_card_reader_id WHERE station.business=${business} AND station.active=TRUE ORDER BY station.station_mode,station.name`,
   ]);
   return {
     locations,
@@ -226,6 +233,7 @@ export async function hardwareDashboard(business: OrderingBusiness) {
     })),
     routes,
     jobs,
+    paymentStations,
   };
 }
 
@@ -317,10 +325,12 @@ export async function saveHardware(input: {
         "mock",
         "payment-placeholder",
         "network-printer",
+        "keyboard-wedge",
       ].includes(adapterKey) ||
       (adapterKey === "payment-placeholder" &&
         deviceType !== "payment_terminal") ||
       (adapterKey === "network-printer" && deviceType !== "printer")
+      || (adapterKey === "keyboard-wedge" && deviceType !== "barcode_scanner")
     )
       throw new Error("Unsupported adapter.");
     const config = safeConfig(body.adapterConfig);
@@ -350,6 +360,29 @@ export async function saveHardware(input: {
     if (!rows.length)
       throw new Error("Hardware location was not found in this business.");
     return { id };
+  }
+  if (input.action === "save_payment_station") {
+    const id = String(body.id || randomUUID()),
+      name = String(body.name || "").trim(),
+      stationKey = String(body.stationKey || "").trim().toLowerCase(),
+      stationMode = String(body.stationMode || "order_taker"),
+      receiptPrinterId = body.receiptPrinterId ? String(body.receiptPrinterId) : null,
+      paymentTerminalId = body.paymentTerminalId ? String(body.paymentTerminalId) : null,
+      giftCardReaderId = body.giftCardReaderId ? String(body.giftCardReaderId) : null;
+    if (!name || !/^[a-z0-9][a-z0-9-]{1,79}$/.test(stationKey)) throw new Error("Station name and a stable lowercase station key are required.");
+    if (!['payment','order_taker'].includes(stationMode)) throw new Error("Unknown station mode.");
+    if (stationMode === 'payment' && !receiptPrinterId) throw new Error("The payment station requires a receipt printer / till.");
+    const deviceIds = [receiptPrinterId,paymentTerminalId,giftCardReaderId].filter(Boolean) as string[];
+    if (deviceIds.length) {
+      const matched = await sql`SELECT id,role FROM ordering_hardware_devices WHERE business=${input.business} AND active=TRUE AND id=ANY(${deviceIds}::uuid[])`;
+      if (matched.length !== new Set(deviceIds).size) throw new Error("One or more station devices were not found.");
+      const roleById = new Map(matched.map((row:any)=>[String(row.id),String(row.role)]));
+      if (receiptPrinterId && roleById.get(receiptPrinterId) !== 'receipt_printer') throw new Error("Choose a receipt printer for the till.");
+      if (paymentTerminalId && roleById.get(paymentTerminalId) !== 'payment_terminal') throw new Error("Choose a payment terminal.");
+      if (giftCardReaderId && roleById.get(giftCardReaderId) !== 'barcode_scanner') throw new Error("Choose a scanner / magnetic-stripe reader.");
+    }
+    await sql`INSERT INTO ordering_payment_stations(id,business,name,station_key,station_mode,receipt_printer_id,payment_terminal_id,gift_card_reader_id,active,created_by,updated_by) VALUES(${id},${input.business},${name},${stationKey},${stationMode},${receiptPrinterId},${paymentTerminalId},${giftCardReaderId},TRUE,${input.actor.id},${input.actor.id}) ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,station_key=EXCLUDED.station_key,station_mode=EXCLUDED.station_mode,receipt_printer_id=EXCLUDED.receipt_printer_id,payment_terminal_id=EXCLUDED.payment_terminal_id,gift_card_reader_id=EXCLUDED.gift_card_reader_id,active=TRUE,updated_by=EXCLUDED.updated_by,updated_at=NOW() WHERE ordering_payment_stations.business=${input.business}`;
+    return {id};
   }
   if (input.action === "probe_device") {
     const id = String(body.id || "");
@@ -383,6 +416,15 @@ export async function saveHardware(input: {
     ]);
     await sql`UPDATE ordering_hardware_devices SET reported_status='online',last_seen_at=NOW(),status_message='Epson ESC/POS test print sent successfully.',updated_by=${input.actor.id},updated_at=NOW() WHERE id=${id}`;
     return { status: "online", message: "Epson ESC/POS test print sent." };
+  }
+  if (input.action === "test_cash_drawer") {
+    const id=String(body.id||"");
+    const device=(await sql`SELECT * FROM ordering_hardware_devices WHERE id=${id} AND business=${input.business} AND role='receipt_printer' AND active=TRUE`)[0];
+    if(!device)throw new Error("Active receipt printer was not found.");
+    if(device.adapter_key!=="network-printer"||device.adapter_config?.cashDrawerEnabled!==true)throw new Error("Enable the cash drawer on a network receipt printer first.");
+    await sendEpsonPrint(device.adapter_config,["******** DRAWER TEST ********",`OPENED BY: ${input.actor.name}`,new Date().toISOString()],{openCashDrawer:true});
+    await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,actor,reason,details) VALUES(${randomUUID()},${input.business},'cash_drawer_test',${input.actor.id},'Manager hardware test',${JSON.stringify({printerId:id,printerName:device.name})}::jsonb)`;
+    return {status:"online",message:"Cash-drawer pulse and marked test receipt sent."};
   }
   if (input.action === "deactivate_device") {
     const id = String(body.id || "");

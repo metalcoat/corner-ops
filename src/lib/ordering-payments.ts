@@ -6,6 +6,8 @@ import type { OrderingActor } from "@/lib/ordering-route-auth";
 import { ensureOrderingGiftCardSchema } from "@/lib/ordering-gift-card-schema";
 import { GiftCardError, redeemGiftCard } from "@/lib/ordering-gift-cards";
 import { canManagePos } from "@/lib/ordering-route-auth";
+import type { PaymentProviderKey } from "@/lib/payment-provider";
+import { completePaidPaymentQueue } from "@/lib/ordering-payment-stations";
 
 export type CheckoutTenderType = "cash" | "card" | "gift_card";
 
@@ -58,7 +60,7 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     }
     const source = (await sql`SELECT * FROM ordering_payment_transactions WHERE id=${input.transactionId} AND order_id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
     if (!source || source.transaction_type !== "payment" || source.status !== "approved") throw new PaymentConflictError("Approved payment tender was not found.");
-    if (source.provider === "helcim") throw new PaymentConflictError("Helcim card reversals must be processed through Helcim before the local payment record is updated.");
+    if (source.tender_type === "card" && source.provider) throw new PaymentConflictError(`${source.provider === "mx_merchant" ? "Dharma / MX Merchant" : "Helcim"} card reversals must be approved by the processor before the local payment record is updated.`);
     const reversed = Number((await sql`SELECT COALESCE(SUM(amount_cents),0) amount FROM ordering_payment_transactions WHERE related_transaction_id=${source.id} AND transaction_type='void' AND status='approved'`)[0].amount);
     if (amount > Number(source.amount_cents) - reversed) throw new PaymentConflictError("Reversal exceeds the tender's unreversed amount.");
     const order = (await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
@@ -71,6 +73,11 @@ export async function reverseTender(input: { orderId: string; business: Ordering
       const balance = Number(ledger.current_balance_cents) + amount;
       await sql`INSERT INTO ordering_gift_card_ledger(id,gift_card_id,business,order_id,entry_type,delta_balance_cents,balance_after_cents,payment_transaction_id,operation_key,related_entry_id,created_by,approved_by,note,metadata) VALUES(${randomUUID()},${ledger.gift_card_id},${input.business},${input.orderId},'reversal',${amount},${balance},${reversalId},${`payment-reversal:${input.clientMutationId}`},${ledger.id},${input.actor.id},${input.actor.id},${reversalReason},${JSON.stringify({sourcePaymentId:source.id,partial:amount<Number(source.amount_cents)-reversed})}::jsonb)`;
       await sql`UPDATE ordering_gift_cards SET current_balance_cents=${balance},status=CASE WHEN status='depleted' THEN 'active' ELSE status END WHERE id=${ledger.gift_card_id}`;
+    }
+    if(source.tender_type==="cash"&&source.details?.registerSessionId){
+      const registerSessionId=String(source.details.registerSessionId),movementId=randomUUID();
+      await sql`INSERT INTO ordering_cash_drawer_movements(id,register_session_id,order_id,payment_transaction_id,movement_type,delta_cash_cents,reason,created_by,approved_by,details) SELECT ${movementId},id,${input.orderId},${reversalId},'refund',${-amount},${reversalReason},${input.actor.id},${input.actor.id},${JSON.stringify({sourcePaymentId:source.id})}::jsonb FROM ordering_register_sessions WHERE id=${registerSessionId}`;
+      await sql`UPDATE ordering_register_sessions SET expected_cash_cents=GREATEST(0,expected_cash_cents-${amount}) WHERE id=${registerSessionId}`;
     }
     const newPaid = Math.max(0, Number(order.paid_cents) - amount), remaining = Math.max(0, Number(order.total_cents) - newPaid);
     const paymentStatus = newPaid === 0 ? "unpaid" : remaining === 0 ? "paid" : "partially_paid";
@@ -98,10 +105,11 @@ export async function commitTender(input: {
   actor: OrderingActor;
   receiptPrinterId?: string;
   cashControlMode?: "till" | "driver_settlement";
+  stationKey?: string;
   giftCardNumber?: string;
   giftCardPin?: string;
   providerApproval?: {
-    provider: "helcim";
+    provider: PaymentProviderKey;
     transactionReference: string;
     brand?: string;
     last4?: string;
@@ -150,7 +158,7 @@ export async function commitTender(input: {
       throw new PaymentConflictError("Credit tender cannot exceed the remaining balance.");
     }
     if (input.tenderType === "card" && !input.providerApproval) {
-      throw new PaymentConflictError("Credit payments must be approved by Helcim before they are recorded.");
+      throw new PaymentConflictError("Credit payments must be approved by the active payment provider before they are recorded.");
     }
     const transactionId = randomUUID();
     await sql`
@@ -167,6 +175,17 @@ export async function commitTender(input: {
         CAST(${JSON.stringify({ actorName: input.actor.name, actorType: input.actor.type, giftCard: input.tenderType === "gift_card", receiptPrinterId: input.receiptPrinterId || null, ...(input.providerApproval?.details || {}) })} AS jsonb)
       )
     `;
+    if (input.tenderType === "cash" && input.cashControlMode === "till" && input.stationKey?.trim()) {
+      const stationKey=input.stationKey.trim().toLowerCase(),station=(await sql`SELECT * FROM ordering_payment_stations WHERE business=${input.business} AND station_key=${stationKey} AND station_mode='payment' AND active=TRUE`)[0];
+      if(!station)throw new PaymentConflictError("Cash can only be accepted at the configured payment station.");
+      const terminalId=randomUUID();
+      const terminal=(await sql`INSERT INTO ordering_pos_terminals(id,business,name,terminal_key,terminal_type,location_label,allow_cash,allow_offline_cash) VALUES(${terminalId},${input.business},${station.name},${station.station_key},'pos',${station.name},TRUE,FALSE) ON CONFLICT(business,terminal_key) DO UPDATE SET name=EXCLUDED.name,active=TRUE,last_seen_at=NOW(),updated_at=NOW() RETURNING id`)[0];
+      let register=(await sql`SELECT * FROM ordering_register_sessions WHERE terminal_id=${terminal.id} AND status IN ('open','counting') ORDER BY opened_at DESC LIMIT 1 FOR UPDATE`)[0];
+      if(!register){const registerId=randomUUID();register=(await sql`INSERT INTO ordering_register_sessions(id,business,terminal_id,status,opening_cash_cents,expected_cash_cents,opened_by,notes) VALUES(${registerId},${input.business},${terminal.id},'open',0,0,${input.actor.id},'Automatically opened on first cash sale; opening float must be reconciled at close.') RETURNING *`)[0]}
+      await sql`INSERT INTO ordering_cash_drawer_movements(id,register_session_id,order_id,payment_transaction_id,movement_type,delta_cash_cents,reason,created_by,details) VALUES(${randomUUID()},${register.id},${input.orderId},${transactionId},'sale',${applied},'Cash sale',${input.actor.id},${JSON.stringify({stationKey,amountTenderedCents:input.amountTenderedCents,changeDueCents:change})}::jsonb)`;
+      await sql`UPDATE ordering_register_sessions SET expected_cash_cents=expected_cash_cents+${applied} WHERE id=${register.id}`;
+      await sql`UPDATE ordering_payment_transactions SET details=details||${JSON.stringify({stationKey,registerSessionId:register.id})}::jsonb WHERE id=${transactionId}`;
+    }
     if (input.tenderType === "gift_card") {
       if (!input.giftCardNumber) throw new PaymentConflictError("Gift card number is required.");
       try {
@@ -195,6 +214,7 @@ export async function commitTender(input: {
           version = version + 1, updated_at = NOW()
       WHERE id = ${input.orderId}
     `;
+    if (remaining === 0) await completePaidPaymentQueue(input.business,input.orderId,input.checkId);
     await sql`
       INSERT INTO ordering_order_events (id, order_id, order_version, event_type, actor_type, actor_id, details)
       SELECT ${randomUUID()}, id, version, 'payment_recorded', ${input.actor.type}, ${input.actor.id},

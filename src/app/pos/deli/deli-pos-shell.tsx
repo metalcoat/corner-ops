@@ -15,6 +15,7 @@ const centerWorkspaces = [
   { label: "Customers", href: "/pos/deli/customers" },
   { label: "Kitchen", href: "/pos/deli/kitchen" },
   { label: "Drivers", href: "/pos/deli/drivers" },
+  { label: "Payments", href: "/pos/deli/payments" },
 ] as const;
 
 function activeWorkspace(pathname: string, href: string) {
@@ -31,6 +32,7 @@ export default function DeliPosShell({ children, idleLockSeconds }: { children: 
   const statusControlRef=useRef<HTMLDivElement>(null);
   const [health, setHealth] = useState<{ application: "Online" | "Unavailable" | "Unknown"; database: "Online" | "Unavailable" | "Unknown" }>({ application: "Unknown", database: "Unknown" });
   const [printers,setPrinters]=useState<{kitchenPrinter:string;receiptPrinter:string}>({kitchenPrinter:"Unknown",receiptPrinter:"Unknown"});
+  const [androidUpdateUrl, setAndroidUpdateUrl] = useState<string | null>(null);
 
   const loadOpenCount = useCallback(async () => {
     const response = await fetch("/api/ordering/order-center?view=open", { cache: "no-store" });
@@ -57,6 +59,23 @@ export default function DeliPosShell({ children, idleLockSeconds }: { children: 
       window.removeEventListener("corner-ops-pos-locked", locked);
     };
   }, [loadOpenCount]);
+
+  useEffect(() => {
+    void (async () => {
+      const { Capacitor } = await import("@capacitor/core");
+      if (Capacitor.getPlatform() !== "android") return;
+      const [{ App }, response] = await Promise.all([
+        import("@capacitor/app"),
+        fetch("/api/mobile/android/version", { cache: "no-store" }),
+      ]);
+      if (!response.ok) return;
+      const [installed, available] = await Promise.all([
+        App.getInfo(),
+        response.json() as Promise<{ versionCode?: number; downloadUrl?: string }>,
+      ]);
+      if (Number(installed.build) < Number(available.versionCode || 0) && available.downloadUrl) setAndroidUpdateUrl(available.downloadUrl);
+    })().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const originalFetch = window.fetch.bind(window);
@@ -111,6 +130,7 @@ export default function DeliPosShell({ children, idleLockSeconds }: { children: 
   }
 
   return <div className="deliPosShell">
+    {androidUpdateUrl ? <a className="deliAndroidUpdate" href={androidUpdateUrl}>ANDROID POS UPDATE AVAILABLE — DOWNLOAD</a> : null}
     <header className="deliShellHeader">
       <div className="deliShellUtilities">
         <button type="button" onClick={() => void logout()}>LOGOUT</button>

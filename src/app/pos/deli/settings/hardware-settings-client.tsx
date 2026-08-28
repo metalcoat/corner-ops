@@ -30,6 +30,7 @@ type Job = {
   error_message: string;
   is_reprint: boolean;
 };
+type PaymentStation={id:string;name:string;station_key:string;station_mode:"payment"|"order_taker";receipt_printer_id?:string|null;payment_terminal_id?:string|null;gift_card_reader_id?:string|null;receipt_printer_name?:string|null;payment_terminal_name?:string|null;gift_card_reader_name?:string|null};
 export default function HardwareSettingsClient() {
   const [data, setData] = useState<{
       locations: Location[];
@@ -41,6 +42,7 @@ export default function HardwareSettingsClient() {
         printer_name: string;
       }>;
       jobs: Job[];
+      paymentStations: PaymentStation[];
       printSettings: { externalKitchenAutoPrint: boolean };
     } | null>(null),
     [message, setMessage] = useState(""),
@@ -57,23 +59,29 @@ export default function HardwareSettingsClient() {
     [ticketHeaderSize, setTicketHeaderSize] = useState("large"),
     [tillKey, setTillKey] = useState(""),
     [cashDrawerEnabled, setCashDrawerEnabled] = useState(false),
+    [stationName,setStationName]=useState(""),
+    [stationKey,setStationKey]=useState(""),
+    [stationMode,setStationMode]=useState<"payment"|"order_taker">("order_taker"),
+    [stationReceiptPrinterId,setStationReceiptPrinterId]=useState(""),
+    [stationPaymentTerminalId,setStationPaymentTerminalId]=useState(""),
+    [stationGiftReaderId,setStationGiftReaderId]=useState(""),
     [locationId, setLocationId] = useState(""),
     [routePrinterId, setRoutePrinterId] = useState(""),
     [targetType, setTargetType] = useState("all"),
     [targetId, setTargetId] = useState(""),
-    [helcim, setHelcim] = useState<{ apiTokenConfigured: boolean; terminalIdConfigured: boolean; deviceCodeConfigured: boolean } | null>(null),
-    [helcimBusy, setHelcimBusy] = useState(false);
+    [paymentProvider, setPaymentProvider] = useState<{ provider:string;label:string;configured:boolean;onlineCheckoutEnabled:boolean;terminalCheckoutEnabled:boolean;sandbox:boolean;missing:string[] } | null>(null),
+    [paymentProviderBusy, setPaymentProviderBusy] = useState(false);
   async function load() {
-    const [response, helcimResponse] = await Promise.all([
+    const [response, paymentResponse] = await Promise.all([
       fetch("/api/ordering/settings/hardware", { cache: "no-store" }),
-      fetch("/api/ordering/orders/status/payments/helcim", { cache: "no-store" }),
+      fetch("/api/ordering/payments/status", { cache: "no-store" }),
     ]),
-      [body, helcimBody] = await Promise.all([response.json(), helcimResponse.json()]);
+      [body, paymentBody] = await Promise.all([response.json(), paymentResponse.json()]);
     if (!response.ok)
       throw new Error(body.error || "Could not load hardware configuration.");
     setData(body);
     if (!locationId && body.locations[0]) setLocationId(body.locations[0].id);
-    if (helcimResponse.ok) setHelcim(helcimBody);
+    if (paymentResponse.ok) setPaymentProvider(paymentBody);
   }
   useEffect(() => {
     void load().catch((error) => setMessage(error.message));
@@ -149,22 +157,22 @@ export default function HardwareSettingsClient() {
         unknown. No live credentials are stored here.
       </p>
       {message && <p role="status">{message}</p>}
-      <h3>Helcim payments</h3>
+      <h3>Payment provider</h3>
       <div className="autoPrintControl">
         <div>
-          <strong>{helcim?.apiTokenConfigured ? "HELCIM CHECKOUT READY" : "HELCIM SETUP REQUIRED"}</strong>
+          <strong>{paymentProvider?.configured ? `${paymentProvider.label.toUpperCase()} CONFIGURED` : `${paymentProvider?.label?.toUpperCase()||"PAYMENT PROVIDER"} SETUP REQUIRED`}</strong>
           <p>
-            API token: {helcim?.apiTokenConfigured ? "configured" : "missing"} · Terminal ID: {helcim?.terminalIdConfigured ? "configured" : "optional / missing"} · Hardware device: {helcim?.deviceCodeConfigured ? "paired" : "not paired"}
+            Online checkout: {paymentProvider?.onlineCheckoutEnabled?"ready":"not ready"} · Terminal checkout: {paymentProvider?.terminalCheckoutEnabled?"ready":"not ready"}{paymentProvider?.sandbox?" · SANDBOX":""}
           </p>
           <small>Credentials are read from the server environment and are never shown or stored in this page.</small>
         </div>
-        <button type="button" disabled={!helcim?.apiTokenConfigured || helcimBusy} onClick={() => {
-          setHelcimBusy(true); setMessage("");
-          void fetch("/api/ordering/orders/status/payments/helcim", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "test" }) })
-            .then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body.error || "Helcim connection failed."); setMessage("Helcim connection verified."); })
-            .catch((error) => setMessage(error instanceof Error ? error.message : "Helcim connection failed."))
-            .finally(() => setHelcimBusy(false));
-        }}>TEST HELCIM</button>
+        <button type="button" disabled={!paymentProvider?.configured || paymentProviderBusy} onClick={() => {
+          setPaymentProviderBusy(true); setMessage("");
+          void fetch("/api/ordering/payments/status", { method: "POST" })
+            .then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body.error || "Payment provider connection failed."); setMessage(`${paymentProvider?.label||"Payment provider"} connection verified.`); })
+            .catch((error) => setMessage(error instanceof Error ? error.message : "Payment provider connection failed."))
+            .finally(() => setPaymentProviderBusy(false));
+        }}>TEST PROVIDER</button>
       </div>
       <h3>Automatic kitchen tickets</h3>
       <div className="autoPrintControl">
@@ -265,6 +273,9 @@ export default function HardwareSettingsClient() {
             )}
             {deviceType === "payment_terminal" && (
               <option value="payment-placeholder">Payment placeholder</option>
+            )}
+            {deviceType === "barcode_scanner" && (
+              <option value="keyboard-wedge">USB/Bluetooth keyboard-wedge reader</option>
             )}
             <option value="mock">Test/mock</option>
           </select>
@@ -410,7 +421,7 @@ export default function HardwareSettingsClient() {
                       : "CHECK STATUS"}
                   </button>
                   {device.adapter_key === "network-printer" && (
-                    <button
+                    <><button
                       onClick={() =>
                         void guarded(
                           { action: "test_print", id: device.id },
@@ -419,7 +430,7 @@ export default function HardwareSettingsClient() {
                       }
                     >
                       TEST PRINT
-                    </button>
+                    </button>{device.role==="receipt_printer"&&device.adapter_config?.cashDrawerEnabled&&<button onClick={()=>void guarded({action:"test_cash_drawer",id:device.id},"Cash-drawer test sent.")}>TEST DRAWER</button>}</>
                   )}
                   <button
                     onClick={() => {
@@ -440,6 +451,20 @@ export default function HardwareSettingsClient() {
           </article>
         ))}
       </div>
+      <h3>POS stations</h3>
+      <p>Use one payment station for the card terminal, gift-card swiper, receipt printer, and cash drawer. Kitchen devices should be order-taking stations.</p>
+      <div className="posSettingsGrid">
+        <label>STATION NAME<input value={stationName} onChange={event=>{setStationName(event.target.value);if(!stationKey)setStationKey(event.target.value.toLowerCase().replace(/\W+/g,"-"))}} /></label>
+        <label>STATION KEY<input value={stationKey} onChange={event=>setStationKey(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""))} /></label>
+        <label>MODE<select value={stationMode} onChange={event=>setStationMode(event.target.value as "payment"|"order_taker")}><option value="order_taker">Order taking only</option><option value="payment">Designated payment station</option></select></label>
+        {stationMode==="payment"&&<>
+          <label>RECEIPT PRINTER / DRAWER<select value={stationReceiptPrinterId} onChange={event=>setStationReceiptPrinterId(event.target.value)}><option value="">Choose receipt printer</option>{data?.devices.filter(device=>device.role==="receipt_printer").map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>
+          <label>DHARMA TERMINAL<select value={stationPaymentTerminalId} onChange={event=>setStationPaymentTerminalId(event.target.value)}><option value="">Pending Dharma hardware</option>{data?.devices.filter(device=>device.role==="payment_terminal").map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>
+          <label>GIFT-CARD SWIPER<select value={stationGiftReaderId} onChange={event=>setStationGiftReaderId(event.target.value)}><option value="">Choose reader</option>{data?.devices.filter(device=>device.role==="barcode_scanner").map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>
+        </>}
+        <button disabled={!stationName||!stationKey||(stationMode==="payment"&&!stationReceiptPrinterId)} onClick={()=>void guarded({action:"save_payment_station",name:stationName,stationKey,stationMode,receiptPrinterId:stationReceiptPrinterId||null,paymentTerminalId:stationPaymentTerminalId||null,giftCardReaderId:stationGiftReaderId||null},"POS station saved.").then(()=>{setStationName("");setStationKey("")})}>ADD STATION</button>
+      </div>
+      <div>{data?.paymentStations.map(station=><article key={station.id}><strong>{station.name}</strong> · {station.station_mode==="payment"?"PAYMENT STATION":"ORDER TAKING"} · {station.station_key}{station.receipt_printer_name?` · till ${station.receipt_printer_name}`:""}{station.gift_card_reader_name?` · gift reader ${station.gift_card_reader_name}`:""}<div className="posTools"><button onClick={()=>{localStorage.setItem("corner-ops-station-key",station.station_key);setMessage(`${station.name} is now assigned to this device. Reload the POS to apply it.`)}}>USE ON THIS DEVICE</button></div></article>)}</div>
       <h3>Printer routing</h3>
       <p>
         Kitchen printers can be routed by all items, stable item/category ID, or

@@ -39,6 +39,7 @@ import {
 import { itemNeedsConfiguration } from "@/lib/ordering-menu-presentation";
 import Link from "next/link";
 import { isHumanTextEntry, KeyboardWedgeDetector } from "@/lib/barcode-scanner";
+import { giftCardNumberFromInput, validGiftCardInput } from "@/lib/gift-card-input";
 
 type PosServiceType = Exclude<ServiceType, "undecided">;
 
@@ -80,6 +81,8 @@ type SavedDraft = {
   loyalty: Array<{ label: string; discountCents: number }>;
   reopened?: boolean;
   checkoutOnly?: boolean;
+  checkId?: string | null;
+  paymentQueue?: boolean;
 };
 type OpenTikiTab = {
   id: string;
@@ -132,6 +135,7 @@ type CheckoutState = {
   }>;
 };
 type HelcimStatus = { checkoutEnabled: boolean; apiTokenConfigured: boolean };
+type PosStationProfile = { name:string;station_key:string;station_mode:"payment"|"order_taker";receipt_printer_id?:string|null };
 type PayableCheck = {
   id: string;
   display_sequence: number;
@@ -585,6 +589,7 @@ export default function PosClient({
   const [giftCardNumber, setGiftCardNumber] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [helcimStatus, setHelcimStatus] = useState<HelcimStatus | null>(null);
+  const [stationProfile,setStationProfile]=useState<PosStationProfile|null>(null);
   useEffect(() => {
     if (business !== "Corner Deli") return;
     fetch("/api/ordering/hardware/status", { cache: "no-store" })
@@ -613,6 +618,8 @@ export default function PosClient({
         setHelcimStatus({ checkoutEnabled: false, apiTokenConfigured: false }),
       );
   }, [business]);
+  useEffect(()=>{if(business!=="Corner Deli")return;const stationKey=localStorage.getItem("corner-ops-station-key")||"";fetch(`/api/ordering/payment-stations?stationKey=${encodeURIComponent(stationKey)}`,{cache:"no-store"}).then(response=>response.json()).then(body=>setStationProfile(body.profile||null)).catch(()=>setStationProfile(null))},[business]);
+  useEffect(()=>{if(stationProfile?.station_mode==="payment"&&stationProfile.receipt_printer_id&&receiptPrinters.some(printer=>printer.id===stationProfile.receipt_printer_id))setReceiptPrinterId(stationProfile.receipt_printer_id)},[stationProfile,receiptPrinters]);
   const [configurationMessage, setConfigurationMessage] = useState("");
   const [cartNotice, setCartNotice] = useState("");
   const [removedLine, setRemovedLine] = useState<CartLine | null>(null);
@@ -972,7 +979,7 @@ export default function PosClient({
   async function handleScan(value: string) {
     if (!session?.authenticated) return;
     if (checkoutOpen) {
-      setGiftCardNumber(value);
+      setGiftCardNumber(giftCardNumberFromInput(value));
       setCheckoutError("");
       setScanNotice(
         "Gift card scanned. Review the card and choose Apply Gift Card.",
@@ -2222,7 +2229,7 @@ export default function PosClient({
       setCheckoutError(checksPayload.error || "Could not prepare checks.");
       return;
     }
-    const checkId = checksPayload.checks[0].id;
+    const checkId = draft.checkId && checksPayload.checks.some(check=>check.id===draft.checkId) ? draft.checkId : checksPayload.checks[0].id;
     const response = await fetch(
       `/api/ordering/orders/${encodeURIComponent(draft.id)}/payments?business=${encodeURIComponent(business)}&checkId=${encodeURIComponent(checkId)}`,
     );
@@ -2246,7 +2253,7 @@ export default function PosClient({
     setPayableChecks([]);
     setSelectedCheckId(null);
     setSavedDraft(null);
-    window.location.assign("/pos/deli/orders");
+    window.location.assign(savedDraft?.paymentQueue ? "/pos/deli/payments" : "/pos/deli/orders");
   }
 
   async function selectCheck(checkId: string) {
@@ -2342,7 +2349,7 @@ export default function PosClient({
     }
     if (
       tenderType === "gift_card" &&
-      giftCardNumber.replace(/[^A-Za-z0-9]/g, "").length < 8
+      !validGiftCardInput(giftCardNumber)
     ) {
       setCheckoutError("Enter a valid gift card number.");
       return;
@@ -2360,9 +2367,10 @@ export default function PosClient({
             checkId: selectedCheckId,
             tenderType,
             amountTenderedCents,
-            giftCardNumber,
+            giftCardNumber: giftCardNumberFromInput(giftCardNumber),
             clientMutationId: clientId(),
             receiptPrinterId: receiptPrinterId || undefined,
+            stationKey: stationProfile?.station_key || "",
           }),
         },
       );
@@ -2402,6 +2410,12 @@ export default function PosClient({
     } finally {
       setPaymentBusy(false);
     }
+  }
+
+  async function sendToPaymentStation(){
+    const draft=savedDraft||activeTab;if(!draft||paymentBusy)return;setPaymentBusy(true);setCheckoutError("");
+    try{const response=await fetch("/api/ordering/payment-stations",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"queue",orderId:draft.id,checkId:selectedCheckId,stationKey:stationProfile?.station_key||"",note:`Order #${draft.displayNumber}`})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not send this check to the payment station.");setCheckoutError(body.duplicate?"This check is already waiting at the payment station.":"Sent to the payment station.")}
+    catch(error){setCheckoutError(error instanceof Error?error.message:"Could not send this check to the payment station.")}finally{setPaymentBusy(false)}
   }
 
   async function startHelcimPayment() {
@@ -3973,6 +3987,15 @@ export default function PosClient({
                 0,
             ) > 0 && (
               <>
+                {stationProfile?.station_mode === "order_taker" && (
+                  <section className="posOrderTakerPaymentNotice">
+                    <strong>ORDER-TAKING STATION</strong>
+                    <span>Payments are handled at the designated front register.</span>
+                    <button type="button" disabled={paymentBusy} onClick={() => void sendToPaymentStation()}>
+                      {paymentBusy ? "SENDING…" : "SEND TO PAYMENT STATION"}
+                    </button>
+                  </section>
+                )}
                 {receiptPrinters.length > 0 && (
                   <label>
                     Till / receipt printer
@@ -4069,7 +4092,7 @@ export default function PosClient({
                     <button
                       className="posTakeCash"
                       type="button"
-                      disabled={paymentBusy || !cashTender}
+                      disabled={paymentBusy || !cashTender || stationProfile?.station_mode === "order_taker"}
                       onClick={() => void commitPayment("cash")}
                     >
                       {paymentBusy ? "PROCESSING…" : "TAKE CASH"}
@@ -4095,7 +4118,7 @@ export default function PosClient({
                     </label>
                     <button
                       type="button"
-                      disabled={paymentBusy || !helcimStatus?.checkoutEnabled}
+                      disabled={paymentBusy || !helcimStatus?.checkoutEnabled || stationProfile?.station_mode === "order_taker"}
                       onClick={() => void startHelcimPayment()}
                     >
                       {helcimStatus?.checkoutEnabled
@@ -4119,7 +4142,8 @@ export default function PosClient({
                       type="button"
                       disabled={
                         paymentBusy ||
-                        giftCardNumber.replace(/[^A-Za-z0-9]/g, "").length < 8
+                        stationProfile?.station_mode === "order_taker" ||
+                        !validGiftCardInput(giftCardNumber)
                       }
                       onClick={() => void commitPayment("gift_card")}
                     >

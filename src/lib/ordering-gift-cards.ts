@@ -4,10 +4,10 @@ import { ensureOrderingGiftCardSchema } from "@/lib/ordering-gift-card-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 import { canManagePos } from "@/lib/ordering-route-auth";
+import { giftCardNumberFromInput } from "@/lib/gift-card-input";
 
 export class GiftCardError extends Error {}
-const normalize = (value: string) =>
-  value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+const normalize = giftCardNumberFromInput;
 const hash = (value: string) =>
   createHash("sha256")
     .update(`corner-ops-gift-card:${normalize(value)}`)

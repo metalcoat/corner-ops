@@ -4,7 +4,7 @@ Both native projects load the secured POS from `https://dev.ordercornerdeli.com/
 
 ## Android APK
 
-Run `npm run mobile:android`. The development APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. It is signed with the local Android debug key and can be sideloaded directly. Use a backed-up, long-lived release keystore before distributing production updates.
+Run `npm run mobile:android` with `CORNER_OPS_ANDROID_KEYSTORE`, `CORNER_OPS_ANDROID_STORE_PASSWORD`, `CORNER_OPS_ANDROID_KEY_ALIAS`, and `CORNER_OPS_ANDROID_KEY_PASSWORD`. The signed APK is written to `android/app/build/outputs/apk/release/app-release.apk`. Back up the keystore and its credentials; every future update must use the same signing identity.
 
 ## iPad / SideStore IPA
 
@@ -20,4 +20,4 @@ The iPad should also keep the POS PWA installed as a non-expiring fallback.
 
 ## Security
 
-The native shell does not contain employee credentials or payment secrets. It uses the existing POS IP approval, employee PIN session, Helcim server integration, and printer routing.
+The native shell does not contain employee credentials or payment secrets. It uses the existing POS IP approval, employee PIN session, configured payment-provider integration, and printer routing. Android checks the server's version endpoint at startup and displays a download banner when a newer signed APK is available.

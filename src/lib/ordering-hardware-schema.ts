@@ -26,6 +26,23 @@ export function ensureOrderingHardwareSchema(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(business,device_key), UNIQUE(location_id,name)
     )`;
     await sql`CREATE INDEX IF NOT EXISTS ordering_hardware_devices_scope_idx ON ordering_hardware_devices(business,location_id,device_type,active)`;
+    await sql`CREATE TABLE IF NOT EXISTS ordering_payment_stations (
+      id UUID PRIMARY KEY, business TEXT NOT NULL CHECK (business IN ('Corner Deli','Tiki')),
+      name TEXT NOT NULL, station_key TEXT NOT NULL, station_mode TEXT NOT NULL DEFAULT 'order_taker' CHECK(station_mode IN ('payment','order_taker')),
+      receipt_printer_id UUID REFERENCES ordering_hardware_devices(id), payment_terminal_id UUID REFERENCES ordering_hardware_devices(id),
+      gift_card_reader_id UUID REFERENCES ordering_hardware_devices(id), active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by TEXT NOT NULL, updated_by TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(business,station_key), UNIQUE(business,name)
+    )`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_one_payment_station_idx ON ordering_payment_stations(business) WHERE station_mode='payment' AND active=TRUE`;
+    await sql`CREATE TABLE IF NOT EXISTS ordering_payment_station_queue (
+      id UUID PRIMARY KEY, business TEXT NOT NULL CHECK (business IN ('Corner Deli','Tiki')), order_id UUID NOT NULL REFERENCES ordering_orders(id) ON DELETE CASCADE,
+      check_id UUID REFERENCES ordering_checks(id) ON DELETE CASCADE, source_station_key TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','claimed','completed','cancelled')),
+      requested_by TEXT NOT NULL, claimed_by TEXT NOT NULL DEFAULT '', request_note TEXT NOT NULL DEFAULT '',
+      queued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), claimed_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, cancelled_at TIMESTAMPTZ
+    )`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_payment_station_queue_active_idx ON ordering_payment_station_queue(business,order_id,COALESCE(check_id,'00000000-0000-0000-0000-000000000000'::uuid)) WHERE status IN ('queued','claimed')`;
+    await sql`CREATE INDEX IF NOT EXISTS ordering_payment_station_queue_status_idx ON ordering_payment_station_queue(business,status,queued_at)`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_printer_routes (
       id UUID PRIMARY KEY, business TEXT NOT NULL CHECK (business IN ('Corner Deli','Tiki')),
       location_id UUID NOT NULL REFERENCES ordering_hardware_locations(id), printer_id UUID NOT NULL REFERENCES ordering_hardware_devices(id),
