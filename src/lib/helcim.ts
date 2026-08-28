@@ -61,6 +61,7 @@ export async function initializeHelcimPay(amountCents: number) {
       paymentMethod: "cc",
       amount: Number((amountCents / 100).toFixed(2)),
       currency: "USD",
+      displayContactFields: 0,
       confirmationScreen: false,
       customStyling: {
         appearance: "light",
