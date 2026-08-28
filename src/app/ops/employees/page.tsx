@@ -38,7 +38,6 @@ type OnboardingSmsResult = {
 };
 type CreateEmployeeResult = Employee & { onboardingSms?: OnboardingSmsResult | null };
 
-
 function initials(value: string): string {
   return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
 }
@@ -51,10 +50,13 @@ export default function EmployeesPage() {
   const [session, setSession] = useState<SessionView | null>(null);
   const [business, setBusiness] = useState<Business>("Corner Deli");
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [showInactive, setShowInactive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const pinLength = employeePinLength(business);
   const pinLabel = employeePinLabel(business);
+  const inactiveCount = employees.filter((employee) => !employee.active).length;
+  const visibleEmployees = showInactive ? employees : employees.filter((employee) => employee.active);
 
   useEffect(() => {
     fetch("/api/auth/session", { cache: "no-store" })
@@ -210,7 +212,7 @@ export default function EmployeesPage() {
   return <main className="workforceShell">
     <header className="workforceHero">
       <div><p className="wfEyebrow">Staff access, identity, and notifications</p><h1>Employees</h1><p>Employee colors and photos appear on schedules. New employees receive their Employee Hub access and paperwork links by SMS after you record their consent.</p></div>
-      <div className="wfBusinessSwitch">{(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "selected" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div>
+      <div className="wfBusinessSwitch">{(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "selected" : ""} onClick={() => { setBusiness(name); setShowInactive(false); }}>{name}</button>)}</div>
     </header>
     {notice && <div className="wfNotice">{notice}</div>}
     <section className="wfTwoColumn">
@@ -239,9 +241,15 @@ export default function EmployeesPage() {
       </article>
 
       <article className="workforcePanel employeeDirectoryPanel">
-        <div className="wfPanelHeader"><div><p className="wfEyebrow">Current records</p><h2>{business} employees</h2></div><a className="wfTextLink" href="/ops/workforce">Open scheduler</a></div>
+        <div className="wfPanelHeader">
+          <div><p className="wfEyebrow">Current records</p><h2>{business} employees</h2></div>
+          <div>
+            {inactiveCount > 0 && <button type="button" className="wfTextLink" onClick={() => setShowInactive((value) => !value)}>{showInactive ? "Hide inactive" : `Show inactive (${inactiveCount})`}</button>}
+            <a className="wfTextLink" href="/ops/workforce">Open scheduler</a>
+          </div>
+        </div>
         <div className="employeeDirectoryGrid">
-          {employees.map((employee) => <article className="employeeIdentityCard" key={employee.id} style={{ "--employee-color": employee.scheduleColor } as CSSProperties}>
+          {visibleEmployees.map((employee) => <article className="employeeIdentityCard" key={employee.id} style={{ "--employee-color": employee.scheduleColor } as CSSProperties}>
             <header>
               <span className="employeeIdentityAvatar">{employee.avatarSet ? <img src={avatarUrl(business, employee.id)} alt={`${employee.name} profile`} loading="lazy" /> : initials(employee.name)}</span>
               <div><strong>{employee.name}</strong><span>{employee.position} · {employee.roleGroup}</span><small>{employee.email || "Email not set"}</small><small>{employee.phone ? maskedPhone(employee.phone) : "Mobile not set"}</small></div>
@@ -263,7 +271,7 @@ export default function EmployeesPage() {
               <button disabled={busy || !employee.phone} onClick={() => void action({ action: "update-access", id: employee.id, smsOptIn: !employee.smsOptIn }, employee.smsOptIn ? "SMS notifications disabled." : "SMS consent recorded and notifications enabled.")}>{employee.smsOptIn ? "Disable SMS" : "Enable SMS"}</button>
             </footer>
           </article>)}
-          {employees.length === 0 && <p className="wfEmpty">No employee records for this location yet.</p>}
+          {visibleEmployees.length === 0 && <p className="wfEmpty">{employees.length === 0 ? "No employee records for this location yet." : "No active employees for this location."}</p>}
         </div>
       </article>
     </section>
