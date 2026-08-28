@@ -27,6 +27,16 @@ type Employee = {
 };
 type DirectoryData = { employees: Employee[] };
 type BulkPinResult = { updated: string[]; missing: string[]; requested: number; pinLength: number };
+type OnboardingSmsResult = {
+  configured: boolean;
+  sent: number;
+  failed: number;
+  missingPhone: number;
+  notOptedIn: number;
+  skipped: number;
+  failures: Array<{ message: string }>;
+};
+type CreateEmployeeResult = Employee & { onboardingSms?: OnboardingSmsResult | null };
 
 
 function initials(value: string): string {
@@ -91,20 +101,48 @@ export default function EmployeesPage() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const position = String(form.get("position") || "");
-    await action({
-      action: "create",
-      email: form.get("email"),
-      phone: form.get("phone"),
-      smsOptIn: form.get("smsOptIn") === "on",
-      name: form.get("name"),
-      pin: form.get("pin"),
-      position,
-      roleGroup: business === "Corner Deli" ? (position === "Delivery" ? "Driver" : "In-House") : form.get("roleGroup"),
-      countsForTips: form.get("countsForTips") === "on",
-      hourlyRate: Number(form.get("hourlyRate") || 0),
-      tippedRate: Number(form.get("tippedRate") || 0),
-    }, "Employee created and ready for schedules and Employee Hub login.");
-    formElement.reset();
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/employee-directory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business,
+          action: "create",
+          email: form.get("email"),
+          phone: form.get("phone"),
+          smsOptIn: form.get("smsOptIn") === "on",
+          sendOnboardingSms: true,
+          name: form.get("name"),
+          pin: form.get("pin"),
+          position,
+          roleGroup: business === "Corner Deli" ? (position === "Delivery" ? "Driver" : "In-House") : form.get("roleGroup"),
+          countsForTips: form.get("countsForTips") === "on",
+          hourlyRate: Number(form.get("hourlyRate") || 0),
+          tippedRate: Number(form.get("tippedRate") || 0),
+        }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      const result = await response.json() as CreateEmployeeResult;
+      await load();
+      formElement.reset();
+
+      const sms = result.onboardingSms;
+      if (sms?.sent) {
+        setNotice(`Employee created. Onboarding text sent to ${maskedPhone(result.phone)}.`);
+      } else if (!sms) {
+        setNotice("Employee created. Onboarding text was not requested.");
+      } else if (sms.notOptedIn) {
+        setNotice("Employee created, but the onboarding text was not sent because SMS consent is not enabled.");
+      } else {
+        setNotice(`Employee created, but the onboarding text was not sent: ${sms.failures[0]?.message || "SMS delivery was unavailable."}`);
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Employee could not be created.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function bulkPins(event: FormEvent<HTMLFormElement>) {
@@ -171,7 +209,7 @@ export default function EmployeesPage() {
 
   return <main className="workforceShell">
     <header className="workforceHero">
-      <div><p className="wfEyebrow">Staff access, identity, and notifications</p><h1>Employees</h1><p>Employee colors and photos appear on schedules. SMS schedule notifications require a mobile number and confirmed employee consent.</p></div>
+      <div><p className="wfEyebrow">Staff access, identity, and notifications</p><h1>Employees</h1><p>Employee colors and photos appear on schedules. New employees receive their Employee Hub access and paperwork links by SMS after you record their consent.</p></div>
       <div className="wfBusinessSwitch">{(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "selected" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div>
     </header>
     {notice && <div className="wfNotice">{notice}</div>}
@@ -181,15 +219,16 @@ export default function EmployeesPage() {
         <form className="wfForm" onSubmit={createEmployee}>
           <label>Name<input name="name" required /></label>
           <label>Email<input name="email" type="email" /></label>
-          <label>Mobile phone<input name="phone" type="tel" placeholder="315-555-0123" /></label>
+          <label>Mobile phone<input name="phone" type="tel" placeholder="315-555-0123" required /></label>
           <label>{pinLabel}<input name="pin" inputMode="numeric" pattern={employeePinPattern(business)} minLength={pinLength} maxLength={pinLength} required /></label>
           <label>Position{business === "Corner Deli" ? <select name="position" defaultValue="Pizza" required>{CORNER_DELI_POSITIONS.map((position) => <option key={position}>{position}</option>)}</select> : <input name="position" defaultValue="Bartender" required />}</label>
           {business !== "Corner Deli" && <label>Role group<select name="roleGroup" defaultValue="In-House"><option>In-House</option><option>Driver</option><option>Ignore</option></select></label>}
           <label>Hourly rate<input name="hourlyRate" type="number" min="0" step="0.01" defaultValue="0" /></label>
           <label>Tipped rate<input name="tippedRate" type="number" min="0" step="0.01" defaultValue="0" /></label>
           <label className="wfWide"><input name="countsForTips" type="checkbox" defaultChecked /> Include in eligible tip pools</label>
-          <label className="wfWide"><input name="smsOptIn" type="checkbox" /> Employee consented to SMS schedule notifications</label>
-          <button className="wfPrimary" disabled={busy}>Create employee</button>
+          <label className="wfWide"><input name="smsOptIn" type="checkbox" required /> Employee consented to receive Corner Ops onboarding and schedule SMS notifications</label>
+          <p className="wfEmpty wfWide">Creating the employee sends their Employee Hub link, PIN, new-hire paperwork link, and tells them to send questions inside Corner Ops instead of replying to the text.</p>
+          <button className="wfPrimary" disabled={busy}>{busy ? "Creating…" : "Create employee & send onboarding text"}</button>
         </form>
       </article>
 
