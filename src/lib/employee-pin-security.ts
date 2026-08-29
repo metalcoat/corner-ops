@@ -1,9 +1,11 @@
 import { getSql } from "@/lib/db";
+import { ConflictError } from "@/lib/http";
 import { validateEmployeePin } from "@/lib/employee-pin";
 import {
   createEmployeePinCryptoRecord,
-  employeePinDigest,
+  employeePinDigestForCandidate,
   employeePinFingerprint,
+  employeePinFingerprintCandidates,
   EMPLOYEE_PIN_HASH_VERSION,
   legacyEmployeePinHash,
 } from "@/lib/employee-pin-crypto";
@@ -24,6 +26,11 @@ type EmployeePinRow = {
   session_version: number;
 };
 
+type PinMatch = {
+  matched: boolean;
+  needsUpgrade: boolean;
+};
+
 export function createEmployeePinRecord(business: Business, suppliedPin: unknown, employeeName = "Employee") {
   const pin = validateEmployeePin(business, suppliedPin, employeeName);
   return { pin, ...createEmployeePinCryptoRecord(business, pin) };
@@ -42,7 +49,7 @@ export async function assertEmployeePinAvailable(input: {
   excludeEmployeeId?: string;
 }): Promise<string> {
   const pin = validateEmployeePin(input.business, input.pin, input.employeeName || "Employee");
-  const fingerprint = employeePinFingerprint(input.business, pin);
+  const [fingerprint, formsFingerprint, sessionFingerprint] = employeePinFingerprintCandidates(input.business, pin);
   const legacyHash = legacyEmployeePinHash(input.business, pin);
   const exclude = input.excludeEmployeeId || null;
   const rows = await getSql()`
@@ -52,6 +59,8 @@ export async function assertEmployeePinAvailable(input: {
       AND active = TRUE
       AND (
         pin_fingerprint = ${fingerprint}
+        OR pin_fingerprint = ${formsFingerprint}
+        OR pin_fingerprint = ${sessionFingerprint}
         OR (pin_hash_version < ${EMPLOYEE_PIN_HASH_VERSION} AND pin_hash = ${legacyHash})
       )
     LIMIT 1
@@ -60,15 +69,39 @@ export async function assertEmployeePinAvailable(input: {
   return pin;
 }
 
-function matches(row: EmployeePinRow, pin: string): boolean {
+function matches(row: EmployeePinRow, pin: string): PinMatch {
   if (Number(row.pin_hash_version || 1) >= EMPLOYEE_PIN_HASH_VERSION && row.pin_salt) {
-    return constantTimeEqual(employeePinDigest(row.business, pin, row.pin_salt), row.pin_hash);
+    const fingerprints = employeePinFingerprintCandidates(row.business, pin);
+
+    for (let index = 0; index < fingerprints.length; index += 1) {
+      if (!row.pin_fingerprint || !constantTimeEqual(fingerprints[index], row.pin_fingerprint)) continue;
+      const digest = employeePinDigestForCandidate(row.business, pin, row.pin_salt, index);
+      if (constantTimeEqual(digest, row.pin_hash)) {
+        return { matched: true, needsUpgrade: index !== 0 };
+      }
+    }
+
+    // A version-2 row should always have a fingerprint, but tolerate an incomplete
+    // historical migration by checking the known key roots directly once.
+    if (!row.pin_fingerprint) {
+      for (let index = 0; index < fingerprints.length; index += 1) {
+        const digest = employeePinDigestForCandidate(row.business, pin, row.pin_salt, index);
+        if (constantTimeEqual(digest, row.pin_hash)) {
+          return { matched: true, needsUpgrade: true };
+        }
+      }
+    }
+
+    return { matched: false, needsUpgrade: false };
   }
-  return constantTimeEqual(legacyEmployeePinHash(row.business, pin), row.pin_hash);
+
+  return {
+    matched: constantTimeEqual(legacyEmployeePinHash(row.business, pin), row.pin_hash),
+    needsUpgrade: true,
+  };
 }
 
-async function upgradeLegacyPin(row: EmployeePinRow, pin: string): Promise<void> {
-  if (Number(row.pin_hash_version || 1) >= EMPLOYEE_PIN_HASH_VERSION && row.pin_salt) return;
+async function rewritePinWithCurrentKey(row: EmployeePinRow, pin: string): Promise<void> {
   const record = createEmployeePinRecord(row.business, pin, row.name);
   try {
     await getSql()`
@@ -80,7 +113,7 @@ async function upgradeLegacyPin(row: EmployeePinRow, pin: string): Promise<void>
     `;
   } catch (error) {
     if (isEmployeePinUniqueViolation(error)) {
-      throw new Error("That PIN is already assigned to another active employee.");
+      throw new ConflictError("This PIN conflicts with another active employee. An owner must reset one of the PINs.");
     }
     throw error;
   }
@@ -95,7 +128,30 @@ export async function employeeByPin(business: Business, suppliedPin: unknown): P
     WHERE business = ${business} AND active = TRUE AND pin_enabled = TRUE
     ORDER BY name
   ` as unknown as EmployeePinRow[];
-  const employee = rows.find((row) => matches(row, pin)) || null;
-  if (employee) await upgradeLegacyPin(employee, pin);
-  return employee;
+
+  const found = rows
+    .map((row) => ({ row, match: matches(row, pin) }))
+    .filter((candidate) => candidate.match.matched);
+
+  if (found.length > 1) {
+    throw new ConflictError("This PIN matches more than one active employee. An owner must reset one of the PINs.");
+  }
+
+  const candidate = found[0];
+  if (!candidate) return null;
+
+  if (candidate.match.needsUpgrade) {
+    try {
+      await rewritePinWithCurrentKey(candidate.row, pin);
+    } catch (error) {
+      if (error instanceof ConflictError) throw error;
+      console.error("[employee-pin] verified PIN but key migration was deferred", {
+        employeeId: candidate.row.id,
+        business: candidate.row.business,
+        error,
+      });
+    }
+  }
+
+  return candidate.row;
 }

@@ -7,7 +7,9 @@ process.env.EMPLOYEE_PIN_PEPPER = "test-employee-pin-pepper-for-purpose-separati
 
 import {
   createEmployeePinCryptoRecord,
+  employeePinDigestForCandidate,
   employeePinFingerprint,
+  employeePinFingerprintCandidates,
   legacyEmployeePinHash,
 } from "../src/lib/employee-pin-crypto";
 import { hmacSignature, legacySessionHmac, openApplicationSecret, sealApplicationSecret } from "../src/lib/security-keys";
@@ -35,4 +37,19 @@ test("employee PIN v2 uses per-row salt while preserving a stable uniqueness fin
   assert.equal(first.fingerprint, second.fingerprint);
   assert.equal(first.fingerprint, employeePinFingerprint("Corner Deli", "1234"));
   assert.notEqual(first.hash, legacyEmployeePinHash("Corner Deli", "1234"));
+});
+
+test("employee PIN verification retains historical key candidates during secret rotation", () => {
+  const [currentFingerprint, formsFingerprint, sessionFingerprint] = employeePinFingerprintCandidates("Tiki", "12345");
+  assert.equal(currentFingerprint, employeePinFingerprint("Tiki", "12345"));
+  assert.notEqual(currentFingerprint, formsFingerprint);
+  assert.notEqual(formsFingerprint, sessionFingerprint);
+
+  const salt = "stable-test-salt";
+  const currentDigest = employeePinDigestForCandidate("Tiki", "12345", salt, 0);
+  const formsDigest = employeePinDigestForCandidate("Tiki", "12345", salt, 1);
+  const sessionDigest = employeePinDigestForCandidate("Tiki", "12345", salt, 2);
+  assert.notEqual(currentDigest, formsDigest);
+  assert.notEqual(formsDigest, sessionDigest);
+  assert.notEqual(currentDigest, sessionDigest);
 });

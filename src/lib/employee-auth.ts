@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { getSql } from "@/lib/db";
 import { employeeByPin } from "@/lib/employee-pin-security";
+import { AuthenticationError } from "@/lib/http";
 import { constantTimeEqual, hmacSignature, legacySessionHmac } from "@/lib/security-keys";
 import type { Business } from "@/lib/types";
 
@@ -36,7 +37,7 @@ function decode(token: string): EmployeeSession | null {
 
 export async function createEmployeeSession(business: Business, suppliedPin: string): Promise<EmployeeSession> {
   const employee = await employeeByPin(business, suppliedPin);
-  if (!employee) throw new Error("PIN not recognized for this location.");
+  if (!employee) throw new AuthenticationError("PIN not recognized for this location.");
   const payload: EmployeeSession = {
     employeeId: employee.id, business: employee.business, name: employee.name, position: employee.position,
     sessionVersion: Number(employee.session_version || 1), expiresAt: Date.now() + EMPLOYEE_SESSION_SECONDS * 1000,
