@@ -84,13 +84,15 @@ export async function punchAuthenticatedTikiEmployee(employeeId: string, locatio
   const openRows = await getSql()`
     SELECT id, clock_in, status
     FROM time_entries
-    WHERE employee_id = ${employee.id}::uuid AND clock_out IS NULL
-    ORDER BY clock_in DESC
-    LIMIT 1
+    WHERE business = 'Tiki'
+      AND employee_id = ${employee.id}::uuid
+      AND clock_out IS NULL
+    ORDER BY clock_in DESC, created_at DESC, id DESC
   ` as unknown as OpenEntryRow[];
 
   if (openRows[0]) {
     const existing = openRows[0];
+    const duplicateNote = "Automatically closed stale duplicate open punch during clock-out.";
     const result = await getSql()`
       UPDATE time_entries SET
         clock_out = NOW(),
@@ -98,6 +100,7 @@ export async function punchAuthenticatedTikiEmployee(employeeId: string, locatio
         clock_out_lng = ${locationCheck.longitude},
         clock_out_accuracy = ${locationCheck.accuracy},
         status = CASE
+          WHEN id <> ${existing.id}::uuid THEN 'Corrected'
           WHEN ${existing.status} = 'Needs Review'
             OR ${locationCheck.needsReview}
             OR NOW() - clock_in > INTERVAL '16 hours'
@@ -105,18 +108,25 @@ export async function punchAuthenticatedTikiEmployee(employeeId: string, locatio
           ELSE 'Complete'
         END,
         notes = CASE
+          WHEN id <> ${existing.id}::uuid
+          THEN CONCAT_WS(' ', NULLIF(notes, ''), ${duplicateNote})
           WHEN ${locationCheck.reason} <> ''
           THEN CONCAT_WS(' ', NULLIF(notes, ''), ${locationCheck.reason})
           ELSE notes
         END,
         updated_at = NOW()
-      WHERE id = ${existing.id}::uuid
+      WHERE business = 'Tiki'
+        AND employee_id = ${employee.id}::uuid
+        AND clock_out IS NULL
       RETURNING id, clock_in, clock_out, status
     ` as unknown as Array<{ id: string; clock_in: string; clock_out: string; status: string }>;
+    const entry = result.find((row) => row.id === existing.id);
+    if (!entry) throw new Error("Clock-out could not be saved. Please try again.");
     return {
       action: "clocked-out" as const,
       employee: employee.name,
-      entry: result[0],
+      entry,
+      duplicateOpenPunchesClosed: Math.max(0, result.length - 1),
       locationReview: locationCheck.needsReview ? locationCheck.reason : null,
     };
   }
