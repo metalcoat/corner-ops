@@ -1,7 +1,6 @@
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
-  correctPunch,
   createPayrollDraft,
   createTipOverride,
   deleteTipOverride,
@@ -9,6 +8,7 @@ import {
   payrollCsv,
   reopenPayrollRun,
 } from "@/lib/payroll-control";
+import { correctPunch } from "@/lib/payroll-punch-correction";
 import { safePayrollControlDashboard } from "@/lib/payroll-control-dashboard";
 import type { Business } from "@/lib/types";
 
