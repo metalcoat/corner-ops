@@ -1068,13 +1068,14 @@
 .addressSuggestions {
   display: grid;
   position: absolute;
-  z-index: 20;
+  z-index: 1000;
   left: 12px;
   right: 12px;
+  max-height: min(420px, 65dvh);
   margin-top: 2px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  overflow: hidden;
+  overflow-y: auto;
   background: #fff;
   box-shadow: 0 12px 28px rgba(18, 42, 30, 0.18);
 }
