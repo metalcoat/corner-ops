@@ -240,6 +240,15 @@ type IncomingDeliCall = {
   open_order_id: string | null;
   open_order_number: string | null;
   open_order_status: string | null;
+  last_call_at: string | null;
+  recent_orders: Array<{
+    id: string;
+    displayNumber: string;
+    createdAt: string;
+    serviceType: string;
+    status: string;
+    totalCents: number;
+  }>;
 };
 type AiDeliCall = IncomingDeliCall & {
   called_did: string;
@@ -4002,6 +4011,26 @@ export default function PosClient({
               </div>
             </header>
             <strong>{incomingCall.caller_phone}</strong>
+            <div className="posCallerHistory">
+              <span>
+                {incomingCall.last_call_at
+                  ? `Last call ${new Date(incomingCall.last_call_at).toLocaleString()}`
+                  : "No previous call history"}
+              </span>
+              {incomingCall.recent_orders?.length ? (
+                <ul>
+                  {incomingCall.recent_orders.slice(0, 4).map((order) => (
+                    <li key={order.id}>
+                      <strong>#{order.displayNumber}</strong>
+                      <span>{new Date(order.createdAt).toLocaleDateString()} · {order.serviceType.replaceAll("_", " ")}</span>
+                      <strong>{money(Number(order.totalCents))}</strong>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No customer order history.</p>
+              )}
+            </div>
             {incomingCall.open_order_id ? (
               <>
                 <p>
