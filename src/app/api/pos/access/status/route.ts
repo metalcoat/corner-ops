@@ -6,7 +6,7 @@ export async function GET(request: Request) {
   const enter = new URL(request.url).searchParams.get("enter") === "1";
   if (allowed && enter) {
     return new Response(null, { status: 303, headers: {
-      Location: new URL("/pos/deli", request.url).toString(),
+      Location: "/pos/deli",
       "Set-Cookie": `${POS_NETWORK_COOKIE}=${networkCookie(ip)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     } });
   }
