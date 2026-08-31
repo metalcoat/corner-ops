@@ -30,6 +30,8 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const callerNumber = phone(url.searchParams.get("number") || "");
     const callId = (url.searchParams.get("callId") || "").trim();
+    const requestedLine = (url.searchParams.get("line") || "").replace(/\D/g, "");
+    const line = requestedLine === "95" || requestedLine === "96" ? requestedLine : undefined;
     if (!callerNumber || !callId)
       return Response.json(
         { error: "A valid caller number and CFD call ID are required." },
@@ -40,6 +42,7 @@ export async function GET(request: Request) {
       callId: `cfd-${callId}`,
       callerNumber,
       queue: process.env.THREE_CX_DELI_QUEUE || "90",
+      line,
       status: "ringing",
       startedAt: new Date().toISOString(),
     });

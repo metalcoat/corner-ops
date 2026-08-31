@@ -383,7 +383,17 @@ function deliLineLabel(extension: string): string {
   if (digits === "96") return "LINE 2 · EXT 96";
   return digits
     ? `EXT ${digits}`
-    : "DELI QUEUE · LINE 1 (EXT 95) FIRST, THEN LINE 2 (EXT 96)";
+    : "DELI QUEUE · WAITING FOR AVAILABLE LINE";
+}
+
+function callAgeLabel(startedAt: string, now: number): string {
+  const elapsedMinutes = Math.max(
+    0,
+    Math.floor((now - new Date(startedAt).getTime()) / 60_000),
+  );
+  if (elapsedMinutes < 1) return "called just now";
+  if (elapsedMinutes === 1) return "called 1 minute ago";
+  return `called ${elapsedMinutes} minutes ago`;
 }
 
 function cloneSelections(
@@ -723,6 +733,7 @@ export default function PosClient({
   const [scanNotice, setScanNotice] = useState("");
   const [unknownBarcode, setUnknownBarcode] = useState("");
   const [incomingCalls, setIncomingCalls] = useState<IncomingDeliCall[]>([]);
+  const [callClock, setCallClock] = useState(() => Date.now());
   const [aiCalls, setAiCalls] = useState<AiDeliCall[]>([]);
   const [posEmployeeId, setPosEmployeeId] = useState("");
   const intervention = aiCalls.find((call) => call.state !== "ai") || null;
@@ -780,6 +791,12 @@ export default function PosClient({
       window.clearInterval(timer);
     };
   }, [business, session?.authenticated]);
+  useEffect(() => {
+    if (!incomingCalls.length) return;
+    setCallClock(Date.now());
+    const timer = window.setInterval(() => setCallClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [incomingCalls.length]);
   useEffect(() => {
     if (!customerOpen || customerQuery.trim().length < 3) {
       setCustomerMatches([]);
@@ -4006,6 +4023,13 @@ export default function PosClient({
                   <b>{deliLineLabel(call.line_number)}</b>
                   <h3>{call.display_name || call.caller_phone}</h3>
                   <strong>{call.caller_phone}</strong>
+                  <span className="posIncomingCallTime">
+                    {new Date(call.started_at).toLocaleTimeString([], {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}{" "}
+                    · {callAgeLabel(call.started_at, callClock)}
+                  </span>
                   <div className="posCallerHistory">
                     <span>{call.last_call_at ? `Last call ${new Date(call.last_call_at).toLocaleString()}` : "No previous call history"}</span>
                     {call.recent_orders?.length ? (
@@ -4933,7 +4957,16 @@ export default function PosClient({
                 autoFocus
                 type="search"
                 value={customerQuery}
-                onChange={(e) => setCustomerQuery(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setCustomerQuery(value);
+                  if (/^[\d\s()+.-]+$/.test(value)) {
+                    setQuickCustomer((current) => ({
+                      ...current,
+                      phone: value,
+                    }));
+                  }
+                }}
                 placeholder="3155551212 or Sarah Smith"
               />
             </label>
