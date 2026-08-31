@@ -297,6 +297,7 @@ export async function commitTender(input: {
           receiptPrinterId: input.receiptPrinterId || "",
           openCashDrawer: tillCash,
           changeDueCents: change,
+          customerReceiptPending: input.business === "Corner Deli" && purpose === "paid_receipt",
         })} AS jsonb)
       )
     `;

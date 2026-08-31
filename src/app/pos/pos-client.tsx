@@ -1180,6 +1180,9 @@ export default function PosClient({
     const payload = {
       schemaVersion: 1,
       updatedAt: new Date().toISOString(),
+      orderId: (savedDraft || activeTab)?.id,
+      checkId: selectedCheckId,
+      receiptPrinterId,
       serviceType,
       lines: cart.map((line) => ({
         id: line.id,
@@ -1190,7 +1193,9 @@ export default function PosClient({
         lineTotalCents: line.unitPriceCents * line.quantity,
       })),
       subtotalCents,
-      totalCents: savedDraft?.totalCents ?? subtotalCents,
+      totalCents: Number(checkoutState?.order.total_cents ?? savedDraft?.totalCents ?? subtotalCents),
+      amountDueCents: Number(checkoutState?.check?.amount_due_cents ?? checkoutState?.order.amount_due_cents ?? savedDraft?.totalCents ?? subtotalCents),
+      paymentStatus: checkoutState?.order.payment_status || "unpaid",
       status: submittedOrder
         ? "submitted"
         : checkoutOpen
@@ -1206,12 +1211,18 @@ export default function PosClient({
     const channel = new BroadcastChannel("corner-ops-customer-display");
     channel.postMessage(payload);
     channel.close();
+    if(stationProfile?.station_key)void fetch("/api/ordering/customer-display",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({stationKey:stationProfile.station_key,payload})}).catch(()=>undefined);
   }, [
     business,
     cart,
     checkoutOpen,
     savedDraft?.displayNumber,
     savedDraft?.totalCents,
+    activeTab?.id,
+    checkoutState,
+    receiptPrinterId,
+    selectedCheckId,
+    stationProfile?.station_key,
     serviceType,
     submittedOrder,
     subtotalCents,
@@ -2792,6 +2803,23 @@ export default function PosClient({
     }
     setTipPromptOpen(true);
   }
+
+  useEffect(() => {
+    const stationKey=stationProfile?.station_key;
+    if(!checkoutOpen||!stationKey)return;
+    let stopped=false,processing=false;
+    async function checkCustomerDisplay(){
+      if(processing||stopped)return;
+      try{
+        const response=await fetch(`/api/ordering/customer-display?stationKey=${encodeURIComponent(stationKey!)}`,{cache:"no-store"}),body=await response.json(),session=body.session;
+        if(!response.ok||!session||Number(session.responseVersion)<=Number(session.handledVersion)||session.response?.action!=="tip")return;
+        processing=true;
+        await applyTipAndStartCard(Number(session.response.tipCents||0));
+        await fetch("/api/ordering/customer-display",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"handled",stationKey,version:session.responseVersion})});
+      }catch{/* Keep checkout usable if the optional CDS is offline. */}finally{processing=false}
+    }
+    void checkCustomerDisplay();const timer=window.setInterval(checkCustomerDisplay,1200);return()=>{stopped=true;window.clearInterval(timer)};
+  },[checkoutOpen,stationProfile?.station_key]);
 
   async function paymentOperation(
     action: "reverse" | "reprint",

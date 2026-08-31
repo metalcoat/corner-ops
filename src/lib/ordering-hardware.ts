@@ -534,6 +534,7 @@ export async function dispatchOrderPrintJobs(
     jobs =
       await sql`SELECT * FROM ordering_print_jobs WHERE order_id=${orderId} AND business=${business} AND status IN('not_configured','queued') AND (${includeKitchen} OR purpose<>'kitchen_production') AND (${jobId}::uuid IS NULL OR id=${jobId}::uuid) ORDER BY created_at,id`;
   for (const job of jobs) {
+    if (job.payload?.customerReceiptPending === true) continue;
     const role =
       job.purpose === "kitchen_production"
         ? "kitchen_printer"
