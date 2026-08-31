@@ -1802,7 +1802,7 @@ export default function PosClient({
       setDeliveryValidatedInput(enteredAddress.trim().replace(/\s+/g, " "));
       setDeliveryRoute(payload.route || null);
       setDeliveryAddress(payload.address.formattedAddress);
-      setDeliveryEditorOpen(false);
+      if (!suggestion?.deliveryLocationId) setDeliveryEditorOpen(false);
       setAddressSessionToken(clientId());
       setSavedDraft(null);
     } catch (error) {
@@ -3179,7 +3179,6 @@ export default function PosClient({
                           (candidate) => candidate.id === event.target.value,
                         );
                         if (address) void chooseSavedAddress(address);
-                        else changeDeliveryAddress("");
                       }}
                     >
                       <option value="">Choose delivery address</option>
@@ -3188,148 +3187,27 @@ export default function PosClient({
                           {address.label || "Address"} · {address.line1}
                         </option>
                       ))}
-                      <option value="">+ New address</option>
                     </select>
                   ) : null}
-                  {!selectedCustomerAddressId && <div className="posAddressAutocomplete">
-                    <input
-                      className={deliveryAddressRequired ? "posDeliveryAddressRequired" : undefined}
-                      value={deliveryAddress}
-                      autoComplete="off"
-                      spellCheck={false}
-                      aria-label="Delivery street address"
-                      aria-invalid={deliveryAddressRequired}
-                      placeholder="Type delivery address"
-                      aria-expanded={addressSuggestions.length > 0}
-                      aria-controls="delivery-address-suggestions"
-                      onChange={(event) =>
-                        changeDeliveryAddress(event.target.value)
-                      }
-                      onKeyDown={(event) => {
-                        if (event.key === "ArrowDown") {
-                          event.preventDefault();
-                          setActiveSuggestion((current) =>
-                            Math.min(
-                              addressSuggestions.length - 1,
-                              current + 1,
-                            ),
-                          );
-                        }
-                        if (event.key === "ArrowUp") {
-                          event.preventDefault();
-                          setActiveSuggestion((current) =>
-                            Math.max(0, current - 1),
-                          );
-                        }
-                        if (event.key === "Escape") setAddressSuggestions([]);
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          const suggestion =
-                            addressSuggestions[activeSuggestion];
-                          if (suggestion) void validateAddress(suggestion);
-                          else void validateAddress();
-                        }
-                      }}
-                    />
-                    {(addressLoading ||
-                      addressSuggestions.length > 0 ||
-                      (deliveryAddress.trim().length >= 2 &&
-                        !addressLoading &&
-                        !validatedAddress &&
-                        !addressError)) && (
-                      <div
-                        id="delivery-address-suggestions"
-                        className="posAddressSuggestions"
-                        role="listbox"
-                      >
-                        {addressLoading && (
-                          <div className="addressState">
-                            Finding nearby addresses…
-                          </div>
-                        )}
-                        {!addressLoading &&
-                          addressSuggestions.map((suggestion, index) => (
-                            <button
-                              key={suggestion.id}
-                              type="button"
-                              role="option"
-                              aria-selected={activeSuggestion === index}
-                              className={
-                                activeSuggestion === index ? "active" : ""
-                              }
-                              onMouseDown={(event) => event.preventDefault()}
-                              onClick={() => void validateAddress(suggestion)}
-                            >
-                              <strong>{suggestion.mainText}</strong>
-                              <span>{suggestion.secondaryText}</span>
-                            </button>
-                          ))}
-                        {!addressLoading && !addressSuggestions.length && (
-                          <div className="addressState">
-                            No addresses found.
-                          </div>
-                        )}
-                        {addressSuggestions.some(
-                          (suggestion) => suggestion.provider === "google",
-                        ) && <small>Address results powered by Google</small>}
-                      </div>
-                    )}
-                  </div>}
-                  {!selectedCustomerAddressId && !selectedDeliveryLocation && (
-                    <input
-                      className="posDeliveryUnit"
-                      aria-label="Apartment or unit"
-                      placeholder="Apt / unit"
-                      value={deliveryUnit}
-                      maxLength={120}
-                      autoComplete="off"
-                      onChange={(event) => {
-                        setDeliveryUnit(event.target.value);
-                        setSavedDraft(null);
-                      }}
-                    />
-                  )}
                   <button
                     type="button"
-                    className="validateAddressButton"
-                    disabled={
-                      validatingAddress ||
-                      deliveryAddress.trim().length < 5 ||
-                      Boolean(validatedAddress)
-                    }
-                    onClick={() => void validateAddress()}
+                    className="posAddAddressButton"
+                    onClick={() => {
+                      setSelectedCustomerAddressId("");
+                      setDeliveryAddress("");
+                      setDeliveryUnit("");
+                      setValidatedAddress(null);
+                      setDeliveryValidationToken("");
+                      setDeliveryValidatedInput("");
+                      setDeliveryRoute(null);
+                      setAddressError("");
+                      setAddressSuggestions([]);
+                      setDeliveryEditorOpen(true);
+                    }}
                   >
-                    {validatingAddress
-                      ? "Validating…"
-                      : validatedAddress
-                        ? "✓ Validated"
-                        : "Validate"}
+                    + ADD NEW ADDRESS
                   </button>
                 </div>
-                {selectedDeliveryLocation && (
-                  <div
-                    className="posDeliveryDropoffs"
-                    aria-label={`${selectedDeliveryLocation.name} drop-off location`}
-                  >
-                    <strong>
-                      WHERE AT {selectedDeliveryLocation.name.toUpperCase()}?
-                    </strong>
-                    {selectedDeliveryLocation.dropoffs.map((dropoff) => (
-                      <button
-                        type="button"
-                        key={dropoff}
-                        className={deliveryUnit === dropoff ? "selected" : ""}
-                        onClick={() => {
-                          setDeliveryUnit(dropoff);
-                          setSavedDraft(null);
-                          setCheckoutError("");
-                        }}
-                      >
-                        {dropoff}
-                      </button>
-                    ))}
-                  </div>
-                )}
                 {validatedAddress && (
                   <p className="addressResult posAddressResultCompact">
                     <strong>{validatedAddress.formattedAddress}</strong>
@@ -4932,9 +4810,165 @@ export default function PosClient({
           <button onClick={() => setIntensityChoice(null)}>Cancel</button>
         </div>
       )}
+      {deliveryEditorOpen && (
+        <div
+          className="posModalBackdrop posTopModalBackdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget)
+              setDeliveryEditorOpen(false);
+          }}
+        >
+          <section
+            className="posCustomerDialog posAddressDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-delivery-address-title"
+          >
+            <header>
+              <div>
+                <span>DELIVERY</span>
+                <h2 id="new-delivery-address-title">Add new address</h2>
+              </div>
+              <button onClick={() => setDeliveryEditorOpen(false)}>Close</button>
+            </header>
+            <div className="posAddressAutocomplete">
+              <label>
+                Street address
+                <input
+                  autoFocus
+                  className={deliveryAddressRequired ? "posDeliveryAddressRequired" : undefined}
+                  value={deliveryAddress}
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label="Delivery street address"
+                  aria-invalid={deliveryAddressRequired}
+                  placeholder="Start typing the delivery address"
+                  aria-expanded={addressSuggestions.length > 0}
+                  aria-controls="delivery-address-suggestions"
+                  onChange={(event) => changeDeliveryAddress(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setActiveSuggestion((current) =>
+                        Math.min(addressSuggestions.length - 1, current + 1),
+                      );
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setActiveSuggestion((current) => Math.max(0, current - 1));
+                    }
+                    if (event.key === "Escape") setAddressSuggestions([]);
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      const suggestion = addressSuggestions[activeSuggestion];
+                      if (suggestion) void validateAddress(suggestion);
+                      else void validateAddress();
+                    }
+                  }}
+                />
+              </label>
+              {(addressLoading ||
+                addressSuggestions.length > 0 ||
+                (deliveryAddress.trim().length >= 2 &&
+                  !addressLoading &&
+                  !validatedAddress &&
+                  !addressError)) && (
+                <div
+                  id="delivery-address-suggestions"
+                  className="posAddressSuggestions"
+                  role="listbox"
+                >
+                  {addressLoading && (
+                    <div className="addressState">Finding nearby addresses…</div>
+                  )}
+                  {!addressLoading &&
+                    addressSuggestions.map((suggestion, index) => (
+                      <button
+                        key={suggestion.id}
+                        type="button"
+                        role="option"
+                        aria-selected={activeSuggestion === index}
+                        className={activeSuggestion === index ? "active" : ""}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => void validateAddress(suggestion)}
+                      >
+                        <strong>{suggestion.mainText}</strong>
+                        <span>{suggestion.secondaryText}</span>
+                      </button>
+                    ))}
+                  {!addressLoading && !addressSuggestions.length && (
+                    <div className="addressState">No addresses found.</div>
+                  )}
+                  {addressSuggestions.some(
+                    (suggestion) => suggestion.provider === "google",
+                  ) && <small>Address results powered by Google</small>}
+                </div>
+              )}
+            </div>
+            {!selectedDeliveryLocation && (
+              <label>
+                Apartment or unit
+                <input
+                  aria-label="Apartment or unit"
+                  placeholder="Optional"
+                  value={deliveryUnit}
+                  maxLength={120}
+                  autoComplete="off"
+                  onChange={(event) => {
+                    setDeliveryUnit(event.target.value);
+                    setSavedDraft(null);
+                  }}
+                />
+              </label>
+            )}
+            {selectedDeliveryLocation && (
+              <div
+                className="posDeliveryDropoffs"
+                aria-label={`${selectedDeliveryLocation.name} drop-off location`}
+              >
+                <strong>WHERE AT {selectedDeliveryLocation.name.toUpperCase()}?</strong>
+                {selectedDeliveryLocation.dropoffs.map((dropoff) => (
+                  <button
+                    type="button"
+                    key={dropoff}
+                    className={deliveryUnit === dropoff ? "selected" : ""}
+                    onClick={() => {
+                      setDeliveryUnit(dropoff);
+                      setSavedDraft(null);
+                      setCheckoutError("");
+                      setDeliveryEditorOpen(false);
+                    }}
+                  >
+                    {dropoff}
+                  </button>
+                ))}
+              </div>
+            )}
+            {addressError && <p className="addressError" role="alert">{addressError}</p>}
+            {!selectedDeliveryLocation && (
+              <button
+                type="button"
+                className="validateAddressButton"
+                disabled={
+                  validatingAddress ||
+                  deliveryAddress.trim().length < 5 ||
+                  Boolean(validatedAddress)
+                }
+                onClick={() => void validateAddress()}
+              >
+                {validatingAddress
+                  ? "Validating…"
+                  : validatedAddress
+                    ? "✓ Validated"
+                    : "VALIDATE & USE ADDRESS"}
+              </button>
+            )}
+          </section>
+        </div>
+      )}
       {customerOpen && (
         <div
-          className="posModalBackdrop"
+          className="posModalBackdrop posTopModalBackdrop"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setCustomerOpen(false);
           }}
