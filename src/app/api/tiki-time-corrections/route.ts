@@ -79,124 +79,6 @@ async function adjustment(input: {
   `;
 }
 
-async function correctTikiPunchAtomically(input: {
-  sourceId: string;
-  employeeName: string;
-  position: string;
-  clockIn: string;
-  clockOut: string | null;
-  reason: string;
-  actor: string;
-}) {
-  const clockInDate = new Date(input.clockIn);
-  const clockOutDate = input.clockOut ? new Date(input.clockOut) : null;
-  if (Number.isNaN(clockInDate.getTime())) throw new ValidationError("Enter a valid clock-in time.");
-  if (clockOutDate && Number.isNaN(clockOutDate.getTime())) throw new ValidationError("Enter a valid clock-out time.");
-  if (clockOutDate && clockOutDate < clockInDate) throw new ValidationError("Clock-out cannot precede clock-in.");
-
-  const auditId = crypto.randomUUID();
-  const staleNote = `Correction: ${input.reason}. Stale open punch zeroed after owner correction reconciled live clock state.`;
-  const selectedNote = `Correction: ${input.reason}`;
-
-  const rows = await getSql()`
-    WITH selected_before AS MATERIALIZED (
-      SELECT *
-      FROM time_entries
-      WHERE id = ${input.sourceId}::uuid
-        AND business = 'Tiki'
-    ),
-    updated_selected AS (
-      UPDATE time_entries AS target
-      SET
-        employee_name = COALESCE(NULLIF(${input.employeeName}, ''), target.employee_name),
-        position = COALESCE(NULLIF(${input.position}, ''), target.position),
-        clock_in = ${input.clockIn}::timestamptz,
-        clock_out = ${input.clockOut}::timestamptz,
-        status = 'Corrected',
-        notes = CONCAT_WS(E'\n', NULLIF(target.notes, ''), ${selectedNote}),
-        updated_at = NOW()
-      FROM selected_before AS before
-      WHERE target.id = before.id
-        AND target.business = 'Tiki'
-      RETURNING target.*
-    ),
-    stale_before AS MATERIALIZED (
-      SELECT stale.*
-      FROM time_entries AS stale
-      JOIN updated_selected AS corrected
-        ON corrected.employee_id = stale.employee_id
-      WHERE stale.business = 'Tiki'
-        AND stale.id <> corrected.id
-        AND corrected.clock_out IS NOT NULL
-        AND stale.clock_out IS NULL
-        AND stale.clock_in <= corrected.clock_out
-    ),
-    updated_stale AS (
-      UPDATE time_entries AS target
-      SET
-        clock_out = target.clock_in,
-        status = 'Corrected',
-        notes = CONCAT_WS(E'\n', NULLIF(target.notes, ''), ${staleNote}),
-        updated_at = NOW()
-      FROM stale_before AS stale
-      WHERE target.id = stale.id
-        AND target.business = 'Tiki'
-        AND target.clock_out IS NULL
-      RETURNING target.*
-    ),
-    audit_insert AS (
-      INSERT INTO time_entry_adjustments (
-        id, business, source_type, source_id, before_state, after_state, reason, actor
-      )
-      SELECT
-        ${auditId}::uuid,
-        'Tiki',
-        'Tiki',
-        before.id,
-        to_jsonb(before),
-        jsonb_build_object(
-          'selected', to_jsonb(corrected),
-          'staleOpenPunchesResolved', (SELECT COUNT(*) FROM updated_stale),
-          'stalePunchIds', COALESCE((SELECT jsonb_agg(id) FROM updated_stale), '[]'::jsonb)
-        ),
-        ${input.reason},
-        ${input.actor}
-      FROM selected_before AS before
-      JOIN updated_selected AS corrected ON corrected.id = before.id
-      RETURNING id
-    )
-    SELECT
-      corrected.id,
-      corrected.employee_id,
-      corrected.employee_name,
-      corrected.clock_in,
-      corrected.clock_out,
-      corrected.status,
-      (SELECT COUNT(*)::int FROM updated_stale) AS stale_open_punches_resolved,
-      (SELECT COUNT(*)::int FROM audit_insert) AS audit_rows_written
-    FROM updated_selected AS corrected
-  ` as unknown as Array<Record<string, unknown>>;
-
-  const saved = rows[0];
-  if (!saved) throw new ValidationError("That Tiki punch was not found. Reload the page and try again.");
-  if (Number(saved.audit_rows_written || 0) !== 1) throw new Error("The Tiki correction audit did not commit.");
-
-  return {
-    corrected: true,
-    punch: {
-      id: String(saved.id),
-      employeeId: String(saved.employee_id),
-      employeeName: String(saved.employee_name),
-      clockIn: new Date(String(saved.clock_in)).toISOString(),
-      clockOut: saved.clock_out ? new Date(String(saved.clock_out)).toISOString() : null,
-      clockInEastern: easternLabel(saved.clock_in),
-      clockOutEastern: easternLabel(saved.clock_out),
-      status: String(saved.status),
-    },
-    staleOpenPunchesResolved: Number(saved.stale_open_punches_resolved || 0),
-  };
-}
-
 async function reconcileLiveClockState(input: {
   sourceId: string;
   reason: string;
@@ -240,17 +122,130 @@ async function reconcileLiveClockState(input: {
     ` as unknown as Array<Record<string, unknown>>;
     const after = savedRows[0];
     if (!after) continue;
-    await adjustment({
-      sourceId: String(stale.id),
-      before: stale,
-      after,
-      reason: input.reason,
-      actor: input.actor,
-    });
+    try {
+      await adjustment({
+        sourceId: String(stale.id),
+        before: stale,
+        after,
+        reason: input.reason,
+        actor: input.actor,
+      });
+    } catch (error) {
+      console.error("[tiki-time-correction] stale-punch audit failed", {
+        sourceId: String(stale.id),
+        error,
+      });
+    }
     resolved += 1;
   }
 
   return { staleOpenPunchesResolved: resolved };
+}
+
+async function correctTikiPunch(input: {
+  sourceId: string;
+  employeeName: string;
+  position: string;
+  clockIn: string;
+  clockOut: string | null;
+  reason: string;
+  actor: string;
+}) {
+  const requestId = crypto.randomUUID().slice(0, 8);
+  const clockIn = new Date(input.clockIn);
+  const clockOut = input.clockOut ? new Date(input.clockOut) : null;
+  if (Number.isNaN(clockIn.getTime())) throw new ValidationError("Enter a valid clock-in time.");
+  if (clockOut && Number.isNaN(clockOut.getTime())) throw new ValidationError("Enter a valid clock-out time.");
+  if (clockOut && clockOut < clockIn) throw new ValidationError("Clock-out cannot precede clock-in.");
+
+  try {
+    const beforeRows = await getSql()`
+      SELECT * FROM time_entries
+      WHERE id = ${input.sourceId}::uuid AND business = 'Tiki'
+      LIMIT 1
+    ` as unknown as Array<Record<string, unknown>>;
+    const before = beforeRows[0];
+    if (!before) throw new ValidationError("That Tiki punch was not found. Reload payroll and try again.");
+
+    const savedRows = await getSql()`
+      UPDATE time_entries SET
+        employee_name = ${input.employeeName || String(before.employee_name || "")},
+        position = ${input.position || String(before.position || "")},
+        clock_in = ${clockIn.toISOString()},
+        clock_out = ${clockOut?.toISOString() || null},
+        status = 'Corrected',
+        notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${input.reason}`}),
+        updated_at = NOW()
+      WHERE id = ${input.sourceId}::uuid AND business = 'Tiki'
+      RETURNING *
+    ` as unknown as Array<Record<string, unknown>>;
+    const saved = savedRows[0];
+    if (!saved) throw new Error("The Tiki punch update returned no row.");
+
+    let auditSaved = true;
+    try {
+      await adjustment({
+        sourceId: input.sourceId,
+        before,
+        after: saved,
+        reason: input.reason,
+        actor: input.actor,
+      });
+    } catch (error) {
+      auditSaved = false;
+      console.error("[tiki-time-correction] primary audit failed", { requestId, sourceId: input.sourceId, error });
+    }
+
+    let staleOpenPunchesResolved = 0;
+    let cleanupWarning = "";
+    try {
+      const liveState = await reconcileLiveClockState({ sourceId: input.sourceId, reason: input.reason, actor: input.actor });
+      staleOpenPunchesResolved = liveState.staleOpenPunchesResolved;
+    } catch (error) {
+      cleanupWarning = "The punch saved, but live-clock cleanup needs review.";
+      console.error("[tiki-time-correction] live-clock cleanup failed", { requestId, sourceId: input.sourceId, error });
+    }
+
+    console.info("[tiki-time-correction] saved", {
+      requestId,
+      sourceId: input.sourceId,
+      employeeName: String(saved.employee_name || ""),
+      clockIn: saved.clock_in,
+      clockOut: saved.clock_out,
+      auditSaved,
+      staleOpenPunchesResolved,
+    });
+
+    return {
+      corrected: true,
+      requestId,
+      punch: {
+        id: String(saved.id),
+        employeeId: String(saved.employee_id),
+        employeeName: String(saved.employee_name),
+        clockIn: new Date(String(saved.clock_in)).toISOString(),
+        clockOut: saved.clock_out ? new Date(String(saved.clock_out)).toISOString() : null,
+        clockInEastern: easternLabel(saved.clock_in),
+        clockOutEastern: easternLabel(saved.clock_out),
+        status: String(saved.status),
+      },
+      auditSaved,
+      staleOpenPunchesResolved,
+      warning: cleanupWarning || (auditSaved ? "" : "The punch saved, but its audit entry needs review."),
+    };
+  } catch (error) {
+    console.error("[tiki-time-correction] save failed", {
+      requestId,
+      sourceId: input.sourceId,
+      employeeName: input.employeeName,
+      clockIn: input.clockIn,
+      clockOut: input.clockOut,
+      error,
+    });
+    if (error instanceof ValidationError) throw error;
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ValidationError(`Tiki correction failed [${requestId}]: ${detail}`);
+  }
 }
 
 export async function GET(request: Request) {
@@ -308,7 +303,7 @@ export async function POST(request: Request) {
       const reason = correctionReason(body.reason);
       const clockIn = easternWallToIso(body.clockInWall);
       const clockOut = String(body.clockOutWall || "").trim() ? easternWallToIso(body.clockOutWall) : null;
-      return Response.json(await correctTikiPunchAtomically({
+      return Response.json(await correctTikiPunch({
         sourceId,
         employeeName: clean(body.employeeName, 120),
         position: clean(body.position, 100),
