@@ -7,8 +7,9 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node tools/apply-production-migrations.mjs && next build",
     "start": "next start",
+    "db:migrate": "node tools/apply-production-migrations.mjs --force",
     "typecheck": "tsc --noEmit",
     "test": "node -e \"require('fs').rmSync('.test-dist',{recursive:true,force:true})\" && tsc -p tsconfig.tests.json && node --test .test-dist/tests/**/*.test.js"
   },
@@ -24,7 +25,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
+    "@types/react-dom": "^19.2.0",
     "typescript": "^5.7.0"
   },
   "overrides": {
