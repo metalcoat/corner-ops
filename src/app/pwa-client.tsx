@@ -59,7 +59,8 @@ async function registerServiceWorker() {
 
 export default function PwaClient() {
   const pathname = usePathname();
-  const hiddenOnPos = pathname.startsWith("/pos");
+  const hiddenOnPos =
+    pathname.startsWith("/pos") || pathname.startsWith("/display/deli");
   const [status, setStatus] = useState<PushStatus | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [installed, setInstalled] = useState(false);
