@@ -51,7 +51,7 @@ function posToken(request: NextRequest): PosToken | null {
 }
 
 function clientIp(request: NextRequest): string {
-  return (request.headers.get("x-real-ip") || request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0] || "").trim().replace(/^::ffff:/, "");
+  return (request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0] || request.headers.get("x-real-ip") || "").trim().replace(/^::ffff:/, "");
 }
 
 function localNetwork(ip: string): boolean {

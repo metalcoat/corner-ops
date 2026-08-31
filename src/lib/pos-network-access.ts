@@ -4,7 +4,7 @@ import { getSql } from "@/lib/db";
 export const POS_NETWORK_COOKIE = "corner_ops_pos_network";
 
 export function requestIp(headers: Headers): string {
-  return (headers.get("x-real-ip") || headers.get("cf-connecting-ip") || headers.get("x-forwarded-for")?.split(",")[0] || "")
+  return (headers.get("cf-connecting-ip") || headers.get("x-forwarded-for")?.split(",")[0] || headers.get("x-real-ip") || "")
     .trim().replace(/^::ffff:/, "").slice(0, 80);
 }
 
