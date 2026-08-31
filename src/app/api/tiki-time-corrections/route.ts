@@ -1,7 +1,6 @@
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { getSql } from "@/lib/db";
 import { apiError, unauthorized, ValidationError } from "@/lib/http";
-import { correctPunch } from "@/lib/payroll-punch-correction";
 import { payrollWeekBounds } from "@/lib/payroll-week";
 
 export const runtime = "nodejs";
@@ -39,8 +38,27 @@ function easternWallToIso(value: unknown) {
   return new Date(timestamp).toISOString();
 }
 
+function easternLabel(value: unknown) {
+  if (!value) return "Open";
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return "Invalid time";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(parsed);
+}
+
 function correctionReason(value: unknown) {
   return String(value || "").trim().slice(0, 1000) || "Owner time correction";
+}
+
+function clean(value: unknown, max: number) {
+  return String(value || "").trim().slice(0, max);
 }
 
 async function adjustment(input: {
@@ -59,6 +77,126 @@ async function adjustment(input: {
       ${input.reason}, ${input.actor}
     )
   `;
+}
+
+async function correctTikiPunchAtomically(input: {
+  sourceId: string;
+  employeeName: string;
+  position: string;
+  clockIn: string;
+  clockOut: string | null;
+  reason: string;
+  actor: string;
+}) {
+  const clockInDate = new Date(input.clockIn);
+  const clockOutDate = input.clockOut ? new Date(input.clockOut) : null;
+  if (Number.isNaN(clockInDate.getTime())) throw new ValidationError("Enter a valid clock-in time.");
+  if (clockOutDate && Number.isNaN(clockOutDate.getTime())) throw new ValidationError("Enter a valid clock-out time.");
+  if (clockOutDate && clockOutDate < clockInDate) throw new ValidationError("Clock-out cannot precede clock-in.");
+
+  const auditId = crypto.randomUUID();
+  const staleNote = `Correction: ${input.reason}. Stale open punch zeroed after owner correction reconciled live clock state.`;
+  const selectedNote = `Correction: ${input.reason}`;
+
+  const rows = await getSql()`
+    WITH selected_before AS MATERIALIZED (
+      SELECT *
+      FROM time_entries
+      WHERE id = ${input.sourceId}::uuid
+        AND business = 'Tiki'
+      FOR UPDATE
+    ),
+    updated_selected AS (
+      UPDATE time_entries AS target
+      SET
+        employee_name = COALESCE(NULLIF(${input.employeeName}, ''), target.employee_name),
+        position = COALESCE(NULLIF(${input.position}, ''), target.position),
+        clock_in = ${input.clockIn}::timestamptz,
+        clock_out = ${input.clockOut}::timestamptz,
+        status = 'Corrected',
+        notes = CONCAT_WS(E'\n', NULLIF(target.notes, ''), ${selectedNote}),
+        updated_at = NOW()
+      FROM selected_before AS before
+      WHERE target.id = before.id
+        AND target.business = 'Tiki'
+      RETURNING target.*
+    ),
+    stale_before AS MATERIALIZED (
+      SELECT stale.*
+      FROM time_entries AS stale
+      JOIN updated_selected AS corrected
+        ON corrected.employee_id = stale.employee_id
+      WHERE stale.business = 'Tiki'
+        AND stale.id <> corrected.id
+        AND corrected.clock_out IS NOT NULL
+        AND stale.clock_out IS NULL
+        AND stale.clock_in <= corrected.clock_out
+      FOR UPDATE
+    ),
+    updated_stale AS (
+      UPDATE time_entries AS target
+      SET
+        clock_out = target.clock_in,
+        status = 'Corrected',
+        notes = CONCAT_WS(E'\n', NULLIF(target.notes, ''), ${staleNote}),
+        updated_at = NOW()
+      FROM stale_before AS stale
+      WHERE target.id = stale.id
+        AND target.business = 'Tiki'
+        AND target.clock_out IS NULL
+      RETURNING target.*
+    ),
+    audit_insert AS (
+      INSERT INTO time_entry_adjustments (
+        id, business, source_type, source_id, before_state, after_state, reason, actor
+      )
+      SELECT
+        ${auditId}::uuid,
+        'Tiki',
+        'Tiki',
+        before.id,
+        to_jsonb(before),
+        jsonb_build_object(
+          'selected', to_jsonb(corrected),
+          'staleOpenPunchesResolved', (SELECT COUNT(*) FROM updated_stale),
+          'stalePunchIds', COALESCE((SELECT jsonb_agg(id) FROM updated_stale), '[]'::jsonb)
+        ),
+        ${input.reason},
+        ${input.actor}
+      FROM selected_before AS before
+      JOIN updated_selected AS corrected ON corrected.id = before.id
+      RETURNING id
+    )
+    SELECT
+      corrected.id,
+      corrected.employee_id,
+      corrected.employee_name,
+      corrected.clock_in,
+      corrected.clock_out,
+      corrected.status,
+      (SELECT COUNT(*)::int FROM updated_stale) AS stale_open_punches_resolved,
+      (SELECT COUNT(*)::int FROM audit_insert) AS audit_rows_written
+    FROM updated_selected AS corrected
+  ` as unknown as Array<Record<string, unknown>>;
+
+  const saved = rows[0];
+  if (!saved) throw new ValidationError("That Tiki punch was not found. Reload the page and try again.");
+  if (Number(saved.audit_rows_written || 0) !== 1) throw new Error("The Tiki correction audit did not commit.");
+
+  return {
+    corrected: true,
+    punch: {
+      id: String(saved.id),
+      employeeId: String(saved.employee_id),
+      employeeName: String(saved.employee_name),
+      clockIn: new Date(String(saved.clock_in)).toISOString(),
+      clockOut: saved.clock_out ? new Date(String(saved.clock_out)).toISOString() : null,
+      clockInEastern: easternLabel(saved.clock_in),
+      clockOutEastern: easternLabel(saved.clock_out),
+      status: String(saved.status),
+    },
+    staleOpenPunchesResolved: Number(saved.stale_open_punches_resolved || 0),
+  };
 }
 
 async function reconcileLiveClockState(input: {
@@ -172,19 +310,15 @@ export async function POST(request: Request) {
       const reason = correctionReason(body.reason);
       const clockIn = easternWallToIso(body.clockInWall);
       const clockOut = String(body.clockOutWall || "").trim() ? easternWallToIso(body.clockOutWall) : null;
-      const corrected = await correctPunch({
-        business: "Tiki",
-        sourceType: "Tiki",
+      return Response.json(await correctTikiPunchAtomically({
         sourceId,
-        employeeName: body.employeeName ? String(body.employeeName) : undefined,
-        position: body.position ? String(body.position) : undefined,
+        employeeName: clean(body.employeeName, 120),
+        position: clean(body.position, 100),
         clockIn,
         clockOut,
         reason,
         actor: session.email,
-      });
-      const liveState = await reconcileLiveClockState({ sourceId, reason, actor: session.email });
-      return Response.json({ ...corrected, ...liveState });
+      }));
     }
 
     if (action === "use-in-as-prior-out") {
