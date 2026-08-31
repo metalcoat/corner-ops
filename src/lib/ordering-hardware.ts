@@ -381,8 +381,8 @@ export async function saveHardware(input: {
       if (paymentTerminalId && roleById.get(paymentTerminalId) !== 'payment_terminal') throw new Error("Choose a payment terminal.");
       if (giftCardReaderId && roleById.get(giftCardReaderId) !== 'barcode_scanner') throw new Error("Choose a scanner / magnetic-stripe reader.");
     }
-    await sql`INSERT INTO ordering_payment_stations(id,business,name,station_key,station_mode,receipt_printer_id,payment_terminal_id,gift_card_reader_id,active,created_by,updated_by) VALUES(${id},${input.business},${name},${stationKey},${stationMode},${receiptPrinterId},${paymentTerminalId},${giftCardReaderId},TRUE,${input.actor.id},${input.actor.id}) ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,station_key=EXCLUDED.station_key,station_mode=EXCLUDED.station_mode,receipt_printer_id=EXCLUDED.receipt_printer_id,payment_terminal_id=EXCLUDED.payment_terminal_id,gift_card_reader_id=EXCLUDED.gift_card_reader_id,active=TRUE,updated_by=EXCLUDED.updated_by,updated_at=NOW() WHERE ordering_payment_stations.business=${input.business}`;
-    return {id};
+    const saved=(await sql`INSERT INTO ordering_payment_stations(id,business,name,station_key,station_mode,receipt_printer_id,payment_terminal_id,gift_card_reader_id,active,created_by,updated_by) VALUES(${id},${input.business},${name},${stationKey},${stationMode},${receiptPrinterId},${paymentTerminalId},${giftCardReaderId},TRUE,${input.actor.id},${input.actor.id}) ON CONFLICT(business,station_key) DO UPDATE SET name=EXCLUDED.name,station_mode=EXCLUDED.station_mode,receipt_printer_id=EXCLUDED.receipt_printer_id,payment_terminal_id=EXCLUDED.payment_terminal_id,gift_card_reader_id=EXCLUDED.gift_card_reader_id,active=TRUE,updated_by=EXCLUDED.updated_by,updated_at=NOW() RETURNING id`)[0];
+    return {id:String(saved.id)};
   }
   if (input.action === "probe_device") {
     const id = String(body.id || "");

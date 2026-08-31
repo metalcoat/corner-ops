@@ -104,10 +104,12 @@ export default function HardwareSettingsClient() {
     try {
       await action(body);
       setMessage(success);
+      return true;
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Hardware update failed.",
       );
+      return false;
     }
   }
   function setKind(value: string) {
@@ -464,7 +466,7 @@ export default function HardwareSettingsClient() {
           <label>DHARMA TERMINAL<select value={stationPaymentTerminalId} onChange={event=>setStationPaymentTerminalId(event.target.value)}><option value="">Pending Dharma hardware</option>{data?.devices.filter(device=>device.role==="payment_terminal").map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>
           <label>GIFT-CARD SWIPER<select value={stationGiftReaderId} onChange={event=>setStationGiftReaderId(event.target.value)}><option value="">Choose reader</option>{data?.devices.filter(device=>device.role==="barcode_scanner").map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>
         </>}
-        <button disabled={!stationName||!stationKey||(stationMode==="payment"&&!stationReceiptPrinterId)} onClick={()=>void guarded({action:"save_payment_station",name:stationName,stationKey,stationMode,receiptPrinterId:stationReceiptPrinterId||null,paymentTerminalId:stationPaymentTerminalId||null,giftCardReaderId:stationGiftReaderId||null},"POS station saved.").then(()=>{setStationName("");setStationKey("")})}>ADD STATION</button>
+        <button disabled={!stationName||!stationKey||(stationMode==="payment"&&!stationReceiptPrinterId)} onClick={()=>void guarded({action:"save_payment_station",name:stationName,stationKey,stationMode,receiptPrinterId:stationReceiptPrinterId||null,paymentTerminalId:stationPaymentTerminalId||null,giftCardReaderId:stationGiftReaderId||null},"POS station saved.").then(saved=>{if(saved){setStationName("");setStationKey("")}})}>ADD STATION</button>
       </div>
       <div className="posStationCards">{data?.paymentStations.map(station=><article key={station.id} className={assignedStationKey===station.station_key?"activeStation":""}><div><strong>{station.name}</strong><span>{station.station_mode==="payment"?"PAYMENT REGISTER":"ORDER-TAKING REGISTER"}{assignedStationKey===station.station_key?" · THIS POS":""}</span></div><label>STATION KEY<code>{station.station_key}</code></label><small>{station.receipt_printer_name?`Till: ${station.receipt_printer_name}`:"No till assigned"}{station.payment_terminal_name?` · Terminal: ${station.payment_terminal_name}`:""}{station.gift_card_reader_name?` · Gift reader: ${station.gift_card_reader_name}`:""}</small><div className="posTools"><button onClick={()=>void navigator.clipboard.writeText(station.station_key).then(()=>setMessage(`Copied station key: ${station.station_key}`))}>COPY KEY</button><button onClick={()=>{localStorage.setItem("corner-ops-station-key",station.station_key);setAssignedStationKey(station.station_key);setMessage(`${station.name} is now assigned to this POS. Reload the POS to apply it.`)}}>USE ON THIS POS</button><a className="button" target="_blank" href={`/display/deli?station=${encodeURIComponent(station.station_key)}`}>OPEN CUSTOMER DISPLAY</a></div></article>)}{data&&data.paymentStations.length===0&&<div className="noticeBar">No POS registers exist yet. Enter a station name and key above, choose its mode and hardware, then select ADD STATION.</div>}</div>
       <h3>Printer routing</h3>
