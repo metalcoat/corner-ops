@@ -28,6 +28,10 @@ type Session = {
   signatureCaptured: boolean;
   receiptCompleted: boolean;
 };
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
 const money = (c: number) =>
     new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -51,8 +55,46 @@ export default function CustomerDisplayClient() {
     [signed, setSigned] = useState(false),
     [email, setEmail] = useState(""),
     [clearedOrderId, setClearedOrderId] = useState(""),
+    [showInstall, setShowInstall] = useState(false),
+    [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null),
     canvas = useRef<HTMLCanvasElement>(null),
     drawing = useRef(false);
+  useEffect(() => {
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+    if (!standalone) setShowInstall(true);
+    const onPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+      setShowInstall(true);
+    };
+    const onInstalled = () => {
+      setShowInstall(false);
+      setInstallPrompt(null);
+    };
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+  async function installDisplay() {
+    if (installPrompt) {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === "accepted") setShowInstall(false);
+      setInstallPrompt(null);
+      return;
+    }
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    setMessage(
+      ios
+        ? "To install: tap Share, then Add to Home Screen. Open the display from its new icon."
+        : "Open the browser menu and choose Install app or Add to Home Screen.",
+    );
+  }
   useEffect(() => {
     const urlKey = new URLSearchParams(location.search).get("station") || "",
       saved = localStorage.getItem("corner-ops-cds-station-key") || "",
@@ -250,6 +292,11 @@ export default function CustomerDisplayClient() {
           </strong>
           <small>{session?.stationName || stationKey}</small>
         </div>
+        {showInstall && (
+          <button className="displayInstall" type="button" onClick={() => void installDisplay()}>
+            INSTALL DISPLAY APP
+          </button>
+        )}
       </header>
       {message && (
         <div className="displayMessage" role="alert">
