@@ -660,6 +660,7 @@ export default function PosClient({
   const [helcimOpen, setHelcimOpen] = useState(false);
   const [helcimStatus, setHelcimStatus] = useState<HelcimStatus | null>(null);
   const [stationProfile,setStationProfile]=useState<PosStationProfile|null>(null);
+  const [assignedStationKey,setAssignedStationKey]=useState("");
   useEffect(() => {
     if (business !== "Corner Deli") return;
     fetch("/api/ordering/hardware/status", { cache: "no-store" })
@@ -688,7 +689,7 @@ export default function PosClient({
         setHelcimStatus({ checkoutEnabled: false, apiTokenConfigured: false }),
       );
   }, [business]);
-  useEffect(()=>{if(business!=="Corner Deli")return;const stationKey=localStorage.getItem("corner-ops-station-key")||"";fetch(`/api/ordering/payment-stations?stationKey=${encodeURIComponent(stationKey)}`,{cache:"no-store"}).then(response=>response.json()).then(body=>setStationProfile(body.profile||null)).catch(()=>setStationProfile(null))},[business]);
+  useEffect(()=>{if(business!=="Corner Deli")return;const stationKey=localStorage.getItem("corner-ops-station-key")||"";setAssignedStationKey(stationKey);fetch(`/api/ordering/payment-stations?stationKey=${encodeURIComponent(stationKey)}`,{cache:"no-store"}).then(response=>response.json()).then(body=>setStationProfile(body.profile||null)).catch(()=>setStationProfile(null))},[business]);
   useEffect(()=>{if(stationProfile?.station_mode==="payment"&&stationProfile.receipt_printer_id&&receiptPrinters.some(printer=>printer.id===stationProfile.receipt_printer_id))setReceiptPrinterId(stationProfile.receipt_printer_id)},[stationProfile,receiptPrinters]);
   const [configurationMessage, setConfigurationMessage] = useState("");
   const [cartNotice, setCartNotice] = useState("");
@@ -1212,7 +1213,7 @@ export default function PosClient({
     const channel = new BroadcastChannel("corner-ops-customer-display");
     channel.postMessage(payload);
     channel.close();
-    if(stationProfile?.station_key)void fetch("/api/ordering/customer-display",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({stationKey:stationProfile.station_key,payload})}).catch(()=>undefined);
+    if(assignedStationKey)void fetch("/api/ordering/customer-display",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({stationKey:assignedStationKey,payload})}).catch(()=>undefined);
   }, [
     business,
     cart,
@@ -1223,7 +1224,7 @@ export default function PosClient({
     checkoutState,
     receiptPrinterId,
     selectedCheckId,
-    stationProfile?.station_key,
+    assignedStationKey,
     serviceType,
     submittedOrder,
     subtotalCents,

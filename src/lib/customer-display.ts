@@ -4,6 +4,7 @@ import { ensureOrderingHardwareSchema } from "@/lib/ordering-hardware-schema";
 import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { sendTransactionalEmail } from "@/lib/transactional-email";
+import { ValidationError } from "@/lib/http";
 
 export type CustomerDisplayPayload = {
   schemaVersion: number;
@@ -47,7 +48,7 @@ export function ensureCustomerDisplaySchema() {
 
 function key(value: unknown) {
   const result = String(value || "").trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9-]{1,79}$/.test(result)) throw new Error("Enter a valid customer-display station key.");
+  if (!/^[a-z0-9][a-z0-9-]{1,79}$/.test(result)) throw new ValidationError("The saved customer-display station key is invalid. Choose Change Station and reconnect it.");
   return result;
 }
 
