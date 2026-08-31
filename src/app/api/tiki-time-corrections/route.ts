@@ -113,7 +113,7 @@ async function reconcileLiveClockState(input: {
       UPDATE time_entries SET
         clock_out = clock_in,
         status = 'Corrected',
-        notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${input.reason}. Stale open punch zeroed after owner correction reconciled live clock state.`}),
+        notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${input.reason}. Stale open punch zeroed after owner correction reconciled live clock state.`}::text),
         updated_at = NOW()
       WHERE id = ${String(stale.id)}::uuid
         AND business = 'Tiki'
@@ -174,7 +174,7 @@ async function correctTikiPunch(input: {
         clock_in = ${clockIn.toISOString()},
         clock_out = ${clockOut?.toISOString() || null},
         status = 'Corrected',
-        notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${input.reason}`}),
+        notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${input.reason}`}::text),
         updated_at = NOW()
       WHERE id = ${input.sourceId}::uuid AND business = 'Tiki'
       RETURNING *
@@ -345,7 +345,7 @@ export async function POST(request: Request) {
         UPDATE time_entries SET
           clock_out = ${mistakenClockInIso},
           status = 'Corrected',
-          notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${reason}. Lunch/duplicate IN used as prior shift OUT.`}),
+          notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${reason}. Lunch/duplicate IN used as prior shift OUT.`}::text),
           updated_at = NOW()
         WHERE id = ${String(prior.id)}::uuid AND business = 'Tiki'
         RETURNING *
@@ -354,7 +354,7 @@ export async function POST(request: Request) {
         UPDATE time_entries SET
           clock_out = clock_in,
           status = 'Corrected',
-          notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${reason}. Mistaken IN moved to prior shift OUT; this row was zeroed.`}),
+          notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${reason}. Mistaken IN moved to prior shift OUT; this row was zeroed.`}::text),
           updated_at = NOW()
         WHERE id = ${sourceId}::uuid AND business = 'Tiki'
         RETURNING *
