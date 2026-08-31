@@ -18,7 +18,7 @@ export async function correctPunch(input: {
   position?: string;
   clockIn: string;
   clockOut?: string | null;
-  reason: string;
+  reason?: string;
   actor: string;
 }) {
   await ensureSchema();
@@ -27,8 +27,7 @@ export async function correctPunch(input: {
   if (Number.isNaN(clockIn.getTime())) throw new Error("Enter a valid clock-in time.");
   if (clockOut && Number.isNaN(clockOut.getTime())) throw new Error("Enter a valid clock-out time.");
   if (clockOut && clockOut < clockIn) throw new Error("Clock-out cannot precede clock-in.");
-  const reason = clean(input.reason, 1000);
-  if (reason.length < 3) throw new Error("A correction reason is required.");
+  const reason = clean(input.reason, 1000) || "Owner time correction";
 
   const beforeRows = input.sourceType === "Tiki"
     ? await getSql()`SELECT * FROM time_entries WHERE id = ${input.sourceId} AND business = ${input.business} LIMIT 1`
