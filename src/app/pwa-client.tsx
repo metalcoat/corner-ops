@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 
 type PushStatus = {
   actorType: "owner" | "employee";
@@ -57,6 +58,8 @@ async function registerServiceWorker() {
 }
 
 export default function PwaClient() {
+  const pathname = usePathname();
+  const hiddenOnPos = pathname.startsWith("/pos");
   const [status, setStatus] = useState<PushStatus | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [installed, setInstalled] = useState(false);
@@ -100,6 +103,11 @@ export default function PwaClient() {
   }, []);
 
   useEffect(() => {
+    if (hiddenOnPos) {
+      setPanelOpen(false);
+      setStatus(null);
+      return;
+    }
     setInstalled(isStandalone());
     const onInstallPrompt = (event: Event) => {
       event.preventDefault();
@@ -126,7 +134,7 @@ export default function PwaClient() {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [refresh]);
+  }, [hiddenOnPos, refresh]);
 
   async function installApp() {
     setNotice("");
@@ -235,7 +243,7 @@ export default function PwaClient() {
     }
   }
 
-  if (!status) return null;
+  if (hiddenOnPos || !status) return null;
 
   return <div className={`pwaControl ${panelOpen ? "open" : ""}`}>
     <button className="pwaControlButton" onClick={() => setPanelOpen((value) => !value)} aria-expanded={panelOpen}>
