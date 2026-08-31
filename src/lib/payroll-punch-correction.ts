@@ -44,7 +44,7 @@ export async function correctPunch(input: {
         clock_in = ${clockIn.toISOString()},
         clock_out = ${clockOut?.toISOString() || null},
         status = 'Corrected',
-        notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${reason}`}),
+        notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${reason}`}::text),
         updated_at = NOW()
       WHERE id = ${input.sourceId} AND business = ${input.business}
       RETURNING *
