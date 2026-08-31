@@ -65,6 +65,7 @@ export default function HardwareSettingsClient() {
     [stationReceiptPrinterId,setStationReceiptPrinterId]=useState(""),
     [stationPaymentTerminalId,setStationPaymentTerminalId]=useState(""),
     [stationGiftReaderId,setStationGiftReaderId]=useState(""),
+    [assignedStationKey,setAssignedStationKey]=useState(""),
     [locationId, setLocationId] = useState(""),
     [routePrinterId, setRoutePrinterId] = useState(""),
     [targetType, setTargetType] = useState("all"),
@@ -84,6 +85,7 @@ export default function HardwareSettingsClient() {
     if (paymentResponse.ok) setPaymentProvider(paymentBody);
   }
   useEffect(() => {
+    setAssignedStationKey(localStorage.getItem("corner-ops-station-key")||"");
     void load().catch((error) => setMessage(error.message));
   }, []);
   async function action(body: Record<string, unknown>) {
@@ -451,8 +453,8 @@ export default function HardwareSettingsClient() {
           </article>
         ))}
       </div>
-      <h3>POS stations</h3>
-      <p>Use one payment station for the card terminal, gift-card swiper, receipt printer, and cash drawer. Kitchen devices should be order-taking stations.</p>
+      <h3>POS registers & customer displays</h3>
+      <p>Create one station for each register. Its clearly labeled station key pairs that register with its customer display.</p>
       <div className="posSettingsGrid">
         <label>STATION NAME<input value={stationName} onChange={event=>{setStationName(event.target.value);if(!stationKey)setStationKey(event.target.value.toLowerCase().replace(/\W+/g,"-"))}} /></label>
         <label>STATION KEY<input value={stationKey} onChange={event=>setStationKey(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""))} /></label>
@@ -464,7 +466,7 @@ export default function HardwareSettingsClient() {
         </>}
         <button disabled={!stationName||!stationKey||(stationMode==="payment"&&!stationReceiptPrinterId)} onClick={()=>void guarded({action:"save_payment_station",name:stationName,stationKey,stationMode,receiptPrinterId:stationReceiptPrinterId||null,paymentTerminalId:stationPaymentTerminalId||null,giftCardReaderId:stationGiftReaderId||null},"POS station saved.").then(()=>{setStationName("");setStationKey("")})}>ADD STATION</button>
       </div>
-      <div>{data?.paymentStations.map(station=><article key={station.id}><strong>{station.name}</strong> · {station.station_mode==="payment"?"PAYMENT STATION":"ORDER TAKING"} · {station.station_key}{station.receipt_printer_name?` · till ${station.receipt_printer_name}`:""}{station.gift_card_reader_name?` · gift reader ${station.gift_card_reader_name}`:""}<div className="posTools"><button onClick={()=>{localStorage.setItem("corner-ops-station-key",station.station_key);setMessage(`${station.name} is now assigned to this device. Reload the POS to apply it.`)}}>USE ON THIS DEVICE</button></div></article>)}</div>
+      <div className="posStationCards">{data?.paymentStations.map(station=><article key={station.id} className={assignedStationKey===station.station_key?"activeStation":""}><div><strong>{station.name}</strong><span>{station.station_mode==="payment"?"PAYMENT REGISTER":"ORDER-TAKING REGISTER"}{assignedStationKey===station.station_key?" · THIS POS":""}</span></div><label>STATION KEY<code>{station.station_key}</code></label><small>{station.receipt_printer_name?`Till: ${station.receipt_printer_name}`:"No till assigned"}{station.payment_terminal_name?` · Terminal: ${station.payment_terminal_name}`:""}{station.gift_card_reader_name?` · Gift reader: ${station.gift_card_reader_name}`:""}</small><div className="posTools"><button onClick={()=>void navigator.clipboard.writeText(station.station_key).then(()=>setMessage(`Copied station key: ${station.station_key}`))}>COPY KEY</button><button onClick={()=>{localStorage.setItem("corner-ops-station-key",station.station_key);setAssignedStationKey(station.station_key);setMessage(`${station.name} is now assigned to this POS. Reload the POS to apply it.`)}}>USE ON THIS POS</button><a className="button" target="_blank" href={`/display/deli?station=${encodeURIComponent(station.station_key)}`}>OPEN CUSTOMER DISPLAY</a></div></article>)}{data&&data.paymentStations.length===0&&<div className="noticeBar">No POS registers exist yet. Enter a station name and key above, choose its mode and hardware, then select ADD STATION.</div>}</div>
       <h3>Printer routing</h3>
       <p>
         Kitchen printers can be routed by all items, stable item/category ID, or
