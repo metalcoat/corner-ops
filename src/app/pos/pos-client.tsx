@@ -720,6 +720,7 @@ export default function PosClient({
   const [deliveryEditorOpen, setDeliveryEditorOpen] = useState(false);
   const [customer, setCustomer] = useState<PosCustomer | null>(null),
     [customerOpen, setCustomerOpen] = useState(false),
+    [quickAddCaller,setQuickAddCaller]=useState(false),
     [customerQuery, setCustomerQuery] = useState(""),
     [customerMatches, setCustomerMatches] = useState<PosCustomer[]>([]);
   const [quickCustomer, setQuickCustomer] = useState({
@@ -1859,6 +1860,9 @@ export default function PosClient({
           ...current,
           phone: call.caller_phone,
         }));
+        setCustomerQuery("");
+        setCustomerMatches([]);
+        setQuickAddCaller(true);
         setCustomerOpen(true);
       }
     }
@@ -1921,6 +1925,7 @@ export default function PosClient({
       chooseCustomer(payload.customer);
       setQuickCustomer({ firstName: "", lastName: "", phone: "" });
       setCustomerQuery("");
+      setQuickAddCaller(false);
       setCustomerOpen(false);
     } catch (error) {
       setQuickCustomerError(
@@ -5097,7 +5102,7 @@ export default function PosClient({
         <div
           className="posModalBackdrop posTopModalBackdrop"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setCustomerOpen(false);
+            if (e.target === e.currentTarget) {setCustomerOpen(false);setQuickAddCaller(false)}
           }}
         >
           <section
@@ -5108,11 +5113,11 @@ export default function PosClient({
             <header>
               <div>
                 <span>CUSTOMER</span>
-                <h2>Find or add customer</h2>
+                <h2>{quickAddCaller?"Add new caller":"Find or add customer"}</h2>
               </div>
-              <button onClick={() => setCustomerOpen(false)}>Close</button>
+              <button onClick={() => {setCustomerOpen(false);setQuickAddCaller(false)}}>Close</button>
             </header>
-            <label>
+            {!quickAddCaller&&<label>
               Search existing customer
               <input
                 autoFocus
@@ -5130,8 +5135,8 @@ export default function PosClient({
                 }}
                 placeholder="3155551212 or Sarah Smith"
               />
-            </label>
-            {customerMatches.map((match) => (
+            </label>}
+            {!quickAddCaller&&customerMatches.map((match) => (
               <button
                 className="posCustomerMatch"
                 key={match.id}
@@ -5159,10 +5164,11 @@ export default function PosClient({
             {business === "Corner Deli" && (
               <form className="posQuickCustomer" onSubmit={createQuickCustomer}>
                 <h3>Quick add</h3>
+                {quickAddCaller&&<p><strong>Caller phone:</strong> {quickCustomer.phone}</p>}
                 <div>
                   <label>
                     First name
-                    <input
+                    <input autoFocus={quickAddCaller}
                       required
                       maxLength={80}
                       autoComplete="off"
@@ -5190,7 +5196,7 @@ export default function PosClient({
                     />
                   </label>
                 </div>
-                <label>
+                {!quickAddCaller&&<label>
                   Phone number
                   <input
                     required
@@ -5205,7 +5211,7 @@ export default function PosClient({
                       }))
                     }
                   />
-                </label>
+                </label>}
                 {quickCustomerError && <p role="alert">{quickCustomerError}</p>}
                 <button
                   className="primary"
@@ -5236,7 +5242,7 @@ export default function PosClient({
             {business === "Corner Deli" && (
               <Link
                 href="/pos/deli/customers"
-                onClick={() => setCustomerOpen(false)}
+                onClick={() => {setCustomerOpen(false);setQuickAddCaller(false)}}
               >
                 Open customer CRM
               </Link>
