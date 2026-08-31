@@ -22,6 +22,17 @@ type Dashboard = {
   punches: Punch[];
 };
 
+type CorrectionResult = {
+  corrected?: boolean;
+  punch?: {
+    id?: string;
+    employeeName?: string;
+    clockInEastern?: string;
+    clockOutEastern?: string;
+  };
+  staleOpenPunchesResolved?: number;
+};
+
 const TIME_ZONE = "America/New_York";
 
 function previousMonday() {
@@ -76,6 +87,7 @@ export default function TikiTimeCorrectionsPage() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [editing, setEditing] = useState<Punch | null>(null);
   const [notice, setNotice] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function load(activeWeek = weekStart) {
@@ -89,6 +101,7 @@ export default function TikiTimeCorrectionsPage() {
 
   useEffect(() => {
     setNotice("");
+    setSaveError("");
     void load(weekStart).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekStart]);
@@ -115,8 +128,9 @@ export default function TikiTimeCorrectionsPage() {
     event.preventDefault();
     if (!editing) return;
     const form = new FormData(event.currentTarget);
+    setSaveError("");
     try {
-      await post({
+      const result = await post({
         action: "correct",
         sourceId: editing.id,
         employeeName: form.get("employeeName"),
@@ -124,11 +138,15 @@ export default function TikiTimeCorrectionsPage() {
         clockInWall: form.get("clockIn"),
         clockOutWall: form.get("clockOut"),
         reason: form.get("reason"),
-      });
+      }) as CorrectionResult;
+      const savedOut = result.punch?.clockOutEastern || "Open";
+      const cleaned = Number(result.staleOpenPunchesResolved || 0);
       setEditing(null);
-      setNotice("Tiki punch corrected. Payroll and tip allocation will use the corrected times.");
+      setNotice(`Saved ${editing.employeeName}: clock-out ${savedOut}.${cleaned ? ` Also resolved ${cleaned} stale open punch${cleaned === 1 ? "" : "es"}.` : ""}`);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setSaveError(message);
+      setNotice(message);
     }
   }
 
@@ -139,6 +157,7 @@ export default function TikiTimeCorrectionsPage() {
     try {
       await post({ action: "use-in-as-prior-out", sourceId: punch.id });
       setEditing(null);
+      setSaveError("");
       setNotice("The lunch/duplicate IN was moved to the prior shift as its OUT, and the mistaken row was zeroed.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
@@ -179,7 +198,7 @@ export default function TikiTimeCorrectionsPage() {
             <td><span className={`badge ${punch.status === "Complete" || punch.status === "Corrected" ? "good" : "warn"}`}>{punch.status}</span></td>
             <td>
               <div className="controlActions">
-                <button onClick={() => setEditing(punch)} disabled={busy}>Edit times</button>
+                <button onClick={() => { setSaveError(""); setEditing(punch); }} disabled={busy}>Edit times</button>
                 <button onClick={() => void useAsPriorOut(punch)} disabled={busy || !punch.clockIn}>This IN was prior OUT</button>
               </div>
             </td>
@@ -197,8 +216,9 @@ export default function TikiTimeCorrectionsPage() {
           <label>Clock in (ET)<input name="clockIn" type="datetime-local" defaultValue={easternInputValue(editing.clockIn)} required /></label>
           <label>Clock out (ET)<input name="clockOut" type="datetime-local" defaultValue={easternInputValue(editing.clockOut)} /></label>
           <label className="wide">Reason <small>Optional</small><textarea name="reason" placeholder="Leave blank for Owner time correction" /></label>
+          {saveError && <div className="noticeBar wide"><strong>Save failed:</strong> {saveError}</div>}
           <div className="controlActions wide">
-            <button className="primary" disabled={busy}>Save correction</button>
+            <button className="primary" disabled={busy}>{busy ? "Saving…" : "Save correction"}</button>
             <button type="button" onClick={() => setEditing(null)} disabled={busy}>Cancel</button>
           </div>
         </form>
