@@ -1,21 +1,432 @@
 "use client";
 import { type PointerEvent, useEffect, useRef, useState } from "react";
-type Display={updatedAt:string;orderId?:string;serviceType:string;lines:Array<{id:string;name:string;variantName:string;quantity:number;modifiers:string[];lineTotalCents:number}>;subtotalCents:number;totalCents:number;amountDueCents?:number;paymentStatus?:string;status:string;orderNumber:string;customerEmail?:string};
-type Session={stationName:string;payload:Display;response?:{action?:string};signatureCaptured:boolean;receiptCompleted:boolean};
-const money=(c:number)=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(c/100),domains=["twcny.rr.com","yahoo.com","outlook.com","gmail.com","hotmail.com"];
-export default function CustomerDisplayClient(){
- const[data,setData]=useState<Display|null>(null),[session,setSession]=useState<Session|null>(null),[stationKey,setStationKey]=useState(""),[setupKey,setSetupKey]=useState(""),[customTip,setCustomTip]=useState(""),[busy,setBusy]=useState(false),[message,setMessage]=useState(""),[signed,setSigned]=useState(false),[email,setEmail]=useState(""),canvas=useRef<HTMLCanvasElement>(null),drawing=useRef(false);
- useEffect(()=>{const urlKey=new URLSearchParams(location.search).get("station")||"",saved=localStorage.getItem("corner-ops-cds-station-key")||"",next=urlKey||saved;if(next){setStationKey(next);setSetupKey(next);localStorage.setItem("corner-ops-cds-station-key",next)}try{const raw=localStorage.getItem("corner-ops-customer-display");if(raw)setData(JSON.parse(raw))}catch{}const channel=new BroadcastChannel("corner-ops-customer-display");channel.onmessage=event=>setData(event.data);return()=>channel.close()},[]);
- useEffect(()=>{if(!stationKey)return;let stopped=false;async function load(){try{const response=await fetch(`/api/ordering/customer-display?stationKey=${encodeURIComponent(stationKey)}`,{cache:"no-store"}),body=await response.json();if(!response.ok){if(response.status===400){localStorage.removeItem("corner-ops-cds-station-key");setStationKey("")}throw new Error(body.error||"Display connection failed.")}if(!stopped&&body.session){setSession(body.session);setData(body.session.payload);setEmail(current=>current||body.session.payload.customerEmail||"");setMessage("")}else if(!stopped&&!body.session)setMessage("Connected. Waiting for this register to send its cart…")}catch(error){if(!stopped)setMessage(error instanceof Error?error.message:"Display connection failed.")}}void load();const timer=window.setInterval(load,1500);return()=>{stopped=true;window.clearInterval(timer)}},[stationKey]);
- async function respond(response:Record<string,unknown>){setBusy(true);setMessage("");try{const result=await fetch("/api/ordering/customer-display",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"respond",stationKey,response})}),body=await result.json();if(!result.ok)throw new Error(body.error||"Could not save your selection.");return true}catch(error){setMessage(error instanceof Error?error.message:"Could not save your selection.");return false}finally{setBusy(false)}}
- async function tip(tipCents:number){if(await respond({action:"tip",tipCents}))setSession(current=>current?{...current,response:{action:"tip"}}:current)}
- function point(event:PointerEvent<HTMLCanvasElement>){const rect=event.currentTarget.getBoundingClientRect();return{x:(event.clientX-rect.left)*event.currentTarget.width/rect.width,y:(event.clientY-rect.top)*event.currentTarget.height/rect.height}}
- function start(event:PointerEvent<HTMLCanvasElement>){drawing.current=true;setSigned(true);event.currentTarget.setPointerCapture(event.pointerId);const ctx=event.currentTarget.getContext("2d"),p=point(event);ctx?.beginPath();ctx?.moveTo(p.x,p.y)}
- function move(event:PointerEvent<HTMLCanvasElement>){if(!drawing.current)return;const ctx=event.currentTarget.getContext("2d"),p=point(event);if(ctx){ctx.lineWidth=4;ctx.lineCap="round";ctx.strokeStyle="#15232c";ctx.lineTo(p.x,p.y);ctx.stroke()}}
- function clearSignature(){const el=canvas.current;el?.getContext("2d")?.clearRect(0,0,el.width,el.height);setSigned(false)}
- async function saveSignature(){if(await respond({action:"signature",signature:canvas.current?.toDataURL("image/png")||""})){setSession(current=>current?{...current,signatureCaptured:true}:current);setSigned(false)}}
- function finishReceipt(method:"email"|"print"|"none"){void respond({action:"receipt",method,email}).then(ok=>{if(ok)setSession(current=>current?{...current,receiptCompleted:true}:current)})}
- function chooseDomain(domain:string){setEmail(`${email.includes("@")?email.split("@")[0]:email}@${domain}`)}
- if(!stationKey)return <main className="customerDisplay"><section className="displaySetup"><h1>Connect customer display</h1><p>Enter this register’s station key from Settings → Hardware.</p><input autoFocus value={setupKey} onChange={e=>setSetupKey(e.target.value.toLowerCase())} placeholder="for example: deli-register"/><button onClick={()=>{localStorage.setItem("corner-ops-cds-station-key",setupKey);setStationKey(setupKey)}}>CONNECT</button></section></main>;
- const paid=data?.paymentStatus==="paid",tipSubmitted=session?.response?.action==="tip",signatureCaptured=session?.signatureCaptured,receiptComplete=session?.receiptCompleted;
- return <main className="customerDisplay"><header><div><small>WELCOME TO</small><h1>Corner Deli</h1></div><div className="displayStation"><strong>{data?.serviceType?.replaceAll("_"," ").toUpperCase()||"READY"}</strong><small>{session?.stationName||stationKey}</small></div></header>{message&&<div className="displayMessage" role="alert">{message}</div>}{!data?.lines.length?<section className="displayWelcome"><h2>What can we make for you?</h2><p>Your order will appear here.</p></section>:receiptComplete?<section className="displayStep displayThanks"><h2>Thank you!</h2><p>Your checkout is complete.</p></section>:paid&&!signatureCaptured?<section className="displayStep"><h2>Please sign below</h2><canvas ref={canvas} width={900} height={250} onPointerDown={start} onPointerMove={move} onPointerUp={()=>drawing.current=false} onPointerCancel={()=>drawing.current=false}/><div className="displayActions"><button className="secondary" onClick={clearSignature}>CLEAR</button><button disabled={!signed||busy} onClick={()=>void saveSignature()}>ACCEPT SIGNATURE</button></div></section>:paid&&signatureCaptured?<section className="displayStep"><h2>How would you like your receipt?</h2><div className="receiptChoices"><button disabled={busy} onClick={()=>finishReceipt("print")}>PRINT RECEIPT</button><button disabled={busy} onClick={()=>finishReceipt("none")}>NO RECEIPT</button></div><div className="emailReceipt"><label>Email receipt<input type="email" inputMode="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@example.com"/></label><div className="emailDomains">{domains.map(domain=><button type="button" key={domain} onClick={()=>chooseDomain(domain)}>@{domain}</button>)}</div><button disabled={busy||!/^\S+@\S+\.\S+$/.test(email)} onClick={()=>finishReceipt("email")}>EMAIL RECEIPT</button></div></section>:data?.status==="checkout"&&!tipSubmitted?<section className="displayStep"><h2>Would you like to leave a tip?</h2><p>Your server or driver receives the tip.</p><div className="tipChoices">{[15,18,20].map(percent=><button disabled={busy} key={percent} onClick={()=>void tip(Math.round((data?.amountDueCents??data?.totalCents??0)*percent/100))}>{percent}%<span>{money(Math.round((data?.amountDueCents??data?.totalCents??0)*percent/100))}</span></button>)}<button disabled={busy} onClick={()=>void tip(0)}>NO TIP</button></div><div className="customTip"><label>Custom tip<input type="number" inputMode="decimal" min="0" step="0.01" value={customTip} onChange={e=>setCustomTip(e.target.value)}/></label><button disabled={busy||customTip===""||Number(customTip)<0} onClick={()=>void tip(Math.round(Number(customTip)*100))}>ADD TIP</button></div></section>:data?.status==="checkout"?<section className="displayStep displayWaiting"><h2>Please complete payment</h2><p>Follow the instructions on the card terminal.</p><strong>{money(data?.amountDueCents??data?.totalCents??0)}</strong></section>:<section className="displayLines">{(data?.lines||[]).map(line=><article key={line.id}><div><b>{line.quantity}× {line.variantName?`${line.variantName} `:""}{line.name}</b>{line.modifiers.map((modifier,index)=><small key={`${modifier}-${index}`}>{modifier}</small>)}</div><strong>{money(line.lineTotalCents)}</strong></article>)}</section>}{!paid&&!receiptComplete&&<footer><span>{data?.status==="checkout"?"Customer checkout":"Review your order"}</span><div><small>TOTAL</small><strong>{money(data?.totalCents??0)}</strong></div></footer>}</main>}
+type Display = {
+  updatedAt: string;
+  orderId?: string;
+  serviceType: string;
+  lines: Array<{
+    id: string;
+    name: string;
+    variantName: string;
+    quantity: number;
+    modifiers: string[];
+    lineTotalCents: number;
+  }>;
+  subtotalCents: number;
+  totalCents: number;
+  amountDueCents?: number;
+  paymentStatus?: string;
+  paymentIntent?: "" | "cash" | "card" | "gift_card";
+  status: string;
+  orderNumber: string;
+  customerEmail?: string;
+};
+type Session = {
+  stationName: string;
+  payload: Display;
+  response?: { action?: string };
+  signatureCaptured: boolean;
+  receiptCompleted: boolean;
+};
+const money = (c: number) =>
+    new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+    }).format(c / 100),
+  domains = [
+    "twcny.rr.com",
+    "yahoo.com",
+    "outlook.com",
+    "gmail.com",
+    "hotmail.com",
+  ];
+export default function CustomerDisplayClient() {
+  const [data, setData] = useState<Display | null>(null),
+    [session, setSession] = useState<Session | null>(null),
+    [stationKey, setStationKey] = useState(""),
+    [setupKey, setSetupKey] = useState(""),
+    [customTip, setCustomTip] = useState(""),
+    [busy, setBusy] = useState(false),
+    [message, setMessage] = useState(""),
+    [signed, setSigned] = useState(false),
+    [email, setEmail] = useState(""),
+    [clearedOrderId, setClearedOrderId] = useState(""),
+    canvas = useRef<HTMLCanvasElement>(null),
+    drawing = useRef(false);
+  useEffect(() => {
+    const urlKey = new URLSearchParams(location.search).get("station") || "",
+      saved = localStorage.getItem("corner-ops-cds-station-key") || "",
+      next = urlKey || saved;
+    if (next) {
+      setStationKey(next);
+      setSetupKey(next);
+      localStorage.setItem("corner-ops-cds-station-key", next);
+    }
+    try {
+      const raw = localStorage.getItem("corner-ops-customer-display");
+      if (raw) setData(JSON.parse(raw));
+    } catch {}
+    const channel = new BroadcastChannel("corner-ops-customer-display");
+    channel.onmessage = (event) => setData(event.data);
+    return () => channel.close();
+  }, []);
+  useEffect(() => {
+    if (!stationKey) return;
+    let stopped = false;
+    async function load() {
+      try {
+        const response = await fetch(
+            `/api/ordering/customer-display?stationKey=${encodeURIComponent(stationKey)}`,
+            { cache: "no-store" },
+          ),
+          body = await response.json();
+        if (!response.ok) {
+          if (response.status === 400) {
+            localStorage.removeItem("corner-ops-cds-station-key");
+            setStationKey("");
+          }
+          throw new Error(body.error || "Display connection failed.");
+        }
+        if (!stopped && body.session) {
+          setSession(body.session);
+          setData(body.session.payload);
+          setEmail(
+            (current) => current || body.session.payload.customerEmail || "",
+          );
+          setMessage("");
+        } else if (!stopped && !body.session)
+          setMessage("Connected. Waiting for this register to send its cart…");
+      } catch (error) {
+        if (!stopped)
+          setMessage(
+            error instanceof Error
+              ? error.message
+              : "Display connection failed.",
+          );
+      }
+    }
+    void load();
+    const timer = window.setInterval(load, 1500);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [stationKey]);
+  async function respond(response: Record<string, unknown>) {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await fetch("/api/ordering/customer-display", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "respond", stationKey, response }),
+        }),
+        body = await result.json();
+      if (!result.ok)
+        throw new Error(body.error || "Could not save your selection.");
+      return true;
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not save your selection.",
+      );
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function tip(tipCents: number) {
+    if (await respond({ action: "tip", tipCents }))
+      setSession((current) =>
+        current ? { ...current, response: { action: "tip" } } : current,
+      );
+  }
+  function point(event: PointerEvent<HTMLCanvasElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) * event.currentTarget.width) / rect.width,
+      y:
+        ((event.clientY - rect.top) * event.currentTarget.height) / rect.height,
+    };
+  }
+  function start(event: PointerEvent<HTMLCanvasElement>) {
+    drawing.current = true;
+    setSigned(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const ctx = event.currentTarget.getContext("2d"),
+      p = point(event);
+    ctx?.beginPath();
+    ctx?.moveTo(p.x, p.y);
+  }
+  function move(event: PointerEvent<HTMLCanvasElement>) {
+    if (!drawing.current) return;
+    const ctx = event.currentTarget.getContext("2d"),
+      p = point(event);
+    if (ctx) {
+      ctx.lineWidth = 4;
+      ctx.lineCap = "round";
+      ctx.strokeStyle = "#15232c";
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+  }
+  function clearSignature() {
+    const el = canvas.current;
+    el?.getContext("2d")?.clearRect(0, 0, el.width, el.height);
+    setSigned(false);
+  }
+  async function saveSignature() {
+    if (
+      await respond({
+        action: "signature",
+        signature: canvas.current?.toDataURL("image/png") || "",
+      })
+    ) {
+      setSession((current) =>
+        current ? { ...current, signatureCaptured: true } : current,
+      );
+      setSigned(false);
+    }
+  }
+  function finishReceipt(method: "email" | "print" | "none") {
+    void respond({ action: "receipt", method, email }).then((ok) => {
+      if (ok)
+        setSession((current) =>
+          current ? { ...current, receiptCompleted: true } : current,
+        );
+    });
+  }
+  function chooseDomain(domain: string) {
+    setEmail(`${email.includes("@") ? email.split("@")[0] : email}@${domain}`);
+  }
+  useEffect(() => {
+    if (data?.paymentStatus !== "paid" || !data.orderId) return;
+    const orderId = data.orderId,
+      timer = window.setTimeout(() => setClearedOrderId(orderId), 10000);
+    return () => window.clearTimeout(timer);
+  }, [data?.orderId, data?.paymentStatus]);
+  if (!stationKey)
+    return (
+      <main className="customerDisplay">
+        <section className="displaySetup">
+          <h1>Connect customer display</h1>
+          <p>Enter this register’s station key from Settings → Hardware.</p>
+          <input
+            autoFocus
+            value={setupKey}
+            onChange={(e) => setSetupKey(e.target.value.toLowerCase())}
+            placeholder="for example: deli-register"
+          />
+          <button
+            onClick={() => {
+              localStorage.setItem("corner-ops-cds-station-key", setupKey);
+              setStationKey(setupKey);
+            }}
+          >
+            CONNECT
+          </button>
+        </section>
+      </main>
+    );
+  const cleared = Boolean(data?.orderId && data.orderId === clearedOrderId),
+    paid = data?.paymentStatus === "paid",
+    tipEligible =
+      data?.paymentIntent === "card" || data?.paymentIntent === "gift_card",
+    signatureRequired = data?.paymentIntent === "card",
+    tipSubmitted = session?.response?.action === "tip",
+    signatureCaptured = session?.signatureCaptured,
+    receiptComplete = session?.receiptCompleted;
+  return (
+    <main className="customerDisplay">
+      <header>
+        <div>
+          <small>WELCOME TO</small>
+          <h1>Corner Deli</h1>
+        </div>
+        <div className="displayStation">
+          <strong>
+            {data?.serviceType?.replaceAll("_", " ").toUpperCase() || "READY"}
+          </strong>
+          <small>{session?.stationName || stationKey}</small>
+        </div>
+      </header>
+      {message && (
+        <div className="displayMessage" role="alert">
+          {message}
+        </div>
+      )}
+      {cleared || !data?.lines.length ? (
+        <section className="displayWelcome">
+          <h2>What can we make for you?</h2>
+          <p>Your order will appear here.</p>
+        </section>
+      ) : receiptComplete ? (
+        <section className="displayStep displayThanks">
+          <h2>Thank you!</h2>
+          <p>Your checkout is complete.</p>
+        </section>
+      ) : paid && signatureRequired && !signatureCaptured ? (
+        <section className="displayStep">
+          <h2>Please sign below</h2>
+          <canvas
+            ref={canvas}
+            width={900}
+            height={250}
+            onPointerDown={start}
+            onPointerMove={move}
+            onPointerUp={() => (drawing.current = false)}
+            onPointerCancel={() => (drawing.current = false)}
+          />
+          <div className="displayActions">
+            <button className="secondary" onClick={clearSignature}>
+              CLEAR
+            </button>
+            <button
+              disabled={!signed || busy}
+              onClick={() => void saveSignature()}
+            >
+              ACCEPT SIGNATURE
+            </button>
+          </div>
+        </section>
+      ) : paid && (!signatureRequired || signatureCaptured) ? (
+        <section className="displayStep">
+          <h2>How would you like your receipt?</h2>
+          <div className="receiptChoices">
+            <button disabled={busy} onClick={() => finishReceipt("print")}>
+              PRINT RECEIPT
+            </button>
+            <button disabled={busy} onClick={() => finishReceipt("none")}>
+              NO RECEIPT
+            </button>
+          </div>
+          <div className="emailReceipt">
+            <label>
+              Email receipt
+              <input
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@example.com"
+              />
+            </label>
+            <div className="emailDomains">
+              {domains.map((domain) => (
+                <button
+                  type="button"
+                  key={domain}
+                  onClick={() => chooseDomain(domain)}
+                >
+                  @{domain}
+                </button>
+              ))}
+            </div>
+            <button
+              disabled={busy || !/^\S+@\S+\.\S+$/.test(email)}
+              onClick={() => finishReceipt("email")}
+            >
+              EMAIL RECEIPT
+            </button>
+          </div>
+        </section>
+      ) : data?.status === "checkout" && tipEligible && !tipSubmitted ? (
+        <section className="displayStep">
+          <h2>Would you like to leave a tip?</h2>
+          <p>Your server or driver receives the tip.</p>
+          <div className="tipChoices">
+            {[15, 18, 20].map((percent) => (
+              <button
+                disabled={busy}
+                key={percent}
+                onClick={() =>
+                  void tip(
+                    Math.round(
+                      ((data?.amountDueCents ?? data?.totalCents ?? 0) *
+                        percent) /
+                        100,
+                    ),
+                  )
+                }
+              >
+                {percent}%
+                <span>
+                  {money(
+                    Math.round(
+                      ((data?.amountDueCents ?? data?.totalCents ?? 0) *
+                        percent) /
+                        100,
+                    ),
+                  )}
+                </span>
+              </button>
+            ))}
+            <button disabled={busy} onClick={() => void tip(0)}>
+              NO TIP
+            </button>
+          </div>
+          <div className="customTip">
+            <label>
+              Custom tip
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={customTip}
+                onChange={(e) => setCustomTip(e.target.value)}
+              />
+            </label>
+            <button
+              disabled={busy || customTip === "" || Number(customTip) < 0}
+              onClick={() => void tip(Math.round(Number(customTip) * 100))}
+            >
+              ADD TIP
+            </button>
+          </div>
+        </section>
+      ) : data?.status === "checkout" ? (
+        <section className="displayStep displayWaiting">
+          <h2>Please complete payment</h2>
+          <p>Follow the instructions on the card terminal.</p>
+          <strong>
+            {money(data?.amountDueCents ?? data?.totalCents ?? 0)}
+          </strong>
+        </section>
+      ) : (
+        <section className="displayLines">
+          {(data?.lines || []).map((line) => (
+            <article key={line.id}>
+              <div>
+                <b>
+                  {line.quantity}×{" "}
+                  {line.variantName ? `${line.variantName} ` : ""}
+                  {line.name}
+                </b>
+                {line.modifiers.map((modifier, index) => (
+                  <small key={`${modifier}-${index}`}>{modifier}</small>
+                ))}
+              </div>
+              <strong>{money(line.lineTotalCents)}</strong>
+            </article>
+          ))}
+        </section>
+      )}
+      {!paid && !receiptComplete && (
+        <footer>
+          <span>
+            {data?.status === "checkout"
+              ? "Customer checkout"
+              : "Review your order"}
+          </span>
+          <div>
+            <small>TOTAL</small>
+            <strong>{money(data?.totalCents ?? 0)}</strong>
+          </div>
+        </footer>
+      )}
+    </main>
+  );
+}

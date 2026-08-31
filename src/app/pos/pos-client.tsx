@@ -40,7 +40,10 @@ import {
 import { itemNeedsConfiguration } from "@/lib/ordering-menu-presentation";
 import Link from "next/link";
 import { isHumanTextEntry, KeyboardWedgeDetector } from "@/lib/barcode-scanner";
-import { giftCardNumberFromInput, validGiftCardInput } from "@/lib/gift-card-input";
+import {
+  giftCardNumberFromInput,
+  validGiftCardInput,
+} from "@/lib/gift-card-input";
 import { consolidateQuantities } from "@/lib/cart-line-consolidation";
 
 type PosServiceType = Exclude<ServiceType, "undecided">;
@@ -65,8 +68,19 @@ type CartLine = {
   specialInstructions: string;
 };
 
-function cartLineConfiguration(line:CartLine){const {id:_id,quantity:_quantity,modifierText:_modifierText,comboText:_comboText,...configuration}=line;return configuration}
-function appendOrIncrementCartLine(current:CartLine[],line:CartLine){return consolidateQuantities([...current,line],cartLineConfiguration)}
+function cartLineConfiguration(line: CartLine) {
+  const {
+    id: _id,
+    quantity: _quantity,
+    modifierText: _modifierText,
+    comboText: _comboText,
+    ...configuration
+  } = line;
+  return configuration;
+}
+function appendOrIncrementCartLine(current: CartLine[], line: CartLine) {
+  return consolidateQuantities([...current, line], cartLineConfiguration);
+}
 
 type MenuPayload = {
   business: Business;
@@ -97,7 +111,12 @@ type ReopenedOrderItem = {
   cancelled_quantity?: number;
   line_total_cents: number;
   special_instructions?: string | null;
-  modifiers?: Array<{ id: string; option_name_snapshot?: string | null; name_snapshot?: string | null; print_on_ticket?: boolean }>;
+  modifiers?: Array<{
+    id: string;
+    option_name_snapshot?: string | null;
+    name_snapshot?: string | null;
+    print_on_ticket?: boolean;
+  }>;
 };
 type OpenTikiTab = {
   id: string;
@@ -149,8 +168,18 @@ type CheckoutState = {
     reason?: string;
   }>;
 };
-type HelcimStatus = { checkoutEnabled: boolean; apiTokenConfigured: boolean; localDevelopment?: boolean };
-type PosStationProfile = { name:string;station_key:string;station_mode:"payment"|"order_taker";receipt_printer_id?:string|null;payment_terminal_id?:string|null };
+type HelcimStatus = {
+  checkoutEnabled: boolean;
+  apiTokenConfigured: boolean;
+  localDevelopment?: boolean;
+};
+type PosStationProfile = {
+  name: string;
+  station_key: string;
+  station_mode: "payment" | "order_taker";
+  receipt_printer_id?: string | null;
+  payment_terminal_id?: string | null;
+};
 type PayableCheck = {
   id: string;
   display_sequence: number;
@@ -386,9 +415,7 @@ function deliLineLabel(extension: string): string {
   const digits = extension.replace(/\D/g, "");
   if (digits === "95") return "LINE 1 · EXT 95";
   if (digits === "96") return "LINE 2 · EXT 96";
-  return digits
-    ? `EXT ${digits}`
-    : "DELI QUEUE · WAITING FOR AVAILABLE LINE";
+  return digits ? `EXT ${digits}` : "DELI QUEUE · WAITING FOR AVAILABLE LINE";
 }
 
 function callAgeLabel(startedAt: string, now: number): string {
@@ -555,20 +582,29 @@ export default function PosClient({
   const [overrideReason, setOverrideReason] = useState("");
   const [savedDraft, setSavedDraft] = useState<SavedDraft | null>(null);
   const [reopenedItems, setReopenedItems] = useState<ReopenedOrderItem[]>([]);
-  const [reopenedCancelItem, setReopenedCancelItem] = useState<ReopenedOrderItem | null>(null);
+  const [reopenedCancelItem, setReopenedCancelItem] =
+    useState<ReopenedOrderItem | null>(null);
   async function refreshReopenedOrder(orderId: string) {
-    const response = await fetch(`/api/ordering/order-center/${encodeURIComponent(orderId)}`, { cache: "no-store" });
+    const response = await fetch(
+      `/api/ordering/order-center/${encodeURIComponent(orderId)}`,
+      { cache: "no-store" },
+    );
     const payload = await response.json();
-    if (!response.ok || !payload.order) throw new Error(payload.error || "Could not load the reopened order.");
+    if (!response.ok || !payload.order)
+      throw new Error(payload.error || "Could not load the reopened order.");
     setReopenedItems(payload.order.items || []);
-    setSavedDraft((current) => current?.id === orderId ? {
-      ...current,
-      totalCents: Number(payload.order.total_cents),
-      deliveryFeeCents: Number(payload.order.delivery_fee_cents || 0),
-    } : current);
+    setSavedDraft((current) =>
+      current?.id === orderId
+        ? {
+            ...current,
+            totalCents: Number(payload.order.total_cents),
+            deliveryFeeCents: Number(payload.order.delivery_fee_cents || 0),
+          }
+        : current,
+    );
   }
   function invalidateEditableDraft() {
-    setSavedDraft((current) => current?.reopened ? current : null);
+    setSavedDraft((current) => (current?.reopened ? current : null));
   }
   useEffect(() => {
     if (business !== "Corner Deli") return;
@@ -586,7 +622,11 @@ export default function PosClient({
         setServiceType(value.serviceType || "pickup");
         setCart([]);
         void refreshReopenedOrder(value.id).catch((error) =>
-          setCheckoutError(error instanceof Error ? error.message : "Could not load the reopened order."),
+          setCheckoutError(
+            error instanceof Error
+              ? error.message
+              : "Could not load the reopened order.",
+          ),
         );
         setCartNotice(
           `Order #${value.displayNumber} reopened. Existing items are locked; swipe or tap VOID to cancel one.`,
@@ -655,12 +695,16 @@ export default function PosClient({
   const [giftCardNumber, setGiftCardNumber] = useState("");
   const giftCardInputRef = useRef<HTMLInputElement>(null);
   const [tipPromptOpen, setTipPromptOpen] = useState(false);
+  const [cdsTenderType, setCdsTenderType] = useState<
+    "" | "cash" | "card" | "gift_card"
+  >("");
   const [customTip, setCustomTip] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [helcimOpen, setHelcimOpen] = useState(false);
   const [helcimStatus, setHelcimStatus] = useState<HelcimStatus | null>(null);
-  const [stationProfile,setStationProfile]=useState<PosStationProfile|null>(null);
-  const [assignedStationKey,setAssignedStationKey]=useState("");
+  const [stationProfile, setStationProfile] =
+    useState<PosStationProfile | null>(null);
+  const [assignedStationKey, setAssignedStationKey] = useState("");
   useEffect(() => {
     if (business !== "Corner Deli") return;
     fetch("/api/ordering/hardware/status", { cache: "no-store" })
@@ -681,7 +725,8 @@ export default function PosClient({
     fetch("/api/ordering/orders/status/payments/helcim", { cache: "no-store" })
       .then(async (response) => {
         const body = await response.json();
-        if (!response.ok) throw new Error(body.error || "Helcim status unavailable.");
+        if (!response.ok)
+          throw new Error(body.error || "Helcim status unavailable.");
         return body;
       })
       .then((body) => setHelcimStatus(body as HelcimStatus))
@@ -689,8 +734,28 @@ export default function PosClient({
         setHelcimStatus({ checkoutEnabled: false, apiTokenConfigured: false }),
       );
   }, [business]);
-  useEffect(()=>{if(business!=="Corner Deli")return;const stationKey=localStorage.getItem("corner-ops-station-key")||"";setAssignedStationKey(stationKey);fetch(`/api/ordering/payment-stations?stationKey=${encodeURIComponent(stationKey)}`,{cache:"no-store"}).then(response=>response.json()).then(body=>setStationProfile(body.profile||null)).catch(()=>setStationProfile(null))},[business]);
-  useEffect(()=>{if(stationProfile?.station_mode==="payment"&&stationProfile.receipt_printer_id&&receiptPrinters.some(printer=>printer.id===stationProfile.receipt_printer_id))setReceiptPrinterId(stationProfile.receipt_printer_id)},[stationProfile,receiptPrinters]);
+  useEffect(() => {
+    if (business !== "Corner Deli") return;
+    const stationKey = localStorage.getItem("corner-ops-station-key") || "";
+    setAssignedStationKey(stationKey);
+    fetch(
+      `/api/ordering/payment-stations?stationKey=${encodeURIComponent(stationKey)}`,
+      { cache: "no-store" },
+    )
+      .then((response) => response.json())
+      .then((body) => setStationProfile(body.profile || null))
+      .catch(() => setStationProfile(null));
+  }, [business]);
+  useEffect(() => {
+    if (
+      stationProfile?.station_mode === "payment" &&
+      stationProfile.receipt_printer_id &&
+      receiptPrinters.some(
+        (printer) => printer.id === stationProfile.receipt_printer_id,
+      )
+    )
+      setReceiptPrinterId(stationProfile.receipt_printer_id);
+  }, [stationProfile, receiptPrinters]);
   const [configurationMessage, setConfigurationMessage] = useState("");
   const [cartNotice, setCartNotice] = useState("");
   const [removedLine, setRemovedLine] = useState<CartLine | null>(null);
@@ -721,7 +786,7 @@ export default function PosClient({
   const [deliveryEditorOpen, setDeliveryEditorOpen] = useState(false);
   const [customer, setCustomer] = useState<PosCustomer | null>(null),
     [customerOpen, setCustomerOpen] = useState(false),
-    [quickAddCaller,setQuickAddCaller]=useState(false),
+    [quickAddCaller, setQuickAddCaller] = useState(false),
     [customerQuery, setCustomerQuery] = useState(""),
     [customerMatches, setCustomerMatches] = useState<PosCustomer[]>([]);
   const [quickCustomer, setQuickCustomer] = useState({
@@ -1195,9 +1260,19 @@ export default function PosClient({
         lineTotalCents: line.unitPriceCents * line.quantity,
       })),
       subtotalCents,
-      totalCents: Number(checkoutState?.order.total_cents ?? savedDraft?.totalCents ?? subtotalCents),
-      amountDueCents: Number(checkoutState?.check?.amount_due_cents ?? checkoutState?.order.amount_due_cents ?? savedDraft?.totalCents ?? subtotalCents),
+      totalCents: Number(
+        checkoutState?.order.total_cents ??
+          savedDraft?.totalCents ??
+          subtotalCents,
+      ),
+      amountDueCents: Number(
+        checkoutState?.check?.amount_due_cents ??
+          checkoutState?.order.amount_due_cents ??
+          savedDraft?.totalCents ??
+          subtotalCents,
+      ),
       paymentStatus: checkoutState?.order.payment_status || "unpaid",
+      paymentIntent: cdsTenderType,
       status: submittedOrder
         ? "submitted"
         : checkoutOpen
@@ -1213,7 +1288,12 @@ export default function PosClient({
     const channel = new BroadcastChannel("corner-ops-customer-display");
     channel.postMessage(payload);
     channel.close();
-    if(assignedStationKey)void fetch("/api/ordering/customer-display",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({stationKey:assignedStationKey,payload})}).catch(()=>undefined);
+    if (assignedStationKey)
+      void fetch("/api/ordering/customer-display", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stationKey: assignedStationKey, payload }),
+      }).catch(() => undefined);
   }, [
     business,
     cart,
@@ -1222,6 +1302,7 @@ export default function PosClient({
     savedDraft?.totalCents,
     activeTab?.id,
     checkoutState,
+    cdsTenderType,
     receiptPrinterId,
     selectedCheckId,
     assignedStationKey,
@@ -1591,7 +1672,7 @@ export default function PosClient({
       comboSelections: {},
       specialInstructions: "",
     };
-    setCart((current) => appendOrIncrementCartLine(current,line));
+    setCart((current) => appendOrIncrementCartLine(current, line));
     invalidateEditableDraft();
     setCartNotice(`Added ${item.name}`);
     window.setTimeout(() => setCartNotice(""), 1800);
@@ -1757,7 +1838,7 @@ export default function PosClient({
         ? current.map((candidate) =>
             candidate.id === editingLineId ? line : candidate,
           )
-        : appendOrIncrementCartLine(current,line),
+        : appendOrIncrementCartLine(current, line),
     );
     setConfiguringItem(null);
     setSelectedVariantId("");
@@ -2404,7 +2485,11 @@ export default function PosClient({
       setCheckoutError(checksPayload.error || "Could not prepare checks.");
       return;
     }
-    const checkId = draft.checkId && checksPayload.checks.some(check=>check.id===draft.checkId) ? draft.checkId : checksPayload.checks[0].id;
+    const checkId =
+      draft.checkId &&
+      checksPayload.checks.some((check) => check.id === draft.checkId)
+        ? draft.checkId
+        : checksPayload.checks[0].id;
     const response = await fetch(
       `/api/ordering/orders/${encodeURIComponent(draft.id)}/payments?business=${encodeURIComponent(business)}&checkId=${encodeURIComponent(checkId)}`,
     );
@@ -2418,18 +2503,27 @@ export default function PosClient({
     setPayableChecks(checksPayload.checks);
     setSelectedCheckId(checkId);
     setCheckoutState(payload);
-    setCashTender((Number(payload.check?.amount_due_cents ?? payload.order.amount_due_cents) / 100).toFixed(2));
+    setCashTender(
+      (
+        Number(
+          payload.check?.amount_due_cents ?? payload.order.amount_due_cents,
+        ) / 100
+      ).toFixed(2),
+    );
     setCheckoutOpen(true);
   }
 
   function closeCheckout() {
     setCheckoutOpen(false);
+    setCdsTenderType("");
     if (!savedDraft?.checkoutOnly) return;
     setCheckoutState(null);
     setPayableChecks([]);
     setSelectedCheckId(null);
     setSavedDraft(null);
-    window.location.assign(savedDraft?.paymentQueue ? "/pos/deli/payments" : "/pos/deli/orders");
+    window.location.assign(
+      savedDraft?.paymentQueue ? "/pos/deli/payments" : "/pos/deli/orders",
+    );
   }
 
   async function selectCheck(checkId: string) {
@@ -2447,7 +2541,13 @@ export default function PosClient({
     }
     setSelectedCheckId(checkId);
     setCheckoutState(payload);
-    setCashTender((Number(payload.check?.amount_due_cents ?? payload.order.amount_due_cents) / 100).toFixed(2));
+    setCashTender(
+      (
+        Number(
+          payload.check?.amount_due_cents ?? payload.order.amount_due_cents,
+        ) / 100
+      ).toFixed(2),
+    );
   }
 
   async function splitOne(checkId: string, orderItemId: string) {
@@ -2485,6 +2585,39 @@ export default function PosClient({
     }
   }
 
+  async function splitEvenly(checkCount: number) {
+    const draft = savedDraft || activeTab;
+    if (!draft || paymentBusy) return;
+    setPaymentBusy(true);
+    setCheckoutError("");
+    try {
+      const response = await fetch(
+        `/api/ordering/orders/${encodeURIComponent(draft.id)}/checks`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ evenCheckCount: checkCount }),
+        },
+      );
+      const payload = (await response.json()) as {
+        checks?: PayableCheck[];
+        error?: string;
+      };
+      if (!response.ok || !payload.checks)
+        throw new Error(payload.error || "Could not split the order evenly.");
+      setPayableChecks(payload.checks);
+      await selectCheck(payload.checks[0].id);
+    } catch (error) {
+      setCheckoutError(
+        error instanceof Error
+          ? error.message
+          : "Could not split the order evenly.",
+      );
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
   const checkoutDueCents = Number(
     checkoutState?.check?.amount_due_cents ??
       checkoutState?.order.amount_due_cents ??
@@ -2508,15 +2641,21 @@ export default function PosClient({
     setCashTender((amountCents / 100).toFixed(2));
   }
 
-  async function commitPayment(tenderType: "cash" | "card" | "gift_card") {
+  async function commitPayment(
+    tenderType: "cash" | "card" | "gift_card",
+    stateOverride?: CheckoutState,
+    amountOverride?: number,
+  ) {
     const draft = savedDraft || activeTab;
-    if (!draft || !checkoutState || paymentBusy) return;
+    const activeCheckout = stateOverride || checkoutState;
+    if (!draft || !activeCheckout || paymentBusy) return;
     const due = Number(
-      checkoutState.check?.amount_due_cents ??
-        checkoutState.order.amount_due_cents,
+      activeCheckout.check?.amount_due_cents ??
+        activeCheckout.order.amount_due_cents,
     );
-    const enteredCents = Math.round(Number(cashTender) * 100);
-    const amountTenderedCents = tenderType === "cash" ? enteredCents : Math.min(due, enteredCents);
+    const enteredCents = amountOverride ?? Math.round(Number(cashTender) * 100);
+    const amountTenderedCents =
+      tenderType === "cash" ? enteredCents : Math.min(due, enteredCents);
     if (
       !Number.isSafeInteger(amountTenderedCents) ||
       amountTenderedCents <= 0
@@ -2524,10 +2663,7 @@ export default function PosClient({
       setCheckoutError("Enter a valid tender amount.");
       return;
     }
-    if (
-      tenderType === "gift_card" &&
-      !validGiftCardInput(giftCardNumber)
-    ) {
+    if (tenderType === "gift_card" && !validGiftCardInput(giftCardNumber)) {
       setCheckoutError("Enter a valid gift card number.");
       return;
     }
@@ -2592,38 +2728,109 @@ export default function PosClient({
   async function commitTestCard() {
     const draft = savedDraft || activeTab;
     if (!draft || !checkoutState || paymentBusy) return;
-    const due = Number(checkoutState.check?.amount_due_cents ?? checkoutState.order.amount_due_cents);
-    const amountTenderedCents = cashTender ? Math.round(Number(cashTender) * 100) : due;
-    if (!Number.isSafeInteger(amountTenderedCents) || amountTenderedCents <= 0 || amountTenderedCents > due) {
-      setCheckoutError("Enter a valid test-card amount no greater than the balance due.");
+    const due = Number(
+      checkoutState.check?.amount_due_cents ??
+        checkoutState.order.amount_due_cents,
+    );
+    const amountTenderedCents = cashTender
+      ? Math.round(Number(cashTender) * 100)
+      : due;
+    if (
+      !Number.isSafeInteger(amountTenderedCents) ||
+      amountTenderedCents <= 0 ||
+      amountTenderedCents > due
+    ) {
+      setCheckoutError(
+        "Enter a valid test-card amount no greater than the balance due.",
+      );
       return;
     }
     setPaymentBusy(true);
     setCheckoutError("");
     try {
-      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ business, checkId: selectedCheckId, tenderType: "card", testCard: true, amountTenderedCents, clientMutationId: clientId(), receiptPrinterId: receiptPrinterId || undefined, stationKey: stationProfile?.station_key || "" }),
-      });
-      const payload = await response.json() as CheckoutState & { error?: string };
-      if (!response.ok) throw new Error(payload.error || "Test card could not be committed.");
+      const response = await fetch(
+        `/api/ordering/orders/${encodeURIComponent(draft.id)}/payments`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            business,
+            checkId: selectedCheckId,
+            tenderType: "card",
+            testCard: true,
+            amountTenderedCents,
+            clientMutationId: clientId(),
+            receiptPrinterId: receiptPrinterId || undefined,
+            stationKey: stationProfile?.station_key || "",
+          }),
+        },
+      );
+      const payload = (await response.json()) as CheckoutState & {
+        error?: string;
+      };
+      if (!response.ok)
+        throw new Error(payload.error || "Test card could not be committed.");
       setCheckoutState(payload);
-      setCashTender((Number(payload.check?.amount_due_cents ?? payload.order.amount_due_cents) / 100).toFixed(2));
+      setCashTender(
+        (
+          Number(
+            payload.check?.amount_due_cents ?? payload.order.amount_due_cents,
+          ) / 100
+        ).toFixed(2),
+      );
     } catch (error) {
-      setCheckoutError(error instanceof Error ? error.message : "Test card could not be committed.");
+      setCheckoutError(
+        error instanceof Error
+          ? error.message
+          : "Test card could not be committed.",
+      );
     } finally {
       setPaymentBusy(false);
     }
   }
 
-  async function sendToPaymentStation(){
-    const draft=savedDraft||activeTab;if(!draft||paymentBusy)return;setPaymentBusy(true);setCheckoutError("");
-    try{const response=await fetch("/api/ordering/payment-stations",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"queue",orderId:draft.id,checkId:selectedCheckId,stationKey:stationProfile?.station_key||"",note:`Order #${draft.displayNumber}`})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not send this check to the payment station.");setCheckoutError(body.duplicate?"This check is already waiting at the payment station.":"Sent to the payment station.")}
-    catch(error){setCheckoutError(error instanceof Error?error.message:"Could not send this check to the payment station.")}finally{setPaymentBusy(false)}
+  async function sendToPaymentStation() {
+    const draft = savedDraft || activeTab;
+    if (!draft || paymentBusy) return;
+    setPaymentBusy(true);
+    setCheckoutError("");
+    try {
+      const response = await fetch("/api/ordering/payment-stations", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "queue",
+            orderId: draft.id,
+            checkId: selectedCheckId,
+            stationKey: stationProfile?.station_key || "",
+            note: `Order #${draft.displayNumber}`,
+          }),
+        }),
+        body = await response.json();
+      if (!response.ok)
+        throw new Error(
+          body.error || "Could not send this check to the payment station.",
+        );
+      setCheckoutError(
+        body.duplicate
+          ? "This check is already waiting at the payment station."
+          : "Sent to the payment station.",
+      );
+    } catch (error) {
+      setCheckoutError(
+        error instanceof Error
+          ? error.message
+          : "Could not send this check to the payment station.",
+      );
+    } finally {
+      setPaymentBusy(false);
+    }
   }
 
-  async function startHelcimPayment(requestedOverride?: number, stateOverride?: CheckoutState) {
+  async function startHelcimPayment(
+    requestedOverride?: number,
+    stateOverride?: CheckoutState,
+  ) {
     const draft = savedDraft || activeTab;
     const activeCheckout = stateOverride || checkoutState;
     if (!draft || !activeCheckout || paymentBusy) return;
@@ -2631,10 +2838,21 @@ export default function PosClient({
     setHelcimOpen(true);
     setCheckoutError("");
     try {
-      const due = Number(activeCheckout.check?.amount_due_cents ?? activeCheckout.order.amount_due_cents);
-      const requestedCents = requestedOverride ?? (cashTender.trim() ? Math.round(Number(cashTender) * 100) : due);
-      if (!Number.isSafeInteger(requestedCents) || requestedCents <= 0 || requestedCents > due)
-        throw new Error("Enter a card amount between $0.01 and the remaining balance.");
+      const due = Number(
+        activeCheckout.check?.amount_due_cents ??
+          activeCheckout.order.amount_due_cents,
+      );
+      const requestedCents =
+        requestedOverride ??
+        (cashTender.trim() ? Math.round(Number(cashTender) * 100) : due);
+      if (
+        !Number.isSafeInteger(requestedCents) ||
+        requestedCents <= 0 ||
+        requestedCents > due
+      )
+        throw new Error(
+          "Enter a card amount between $0.01 and the remaining balance.",
+        );
       if (!window.appendHelcimPayIframe) {
         await new Promise<void>((resolve, reject) => {
           const existing = document.querySelector<HTMLScriptElement>(
@@ -2749,7 +2967,13 @@ export default function PosClient({
         window.appendHelcimPayIframe(checkoutToken);
       });
       setCheckoutState(result);
-      setCashTender((Number(result.check?.amount_due_cents ?? result.order.amount_due_cents) / 100).toFixed(2));
+      setCashTender(
+        (
+          Number(
+            result.check?.amount_due_cents ?? result.order.amount_due_cents,
+          ) / 100
+        ).toFixed(2),
+      );
       setPayableChecks((checks) =>
         checks.map((check) =>
           check.id === selectedCheckId && result.check
@@ -2776,22 +3000,46 @@ export default function PosClient({
     setPaymentBusy(true);
     setCheckoutError("");
     try {
-      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ business, action: "set_tip", checkId: selectedCheckId, tipCents }),
-      });
-      const payload = await response.json() as CheckoutState & { error?: string };
-      if (!response.ok) throw new Error(payload.error || "Tip could not be added.");
+      const response = await fetch(
+        `/api/ordering/orders/${encodeURIComponent(draft.id)}/payments`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            business,
+            action: "set_tip",
+            checkId: selectedCheckId,
+            tipCents,
+          }),
+        },
+      );
+      const payload = (await response.json()) as CheckoutState & {
+        error?: string;
+      };
+      if (!response.ok)
+        throw new Error(payload.error || "Tip could not be added.");
       setCheckoutState(payload);
-      const due = Number(payload.check?.amount_due_cents ?? payload.order.amount_due_cents);
+      const due = Number(
+        payload.check?.amount_due_cents ?? payload.order.amount_due_cents,
+      );
       const cardAmount = Math.min(due, enteredCents + tipCents);
       setCashTender((cardAmount / 100).toFixed(2));
       setPaymentBusy(false);
       setCustomTip("");
-      window.setTimeout(() => void startHelcimPayment(cardAmount, payload), 0);
+      if (cdsTenderType === "gift_card")
+        window.setTimeout(
+          () => void commitPayment("gift_card", payload, due),
+          0,
+        );
+      else
+        window.setTimeout(
+          () => void startHelcimPayment(cardAmount, payload),
+          0,
+        );
     } catch (error) {
-      setCheckoutError(error instanceof Error ? error.message : "Tip could not be added.");
+      setCheckoutError(
+        error instanceof Error ? error.message : "Tip could not be added.",
+      );
       setPaymentBusy(false);
       return;
     }
@@ -2799,10 +3047,18 @@ export default function PosClient({
 
   function chooseCredit() {
     const enteredCents = Math.round(Number(cashTender) * 100);
-    if (!Number.isSafeInteger(enteredCents) || enteredCents <= 0 || enteredCents > checkoutDueCents) {
-      setCheckoutError("Enter a credit amount between $0.01 and the remaining balance.");
+    if (
+      !Number.isSafeInteger(enteredCents) ||
+      enteredCents <= 0 ||
+      enteredCents > checkoutDueCents
+    ) {
+      setCheckoutError(
+        "Enter a credit amount between $0.01 and the remaining balance.",
+      );
       return;
     }
+    setCdsTenderType("card");
+    if (assignedStationKey) return;
     if (stationProfile?.payment_terminal_id) {
       void startHelcimPayment();
       return;
@@ -2811,21 +3067,50 @@ export default function PosClient({
   }
 
   useEffect(() => {
-    const stationKey=stationProfile?.station_key;
-    if(!checkoutOpen||!stationKey)return;
-    let stopped=false,processing=false;
-    async function checkCustomerDisplay(){
-      if(processing||stopped)return;
-      try{
-        const response=await fetch(`/api/ordering/customer-display?stationKey=${encodeURIComponent(stationKey!)}`,{cache:"no-store"}),body=await response.json(),session=body.session;
-        if(!response.ok||!session||Number(session.responseVersion)<=Number(session.handledVersion)||session.response?.action!=="tip")return;
-        processing=true;
-        await applyTipAndStartCard(Number(session.response.tipCents||0));
-        await fetch("/api/ordering/customer-display",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"handled",stationKey,version:session.responseVersion})});
-      }catch{/* Keep checkout usable if the optional CDS is offline. */}finally{processing=false}
+    const stationKey = assignedStationKey;
+    if (!checkoutOpen || !stationKey) return;
+    let stopped = false,
+      processing = false;
+    async function checkCustomerDisplay() {
+      if (processing || stopped) return;
+      try {
+        const response = await fetch(
+            `/api/ordering/customer-display?stationKey=${encodeURIComponent(stationKey!)}`,
+            { cache: "no-store" },
+          ),
+          body = await response.json(),
+          session = body.session;
+        if (
+          !response.ok ||
+          !session ||
+          Number(session.responseVersion) <= Number(session.handledVersion) ||
+          session.response?.action !== "tip"
+        )
+          return;
+        processing = true;
+        await applyTipAndStartCard(Number(session.response.tipCents || 0));
+        await fetch("/api/ordering/customer-display", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "handled",
+            stationKey,
+            version: session.responseVersion,
+          }),
+        });
+      } catch {
+        /* Keep checkout usable if the optional CDS is offline. */
+      } finally {
+        processing = false;
+      }
     }
-    void checkCustomerDisplay();const timer=window.setInterval(checkCustomerDisplay,1200);return()=>{stopped=true;window.clearInterval(timer)};
-  },[checkoutOpen,stationProfile?.station_key]);
+    void checkCustomerDisplay();
+    const timer = window.setInterval(checkCustomerDisplay, 1200);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [checkoutOpen, assignedStationKey, cdsTenderType]);
 
   async function paymentOperation(
     action: "reverse" | "reprint",
@@ -3540,36 +3825,65 @@ export default function PosClient({
           </div>
           <div className="posCartLines">
             {reopenedItems
-              .filter((line) => Number(line.quantity) > Number(line.cancelled_quantity || 0))
+              .filter(
+                (line) =>
+                  Number(line.quantity) > Number(line.cancelled_quantity || 0),
+              )
               .map((line) => {
-                const remaining = Number(line.quantity) - Number(line.cancelled_quantity || 0);
+                const remaining =
+                  Number(line.quantity) - Number(line.cancelled_quantity || 0);
                 return (
                   <article
                     className="posCartLine posPersistedTabLine posReopenedLine"
                     key={line.id}
                     onTouchStart={(event) => {
                       const touch = event.touches[0];
-                      swipeStart.current = { id: line.id, x: touch.clientX, y: touch.clientY };
+                      swipeStart.current = {
+                        id: line.id,
+                        x: touch.clientX,
+                        y: touch.clientY,
+                      };
                     }}
                     onTouchEnd={(event) => {
-                      const start = swipeStart.current, touch = event.changedTouches[0];
+                      const start = swipeStart.current,
+                        touch = event.changedTouches[0];
                       swipeStart.current = null;
-                      if (start?.id === line.id && start.x - touch.clientX > 80 && Math.abs(start.y - touch.clientY) < 45)
+                      if (
+                        start?.id === line.id &&
+                        start.x - touch.clientX > 80 &&
+                        Math.abs(start.y - touch.clientY) < 45
+                      )
                         setReopenedCancelItem(line);
                     }}
                   >
                     <div className="posLineTop">
-                      <strong>{remaining}× {line.item_name_snapshot}</strong>
+                      <strong>
+                        {remaining}× {line.item_name_snapshot}
+                      </strong>
                       <span>{money(Number(line.line_total_cents))}</span>
                     </div>
-                    {line.variant_name_snapshot && <small>Size / form: {line.variant_name_snapshot}</small>}
-                    {(line.modifiers || []).filter((modifier) => modifier.print_on_ticket !== false).map((modifier) => (
-                      <small key={modifier.id}>{modifier.option_name_snapshot || modifier.name_snapshot}</small>
-                    ))}
-                    {line.special_instructions && <small>Note: {line.special_instructions}</small>}
+                    {line.variant_name_snapshot && (
+                      <small>Size / form: {line.variant_name_snapshot}</small>
+                    )}
+                    {(line.modifiers || [])
+                      .filter((modifier) => modifier.print_on_ticket !== false)
+                      .map((modifier) => (
+                        <small key={modifier.id}>
+                          {modifier.option_name_snapshot ||
+                            modifier.name_snapshot}
+                        </small>
+                      ))}
+                    {line.special_instructions && (
+                      <small>Note: {line.special_instructions}</small>
+                    )}
                     <div className="posReopenedLineFooter">
                       <small>EXISTING ITEM · LOCKED</small>
-                      <button type="button" onClick={() => setReopenedCancelItem(line)}>VOID</button>
+                      <button
+                        type="button"
+                        onClick={() => setReopenedCancelItem(line)}
+                      >
+                        VOID
+                      </button>
                     </div>
                   </article>
                 );
@@ -3591,11 +3905,16 @@ export default function PosClient({
                 <small>Already on tab</small>
               </article>
             ))}
-            {!cart.length && !activeTabItems.length && !reopenedItems.some((line) => Number(line.quantity) > Number(line.cancelled_quantity || 0)) && (
-              <div className="posEmpty">
-                Tap a menu item to start the order.
-              </div>
-            )}
+            {!cart.length &&
+              !activeTabItems.length &&
+              !reopenedItems.some(
+                (line) =>
+                  Number(line.quantity) > Number(line.cancelled_quantity || 0),
+              ) && (
+                <div className="posEmpty">
+                  Tap a menu item to start the order.
+                </div>
+              )}
             {cart.map((line) => (
               <article
                 className="posCartLine"
@@ -3758,7 +4077,12 @@ export default function PosClient({
               type="button"
               className="submitOrder"
               aria-disabled={Boolean(sendRequirement)}
-              disabled={!cart.length || submittingOrder || savingDraft || Boolean(sendRequirement)}
+              disabled={
+                !cart.length ||
+                submittingOrder ||
+                savingDraft ||
+                Boolean(sendRequirement)
+              }
               onClick={() => void submitOrder()}
             >
               {submittingOrder ? "SENDING…" : "SEND"}
@@ -3766,7 +4090,11 @@ export default function PosClient({
             <button
               type="button"
               className="primary"
-              disabled={(!cart.length && !activeTab) || savingDraft || Boolean(sendRequirement)}
+              disabled={
+                (!cart.length && !activeTab) ||
+                savingDraft ||
+                Boolean(sendRequirement)
+              }
               onClick={() => void openCheckout()}
             >
               CHECKOUT
@@ -3920,20 +4248,47 @@ export default function PosClient({
             )}
             {intervention.open_order_id && (
               <div className="posAiOrderPreview posHandoffOrderPreview">
-                <b>{(intervention.service_type || "order").replaceAll("_", " ").toUpperCase()} · ORDER SO FAR</b>
+                <b>
+                  {(intervention.service_type || "order")
+                    .replaceAll("_", " ")
+                    .toUpperCase()}{" "}
+                  · ORDER SO FAR
+                </b>
                 {intervention.order_items.length ? (
                   <ul>
                     {intervention.order_items.map((item) => (
                       <li key={item.id}>
-                        <span>{item.quantity}× {item.name}{item.variant ? ` · ${item.variant}` : ""}</span>
+                        <span>
+                          {item.quantity}× {item.name}
+                          {item.variant ? ` · ${item.variant}` : ""}
+                        </span>
                         <em>{money(item.lineTotalCents)}</em>
-                        {item.modifiers.length > 0 && <small>{item.modifiers.map((modifier) => `${modifier.quantity > 1 ? `${modifier.quantity}× ` : ""}${modifier.name}`).join(", ")}</small>}
-                        {item.instructions && <small>{item.instructions}</small>}
+                        {item.modifiers.length > 0 && (
+                          <small>
+                            {item.modifiers
+                              .map(
+                                (modifier) =>
+                                  `${modifier.quantity > 1 ? `${modifier.quantity}× ` : ""}${modifier.name}`,
+                              )
+                              .join(", ")}
+                          </small>
+                        )}
+                        {item.instructions && (
+                          <small>{item.instructions}</small>
+                        )}
                       </li>
                     ))}
                   </ul>
-                ) : <small>No items have been captured yet.</small>}
-                <footer><span>Subtotal {money(intervention.subtotal_cents || 0)} · Tax {money(intervention.tax_cents || 0)}</span><strong>Total {money(intervention.total_cents || 0)}</strong></footer>
+                ) : (
+                  <small>No items have been captured yet.</small>
+                )}
+                <footer>
+                  <span>
+                    Subtotal {money(intervention.subtotal_cents || 0)} · Tax{" "}
+                    {money(intervention.tax_cents || 0)}
+                  </span>
+                  <strong>Total {money(intervention.total_cents || 0)}</strong>
+                </footer>
               </div>
             )}
             {intervention.claimed_by &&
@@ -3980,7 +4335,12 @@ export default function PosClient({
       )}
       {reopenedCancelItem && savedDraft?.reopened && (
         <div className="posModalBackdrop" role="presentation">
-          <section className="posCustomerDialog posReopenedVoidDialog" role="dialog" aria-modal="true" aria-label="Void existing order item">
+          <section
+            className="posCustomerDialog posReopenedVoidDialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Void existing order item"
+          >
             <ItemCancellationPanel
               orderId={savedDraft.id}
               item={reopenedCancelItem}
@@ -3988,7 +4348,9 @@ export default function PosClient({
               onDone={async () => {
                 setReopenedCancelItem(null);
                 await refreshReopenedOrder(savedDraft.id);
-                setCartNotice(`Item voided from order #${savedDraft.displayNumber}.`);
+                setCartNotice(
+                  `Item voided from order #${savedDraft.displayNumber}.`,
+                );
               }}
             />
           </section>
@@ -4004,8 +4366,14 @@ export default function PosClient({
           >
             <header>
               <div>
-                <span>INCOMING DELI {incomingCalls.length === 1 ? "CALL" : "CALLS"}</span>
-                <h2>{incomingCalls.length === 1 ? "One incoming caller" : `${incomingCalls.length} incoming callers`}</h2>
+                <span>
+                  INCOMING DELI {incomingCalls.length === 1 ? "CALL" : "CALLS"}
+                </span>
+                <h2>
+                  {incomingCalls.length === 1
+                    ? "One incoming caller"
+                    : `${incomingCalls.length} incoming callers`}
+                </h2>
               </div>
             </header>
             <div className="posIncomingCallGrid">
@@ -4022,22 +4390,61 @@ export default function PosClient({
                     · {callAgeLabel(call.started_at, callClock)}
                   </span>
                   <div className="posCallerHistory">
-                    <span>{call.last_call_at ? `Last call ${new Date(call.last_call_at).toLocaleString()}` : "No previous call history"}</span>
+                    <span>
+                      {call.last_call_at
+                        ? `Last call ${new Date(call.last_call_at).toLocaleString()}`
+                        : "No previous call history"}
+                    </span>
                     {call.recent_orders?.length ? (
-                      <ul>{call.recent_orders.slice(0, 4).map((order) => (
-                        <li key={order.id}><strong>#{order.displayNumber}</strong><span>{new Date(order.createdAt).toLocaleDateString()} · {order.serviceType.replaceAll("_", " ")}</span><strong>{money(Number(order.totalCents))}</strong></li>
-                      ))}</ul>
-                    ) : <p>No customer order history.</p>}
+                      <ul>
+                        {call.recent_orders.slice(0, 4).map((order) => (
+                          <li key={order.id}>
+                            <strong>#{order.displayNumber}</strong>
+                            <span>
+                              {new Date(order.createdAt).toLocaleDateString()} ·{" "}
+                              {order.serviceType.replaceAll("_", " ")}
+                            </span>
+                            <strong>{money(Number(order.totalCents))}</strong>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>No customer order history.</p>
+                    )}
                   </div>
                   {call.open_order_id ? (
                     <>
-                      <p>Existing order #{call.open_order_number} · {call.open_order_status?.replaceAll("_", " ")}</p>
-                      <a className="primary" href={`/pos/deli/orders?orderId=${encodeURIComponent(call.open_order_id)}`} onClick={(event) => { event.preventDefault(); const href = event.currentTarget.href; void acknowledgeIncomingCall(call).then(() => { window.location.href = href; }); }}>OPEN EXISTING ORDER</a>
+                      <p>
+                        Existing order #{call.open_order_number} ·{" "}
+                        {call.open_order_status?.replaceAll("_", " ")}
+                      </p>
+                      <a
+                        className="primary"
+                        href={`/pos/deli/orders?orderId=${encodeURIComponent(call.open_order_id)}`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          const href = event.currentTarget.href;
+                          void acknowledgeIncomingCall(call).then(() => {
+                            window.location.href = href;
+                          });
+                        }}
+                      >
+                        OPEN EXISTING ORDER
+                      </a>
                     </>
                   ) : (
-                    <button className="primary" onClick={() => void acknowledgeIncomingCall(call, true)}>{call.customer_id ? "USE CUSTOMER / START ORDER" : "ADD CALLER / START ORDER"}</button>
+                    <button
+                      className="primary"
+                      onClick={() => void acknowledgeIncomingCall(call, true)}
+                    >
+                      {call.customer_id
+                        ? "USE CUSTOMER / START ORDER"
+                        : "ADD CALLER / START ORDER"}
+                    </button>
                   )}
-                  <button onClick={() => void acknowledgeIncomingCall(call)}>ANSWERED / DISMISS THIS LINE</button>
+                  <button onClick={() => void acknowledgeIncomingCall(call)}>
+                    ANSWERED / DISMISS THIS LINE
+                  </button>
                 </article>
               ))}
             </div>
@@ -4046,17 +4453,30 @@ export default function PosClient({
         </div>
       )}
       {helcimOpen && (
-        <div className="posSecurePaymentBackdrop" role="status" aria-live="polite">
-          <div><span>SECURE CARD PAYMENT</span><strong>Loading Helcim…</strong></div>
+        <div
+          className="posSecurePaymentBackdrop"
+          role="status"
+          aria-live="polite"
+        >
+          <div>
+            <span>SECURE CARD PAYMENT</span>
+            <strong>Loading Helcim…</strong>
+          </div>
         </div>
       )}
       {checkoutOpen && (savedDraft || activeTab) && (
-        <div className="posModalBackdrop" role="presentation">
+        <div
+          className="posCheckoutSideBackdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeCheckout();
+          }}
+        >
           <section
-            className="posCustomerDialog"
+            className="posCustomerDialog posCheckoutSidePanel"
             role="dialog"
-            aria-modal="true"
             aria-labelledby="checkout-title"
+            onMouseDown={(event) => event.stopPropagation()}
           >
             <h2 id="checkout-title">
               Checkout · Order #{(savedDraft || activeTab)!.displayNumber}
@@ -4074,6 +4494,24 @@ export default function PosClient({
                 </button>
               ))}
             </nav>
+            {Number(checkoutState?.order.paid_cents || 0) === 0 &&
+              payableChecks.length === 1 && (
+                <div className="posEvenSplit" aria-label="Split order evenly">
+                  <span>
+                    Split the complete ticket evenly, including delivery fee
+                  </span>
+                  {[2, 3, 4].map((count) => (
+                    <button
+                      type="button"
+                      key={count}
+                      disabled={paymentBusy}
+                      onClick={() => void splitEvenly(count)}
+                    >
+                      {count} CHECKS
+                    </button>
+                  ))}
+                </div>
+              )}
             <p>Amount due</p>
             <strong>
               {money(
@@ -4084,7 +4522,11 @@ export default function PosClient({
                 ),
               )}
             </strong>
-            {checkoutError && <div className="posCheckoutInlineError" role="alert">{checkoutError}</div>}
+            {checkoutError && (
+              <div className="posCheckoutInlineError" role="alert">
+                {checkoutError}
+              </div>
+            )}
             {payableChecks
               .find((check) => check.id === selectedCheckId)
               ?.lines.map((line) => (
@@ -4196,8 +4638,14 @@ export default function PosClient({
                 {stationProfile?.station_mode === "order_taker" && (
                   <section className="posOrderTakerPaymentNotice">
                     <strong>ORDER-TAKING STATION</strong>
-                    <span>Payments are handled at the designated front register.</span>
-                    <button type="button" disabled={paymentBusy} onClick={() => void sendToPaymentStation()}>
+                    <span>
+                      Payments are handled at the designated front register.
+                    </span>
+                    <button
+                      type="button"
+                      disabled={paymentBusy}
+                      onClick={() => void sendToPaymentStation()}
+                    >
                       {paymentBusy ? "SENDING…" : "SEND TO PAYMENT STATION"}
                     </button>
                   </section>
@@ -4291,33 +4739,138 @@ export default function PosClient({
                         }
                       />
                     </label>
-                    <p>The card will apply up to the selected amount or its available balance, whichever is less.</p>
+                    <p>
+                      The card will apply up to the selected amount or its
+                      available balance, whichever is less.
+                    </p>
                   </section>
                 </div>
-                <div className="posTenderButtons" aria-label="Choose payment type">
-                  <button type="button" disabled={paymentBusy || !cashTender || stationProfile?.station_mode === "order_taker"} onClick={() => void commitPayment("cash")}>CASH</button>
-                  <button type="button" disabled={paymentBusy || !helcimStatus?.checkoutEnabled || stationProfile?.station_mode === "order_taker"} onClick={chooseCredit}>
-                    {helcimStatus?.checkoutEnabled ? "CREDIT" : "CREDIT SETUP REQUIRED"}
+                <div
+                  className="posTenderButtons"
+                  aria-label="Choose payment type"
+                >
+                  <button
+                    type="button"
+                    disabled={
+                      paymentBusy ||
+                      !cashTender ||
+                      stationProfile?.station_mode === "order_taker"
+                    }
+                    onClick={() => {
+                      setCdsTenderType("cash");
+                      void commitPayment("cash");
+                    }}
+                  >
+                    CASH
                   </button>
-                  <button type="button" disabled={paymentBusy || stationProfile?.station_mode === "order_taker"} onClick={() => validGiftCardInput(giftCardNumber) ? void commitPayment("gift_card") : giftCardInputRef.current?.focus()}>GIFT CARD</button>
+                  <button
+                    type="button"
+                    disabled={
+                      paymentBusy ||
+                      !helcimStatus?.checkoutEnabled ||
+                      stationProfile?.station_mode === "order_taker"
+                    }
+                    onClick={chooseCredit}
+                  >
+                    {helcimStatus?.checkoutEnabled
+                      ? "CREDIT"
+                      : "CREDIT SETUP REQUIRED"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      paymentBusy ||
+                      stationProfile?.station_mode === "order_taker"
+                    }
+                    onClick={() => {
+                      if (!validGiftCardInput(giftCardNumber)) {
+                        giftCardInputRef.current?.focus();
+                        return;
+                      }
+                      setCdsTenderType("gift_card");
+                      if (!assignedStationKey) setTipPromptOpen(true);
+                    }}
+                  >
+                    GIFT CARD
+                  </button>
                 </div>
                 {helcimStatus?.localDevelopment && canManagePayments && (
-                  <button type="button" disabled={paymentBusy || stationProfile?.station_mode === "order_taker"} onClick={() => void commitTestCard()}>
+                  <button
+                    type="button"
+                    disabled={
+                      paymentBusy ||
+                      stationProfile?.station_mode === "order_taker"
+                    }
+                    onClick={() => void commitTestCard()}
+                  >
                     {paymentBusy ? "PROCESSING…" : "APPROVE TEST CARD"}
                   </button>
                 )}
                 {tipPromptOpen && (
                   <div className="posChangeBackdrop">
-                    <section className="posTipWindow" role="dialog" aria-modal="true" aria-labelledby="tip-title">
+                    <section
+                      className="posTipWindow"
+                      role="dialog"
+                      aria-modal="true"
+                      aria-labelledby="tip-title"
+                    >
                       <small>MANUAL CARD ENTRY</small>
                       <h2 id="tip-title">Add a tip?</h2>
                       <div className="posTipChoices">
-                        {[15,18,20].map(percent => <button type="button" key={percent} onClick={() => void applyTipAndStartCard(Math.round(checkoutDueCents * percent / 100))}>{percent}%<span>{money(Math.round(checkoutDueCents * percent / 100))}</span></button>)}
-                        <button type="button" onClick={() => void applyTipAndStartCard(0)}>NO TIP</button>
+                        {[15, 18, 20].map((percent) => (
+                          <button
+                            type="button"
+                            key={percent}
+                            onClick={() =>
+                              void applyTipAndStartCard(
+                                Math.round((checkoutDueCents * percent) / 100),
+                              )
+                            }
+                          >
+                            {percent}%
+                            <span>
+                              {money(
+                                Math.round((checkoutDueCents * percent) / 100),
+                              )}
+                            </span>
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => void applyTipAndStartCard(0)}
+                        >
+                          NO TIP
+                        </button>
                       </div>
-                      <label>Custom tip<input autoFocus type="number" inputMode="decimal" min="0" step="0.01" value={customTip} onChange={event=>setCustomTip(event.target.value)}/></label>
-                      <button type="button" disabled={!customTip || Number(customTip)<0} onClick={() => void applyTipAndStartCard(Math.round(Number(customTip)*100))}>ADD CUSTOM TIP</button>
-                      <button type="button" onClick={() => setTipPromptOpen(false)}>CANCEL</button>
+                      <label>
+                        Custom tip
+                        <input
+                          autoFocus
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="0.01"
+                          value={customTip}
+                          onChange={(event) => setCustomTip(event.target.value)}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={!customTip || Number(customTip) < 0}
+                        onClick={() =>
+                          void applyTipAndStartCard(
+                            Math.round(Number(customTip) * 100),
+                          )
+                        }
+                      >
+                        ADD CUSTOM TIP
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTipPromptOpen(false)}
+                      >
+                        CANCEL
+                      </button>
                     </section>
                   </div>
                 )}
@@ -4505,7 +5058,8 @@ export default function PosClient({
               </button>
             </header>
             <div className="posConfigBody">
-              {configuringItem.variants.filter((variant) => variant.available).length > 1 && (
+              {configuringItem.variants.filter((variant) => variant.available)
+                .length > 1 && (
                 <fieldset
                   id="variant-choice"
                   className={!selectedVariant ? "needsSelection" : ""}
@@ -4517,30 +5071,36 @@ export default function PosClient({
                     </small>
                   </legend>
                   <div className="posChoiceGrid">
-                    {configuringItem.variants.filter((variant) => variant.available).map((variant) => (
-                      <button
-                        key={variant.id}
-                        type="button"
-                        disabled={!variant.available}
-                        className={
-                          selectedVariantId === variant.id ? "selected" : ""
-                        }
-                        onClick={() => chooseVariant(variant)}
-                      >
-                        <strong>{variant.name}</strong>
-                        <span>
-                          {variant.available
-                            ? money(variant.basePriceCents)
-                            : "Unavailable"}
-                        </span>
-                      </button>
-                    ))}
+                    {configuringItem.variants
+                      .filter((variant) => variant.available)
+                      .map((variant) => (
+                        <button
+                          key={variant.id}
+                          type="button"
+                          disabled={!variant.available}
+                          className={
+                            selectedVariantId === variant.id ? "selected" : ""
+                          }
+                          onClick={() => chooseVariant(variant)}
+                        >
+                          <strong>{variant.name}</strong>
+                          <span>
+                            {variant.available
+                              ? money(variant.basePriceCents)
+                              : "Unavailable"}
+                          </span>
+                        </button>
+                      ))}
                   </div>
                 </fieldset>
               )}
 
               {configuringItem.modifiers
-                .filter((group) => group.presentationBehavior === "pizza_topping" && modifierGroupVisible(group))
+                .filter(
+                  (group) =>
+                    group.presentationBehavior === "pizza_topping" &&
+                    modifierGroupVisible(group),
+                )
                 .map((group) => (
                   <PizzaToppingSelector
                     key={group.id}
@@ -4603,7 +5163,9 @@ export default function PosClient({
               )}
 
               {configuringItem.modifiers
-                .filter((group) => group.presentationBehavior !== "pizza_topping")
+                .filter(
+                  (group) => group.presentationBehavior !== "pizza_topping",
+                )
                 .filter(modifierGroupVisible)
                 .toSorted(
                   (left, right) => left.componentOrder - right.componentOrder,
@@ -4942,14 +5504,20 @@ export default function PosClient({
                 <span>DELIVERY</span>
                 <h2 id="new-delivery-address-title">Add new address</h2>
               </div>
-              <button onClick={() => setDeliveryEditorOpen(false)}>Close</button>
+              <button onClick={() => setDeliveryEditorOpen(false)}>
+                Close
+              </button>
             </header>
             <div className="posAddressAutocomplete">
               <label>
                 Street address
                 <input
                   autoFocus
-                  className={deliveryAddressRequired ? "posDeliveryAddressRequired" : undefined}
+                  className={
+                    deliveryAddressRequired
+                      ? "posDeliveryAddressRequired"
+                      : undefined
+                  }
                   value={deliveryAddress}
                   autoComplete="off"
                   spellCheck={false}
@@ -4958,7 +5526,9 @@ export default function PosClient({
                   placeholder="Start typing the delivery address"
                   aria-expanded={addressSuggestions.length > 0}
                   aria-controls="delivery-address-suggestions"
-                  onChange={(event) => changeDeliveryAddress(event.target.value)}
+                  onChange={(event) =>
+                    changeDeliveryAddress(event.target.value)
+                  }
                   onKeyDown={(event) => {
                     if (event.key === "ArrowDown") {
                       event.preventDefault();
@@ -4968,7 +5538,9 @@ export default function PosClient({
                     }
                     if (event.key === "ArrowUp") {
                       event.preventDefault();
-                      setActiveSuggestion((current) => Math.max(0, current - 1));
+                      setActiveSuggestion((current) =>
+                        Math.max(0, current - 1),
+                      );
                     }
                     if (event.key === "Escape") setAddressSuggestions([]);
                     if (event.key === "Enter") {
@@ -4992,7 +5564,9 @@ export default function PosClient({
                   role="listbox"
                 >
                   {addressLoading && (
-                    <div className="addressState">Finding nearby addresses…</div>
+                    <div className="addressState">
+                      Finding nearby addresses…
+                    </div>
                   )}
                   {!addressLoading &&
                     addressSuggestions.map((suggestion, index) => (
@@ -5039,7 +5613,9 @@ export default function PosClient({
                 className="posDeliveryDropoffs"
                 aria-label={`${selectedDeliveryLocation.name} drop-off location`}
               >
-                <strong>WHERE AT {selectedDeliveryLocation.name.toUpperCase()}?</strong>
+                <strong>
+                  WHERE AT {selectedDeliveryLocation.name.toUpperCase()}?
+                </strong>
                 {selectedDeliveryLocation.dropoffs.map((dropoff) => (
                   <button
                     type="button"
@@ -5063,20 +5639,21 @@ export default function PosClient({
                 {deliveryUnit && <span>Apartment / room: {deliveryUnit}</span>}
               </p>
             )}
-            {addressError && <p className="addressError" role="alert">{addressError}</p>}
+            {addressError && (
+              <p className="addressError" role="alert">
+                {addressError}
+              </p>
+            )}
             {!validatedAddress ? (
               <button
                 type="button"
                 className="validateAddressButton"
                 disabled={
-                  validatingAddress ||
-                  deliveryAddress.trim().length < 5
+                  validatingAddress || deliveryAddress.trim().length < 5
                 }
                 onClick={() => void validateAddress()}
               >
-                {validatingAddress
-                  ? "Validating…"
-                  : "VERIFY ADDRESS"}
+                {validatingAddress ? "Validating…" : "VERIFY ADDRESS"}
               </button>
             ) : (
               <button
@@ -5103,7 +5680,10 @@ export default function PosClient({
         <div
           className="posModalBackdrop posTopModalBackdrop"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget) {setCustomerOpen(false);setQuickAddCaller(false)}
+            if (e.target === e.currentTarget) {
+              setCustomerOpen(false);
+              setQuickAddCaller(false);
+            }
           }}
         >
           <section
@@ -5114,62 +5694,79 @@ export default function PosClient({
             <header>
               <div>
                 <span>CUSTOMER</span>
-                <h2>{quickAddCaller?"Add new caller":"Find or add customer"}</h2>
+                <h2>
+                  {quickAddCaller ? "Add new caller" : "Find or add customer"}
+                </h2>
               </div>
-              <button onClick={() => {setCustomerOpen(false);setQuickAddCaller(false)}}>Close</button>
-            </header>
-            {!quickAddCaller&&<label>
-              Search existing customer
-              <input
-                autoFocus
-                type="search"
-                value={customerQuery}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setCustomerQuery(value);
-                  if (/^[\d\s()+.-]+$/.test(value)) {
-                    setQuickCustomer((current) => ({
-                      ...current,
-                      phone: value,
-                    }));
-                  }
-                }}
-                placeholder="3155551212 or Sarah Smith"
-              />
-            </label>}
-            {!quickAddCaller&&customerMatches.map((match) => (
               <button
-                className="posCustomerMatch"
-                key={match.id}
                 onClick={() => {
-                  chooseCustomer(match);
                   setCustomerOpen(false);
+                  setQuickAddCaller(false);
                 }}
               >
-                <strong>{match.display_name}</strong>
-                <span>
-                  {match.phones
-                    ?.map((phone) => phone.display_phone)
-                    .join(" · ") || match.display_phone}
-                </span>
-                {match.addresses[0] && (
-                  <small>
-                    {match.addresses[0].line1} · Last order{" "}
-                    {match.last_order_at
-                      ? new Date(match.last_order_at).toLocaleDateString()
-                      : "never"}
-                  </small>
-                )}
+                Close
               </button>
-            ))}
+            </header>
+            {!quickAddCaller && (
+              <label>
+                Search existing customer
+                <input
+                  autoFocus
+                  type="search"
+                  value={customerQuery}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setCustomerQuery(value);
+                    if (/^[\d\s()+.-]+$/.test(value)) {
+                      setQuickCustomer((current) => ({
+                        ...current,
+                        phone: value,
+                      }));
+                    }
+                  }}
+                  placeholder="3155551212 or Sarah Smith"
+                />
+              </label>
+            )}
+            {!quickAddCaller &&
+              customerMatches.map((match) => (
+                <button
+                  className="posCustomerMatch"
+                  key={match.id}
+                  onClick={() => {
+                    chooseCustomer(match);
+                    setCustomerOpen(false);
+                  }}
+                >
+                  <strong>{match.display_name}</strong>
+                  <span>
+                    {match.phones
+                      ?.map((phone) => phone.display_phone)
+                      .join(" · ") || match.display_phone}
+                  </span>
+                  {match.addresses[0] && (
+                    <small>
+                      {match.addresses[0].line1} · Last order{" "}
+                      {match.last_order_at
+                        ? new Date(match.last_order_at).toLocaleDateString()
+                        : "never"}
+                    </small>
+                  )}
+                </button>
+              ))}
             {business === "Corner Deli" && (
               <form className="posQuickCustomer" onSubmit={createQuickCustomer}>
                 <h3>Quick add</h3>
-                {quickAddCaller&&<p><strong>Caller phone:</strong> {quickCustomer.phone}</p>}
+                {quickAddCaller && (
+                  <p>
+                    <strong>Caller phone:</strong> {quickCustomer.phone}
+                  </p>
+                )}
                 <div>
                   <label>
                     First name
-                    <input autoFocus={quickAddCaller}
+                    <input
+                      autoFocus={quickAddCaller}
                       required
                       maxLength={80}
                       autoComplete="off"
@@ -5197,22 +5794,24 @@ export default function PosClient({
                     />
                   </label>
                 </div>
-                {!quickAddCaller&&<label>
-                  Phone number
-                  <input
-                    required
-                    inputMode="tel"
-                    autoComplete="tel"
-                    placeholder="315-555-1212"
-                    value={quickCustomer.phone}
-                    onChange={(e) =>
-                      setQuickCustomer((current) => ({
-                        ...current,
-                        phone: e.target.value,
-                      }))
-                    }
-                  />
-                </label>}
+                {!quickAddCaller && (
+                  <label>
+                    Phone number
+                    <input
+                      required
+                      inputMode="tel"
+                      autoComplete="tel"
+                      placeholder="315-555-1212"
+                      value={quickCustomer.phone}
+                      onChange={(e) =>
+                        setQuickCustomer((current) => ({
+                          ...current,
+                          phone: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                )}
                 {quickCustomerError && <p role="alert">{quickCustomerError}</p>}
                 <button
                   className="primary"
@@ -5243,7 +5842,10 @@ export default function PosClient({
             {business === "Corner Deli" && (
               <Link
                 href="/pos/deli/customers"
-                onClick={() => {setCustomerOpen(false);setQuickAddCaller(false)}}
+                onClick={() => {
+                  setCustomerOpen(false);
+                  setQuickAddCaller(false);
+                }}
               >
                 Open customer CRM
               </Link>
