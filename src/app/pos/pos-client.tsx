@@ -377,6 +377,13 @@ function money(cents: number): string {
   }).format(cents / 100);
 }
 
+function deliLineLabel(extension: string): string {
+  const digits = extension.replace(/\D/g, "");
+  if (digits === "95") return "LINE 1 · EXT 95";
+  if (digits === "96") return "LINE 2 · EXT 96";
+  return digits ? `EXT ${digits}` : "DELI LINES 1 & 2";
+}
+
 function cloneSelections(
   value: Record<string, string[]>,
 ): Record<string, string[]> {
@@ -713,9 +720,7 @@ export default function PosClient({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [scanNotice, setScanNotice] = useState("");
   const [unknownBarcode, setUnknownBarcode] = useState("");
-  const [incomingCall, setIncomingCall] = useState<IncomingDeliCall | null>(
-    null,
-  );
+  const [incomingCalls, setIncomingCalls] = useState<IncomingDeliCall[]>([]);
   const [aiCalls, setAiCalls] = useState<AiDeliCall[]>([]);
   const [posEmployeeId, setPosEmployeeId] = useState("");
   const intervention = aiCalls.find((call) => call.state !== "ai") || null;
@@ -760,7 +765,7 @@ export default function PosClient({
         .then((r) => (r.ok ? r.json() : null))
         .then((body) => {
           if (!stopped) {
-            setIncomingCall(body?.calls?.[0] || null);
+            setIncomingCalls(body?.calls || []);
             setAiCalls(body?.aiCalls || []);
             setPosEmployeeId(body?.employeeId || "");
           }
@@ -1804,9 +1809,10 @@ export default function PosClient({
     setSelectedCustomerPhoneId(phone?.id || "");
     setSavedDraft(null);
   }
-  async function acknowledgeIncomingCall(useCaller = false) {
-    const call = incomingCall;
-    if (!call) return;
+  async function acknowledgeIncomingCall(
+    call: IncomingDeliCall,
+    useCaller = false,
+  ) {
     if (useCaller) {
       const response = await fetch(
           `/api/ordering/customers?q=${encodeURIComponent(call.caller_phone)}`,
@@ -1826,7 +1832,9 @@ export default function PosClient({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: call.id }),
     });
-    setIncomingCall(null);
+    setIncomingCalls((current) =>
+      current.filter((candidate) => candidate.id !== call.id),
+    );
   }
   async function updateAiCall(
     call: AiDeliCall,
@@ -3989,81 +3997,46 @@ export default function PosClient({
           </section>
         </div>
       )}
-      {incomingCall && (
+      {incomingCalls.length > 0 && (
         <div className="posModalBackdrop">
           <section
-            className="posCustomerDialog posIncomingCall"
+            className="posCustomerDialog posIncomingCall posIncomingCallBoard"
             role="dialog"
             aria-modal="true"
-            aria-label="Incoming deli call"
+            aria-label={`${incomingCalls.length} incoming deli ${incomingCalls.length === 1 ? "call" : "calls"}`}
           >
             <header>
               <div>
-                <span>
-                  INCOMING DELI CALL
-                  {incomingCall.line_number
-                    ? ` · LINE ${incomingCall.line_number}`
-                    : ""}
-                </span>
-                <h2>
-                  {incomingCall.display_name || incomingCall.caller_phone}
-                </h2>
+                <span>INCOMING DELI {incomingCalls.length === 1 ? "CALL" : "CALLS"}</span>
+                <h2>{incomingCalls.length === 1 ? "One line ringing" : `${incomingCalls.length} lines ringing`}</h2>
               </div>
             </header>
-            <strong>{incomingCall.caller_phone}</strong>
-            <div className="posCallerHistory">
-              <span>
-                {incomingCall.last_call_at
-                  ? `Last call ${new Date(incomingCall.last_call_at).toLocaleString()}`
-                  : "No previous call history"}
-              </span>
-              {incomingCall.recent_orders?.length ? (
-                <ul>
-                  {incomingCall.recent_orders.slice(0, 4).map((order) => (
-                    <li key={order.id}>
-                      <strong>#{order.displayNumber}</strong>
-                      <span>{new Date(order.createdAt).toLocaleDateString()} · {order.serviceType.replaceAll("_", " ")}</span>
-                      <strong>{money(Number(order.totalCents))}</strong>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p>No customer order history.</p>
-              )}
+            <div className="posIncomingCallGrid">
+              {incomingCalls.map((call) => (
+                <article className="posIncomingCallCard" key={call.id}>
+                  <b>{deliLineLabel(call.line_number)}</b>
+                  <h3>{call.display_name || call.caller_phone}</h3>
+                  <strong>{call.caller_phone}</strong>
+                  <div className="posCallerHistory">
+                    <span>{call.last_call_at ? `Last call ${new Date(call.last_call_at).toLocaleString()}` : "No previous call history"}</span>
+                    {call.recent_orders?.length ? (
+                      <ul>{call.recent_orders.slice(0, 4).map((order) => (
+                        <li key={order.id}><strong>#{order.displayNumber}</strong><span>{new Date(order.createdAt).toLocaleDateString()} · {order.serviceType.replaceAll("_", " ")}</span><strong>{money(Number(order.totalCents))}</strong></li>
+                      ))}</ul>
+                    ) : <p>No customer order history.</p>}
+                  </div>
+                  {call.open_order_id ? (
+                    <>
+                      <p>Existing order #{call.open_order_number} · {call.open_order_status?.replaceAll("_", " ")}</p>
+                      <a className="primary" href={`/pos/deli/orders?orderId=${encodeURIComponent(call.open_order_id)}`} onClick={(event) => { event.preventDefault(); const href = event.currentTarget.href; void acknowledgeIncomingCall(call).then(() => { window.location.href = href; }); }}>OPEN EXISTING ORDER</a>
+                    </>
+                  ) : (
+                    <button className="primary" onClick={() => void acknowledgeIncomingCall(call, true)}>{call.customer_id ? "USE CUSTOMER / START ORDER" : "ADD CALLER / START ORDER"}</button>
+                  )}
+                  <button onClick={() => void acknowledgeIncomingCall(call)}>ANSWERED / DISMISS THIS LINE</button>
+                </article>
+              ))}
             </div>
-            {incomingCall.open_order_id ? (
-              <>
-                <p>
-                  Existing order #{incomingCall.open_order_number} ·{" "}
-                  {incomingCall.open_order_status?.replaceAll("_", " ")}
-                </p>
-                <a
-                  className="primary"
-                  href={`/pos/deli/orders?orderId=${encodeURIComponent(incomingCall.open_order_id)}`}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    const href = event.currentTarget.href;
-                    void acknowledgeIncomingCall().then(() => {
-                      window.location.href = href;
-                    });
-                  }}
-                >
-                  OPEN EXISTING ORDER
-                </a>
-              </>
-            ) : (
-              <button
-                className="primary"
-                onClick={() => void acknowledgeIncomingCall(true)}
-              >
-                {incomingCall.customer_id
-                  ? "USE CUSTOMER / START ORDER"
-                  : "ADD CALLER / START ORDER"}
-              </button>
-            )}
-            <button onClick={() => void acknowledgeIncomingCall()}>
-              ANSWERED / DISMISS POPUP
-            </button>
             <small>Answer the call on the physical phone.</small>
           </section>
         </div>
