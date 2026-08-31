@@ -61,6 +61,62 @@ async function adjustment(input: {
   `;
 }
 
+async function reconcileLiveClockState(input: {
+  sourceId: string;
+  reason: string;
+  actor: string;
+}) {
+  const selectedRows = await getSql()`
+    SELECT * FROM time_entries
+    WHERE id = ${input.sourceId}::uuid AND business = 'Tiki'
+    LIMIT 1
+  ` as unknown as Array<Record<string, unknown>>;
+  const selected = selectedRows[0];
+  if (!selected) throw new ValidationError("The corrected Tiki punch could not be reloaded.");
+  if (!selected.clock_out) return { staleOpenPunchesResolved: 0 };
+
+  const correctedOut = new Date(String(selected.clock_out));
+  if (Number.isNaN(correctedOut.getTime())) throw new ValidationError("The corrected Tiki clock-out is invalid.");
+  const correctedOutIso = correctedOut.toISOString();
+
+  const staleRows = await getSql()`
+    SELECT * FROM time_entries
+    WHERE business = 'Tiki'
+      AND employee_id = ${String(selected.employee_id)}::uuid
+      AND id <> ${input.sourceId}::uuid
+      AND clock_out IS NULL
+      AND clock_in <= ${correctedOutIso}
+    ORDER BY clock_in, created_at, id
+  ` as unknown as Array<Record<string, unknown>>;
+
+  let resolved = 0;
+  for (const stale of staleRows) {
+    const savedRows = await getSql()`
+      UPDATE time_entries SET
+        clock_out = clock_in,
+        status = 'Corrected',
+        notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${input.reason}. Stale open punch zeroed after owner correction reconciled live clock state.`}),
+        updated_at = NOW()
+      WHERE id = ${String(stale.id)}::uuid
+        AND business = 'Tiki'
+        AND clock_out IS NULL
+      RETURNING *
+    ` as unknown as Array<Record<string, unknown>>;
+    const after = savedRows[0];
+    if (!after) continue;
+    await adjustment({
+      sourceId: String(stale.id),
+      before: stale,
+      after,
+      reason: input.reason,
+      actor: input.actor,
+    });
+    resolved += 1;
+  }
+
+  return { staleOpenPunchesResolved: resolved };
+}
+
 export async function GET(request: Request) {
   try {
     const session = await getSession();
@@ -112,19 +168,23 @@ export async function POST(request: Request) {
     const action = String(body.action || "");
 
     if (action === "correct") {
+      const sourceId = String(body.sourceId || "");
+      const reason = correctionReason(body.reason);
       const clockIn = easternWallToIso(body.clockInWall);
       const clockOut = String(body.clockOutWall || "").trim() ? easternWallToIso(body.clockOutWall) : null;
-      return Response.json(await correctPunch({
+      const corrected = await correctPunch({
         business: "Tiki",
         sourceType: "Tiki",
-        sourceId: String(body.sourceId || ""),
+        sourceId,
         employeeName: body.employeeName ? String(body.employeeName) : undefined,
         position: body.position ? String(body.position) : undefined,
         clockIn,
         clockOut,
-        reason: correctionReason(body.reason),
+        reason,
         actor: session.email,
-      }));
+      });
+      const liveState = await reconcileLiveClockState({ sourceId, reason, actor: session.email });
+      return Response.json({ ...corrected, ...liveState });
     }
 
     if (action === "use-in-as-prior-out") {
@@ -179,12 +239,14 @@ export async function POST(request: Request) {
 
       await adjustment({ sourceId: String(prior.id), before: prior, after: priorAfter, reason, actor: session.email });
       await adjustment({ sourceId, before: mistaken, after: mistakenAfter, reason, actor: session.email });
+      const liveState = await reconcileLiveClockState({ sourceId: String(prior.id), reason, actor: session.email });
 
       return Response.json({
         corrected: true,
         priorShiftId: String(prior.id),
         mistakenPunchId: sourceId,
         priorClockOut: mistakenClockInIso,
+        ...liveState,
       });
     }
 

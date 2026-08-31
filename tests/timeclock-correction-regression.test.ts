@@ -44,3 +44,19 @@ test("payroll correction only reports success after the punch row is returned", 
   assert.match(correction, /if \(!after\) \{[\s\S]*Shift correction was not saved\. Reload payroll and try again\./);
   assert.match(correction, /INSERT INTO time_entry_adjustments/);
 });
+
+test("owner Tiki corrections reconcile stale open punches used by the live clock", () => {
+  const route = source("src/app/api/tiki-time-corrections/route.ts");
+
+  assert.match(route, /async function reconcileLiveClockState/);
+  assert.match(
+    route,
+    /employee_id = \$\{String\(selected\.employee_id\)\}::uuid[\s\S]*clock_out IS NULL[\s\S]*clock_in <= \$\{correctedOutIso\}/,
+  );
+  assert.match(
+    route,
+    /UPDATE time_entries SET[\s\S]*clock_out = clock_in[\s\S]*status = 'Corrected'[\s\S]*Stale open punch zeroed after owner correction reconciled live clock state/,
+  );
+  assert.match(route, /const liveState = await reconcileLiveClockState\(\{ sourceId, reason, actor: session\.email \}\)/);
+  assert.match(route, /staleOpenPunchesResolved/);
+});
