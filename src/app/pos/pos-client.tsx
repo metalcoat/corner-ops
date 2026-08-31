@@ -381,7 +381,7 @@ function deliLineLabel(extension: string): string {
   const digits = extension.replace(/\D/g, "");
   if (digits === "95") return "LINE 1 · EXT 95";
   if (digits === "96") return "LINE 2 · EXT 96";
-  return digits ? `EXT ${digits}` : "DELI LINES 1 & 2";
+  return digits ? `EXT ${digits}` : "DELI LINE NOT YET CONFIRMED";
 }
 
 function cloneSelections(
@@ -4008,7 +4008,7 @@ export default function PosClient({
             <header>
               <div>
                 <span>INCOMING DELI {incomingCalls.length === 1 ? "CALL" : "CALLS"}</span>
-                <h2>{incomingCalls.length === 1 ? "One line ringing" : `${incomingCalls.length} lines ringing`}</h2>
+                <h2>{incomingCalls.length === 1 ? "One incoming caller" : `${incomingCalls.length} incoming callers`}</h2>
               </div>
             </header>
             <div className="posIncomingCallGrid">

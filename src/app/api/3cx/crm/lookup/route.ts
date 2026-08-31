@@ -2,7 +2,6 @@ import { timingSafeEqual } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { apiError } from "@/lib/http";
 import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
-import { ingestThreeCxLiveCall } from "@/lib/three-cx-live-calls";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,15 +34,6 @@ export async function GET(request: Request) {
       return Response.json({ error: "A valid caller phone number is required." }, { status: 400 });
 
     await ensureOrderingCustomerSchema();
-    const bucket = Math.floor(Date.now() / 120_000);
-    await ingestThreeCxLiveCall({
-      callId: `crm-${phone}-${bucket}`,
-      callerNumber: phone,
-      queue: process.env.THREE_CX_DELI_QUEUE || "90",
-      status: "ringing",
-      startedAt: new Date().toISOString(),
-    });
-
     const customer = (await getSql()`
       SELECT customer.id, customer.first_name, customer.last_name,
              customer.display_name, customer.email
