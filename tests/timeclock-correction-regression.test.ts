@@ -45,21 +45,18 @@ test("payroll correction only reports success after the punch row is returned", 
   assert.match(correction, /INSERT INTO time_entry_adjustments/);
 });
 
-test("owner Tiki corrections atomically update the punch, reconcile live clock state, and audit", () => {
+test("owner Tiki correction saves the punch first and treats cleanup as best-effort", () => {
   const route = source("src/app/api/tiki-time-corrections/route.ts");
 
-  assert.match(route, /async function correctTikiPunchAtomically/);
-  assert.match(route, /WITH selected_before AS MATERIALIZED/);
-  assert.match(route, /updated_selected AS \([\s\S]*UPDATE time_entries AS target/);
+  assert.match(route, /async function correctTikiPunch\(/);
   assert.match(
     route,
-    /stale_before AS MATERIALIZED \([\s\S]*clock_out IS NULL[\s\S]*stale\.clock_in <= corrected\.clock_out/,
+    /UPDATE time_entries SET[\s\S]*clock_in = \$\{clockIn\.toISOString\(\)\}[\s\S]*clock_out = \$\{clockOut\?\.toISOString\(\) \|\| null\}[\s\S]*RETURNING \*/,
   );
-  assert.match(
-    route,
-    /updated_stale AS \([\s\S]*clock_out = target\.clock_in[\s\S]*status = 'Corrected'/,
-  );
-  assert.match(route, /audit_insert AS \([\s\S]*INSERT INTO time_entry_adjustments/);
-  assert.match(route, /staleOpenPunchesResolved/);
-  assert.match(route, /return Response\.json\(await correctTikiPunchAtomically\(/);
+  assert.match(route, /if \(!saved\) throw new Error\("The Tiki punch update returned no row\."\)/);
+  assert.match(route, /try \{[\s\S]*await adjustment\([\s\S]*primary audit failed/);
+  assert.match(route, /try \{[\s\S]*await reconcileLiveClockState\([\s\S]*live-clock cleanup failed/);
+  assert.match(route, /requestId = crypto\.randomUUID\(\)\.slice\(0, 8\)/);
+  assert.match(route, /Tiki correction failed \[\$\{requestId\}\]/);
+  assert.match(route, /return Response\.json\(await correctTikiPunch\(/);
 });
