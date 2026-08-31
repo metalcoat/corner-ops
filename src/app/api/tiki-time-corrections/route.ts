@@ -104,7 +104,6 @@ async function correctTikiPunchAtomically(input: {
       FROM time_entries
       WHERE id = ${input.sourceId}::uuid
         AND business = 'Tiki'
-      FOR UPDATE
     ),
     updated_selected AS (
       UPDATE time_entries AS target
@@ -131,7 +130,6 @@ async function correctTikiPunchAtomically(input: {
         AND corrected.clock_out IS NOT NULL
         AND stale.clock_out IS NULL
         AND stale.clock_in <= corrected.clock_out
-      FOR UPDATE OF stale
     ),
     updated_stale AS (
       UPDATE time_entries AS target
