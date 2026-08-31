@@ -41,6 +41,7 @@ test("payroll correction only reports success after the punch row is returned", 
     correction,
     /UPDATE time_entries SET[\s\S]*WHERE id = \$\{input\.sourceId\} AND business = \$\{input\.business\}[\s\S]*RETURNING \*/,
   );
+  assert.match(correction, /\$\{`Correction: \$\{reason\}`\}::text/);
   assert.match(correction, /if \(!after\) \{[\s\S]*Shift correction was not saved\. Reload payroll and try again\./);
   assert.match(correction, /INSERT INTO time_entry_adjustments/);
 });
@@ -52,6 +53,10 @@ test("owner Tiki correction saves the punch first and treats cleanup as best-eff
   assert.match(
     route,
     /UPDATE time_entries SET[\s\S]*clock_in = \$\{clockIn\.toISOString\(\)\}[\s\S]*clock_out = \$\{clockOut\?\.toISOString\(\) \|\| null\}[\s\S]*RETURNING \*/,
+  );
+  assert.ok(
+    (route.match(/::text\)/g) || []).length >= 4,
+    "Every Tiki correction note passed to CONCAT_WS must be explicitly typed as text.",
   );
   assert.match(route, /if \(!saved\) throw new Error\("The Tiki punch update returned no row\."\)/);
   assert.match(route, /try \{[\s\S]*await adjustment\([\s\S]*primary audit failed/);
