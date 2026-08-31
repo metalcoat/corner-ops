@@ -12,6 +12,8 @@ test("message migration snapshots recipients and excludes later employees from o
   assert.match(migration, /CREATE TABLE public\.employee_message_recipients/);
   assert.match(migration, /e\.created_at <= m\.created_at/);
   assert.match(migration, /ON CONFLICT \(message_id, employee_id\) DO NOTHING/);
+  assert.match(migration, /employee_messages_message_type_check/);
+  assert.match(migration, /'Conversation'::text/);
   assert.match(migration, /SET message_type = 'Conversation'/);
 });
 
@@ -36,4 +38,12 @@ test("owner and employee messaging use stable inline conversation channels", () 
   assert.match(employee, /label: "Whole team"/);
   assert.match(employee, /conversationKey/);
   assert.match(employee, /employeeConversationReceipt/);
+});
+
+test("production migration runner expands the legacy message-type constraint before converting messages", () => {
+  const runner = source("tools/apply-production-migrations.mjs");
+  assert.match(runner, /allow conversation message type/);
+  assert.match(runner, /DROP CONSTRAINT IF EXISTS employee_messages_message_type_check/);
+  assert.match(runner, /'Conversation'::text/);
+  assert.match(runner, /retire dynamic team visibility/);
 });

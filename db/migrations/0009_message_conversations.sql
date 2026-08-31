@@ -61,6 +61,16 @@ WHERE participant.employee_id IS NOT NULL
   AND m.message_type NOT IN ('Team', 'Announcement')
 ON CONFLICT (message_id, employee_id) DO NOTHING;
 
+ALTER TABLE ONLY public.employee_messages
+  DROP CONSTRAINT IF EXISTS employee_messages_message_type_check,
+  ADD CONSTRAINT employee_messages_message_type_check
+  CHECK (message_type = ANY (ARRAY[
+    'Team'::text,
+    'Direct'::text,
+    'Announcement'::text,
+    'Conversation'::text
+  ]));
+
 -- Conversation visibility is now governed by the immutable recipient snapshot,
 -- not by a live "all active employees" predicate in older clients.
 UPDATE public.employee_messages
