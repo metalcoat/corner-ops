@@ -12,6 +12,7 @@ import {
 } from "@/lib/helcim";
 import { ensureOrderingHelcimSchema } from "@/lib/ordering-helcim-schema";
 import {
+  assertOrderReadyForCheckout,
   checkoutState,
   commitTender,
   PaymentConflictError,
@@ -46,6 +47,7 @@ export async function POST(
     await ensureOrderingHelcimSchema();
     const sql = getSql();
     if (body.action === "initialize") {
+      await assertOrderReadyForCheckout(orderId, business);
       const checkId = body.checkId ? String(body.checkId) : null;
       const state = await checkoutState(orderId, business, checkId);
       const remainingCents = Number(

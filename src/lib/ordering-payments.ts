@@ -8,10 +8,37 @@ import { GiftCardError, redeemGiftCard } from "@/lib/ordering-gift-cards";
 import { canManagePos } from "@/lib/ordering-route-auth";
 import type { PaymentProviderKey } from "@/lib/payment-provider";
 import { completePaidPaymentQueue } from "@/lib/ordering-payment-stations";
+import { ensureOrderingAddressSchema } from "@/lib/ordering-address-schema";
 
 export type CheckoutTenderType = "cash" | "card" | "gift_card";
 
 export class PaymentConflictError extends Error {}
+
+export async function assertOrderReadyForCheckout(orderId: string, business: OrderingBusiness) {
+  if (business !== "Corner Deli") return;
+  await ensureOrderingAddressSchema();
+  const sql = getSql();
+  const order = (await sql`
+    SELECT first_name_snapshot, last_name_snapshot, phone_snapshot, service_type
+    FROM ordering_orders WHERE id=${orderId} AND business=${business} LIMIT 1
+  `)[0];
+  if (!order) throw new PaymentConflictError("Order was not found.");
+  const customerName = `${order.first_name_snapshot || ""} ${order.last_name_snapshot || ""}`.trim();
+  if (!customerName) throw new PaymentConflictError("Customer name is required before checkout.");
+  if (["pickup", "delivery", "no_contact_delivery"].includes(String(order.service_type)) && !String(order.phone_snapshot || "").trim()) {
+    throw new PaymentConflictError(order.service_type === "pickup"
+      ? "Phone number is required for pickup orders."
+      : "Phone number is required for delivery orders.");
+  }
+  if (["delivery", "no_contact_delivery"].includes(String(order.service_type))) {
+    const address = (await sql`
+      SELECT validation_status, route_distance_miles
+      FROM ordering_order_delivery_addresses WHERE order_id=${orderId} LIMIT 1
+    `)[0];
+    if (address?.validation_status !== "validated") throw new PaymentConflictError("Delivery address is required before checkout.");
+    if (address.route_distance_miles == null) throw new PaymentConflictError("Driving distance is required before checkout.");
+  }
+}
 
 function cents(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value <= 0) throw new PaymentConflictError(`${label} must be a positive amount in cents.`);
@@ -144,6 +171,7 @@ export async function commitTender(input: {
     details?: Record<string, unknown>;
   };
 }) {
+  await assertOrderReadyForCheckout(input.orderId, input.business);
   if (input.tenderType === "gift_card") await ensureOrderingGiftCardSchema(); else await ensureOrderingAccountSchema();
   cents(input.amountTenderedCents, "Tender amount");
   if (!input.clientMutationId.trim() || input.clientMutationId.length > 160) throw new PaymentConflictError("A valid payment request ID is required.");

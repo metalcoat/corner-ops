@@ -2251,6 +2251,10 @@ export default function PosClient({
 
   async function openCheckout(draftOverride?: SavedDraft) {
     setLastChangeDueCents(null);
+    if (sendRequirement) {
+      setCheckoutError(sendRequirement);
+      return;
+    }
     const draft =
       draftOverride ||
       (business === "Tiki" && activeTab && cart.length
@@ -2809,6 +2813,11 @@ export default function PosClient({
               !deliveryUnit
             ? "Choose exact drop-off location"
             : "";
+  const deliveryAddressRequired =
+    business === "Corner Deli" &&
+    serviceType === "delivery" &&
+    Boolean(customer) &&
+    !validatedAddress;
   async function showTabs() {
     setTabsOpen(true);
     setTabsLoading(true);
@@ -3126,10 +3135,12 @@ export default function PosClient({
                 <div className="posAddressEntry">
                   <div className="posAddressAutocomplete">
                     <input
+                      className={deliveryAddressRequired ? "posDeliveryAddressRequired" : undefined}
                       value={deliveryAddress}
                       autoComplete="off"
                       spellCheck={false}
                       aria-label="Delivery street address"
+                      aria-invalid={deliveryAddressRequired}
                       placeholder="Type delivery address"
                       aria-expanded={addressSuggestions.length > 0}
                       aria-controls="delivery-address-suggestions"
@@ -3733,7 +3744,7 @@ export default function PosClient({
               type="button"
               className="submitOrder"
               aria-disabled={Boolean(sendRequirement)}
-              disabled={!cart.length || submittingOrder || savingDraft}
+              disabled={!cart.length || submittingOrder || savingDraft || Boolean(sendRequirement)}
               onClick={() => void submitOrder()}
             >
               {submittingOrder ? "SENDING…" : "SEND"}
@@ -3741,7 +3752,7 @@ export default function PosClient({
             <button
               type="button"
               className="primary"
-              disabled={(!cart.length && !activeTab) || savingDraft}
+              disabled={(!cart.length && !activeTab) || savingDraft || Boolean(sendRequirement)}
               onClick={() => void openCheckout()}
             >
               CHECKOUT
