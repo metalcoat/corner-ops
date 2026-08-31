@@ -175,10 +175,15 @@ type AddressSuggestion = {
   deliveryLocationId?: string;
 };
 type ValidatedAddress = {
+  line1: string;
   formattedAddress: string;
   city: string;
   state: string;
   postalCode: string;
+  latitude: number;
+  longitude: number;
+  provider: string;
+  providerReferenceId: string;
 };
 type DeliveryRoute = {
   distanceMiles: number;
@@ -701,6 +706,7 @@ export default function PosClient({
   const [addressError, setAddressError] = useState("");
   const [activeSuggestion, setActiveSuggestion] = useState(-1);
   const [validatingAddress, setValidatingAddress] = useState(false);
+  const [savingCustomerAddress, setSavingCustomerAddress] = useState(false);
   const [validatedAddress, setValidatedAddress] =
     useState<ValidatedAddress | null>(null);
   const [deliveryValidationToken, setDeliveryValidationToken] = useState("");
@@ -1802,7 +1808,6 @@ export default function PosClient({
       setDeliveryValidatedInput(enteredAddress.trim().replace(/\s+/g, " "));
       setDeliveryRoute(payload.route || null);
       setDeliveryAddress(payload.address.formattedAddress);
-      if (!suggestion?.deliveryLocationId) setDeliveryEditorOpen(false);
       setAddressSessionToken(clientId());
       setSavedDraft(null);
     } catch (error) {
@@ -1930,6 +1935,80 @@ export default function PosClient({
     setDeliveryAddress(entered);
     setDeliveryUnit(address.line2 || "");
     await validateAddress(undefined, entered);
+  }
+
+  async function saveAndUseCustomerAddress() {
+    if (!customer || !validatedAddress || savingCustomerAddress) return;
+    setSavingCustomerAddress(true);
+    setAddressError("");
+    try {
+      const response = await fetch(
+        `/api/ordering/customers/${encodeURIComponent(customer.id)}/addresses`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            label: "Delivery",
+            line1: validatedAddress.line1,
+            line2: deliveryUnit,
+            city: validatedAddress.city,
+            state: validatedAddress.state,
+            postalCode: validatedAddress.postalCode,
+            standardizedAddress: validatedAddress.formattedAddress,
+            provider: validatedAddress.provider,
+            providerReferenceId: validatedAddress.providerReferenceId,
+            latitude: validatedAddress.latitude,
+            longitude: validatedAddress.longitude,
+            isPrimary: !customer.addresses.length,
+          }),
+        },
+      );
+      const payload = (await response.json()) as {
+        addressId?: string;
+        error?: string;
+      };
+      if (!response.ok || !payload.addressId)
+        throw new Error(payload.error || "Could not save this address.");
+      const savedAddress: PosCustomerAddress = {
+        id: payload.addressId,
+        label: "Delivery",
+        line1: validatedAddress.line1,
+        line2: deliveryUnit,
+        city: validatedAddress.city,
+        state: validatedAddress.state,
+        postal_code: validatedAddress.postalCode,
+        standardized_address: validatedAddress.formattedAddress,
+        provider: validatedAddress.provider,
+        provider_reference_id: validatedAddress.providerReferenceId,
+        latitude: validatedAddress.latitude,
+        longitude: validatedAddress.longitude,
+        is_primary: !customer.addresses.length,
+        last_used_at: new Date().toISOString(),
+      };
+      setCustomer((current) =>
+        current
+          ? {
+              ...current,
+              addresses: [
+                savedAddress,
+                ...current.addresses.filter(
+                  (address) => address.id !== savedAddress.id,
+                ),
+              ],
+            }
+          : current,
+      );
+      setSelectedCustomerAddressId(savedAddress.id);
+      setSavedDraft(null);
+      setCheckoutError("");
+      setDeliveryEditorOpen(false);
+    } catch (error) {
+      setAddressError(
+        error instanceof Error ? error.message : "Could not save this address.",
+      );
+    } finally {
+      setSavingCustomerAddress(false);
+    }
   }
 
   function removeLine(lineId: string) {
@@ -4936,7 +5015,6 @@ export default function PosClient({
                       setDeliveryUnit(dropoff);
                       setSavedDraft(null);
                       setCheckoutError("");
-                      setDeliveryEditorOpen(false);
                     }}
                   >
                     {dropoff}
@@ -4944,23 +5022,44 @@ export default function PosClient({
                 ))}
               </div>
             )}
+            {validatedAddress && (
+              <p className="addressResult posAddressConfirmation">
+                <strong>✓ ADDRESS VERIFIED</strong>
+                <span>{validatedAddress.formattedAddress}</span>
+                {deliveryUnit && <span>Apartment / room: {deliveryUnit}</span>}
+              </p>
+            )}
             {addressError && <p className="addressError" role="alert">{addressError}</p>}
-            {!selectedDeliveryLocation && (
+            {!validatedAddress ? (
               <button
                 type="button"
                 className="validateAddressButton"
                 disabled={
                   validatingAddress ||
-                  deliveryAddress.trim().length < 5 ||
-                  Boolean(validatedAddress)
+                  deliveryAddress.trim().length < 5
                 }
                 onClick={() => void validateAddress()}
               >
                 {validatingAddress
                   ? "Validating…"
-                  : validatedAddress
-                    ? "✓ Validated"
-                    : "VALIDATE & USE ADDRESS"}
+                  : "VERIFY ADDRESS"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="validateAddressButton posSaveAddressButton"
+                disabled={
+                  savingCustomerAddress ||
+                  !customer ||
+                  Boolean(selectedDeliveryLocation && !deliveryUnit)
+                }
+                onClick={() => void saveAndUseCustomerAddress()}
+              >
+                {savingCustomerAddress
+                  ? "SAVING…"
+                  : customer
+                    ? "ADD & USE THIS ADDRESS"
+                    : "ADD CUSTOMER FIRST"}
               </button>
             )}
           </section>
