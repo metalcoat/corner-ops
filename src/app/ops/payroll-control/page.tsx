@@ -143,34 +143,6 @@ function easternInputValue(value: string | null) {
   return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
 }
 
-function easternOffsetMilliseconds(date: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: EASTERN_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return Date.UTC(
-    Number(values.year), Number(values.month) - 1, Number(values.day),
-    Number(values.hour), Number(values.minute), Number(values.second),
-  ) - date.getTime();
-}
-
-function easternInputToIso(value: string) {
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
-  if (!match) throw new Error("Enter a valid Eastern date and time.");
-  const wall = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), 0);
-  let timestamp = wall;
-  for (let index = 0; index < 3; index += 1) timestamp = wall - easternOffsetMilliseconds(new Date(timestamp));
-  return new Date(timestamp).toISOString();
-}
-
-
 export default function PayrollControlPage() {
   const [session, setSession] = useState<SessionView | null>(null);
   const [business, setBusiness] = useState<Business>("Corner Deli");
@@ -224,6 +196,27 @@ export default function PayrollControlPage() {
     }
   }
 
+  async function postTikiCorrection(body: Record<string, unknown>) {
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/tiki-time-corrections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      const result = await response.json();
+      await load("Tiki", weekStart);
+      return result as Record<string, unknown>;
+    } catch (error) {
+      setNotice(`Save failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function recalculate() {
     setBusy(true);
     setNotice("");
@@ -243,19 +236,50 @@ export default function PayrollControlPage() {
     const form = new FormData(event.currentTarget);
     const clockIn = String(form.get("clockIn") || "");
     const clockOut = String(form.get("clockOut") || "");
-    await post({
-      action: "punch-correct",
-      business,
-      sourceType: business === "Tiki" ? "Tiki" : "Rezku",
-      sourceId: editing.id,
-      employeeName: form.get("employeeName"),
-      position: form.get("position"),
-      clockIn: easternInputToIso(clockIn),
-      clockOut: clockOut ? easternInputToIso(clockOut) : null,
-      reason: form.get("reason"),
-    });
-    setEditing(null);
-    setNotice("Shift corrected in Eastern Time. Payroll hours and tip allocation were recalculated immediately.");
+    try {
+      if (business === "Tiki") {
+        const result = await postTikiCorrection({
+          action: "correct",
+          sourceId: editing.id,
+          employeeName: form.get("employeeName"),
+          position: form.get("position"),
+          clockInWall: clockIn,
+          clockOutWall: clockOut,
+          reason: form.get("reason"),
+        });
+        const punch = result.punch as Record<string, unknown> | undefined;
+        setEditing(null);
+        setNotice(`Saved ${editing.employeeName}: ${String(punch?.clockInEastern || "clock-in saved")} to ${String(punch?.clockOutEastern || "Open")}. Payroll and the live Tiki clock now use this correction.`);
+        return;
+      }
+
+      await post({
+        action: "punch-correct",
+        business,
+        sourceType: "Rezku",
+        sourceId: editing.id,
+        employeeName: form.get("employeeName"),
+        position: form.get("position"),
+        clockInWall: clockIn,
+        clockOutWall: clockOut,
+        reason: form.get("reason"),
+      });
+      setEditing(null);
+      setNotice("Shift corrected in Eastern Time. Payroll hours and tip allocation were recalculated immediately.");
+    } catch {
+      // post/postTikiCorrection already put the useful error on screen.
+    }
+  }
+
+  async function tikiUseAsPriorOut(punch: Punch) {
+    if (!window.confirm(`${punch.employeeName}: use ${easternDateTime(punch.clockIn, punch.clockInEastern)} as the previous shift's clock-out and zero this mistaken IN?`)) return;
+    try {
+      const result = await postTikiCorrection({ action: "use-in-as-prior-out", sourceId: punch.id });
+      setEditing(null);
+      setNotice(`Corrected ${punch.employeeName}: the mistaken IN became the prior shift's OUT. ${Number(result.staleOpenPunchesResolved || 0) ? `Also cleared ${Number(result.staleOpenPunchesResolved)} stale open punch(es).` : "The live clock state is reconciled."}`);
+    } catch {
+      // Error is already displayed by postTikiCorrection.
+    }
   }
 
   async function tipOverride(event: FormEvent<HTMLFormElement>) {
@@ -323,7 +347,7 @@ export default function PayrollControlPage() {
         </div>
         <p className="reportNote">{business === "Corner Deli"
           ? "Every saved shift correction and tip override is included the next time totals load. Corner Deli tips are reconciled by business day before the 3.5% deduction, so rounding cannot quietly create extra payroll."
-          : "Square tips are split equally among tip-eligible Tiki employees clocked in when the payment was created. Payments without a matching punch stay below for review."}</p>
+          : "Square tips are split equally among tip-eligible Tiki employees clocked in when the payment was created. Tiki corrections on this page also reconcile the live employee clock state."}</p>
       </section>
 
       {business === "Corner Deli" && <section className="controlCard">
@@ -373,10 +397,10 @@ export default function PayrollControlPage() {
       <section className="controlCard">
         <p className="eyebrow">Shift corrections · Eastern Time</p>
         <h2>Punches used for this payroll week</h2>
-        <p>Every displayed and entered time is interpreted as America/New_York. The corrected times are then used for payroll and tip allocation.</p>
+        <p>{business === "Tiki" ? "Correct Tiki punches here. Save updates payroll and the live employee clock state. If a lunch IN was actually the prior OUT, use the button beside that punch." : "Every displayed and entered time is interpreted as America/New_York. The corrected times are then used for payroll and tip allocation."}</p>
         <div className="tableWrap"><table className="controlTable">
           <thead><tr><th>Employee</th><th>Clock in</th><th>Clock out</th><th>Source</th><th>Status</th><th></th></tr></thead>
-          <tbody>{data?.punches.map((punch) => <tr key={punch.id}><td><strong>{punch.employeeName}</strong><small>{punch.position}</small></td><td>{easternDateTime(punch.clockIn, punch.clockInEastern)}</td><td>{punch.clockOut ? easternDateTime(punch.clockOut, punch.clockOutEastern) : "Open"}</td><td>{punch.source}</td><td><span className={`badge ${punch.status === "Complete" ? "good" : "warn"}`}>{punch.status}</span></td><td><button onClick={() => setEditing(punch)}>Correct shift</button></td></tr>)}</tbody>
+          <tbody>{data?.punches.map((punch) => <tr key={punch.id}><td><strong>{punch.employeeName}</strong><small>{punch.position}</small></td><td>{easternDateTime(punch.clockIn, punch.clockInEastern)}</td><td>{punch.clockOut ? easternDateTime(punch.clockOut, punch.clockOutEastern) : "Open"}</td><td>{punch.source}</td><td><span className={`badge ${punch.status === "Complete" || punch.status === "Corrected" ? "good" : "warn"}`}>{punch.status}</span></td><td><div className="controlActions"><button onClick={() => setEditing(punch)} disabled={busy}>Correct shift</button>{business === "Tiki" && <button onClick={() => void tikiUseAsPriorOut(punch)} disabled={busy || !punch.clockIn}>This IN was prior OUT</button>}</div></td></tr>)}</tbody>
         </table></div>
       </section>
 
@@ -388,8 +412,8 @@ export default function PayrollControlPage() {
           <label>Position<input name="position" defaultValue={editing.position} /></label>
           <label>Clock in (ET)<input name="clockIn" type="datetime-local" defaultValue={easternInputValue(editing.clockIn)} required /></label>
           <label>Clock out (ET)<input name="clockOut" type="datetime-local" defaultValue={easternInputValue(editing.clockOut)} /></label>
-          <label className="wide">Reason<textarea name="reason" required /></label>
-          <div className="controlActions wide"><button className="primary" disabled={busy}>Save & recalculate</button><button type="button" onClick={() => setEditing(null)}>Cancel</button></div>
+          <label className="wide">Reason <small>Optional</small><textarea name="reason" placeholder="Leave blank for Owner time correction" /></label>
+          <div className="controlActions wide"><button className="primary" disabled={busy}>{busy ? "Saving…" : "Save & recalculate"}</button><button type="button" onClick={() => setEditing(null)} disabled={busy}>Cancel</button></div>
         </form>
       </section>}
 
