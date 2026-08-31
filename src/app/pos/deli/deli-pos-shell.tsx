@@ -108,6 +108,7 @@ export default function DeliPosShell({ children, idleLockSeconds }: { children: 
   async function logout() {
     await fetch("/api/pos/session", { method: "DELETE" });
     window.dispatchEvent(new Event("corner-ops-pos-locked"));
+    window.location.assign("/pos/deli");
   }
 
   async function showStatus() {

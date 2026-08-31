@@ -3152,7 +3152,29 @@ export default function PosClient({
             >
               <div className="posDeliveryEditor">
                 <div className="posAddressEntry">
-                  <div className="posAddressAutocomplete">
+                  {customer?.addresses?.length ? (
+                    <select
+                      className="posSavedAddressSelect"
+                      aria-label="Saved delivery address"
+                      value={selectedCustomerAddressId}
+                      onChange={(event) => {
+                        const address = customer.addresses.find(
+                          (candidate) => candidate.id === event.target.value,
+                        );
+                        if (address) void chooseSavedAddress(address);
+                        else changeDeliveryAddress("");
+                      }}
+                    >
+                      <option value="">Choose delivery address</option>
+                      {customer.addresses.map((address) => (
+                        <option key={address.id} value={address.id}>
+                          {address.label || "Address"} · {address.line1}
+                        </option>
+                      ))}
+                      <option value="">+ New address</option>
+                    </select>
+                  ) : null}
+                  {!selectedCustomerAddressId && <div className="posAddressAutocomplete">
                     <input
                       className={deliveryAddressRequired ? "posDeliveryAddressRequired" : undefined}
                       value={deliveryAddress}
@@ -3235,8 +3257,8 @@ export default function PosClient({
                         ) && <small>Address results powered by Google</small>}
                       </div>
                     )}
-                  </div>
-                  {!selectedDeliveryLocation && (
+                  </div>}
+                  {!selectedCustomerAddressId && !selectedDeliveryLocation && (
                     <input
                       className="posDeliveryUnit"
                       aria-label="Apartment or unit"
@@ -3291,43 +3313,8 @@ export default function PosClient({
                     ))}
                   </div>
                 )}
-                {customer?.addresses?.length ? (
-                  <div
-                    className="posSavedAddresses"
-                    aria-label="Saved delivery addresses"
-                  >
-                    <strong>DELIVER TO</strong>
-                    {customer.addresses.map((address) => (
-                      <button
-                        type="button"
-                        key={address.id}
-                        className={
-                          selectedCustomerAddressId === address.id
-                            ? "selected"
-                            : ""
-                        }
-                        onClick={() => void chooseSavedAddress(address)}
-                      >
-                        <b>{address.label || "Address"}</b>
-                        <span>
-                          {address.line1}
-                          {address.line2 ? ` · ${address.line2}` : ""}
-                        </span>
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedCustomerAddressId("");
-                        changeDeliveryAddress("");
-                      }}
-                    >
-                      + NEW ADDRESS
-                    </button>
-                  </div>
-                ) : null}
                 {validatedAddress && (
-                  <p className="addressResult">
+                  <p className="addressResult posAddressResultCompact">
                     <strong>{validatedAddress.formattedAddress}</strong>
                     {deliveryRoute
                       ? ` · ${deliveryRoute.distanceMiles.toFixed(1)} driving miles · about ${Math.max(1, Math.round(deliveryRoute.durationSeconds / 60))} min`
