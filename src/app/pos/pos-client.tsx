@@ -381,7 +381,9 @@ function deliLineLabel(extension: string): string {
   const digits = extension.replace(/\D/g, "");
   if (digits === "95") return "LINE 1 · EXT 95";
   if (digits === "96") return "LINE 2 · EXT 96";
-  return digits ? `EXT ${digits}` : "DELI LINE NOT YET CONFIRMED";
+  return digits
+    ? `EXT ${digits}`
+    : "DELI QUEUE · LINE 1 (EXT 95) FIRST, THEN LINE 2 (EXT 96)";
 }
 
 function cloneSelections(
