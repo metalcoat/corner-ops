@@ -45,18 +45,21 @@ test("payroll correction only reports success after the punch row is returned", 
   assert.match(correction, /INSERT INTO time_entry_adjustments/);
 });
 
-test("owner Tiki corrections reconcile stale open punches used by the live clock", () => {
+test("owner Tiki corrections atomically update the punch, reconcile live clock state, and audit", () => {
   const route = source("src/app/api/tiki-time-corrections/route.ts");
 
-  assert.match(route, /async function reconcileLiveClockState/);
+  assert.match(route, /async function correctTikiPunchAtomically/);
+  assert.match(route, /WITH selected_before AS MATERIALIZED/);
+  assert.match(route, /updated_selected AS \([\s\S]*UPDATE time_entries AS target/);
   assert.match(
     route,
-    /employee_id = \$\{String\(selected\.employee_id\)\}::uuid[\s\S]*clock_out IS NULL[\s\S]*clock_in <= \$\{correctedOutIso\}/,
+    /stale_before AS MATERIALIZED \([\s\S]*clock_out IS NULL[\s\S]*stale\.clock_in <= corrected\.clock_out/,
   );
   assert.match(
     route,
-    /UPDATE time_entries SET[\s\S]*clock_out = clock_in[\s\S]*status = 'Corrected'[\s\S]*Stale open punch zeroed after owner correction reconciled live clock state/,
+    /updated_stale AS \([\s\S]*clock_out = target\.clock_in[\s\S]*status = 'Corrected'/,
   );
-  assert.match(route, /const liveState = await reconcileLiveClockState\(\{ sourceId, reason, actor: session\.email \}\)/);
+  assert.match(route, /audit_insert AS \([\s\S]*INSERT INTO time_entry_adjustments/);
   assert.match(route, /staleOpenPunchesResolved/);
+  assert.match(route, /return Response\.json\(await correctTikiPunchAtomically\(/);
 });
