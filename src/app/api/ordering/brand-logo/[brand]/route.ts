@@ -1,7 +1,11 @@
 const files:Record<string,string>={
   pepsi:"Pepsi_2023.svg",
   diet_pepsi:"Diet_Pepsi_2023.svg",
+  cherry_pepsi:"Pepsi_wildcherry_brand_logo.png",
   mountain_dew:"Mountain_Dew_2025_logo.svg",
+  diet_mountain_dew:"Diet_Mountain_Dew_logo.svg",
+  code_red:"Mountain_Dew_Zero_Sugar_Code_Red_logo.svg",
+  baja_blast:"Baja_Blast_logo.svg",
   starry:"Starry_logo.svg",
   brisk:"Brisk_logo.svg",
   root_beer:"Root_beer_mug.svg",

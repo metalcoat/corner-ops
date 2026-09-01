@@ -81,7 +81,7 @@ function cartLineConfiguration(line: CartLine) {
 function appendOrIncrementCartLine(current: CartLine[], line: CartLine) {
   return consolidateQuantities([...current, line], cartLineConfiguration);
 }
-function sodaLogoUrl(name:string){if(/diet pepsi/i.test(name))return "/api/ordering/brand-logo/diet_pepsi";if(/pepsi/i.test(name))return "/api/ordering/brand-logo/pepsi";if(/baja blast|mountain dew|code red/i.test(name))return "/api/ordering/brand-logo/mountain_dew";if(/starry/i.test(name))return "/api/ordering/brand-logo/starry";if(/brisk/i.test(name))return "/api/ordering/brand-logo/brisk";if(/mug root beer/i.test(name))return "/api/ordering/brand-logo/root_beer";return ""}
+function sodaLogoUrl(name:string){if(/(?:cherry pepsi|pepsi (?:wild )?cherry)/i.test(name))return "/api/ordering/brand-logo/cherry_pepsi";if(/diet pepsi/i.test(name))return "/api/ordering/brand-logo/diet_pepsi";if(/pepsi/i.test(name))return "/api/ordering/brand-logo/pepsi";if(/baja blast/i.test(name))return "/api/ordering/brand-logo/baja_blast";if(/code red/i.test(name))return "/api/ordering/brand-logo/code_red";if(/diet (?:mountain|mtn) dew/i.test(name))return "/api/ordering/brand-logo/diet_mountain_dew";if(/mountain dew|mtn dew/i.test(name))return "/api/ordering/brand-logo/mountain_dew";if(/starry/i.test(name))return "/api/ordering/brand-logo/starry";if(/brisk/i.test(name))return "/api/ordering/brand-logo/brisk";if(/mug root beer/i.test(name))return "/api/ordering/brand-logo/root_beer";return ""}
 
 type MenuPayload = {
   business: Business;
