@@ -31,9 +31,14 @@ export function ensureOrderingHardwareSchema(): Promise<void> {
       name TEXT NOT NULL, station_key TEXT NOT NULL, station_mode TEXT NOT NULL DEFAULT 'order_taker' CHECK(station_mode IN ('payment','order_taker')),
       receipt_printer_id UUID REFERENCES ordering_hardware_devices(id), payment_terminal_id UUID REFERENCES ordering_hardware_devices(id),
       gift_card_reader_id UUID REFERENCES ordering_hardware_devices(id), active BOOLEAN NOT NULL DEFAULT TRUE,
+      phone_card_payments_enabled BOOLEAN NOT NULL DEFAULT FALSE, customer_display_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      shared_register_key TEXT NOT NULL DEFAULT '',
       created_by TEXT NOT NULL, updated_by TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(business,station_key), UNIQUE(business,name)
     )`;
+    await sql`ALTER TABLE ordering_payment_stations ADD COLUMN IF NOT EXISTS phone_card_payments_enabled BOOLEAN NOT NULL DEFAULT FALSE`;
+    await sql`ALTER TABLE ordering_payment_stations ADD COLUMN IF NOT EXISTS customer_display_enabled BOOLEAN NOT NULL DEFAULT FALSE`;
+    await sql`ALTER TABLE ordering_payment_stations ADD COLUMN IF NOT EXISTS shared_register_key TEXT NOT NULL DEFAULT ''`;
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_one_payment_station_idx ON ordering_payment_stations(business) WHERE station_mode='payment' AND active=TRUE`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_payment_station_queue (
       id UUID PRIMARY KEY, business TEXT NOT NULL CHECK (business IN ('Corner Deli','Tiki')), order_id UUID NOT NULL REFERENCES ordering_orders(id) ON DELETE CASCADE,

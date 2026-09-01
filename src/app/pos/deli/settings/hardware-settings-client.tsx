@@ -16,6 +16,7 @@ type Device = {
     ticketHeaderSize?: string;
     tillKey?: string;
     cashDrawerEnabled?: boolean;
+    receiptEnabled?: boolean;
   };
   active: boolean;
   effective_status: string;
@@ -30,7 +31,7 @@ type Job = {
   error_message: string;
   is_reprint: boolean;
 };
-type PaymentStation={id:string;name:string;station_key:string;station_mode:"payment"|"order_taker";receipt_printer_id?:string|null;payment_terminal_id?:string|null;gift_card_reader_id?:string|null;receipt_printer_name?:string|null;payment_terminal_name?:string|null;gift_card_reader_name?:string|null};
+type PaymentStation={id:string;name:string;station_key:string;station_mode:"payment"|"order_taker";phone_card_payments_enabled:boolean;customer_display_enabled:boolean;shared_register_key:string;receipt_printer_id?:string|null;payment_terminal_id?:string|null;gift_card_reader_id?:string|null;receipt_printer_name?:string|null;payment_terminal_name?:string|null;gift_card_reader_name?:string|null};
 export default function HardwareSettingsClient() {
   const [data, setData] = useState<{
       locations: Location[];
@@ -59,12 +60,16 @@ export default function HardwareSettingsClient() {
     [ticketHeaderSize, setTicketHeaderSize] = useState("large"),
     [tillKey, setTillKey] = useState(""),
     [cashDrawerEnabled, setCashDrawerEnabled] = useState(false),
+    [receiptEnabled, setReceiptEnabled] = useState(false),
     [stationName,setStationName]=useState(""),
     [stationKey,setStationKey]=useState(""),
     [stationMode,setStationMode]=useState<"payment"|"order_taker">("order_taker"),
     [stationReceiptPrinterId,setStationReceiptPrinterId]=useState(""),
     [stationPaymentTerminalId,setStationPaymentTerminalId]=useState(""),
     [stationGiftReaderId,setStationGiftReaderId]=useState(""),
+    [stationPhonePayments,setStationPhonePayments]=useState(true),
+    [stationCustomerDisplay,setStationCustomerDisplay]=useState(false),
+    [stationRegisterKey,setStationRegisterKey]=useState(""),
     [assignedStationKey,setAssignedStationKey]=useState(""),
     [locationId, setLocationId] = useState(""),
     [routePrinterId, setRoutePrinterId] = useState(""),
@@ -139,6 +144,7 @@ export default function HardwareSettingsClient() {
     setTicketHeaderSize(device.adapter_config?.ticketHeaderSize || "large");
     setTillKey(device.adapter_config?.tillKey || "");
     setCashDrawerEnabled(Boolean(device.adapter_config?.cashDrawerEnabled));
+    setReceiptEnabled(device.role === "receipt_printer" || Boolean(device.adapter_config?.receiptEnabled));
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
   function clearDevice() {
@@ -151,6 +157,7 @@ export default function HardwareSettingsClient() {
     setTicketHeaderSize("large");
     setTillKey("");
     setCashDrawerEnabled(false);
+    setReceiptEnabled(false);
   }
   return (
     <section className="posSettingsCard">
@@ -348,6 +355,7 @@ export default function HardwareSettingsClient() {
                 </label>
               </>
             )}
+            {role === "kitchen_printer" && <><label><input type="checkbox" checked={receiptEnabled} onChange={(e) => setReceiptEnabled(e.target.checked)} />Also use this kitchen printer for receipts</label>{receiptEnabled && <><label>TILL / REGISTER<input value={tillKey} onChange={(e) => setTillKey(e.target.value)} placeholder="Shared Back Register" /></label><label><input type="checkbox" checked={cashDrawerEnabled} onChange={(e) => setCashDrawerEnabled(e.target.checked)} />Cash drawer connected to this printer</label></>}</>}
           </>
         )}
         <button
@@ -377,6 +385,7 @@ export default function HardwareSettingsClient() {
                         ticketHeaderSize,
                         tillKey,
                         cashDrawerEnabled,
+                        receiptEnabled,
                       }
                     : {},
               },
@@ -461,14 +470,17 @@ export default function HardwareSettingsClient() {
         <label>STATION NAME<input value={stationName} onChange={event=>{setStationName(event.target.value);if(!stationKey)setStationKey(event.target.value.toLowerCase().replace(/\W+/g,"-"))}} /></label>
         <label>STATION KEY<input value={stationKey} onChange={event=>setStationKey(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""))} /></label>
         <label>MODE<select value={stationMode} onChange={event=>setStationMode(event.target.value as "payment"|"order_taker")}><option value="order_taker">Order taking only</option><option value="payment">Designated payment station</option></select></label>
+        <label>SHARED REGISTER KEY<input value={stationRegisterKey} onChange={event=>setStationRegisterKey(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""))} placeholder={stationMode==="payment"?"front-register":"back-register"} /></label>
+        <label><input type="checkbox" checked={stationPhonePayments} onChange={event=>setStationPhonePayments(event.target.checked)} />Allow card payments taken by phone on this POS</label>
+        <label><input type="checkbox" checked={stationCustomerDisplay} onChange={event=>setStationCustomerDisplay(event.target.checked)} />This POS has a customer display (CDS)</label>
         {stationMode==="payment"&&<>
-          <label>RECEIPT PRINTER / DRAWER<select value={stationReceiptPrinterId} onChange={event=>setStationReceiptPrinterId(event.target.value)}><option value="">Choose receipt printer</option>{data?.devices.filter(device=>device.role==="receipt_printer").map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>
+          <label>RECEIPT PRINTER / DRAWER<select value={stationReceiptPrinterId} onChange={event=>setStationReceiptPrinterId(event.target.value)}><option value="">Choose receipt-capable printer</option>{data?.devices.filter(device=>device.role==="receipt_printer"||(device.role==="kitchen_printer"&&device.adapter_config?.receiptEnabled)).map(device=><option key={device.id} value={device.id}>{device.name}{device.role==="kitchen_printer"?" (kitchen + receipts)":""}</option>)}</select></label>
           <label>DHARMA TERMINAL<select value={stationPaymentTerminalId} onChange={event=>setStationPaymentTerminalId(event.target.value)}><option value="">Pending Dharma hardware</option>{data?.devices.filter(device=>device.role==="payment_terminal").map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>
           <label>GIFT-CARD SWIPER<select value={stationGiftReaderId} onChange={event=>setStationGiftReaderId(event.target.value)}><option value="">Choose reader</option>{data?.devices.filter(device=>device.role==="barcode_scanner").map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>
         </>}
-        <button disabled={!stationName||!stationKey||(stationMode==="payment"&&!stationReceiptPrinterId)} onClick={()=>void guarded({action:"save_payment_station",name:stationName,stationKey,stationMode,receiptPrinterId:stationReceiptPrinterId||null,paymentTerminalId:stationPaymentTerminalId||null,giftCardReaderId:stationGiftReaderId||null},"POS station saved.").then(saved=>{if(saved){setStationName("");setStationKey("")}})}>ADD STATION</button>
+        <button disabled={!stationName||!stationKey||(stationMode==="payment"&&!stationReceiptPrinterId)} onClick={()=>void guarded({action:"save_payment_station",name:stationName,stationKey,stationMode,receiptPrinterId:stationReceiptPrinterId||null,paymentTerminalId:stationPaymentTerminalId||null,giftCardReaderId:stationGiftReaderId||null,phoneCardPaymentsEnabled:stationPhonePayments,customerDisplayEnabled:stationCustomerDisplay,sharedRegisterKey:stationRegisterKey},"POS station saved.").then(saved=>{if(saved){setStationName("");setStationKey("")}})}>ADD STATION</button>
       </div>
-      <div className="posStationCards">{data?.paymentStations.map(station=><article key={station.id} className={assignedStationKey===station.station_key?"activeStation":""}><div><strong>{station.name}</strong><span>{station.station_mode==="payment"?"PAYMENT REGISTER":"ORDER-TAKING REGISTER"}{assignedStationKey===station.station_key?" · THIS POS":""}</span></div><label>STATION KEY<code>{station.station_key}</code></label><small>{station.receipt_printer_name?`Till: ${station.receipt_printer_name}`:"No till assigned"}{station.payment_terminal_name?` · Terminal: ${station.payment_terminal_name}`:""}{station.gift_card_reader_name?` · Gift reader: ${station.gift_card_reader_name}`:""}</small><div className="posTools"><button onClick={()=>void navigator.clipboard.writeText(station.station_key).then(()=>setMessage(`Copied station key: ${station.station_key}`))}>COPY KEY</button><button onClick={()=>{localStorage.setItem("corner-ops-station-key",station.station_key);setAssignedStationKey(station.station_key);setMessage(`${station.name} is now assigned to this POS. Reload the POS to apply it.`)}}>USE ON THIS POS</button><a className="button" target="_blank" href={`/display/deli?station=${encodeURIComponent(station.station_key)}`}>OPEN CUSTOMER DISPLAY</a></div></article>)}{data&&data.paymentStations.length===0&&<div className="noticeBar">No POS registers exist yet. Enter a station name and key above, choose its mode and hardware, then select ADD STATION.</div>}</div>
+      <div className="posStationCards">{data?.paymentStations.map(station=><article key={station.id} className={assignedStationKey===station.station_key?"activeStation":""}><div><strong>{station.name}</strong><span>{station.station_mode==="payment"?"FRONT PAYMENT REGISTER":"BACK ORDER-TAKING POS"}{assignedStationKey===station.station_key?" · THIS POS":""}</span></div><label>STATION KEY<code>{station.station_key}</code></label><small>{station.shared_register_key?`Register: ${station.shared_register_key}`:"No shared register key"}{station.phone_card_payments_enabled?" · Phone card payments enabled":""}{station.customer_display_enabled?" · CDS enabled":""}{station.receipt_printer_name?` · Printer: ${station.receipt_printer_name}`:""}{station.payment_terminal_name?` · Terminal: ${station.payment_terminal_name}`:""}</small><div className="posTools"><button onClick={()=>{setStationName(station.name);setStationKey(station.station_key);setStationMode(station.station_mode);setStationReceiptPrinterId(station.receipt_printer_id||"");setStationPaymentTerminalId(station.payment_terminal_id||"");setStationGiftReaderId(station.gift_card_reader_id||"");setStationPhonePayments(station.phone_card_payments_enabled);setStationCustomerDisplay(station.customer_display_enabled);setStationRegisterKey(station.shared_register_key||"");window.scrollTo({top:0,behavior:"smooth"})}}>CONFIGURE</button><button onClick={()=>void navigator.clipboard.writeText(station.station_key).then(()=>setMessage(`Copied station key: ${station.station_key}`))}>COPY KEY</button><button onClick={()=>{localStorage.setItem("corner-ops-station-key",station.station_key);setAssignedStationKey(station.station_key);setMessage(`${station.name} is now assigned to this POS. Reload the POS to apply it.`)}}>USE ON THIS POS</button>{station.customer_display_enabled&&<a className="button" target="_blank" href={`/display/deli?station=${encodeURIComponent(station.station_key)}`}>OPEN CUSTOMER DISPLAY</a>}</div></article>)}{data&&data.paymentStations.length===0&&<div className="noticeBar">No POS registers exist yet. Enter a station name and key above, choose its mode and hardware, then select ADD STATION.</div>}</div>
       <h3>Printer routing</h3>
       <p>
         Kitchen printers can be routed by all items, stable item/category ID, or

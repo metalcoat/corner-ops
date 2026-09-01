@@ -178,6 +178,9 @@ type PosStationProfile = {
   name: string;
   station_key: string;
   station_mode: "payment" | "order_taker";
+  phone_card_payments_enabled?: boolean;
+  customer_display_enabled?: boolean;
+  shared_register_key?: string;
   receipt_printer_id?: string | null;
   payment_terminal_id?: string | null;
 };
@@ -4797,7 +4800,7 @@ export default function PosClient({
                   <section className="posOrderTakerPaymentNotice">
                     <strong>ORDER-TAKING STATION</strong>
                     <span>
-                      Payments are handled at the designated front register.
+                      {stationProfile.phone_card_payments_enabled ? "Phone card payments can be taken here. Cash and in-person payments go to the front register." : "Payments are handled at the designated front register."}
                     </span>
                     <button
                       type="button"
@@ -4927,7 +4930,7 @@ export default function PosClient({
                     disabled={
                       paymentBusy ||
                       !helcimStatus?.checkoutEnabled ||
-                      stationProfile?.station_mode === "order_taker"
+                      (stationProfile?.station_mode === "order_taker" && !stationProfile.phone_card_payments_enabled)
                     }
                     onClick={chooseCredit}
                   >
@@ -4958,7 +4961,7 @@ export default function PosClient({
                     type="button"
                     disabled={
                       paymentBusy ||
-                      stationProfile?.station_mode === "order_taker"
+                      (stationProfile?.station_mode === "order_taker" && !stationProfile.phone_card_payments_enabled)
                     }
                     onClick={() => void commitTestCard()}
                   >
