@@ -6,6 +6,7 @@ import ItemCancellationPanel from "./item-cancellation-panel";
 import { formatOrderModifier } from "@/lib/ordering-line-format";
 type Order = {
   id: string;
+  customer_id?: string | null;
   display_number: string;
   status: string;
   payment_status: string;
@@ -55,6 +56,7 @@ export default function OrderCenterClient() {
     [clearEnabled, setClearEnabled] = useState(false),
     [clearBusy, setClearBusy] = useState(false),
     [cancelItem, setCancelItem] = useState<any>(null);
+  const [creditAmount,setCreditAmount]=useState(""),[creditReason,setCreditReason]=useState(""),[creditBusy,setCreditBusy]=useState(false);
   useEffect(() => {
     fetch("/api/pos/session", { cache: "no-store" })
       .then((r) => r.json())
@@ -101,6 +103,7 @@ export default function OrderCenterClient() {
     paid = orders.filter((o) =>
       o.status === "cancelled" || ["paid", "refunded"].includes(o.payment_status),
     );
+  const searchingHistory = query.trim().length > 0;
   async function details(order: Order) {
     const r = await fetch(`/api/ordering/order-center/${order.id}`);
     const b = await r.json();
@@ -229,6 +232,11 @@ export default function OrderCenterClient() {
     } finally {
       setClearBusy(false);
     }
+  }
+  async function issueCredit(order:Order){
+    if(!order.customer_id)return setError("This order must be attached to a customer account before credit can be issued.");
+    setCreditBusy(true);setError("");
+    try{const response=await fetch("/api/ordering/customer-credits",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({customerId:order.customer_id,orderId:order.id,amountCents:Math.round(Number(creditAmount)*100),reason:creditReason})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not issue credit.");setCreditAmount("");setCreditReason("");setError(`Account credit issued. Available balance: ${money(Number(body.balanceCents||0))}.`)}catch(cause){setError(cause instanceof Error?cause.message:"Could not issue credit.")}finally{setCreditBusy(false)}
   }
   function move(days: number) {
     const d = new Date(`${date}T12:00:00`);
@@ -362,14 +370,14 @@ export default function OrderCenterClient() {
         )}
       </div>
       {error && !selected && <p role="alert">{error}</p>}
-      {view === "date" &&
+      {searchingHistory ? section("SEARCH RESULTS · LAST 60 DAYS", orders) : <>{view === "date" &&
         date === isoDate(new Date()) &&
         section("OVERDUE UNPAID", overdue)}
       {section(
         view === "date" ? "TODAY OPEN / UNPAID" : "ALL OPEN / UNPAID",
         open,
       )}
-      {view === "date" && section("TODAY PAID / CLOSED", paid, true)}
+      {view === "date" && section("TODAY PAID / CLOSED", paid, true)}</>}
       {selected && (
         <div
           className="ocBackdrop"
@@ -480,6 +488,7 @@ export default function OrderCenterClient() {
                 )}
               </div>
             )}
+            {session.session?.posRole !== "employee" && <form className="ocVoidForm" onSubmit={(event)=>{event.preventDefault();void issueCredit(selected)}}><h3>Customer account credit</h3><p>Use this when the store owes this customer credit because of a problem with this order. It follows their phone-linked customer account.</p><label>Credit amount<input type="number" inputMode="decimal" min="0.01" step="0.01" value={creditAmount} onChange={event=>setCreditAmount(event.target.value)} /></label><label>Reason<textarea maxLength={500} value={creditReason} onChange={event=>setCreditReason(event.target.value)} placeholder="What went wrong?" /></label><button className="primary" disabled={creditBusy||!creditAmount||creditReason.trim().length<3}>{creditBusy?"ISSUING…":"ISSUE ACCOUNT CREDIT"}</button></form>}
             {session.session?.posRole !== "employee" &&
               [
                 "draft",

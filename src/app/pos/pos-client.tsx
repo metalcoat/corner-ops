@@ -81,6 +81,7 @@ function cartLineConfiguration(line: CartLine) {
 function appendOrIncrementCartLine(current: CartLine[], line: CartLine) {
   return consolidateQuantities([...current, line], cartLineConfiguration);
 }
+function sodaLogoUrl(name:string){if(/diet pepsi/i.test(name))return "/api/ordering/brand-logo/diet_pepsi";if(/pepsi/i.test(name))return "/api/ordering/brand-logo/pepsi";if(/baja blast|mountain dew|code red/i.test(name))return "/api/ordering/brand-logo/mountain_dew";if(/starry/i.test(name))return "/api/ordering/brand-logo/starry";if(/brisk/i.test(name))return "/api/ordering/brand-logo/brisk";if(/mug root beer/i.test(name))return "/api/ordering/brand-logo/root_beer";return ""}
 
 type MenuPayload = {
   business: Business;
@@ -197,6 +198,7 @@ type PayableCheck = {
 type SplitLine = PayableCheck["lines"][number];
 type SplitDrag = { line: SplitLine; x: number; y: number; startX: number; startY: number; moved: boolean };
 type PaidReceiptPrompt = { orderId: string; displayNumber: string; changeDueCents: number };
+type EmployeeMealLine = { itemId: string; name: string; quantity: number };
 
 type AddressSuggestion = {
   id: string;
@@ -258,6 +260,7 @@ type PosCustomer = {
   phones: PosCustomerPhone[];
   addresses: PosCustomerAddress[];
 };
+type CustomerCredit = { balanceCents: number; reason: string };
 type BarcodeMapping = {
   id: string;
   barcode: string;
@@ -553,6 +556,7 @@ export default function PosClient({
   const [configuringItem, setConfiguringItem] =
     useState<OrderingMenuItemWithVariants | null>(null);
   const [selectedVariantId, setSelectedVariantId] = useState("");
+  const [partySaladGuests, setPartySaladGuests] = useState("1");
   const [modifierSelections, setModifierSelections] = useState<
     Record<string, string[]>
   >({});
@@ -685,10 +689,17 @@ export default function PosClient({
   const [payableChecks, setPayableChecks] = useState<PayableCheck[]>([]);
   const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
   const [splitOpen, setSplitOpen] = useState(false);
+  const [splitPaymentReady, setSplitPaymentReady] = useState(false);
   const [splitColumns, setSplitColumns] = useState<SplitLine[][]>([[], [], []]);
   const [splitSelectedItemId, setSplitSelectedItemId] = useState("");
   const [splitDrag, setSplitDrag] = useState<SplitDrag | null>(null);
   const [paidReceiptPrompt, setPaidReceiptPrompt] = useState<PaidReceiptPrompt | null>(null);
+  const [employeeMealOpen, setEmployeeMealOpen] = useState(false);
+  const [employeeMealLines, setEmployeeMealLines] = useState<EmployeeMealLine[]>([]);
+  const [employeeMealSearch, setEmployeeMealSearch] = useState("");
+  const [employeeMealNote, setEmployeeMealNote] = useState("");
+  const [employeeMealBusy, setEmployeeMealBusy] = useState(false);
+  const [employeeMealMessage, setEmployeeMealMessage] = useState("");
   const [cashTender, setCashTender] = useState("");
   const [receiptPrinters, setReceiptPrinters] = useState<
     Array<{
@@ -807,6 +818,7 @@ export default function PosClient({
     [quickCustomerBusy, setQuickCustomerBusy] = useState(false),
     [quickCustomerError, setQuickCustomerError] = useState("");
   const [selectedCustomerPhoneId, setSelectedCustomerPhoneId] = useState("");
+  const [customerCredit, setCustomerCredit] = useState<CustomerCredit>({ balanceCents: 0, reason: "" });
   const [selectedCustomerAddressId, setSelectedCustomerAddressId] =
     useState("");
   const [orderOrigin, setOrderOrigin] = useState<"pos" | "phone">("pos");
@@ -1183,18 +1195,24 @@ export default function PosClient({
   }
 
   async function eightySixItem(item: OrderingMenuItemWithVariants) {
-    if (!window.confirm(`86 ${item.name}? This removes it from every ordering channel and emails management.`)) return;
+    const returning = !item.available;
+    if (!window.confirm(returning ? `Return ${item.name}? This makes it orderable everywhere again and emails management.` : `86 ${item.name}? This removes it from every ordering channel and emails management.`)) return;
     setMenuError("");
     try {
-      const response = await fetch("/api/ordering/menu/86", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ itemId: item.id }) });
+      const response = await fetch("/api/ordering/menu/86", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ itemId: item.id, available: returning }) });
       const payload = await response.json() as { error?: string; emailSent?: boolean };
       if (!response.ok) throw new Error(payload.error || "The item could not be 86'd.");
-      setMenu((current) => current.map((category) => ({ ...category, items: category.items.map((candidate) => candidate.id === item.id ? { ...candidate, available: false } : candidate) })));
-      setCartNotice(`${item.name} is now 86'd everywhere.${payload.emailSent ? " Management was emailed." : " Management email could not be confirmed."}`);
+      setMenu((current) => current.map((category) => ({ ...category, items: category.items.map((candidate) => candidate.id === item.id ? { ...candidate, available: returning } : candidate) })));
+      setCartNotice(`${item.name} is now ${returning ? "active again" : "86'd"} everywhere.${payload.emailSent ? " Management was emailed." : " Management email could not be confirmed."}`);
     } catch (error) {
       setMenuError(error instanceof Error ? error.message : "The item could not be 86'd.");
     }
   }
+
+  function changeEmployeeMealItem(item: OrderingMenuItemWithVariants, delta: number) {
+    setEmployeeMealLines((current) => {const existing=current.find((line)=>line.itemId===item.id),quantity=(existing?.quantity||0)+delta;if(quantity<=0)return current.filter((line)=>line.itemId!==item.id);if(existing)return current.map((line)=>line.itemId===item.id?{...line,quantity:Math.min(25,quantity)}:line);return[...current,{itemId:item.id,name:item.name,quantity:1}];});
+  }
+  async function submitEmployeeMeal(){if(!employeeMealLines.length||employeeMealBusy)return;setEmployeeMealBusy(true);setEmployeeMealMessage("");try{const response=await fetch("/api/ordering/employee-meals",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({lines:employeeMealLines,note:employeeMealNote})}),payload=await response.json() as {error?:string;employeeName?:string;unmappedItems?:string[]};if(!response.ok)throw new Error(payload.error||"Employee meal could not be recorded.");const unmapped=payload.unmappedItems||[];setEmployeeMealMessage(unmapped.length?`Meal recorded for ${payload.employeeName}. Inventory mapping is still needed for: ${unmapped.join(", ")}.`:`Meal recorded for ${payload.employeeName} and removed from inventory.`);setEmployeeMealLines([]);setEmployeeMealNote("");}catch(error){setEmployeeMealMessage(error instanceof Error?error.message:"Employee meal could not be recorded.");}finally{setEmployeeMealBusy(false);}}
 
   useEffect(() => {
     if (!session?.authenticated) return;
@@ -1250,9 +1268,9 @@ export default function PosClient({
   }
   const visibleItems = useMemo(() => {
     const query = menuSearch.trim().toLowerCase();
-    if (!query) return (activeCategory?.items || []).filter((item) => item.available);
+    if (!query) return activeCategory?.items || [];
     return allItems.filter((item) =>
-      item.available && [
+      [
         item.name,
         item.description,
         ...item.variants.flatMap((variant) => [
@@ -1491,7 +1509,8 @@ export default function PosClient({
   const selectedVariant =
     configuringItem?.variants.find(
       (variant) => variant.id === selectedVariantId,
-    ) || null;
+      ) || null;
+  const partySalad = Boolean(configuringItem?.description.includes("1/3 lb per person"));
   const modifierGroupVisible = (group: OrderingModifierGroupView) => {
     if (group.presentationContext === "hidden") return false;
     if (group.presentationContext === "combo_trigger")
@@ -1642,6 +1661,8 @@ export default function PosClient({
         variant
       : variant;
     setSelectedVariantId(lineVariant?.id || "");
+    const existingGuests=lineVariant?.name.match(/^Feeds (\d+)/)?.[1];
+    setPartySaladGuests(existingGuests||"1");
     setModifierSelections(
       line
         ? cloneSelections(line.modifierSelections)
@@ -1950,6 +1971,14 @@ export default function PosClient({
       next.phones?.[0];
     setSelectedCustomerPhoneId(phone?.id || "");
     setSavedDraft(null);
+    void fetch(`/api/ordering/customer-credits?customerId=${encodeURIComponent(next.id)}`,{cache:"no-store"}).then(async response=>{const body=await response.json();if(response.ok)setCustomerCredit({balanceCents:Number(body.balanceCents||0),reason:String(body.reason||"")})});
+  }
+
+  async function applyCustomerCredit() {
+    const draft=savedDraft||activeTab;
+    if(!draft||paymentBusy)return;
+    setPaymentBusy(true);setCheckoutError("");
+    try{const response=await fetch("/api/ordering/customer-credits",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"redeem",orderId:draft.id,checkId:selectedCheckId})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not apply customer credit.");setCustomerCredit(body.credit);await selectCheck(selectedCheckId||payableChecks[0]?.id);const checksResponse=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/checks`),checksBody=await checksResponse.json();if(checksResponse.ok)setPayableChecks(checksBody.checks||[])}catch(cause){setCheckoutError(cause instanceof Error?cause.message:"Could not apply customer credit.")}finally{setPaymentBusy(false)}
   }
   async function acknowledgeIncomingCall(
     call: IncomingDeliCall,
@@ -2552,7 +2581,7 @@ export default function PosClient({
 
   async function selectCheck(checkId: string) {
     const draft = savedDraft || activeTab;
-    if (!draft) return;
+    if (!draft) return null;
     const response = await fetch(
       `/api/ordering/orders/${encodeURIComponent(draft.id)}/payments?business=${encodeURIComponent(business)}&checkId=${encodeURIComponent(checkId)}`,
     );
@@ -2561,7 +2590,7 @@ export default function PosClient({
     };
     if (!response.ok) {
       setCheckoutError(payload.error || "Could not load check.");
-      return;
+      return null;
     }
     setSelectedCheckId(checkId);
     setCheckoutState(payload);
@@ -2572,6 +2601,7 @@ export default function PosClient({
         ) / 100
       ).toFixed(2),
     );
+    return payload;
   }
 
   async function splitOne(checkId: string, orderItemId: string) {
@@ -2649,10 +2679,12 @@ export default function PosClient({
     });
     setSplitColumns(columns);
     setSplitSelectedItemId("");
+    setSplitPaymentReady(payableChecks.length > 1);
     setSplitOpen(true);
   }
 
   function moveSplitItem(orderItemId: string, targetIndex: number) {
+    if (splitPaymentReady) return;
     setSplitColumns((current) => {
       const next = current.map((column) => [...column]);
       let moving: SplitLine | undefined;
@@ -2696,7 +2728,7 @@ export default function PosClient({
       const payload = await response.json() as { checks?: PayableCheck[]; error?: string };
       if (!response.ok || !payload.checks?.length) throw new Error(payload.error || "Could not save the split order.");
       setPayableChecks(payload.checks);
-      setSplitOpen(false);
+      setSplitPaymentReady(true);
       await selectCheck(payload.checks[0].id);
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : "Could not save the split order.");
@@ -2760,6 +2792,7 @@ export default function PosClient({
     tenderType: "cash" | "card" | "gift_card",
     stateOverride?: CheckoutState,
     amountOverride?: number,
+    checkIdOverride?: string,
   ) {
     const draft = savedDraft || activeTab;
     const activeCheckout = stateOverride || checkoutState;
@@ -2792,7 +2825,7 @@ export default function PosClient({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             business,
-            checkId: selectedCheckId,
+            checkId: checkIdOverride || selectedCheckId,
             tenderType,
             amountTenderedCents,
             giftCardNumber: giftCardNumberFromInput(giftCardNumber),
@@ -2826,7 +2859,7 @@ export default function PosClient({
       }
       setPayableChecks((checks) =>
         checks.map((check) =>
-          check.id === selectedCheckId && payload.check
+          check.id === (checkIdOverride || selectedCheckId) && payload.check
             ? { ...check, ...payload.check }
             : check,
         ),
@@ -2948,6 +2981,7 @@ export default function PosClient({
   async function startHelcimPayment(
     requestedOverride?: number,
     stateOverride?: CheckoutState,
+    checkIdOverride?: string,
   ) {
     const draft = savedDraft || activeTab;
     const activeCheckout = stateOverride || checkoutState;
@@ -3002,7 +3036,7 @@ export default function PosClient({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             action: "initialize",
-            checkId: selectedCheckId,
+            checkId: checkIdOverride || selectedCheckId,
             amountCents: requestedCents,
           }),
         },
@@ -3094,7 +3128,7 @@ export default function PosClient({
       );
       setPayableChecks((checks) =>
         checks.map((check) =>
-          check.id === selectedCheckId && result.check
+          check.id === (checkIdOverride || selectedCheckId) && result.check
             ? { ...check, ...result.check }
             : check,
         ),
@@ -3109,6 +3143,30 @@ export default function PosClient({
       setHelcimOpen(false);
       setPaymentBusy(false);
     }
+  }
+
+  async function paySplitCheck(check: PayableCheck, tenderType: "cash" | "card" | "gift_card") {
+    if (paymentBusy || Number(check.amount_due_cents) <= 0) return;
+    const state = await selectCheck(check.id);
+    if (!state) return;
+    const due = Number(state.check?.amount_due_cents ?? state.order.amount_due_cents);
+    setCashTender((due / 100).toFixed(2));
+    setCdsTenderType(tenderType);
+    if (tenderType === "cash") {
+      await commitPayment("cash", state, due, check.id);
+      return;
+    }
+    if (tenderType === "gift_card" && !validGiftCardInput(giftCardNumber)) {
+      setCheckoutError("Enter the gift card number above the checks first.");
+      giftCardInputRef.current?.focus();
+      return;
+    }
+    if (assignedStationKey) return;
+    if (tenderType === "card" && stationProfile?.payment_terminal_id) {
+      await startHelcimPayment(due, state, check.id);
+      return;
+    }
+    setTipPromptOpen(true);
   }
 
   async function applyTipAndStartCard(tipCents: number) {
@@ -3441,6 +3499,7 @@ export default function PosClient({
             {posEmployee && (
               <span className="posEmployeeName">{posEmployee.name}</span>
             )}
+            {business === "Corner Deli" && posEmployee && <button type="button" className="posEmployeeMealButton" onClick={()=>{setEmployeeMealMessage("");setEmployeeMealOpen(true)}}>MEAL</button>}
             {config.utilities.map((utility) =>
               business === "Corner Deli" && utility === "orders" ? (
                 <a key={utility} href="/pos/deli/orders">
@@ -3616,6 +3675,7 @@ export default function PosClient({
                       : `${program.progress} / ${program.quantityRequired}`}
                   </small>
                 ))}
+                {customerCredit.balanceCents>0&&<small className="posCustomerCredit">CREDIT {money(customerCredit.balanceCents)} · {customerCredit.reason||"Customer account credit"}</small>}
               </>
             ) : (
               <>
@@ -3905,16 +3965,15 @@ export default function PosClient({
                   key={item.id}
                   type="button"
                   className={`posItemButton ${item.available ? "" : "soldOut"}`}
-                  disabled={!item.available}
                   onPointerDown={() => { item86Triggered.current = false; item86Timer.current = window.setTimeout(() => { item86Triggered.current = true; void eightySixItem(item); }, 900); }}
                   onPointerUp={() => { if (item86Timer.current !== null) window.clearTimeout(item86Timer.current); item86Timer.current = null; }}
                   onPointerCancel={() => { if (item86Timer.current !== null) window.clearTimeout(item86Timer.current); item86Timer.current = null; }}
                   onPointerLeave={() => { if (item86Timer.current !== null) window.clearTimeout(item86Timer.current); item86Timer.current = null; }}
-                  onClick={(event) => { if (item86Triggered.current) { event.preventDefault(); item86Triggered.current = false; return; } selectItem(item); }}
+                  onClick={(event) => { if (item86Triggered.current) { event.preventDefault(); item86Triggered.current = false; return; } if(item.available)selectItem(item); }}
                 >
-                  {item.imageUrl && (
+                  {(item.imageUrl || sodaLogoUrl(item.name)) && (
                     <img
-                      src={item.imageUrl}
+                      src={item.imageUrl || sodaLogoUrl(item.name)}
                       alt={item.imageAlt}
                       loading="lazy"
                     />
@@ -3925,7 +3984,7 @@ export default function PosClient({
                       ? `From ${money(displayPrice)}`
                       : money(displayPrice)}
                   </span>
-                  {!item.available && <small>SOLD OUT</small>}
+                  {!item.available && <small>86'D · HOLD TO RETURN</small>}
                 </button>
               );
             })}
@@ -4838,6 +4897,7 @@ export default function PosClient({
                   className="posTenderButtons"
                   aria-label="Choose payment type"
                 >
+                  {customerCredit.balanceCents>0&&<button type="button" className="posApplyCredit" disabled={paymentBusy} onClick={()=>void applyCustomerCredit()}>APPLY {money(Math.min(customerCredit.balanceCents,checkoutDueCents))} CREDIT</button>}
                   <button
                     type="button"
                     disabled={
@@ -4991,14 +5051,18 @@ export default function PosClient({
           <section className="posSplitDialog" role="dialog" aria-modal="true" aria-labelledby="split-order-title">
             <header>
               <div><small>ORDER #{(savedDraft || activeTab)?.displayNumber}</small><h2 id="split-order-title">Split order</h2></div>
-              <button type="button" onClick={() => setSplitOpen(false)}>CANCEL</button>
+              <button type="button" onClick={() => setSplitOpen(false)}>BACK TO ORDER</button>
             </header>
-            <p>Drag items between checks. On a touchscreen, tap an item and then tap “Move selected here.” Empty checks are not created.</p>
+            <p>{splitPaymentReady ? "Take payment under each check. This window stays open until every check is paid or you return to the order." : "Drag items between checks. On a touchscreen, tap an item and then tap “Move selected here.” Empty checks are not created."}</p>
+            {splitPaymentReady && <label className="posSplitGiftCard">Gift card number (when using Gift Card)<input ref={giftCardInputRef} type="text" inputMode="numeric" autoComplete="off" value={giftCardNumber} onChange={(event) => setGiftCardNumber(event.target.value)} /></label>}
             <div className="posSplitGrid">
-              {splitColumns.map((column, columnIndex) => (
-                <section key={columnIndex} data-split-column={columnIndex} className="posSplitColumn">
-                  <header><strong>CHECK {columnIndex + 1}</strong><span>{money(column.reduce((sum, line) => sum + Number(line.allocated_cents), 0))}</span></header>
-                  <button type="button" className="posSplitMoveHere" disabled={!splitSelectedItemId} onClick={() => moveSplitItem(splitSelectedItemId, columnIndex)}>MOVE SELECTED HERE</button>
+              {splitColumns.map((column, columnIndex) => {
+                const check = payableChecks[columnIndex];
+                const paid = splitPaymentReady && check && Number(check.amount_due_cents) <= 0;
+                return (
+                <section key={columnIndex} data-split-column={columnIndex} className={`posSplitColumn${paid ? " paid" : ""}`}>
+                  <header><strong>CHECK {columnIndex + 1}</strong><span>{splitPaymentReady && check ? `${money(Number(check.amount_due_cents))} DUE` : money(column.reduce((sum, line) => sum + Number(line.allocated_cents), 0))}</span></header>
+                  {!splitPaymentReady && <button type="button" className="posSplitMoveHere" disabled={!splitSelectedItemId} onClick={() => moveSplitItem(splitSelectedItemId, columnIndex)}>MOVE SELECTED HERE</button>}
                   <div className="posSplitItems">
                     {column.map((line) => (
                       <button type="button" key={line.order_item_id} className={splitSelectedItemId === line.order_item_id ? "selected" : ""} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setSplitDrag({ line, x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, moved: false }); }} onPointerMove={(event) => { setSplitDrag((current) => current?.line.order_item_id === line.order_item_id ? { ...current, x: event.clientX, y: event.clientY, moved: current.moved || Math.hypot(event.clientX - current.startX, event.clientY - current.startY) > 6 } : current); }} onPointerUp={(event) => finishSplitDrag(event, line)} onPointerCancel={() => setSplitDrag(null)}>
@@ -5007,12 +5071,13 @@ export default function PosClient({
                     ))}
                     {!column.length && <span className="posSplitEmpty">Drop items here</span>}
                   </div>
+                  {splitPaymentReady && check && <div className="posSplitCheckout">{paid ? <strong>PAID</strong> : <><button type="button" disabled={paymentBusy} onClick={() => void paySplitCheck(check, "cash")}>CASH</button><button type="button" disabled={paymentBusy || !helcimStatus?.checkoutEnabled} onClick={() => void paySplitCheck(check, "card")}>CREDIT</button><button type="button" disabled={paymentBusy} onClick={() => void paySplitCheck(check, "gift_card")}>GIFT CARD</button></>}</div>}
                 </section>
-              ))}
+              )})}
             </div>
             {splitDrag?.moved && <div className="posSplitDragGhost" style={{ left: splitDrag.x, top: splitDrag.y }} aria-hidden="true"><strong>{splitDrag.line.quantity}× {splitDrag.line.item_name_snapshot}</strong><span>{money(Number(splitDrag.line.allocated_cents))}</span></div>}
             {checkoutError && <div className="posCheckoutInlineError" role="alert">{checkoutError}</div>}
-            <footer><button type="button" className="primary" disabled={paymentBusy} onClick={() => void saveSplitOrder()}>{paymentBusy ? "SAVING…" : "SAVE SPLIT & RETURN TO PAYMENT"}</button></footer>
+            <footer>{splitPaymentReady ? <button type="button" onClick={() => setSplitOpen(false)}>BACK TO ORDER</button> : <button type="button" className="primary" disabled={paymentBusy} onClick={() => void saveSplitOrder()}>{paymentBusy ? "SAVING…" : "SAVE SPLIT & START PAYMENT"}</button>}</footer>
           </section>
         </div>
       )}
@@ -5025,6 +5090,18 @@ export default function PosClient({
           <button type="button" disabled={paymentBusy} onClick={() => void printFinalReceipt(true)}>PRINT ITEMIZED</button>
           <button type="button" disabled={paymentBusy} onClick={() => setPaidReceiptPrompt(null)}>NO RECEIPT</button>
         </aside>
+      )}
+      {employeeMealOpen && (
+        <div className="posModalBackdrop posTopModalBackdrop" role="presentation" onMouseDown={(event)=>{if(event.target===event.currentTarget)setEmployeeMealOpen(false)}}>
+          <section className="posEmployeeMealDialog" role="dialog" aria-modal="true" aria-labelledby="employee-meal-title">
+            <header><div><small>PIN EMPLOYEE · {posEmployee?.name}</small><h2 id="employee-meal-title">Employee meal</h2></div><button type="button" onClick={()=>setEmployeeMealOpen(false)}>CLOSE</button></header>
+            <p>This records who took each item. Linked ingredients or stock items are deducted automatically.</p>
+            <input type="search" value={employeeMealSearch} onChange={(event)=>setEmployeeMealSearch(event.target.value)} placeholder="Search menu items" autoFocus />
+            <div className="posEmployeeMealBody"><div className="posEmployeeMealItems">{allItems.filter((item)=>item.available&&(!employeeMealSearch.trim()||item.name.toLowerCase().includes(employeeMealSearch.trim().toLowerCase()))).slice(0,80).map((item)=><button type="button" key={item.id} onClick={()=>changeEmployeeMealItem(item,1)}>{item.name}</button>)}</div><aside><h3>Taken</h3>{employeeMealLines.length?employeeMealLines.map((line)=><div key={line.itemId}><span>{line.name}</span><button type="button" onClick={()=>{const item=allItems.find(candidate=>candidate.id===line.itemId);if(item)changeEmployeeMealItem(item,-1)}}>−</button><strong>{line.quantity}</strong><button type="button" onClick={()=>{const item=allItems.find(candidate=>candidate.id===line.itemId);if(item)changeEmployeeMealItem(item,1)}}>+</button></div>):<p>No items selected.</p>}<label>Note<textarea value={employeeMealNote} onChange={(event)=>setEmployeeMealNote(event.target.value)} maxLength={500}/></label></aside></div>
+            {employeeMealMessage&&<div className="posCheckoutInlineError" role="status">{employeeMealMessage}</div>}
+            <footer><button type="button" className="primary" disabled={!employeeMealLines.length||employeeMealBusy} onClick={()=>void submitEmployeeMeal()}>{employeeMealBusy?"RECORDING…":"RECORD EMPLOYEE MEAL"}</button></footer>
+          </section>
+        </div>
       )}
       {tabsOpen && (
         <div
@@ -5187,7 +5264,7 @@ export default function PosClient({
               </button>
             </header>
             <div className="posConfigBody">
-              {configuringItem.variants.filter((variant) => variant.available)
+              {partySalad ? <fieldset id="variant-choice" className={!selectedVariant ? "needsSelection" : ""}><legend>How many people?<small>Uses 1/3 lb per person and rounds up to the next 0.25 lb</small></legend><div className="posPartySaladCalculator"><input type="number" inputMode="numeric" min="1" max="120" value={partySaladGuests} onChange={(event)=>{const value=event.target.value,set=Number(value);setPartySaladGuests(value);const match=configuringItem.variants.find(variant=>variant.name.startsWith(`Feeds ${set} ·`));setSelectedVariantId(match?.id||"")}} />{selectedVariant&&<strong>{selectedVariant.name.replace(/^Feeds \d+ · /,"")} · {money(selectedVariant.basePriceCents)}</strong>}</div></fieldset> : configuringItem.variants.filter((variant) => variant.available)
                 .length > 1 && (
                 <fieldset
                   id="variant-choice"

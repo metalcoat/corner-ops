@@ -8,7 +8,7 @@ export function businessDate(value = new Date(), timezone = BUSINESS_TIMEZONE): 
   return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
 }
 
-export async function listOrders(input: { business: OrderingBusiness; date?: string; allOpen?: boolean; query?: string }) {
+export async function listOrders(input: { business: OrderingBusiness; date?: string; allOpen?: boolean; query?: string; searchDays?: number }) {
   await ensureOrderingCustomerSchema();
   await ensureOrderingAccountSchema();
   const q = String(input.query || "").trim();
@@ -19,6 +19,8 @@ export async function listOrders(input: { business: OrderingBusiness; date?: str
   const date = input.date || businessDate(new Date(), timezone);
   const openOnly = Boolean(input.allOpen);
   const includeOverdue = !openOnly && date === businessDate(new Date(), timezone);
+  const searchDays = Math.max(1, Math.min(365, Number(input.searchDays || 60)));
+  const searchingHistory = q.length > 0;
   return getSql()`
     SELECT o.id,o.display_number,o.status,o.payment_status,o.service_type,o.source,o.order_origin,
       o.total_cents,o.paid_cents,o.amount_due_cents,o.created_at,o.updated_at,o.scheduled_for,o.voided_at,o.void_reason,
@@ -32,7 +34,7 @@ export async function listOrders(input: { business: OrderingBusiness; date?: str
     LEFT JOIN LATERAL (SELECT display_phone FROM ordering_customer_phones WHERE customer_id=c.id ORDER BY is_primary DESC,created_at LIMIT 1) p ON TRUE
     LEFT JOIN ordering_order_delivery_addresses a ON a.order_id=o.id
     WHERE o.business=${input.business}
-      AND (CASE WHEN ${openOnly} THEN o.payment_status NOT IN ('paid','refunded') AND o.status <> 'cancelled' ELSE ((o.created_at AT TIME ZONE ${timezone})::date=${date}::date OR (${includeOverdue} AND (o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.payment_status NOT IN ('paid','refunded') AND o.status <> 'cancelled')) END)
+      AND (CASE WHEN ${searchingHistory} THEN o.created_at >= NOW()-(${searchDays}::text||' days')::interval WHEN ${openOnly} THEN o.payment_status NOT IN ('paid','refunded') AND o.status <> 'cancelled' ELSE ((o.created_at AT TIME ZONE ${timezone})::date=${date}::date OR (${includeOverdue} AND (o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.payment_status NOT IN ('paid','refunded') AND o.status <> 'cancelled')) END)
       AND (${q}='' OR o.display_number ILIKE ${like} OR o.first_name_snapshot ILIKE ${like} OR o.last_name_snapshot ILIKE ${like}
         OR trim(o.first_name_snapshot||' '||o.last_name_snapshot) ILIKE ${like} OR c.display_name ILIKE ${like}
         OR regexp_replace(COALESCE(NULLIF(o.phone_snapshot,''),p.display_phone,o.caller_phone),'[^0-9]','','g') LIKE ${digitLike}
