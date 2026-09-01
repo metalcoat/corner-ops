@@ -44,7 +44,7 @@ export default function OrderCenterClient() {
   const router = useRouter();
   const [session, setSession] = useState<PosSessionView | null>(null),
     [date, setDate] = useState(isoDate(new Date())),
-    [view, setView] = useState<"date" | "open">("date"),
+    [view, setView] = useState<"date" | "open" | "future">("date"),
     [query, setQuery] = useState(""),
     [orders, setOrders] = useState<Order[]>([]),
     [selected, setSelected] = useState<Order | null>(null),
@@ -70,7 +70,7 @@ export default function OrderCenterClient() {
   const load = useCallback(async () => {
     if (!session?.authenticated) return;
     const p = new URLSearchParams({
-      view: view === "open" ? "open" : "date",
+      view,
       date,
       q: query,
     });
@@ -104,6 +104,8 @@ export default function OrderCenterClient() {
       o.status === "cancelled" || ["paid", "refunded"].includes(o.payment_status),
     );
   const searchingHistory = query.trim().length > 0;
+  const futureUnpaid = orders.filter((o) => !["paid", "refunded"].includes(o.payment_status));
+  const futurePaid = orders.filter((o) => ["paid", "refunded"].includes(o.payment_status));
   async function details(order: Order) {
     const r = await fetch(`/api/ordering/order-center/${order.id}`);
     const b = await r.json();
@@ -335,6 +337,12 @@ export default function OrderCenterClient() {
           >
             ALL OPEN
           </button>
+          <button
+            onClick={() => setView("future")}
+            className={view === "future" ? "active" : ""}
+          >
+            FUTURE ORDERS
+          </button>
         </nav>
       </header>
       <div className="ocTools">
@@ -370,7 +378,10 @@ export default function OrderCenterClient() {
         )}
       </div>
       {error && !selected && <p role="alert">{error}</p>}
-      {searchingHistory ? section("SEARCH RESULTS · LAST 60 DAYS", orders) : <>{view === "date" &&
+      {searchingHistory ? section("SEARCH RESULTS · LAST 60 DAYS", orders) : view === "future" ? <>
+        {section("FUTURE · UNPAID", futureUnpaid)}
+        {section("FUTURE · PAID", futurePaid, true)}
+      </> : <>{view === "date" &&
         date === isoDate(new Date()) &&
         section("OVERDUE UNPAID", overdue)}
       {section(

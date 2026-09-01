@@ -116,7 +116,7 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     const source = (await sql`SELECT * FROM ordering_payment_transactions WHERE id=${input.transactionId} AND order_id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
     if (!source || source.transaction_type !== "payment" || source.status !== "approved") throw new PaymentConflictError("Approved payment tender was not found.");
     if (source.tender_type === "card" && source.provider && source.provider !== "test") throw new PaymentConflictError(`${source.provider === "mx_merchant" ? "Dharma / MX Merchant" : "Helcim"} card reversals must be approved by the processor before the local payment record is updated.`);
-    const reversed = Number((await sql`SELECT COALESCE(SUM(amount_cents),0) amount FROM ordering_payment_transactions WHERE related_transaction_id=${source.id} AND transaction_type='void' AND status='approved'`)[0].amount);
+    const reversed = Number((await sql`SELECT COALESCE(SUM(amount_cents),0) amount FROM ordering_payment_transactions WHERE related_transaction_id=${source.id} AND transaction_type IN ('void','refund') AND status='approved'`)[0].amount);
     if (amount > Number(source.amount_cents) - reversed) throw new PaymentConflictError("Reversal exceeds the tender's unreversed amount.");
     const order = (await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
     if (!order) throw new PaymentConflictError("Order was not found.");
@@ -141,6 +141,34 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     const version = Number(order.version)+1;
     await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) VALUES(${randomUUID()},${input.orderId},${version},'payment_reversed',${input.actor.type},${input.actor.id},${JSON.stringify({transactionId:reversalId,sourceTransactionId:source.id,tenderType:source.tender_type,amountCents:amount,reason:reversalReason,actorName:input.actor.name,actorRole:input.actor.role,totalPaidCents:newPaid,remainingDueCents:remaining})}::jsonb)`;
     return { ...(await checkoutState(input.orderId,input.business,source.check_id)), duplicate: false };
+  });
+}
+
+export async function settleTenderAsStoreCredit(input: { orderId: string; transactionId: string; refundCents: number; creditCents: number; clientMutationId: string; reason: string; actor: OrderingActor }) {
+  if (!canManagePos(input.actor)) throw new PaymentConflictError("Manager or owner authorization is required to issue refund credit.");
+  const reversalReason = reason(input.reason, "refund credit");
+  const refundCents = cents(input.refundCents, "Refund amount");
+  const creditCents = cents(input.creditCents, "Customer credit amount");
+  if (creditCents > refundCents) throw new PaymentConflictError("Customer credit cannot exceed the original refund amount.");
+  await ensureOrderingGiftCardSchema();
+  return withTransaction(async () => {
+    const sql = getSql();
+    const duplicate = await sql`SELECT id FROM ordering_payment_transactions WHERE business='Corner Deli' AND client_mutation_id=${input.clientMutationId}`;
+    if (duplicate[0]) return { duplicate: true };
+    const source = (await sql`SELECT * FROM ordering_payment_transactions WHERE id=${input.transactionId} AND order_id=${input.orderId} AND business='Corner Deli' FOR UPDATE`)[0];
+    if (!source || source.transaction_type !== "payment" || source.status !== "approved") throw new PaymentConflictError("Approved payment tender was not found.");
+    const reversed = Number((await sql`SELECT COALESCE(SUM(amount_cents),0) amount FROM ordering_payment_transactions WHERE related_transaction_id=${source.id} AND transaction_type IN ('void','refund') AND status='approved'`)[0].amount);
+    if (refundCents > Number(source.amount_cents) - reversed) throw new PaymentConflictError("Refund exceeds the tender's remaining refundable amount.");
+    const order = (await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business='Corner Deli' FOR UPDATE`)[0];
+    if (!order?.customer_id) throw new PaymentConflictError("Attach this order to a customer before issuing credit for next time.");
+    const transactionId = randomUUID();
+    await sql`INSERT INTO ordering_payment_transactions(id,business,order_id,check_id,customer_id,tender_type,transaction_type,status,amount_cents,amount_tendered_cents,provider,related_transaction_id,client_mutation_id,created_by,approved_at,reason,details) VALUES(${transactionId},'Corner Deli',${input.orderId},${source.check_id},${order.customer_id},'store_credit','refund','approved',${refundCents},${creditCents},'corner_ops_store_credit',${source.id},${input.clientMutationId},${input.actor.id},NOW(),${reversalReason},${JSON.stringify({actorName:input.actor.name,actorRole:input.actor.role,sourceTenderType:source.tender_type,creditIssuedCents:creditCents,reducedFromRefundCents:refundCents-creditCents})}::jsonb)`;
+    await sql`INSERT INTO ordering_store_credit_ledger(id,business,customer_id,order_id,entry_type,delta_balance_cents,reason,created_by,approved_by) VALUES(${randomUUID()},'Corner Deli',${order.customer_id},${input.orderId},'refund',${creditCents},${reversalReason},${input.actor.id},${input.actor.name})`;
+    const newPaid = Math.max(0, Number(order.paid_cents) - refundCents), remaining = Math.max(0, Number(order.total_cents) - newPaid);
+    await sql`UPDATE ordering_orders SET paid_cents=${newPaid},amount_due_cents=${remaining},payment_status=CASE WHEN ${newPaid}=0 THEN 'unpaid' WHEN ${remaining}=0 THEN 'paid' ELSE 'partially_paid' END,paid_at=CASE WHEN ${remaining}=0 THEN paid_at ELSE NULL END,version=version+1,updated_at=NOW() WHERE id=${input.orderId}`;
+    if (source.check_id) await sql`UPDATE ordering_checks SET paid_cents=GREATEST(0,paid_cents-${refundCents}),amount_due_cents=LEAST(total_cents,amount_due_cents+${refundCents}),status=CASE WHEN paid_cents-${refundCents}<=0 THEN 'open' WHEN amount_due_cents+${refundCents}>0 THEN 'partially_paid' ELSE 'paid' END,updated_at=NOW() WHERE id=${source.check_id}`;
+    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) SELECT ${randomUUID()},id,version,'refund_issued_as_store_credit',${input.actor.type},${input.actor.id},${JSON.stringify({transactionId,sourceTransactionId:source.id,refundCents,creditCents,reason:reversalReason,actorName:input.actor.name,actorRole:input.actor.role})}::jsonb FROM ordering_orders WHERE id=${input.orderId}`;
+    return { duplicate: false, transactionId, creditCents };
   });
 }
 
