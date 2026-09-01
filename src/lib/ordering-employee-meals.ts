@@ -20,23 +20,32 @@ export async function ensureEmployeeMealSchema() {
   return schemaPromise;
 }
 
+export async function employeeMealEligibility(input:{business:"Corner Deli";actor:OrderingActor}) {
+  await ensureEmployeeMealSchema();
+  await ensureWorkforceSchema();
+  const sql=getSql(),employee=(await sql`SELECT id FROM employees WHERE id=${input.actor.id} AND business=${input.business} AND active=TRUE`)[0];
+  if(!employee)return {eligible:false,error:"The signed-in employee was not found."};
+  const scheduled=(await sql`SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ends_at-starts_at))),0) seconds FROM schedule_shifts WHERE business=${input.business} AND employee_id=${input.actor.id} AND status='Published' AND (starts_at AT TIME ZONE 'America/New_York')::date=(NOW() AT TIME ZONE 'America/New_York')::date`)[0];
+  if(Number(scheduled?.seconds||0)<21600)return {eligible:false,error:"Employee meals require a published shift totaling at least 6 hours today."};
+  const already=(await sql`SELECT id FROM ordering_employee_meals WHERE business=${input.business} AND employee_id=${input.actor.id} AND (created_at AT TIME ZONE 'America/New_York')::date=(NOW() AT TIME ZONE 'America/New_York')::date LIMIT 1`)[0];
+  if(already)return {eligible:false,error:"An employee meal has already been recorded for this employee today."};
+  return {eligible:true,error:""};
+}
+
 export async function recordEmployeeMeal(input:{business:"Corner Deli";items:ConfiguredOrderItemInput[];note:string;breakAcknowledged:boolean;actor:OrderingActor}) {
   await ensureEmployeeMealSchema();
   await ensureWorkforceSchema();
   if (!input.breakAcknowledged) throw new Error("Confirm that this meal will only be eaten during a break, not while working.");
   if (input.items.length !== 1 || Number(input.items[0]?.quantity || 1) !== 1) throw new Error("Employee meals are limited to one entrée or one combo. Drinks and extra items are not included.");
-  const sql=getSql(),employee=(await sql`SELECT id FROM employees WHERE id=${input.actor.id} AND business=${input.business} AND active=TRUE`)[0];
-  if(!employee)throw new Error("The signed-in employee was not found.");
-  const scheduled=(await sql`SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (ends_at-starts_at))),0) seconds FROM schedule_shifts WHERE business=${input.business} AND employee_id=${input.actor.id} AND status='Published' AND (starts_at AT TIME ZONE 'America/New_York')::date=(NOW() AT TIME ZONE 'America/New_York')::date`)[0];
-  if(Number(scheduled?.seconds||0)<21600)throw new Error("Employee meals require a published shift totaling at least 6 hours today.");
-  const already=(await sql`SELECT id FROM ordering_employee_meals WHERE business=${input.business} AND employee_id=${input.actor.id} AND (created_at AT TIME ZONE 'America/New_York')::date=(NOW() AT TIME ZONE 'America/New_York')::date LIMIT 1`)[0];
-  if(already)throw new Error("An employee meal has already been recorded for this employee today.");
+  const eligibility=await employeeMealEligibility({business:input.business,actor:input.actor});
+  if(!eligibility.eligible)throw new Error(eligibility.error);
+  const sql=getSql();
   const order=await createDraftOrder({business:input.business,source:"pos",serviceType:"dine_in",customerFirstName:input.actor.name,orderOrigin:"pos",createdBy:input.actor.id,createdByName:input.actor.name,items:input.items});
   try {
     const priced=(await sql`SELECT item.id,item.item_id,item.item_name_snapshot,item.variant_name_snapshot,item.quantity,item.line_total_cents,COALESCE(category.display_name,category.name,'') category_name FROM ordering_order_items item JOIN ordering_menu_items menu ON menu.id=item.item_id LEFT JOIN ordering_menu_categories category ON category.id=menu.category_id WHERE item.order_id=${order.id}`)[0];
     if(!priced)throw new Error("Choose one employee meal item.");
     const label=`${priced.item_name_snapshot} ${priced.variant_name_snapshot||""} ${priced.category_name||""}`.toLowerCase();
-    if(/drink|beverage|soda|pepsi|coke|mountain dew|coffee|tea|water/.test(label))throw new Error("Drinks are not included with an employee meal.");
+    if(/candy|catering|dessert|drink|beverage|soda|pepsi|coke|mountain dew|coffee|tea|water|chip/.test(label))throw new Error("Candy, catering, desserts, drinks, and chips are not included with an employee meal.");
     const customerPriceCents=Number(priced.line_total_cents),employeeOwesCents=Math.max(0,customerPriceCents-1000);
     if(/wing/.test(label)){const counts=[...label.matchAll(/\b(\d{1,2})\b/g)].map(match=>Number(match[1]));if(!counts.length||Math.max(...counts)>8)throw new Error("Employee meals are limited to 8 wings.");}
     const mealId=randomUUID(),unmappedItems:string[]=[];

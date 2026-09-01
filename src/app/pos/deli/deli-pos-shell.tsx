@@ -34,7 +34,7 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
   const [health, setHealth] = useState<{ application: "Online" | "Unavailable" | "Unknown"; database: "Online" | "Unavailable" | "Unknown" }>({ application: "Unknown", database: "Unknown" });
   const [printers,setPrinters]=useState<{kitchenPrinter:string;receiptPrinter:string;cardReader:string}>({kitchenPrinter:"Unknown",receiptPrinter:"Unknown",cardReader:"Not applicable"});
   const [androidUpdateUrl, setAndroidUpdateUrl] = useState<string | null>(null);
-  useOnlineOrderAlert(Boolean(session?.authenticated), alertSound, alertVolume);
+  const onlineOrderAlerts = useOnlineOrderAlert(Boolean(session?.authenticated), alertSound, alertVolume);
 
   const loadOpenCount = useCallback(async () => {
     const response = await fetch("/api/ordering/order-center?view=open", { cache: "no-store" });
@@ -131,9 +131,11 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
 
   return <div className="deliPosShell">
     {androidUpdateUrl ? <a className="deliAndroidUpdate" href={androidUpdateUrl}>ANDROID POS UPDATE AVAILABLE — DOWNLOAD</a> : null}
+    {onlineOrderAlerts.alertNotice && <div className="deliAlertNotice" role="status">{onlineOrderAlerts.alertNotice}</div>}
     <header className="deliShellHeader">
       <div className="deliShellUtilities">
         <button type="button" onClick={() => void logout()}>SWITCH EMPLOYEE</button>
+        {session?.authenticated && <button type="button" className={`deliAlertEnable ${onlineOrderAlerts.alertsEnabled?"enabled":"needed"}`} disabled={onlineOrderAlerts.alertBusy} onClick={()=>void (onlineOrderAlerts.alertsEnabled?onlineOrderAlerts.testAlerts():onlineOrderAlerts.enableAlerts())}>{onlineOrderAlerts.alertBusy?"ENABLING…":onlineOrderAlerts.alertsEnabled?"🔔":"ENABLE SOUND & NOTIFICATIONS"}</button>}
         {session?.authenticated && <button type="button" className="deliUtilityIcon" aria-label="Employee meal" title="Employee meal" onClick={() => window.dispatchEvent(new Event("corner-ops-pos-employee-meal"))}>🍽</button>}
         <Link className={`deliUtilityIcon ${activeWorkspace(pathname, "/pos/deli/reports") ? "active" : ""}`} aria-label="Reports" title="Reports" aria-current={activeWorkspace(pathname, "/pos/deli/reports") ? "page" : undefined} href="/pos/deli/reports">▥</Link>
         <Link className={`deliUtilityIcon ${activeWorkspace(pathname, "/pos/deli/settings") ? "active" : ""}`} aria-label="Settings" title="Settings" aria-current={activeWorkspace(pathname, "/pos/deli/settings") ? "page" : undefined} href="/pos/deli/settings">⚙</Link>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { OnlineOrderAlertSound } from "@/lib/ordering-pos-settings";
 
 type AlertOrder = {
@@ -14,11 +14,29 @@ const ONLINE_SOURCES = new Set(["web", "online", "customer_web", "kiosk", "ai_ph
 
 type AlertPreference = { sound: OnlineOrderAlertSound; volume: number };
 
+function applicationServerKey(value: string): ArrayBuffer {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const decoded = atob((value + padding).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(decoded, character => character.charCodeAt(0)).buffer;
+}
+
+function installedOnHomeScreen() {
+  return Boolean((navigator as Navigator & { standalone?: boolean }).standalone) || window.matchMedia("(display-mode: standalone)").matches;
+}
+
+function posDeviceLabel() {
+  const device = /ipad/i.test(navigator.userAgent) ? "iPad" : /iphone/i.test(navigator.userAgent) ? "iPhone" : /android/i.test(navigator.userAgent) ? "Android" : "Browser";
+  return `POS/KDS:${device}`;
+}
+
 export function useOnlineOrderAlert(authenticated: boolean, initialSound: OnlineOrderAlertSound, initialVolume: number) {
   const initialized = useRef(false);
   const seen = useRef(new Set<string>());
   const audio = useRef<AudioContext | null>(null);
   const preference = useRef<AlertPreference>({ sound: initialSound, volume: initialVolume });
+  const [alertsEnabled, setAlertsEnabled] = useState(false);
+  const [alertBusy, setAlertBusy] = useState(false);
+  const [alertNotice, setAlertNotice] = useState("");
 
   const unlockAudio = useCallback(() => {
     const Context = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -133,4 +151,58 @@ export function useOnlineOrderAlert(authenticated: boolean, initialSound: Online
     const timer = window.setInterval(() => void poll(), 3_000);
     return () => { stopped = true; window.clearInterval(timer); };
   }, [authenticated, ring]);
+
+  useEffect(() => {
+    if (!authenticated || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setAlertsEnabled(false);
+      return;
+    }
+    void navigator.serviceWorker.register("/sw.js", { scope: "/" }).then(() => navigator.serviceWorker.ready).then(registration => registration.pushManager.getSubscription()).then(subscription => setAlertsEnabled(Boolean(subscription && Notification.permission === "granted"))).catch(() => setAlertsEnabled(false));
+  }, [authenticated]);
+
+  const enableAlerts = useCallback(async () => {
+    setAlertBusy(true);
+    setAlertNotice("");
+    try {
+      unlockAudio();
+      if (audio.current?.state === "suspended") await audio.current.resume();
+      if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) throw new Error("This device does not support PWA notifications.");
+      if (/iphone|ipad|ipod/i.test(navigator.userAgent) && !installedOnHomeScreen()) throw new Error("Add the POS to the Home Screen, open it from its icon, then enable alerts.");
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") throw new Error("Notification permission was not granted. Allow Corner Deli POS notifications in Apple Settings.");
+      const statusResponse = await fetch("/api/push?audience=pos", { cache: "no-store" });
+      const status = await statusResponse.json() as { publicKey?: string; error?: string };
+      if (!statusResponse.ok || !status.publicKey) throw new Error(status.error || "Notification setup could not be loaded.");
+      const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+      await navigator.serviceWorker.ready;
+      const existing = await registration.pushManager.getSubscription();
+      const subscription = existing || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: applicationServerKey(status.publicKey) });
+      const response = await fetch("/api/push", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "subscribe", audience: "pos", subscription: subscription.toJSON(), userAgent: navigator.userAgent, deviceLabel: posDeviceLabel() }) });
+      const payload = await response.json().catch(() => null) as { error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error || "This POS could not be registered for notifications.");
+      setAlertsEnabled(true);
+      setAlertNotice("Sound and background order notifications are enabled on this device.");
+      ring();
+    } catch (error) {
+      setAlertsEnabled(false);
+      setAlertNotice(error instanceof Error ? error.message : "Alerts could not be enabled.");
+    } finally {
+      setAlertBusy(false);
+    }
+  }, [ring, unlockAudio]);
+
+  const testAlerts = useCallback(async () => {
+    setAlertNotice("");
+    unlockAudio();
+    ring();
+    try {
+      const response = await fetch("/api/push", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "test", audience: "pos" }) });
+      if (!response.ok) throw new Error("The background test notification could not be sent.");
+      setAlertNotice("Foreground sound played and a background notification was sent.");
+    } catch (error) {
+      setAlertNotice(error instanceof Error ? error.message : "The alert test failed.");
+    }
+  }, [ring, unlockAudio]);
+
+  return { alertsEnabled, alertBusy, alertNotice, enableAlerts, testAlerts };
 }

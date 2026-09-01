@@ -272,7 +272,7 @@ async function sendToSubscription(subscription: StoredSubscription, message: Pus
       "Content-Encoding": "aes128gcm",
       "Content-Type": "application/octet-stream",
       TTL: "86400",
-      Urgency: "normal",
+      Urgency: message.category === "online_order" ? "high" : "normal",
     },
     body: requestBody(body),
     cache: "no-store",
@@ -344,6 +344,33 @@ async function employeeSubscriptions(input: { business: Business; recipientEmplo
       AND (${input.excludeEmployeeId || null}::uuid IS NULL OR employee_id <> ${input.excludeEmployeeId || null}::uuid)
     ORDER BY updated_at DESC
   ` as unknown as StoredSubscription[];
+}
+
+export async function notifyPosStationsOfOnlineOrder(input: {
+  business: Business;
+  orderId: string;
+  displayNumber: string;
+  source: string;
+  serviceType: string;
+  customerName: string;
+}) {
+  await ensurePushSchema();
+  const subscriptions = await getSql()`
+    SELECT id, endpoint, p256dh, auth FROM push_subscriptions
+    WHERE audience_type = 'employee' AND business = ${input.business}
+      AND active = TRUE AND device_label LIKE 'POS/KDS:%'
+    ORDER BY updated_at DESC
+  ` as unknown as StoredSubscription[];
+  const service = clean(input.serviceType, 60).replaceAll("_", " ").toUpperCase();
+  const customer = clean(input.customerName, 100);
+  return deliver(subscriptions, {
+    title: `NEW ${service || "ONLINE"} ORDER #${clean(input.displayNumber, 30)}`,
+    body: customer ? `${customer} · Tap to open the kitchen queue.` : "Tap to open the kitchen queue.",
+    url: "/pos/deli/kitchen",
+    tag: `new-order-${clean(input.orderId, 100)}`,
+    category: "online_order",
+    business: input.business,
+  });
 }
 
 function senderLabel(value: string): string {

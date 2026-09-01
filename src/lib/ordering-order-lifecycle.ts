@@ -18,6 +18,7 @@ import { earnLoyaltyForOrder, finalizeLoyaltyRedemptions } from "@/lib/ordering-
 import { kitchenTicketTimingLines } from "@/lib/ordering-kitchen-ticket";
 import { compareKitchenItems } from "@/lib/ordering-line-format";
 import { ensureRestaurantPlatformSchema } from "@/lib/restaurant-platform";
+import { notifyPosStationsOfOnlineOrder } from "@/lib/push-notifications";
 
 export type StoredOrderStatus = "draft" | "confirmed" | "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
 export type KitchenOrderStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -230,7 +231,7 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
   await ensureOrderingMenuOverrideSchema();
   await ensureOrderingAccountSchema();
   await ensureRestaurantPlatformSchema();
-  return withTransaction(async () => {
+  const result = await withTransaction(async () => {
     // Draft pricing follows current promotion configuration until Send locks it.
     await applyPromotionsToOrder(orderId);
     const sql = getSql();
@@ -304,6 +305,7 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
       WHERE id = ${orderId} AND business = ${business} AND status = 'draft' AND version = ${order.version}
       RETURNING id, business, source, display_number, status, payment_status, service_type, version,
                 subtotal_cents, discount_cents, tax_cents, tip_cents, total_cents, paid_cents, amount_due_cents,
+                first_name_snapshot, last_name_snapshot,
                 delivery_fee_cents, special_instructions, created_at, updated_at, submitted_at, started_at, ready_at, completed_at, cancelled_at
     `;
     if (!updated.length) throw new OrderConflictError("This order changed while it was being submitted. Refresh and review it.");
@@ -348,6 +350,18 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
     if(reopenDetails)await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${updated[0].version},'order_addition_submitted',${actor.type},${actor.id},${JSON.stringify({addedItemIds,previousTotalCents:Number(reopenDetails.previousTotalCents||0),newTotalCents:Number(updated[0].total_cents),additionalAmountDueCents:Number(updated[0].amount_due_cents),actorName:actor.name})}::jsonb)`;
     return { order: updated[0], alreadySubmitted: false };
   });
+  const source = String(result.order.source || "").toLowerCase();
+  if (!result.alreadySubmitted && ["web", "online", "customer_web", "kiosk", "ai_phone"].includes(source)) {
+    await notifyPosStationsOfOnlineOrder({
+      business,
+      orderId: String(result.order.id),
+      displayNumber: String(result.order.display_number),
+      source,
+      serviceType: String(result.order.service_type || "online"),
+      customerName: `${String(result.order.first_name_snapshot || "")} ${String(result.order.last_name_snapshot || "")}`.trim(),
+    }).catch(() => undefined);
+  }
+  return result;
 }
 
 export async function transitionKitchenOrder(input: {

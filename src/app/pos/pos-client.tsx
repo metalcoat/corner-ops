@@ -652,10 +652,13 @@ export default function PosClient({
   const [employeeMealBusy, setEmployeeMealBusy] = useState(false);
   const [employeeMealMessage, setEmployeeMealMessage] = useState("");
   const [employeeMealBreakAcknowledged, setEmployeeMealBreakAcknowledged] = useState(false);
+  const [employeeMealSelecting, setEmployeeMealSelecting] = useState(false);
+  const [employeeMealEligible, setEmployeeMealEligible] = useState(false);
+  async function openEmployeeMeal(){setEmployeeMealMessage("");try{const response=await fetch("/api/ordering/employee-meals",{cache:"no-store"}),payload=await response.json() as {eligible?:boolean;error?:string};if(!response.ok)throw new Error(payload.error||"Employee meal eligibility could not be checked.");setEmployeeMealEligible(Boolean(payload.eligible));setEmployeeMealMessage(payload.eligible?"":payload.error||"This employee is not eligible for another meal today.");setEmployeeMealOpen(true);}catch(error){setEmployeeMealEligible(false);setEmployeeMealMessage(error instanceof Error?error.message:"Employee meal eligibility could not be checked.");setEmployeeMealOpen(true);}}
   useEffect(() => {
-    const openEmployeeMeal = () => { setEmployeeMealMessage(""); setEmployeeMealOpen(true); };
-    window.addEventListener("corner-ops-pos-employee-meal", openEmployeeMeal);
-    return () => window.removeEventListener("corner-ops-pos-employee-meal", openEmployeeMeal);
+    const open = () => { void openEmployeeMeal(); };
+    window.addEventListener("corner-ops-pos-employee-meal", open);
+    return () => window.removeEventListener("corner-ops-pos-employee-meal", open);
   }, []);
   const [cashTender, setCashTender] = useState("");
   const [receiptPrinters, setReceiptPrinters] = useState<
@@ -1239,6 +1242,8 @@ export default function PosClient({
       ].some((value) => value.toLowerCase().includes(query)),
     );
   }, [activeCategory, allItems, menuSearch]);
+  const employeeMealCategoryAllowed = (category: OrderingMenuCategoryWithVariants) => !/candy|catering|dessert|drink|beverage|chip/.test(`${category.name} ${category.displayName}`.toLowerCase());
+  const employeeMealItemAllowed = (item: OrderingMenuItemWithVariants) => !/candy|catering|dessert|drink|beverage|soda|pepsi|coke|mountain dew|coffee|tea|water|chip/.test(item.name.toLowerCase());
   const subtotalCents = cart.reduce(
     (sum, line) => sum + line.unitPriceCents * line.quantity,
     0,
@@ -1844,6 +1849,7 @@ export default function PosClient({
           )
         : appendOrIncrementCartLine(current, line),
     );
+    if(employeeMealSelecting){setEmployeeMealSelecting(false);setEmployeeMealOpen(true);}
     setConfiguringItem(null);
     setSelectedVariantId("");
     setEditingLineId(null);
@@ -3485,7 +3491,7 @@ export default function PosClient({
             {posEmployee && (
               <span className="posEmployeeName">{posEmployee.name}</span>
             )}
-            {business === "Corner Deli" && posEmployee && <button type="button" className="posEmployeeMealButton" onClick={()=>{setEmployeeMealMessage("");setEmployeeMealOpen(true)}}>MEAL</button>}
+            {business === "Corner Deli" && posEmployee && <button type="button" className="posEmployeeMealButton" onClick={()=>void openEmployeeMeal()}>MEAL</button>}
             {config.utilities.map((utility) =>
               business === "Corner Deli" && utility === "orders" ? (
                 <a key={utility} href="/pos/deli/orders">
@@ -5061,10 +5067,10 @@ export default function PosClient({
           <section className="posEmployeeMealDialog" role="dialog" aria-modal="true" aria-labelledby="employee-meal-title">
             <header><div><small>PIN EMPLOYEE · {posEmployee?.name}</small><h2 id="employee-meal-title">Employee meal</h2></div><button type="button" onClick={()=>setEmployeeMealOpen(false)}>CLOSE</button></header>
             <p>Select one item below. The employee meal covers the first $10; if the configured item costs more, checkout opens for the employee to pay the difference. No drinks and no more than 8 wings. The employee must have at least 6 published hours scheduled today.</p>
-            <div className="posEmployeeMealPicker" aria-label="Employee meal item selection"><strong>CHOOSE AN ITEM</strong><nav>{primaryCategories.map(category=><button type="button" key={category.id} className={activePrimary?.id===category.id?"active":""} onClick={()=>{setPrimaryCategoryId(category.id);const children=menu.filter(child=>child.parentId===category.id);setCategoryId(category.presentationOnly?children[0]?.id||"":category.id)}}>{category.displayName}</button>)}</nav>{subcategories.length>0&&<nav>{subcategories.map(category=><button type="button" key={category.id} className={activeCategory?.id===category.id?"active":""} onClick={()=>setCategoryId(category.id)}>{category.displayName}</button>)}</nav>}<div>{visibleItems.filter(item=>item.available).map(item=><button type="button" key={item.id} onClick={()=>{setEmployeeMealOpen(false);if(itemNeedsConfiguration(item))openItem(item);else selectItem(item)}}>{item.name}<small>{item.variants.length===1?money(item.variants[0].basePriceCents):"Choose options"}</small></button>)}</div></div>
+            <div className="posEmployeeMealPicker" aria-label="Employee meal item selection"><strong>CHOOSE AN ITEM</strong><nav>{primaryCategories.filter(employeeMealCategoryAllowed).map(category=><button type="button" key={category.id} className={activePrimary?.id===category.id?"active":""} onClick={()=>{setPrimaryCategoryId(category.id);const children=menu.filter(child=>child.parentId===category.id&&employeeMealCategoryAllowed(child));setCategoryId(category.presentationOnly?children[0]?.id||"":category.id)}}>{category.displayName}</button>)}</nav>{subcategories.filter(employeeMealCategoryAllowed).length>0&&<nav>{subcategories.filter(employeeMealCategoryAllowed).map(category=><button type="button" key={category.id} className={activeCategory?.id===category.id?"active":""} onClick={()=>setCategoryId(category.id)}>{category.displayName}</button>)}</nav>}<div>{visibleItems.filter(item=>item.available&&employeeMealItemAllowed(item)).map(item=><button type="button" key={item.id} onClick={()=>{if(!employeeMealEligible){setEmployeeMealMessage("An employee meal has already been used today or this employee is not eligible.");return;}if(cart.length){setEmployeeMealMessage("Employee meals are limited to one item. Remove the current selection before choosing another.");return;}if(itemNeedsConfiguration(item)){setEmployeeMealSelecting(true);setEmployeeMealOpen(false);openItem(item);}else{selectItem(item);setEmployeeMealOpen(true);}}}>{item.name}<small>{item.variants.length===1?money(item.variants[0].basePriceCents):"Choose options"}</small></button>)}</div></div>
             <div className="posEmployeeMealBody"><div className="posEmployeeMealItems">{cart.length?cart.map(line=><article key={line.id}><strong>{line.quantity}× {line.name}{line.variantName?` · ${line.variantName}`:""}</strong><span>{[...line.modifierText,...line.comboText].join(" · ")||"No options"}</span><b>{money(line.unitPriceCents*line.quantity)}</b></article>):<p>Choose an item above. Items with sizes or modifiers open the normal configuration screen; tap MEAL again after configuring it.</p>}</div><aside><h3>Employee meal</h3><strong>Customer-menu value: {money(subtotalCents)}</strong><strong>Covered: {money(Math.min(1000,subtotalCents))}</strong>{subtotalCents>1000&&<strong className="posEmployeeMealOwes">Employee pays: {money(subtotalCents-1000)}</strong>}<label>Kitchen note<textarea value={employeeMealNote} onChange={(event)=>setEmployeeMealNote(event.target.value)} maxLength={500}/></label><label><input type="checkbox" checked={employeeMealBreakAcknowledged} onChange={event=>setEmployeeMealBreakAcknowledged(event.target.checked)}/> I understand this meal may only be eaten during my break and not while I am working.</label></aside></div>
             {employeeMealMessage&&<div className="posCheckoutInlineError" role="status">{employeeMealMessage}</div>}
-            <footer><button type="button" className="primary" disabled={!cart.length||!employeeMealBreakAcknowledged||employeeMealBusy} onClick={()=>void submitEmployeeMeal()}>{employeeMealBusy?"SENDING…":"SEND EMPLOYEE MEAL TO KITCHEN"}</button></footer>
+            <footer><button type="button" className="primary" disabled={!employeeMealEligible||!cart.length||!employeeMealBreakAcknowledged||employeeMealBusy} onClick={()=>void submitEmployeeMeal()}>{employeeMealBusy?"SENDING…":"SEND EMPLOYEE MEAL TO KITCHEN"}</button></footer>
           </section>
         </div>
       )}
@@ -5614,7 +5620,7 @@ export default function PosClient({
                     ))}
                   </div>
                 )}
-                <button type="button" onClick={() => setConfiguringItem(null)}>
+                <button type="button" onClick={() => {setConfiguringItem(null);setEmployeeMealSelecting(false)}}>
                   CANCEL
                 </button>
                 <button
