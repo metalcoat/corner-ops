@@ -34,11 +34,11 @@ const landmarks: Array<{ aliases: RegExp; address: string }> = [
   },
   {
     aliases: /^(?:new )ansen(?: corporation)?(?: new)?$/i,
-    address: "100 Chimney Point Drive, Ogdensburg, NY 13669",
+    address: "830 Proctor Avenue, Ogdensburg, NY 13669",
   },
   {
     aliases: /^(?:old )ansen(?: corporation)?(?: old)?$/i,
-    address: "830 Proctor Avenue, Ogdensburg, NY 13669",
+    address: "100 Chimney Point Drive, Ogdensburg, NY 13669",
   },
   {
     aliases: /^(?:the )?(?:prison|riverview(?: correctional facility)?)$/i,

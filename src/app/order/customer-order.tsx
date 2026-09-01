@@ -438,7 +438,7 @@ export default function CustomerOrder() {
     setBusy(true);
     setMessage("");
     try {
-      if (serviceType === "delivery" && selectedDeliveryLocation && !deliveryUnit) throw new Error(`Choose where at ${selectedDeliveryLocation.name} this delivery is going.`);
+      if (serviceType === "delivery" && selectedDeliveryLocation?.requiresDropoff !== false && selectedDeliveryLocation && !deliveryUnit) throw new Error(`Choose where at ${selectedDeliveryLocation.name} this delivery is going.`);
       const response = await fetch("/api/customer/cart", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1195,7 +1195,7 @@ export default function CustomerOrder() {
                             ))}
                           </div>
                         )}
-                        {selectedDeliveryLocation && <div className="addressSuggestions"><strong>Where at {selectedDeliveryLocation.name}?</strong>{selectedDeliveryLocation.dropoffs.map(dropoff=><button type="button" key={dropoff} className={deliveryUnit===dropoff?"selected":""} onClick={()=>setDeliveryUnit(dropoff)}><strong>{dropoff}</strong></button>)}</div>}
+                        {selectedDeliveryLocation?.requiresDropoff !== false && selectedDeliveryLocation && <div className="addressSuggestions"><strong>{selectedDeliveryLocation.id==="state-hospital"?"Where at?":`Where at ${selectedDeliveryLocation.name}?`}</strong>{selectedDeliveryLocation.dropoffs.map(dropoff=><button type="button" key={dropoff} className={deliveryUnit===dropoff?"selected":""} onClick={()=>setDeliveryUnit(dropoff)}><strong>{dropoff}</strong></button>)}</div>}
                         <input
                           aria-label="Apartment, suite, or delivery note"
                           placeholder="Apartment, suite, or location note (optional)"

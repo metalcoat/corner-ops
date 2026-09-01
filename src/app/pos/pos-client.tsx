@@ -2431,6 +2431,7 @@ export default function PosClient({
     if (
       business === "Corner Deli" &&
       serviceType === "delivery" &&
+      selectedDeliveryLocation?.requiresDropoff !== false &&
       selectedDeliveryLocationId &&
       !deliveryUnit
     ) {
@@ -3404,6 +3405,7 @@ export default function PosClient({
           ? "Validated delivery address required"
           : business === "Corner Deli" &&
               serviceType === "delivery" &&
+              selectedDeliveryLocation?.requiresDropoff !== false &&
               selectedDeliveryLocation &&
               !deliveryUnit
             ? "Choose exact drop-off location"
@@ -5760,7 +5762,7 @@ export default function PosClient({
                 </div>
               )}
             </div>
-            {!selectedDeliveryLocation && (
+            {(!selectedDeliveryLocation || selectedDeliveryLocation.requiresDropoff === false) && (
               <label>
                 Apartment or unit
                 <input
@@ -5776,13 +5778,13 @@ export default function PosClient({
                 />
               </label>
             )}
-            {selectedDeliveryLocation && (
+            {selectedDeliveryLocation && selectedDeliveryLocation.requiresDropoff !== false && (
               <div
                 className="posDeliveryDropoffs"
                 aria-label={`${selectedDeliveryLocation.name} drop-off location`}
               >
                 <strong>
-                  WHERE AT {selectedDeliveryLocation.name.toUpperCase()}?
+                  {selectedDeliveryLocation.id === "state-hospital" ? "WHERE AT?" : `WHERE AT ${selectedDeliveryLocation.name.toUpperCase()}?`}
                 </strong>
                 {selectedDeliveryLocation.dropoffs.map((dropoff) => (
                   <button
@@ -5798,7 +5800,6 @@ export default function PosClient({
                     {dropoff}
                   </button>
                 ))}
-                {!selectedDeliveryLocation.dropoffs.length && <input autoFocus aria-label={`Where at ${selectedDeliveryLocation.name}`} placeholder="Building, department, hall, entrance, or room" value={deliveryUnit} maxLength={120} onChange={(event)=>{setDeliveryUnit(event.target.value);setSavedDraft(null);setCheckoutError("")}} />}
               </div>
             )}
             {validatedAddress && (
@@ -5832,7 +5833,7 @@ export default function PosClient({
                 disabled={
                   savingCustomerAddress ||
                   !customer ||
-                  Boolean(selectedDeliveryLocation && !deliveryUnit)
+                  Boolean(selectedDeliveryLocation?.requiresDropoff !== false && selectedDeliveryLocation && !deliveryUnit)
                 }
                 onClick={() => void saveAndUseCustomerAddress()}
               >
