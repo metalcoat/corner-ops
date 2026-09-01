@@ -8,6 +8,7 @@ import type { PosEmployeeSession, PosSessionView } from "../pos-pin-gate";
 import "./deli-pos-shell.css";
 import "./deli-pos-shell-overrides.css";
 import "./deli-safe-area.css";
+import { useOnlineOrderAlert } from "./use-online-order-alert";
 
 const centerWorkspaces = [
   { label: "Menu", href: "/pos/deli" },
@@ -33,6 +34,7 @@ export default function DeliPosShell({ children, idleLockSeconds }: { children: 
   const [health, setHealth] = useState<{ application: "Online" | "Unavailable" | "Unknown"; database: "Online" | "Unavailable" | "Unknown" }>({ application: "Unknown", database: "Unknown" });
   const [printers,setPrinters]=useState<{kitchenPrinter:string;receiptPrinter:string;cardReader:string}>({kitchenPrinter:"Unknown",receiptPrinter:"Unknown",cardReader:"Not applicable"});
   const [androidUpdateUrl, setAndroidUpdateUrl] = useState<string | null>(null);
+  useOnlineOrderAlert(Boolean(session?.authenticated));
 
   const loadOpenCount = useCallback(async () => {
     const response = await fetch("/api/ordering/order-center?view=open", { cache: "no-store" });

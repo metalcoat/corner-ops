@@ -408,7 +408,7 @@ export async function listKitchenOrders(business: OrderingBusiness, includeRecen
     WHERE business = ${business}
       AND (${includeRecent} OR (
         status IN ('sent_to_kitchen', 'in_progress', 'ready')
-        AND payment_status <> 'paid'
+        AND (payment_status <> 'paid' OR source IN ('web','online','customer_web','kiosk','ai_phone'))
         AND NOT EXISTS (
           SELECT 1 FROM ordering_delivery_assignments delivery
           WHERE delivery.order_id=ordering_orders.id AND delivery.status='DELIVERED'

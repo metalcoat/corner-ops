@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Category = {
   id: string;
@@ -127,6 +127,14 @@ export default function CatalogEditor({
       entity: "category" | "item";
       id: string;
     } | null>(null),
+    [pointerDrag, setPointerDrag] = useState<{
+      entity: "category" | "item";
+      id: string;
+      label: string;
+      x: number;
+      y: number;
+    } | null>(null),
+    dragGhostRef = useRef<HTMLDivElement>(null),
     [query, setQuery] = useState(""),
     [mode, setMode] = useState<"catalog" | "modifiers">("catalog"),
     [error, setError] = useState(""),
@@ -238,7 +246,22 @@ export default function CatalogEditor({
       ? `${parent.display_name || parent.name} › ${category.display_name || category.name}`
       : category.display_name || category.name;
   };
+  const categoryRows: Array<{ category: Category; depth: number }> = [];
+  const visited = new Set<string>();
+  const appendCategories = (parentId: string | null, depth: number) => {
+    data.categories
+      .filter((category) => (category.parent_id || null) === parentId)
+      .forEach((category) => {
+        if (visited.has(category.id)) return;
+        visited.add(category.id);
+        categoryRows.push({ category, depth });
+        appendCategories(category.id, depth + 1);
+      });
+  };
+  appendCategories(null, 0);
+  data.categories.filter((category) => !visited.has(category.id)).forEach((category) => categoryRows.push({ category, depth: 0 }));
   const current = data.items.find((i) => i.id === selectedItem),
+    currentCategory = data.categories.find((category) => category.id === selectedCategory),
     variants = data.variants.filter((v) => v.item_id === selectedItem),
     linked = data.links
       .filter((l) => l.item_id === selectedItem)
@@ -257,9 +280,11 @@ export default function CatalogEditor({
     });
   };
   const move = (entity: "category" | "item", id: string, delta: number) => {
-    const ids = (entity === "category" ? data.categories : matches).map(
-        (row) => row.id,
-      ),
+    const sourceCategory = entity === "category" ? data.categories.find((row) => row.id === id) : null;
+    const rows = entity === "category"
+      ? data.categories.filter((row) => (row.parent_id || null) === (sourceCategory?.parent_id || null))
+      : matches;
+    const ids = rows.map((row) => row.id),
       index = ids.indexOf(id),
       target = index + delta;
     if (index < 0 || target < 0 || target >= ids.length) return;
@@ -269,15 +294,52 @@ export default function CatalogEditor({
   const drop = (entity: "category" | "item", targetId: string) => {
     if (!dragging || dragging.entity !== entity || dragging.id === targetId)
       return;
-    const ids = (entity === "category" ? data.categories : matches).map(
-        (row) => row.id,
-      ),
+    const sourceCategory = entity === "category" ? data.categories.find((row) => row.id === dragging.id) : null;
+    const targetCategory = entity === "category" ? data.categories.find((row) => row.id === targetId) : null;
+    if (entity === "category" && (sourceCategory?.parent_id || null) !== (targetCategory?.parent_id || null)) return;
+    const rows = entity === "category"
+      ? data.categories.filter((row) => (row.parent_id || null) === (sourceCategory?.parent_id || null))
+      : matches;
+    const ids = rows.map((row) => row.id),
       from = ids.indexOf(dragging.id),
       to = ids.indexOf(targetId);
     if (from < 0 || to < 0) return;
     ids.splice(to, 0, ids.splice(from, 1)[0]);
     setDragging(null);
     void reorder(entity, ids);
+  };
+  const pointerDrop = (entity: "category" | "item", sourceId: string, targetId: string) => {
+    if (sourceId === targetId) return;
+    let ids: string[];
+    if (entity === "category") {
+      const source = data.categories.find((row) => row.id === sourceId);
+      const target = data.categories.find((row) => row.id === targetId);
+      if (!source || !target || (source.parent_id || null) !== (target.parent_id || null)) return;
+      ids = data.categories.filter((row) => (row.parent_id || null) === (source.parent_id || null)).map((row) => row.id);
+    } else ids = matches.map((row) => row.id);
+    const from = ids.indexOf(sourceId), to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    void reorder(entity, ids);
+  };
+  const startPointerDrag = (event: React.PointerEvent<HTMLElement>, entity: "category" | "item", id: string, label: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setPointerDrag({ entity, id, label, x: event.clientX, y: event.clientY });
+  };
+  const movePointerDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (!pointerDrag) return;
+    if (dragGhostRef.current) {
+      dragGhostRef.current.style.left = `${event.clientX}px`;
+      dragGhostRef.current.style.top = `${event.clientY}px`;
+    }
+  };
+  const finishPointerDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (!pointerDrag) return;
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>(`[data-reorder-entity="${pointerDrag.entity}"]`);
+    if (target?.dataset.reorderId) pointerDrop(pointerDrag.entity, pointerDrag.id, target.dataset.reorderId);
+    setPointerDrag(null);
   };
   async function saveItem() {
     try {
@@ -346,23 +408,39 @@ export default function CatalogEditor({
             >
               + Category
             </button>
+            {currentCategory && <div className="categoryEditor" key={currentCategory.id}>
+              <label>Name<input defaultValue={currentCategory.display_name || currentCategory.name} onBlur={(event) => { const name=event.currentTarget.value.trim();if(name&&name!==(currentCategory.display_name||currentCategory.name))void post({action:"update",entity:"category",id:currentCategory.id,patch:{name,displayName:name}}) }}/></label>
+              <label>Parent<select value={currentCategory.parent_id || ""} onChange={(event)=>void post({action:"update",entity:"category",id:currentCategory.id,patch:{parentId:event.target.value}})}><option value="">Top-level category</option>{data.categories.filter(category=>category.id!==currentCategory.id&&category.parent_id!==currentCategory.id).map(category=><option key={category.id} value={category.id}>{categoryName(category)}</option>)}</select></label>
+              <label><input type="checkbox" checked={currentCategory.active} onChange={(event)=>void post({action:"update",entity:"category",id:currentCategory.id,patch:{active:event.target.checked}})}/> Active</label>
+              <button onClick={async()=>{const name=prompt(`New subcategory under ${currentCategory.display_name||currentCategory.name}`);if(name)await post({action:"create_category",name,parentId:currentCategory.id})}}>+ Subcategory</button>
+            </div>}
             <p className="reorderHint">Drag to set the POS display order.</p>
-            {data.categories.map((c, index) => (
+            {categoryRows.map(({ category: c, depth }, index) => (
               <div
                 key={c.id}
                 className="categoryRow"
+                data-reorder-entity="category"
+                data-reorder-id={c.id}
+                style={{ paddingLeft: `${depth * 14}px` }}
                 draggable
-                onDragStart={() =>
-                  setDragging({ entity: "category", id: c.id })
-                }
+                onDragStart={() => setDragging({ entity: "category", id: c.id })}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() => drop("category", c.id)}
               >
+                <span
+                  className="touchDragHandle"
+                  role="button"
+                  aria-label={`Drag ${categoryName(c)}`}
+                  onPointerDown={(event) => startPointerDrag(event, "category", c.id, categoryName(c))}
+                  onPointerMove={movePointerDrag}
+                  onPointerUp={finishPointerDrag}
+                  onPointerCancel={() => setPointerDrag(null)}
+                >☰</span>
                 <button
                   className={selectedCategory === c.id ? "selected" : ""}
                   onClick={() => setSelectedCategory(c.id)}
                 >
-                  ☰ {categoryName(c)}
+                  {categoryName(c)}
                   {!c.active && <small>Archived</small>}
                 </button>
                 <button
@@ -425,6 +503,8 @@ export default function CatalogEditor({
                 <div
                   key={i.id}
                   className={`itemTile ${selectedItem === i.id ? "selected" : ""}`}
+                  data-reorder-entity="item"
+                  data-reorder-id={i.id}
                   draggable={!query}
                   onDragStart={() => setDragging({ entity: "item", id: i.id })}
                   onDragOver={(event) => event.preventDefault()}
@@ -439,7 +519,15 @@ export default function CatalogEditor({
                     {!i.active && <small>Archived</small>}
                   </button>
                   <div className="tileOrderControls">
-                    <span aria-hidden="true">☰</span>
+                    <span
+                      className="touchDragHandle"
+                      role="button"
+                      aria-label={`Drag ${i.name}`}
+                      onPointerDown={(event) => startPointerDrag(event, "item", i.id, i.name)}
+                      onPointerMove={movePointerDrag}
+                      onPointerUp={finishPointerDrag}
+                      onPointerCancel={() => setPointerDrag(null)}
+                    >☰</span>
                     <button
                       aria-label={`Move ${i.name} up`}
                       disabled={Boolean(query) || index === 0}
@@ -763,6 +851,7 @@ export default function CatalogEditor({
           </div>
         </div>
       )}
+      {pointerDrag && <div ref={dragGhostRef} className="menuDragGhost" style={{ left: pointerDrag.x, top: pointerDrag.y }}>{pointerDrag.label}</div>}
       <style jsx>{`
         .catalogTools {
           display: flex;
@@ -799,14 +888,49 @@ export default function CatalogEditor({
           font-size: 0.82rem;
           margin: 4px 0 8px;
         }
+        .categoryEditor { display: grid; gap: 7px; margin: 9px 0; padding: 9px; border: 1px solid #c7d4c9; border-radius: 8px; background: #f7faf7; }
+        .categoryEditor label { font-size: .72rem; }
+        .categoryEditor input, .categoryEditor select { min-width: 0; width: 100%; }
+        .categoryEditor label:has(input[type="checkbox"]) { display: flex; align-items: center; gap: 6px; }
+        .categoryEditor input[type="checkbox"] { width: auto; }
         .categoryRow {
           display: grid;
-          grid-template-columns: minmax(0, 1fr) 34px 34px;
+          grid-template-columns: 34px minmax(0, 1fr) 34px 34px;
           gap: 3px;
           margin: 4px 0;
           cursor: grab;
         }
-        .categoryRow > button:first-child {
+        .touchDragHandle {
+          min-width: 34px;
+          min-height: 42px;
+          display: grid;
+          place-items: center;
+          border: 1px solid #9daf9f;
+          border-radius: 7px;
+          background: #edf4ee;
+          color: #173f35;
+          font-weight: 900;
+          cursor: grab;
+          touch-action: none;
+          user-select: none;
+        }
+        .touchDragHandle:active { cursor: grabbing; background: #cce5d2; }
+        .menuDragGhost {
+          position: fixed;
+          z-index: 9999;
+          pointer-events: none;
+          width: min(280px, 65vw);
+          transform: translate(-50%, -58%) rotate(1deg) scale(1.03);
+          padding: 14px;
+          border: 3px solid #74c78b;
+          border-radius: 10px;
+          background: #173f35;
+          color: white;
+          box-shadow: 0 18px 45px #0008;
+          font-weight: 900;
+          opacity: .96;
+        }
+        .categoryRow > button:nth-child(2) {
           display: flex;
           justify-content: space-between;
           min-width: 0;

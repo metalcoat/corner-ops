@@ -125,15 +125,18 @@ export async function mutateMenu(actor: Actor, input: any) {
     if (action === "create_category") {
       const name = clean(input.name);
       if (!name) throw new Error("Category name is required.");
+      const parentId = clean(input.parentId, 80) || null;
+      if (parentId && !await category(parentId, actor.business)) throw new Error("Parent category was not found for this business.");
       const newId = randomUUID();
-      await sql`INSERT INTO ordering_menu_categories(id,business,name,display_name,sort_order,active,presentation_only) VALUES(${newId},${actor.business},${name},${clean(input.displayName) || name},${integer(input.sortOrder ?? 0)},TRUE,FALSE)`;
+      await sql`INSERT INTO ordering_menu_categories(id,business,name,display_name,parent_id,sort_order,active,presentation_only) VALUES(${newId},${actor.business},${name},${clean(input.displayName) || name},${parentId},${integer(input.sortOrder ?? 0)},TRUE,FALSE)`;
       await own(actor, "category", newId, [
         "name",
         "display_name",
+        "parent_id",
         "sort_order",
         "active",
       ]);
-      await audit(actor, "category", newId, "create", null, { name });
+      await audit(actor, "category", newId, "create", null, { name, parentId });
       return { id: newId };
     }
     if (action === "create_item") {
@@ -391,11 +394,22 @@ export async function mutateMenu(actor: Actor, input: any) {
     if (entity === "category") {
       const name = patch.name === undefined ? before.name : clean(patch.name);
       if (!name) throw new Error("Category name is required.");
+      let parentId = before.parent_id;
+      if (patch.parentId !== undefined) {
+        parentId = clean(patch.parentId, 80) || null;
+        if (parentId === id) throw new Error("A category cannot be its own parent.");
+        if (parentId) {
+          const parent = await category(parentId, actor.business);
+          if (!parent) throw new Error("Parent category was not found for this business.");
+          const descendants = await sql`WITH RECURSIVE tree AS (SELECT id FROM ordering_menu_categories WHERE parent_id=${id} UNION ALL SELECT child.id FROM ordering_menu_categories child JOIN tree ON child.parent_id=tree.id) SELECT id FROM tree WHERE id=${parentId}`;
+          if (descendants.length) throw new Error("A category cannot be moved under one of its own subcategories.");
+        }
+      }
       const sort =
         patch.sortOrder === undefined
           ? before.sort_order
           : integer(patch.sortOrder);
-      await sql`UPDATE ordering_menu_categories SET name=${name},display_name=${patch.displayName === undefined ? before.display_name : clean(patch.displayName)},sort_order=${sort},active=${patch.active === undefined ? before.active : Boolean(patch.active)},updated_at=NOW() WHERE id=${id} AND business=${actor.business}`;
+      await sql`UPDATE ordering_menu_categories SET name=${name},display_name=${patch.displayName === undefined ? before.display_name : clean(patch.displayName)},parent_id=${parentId},sort_order=${sort},active=${patch.active === undefined ? before.active : Boolean(patch.active)},updated_at=NOW() WHERE id=${id} AND business=${actor.business}`;
     } else if (entity === "item") {
       let categoryId = before.category_id;
       if (patch.categoryId !== undefined) {

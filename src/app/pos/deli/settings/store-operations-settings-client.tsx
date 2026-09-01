@@ -33,8 +33,8 @@ export default function StoreOperationsSettingsClient() {
     setMessage("Store Operations updated.");
   }
 
-  if (!data) return <section className="posSettingsCard"><h2>Store Operations</h2><p role="status">{message || "Loading…"}</p></section>;
-  return <section className="posSettingsCard">
+  if (!data) return <section className="posSettingsCard storeOperationsCard"><h2>Store Operations</h2><p role="status">{message || "Loading…"}</p></section>;
+  return <section className="posSettingsCard storeOperationsCard">
     <p className="posDevEyebrow">Shared ordering rules · {data.timezone}</p>
     <h2>Store and ordering hours</h2>
     <p className="posSettingsHint">Ordering start and cutoff inherit the store interval when left blank. The closing minute is inclusive.</p>

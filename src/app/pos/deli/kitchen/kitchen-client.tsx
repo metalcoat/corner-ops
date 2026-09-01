@@ -22,6 +22,7 @@ type KitchenModifier = {
 };
 type KitchenItem = {
   id: string;
+  source: string;
   item_name_snapshot: string;
   item_print_name_snapshot?: string;
   category_name?: string;
