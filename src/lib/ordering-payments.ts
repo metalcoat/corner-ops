@@ -267,13 +267,14 @@ export async function commitTender(input: {
     if (input.tenderType === "cash" && input.cashControlMode === "till" && input.stationKey?.trim()) {
       const stationKey=input.stationKey.trim().toLowerCase(),station=(await sql`SELECT * FROM ordering_payment_stations WHERE business=${input.business} AND station_key=${stationKey} AND station_mode='payment' AND active=TRUE`)[0];
       if(!station)throw new PaymentConflictError("Cash can only be accepted at the configured payment station.");
-      const terminalId=randomUUID();
-      const terminal=(await sql`INSERT INTO ordering_pos_terminals(id,business,name,terminal_key,terminal_type,location_label,allow_cash,allow_offline_cash) VALUES(${terminalId},${input.business},${station.name},${station.station_key},'pos',${station.name},TRUE,FALSE) ON CONFLICT(business,terminal_key) DO UPDATE SET name=EXCLUDED.name,active=TRUE,last_seen_at=NOW(),updated_at=NOW() RETURNING id`)[0];
-      let register=(await sql`SELECT * FROM ordering_register_sessions WHERE terminal_id=${terminal.id} AND status IN ('open','counting') ORDER BY opened_at DESC LIMIT 1 FOR UPDATE`)[0];
-      if(!register){const registerId=randomUUID();register=(await sql`INSERT INTO ordering_register_sessions(id,business,terminal_id,status,opening_cash_cents,expected_cash_cents,opened_by,notes) VALUES(${registerId},${input.business},${terminal.id},'open',0,0,${input.actor.id},'Automatically opened on first cash sale; opening float must be reconciled at close.') RETURNING *`)[0]}
+      const terminalId=randomUUID(),terminalKey=String(station.shared_register_key||station.station_key).trim().toLowerCase(),terminalName=String(station.shared_register_key||station.name);
+      const terminal=(await sql`INSERT INTO ordering_pos_terminals(id,business,name,terminal_key,terminal_type,location_label,allow_cash,allow_offline_cash) VALUES(${terminalId},${input.business},${terminalName},${terminalKey},'pos',${station.name},TRUE,TRUE) ON CONFLICT(business,terminal_key) DO UPDATE SET name=EXCLUDED.name,active=TRUE,allow_offline_cash=TRUE,last_seen_at=NOW(),updated_at=NOW() RETURNING id`)[0];
+      const register=(await sql`SELECT * FROM ordering_register_sessions WHERE terminal_id=${terminal.id} AND status IN ('open','counting','needs_review') ORDER BY opened_at DESC LIMIT 1 FOR UPDATE`)[0];
+      if(!register)throw new PaymentConflictError("Open the register before accepting cash.");
+      if(register.status!=="open")throw new PaymentConflictError(register.status==="counting"?"Finish the drawer count before accepting cash.":"A manager must review the drawer variance before accepting cash.");
       await sql`INSERT INTO ordering_cash_drawer_movements(id,register_session_id,order_id,payment_transaction_id,movement_type,delta_cash_cents,reason,created_by,details) VALUES(${randomUUID()},${register.id},${input.orderId},${transactionId},'sale',${applied},'Cash sale',${input.actor.id},${JSON.stringify({stationKey,amountTenderedCents:input.amountTenderedCents,changeDueCents:change})}::jsonb)`;
       await sql`UPDATE ordering_register_sessions SET expected_cash_cents=expected_cash_cents+${applied} WHERE id=${register.id}`;
-      await sql`UPDATE ordering_payment_transactions SET details=details||${JSON.stringify({stationKey,registerSessionId:register.id})}::jsonb WHERE id=${transactionId}`;
+      await sql`UPDATE ordering_payment_transactions SET details=details||${JSON.stringify({stationKey,terminalKey,registerSessionId:register.id})}::jsonb WHERE id=${transactionId}`;
     }
     if (input.tenderType === "gift_card") {
       if (!input.giftCardNumber) throw new PaymentConflictError("Gift card number is required.");

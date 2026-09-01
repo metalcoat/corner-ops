@@ -102,7 +102,7 @@ export function ensureOrderingPosSchema(): Promise<void> {
           notes TEXT NOT NULL DEFAULT ''
         )
       `;
-      await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_one_open_register_per_terminal ON ordering_register_sessions (terminal_id) WHERE status IN ('open', 'counting')`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_one_active_register_per_terminal ON ordering_register_sessions (terminal_id) WHERE status IN ('open', 'counting', 'needs_review')`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_register_sessions_business_idx ON ordering_register_sessions (business, opened_at DESC)`;
 
       await sql`
