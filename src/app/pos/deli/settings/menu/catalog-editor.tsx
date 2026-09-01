@@ -7,6 +7,8 @@ type Category = {
   display_name: string;
   sort_order: number;
   active: boolean;
+  parent_id?: string | null;
+  presentation_only?: boolean;
 };
 type Item = {
   id: string;
@@ -230,6 +232,12 @@ export default function CatalogEditor({
     );
   }, [data, query, selectedCategory]);
   if (!data) return <p>{error || "Loading catalog…"}</p>;
+  const categoryName = (category: Category) => {
+    const parent = data.categories.find((row) => row.id === category.parent_id);
+    return parent
+      ? `${parent.display_name || parent.name} › ${category.display_name || category.name}`
+      : category.display_name || category.name;
+  };
   const current = data.items.find((i) => i.id === selectedItem),
     variants = data.variants.filter((v) => v.item_id === selectedItem),
     linked = data.links
@@ -354,7 +362,7 @@ export default function CatalogEditor({
                   className={selectedCategory === c.id ? "selected" : ""}
                   onClick={() => setSelectedCategory(c.id)}
                 >
-                  ☰ {c.display_name || c.name}
+                  ☰ {categoryName(c)}
                   {!c.active && <small>Archived</small>}
                 </button>
                 <button
