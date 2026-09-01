@@ -4,11 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import PosPinGate, { type PosSessionView } from "../../pos-pin-gate";
 
 type Phone = { id: string; normalized_phone: string; display_phone: string; label: string; is_primary: boolean; last_used_at: string | null };
+type Email = { id: string; display_email: string; label: string; is_primary: boolean };
 type Address = { id: string; label: string; line1: string; line2: string; city: string; state: string; postal_code: string; is_primary: boolean; last_used_at: string | null };
 type Customer = {
   id: string; first_name: string; last_name: string; display_name: string; normalized_phone: string;
-  display_phone: string; email: string; notes: string; last_order_at: string | null; phones: Phone[]; addresses: Address[];
+  display_phone: string; email: string; notes: string; last_order_at: string | null; phones: Phone[]; emails: Email[]; addresses: Address[];
 };
+type ImportPreview={sourceRows:number;customerGroups:number;duplicatesCollapsed:number;phones:number;emails:number;addresses:number;sample:Array<{name:string;rows:number;phones:string[];emails:string[];addresses:string[]}>};
 type DuplicateMatch = { customer_id: string; display_name: string; display_phone: string };
 type LoyaltyProgram={programId:string;name:string;progress:number;quantityRequired:number;rewardsAvailable:number};type LoyaltyEvent={id:string;entry_type:string;delta_units:number;reason:string;created_by:string;display_number:string|null;created_at:string};
 
@@ -27,6 +29,7 @@ export default function CustomersClient() {
   const [address, setAddress] = useState({ label: "Home", line1: "", line2: "", city: "Ogdensburg", state: "NY", postalCode: "", isPrimary: false });
   const [message, setMessage] = useState("");
   const [merge, setMerge] = useState<string[]>([]);
+  const[importFile,setImportFile]=useState<File|null>(null),[importPreview,setImportPreview]=useState<ImportPreview|null>(null),[importBusy,setImportBusy]=useState(false);
   const[loyalty,setLoyalty]=useState<LoyaltyProgram[]>([]),[loyaltyHistory,setLoyaltyHistory]=useState<LoyaltyEvent[]>([]),[adjustment,setAdjustment]=useState({programId:"",deltaUnits:1,reason:""});
 
   useEffect(() => { fetch("/api/pos/session").then((response) => response.json()).then(setSession); }, []);
@@ -93,6 +96,11 @@ export default function CustomersClient() {
     setMessage(`${customer.display_name} attached to the current order.`);
   }
 
+  async function importCrm(action:"preview"|"apply"){
+    if(!importFile)return;setImportBusy(true);setMessage("");
+    try{const form=new FormData();form.set("file",importFile);form.set("action",action);const response=await fetch("/api/ordering/customers/import",{method:"POST",body:form}),body=await response.json();if(!response.ok){setMessage(body.error||"CRM import could not be completed.");return}if(action==="preview"){setImportPreview(body);setMessage(`Preview ready: ${body.duplicatesCollapsed} duplicate rows will be combined.`)}else{setImportPreview(null);setImportFile(null);setMessage(`CRM imported: ${body.batch.created_customers} new, ${body.batch.updated_customers} updated, ${body.batch.merged_customers} merged.`);await load()}}finally{setImportBusy(false)}
+  }
+
   if (!session) return <main className="ocPage">Loading customers…</main>;
   if (!session.authenticated) return <PosPinGate onAuthenticated={(next) => setSession({ authenticated: true, session: next })} />;
 
@@ -111,6 +119,12 @@ export default function CustomersClient() {
             <button onClick={() => void create()}>CREATE / FIND</button>
           </div>
         </details>
+        {session.session?.posRole!=="employee"&&<details className="customerCreate customerImport">
+          <summary>IMPORT CRM</summary>
+          <p>CSV or Excel. Existing phones, emails, and addresses are combined; imported addresses are not revalidated.</p>
+          <div className="customerFormRow"><input type="file" accept=".csv,.xls,.xlsx" onChange={event=>{setImportFile(event.target.files?.[0]||null);setImportPreview(null)}}/><button disabled={!importFile||importBusy} onClick={()=>void importCrm("preview")}>{importBusy?"CHECKING…":"PREVIEW"}</button></div>
+          {importPreview&&<div className="crmPreview"><b>{importPreview.customerGroups.toLocaleString()} customers from {importPreview.sourceRows.toLocaleString()} rows</b><span>{importPreview.duplicatesCollapsed.toLocaleString()} duplicates combined · {importPreview.phones.toLocaleString()} phones · {importPreview.emails.toLocaleString()} emails · {importPreview.addresses.toLocaleString()} addresses</span><small>The most frequently used imported address is listed first and becomes the default when the customer has no existing default.</small><button disabled={importBusy} onClick={()=>{if(window.confirm(`Import ${importPreview.customerGroups.toLocaleString()} customer records?`))void importCrm("apply")}}>IMPORT CUSTOMERS</button></div>}
+        </details>}
         <h2>ACTIVE CUSTOMERS <span>{customers.length}</span></h2>
         {customers.map((customer) => <article className={`customerRow ${selectedId === customer.id ? "selected" : ""}`} key={customer.id}>
           <button className="customerSelect" onClick={() => setSelectedId(customer.id)}>
@@ -133,6 +147,8 @@ export default function CustomersClient() {
           <div className="customerContactList">{selected.phones.map((item) => <div key={item.id}><b>{item.label || "Other"}</b><span>{item.display_phone}</span>{item.is_primary && <em>Primary</em>}</div>)}</div>
           <div className="customerFormRow"><select value={phoneLabel} onChange={(event) => setPhoneLabel(event.target.value)}><option>Mobile</option><option>Home</option><option>Work</option><option>Other</option></select><input placeholder="Phone number" value={newPhone} onChange={(event) => { setNewPhone(event.target.value); setDuplicateMatches([]); }} /><label><input type="checkbox" checked={phonePrimary} onChange={(event) => setPhonePrimary(event.target.checked)} /> Primary</label><button onClick={() => void addPhone()}>+ PHONE</button></div>
           {duplicateMatches.length > 0 && <div className="duplicateWarning"><strong>EXISTING CUSTOMER</strong>{duplicateMatches.map((match) => <button key={match.customer_id} onClick={() => { setQuery(match.display_phone); setSelectedId(match.customer_id); }}>{match.display_name} · {match.display_phone}<small>USE CUSTOMER</small></button>)}<button className="sharedPhone" onClick={() => void addPhone(true)}>SHARE NUMBER ANYWAY</button></div>}
+
+          <h3>EMAILS</h3><div className="customerContactList">{(selected.emails||[]).map(item=><div key={item.id}><b>{item.label||"Email"}</b><span>{item.display_email}</span>{item.is_primary&&<em>Primary</em>}</div>)}{!(selected.emails||[]).length&&<p>No email addresses.</p>}</div>
 
           <h3>ADDRESSES</h3>
           <div className="customerContactList">{selected.addresses.map((item) => <div key={item.id}><b>{item.label || "Other"}</b><span>{item.line1}{item.line2 ? `, ${item.line2}` : ""}<small>{item.city}, {item.state} {item.postal_code}</small></span>{item.is_primary && <em>Primary</em>}</div>)}</div>

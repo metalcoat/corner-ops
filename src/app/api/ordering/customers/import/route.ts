@@ -1,0 +1,5 @@
+import { isAuthorizationResponse, orderingManagerActor } from "@/lib/ordering-route-auth";
+import { applyCrmImport, previewCrmImport } from "@/lib/ordering-crm-import";
+import { apiError } from "@/lib/http";
+export const runtime="nodejs";
+export async function POST(request:Request){try{const actor=await orderingManagerActor("Corner Deli");if(isAuthorizationResponse(actor))return actor;const form=await request.formData(),file=form.get("file"),action=String(form.get("action")||"preview");if(!(file instanceof File))return Response.json({error:"Choose a CSV or Excel CRM export."},{status:400});if(file.size>10_000_000)return Response.json({error:"CRM files are limited to 10 MB."},{status:413});if(!/\.(csv|xlsx?|xls)$/i.test(file.name))return Response.json({error:"Upload a CSV or Excel file."},{status:400});const bytes=Buffer.from(await file.arrayBuffer());return Response.json(action==="apply"?await applyCrmImport({business:"Corner Deli",bytes,fileName:file.name,actorId:actor.id}):previewCrmImport(bytes),{status:action==="apply"?201:200})}catch(error){return apiError(error)}}

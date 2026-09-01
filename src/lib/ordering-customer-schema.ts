@@ -15,6 +15,19 @@ export function ensureOrderingCustomerSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_customers ADD COLUMN IF NOT EXISTS merged_into_customer_id UUID REFERENCES ordering_customers(id)`;
       await sql`ALTER TABLE ordering_customers ADD COLUMN IF NOT EXISTS merged_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_customers ADD COLUMN IF NOT EXISTS last_order_at TIMESTAMPTZ`;
+      await sql`CREATE TABLE IF NOT EXISTS ordering_customer_emails (
+        id UUID PRIMARY KEY, customer_id UUID NOT NULL REFERENCES ordering_customers(id) ON DELETE CASCADE,
+        normalized_email TEXT NOT NULL, display_email TEXT NOT NULL, label TEXT NOT NULL DEFAULT 'Email',
+        is_primary BOOLEAN NOT NULL DEFAULT FALSE, verified_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(customer_id,normalized_email)
+      )`;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_customer_emails_lookup_idx ON ordering_customer_emails(normalized_email)`;
+      await sql`INSERT INTO ordering_customer_emails(id,customer_id,normalized_email,display_email,is_primary)
+        SELECT gen_random_uuid(),id,lower(trim(email)),trim(email),TRUE FROM ordering_customers customer
+        WHERE trim(email)<>'' AND NOT EXISTS(SELECT 1 FROM ordering_customer_emails existing WHERE existing.customer_id=customer.id AND existing.normalized_email=lower(trim(customer.email)))`;
+      await sql`WITH ranked AS (SELECT id,row_number() OVER(PARTITION BY customer_id ORDER BY created_at,id) position FROM ordering_customer_emails WHERE is_primary=TRUE) UPDATE ordering_customer_emails email SET is_primary=FALSE,updated_at=NOW() FROM ranked WHERE email.id=ranked.id AND ranked.position>1`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_customer_emails_one_primary_idx ON ordering_customer_emails(customer_id) WHERE is_primary=TRUE`;
       await sql`ALTER TABLE ordering_customer_phones ADD COLUMN IF NOT EXISTS display_phone TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_customer_phones ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`;
       await sql`ALTER TABLE ordering_customer_phones ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ`;
@@ -34,6 +47,14 @@ export function ensureOrderingCustomerSchema(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS ordering_orders_customer_search_idx ON ordering_orders (business, created_at DESC, payment_status)`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_customers_merged_idx ON ordering_customers (business, merged_into_customer_id)`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_customer_phones_customer_active_idx ON ordering_customer_phones (customer_id, is_primary DESC, last_used_at DESC NULLS LAST)`;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_customer_emails_customer_idx ON ordering_customer_emails(customer_id,is_primary DESC,created_at)`;
+      await sql`CREATE TABLE IF NOT EXISTS ordering_crm_import_batches(
+        id UUID PRIMARY KEY,business TEXT NOT NULL,file_name TEXT NOT NULL,file_hash TEXT NOT NULL,
+        source_rows INTEGER NOT NULL,customer_groups INTEGER NOT NULL,created_customers INTEGER NOT NULL DEFAULT 0,
+        updated_customers INTEGER NOT NULL DEFAULT 0,merged_customers INTEGER NOT NULL DEFAULT 0,
+        imported_by TEXT NOT NULL,details JSONB NOT NULL DEFAULT '{}'::jsonb,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(business,file_hash)
+      )`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_orders_customer_phone_idx ON ordering_orders (customer_phone_id)`;
       await sql`WITH ranked AS (SELECT id,row_number() OVER(PARTITION BY customer_id ORDER BY created_at,id) position FROM ordering_customer_phones WHERE is_primary=TRUE) UPDATE ordering_customer_phones phone SET is_primary=FALSE,updated_at=NOW() FROM ranked WHERE phone.id=ranked.id AND ranked.position>1`;
       await sql`WITH ranked AS (SELECT id,row_number() OVER(PARTITION BY customer_id ORDER BY last_used_at DESC NULLS LAST,created_at,id) position FROM ordering_customer_addresses WHERE is_primary=TRUE AND active=TRUE) UPDATE ordering_customer_addresses address SET is_primary=FALSE,updated_at=NOW() FROM ranked WHERE address.id=ranked.id AND ranked.position>1`;

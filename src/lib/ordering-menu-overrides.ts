@@ -173,6 +173,16 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
           WHERE link.group_id=groups.id AND item.name IN ('Wings','Boneless Wings')
         )
     `;
+      await sql`
+      INSERT INTO ordering_modifier_presentation_overrides(item_id,group_id,sort_order,updated_by)
+      SELECT link.item_id,link.group_id,
+        CASE WHEN groups.name='Wing Sauce' THEN 10 ELSE 20 END,
+        'wing-sauce-before-addons'
+      FROM ordering_menu_item_modifier_groups link
+      JOIN ordering_menu_items item ON item.id=link.item_id AND item.business='Corner Deli' AND item.name IN ('Wings','Boneless Wings')
+      JOIN ordering_modifier_groups groups ON groups.id=link.group_id AND groups.name IN ('Wing Sauce','Wings Add Ons')
+      ON CONFLICT(item_id,group_id) DO UPDATE SET sort_order=EXCLUDED.sort_order,updated_by=EXCLUDED.updated_by,updated_at=NOW()
+    `;
       // Bacon is its own repeatable burger add-on so extra bacon can be priced
       // per portion without making every ordinary burger topping repeatable.
       await sql`INSERT INTO ordering_modifier_groups(id,business,name,prompt,min_selections,max_selections,allow_option_quantity,active,sort_order) SELECT gen_random_uuid(),'Corner Deli','Burger Bacon','Add bacon?',0,10,TRUE,TRUE,900 WHERE NOT EXISTS(SELECT 1 FROM ordering_modifier_groups WHERE business='Corner Deli' AND name='Burger Bacon')`;

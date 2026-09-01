@@ -28,11 +28,13 @@ export async function findCustomers(business: OrderingBusiness, query = "") {
     SELECT c.id,c.first_name,c.last_name,c.display_name,c.email,c.notes,c.active,c.created_at,c.updated_at,c.last_order_at,
       p.normalized_phone,p.display_phone,
       COALESCE((SELECT json_agg(phone ORDER BY phone.is_primary DESC,phone.last_used_at DESC NULLS LAST,phone.created_at) FROM ordering_customer_phones phone WHERE phone.customer_id=c.id),'[]') phones,
+      COALESCE((SELECT json_agg(email ORDER BY email.is_primary DESC,email.created_at) FROM ordering_customer_emails email WHERE email.customer_id=c.id),'[]') emails,
       COALESCE((SELECT json_agg(a ORDER BY a.is_primary DESC,a.last_used_at DESC NULLS LAST,a.created_at DESC) FROM ordering_customer_addresses a WHERE a.customer_id=c.id AND a.active=TRUE),'[]') addresses
     FROM ordering_customers c
     LEFT JOIN LATERAL (SELECT normalized_phone,display_phone FROM ordering_customer_phones WHERE customer_id=c.id ORDER BY is_primary DESC,created_at LIMIT 1) p ON TRUE
     WHERE c.business=${business} AND c.active=TRUE AND c.merged_into_customer_id IS NULL
       AND (${q}='' OR c.first_name ILIKE ${like} OR c.last_name ILIKE ${like} OR c.display_name ILIKE ${like}
+        OR EXISTS (SELECT 1 FROM ordering_customer_emails match_email WHERE match_email.customer_id=c.id AND match_email.normalized_email ILIKE ${like})
         OR EXISTS (SELECT 1 FROM ordering_customer_phones match_phone WHERE match_phone.customer_id=c.id AND (match_phone.normalized_phone=${phone} OR (${phonePrefix}<>'' AND match_phone.normalized_phone LIKE ${phonePrefix}))))
     ORDER BY c.last_order_at DESC NULLS LAST,c.display_name LIMIT ${q ? 20 : 100}
   `;
@@ -76,8 +78,10 @@ export async function createCustomer(input: {
     const existing = await findCustomers(input.business, normalized);
     if (existing.length) return { customer: existing[0], duplicate: true };
     const id = randomUUID();
-    await sql`INSERT INTO ordering_customers (id,business,display_name,first_name,last_name,email,notes) VALUES (${id},${input.business},${`${first} ${last}`.trim()},${first},${last},${String(input.email || "").trim()},${String(input.notes || "").trim()})`;
+    const email=String(input.email||"").trim(),normalizedEmail=email.toLowerCase();
+    await sql`INSERT INTO ordering_customers (id,business,display_name,first_name,last_name,email,notes) VALUES (${id},${input.business},${`${first} ${last}`.trim()},${first},${last},${email},${String(input.notes || "").trim()})`;
     await sql`INSERT INTO ordering_customer_phones (id,customer_id,normalized_phone,display_phone,is_primary) VALUES (${randomUUID()},${id},${normalized},${displayPhone(normalized)},TRUE)`;
+    if(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail))await sql`INSERT INTO ordering_customer_emails(id,customer_id,normalized_email,display_email,is_primary)VALUES(${randomUUID()},${id},${normalizedEmail},${email},TRUE)`;
     return {
       customer: (await findCustomers(input.business, normalized))[0],
       duplicate: false,
@@ -207,12 +211,16 @@ export async function mergeCustomers(input: {
     await sql`UPDATE ordering_customer_addresses SET active=FALSE WHERE customer_id=${input.mergedId}`;
     await sql`UPDATE ordering_customer_phones p SET customer_id=${input.survivorId},is_primary=FALSE WHERE customer_id=${input.mergedId} AND NOT EXISTS (SELECT 1 FROM ordering_customer_phones s WHERE s.customer_id=${input.survivorId} AND s.normalized_phone=p.normalized_phone)`;
     await sql`DELETE FROM ordering_customer_phones WHERE customer_id=${input.mergedId}`;
+    await sql`UPDATE ordering_customer_emails e SET customer_id=${input.survivorId},is_primary=FALSE,updated_at=NOW() WHERE customer_id=${input.mergedId} AND NOT EXISTS (SELECT 1 FROM ordering_customer_emails s WHERE s.customer_id=${input.survivorId} AND s.normalized_email=e.normalized_email)`;
+    await sql`DELETE FROM ordering_customer_emails WHERE customer_id=${input.mergedId}`;
     if (
       !(
         await sql`SELECT id FROM ordering_customer_phones WHERE customer_id=${input.survivorId} AND is_primary=TRUE`
       )[0]
     )
       await sql`UPDATE ordering_customer_phones SET is_primary=TRUE,updated_at=NOW() WHERE id=(SELECT id FROM ordering_customer_phones WHERE customer_id=${input.survivorId} ORDER BY last_used_at DESC NULLS LAST,created_at LIMIT 1)`;
+    if(!(await sql`SELECT id FROM ordering_customer_emails WHERE customer_id=${input.survivorId} AND is_primary=TRUE`)[0])await sql`UPDATE ordering_customer_emails SET is_primary=TRUE,updated_at=NOW() WHERE id=(SELECT id FROM ordering_customer_emails WHERE customer_id=${input.survivorId} ORDER BY created_at LIMIT 1)`;
+    await sql`UPDATE ordering_customers SET email=COALESCE((SELECT display_email FROM ordering_customer_emails WHERE customer_id=${input.survivorId} ORDER BY is_primary DESC,created_at LIMIT 1),'') WHERE id=${input.survivorId}`;
     if (
       !(
         await sql`SELECT id FROM ordering_customer_addresses WHERE customer_id=${input.survivorId} AND active=TRUE AND is_primary=TRUE`
