@@ -3,6 +3,7 @@ import { getSql, withTransaction } from "@/lib/db";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
 import { canManagePos, type OrderingActor } from "@/lib/ordering-route-auth";
 import { sendEpsonPrint } from "@/lib/ordering-hardware";
+import { deliverSms } from "@/lib/sms-notifications";
 
 export class RegisterError extends Error {}
 
@@ -35,7 +36,7 @@ export async function registerDashboard(stationKey:string,actor:OrderingActor){
   return {station:{name:station.name,stationKey:station.station_key,sharedRegisterKey:station.shared_register_key},terminal:{id:terminal.id,name:terminal.name,terminalKey:terminal.terminal_key},session,movements,recent,canManage:canManagePos(actor)};
 }
 
-export async function updateRegister(input:{stationKey:string;action:string;amountCents?:number;reason?:string;notes?:string;actor:OrderingActor}){
+export async function updateRegister(input:{stationKey:string;action:string;amountCents?:number;reason?:string;notes?:string;lowOnOnes?:boolean;actor:OrderingActor}){
   await ensureOrderingPosSchema();
   const {station,terminal}=await terminalForStation(input.stationKey,input.actor),reason=String(input.reason||"").trim().slice(0,500),notes=String(input.notes||"").trim().slice(0,1000);
   if(input.action==="no_sale"){
@@ -49,7 +50,7 @@ export async function updateRegister(input:{stationKey:string;action:string;amou
     await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,employee_id,terminal_id,actor,reason,details) VALUES(${randomUUID()},'Corner Deli','cash_drawer_no_sale',${input.actor.id},${terminal.id},${input.actor.name},'Manager No Sale',${JSON.stringify({registerSessionId:current.id,stationKey:station.station_key,printerId:printer.id,printerName:printer.name})}::jsonb)`;
     return current;
   }
-  return withTransaction(async()=>{
+  const updated=await withTransaction(async()=>{
     const sql=getSql();
     const current=(await sql`SELECT * FROM ordering_register_sessions WHERE terminal_id=${terminal.id} AND status IN('open','counting','needs_review') ORDER BY opened_at DESC LIMIT 1 FOR UPDATE`)[0];
     if(input.action==="open"){
@@ -74,9 +75,10 @@ export async function updateRegister(input:{stationKey:string;action:string;amou
       await sql`UPDATE ordering_register_sessions SET status='counting' WHERE id=${current.id}`;
     }else if(input.action==="close"){
       if(current.status!=="counting")throw new RegisterError("Start the blind drawer count first.");
+      if(typeof input.lowOnOnes!=="boolean")throw new RegisterError("Answer whether the drawer has less than $30 in $1 bills.");
       const counted=cents(input.amountCents,"Counted cash",true),overShort=counted-Number(current.expected_cash_cents),status=overShort===0?'closed':'needs_review';
       await sql`UPDATE ordering_register_sessions SET counted_cash_cents=${counted},over_short_cents=${overShort},status=${status},closed_by=CASE WHEN ${status}='closed' THEN ${input.actor.id} ELSE '' END,closed_at=CASE WHEN ${status}='closed' THEN NOW() ELSE NULL END,notes=CONCAT_WS(E'\n',NULLIF(notes,''),NULLIF(${notes},'')) WHERE id=${current.id}`;
-      await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,employee_id,terminal_id,actor,reason,details) VALUES(${randomUUID()},'Corner Deli',${status==='closed'?'register_closed':'register_count_variance'},${input.actor.id},${terminal.id},${input.actor.name},${notes},${JSON.stringify({countedCashCents:counted,expectedCashCents:Number(current.expected_cash_cents),overShortCents:overShort})}::jsonb)`;
+      await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,employee_id,terminal_id,actor,reason,details) VALUES(${randomUUID()},'Corner Deli',${status==='closed'?'register_closed':'register_count_variance'},${input.actor.id},${terminal.id},${input.actor.name},${notes},${JSON.stringify({countedCashCents:counted,expectedCashCents:Number(current.expected_cash_cents),overShortCents:overShort,lowOnOneDollarBills:input.lowOnOnes})}::jsonb)`;
     }else if(input.action==="approve_variance"){
       if(!canManagePos(input.actor))throw new RegisterError("Manager or owner approval is required.");
       if(current.status!=="needs_review")throw new RegisterError("This register does not have a variance awaiting review.");
@@ -86,4 +88,11 @@ export async function updateRegister(input:{stationKey:string;action:string;amou
     }else throw new RegisterError("Unknown register action.");
     return (await sql`SELECT * FROM ordering_register_sessions WHERE id=${current.id}`)[0];
   });
+  if(input.action==="close"&&input.lowOnOnes===true){
+    const sql=getSql(),recipients=(await sql`SELECT id,name,phone,sms_opt_in FROM employees WHERE business='Corner Deli' AND active=TRUE AND pos_role='owner' ORDER BY name`) as Array<{id:string;name:string;phone:string;sms_opt_in:boolean}>;
+    const alert=await deliverSms({recipients:recipients.map(row=>({id:String(row.id),name:String(row.name),phone:String(row.phone||""),smsOptIn:Boolean(row.sms_opt_in)})),text:()=>`Corner Deli till alert: ${terminal.name} has less than $30 in $1 bills. Reported by ${input.actor.name} during close-out.`});
+    await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,employee_id,terminal_id,actor,reason,details) VALUES(${randomUUID()},'Corner Deli','register_low_ones_alert',${input.actor.id},${terminal.id},${input.actor.name},'Less than $30 in $1 bills',${JSON.stringify({registerSessionId:updated.id,smsProvider:alert.provider,smsConfigured:alert.configured,smsSent:alert.sent,smsFailed:alert.failed,smsSkipped:alert.skipped})}::jsonb)`;
+    return {...updated,lowOnOnesAlert:alert};
+  }
+  return updated;
 }
