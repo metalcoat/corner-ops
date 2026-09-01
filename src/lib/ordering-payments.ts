@@ -9,6 +9,8 @@ import { canManagePos } from "@/lib/ordering-route-auth";
 import type { PaymentProviderKey } from "@/lib/payment-provider";
 import { completePaidPaymentQueue } from "@/lib/ordering-payment-stations";
 import { ensureOrderingAddressSchema } from "@/lib/ordering-address-schema";
+import {reconcileOrderTips} from "@/lib/ordering-tips";
+import {ensureOrderingTipSchema} from "@/lib/ordering-tip-schema";
 
 export type CheckoutTenderType = "cash" | "card" | "gift_card";
 
@@ -205,6 +207,7 @@ export async function commitTender(input: {
   };
 }) {
   await assertOrderReadyForCheckout(input.orderId, input.business);
+  await ensureOrderingTipSchema();
   if (input.tenderType === "gift_card") await ensureOrderingGiftCardSchema(); else await ensureOrderingAccountSchema();
   cents(input.amountTenderedCents, "Tender amount");
   if (!input.clientMutationId.trim() || input.clientMutationId.length > 160) throw new PaymentConflictError("A valid payment request ID is required.");
@@ -305,6 +308,7 @@ export async function commitTender(input: {
       WHERE id = ${input.orderId}
     `;
     if (remaining === 0) await completePaidPaymentQueue(input.business,input.orderId,input.checkId);
+    if (remaining === 0) await reconcileOrderTips(input.orderId,input.business);
     await sql`
       INSERT INTO ordering_order_events (id, order_id, order_version, event_type, actor_type, actor_id, details)
       SELECT ${randomUUID()}, id, version, 'payment_recorded', ${input.actor.type}, ${input.actor.id},
