@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/apply-messaging-rework.yml
       - tools/messaging-rework-payload.tar.xz
+      - tools/messaging-rework-payload.part.*
 
 permissions:
   contents: write
@@ -27,10 +28,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "92d9300aec566aea0169edfd79a7f84a0135ad3a578f26d3c53252b2e374cc8e  tools/messaging-rework-payload.tar.xz" | sha256sum -c -
-          tar -tJf tools/messaging-rework-payload.tar.xz
-          tar -xJf tools/messaging-rework-payload.tar.xz
-          rm tools/messaging-rework-payload.tar.xz
+          cat tools/messaging-rework-payload.part.* | base64 --decode > /tmp/messaging-rework-payload.tar.xz
+          echo "92d9300aec566aea0169edfd79a7f84a0135ad3a578f26d3c53252b2e374cc8e  /tmp/messaging-rework-payload.tar.xz" | sha256sum -c -
+          tar -tJf /tmp/messaging-rework-payload.tar.xz
+          tar -xJf /tmp/messaging-rework-payload.tar.xz
+          rm -f tools/messaging-rework-payload.tar.xz
+          rm -f tools/messaging-rework-payload.part.*
           rm .github/workflows/apply-messaging-rework.yml
 
           git config user.name "github-actions[bot]"
