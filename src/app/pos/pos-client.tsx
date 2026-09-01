@@ -25,6 +25,7 @@ import type {
 import "./pos.css";
 import { usePosIdleLock } from "./use-pos-idle-lock";
 import PizzaToppingSelector from "@/components/pizza-topping-selector";
+import { DELIVERY_LOCATION_PRESETS, deliveryPresetSuggestions } from "@/lib/ordering-delivery-presets";
 import {
   formatModifierIntensity,
   supportsSubModifierIntensity,
@@ -322,59 +323,8 @@ type AiDeliCall = IncomingDeliCall & {
   }>;
 };
 
-const DELIVERY_LOCATIONS = [
-  {
-    id: "ogdensburg-bowl",
-    name: "Ogdensburg Bowl",
-    address: "1121 Paterson Street, Ogdensburg, NY 13669",
-    aliases: [
-      "ogdensburg bowl",
-      "bowling alley",
-      "1121 paterson",
-      "1121 patterson",
-    ],
-    dropoffs: [
-      ...Array.from({ length: 14 }, (_, index) => `Lane ${index + 1}`),
-      "Bar",
-    ],
-  },
-  {
-    id: "claxton-hepburn",
-    name: "Claxton-Hepburn Medical Center",
-    address: "214 King Street, Ogdensburg, NY 13669",
-    aliases: ["claxton", "claxton hepburn", "hospital", "214 king"],
-    dropoffs: ["ICU", "ER", "Front Desk"],
-  },
-  {
-    id: "ansen",
-    name: "Ansen Corporation",
-    address: "100 Chimney Point Drive, Ogdensburg, NY 13669",
-    aliases: ["ansen", "new ansen", "old ansen", "100 chimney point"],
-    dropoffs: ["New Ansen", "Old Ansen"],
-  },
-] as const;
-
 function deliveryLocationSuggestions(input: string): AddressSuggestion[] {
-  const query = input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-  if (query.length < 2) return [];
-  return DELIVERY_LOCATIONS.filter((location) =>
-    [location.name, location.address, ...location.aliases].some((value) =>
-      value
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, " ")
-        .includes(query),
-    ),
-  ).map((location) => ({
-    id: `preset:${location.id}`,
-    text: location.address,
-    mainText: location.name,
-    secondaryText: `${location.address} · Choose drop-off location`,
-    provider: "preset",
-    deliveryLocationId: location.id,
-  }));
+  return deliveryPresetSuggestions(input);
 }
 
 function deliBusinessDate(): string {
@@ -3440,7 +3390,7 @@ export default function PosClient({
         session.role === "Co-Owner" ||
         session.role === "Manager");
   const canManagePayments = canManageBarcodes;
-  const selectedDeliveryLocation = DELIVERY_LOCATIONS.find(
+  const selectedDeliveryLocation = DELIVERY_LOCATION_PRESETS.find(
     (location) => location.id === selectedDeliveryLocationId,
   );
   const sendRequirement =

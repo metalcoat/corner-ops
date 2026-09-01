@@ -14,6 +14,7 @@ import {
 } from "@/lib/ordering-modifier-intensity";
 import { unwrapHelcimPayResponse } from "@/lib/helcim-pay-response";
 import { consolidateQuantities } from "@/lib/cart-line-consolidation";
+import { DELIVERY_LOCATION_PRESETS, deliveryPresetSuggestions } from "@/lib/ordering-delivery-presets";
 
 function localDateValue(value = new Date()) {
   const year = value.getFullYear();
@@ -147,6 +148,8 @@ type AddressSuggestion = {
   text: string;
   mainText: string;
   secondaryText: string;
+  provider?: "google" | "preset";
+  deliveryLocationId?: string;
 };
 type CartLine = {
   key: string;
@@ -253,6 +256,7 @@ export default function CustomerOrder() {
       [],
     ),
     [selectedPlaceId, setSelectedPlaceId] = useState(""),
+    [selectedDeliveryLocationId, setSelectedDeliveryLocationId] = useState(""),
     [addressValidationToken, setAddressValidationToken] = useState(""),
     [deliveryDistanceMiles, setDeliveryDistanceMiles] = useState<number | null>(null),
     [deliveryQuoteCents, setDeliveryQuoteCents] = useState<number | null>(null),
@@ -266,6 +270,7 @@ export default function CustomerOrder() {
   useEffect(() => {
     setAddressPortal(document.getElementById("delivery-address-top"));
   }, []);
+  const selectedDeliveryLocation = DELIVERY_LOCATION_PRESETS.find((location) => location.id === selectedDeliveryLocationId);
   useEffect(() => {
     setLoading(true);
     fetch(`/api/customer/catalog?serviceType=${serviceType}`, {
@@ -319,6 +324,8 @@ export default function CustomerOrder() {
       setAddressSuggestions([]);
       return;
     }
+    const presets = deliveryPresetSuggestions(deliveryAddress);
+    setAddressSuggestions(presets);
     const timer = window.setTimeout(() => {
       fetch("/api/customer/delivery/address/suggest", {
         method: "POST",
@@ -333,8 +340,8 @@ export default function CustomerOrder() {
             ? response.json()
             : Promise.reject(new Error(await failure(response))),
         )
-        .then((body) => setAddressSuggestions(body.suggestions || []))
-        .catch(() => setAddressSuggestions([]));
+        .then((body) => setAddressSuggestions([...presets, ...(body.suggestions || [])]))
+        .catch(() => setAddressSuggestions(presets));
     }, 250);
     return () => window.clearTimeout(timer);
   }, [
@@ -431,6 +438,7 @@ export default function CustomerOrder() {
     setBusy(true);
     setMessage("");
     try {
+      if (serviceType === "delivery" && selectedDeliveryLocation && !deliveryUnit) throw new Error(`Choose where at ${selectedDeliveryLocation.name} this delivery is going.`);
       const response = await fetch("/api/customer/cart", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1157,6 +1165,8 @@ export default function CustomerOrder() {
                             setDeliveryAddress(event.target.value);
                             setSavedAddressId("");
                             setSelectedPlaceId("");
+                            setSelectedDeliveryLocationId("");
+                            setDeliveryUnit("");
                             setAddressValidationToken("");
                             setValidatedDelivery(null);
                           }}
@@ -1169,11 +1179,13 @@ export default function CustomerOrder() {
                                 key={suggestion.id}
                                 onClick={() => {
                                   setDeliveryAddress(suggestion.text);
-                                  setSelectedPlaceId(suggestion.id);
+                                  setSelectedPlaceId(suggestion.provider === "preset" ? "" : suggestion.id);
+                                  setSelectedDeliveryLocationId(suggestion.deliveryLocationId || "");
+                                  setDeliveryUnit("");
                                   setAddressSuggestions([]);
                                   void validateDeliveryAddressNow(
                                     suggestion.text,
-                                    suggestion.id,
+                                    suggestion.provider === "preset" ? "" : suggestion.id,
                                   );
                                 }}
                               >
@@ -1183,6 +1195,7 @@ export default function CustomerOrder() {
                             ))}
                           </div>
                         )}
+                        {selectedDeliveryLocation && <div className="addressSuggestions"><strong>Where at {selectedDeliveryLocation.name}?</strong>{selectedDeliveryLocation.dropoffs.map(dropoff=><button type="button" key={dropoff} className={deliveryUnit===dropoff?"selected":""} onClick={()=>setDeliveryUnit(dropoff)}><strong>{dropoff}</strong></button>)}</div>}
                         <input
                           aria-label="Apartment, suite, or delivery note"
                           placeholder="Apartment, suite, or location note (optional)"

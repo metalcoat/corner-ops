@@ -29,6 +29,10 @@ const landmarks: Array<{ aliases: RegExp; address: string }> = [
     address: "214 King Street, Ogdensburg, NY 13669",
   },
   {
+    aliases: /^(?:the )?(?:state hospital|psych(?:iatric)? center|st\.? lawrence psych(?:iatric)? center|saint lawrence psych(?:iatric)? center)$/i,
+    address: "1 Chimney Point Drive, Ogdensburg, NY 13669",
+  },
+  {
     aliases: /^(?:new )ansen(?: corporation)?(?: new)?$/i,
     address: "100 Chimney Point Drive, Ogdensburg, NY 13669",
   },
