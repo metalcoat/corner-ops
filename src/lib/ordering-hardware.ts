@@ -432,8 +432,8 @@ export async function saveHardware(input: {
   }
   if (input.action === "test_cash_drawer") {
     const id=String(body.id||"");
-    const device=(await sql`SELECT * FROM ordering_hardware_devices WHERE id=${id} AND business=${input.business} AND role='receipt_printer' AND active=TRUE`)[0];
-    if(!device)throw new Error("Active receipt printer was not found.");
+    const device=(await sql`SELECT * FROM ordering_hardware_devices WHERE id=${id} AND business=${input.business} AND device_type='printer' AND active=TRUE`)[0];
+    if(!device||!(device.role==='receipt_printer'||(device.role==='kitchen_printer'&&device.adapter_config?.receiptEnabled===true)))throw new Error("An active receipt-enabled printer was not found.");
     if(device.adapter_key!=="network-printer"||device.adapter_config?.cashDrawerEnabled!==true)throw new Error("Enable the cash drawer on a network receipt printer first.");
     await sendEpsonPrint(device.adapter_config,["******** DRAWER TEST ********",`OPENED BY: ${input.actor.name}`,new Date().toISOString()],{openCashDrawer:true});
     await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,actor,reason,details) VALUES(${randomUUID()},${input.business},'cash_drawer_test',${input.actor.id},'Manager hardware test',${JSON.stringify({printerId:id,printerName:device.name})}::jsonb)`;

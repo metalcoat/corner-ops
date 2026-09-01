@@ -443,7 +443,7 @@ export default function HardwareSettingsClient() {
                       }
                     >
                       TEST PRINT
-                    </button>{device.role==="receipt_printer"&&device.adapter_config?.cashDrawerEnabled&&<button onClick={()=>void guarded({action:"test_cash_drawer",id:device.id},"Cash-drawer test sent.")}>TEST DRAWER</button>}</>
+                    </button>{device.adapter_config?.receiptEnabled&&device.adapter_config?.cashDrawerEnabled&&<button onClick={()=>void guarded({action:"test_cash_drawer",id:device.id},"Cash-drawer test sent.")}>TEST DRAWER</button>}</>
                   )}
                   <button
                     onClick={() => {
