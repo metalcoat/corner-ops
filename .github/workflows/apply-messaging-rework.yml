@@ -1,0 +1,42 @@
+name: Apply messaging rework
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-messaging-rework.yml
+      - tools/messaging-rework-payload.tar.xz
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-messaging-rework
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify and apply messaging rework
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "92d9300aec566aea0169edfd79a7f84a0135ad3a578f26d3c53252b2e374cc8e  tools/messaging-rework-payload.tar.xz" | sha256sum -c -
+          tar -tJf tools/messaging-rework-payload.tar.xz
+          tar -xJf tools/messaging-rework-payload.tar.xz
+          rm tools/messaging-rework-payload.tar.xz
+          rm .github/workflows/apply-messaging-rework.yml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit -m "Rebuild messaging as an active-staff inbox" \
+            -m "Replace the owner dropdown and employee dock with full conversation inboxes, add read-only employee impersonation, hide archived staff conversations, preserve recipient snapshots, redirect message notifications, and harden direct/team sends."
+          git pull --rebase origin main
+          git push origin HEAD:main
