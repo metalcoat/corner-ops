@@ -781,6 +781,7 @@ export default function PosClient({
   const [cartNotice, setCartNotice] = useState("");
   const [removedLine, setRemovedLine] = useState<CartLine | null>(null);
   const swipeStart = useRef<{ id: string; x: number; y: number } | null>(null);
+  const [swipingAwayId,setSwipingAwayId]=useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryUnit, setDeliveryUnit] = useState("");
   const [deliveryBusinessName, setDeliveryBusinessName] = useState("");
@@ -2173,6 +2174,7 @@ export default function PosClient({
     });
     invalidateEditableDraft();
   }
+  function swipeAwayLine(lineId:string,after:()=>void){if(swipingAwayId)return;setSwipingAwayId(lineId);window.setTimeout(()=>{after();setSwipingAwayId("")},260)}
 
   function changeQuantity(lineId: string, delta: number) {
     setCart((current) =>
@@ -4022,7 +4024,7 @@ export default function PosClient({
                   Number(line.quantity) - Number(line.cancelled_quantity || 0);
                 return (
                   <article
-                    className="posCartLine posPersistedTabLine posReopenedLine"
+                    className={`posCartLine posPersistedTabLine posReopenedLine${swipingAwayId===line.id?" swipingAway":""}`}
                     key={line.id}
                     onTouchStart={(event) => {
                       const touch = event.touches[0];
@@ -4041,7 +4043,7 @@ export default function PosClient({
                         start.x - touch.clientX > 80 &&
                         Math.abs(start.y - touch.clientY) < 45
                       )
-                        setReopenedCancelItem(line);
+                        swipeAwayLine(line.id,()=>setReopenedCancelItem(line));
                     }}
                   >
                     <div className="posLineTop">
@@ -4105,7 +4107,7 @@ export default function PosClient({
               )}
             {cart.map((line) => (
               <article
-                className="posCartLine"
+                className={`posCartLine${swipingAwayId===line.id?" swipingAway":""}`}
                 key={line.id}
                 onTouchStart={(e) => {
                   const t = e.touches[0];
@@ -4124,7 +4126,7 @@ export default function PosClient({
                     s.x - t.clientX > 80 &&
                     Math.abs(s.y - t.clientY) < 45
                   )
-                    removeLine(line.id);
+                    swipeAwayLine(line.id,()=>removeLine(line.id));
                 }}
               >
                 <div className="posLineTop">
