@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import PosPinGate, { type PosSessionView } from "../../pos-pin-gate";
 import ItemCancellationPanel from "./item-cancellation-panel";
 import { formatOrderModifier } from "@/lib/ordering-line-format";
@@ -343,6 +344,7 @@ export default function OrderCenterClient() {
           >
             FUTURE ORDERS
           </button>
+          <Link href="/pos/deli/drivers">DRIVERS / DISPATCH</Link>
         </nav>
       </header>
       <div className="ocTools">

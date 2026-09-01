@@ -16,7 +16,6 @@ const centerWorkspaces = [
   { label: "Dashboard", href: "/pos/deli/dashboard" },
   { label: "Customers", href: "/pos/deli/customers" },
   { label: "Kitchen", href: "/pos/deli/kitchen" },
-  { label: "Drivers", href: "/pos/deli/drivers" },
   { label: "Payments", href: "/pos/deli/payments" },
   { label: "Tips", href: "/pos/deli/tips" },
 ] as const;
@@ -38,6 +37,9 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
   const [androidUpdateUrl, setAndroidUpdateUrl] = useState<string | null>(null);
   const onlineOrderAlerts = useOnlineOrderAlert(Boolean(session?.authenticated), alertSound, alertVolume);
   const [online,setOnline]=useState(true),[offlinePending,setOfflinePending]=useState(0),[offlineMessage,setOfflineMessage]=useState("");
+  const [pendingEmployeeMeal,setPendingEmployeeMeal]=useState(false);
+
+  useEffect(()=>{if(!menuActive||!pendingEmployeeMeal)return;setPendingEmployeeMeal(false);window.requestAnimationFrame(()=>window.dispatchEvent(new Event("corner-ops-pos-employee-meal")))},[menuActive,pendingEmployeeMeal]);
 
   useEffect(()=>{let active=true;const refresh=()=>{setOnline(navigator.onLine);setOfflinePending(offlineOrders().length)};const sync=async()=>{refresh();if(!navigator.onLine)return;const result=await syncOfflineOrders();if(!active)return;setOfflinePending(result.remaining);if(result.synced)setOfflineMessage(`${result.synced} offline order${result.synced===1?"":"s"} synced to the kitchen and register.`)};refresh();void sync();window.addEventListener("online",sync);window.addEventListener("offline",refresh);window.addEventListener("corner-ops-offline-queue",refresh);const timer=window.setInterval(()=>void sync(),15000);return()=>{active=false;window.clearInterval(timer);window.removeEventListener("online",sync);window.removeEventListener("offline",refresh);window.removeEventListener("corner-ops-offline-queue",refresh)}},[]);
 
@@ -136,6 +138,11 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
     window.setTimeout(() => window.dispatchEvent(new Event("corner-ops-pos-product-search")), 80);
   }
 
+  function showEmployeeMeal() {
+    setPendingEmployeeMeal(true);
+    if (!menuActive) router.push("/pos/deli");
+  }
+
   return <div className="deliPosShell">
     {(!online||offlinePending>0||offlineMessage)&&<div className={`deliOfflineBanner ${online?"syncing":"offline"}`} role="status"><strong>{online?offlinePending?`${offlinePending} OFFLINE ORDER${offlinePending===1?"":"S"} WAITING TO SYNC`:offlineMessage:"OFFLINE — CASH ONLY"}</strong>{offlinePending>0&&online&&<button type="button" onClick={()=>void syncOfflineOrders().then(result=>{setOfflinePending(result.remaining);setOfflineMessage(result.synced?`${result.synced} order${result.synced===1?"":"s"} synced.`:result.remaining?"Sync needs attention. Tap system status for connection details.":"")})}>SYNC NOW</button>}</div>}
     {androidUpdateUrl ? <a className="deliAndroidUpdate" href={androidUpdateUrl}>ANDROID POS UPDATE AVAILABLE — DOWNLOAD</a> : null}
@@ -144,7 +151,7 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
       <div className="deliShellUtilities">
         <button type="button" onClick={() => void logout()}>SWITCH EMPLOYEE</button>
         {session?.authenticated && <button type="button" className={`deliAlertEnable ${onlineOrderAlerts.alertsEnabled?"enabled":"needed"}`} disabled={onlineOrderAlerts.alertBusy} onClick={()=>void (onlineOrderAlerts.alertsEnabled?onlineOrderAlerts.testAlerts():onlineOrderAlerts.enableAlerts())}>{onlineOrderAlerts.alertBusy?"ENABLING…":onlineOrderAlerts.alertsEnabled?"🔔":"ENABLE SOUND & NOTIFICATIONS"}</button>}
-        {session?.authenticated && <button type="button" className="deliUtilityIcon" aria-label="Employee meal" title="Employee meal" onClick={() => window.dispatchEvent(new Event("corner-ops-pos-employee-meal"))}>🍽</button>}
+        {session?.authenticated && <button type="button" className="deliUtilityIcon" aria-label="Employee meal" title="Employee meal" onClick={showEmployeeMeal}>🍽</button>}
         <Link className={`deliUtilityIcon ${activeWorkspace(pathname, "/pos/deli/reports") ? "active" : ""}`} aria-label="Reports" title="Reports" aria-current={activeWorkspace(pathname, "/pos/deli/reports") ? "page" : undefined} href="/pos/deli/reports"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 20V10h4v10H4Zm6 0V4h4v16h-4Zm6 0v-7h4v7h-4Z" /></svg></Link>
         <Link className={`deliUtilityIcon ${activeWorkspace(pathname, "/pos/deli/settings") ? "active" : ""}`} aria-label="Settings" title="Settings" aria-current={activeWorkspace(pathname, "/pos/deli/settings") ? "page" : undefined} href="/pos/deli/settings">⚙</Link>
         <div className="deliStatusControl" ref={statusControlRef}><button type="button" className={`deliStatusButton ${health.application!=="Online"||health.database!=="Online"||["Offline","Unavailable"].includes(printers.cardReader)?"red":[printers.kitchenPrinter,printers.receiptPrinter].some(value=>value!=="Online"&&value!=="Not configured")?"yellow":"green"}`} aria-label="System status" title="System status" aria-expanded={statusOpen} onClick={() => void showStatus()}><span aria-hidden="true">●</span></button>{statusOpen && <div className="deliStatusPopover" role="status"><strong>System status</strong><dl><div><dt>Application</dt><dd>{health.application}</dd></div><div><dt>Database</dt><dd>{health.database}</dd></div><div><dt>Kitchen printer</dt><dd>{printers.kitchenPrinter}</dd></div><div><dt>Receipt printer</dt><dd>{printers.receiptPrinter}</dd></div><div><dt>Card reader</dt><dd>{printers.cardReader}</dd></div></dl></div>}</div>
