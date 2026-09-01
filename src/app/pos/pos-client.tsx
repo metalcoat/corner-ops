@@ -5798,6 +5798,7 @@ export default function PosClient({
                     {dropoff}
                   </button>
                 ))}
+                {!selectedDeliveryLocation.dropoffs.length && <input autoFocus aria-label={`Where at ${selectedDeliveryLocation.name}`} placeholder="Building, department, hall, entrance, or room" value={deliveryUnit} maxLength={120} onChange={(event)=>{setDeliveryUnit(event.target.value);setSavedDraft(null);setCheckoutError("")}} />}
               </div>
             )}
             {validatedAddress && (
