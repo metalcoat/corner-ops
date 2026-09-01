@@ -780,8 +780,12 @@ export default function PosClient({
   const [configurationMessage, setConfigurationMessage] = useState("");
   const [cartNotice, setCartNotice] = useState("");
   const [removedLine, setRemovedLine] = useState<CartLine | null>(null);
-  const swipeStart = useRef<{ id: string; x: number; y: number } | null>(null);
-  const [swipingAwayId,setSwipingAwayId]=useState("");
+  const [swipeDrag, setSwipeDrag] = useState<{
+    id: string;
+    startX: number;
+    startY: number;
+    offsetX: number;
+  } | null>(null);
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryUnit, setDeliveryUnit] = useState("");
   const [deliveryBusinessName, setDeliveryBusinessName] = useState("");
@@ -2174,7 +2178,27 @@ export default function PosClient({
     });
     invalidateEditableDraft();
   }
-  function swipeAwayLine(lineId:string,after:()=>void){if(swipingAwayId)return;setSwipingAwayId(lineId);window.setTimeout(()=>{after();setSwipingAwayId("")},260)}
+  function startLineSwipe(event: React.PointerEvent<HTMLElement>, lineId: string) {
+    if (!event.isPrimary) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSwipeDrag({ id: lineId, startX: event.clientX, startY: event.clientY, offsetX: 0 });
+  }
+
+  function moveLineSwipe(event: React.PointerEvent<HTMLElement>, lineId: string) {
+    setSwipeDrag((current) => {
+      if (current?.id !== lineId) return current;
+      const offsetX = Math.min(0, event.clientX - current.startX);
+      if (Math.abs(event.clientY - current.startY) > Math.abs(offsetX)) return current;
+      return { ...current, offsetX };
+    });
+  }
+
+  function finishLineSwipe(event: React.PointerEvent<HTMLElement>, lineId: string, remove: () => void) {
+    if (swipeDrag?.id !== lineId) return;
+    const offsetX = Math.min(0, event.clientX - swipeDrag.startX);
+    setSwipeDrag(null);
+    if (offsetX <= -80) remove();
+  }
 
   function changeQuantity(lineId: string, delta: number) {
     setCart((current) =>
@@ -4024,27 +4048,16 @@ export default function PosClient({
                   Number(line.quantity) - Number(line.cancelled_quantity || 0);
                 return (
                   <article
-                    className={`posCartLine posPersistedTabLine posReopenedLine${swipingAwayId===line.id?" swipingAway":""}`}
+                    className={`posCartLine posPersistedTabLine posReopenedLine${swipeDrag?.id === line.id ? " isDragging" : ""}`}
                     key={line.id}
-                    onTouchStart={(event) => {
-                      const touch = event.touches[0];
-                      swipeStart.current = {
-                        id: line.id,
-                        x: touch.clientX,
-                        y: touch.clientY,
-                      };
-                    }}
-                    onTouchEnd={(event) => {
-                      const start = swipeStart.current,
-                        touch = event.changedTouches[0];
-                      swipeStart.current = null;
-                      if (
-                        start?.id === line.id &&
-                        start.x - touch.clientX > 80 &&
-                        Math.abs(start.y - touch.clientY) < 45
-                      )
-                        swipeAwayLine(line.id,()=>setReopenedCancelItem(line));
-                    }}
+                    style={swipeDrag?.id === line.id ? {
+                      transform: `translateX(${swipeDrag.offsetX}px)`,
+                      backgroundColor: `rgba(153, 27, 27, ${Math.min(1, Math.abs(swipeDrag.offsetX) / 80)})`,
+                    } : undefined}
+                    onPointerDown={(event) => startLineSwipe(event, line.id)}
+                    onPointerMove={(event) => moveLineSwipe(event, line.id)}
+                    onPointerUp={(event) => finishLineSwipe(event, line.id, () => setReopenedCancelItem(line))}
+                    onPointerCancel={() => setSwipeDrag(null)}
                   >
                     <div className="posLineTop">
                       <strong>
@@ -4107,27 +4120,16 @@ export default function PosClient({
               )}
             {cart.map((line) => (
               <article
-                className={`posCartLine${swipingAwayId===line.id?" swipingAway":""}`}
+                className={`posCartLine${swipeDrag?.id === line.id ? " isDragging" : ""}`}
                 key={line.id}
-                onTouchStart={(e) => {
-                  const t = e.touches[0];
-                  swipeStart.current = {
-                    id: line.id,
-                    x: t.clientX,
-                    y: t.clientY,
-                  };
-                }}
-                onTouchEnd={(e) => {
-                  const s = swipeStart.current,
-                    t = e.changedTouches[0];
-                  swipeStart.current = null;
-                  if (
-                    s?.id === line.id &&
-                    s.x - t.clientX > 80 &&
-                    Math.abs(s.y - t.clientY) < 45
-                  )
-                    swipeAwayLine(line.id,()=>removeLine(line.id));
-                }}
+                style={swipeDrag?.id === line.id ? {
+                  transform: `translateX(${swipeDrag.offsetX}px)`,
+                  backgroundColor: `rgba(153, 27, 27, ${Math.min(1, Math.abs(swipeDrag.offsetX) / 80)})`,
+                } : undefined}
+                onPointerDown={(event) => startLineSwipe(event, line.id)}
+                onPointerMove={(event) => moveLineSwipe(event, line.id)}
+                onPointerUp={(event) => finishLineSwipe(event, line.id, () => removeLine(line.id))}
+                onPointerCancel={() => setSwipeDrag(null)}
               >
                 <div className="posLineTop">
                   <strong>

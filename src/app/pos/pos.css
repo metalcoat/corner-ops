@@ -932,10 +932,12 @@
 .posCartLine {
   padding: 12px 0;
   border-bottom: 1px solid #263349;
-  transition:transform .26s ease,opacity .26s ease,background-color .2s ease,padding .26s ease;
+  transition: transform .16s ease, background-color .16s ease;
   transform-origin:center;
+  touch-action: pan-y;
+  user-select: none;
 }
-.posCartLine.swipingAway{padding-inline:12px;background:#991b1b;color:#fff;opacity:0;transform:translateX(-115%) rotate(-2deg)}
+.posCartLine.isDragging { transition: none; color: #fff; will-change: transform; }
 .posReopenedLine {
   background: #17203380;
   filter: saturate(0.65);
