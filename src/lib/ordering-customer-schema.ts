@@ -43,10 +43,14 @@ export function ensureOrderingCustomerSchema(): Promise<void> {
       CREATE TABLE IF NOT EXISTS ordering_business_settings (
         business TEXT PRIMARY KEY CHECK (business IN ('Corner Deli', 'Tiki')),
         pos_idle_lock_seconds INTEGER NOT NULL DEFAULT 60 CHECK (pos_idle_lock_seconds = 0 OR pos_idle_lock_seconds BETWEEN 15 AND 3600),
+        online_order_alert_sound TEXT NOT NULL DEFAULT 'kitchen_ring',
+        online_order_alert_volume INTEGER NOT NULL DEFAULT 100,
         business_timezone TEXT NOT NULL DEFAULT 'America/New_York',
         updated_by TEXT NOT NULL DEFAULT '', updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `;
+      await sql`ALTER TABLE ordering_business_settings ADD COLUMN IF NOT EXISTS online_order_alert_sound TEXT NOT NULL DEFAULT 'kitchen_ring'`;
+      await sql`ALTER TABLE ordering_business_settings ADD COLUMN IF NOT EXISTS online_order_alert_volume INTEGER NOT NULL DEFAULT 100`;
       await sql`INSERT INTO ordering_business_settings (business) VALUES ('Corner Deli'), ('Tiki') ON CONFLICT DO NOTHING`;
       await sql`
       CREATE TABLE IF NOT EXISTS ordering_customer_merge_events (

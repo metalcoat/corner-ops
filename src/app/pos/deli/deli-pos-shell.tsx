@@ -23,7 +23,7 @@ function activeWorkspace(pathname: string, href: string) {
   return href === "/pos/deli" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export default function DeliPosShell({ children, idleLockSeconds }: { children: ReactNode; idleLockSeconds: number }) {
+export default function DeliPosShell({ children, idleLockSeconds, alertSound, alertVolume }: { children: ReactNode; idleLockSeconds: number; alertSound: import("@/lib/ordering-pos-settings").OnlineOrderAlertSound; alertVolume: number }) {
   const pathname = usePathname();
   const router = useRouter();
   const menuActive = pathname === "/pos/deli";
@@ -34,7 +34,7 @@ export default function DeliPosShell({ children, idleLockSeconds }: { children: 
   const [health, setHealth] = useState<{ application: "Online" | "Unavailable" | "Unknown"; database: "Online" | "Unavailable" | "Unknown" }>({ application: "Unknown", database: "Unknown" });
   const [printers,setPrinters]=useState<{kitchenPrinter:string;receiptPrinter:string;cardReader:string}>({kitchenPrinter:"Unknown",receiptPrinter:"Unknown",cardReader:"Not applicable"});
   const [androidUpdateUrl, setAndroidUpdateUrl] = useState<string | null>(null);
-  useOnlineOrderAlert(Boolean(session?.authenticated));
+  useOnlineOrderAlert(Boolean(session?.authenticated), alertSound, alertVolume);
 
   const loadOpenCount = useCallback(async () => {
     const response = await fetch("/api/ordering/order-center?view=open", { cache: "no-store" });

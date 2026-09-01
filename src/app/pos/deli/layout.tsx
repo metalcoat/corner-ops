@@ -13,5 +13,5 @@ export const metadata: Metadata = {
 
 export default async function DeliLayout({ children }: { children: ReactNode }) {
   const settings = await getPosSettings("Corner Deli");
-  return <DeliPosShell idleLockSeconds={settings.posIdleLockSeconds}>{children}</DeliPosShell>;
+  return <DeliPosShell idleLockSeconds={settings.posIdleLockSeconds} alertSound={settings.onlineOrderAlertSound} alertVolume={settings.onlineOrderAlertVolume}>{children}</DeliPosShell>;
 }

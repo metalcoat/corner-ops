@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import type { OnlineOrderAlertSound } from "@/lib/ordering-pos-settings";
 
 type AlertOrder = {
   id: string;
@@ -11,10 +12,13 @@ type AlertOrder = {
 
 const ONLINE_SOURCES = new Set(["web", "online", "customer_web", "kiosk", "ai_phone"]);
 
-export function useOnlineOrderAlert(authenticated: boolean) {
+type AlertPreference = { sound: OnlineOrderAlertSound; volume: number };
+
+export function useOnlineOrderAlert(authenticated: boolean, initialSound: OnlineOrderAlertSound, initialVolume: number) {
   const initialized = useRef(false);
   const seen = useRef(new Set<string>());
   const audio = useRef<AudioContext | null>(null);
+  const preference = useRef<AlertPreference>({ sound: initialSound, volume: initialVolume });
 
   const unlockAudio = useCallback(() => {
     const Context = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -23,10 +27,12 @@ export function useOnlineOrderAlert(authenticated: boolean) {
     if (audio.current.state === "suspended") void audio.current.resume();
   }, []);
 
-  const ring = useCallback(() => {
+  const ring = useCallback((override?: AlertPreference) => {
     unlockAudio();
     const context = audio.current;
     if (!context || context.state !== "running") return;
+    const selected = override || preference.current;
+    if (selected.sound === "off") return;
     const start = context.currentTime;
     const compressor = context.createDynamicsCompressor();
     compressor.threshold.value = -18;
@@ -35,28 +41,56 @@ export function useOnlineOrderAlert(authenticated: boolean) {
     compressor.attack.value = 0.003;
     compressor.release.value = 0.2;
     compressor.connect(context.destination);
+    const volume = Math.max(0.1, Math.min(1, selected.volume / 100));
 
-    // A loud, two-burst kitchen bell. The paired tones cut through kitchen noise
-    // better than the previous short sine-wave chime without clipping speakers.
-    [0, 0.72].forEach((delay) => {
-      [640, 880].forEach((frequency, toneIndex) => {
-        const oscillator = context.createOscillator();
-        const gain = context.createGain();
-        const begins = start + delay;
-        const ends = begins + 0.52;
-        oscillator.type = toneIndex === 0 ? "square" : "triangle";
-        oscillator.frequency.setValueAtTime(frequency, begins);
-        oscillator.frequency.linearRampToValueAtTime(frequency + 35, ends);
-        gain.gain.setValueAtTime(0.0001, begins);
-        gain.gain.exponentialRampToValueAtTime(toneIndex === 0 ? 0.48 : 0.62, begins + 0.018);
-        gain.gain.setValueAtTime(toneIndex === 0 ? 0.48 : 0.62, ends - 0.08);
-        gain.gain.exponentialRampToValueAtTime(0.0001, ends);
-        oscillator.connect(gain).connect(compressor);
-        oscillator.start(begins);
-        oscillator.stop(ends + 0.01);
+    const tone = (begins: number, duration: number, frequency: number, endFrequency: number, type: OscillatorType, level: number) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const ends = begins + duration;
+      oscillator.type = type;
+      oscillator.frequency.setValueAtTime(frequency, begins);
+      oscillator.frequency.linearRampToValueAtTime(endFrequency, ends);
+      gain.gain.setValueAtTime(0.0001, begins);
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, level * volume), begins + 0.018);
+      gain.gain.setValueAtTime(Math.max(0.0001, level * volume), ends - 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ends);
+      oscillator.connect(gain).connect(compressor);
+      oscillator.start(begins);
+      oscillator.stop(ends + 0.01);
+    };
+
+    if (selected.sound === "kitchen_ring") {
+      [0, 0.72].forEach((delay) => {
+        tone(start + delay, 0.52, 640, 675, "square", 0.48);
+        tone(start + delay, 0.52, 880, 915, "triangle", 0.62);
       });
-    });
+    } else if (selected.sound === "horn") {
+      [0, 0.62].forEach((delay) => {
+        tone(start + delay, 0.45, 310, 285, "sawtooth", 0.62);
+        tone(start + delay, 0.45, 415, 390, "square", 0.4);
+      });
+    } else if (selected.sound === "telephone") {
+      [0, 0.22, 0.7, 0.92].forEach((delay) => {
+        tone(start + delay, 0.17, 440, 440, "square", 0.42);
+        tone(start + delay, 0.17, 480, 480, "sine", 0.58);
+      });
+    } else {
+      [0, 0.24, 0.48].forEach((delay, index) => tone(start + delay, 0.2, index === 1 ? 988 : 784, index === 1 ? 988 : 784, "sine", 0.34));
+    }
   }, [unlockAudio]);
+
+  useEffect(() => { preference.current = { sound: initialSound, volume: initialVolume }; }, [initialSound, initialVolume]);
+
+  useEffect(() => {
+    const update = (event: Event) => {
+      const detail = (event as CustomEvent<AlertPreference & { test?: boolean }>).detail;
+      if (!detail) return;
+      preference.current = { sound: detail.sound, volume: detail.volume };
+      if (detail.test) ring(preference.current);
+    };
+    window.addEventListener("corner-ops-online-order-alert-preference", update);
+    return () => window.removeEventListener("corner-ops-online-order-alert-preference", update);
+  }, [ring]);
 
   useEffect(() => {
     const unlock = () => unlockAudio();
