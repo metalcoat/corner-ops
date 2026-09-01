@@ -31,7 +31,7 @@ export default function DeliPosShell({ children, idleLockSeconds }: { children: 
   const [statusOpen, setStatusOpen] = useState(false);
   const statusControlRef=useRef<HTMLDivElement>(null);
   const [health, setHealth] = useState<{ application: "Online" | "Unavailable" | "Unknown"; database: "Online" | "Unavailable" | "Unknown" }>({ application: "Unknown", database: "Unknown" });
-  const [printers,setPrinters]=useState<{kitchenPrinter:string;receiptPrinter:string}>({kitchenPrinter:"Unknown",receiptPrinter:"Unknown"});
+  const [printers,setPrinters]=useState<{kitchenPrinter:string;receiptPrinter:string;cardReader:string}>({kitchenPrinter:"Unknown",receiptPrinter:"Unknown",cardReader:"Not applicable"});
   const [androidUpdateUrl, setAndroidUpdateUrl] = useState<string | null>(null);
 
   const loadOpenCount = useCallback(async () => {
@@ -100,30 +100,27 @@ export default function DeliPosShell({ children, idleLockSeconds }: { children: 
     return()=>{document.removeEventListener("pointerdown",closeOnPointer);document.removeEventListener("keydown",closeOnEscape)};
   },[statusOpen]);
 
-  function lock() {
-    window.dispatchEvent(new Event("corner-ops-pos-lock-request"));
-    window.dispatchEvent(new Event("corner-ops-pos-locked"));
-  }
-
   async function logout() {
     await fetch("/api/pos/session", { method: "DELETE" });
     window.dispatchEvent(new Event("corner-ops-pos-locked"));
     window.location.assign("/pos/deli");
   }
 
-  async function showStatus() {
-    const opening = !statusOpen;
-    setStatusOpen(opening);
-    if (!opening) return;
+  async function showStatus(refreshOnly=false) {
+    const opening = refreshOnly ? false : !statusOpen;
+    if(!refreshOnly)setStatusOpen(opening);
+    if (!opening && !refreshOnly) return;
     try {
-      const [response,printerResponse] = await Promise.all([fetch("/api/health", { cache: "no-store" }),fetch("/api/ordering/hardware/status",{cache:"no-store"})]);
+      const stationKey=localStorage.getItem("corner-ops-station-key")||"";
+      const [response,printerResponse] = await Promise.all([fetch("/api/health", { cache: "no-store" }),fetch(`/api/ordering/hardware/status?stationKey=${encodeURIComponent(stationKey)}`,{cache:"no-store"})]);
       const body = await response.json() as { database?: { status?: string } };
-      const printerBody=await printerResponse.json() as {kitchenPrinter?:string;receiptPrinter?:string};
-      const label=(value?:string)=>value==="online"?"Online":value==="offline"?"Offline":value==="not_configured"?"Not configured":"Unknown";
+      const printerBody=await printerResponse.json() as {kitchenPrinter?:string;receiptPrinter?:string;cardReader?:string};
+      const label=(value?:string)=>value==="online"?"Online":value==="offline"?"Offline":value==="not_configured"?"Not configured":value==="not_applicable"?"Not applicable":"Unknown";
       setHealth({ application: response.ok ? "Online" : "Unavailable", database: body.database?.status === "ok" ? "Online" : body.database?.status === "error" ? "Unavailable" : "Unknown" });
-      setPrinters(printerResponse.ok?{kitchenPrinter:label(printerBody.kitchenPrinter),receiptPrinter:label(printerBody.receiptPrinter)}:{kitchenPrinter:"Unavailable",receiptPrinter:"Unavailable"});
-    } catch { setHealth({ application: "Unavailable", database: "Unknown" });setPrinters({kitchenPrinter:"Unavailable",receiptPrinter:"Unavailable"}); }
+      setPrinters(printerResponse.ok?{kitchenPrinter:label(printerBody.kitchenPrinter),receiptPrinter:label(printerBody.receiptPrinter),cardReader:label(printerBody.cardReader)}:{kitchenPrinter:"Unavailable",receiptPrinter:"Unavailable",cardReader:"Unavailable"});
+    } catch { setHealth({ application: "Unavailable", database: "Unknown" });setPrinters({kitchenPrinter:"Unavailable",receiptPrinter:"Unavailable",cardReader:"Unavailable"}); }
   }
+  useEffect(()=>{if(!session?.authenticated)return;void showStatus(true);const timer=window.setInterval(()=>void showStatus(true),30000);return()=>window.clearInterval(timer)},[session?.authenticated]);
 
   function searchProducts() {
     router.push("/pos/deli");
@@ -134,12 +131,12 @@ export default function DeliPosShell({ children, idleLockSeconds }: { children: 
     {androidUpdateUrl ? <a className="deliAndroidUpdate" href={androidUpdateUrl}>ANDROID POS UPDATE AVAILABLE — DOWNLOAD</a> : null}
     <header className="deliShellHeader">
       <div className="deliShellUtilities">
-        <button type="button" onClick={() => void logout()}>LOGOUT</button>
-        <Link className={activeWorkspace(pathname, "/pos/deli/reports") ? "active" : ""} aria-current={activeWorkspace(pathname, "/pos/deli/reports") ? "page" : undefined} href="/pos/deli/reports">REPORTS</Link>
-        <Link className={activeWorkspace(pathname, "/pos/deli/settings") ? "active" : ""} aria-current={activeWorkspace(pathname, "/pos/deli/settings") ? "page" : undefined} href="/pos/deli/settings">SETTINGS</Link>
-        <div className="deliStatusControl" ref={statusControlRef}><button type="button" aria-expanded={statusOpen} onClick={() => void showStatus()}>STATUS</button>{statusOpen && <div className="deliStatusPopover" role="status"><strong>System status</strong><dl><div><dt>Application</dt><dd>{health.application}</dd></div><div><dt>Database</dt><dd>{health.database}</dd></div><div><dt>Kitchen printer</dt><dd>{printers.kitchenPrinter}</dd></div><div><dt>Receipt printer</dt><dd>{printers.receiptPrinter}</dd></div><div><dt>Card reader</dt><dd>Not configured</dd></div></dl></div>}</div>
+        <button type="button" onClick={() => void logout()}>SWITCH EMPLOYEE</button>
+        <Link className={`deliUtilityIcon ${activeWorkspace(pathname, "/pos/deli/reports") ? "active" : ""}`} aria-label="Reports" title="Reports" aria-current={activeWorkspace(pathname, "/pos/deli/reports") ? "page" : undefined} href="/pos/deli/reports">▥</Link>
+        <Link className={`deliUtilityIcon ${activeWorkspace(pathname, "/pos/deli/settings") ? "active" : ""}`} aria-label="Settings" title="Settings" aria-current={activeWorkspace(pathname, "/pos/deli/settings") ? "page" : undefined} href="/pos/deli/settings">⚙</Link>
+        <div className="deliStatusControl" ref={statusControlRef}><button type="button" className={`deliStatusButton ${health.application!=="Online"||health.database!=="Online"||["Offline","Unavailable"].includes(printers.cardReader)?"red":[printers.kitchenPrinter,printers.receiptPrinter].some(value=>value!=="Online"&&value!=="Not configured")?"yellow":"green"}`} aria-label="System status" title="System status" aria-expanded={statusOpen} onClick={() => void showStatus()}><span aria-hidden="true">●</span></button>{statusOpen && <div className="deliStatusPopover" role="status"><strong>System status</strong><dl><div><dt>Application</dt><dd>{health.application}</dd></div><div><dt>Database</dt><dd>{health.database}</dd></div><div><dt>Kitchen printer</dt><dd>{printers.kitchenPrinter}</dd></div><div><dt>Receipt printer</dt><dd>{printers.receiptPrinter}</dd></div><div><dt>Card reader</dt><dd>{printers.cardReader}</dd></div></dl></div>}</div>
       </div>
-      <div className="deliShellIdentity"><span>DEV</span><strong>Corner Deli POS</strong><small>{session?.authenticated ? session.session?.name : "Employee locked"}</small><button type="button" disabled={!session?.authenticated} onClick={lock}>LOCK / SWITCH EMPLOYEE</button></div>
+      <div className="deliShellIdentity"><span>DEV</span><strong>Corner Deli POS</strong><small>{session?.authenticated ? session.session?.name : "Employee locked"}</small></div>
       <nav className="deliWorkspaceNav" aria-label="Corner Deli POS workspaces">
         {centerWorkspaces.map((workspace) => { const active = activeWorkspace(pathname, workspace.href); return <Link key={workspace.href} href={workspace.href} aria-current={active ? "page" : undefined} className={active ? "active" : ""}>{workspace.label}</Link>; })}
       </nav>

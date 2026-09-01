@@ -591,6 +591,7 @@
 }
 .posCustomerCredit{color:#fef08a!important;font-weight:950}.posTenderButtons>.posApplyCredit{grid-column:1/-1;background:#854d0e;border-color:#facc15;color:#fff}
 .posPartySaladCalculator{display:flex;align-items:center;gap:14px}.posPartySaladCalculator input{width:140px;min-height:64px;font-size:1.5rem;font-weight:950;text-align:center}.posPartySaladCalculator strong{font-size:1.2rem;color:#fde68a}
+.posAddressInputRow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.posAddressInputRow input{min-width:0}.posAddressClear{min-width:72px;padding:6px 10px;background:#7f1d1d;border-color:#f87171;font-size:.75rem;font-weight:950}.posVerifiedBusiness{color:#fde68a;font-size:1.05rem;font-weight:950}
 .posChangeBackdrop {
   position: fixed;
   z-index: 220;

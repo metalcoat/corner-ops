@@ -783,6 +783,7 @@ export default function PosClient({
   const swipeStart = useRef<{ id: string; x: number; y: number } | null>(null);
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [deliveryUnit, setDeliveryUnit] = useState("");
+  const [deliveryBusinessName, setDeliveryBusinessName] = useState("");
   const [selectedDeliveryLocationId, setSelectedDeliveryLocationId] =
     useState("");
   const [addressSessionToken, setAddressSessionToken] = useState("");
@@ -1898,6 +1899,7 @@ export default function PosClient({
 
   function changeDeliveryAddress(value: string) {
     setDeliveryAddress(value);
+    setDeliveryBusinessName("");
     setDeliveryUnit("");
     setSelectedDeliveryLocationId("");
     setSelectedCustomerAddressId("");
@@ -1917,6 +1919,7 @@ export default function PosClient({
       explicitAddress || suggestion?.text || deliveryAddress;
     if (suggestion) {
       setDeliveryAddress(suggestion.text);
+      setDeliveryBusinessName(/^\d/.test(suggestion.mainText.trim()) ? "" : suggestion.mainText.trim());
       setSelectedDeliveryLocationId(suggestion.deliveryLocationId || "");
       setDeliveryUnit("");
     }
@@ -2085,6 +2088,7 @@ export default function PosClient({
       .join(", ");
     setDeliveryAddress(entered);
     setDeliveryUnit(address.line2 || "");
+    setDeliveryBusinessName(address.label && address.label !== "Delivery" ? address.label : "");
     await validateAddress(undefined, entered);
   }
 
@@ -2099,7 +2103,7 @@ export default function PosClient({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            label: "Delivery",
+            label: deliveryBusinessName || "Delivery",
             line1: validatedAddress.line1,
             line2: deliveryUnit,
             city: validatedAddress.city,
@@ -2122,7 +2126,7 @@ export default function PosClient({
         throw new Error(payload.error || "Could not save this address.");
       const savedAddress: PosCustomerAddress = {
         id: payload.addressId,
-        label: "Delivery",
+        label: deliveryBusinessName || "Delivery",
         line1: validatedAddress.line1,
         line2: deliveryUnit,
         city: validatedAddress.city,
@@ -2500,6 +2504,7 @@ export default function PosClient({
       setSelectedCustomerPhoneId("");
       setSelectedCustomerAddressId("");
       setDeliveryAddress("");
+      setDeliveryBusinessName("");
       setDeliveryUnit("");
       setSelectedDeliveryLocationId("");
       setValidatedAddress(null);
@@ -3772,6 +3777,7 @@ export default function PosClient({
                     onClick={() => {
                       setSelectedCustomerAddressId("");
                       setDeliveryAddress("");
+                      setDeliveryBusinessName("");
                       setDeliveryUnit("");
                       setValidatedAddress(null);
                       setDeliveryValidationToken("");
@@ -5715,9 +5721,9 @@ export default function PosClient({
               </button>
             </header>
             <div className="posAddressAutocomplete">
-              <label>
+              <label className="posAddressInputLabel">
                 Street address
-                <input
+                <span className="posAddressInputRow"><input
                   autoFocus
                   className={
                     deliveryAddressRequired
@@ -5756,7 +5762,7 @@ export default function PosClient({
                       else void validateAddress();
                     }
                   }}
-                />
+                /><button type="button" className="posAddressClear" disabled={!deliveryAddress} onClick={()=>changeDeliveryAddress("")}>CLEAR</button></span>
               </label>
               {(addressLoading ||
                 addressSuggestions.length > 0 ||
@@ -5841,6 +5847,7 @@ export default function PosClient({
             {validatedAddress && (
               <p className="addressResult posAddressConfirmation">
                 <strong>✓ ADDRESS VERIFIED</strong>
+                {deliveryBusinessName && <span className="posVerifiedBusiness">{deliveryBusinessName}</span>}
                 <span>{validatedAddress.formattedAddress}</span>
                 {deliveryUnit && <span>Apartment / room: {deliveryUnit}</span>}
               </p>
