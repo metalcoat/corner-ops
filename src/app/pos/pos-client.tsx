@@ -703,6 +703,11 @@ export default function PosClient({
   const [employeeMealNote, setEmployeeMealNote] = useState("");
   const [employeeMealBusy, setEmployeeMealBusy] = useState(false);
   const [employeeMealMessage, setEmployeeMealMessage] = useState("");
+  useEffect(() => {
+    const openEmployeeMeal = () => { setEmployeeMealMessage(""); setEmployeeMealOpen(true); };
+    window.addEventListener("corner-ops-pos-employee-meal", openEmployeeMeal);
+    return () => window.removeEventListener("corner-ops-pos-employee-meal", openEmployeeMeal);
+  }, []);
   const [cashTender, setCashTender] = useState("");
   const [receiptPrinters, setReceiptPrinters] = useState<
     Array<{
