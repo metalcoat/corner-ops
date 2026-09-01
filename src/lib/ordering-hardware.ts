@@ -372,20 +372,21 @@ export async function saveHardware(input: {
       paymentTerminalId = body.paymentTerminalId ? String(body.paymentTerminalId) : null,
       giftCardReaderId = body.giftCardReaderId ? String(body.giftCardReaderId) : null;
     const phoneCardPaymentsEnabled = body.phoneCardPaymentsEnabled === true,
-      customerDisplayEnabled = body.customerDisplayEnabled === true,
-      sharedRegisterKey = String(body.sharedRegisterKey || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 80);
+      customerDisplayEnabled = body.customerDisplayEnabled === true;
+    let sharedRegisterKey = String(body.sharedRegisterKey || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 80);
     if (!name || !/^[a-z0-9][a-z0-9-]{1,79}$/.test(stationKey)) throw new Error("Station name and a stable lowercase station key are required.");
     if (!['payment','order_taker'].includes(stationMode)) throw new Error("Unknown station mode.");
     if (stationMode === 'payment' && !receiptPrinterId) throw new Error("The payment station requires a receipt printer / till.");
     const deviceIds = [receiptPrinterId,paymentTerminalId,giftCardReaderId].filter(Boolean) as string[];
     if (deviceIds.length) {
-      const matched = await sql`SELECT id,role FROM ordering_hardware_devices WHERE business=${input.business} AND active=TRUE AND id=ANY(${deviceIds}::uuid[])`;
+      const matched = await sql`SELECT id,role,device_key,adapter_config FROM ordering_hardware_devices WHERE business=${input.business} AND active=TRUE AND id=ANY(${deviceIds}::uuid[])`;
       if (matched.length !== new Set(deviceIds).size) throw new Error("One or more station devices were not found.");
       const roleById = new Map(matched.map((row:any)=>[String(row.id),String(row.role)]));
       if (receiptPrinterId) {
         const printer = matched.find((row:any) => String(row.id) === receiptPrinterId);
-        const device = (await sql`SELECT adapter_config FROM ordering_hardware_devices WHERE id=${receiptPrinterId}`)[0];
+        const device = printer;
         if (printer?.role !== 'receipt_printer' && !(printer?.role === 'kitchen_printer' && device?.adapter_config?.receiptEnabled === true)) throw new Error("Choose a receipt printer or a kitchen printer enabled for receipts.");
+        if (!sharedRegisterKey) sharedRegisterKey = String(device?.adapter_config?.tillKey || device?.device_key || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 80);
       }
       if (paymentTerminalId && roleById.get(paymentTerminalId) !== 'payment_terminal') throw new Error("Choose a payment terminal.");
       if (giftCardReaderId && roleById.get(giftCardReaderId) !== 'barcode_scanner') throw new Error("Choose a scanner / magnetic-stripe reader.");

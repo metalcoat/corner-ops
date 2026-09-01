@@ -772,8 +772,7 @@ export default function PosClient({
   }, [business]);
   useEffect(() => {
     if (
-      stationProfile?.station_mode === "payment" &&
-      stationProfile.receipt_printer_id &&
+      stationProfile?.receipt_printer_id &&
       receiptPrinters.some(
         (printer) => printer.id === stationProfile.receipt_printer_id,
       )
