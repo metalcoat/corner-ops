@@ -35,6 +35,7 @@ type Group = {
   prompt: string;
   minSelections: number;
   maxSelections: number;
+  allowOptionQuantity: boolean;
   presentationBehavior: "standard" | "pizza_topping";
   supportsIntensity?: boolean;
   presentationContext?: "ordinary" | "combo_trigger" | "dependent";
@@ -1483,6 +1484,16 @@ function ItemDialog({
               : values;
       return { ...current, [group.id]: next };
     });
+  const changeOptionQuantity = (group: Group, id: string, delta: number) =>
+    setSelected((current) => {
+      const values = current[group.id] || [], count = values.filter((value) => value === id).length;
+      if (delta > 0 && values.length < group.maxSelections) return { ...current, [group.id]: [...values, id] };
+      if (delta < 0 && count > 0) {
+        const index = values.lastIndexOf(id);
+        return { ...current, [group.id]: values.filter((_, valueIndex) => valueIndex !== index) };
+      }
+      return current;
+    });
   const beginIntensityHold = (group: Group, option: Option) => {
     if (
       !supportsSubModifierIntensity(
@@ -1591,7 +1602,7 @@ function ItemDialog({
                 .map((option) => {
                   const isSelected = (selected[group.id] || []).includes(
                     option.id,
-                  );
+                  ), optionQuantity = (selected[group.id] || []).filter((id) => id === option.id).length;
                   const supportsIntensity = supportsSubModifierIntensity(
                     Boolean(group.supportsIntensity),
                     option.name,
@@ -1639,6 +1650,13 @@ function ItemDialog({
                           ).toUpperCase()}{" "}
                           ▾
                         </button>
+                      )}
+                      {isSelected && group.allowOptionQuantity && (
+                        <div className="customerModifierQty" aria-label={`${option.name} quantity`}>
+                          <button type="button" onClick={() => changeOptionQuantity(group, option.id, -1)}>−</button>
+                          <strong>{optionQuantity}</strong>
+                          <button type="button" onClick={() => changeOptionQuantity(group, option.id, 1)}>+</button>
+                        </div>
                       )}
                     </div>
                   );

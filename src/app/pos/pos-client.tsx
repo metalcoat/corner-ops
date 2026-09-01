@@ -195,6 +195,8 @@ type PayableCheck = {
   }>;
 };
 type SplitLine = PayableCheck["lines"][number];
+type SplitDrag = { line: SplitLine; x: number; y: number; startX: number; startY: number; moved: boolean };
+type PaidReceiptPrompt = { orderId: string; displayNumber: string; changeDueCents: number };
 
 type AddressSuggestion = {
   id: string;
@@ -566,6 +568,8 @@ export default function PosClient({
   } | null>(null);
   const holdTimer = useRef<number | null>(null),
     held = useRef(false);
+  const item86Timer = useRef<number | null>(null),
+    item86Triggered = useRef(false);
   const [modifierDeclines, setModifierDeclines] = useState<string[]>([]);
   const [pizzaToppings, setPizzaToppings] = useState<PizzaToppingSelection[]>(
     [],
@@ -683,6 +687,8 @@ export default function PosClient({
   const [splitOpen, setSplitOpen] = useState(false);
   const [splitColumns, setSplitColumns] = useState<SplitLine[][]>([[], [], []]);
   const [splitSelectedItemId, setSplitSelectedItemId] = useState("");
+  const [splitDrag, setSplitDrag] = useState<SplitDrag | null>(null);
+  const [paidReceiptPrompt, setPaidReceiptPrompt] = useState<PaidReceiptPrompt | null>(null);
   const [cashTender, setCashTender] = useState("");
   const [receiptPrinters, setReceiptPrinters] = useState<
     Array<{
@@ -1173,6 +1179,20 @@ export default function PosClient({
       setScanNotice(
         error instanceof Error ? error.message : "Barcode could not be read.",
       );
+    }
+  }
+
+  async function eightySixItem(item: OrderingMenuItemWithVariants) {
+    if (!window.confirm(`86 ${item.name}? This removes it from every ordering channel and emails management.`)) return;
+    setMenuError("");
+    try {
+      const response = await fetch("/api/ordering/menu/86", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ itemId: item.id }) });
+      const payload = await response.json() as { error?: string; emailSent?: boolean };
+      if (!response.ok) throw new Error(payload.error || "The item could not be 86'd.");
+      setMenu((current) => current.map((category) => ({ ...category, items: category.items.map((candidate) => candidate.id === item.id ? { ...candidate, available: false } : candidate) })));
+      setCartNotice(`${item.name} is now 86'd everywhere.${payload.emailSent ? " Management was emailed." : " Management email could not be confirmed."}`);
+    } catch (error) {
+      setMenuError(error instanceof Error ? error.message : "The item could not be 86'd.");
     }
   }
 
@@ -2646,6 +2666,18 @@ export default function PosClient({
     setSplitSelectedItemId("");
   }
 
+  function finishSplitDrag(event: React.PointerEvent<HTMLButtonElement>, line: SplitLine) {
+    if (!splitDrag?.moved) {
+      setSplitSelectedItemId(line.order_item_id);
+      setSplitDrag(null);
+      return;
+    }
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-split-column]");
+    if (target) moveSplitItem(line.order_item_id, Number(target.dataset.splitColumn));
+    else setSplitSelectedItemId(line.order_item_id);
+    setSplitDrag(null);
+  }
+
   async function saveSplitOrder() {
     const draft = savedDraft || activeTab;
     if (!draft || paymentBusy) return;
@@ -2694,6 +2726,34 @@ export default function PosClient({
 
   function setQuickCash(amountCents: number) {
     setCashTender((amountCents / 100).toFixed(2));
+  }
+
+  function closePaidCheckout(draft: SavedDraft, state: CheckoutState, changeDueCents = 0) {
+    if (state.order.payment_status !== "paid") return false;
+    setCheckoutOpen(false);
+    setSplitOpen(false);
+    setCdsTenderType("");
+    setLastChangeDueCents(null);
+    setPaidReceiptPrompt({ orderId: draft.id, displayNumber: draft.displayNumber, changeDueCents });
+    setCart([]);
+    setSavedDraft(null);
+    setActiveTab(null);
+    return true;
+  }
+
+  async function printFinalReceipt(itemized = false) {
+    if (!paidReceiptPrompt || paymentBusy) return;
+    setPaymentBusy(true);
+    try {
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(paidReceiptPrompt.orderId)}/payments`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ business, action: "print_paid_receipt", itemized, receiptPrinterId: receiptPrinterId || undefined }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Receipt could not be printed.");
+      setPaidReceiptPrompt(null);
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "Receipt could not be printed.");
+    } finally {
+      setPaymentBusy(false);
+    }
   }
 
   async function commitPayment(
@@ -2757,7 +2817,9 @@ export default function PosClient({
               tender.tender_type === "cash",
           );
         setLastChangeDueCents(Number(latest?.change_due_cents || 0));
+        if (closePaidCheckout(draft, payload, Number(latest?.change_due_cents || 0))) return;
       }
+      if (tenderType !== "cash" && closePaidCheckout(draft, payload)) return;
       setCashTender("");
       if (tenderType === "gift_card") {
         setGiftCardNumber("");
@@ -2833,6 +2895,7 @@ export default function PosClient({
           ) / 100
         ).toFixed(2),
       );
+      if (closePaidCheckout(draft, payload)) return;
     } catch (error) {
       setCheckoutError(
         error instanceof Error
@@ -3036,6 +3099,7 @@ export default function PosClient({
             : check,
         ),
       );
+      closePaidCheckout(draft, result);
     } catch (error) {
       setCheckoutError(
         error instanceof Error ? error.message : "Helcim payment failed.",
@@ -3842,7 +3906,11 @@ export default function PosClient({
                   type="button"
                   className={`posItemButton ${item.available ? "" : "soldOut"}`}
                   disabled={!item.available}
-                  onClick={() => selectItem(item)}
+                  onPointerDown={() => { item86Triggered.current = false; item86Timer.current = window.setTimeout(() => { item86Triggered.current = true; void eightySixItem(item); }, 900); }}
+                  onPointerUp={() => { if (item86Timer.current !== null) window.clearTimeout(item86Timer.current); item86Timer.current = null; }}
+                  onPointerCancel={() => { if (item86Timer.current !== null) window.clearTimeout(item86Timer.current); item86Timer.current = null; }}
+                  onPointerLeave={() => { if (item86Timer.current !== null) window.clearTimeout(item86Timer.current); item86Timer.current = null; }}
+                  onClick={(event) => { if (item86Triggered.current) { event.preventDefault(); item86Triggered.current = false; return; } selectItem(item); }}
                 >
                   {item.imageUrl && (
                     <img
@@ -4536,7 +4604,7 @@ export default function PosClient({
             <h2 id="checkout-title">
               Checkout · Order #{(savedDraft || activeTab)!.displayNumber}
             </h2>
-            <nav aria-label="Payable checks">
+            <nav className="posCheckTabs" aria-label="Payable checks">
               {payableChecks.map((check) => (
                 <button
                   type="button"
@@ -4928,12 +4996,12 @@ export default function PosClient({
             <p>Drag items between checks. On a touchscreen, tap an item and then tap “Move selected here.” Empty checks are not created.</p>
             <div className="posSplitGrid">
               {splitColumns.map((column, columnIndex) => (
-                <section key={columnIndex} className="posSplitColumn" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const itemId = event.dataTransfer.getData("text/plain"); if (itemId) moveSplitItem(itemId, columnIndex); }}>
+                <section key={columnIndex} data-split-column={columnIndex} className="posSplitColumn">
                   <header><strong>CHECK {columnIndex + 1}</strong><span>{money(column.reduce((sum, line) => sum + Number(line.allocated_cents), 0))}</span></header>
                   <button type="button" className="posSplitMoveHere" disabled={!splitSelectedItemId} onClick={() => moveSplitItem(splitSelectedItemId, columnIndex)}>MOVE SELECTED HERE</button>
                   <div className="posSplitItems">
                     {column.map((line) => (
-                      <button type="button" draggable key={line.order_item_id} className={splitSelectedItemId === line.order_item_id ? "selected" : ""} onDragStart={(event) => event.dataTransfer.setData("text/plain", line.order_item_id)} onClick={() => setSplitSelectedItemId(line.order_item_id)}>
+                      <button type="button" key={line.order_item_id} className={splitSelectedItemId === line.order_item_id ? "selected" : ""} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setSplitDrag({ line, x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, moved: false }); }} onPointerMove={(event) => { setSplitDrag((current) => current?.line.order_item_id === line.order_item_id ? { ...current, x: event.clientX, y: event.clientY, moved: current.moved || Math.hypot(event.clientX - current.startX, event.clientY - current.startY) > 6 } : current); }} onPointerUp={(event) => finishSplitDrag(event, line)} onPointerCancel={() => setSplitDrag(null)}>
                         <strong>{line.quantity}× {line.item_name_snapshot}</strong><span>{money(Number(line.allocated_cents))}</span>
                       </button>
                     ))}
@@ -4942,10 +5010,21 @@ export default function PosClient({
                 </section>
               ))}
             </div>
+            {splitDrag?.moved && <div className="posSplitDragGhost" style={{ left: splitDrag.x, top: splitDrag.y }} aria-hidden="true"><strong>{splitDrag.line.quantity}× {splitDrag.line.item_name_snapshot}</strong><span>{money(Number(splitDrag.line.allocated_cents))}</span></div>}
             {checkoutError && <div className="posCheckoutInlineError" role="alert">{checkoutError}</div>}
             <footer><button type="button" className="primary" disabled={paymentBusy} onClick={() => void saveSplitOrder()}>{paymentBusy ? "SAVING…" : "SAVE SPLIT & RETURN TO PAYMENT"}</button></footer>
           </section>
         </div>
+      )}
+      {paidReceiptPrompt && (
+        <aside className="posPaidReceiptPrompt" role="dialog" aria-label="Print receipt">
+          <small>ORDER #{paidReceiptPrompt.displayNumber} PAID</small>
+          {paidReceiptPrompt.changeDueCents > 0 && <strong>CHANGE {money(paidReceiptPrompt.changeDueCents)}</strong>}
+          <span>Print a receipt?</span>
+          <button type="button" className="primary" disabled={paymentBusy} onClick={() => void printFinalReceipt(false)}>PRINT RECEIPT</button>
+          <button type="button" disabled={paymentBusy} onClick={() => void printFinalReceipt(true)}>PRINT ITEMIZED</button>
+          <button type="button" disabled={paymentBusy} onClick={() => setPaidReceiptPrompt(null)}>NO RECEIPT</button>
+        </aside>
       )}
       {tabsOpen && (
         <div

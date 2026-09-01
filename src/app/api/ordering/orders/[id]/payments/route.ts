@@ -1,6 +1,6 @@
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
-import { assertOrderReadyForCheckout, checkoutState, commitTender, PaymentConflictError, reprintPaymentReceipt, reverseTender, setCheckoutTip, type CheckoutTenderType } from "@/lib/ordering-payments";
+import { assertOrderReadyForCheckout, checkoutState, commitTender, PaymentConflictError, printPaidReceipt, reprintPaymentReceipt, reverseTender, setCheckoutTip, type CheckoutTenderType } from "@/lib/ordering-payments";
 import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { paymentStationProfile, PaymentStationError } from "@/lib/ordering-payment-stations";
@@ -43,6 +43,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if(station?.station_mode==="order_taker")throw new PaymentStationError("This device is an order-taking station. Send the check to the payment station.");
     if (body.action === "reverse") return Response.json(await reverseTender({orderId:id,business,transactionId:String(body.transactionId||""),amountCents:Number(body.amountCents),clientMutationId:String(body.clientMutationId||""),reason:String(body.reason||""),actor}),{status:201});
     if (body.action === "reprint") {const result=await reprintPaymentReceipt({orderId:id,business,transactionId:String(body.transactionId||""),reason:String(body.reason||""),actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});return Response.json(result,{status:201})}
+    if (body.action === "print_paid_receipt") {const result=await printPaidReceipt({orderId:id,business,itemized:body.itemized===true,receiptPrinterId:body.receiptPrinterId?String(body.receiptPrinterId):undefined,actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false,jobId:result.printJobId});return Response.json(result,{status:201})}
     if (body.action === "set_tip") {await assertOrderReadyForCheckout(id,business);return Response.json(await setCheckoutTip({orderId:id,business,checkId:body.checkId?String(body.checkId):null,tipCents:Number(body.tipCents),actor}),{status:200});}
     const result=await commitTender({
       orderId: id,

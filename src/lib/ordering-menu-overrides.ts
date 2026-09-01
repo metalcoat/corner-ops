@@ -162,6 +162,35 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
         WHERE included_link.item_id=item.id AND included_group.name='Choose Dressing')
       ON CONFLICT(item_id,group_id) DO UPDATE SET context='hidden',updated_by='hot-meat-meal-defaults',updated_at=NOW()
     `;
+      // Bone-in and boneless wings always require a flavor decision. Plain is
+      // an explicit real option, so every ordering channel records the choice.
+      await sql`
+      UPDATE ordering_modifier_groups groups SET min_selections=1,updated_at=NOW()
+      WHERE groups.business='Corner Deli' AND groups.name='Wing Sauce'
+        AND EXISTS (
+          SELECT 1 FROM ordering_menu_item_modifier_groups link
+          JOIN ordering_menu_items item ON item.id=link.item_id
+          WHERE link.group_id=groups.id AND item.name IN ('Wings','Boneless Wings')
+        )
+    `;
+      // Bacon is its own repeatable burger add-on so extra bacon can be priced
+      // per portion without making every ordinary burger topping repeatable.
+      await sql`INSERT INTO ordering_modifier_groups(id,business,name,prompt,min_selections,max_selections,allow_option_quantity,active,sort_order) SELECT gen_random_uuid(),'Corner Deli','Burger Bacon','Add bacon?',0,10,TRUE,TRUE,900 WHERE NOT EXISTS(SELECT 1 FROM ordering_modifier_groups WHERE business='Corner Deli' AND name='Burger Bacon')`;
+      await sql`INSERT INTO ordering_modifier_options(id,group_id,name,price_delta_cents,available,active,sort_order) SELECT gen_random_uuid(),id,'Bacon',150,TRUE,TRUE,10 FROM ordering_modifier_groups WHERE business='Corner Deli' AND name='Burger Bacon' ON CONFLICT(group_id,name) DO UPDATE SET price_delta_cents=150,available=TRUE,active=TRUE,updated_at=NOW()`;
+      await sql`
+      INSERT INTO ordering_menu_item_modifier_groups(id,item_id,group_id,sort_order)
+      SELECT gen_random_uuid(),link.item_id,bacon.id,COALESCE(MAX(existing.sort_order),0)+10
+      FROM ordering_menu_item_modifier_groups link
+      JOIN ordering_modifier_groups original ON original.id=link.group_id AND original.business='Corner Deli' AND original.name='Burger Toppings'
+      JOIN ordering_modifier_groups bacon ON bacon.business='Corner Deli' AND bacon.name='Burger Bacon'
+      LEFT JOIN ordering_menu_item_modifier_groups existing ON existing.item_id=link.item_id
+      GROUP BY link.item_id,bacon.id
+      ON CONFLICT(item_id,group_id) DO NOTHING
+    `;
+      await sql`UPDATE ordering_modifier_options option SET active=FALSE,available=FALSE,updated_at=NOW() FROM ordering_modifier_groups groups WHERE option.group_id=groups.id AND groups.business='Corner Deli' AND groups.name='Burger Toppings' AND option.name='Bacon'`;
+      // Pizza Sub has six distinct free toppings; the imported maximum of five
+      // prevented selecting the complete free build.
+      await sql`UPDATE ordering_modifier_groups groups SET max_selections=9,updated_at=NOW() WHERE groups.business='Corner Deli' AND groups.name='Pizza Sub Toppings' AND EXISTS(SELECT 1 FROM ordering_menu_item_modifier_groups link JOIN ordering_menu_items item ON item.id=link.item_id WHERE link.group_id=groups.id AND item.name='Pizza Sub')`;
     })().catch((error) => {
       promise = null;
       throw error;

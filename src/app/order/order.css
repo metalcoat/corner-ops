@@ -1250,3 +1250,4 @@
     transform: none !important;
   }
 }
+.customerModifierQty{display:grid;grid-template-columns:42px 48px 42px;align-items:center;gap:5px;margin-top:6px}.customerModifierQty button{min-height:42px;padding:4px;font-size:1.25rem}.customerModifierQty strong{text-align:center;font-size:1.05rem}
