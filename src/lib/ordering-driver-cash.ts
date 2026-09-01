@@ -10,7 +10,7 @@ export async function driverCashDashboard(actor: DriverActor) {
   await ensureDriverDeliverySchema();
   const sql = getSql();
   const [orders, settlements] = await Promise.all([
-    sql`SELECT o.id order_id,o.display_number,o.amount_due_cents,o.total_cents,d.driver_employee_id,d.delivered_at,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,COALESCE(address.formatted_address,address.line1,'') delivery_address,COALESCE(address.line2,'') delivery_unit FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=o.id WHERE d.business=${actor.business} AND d.status='DELIVERED' AND o.amount_due_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_driver_cash_settlement_orders so JOIN ordering_driver_cash_settlements s ON s.id=so.settlement_id WHERE so.order_id=o.id AND s.status='posted') ORDER BY d.delivered_at,o.display_number`,
+    sql`SELECT o.id order_id,o.display_number,o.amount_due_cents,o.total_cents,dispatch.driver_employee_id,dispatch.status delivery_status,dispatch.delivered_at,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,COALESCE(address.formatted_address,address.line1,'') delivery_address,COALESCE(address.line2,'') delivery_unit FROM ordering_orders o LEFT JOIN LATERAL(SELECT d.driver_employee_id,d.status,d.delivered_at FROM ordering_delivery_assignments d WHERE d.order_id=o.id AND d.business=o.business ORDER BY d.updated_at DESC,d.created_at DESC LIMIT 1)dispatch ON TRUE LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=o.id WHERE o.business=${actor.business} AND o.service_type='delivery' AND o.status IN('confirmed','sent_to_kitchen','in_progress','ready','completed') AND (o.timing_mode<>'future' OR o.scheduled_for<=NOW()) AND o.amount_due_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_driver_cash_settlement_orders so JOIN ordering_driver_cash_settlements s ON s.id=so.settlement_id WHERE so.order_id=o.id AND s.status='posted') ORDER BY COALESCE(dispatch.delivered_at,o.completed_at,o.ready_at,o.submitted_at,o.created_at),o.display_number`,
     sql`SELECT s.id,s.business_date,s.order_count,s.expected_cash_cents,s.turned_in_cash_cents,s.over_short_cents,s.posted_at,e.name handled_by_name FROM ordering_driver_cash_settlements s JOIN employees e ON e.id=s.driver_employee_id WHERE s.business=${actor.business} AND s.status='posted' ORDER BY s.posted_at DESC LIMIT 30`,
   ]);
   return { orders, settlements, handledBy: actor.name };
@@ -26,7 +26,7 @@ export async function postDriverCashSettlement(
 ) {
   await ensureDriverDeliverySchema();
   const orderIds = [...new Set(input.orderIds.map(String))];
-  if (!orderIds.length) throw new Error("Select at least one delivered order.");
+  if (!orderIds.length) throw new Error("Select at least one delivery order.");
   if (
     !Number.isSafeInteger(input.turnedInCashCents) ||
     input.turnedInCashCents < 0
@@ -37,7 +37,7 @@ export async function postDriverCashSettlement(
   return withTransaction(async () => {
     const sql = getSql();
     const orders =
-      await sql`SELECT o.id,o.display_number,o.amount_due_cents FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id WHERE d.business=${actor.business} AND d.status='DELIVERED' AND o.id=ANY(${orderIds}::uuid[]) AND o.amount_due_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_driver_cash_settlement_orders so JOIN ordering_driver_cash_settlements s ON s.id=so.settlement_id WHERE so.order_id=o.id AND s.status='posted') FOR UPDATE OF o,d`;
+      await sql`SELECT o.id,o.display_number,o.amount_due_cents FROM ordering_orders o WHERE o.business=${actor.business} AND o.service_type='delivery' AND o.status IN('confirmed','sent_to_kitchen','in_progress','ready','completed') AND (o.timing_mode<>'future' OR o.scheduled_for<=NOW()) AND o.id=ANY(${orderIds}::uuid[]) AND o.amount_due_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_driver_cash_settlement_orders so JOIN ordering_driver_cash_settlements s ON s.id=so.settlement_id WHERE so.order_id=o.id AND s.status='posted') FOR UPDATE OF o`;
     if (orders.length !== orderIds.length)
       throw new Error(
         "One or more orders are no longer eligible. Refresh and review the cash-out.",

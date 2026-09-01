@@ -13,6 +13,7 @@ type Order = {
   delivery_address: string;
   delivery_unit: string;
   delivered_at: string;
+  delivery_status: string | null;
 };
 export default function DriverCashClient() {
   const [data, setData] = useState<any>(null),
@@ -79,7 +80,7 @@ export default function DriverCashClient() {
         <a href="/pos/deli">← Cashier POS</a>
         <h1>Driver bulk cash-out</h1>
         <p>
-          Select each delivered cash order once. The system totals the orders
+          Select any eligible delivery cash order, even when the driver did not use the delivery app. The system totals the orders
           and posts one audited end-of-shift settlement under the employee currently signed into this POS.
         </p>
       </header>
@@ -98,7 +99,7 @@ export default function DriverCashClient() {
               )
             }
           />{" "}
-          Select all eligible orders
+          Select all delivery orders
         </label>
         {orders.map((order) => (
           <article key={order.order_id}>
@@ -116,11 +117,12 @@ export default function DriverCashClient() {
               />{" "}
               #{order.display_number} · {order.customer_name} · {money(Number(order.amount_due_cents))}
               <small>{order.delivery_address}{order.delivery_unit ? ` · ${order.delivery_unit}` : ""}</small>
+              <small>Dispatch: {order.delivery_status?.replaceAll("_", " ") || "Not used"}</small>
             </label>
           </article>
         ))}
         {!orders.length && (
-          <p>No delivered unpaid orders are eligible for cash-out.</p>
+          <p>No unpaid delivery orders are eligible for cash-out.</p>
         )}
       </div>
       <h2>Expected cash: {money(expected)}</h2>
