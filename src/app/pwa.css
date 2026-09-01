@@ -6,6 +6,10 @@
   font-family: inherit;
 }
 
+.employee-messages-open .pwaControl{display:none}
+
+@media (min-width:1101px){body:has(.employeeMessagesDock) .pwaControl{right:390px}}
+
 .pwaControlButton {
   display: flex;
   align-items: center;

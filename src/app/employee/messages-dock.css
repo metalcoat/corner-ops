@@ -28,7 +28,7 @@
 .employeeProfilePhotoForm{display:grid;grid-template-columns:1fr 1fr auto;gap:7px;padding:9px 0 0;border-top:1px solid #334155}
 .employeeProfilePhotoForm label{display:flex;align-items:center;justify-content:center;border:1px solid #53657b;border-radius:9px;background:#172033;color:#f1f5f9;font-size:.72rem;font-weight:800;padding:8px;text-align:center;cursor:pointer}
 .employeeProfilePhotoForm input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
-.employeeMessagesComposer{display:grid;gap:9px;padding:10px 0 13px;border-bottom:1px solid #334155}
+.employeeMessagesComposer{display:grid;gap:9px;padding:10px 0 0;border-top:1px solid #334155;background:#0a101c}
 .employeeMessagesComposer label{display:grid;gap:5px;color:#d8e0eb;font-size:.8rem}
 .employeeMessagesComposer select,.employeeMessagesComposer textarea{box-sizing:border-box;width:100%;border:1px solid #475569;border-radius:10px;background:#070d17;color:#f8fafc;padding:10px}
 .employeeMessagesPhotoControls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
@@ -76,7 +76,8 @@
   .employeeMessagesDock.hasUnread .employeeMessagesPreview{color:#fde7a5;font-weight:750}
   .employeeMessagesChevron{border:1px solid #475569;border-radius:999px;color:#cbd5e1;font-size:.66rem;font-weight:850;padding:5px 8px;text-transform:uppercase}
   .employeeMessagesPanel{display:none;border-top:1px solid #334155;padding:0 11px 11px;background:#0a101c}
-  .employeeMessagesDock.isOpen .employeeMessagesPanel{display:flex;max-height:min(74vh,680px)}
+  .employeeMessagesDock.isOpen{position:fixed;top:calc(var(--employee-visual-top,0px) + max(6px,env(safe-area-inset-top)));right:7px;left:7px;margin:0;max-height:calc(var(--employee-visual-height,100dvh) - max(12px,env(safe-area-inset-top)) - max(8px,env(safe-area-inset-bottom)))}
+  .employeeMessagesDock.isOpen .employeeMessagesPanel{display:flex;max-height:calc(var(--employee-visual-height,100dvh) - 72px - max(20px,env(safe-area-inset-top)) - max(8px,env(safe-area-inset-bottom)))}
   .employeeMessagesFeed{flex:1;min-height:120px;max-height:none;padding-right:2px}
   .employeePortalContent{padding-top:0}
 }

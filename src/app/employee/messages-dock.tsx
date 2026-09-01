@@ -115,6 +115,8 @@ export default function EmployeeMessagesDock() {
   const expandedRef = useRef(false);
   const hasLoadedRef = useRef(false);
   const loadedLatestIdRef = useRef<string | null>(null);
+  const feedRef = useRef<HTMLDivElement | null>(null);
+  const positionedOpenRef = useRef(false);
 
   const loadMessages = useCallback(async () => {
     const response = await fetch("/api/employee/messages?limit=80", { cache: "no-store" });
@@ -226,6 +228,34 @@ export default function EmployeeMessagesDock() {
   }, [loadStatus, session]);
 
   useEffect(() => {
+    const viewport=window.visualViewport;
+    const update=()=>{
+      const height=viewport?.height||window.innerHeight,top=viewport?.offsetTop||0;
+      document.documentElement.style.setProperty("--employee-visual-height",`${height}px`);
+      document.documentElement.style.setProperty("--employee-visual-top",`${top}px`);
+    };
+    update();viewport?.addEventListener("resize",update);viewport?.addEventListener("scroll",update);window.addEventListener("resize",update);
+    return()=>{viewport?.removeEventListener("resize",update);viewport?.removeEventListener("scroll",update);window.removeEventListener("resize",update)};
+  }, []);
+
+  useEffect(()=>{
+    if((!expanded&&!window.matchMedia("(min-width:1101px)").matches)||!data?.messages.length||positionedOpenRef.current)return;
+    const frame=window.requestAnimationFrame(()=>{
+      const feed=feedRef.current;if(!feed)return;
+      const chronological=[...data.messages].reverse(),firstUnread=chronological.find(message=>data.unreadMessageIds.includes(message.id));
+      if(firstUnread){const target=feed.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(firstUnread.id)}"]`);if(target)feed.scrollTop=Math.max(0,target.offsetTop-feed.offsetTop)}
+      else feed.scrollTop=feed.scrollHeight;
+      positionedOpenRef.current=true;
+    });
+    return()=>window.cancelAnimationFrame(frame);
+  },[data?.messages,data?.unreadMessageIds,expanded]);
+
+  useEffect(()=>{
+    document.documentElement.classList.toggle("employee-messages-open",expanded);
+    return()=>document.documentElement.classList.remove("employee-messages-open");
+  },[expanded]);
+
+  useEffect(() => {
     if (!session) return;
     const media = window.matchMedia("(min-width: 1101px)");
     const onChange = () => {
@@ -276,6 +306,7 @@ export default function EmployeeMessagesDock() {
     const next = !expandedRef.current;
     expandedRef.current = next;
     setExpanded(next);
+    positionedOpenRef.current=false;
     if (!next) return;
     try {
       if (!hasLoadedRef.current) await loadMessages();
@@ -325,6 +356,7 @@ export default function EmployeeMessagesDock() {
       formElement.reset();
       await loadMessages();
       await loadStatus();
+      window.requestAnimationFrame(()=>{const feed=feedRef.current;if(feed)feed.scrollTop=feed.scrollHeight});
       setNotice(photo ? "Photo message sent." : "Message sent.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Message could not be sent.");
@@ -407,6 +439,7 @@ export default function EmployeeMessagesDock() {
     : status.latestMessageId
       ? "All caught up"
       : "No messages yet";
+  const feedMessages=[...(data?.messages||[])].reverse();
 
   return <aside className={`employeeMessagesDock ${expanded ? "isOpen" : "isCollapsed"} ${displayedUnreadCount ? "hasUnread" : ""}`} aria-label="Employee messages">
     <header className="employeeMessagesMobileHeader">
@@ -455,21 +488,10 @@ export default function EmployeeMessagesDock() {
         </div>
       </details>
 
-      <form className="employeeMessagesComposer" onSubmit={sendMessage}>
-        <input type="hidden" name="action" value="message-send" />
-        <label>Send to<select name="recipientEmployeeId" defaultValue=""><option value="">Everyone at {session.business}</option>{recipients.map((person) => <option key={person.id} value={person.id}>{person.chatNickname || firstName(person.name)}</option>)}</select></label>
-        <label>Message<textarea name="body" rows={3} placeholder="Type a message, add a photo, or both" /></label>
-        <div className="employeeMessagesPhotoControls">
-          <label className="employeeMessagesPhotoButton">Take photo<input name="cameraPhoto" type="file" accept="image/*" capture="environment" /></label>
-          <label className="employeeMessagesPhotoButton secondary">Choose photo<input name="photo" type="file" accept="image/*" /></label>
-        </div>
-        <button className="employeeMessagesSend" disabled={busy}>Send message</button>
-      </form>
-
       {notice && <div className="employeeMessagesNotice">{notice}</div>}
 
-      <div className="employeeMessagesFeed" aria-live="polite">
-        {(data?.messages || []).map((message) => {
+      <div className="employeeMessagesFeed" ref={feedRef} aria-live="polite">
+        {feedMessages.map((message) => {
           const senderColor = message.sender_schedule_color || "#64748B";
           const senderDisplay = message.sender_chat_nickname || firstName(message.sender_name);
           const unread = unreadIds.has(message.id);
@@ -490,6 +512,17 @@ export default function EmployeeMessagesDock() {
         })}
         {!data?.messages.length && <p className="employeeMessagesEmpty">No messages yet.</p>}
       </div>
+
+      <form className="employeeMessagesComposer" onSubmit={sendMessage}>
+        <input type="hidden" name="action" value="message-send" />
+        <label>Send to<select name="recipientEmployeeId" defaultValue=""><option value="">Everyone at {session.business}</option>{recipients.map((person) => <option key={person.id} value={person.id}>{person.chatNickname || firstName(person.name)}</option>)}</select></label>
+        <label>Message<textarea name="body" rows={3} placeholder="Type a message, add a photo, or both" /></label>
+        <div className="employeeMessagesPhotoControls">
+          <label className="employeeMessagesPhotoButton">Take photo<input name="cameraPhoto" type="file" accept="image/*" capture="environment" /></label>
+          <label className="employeeMessagesPhotoButton secondary">Choose photo<input name="photo" type="file" accept="image/*" /></label>
+        </div>
+        <button className="employeeMessagesSend" disabled={busy}>Send message</button>
+      </form>
     </div>
   </aside>;
 }
