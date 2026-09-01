@@ -28,17 +28,33 @@ export function useOnlineOrderAlert(authenticated: boolean) {
     const context = audio.current;
     if (!context || context.state !== "running") return;
     const start = context.currentTime;
-    [0, 0.24, 0.48].forEach((delay, index) => {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.type = "sine";
-      oscillator.frequency.value = index === 1 ? 988 : 784;
-      gain.gain.setValueAtTime(0.0001, start + delay);
-      gain.gain.exponentialRampToValueAtTime(0.34, start + delay + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + delay + 0.18);
-      oscillator.connect(gain).connect(context.destination);
-      oscillator.start(start + delay);
-      oscillator.stop(start + delay + 0.2);
+    const compressor = context.createDynamicsCompressor();
+    compressor.threshold.value = -18;
+    compressor.knee.value = 12;
+    compressor.ratio.value = 8;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.2;
+    compressor.connect(context.destination);
+
+    // A loud, two-burst kitchen bell. The paired tones cut through kitchen noise
+    // better than the previous short sine-wave chime without clipping speakers.
+    [0, 0.72].forEach((delay) => {
+      [640, 880].forEach((frequency, toneIndex) => {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        const begins = start + delay;
+        const ends = begins + 0.52;
+        oscillator.type = toneIndex === 0 ? "square" : "triangle";
+        oscillator.frequency.setValueAtTime(frequency, begins);
+        oscillator.frequency.linearRampToValueAtTime(frequency + 35, ends);
+        gain.gain.setValueAtTime(0.0001, begins);
+        gain.gain.exponentialRampToValueAtTime(toneIndex === 0 ? 0.48 : 0.62, begins + 0.018);
+        gain.gain.setValueAtTime(toneIndex === 0 ? 0.48 : 0.62, ends - 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ends);
+        oscillator.connect(gain).connect(compressor);
+        oscillator.start(begins);
+        oscillator.stop(ends + 0.01);
+      });
     });
   }, [unlockAudio]);
 
