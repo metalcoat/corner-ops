@@ -280,6 +280,10 @@ export default function OrderCenterClient() {
           <time>
             {new Intl.DateTimeFormat("en-US", {
               timeZone: tz,
+              weekday: "short",
+              month: "short",
+              day: "numeric",
+              year: "numeric",
               hour: "numeric",
               minute: "2-digit",
             }).format(new Date(o.created_at))}

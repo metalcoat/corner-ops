@@ -1250,9 +1250,9 @@ export default function PosClient({
   }
   const visibleItems = useMemo(() => {
     const query = menuSearch.trim().toLowerCase();
-    if (!query) return activeCategory?.items || [];
+    if (!query) return (activeCategory?.items || []).filter((item) => item.available);
     return allItems.filter((item) =>
-      [
+      item.available && [
         item.name,
         item.description,
         ...item.variants.flatMap((variant) => [

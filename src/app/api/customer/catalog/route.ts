@@ -40,7 +40,7 @@ export async function GET(request: Request) {
       displayName: category.displayName,
       parentId: category.parentId,
       presentationOnly: category.presentationOnly,
-      items: category.items.map((item: any) => ({
+      items: category.items.filter((item: any) => item.available).map((item: any) => ({
         id: item.id,
         categoryId: item.categoryId,
         displayName: item.name,
