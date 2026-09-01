@@ -46,6 +46,7 @@ import {
   validGiftCardInput,
 } from "@/lib/gift-card-input";
 import { consolidateQuantities } from "@/lib/cart-line-consolidation";
+import { queueOfflineOrder } from "@/lib/pos-offline-queue";
 
 type PosServiceType = Exclude<ServiceType, "undecided">;
 
@@ -104,6 +105,7 @@ type SavedDraft = {
   checkoutOnly?: boolean;
   checkId?: string | null;
   paymentQueue?: boolean;
+  offlinePayload?: { mutationId: string; orderBody: Record<string, unknown> };
 };
 type ReopenedOrderItem = {
   id: string;
@@ -823,8 +825,8 @@ export default function PosClient({
       { cache: "no-store" },
     )
       .then((response) => response.json())
-      .then((payload: SessionView | PosSessionView) => setSession(payload))
-      .catch(() => setSession({ authenticated: false } as SessionView));
+      .then((payload: SessionView | PosSessionView) => {setSession(payload);if(business==="Corner Deli"&&payload.authenticated)localStorage.setItem("corner-ops-offline-session",JSON.stringify(payload))})
+      .catch(() => {if(business==="Corner Deli"&&!navigator.onLine){try{const cached=JSON.parse(localStorage.getItem("corner-ops-offline-session")||"null") as PosSessionView|null;if(cached?.authenticated&&Number(cached.session?.expiresAt||0)>Date.now()){setSession(cached);return}}catch{}}setSession({ authenticated: false } as SessionView)});
   }, [business]);
 
   useEffect(() => {
@@ -2181,6 +2183,21 @@ export default function PosClient({
       return null;
     }
     const reopenedDraft = savedDraft?.reopened ? savedDraft : null;
+    const mutationId=clientId();
+    const orderBody={
+      business,serviceType,timingMode,
+      scheduledFor:timingMode === "future" ? new Date(scheduledFor).toISOString() : null,
+      deliveryAddress:serviceType === "delivery" ? deliveryValidatedInput : undefined,
+      deliveryUnit:serviceType === "delivery" ? deliveryUnit : undefined,
+      deliveryValidationToken:serviceType === "delivery" ? deliveryValidationToken : undefined,
+      customerId:customer?.id,customerPhoneId:selectedCustomerPhoneId || undefined,
+      customerAddressId:serviceType === "delivery" ? selectedCustomerAddressId || undefined : undefined,
+      customerFirstName:customer?.first_name || (business === "Tiki" && serviceType === "bar" ? tabName.trim() : undefined),
+      customerLastName:customer?.last_name,
+      callerPhone:customer?.phones?.find(phone => phone.id === selectedCustomerPhoneId)?.normalized_phone || customer?.normalized_phone,
+      orderOrigin,tableSessionId,
+      items:cart.map(line=>({itemId:line.itemId,variantId:line.variantId,quantity:line.quantity,modifierSelections:line.modifierSelections,modifierQuantities:line.modifierQuantities,modifierAmounts:line.modifierAmounts,modifierDeclines:line.modifierDeclines,pizzaToppings:line.pizzaToppings,comboId:line.comboId,comboSelections:line.comboSelections,specialInstructions:line.specialInstructions})),
+    };
     setSavingDraft(true);
     setCheckoutError("");
     setSavedDraft(reopenedDraft);
@@ -2234,51 +2251,7 @@ export default function PosClient({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            business,
-            serviceType,
-            timingMode,
-            scheduledFor:
-              timingMode === "future"
-                ? new Date(scheduledFor).toISOString()
-                : null,
-            deliveryAddress:
-              serviceType === "delivery" ? deliveryValidatedInput : undefined,
-            deliveryUnit: serviceType === "delivery" ? deliveryUnit : undefined,
-            deliveryValidationToken:
-              serviceType === "delivery" ? deliveryValidationToken : undefined,
-            customerId: customer?.id,
-            customerPhoneId: selectedCustomerPhoneId || undefined,
-            customerAddressId:
-              serviceType === "delivery"
-                ? selectedCustomerAddressId || undefined
-                : undefined,
-            customerFirstName:
-              customer?.first_name ||
-              (business === "Tiki" && serviceType === "bar"
-                ? tabName.trim()
-                : undefined),
-            customerLastName: customer?.last_name,
-            callerPhone:
-              customer?.phones?.find(
-                (phone) => phone.id === selectedCustomerPhoneId,
-              )?.normalized_phone || customer?.normalized_phone,
-            orderOrigin,
-            tableSessionId,
-            items: cart.map((line) => ({
-              itemId: line.itemId,
-              variantId: line.variantId,
-              quantity: line.quantity,
-              modifierSelections: line.modifierSelections,
-              modifierQuantities: line.modifierQuantities,
-              modifierAmounts: line.modifierAmounts,
-              modifierDeclines: line.modifierDeclines,
-              pizzaToppings: line.pizzaToppings,
-              comboId: line.comboId,
-              comboSelections: line.comboSelections,
-              specialInstructions: line.specialInstructions,
-            })),
-          }),
+          body: JSON.stringify(orderBody),
         },
       );
       const payload = (await response.json()) as {
@@ -2347,6 +2320,11 @@ export default function PosClient({
       }
       return draft;
     } catch (error) {
+      if(business==="Corner Deli"&&!reopenedDraft&&(navigator.onLine===false||error instanceof TypeError)){
+        const estimatedTotal=Math.max(0,subtotalCents-promotionDiscountCents+(quotedDeliveryFeeCents||0));
+        const offlineDraft:SavedDraft={id:`offline:${mutationId}`,displayNumber:`OFF-${mutationId.slice(-6).toUpperCase()}`,totalCents:estimatedTotal,deliveryFeeCents:quotedDeliveryFeeCents||0,timingMessage:"Stored on this POS until connection returns",kitchenTimingLabel:"OFFLINE — PRINTS AFTER SYNC",scheduledFor:timingMode==="future"?new Date(scheduledFor).toISOString():null,promotions:quotedPromotions,orderItemIds:cart.map(line=>line.id),loyalty:[],offlinePayload:{mutationId,orderBody}};
+        setSavedDraft(offlineDraft);setCheckoutError("Offline order staged. Cash only; it will reach the kitchen when this POS reconnects.");return offlineDraft;
+      }
       setCheckoutError(
         error instanceof Error ? error.message : "Could not save draft order.",
       );
@@ -2450,6 +2428,7 @@ export default function PosClient({
       draft = await saveDraft();
     if (!draft) draft = activeTab || (await saveDraft());
     if (!draft) return;
+    if(draft.offlinePayload){queueOfflineOrder({id:draft.offlinePayload.mutationId,createdAt:new Date().toISOString(),orderBody:draft.offlinePayload.orderBody,amountTenderedCents:null,stationKey:stationProfile?.station_key||""});setSubmittedOrder({displayNumber:draft.displayNumber,totalCents:draft.totalCents});setCart([]);setSavedDraft(null);setCheckoutError("Offline order queued. It will print in the kitchen after connection returns.");return;}
     setSubmittingOrder(true);
     setCheckoutError("");
     try {
@@ -2518,6 +2497,7 @@ export default function PosClient({
         ? await saveDraft()
         : savedDraft || activeTab || (await saveDraft()));
     if (!draft) return;
+    if(draft.offlinePayload){const checkId=`offline-check:${draft.offlinePayload.mutationId}`;setPayableChecks([{id:checkId,display_sequence:1,status:"open",total_cents:draft.totalCents,paid_cents:0,amount_due_cents:draft.totalCents,lines:[]}]);setSelectedCheckId(checkId);setCheckoutState({order:{payment_status:"unpaid",total_cents:draft.totalCents,paid_cents:0,amount_due_cents:draft.totalCents},check:{id:checkId,display_sequence:1,status:"open",total_cents:draft.totalCents,paid_cents:0,amount_due_cents:draft.totalCents},tenders:[]});setCashTender((draft.totalCents/100).toFixed(2));setCheckoutOpen(true);return;}
     const checksResponse = await fetch(
       `/api/ordering/orders/${encodeURIComponent(draft.id)}/checks`,
     );
@@ -2806,6 +2786,7 @@ export default function PosClient({
       setCheckoutError("Enter a valid gift card number.");
       return;
     }
+    if(draft.offlinePayload){if(tenderType!=="cash"){setCheckoutError("Only cash payments can be accepted offline.");return}if(!stationProfile?.station_key){setCheckoutError("Assign this device to a payment station before accepting offline cash.");return}let register:{open?:boolean;checkedAt?:number}={};try{register=JSON.parse(localStorage.getItem(`corner-ops-register-${stationProfile.station_key}`)||"{}")}catch{}if(!register.open||Date.now()-Number(register.checkedAt||0)>43_200_000){setCheckoutError("Open and verify this register while online before accepting offline cash.");return}queueOfflineOrder({id:draft.offlinePayload.mutationId,createdAt:new Date().toISOString(),orderBody:draft.offlinePayload.orderBody,amountTenderedCents,stationKey:stationProfile.station_key});setCheckoutOpen(false);setCheckoutState(null);setPayableChecks([]);setCart([]);setSavedDraft(null);setLastChangeDueCents(Math.max(0,amountTenderedCents-due));setSubmittedOrder({displayNumber:draft.displayNumber,totalCents:draft.totalCents});setCheckoutError("Offline cash order saved. Keep this POS on until it syncs; the kitchen ticket prints after reconnection.");return;}
     setPaymentBusy(true);
     setCheckoutError("");
     try {

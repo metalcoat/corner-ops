@@ -9,6 +9,7 @@ import "./deli-pos-shell.css";
 import "./deli-pos-shell-overrides.css";
 import "./deli-safe-area.css";
 import { useOnlineOrderAlert } from "./use-online-order-alert";
+import { offlineOrders, syncOfflineOrders } from "@/lib/pos-offline-queue";
 
 const centerWorkspaces = [
   { label: "Menu", href: "/pos/deli" },
@@ -36,6 +37,9 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
   const [printers,setPrinters]=useState<{kitchenPrinter:string;receiptPrinter:string;cardReader:string}>({kitchenPrinter:"Unknown",receiptPrinter:"Unknown",cardReader:"Not applicable"});
   const [androidUpdateUrl, setAndroidUpdateUrl] = useState<string | null>(null);
   const onlineOrderAlerts = useOnlineOrderAlert(Boolean(session?.authenticated), alertSound, alertVolume);
+  const [online,setOnline]=useState(true),[offlinePending,setOfflinePending]=useState(0),[offlineMessage,setOfflineMessage]=useState("");
+
+  useEffect(()=>{let active=true;const refresh=()=>{setOnline(navigator.onLine);setOfflinePending(offlineOrders().length)};const sync=async()=>{refresh();if(!navigator.onLine)return;const result=await syncOfflineOrders();if(!active)return;setOfflinePending(result.remaining);if(result.synced)setOfflineMessage(`${result.synced} offline order${result.synced===1?"":"s"} synced to the kitchen and register.`)};refresh();void sync();window.addEventListener("online",sync);window.addEventListener("offline",refresh);window.addEventListener("corner-ops-offline-queue",refresh);const timer=window.setInterval(()=>void sync(),15000);return()=>{active=false;window.clearInterval(timer);window.removeEventListener("online",sync);window.removeEventListener("offline",refresh);window.removeEventListener("corner-ops-offline-queue",refresh)}},[]);
 
   const loadOpenCount = useCallback(async () => {
     const response = await fetch("/api/ordering/order-center?view=open", { cache: "no-store" });
@@ -47,8 +51,9 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
   useEffect(() => {
     fetch("/api/pos/session", { cache: "no-store" }).then((response) => response.json()).then((next: PosSessionView) => {
       setSession(next);
+      if(next.authenticated)localStorage.setItem("corner-ops-offline-session",JSON.stringify(next));
       if (next.authenticated) void loadOpenCount();
-    }).catch(() => setSession({ authenticated: false }));
+    }).catch(() => {if(!navigator.onLine){try{const cached=JSON.parse(localStorage.getItem("corner-ops-offline-session")||"null") as PosSessionView|null;if(cached?.authenticated&&Number(cached.session?.expiresAt||0)>Date.now()){setSession(cached);return}}catch{}}setSession({ authenticated: false })});
     const authenticated = (event: Event) => {
       const employee = (event as CustomEvent<PosEmployeeSession>).detail;
       setSession({ authenticated: true, session: employee });
@@ -104,7 +109,8 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
   },[statusOpen]);
 
   async function logout() {
-    await fetch("/api/pos/session", { method: "DELETE" });
+    try{await fetch("/api/pos/session", { method: "DELETE" })}catch{/* Local lock still applies while offline. */}
+    localStorage.removeItem("corner-ops-offline-session");
     window.dispatchEvent(new Event("corner-ops-pos-locked"));
     window.location.assign("/pos/deli");
   }
@@ -131,6 +137,7 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
   }
 
   return <div className="deliPosShell">
+    {(!online||offlinePending>0||offlineMessage)&&<div className={`deliOfflineBanner ${online?"syncing":"offline"}`} role="status"><strong>{online?offlinePending?`${offlinePending} OFFLINE ORDER${offlinePending===1?"":"S"} WAITING TO SYNC`:offlineMessage:"OFFLINE — CASH ONLY"}</strong>{offlinePending>0&&online&&<button type="button" onClick={()=>void syncOfflineOrders().then(result=>{setOfflinePending(result.remaining);setOfflineMessage(result.synced?`${result.synced} order${result.synced===1?"":"s"} synced.`:result.remaining?"Sync needs attention. Tap system status for connection details.":"")})}>SYNC NOW</button>}</div>}
     {androidUpdateUrl ? <a className="deliAndroidUpdate" href={androidUpdateUrl}>ANDROID POS UPDATE AVAILABLE — DOWNLOAD</a> : null}
     {onlineOrderAlerts.alertNotice && <div className="deliAlertNotice" role="status">{onlineOrderAlerts.alertNotice}</div>}
     <header className="deliShellHeader">
