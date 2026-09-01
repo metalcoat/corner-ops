@@ -201,7 +201,6 @@ type PayableCheck = {
 type SplitLine = PayableCheck["lines"][number];
 type SplitDrag = { line: SplitLine; x: number; y: number; startX: number; startY: number; moved: boolean };
 type PaidReceiptPrompt = { orderId: string; displayNumber: string; changeDueCents: number };
-type EmployeeMealLine = { itemId: string; name: string; quantity: number };
 
 type AddressSuggestion = {
   id: string;
@@ -698,11 +697,11 @@ export default function PosClient({
   const [splitDrag, setSplitDrag] = useState<SplitDrag | null>(null);
   const [paidReceiptPrompt, setPaidReceiptPrompt] = useState<PaidReceiptPrompt | null>(null);
   const [employeeMealOpen, setEmployeeMealOpen] = useState(false);
-  const [employeeMealLines, setEmployeeMealLines] = useState<EmployeeMealLine[]>([]);
-  const [employeeMealSearch, setEmployeeMealSearch] = useState("");
+  const [, setEmployeeMealLines] = useState<Array<{ itemId: string; name: string; quantity: number }>>([]);
   const [employeeMealNote, setEmployeeMealNote] = useState("");
   const [employeeMealBusy, setEmployeeMealBusy] = useState(false);
   const [employeeMealMessage, setEmployeeMealMessage] = useState("");
+  const [employeeMealBreakAcknowledged, setEmployeeMealBreakAcknowledged] = useState(false);
   useEffect(() => {
     const openEmployeeMeal = () => { setEmployeeMealMessage(""); setEmployeeMealOpen(true); };
     window.addEventListener("corner-ops-pos-employee-meal", openEmployeeMeal);
@@ -1222,10 +1221,7 @@ export default function PosClient({
     }
   }
 
-  function changeEmployeeMealItem(item: OrderingMenuItemWithVariants, delta: number) {
-    setEmployeeMealLines((current) => {const existing=current.find((line)=>line.itemId===item.id),quantity=(existing?.quantity||0)+delta;if(quantity<=0)return current.filter((line)=>line.itemId!==item.id);if(existing)return current.map((line)=>line.itemId===item.id?{...line,quantity:Math.min(25,quantity)}:line);return[...current,{itemId:item.id,name:item.name,quantity:1}];});
-  }
-  async function submitEmployeeMeal(){if(!employeeMealLines.length||employeeMealBusy)return;setEmployeeMealBusy(true);setEmployeeMealMessage("");try{const response=await fetch("/api/ordering/employee-meals",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({lines:employeeMealLines,note:employeeMealNote})}),payload=await response.json() as {error?:string;employeeName?:string;unmappedItems?:string[]};if(!response.ok)throw new Error(payload.error||"Employee meal could not be recorded.");const unmapped=payload.unmappedItems||[];setEmployeeMealMessage(unmapped.length?`Meal recorded for ${payload.employeeName}. Inventory mapping is still needed for: ${unmapped.join(", ")}.`:`Meal recorded for ${payload.employeeName} and removed from inventory.`);setEmployeeMealLines([]);setEmployeeMealNote("");}catch(error){setEmployeeMealMessage(error instanceof Error?error.message:"Employee meal could not be recorded.");}finally{setEmployeeMealBusy(false);}}
+  async function submitEmployeeMeal(){if(!cart.length||employeeMealBusy)return;setEmployeeMealBusy(true);setEmployeeMealMessage("");try{const response=await fetch("/api/ordering/employee-meals",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({items:cart.map(line=>({itemId:line.itemId,variantId:line.variantId,quantity:line.quantity,modifierSelections:line.modifierSelections,modifierQuantities:line.modifierQuantities,modifierAmounts:line.modifierAmounts,modifierDeclines:line.modifierDeclines,pizzaToppings:line.pizzaToppings,comboId:line.comboId,comboSelections:line.comboSelections,specialInstructions:line.specialInstructions})),note:employeeMealNote,breakAcknowledged:employeeMealBreakAcknowledged})}),payload=await response.json() as {error?:string;employeeName?:string;displayNumber?:string;unmappedItems?:string[]};if(!response.ok)throw new Error(payload.error||"Employee meal could not be recorded.");const unmapped=payload.unmappedItems||[];setEmployeeMealMessage(unmapped.length?`Meal #${payload.displayNumber} sent to the kitchen for ${payload.employeeName}. Inventory mapping is still needed for: ${unmapped.join(", ")}.`:`Meal #${payload.displayNumber} sent to the kitchen for ${payload.employeeName} and removed from inventory.`);setCart([]);setEmployeeMealLines([]);setEmployeeMealNote("");setEmployeeMealBreakAcknowledged(false);}catch(error){setEmployeeMealMessage(error instanceof Error?error.message:"Employee meal could not be recorded.");}finally{setEmployeeMealBusy(false);}}
 
   useEffect(() => {
     if (!session?.authenticated) return;
@@ -5112,11 +5108,10 @@ export default function PosClient({
         <div className="posModalBackdrop posTopModalBackdrop" role="presentation" onMouseDown={(event)=>{if(event.target===event.currentTarget)setEmployeeMealOpen(false)}}>
           <section className="posEmployeeMealDialog" role="dialog" aria-modal="true" aria-labelledby="employee-meal-title">
             <header><div><small>PIN EMPLOYEE · {posEmployee?.name}</small><h2 id="employee-meal-title">Employee meal</h2></div><button type="button" onClick={()=>setEmployeeMealOpen(false)}>CLOSE</button></header>
-            <p>This records who took each item. Linked ingredients or stock items are deducted automatically.</p>
-            <input type="search" value={employeeMealSearch} onChange={(event)=>setEmployeeMealSearch(event.target.value)} placeholder="Search menu items" autoFocus />
-            <div className="posEmployeeMealBody"><div className="posEmployeeMealItems">{allItems.filter((item)=>item.available&&(!employeeMealSearch.trim()||item.name.toLowerCase().includes(employeeMealSearch.trim().toLowerCase()))).slice(0,80).map((item)=><button type="button" key={item.id} onClick={()=>changeEmployeeMealItem(item,1)}>{item.name}</button>)}</div><aside><h3>Taken</h3>{employeeMealLines.length?employeeMealLines.map((line)=><div key={line.itemId}><span>{line.name}</span><button type="button" onClick={()=>{const item=allItems.find(candidate=>candidate.id===line.itemId);if(item)changeEmployeeMealItem(item,-1)}}>−</button><strong>{line.quantity}</strong><button type="button" onClick={()=>{const item=allItems.find(candidate=>candidate.id===line.itemId);if(item)changeEmployeeMealItem(item,1)}}>+</button></div>):<p>No items selected.</p>}<label>Note<textarea value={employeeMealNote} onChange={(event)=>setEmployeeMealNote(event.target.value)} maxLength={500}/></label></aside></div>
+            <p>Build the meal in the normal POS first so sizes, modifiers, and burger combos are included. Policy: one entrée or combo, customer-menu value up to $10, no drinks, and no more than 8 wings. The employee must have at least 6 published hours scheduled today.</p>
+            <div className="posEmployeeMealBody"><div className="posEmployeeMealItems">{cart.length?cart.map(line=><article key={line.id}><strong>{line.quantity}× {line.name}{line.variantName?` · ${line.variantName}`:""}</strong><span>{[...line.modifierText,...line.comboText].join(" · ")||"No options"}</span><b>{money(line.unitPriceCents*line.quantity)}</b></article>):<p>Nothing is in the cart. Close this window, build one meal using the normal menu, then tap the meal icon again.</p>}</div><aside><h3>Employee meal</h3><strong>Customer-menu value: {money(subtotalCents)}</strong><label>Kitchen note<textarea value={employeeMealNote} onChange={(event)=>setEmployeeMealNote(event.target.value)} maxLength={500}/></label><label><input type="checkbox" checked={employeeMealBreakAcknowledged} onChange={event=>setEmployeeMealBreakAcknowledged(event.target.checked)}/> I understand this meal may only be eaten during my break and not while I am working.</label></aside></div>
             {employeeMealMessage&&<div className="posCheckoutInlineError" role="status">{employeeMealMessage}</div>}
-            <footer><button type="button" className="primary" disabled={!employeeMealLines.length||employeeMealBusy} onClick={()=>void submitEmployeeMeal()}>{employeeMealBusy?"RECORDING…":"RECORD EMPLOYEE MEAL"}</button></footer>
+            <footer><button type="button" className="primary" disabled={!cart.length||!employeeMealBreakAcknowledged||employeeMealBusy} onClick={()=>void submitEmployeeMeal()}>{employeeMealBusy?"SENDING…":"SEND EMPLOYEE MEAL TO KITCHEN"}</button></footer>
           </section>
         </div>
       )}
