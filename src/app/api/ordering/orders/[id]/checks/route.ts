@@ -5,6 +5,7 @@ import {
   listChecks,
   splitCheck,
   splitCheckEvenly,
+  assignChecks,
 } from "@/lib/ordering-checks";
 import { orderingActor } from "@/lib/ordering-route-auth";
 
@@ -38,8 +39,21 @@ export async function POST(
       fromCheckId?: unknown;
       lines?: Array<{ orderItemId?: unknown; quantity?: unknown }>;
       evenCheckCount?: unknown;
+      action?: unknown;
+      checks?: Array<Array<{ orderItemId?: unknown; quantity?: unknown }>>;
     };
     const { id } = await params;
+    if (body.action === "assign") {
+      return Response.json(await assignChecks({
+        orderId: id,
+        business: "Corner Deli",
+        checks: (body.checks || []).map((check) => check.map((line) => ({
+          orderItemId: String(line.orderItemId || ""),
+          quantity: Number(line.quantity),
+        }))),
+        actor,
+      }), { status: 201 });
+    }
     if (body.evenCheckCount !== undefined) {
       return Response.json(
         await splitCheckEvenly({

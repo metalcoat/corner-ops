@@ -194,6 +194,7 @@ type PayableCheck = {
     item_name_snapshot: string;
   }>;
 };
+type SplitLine = PayableCheck["lines"][number];
 
 type AddressSuggestion = {
   id: string;
@@ -679,6 +680,9 @@ export default function PosClient({
   );
   const [payableChecks, setPayableChecks] = useState<PayableCheck[]>([]);
   const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [splitColumns, setSplitColumns] = useState<SplitLine[][]>([[], [], []]);
+  const [splitSelectedItemId, setSplitSelectedItemId] = useState("");
   const [cashTender, setCashTender] = useState("");
   const [receiptPrinters, setReceiptPrinters] = useState<
     Array<{
@@ -2618,6 +2622,57 @@ export default function PosClient({
     }
   }
 
+  function openSplitOrder() {
+    const columns: SplitLine[][] = [[], [], []];
+    payableChecks.slice(0, 3).forEach((check, index) => {
+      columns[index] = check.lines.map((line) => ({ ...line }));
+    });
+    setSplitColumns(columns);
+    setSplitSelectedItemId("");
+    setSplitOpen(true);
+  }
+
+  function moveSplitItem(orderItemId: string, targetIndex: number) {
+    setSplitColumns((current) => {
+      const next = current.map((column) => [...column]);
+      let moving: SplitLine | undefined;
+      for (let index = 0; index < next.length; index += 1) {
+        const position = next[index].findIndex((line) => line.order_item_id === orderItemId);
+        if (position >= 0) moving = next[index].splice(position, 1)[0];
+      }
+      if (moving) next[targetIndex].push(moving);
+      return next;
+    });
+    setSplitSelectedItemId("");
+  }
+
+  async function saveSplitOrder() {
+    const draft = savedDraft || activeTab;
+    if (!draft || paymentBusy) return;
+    const checks = splitColumns.filter((column) => column.length > 0);
+    setPaymentBusy(true);
+    setCheckoutError("");
+    try {
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/checks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "assign",
+          checks: checks.map((column) => column.map((line) => ({ orderItemId: line.order_item_id, quantity: line.quantity }))),
+        }),
+      });
+      const payload = await response.json() as { checks?: PayableCheck[]; error?: string };
+      if (!response.ok || !payload.checks?.length) throw new Error(payload.error || "Could not save the split order.");
+      setPayableChecks(payload.checks);
+      setSplitOpen(false);
+      await selectCheck(payload.checks[0].id);
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "Could not save the split order.");
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
   const checkoutDueCents = Number(
     checkoutState?.check?.amount_due_cents ??
       checkoutState?.order.amount_due_cents ??
@@ -4494,24 +4549,11 @@ export default function PosClient({
                 </button>
               ))}
             </nav>
-            {Number(checkoutState?.order.paid_cents || 0) === 0 &&
-              payableChecks.length === 1 && (
-                <div className="posEvenSplit" aria-label="Split order evenly">
-                  <span>
-                    Split the complete ticket evenly, including delivery fee
-                  </span>
-                  {[2, 3, 4].map((count) => (
-                    <button
-                      type="button"
-                      key={count}
-                      disabled={paymentBusy}
-                      onClick={() => void splitEvenly(count)}
-                    >
-                      {count} CHECKS
-                    </button>
-                  ))}
-                </div>
-              )}
+            {Number(checkoutState?.order.paid_cents || 0) === 0 && (
+              <button type="button" className="posSplitOrderButton" disabled={paymentBusy} onClick={openSplitOrder}>
+                {payableChecks.length > 1 ? "EDIT SPLIT ORDER" : "SPLIT ORDER"}
+              </button>
+            )}
             <p>Amount due</p>
             <strong>
               {money(
@@ -4527,27 +4569,6 @@ export default function PosClient({
                 {checkoutError}
               </div>
             )}
-            {payableChecks
-              .find((check) => check.id === selectedCheckId)
-              ?.lines.map((line) => (
-                <div key={line.order_item_id}>
-                  <span>
-                    {line.quantity}× {line.item_name_snapshot} ·{" "}
-                    {money(Number(line.allocated_cents))}
-                  </span>
-                  {Number(checkoutState?.order.paid_cents || 0) === 0 && (
-                    <button
-                      type="button"
-                      disabled={paymentBusy}
-                      onClick={() =>
-                        void splitOne(selectedCheckId!, line.order_item_id)
-                      }
-                    >
-                      MOVE ONE TO NEW CHECK
-                    </button>
-                  )}
-                </div>
-              ))}
             {checkoutState?.tenders.map((tender) => {
               const reversed = checkoutState.tenders
                   .filter(
@@ -4894,6 +4915,35 @@ export default function PosClient({
             <button type="button" onClick={closeCheckout}>
               {savedDraft?.checkoutOnly ? "BACK TO ORDERS" : "BACK TO ORDER"}
             </button>
+          </section>
+        </div>
+      )}
+      {splitOpen && (
+        <div className="posModalBackdrop posSplitBackdrop" role="presentation">
+          <section className="posSplitDialog" role="dialog" aria-modal="true" aria-labelledby="split-order-title">
+            <header>
+              <div><small>ORDER #{(savedDraft || activeTab)?.displayNumber}</small><h2 id="split-order-title">Split order</h2></div>
+              <button type="button" onClick={() => setSplitOpen(false)}>CANCEL</button>
+            </header>
+            <p>Drag items between checks. On a touchscreen, tap an item and then tap “Move selected here.” Empty checks are not created.</p>
+            <div className="posSplitGrid">
+              {splitColumns.map((column, columnIndex) => (
+                <section key={columnIndex} className="posSplitColumn" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const itemId = event.dataTransfer.getData("text/plain"); if (itemId) moveSplitItem(itemId, columnIndex); }}>
+                  <header><strong>CHECK {columnIndex + 1}</strong><span>{money(column.reduce((sum, line) => sum + Number(line.allocated_cents), 0))}</span></header>
+                  <button type="button" className="posSplitMoveHere" disabled={!splitSelectedItemId} onClick={() => moveSplitItem(splitSelectedItemId, columnIndex)}>MOVE SELECTED HERE</button>
+                  <div className="posSplitItems">
+                    {column.map((line) => (
+                      <button type="button" draggable key={line.order_item_id} className={splitSelectedItemId === line.order_item_id ? "selected" : ""} onDragStart={(event) => event.dataTransfer.setData("text/plain", line.order_item_id)} onClick={() => setSplitSelectedItemId(line.order_item_id)}>
+                        <strong>{line.quantity}× {line.item_name_snapshot}</strong><span>{money(Number(line.allocated_cents))}</span>
+                      </button>
+                    ))}
+                    {!column.length && <span className="posSplitEmpty">Drop items here</span>}
+                  </div>
+                </section>
+              ))}
+            </div>
+            {checkoutError && <div className="posCheckoutInlineError" role="alert">{checkoutError}</div>}
+            <footer><button type="button" className="primary" disabled={paymentBusy} onClick={() => void saveSplitOrder()}>{paymentBusy ? "SAVING…" : "SAVE SPLIT & RETURN TO PAYMENT"}</button></footer>
           </section>
         </div>
       )}

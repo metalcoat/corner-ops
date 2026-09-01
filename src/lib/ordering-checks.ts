@@ -161,6 +161,67 @@ export async function splitCheckEvenly(input: {
   });
 }
 
+export async function assignChecks(input: {
+  orderId: string;
+  business: OrderingBusiness;
+  checks: Array<Array<{ orderItemId: string; quantity: number }>>;
+  actor: OrderingActor;
+}) {
+  await ensureInitialCheck(input.orderId, input.business, input.actor);
+  const requestedChecks = input.checks.filter((check) => check.length > 0);
+  if (requestedChecks.length < 1 || requestedChecks.length > 3)
+    throw new CheckConflictError("Use between 1 and 3 non-empty checks.");
+  return withTransaction(async () => {
+    const sql = getSql();
+    const order = (
+      await sql`SELECT id,total_cents,paid_cents FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`
+    )[0];
+    if (!order) throw new CheckConflictError("Order was not found.");
+    if (Number(order.paid_cents) > 0)
+      throw new CheckConflictError("The order cannot be split after payment has started.");
+    const items =
+      await sql`SELECT id,quantity,line_total_cents FROM ordering_order_items WHERE order_id=${input.orderId} ORDER BY sort_order,created_at,id`;
+    const expected = new Map(items.map((item) => [String(item.id), Number(item.quantity)]));
+    const assigned = new Map<string, number>();
+    for (const check of requestedChecks) {
+      for (const line of check) {
+        if (!expected.has(line.orderItemId) || !Number.isSafeInteger(line.quantity) || line.quantity <= 0)
+          throw new CheckConflictError("The split contains an invalid order item.");
+        assigned.set(line.orderItemId, (assigned.get(line.orderItemId) || 0) + line.quantity);
+      }
+    }
+    for (const [itemId, quantity] of expected) {
+      if (assigned.get(itemId) !== quantity)
+        throw new CheckConflictError("Every item must be assigned to exactly one check.");
+    }
+    await sql`DELETE FROM ordering_checks WHERE order_id=${input.orderId}`;
+    const itemById = new Map(items.map((item) => [String(item.id), item]));
+    const itemTotal = items.reduce((sum, item) => sum + Number(item.line_total_cents), 0);
+    const shared = Number(order.total_cents) - itemTotal;
+    const sharedBase = Math.trunc(shared / requestedChecks.length);
+    let sharedRemainder = shared - sharedBase * requestedChecks.length;
+    for (let index = 0; index < requestedChecks.length; index += 1) {
+      const checkId = randomUUID();
+      const checkLines = requestedChecks[index];
+      const linesTotal = checkLines.reduce((sum, line) => {
+        const item = itemById.get(line.orderItemId)!;
+        return sum + Math.round(Number(item.line_total_cents) * line.quantity / Number(item.quantity));
+      }, 0);
+      const adjustment = sharedBase + (sharedRemainder > 0 ? 1 : sharedRemainder < 0 ? -1 : 0);
+      if (sharedRemainder > 0) sharedRemainder -= 1;
+      if (sharedRemainder < 0) sharedRemainder += 1;
+      const total = Math.max(0, linesTotal + adjustment);
+      await sql`INSERT INTO ordering_checks(id,business,order_id,display_sequence,total_cents,amount_due_cents,created_by) VALUES(${checkId},${input.business},${input.orderId},${index + 1},${total},${total},${input.actor.id})`;
+      for (const line of checkLines) {
+        const item = itemById.get(line.orderItemId)!;
+        const allocated = Math.round(Number(item.line_total_cents) * line.quantity / Number(item.quantity));
+        await sql`INSERT INTO ordering_check_line_assignments(check_id,order_item_id,quantity,allocated_cents) VALUES(${checkId},${line.orderItemId},${line.quantity},${allocated})`;
+      }
+    }
+    return { checks: await listChecks(input.orderId, input.business) };
+  });
+}
+
 export async function listChecks(orderId: string, business: OrderingBusiness) {
   await ensureOrderingAccountSchema();
   const sql = getSql();
