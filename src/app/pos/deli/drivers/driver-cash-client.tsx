@@ -87,7 +87,7 @@ export default function DriverCashClient() {
       {message && <p role="status">{message}</p>}
       {data?.handledBy && <p><strong>CASHING OUT AS: {data.handledBy}</strong></p>}
       <div>
-        <label>
+        <label className="cashSelectAll">
           <input
             type="checkbox"
             checked={allSelected}
@@ -101,9 +101,11 @@ export default function DriverCashClient() {
           />{" "}
           Select all delivery orders
         </label>
-        {orders.map((order) => (
-          <article key={order.order_id}>
-            <label>
+        {orders.length>0&&<div className="driverCashGrid">
+          <div className="driverCashHead"><span>ORDER</span><span>CUSTOMER / ADDRESS</span><span>DISPATCH</span><span>AMOUNT</span></div>
+          {orders.map((order) => (
+          <article className={selected.includes(order.order_id)?"selected":""} key={order.order_id}>
+            <label className="driverCashRow">
               <input
                 type="checkbox"
                 checked={selected.includes(order.order_id)}
@@ -114,13 +116,14 @@ export default function DriverCashClient() {
                       : rows.filter((id) => id !== order.order_id),
                   )
                 }
-              />{" "}
-              #{order.display_number} · {order.customer_name} · {money(Number(order.amount_due_cents))}
-              <small>{order.delivery_address}{order.delivery_unit ? ` · ${order.delivery_unit}` : ""}</small>
-              <small>Dispatch: {order.delivery_status?.replaceAll("_", " ") || "Not used"}</small>
+              />
+              <strong>#{order.display_number}</strong>
+              <span><b>{order.customer_name}</b><small>{order.delivery_address}{order.delivery_unit ? ` · ${order.delivery_unit}` : ""}</small></span>
+              <span>{order.delivery_status?.replaceAll("_", " ") || "App not used"}</span>
+              <b>{money(Number(order.amount_due_cents))}</b>
             </label>
           </article>
-        ))}
+        ))}</div>}
         {!orders.length && (
           <p>No unpaid delivery orders are eligible for cash-out.</p>
         )}
@@ -159,6 +162,7 @@ export default function DriverCashClient() {
           ))}
         </section>
       )}
+      <style jsx>{`.cashSelectAll{display:flex;align-items:center;gap:10px;margin:12px 0;padding:10px 12px;border:1px solid #475569;border-radius:8px;background:#172033;color:#fff;font-weight:900}.driverCashGrid{overflow:hidden;border:1px solid #475569;border-radius:10px;background:#0f172a;color:#fff}.driverCashHead,.driverCashRow{display:grid;grid-template-columns:24px minmax(90px,.65fr) minmax(240px,2fr) minmax(110px,.8fr) minmax(90px,.6fr);align-items:center;gap:10px}.driverCashHead{grid-template-columns:minmax(90px,.65fr) minmax(240px,2fr) minmax(110px,.8fr) minmax(90px,.6fr);margin-left:34px;padding:9px 12px;background:#1e293b;color:#94a3b8;font-size:.7rem;font-weight:900;letter-spacing:.08em}.driverCashGrid article{margin:0;padding:0;border:0;border-top:1px solid #334155;border-radius:0;background:#111827}.driverCashGrid article.selected{background:#12345a;box-shadow:inset 5px 0 #3b82f6}.driverCashRow{min-height:66px;padding:8px 12px;cursor:pointer}.driverCashRow:hover{background:#1e293b}.driverCashRow span{display:flex;min-width:0;flex-direction:column;gap:3px}.driverCashRow small{overflow:hidden;color:#cbd5e1;text-overflow:ellipsis;white-space:nowrap}.driverCashRow>span:nth-last-child(2){text-transform:capitalize;color:#bfdbfe}.driverCashRow>input{width:20px;height:20px}.driverCashRow>b:last-child{text-align:right;color:#86efac;font-size:1.05rem}@media(max-width:700px){.driverCashHead{display:none}.driverCashRow{grid-template-columns:24px 90px minmax(150px,1fr) 92px}.driverCashRow>span:nth-last-child(2){display:none}}`}</style>
     </main>
   );
 }
