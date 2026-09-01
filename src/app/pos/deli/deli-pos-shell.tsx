@@ -18,8 +18,6 @@ const centerWorkspaces = [
   { label: "Kitchen", href: "/pos/deli/kitchen" },
   { label: "Drivers", href: "/pos/deli/drivers" },
   { label: "Payments", href: "/pos/deli/payments" },
-  { label: "Register", href: "/pos/deli/register" },
-  { label: "Inventory", href: "/pos/deli/inventory" },
   { label: "Tips", href: "/pos/deli/tips" },
 ] as const;
 
@@ -147,7 +145,7 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
         <button type="button" onClick={() => void logout()}>SWITCH EMPLOYEE</button>
         {session?.authenticated && <button type="button" className={`deliAlertEnable ${onlineOrderAlerts.alertsEnabled?"enabled":"needed"}`} disabled={onlineOrderAlerts.alertBusy} onClick={()=>void (onlineOrderAlerts.alertsEnabled?onlineOrderAlerts.testAlerts():onlineOrderAlerts.enableAlerts())}>{onlineOrderAlerts.alertBusy?"ENABLING…":onlineOrderAlerts.alertsEnabled?"🔔":"ENABLE SOUND & NOTIFICATIONS"}</button>}
         {session?.authenticated && <button type="button" className="deliUtilityIcon" aria-label="Employee meal" title="Employee meal" onClick={() => window.dispatchEvent(new Event("corner-ops-pos-employee-meal"))}>🍽</button>}
-        <Link className={`deliUtilityIcon ${activeWorkspace(pathname, "/pos/deli/reports") ? "active" : ""}`} aria-label="Reports" title="Reports" aria-current={activeWorkspace(pathname, "/pos/deli/reports") ? "page" : undefined} href="/pos/deli/reports">▥</Link>
+        <Link className={`deliUtilityIcon ${activeWorkspace(pathname, "/pos/deli/reports") ? "active" : ""}`} aria-label="Reports" title="Reports" aria-current={activeWorkspace(pathname, "/pos/deli/reports") ? "page" : undefined} href="/pos/deli/reports"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 20V10h4v10H4Zm6 0V4h4v16h-4Zm6 0v-7h4v7h-4Z" /></svg></Link>
         <Link className={`deliUtilityIcon ${activeWorkspace(pathname, "/pos/deli/settings") ? "active" : ""}`} aria-label="Settings" title="Settings" aria-current={activeWorkspace(pathname, "/pos/deli/settings") ? "page" : undefined} href="/pos/deli/settings">⚙</Link>
         <div className="deliStatusControl" ref={statusControlRef}><button type="button" className={`deliStatusButton ${health.application!=="Online"||health.database!=="Online"||["Offline","Unavailable"].includes(printers.cardReader)?"red":[printers.kitchenPrinter,printers.receiptPrinter].some(value=>value!=="Online"&&value!=="Not configured")?"yellow":"green"}`} aria-label="System status" title="System status" aria-expanded={statusOpen} onClick={() => void showStatus()}><span aria-hidden="true">●</span></button>{statusOpen && <div className="deliStatusPopover" role="status"><strong>System status</strong><dl><div><dt>Application</dt><dd>{health.application}</dd></div><div><dt>Database</dt><dd>{health.database}</dd></div><div><dt>Kitchen printer</dt><dd>{printers.kitchenPrinter}</dd></div><div><dt>Receipt printer</dt><dd>{printers.receiptPrinter}</dd></div><div><dt>Card reader</dt><dd>{printers.cardReader}</dd></div></dl></div>}</div>
       </div>

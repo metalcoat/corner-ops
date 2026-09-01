@@ -85,7 +85,7 @@ function epsonTextSize(value: unknown) {
 export async function sendEpsonPrint(
   config: Record<string, unknown>,
   lines: string[],
-  options: { openCashDrawer?: boolean } = {},
+  options: { openCashDrawer?: boolean; drawerOnly?: boolean } = {},
 ) {
   const host = String(config.host || "").trim(),
     port = Number(config.port || 9100);
@@ -107,7 +107,10 @@ export async function sendEpsonPrint(
       options.openCashDrawer && config.cashDrawerEnabled === true
         ? Buffer.from([0x1b, 0x70, 0x00, 0x19, 0xfa])
         : Buffer.alloc(0);
-  const data = Buffer.concat([
+  const data = options.drawerOnly ? Buffer.concat([
+    Buffer.from([0x1b, 0x40]),
+    drawer,
+  ]) : Buffer.concat([
     Buffer.from([0x1b, 0x40]),
     drawer,
     Buffer.from([0x1b, 0x61, 0x01, 0x1b, 0x45, 0x01, 0x1d, 0x21, headerSize]),

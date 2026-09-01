@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getSql, withTransaction } from "@/lib/db";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
 import { canManagePos, type OrderingActor } from "@/lib/ordering-route-auth";
+import { sendEpsonPrint } from "@/lib/ordering-hardware";
 
 export class RegisterError extends Error {}
 
@@ -36,7 +37,18 @@ export async function registerDashboard(stationKey:string,actor:OrderingActor){
 
 export async function updateRegister(input:{stationKey:string;action:string;amountCents?:number;reason?:string;notes?:string;actor:OrderingActor}){
   await ensureOrderingPosSchema();
-  const {terminal}=await terminalForStation(input.stationKey,input.actor),reason=String(input.reason||"").trim().slice(0,500),notes=String(input.notes||"").trim().slice(0,1000);
+  const {station,terminal}=await terminalForStation(input.stationKey,input.actor),reason=String(input.reason||"").trim().slice(0,500),notes=String(input.notes||"").trim().slice(0,1000);
+  if(input.action==="no_sale"){
+    if(!canManagePos(input.actor))throw new RegisterError("Manager or owner authorization is required to open the drawer without a sale.");
+    const sql=getSql(),current=(await sql`SELECT * FROM ordering_register_sessions WHERE terminal_id=${terminal.id} AND status='open' ORDER BY opened_at DESC LIMIT 1`)[0];
+    if(!current)throw new RegisterError("Open the register before using No Sale.");
+    const printer=(await sql`SELECT * FROM ordering_hardware_devices WHERE id=${station.receipt_printer_id} AND business='Corner Deli' AND device_type='printer' AND active=TRUE LIMIT 1`)[0];
+    if(!printer)throw new RegisterError("The receipt printer assigned to this station is not available.");
+    if(printer.adapter_key!=="network-printer"||printer.adapter_config?.cashDrawerEnabled!==true)throw new RegisterError("Enable the cash drawer on this station's network receipt printer first.");
+    try{await sendEpsonPrint(printer.adapter_config,[],{openCashDrawer:true,drawerOnly:true})}catch(error){throw new RegisterError(error instanceof Error?error.message:"The cash drawer could not be opened.")}
+    await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,employee_id,terminal_id,actor,reason,details) VALUES(${randomUUID()},'Corner Deli','cash_drawer_no_sale',${input.actor.id},${terminal.id},${input.actor.name},'Manager No Sale',${JSON.stringify({registerSessionId:current.id,stationKey:station.station_key,printerId:printer.id,printerName:printer.name})}::jsonb)`;
+    return current;
+  }
   return withTransaction(async()=>{
     const sql=getSql();
     const current=(await sql`SELECT * FROM ordering_register_sessions WHERE terminal_id=${terminal.id} AND status IN('open','counting','needs_review') ORDER BY opened_at DESC LIMIT 1 FOR UPDATE`)[0];
