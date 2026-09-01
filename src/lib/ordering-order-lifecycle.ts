@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getSql, withTransaction } from "@/lib/db";
+import {depleteInventoryForOrder} from "@/lib/ordering-inventory";
+import {ensureOrderingInventorySchema} from "@/lib/ordering-inventory-schema";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
 import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
@@ -231,6 +233,7 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
   await ensureOrderingMenuOverrideSchema();
   await ensureOrderingAccountSchema();
   await ensureRestaurantPlatformSchema();
+  await ensureOrderingInventorySchema();
   const result = await withTransaction(async () => {
     // Draft pricing follows current promotion configuration until Send locks it.
     await applyPromotionsToOrder(orderId);
@@ -348,6 +351,7 @@ export async function submitDraftOrder(orderId: string, business: OrderingBusine
       ON CONFLICT DO NOTHING
     `;
     if(reopenDetails)await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${updated[0].version},'order_addition_submitted',${actor.type},${actor.id},${JSON.stringify({addedItemIds,previousTotalCents:Number(reopenDetails.previousTotalCents||0),newTotalCents:Number(updated[0].total_cents),additionalAmountDueCents:Number(updated[0].amount_due_cents),actorName:actor.name})}::jsonb)`;
+    await depleteInventoryForOrder(orderId,business,actor);
     return { order: updated[0], alreadySubmitted: false };
   });
   const source = String(result.order.source || "").toLowerCase();
