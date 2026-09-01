@@ -4,8 +4,7 @@ import { canvasToJpegBlob, drawCanvasImage } from "@/app/client-image";
 import { responseMessage } from "@/app/client-http";
 import { firstName } from "@/app/client-text";
 import { ChangeEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import "./messages-dock.css";
-import "./conversation-messages-dock.css";
+import "../message-inbox.css";
 
 type EmployeeSession = {
   employeeId: string;
@@ -47,36 +46,66 @@ type EmployeeData = {
   unreadMessageIds: string[];
 };
 
-type ConversationOption = { key: string; label: string; detail: string };
+type ConversationKind = "team" | "management" | "direct";
+type Conversation = {
+  key: string;
+  kind: ConversationKind;
+  label: string;
+  detail: string;
+  messages: Message[];
+  latest: Message | null;
+  unreadCount: number;
+};
 
 const SAFE_FUNCTION_UPLOAD_BYTES = 3.5 * 1024 * 1024;
 const MESSAGE_IMAGE_MAX_DIMENSION = 1920;
 
-function local(value: string): string {
-  return new Date(value).toLocaleString([], {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 function initials(value: string): string {
   return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
-}
-
-function compact(value: string, max = 58): string {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 function directKey(first: string, second: string): string {
   return `direct:${[first.toLowerCase(), second.toLowerCase()].sort().join(":")}`;
 }
 
+function directIds(key: string): string[] {
+  return key.startsWith("direct:") ? key.split(":").slice(1) : [];
+}
+
 function avatarUrl(employeeId: string): string {
   return `/api/employee/avatar?id=${encodeURIComponent(employeeId)}`;
+}
+
+function photoUrl(messageId: string): string {
+  return `/api/employee/message-conversations/photo?id=${encodeURIComponent(messageId)}`;
+}
+
+function messageTime(value: string): string {
+  return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function listDate(value: string): string {
+  const date = new Date(value);
+  const today = new Date();
+  return date.toDateString() === today.toDateString()
+    ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : date.toLocaleDateString([], { month: "numeric", day: "numeric", year: "2-digit" });
+}
+
+function dayLabel(value: string): string {
+  const date = new Date(value);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString([], { month: "long", day: "numeric", year: date.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+}
+
+function compact(value: string, max = 72): string {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "No messages yet";
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 function selectedPhoto(form: FormData): File | null {
@@ -134,16 +163,17 @@ async function prepareImageUpload(file: File): Promise<File> {
   throw new Error("The photo is still too large after resizing. Choose a smaller photo and try again.");
 }
 
-export default function ConversationMessagesDock() {
+export default function EmployeeMessagesApp() {
   const [session, setSession] = useState<EmployeeSession | null>(null);
   const [data, setData] = useState<EmployeeData | null>(null);
   const [selectedKey, setSelectedKey] = useState("team");
+  const [threadOpen, setThreadOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  const [expanded, setExpanded] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<{ url: string; name: string; size: number } | null>(null);
   const reportedSeen = useRef(new Set<string>());
-  const firstLoad = useRef(true);
   const cameraPhotoRef = useRef<HTMLInputElement | null>(null);
   const libraryPhotoRef = useRef<HTMLInputElement | null>(null);
   const photoPreviewUrlRef = useRef<string | null>(null);
@@ -180,14 +210,11 @@ export default function ConversationMessagesDock() {
       }
       throw new Error(await responseMessage(response));
     }
-    const payload = await response.json() as EmployeeData;
-    setData(payload);
-    if (firstLoad.current) {
-      const unread = new Set(payload.unreadMessageIds || []);
-      const newestUnread = (payload.messages || []).find((message) => unread.has(message.id));
-      if (newestUnread?.conversationKey) setSelectedKey(newestUnread.conversationKey);
-      firstLoad.current = false;
-    }
+    setData(await response.json() as EmployeeData);
+  }, []);
+
+  useEffect(() => {
+    if (window.matchMedia("(min-width: 901px)").matches) setThreadOpen(true);
   }, []);
 
   useEffect(() => {
@@ -217,77 +244,125 @@ export default function ConversationMessagesDock() {
     () => new Map((data?.directory || []).map((employee) => [employee.id.toLowerCase(), employee])),
     [data?.directory],
   );
+  const unreadIds = useMemo(() => new Set(data?.unreadMessageIds || []), [data?.unreadMessageIds]);
 
-  function conversationLabel(key: string): ConversationOption {
-    if (!session || key === "team") {
-      return { key: "team", label: "Whole team", detail: "Everyone active when each message is sent" };
-    }
-    if (key === `owner:${session.employeeId.toLowerCase()}`) {
-      return { key, label: "Management", detail: "Private conversation with management" };
-    }
-    if (key.startsWith("direct:")) {
-      const ids = key.split(":").slice(1);
-      const otherId = ids.find((id) => id !== session.employeeId.toLowerCase());
-      const other = otherId ? employeesById.get(otherId) : null;
-      return { key, label: other?.chatNickname || firstName(other?.name || "Direct message"), detail: other?.position || "Direct conversation" };
-    }
-    return { key, label: "Conversation", detail: "Message conversation" };
-  }
-
-  const conversationOptions = useMemo(() => {
-    if (!session) return [] as ConversationOption[];
-    const keys = new Set<string>(["team", `owner:${session.employeeId.toLowerCase()}`]);
+  const conversations = useMemo(() => {
+    if (!session) return [] as Conversation[];
+    const ownId = session.employeeId.toLowerCase();
+    const keys = new Set<string>(["team", `owner:${ownId}`]);
     for (const employee of data?.directory || []) {
-      if (employee.id !== session.employeeId) keys.add(directKey(session.employeeId, employee.id));
+      if (employee.id.toLowerCase() !== ownId) keys.add(directKey(ownId, employee.id));
     }
     for (const message of data?.messages || []) keys.add(message.conversationKey || "team");
-    const options = Array.from(keys).map(conversationLabel);
-    return options.sort((a, b) => {
-      const order = (key: string) => key === "team" ? 0 : key.startsWith("owner:") ? 1 : 2;
-      return order(a.key) - order(b.key) || a.label.localeCompare(b.label);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.directory, data?.messages, employeesById, session]);
 
-  const unreadIds = useMemo(() => new Set(data?.unreadMessageIds || []), [data?.unreadMessageIds]);
-  const selectedMessages = useMemo(
-    () => (data?.messages || [])
-      .filter((message) => (message.conversationKey || "team") === selectedKey)
-      .slice()
-      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
-    [data?.messages, selectedKey],
-  );
-  const selectedConversation = conversationOptions.find((option) => option.key === selectedKey)
-    || conversationLabel(selectedKey);
+    const items = Array.from(keys).map((key): Conversation | null => {
+      let kind: ConversationKind = "team";
+      let label = "Entire team";
+      let detail = `${data?.directory.length || 0} active employees`;
+      if (key === `owner:${ownId}`) {
+        kind = "management";
+        label = "Management";
+        detail = "Private conversation with management";
+      } else if (key.startsWith("direct:")) {
+        kind = "direct";
+        const ids = directIds(key);
+        if (!ids.includes(ownId)) return null;
+        const otherId = ids.find((id) => id !== ownId);
+        const employee = otherId ? employeesById.get(otherId) : null;
+        if (!employee) return null;
+        label = employee.chatNickname || employee.name;
+        detail = employee.position || "Employee conversation";
+      }
+      const messages = (data?.messages || [])
+        .filter((message) => (message.conversationKey || "team") === key)
+        .slice()
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      const latest = messages.length ? messages[messages.length - 1] : null;
+      return {
+        key,
+        kind,
+        label,
+        detail,
+        messages,
+        latest,
+        unreadCount: messages.filter((message) => unreadIds.has(message.id)).length,
+      };
+    }).filter(Boolean) as Conversation[];
+
+    return items.sort((a, b) => {
+      if (a.key === "team") return -1;
+      if (b.key === "team") return 1;
+      if (a.kind === "management" && b.kind !== "management") return -1;
+      if (b.kind === "management" && a.kind !== "management") return 1;
+      const aTime = a.latest ? new Date(a.latest.created_at).getTime() : 0;
+      const bTime = b.latest ? new Date(b.latest.created_at).getTime() : 0;
+      if (aTime !== bTime) return bTime - aTime;
+      return a.label.localeCompare(b.label);
+    });
+  }, [data?.directory, data?.messages, employeesById, session, unreadIds]);
+
+  const filteredConversations = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return conversations;
+    return conversations.filter((conversation) => {
+      const latest = conversation.latest?.body || conversation.latest?.attachment_name || "";
+      return `${conversation.label} ${conversation.detail} ${latest}`.toLowerCase().includes(needle);
+    });
+  }, [conversations, search]);
+
+  const selectedConversation = conversations.find((conversation) => conversation.key === selectedKey)
+    || conversations[0]
+    || null;
+  const selectedMessages = selectedConversation?.messages || [];
 
   useEffect(() => {
-    if (!session || !selectedMessages.length) return;
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting || entry.intersectionRatio < 0.6) continue;
-        const messageId = (entry.target as HTMLElement).dataset.messageId || "";
-        const message = selectedMessages.find((item) => item.id === messageId);
-        if (!message || !unreadIds.has(messageId) || message.sender_employee_id === session.employeeId || reportedSeen.current.has(messageId)) continue;
-        reportedSeen.current.add(messageId);
-        void fetch("/api/employee/message-conversations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "message-seen", messageId }),
-        }).then(async (response) => {
-          if (!response.ok) throw new Error(await responseMessage(response));
-          setData((current) => current ? {
-            ...current,
-            unreadMessageIds: current.unreadMessageIds.filter((id) => id !== messageId),
-          } : current);
-        }).catch(() => reportedSeen.current.delete(messageId));
-      }
-    }, { threshold: [0.6] });
-    document.querySelectorAll<HTMLElement>("[data-conversation-message-id]").forEach((element) => observer.observe(element));
-    return () => observer.disconnect();
-  }, [selectedMessages, session, unreadIds]);
+    if (selectedConversation && selectedConversation.key !== selectedKey) setSelectedKey(selectedConversation.key);
+  }, [selectedConversation, selectedKey]);
+
+  useEffect(() => {
+    if (!session || !threadOpen || !selectedMessages.length) return;
+    const ids = selectedMessages
+      .filter((message) => unreadIds.has(message.id))
+      .filter((message) => message.sender_employee_id !== session.employeeId)
+      .map((message) => message.id)
+      .filter((id) => !reportedSeen.current.has(id));
+    if (!ids.length) return;
+    for (const id of ids) reportedSeen.current.add(id);
+    void Promise.all(ids.map(async (messageId) => {
+      const response = await fetch("/api/employee/message-conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "message-seen", messageId }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      return messageId;
+    })).then((seenIds) => {
+      const seen = new Set(seenIds);
+      setData((current) => current ? {
+        ...current,
+        unreadMessageIds: current.unreadMessageIds.filter((id) => !seen.has(id)),
+      } : current);
+    }).catch(() => {
+      for (const id of ids) reportedSeen.current.delete(id);
+    });
+  }, [selectedMessages, session, threadOpen, unreadIds]);
+
+  function senderName(message: Message, useYou = false): string {
+    if (!message.sender_employee_id) return "Management";
+    if (useYou && session && message.sender_employee_id.toLowerCase() === session.employeeId.toLowerCase()) return "You";
+    const employee = employeesById.get(message.sender_employee_id.toLowerCase());
+    return message.sender_chat_nickname || employee?.chatNickname || employee?.name || firstName(message.sender_name);
+  }
+
+  function chooseConversation(key: string) {
+    setSelectedKey(key);
+    setThreadOpen(true);
+    setNotice("");
+  }
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!selectedConversation) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const body = String(form.get("body") || "").trim();
@@ -297,7 +372,7 @@ export default function ConversationMessagesDock() {
       return;
     }
     form.set("action", "message-send");
-    form.set("conversationKey", selectedKey);
+    form.set("conversationKey", selectedConversation.key);
     setBusy(true);
     setNotice("");
     try {
@@ -313,7 +388,7 @@ export default function ConversationMessagesDock() {
       formElement.reset();
       clearPhotoAttachment(false);
       await loadMessages();
-      setNotice(`Reply sent in ${selectedConversation.label}.`);
+      setNotice(`Message sent to ${selectedConversation.label}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Message could not be sent.");
     } finally {
@@ -324,6 +399,7 @@ export default function ConversationMessagesDock() {
   async function deleteMessage(message: Message) {
     if (!window.confirm("Delete this message for everyone? This cannot be undone.")) return;
     setBusy(true);
+    setNotice("");
     try {
       const response = await fetch("/api/employee/message-conversations", {
         method: "POST",
@@ -344,6 +420,7 @@ export default function ConversationMessagesDock() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     setBusy(true);
+    setNotice("");
     try {
       const response = await fetch("/api/employee", {
         method: "POST",
@@ -366,19 +443,22 @@ export default function ConversationMessagesDock() {
     const form = new FormData(formElement);
     form.set("action", "profile-photo");
     const profilePhoto = selectedProfilePhoto(form);
+    if (!profilePhoto) {
+      setNotice("Choose a profile photo first.");
+      return;
+    }
     setBusy(true);
+    setNotice("");
     try {
-      if (profilePhoto) {
-        const prepared = await prepareImageUpload(profilePhoto);
-        const camera = form.get("cameraProfilePhoto");
-        if (camera instanceof File && camera.size > 0) form.set("cameraProfilePhoto", prepared);
-        else form.set("profilePhoto", prepared);
-      }
+      const prepared = await prepareImageUpload(profilePhoto);
+      const camera = form.get("cameraProfilePhoto");
+      if (camera instanceof File && camera.size > 0) form.set("cameraProfilePhoto", prepared);
+      else form.set("profilePhoto", prepared);
       const response = await fetch("/api/employee", { method: "POST", body: form });
       if (!response.ok) throw new Error(await responseMessage(response));
       formElement.reset();
       await loadMessages();
-      setNotice("Your message icon was updated.");
+      setNotice("Your message photo was updated.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Profile photo could not be uploaded.");
     } finally {
@@ -386,85 +466,103 @@ export default function ConversationMessagesDock() {
     }
   }
 
-  if (!session) return null;
+  if (!session) return <main className="messageApp"><div className="messageLoading">Sign in with your employee PIN to view messages.</div></main>;
   const current = data?.employee;
   const currentDisplay = current?.chatNickname || firstName(session.name);
-  const unreadMessages = (data?.messages || []).filter((message) => unreadIds.has(message.id));
-  const previewMessage = unreadMessages[0] || data?.messages[0];
-  const previewSender = previewMessage
-    ? previewMessage.sender_employee_id
-      ? previewMessage.sender_chat_nickname || firstName(previewMessage.sender_name)
-      : "Management"
-    : "";
-  const previewBody = previewMessage?.body || (previewMessage?.attachment_name ? "Photo message" : "");
-  const previewText = unreadMessages.length
-    ? compact(`${previewSender}: ${previewBody || "New message"}`)
-    : data?.messages.length ? "All caught up" : "No messages yet";
 
-  return <aside className={`employeeMessagesDock ${expanded ? "isOpen" : "isCollapsed"} ${unreadMessages.length ? "hasUnread" : ""}`} aria-label="Employee messages">
-    <header className="employeeMessagesMobileHeader">
-      <button className="employeeMessagesToggle" type="button" aria-expanded={expanded} aria-controls="employee-messages-panel" onClick={() => setExpanded((value) => !value)}>
-        <span className="employeeMessagesBell" aria-hidden="true">✉</span>
-        <span className="employeeMessagesCompactCopy"><span className="employeeMessagesCompactTitle">Messages{unreadMessages.length ? <span className="employeeMessagesUnreadCount">{unreadMessages.length}</span> : null}</span><span className="employeeMessagesPreview">{previewText}</span></span>
-        <span className="employeeMessagesChevron" aria-hidden="true">{expanded ? "Close" : "Open"}</span>
-      </button>
-    </header>
-
-    <header className="employeeMessagesHeader">
-      <div className="employeeMessagesIdentity" style={{ "--employee-color": current?.scheduleColor || "#64748B" } as CSSProperties}>
-        <span className="employeeMessageAvatar large">{current?.avatarSet ? <img src={avatarUrl(session.employeeId)} alt="Your profile" /> : initials(currentDisplay)}</span>
-        <div><p className="employeeMessagesEyebrow">Conversations</p><h2>Messages</h2><small>{current?.chatNickname ? `${current.chatNickname} · ${session.name}` : session.name}</small></div>
+  return <main className="messageApp employeeMessageApp">
+    <header className="messageTopBar">
+      <div className="messageTopTitle">
+        <a className="messageTopIcon" href="/employee" aria-label="Back to Employee Hub">←</a>
+        <div><h1>Messages</h1><p>{session.business}</p></div>
       </div>
-      <button type="button" onClick={() => void loadMessages()} disabled={busy}>Refresh</button>
+      <div className="messageTopActions">
+        <button type="button" aria-label="Search conversations" onClick={() => document.getElementById("employee-message-search")?.focus()}>⌕</button>
+        <button type="button" aria-label="Message profile settings" onClick={() => setProfileOpen((value) => !value)}>⚙</button>
+      </div>
     </header>
 
-    <div className="employeeMessagesPanel" id="employee-messages-panel">
-      <details className="employeeMessageOptions">
-        <summary>Profile & chat options</summary>
-        <div className="employeeMessageOptionsBody">
-          <form className="employeeNicknameForm" key={current?.chatNickname || "no-nickname"} onSubmit={updateNickname}>
-            <label>Chat nickname<input name="nickname" maxLength={32} defaultValue={current?.chatNickname || ""} placeholder={firstName(session.name)} /></label>
-            <button disabled={busy}>Save nickname</button><small>Used in messages only.</small>
-          </form>
-          <form className="employeeProfilePhotoForm" onSubmit={uploadProfilePhoto}>
-            <label>Take icon photo<input name="cameraProfilePhoto" type="file" accept="image/*" capture="user" /></label>
-            <label>Choose icon photo<input name="profilePhoto" type="file" accept="image/*" /></label>
-            <button disabled={busy}>Update icon</button>
-          </form>
+    {profileOpen && <section className="messageProfilePanel">
+      <div className="messageProfileIdentity" style={{ "--employee-color": current?.scheduleColor || "#7C3AED" } as CSSProperties}>
+        <span>{current?.avatarSet ? <img src={avatarUrl(session.employeeId)} alt="Your profile" /> : initials(currentDisplay)}</span>
+        <div><strong>{currentDisplay}</strong><small>{session.name}</small></div>
+      </div>
+      <form onSubmit={updateNickname}><label>Chat nickname<input name="nickname" maxLength={32} defaultValue={current?.chatNickname || ""} placeholder={firstName(session.name)} /></label><button disabled={busy}>Save</button></form>
+      <form onSubmit={uploadProfilePhoto}><label>Take photo<input name="cameraProfilePhoto" type="file" accept="image/*" capture="user" /></label><label>Choose photo<input name="profilePhoto" type="file" accept="image/*" /></label><button disabled={busy}>Update photo</button></form>
+    </section>}
+    {notice && <div className="messageNotice" role="status">{notice}</div>}
+
+    <div className={`messageShell ${threadOpen ? "threadOpen" : ""}`}>
+      <section className="messageInboxPane" aria-label="Conversation list">
+        <div className="messageInboxToolbar">
+          <label><span className="srOnly">Search messages</span><input id="employee-message-search" value={search} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)} placeholder="Search conversations" /></label>
+          <small>{filteredConversations.length} conversation{filteredConversations.length === 1 ? "" : "s"}</small>
         </div>
-      </details>
+        <div className="messageConversationList">
+          {filteredConversations.map((conversation) => {
+            const latest = conversation.latest;
+            const preview = latest
+              ? `${senderName(latest, true)}: ${latest.body || (latest.attachment_name ? "Photo" : "Message")}`
+              : conversation.kind === "management" ? "Send a private message to management" : "No messages yet";
+            const directId = conversation.kind === "direct"
+              ? directIds(conversation.key).find((id) => id !== session.employeeId.toLowerCase())
+              : null;
+            const avatarEmployee = directId ? employeesById.get(directId) : null;
+            return <button type="button" key={conversation.key} className={`messageConversationRow ${selectedKey === conversation.key ? "selected" : ""}`} onClick={() => chooseConversation(conversation.key)}>
+              <span className={`messageListAvatar ${conversation.kind}`} style={{ "--employee-color": avatarEmployee?.scheduleColor || current?.scheduleColor || "#7C3AED" } as CSSProperties}>
+                {conversation.kind === "team" ? "🏪" : conversation.kind === "management" ? "👥" : avatarEmployee?.avatarSet ? <img src={avatarUrl(avatarEmployee.id)} alt="" loading="lazy" /> : initials(conversation.label)}
+              </span>
+              <span className="messageListText"><strong>{conversation.label}</strong><span>{compact(preview)}</span></span>
+              <span className="messageListStatus">{conversation.unreadCount > 0 && <b>{conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}</b>}{latest && <time>{listDate(latest.created_at)}</time>}</span>
+            </button>;
+          })}
+          {!filteredConversations.length && <div className="messageEmptyList">No active employee conversations match that search.</div>}
+        </div>
+      </section>
 
-      <label className="employeeConversationPicker">Conversation<select value={selectedKey} onChange={(event) => setSelectedKey(event.target.value)}>{conversationOptions.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select><small>{selectedConversation.detail}</small></label>
+      <section className="messageThreadPane" aria-label="Selected conversation">
+        {selectedConversation ? <>
+          <header className="messageThreadHeader">
+            <button type="button" className="messageBack" aria-label="Back to conversations" onClick={() => setThreadOpen(false)}>←</button>
+            <div><h2>{selectedConversation.label}</h2><p>{selectedConversation.detail}</p></div>
+            <span className={`messageHeaderAvatar ${selectedConversation.kind}`} aria-hidden="true">{selectedConversation.kind === "team" ? "🏪" : selectedConversation.kind === "management" ? "👥" : initials(selectedConversation.label)}</span>
+          </header>
 
-      <div className="employeeMessagesFeed employeeConversationThread" aria-live="polite">
-        {selectedMessages.map((message) => {
-          const senderDisplay = message.sender_employee_id
-            ? message.sender_chat_nickname || firstName(message.sender_name)
-            : "Management";
-          const unread = unreadIds.has(message.id);
-          const canDelete = message.sender_employee_id === session.employeeId;
-          return <article className={`employeeMessagesItem ${unread ? "isUnread" : ""}`} key={message.id} data-conversation-message-id={message.id} data-message-id={message.id} style={{ "--employee-color": message.sender_schedule_color || "#64748B" } as CSSProperties}>
-            <header className="employeeMessageMeta">
-              <span className="employeeMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(message.sender_employee_id)} alt="" loading="lazy" /> : initials(senderDisplay)}</span>
-              <div><strong>{senderDisplay}</strong><span>{local(message.created_at)}</span></div>
-              <div className="employeeMessageStatus">{unread ? <span className="employeeMessagesUnreadMark">New</span> : null}{canDelete && <button type="button" className="employeeMessageDelete" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>}</div>
-            </header>
-            {message.body && <p>{message.body}</p>}
-            {message.attachment_name && <a className="employeeMessagesPhoto" href={`/api/employee/message-conversations/photo?id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer"><img src={`/api/employee/message-conversations/photo?id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${senderDisplay}`} loading="lazy" /></a>}
-            <details className="employeeConversationReceipt"><summary>{message.expectedCount === 0 ? "No employee recipients" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary><div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {local(read.readAt)}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}</div></details>
-          </article>;
-        })}
-        {!selectedMessages.length && <div className="employeeMessagesEmpty">No messages in {selectedConversation.label} yet.</div>}
-      </div>
+          <div className="messageThread" aria-live="polite">
+            {selectedMessages.map((message, index) => {
+              const prior = selectedMessages[index - 1];
+              const showDay = !prior || new Date(prior.created_at).toDateString() !== new Date(message.created_at).toDateString();
+              const isOwn = message.sender_employee_id?.toLowerCase() === session.employeeId.toLowerCase();
+              const displayName = senderName(message);
+              return <div key={message.id}>
+                {showDay && <div className="messageDay"><span>{dayLabel(message.created_at)}</span></div>}
+                <article className={`messageBubbleRow ${isOwn ? "own" : "other"}`}>
+                  {!isOwn && <span className="messageTinyAvatar" style={{ "--employee-color": message.sender_schedule_color || "#7C3AED" } as CSSProperties}>{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(message.sender_employee_id)} alt="" loading="lazy" /> : initials(displayName)}</span>}
+                  <div className="messageBubbleWrap">
+                    <div className="messageBubble">
+                      {message.attachment_name && <a className="messagePhoto" href={photoUrl(message.id)} target="_blank" rel="noreferrer"><img src={photoUrl(message.id)} alt={message.body || `Photo from ${displayName}`} loading="lazy" /></a>}
+                      {message.body && <p>{message.body}</p>}
+                    </div>
+                    <div className="messageBubbleMeta"><span>{isOwn ? "You" : displayName}</span><time>{messageTime(message.created_at)}</time>{isOwn && <button type="button" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>}</div>
+                    <details className="messageReceipt"><summary>{message.expectedCount === 0 ? "Sent to management" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary><div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {new Date(read.readAt).toLocaleString()}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}{message.expectedCount > 0 && !message.unseenNames.length && <p>Everyone still active on this message has seen it.</p>}</div></details>
+                  </div>
+                </article>
+              </div>;
+            })}
+            {!selectedMessages.length && <div className="messageThreadEmpty"><strong>No messages here yet.</strong><span>Send the first message below.</span></div>}
+          </div>
 
-      <form className="employeeMessagesComposer employeeConversationReply" onSubmit={sendMessage}>
-        <input type="hidden" name="action" value="message-send" />
-        <label>Reply in {selectedConversation.label}<textarea name="body" rows={3} placeholder="Type a message, add a photo, or both" /></label>
-        <div className="employeeMessagesPhotoControls"><label className="employeeMessagesPhotoButton">Take photo<input ref={cameraPhotoRef} name="cameraPhoto" type="file" accept="image/*" capture="environment" onChange={(event) => choosePhoto(event, "camera")} /></label><label className="employeeMessagesPhotoButton secondary">Choose photo<input ref={libraryPhotoRef} name="photo" type="file" accept="image/*" onChange={(event) => choosePhoto(event, "library")} /></label></div>
-        {photoPreview && <div className="employeeMessagesAttachmentPreview"><div className="employeeMessagesAttachmentThumb"><img src={photoPreview.url} alt="Selected attachment preview" /></div><div className="employeeMessagesAttachmentInfo"><strong>Photo attached</strong><span>{photoPreview.name}</span><small>{(photoPreview.size / 1024 / 1024).toFixed(1)} MB before resizing</small></div><button type="button" disabled={busy} onClick={() => clearPhotoAttachment()}>Remove photo</button></div>}
-        <button className="employeeMessagesSend" disabled={busy}>{busy ? "Sending…" : "Send reply"}</button>
-      </form>
-      {notice && <div className="employeeMessagesNotice">{notice}</div>}
+          <form className="messageComposer employeeMessageComposer" onSubmit={sendMessage}>
+            <div className="messageAttachControls">
+              <label aria-label="Take a photo">📷<input ref={cameraPhotoRef} name="cameraPhoto" type="file" accept="image/*" capture="environment" onChange={(event: ChangeEvent<HTMLInputElement>) => choosePhoto(event, "camera")} /></label>
+              <label aria-label="Choose a photo">＋<input ref={libraryPhotoRef} name="photo" type="file" accept="image/*" onChange={(event: ChangeEvent<HTMLInputElement>) => choosePhoto(event, "library")} /></label>
+            </div>
+            <textarea name="body" rows={2} placeholder="Send a message" aria-label={`Message ${selectedConversation.label}`} />
+            <button type="submit" disabled={busy} aria-label="Send message">{busy ? "…" : "➤"}</button>
+            {photoPreview && <div className="messageAttachmentPreview"><img src={photoPreview.url} alt="Selected attachment" /><span><strong>{photoPreview.name}</strong><small>{(photoPreview.size / 1024 / 1024).toFixed(1)} MB before resizing</small></span><button type="button" onClick={() => clearPhotoAttachment()} disabled={busy}>Remove</button></div>}
+          </form>
+        </> : <div className="messageThreadEmpty"><strong>Select a conversation.</strong></div>}
+      </section>
     </div>
-  </aside>;
+  </main>;
 }

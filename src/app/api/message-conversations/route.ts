@@ -35,8 +35,9 @@ export async function GET(request: Request) {
     if (!canAccessBusiness(session, business)) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
     }
-    await markAdminMessagesRead(session.email, business);
-    return Response.json(await ownerConversationDashboard(business), {
+    const viewAsEmployeeId = url.searchParams.get("viewAsEmployeeId") || "";
+    if (!viewAsEmployeeId) await markAdminMessagesRead(session.email, business);
+    return Response.json(await ownerConversationDashboard(business, viewAsEmployeeId), {
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {
@@ -67,9 +68,16 @@ export async function POST(request: Request) {
       return Response.json({ error: "Unknown conversation action." }, { status: 400 });
     }
 
+    const conversationKey = String(body.conversationKey || TEAM_CONVERSATION_KEY);
+    if (conversationKey.toLowerCase().startsWith("direct:")) {
+      return Response.json({
+        error: "Employee-to-employee conversations are view-only for management. Use an employee conversation or the entire team.",
+      }, { status: 400 });
+    }
+
     const result = await sendConversationMessage({
       business,
-      conversationKey: body.conversationKey,
+      conversationKey,
       senderName: session.email,
       body: body.body,
     });
@@ -81,18 +89,18 @@ export async function POST(request: Request) {
           recipientEmployeeId: null,
           body: messageBody,
           actor: session.email,
-        }).catch((error) => {
+        }).catch((error: unknown) => {
           console.error("[api/message-conversations] team push failed", error);
           return { attempted: 0, delivered: 0, failed: 0 };
         })]
-      : await Promise.all(result.pushRecipientEmployeeIds.map((employeeId) =>
+      : await Promise.all(result.pushRecipientEmployeeIds.map((employeeId: string) =>
           notifyEmployeesOfOwnerMessage({
             business,
             recipientEmployeeId: employeeId,
             body: messageBody,
             actor: session.email,
-          }).catch((error) => {
-            console.error("[api/message-conversations] direct push failed", error);
+          }).catch((error: unknown) => {
+            console.error("[api/message-conversations] employee push failed", error);
             return { attempted: 0, delivered: 0, failed: 0 };
           }),
         ));

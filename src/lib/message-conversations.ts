@@ -57,6 +57,15 @@ type ReceiptRow = {
   read_at?: string | null;
 };
 
+type DecoratedMessage = MessageRow & {
+  conversationKey: string;
+  attachment_size: number;
+  expectedCount: number;
+  seenCount: number;
+  seenBy: Array<{ employeeId: string; name: string; readAt: string }>;
+  unseenNames: string[];
+};
+
 function clean(value: unknown, max = 500): string {
   return String(value ?? "").trim().slice(0, max);
 }
@@ -95,6 +104,35 @@ function parseConversationKey(value: unknown): ConversationDescriptor {
   throw new Error("Choose a valid message conversation.");
 }
 
+export function conversationParticipantIds(value: unknown): string[] {
+  try {
+    return parseConversationKey(value).employeeIds;
+  } catch {
+    return [];
+  }
+}
+
+export function conversationIsVisibleToActiveRoster(
+  value: unknown,
+  activeEmployeeIds: Iterable<string>,
+  viewerEmployeeId?: string | null,
+): boolean {
+  let descriptor: ConversationDescriptor;
+  try {
+    descriptor = parseConversationKey(value);
+  } catch {
+    return false;
+  }
+  const active = new Set(Array.from(activeEmployeeIds, (id) => String(id).toLowerCase()));
+  const viewer = viewerEmployeeId ? String(viewerEmployeeId).toLowerCase() : null;
+
+  if (descriptor.kind === "team") return true;
+  if (descriptor.employeeIds.some((id) => !active.has(id))) return false;
+  if (!viewer) return true;
+  if (descriptor.kind === "owner") return descriptor.employeeIds[0] === viewer;
+  return descriptor.employeeIds.includes(viewer);
+}
+
 async function activeEmployees(business: Business, employeeIds?: string[]): Promise<ActiveEmployee[]> {
   if (employeeIds?.length) {
     const rows = await getSql()`
@@ -108,7 +146,9 @@ async function activeEmployees(business: Business, employeeIds?: string[]): Prom
         )
       ORDER BY name
     ` as unknown as ActiveEmployee[];
-    if (rows.length !== new Set(employeeIds).size) throw new Error("One or more conversation participants are no longer active at this location.");
+    if (rows.length !== new Set(employeeIds).size) {
+      throw new Error("One or more conversation participants are archived or no longer active at this location.");
+    }
     return rows;
   }
   return await getSql()`
@@ -137,7 +177,7 @@ async function resolveConversation(input: {
       throw new Error("Employees can only use their own management conversation.");
     }
     if (descriptor.kind === "direct" && !memberIds.has(senderEmployeeId)) {
-      throw new Error("You are not a participant in this direct conversation.");
+      throw new Error("You are not a participant in this employee conversation.");
     }
     if (descriptor.kind === "team" && !memberIds.has(senderEmployeeId)) {
       throw new Error("Employee is not active for this location.");
@@ -172,8 +212,10 @@ export async function sendConversationMessage(input: {
   if (!messageBody && !input.attachment) throw new Error("Type a message or attach a photo.");
 
   const id = crypto.randomUUID();
-  const memberIds = members.map((member) => String(member.id));
+  const memberIds = Array.from(new Set(members.map((member) => String(member.id).toLowerCase())));
   const attachment = input.attachment || null;
+  const senderUuid = senderEmployeeId || "";
+  const recipientUuid = recipientEmployeeId || "";
   const rows = await getSql()`
     WITH inserted AS (
       INSERT INTO employee_messages (
@@ -181,8 +223,9 @@ export async function sendConversationMessage(input: {
         recipient_employee_id, message_type, body,
         attachment_url, attachment_pathname, attachment_name, attachment_type, attachment_size
       ) VALUES (
-        ${id}::uuid, ${input.business}, ${descriptor.key}, ${senderEmployeeId}::uuid,
-        ${clean(input.senderName, 160)}, ${recipientEmployeeId}::uuid, 'Conversation', ${messageBody},
+        ${id}::uuid, ${input.business}, ${descriptor.key}, NULLIF(${senderUuid}::text, '')::uuid,
+        ${clean(input.senderName, 160)}, NULLIF(${recipientUuid}::text, '')::uuid,
+        'Conversation', ${messageBody},
         ${clean(attachment?.url, 1000)}, ${clean(attachment?.pathname, 1000)},
         ${clean(attachment?.name, 255)}, ${clean(attachment?.type, 120)},
         ${Math.max(0, Math.round(Number(attachment?.size || 0)))}
@@ -193,14 +236,18 @@ export async function sendConversationMessage(input: {
       SELECT inserted.id, participant.value::uuid
       FROM inserted
       CROSS JOIN jsonb_array_elements_text(${JSON.stringify(memberIds)}::jsonb) AS participant(value)
+      ON CONFLICT (message_id, employee_id) DO NOTHING
       RETURNING employee_id
     )
     SELECT inserted.*,
-      COALESCE((SELECT jsonb_agg(employee_id) FROM snapshotted), '[]'::jsonb) AS recipient_ids
+      (SELECT COUNT(*)::integer FROM snapshotted) AS recipient_count
     FROM inserted
   ` as unknown as Array<Record<string, unknown>>;
   const saved = rows[0];
   if (!saved) throw new Error("The message was not saved.");
+  if (Number(saved.recipient_count || 0) !== memberIds.length) {
+    throw new Error("The message recipient list could not be saved completely.");
+  }
 
   return {
     sent: true,
@@ -230,7 +277,7 @@ function receiptMaps(recipientRows: ReceiptRow[], readRows: ReceiptRow[]) {
   return { recipients, reads };
 }
 
-function decorateMessages(messages: MessageRow[], recipientRows: ReceiptRow[], readRows: ReceiptRow[]) {
+function decorateMessages(messages: MessageRow[], recipientRows: ReceiptRow[], readRows: ReceiptRow[]): DecoratedMessage[] {
   const maps = receiptMaps(recipientRows, readRows);
   return messages.map((message) => {
     const expected = (maps.recipients.get(message.id) || [])
@@ -252,6 +299,18 @@ function decorateMessages(messages: MessageRow[], recipientRows: ReceiptRow[], r
   });
 }
 
+function visibleMessages(
+  messages: DecoratedMessage[],
+  activeEmployeeIds: Iterable<string>,
+  viewerEmployeeId?: string | null,
+): DecoratedMessage[] {
+  return messages.filter((message) => conversationIsVisibleToActiveRoster(
+    message.conversationKey,
+    activeEmployeeIds,
+    viewerEmployeeId,
+  ));
+}
+
 async function recentMessageRows(business: Business, employeeId?: string | null): Promise<MessageRow[]> {
   if (employeeId) {
     return await getSql()`
@@ -269,7 +328,7 @@ async function recentMessageRows(business: Business, employeeId?: string | null)
       LEFT JOIN employees recipient ON recipient.id = m.recipient_employee_id
       WHERE m.business = ${business} AND m.deleted_at IS NULL
       ORDER BY m.created_at DESC, m.id DESC
-      LIMIT 400
+      LIMIT 500
     ` as unknown as MessageRow[];
   }
   return await getSql()`
@@ -285,7 +344,7 @@ async function recentMessageRows(business: Business, employeeId?: string | null)
     LEFT JOIN employees recipient ON recipient.id = m.recipient_employee_id
     WHERE m.business = ${business} AND m.deleted_at IS NULL
     ORDER BY m.created_at DESC, m.id DESC
-    LIMIT 500
+    LIMIT 700
   ` as unknown as MessageRow[];
 }
 
@@ -295,46 +354,46 @@ async function receiptRows(business: Business, employeeId?: string | null) {
         SELECT mr.message_id, mr.employee_id, e.name
         FROM employee_message_recipients mr
         JOIN employee_messages m ON m.id = mr.message_id
-        JOIN employees e ON e.id = mr.employee_id
+        JOIN employees e ON e.id = mr.employee_id AND e.active = TRUE
         WHERE m.business = ${business} AND m.deleted_at IS NULL
           AND EXISTS (
             SELECT 1 FROM employee_message_recipients own
             WHERE own.message_id = m.id AND own.employee_id = ${employeeId}::uuid
           )
         ORDER BY m.created_at DESC
-        LIMIT 5000
+        LIMIT 6000
       `
     : await getSql()`
         SELECT mr.message_id, mr.employee_id, e.name
         FROM employee_message_recipients mr
         JOIN employee_messages m ON m.id = mr.message_id
-        JOIN employees e ON e.id = mr.employee_id
+        JOIN employees e ON e.id = mr.employee_id AND e.active = TRUE
         WHERE m.business = ${business} AND m.deleted_at IS NULL
         ORDER BY m.created_at DESC
-        LIMIT 7000
+        LIMIT 9000
       `;
   const reads = employeeId
     ? await getSql()`
         SELECT r.message_id, r.employee_id, e.name, r.read_at
         FROM employee_message_reads r
         JOIN employee_messages m ON m.id = r.message_id
-        JOIN employees e ON e.id = r.employee_id
+        JOIN employees e ON e.id = r.employee_id AND e.active = TRUE
         WHERE m.business = ${business} AND m.deleted_at IS NULL
           AND EXISTS (
             SELECT 1 FROM employee_message_recipients own
             WHERE own.message_id = m.id AND own.employee_id = ${employeeId}::uuid
           )
         ORDER BY r.read_at
-        LIMIT 5000
+        LIMIT 6000
       `
     : await getSql()`
         SELECT r.message_id, r.employee_id, e.name, r.read_at
         FROM employee_message_reads r
         JOIN employee_messages m ON m.id = r.message_id
-        JOIN employees e ON e.id = r.employee_id
+        JOIN employees e ON e.id = r.employee_id AND e.active = TRUE
         WHERE m.business = ${business} AND m.deleted_at IS NULL
         ORDER BY r.read_at
-        LIMIT 7000
+        LIMIT 9000
       `;
   return {
     recipients: visibility as unknown as ReceiptRow[],
@@ -342,56 +401,76 @@ async function receiptRows(business: Business, employeeId?: string | null) {
   };
 }
 
-export async function ownerConversationDashboard(business: Business) {
-  const [employees, messages, receipts] = await Promise.all([
-    activeEmployees(business),
-    recentMessageRows(business),
-    receiptRows(business),
+function mapEmployee(item: ActiveEmployee) {
+  return {
+    id: String(item.id),
+    name: String(item.name),
+    position: String(item.position || ""),
+    active: true,
+    scheduleColor: String(item.schedule_color || scheduleColorFromId(String(item.id))),
+    avatarSet: Boolean(item.profile_photo_pathname),
+    chatNickname: String(item.chat_nickname || ""),
+  };
+}
+
+function unreadMessageIdsForViewer(messages: DecoratedMessage[], reads: ReceiptRow[], viewerEmployeeId: string): string[] {
+  const readKeys = new Set(reads
+    .filter((read) => read.employee_id.toLowerCase() === viewerEmployeeId.toLowerCase())
+    .map((read) => read.message_id));
+  return messages
+    .filter((message) => message.sender_employee_id?.toLowerCase() !== viewerEmployeeId.toLowerCase() && !readKeys.has(message.id))
+    .map((message) => message.id);
+}
+
+export async function ownerConversationDashboard(business: Business, viewAsEmployeeId?: unknown) {
+  const employees = await activeEmployees(business);
+  const activeIds = employees.map((employee) => String(employee.id).toLowerCase());
+  const requestedViewer = clean(viewAsEmployeeId, 80);
+  const viewerId = requestedViewer ? uuid(requestedViewer, "Employee") : null;
+  const viewer = viewerId
+    ? employees.find((employee) => String(employee.id).toLowerCase() === viewerId)
+    : null;
+  if (viewerId && !viewer) throw new Error("That employee is archived or no longer active at this location.");
+
+  const [messages, receipts] = await Promise.all([
+    recentMessageRows(business, viewerId),
+    receiptRows(business, viewerId),
   ]);
+  const decorated = visibleMessages(
+    decorateMessages(messages, receipts.recipients, receipts.reads),
+    activeIds,
+    viewerId,
+  );
+
   return {
     business,
-    employees: employees.map((employee) => ({
-      id: String(employee.id),
-      name: String(employee.name),
-      position: String(employee.position || ""),
-      active: true,
-      scheduleColor: String(employee.schedule_color || scheduleColorFromId(String(employee.id))),
-      avatarSet: Boolean(employee.profile_photo_pathname),
-      chatNickname: String(employee.chat_nickname || ""),
-    })),
-    messages: decorateMessages(messages, receipts.recipients, receipts.reads),
+    employees: employees.map(mapEmployee),
+    messages: decorated,
+    unreadMessageIds: viewerId ? unreadMessageIdsForViewer(decorated, receipts.reads, viewerId) : [],
+    viewAsEmployee: viewer ? mapEmployee(viewer) : null,
   };
 }
 
 export async function employeeConversationDashboard(session: EmployeeSession) {
-  const [employees, messages, receipts] = await Promise.all([
-    activeEmployees(session.business),
+  const employees = await activeEmployees(session.business);
+  const employee = employees.find((item) => String(item.id).toLowerCase() === session.employeeId.toLowerCase());
+  if (!employee) throw new Error("Employee is archived or no longer active for this location.");
+  const [messages, receipts] = await Promise.all([
     recentMessageRows(session.business, session.employeeId),
     receiptRows(session.business, session.employeeId),
   ]);
-  const employee = employees.find((item) => String(item.id) === session.employeeId);
-  if (!employee) throw new Error("Employee is not active for this location.");
-  const decorated = decorateMessages(messages, receipts.recipients, receipts.reads);
-  const readKeys = new Set(receipts.reads
-    .filter((read) => read.employee_id === session.employeeId)
-    .map((read) => read.message_id));
-  const unreadMessageIds = decorated
-    .filter((message) => message.sender_employee_id !== session.employeeId && !readKeys.has(message.id))
-    .map((message) => message.id);
+  const activeIds = employees.map((item) => String(item.id).toLowerCase());
+  const decorated = visibleMessages(
+    decorateMessages(messages, receipts.recipients, receipts.reads),
+    activeIds,
+    session.employeeId,
+  );
 
-  const mapEmployee = (item: ActiveEmployee) => ({
-    id: String(item.id),
-    name: String(item.name),
-    position: String(item.position || ""),
-    scheduleColor: String(item.schedule_color || scheduleColorFromId(String(item.id))),
-    avatarSet: Boolean(item.profile_photo_pathname),
-    chatNickname: String(item.chat_nickname || ""),
-  });
   return {
     employee: mapEmployee(employee),
     directory: employees.map(mapEmployee),
     messages: decorated,
-    unreadMessageIds,
+    unreadMessageIds: unreadMessageIdsForViewer(decorated, receipts.reads, session.employeeId),
   };
 }
 

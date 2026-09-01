@@ -2,10 +2,9 @@
 
 import { responseMessage } from "@/app/client-http";
 import { firstName } from "@/app/client-text";
-import { CSSProperties, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, CSSProperties, FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
-import "../control-center.css";
-import "./conversations.css";
+import "../../message-inbox.css";
 
 type Employee = {
   id: string;
@@ -36,40 +35,83 @@ type Message = {
   created_at: string;
 };
 
-type Payload = { business: Business; employees: Employee[]; messages: Message[] };
-type ConversationOption = { key: string; label: string; detail: string };
+type Payload = {
+  business: Business;
+  employees: Employee[];
+  messages: Message[];
+  unreadMessageIds: string[];
+  viewAsEmployee: Employee | null;
+};
 
-function initials(value: string) {
+type ConversationKind = "team" | "management" | "direct";
+type Conversation = {
+  key: string;
+  kind: ConversationKind;
+  label: string;
+  detail: string;
+  messages: Message[];
+  latest: Message | null;
+  unreadCount: number;
+};
+
+function initials(value: string): string {
   return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
 }
 
-function local(value: string) {
-  return new Date(value).toLocaleString([], {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function ownerKey(employeeId: string) {
+function ownerKey(employeeId: string): string {
   return `owner:${employeeId.toLowerCase()}`;
 }
 
-function avatarUrl(business: Business, employeeId: string) {
+function directIds(key: string): string[] {
+  return key.startsWith("direct:") ? key.split(":").slice(1) : [];
+}
+
+function avatarUrl(business: Business, employeeId: string): string {
   return `/api/employee-directory/avatar?business=${encodeURIComponent(business)}&id=${encodeURIComponent(employeeId)}`;
 }
 
-function directIds(key: string) {
-  return key.startsWith("direct:") ? key.split(":").slice(1) : [];
+function messagePhotoUrl(business: Business, messageId: string): string {
+  return `/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(messageId)}`;
+}
+
+function messageTime(value: string): string {
+  return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function listDate(value: string): string {
+  const date = new Date(value);
+  const today = new Date();
+  const sameDay = date.toDateString() === today.toDateString();
+  return sameDay
+    ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : date.toLocaleDateString([], { month: "numeric", day: "numeric", year: "2-digit" });
+}
+
+function dayLabel(value: string): string {
+  const date = new Date(value);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString([], { month: "long", day: "numeric", year: date.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+}
+
+function compact(value: string, max = 72): string {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "No messages yet";
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 export default function MessagesPage() {
   const [session, setSession] = useState<SessionView | null>(null);
   const [business, setBusiness] = useState<Business>("Corner Deli");
+  const [viewAsEmployeeId, setViewAsEmployeeId] = useState("");
   const [data, setData] = useState<Payload | null>(null);
   const [selectedKey, setSelectedKey] = useState("team");
+  const [threadOpen, setThreadOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [startOpen, setStartOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -90,11 +132,13 @@ export default function MessagesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function load(activeBusiness = business) {
-    const response = await fetch(
-      `/api/message-conversations?business=${encodeURIComponent(activeBusiness)}`,
-      { cache: "no-store", headers: { "Cache-Control": "no-cache" } },
-    );
+  async function load(activeBusiness = business, activeViewAs = viewAsEmployeeId) {
+    const params = new URLSearchParams({ business: activeBusiness });
+    if (activeViewAs) params.set("viewAsEmployeeId", activeViewAs);
+    const response = await fetch(`/api/message-conversations?${params.toString()}`, {
+      cache: "no-store",
+      headers: { "Cache-Control": "no-cache" },
+    });
     if (!response.ok) throw new Error(await responseMessage(response));
     setData(await response.json() as Payload);
     window.dispatchEvent(new Event("corner-ops-notifications-refresh"));
@@ -103,67 +147,123 @@ export default function MessagesPage() {
   useEffect(() => {
     if (!session?.authenticated) return;
     setSelectedKey("team");
+    setThreadOpen(false);
+    setStartOpen(false);
     setNotice("");
-    void load(business).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
+    void load(business, viewAsEmployeeId).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
     const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load(business).catch(() => undefined);
+      if (document.visibilityState === "visible") void load(business, viewAsEmployeeId).catch(() => undefined);
     }, 30_000);
     return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [business, session?.authenticated]);
+  }, [business, session?.authenticated, viewAsEmployeeId]);
 
   const employeesById = useMemo(
     () => new Map((data?.employees || []).map((employee) => [employee.id.toLowerCase(), employee])),
     [data?.employees],
   );
+  const unreadIds = useMemo(() => new Set(data?.unreadMessageIds || []), [data?.unreadMessageIds]);
 
-  function conversationLabel(key: string): ConversationOption {
-    if (key === "team") {
-      return { key, label: "Whole team", detail: `Everyone active at ${business} when each message is sent` };
+  const conversations = useMemo(() => {
+    const keys = new Set<string>(["team"]);
+    if (viewAsEmployeeId) {
+      keys.add(ownerKey(viewAsEmployeeId));
+    } else {
+      for (const employee of data?.employees || []) keys.add(ownerKey(employee.id));
     }
-    if (key.startsWith("owner:")) {
-      const employee = employeesById.get(key.slice(6).toLowerCase());
+    for (const message of data?.messages || []) keys.add(message.conversationKey || "team");
+
+    const items = Array.from(keys).map((key): Conversation | null => {
+      let kind: ConversationKind = "team";
+      let label = "Entire team";
+      let detail = `${data?.employees.length || 0} active employees`;
+      if (key.startsWith("owner:")) {
+        kind = "management";
+        const employee = employeesById.get(key.slice(6).toLowerCase());
+        if (!employee) return null;
+        label = viewAsEmployeeId ? "Management" : employee.name;
+        detail = viewAsEmployeeId ? "Private conversation with management" : `${employee.position || "Employee"} · Management conversation`;
+      } else if (key.startsWith("direct:")) {
+        kind = "direct";
+        const ids = directIds(key);
+        const people = ids.map((id) => employeesById.get(id.toLowerCase())).filter(Boolean) as Employee[];
+        if (people.length !== ids.length) return null;
+        if (viewAsEmployeeId && !ids.includes(viewAsEmployeeId.toLowerCase())) return null;
+        const otherPeople = viewAsEmployeeId
+          ? people.filter((person) => person.id.toLowerCase() !== viewAsEmployeeId.toLowerCase())
+          : people;
+        label = otherPeople.map((person) => person.chatNickname || person.name).join(" ↔ ") || "Employee conversation";
+        detail = viewAsEmployeeId ? "Employee conversation" : "Employee-to-employee · View only";
+      }
+      const messages = (data?.messages || [])
+        .filter((message) => (message.conversationKey || "team") === key)
+        .slice()
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      const latest = messages.length ? messages[messages.length - 1] : null;
       return {
         key,
-        label: employee?.name || "Employee conversation",
-        detail: employee?.position || "Management and employee",
+        kind,
+        label,
+        detail,
+        messages,
+        latest,
+        unreadCount: messages.filter((message) => unreadIds.has(message.id)).length,
       };
-    }
-    const names = directIds(key).map((id) => employeesById.get(id.toLowerCase())?.name).filter(Boolean) as string[];
-    return {
-      key,
-      label: names.length ? names.join(" ↔ ") : "Employee direct conversation",
-      detail: "Direct employee conversation visible to management",
-    };
-  }
+    }).filter(Boolean) as Conversation[];
 
-  const conversationOptions = useMemo(() => {
-    const keys = new Set<string>(["team"]);
-    for (const employee of data?.employees || []) keys.add(ownerKey(employee.id));
-    for (const message of data?.messages || []) keys.add(message.conversationKey || "team");
-    const options = Array.from(keys).map(conversationLabel);
-    return options.sort((a, b) => {
+    return items.sort((a, b) => {
       if (a.key === "team") return -1;
       if (b.key === "team") return 1;
+      const aTime = a.latest ? new Date(a.latest.created_at).getTime() : 0;
+      const bTime = b.latest ? new Date(b.latest.created_at).getTime() : 0;
+      if (aTime !== bTime) return bTime - aTime;
       return a.label.localeCompare(b.label);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.employees, data?.messages, employeesById, business]);
+  }, [data?.employees, data?.messages, employeesById, unreadIds, viewAsEmployeeId]);
 
-  const selectedMessages = useMemo(
-    () => (data?.messages || [])
-      .filter((message) => (message.conversationKey || "team") === selectedKey)
-      .slice()
-      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
-    [data?.messages, selectedKey],
-  );
-  const selectedConversation = conversationOptions.find((option) => option.key === selectedKey)
-    || conversationLabel(selectedKey);
+  const filteredConversations = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return conversations;
+    return conversations.filter((conversation) => {
+      const latest = conversation.latest?.body || conversation.latest?.attachment_name || "";
+      return `${conversation.label} ${conversation.detail} ${latest}`.toLowerCase().includes(needle);
+    });
+  }, [conversations, search]);
+
+  const selectedConversation = conversations.find((conversation) => conversation.key === selectedKey)
+    || conversations[0]
+    || null;
+  const selectedMessages = selectedConversation?.messages || [];
+  const canWrite = Boolean(selectedConversation)
+    && !viewAsEmployeeId
+    && selectedConversation?.kind !== "direct";
+
+  useEffect(() => {
+    if (selectedConversation && selectedConversation.key !== selectedKey) setSelectedKey(selectedConversation.key);
+  }, [selectedConversation, selectedKey]);
+
+  function senderName(message: Message, useYou = false): string {
+    if (!message.sender_employee_id) return useYou && !viewAsEmployeeId ? "You" : "Management";
+    const employee = employeesById.get(message.sender_employee_id.toLowerCase());
+    const display = message.sender_chat_nickname || employee?.chatNickname || employee?.name || firstName(message.sender_name);
+    if (useYou && viewAsEmployeeId && message.sender_employee_id.toLowerCase() === viewAsEmployeeId.toLowerCase()) return "You";
+    return display;
+  }
+
+  function chooseConversation(key: string) {
+    setSelectedKey(key);
+    setThreadOpen(true);
+    setStartOpen(false);
+    setNotice("");
+  }
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!selectedConversation || !canWrite) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
+    const body = String(form.get("body") || "").trim();
+    if (!body) return;
     setBusy(true);
     setNotice("");
     try {
@@ -173,14 +273,14 @@ export default function MessagesPage() {
         body: JSON.stringify({
           action: "send",
           business,
-          conversationKey: selectedKey,
-          body: form.get("body"),
+          conversationKey: selectedConversation.key,
+          body,
         }),
       });
       if (!response.ok) throw new Error(await responseMessage(response));
       formElement.reset();
       await load();
-      setNotice(`Message added to ${selectedConversation.label}.`);
+      setNotice(`Message sent to ${selectedConversation.label}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Message could not be sent.");
     } finally {
@@ -189,10 +289,7 @@ export default function MessagesPage() {
   }
 
   async function deleteMessage(message: Message) {
-    const description = message.body.trim()
-      ? `“${message.body.trim().slice(0, 80)}${message.body.trim().length > 80 ? "…" : ""}”`
-      : "this message";
-    if (!window.confirm(`Delete ${description} for everyone? This cannot be undone.`)) return;
+    if (!window.confirm("Delete this message for everyone? This cannot be undone.")) return;
     setBusy(true);
     setNotice("");
     try {
@@ -202,10 +299,7 @@ export default function MessagesPage() {
         body: JSON.stringify({ action: "delete", business, id: message.id }),
       });
       if (!response.ok) throw new Error(await responseMessage(response));
-      setData((current) => current ? {
-        ...current,
-        messages: current.messages.filter((item) => item.id !== message.id),
-      } : current);
+      await load();
       setNotice("Message deleted for everyone.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Message could not be deleted.");
@@ -214,76 +308,113 @@ export default function MessagesPage() {
     }
   }
 
-  if (!session) return <main className="controlPage">Loading messages…</main>;
-  if (!session.authenticated) return <main className="controlPage"><a href="/signin">Sign in to Corner Ops</a></main>;
+  if (!session) return <main className="messageApp"><div className="messageLoading">Loading messages…</div></main>;
+  if (!session.authenticated) return <main className="messageApp"><div className="messageLoading"><a href="/signin">Sign in to Corner Ops</a></div></main>;
   const allowed = session.businesses?.length ? session.businesses : (["Corner Deli", "Tiki"] as Business[]);
 
-  return <main className="controlPage">
-    <header className="controlHeader">
-      <div>
-        <p className="eyebrow">Team communication</p>
-        <h1>{business} conversations</h1>
-        <p>Choose one employee or the whole team. Replies stay together, and each message keeps the exact recipient list from the moment it was sent.</p>
+  return <main className="messageApp">
+    <header className="messageTopBar">
+      <div className="messageTopTitle">
+        <a className="messageTopIcon" href="/ops/people" aria-label="Open Corner Ops">☰</a>
+        <div><h1>Messages</h1><p>{business}</p></div>
       </div>
-      <div className="controlActions">
-        <div className="businessPills">{allowed.map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div>
-        <button disabled={busy} onClick={() => void load()}>Refresh</button>
-        <a href="/ops/workforce">Workforce</a>
+      <div className="messageTopActions">
+        <button type="button" aria-label="Search conversations" onClick={() => document.getElementById("message-search")?.focus()}>⌕</button>
+        {!viewAsEmployeeId && <button type="button" aria-label="Start a conversation" onClick={() => setStartOpen((value) => !value)}>＋</button>}
       </div>
     </header>
-    {notice && <div className="noticeBar">{notice}</div>}
 
-    <div className="conversationWorkspace">
-      <aside className="controlCard conversationChooser">
-        <p className="eyebrow">Conversation</p>
-        <label>Person or group
-          <select value={selectedKey} onChange={(event) => setSelectedKey(event.target.value)}>
-            {conversationOptions.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
-          </select>
-        </label>
-        <div className="conversationSelectionSummary">
-          <strong>{selectedConversation.label}</strong>
-          <span>{selectedConversation.detail}</span>
-          <small>{selectedMessages.length} message{selectedMessages.length === 1 ? "" : "s"}</small>
+    <div className="messageControlBar">
+      <div className="messageBusinessTabs">{allowed.map((name) => <button key={name} type="button" className={business === name ? "active" : ""} onClick={() => { setViewAsEmployeeId(""); setBusiness(name); }}>{name}</button>)}</div>
+      <label className="messageImpersonation">View as
+        <select value={viewAsEmployeeId} onChange={(event: ChangeEvent<HTMLSelectElement>) => setViewAsEmployeeId(event.target.value)}>
+          <option value="">Management</option>
+          {(data?.employees || []).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
+        </select>
+      </label>
+      <button type="button" className="messageRefresh" disabled={busy} onClick={() => void load()}>Refresh</button>
+    </div>
+
+    {data?.viewAsEmployee && <div className="messageImpersonationBanner"><strong>Viewing as {data.viewAsEmployee.name}</strong><span>Read-only impersonation. Opening messages here does not mark them seen for the employee.</span></div>}
+    {notice && <div className="messageNotice" role="status">{notice}</div>}
+
+    {startOpen && !viewAsEmployeeId && <section className="messageStartMenu" aria-label="Start a conversation">
+      <strong>New message</strong>
+      <button type="button" onClick={() => chooseConversation("team")}>🏪 Entire team</button>
+      {(data?.employees || []).map((employee) => <button type="button" key={employee.id} onClick={() => chooseConversation(ownerKey(employee.id))}>{initials(employee.name)} {employee.name}</button>)}
+    </section>}
+
+    <div className={`messageShell ${threadOpen ? "threadOpen" : ""}`}>
+      <section className="messageInboxPane" aria-label="Conversation list">
+        <div className="messageInboxToolbar">
+          <label><span className="srOnly">Search messages</span><input id="message-search" value={search} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)} placeholder="Search conversations" /></label>
+          <small>{filteredConversations.length} conversation{filteredConversations.length === 1 ? "" : "s"}</small>
         </div>
-        <p className="conversationSnapshotNote">Team recipients are snapshotted separately on every message. Someone added tomorrow sees tomorrow’s team messages, not yesterday’s.</p>
-      </aside>
-
-      <section className="controlCard conversationThreadCard">
-        <header className="conversationThreadHeader">
-          <div><p className="eyebrow">Inline replies</p><h2>{selectedConversation.label}</h2><span>{selectedConversation.detail}</span></div>
-        </header>
-
-        <div className="conversationThread" aria-live="polite">
-          {selectedMessages.map((message) => {
-            const employeeSender = message.sender_employee_id
-              ? employeesById.get(message.sender_employee_id.toLowerCase())
+        <div className="messageConversationList">
+          {filteredConversations.map((conversation) => {
+            const latest = conversation.latest;
+            const previewSender = latest ? senderName(latest, true) : "";
+            const preview = latest
+              ? `${previewSender}: ${latest.body || (latest.attachment_name ? "Photo" : "Message")}`
+              : conversation.kind === "management" ? "Start a private employee message" : "No messages yet";
+            const avatarEmployee = conversation.kind === "management"
+              ? employeesById.get(conversation.key.slice(6).toLowerCase())
               : null;
-            const displayName = message.sender_employee_id
-              ? message.sender_chat_nickname || employeeSender?.chatNickname || firstName(message.sender_name)
-              : "Management";
-            const senderColor = message.sender_schedule_color || employeeSender?.scheduleColor || "#64748B";
-            return <article className={`conversationPost ${message.sender_employee_id ? "fromEmployee" : "fromManagement"}`} key={message.id} style={{ "--employee-color": senderColor } as CSSProperties}>
-              <header>
-                <span className="conversationAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(business, message.sender_employee_id)} alt="" loading="lazy" /> : initials(displayName)}</span>
-                <div><strong>{displayName}</strong>{message.sender_employee_id && message.sender_chat_nickname && <small>{message.sender_name}</small>}<span>{local(message.created_at)}</span></div>
-                <button type="button" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>
-              </header>
-              {message.body && <p>{message.body}</p>}
-              {message.attachment_name && <a className="conversationPhoto" href={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer"><img src={`/api/workforce/message-photo?business=${encodeURIComponent(business)}&id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${displayName}`} loading="lazy" /></a>}
-              <details className="conversationReceipt">
-                <summary>{message.expectedCount === 0 ? "No employee recipients" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary>
-                <div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {local(read.readAt)}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}{message.expectedCount > 0 && message.unseenNames.length === 0 && <p>Everyone included on this message has seen it.</p>}</div>
-              </details>
-            </article>;
+            return <button type="button" key={conversation.key} className={`messageConversationRow ${selectedKey === conversation.key ? "selected" : ""}`} onClick={() => chooseConversation(conversation.key)}>
+              <span className={`messageListAvatar ${conversation.kind}`} style={{ "--employee-color": avatarEmployee?.scheduleColor || "#7C3AED" } as CSSProperties}>
+                {conversation.kind === "team" ? "🏪" : avatarEmployee?.avatarSet ? <img src={avatarUrl(business, avatarEmployee.id)} alt="" loading="lazy" /> : initials(conversation.label)}
+              </span>
+              <span className="messageListText"><strong>{conversation.label}</strong><span>{compact(preview)}</span>{conversation.kind === "direct" && <small>Employee chat</small>}</span>
+              <span className="messageListStatus">{conversation.unreadCount > 0 && <b>{conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}</b>}{latest && <time>{listDate(latest.created_at)}</time>}</span>
+            </button>;
           })}
-          {!selectedMessages.length && <div className="conversationEmpty"><strong>No messages here yet.</strong><span>Your first message starts this conversation without creating another administrative scavenger hunt.</span></div>}
+          {!filteredConversations.length && <div className="messageEmptyList">No active employee conversations match that search.</div>}
         </div>
+      </section>
 
-        <form className="conversationReply" onSubmit={sendMessage}>
-          <label>Reply in {selectedConversation.label}<textarea name="body" rows={4} required placeholder="Type the next message in this conversation" /></label>
-          <button className="primary" disabled={busy}>{busy ? "Sending…" : "Send reply"}</button>
-        </form>
+      <section className="messageThreadPane" aria-label="Selected conversation">
+        {selectedConversation ? <>
+          <header className="messageThreadHeader">
+            <button type="button" className="messageBack" aria-label="Back to conversations" onClick={() => setThreadOpen(false)}>←</button>
+            <div><h2>{selectedConversation.label}</h2><p>{selectedConversation.detail}</p></div>
+            <span className={`messageHeaderAvatar ${selectedConversation.kind}`} aria-hidden="true">{selectedConversation.kind === "team" ? "🏪" : initials(selectedConversation.label)}</span>
+          </header>
+
+          <div className="messageThread" aria-live="polite">
+            {selectedMessages.map((message, index) => {
+              const prior = selectedMessages[index - 1];
+              const showDay = !prior || new Date(prior.created_at).toDateString() !== new Date(message.created_at).toDateString();
+              const isOwn = viewAsEmployeeId
+                ? message.sender_employee_id?.toLowerCase() === viewAsEmployeeId.toLowerCase()
+                : !message.sender_employee_id;
+              const displayName = senderName(message);
+              const employeeSender = message.sender_employee_id ? employeesById.get(message.sender_employee_id.toLowerCase()) : null;
+              return <div key={message.id}>
+                {showDay && <div className="messageDay"><span>{dayLabel(message.created_at)}</span></div>}
+                <article className={`messageBubbleRow ${isOwn ? "own" : "other"}`}>
+                  {!isOwn && <span className="messageTinyAvatar" style={{ "--employee-color": message.sender_schedule_color || employeeSender?.scheduleColor || "#7C3AED" } as CSSProperties}>{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(business, message.sender_employee_id)} alt="" loading="lazy" /> : initials(displayName)}</span>}
+                  <div className="messageBubbleWrap">
+                    <div className="messageBubble">
+                      {message.attachment_name && <a className="messagePhoto" href={messagePhotoUrl(business, message.id)} target="_blank" rel="noreferrer"><img src={messagePhotoUrl(business, message.id)} alt={message.body || `Photo from ${displayName}`} loading="lazy" /></a>}
+                      {message.body && <p>{message.body}</p>}
+                    </div>
+                    <div className="messageBubbleMeta"><span>{isOwn ? "You" : displayName}</span><time>{messageTime(message.created_at)}</time>{!viewAsEmployeeId && <button type="button" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>}</div>
+                    <details className="messageReceipt">
+                      <summary>{message.expectedCount === 0 ? "Sent to management" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary>
+                      <div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {new Date(read.readAt).toLocaleString()}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}{message.expectedCount > 0 && !message.unseenNames.length && <p>Everyone still active on this message has seen it.</p>}</div>
+                    </details>
+                  </div>
+                </article>
+              </div>;
+            })}
+            {!selectedMessages.length && <div className="messageThreadEmpty"><strong>No messages here yet.</strong><span>{canWrite ? "Send the first message below." : "There is nothing to review in this conversation."}</span></div>}
+          </div>
+
+          {canWrite ? <form className="messageComposer" onSubmit={sendMessage}>
+            <textarea name="body" rows={2} required placeholder="Send a message" aria-label={`Message ${selectedConversation.label}`} />
+            <button type="submit" disabled={busy} aria-label="Send message">{busy ? "…" : "➤"}</button>
+          </form> : <div className="messageReadOnlyComposer"><strong>View only</strong><span>{viewAsEmployeeId ? "Impersonation never sends or marks messages as read." : "Management can review employee-to-employee conversations but cannot post into them."}</span></div>}
+        </> : <div className="messageThreadEmpty"><strong>Select a conversation.</strong></div>}
       </section>
     </div>
   </main>;
