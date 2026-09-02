@@ -21,8 +21,6 @@ export default function MxKeyedPaymentDialog({payment,onApproved,onCancel}:{
   const [number,setNumber]=useState("");
   const [expiry,setExpiry]=useState("");
   const [cvv,setCvv]=useState("");
-  const [avsStreet,setAvsStreet]=useState(payment.avsStreet||"");
-  const [avsZip,setAvsZip]=useState(payment.avsZip||"");
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   async function submit(event:React.FormEvent){
@@ -36,7 +34,7 @@ export default function MxKeyedPaymentDialog({payment,onApproved,onCancel}:{
         method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
           merchantId:payment.merchantId,tenderType:"Card",paymentType:"Sale",amount:payment.amount,
           replayId:payment.replayId,source:"API",customerName:payment.customerName,
-          cardAccount:{number:digits,expiryMonth:match[1].padStart(2,"0"),expiryYear:year,cvv:cvv.replace(/\D/g,""),avsStreet,avsZip},
+          cardAccount:{number:digits,expiryMonth:match[1].padStart(2,"0"),expiryYear:year,cvv:cvv.replace(/\D/g,""),...(payment.avsStreet?{avsStreet:payment.avsStreet}:{}),...(payment.avsZip?{avsZip:payment.avsZip}:{})},
         }),
       });
       const result=await response.json().catch(()=>null) as {status?:string;message?:string;authMessage?:string}|null;
@@ -49,7 +47,6 @@ export default function MxKeyedPaymentDialog({payment,onApproved,onCancel}:{
     <h2 id="mx-payment-title">Secure card payment</h2><strong>${payment.amount.toFixed(2)}</strong>
     <label>Card number<input autoFocus inputMode="numeric" autoComplete="cc-number" value={number} onChange={e=>setNumber(e.target.value)} placeholder="4242 4242 4242 4242"/></label>
     <div><label>Expiration<input inputMode="numeric" autoComplete="cc-exp" value={expiry} onChange={e=>setExpiry(e.target.value)} placeholder="MM/YY"/></label><label>Security code<input inputMode="numeric" autoComplete="cc-csc" value={cvv} onChange={e=>setCvv(e.target.value)} placeholder="CVV"/></label></div>
-    {!payment.avsZip&&<div><label>Billing street number<input inputMode="numeric" autoComplete="address-line1" value={avsStreet} onChange={e=>setAvsStreet(e.target.value)} placeholder="123"/></label><label>Billing ZIP<input inputMode="numeric" autoComplete="postal-code" value={avsZip} onChange={e=>setAvsZip(e.target.value)} placeholder="ZIP"/></label></div>}
     <small>Card details are sent directly to MX Merchant and never pass through Corner Deli servers.</small>
     {error&&<p role="alert">{error}</p>}<footer><button type="button" onClick={onCancel} disabled={busy}>CANCEL</button><button disabled={busy}>{busy?"PROCESSING…":"PAY"}</button></footer>
   </form></div>;
