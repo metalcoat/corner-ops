@@ -1,0 +1,128 @@
+name: Apply schedule week boundary fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-schedule-week-boundary-fix.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: schedule-week-boundary-fix
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Correct New York schedule-week SQL boundaries
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              "src/lib/schedule-publish-validation.ts": [
+                  ("(${weekStart}::date AT TIME ZONE ${TIME_ZONE})", "(${weekStart}::date::timestamp AT TIME ZONE ${TIME_ZONE})"),
+                  ("((${weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})", "(((${weekStart}::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE})"),
+              ],
+              "src/lib/business-schedule-publication.ts": [
+                  ("(${input.weekStart}::date AT TIME ZONE ${TIME_ZONE})", "(${input.weekStart}::date::timestamp AT TIME ZONE ${TIME_ZONE})"),
+                  ("((${input.weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})", "(((${input.weekStart}::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE})"),
+              ],
+              "src/lib/schedule-publication-sms.ts": [
+                  ("(${input.weekStart}::date AT TIME ZONE ${TIME_ZONE})", "(${input.weekStart}::date::timestamp AT TIME ZONE ${TIME_ZONE})"),
+                  ("((${input.weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})", "(((${input.weekStart}::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE})"),
+              ],
+          }
+
+          changed = []
+          total_replacements = 0
+          for path_string, pairs in replacements.items():
+              path = Path(path_string)
+              text = path.read_text(encoding="utf-8")
+              original = text
+              for old, new in pairs:
+                  count = text.count(old)
+                  if count < 1:
+                      raise SystemExit(f"Expected at least one schedule boundary in {path_string}: {old}")
+                  text = text.replace(old, new)
+                  total_replacements += count
+              if text == original:
+                  raise SystemExit(f"No schedule boundary changes were made in {path_string}")
+              path.write_text(text, encoding="utf-8")
+              changed.append(path_string)
+
+          if total_replacements < 6:
+              raise SystemExit(f"Expected at least six corrected schedule boundary expressions, found {total_replacements}")
+
+          test = Path("tests/schedule-week-boundary.test.ts")
+          test.write_text('''import test from "node:test";
+          import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+          import { join } from "node:path";
+
+          const root = process.cwd();
+          const source = (path: string) => readFileSync(join(root, path), "utf8");
+
+          test("schedule publication uses New York midnight boundaries through the end of Sunday", () => {
+            const files = [
+              "src/lib/schedule-publish-validation.ts",
+              "src/lib/business-schedule-publication.ts",
+              "src/lib/schedule-publication-sms.ts",
+            ];
+            for (const file of files) {
+              const text = source(file);
+              assert.equal(text.includes("::date AT TIME ZONE ${TIME_ZONE}"), false, `${file} still casts a date directly through AT TIME ZONE`);
+              assert.equal(text.includes("::date::timestamp AT TIME ZONE ${TIME_ZONE}"), true, `${file} is missing an explicit local-midnight timestamp cast`);
+              assert.equal(text.includes("::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE}"), true, `${file} is missing the corrected end-of-week boundary`);
+            }
+          });
+          ''', encoding="utf-8")
+
+          print(f"Corrected {total_replacements} schedule boundary expressions in: {', '.join(changed)}")
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build application
+        run: npm run build
+        env:
+          APP_EMAIL: owner@example.test
+          DATABASE_URL: ""
+          BLOB_READ_WRITE_TOKEN: vercel_blob_rw_placeholder
+          SESSION_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          EMPLOYMENT_FORMS_ENCRYPTION_KEY: abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+
+      - name: Commit tested correction
+        shell: bash
+        run: |
+          rm -f .github/workflows/apply-schedule-week-boundary-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Include all Sunday shifts when publishing schedules" \
+            -m "Cast schedule week dates to local timestamps before applying the New York time zone so the server, publication update, and SMS schedule all cover Monday midnight through the following Monday midnight."
+          git pull --rebase origin main
+          git push origin HEAD:main
