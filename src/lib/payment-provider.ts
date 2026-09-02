@@ -33,7 +33,7 @@ export function mxMerchantStatus(): PaymentProviderStatus {
     provider: "mx_merchant",
     label: "Dharma / MX Merchant",
     configured,
-    onlineCheckoutEnabled: false,
+    onlineCheckoutEnabled: configured,
     terminalCheckoutEnabled:
       configured && Boolean(process.env.MX_TERMINAL_API_ENABLED?.trim() === "true"),
     sandbox: process.env.MX_ENVIRONMENT?.trim().toLowerCase() !== "production",

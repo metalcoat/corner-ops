@@ -5,7 +5,7 @@ import { getDeliveryPricingSettings } from "@/lib/ordering-delivery";
 import { getSql } from "@/lib/db";
 import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
 import { customerOrderingSession } from "@/lib/customer-ordering-session";
-import { helcimStatus } from "@/lib/helcim";
+import { paymentProviderStatus } from "@/lib/payment-provider";
 import { loyaltyStatus } from "@/lib/ordering-loyalty";
 
 export const runtime = "nodejs";
@@ -180,8 +180,8 @@ export async function GET(request: Request) {
         giftCardsAcceptedAtPayment: true,
       },
       checkout: {
-        paymentEnabled: helcimStatus().checkoutEnabled,
-        provider: "helcim",
+        paymentEnabled: paymentProviderStatus().configured,
+        provider: paymentProviderStatus().provider,
         pickupEnabled: true,
         deliveryEnabled: delivery.enabled,
       },

@@ -15,6 +15,8 @@ import {
 import { unwrapHelcimPayResponse } from "@/lib/helcim-pay-response";
 import { consolidateQuantities } from "@/lib/cart-line-consolidation";
 import { DELIVERY_LOCATION_PRESETS, deliveryPresetSuggestions } from "@/lib/ordering-delivery-presets";
+import MxKeyedPaymentDialog,{type MxPaymentInitialization}from"@/components/mx-keyed-payment-dialog";
+import "@/components/mx-keyed-payment-dialog.css";
 
 function localDateValue(value = new Date()) {
   const year = value.getFullYear();
@@ -245,6 +247,7 @@ export default function CustomerOrder() {
       null,
     ),
     [paymentOpen, setPaymentOpen] = useState(false),
+    [mxPayment,setMxPayment]=useState<MxPaymentInitialization|null>(null),
     [deliveryAddress, setDeliveryAddress] = useState(""),
     [deliveryUnit, setDeliveryUnit] = useState(""),
     [savedAddressId, setSavedAddressId] = useState(""),
@@ -510,7 +513,7 @@ export default function CustomerOrder() {
     if (!paymentChoice || busy) return;
     const priced = review || (await price());
     if (!priced) return;
-    if (paymentChoice === "card") await payWithHelcim(priced);
+    if (paymentChoice === "card") await payWithMx(priced);
     if (paymentChoice === "pickup") await submitPayLater(priced);
   }
   async function applyLoyaltyReward(programId: string) {
@@ -540,6 +543,8 @@ export default function CustomerOrder() {
       setBusy(false);
     }
   }
+  async function payWithMx(order=review){if(!order?.id||busy)return;setBusy(true);setMessage("");try{const response=await fetch(`/api/customer/orders/${encodeURIComponent(order.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"initialize"})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not start secure checkout.");setMxPayment(body);setPaymentOpen(true)}catch(e){setMessage(e instanceof Error?e.message:"Could not start secure checkout.");setBusy(false)}}
+  async function confirmMxPayment(replayId:number){if(!review?.id)return;try{const response=await fetch(`/api/customer/orders/${encodeURIComponent(review.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"confirm",replayId})}),result=await response.json();if(!response.ok)throw new Error(result.error||"Payment could not be verified.");setMxPayment(null);setPaymentOpen(false);setCompletedOrder(result.order);setReview(null);setCart([]);window.location.assign(`/order/confirmation?orderId=${encodeURIComponent(result.order.id)}`)}catch(e){setMessage(e instanceof Error?e.message:"Payment could not be verified.");setMxPayment(null);setPaymentOpen(false)}finally{setBusy(false)}}
   async function payWithHelcim(order = review) {
     if (!order?.id || busy) return;
     setBusy(true);
@@ -735,7 +740,8 @@ export default function CustomerOrder() {
   }
   return (
     <main className="customerOrder">
-      {paymentOpen ? (
+      {mxPayment&&<MxKeyedPaymentDialog payment={mxPayment} onApproved={confirmMxPayment} onCancel={()=>{setMxPayment(null);setPaymentOpen(false);setBusy(false)}}/>}
+      {paymentOpen&&!mxPayment ? (
         <div className="securePaymentBackdrop" aria-hidden="true" />
       ) : null}
       <header className="orderHero">
