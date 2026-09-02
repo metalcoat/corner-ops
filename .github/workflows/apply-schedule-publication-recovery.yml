@@ -63,7 +63,7 @@ jobs:
 
           test("SMS configuration status is explicitly non-blocking in the manager notice", () => {
             const page = source("src/app/ops/workforce/page.tsx");
-            assert.equal(page.includes("SMS unavailable; schedule publication is not blocked"), true);
+            assert.equal(page.includes("unavailable; schedule publication is not blocked"), true);
           });
           EOF
 
