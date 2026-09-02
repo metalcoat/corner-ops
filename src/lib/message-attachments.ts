@@ -14,11 +14,6 @@ export function ensureMessageAttachmentSchema(): Promise<void> {
     messageAttachmentSchemaPromise = (async () => {
       await ensureWorkforceSchema();
       const sql = getSql();
-      await sql`ALTER TABLE employee_messages ADD COLUMN IF NOT EXISTS attachment_url TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employee_messages ADD COLUMN IF NOT EXISTS attachment_pathname TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employee_messages ADD COLUMN IF NOT EXISTS attachment_name TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employee_messages ADD COLUMN IF NOT EXISTS attachment_type TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employee_messages ADD COLUMN IF NOT EXISTS attachment_size BIGINT NOT NULL DEFAULT 0`;
     })().catch((error) => {
       messageAttachmentSchemaPromise = null;
       throw error;
@@ -89,6 +84,7 @@ export async function employeeMessageAttachment(session: EmployeeSession, messag
     SELECT attachment_pathname, attachment_name, attachment_type, attachment_size
     FROM employee_messages
     WHERE id = ${messageId}
+      AND deleted_at IS NULL
       AND business = ${session.business}
       AND attachment_pathname <> ''
       AND (
@@ -106,7 +102,7 @@ export async function ownerMessageAttachment(business: Business, messageId: stri
   const rows = await getSql()`
     SELECT attachment_pathname, attachment_name, attachment_type, attachment_size
     FROM employee_messages
-    WHERE id = ${messageId} AND business = ${business} AND attachment_pathname <> ''
+    WHERE id = ${messageId} AND business = ${business} AND deleted_at IS NULL AND attachment_pathname <> ''
     LIMIT 1
   ` as unknown as Array<Record<string, unknown>>;
   return rows[0] ? mapAttachment(rows[0]) : null;

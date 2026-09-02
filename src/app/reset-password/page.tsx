@@ -1,12 +1,13 @@
 "use client";
 
+import { requestFailure } from "@/app/client-http";
 import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import "../ops/control-center.css";
 
 async function message(response: Response): Promise<string> {
   const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
+  return payload?.error || requestFailure(response);
 }
 
 function ResetPasswordForm() {

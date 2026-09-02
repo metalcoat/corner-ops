@@ -1,8 +1,10 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { CORNER_DELI_POSITIONS } from "@/lib/business-positions";
 import type { Business } from "@/lib/types";
+import { useModalFocus } from "@/app/use-modal-focus";
 import "./employee-editor-overlay.css";
 
 type Employee = {
@@ -22,10 +24,6 @@ type Employee = {
   scheduleColor: string;
 };
 
-async function responseMessage(response: Response): Promise<string> {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function selectedBusiness(): Business {
   const text = document.querySelector<HTMLButtonElement>(".wfBusinessSwitch button.selected")?.textContent?.trim();
@@ -48,6 +46,7 @@ export default function EmployeeEditorOverlay() {
   const [toast, setToast] = useState("");
   const employeesRef = useRef<Employee[]>([]);
   const businessRef = useRef<Business>(business);
+  const employeeModalRef = useModalFocus<HTMLElement>(Boolean(selected), () => { if (!busy) setSelected(null); });
 
   function storeEmployees(rows: Employee[]) {
     employeesRef.current = rows;
@@ -142,7 +141,7 @@ export default function EmployeeEditorOverlay() {
   return <>
     {toast && <div className="employeeEditorToast" role="status"><span>{toast}</span><button type="button" onClick={() => setToast("")}>×</button></div>}
     {selected && <div className="employeeEditorBackdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setSelected(null); }}>
-      <section className="employeeEditorModal" role="dialog" aria-modal="true" aria-labelledby="employee-editor-title">
+      <section ref={employeeModalRef} tabIndex={-1} className="employeeEditorModal" role="dialog" aria-modal="true" aria-labelledby="employee-editor-title">
         <header>
           <div><p>Edit employee</p><h2 id="employee-editor-title">{selected.name}</h2><span>{selected.business}</span></div>
           <button type="button" aria-label="Close employee editor" disabled={busy} onClick={() => setSelected(null)}>×</button>

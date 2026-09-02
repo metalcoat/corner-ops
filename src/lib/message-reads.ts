@@ -11,30 +11,6 @@ export function ensureMessageReadSchema(): Promise<void> {
     readSchemaPromise = (async () => {
       await Promise.all([ensureMessageAttachmentSchema(), ensureEmployeeProfileSchema()]);
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS employee_message_reads (
-          message_id UUID NOT NULL REFERENCES employee_messages(id) ON DELETE CASCADE,
-          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-          read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          PRIMARY KEY (message_id, employee_id)
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS employee_message_reads_employee_idx ON employee_message_reads (employee_id, read_at DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS owner_message_reads (
-          message_id UUID NOT NULL REFERENCES employee_messages(id) ON DELETE CASCADE,
-          reader_email TEXT NOT NULL,
-          read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          PRIMARY KEY (message_id, reader_email)
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS owner_message_reads_reader_idx ON owner_message_reads (reader_email, read_at DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS owner_message_notification_state (
-          reader_email TEXT PRIMARY KEY,
-          started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
     })().catch((error) => {
       readSchemaPromise = null;
       throw error;
@@ -76,6 +52,7 @@ export async function adminUnreadMessageSummary(readerEmail: string, businesses:
     SELECT m.business, COUNT(*)::INTEGER AS unread_count
     FROM employee_messages m
     WHERE m.sender_employee_id IS NOT NULL
+      AND m.deleted_at IS NULL
       AND m.created_at >= ${startedAt}
       AND (
         (m.business = 'Corner Deli' AND ${canReadDeli})
@@ -105,6 +82,7 @@ export async function markAdminMessagesRead(readerEmail: string, business: Busin
     SELECT m.id, ${email}
     FROM employee_messages m
     WHERE m.business = ${business}
+      AND m.deleted_at IS NULL
       AND m.sender_employee_id IS NOT NULL
       AND m.created_at >= ${startedAt}
     ON CONFLICT (message_id, reader_email) DO NOTHING
@@ -119,6 +97,7 @@ export async function markEmployeeMessageSeen(session: EmployeeSession, messageI
     SELECT id, sender_employee_id
     FROM employee_messages
     WHERE id = ${messageId}
+      AND deleted_at IS NULL
       AND business = ${session.business}
       AND (
         message_type IN ('Team', 'Announcement')
@@ -181,6 +160,7 @@ export async function adminMessagesDashboard(business: Business) {
       LEFT JOIN employees sender ON sender.id = m.sender_employee_id
       LEFT JOIN employees recipient ON recipient.id = m.recipient_employee_id
       WHERE m.business = ${business}
+        AND m.deleted_at IS NULL
       ORDER BY m.created_at DESC
       LIMIT 250
     `,
@@ -190,6 +170,7 @@ export async function adminMessagesDashboard(business: Business) {
       JOIN employee_messages m ON m.id = r.message_id
       JOIN employees e ON e.id = r.employee_id
       WHERE m.business = ${business}
+        AND m.deleted_at IS NULL
       ORDER BY r.read_at
     `,
   ]);

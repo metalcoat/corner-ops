@@ -150,6 +150,7 @@ export async function POST(request: Request) {
         billId: clean(body.billId, 80),
         status: body.status === "Paid" || body.status === "Void" ? body.status : "Open",
         bankTransactionId: clean(body.bankTransactionId, 80) || null,
+        actor: session.email,
       }));
     }
     if (action === "create-inventory-item") {
@@ -181,6 +182,7 @@ export async function POST(request: Request) {
         business,
         inventoryItemId: clean(body.inventoryItemId, 80),
         currentQuantity: numeric(body.currentQuantity),
+        actor: session.email,
       }));
     }
     if (action === "create-recipe") {

@@ -12,7 +12,20 @@ type SmsFailure = {
   message: string;
 };
 
+type SmsAccepted = {
+  employeeId: string;
+  messageId: string;
+  status: string;
+};
+
+type TelnyxMessagePayload = {
+  id?: string;
+  to?: Array<{ status?: string; phone_number?: string }>;
+  errors?: Array<{ code?: string; title?: string; detail?: string }>;
+};
+
 const SMS_CONCURRENCY = 6;
+
 function configuration() {
   const apiKey = process.env.TELNYX_API_KEY?.trim();
   const from = process.env.TELNYX_FROM_NUMBER?.trim();
@@ -31,6 +44,34 @@ async function inBatches<T>(items: T[], concurrency: number, worker: (item: T) =
   }
 }
 
+export async function getSmsDeliveryStatus(messageId: string) {
+  const configured = configuration();
+  if (!configured) throw new Error("Telnyx SMS is not configured.");
+  const cleanId = String(messageId || "").trim();
+  if (!cleanId) throw new Error("Missing Telnyx message ID.");
+
+  const response = await fetch(`https://api.telnyx.com/v2/messages/${encodeURIComponent(cleanId)}`, {
+    headers: { Authorization: `Bearer ${configured.apiKey}` },
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => null) as { data?: TelnyxMessagePayload; errors?: Array<{ code?: string; title?: string; detail?: string }> } | null;
+  if (!response.ok) {
+    const detail = payload?.errors?.[0]?.detail || payload?.errors?.[0]?.title || `Telnyx status request failed (${response.status}).`;
+    throw new Error(detail);
+  }
+
+  const data = payload?.data || {};
+  return {
+    messageId: data.id || cleanId,
+    status: data.to?.[0]?.status || "unknown",
+    errors: (data.errors || []).map((error) => ({
+      code: error.code || "",
+      title: error.title || "",
+      detail: error.detail || "",
+    })),
+  };
+}
+
 export async function deliverSms(input: {
   recipients: SmsRecipient[];
   text: (employee: SmsRecipient) => string;
@@ -39,6 +80,7 @@ export async function deliverSms(input: {
   const optedIn = input.recipients.filter((employee) => employee.smsOptIn);
   const deliverable: Array<SmsRecipient & { normalizedPhone: string }> = [];
   const failures: SmsFailure[] = [];
+  const accepted: SmsAccepted[] = [];
   let missingPhone = 0;
 
   for (const employee of optedIn) {
@@ -67,6 +109,7 @@ export async function deliverSms(input: {
       notOptedIn: input.recipients.length - optedIn.length,
       skipped: deliverable.length,
       failures,
+      accepted,
     };
   }
 
@@ -86,12 +129,17 @@ export async function deliverSms(input: {
           type: "SMS",
         }),
       });
+      const payload = await response.json().catch(() => null) as { data?: TelnyxMessagePayload; errors?: Array<{ detail?: string; title?: string }> } | null;
       if (!response.ok) {
-        const payload = await response.json().catch(() => null) as { errors?: Array<{ detail?: string; title?: string }> } | null;
         const detail = payload?.errors?.[0]?.detail || payload?.errors?.[0]?.title || `Telnyx request failed (${response.status}).`;
         throw new Error(detail);
       }
       sent += 1;
+      accepted.push({
+        employeeId: employee.id,
+        messageId: payload?.data?.id || "",
+        status: payload?.data?.to?.[0]?.status || "accepted",
+      });
     } catch (error) {
       failures.push({
         employeeId: employee.id,
@@ -109,5 +157,6 @@ export async function deliverSms(input: {
     notOptedIn: input.recipients.length - optedIn.length,
     skipped: 0,
     failures,
+    accepted,
   };
 }

@@ -31,6 +31,7 @@ export async function GET(request: Request) {
         LEFT JOIN employees sender ON sender.id = m.sender_employee_id
         LEFT JOIN employees recipient ON recipient.id = m.recipient_employee_id
         WHERE m.business = ${session.business}
+          AND m.deleted_at IS NULL
           AND (
             m.message_type IN ('Team', 'Announcement')
             OR m.sender_employee_id = ${session.employeeId}
@@ -43,6 +44,7 @@ export async function GET(request: Request) {
         SELECT m.id
         FROM employee_messages m
         WHERE m.business = ${session.business}
+          AND m.deleted_at IS NULL
           AND (
             m.message_type IN ('Team', 'Announcement')
             OR m.sender_employee_id = ${session.employeeId}

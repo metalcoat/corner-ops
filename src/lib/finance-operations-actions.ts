@@ -1,4 +1,5 @@
-import { getSql } from "@/lib/db";
+import { getSql, withTransaction } from "@/lib/db";
+import { recordAuditEvent } from "@/lib/audit";
 import { ensureFinanceOperationsSchema } from "@/lib/finance-operations-schema";
 import type { Business } from "@/lib/types";
 
@@ -11,7 +12,7 @@ function numeric(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function money(value: unknown): number {
+function nonNegativeMoney(value: unknown): number {
   return Math.round(Math.max(0, numeric(value)) * 100) / 100;
 }
 
@@ -58,10 +59,10 @@ export async function createVendorBill(input: {
   const invoiceNumber = clean(input.invoiceNumber, 100);
   const invoiceDate = validDate(input.invoiceDate, "Invoice date");
   const dueDate = validDate(input.dueDate, "Due date");
-  const totalAmount = money(input.totalAmount);
+  const totalAmount = nonNegativeMoney(input.totalAmount);
   if (totalAmount <= 0) throw new Error("Bill total must be greater than zero.");
-  const taxAmount = money(input.taxAmount);
-  const subtotal = money(input.subtotal) || money(totalAmount - taxAmount);
+  const taxAmount = nonNegativeMoney(input.taxAmount);
+  const subtotal = nonNegativeMoney(input.subtotal) || nonNegativeMoney(totalAmount - taxAmount);
   const lines = (input.lines || []).map((line) => {
     const lineQuantity = quantity(line.quantity) || 1;
     const unitPrice = Math.round(Math.max(0, numeric(line.unitPrice)) * 10_000) / 10_000;
@@ -71,7 +72,7 @@ export async function createVendorBill(input: {
       quantity: lineQuantity,
       unit: clean(line.unit, 40) || "each",
       unitPrice,
-      lineTotal: money(lineQuantity * unitPrice),
+      lineTotal: nonNegativeMoney(lineQuantity * unitPrice),
     };
   }).filter((line) => line.description && line.lineTotal >= 0);
 
@@ -90,63 +91,64 @@ export async function createVendorBill(input: {
     }
   }
 
-  const id = crypto.randomUUID();
-  await getSql()`
-    INSERT INTO vendor_bills (
-      id, business, vendor, invoice_number, invoice_date, due_date, subtotal, tax_amount,
-      total_amount, category, account_code, status, notes, file_name, content_type,
-      blob_url, blob_pathname, created_by
-    ) VALUES (
-      ${id}, ${input.business}, ${vendor}, ${invoiceNumber}, ${invoiceDate}, ${dueDate},
-      ${subtotal}, ${taxAmount}, ${totalAmount}, ${clean(input.category, 120) || "Other Expense"},
-      ${clean(input.accountCode, 20) || "5900"}, 'Open', ${clean(input.notes, 1500)},
-      ${clean(input.fileName, 255)}, ${clean(input.contentType, 160)}, ${clean(input.blobUrl, 1000)},
-      ${clean(input.blobPathname, 1000)}, ${clean(input.actor, 240)}
-    )
-  `;
+  const inventoryChecks = await Promise.all(lines.map(async (line, index) => {
+    if (!line.inventoryItemId) return null;
+    const item = await getSql()`
+      SELECT id FROM inventory_items
+      WHERE id = ${line.inventoryItemId} AND business = ${input.business} AND active = TRUE
+      LIMIT 1
+    ` as unknown as Array<{ id: string }>;
+    if (!item[0]) throw new Error(`Inventory item on line ${index + 1} was not found for ${input.business}.`);
+    return item[0].id;
+  }));
+  void inventoryChecks;
 
-  try {
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index];
-      if (line.inventoryItemId) {
-        const item = await getSql()`
-          SELECT id FROM inventory_items
-          WHERE id = ${line.inventoryItemId} AND business = ${input.business} AND active = TRUE
-          LIMIT 1
-        ` as unknown as Array<{ id: string }>;
-        if (!item[0]) throw new Error(`Inventory item on line ${index + 1} was not found for ${input.business}.`);
-      }
-      await getSql()`
-        INSERT INTO vendor_bill_lines (
-          id, bill_id, line_number, inventory_item_id, description, quantity, unit, unit_price, line_total
+  const id = crypto.randomUUID();
+  await withTransaction(async () => {
+    const sql = getSql();
+    await sql`
+      INSERT INTO vendor_bills (
+        id, business, vendor, invoice_number, invoice_date, due_date, subtotal, tax_amount,
+        total_amount, category, account_code, status, notes, file_name, content_type,
+        blob_url, blob_pathname, created_by
+      ) VALUES (
+        ${id}, ${input.business}, ${vendor}, ${invoiceNumber}, ${invoiceDate}, ${dueDate},
+        ${subtotal}, ${taxAmount}, ${totalAmount}, ${clean(input.category, 120) || "Other Expense"},
+        ${clean(input.accountCode, 20) || "5900"}, 'Open', ${clean(input.notes, 1500)},
+        ${clean(input.fileName, 255)}, ${clean(input.contentType, 160)}, ${clean(input.blobUrl, 1000)},
+        ${clean(input.blobPathname, 1000)}, ${clean(input.actor, 240)}
+      )
+    `;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    await sql`
+      INSERT INTO vendor_bill_lines (
+        id, bill_id, line_number, inventory_item_id, description, quantity, unit, unit_price, line_total
+      ) VALUES (
+        ${crypto.randomUUID()}, ${id}, ${index + 1}, ${line.inventoryItemId}, ${line.description},
+        ${line.quantity}, ${line.unit}, ${line.unitPrice}, ${line.lineTotal}
+      )
+    `;
+    if (line.inventoryItemId && line.unitPrice > 0) {
+      await sql`
+        INSERT INTO inventory_purchases (
+          id, business, inventory_item_id, vendor, purchase_date, quantity, unit,
+          unit_price, total_amount, bill_id, source
         ) VALUES (
-          ${crypto.randomUUID()}, ${id}, ${index + 1}, ${line.inventoryItemId}, ${line.description},
-          ${line.quantity}, ${line.unit}, ${line.unitPrice}, ${line.lineTotal}
+          ${crypto.randomUUID()}, ${input.business}, ${line.inventoryItemId}, ${vendor}, ${invoiceDate},
+          ${line.quantity}, ${line.unit}, ${line.unitPrice}, ${line.lineTotal}, ${id}, 'Vendor bill'
         )
       `;
-      if (line.inventoryItemId && line.unitPrice > 0) {
-        await getSql()`
-          INSERT INTO inventory_purchases (
-            id, business, inventory_item_id, vendor, purchase_date, quantity, unit,
-            unit_price, total_amount, bill_id, source
-          ) VALUES (
-            ${crypto.randomUUID()}, ${input.business}, ${line.inventoryItemId}, ${vendor}, ${invoiceDate},
-            ${line.quantity}, ${line.unit}, ${line.unitPrice}, ${line.lineTotal}, ${id}, 'Vendor bill'
-          )
-        `;
-        await getSql()`
-          UPDATE inventory_items SET
-            current_quantity = current_quantity + ${line.quantity},
-            preferred_vendor = CASE WHEN preferred_vendor = '' THEN ${vendor} ELSE preferred_vendor END,
-            updated_at = NOW()
-          WHERE id = ${line.inventoryItemId} AND business = ${input.business}
-        `;
-      }
+      await sql`
+        UPDATE inventory_items SET
+          current_quantity = current_quantity + ${line.quantity},
+          preferred_vendor = CASE WHEN preferred_vendor = '' THEN ${vendor} ELSE preferred_vendor END,
+          updated_at = NOW()
+        WHERE id = ${line.inventoryItemId} AND business = ${input.business}
+      `;
     }
-  } catch (error) {
-    await getSql()`DELETE FROM vendor_bills WHERE id = ${id}`;
-    throw error;
   }
+  });
 
   return { id, created: true, lines: lines.length, totalAmount };
 }
@@ -156,6 +158,7 @@ export async function updateVendorBillStatus(input: {
   billId: string;
   status: "Open" | "Paid" | "Void";
   bankTransactionId?: string | null;
+  actor: string;
 }) {
   await ensureFinanceOperationsSchema();
   const rows = await getSql()`
@@ -184,6 +187,7 @@ export async function updateVendorBillStatus(input: {
       status = ${input.status}, paid_bank_transaction_id = ${bankTransactionId}, updated_at = NOW()
     WHERE id = ${input.billId} AND business = ${input.business}
   `;
+  await recordAuditEvent({ business: input.business, entityType: "vendor_bill", entityId: input.billId, action: `status_${input.status.toLowerCase()}`, actor: input.actor, details: { priorStatus: bill.status, bankTransactionId } });
   return { updated: true, status: input.status };
 }
 
@@ -243,7 +247,7 @@ export async function recordInventoryPurchase(input: {
   const unitPrice = Math.round(Math.max(0, numeric(input.unitPrice)) * 10_000) / 10_000;
   if (purchaseQuantity <= 0) throw new Error("Purchase quantity must be greater than zero.");
   if (unitPrice <= 0) throw new Error("Unit price must be greater than zero.");
-  const total = money(purchaseQuantity * unitPrice);
+  const total = nonNegativeMoney(purchaseQuantity * unitPrice);
   await getSql()`
     INSERT INTO inventory_purchases (
       id, business, inventory_item_id, vendor, purchase_date, quantity, unit,
@@ -268,6 +272,7 @@ export async function adjustInventoryQuantity(input: {
   business: Business;
   inventoryItemId: string;
   currentQuantity: number;
+  actor: string;
 }) {
   await ensureFinanceOperationsSchema();
   const rows = await getSql()`
@@ -276,6 +281,7 @@ export async function adjustInventoryQuantity(input: {
     RETURNING id, name, current_quantity
   ` as unknown as Array<{ id: string; name: string; current_quantity: string | number }>;
   if (!rows[0]) throw new Error("Inventory item was not found.");
+  await recordAuditEvent({ business: input.business, entityType: "inventory_item", entityId: rows[0].id, action: "quantity_adjusted", actor: input.actor, details: { currentQuantity: Number(rows[0].current_quantity) } });
   return { id: rows[0].id, name: rows[0].name, currentQuantity: Number(rows[0].current_quantity) };
 }
 
@@ -292,7 +298,7 @@ export async function createRecipe(input: {
     INSERT INTO recipes (id, business, product_name, yield_quantity, selling_price)
     VALUES (
       ${crypto.randomUUID()}, ${input.business}, ${productName},
-      ${Math.max(0.0001, quantity(input.yieldQuantity) || 1)}, ${money(input.sellingPrice)}
+      ${Math.max(0.0001, quantity(input.yieldQuantity) || 1)}, ${nonNegativeMoney(input.sellingPrice)}
     )
     ON CONFLICT (business, product_name) DO UPDATE SET
       yield_quantity = EXCLUDED.yield_quantity,
@@ -367,7 +373,7 @@ export async function createForecastEvent(input: {
   await ensureFinanceOperationsSchema();
   const description = clean(input.description, 300);
   if (!description) throw new Error("Forecast event description is required.");
-  const amount = money(input.amount);
+  const amount = nonNegativeMoney(input.amount);
   if (amount <= 0) throw new Error("Forecast event amount must be greater than zero.");
   const recurrence = input.recurrence === "Weekly" || input.recurrence === "Monthly" ? input.recurrence : "None";
   const rows = await getSql()`

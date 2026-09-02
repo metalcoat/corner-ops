@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useState } from "react";
 import "./forms.css";
 
@@ -20,10 +21,6 @@ type FormSummary = {
 type FormDetail = FormSummary & { payload: Record<string, unknown> };
 type EmployeePayload = { employee: { name: string; business: string; position: string }; forms: FormSummary[] };
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value ? value as Record<string, unknown> : {};

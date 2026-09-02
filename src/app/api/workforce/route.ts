@@ -1,13 +1,15 @@
+import { after } from "next/server";
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
 import { getSql } from "@/lib/db";
 import { listDirectoryEmployees } from "@/lib/employee-directory-admin";
-import { apiError, unauthorized } from "@/lib/http";
+import { apiError, ConflictError, unauthorized } from "@/lib/http";
 import { createEmployee, updateEmployee } from "@/lib/operations";
 import { updateScheduleShiftSafely } from "@/lib/schedule-actions";
 import { createScheduleDraftWithMeals } from "@/lib/schedule-draft";
 import { ensureScheduleMealSchema } from "@/lib/schedule-meal-storage";
 import { publishValidatedScheduleWeek } from "@/lib/schedule-publish-validation";
+import { processSchedulePublicationDeliveries } from "@/lib/schedule-publication-delivery";
 import { copyScheduleWeekToTarget } from "@/lib/schedule-week-copy";
 import { sendStaffNotification } from "@/lib/staff-notifications";
 import type { Business } from "@/lib/types";
@@ -38,7 +40,7 @@ function delay(milliseconds: number) {
 
 function actionError(error: unknown, fallback: string): Response {
   const candidate = error as { code?: unknown };
-  if (candidate?.code) return apiError(error);
+  if (candidate?.code || error instanceof ConflictError) return apiError(error);
   return Response.json({ error: error instanceof Error ? error.message : fallback }, { status: 400 });
 }
 
@@ -51,6 +53,7 @@ async function buildWorkforcePayload(business: Business) {
       extra_meal_break_start, extra_meal_break_minutes
     FROM schedule_shifts
     WHERE business = ${business}
+      AND status <> 'Cancelled'
       AND starts_at >= NOW() - INTERVAL '21 days'
       AND starts_at < NOW() + INTERVAL '120 days'
   ` as unknown as Array<{
@@ -183,6 +186,7 @@ export async function POST(request: Request) {
           extraMealBreakMinutes: Number(body.extraMealBreakMinutes || 0),
           notes: body.notes ? String(body.notes) : "",
           actor: session.displayName,
+          acknowledgePendingTimeOff: body.acknowledgePendingTimeOff === true,
         }), { status: 201 });
       } catch (error) {
         return actionError(error, "The shift could not be created.");
@@ -195,9 +199,7 @@ export async function POST(request: Request) {
         if (requestedStatus && requestedStatus !== "Draft" && requestedStatus !== "Published" && requestedStatus !== "Open" && requestedStatus !== "Cancelled") {
           throw new Error("Invalid shift status.");
         }
-        const status = requestedStatus === "Published" || requestedStatus === "Open"
-          ? "Draft"
-          : requestedStatus;
+        const status = requestedStatus;
         return Response.json(await updateScheduleShiftSafely({
           id: String(body.id || ""),
           business,
@@ -209,8 +211,10 @@ export async function POST(request: Request) {
           mealBreakMinutes: body.mealBreakMinutes === undefined ? undefined : Number(body.mealBreakMinutes || 0),
           extraMealBreakStart: body.extraMealBreakStart === undefined ? undefined : body.extraMealBreakStart ? String(body.extraMealBreakStart) : null,
           extraMealBreakMinutes: body.extraMealBreakMinutes === undefined ? undefined : Number(body.extraMealBreakMinutes || 0),
-          status: status as "Draft" | "Cancelled" | undefined,
+          status: status as "Draft" | "Published" | "Open" | "Cancelled" | undefined,
           notes: body.notes === undefined ? undefined : String(body.notes || ""),
+          acknowledgePendingTimeOff: body.acknowledgePendingTimeOff === true,
+          expectedUpdatedAt: body.expectedUpdatedAt ? String(body.expectedUpdatedAt) : null,
         }));
       } catch (error) {
         return actionError(error, "The shift could not be updated.");
@@ -219,11 +223,17 @@ export async function POST(request: Request) {
 
     if (action === "week-publish") {
       try {
-        return Response.json(await publishValidatedScheduleWeek({
+        const result = await publishValidatedScheduleWeek({
           business,
           weekStart: String(body.weekStart || ""),
           actor: session.displayName,
-        }));
+        });
+        if (result.publicationId) {
+          after(() => processSchedulePublicationDeliveries({ publicationId: String(result.publicationId), limit: 30 }).catch((error) => {
+            console.error("[schedule-delivery] post-response worker failed", error);
+          }));
+        }
+        return Response.json(result);
       } catch (error) {
         return actionError(error, "The schedule could not be published.");
       }
@@ -248,6 +258,7 @@ export async function POST(request: Request) {
         recipientEmployeeId: body.recipientEmployeeId ? String(body.recipientEmployeeId) : null,
         body: String(body.body || ""),
         actor: session.displayName,
+        sendSms: body.sendSms === true,
       }));
     }
 

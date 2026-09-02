@@ -10,6 +10,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "test": "node -e \"require('fs').rmSync('.test-dist',{recursive:true,force:true})\" && tsc -p tsconfig.tests.json && node --test .test-dist/tests/**/*.test.js",
     "db:bootstrap:local": "tsx scripts/local-db.ts bootstrap",
     "db:status": "tsx scripts/local-db.ts status",
     "menu:rezku:preview": "tsx scripts/rezku-menu-local.ts preview",
@@ -104,5 +105,10 @@
     "@types/react-dom": "^19.0.0",
     "tsx": "^4.23.12",
     "typescript": "^5.7.0"
+  },
+  "overrides": {
+    "nanoid": "3.3.18",
+    "postcss": "8.5.26",
+    "sharp": "0.35.3"
   }
 }

@@ -21,6 +21,13 @@ export class PermissionError extends Error {
   }
 }
 
+export class ConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConflictError";
+  }
+}
+
 export class RateLimitError extends Error {
   retryAfterSeconds: number;
 
@@ -47,6 +54,9 @@ export function apiError(error: unknown): Response {
   }
   if (error instanceof PermissionError) {
     return Response.json({ error: error.message }, { status: 403 });
+  }
+  if (error instanceof ConflictError) {
+    return Response.json({ error: error.message }, { status: 409 });
   }
   if (error instanceof ValidationError) {
     return Response.json({ error: error.message }, { status: 400 });

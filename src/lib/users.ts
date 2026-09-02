@@ -12,6 +12,7 @@ export type AppUserIdentity = {
   role: AppRole;
   businesses: Business[];
   permissions: string[];
+  sessionVersion: number;
 };
 
 type UserRow = {
@@ -27,6 +28,7 @@ type UserRow = {
   created_by: string;
   created_at: string;
   updated_at: string;
+  session_version: number;
 };
 
 const rolePermissions: Record<AppRole, string[]> = {
@@ -101,25 +103,10 @@ export function roleHasPermission(role: AppRole, permission: string): boolean {
 export async function ensureUserSchema(): Promise<void> {
   await ensureSchema();
   const sql = getSql();
-  await sql`
-    CREATE TABLE IF NOT EXISTS app_users (
-      id UUID PRIMARY KEY,
-      email TEXT NOT NULL UNIQUE,
-      display_name TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('Owner', 'Co-Owner', 'Accountant', 'Manager', 'Viewer')),
-      businesses TEXT[] NOT NULL DEFAULT ARRAY['Corner Deli', 'Tiki']::TEXT[],
-      password_salt TEXT NOT NULL DEFAULT '',
-      password_hash TEXT NOT NULL DEFAULT '',
-      legacy_owner BOOLEAN NOT NULL DEFAULT FALSE,
-      active BOOLEAN NOT NULL DEFAULT TRUE,
-      created_by TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS app_users_active_idx ON app_users (active, role, email)`;
 
-  const ownerEmail = normalizedEmail(process.env.APP_EMAIL || "crfrary@gmail.com");
+  const configuredOwnerEmail = process.env.APP_EMAIL?.trim();
+  if (!configuredOwnerEmail) throw new Error("APP_EMAIL is required before user accounts can be initialized.");
+  const ownerEmail = normalizedEmail(configuredOwnerEmail);
   await sql`
     INSERT INTO app_users (
       id, email, display_name, role, businesses, legacy_owner, created_by
@@ -127,30 +114,7 @@ export async function ensureUserSchema(): Promise<void> {
       ${crypto.randomUUID()}, ${ownerEmail}, 'Owner', 'Owner',
       ARRAY['Corner Deli', 'Tiki']::TEXT[], TRUE, 'System bootstrap'
     )
-    ON CONFLICT (email) DO UPDATE SET
-      role = 'Owner',
-      businesses = ARRAY['Corner Deli', 'Tiki']::TEXT[],
-      active = TRUE,
-      legacy_owner = CASE
-        WHEN app_users.password_hash = '' THEN TRUE
-        ELSE app_users.legacy_owner
-      END,
-      updated_at = NOW()
-  `;
-
-  // Create Michael's requested Tiki-only report account without committing a
-  // password to source control. The owner sets the first password in Users.
-  await sql`
-    INSERT INTO app_users (
-      id, email, display_name, role, businesses, legacy_owner, active, created_by
-    ) VALUES (
-      ${crypto.randomUUID()}, 'mike@fraryfuneralhome.com', 'Michael Frary', 'Viewer',
-      ARRAY['Tiki']::TEXT[], FALSE, TRUE, 'System bootstrap'
-    )
-    ON CONFLICT (email) DO UPDATE SET
-      display_name = 'Michael Frary',
-      businesses = ARRAY['Tiki']::TEXT[],
-      updated_at = NOW()
+    ON CONFLICT (email) DO NOTHING
   `;
 }
 
@@ -169,6 +133,7 @@ function mapUser(row: UserRow): AppUserIdentity & {
     role: row.role,
     businesses: normalizeBusinesses(row.businesses),
     permissions: permissionsForRole(row.role),
+    sessionVersion: Number(row.session_version || 1),
     active: row.active,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -181,7 +146,7 @@ function mapUser(row: UserRow): AppUserIdentity & {
 async function rowByEmail(email: string): Promise<UserRow | null> {
   const rows = await getSql()`
     SELECT id, email, display_name, role, businesses, password_salt, password_hash,
-      legacy_owner, active, created_by, created_at, updated_at
+      legacy_owner, active, created_by, created_at, updated_at, session_version
     FROM app_users
     WHERE email = ${normalizedEmail(email)}
     LIMIT 1
@@ -191,7 +156,7 @@ async function rowByEmail(email: string): Promise<UserRow | null> {
 
 export async function authenticateAppUser(emailValue: unknown, passwordValue: unknown): Promise<AppUserIdentity | null> {
   await ensureUserSchema();
-  const email = normalizedEmail(emailValue || process.env.APP_EMAIL || "crfrary@gmail.com");
+  const email = normalizedEmail(emailValue || process.env.APP_EMAIL || "");
   const password = String(passwordValue ?? "");
   const row = await rowByEmail(email);
   if (!row || !row.active) return null;
@@ -199,7 +164,7 @@ export async function authenticateAppUser(emailValue: unknown, passwordValue: un
   let valid = false;
   if (row.password_hash && row.password_salt) {
     valid = safeEqual(passwordDigest(password, row.password_salt), row.password_hash);
-  } else if (row.legacy_owner && email === normalizedEmail(process.env.APP_EMAIL || "crfrary@gmail.com")) {
+  } else if (row.legacy_owner && Boolean(process.env.APP_EMAIL?.trim()) && email === normalizedEmail(process.env.APP_EMAIL)) {
     const legacyPassword = process.env.APP_PASSWORD || "";
     valid = Boolean(legacyPassword) && safeEqual(password, legacyPassword);
   }
@@ -210,7 +175,7 @@ export async function listAppUsers() {
   await ensureUserSchema();
   const rows = await getSql()`
     SELECT id, email, display_name, role, businesses, password_salt, password_hash,
-      legacy_owner, active, created_by, created_at, updated_at
+      legacy_owner, active, created_by, created_at, updated_at, session_version
     FROM app_users
     ORDER BY active DESC,
       CASE role WHEN 'Owner' THEN 1 WHEN 'Co-Owner' THEN 2 WHEN 'Accountant' THEN 3 WHEN 'Manager' THEN 4 ELSE 5 END,
@@ -260,7 +225,7 @@ export async function saveAppUser(input: {
         password_hash = CASE WHEN ${password?.hash || ""} = '' THEN password_hash ELSE ${password?.hash || ""} END,
         legacy_owner = CASE WHEN ${password?.hash || ""} = '' THEN legacy_owner ELSE FALSE END,
         active = ${input.active ?? true},
-        updated_at = NOW()
+        session_version = session_version + 1, updated_at = NOW()
       WHERE id = ${input.id}
     `;
     return mapUser((await rowByEmail(email))!);
@@ -290,6 +255,6 @@ export async function setUserActive(id: string, active: boolean) {
   const rows = await getSql()`SELECT role FROM app_users WHERE id = ${id} LIMIT 1` as unknown as Array<{ role: AppRole }>;
   if (!rows[0]) throw new Error("User was not found.");
   if (rows[0].role === "Owner" && !active) throw new Error("The primary owner cannot be deactivated.");
-  await getSql()`UPDATE app_users SET active = ${active}, updated_at = NOW() WHERE id = ${id}`;
+  await getSql()`UPDATE app_users SET active = ${active}, session_version = session_version + 1, updated_at = NOW() WHERE id = ${id}`;
   return { updated: true };
 }

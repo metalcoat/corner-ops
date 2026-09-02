@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { employeePinLabel, employeePinLength, employeePinPattern } from "@/lib/employee-pin";
+import { employeePinLabel, employeePinPattern } from "@/lib/employee-pin";
 import type { Business } from "@/lib/types";
 
 function isBusiness(value: string): value is Business {
@@ -11,6 +11,10 @@ function isBusiness(value: string): value is Business {
 function requestedBusiness(): Business | null {
   const value = new URLSearchParams(window.location.search).get("business");
   return value && isBusiness(value) ? value : null;
+}
+
+function pinIsComplete(business: Business, value: string): boolean {
+  return business === "Corner Deli" ? /^\d{4,5}$/.test(value) : /^\d{5}$/.test(value);
 }
 
 export default function EmployeePinController() {
@@ -29,11 +33,12 @@ export default function EmployeePinController() {
         if (!isBusiness(businessSelect.value)) continue;
 
         const business = businessSelect.value;
-        const length = employeePinLength(business);
+        const minLength = business === "Corner Deli" ? 4 : 5;
+        const maxLength = 5;
         pinInput.pattern = employeePinPattern(business);
-        pinInput.maxLength = length;
-        pinInput.minLength = length;
-        pinInput.placeholder = `${length} digits`;
+        pinInput.maxLength = maxLength;
+        pinInput.minLength = minLength;
+        pinInput.placeholder = business === "Corner Deli" ? "4 or 5 digits" : "5 digits";
         pinInput.setAttribute("aria-label", employeePinLabel(business));
 
         const label = pinInput.closest("label");
@@ -45,7 +50,7 @@ export default function EmployeePinController() {
         const submitButton = form.querySelector<HTMLButtonElement>('button[type="submit"], button:not([type])');
         if (submitButton) {
           const signingIn = submitButton.textContent?.includes("Signing in") ?? false;
-          submitButton.disabled = signingIn || pinInput.value.length !== length;
+          submitButton.disabled = signingIn || !pinIsComplete(business, pinInput.value);
         }
       }
     }

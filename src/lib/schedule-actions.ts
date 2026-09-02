@@ -1,6 +1,8 @@
 import { getSql } from "@/lib/db";
+import { ConflictError } from "@/lib/http";
 import { ensureScheduleMealSchema, normalizeScheduledMealFields } from "@/lib/schedule-meal-storage";
 import { normalizeScheduleTimeRange } from "@/lib/schedule-time-range";
+import { enforceScheduleTimeOff } from "@/lib/schedule-time-off";
 import type { Business } from "@/lib/types";
 
 function clean(value: unknown, max = 500): string {
@@ -20,6 +22,8 @@ export async function updateScheduleShiftSafely(input: {
   extraMealBreakMinutes?: number;
   status?: "Draft" | "Published" | "Open" | "Cancelled";
   notes?: string;
+  acknowledgePendingTimeOff?: boolean;
+  expectedUpdatedAt?: string | null;
 }) {
   await ensureScheduleMealSchema();
   const sql = getSql();
@@ -72,9 +76,19 @@ export async function updateScheduleShiftSafely(input: {
       LIMIT 1
     ` as unknown as Array<{ id: string }>;
     if (overlap[0]) throw new Error("That employee already has an overlapping shift.");
+    await enforceScheduleTimeOff({
+      business: input.business,
+      employeeId,
+      startsAt: start,
+      endsAt: end,
+      acknowledgePendingTimeOff: input.acknowledgePendingTimeOff,
+    });
   }
 
-  await sql`
+  const expectedUpdatedAt = input.expectedUpdatedAt
+    ? new Date(input.expectedUpdatedAt).toISOString()
+    : null;
+  const updated = await sql`
     UPDATE schedule_shifts SET
       employee_id = ${employeeId},
       position = ${clean(input.position ?? current.position, 100)},
@@ -92,8 +106,19 @@ export async function updateScheduleShiftSafely(input: {
         ELSE published_at
       END,
       updated_at = NOW()
-    WHERE id = ${input.id}
-  `;
+    WHERE id = ${input.id} AND business = ${input.business}
+      -- PostgreSQL keeps microseconds while JavaScript Date only keeps milliseconds.
+      -- Compare at the precision the client can faithfully round-trip so an unchanged
+      -- shift is not rejected by its own optimistic-lock check.
+      AND (
+        ${expectedUpdatedAt}::timestamptz IS NULL
+        OR date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', ${expectedUpdatedAt}::timestamptz)
+      )
+    RETURNING id, updated_at
+  ` as unknown as Array<{ id: string; updated_at: string }>;
+  if (!updated[0]) {
+    throw new ConflictError("This shift changed after you opened it. Reload the schedule and apply your change again.");
+  }
 
-  return { id: input.id };
+  return { id: input.id, updatedAt: String(updated[0].updated_at) };
 }

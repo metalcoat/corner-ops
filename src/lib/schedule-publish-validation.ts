@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { ensureScheduleMealSchema } from "@/lib/schedule-meal-storage";
+import { deliverSchedulePublicationSms } from "@/lib/schedule-publication-sms";
 import { analyzeSchedule } from "@/lib/schedule-validation";
 import { publishBusinessScheduleWeek } from "@/lib/business-schedule-publication";
 import type { Business } from "@/lib/types";
@@ -78,7 +79,25 @@ export async function publishValidatedScheduleWeek(input: {
     status: row.status,
   })), { enforceLoneWorker: input.business === "Corner Deli" });
 
+  const approvedTimeOffConflicts = await getSql()`
+    SELECT s.id AS shift_id, e.name AS employee_name, s.starts_at
+    FROM schedule_shifts s
+    JOIN employees e ON e.id = s.employee_id
+    JOIN time_off_requests t ON t.employee_id = s.employee_id AND t.business = s.business
+    WHERE s.business = ${input.business}
+      AND s.starts_at >= (${weekStart}::date AT TIME ZONE ${TIME_ZONE})
+      AND s.starts_at < ((${weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+      AND s.status <> 'Cancelled'
+      AND t.status = 'Approved'
+      AND t.starts_on <= ((s.ends_at - INTERVAL '1 millisecond') AT TIME ZONE ${TIME_ZONE})::date
+      AND t.ends_on >= (s.starts_at AT TIME ZONE ${TIME_ZONE})::date
+    ORDER BY s.starts_at, e.name
+  ` as unknown as Array<{ shift_id: string; employee_name: string; starts_at: string }>;
+
   const problems: string[] = [];
+  if (approvedTimeOffConflicts.length) {
+    problems.push(`Approved time off conflicts: ${approvedTimeOffConflicts.slice(0, 8).map((item) => `${item.employee_name} at ${localStamp(item.starts_at)}`).join("; ")}. Reassign or open these shifts.`);
+  }
   if (analysis.overForty.length) {
     problems.push(`Over 40 paid hours: ${analysis.overForty.map((employee) => `${employee.employeeName} (${employee.hours.toFixed(1)} hrs)`).join(", ")}`);
   }
@@ -91,7 +110,9 @@ export async function publishValidatedScheduleWeek(input: {
   if (input.business === "Corner Deli" && analysis.loneWorkerViolations.length) {
     problems.push(`Alone over 30 minutes: ${analysis.loneWorkerViolations.slice(0, 4).map((violation) => `${violation.employeeName}, ${localStamp(violation.startsAt)}–${localTime(violation.endsAt)} (${violation.minutes} min)`).join("; ")}`);
   }
-  if (analysis.mealPeriodViolations.length) {
+  // Tiki normally runs one bartender at a time, so an off-duty meal would leave the bar uncovered.
+  // Keep Corner Deli meal compliance intact, but do not require scheduled off-duty meals for Tiki.
+  if (input.business === "Corner Deli" && analysis.mealPeriodViolations.length) {
     problems.push(`Meal periods: ${analysis.mealPeriodViolations.slice(0, 6).map((violation) => `${violation.employeeName}, ${localStamp(violation.startsAt)}: ${violation.message}`).join("; ")}`);
   }
 
@@ -99,5 +120,41 @@ export async function publishValidatedScheduleWeek(input: {
     throw new Error(`Schedule cannot be published. ${problems.join(" | ")}`);
   }
 
-  return publishBusinessScheduleWeek({ ...input, weekStart });
+  const publication = await publishBusinessScheduleWeek({ ...input, weekStart });
+  const duplicate = "duplicate" in publication && publication.duplicate === true;
+  const employeeIds = "affectedEmployeeIds" in publication && Array.isArray(publication.affectedEmployeeIds)
+    ? publication.affectedEmployeeIds.filter((value): value is string => typeof value === "string" && Boolean(value))
+    : [];
+  const mode = publication.mode === "initial" || publication.mode === "changes" || publication.mode === "resend"
+    ? publication.mode
+    : "changes";
+
+  if (duplicate || !publication.publicationId) return publication;
+
+  try {
+    const sms = await deliverSchedulePublicationSms({
+      business: input.business,
+      weekStart,
+      publicationId: String(publication.publicationId),
+      employeeIds,
+      mode,
+    });
+    return { ...publication, sms };
+  } catch (error) {
+    console.error("[schedule-sms] schedule published but SMS delivery failed", error);
+    return {
+      ...publication,
+      sms: {
+        provider: "telnyx" as const,
+        configured: true,
+        sent: 0,
+        failed: 1,
+        missingPhone: 0,
+        notOptedIn: 0,
+        skipped: employeeIds.length,
+        failures: [{ employeeId: "", message: error instanceof Error ? error.message : String(error) }],
+        accepted: [],
+      },
+    };
+  }
 }

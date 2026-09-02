@@ -16,6 +16,7 @@ export async function GET() {
       SELECT m.id
       FROM employee_messages m
       WHERE m.business = ${session.business}
+          AND m.deleted_at IS NULL
         AND (
           m.message_type IN ('Team', 'Announcement')
           OR m.sender_employee_id = ${session.employeeId}

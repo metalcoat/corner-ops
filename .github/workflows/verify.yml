@@ -22,14 +22,26 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Generate CI-only secrets
+        shell: bash
+        run: |
+          echo "SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "EMPLOYMENT_FORMS_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: npm ci
+      - name: Reject runtime schema DDL
+        run: python3 tools/verify_no_runtime_ddl.py
+      - name: Dependency security
+        run: python3 tools/verify_dependencies.py
+      - name: CODEBASEREVIEW regression guard
+        run: python3 tools/verify_review_regressions.py
+      - name: Unit tests
+        run: npm test
       - name: Type check
         run: npm run typecheck
       - name: Build application
         run: npm run build
         env:
-          SESSION_SECRET: github-actions-build-placeholder-with-sufficient-length
-          EMPLOYMENT_FORMS_ENCRYPTION_KEY: github-actions-employment-key-placeholder-1234567890
+          APP_EMAIL: owner@example.test
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
           BLOB_READ_WRITE_TOKEN: vercel_blob_rw_placeholder

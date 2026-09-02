@@ -140,19 +140,22 @@ async function deliverEmails(input: {
 
   let sent = 0;
   const failures: Array<{ employeeId: string; message: string }> = [];
-  for (const employee of deliverable) {
-    try {
-      const result = await configured.resend.emails.send({
-        from: configured.from,
-        to: clean(employee.email, 255),
-        subject: input.subject(employee),
-        text: input.text(employee),
-      });
-      if (result.error) throw new Error(result.error.message);
-      sent += 1;
-    } catch (error) {
-      failures.push({ employeeId: employee.id, message: error instanceof Error ? error.message : String(error) });
-    }
+  const concurrency = 6;
+  for (let index = 0; index < deliverable.length; index += concurrency) {
+    await Promise.all(deliverable.slice(index, index + concurrency).map(async (employee) => {
+      try {
+        const result = await configured.resend.emails.send({
+          from: configured.from,
+          to: clean(employee.email, 255),
+          subject: input.subject(employee),
+          text: input.text(employee),
+        });
+        if (result.error) throw new Error(result.error.message);
+        sent += 1;
+      } catch (error) {
+        failures.push({ employeeId: employee.id, message: error instanceof Error ? error.message : String(error) });
+      }
+    }));
   }
 
   return {
@@ -171,35 +174,6 @@ export function ensureStaffNotificationSchema(): Promise<void> {
       await ensureScheduleMealSchema();
       await ensureEmployeeDirectorySchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS schedule_publications (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          week_start DATE NOT NULL,
-          week_end DATE NOT NULL,
-          published_by TEXT NOT NULL,
-          shift_count INTEGER NOT NULL DEFAULT 0,
-          active_employee_count INTEGER NOT NULL DEFAULT 0,
-          email_sent_count INTEGER NOT NULL DEFAULT 0,
-          email_missing_count INTEGER NOT NULL DEFAULT 0,
-          email_failed_count INTEGER NOT NULL DEFAULT 0,
-          email_configured BOOLEAN NOT NULL DEFAULT FALSE,
-          sms_sent_count INTEGER NOT NULL DEFAULT 0,
-          sms_missing_count INTEGER NOT NULL DEFAULT 0,
-          sms_failed_count INTEGER NOT NULL DEFAULT 0,
-          sms_configured BOOLEAN NOT NULL DEFAULT FALSE,
-          details JSONB NOT NULL DEFAULT '{}'::jsonb,
-          published_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`ALTER TABLE schedule_publications ADD COLUMN IF NOT EXISTS sms_sent_count INTEGER NOT NULL DEFAULT 0`;
-      await sql`ALTER TABLE schedule_publications ADD COLUMN IF NOT EXISTS sms_missing_count INTEGER NOT NULL DEFAULT 0`;
-      await sql`ALTER TABLE schedule_publications ADD COLUMN IF NOT EXISTS sms_failed_count INTEGER NOT NULL DEFAULT 0`;
-      await sql`ALTER TABLE schedule_publications ADD COLUMN IF NOT EXISTS sms_configured BOOLEAN NOT NULL DEFAULT FALSE`;
-      await sql`
-        CREATE INDEX IF NOT EXISTS schedule_publications_business_week_idx
-        ON schedule_publications (business, week_start, published_at DESC)
-      `;
     })().catch((error) => {
       notificationSchemaPromise = null;
       throw error;
@@ -354,7 +328,7 @@ export async function publishScheduleWeek(input: {
         "Your schedule:",
         schedule,
         openShifts.length ? `\nThere ${openShifts.length === 1 ? "is" : "are"} ${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"} in Employee Hub.` : "",
-        hubUrl ? `\nView the schedule: ${hubUrl}` : "",
+        hubUrl ? `\nNeed to offer, swap, claim an open shift, or check for changes? ${hubUrl}` : "",
         hubUrl ? `Sign in with your ${pinLength}-digit employee PIN.` : "",
         "",
         "This email was sent by Corner Ops.",
@@ -364,12 +338,33 @@ export async function publishScheduleWeek(input: {
 
   const sms = await deliverSms({
     recipients: contacts,
-    text: () => [
-      `${input.business} schedule ${scheduleVerb} for ${dateLabel(weekStart)}-${dateLabel(weekEnd)}.`,
-      hubUrl ? `Review: ${hubUrl}` : "Open Employee Hub to review.",
-      `Use your ${pinLength}-digit employee PIN.`,
-      "Reply STOP to opt out.",
-    ].join(" "),
+    text: (employee) => {
+      const employeeShifts = shifts.filter((shift) => shift.employee_id === employee.id);
+      const schedule = employeeShifts.length
+        ? employeeShifts.map((shift) => {
+            const start = new Date(shift.starts_at);
+            const end = new Date(shift.ends_at);
+            const day = new Intl.DateTimeFormat("en-US", {
+              timeZone: TIME_ZONE,
+              weekday: "short",
+              month: "numeric",
+              day: "numeric",
+            }).format(start);
+            const time = new Intl.DateTimeFormat("en-US", {
+              timeZone: TIME_ZONE,
+              hour: "numeric",
+              minute: "2-digit",
+            });
+            return `${day} ${time.format(start)}-${time.format(end)} ${clean(shift.position, 60) || "Shift"}`;
+          }).join("; ")
+        : "No shifts assigned this week.";
+      return [
+        `${input.business} schedule ${scheduleVerb}: ${schedule}.`,
+        openShifts.length ? `${openShifts.length} open shift${openShifts.length === 1 ? "" : "s"} available.` : "",
+        hubUrl ? `Changes/open shifts: ${hubUrl}` : "",
+        "Reply STOP to opt out.",
+      ].filter(Boolean).join(" ");
+    },
   });
 
   const publicationId = crypto.randomUUID();
@@ -404,6 +399,7 @@ export async function sendStaffNotification(input: {
   recipientEmployeeId?: string | null;
   body: string;
   actor: string;
+  sendSms?: boolean;
 }) {
   await ensureStaffNotificationSchema();
   const body = clean(input.body, 3000);
@@ -439,5 +435,16 @@ export async function sendStaffNotification(input: {
     ].filter(Boolean).join("\n"),
   });
 
-  return { sent: true, recipients: recipients.length, email };
+  const sms = input.sendSms === true
+    ? await deliverSms({
+        recipients,
+        text: () => [
+          `${input.business}: ${body}`,
+          hubUrl ? `Open Employee Hub: ${hubUrl}` : "",
+          "Reply STOP to opt out.",
+        ].filter(Boolean).join(" "),
+      })
+    : { provider: "disabled" as const, configured: false, requested: false, sent: 0, failed: 0, missingPhone: 0, notOptedIn: recipients.filter((employee) => !employee.smsOptIn).length, skipped: recipients.length, failures: [], accepted: [] };
+
+  return { sent: true, recipients: recipients.length, email, sms };
 }

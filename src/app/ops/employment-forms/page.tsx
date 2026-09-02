@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -40,11 +41,8 @@ type Profile = {
 };
 type PageData = { business: Business; employees: Employee[]; forms: FormSummary[]; profile: Profile };
 type FormDetail = FormSummary & { payload: Record<string, unknown>; events: FormAuditEvent[] };
+type PreviewRow = { label: string; value: string };
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function dateLabel(value: string | null) {
   return value ? new Date(`${value}T12:00:00`).toLocaleDateString() : "Not specified";
@@ -85,6 +83,28 @@ function friendlyField(value: string): string {
 
 function auditAction(value: string): string {
   return value.replace(/[-_]+/g, " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function assignedPreview(payload: Record<string, unknown>): PreviewRow[] {
+  const hidden = new Set(["employeeSubmission", "employeeAttestation", "employerReview", "employerAttestation"]);
+  const rows: PreviewRow[] = [];
+
+  for (const [key, value] of Object.entries(payload)) {
+    if (hidden.has(key)) continue;
+    if (Array.isArray(value)) {
+      rows.push({ label: friendlyField(key), value: value.map(display).join(", ") || "—" });
+      continue;
+    }
+    if (typeof value === "object" && value) {
+      for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+        if (typeof childValue === "object" && childValue !== null) continue;
+        rows.push({ label: `${friendlyField(key)} · ${friendlyField(childKey)}`, value: display(childValue) });
+      }
+      continue;
+    }
+    rows.push({ label: friendlyField(key), value: display(value) });
+  }
+  return rows;
 }
 
 export default function EmploymentFormsPage() {
@@ -216,9 +236,10 @@ export default function EmploymentFormsPage() {
   }
 
   const allowedBusinesses = session?.businesses?.length ? session.businesses : (["Corner Deli", "Tiki"] as Business[]);
-  const pending = useMemo(() => data?.forms.filter((form) => form.status === "Assigned" || form.status === "Employer Review") || [], [data?.forms]);
+  const pending = useMemo(() => data?.forms.filter((form) => form.status !== "Completed" && form.status !== "Superseded") || [], [data?.forms]);
   const completed = useMemo(() => data?.forms.filter((form) => form.status === "Completed") || [], [data?.forms]);
   const employeeSubmission = asRecord(review?.payload.employeeSubmission);
+  const assignedDetails = useMemo(() => review ? assignedPreview(review.payload) : [], [review]);
 
   if (!session) return <main className="controlPage">Loading employment forms…</main>;
   if (!session.authenticated) return <main className="controlPage"><a href="/signin">Sign in to Corner Ops</a></main>;
@@ -263,9 +284,20 @@ export default function EmploymentFormsPage() {
 
       <section className="controlCard employmentRecords"><div className="employmentRecordsHeader"><div><p className="eyebrow">Signature and review queue</p><h2>Employment form records</h2></div><span>{data.forms.length} total</span></div><div className="tableWrap"><table><thead><tr><th>Employee</th><th>Form</th><th>Version</th><th>Effective</th><th>Status</th><th>Assigned</th><th>Action</th></tr></thead><tbody>{data.forms.map((form) => <tr key={form.id}><td>{form.employeeName}</td><td>{form.title}</td><td>{form.templateVersion}</td><td>{dateLabel(form.effectiveDate)}</td><td><span className={`employmentStatus ${form.status.replace(/\s+/g, "").toLowerCase()}`}>{form.status}</span></td><td><strong>{dateTimeLabel(form.assignedAt)}</strong><small>by {form.assignedBy || "Unknown account"}</small></td><td><div className="employmentRowActions"><button disabled={busy} onClick={() => void openReview(form.id)}>{form.status === "Employer Review" ? "Complete I-9" : "Review"}</button>{form.status === "Assigned" && <button className="employmentUnassign" disabled={busy} onClick={() => void unassignForm(form)}>Unassign</button>}</div></td></tr>)}{!data.forms.length && <tr><td colSpan={7}>No employment forms assigned yet.</td></tr>}</tbody></table></div></section>
 
-      {review && <section className="controlCard employmentReview"><div className="employmentRecordsHeader"><div><p className="eyebrow">Secure record</p><h2>{review.employeeName} · {review.title}</h2><p>{review.status} · {review.templateVersion}</p></div><button onClick={() => setReview(null)}>Close</button></div>
+      {review && <section className="controlCard employmentReview"><div className="employmentRecordsHeader"><div><p className="eyebrow">Secure record</p><h2>{review.employeeName} · {review.title}</h2><p>{review.status} · {review.templateVersion}</p></div><div className="employmentRowActions"><a href={review.sourceUrl} target="_blank" rel="noreferrer">Official form</a><button onClick={() => setReview(null)}>Close</button></div></div>
         <section className="employmentAuditSummary"><div><span>Assigned by</span><strong>{review.assignedBy || "Unknown account"}</strong></div><div><span>Assigned at</span><strong>{dateTimeLabel(review.assignedAt)}</strong></div><div><span>Current status</span><strong>{review.status}</strong></div>{review.status === "Assigned" && <button className="employmentUnassign" disabled={busy} onClick={() => void unassignForm(review)}>Unassign this form</button>}</section>
-        <div className="employmentSubmissionGrid">{Object.entries(employeeSubmission).map(([key, value]) => <div key={key}><span>{friendlyField(key)}</span><strong>{key.toLowerCase().includes("ssn") ? "Stored securely" : display(value)}</strong></div>)}{!Object.keys(employeeSubmission).length && <p>No employee submission is available yet.</p>}</div>
+
+        <section>
+          <p className="eyebrow">Assigned form details</p>
+          <div className="employmentSubmissionGrid">{assignedDetails.map((entry) => <div key={entry.label}><span>{entry.label}</span><strong>{entry.value}</strong></div>)}{!assignedDetails.length && <p>No assignment details were stored for this form.</p>}</div>
+        </section>
+
+        <section>
+          <p className="eyebrow">Employee submission</p>
+          {review.status === "Assigned" && <p className="employmentHelp">The employee has not submitted this form yet. The assigned details above are available now; employee-entered answers will appear here after the employee signs and submits it.</p>}
+          <div className="employmentSubmissionGrid">{Object.entries(employeeSubmission).map(([key, value]) => <div key={key}><span>{friendlyField(key)}</span><strong>{key.toLowerCase().includes("ssn") ? "Stored securely" : display(value)}</strong></div>)}{!Object.keys(employeeSubmission).length && review.status !== "Assigned" && <p>No employee submission is available yet.</p>}</div>
+        </section>
+
         <section className="employmentAuditTrail"><p className="eyebrow">Audit trail</p>{review.events?.length ? review.events.map((entry, index) => <article key={`${entry.createdAt}-${entry.action}-${index}`}><div><strong>{auditAction(entry.action)}</strong><span>{dateTimeLabel(entry.createdAt)}</span></div><p>{entry.actor}</p>{entry.metadata.reason ? <small>{String(entry.metadata.reason)}</small> : null}</article>) : <p>No audit events were recorded.</p>}</section>
         {review.formType === "I9" && review.status === "Employer Review" && <form className="employmentAdminForm employmentI9Form" onSubmit={completeI9}>
           <div className="wide employmentWarning">Examine documents selected by the employee. Do not demand a particular List A, B, or C document. Record either one acceptable List A document or an acceptable List B plus List C combination.</div>

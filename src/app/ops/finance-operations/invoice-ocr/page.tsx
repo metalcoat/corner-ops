@@ -1,5 +1,7 @@
 "use client";
 
+import { formatUsd } from "@/app/client-format";
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../../control-center.css";
@@ -84,9 +86,6 @@ function requestedBusiness(): Business {
   if (typeof window === "undefined") return "Corner Deli";
   return new URLSearchParams(window.location.search).get("business") === "Tiki" ? "Tiki" : "Corner Deli";
 }
-function money(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0);
-}
 function confidencePercent(value: number) {
   return `${Math.round(Math.max(0, Math.min(1, value || 0)) * 100)}%`;
 }
@@ -94,10 +93,6 @@ function confidenceClass(value: number) {
   if (value >= .85) return "high";
   if (value >= .65) return "medium";
   return "low";
-}
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
 }
 function dateAfter(dateText: string, days: number) {
   if (!dateText) return "";
@@ -230,7 +225,7 @@ export default function InvoiceOcrPage() {
       if (!response.ok) throw new Error(await responseMessage(response));
       const payload = await response.json() as { lines: number; totalAmount: number };
       resetDraft();
-      setNotice(`Bill saved for ${money(payload.totalAmount)} with ${payload.lines} line item${payload.lines === 1 ? "" : "s"}.`);
+      setNotice(`Bill saved for ${formatUsd(payload.totalAmount)} with ${payload.lines} line item${payload.lines === 1 ? "" : "s"}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The reviewed invoice could not be saved.");
     } finally {
@@ -308,7 +303,7 @@ export default function InvoiceOcrPage() {
             <label><span>Quantity</span><input type="number" step="0.0001" min="0" value={line.quantity} onChange={(event) => updateLine(index, { quantity: Number(event.target.value) })} /></label>
             <label><span>Unit</span><input value={line.unit} onChange={(event) => updateLine(index, { unit: event.target.value })} /></label>
             <label><span>Unit price</span><input type="number" step="0.0001" min="0" value={line.unitPrice} onChange={(event) => updateLine(index, { unitPrice: Number(event.target.value) })} /></label>
-            <div className="invoiceLineAmount"><span>Line total</span><strong>{money(line.amount)}</strong></div>
+            <div className="invoiceLineAmount"><span>Line total</span><strong>{formatUsd(line.amount)}</strong></div>
           </article>)}
           {!lines.length && <div className="invoiceEmptyLines">No line items were extracted. Add them manually or save the invoice header only.</div>}
         </div>
@@ -316,7 +311,7 @@ export default function InvoiceOcrPage() {
 
       <section className="controlCard invoiceSaveBar">
         <div><p className="eyebrow">Step 3</p><h2>Save reviewed bill</h2><p>The original invoice is stored privately with the AP record. Nothing enters AP until this button is pressed.</p></div>
-        <div><strong>{money(draft.totalAmount)}</strong><button className="primary" disabled={saving || scanning}>{saving ? "Saving…" : "Save reviewed bill"}</button></div>
+        <div><strong>{formatUsd(draft.totalAmount)}</strong><button className="primary" disabled={saving || scanning}>{saving ? "Saving…" : "Save reviewed bill"}</button></div>
       </section>
       {result.textPreview && <details className="controlCard invoiceTextPreview"><summary>Show OCR text preview</summary><pre>{result.textPreview}</pre></details>}
     </form>}

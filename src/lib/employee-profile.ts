@@ -25,13 +25,6 @@ export function ensureEmployeeProfileSchema(): Promise<void> {
     profileSchemaPromise = (async () => {
       await ensureEmployeeDirectorySchema();
       const sql = getSql();
-      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS schedule_color TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS profile_photo_pathname TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS profile_photo_name TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS profile_photo_type TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS profile_photo_size BIGINT NOT NULL DEFAULT 0`;
-      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS chat_nickname TEXT NOT NULL DEFAULT ''`;
       await sql`
         UPDATE employees
         SET schedule_color = (ARRAY[

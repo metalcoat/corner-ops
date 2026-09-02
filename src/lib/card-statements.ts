@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import { getSql } from "@/lib/db";
+import { recordAuditEvent } from "@/lib/audit";
 import { ensureIntegrationSchema } from "@/lib/integrations";
 import type { Business } from "@/lib/types";
 
@@ -74,45 +75,6 @@ export function ensureCardStatementSchema(): Promise<void> {
     statementSchemaPromise = (async () => {
       await ensureIntegrationSchema();
       const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS credit_card_statements (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          issuer TEXT NOT NULL,
-          account_name TEXT NOT NULL DEFAULT '',
-          last_four TEXT NOT NULL DEFAULT '',
-          statement_end_date DATE NOT NULL,
-          statement_balance NUMERIC(14,2) NOT NULL DEFAULT 0,
-          payment_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
-          file_name TEXT NOT NULL,
-          content_type TEXT NOT NULL,
-          size_bytes BIGINT NOT NULL,
-          blob_url TEXT NOT NULL UNIQUE,
-          blob_pathname TEXT NOT NULL,
-          extraction_status TEXT NOT NULL CHECK (extraction_status IN ('Document Only', 'Extracted', 'No Rows')),
-          parsed_transaction_count INTEGER NOT NULL DEFAULT 0,
-          parsed_total NUMERIC(14,2) NOT NULL DEFAULT 0,
-          suggested_bank_transaction_id UUID REFERENCES bank_transactions(id) ON DELETE SET NULL,
-          matched_bank_transaction_id UUID REFERENCES bank_transactions(id) ON DELETE SET NULL,
-          match_status TEXT NOT NULL DEFAULT 'Unmatched' CHECK (match_status IN ('Unmatched', 'Suggested', 'Matched')),
-          created_by TEXT NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS credit_card_statements_business_date_idx ON credit_card_statements (business, statement_end_date DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS credit_card_statement_transactions (
-          id UUID PRIMARY KEY,
-          statement_id UUID NOT NULL REFERENCES credit_card_statements(id) ON DELETE CASCADE,
-          transaction_date DATE NOT NULL,
-          description TEXT NOT NULL,
-          amount NUMERIC(14,2) NOT NULL,
-          raw JSONB NOT NULL DEFAULT '{}'::jsonb,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS credit_card_statement_transactions_statement_idx ON credit_card_statement_transactions (statement_id, transaction_date)`;
     })().catch((error) => {
       statementSchemaPromise = null;
       throw error;
@@ -126,8 +88,10 @@ async function paymentCandidates(business: Business, statementEndDate: string, p
   return await getSql()`
     SELECT id, transaction_date, merchant_name, description, signed_amount,
       ABS(transaction_date - ${statementEndDate}::date) AS date_distance
-    FROM bank_transactions
-    WHERE business = ${business}
+    FROM bank_transactions t
+    JOIN bank_accounts a ON a.external_account_id = t.external_account_id
+    WHERE t.business = ${business}
+      AND a.account_type <> 'credit'
       AND removed = FALSE
       AND signed_amount = ${-Math.abs(paymentAmount)}
       AND transaction_date >= ${statementEndDate}::date - 10
@@ -277,12 +241,14 @@ export async function confirmCardStatementMatch(input: {
   business: Business;
   statementId: string;
   bankTransactionId: string;
+  actor: string;
 }) {
   await ensureCardStatementSchema();
   const rows = await getSql()`
     SELECT s.id
     FROM credit_card_statements s
     JOIN bank_transactions t ON t.id = ${input.bankTransactionId} AND t.business = s.business
+    JOIN bank_accounts a ON a.external_account_id = t.external_account_id AND a.account_type <> 'credit'
     WHERE s.id = ${input.statementId} AND s.business = ${input.business}
       AND t.signed_amount = -ABS(s.payment_amount)
     LIMIT 1
@@ -296,6 +262,7 @@ export async function confirmCardStatementMatch(input: {
       updated_at = NOW()
     WHERE id = ${input.statementId} AND business = ${input.business}
   `;
+  await recordAuditEvent({ business: input.business, entityType: "credit_card_statement", entityId: input.statementId, action: "payment_matched", actor: input.actor, details: { bankTransactionId: input.bankTransactionId } });
   return { matched: true };
 }
 

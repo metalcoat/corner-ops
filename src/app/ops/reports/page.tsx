@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -135,10 +136,6 @@ function dateLabel(value: string, weekday = false): string {
   return new Date(`${value}T12:00:00Z`).toLocaleDateString([], weekday ? { weekday: "short", month: "short", day: "numeric" } : { month: "short", day: "numeric" });
 }
 
-async function errorMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function MetricCard(props: { label: string; value: number; delta: Delta | null; available: boolean; format: "money" | "number" }) {
   if (!props.available) return <div className="reportMetric unavailable"><span>{props.label}</span><strong>Unavailable</strong><small>Not supplied by this source</small></div>;
@@ -238,11 +235,11 @@ export default function ReportsPage() {
       const weatherQuery = new URLSearchParams({ business, start: range.start, end: range.end });
       const [reportResult, weatherResult] = await Promise.allSettled([
         fetch(`/api/reports?${reportQuery}`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
-          if (!response.ok) throw new Error(await errorMessage(response));
+          if (!response.ok) throw new Error(await responseMessage(response));
           return response.json() as Promise<ReportPayload>;
         }),
         fetch(`/api/weather?${weatherQuery}`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
-          if (!response.ok) throw new Error(await errorMessage(response));
+          if (!response.ok) throw new Error(await responseMessage(response));
           return response.json() as Promise<WeatherPayload>;
         }),
       ]);

@@ -1,34 +1,27 @@
 "use client";
 
+import { BeforeInstallPromptEvent, isIos, isStandalone } from "@/app/pwa-platform";
 import { useEffect, useState } from "react";
+import { useModalFocus } from "@/app/use-modal-focus";
 import "./install-prompt.css";
 
-type InstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-};
 
 const DISMISS_KEY = "corner-ops-employee-install-dismissed-at";
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
 
-function isStandalone() {
-  const iosStandalone = Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
-  return iosStandalone || window.matchMedia("(display-mode: standalone)").matches;
-}
 
-function isIos() {
-  return /iphone|ipad|ipod/i.test(navigator.userAgent);
-}
 
 export default function EmployeeInstallPrompt() {
   const [authenticated, setAuthenticated] = useState(false);
-  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [visible, setVisible] = useState(false);
   const [notice, setNotice] = useState("");
+  const installModalRef = useModalFocus<HTMLDivElement>(visible, () => dismiss());
 
   useEffect(() => {
     let cancelled = false;
     const checkSession = async () => {
+      if (document.visibilityState === "hidden") return;
       try {
         const response = await fetch("/api/employee/session", { cache: "no-store" });
         const payload = await response.json() as { session?: unknown };
@@ -37,20 +30,25 @@ export default function EmployeeInstallPrompt() {
         if (!cancelled) setAuthenticated(false);
       }
     };
+    const onFocus = () => void checkSession();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void checkSession();
+    };
+
     void checkSession();
-    const interval = window.setInterval(checkSession, 5_000);
-    window.addEventListener("focus", checkSession);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", checkSession);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 
   useEffect(() => {
     const onInstallPrompt = (event: Event) => {
       event.preventDefault();
-      setInstallPrompt(event as InstallPromptEvent);
+      setInstallPrompt(event as BeforeInstallPromptEvent);
     };
     const onInstalled = () => {
       setVisible(false);
@@ -98,7 +96,7 @@ export default function EmployeeInstallPrompt() {
   if (!visible) return null;
 
   const ios = isIos();
-  return <div className="employeeInstallOverlay" role="dialog" aria-modal="true" aria-labelledby="employee-install-title">
+  return <div ref={installModalRef} tabIndex={-1} className="employeeInstallOverlay" role="dialog" aria-modal="true" aria-labelledby="employee-install-title">
     <section className="employeeInstallCard">
       <img src="/corner-ops-icon.svg" alt="" />
       <div className="employeeInstallCopy">

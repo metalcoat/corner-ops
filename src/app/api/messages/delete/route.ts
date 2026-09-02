@@ -1,4 +1,3 @@
-import { del } from "@/lib/storage";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import { deleteOwnerMessage } from "@/lib/message-deletion";
@@ -22,12 +21,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
     }
 
-    const deleted = await deleteOwnerMessage({ id: String(body.id || ""), business });
-    if (deleted.attachmentUrl) {
-      await del(deleted.attachmentUrl).catch((error) => {
-        console.error("[api/messages/delete] message deleted but blob cleanup failed", error);
-      });
-    }
+    const deleted = await deleteOwnerMessage({ id: String(body.id || ""), business, actor: session.email });
     return Response.json({ deleted: true, id: deleted.id });
   } catch (error) {
     return apiError(error);

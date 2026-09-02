@@ -14,6 +14,8 @@ type DateParts = {
 export type MealScheduleInput = {
   startsAt: string;
   endsAt: string;
+  business?: string | null;
+  position?: string | null;
   mealBreakStart?: string | null;
   mealBreakMinutes?: number | null;
   extraMealBreakStart?: string | null;
@@ -218,10 +220,12 @@ function noonRequirement(start: Date, end: Date): MealRequirement | null {
   for (const key of dateKeysBetween(start, end)) {
     const windowStart = newYorkDateTime(key, "11:00");
     const windowEnd = newYorkDateTime(key, "14:00");
-    if (start < windowStart && end > windowEnd) {
+    const overlapStart = Math.max(start.getTime(), windowStart.getTime());
+    const overlapEnd = Math.min(end.getTime(), windowEnd.getTime());
+    if (overlapEnd - overlapStart >= 30 * MINUTE_MS) {
       const midpointMs = start.getTime() + (end.getTime() - start.getTime()) / 2;
-      const earliest = windowStart.getTime();
-      const latest = windowEnd.getTime() - 30 * MINUTE_MS;
+      const earliest = overlapStart;
+      const latest = overlapEnd - 30 * MINUTE_MS;
       const suggestedMs = clamp(roundDownQuarter(midpointMs - 15 * MINUTE_MS), earliest, latest);
       return {
         code: "noon-meal",
@@ -230,8 +234,8 @@ function noonRequirement(start: Date, end: Date): MealRequirement | null {
         label: "30-minute noon meal",
         detail: "A shift over six hours extending through New York's 11 AM–2 PM noon meal period requires at least 30 off-duty minutes inside that window.",
         suggestedStart: new Date(suggestedMs).toISOString(),
-        windowStart: windowStart.toISOString(),
-        windowEnd: windowEnd.toISOString(),
+        windowStart: new Date(overlapStart).toISOString(),
+        windowEnd: new Date(overlapEnd).toISOString(),
       };
     }
   }
@@ -260,7 +264,13 @@ function extraEveningRequirement(start: Date, end: Date): MealRequirement | null
   return null;
 }
 
-export function mealRequirements(input: Pick<MealScheduleInput, "startsAt" | "endsAt">): MealRequirement[] {
+export function mealRequirements(input: Pick<MealScheduleInput, "startsAt" | "endsAt" | "business" | "position">): MealRequirement[] {
+  const business = String(input.business || "").trim();
+  const position = String(input.position || "").trim().toLowerCase();
+  // Tiki normally runs a single bartender, so an off-duty meal would leave the bar uncovered.
+  // Do not impose Corner Deli's scheduled meal requirement on Tiki/Bartender shifts.
+  if (business === "Tiki" || position === "bartender") return [];
+
   const start = new Date(input.startsAt);
   const end = new Date(input.endsAt);
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) return [];

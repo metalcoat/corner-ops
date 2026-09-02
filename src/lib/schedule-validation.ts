@@ -71,6 +71,34 @@ function employeeLabel(shift: ScheduleValidationShift): string {
   return String(shift.employeeName || (shift.employeeId ? "Employee" : "Unassigned shift")).trim() || "Employee";
 }
 
+function addCalendarDays(dateKey: string, days: number): string {
+  const date = new Date(`${dateKey}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function mondayForDateKey(dateKey: string): string {
+  const date = new Date(`${dateKey}T12:00:00Z`);
+  const weekday = date.getUTCDay();
+  return addCalendarDays(dateKey, -((weekday + 6) % 7));
+}
+
+function keepLatestNewYorkCalendarWeek(normalized: NormalizedShift[]): NormalizedShift[] {
+  if (!normalized.length) return normalized;
+
+  const latestDateKey = normalized.reduce((latest, shift) => {
+    const key = newYorkDateKey(shift.startsAt);
+    return key > latest ? key : latest;
+  }, "");
+  const weekStart = mondayForDateKey(latestDateKey);
+  const weekEnd = addCalendarDays(weekStart, 7);
+
+  return normalized.filter((shift) => {
+    const key = newYorkDateKey(shift.startsAt);
+    return key >= weekStart && key < weekEnd;
+  });
+}
+
 function workSegmentsForShift(shift: ScheduleValidationShift, startMs: number, endMs: number): WorkSegment[] {
   const analysis = analyzeShiftMealCompliance(shift);
   const breaks = [analysis.primaryBreak, analysis.extraBreak]
@@ -95,7 +123,7 @@ function workSegmentsForShift(shift: ScheduleValidationShift, startMs: number, e
 }
 
 function normalizedShifts(shifts: ScheduleValidationShift[]): NormalizedShift[] {
-  return shifts
+  const normalized = shifts
     .filter((shift) => shift.status !== "Cancelled")
     .map((shift) => {
       const startMs = new Date(shift.startsAt).getTime();
@@ -114,6 +142,8 @@ function normalizedShifts(shifts: ScheduleValidationShift[]): NormalizedShift[] 
       };
     })
     .filter((shift) => shift.endMs > shift.startMs);
+
+  return keepLatestNewYorkCalendarWeek(normalized);
 }
 
 function coverageGapsForDays(normalized: NormalizedShift[]): CoverageGap[] {

@@ -1,5 +1,6 @@
 "use client";
 
+import { requestFailure } from "@/app/client-http";
 import { FormEvent, useEffect, useState } from "react";
 import "./direct-deposit.css";
 
@@ -14,7 +15,7 @@ type PageData = { employee: { name: string; business: string; position: string }
 
 async function message(response: Response) {
   const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
+  return payload?.error || requestFailure(response);
 }
 
 function record(value: unknown): Record<string, unknown> {

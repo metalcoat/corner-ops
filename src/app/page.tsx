@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   businesses,
@@ -10,6 +11,7 @@ import {
   type DocumentStatus,
   type SessionView,
 } from "@/lib/types";
+import "./operations.css";
 
 const categories = ["Operations", "Inventory", "Financial", "Compliance", "Employee", "Vendor", "General"];
 
@@ -31,10 +33,6 @@ function formatEvent(event: AuditEvent): string {
   return `${title} was ${verbs[event.action]}.`;
 }
 
-async function responseMessage(response: Response): Promise<string> {
-  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function Home() {
   const [session, setSession] = useState<SessionView | null>(null);
@@ -318,8 +316,8 @@ export default function Home() {
           )}
 
           <div className="filters">
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, category, filename, or notes" />
-            <select value={status} onChange={(event) => setStatus(event.target.value as "All" | DocumentStatus)}>
+            <input aria-label="Search documents" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, category, filename, or notes" />
+            <select aria-label="Filter documents by status" value={status} onChange={(event) => setStatus(event.target.value as "All" | DocumentStatus)}>
               <option>All</option>{documentStatuses.map((name) => <option key={name}>{name}</option>)}
             </select>
           </div>

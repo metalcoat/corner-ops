@@ -1,6 +1,9 @@
 "use client";
 
-import { CSSProperties, FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { canvasToJpegBlob, drawCanvasImage } from "@/app/client-image";
+import { firstName } from "@/app/client-text";
+import { responseMessage } from "@/app/client-http";
+import { ChangeEvent, CSSProperties, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import "./messages-dock.css";
 
 type EmployeeSession = {
@@ -58,10 +61,6 @@ const emptyStatus: MessageStatus = {
   preview: null,
 };
 
-async function responseMessage(response: Response): Promise<string> {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function local(value: string): string {
   return new Date(value).toLocaleString([], {
@@ -73,15 +72,6 @@ function local(value: string): string {
   });
 }
 
-function firstName(value: string | null): string {
-  const text = String(value || "").trim();
-  if (!text) return "Unknown";
-  if (text.toLowerCase() === "crfrary@gmail.com") return "Chris";
-  const candidate = text.includes("@")
-    ? text.split("@")[0].split(/[._-]/)[0]
-    : text.split(/\s+/)[0];
-  return candidate.charAt(0).toUpperCase() + candidate.slice(1);
-}
 
 function initials(value: string): string {
   return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
@@ -92,11 +82,73 @@ function compact(value: string, max = 58): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
+const SAFE_FUNCTION_UPLOAD_BYTES = 3.5 * 1024 * 1024;
+const MESSAGE_IMAGE_MAX_DIMENSION = 1920;
+
 function selectedPhoto(form: FormData): File | null {
   const camera = form.get("cameraPhoto");
   if (camera instanceof File && camera.size > 0) return camera;
   const library = form.get("photo");
   return library instanceof File && library.size > 0 ? library : null;
+}
+
+function selectedProfilePhoto(form: FormData): File | null {
+  const camera = form.get("cameraProfilePhoto");
+  if (camera instanceof File && camera.size > 0) return camera;
+  const library = form.get("profilePhoto");
+  return library instanceof File && library.size > 0 ? library : null;
+}
+
+function jpegName(fileName: string): string {
+  const base = fileName.replace(/\.[^.]+$/, "").trim() || "photo";
+  return `${base}.jpg`;
+}
+
+
+async function prepareImageUpload(file: File): Promise<File> {
+  if (file.size <= SAFE_FUNCTION_UPLOAD_BYTES) return file;
+  if (!file.type.toLowerCase().startsWith("image/")) return file;
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = objectUrl;
+    await image.decode();
+
+    const longest = Math.max(image.naturalWidth, image.naturalHeight);
+    if (!longest) throw new Error("This photo could not be read.");
+
+    for (const maxDimension of [MESSAGE_IMAGE_MAX_DIMENSION, 1600, 1280]) {
+      const scale = Math.min(1, maxDimension / longest);
+      const width = Math.max(1, Math.round(image.naturalWidth * scale));
+      const height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("This browser could not prepare the photo.");
+      drawCanvasImage(context, image, null, { x: 0, y: 0, width, height });
+
+      for (const quality of [0.84, 0.74, 0.64, 0.54]) {
+        const blob = await canvasToJpegBlob(canvas, quality, "This photo could not be prepared for upload.");
+        if (blob.size <= SAFE_FUNCTION_UPLOAD_BYTES) {
+          return new File([blob], jpegName(file.name), {
+            type: "image/jpeg",
+            lastModified: Date.now(),
+          });
+        }
+      }
+    }
+  } catch (error) {
+    if (file.size <= SAFE_FUNCTION_UPLOAD_BYTES) return file;
+    throw new Error(error instanceof Error
+      ? `${error.message} Choose a smaller photo and try again.`
+      : "Choose a smaller photo and try again.");
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+
+  throw new Error("The photo is still too large after resizing. Choose a smaller photo and try again.");
 }
 
 function avatarUrl(employeeId: string): string {
@@ -110,13 +162,39 @@ export default function EmployeeMessagesDock() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [expanded, setExpanded] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<{ url: string; name: string; size: number } | null>(null);
   const reportedSeen = useRef(new Set<string>());
   const sessionRef = useRef<EmployeeSession | null>(null);
   const expandedRef = useRef(false);
   const hasLoadedRef = useRef(false);
   const loadedLatestIdRef = useRef<string | null>(null);
+  const cameraPhotoRef = useRef<HTMLInputElement | null>(null);
+  const libraryPhotoRef = useRef<HTMLInputElement | null>(null);
+  const photoPreviewUrlRef = useRef<string | null>(null);
   const feedRef = useRef<HTMLDivElement | null>(null);
   const positionedOpenRef = useRef(false);
+
+  const clearPhotoAttachment = useCallback((resetInputs = true) => {
+    if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
+    photoPreviewUrlRef.current = null;
+    setPhotoPreview(null);
+    if (resetInputs) {
+      if (cameraPhotoRef.current) cameraPhotoRef.current.value = "";
+      if (libraryPhotoRef.current) libraryPhotoRef.current.value = "";
+    }
+  }, []);
+
+  function choosePhoto(event: ChangeEvent<HTMLInputElement>, source: "camera" | "library") {
+    const file = event.currentTarget.files?.[0] || null;
+    if (!file) return;
+    if (source === "camera" && libraryPhotoRef.current) libraryPhotoRef.current.value = "";
+    if (source === "library" && cameraPhotoRef.current) cameraPhotoRef.current.value = "";
+    if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
+    const url = URL.createObjectURL(file);
+    photoPreviewUrlRef.current = url;
+    setPhotoPreview({ url, name: file.name || "Photo", size: file.size });
+    setNotice("");
+  }
 
   const loadMessages = useCallback(async () => {
     const response = await fetch("/api/employee/messages?limit=80", { cache: "no-store" });
@@ -196,6 +274,10 @@ export default function EmployeeMessagesDock() {
     }
   }, [loadMessages, loadStatus]);
 
+  useEffect(() => () => {
+    if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
+  }, []);
+
   useEffect(() => {
     void checkSession().catch((error) => setNotice(error instanceof Error ? error.message : "Messages could not be loaded."));
     const onSessionCheck = () => void checkSession().catch(() => undefined);
@@ -229,31 +311,18 @@ export default function EmployeeMessagesDock() {
 
   useEffect(() => {
     const viewport=window.visualViewport;
-    const update=()=>{
-      const height=viewport?.height||window.innerHeight,top=viewport?.offsetTop||0;
-      document.documentElement.style.setProperty("--employee-visual-height",`${height}px`);
-      document.documentElement.style.setProperty("--employee-visual-top",`${top}px`);
-    };
+    const update=()=>{const height=viewport?.height||window.innerHeight,top=viewport?.offsetTop||0;document.documentElement.style.setProperty("--employee-visual-height",`${height}px`);document.documentElement.style.setProperty("--employee-visual-top",`${top}px`)};
     update();viewport?.addEventListener("resize",update);viewport?.addEventListener("scroll",update);window.addEventListener("resize",update);
     return()=>{viewport?.removeEventListener("resize",update);viewport?.removeEventListener("scroll",update);window.removeEventListener("resize",update)};
   }, []);
 
   useEffect(()=>{
     if((!expanded&&!window.matchMedia("(min-width:1101px)").matches)||!data?.messages.length||positionedOpenRef.current)return;
-    const frame=window.requestAnimationFrame(()=>{
-      const feed=feedRef.current;if(!feed)return;
-      const chronological=[...data.messages].reverse(),firstUnread=chronological.find(message=>data.unreadMessageIds.includes(message.id));
-      if(firstUnread){const target=feed.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(firstUnread.id)}"]`);if(target)feed.scrollTop=Math.max(0,target.offsetTop-feed.offsetTop)}
-      else feed.scrollTop=feed.scrollHeight;
-      positionedOpenRef.current=true;
-    });
+    const frame=window.requestAnimationFrame(()=>{const feed=feedRef.current;if(!feed)return;const chronological=[...data.messages].reverse(),firstUnread=chronological.find(message=>data.unreadMessageIds.includes(message.id));if(firstUnread){const target=feed.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(firstUnread.id)}"]`);if(target)feed.scrollTop=Math.max(0,target.offsetTop-feed.offsetTop)}else feed.scrollTop=feed.scrollHeight;positionedOpenRef.current=true});
     return()=>window.cancelAnimationFrame(frame);
   },[data?.messages,data?.unreadMessageIds,expanded]);
 
-  useEffect(()=>{
-    document.documentElement.classList.toggle("employee-messages-open",expanded);
-    return()=>document.documentElement.classList.remove("employee-messages-open");
-  },[expanded]);
+  useEffect(()=>{document.documentElement.classList.toggle("employee-messages-open",expanded);return()=>document.documentElement.classList.remove("employee-messages-open")},[expanded]);
 
   useEffect(() => {
     if (!session) return;
@@ -342,7 +411,7 @@ export default function EmployeeMessagesDock() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const body = String(form.get("body") || "").trim();
-    const photo = selectedPhoto(form);
+    let photo = selectedPhoto(form);
     if (!body && !photo) {
       setNotice("Type a message or attach a photo.");
       return;
@@ -351,9 +420,17 @@ export default function EmployeeMessagesDock() {
     setBusy(true);
     setNotice("");
     try {
+      if (photo) {
+        const prepared = await prepareImageUpload(photo);
+        const camera = form.get("cameraPhoto");
+        if (camera instanceof File && camera.size > 0) form.set("cameraPhoto", prepared);
+        else form.set("photo", prepared);
+        photo = prepared;
+      }
       const response = await fetch("/api/employee", { method: "POST", body: form });
       if (!response.ok) throw new Error(await responseMessage(response));
       formElement.reset();
+      clearPhotoAttachment(false);
       await loadMessages();
       await loadStatus();
       window.requestAnimationFrame(()=>{const feed=feedRef.current;if(feed)feed.scrollTop=feed.scrollHeight});
@@ -403,9 +480,16 @@ export default function EmployeeMessagesDock() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     form.set("action", "profile-photo");
+    const profilePhoto = selectedProfilePhoto(form);
     setBusy(true);
     setNotice("");
     try {
+      if (profilePhoto) {
+        const prepared = await prepareImageUpload(profilePhoto);
+        const camera = form.get("cameraProfilePhoto");
+        if (camera instanceof File && camera.size > 0) form.set("cameraProfilePhoto", prepared);
+        else form.set("profilePhoto", prepared);
+      }
       const response = await fetch("/api/employee", { method: "POST", body: form });
       if (!response.ok) throw new Error(await responseMessage(response));
       formElement.reset();
@@ -497,17 +581,8 @@ export default function EmployeeMessagesDock() {
           const unread = unreadIds.has(message.id);
           const canDelete = message.sender_employee_id === session.employeeId;
           return <article className={`employeeMessagesItem ${unread ? "isUnread" : ""}`} key={message.id} data-message-id={message.id} style={{ "--employee-color": senderColor } as CSSProperties}>
-            <header className="employeeMessageMeta">
-              <span className="employeeMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(message.sender_employee_id)} alt="" loading="lazy" /> : initials(senderDisplay)}</span>
-              <div><strong>{senderDisplay}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div>
-              <div className="employeeMessageStatus">
-                {unread ? <span className="employeeMessagesUnreadMark">New</span> : null}
-                <small>{local(message.created_at)}</small>
-                {canDelete && <button type="button" className="employeeMessageDelete" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>}
-              </div>
-            </header>
-            {message.body && <p>{message.body}</p>}
-            {message.attachment_name && <a className="employeeMessagesPhoto" href={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer" aria-label={`Open photo from ${senderDisplay}`}><img src={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${senderDisplay}`} loading="lazy" /></a>}
+            <header className="employeeMessageMeta"><span className="employeeMessageAvatar">{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(message.sender_employee_id)} alt="" loading="lazy" /> : initials(senderDisplay)}</span><div><strong>{senderDisplay}</strong><span>{message.recipient_name ? `to ${firstName(message.recipient_name)}` : message.message_type}</span></div><div className="employeeMessageStatus">{unread ? <span className="employeeMessagesUnreadMark">New</span> : null}<small>{local(message.created_at)}</small>{canDelete && <button type="button" className="employeeMessageDelete" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>}</div></header>
+            {message.body && <p>{message.body}</p>}{message.attachment_name && <a className="employeeMessagesPhoto" href={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`} target="_blank" rel="noreferrer" aria-label={`Open photo from ${senderDisplay}`}><img src={`/api/employee/message-photo?id=${encodeURIComponent(message.id)}`} alt={message.body || `Photo from ${senderDisplay}`} loading="lazy" /></a>}
           </article>;
         })}
         {!data?.messages.length && <p className="employeeMessagesEmpty">No messages yet.</p>}
@@ -518,11 +593,17 @@ export default function EmployeeMessagesDock() {
         <label>Send to<select name="recipientEmployeeId" defaultValue=""><option value="">Everyone at {session.business}</option>{recipients.map((person) => <option key={person.id} value={person.id}>{person.chatNickname || firstName(person.name)}</option>)}</select></label>
         <label>Message<textarea name="body" rows={3} placeholder="Type a message, add a photo, or both" /></label>
         <div className="employeeMessagesPhotoControls">
-          <label className="employeeMessagesPhotoButton">Take photo<input name="cameraPhoto" type="file" accept="image/*" capture="environment" /></label>
-          <label className="employeeMessagesPhotoButton secondary">Choose photo<input name="photo" type="file" accept="image/*" /></label>
+          <label className="employeeMessagesPhotoButton">Take photo<input ref={cameraPhotoRef} name="cameraPhoto" type="file" accept="image/*" capture="environment" onChange={(event) => choosePhoto(event, "camera")} /></label>
+          <label className="employeeMessagesPhotoButton secondary">Choose photo<input ref={libraryPhotoRef} name="photo" type="file" accept="image/*" onChange={(event) => choosePhoto(event, "library")} /></label>
         </div>
+        {photoPreview && <div className="employeeMessagesAttachmentPreview">
+          <div className="employeeMessagesAttachmentThumb"><img src={photoPreview.url} alt="Selected attachment preview" /></div>
+          <div className="employeeMessagesAttachmentInfo"><strong>Photo attached</strong><span>{photoPreview.name}</span><small>{(photoPreview.size / 1024 / 1024).toFixed(1)} MB before upload resizing</small></div>
+          <button type="button" disabled={busy} onClick={() => clearPhotoAttachment()}>Remove photo</button>
+        </div>}
         <button className="employeeMessagesSend" disabled={busy}>Send message</button>
       </form>
+
     </div>
   </aside>;
 }

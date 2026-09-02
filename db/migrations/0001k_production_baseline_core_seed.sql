@@ -1,0 +1,32 @@
+-- Core reference data previously seeded by runtime ensureSchema().
+INSERT INTO accounting_accounts (id, business, code, name, account_type)
+VALUES
+  (gen_random_uuid(), 'Corner Deli', '1000', 'Operating Cash', 'Asset'),
+  (gen_random_uuid(), 'Corner Deli', '1100', 'Bank Clearing', 'Asset'),
+  (gen_random_uuid(), 'Corner Deli', '2000', 'Accounts Payable', 'Liability'),
+  (gen_random_uuid(), 'Corner Deli', '2100', 'Credit Cards', 'Liability'),
+  (gen_random_uuid(), 'Corner Deli', '3000', 'Owner Equity', 'Equity'),
+  (gen_random_uuid(), 'Corner Deli', '4000', 'Food and Beverage Sales', 'Revenue'),
+  (gen_random_uuid(), 'Corner Deli', '5000', 'Cost of Goods Sold', 'Expense'),
+  (gen_random_uuid(), 'Corner Deli', '5100', 'Payroll', 'Expense'),
+  (gen_random_uuid(), 'Corner Deli', '5200', 'Rent and Occupancy', 'Expense'),
+  (gen_random_uuid(), 'Corner Deli', '5300', 'Utilities', 'Expense'),
+  (gen_random_uuid(), 'Corner Deli', '5400', 'Supplies', 'Expense'),
+  (gen_random_uuid(), 'Corner Deli', '5500', 'Repairs and Maintenance', 'Expense'),
+  (gen_random_uuid(), 'Corner Deli', '5600', 'Merchant and Bank Fees', 'Expense'),
+  (gen_random_uuid(), 'Corner Deli', '5900', 'Other Expense', 'Expense'),
+  (gen_random_uuid(), 'Tiki', '1000', 'Operating Cash', 'Asset'),
+  (gen_random_uuid(), 'Tiki', '1100', 'Bank Clearing', 'Asset'),
+  (gen_random_uuid(), 'Tiki', '2000', 'Accounts Payable', 'Liability'),
+  (gen_random_uuid(), 'Tiki', '2100', 'Credit Cards', 'Liability'),
+  (gen_random_uuid(), 'Tiki', '3000', 'Owner Equity', 'Equity'),
+  (gen_random_uuid(), 'Tiki', '4100', 'Bar Sales', 'Revenue'),
+  (gen_random_uuid(), 'Tiki', '5000', 'Cost of Goods Sold', 'Expense'),
+  (gen_random_uuid(), 'Tiki', '5100', 'Payroll', 'Expense'),
+  (gen_random_uuid(), 'Tiki', '5200', 'Rent and Occupancy', 'Expense'),
+  (gen_random_uuid(), 'Tiki', '5300', 'Utilities', 'Expense'),
+  (gen_random_uuid(), 'Tiki', '5400', 'Supplies', 'Expense'),
+  (gen_random_uuid(), 'Tiki', '5500', 'Repairs and Maintenance', 'Expense'),
+  (gen_random_uuid(), 'Tiki', '5600', 'Merchant and Bank Fees', 'Expense'),
+  (gen_random_uuid(), 'Tiki', '5900', 'Other Expense', 'Expense')
+ON CONFLICT (business, code) DO NOTHING;

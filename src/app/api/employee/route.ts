@@ -19,8 +19,8 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const MAX_MESSAGE_PHOTO = 12 * 1024 * 1024;
-const MAX_PROFILE_PHOTO = 8 * 1024 * 1024;
+const MAX_MESSAGE_PHOTO = 4 * 1024 * 1024;
+const MAX_PROFILE_PHOTO = 4 * 1024 * 1024;
 
 function safeFileName(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "photo.jpg";
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
           return Response.json({ error: "Profile photos must be image files." }, { status: 415 });
         }
         if (photo.size > MAX_PROFILE_PHOTO) {
-          return Response.json({ error: "Profile photos are limited to 8 MB." }, { status: 413 });
+          return Response.json({ error: "Profile photos are limited to 4 MB after resizing." }, { status: 413 });
         }
         const blob = await put(employeeProfilePath(session.business, session.employeeId, photo.name), photo, {
           access: "private",
@@ -167,7 +167,7 @@ export async function POST(request: Request) {
         return Response.json({ error: "Message attachments must be image files." }, { status: 415 });
       }
       if (photo.size > MAX_MESSAGE_PHOTO) {
-        return Response.json({ error: "Message photos are limited to 12 MB." }, { status: 413 });
+        return Response.json({ error: "Message photos are limited to 4 MB after resizing." }, { status: 413 });
       }
 
       const blob = await put(employeeMessagePath(session.business, photo.name), photo, {

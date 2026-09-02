@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -61,6 +62,7 @@ type Dashboard = {
   bankAccounts: Array<{ externalAccountId: string; institutionName: string; name: string; mask: string; currentBalance: number | null }>;
   transactions: Tx[];
   reconciliations: Array<Record<string, unknown>>;
+  unbalancedEntries: Array<{ id: string; entryDate: string; description: string; source: string; debits: number; credits: number; difference: number }>;
   monthly: Array<{ month: string; revenue: number; expenses: number; profit: number }>;
   squareDepositMatches: Array<Record<string, unknown>>;
   squareDays: Array<Record<string, unknown>>;
@@ -75,10 +77,6 @@ const localDate = () => {
   const offset = now.getTimezoneOffset();
   return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10);
 };
-async function errorMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function AccountingControlPage() {
   const [session, setSession] = useState<SessionView | null>(null);
@@ -102,7 +100,7 @@ export default function AccountingControlPage() {
       fetch(`/api/accounting-control?business=${encodeURIComponent(active)}`, { cache: "no-store" }),
       fetch("/api/accounting-control?area=square", { cache: "no-store" }),
     ]);
-    if (!accountingResponse.ok) throw new Error(await errorMessage(accountingResponse));
+    if (!accountingResponse.ok) throw new Error(await responseMessage(accountingResponse));
     setData(await accountingResponse.json() as Dashboard);
     if (squareResponse.ok) setSquare(await squareResponse.json() as SquareDash);
   }
@@ -121,7 +119,7 @@ export default function AccountingControlPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!response.ok) throw new Error(await errorMessage(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       const result = await response.json();
       await load();
       return result;
@@ -238,7 +236,7 @@ export default function AccountingControlPage() {
       form.set("business", business);
       form.set("postApproved", String(form.get("postApproved") === "on"));
       const response = await fetch("/api/accounting-control", { method: "POST", body: form });
-      if (!response.ok) throw new Error(await errorMessage(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       const result = await response.json();
       await load();
       setNotice(`Imported ${result.imported} coded transactions; posted ${result.posted}.`);
@@ -302,7 +300,8 @@ export default function AccountingControlPage() {
       <details className="advancedAccounting"><summary>Reconciliation and advanced accounting</summary><div className="advancedGrid">
         <section><p className="eyebrow">Statement control</p><h2>Bank reconciliation</h2><form className="controlForm" onSubmit={reconcile}><label>Bank account<select name="externalAccountId" required><option value="">Choose account</option>{data?.bankAccounts.map((account) => <option key={account.externalAccountId} value={account.externalAccountId}>{account.institutionName} · {account.name} •{account.mask}</option>)}</select></label><label>Selected transactions<input value={`${selected.length} selected`} readOnly /></label><label>Statement start<input name="statementStartDate" type="date" required /></label><label>Statement end<input name="statementEndDate" type="date" required /></label><label>Beginning balance<input name="beginningBalance" type="number" step="0.01" required /></label><label>Ending balance<input name="endingBalance" type="number" step="0.01" required /></label><label className="wide">Notes<textarea name="notes" /></label><div className="controlActions wide"><button type="submit">Save draft</button><button type="submit" value="finalize" className="primary" disabled={busy}>Finalize</button></div></form></section>
         <section><p className="eyebrow">Rare manual setup</p><h2>Opening balance</h2><form className="controlForm" onSubmit={openingBalance}><label>Date<input name="entryDate" type="date" defaultValue={localDate()} required /></label><label>Description<input name="description" defaultValue="Opening balances" required /></label><label>Debit account<select name="assetCode">{data?.accounts.map((account) => <option key={account.code} value={account.code}>{account.code} · {account.name}</option>)}</select></label><label>Debit amount<input name="assetDebit" type="number" step="0.01" /></label><label>Credit account<select name="offsetCode">{data?.accounts.map((account) => <option key={account.code} value={account.code}>{account.code} · {account.name}</option>)}</select></label><label>Credit amount<input name="offsetCredit" type="number" step="0.01" /></label><label className="wide">Reference<input name="reference" /></label><button className="primary" disabled={busy}>Post opening entry</button></form></section>
-        <section><p className="eyebrow">History migration</p><h2>Import coded workbook</h2><form className="controlForm" onSubmit={historyImport}><label>Institution/source<input name="institutionName" defaultValue="Historical bookkeeping" /></label><label>Workbook<input name="file" type="file" accept=".xlsx,.xls,.csv" required /></label><label className="wide"><span><input name="postApproved" type="checkbox" /> Post imported approved rows immediately</span></label><button className="primary" disabled={busy}>Import history</button></form></section>
+        <section><p className="eyebrow">History migration</p><h2>Import coded workbook</h2><form className="controlForm" onSubmit={historyImport}><label>Institution/source<input name="institutionName" defaultValue="Historical bookkeeping" /></label><label>Control account<select name="accountType" defaultValue="depository"><option value="depository">Bank / cash account</option><option value="credit">Credit-card account</option></select></label><label>Workbook<input name="file" type="file" accept=".xlsx,.xls,.csv" required /></label><label className="wide"><span><input name="postApproved" type="checkbox" /> Post imported approved rows immediately</span></label><button className="primary" disabled={busy}>Import history</button></form></section>
+        <section><p className="eyebrow">Ledger repair</p><h2>Unbalanced entries</h2>{data?.unbalancedEntries.length ? <div className="controlList">{data.unbalancedEntries.map((entry) => <div key={entry.id}><strong>{entry.entryDate} · {entry.description}</strong><small>{entry.source} · difference {dollars(entry.difference)}</small><button disabled={busy} onClick={() => void post({ action: "journal-reverse", business, entryId: entry.id, reason: "Reversed from accounting control after balance review" }).then(() => setNotice("Journal entry reversed."))}>Reverse entry</button></div>)}</div> : <p>No unbalanced entries detected.</p>}</section>
         <section><p className="eyebrow">18-month trend</p><h2>Monthly profit</h2><div className="chartBars">{data?.monthly.map((month) => <div className="chartBar" key={month.month} title={`${month.month}: ${dollars(month.profit)}`}><i style={{ height: `${Math.max(2, (Math.max(0, month.profit) / maxProfit) * 180)}px` }} /><small>{month.month}</small></div>)}</div></section>
       </div></details>
     </section>

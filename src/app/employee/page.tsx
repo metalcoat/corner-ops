@@ -1,6 +1,8 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { newYorkDateKey } from "@/lib/schedule-meal-compliance";
 import type { Business } from "@/lib/types";
 import "./employee.css";
 
@@ -85,10 +87,6 @@ function validBusiness(value: string | null): value is Business {
   return businessNames.includes(value as Business);
 }
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function local(value: string | null) {
   if (!value) return "Missing";
@@ -117,12 +115,21 @@ function localDateKey(value: Date | string) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function addDateKeyDays(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function mondayDateKey(value: Date | string) {
+  const key = newYorkDateKey(value);
+  const date = new Date(`${key}T12:00:00Z`);
+  const day = date.getUTCDay();
+  return addDateKeyDays(key, -(day === 0 ? 6 : day - 1));
+}
+
 function mondayFor(date: Date) {
-  const result = new Date(date);
-  result.setHours(0, 0, 0, 0);
-  const day = result.getDay();
-  result.setDate(result.getDate() - (day === 0 ? 6 : day - 1));
-  return result;
+  return new Date(`${mondayDateKey(date)}T12:00:00`);
 }
 
 function messagePreview(value: string) {
@@ -242,7 +249,7 @@ export default function EmployeePage() {
     setPin("");
   }
 
-  async function action(body: Record<string, unknown>, success: string) {
+  async function action(body: Record<string, unknown>, success: string): Promise<boolean> {
     setBusy(true);
     setNotice("");
     try {
@@ -254,8 +261,10 @@ export default function EmployeePage() {
       if (!response.ok) throw new Error(await responseMessage(response));
       await load();
       setNotice(success);
+      return true;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The request failed.");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -265,47 +274,47 @@ export default function EmployeePage() {
     event.preventDefault();
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    await action({
+    const saved = await action({
       action: "message-send",
       recipientEmployeeId: form.get("recipientEmployeeId") || null,
       body: form.get("body"),
     }, "Message sent.");
-    formElement.reset();
+    if (saved) formElement.reset();
   }
 
   async function requestSwap(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    await action({
+    const saved = await action({
       action: "shift-request",
       requestType: "Swap",
       shiftId: form.get("shiftId"),
       offeredShiftId: form.get("offeredShiftId"),
       note: form.get("note"),
     }, "Swap request sent to the other employee.");
-    formElement.reset();
+    if (saved) formElement.reset();
   }
 
   async function requestCorrection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    await action({
+    const saved = await action({
       action: "time-correction-request",
       sourceId: form.get("sourceId"),
       requestedClockIn: form.get("requestedClockIn") || null,
       requestedClockOut: form.get("requestedClockOut") || null,
       reason: form.get("reason"),
     }, "Time correction submitted for review.");
-    formElement.reset();
+    if (saved) formElement.reset();
   }
 
   async function saveAvailability(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    await action({
+    const saved = await action({
       action: "availability-save",
       weekday: Number(form.get("weekday")),
       available: form.get("available") === "yes",
@@ -313,33 +322,49 @@ export default function EmployeePage() {
       availableTo: form.get("availableTo"),
       notes: form.get("notes"),
     }, "Availability saved.");
-    formElement.reset();
+    if (saved) formElement.reset();
   }
 
   async function requestDaysOff(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    await action({
+    const saved = await action({
       action: "time-off-request",
       startsOn: form.get("startsOn"),
       endsOn: form.get("endsOn"),
       reason: form.get("reason"),
     }, "Time-off request submitted.");
-    formElement.reset();
+    if (saved) formElement.reset();
   }
 
+  const currentWeekStartKey = mondayDateKey(new Date());
+  const currentWeekEndKey = addDateKeyDays(currentWeekStartKey, 7);
+  const shiftIsInCurrentWeek = (shift: Shift) => {
+    const key = newYorkDateKey(shift.startsAt);
+    return key >= currentWeekStartKey && key < currentWeekEndKey;
+  };
+  const shiftIsFuture = (shift: Shift) => new Date(shift.startsAt).getTime() > Date.now();
+
   const myShifts = useMemo(
-    () => (data?.teamShifts || []).filter((shift) => shift.employeeId === session?.employeeId),
-    [data?.teamShifts, session?.employeeId],
+    () => (data?.teamShifts || []).filter(
+      (shift) => shift.employeeId === session?.employeeId && shiftIsInCurrentWeek(shift),
+    ),
+    [data?.teamShifts, session?.employeeId, currentWeekEndKey, currentWeekStartKey],
   );
+  const tradeableMyShifts = useMemo(() => myShifts.filter(shiftIsFuture), [myShifts]);
   const openShifts = useMemo(
-    () => (data?.teamShifts || []).filter((shift) => !shift.employeeId && shift.status === "Open"),
+    () => (data?.teamShifts || []).filter(
+      (shift) => !shift.employeeId && shift.status === "Open" && shiftIsFuture(shift),
+    ),
     [data?.teamShifts],
   );
   const otherShifts = useMemo(
     () => (data?.teamShifts || []).filter(
-      (shift) => shift.employeeId && shift.employeeId !== session?.employeeId && shift.status === "Published",
+      (shift) => shift.employeeId
+        && shift.employeeId !== session?.employeeId
+        && shift.status === "Published"
+        && shiftIsFuture(shift),
     ),
     [data?.teamShifts, session?.employeeId],
   );
@@ -430,7 +455,7 @@ export default function EmployeePage() {
     {notice && <div className="empNotice">{notice}</div>}
 
     <section className="employeeStats">
-      <article><span>My upcoming shifts</span><strong>{myShifts.length}</strong></article>
+      <article><span>My upcoming shifts</span><strong>{tradeableMyShifts.length}</strong></article>
       <article><span>Open shifts</span><strong>{openShifts.length}</strong></article>
       <article><span>Incoming requests</span><strong>{incomingRequests.length}</strong></article>
       <article><span>New updates</span><strong>{latestMessages.length}</strong></article>
@@ -450,7 +475,7 @@ export default function EmployeePage() {
 
     <nav className="employeeTabs" aria-label="Employee Hub sections">
       {(["schedule", "messages", "requests", "time", "availability"] as Tab[]).map((name) => (
-        <button key={name} className={tab === name ? "active" : ""} onClick={() => setTab(name)}>
+        <button key={name} className={`${tab === name ? "active" : ""}${name === "time" ? " employeeTimeTab" : ""}`.trim()} onClick={() => setTab(name)}>
           {name === "time" ? "Time & corrections" : name[0].toUpperCase() + name.slice(1)}
         </button>
       ))}
@@ -462,9 +487,9 @@ export default function EmployeePage() {
         <div className="employeeList">
           {myShifts.map((shift) => <div className="employeeShift" key={shift.id}>
             <div><strong>{shift.position || session.position}</strong><span>{local(shift.startsAt)} to {localTime(shift.endsAt)}</span>{shift.notes && <small>{shift.notes}</small>}</div>
-            <button disabled={busy} onClick={() => void action({ action: "shift-request", requestType: "Offer", shiftId: shift.id }, "Shift offered for manager approval.")}>Offer shift</button>
+            {shiftIsFuture(shift) && <button disabled={busy} onClick={() => void action({ action: "shift-request", requestType: "Offer", shiftId: shift.id }, "Shift offered for manager approval.")}>Offer shift</button>}
           </div>)}
-          {myShifts.length === 0 && <p className="empEmpty">No upcoming assigned shifts.</p>}
+          {myShifts.length === 0 && <p className="empEmpty">No assigned shifts this week.</p>}
         </div>
       </article>
 
@@ -546,7 +571,7 @@ export default function EmployeePage() {
       <article className="employeeCard">
         <div className="employeeCardHeader"><div><p className="empEyebrow">Trade assigned shifts</p><h2>Request a swap</h2></div></div>
         <form className="employeeForm" onSubmit={requestSwap}>
-          <label>My shift<select name="shiftId" required><option value="">Choose shift</option>{myShifts.map((shift) => <option key={shift.id} value={shift.id}>{local(shift.startsAt)} · {shift.position}</option>)}</select></label>
+          <label>My shift<select name="shiftId" required><option value="">Choose shift</option>{tradeableMyShifts.map((shift) => <option key={shift.id} value={shift.id}>{local(shift.startsAt)} · {shift.position}</option>)}</select></label>
           <label>Other employee&apos;s shift<select name="offeredShiftId" required><option value="">Choose shift</option>{otherShifts.map((shift) => <option key={shift.id} value={shift.id}>{shift.employeeName} · {local(shift.startsAt)} · {shift.position}</option>)}</select></label>
           <label>Note<textarea name="note" rows={3} /></label>
           <button disabled={busy}>Send swap request</button>

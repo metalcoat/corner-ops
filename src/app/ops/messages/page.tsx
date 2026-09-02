@@ -1,5 +1,7 @@
 "use client";
 
+import { firstName } from "@/app/client-text";
+import { responseMessage } from "@/app/client-http";
 import { CSSProperties, FormEvent, useEffect, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -28,18 +30,7 @@ type Message = {
 };
 type MessagesPayload = { business: Business; employees: Employee[]; messages: Message[] };
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
-function firstName(value: string | null) {
-  const text = String(value || "").trim();
-  if (!text) return "Unknown";
-  if (text.toLowerCase() === "crfrary@gmail.com") return "Chris";
-  const candidate = text.includes("@") ? text.split("@")[0].split(/[._-]/)[0] : text.split(/\s+/)[0];
-  return candidate.charAt(0).toUpperCase() + candidate.slice(1);
-}
 
 function initials(value: string) {
   return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";

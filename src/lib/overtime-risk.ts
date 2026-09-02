@@ -3,12 +3,13 @@ import { analyzeShiftMealCompliance } from "@/lib/schedule-meal-compliance";
 import { ensureSchema, getSql } from "@/lib/db";
 import { createOperationIssue, ensureIntegrationSchema } from "@/lib/integrations";
 import { notifyOwnersOfOperationalAlert } from "@/lib/owner-operational-alerts";
+import { addDateKeyDays as addDays, currentPayrollWeekStart, payrollWeekBounds } from "@/lib/payroll-week";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
-const WORKWEEK_START_HOUR = 4;
 const WARNING_HOURS = 38;
 const OVERTIME_HOURS = 40;
+const PROJECTION_ALERT_WEEK_PROGRESS = 0.75;
 const MAX_OPEN_SHIFT_HOURS = 18;
 let overtimeSchemaPromise: Promise<void> | null = null;
 
@@ -162,61 +163,15 @@ function localDateString(value: Date | string): string {
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
 }
 
-function getOffsetMilliseconds(date: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const represented = Date.UTC(
-    Number(values.year),
-    Number(values.month) - 1,
-    Number(values.day),
-    Number(values.hour),
-    Number(values.minute),
-    Number(values.second),
-  );
-  return represented - date.getTime();
-}
-
-function zonedDateToUtc(dateText: string, hour: number): Date {
-  const [year, month, day] = dateText.split("-").map(Number);
-  let timestamp = Date.UTC(year, month - 1, day, hour, 0, 0);
-  for (let index = 0; index < 2; index += 1) {
-    timestamp = Date.UTC(year, month - 1, day, hour, 0, 0)
-      - getOffsetMilliseconds(new Date(timestamp), TIME_ZONE);
-  }
-  return new Date(timestamp);
-}
-
 export function currentOvertimeWeekStart(value = new Date()): string {
-  const local = localDateParts(value);
-  const date = new Date(Date.UTC(local.year, local.month - 1, local.day, 12));
-  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(local.weekday);
-  const daysSinceMonday = (Math.max(0, weekday) + 6) % 7;
-  date.setUTCDate(date.getUTCDate() - daysSinceMonday);
-  if (daysSinceMonday === 0 && local.hour < WORKWEEK_START_HOUR) date.setUTCDate(date.getUTCDate() - 7);
-  return dateKey(date);
-}
-
-function addDays(value: string, days: number): string {
-  const date = new Date(`${value}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return dateKey(date);
+  return currentPayrollWeekStart(value);
 }
 
 function workweekBounds(requestedWeekStart?: string) {
   const weekStart = requestedWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(requestedWeekStart)
     ? requestedWeekStart
     : currentOvertimeWeekStart();
-  const start = zonedDateToUtc(weekStart, WORKWEEK_START_HOUR);
-  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const { start, end } = payrollWeekBounds(weekStart);
   return { weekStart, start, end };
 }
 
@@ -224,6 +179,22 @@ function riskLevel(hours: number): RiskLevel {
   if (hours > OVERTIME_HOURS) return "overtime";
   if (hours >= WARNING_HOURS) return "warning";
   return "normal";
+}
+
+function operationalRiskLevel(input: {
+  actualHours: number;
+  projectedHours: number;
+  weekStartMs: number;
+  weekEndMs: number;
+  nowMs: number;
+}): RiskLevel {
+  const actualRisk = riskLevel(input.actualHours);
+  if (actualRisk !== "normal") return actualRisk;
+
+  const duration = Math.max(1, input.weekEndMs - input.weekStartMs);
+  const progress = Math.max(0, Math.min(1, (input.nowMs - input.weekStartMs) / duration));
+  if (progress < PROJECTION_ALERT_WEEK_PROGRESS) return "normal";
+  return riskLevel(input.projectedHours);
 }
 
 function actualHours(row: ActualRow, weekStartMs: number, weekEndMs: number): number {
@@ -357,41 +328,6 @@ export async function ensureOvertimeRiskSchema(): Promise<void> {
       await ensureIntegrationSchema();
       const sql = getSql();
       await sql`
-        CREATE TABLE IF NOT EXISTS shift_change_log (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          shift_id UUID REFERENCES schedule_shifts(id) ON DELETE SET NULL,
-          change_type TEXT NOT NULL,
-          prior_employee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
-          prior_employee_name TEXT NOT NULL DEFAULT '',
-          new_employee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
-          new_employee_name TEXT NOT NULL DEFAULT '',
-          starts_at TIMESTAMPTZ,
-          ends_at TIMESTAMPTZ,
-          details JSONB NOT NULL DEFAULT '{}'::jsonb,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS shift_change_log_business_created_idx ON shift_change_log (business, created_at DESC)`;
-      await sql`
-        CREATE TABLE IF NOT EXISTS overtime_risk_alerts (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-          week_start DATE NOT NULL,
-          risk_level TEXT NOT NULL CHECK (risk_level IN ('warning', 'overtime')),
-          signature TEXT NOT NULL,
-          details JSONB NOT NULL DEFAULT '{}'::jsonb,
-          status TEXT NOT NULL DEFAULT 'Open' CHECK (status IN ('Open', 'Resolved')),
-          first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          last_notified_at TIMESTAMPTZ,
-          resolved_at TIMESTAMPTZ,
-          UNIQUE (business, employee_id, week_start)
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS overtime_risk_alerts_open_idx ON overtime_risk_alerts (business, status, week_start)`;
-      await sql`
         CREATE OR REPLACE FUNCTION corner_ops_log_schedule_shift_change()
         RETURNS trigger
         LANGUAGE plpgsql
@@ -455,20 +391,6 @@ export async function ensureOvertimeRiskSchema(): Promise<void> {
             )
           );
           RETURN NEW;
-        END;
-        $$;
-      `;
-      await sql`
-        DO $$
-        BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_trigger
-            WHERE tgname = 'corner_ops_schedule_shift_change' AND NOT tgisinternal
-          ) THEN
-            CREATE TRIGGER corner_ops_schedule_shift_change
-            AFTER INSERT OR UPDATE OF employee_id, starts_at, ends_at, status ON schedule_shifts
-            FOR EACH ROW EXECUTE FUNCTION corner_ops_log_schedule_shift_change();
-          END IF;
         END;
         $$;
       `;
@@ -696,7 +618,13 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
       warningShift,
       overtimeShift,
       replacementShift: overtimeShift || warningShift || remaining[0]?.shift || null,
-      risk: riskLevel(projected),
+      risk: operationalRiskLevel({
+        actualHours: actualValue,
+        projectedHours: projected,
+        weekStartMs: bounds.start.getTime(),
+        weekEndMs: bounds.end.getTime(),
+        nowMs,
+      }),
     };
   });
   const baseById = new Map(base.map((item) => [item.employee.id, item]));
@@ -764,7 +692,11 @@ export async function overtimeRiskDashboard(business: Business, requestedWeekSta
     weekStart,
     weekEnd: addDays(weekStart, 6),
     generatedAt: new Date().toISOString(),
-    thresholds: { warning: WARNING_HOURS, overtime: OVERTIME_HOURS },
+    thresholds: {
+      warning: WARNING_HOURS,
+      overtime: OVERTIME_HOURS,
+      projectionAlertWeekProgress: PROJECTION_ALERT_WEEK_PROGRESS,
+    },
     summary: {
       activeEmployees: employees.length,
       warning: risks.filter((item) => item.risk === "warning").length,

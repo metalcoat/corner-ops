@@ -1,6 +1,8 @@
 import { createSign } from "node:crypto";
 import { ensureAccountingControlSchema } from "@/lib/accounting-control";
 import { getSql } from "@/lib/db";
+import { recordAuditEvent } from "@/lib/audit";
+import { ConflictError } from "@/lib/http";
 import type { Business } from "@/lib/types";
 
 const MAX_RECEIPT_BYTES = 40 * 1024 * 1024;
@@ -197,23 +199,6 @@ export function ensureExpenseControlSchema(): Promise<void> {
       await ensureAccountingControlSchema();
       const sql = getSql();
       await sql`
-        CREATE TABLE IF NOT EXISTS credit_card_transfer_matches (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          bank_transaction_id UUID NOT NULL REFERENCES bank_transactions(id) ON DELETE CASCADE,
-          card_transaction_id UUID NOT NULL REFERENCES bank_transactions(id) ON DELETE CASCADE,
-          amount NUMERIC(14,2) NOT NULL,
-          date_difference INTEGER NOT NULL DEFAULT 0,
-          confidence NUMERIC(5,4) NOT NULL DEFAULT 0,
-          status TEXT NOT NULL DEFAULT 'Suggested' CHECK (status IN ('Suggested', 'Matched', 'Ignored')),
-          matched_by TEXT NOT NULL DEFAULT '',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          matched_at TIMESTAMPTZ,
-          UNIQUE (bank_transaction_id, card_transaction_id)
-        )
-      `;
-      await sql`
         CREATE UNIQUE INDEX IF NOT EXISTS card_transfer_active_bank_unique
         ON credit_card_transfer_matches (bank_transaction_id)
         WHERE status <> 'Ignored'
@@ -224,55 +209,7 @@ export function ensureExpenseControlSchema(): Promise<void> {
         WHERE status <> 'Ignored'
       `;
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS receipt_documents (
-          id UUID PRIMARY KEY,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          source TEXT NOT NULL CHECK (source IN ('Upload', 'Google Drive')),
-          source_key TEXT NOT NULL UNIQUE,
-          external_file_id TEXT NOT NULL DEFAULT '',
-          file_name TEXT NOT NULL,
-          mime_type TEXT NOT NULL,
-          size_bytes BIGINT NOT NULL DEFAULT 0,
-          source_url TEXT NOT NULL DEFAULT '',
-          storage_url TEXT NOT NULL DEFAULT '',
-          storage_pathname TEXT NOT NULL DEFAULT '',
-          modified_at_source TIMESTAMPTZ,
-          ocr_status TEXT NOT NULL DEFAULT 'Pending' CHECK (ocr_status IN ('Pending', 'Processed', 'Failed', 'Needs Configuration', 'Unsupported')),
-          merchant_name TEXT NOT NULL DEFAULT '',
-          receipt_date DATE,
-          total_amount NUMERIC(14,2),
-          tax_amount NUMERIC(14,2),
-          currency TEXT NOT NULL DEFAULT 'USD',
-          raw_text TEXT NOT NULL DEFAULT '',
-          entities JSONB NOT NULL DEFAULT '{}'::jsonb,
-          ocr_error TEXT NOT NULL DEFAULT '',
-          created_by TEXT NOT NULL DEFAULT '',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`CREATE INDEX IF NOT EXISTS receipt_documents_business_idx ON receipt_documents (business, receipt_date DESC, created_at DESC)`;
-      await sql`CREATE INDEX IF NOT EXISTS receipt_documents_status_idx ON receipt_documents (business, ocr_status, created_at DESC)`;
 
-      await sql`
-        CREATE TABLE IF NOT EXISTS receipt_transaction_matches (
-          id UUID PRIMARY KEY,
-          receipt_id UUID NOT NULL REFERENCES receipt_documents(id) ON DELETE CASCADE,
-          bank_transaction_id UUID NOT NULL REFERENCES bank_transactions(id) ON DELETE CASCADE,
-          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
-          confidence NUMERIC(5,4) NOT NULL DEFAULT 0,
-          amount_variance NUMERIC(14,2) NOT NULL DEFAULT 0,
-          date_difference INTEGER NOT NULL DEFAULT 0,
-          merchant_score NUMERIC(5,4) NOT NULL DEFAULT 0,
-          status TEXT NOT NULL DEFAULT 'Suggested' CHECK (status IN ('Suggested', 'Matched', 'Ignored')),
-          matched_by TEXT NOT NULL DEFAULT '',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          matched_at TIMESTAMPTZ,
-          UNIQUE (receipt_id, bank_transaction_id)
-        )
-      `;
       await sql`
         CREATE UNIQUE INDEX IF NOT EXISTS receipt_active_document_unique
         ON receipt_transaction_matches (receipt_id)
@@ -329,6 +266,8 @@ async function applyTransferMatch(id: string, actor: string) {
       status = 'Matched', matched_by = ${clean(actor, 255)}, matched_at = NOW(), updated_at = NOW()
     WHERE id = ${id}
   `;
+  const businessRows = await getSql()`SELECT business FROM credit_card_transfer_matches WHERE id = ${id} LIMIT 1` as unknown as Array<{ business: Business }>;
+  if (businessRows[0]) await recordAuditEvent({ business: businessRows[0].business, entityType: "credit_card_transfer_match", entityId: id, action: "matched", actor, details: { bankTransactionId: match.bank_transaction_id, cardTransactionId: match.card_transaction_id } });
 }
 
 export async function refreshCreditCardPaymentMatches(business?: Business) {
@@ -351,8 +290,11 @@ export async function refreshCreditCardPaymentMatches(business?: Business) {
       ORDER BY t.transaction_date DESC
     ` as unknown as BankTransactionRow[];
 
-    const bankPayments = rows.filter((row) => row.account_type !== "credit" && numberValue(row.signed_amount) < 0);
-    const cardCredits = rows.filter((row) => row.account_type === "credit" && numberValue(row.signed_amount) > 0);
+    const claimedRows = await getSql()`SELECT bank_transaction_id, card_transaction_id FROM credit_card_transfer_matches WHERE business = ${activeBusiness} AND status <> 'Ignored'` as unknown as Array<{ bank_transaction_id: string; card_transaction_id: string }>;
+    const claimedBankIds = new Set(claimedRows.map((row) => row.bank_transaction_id));
+    const claimedCardIds = new Set(claimedRows.map((row) => row.card_transaction_id));
+    const bankPayments = rows.filter((row) => row.account_type !== "credit" && numberValue(row.signed_amount) < 0 && !claimedBankIds.has(row.id));
+    const cardCredits = rows.filter((row) => row.account_type === "credit" && numberValue(row.signed_amount) > 0 && !claimedCardIds.has(row.id));
     let suggested = 0;
     let autoMatched = 0;
 
@@ -375,7 +317,10 @@ export async function refreshCreditCardPaymentMatches(business?: Business) {
       const best = candidates[0];
       if (!best || best.confidence < 0.75) continue;
 
-      const inserted = await getSql()`
+      if (claimedCardIds.has(best.card.id) || claimedBankIds.has(bank.id)) continue;
+      let inserted: Array<{ id: string; status: string }> = [];
+      try {
+        inserted = await getSql()`
         INSERT INTO credit_card_transfer_matches (
           id, business, bank_transaction_id, card_transaction_id, amount,
           date_difference, confidence, status
@@ -390,7 +335,13 @@ export async function refreshCreditCardPaymentMatches(business?: Business) {
           updated_at = NOW()
         RETURNING id, status
       ` as unknown as Array<{ id: string; status: string }>;
+      } catch (error) {
+        if (String((error as { code?: string }).code || "") === "23505") continue;
+        throw error;
+      }
       if (!inserted[0]) continue;
+      claimedBankIds.add(bank.id);
+      claimedCardIds.add(best.card.id);
       suggested += inserted[0].status === "Suggested" ? 1 : 0;
       const uniqueHighConfidence = best.confidence >= 0.97
         && (!candidates[1] || best.confidence - candidates[1].confidence >= 0.12);
@@ -547,8 +498,9 @@ export async function ingestReceipt(input: {
   const id = rows[0].id;
 
   if (!documentAiConfigured()) return { id, status: "Needs Configuration" };
+  let parsed: Awaited<ReturnType<typeof processWithDocumentAi>>;
   try {
-    const parsed = await processWithDocumentAi(input.bytes, input.mimeType);
+    parsed = await processWithDocumentAi(input.bytes, input.mimeType);
     await getSql()`
       UPDATE receipt_documents SET
         ocr_status = 'Processed',
@@ -563,8 +515,6 @@ export async function ingestReceipt(input: {
         updated_at = NOW()
       WHERE id = ${id}
     `;
-    await refreshReceiptMatches(input.business);
-    return { id, status: "Processed", ...parsed };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await getSql()`
@@ -572,6 +522,15 @@ export async function ingestReceipt(input: {
       WHERE id = ${id}
     `;
     return { id, status: "Failed", error: message };
+  }
+
+  try {
+    await refreshReceiptMatches(input.business);
+    return { id, status: "Processed", ...parsed };
+  } catch (error) {
+    const matchError = error instanceof Error ? error.message : String(error);
+    console.error("[expense-control] receipt OCR succeeded but match refresh failed", error);
+    return { id, status: "Processed", ...parsed, matchError };
   }
 }
 
@@ -683,6 +642,14 @@ export async function reviewReceiptMatch(input: {
     SELECT id FROM receipt_transaction_matches WHERE id = ${input.id} AND business = ${input.business} LIMIT 1
   ` as unknown as Array<{ id: string }>;
   if (!rows[0]) throw new Error("Receipt match was not found.");
+  if (input.accept) {
+    const conflict = await getSql()`
+      SELECT other.id FROM receipt_transaction_matches target
+      JOIN receipt_transaction_matches other ON other.bank_transaction_id = target.bank_transaction_id AND other.status = 'Matched' AND other.id <> target.id
+      WHERE target.id = ${input.id} AND target.business = ${input.business} LIMIT 1
+    ` as unknown as Array<{ id: string }>;
+    if (conflict[0]) throw new ConflictError("That bank transaction is already matched to another receipt.");
+  }
   await getSql()`
     UPDATE receipt_transaction_matches SET
       status = ${input.accept ? "Matched" : "Ignored"},
@@ -691,6 +658,7 @@ export async function reviewReceiptMatch(input: {
       updated_at = NOW()
     WHERE id = ${input.id}
   `;
+  await recordAuditEvent({ business: input.business, entityType: "receipt_match", entityId: input.id, action: input.accept ? "matched" : "ignored", actor: input.actor });
   return { id: input.id, status: input.accept ? "Matched" : "Ignored" };
 }
 
@@ -758,11 +726,11 @@ export async function syncReceiptDriveFolder(business: Business) {
       unsupported += 1;
       continue;
     }
-    const sourceKey = `drive:${file.id}:${file.modifiedTime || "unknown"}`;
+    const sourceKey = `drive:${file.id}`;
     const existing = await getSql()`
-      SELECT id FROM receipt_documents WHERE source_key = ${sourceKey} LIMIT 1
-    ` as unknown as Array<{ id: string }>;
-    if (existing[0]) {
+      SELECT id, modified_at_source FROM receipt_documents WHERE source_key = ${sourceKey} LIMIT 1
+    ` as unknown as Array<{ id: string; modified_at_source: string | null }>;
+    if (existing[0] && String(existing[0].modified_at_source || "") === String(file.modifiedTime || "")) {
       unchanged += 1;
       continue;
     }

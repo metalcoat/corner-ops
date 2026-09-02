@@ -1,8 +1,10 @@
 "use client";
 
+import { firstName } from "@/app/client-text";
+import { requestFailure, responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
-import ScheduleBoard, { type ScheduleEmployee, type ScheduleShift } from "./schedule-board";
+import ScheduleBoard, { type ScheduleEmployee, type ScheduleShift, type ScheduleTimeOff } from "./schedule-board";
 import WeekCopyPanel from "./week-copy-panel";
 import "./workforce.css";
 
@@ -29,13 +31,12 @@ type Correction = {
   reason: string;
   status: string;
 };
-type TimeOff = {
-  id: string;
+type TimeOff = ScheduleTimeOff & {
+  reason: string;
   employee_name: string;
   starts_on: string;
   ends_on: string;
-  reason: string;
-  status: string;
+  created_at: string;
 };
 type Message = {
   id: string;
@@ -68,10 +69,6 @@ type Tab = "schedule" | "messages" | "requests" | "corrections" | "availability"
 
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 function local(value: string | null) {
   if (!value) return "Missing";
@@ -79,18 +76,40 @@ function local(value: string | null) {
 }
 
 function dateOnly(value: string) {
-  return new Date(`${value}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  const raw = String(value || "").trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+  if (!match) return "Invalid date";
+  const date = new Date(`${match[1]}-${match[2]}-${match[3]}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "Invalid date";
+  return date.toLocaleDateString([], {
+    timeZone: "UTC",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
-function firstName(value: string | null) {
-  const text = String(value || "").trim();
-  if (!text) return "Unknown";
-  if (text.toLowerCase() === "crfrary@gmail.com") return "Chris";
-  const candidate = text.includes("@")
-    ? text.split("@")[0].split(/[._-]/)[0]
-    : text.split(/\s+/)[0];
-  return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+function newYorkDateKey(value: string | Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${map.year}-${map.month}-${map.day}`;
 }
+
+function timeOffShiftConflicts(request: TimeOff, shifts: ScheduleShift[]) {
+  return shifts.filter((shift) => {
+    if (shift.status === "Cancelled" || shift.employeeId !== request.employee_id) return false;
+    const shiftStart = newYorkDateKey(shift.startsAt);
+    const endInstant = new Date(Math.max(new Date(shift.startsAt).getTime(), new Date(shift.endsAt).getTime() - 1));
+    const shiftEnd = newYorkDateKey(endInstant);
+    return request.starts_on <= shiftEnd && request.ends_on >= shiftStart;
+  });
+}
+
 
 export default function WorkforcePage() {
   const [session, setSession] = useState<SessionView | null>(null);
@@ -150,15 +169,56 @@ export default function WorkforcePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...body, business: actionBusiness }),
       });
-      if (!response.ok) throw new Error(await responseMessage(response));
+      const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if (!response.ok) throw new Error(String(payload?.error || requestFailure(response)));
       if (businessRef.current === actionBusiness) {
         await load(actionBusiness);
-        if (businessRef.current === actionBusiness) setNotice(success);
+        if (businessRef.current === actionBusiness) {
+          const email = payload?.email as { configured?: boolean; sent?: number; failed?: number; missingEmail?: number; queued?: number } | undefined;
+          const sms = payload?.sms as { configured?: boolean; sent?: number; failed?: number; missingPhone?: number; notOptedIn?: number } | undefined;
+          const duplicate = Boolean(payload?.duplicate);
+          const delivery = email || sms
+            ? [
+                email ? `Email ${email.queued ? `${email.queued} queued` : email.configured === false ? "not configured" : `${email.sent || 0} sent, ${email.failed || 0} failed, ${email.missingEmail || 0} missing`}` : "",
+                sms ? `SMS ${sms.configured === false ? "not configured" : `${sms.sent || 0} sent, ${sms.failed || 0} failed, ${sms.missingPhone || 0} missing, ${sms.notOptedIn || 0} opted out`}` : "",
+              ].filter(Boolean).join(" · ")
+            : "";
+          setNotice(`${duplicate ? "Schedule publish already processed." : success}${delivery ? ` ${delivery}.` : ""}`);
+        }
       }
+      return payload;
     } catch (error) {
       const message = error instanceof Error ? error.message : "The operation failed.";
       if (businessRef.current === actionBusiness) setNotice(message);
       throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveTimeOff(request: TimeOff) {
+    const actionBusiness = businessRef.current;
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/workforce", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "time-off-review", business: actionBusiness, id: request.id, approve: true }),
+      });
+      const payload = await response.json().catch(() => null) as { error?: string; requiresReassignment?: boolean; conflictingShifts?: unknown[]; employeeName?: string } | null;
+      if (!response.ok) throw new Error(payload?.error || requestFailure(response));
+      if (businessRef.current === actionBusiness) {
+        await load(actionBusiness);
+        if (businessRef.current === actionBusiness) {
+          const count = payload?.conflictingShifts?.length || 0;
+          setNotice(payload?.requiresReassignment
+            ? `Time off approved. ${payload.employeeName || request.employee_name} is already assigned to ${count} conflicting shift${count === 1 ? "" : "s"}. Reassign or open ${count === 1 ? "that shift" : "those shifts"} before publishing/resending.`
+            : "Time off approved.");
+        }
+      }
+    } catch (error) {
+      if (businessRef.current === actionBusiness) setNotice(error instanceof Error ? error.message : "Time off could not be approved.");
     } finally {
       setBusy(false);
     }
@@ -236,6 +296,7 @@ export default function WorkforcePage() {
         business={business}
         employees={activeEmployees}
         shifts={currentData?.shifts || []}
+        timeOff={currentData?.timeOff || []}
         busy={busy}
         runAction={action}
       />
@@ -263,7 +324,10 @@ export default function WorkforcePage() {
       </article>
       <article className="workforcePanel">
         <div className="wfPanelHeader"><div><p className="wfEyebrow">Requested days away</p><h2>Time off</h2></div></div>
-        <div className="wfList">{(currentData?.timeOff || []).map((request) => <div className="wfRequest" key={request.id}><div><strong>{request.employee_name}</strong><span>{dateOnly(request.starts_on)} through {dateOnly(request.ends_on)}</span>{request.reason && <p>{request.reason}</p>}</div><div className="wfActions"><span className={`wfBadge ${request.status.toLowerCase()}`}>{request.status}</span>{request.status === "Pending" && <><button disabled={busy} onClick={() => void action({ action: "time-off-review", id: request.id, approve: true }, "Time off approved.").catch(() => undefined)}>Approve</button><button disabled={busy} onClick={() => void action({ action: "time-off-review", id: request.id, approve: false }, "Time off rejected.").catch(() => undefined)}>Reject</button></>}</div></div>)}{!currentData?.timeOff.length && <p className="wfEmpty">No time-off requests.</p>}</div>
+        <div className="wfList">{(currentData?.timeOff || []).map((request) => {
+          const conflicts = timeOffShiftConflicts(request, currentData?.shifts || []);
+          return <div className="wfRequest" key={request.id}><div><strong>{request.employee_name}</strong><span>{dateOnly(request.starts_on)} through {dateOnly(request.ends_on)}</span><small>Submitted {local(request.created_at)} via Employee Hub</small>{request.reason && <p>{request.reason}</p>}{conflicts.length > 0 && <p className="wfTimeOffConflict"><strong>Schedule conflict:</strong> already assigned to {conflicts.map((shift) => `${local(shift.startsAt)}–${new Date(shift.endsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`).join("; ")}. {request.status === "Pending" ? "Approving this request will require reassignment." : request.status === "Approved" ? "Reassign or open the conflicting shift." : ""}</p>}</div><div className="wfActions"><span className={`wfBadge ${request.status.toLowerCase()}`}>{request.status}</span>{request.status === "Pending" && <><button disabled={busy} onClick={() => void approveTimeOff(request)}>Approve</button><button disabled={busy} onClick={() => void action({ action: "time-off-review", id: request.id, approve: false }, "Time off rejected.").catch(() => undefined)}>Reject</button></>}</div></div>;
+        })}{!currentData?.timeOff.length && <p className="wfEmpty">No time-off requests.</p>}</div>
       </article>
     </section>}
 

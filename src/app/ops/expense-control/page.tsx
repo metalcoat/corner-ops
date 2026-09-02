@@ -1,5 +1,6 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
 import { FormEvent, useEffect, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -102,10 +103,6 @@ const money = (value: number | null) => value === null
 const percent = (value: number) => `${Math.round(value * 100)}%`;
 const local = (value: string | null) => value ? new Date(value).toLocaleString() : "Never";
 
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
 
 export default function ExpenseControlPage() {
   const [session, setSession] = useState<SessionView | null>(null);

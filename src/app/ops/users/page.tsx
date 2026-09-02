@@ -1,5 +1,6 @@
 "use client";
 
+import { requestFailure } from "@/app/client-http";
 import { FormEvent, useEffect, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -20,7 +21,7 @@ type User = {
 
 async function message(response: Response): Promise<string> {
   const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
+  return payload?.error || requestFailure(response);
 }
 
 export default function UsersPage() {

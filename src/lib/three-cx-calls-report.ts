@@ -237,9 +237,9 @@ export async function threeCxDeliCallReport(startText: string, endText: string) 
       final_number, final_dn, chain, from_type, to_type, final_type,
       from_display_name, to_display_name, final_display_name, missed_queue_calls, received_at
     FROM three_cx_cdr_records
-    WHERE COALESCE(ended_at, started_at, received_at) >= ${queryStart.toISOString()}
-      AND COALESCE(started_at, ended_at, received_at) < ${queryEnd.toISOString()}
-    ORDER BY COALESCE(ended_at, started_at, received_at)
+    WHERE event_at >= ${queryStart.toISOString()}
+      AND event_at < ${queryEnd.toISOString()}
+    ORDER BY event_at
   ` as unknown as Array<Record<string, unknown>>;
 
   const records = rows.map(mapStored);

@@ -361,8 +361,8 @@ function resultFromAzure(operation: AzureAnalyzeOperation, documentType: Invoice
   if (fields.totalAmount.value && lineTotal && !approximateEqual(fields.totalAmount.value, lineTotal + fields.taxAmount.value, 0.5)) {
     warnings.push(`Extracted line items plus tax total $${(lineTotal + fields.taxAmount.value).toFixed(2)}, which differs from the document total.`);
   }
-  if ((analyzeResult.pages?.length || 0) >= (receipt ? 1 : 2)) {
-    warnings.push(`Only the first ${receipt ? "page" : "two pages"} were analyzed to stay within the Azure free-tier document limits.`);
+  if (!receipt && (analyzeResult.pages?.length || 0) >= 2) {
+    warnings.push("Only the first two pages were analyzed to stay within the Azure free-tier document limits.");
   }
   if (overallConfidence > 0 && overallConfidence < 0.7) warnings.push("Overall OCR confidence is low; compare every field with the source document.");
   for (const [label, field] of Object.entries(fields)) {

@@ -23,7 +23,9 @@ export type AuditEvent = {
   id: string;
   business: Business;
   documentId: string | null;
-  action: "uploaded" | "updated" | "archived" | "restored" | "deleted";
+  entityType: string;
+  entityId: string;
+  action: string;
   actor: string;
   details: Record<string, unknown>;
   createdAt: string;
