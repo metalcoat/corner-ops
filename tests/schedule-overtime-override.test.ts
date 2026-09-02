@@ -11,9 +11,12 @@ test("schedule publishing keeps 38-plus hours as a warning and permits explicit 
   assert.match(board, /blockingIssueCount - publishAnalysis\.overForty\.length/);
   assert.match(board, /OVERTIME WARNING/);
   assert.match(board, /allowOvertime/);
-  assert.match(board, /disabled=\{busy \|\| !weekShifts\.length \|\| schedulePublishBlocked\}/);
+  assert.match(board, /disabled=\{busy \|\| !weekShifts\.length\}/);
   assert.match(board, /Manager confirmation required to publish/);
+  assert.doesNotMatch(board, /disabled=\{busy \|\| !weekShifts\.length \|\| schedulePublishBlocked/);
   assert.doesNotMatch(board, /disabled=\{busy \|\| !weekShifts\.length \|\| !publishAnalysis\.canPublish/);
+  assert.match(board, /Click to see the schedule issues preventing publication/);
+  assert.match(board, /open=\{schedulePublishBlocked \|\| overtimeApprovalRequired\}/);
 });
 
 test("server requires and records the manager overtime approval", () => {

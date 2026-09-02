@@ -667,7 +667,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
         <button type="button" onClick={() => setWeekStart(addDays(weekStart, -7))}>← Previous</button>
         <button type="button" onClick={() => setWeekStart(startOfMonday(new Date()))}>Today</button>
         <button type="button" onClick={() => setWeekStart(addDays(weekStart, 7))}>Next →</button>
-        <button type="button" className="schedulePrimary" disabled={busy || !weekShifts.length || schedulePublishBlocked} title={overtimeApprovalRequired ? "Publishing requires manager overtime confirmation." : undefined} onClick={() => void publishWeek()}>
+        <button type="button" className="schedulePrimary" disabled={busy || !weekShifts.length} title={schedulePublishBlocked ? "Click to see the schedule issues preventing publication." : overtimeApprovalRequired ? "Publishing requires manager overtime confirmation." : undefined} onClick={() => void publishWeek()}>
           {draftCount > 0 ? `Publish (${draftCount})` : "Resend"}
         </button>
         <button type="button" className="schedulePrimary" onClick={() => setEditor(defaultEditor(activeEmployees[0]?.id || null, weekStart, activeEmployees[0]))}>+ Shift</button>
@@ -687,7 +687,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
           {loneWorkerApplies && <span className={publishAnalysis.loneWorkerViolations.length ? "danger" : "clear"}>{publishAnalysis.loneWorkerViolations.length} alone</span>}
         </div>
       </div>
-      {issueCount > 0 && <details className="scheduleIssueDetails">
+      {issueCount > 0 && <details className="scheduleIssueDetails" open={schedulePublishBlocked || overtimeApprovalRequired}>
         <summary>View {issueCount} schedule warning{issueCount === 1 ? "" : "s"}</summary>
         <div className="scheduleIssueList">
           {publishAnalysis.overThirtyEight.map((employee) => <div className="scheduleIssue warning" key={`38-${employee.employeeId}`}><strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} paid hours.</span></div>)}
