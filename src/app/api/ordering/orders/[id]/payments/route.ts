@@ -4,6 +4,8 @@ import { assertOrderReadyForCheckout, checkoutState, commitTender, PaymentConfli
 import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { paymentStationProfile, PaymentStationError } from "@/lib/ordering-payment-stations";
+import { submitDraftOrder } from "@/lib/ordering-order-lifecycle";
+import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
 
 export const runtime = "nodejs";
 
@@ -65,7 +67,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         last4: "4242",
         details: { simulated: true, localDevelopment: true },
       } : undefined,
-    });await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});return Response.json(result,{status:201});
+    });
+    if(result.order.payment_status==="paid"&&result.order.status==="draft"){
+      await submitDraftOrder(id,business,actor);
+      await dispatchSubmittedOrderPrintJobs(id,business);
+    }else await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});
+    return Response.json(result,{status:201});
   } catch (error) {
     if (error instanceof PaymentConflictError || error instanceof PaymentStationError) return Response.json({ error: error.message }, { status: 409 });
     return apiError(error);
