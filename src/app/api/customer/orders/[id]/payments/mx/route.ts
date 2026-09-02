@@ -79,6 +79,7 @@ export async function POST(
         avsStreet: customer?.billingAddress?.street1,
         avsZip: customer?.billingAddress?.postalCode,
         requireAvsZip: owner.row.service_type === "pickup",
+        requireAvsStreet: owner.row.service_type === "pickup",
       });
     }
     if (body.action !== "confirm")

@@ -12,6 +12,7 @@ export type MxPaymentInitialization = {
   avsStreet?: string;
   avsZip?: string;
   requireAvsZip?: boolean;
+  requireAvsStreet?: boolean;
 };
 
 export default function MxKeyedPaymentDialog({
@@ -27,6 +28,7 @@ export default function MxKeyedPaymentDialog({
   const [expiry, setExpiry] = useState("");
   const [cvv, setCvv] = useState("");
   const [billingZip, setBillingZip] = useState(payment.avsZip || "");
+  const [billingStreet, setBillingStreet] = useState(payment.avsStreet || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   function updateExpiry(value: string) {
@@ -66,6 +68,8 @@ export default function MxKeyedPaymentDialog({
         );
       if (payment.requireAvsZip && billingZip.replace(/\D/g, "").length < 5)
         throw new Error("Enter the card billing ZIP code.");
+      if (payment.requireAvsStreet && billingStreet.trim().length < 1)
+        throw new Error("Enter the card billing street address.");
       const year = match[2].length === 2 ? `20${match[2]}` : match[2];
       const response = await fetch(
         `${payment.paymentUrl}?token=${encodeURIComponent(payment.token)}&echo=true`,
@@ -85,7 +89,7 @@ export default function MxKeyedPaymentDialog({
               expiryMonth: match[1].padStart(2, "0"),
               expiryYear: year,
               cvv: cvv.replace(/\D/g, ""),
-              ...(payment.avsStreet ? { avsStreet: payment.avsStreet } : {}),
+              ...(billingStreet ? { avsStreet: billingStreet.trim() } : {}),
               ...(billingZip ? { avsZip: billingZip.replace(/\s/g, "") } : {}),
             },
           }),
@@ -163,21 +167,37 @@ export default function MxKeyedPaymentDialog({
           </label>
         </div>
         {payment.requireAvsZip && (
-          <label>
-            Billing ZIP code
-            <input
-              inputMode="numeric"
-              autoComplete="postal-code"
-              value={billingZip}
-              onChange={(e) =>
-                setBillingZip(
-                  e.target.value.replace(/[^\d-]/g, "").slice(0, 10),
-                )
-              }
-              placeholder="ZIP code"
-              required
-            />
-          </label>
+          <>
+            {payment.requireAvsStreet && (
+              <label>
+                Billing street address
+                <input
+                  autoComplete="address-line1"
+                  value={billingStreet}
+                  onChange={(e) =>
+                    setBillingStreet(e.target.value.slice(0, 120))
+                  }
+                  placeholder="Street address"
+                  required
+                />
+              </label>
+            )}
+            <label>
+              Billing ZIP code
+              <input
+                inputMode="numeric"
+                autoComplete="postal-code"
+                value={billingZip}
+                onChange={(e) =>
+                  setBillingZip(
+                    e.target.value.replace(/[^\d-]/g, "").slice(0, 10),
+                  )
+                }
+                placeholder="ZIP code"
+                required
+              />
+            </label>
+          </>
         )}
         <small>
           Card details are sent directly to MX Merchant and never pass through
