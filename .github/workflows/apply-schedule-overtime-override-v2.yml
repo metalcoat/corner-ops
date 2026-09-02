@@ -26,6 +26,20 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Preserve backslashes in regex replacement text
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("tools/apply-schedule-overtime-override.py")
+          text = path.read_text(encoding="utf-8")
+          old = "updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)"
+          new = "updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.S)"
+          if text.count(old) != 1:
+              raise SystemExit("Could not find the guarded regex replacement line.")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
       - name: Apply guarded source changes
         run: python3 tools/apply-schedule-overtime-override.py
 
