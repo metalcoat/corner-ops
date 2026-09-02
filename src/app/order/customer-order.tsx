@@ -1419,24 +1419,20 @@ export default function CustomerOrder() {
           ) : (
             <fieldset className="customerContact">
               <legend>Contact</legend>
-              {(!catalog?.customer.authenticated || !firstName.trim()) && (
-                <>
-                  <input
-                    aria-label="First name"
-                    autoComplete="given-name"
-                    placeholder="First name"
-                    value={firstName}
-                    onChange={(event) => setFirstName(event.target.value)}
-                  />
-                  <input
-                    aria-label="Last name"
-                    autoComplete="family-name"
-                    placeholder="Last name"
-                    value={lastName}
-                    onChange={(event) => setLastName(event.target.value)}
-                  />
-                </>
-              )}
+              <input
+                aria-label="First name"
+                autoComplete="given-name"
+                placeholder="First name"
+                value={firstName}
+                onChange={(event) => setFirstName(event.target.value)}
+              />
+              <input
+                aria-label="Last name"
+                autoComplete="family-name"
+                placeholder="Last name"
+                value={lastName}
+                onChange={(event) => setLastName(event.target.value)}
+              />
               <input
                 aria-label="Phone number"
                 autoComplete="tel"
