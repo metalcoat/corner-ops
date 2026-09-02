@@ -30,6 +30,19 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Repair SQL quote boundary in one-time patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("tools/apply-archived-schedule-shift-fix.py")
+          text = path.read_text(encoding="utf-8")
+          needle = "      AND t.status = 'Approved' ''',"
+          if text.count(needle) != 2:
+              raise SystemExit(f"Expected two SQL quote-boundary matches, found {text.count(needle)}")
+          path.write_text(text.replace(needle, "      AND t.status = 'Approved'\n''',"), encoding="utf-8")
+          PY
+
       - name: Apply guarded source changes
         run: python3 tools/apply-archived-schedule-shift-fix.py
 
