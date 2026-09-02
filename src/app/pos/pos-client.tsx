@@ -708,14 +708,20 @@ export default function PosClient({
         );
       })
       .catch(() => setReceiptPrinters([]));
-    fetch("/api/ordering/orders/status/payments/mx", { cache: "no-store" })
+    fetch("/api/ordering/payments/status", { cache: "no-store" })
       .then(async (response) => {
         const body = await response.json();
         if (!response.ok)
-          throw new Error(body.error || "Helcim status unavailable.");
+          throw new Error(body.error || "Payment provider status unavailable.");
         return body;
       })
-      .then((body) => setHelcimStatus(body as HelcimStatus))
+      .then((body) =>
+        setHelcimStatus({
+          checkoutEnabled: Boolean(body.onlineCheckoutEnabled),
+          apiTokenConfigured: Boolean(body.configured),
+          localDevelopment: Boolean(body.sandbox),
+        }),
+      )
       .catch(() =>
         setHelcimStatus({ checkoutEnabled: false, apiTokenConfigured: false }),
       );
