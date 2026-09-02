@@ -11,6 +11,7 @@ export type MxPaymentInitialization = {
   customerName?: string;
   avsStreet?: string;
   avsZip?: string;
+  requireAvsZip?: boolean;
 };
 
 export default function MxKeyedPaymentDialog({
@@ -25,11 +26,27 @@ export default function MxKeyedPaymentDialog({
   const [number, setNumber] = useState("");
   const [expiry, setExpiry] = useState("");
   const [cvv, setCvv] = useState("");
+  const [billingZip, setBillingZip] = useState(payment.avsZip || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   function updateExpiry(value: string) {
     const digits = value.replace(/\D/g, "").slice(0, 4);
-    setExpiry(digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits);
+    setExpiry(
+      digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits,
+    );
+  }
+  function updateCardNumber(value: string) {
+    const digits = value.replace(/\D/g, "").slice(0, 19);
+    const groups = /^3[47]/.test(digits)
+      ? [digits.slice(0, 4), digits.slice(4, 10), digits.slice(10, 15)]
+      : [
+          digits.slice(0, 4),
+          digits.slice(4, 8),
+          digits.slice(8, 12),
+          digits.slice(12, 16),
+          digits.slice(16, 19),
+        ];
+    setNumber(groups.filter(Boolean).join(" "));
   }
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -47,6 +64,8 @@ export default function MxKeyedPaymentDialog({
         throw new Error(
           "Enter a valid card number, expiration, and security code.",
         );
+      if (payment.requireAvsZip && billingZip.replace(/\D/g, "").length < 5)
+        throw new Error("Enter the card billing ZIP code.");
       const year = match[2].length === 2 ? `20${match[2]}` : match[2];
       const response = await fetch(
         `${payment.paymentUrl}?token=${encodeURIComponent(payment.token)}&echo=true`,
@@ -67,7 +86,7 @@ export default function MxKeyedPaymentDialog({
               expiryYear: year,
               cvv: cvv.replace(/\D/g, ""),
               ...(payment.avsStreet ? { avsStreet: payment.avsStreet } : {}),
-              ...(payment.avsZip ? { avsZip: payment.avsZip } : {}),
+              ...(billingZip ? { avsZip: billingZip.replace(/\s/g, "") } : {}),
             },
           }),
         },
@@ -117,7 +136,7 @@ export default function MxKeyedPaymentDialog({
             inputMode="numeric"
             autoComplete="cc-number"
             value={number}
-            onChange={(e) => setNumber(e.target.value)}
+            onChange={(e) => updateCardNumber(e.target.value)}
             placeholder="4242 4242 4242 4242"
           />
         </label>
@@ -128,7 +147,7 @@ export default function MxKeyedPaymentDialog({
               inputMode="numeric"
               autoComplete="cc-exp"
               value={expiry}
-          onChange={(e) => updateExpiry(e.target.value)}
+              onChange={(e) => updateExpiry(e.target.value)}
               placeholder="MM/YY"
             />
           </label>
@@ -143,6 +162,23 @@ export default function MxKeyedPaymentDialog({
             />
           </label>
         </div>
+        {payment.requireAvsZip && (
+          <label>
+            Billing ZIP code
+            <input
+              inputMode="numeric"
+              autoComplete="postal-code"
+              value={billingZip}
+              onChange={(e) =>
+                setBillingZip(
+                  e.target.value.replace(/[^\d-]/g, "").slice(0, 10),
+                )
+              }
+              placeholder="ZIP code"
+              required
+            />
+          </label>
+        )}
         <small>
           Card details are sent directly to MX Merchant and never pass through
           Corner Deli servers.
