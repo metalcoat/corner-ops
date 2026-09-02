@@ -1,0 +1,112 @@
+name: Apply schedule publish feedback fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-schedule-publish-feedback.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: schedule-publish-feedback-fix
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Keep Publish clickable and expose blockers
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected one match in {path}, found {count}: {old[:160]!r}")
+              file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          board = "src/app/ops/workforce/schedule-board.tsx"
+          replace_once(
+              board,
+              '''        <button type="button" className="schedulePrimary" disabled={busy || !weekShifts.length || schedulePublishBlocked} title={overtimeApprovalRequired ? "Publishing requires manager overtime confirmation." : undefined} onClick={() => void publishWeek()}>''',
+              '''        <button
+          type="button"
+          className="schedulePrimary"
+          disabled={busy || !weekShifts.length}
+          title={schedulePublishBlocked
+            ? "Click to see the schedule issues preventing publication."
+            : overtimeApprovalRequired
+              ? "Publishing requires manager overtime confirmation."
+              : undefined}
+          onClick={() => void publishWeek()}
+        >''',
+          )
+          replace_once(
+              board,
+              '''      {issueCount > 0 && <details className="scheduleIssueDetails">''',
+              '''      {issueCount > 0 && <details className="scheduleIssueDetails" open={schedulePublishBlocked || overtimeApprovalRequired}>''',
+          )
+
+          test_path = "tests/schedule-overtime-override.test.ts"
+          replace_once(
+              test_path,
+              '''  assert.match(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| schedulePublishBlocked\\}/);''',
+              '''  assert.match(board, /disabled=\\{busy \\|\\| !weekShifts\\.length\\}/);''',
+          )
+          replace_once(
+              test_path,
+              '''  assert.doesNotMatch(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| !publishAnalysis\\.canPublish/);''',
+              '''  assert.doesNotMatch(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| schedulePublishBlocked/);
+  assert.doesNotMatch(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| !publishAnalysis\\.canPublish/);
+  assert.match(board, /Click to see the schedule issues preventing publication/);
+  assert.match(board, /open=\\{schedulePublishBlocked \\|\\| overtimeApprovalRequired\\}/);''',
+          )
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build application
+        run: npm run build
+        env:
+          APP_EMAIL: owner@example.test
+          DATABASE_URL: ""
+          BLOB_READ_WRITE_TOKEN: vercel_blob_rw_placeholder
+          SESSION_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          EMPLOYMENT_FORMS_ENCRYPTION_KEY: abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+
+      - name: Commit tested fix
+        shell: bash
+        run: |
+          rm -f .github/workflows/apply-schedule-publish-feedback.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Show why a draft schedule cannot publish" \
+            -m "Keep the Publish button clickable when validation blocks the week, automatically expand blocking issues, and preserve manager overtime confirmation."
+          git pull --rebase origin main
+          git push origin HEAD:main
