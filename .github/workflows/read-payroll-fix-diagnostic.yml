@@ -13,7 +13,7 @@ jobs:
   read:
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for production diagnostic
+      - name: Wait for corrected production diagnostic
         shell: bash
         run: |
           set -euo pipefail
