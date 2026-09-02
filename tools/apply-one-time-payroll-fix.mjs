@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 
+// This guarded script runs only during the production deployment and is removed after verification.
 const productionBuild = process.env.VERCEL_ENV === "production";
 const databaseUrl = process.env.DATABASE_URL?.trim();
 
