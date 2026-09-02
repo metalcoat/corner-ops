@@ -39,7 +39,7 @@ export function ensureOrderingCustomerSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_customer_addresses ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ`;
       await sql`UPDATE ordering_customer_addresses SET label=CASE
         WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('3000fordstreetextension','3000fordstextension','3000fordstreetext') THEN 'Walmart'
-        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g')='1515knoxstreet' OR regexp_replace(lower(line1),'[^a-z0-9]','','g')='1515knoxst' THEN 'Step by Step'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('1515knox','1515knoxstreet','1515knoxst') THEN 'Step by Step'
         WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('830proctoravenue','830proctorave') THEN 'New Ansen'
         WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('100chimneypointdrive','100chimneypointdr') THEN 'Old Ansen'
         WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('214kingstreet','214kingst') THEN 'Claxton-Hepburn Medical Center'
