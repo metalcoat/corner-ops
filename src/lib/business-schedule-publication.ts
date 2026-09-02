@@ -364,7 +364,7 @@ export async function publishBusinessScheduleWeek(input: {
     stateHash,
     mode,
   });
-  const publicationId = crypto.randomUUID();
+  let publicationId = crypto.randomUUID();
   const emailConfigured = Boolean(emailConfiguration());
   const emailMissingCount = contacts.filter((employee) => !clean(employee.email, 255)).length;
   const emailContacts = contacts.filter((employee) => clean(employee.email, 255));
@@ -419,35 +419,86 @@ export async function publishBusinessScheduleWeek(input: {
 
   if (!reserved[0]) {
     const existing = await sql`
-      SELECT id, delivery_status, email_sent_count, email_missing_count, email_failed_count, email_configured,
+      SELECT id, details, published_at, delivery_status,
+        email_sent_count, email_missing_count, email_failed_count, email_configured,
         sms_sent_count, sms_missing_count, sms_failed_count, sms_configured
       FROM schedule_publications WHERE idempotency_key = ${idempotencyKey} LIMIT 1
     ` as unknown as PublicationRow[];
     const row = existing[0];
-    return {
-      publicationId: row?.id || null,
-      duplicate: true,
-      weekStart: input.weekStart,
-      weekEnd,
-      publishedShifts: shifts.length,
-      activeEmployees: allContacts.length,
-      affectedEmployees: contacts.length,
-      openShifts: openShifts.length,
-      mode,
-      deliveryStatus: row?.delivery_status || "Pending",
-      email: { configured: Boolean(row?.email_configured), sent: Number(row?.email_sent_count || 0), failed: Number(row?.email_failed_count || 0), missingEmail: Number(row?.email_missing_count || 0) },
-      sms: { configured: Boolean(row?.sms_configured), sent: Number(row?.sms_sent_count || 0), failed: Number(row?.sms_failed_count || 0), missingPhone: Number(row?.sms_missing_count || 0), notOptedIn: 0 },
-    };
+    const reservationAgeMs = row?.published_at
+      ? Date.now() - new Date(row.published_at).getTime()
+      : Number.POSITIVE_INFINITY;
+    const resumeStalledPublication = Boolean(
+      row?.id
+      && draftRows.length > 0
+      && (row.delivery_status === "Failed" || reservationAgeMs >= 15_000),
+    );
+
+    if (!resumeStalledPublication) {
+      return {
+        publicationId: row?.id || null,
+        duplicate: true,
+        weekStart: input.weekStart,
+        weekEnd,
+        publishedShifts: shifts.length,
+        activeEmployees: allContacts.length,
+        affectedEmployees: contacts.length,
+        openShifts: openShifts.length,
+        mode,
+        deliveryStatus: row?.delivery_status || "Pending",
+        email: { configured: Boolean(row?.email_configured), sent: Number(row?.email_sent_count || 0), failed: Number(row?.email_failed_count || 0), missingEmail: Number(row?.email_missing_count || 0) },
+        sms: { configured: Boolean(row?.sms_configured), sent: Number(row?.sms_sent_count || 0), failed: Number(row?.sms_failed_count || 0), missingPhone: Number(row?.sms_missing_count || 0), notOptedIn: 0 },
+      };
+    }
+
+    publicationId = row.id;
+    await sql.transaction([
+      sql`DELETE FROM schedule_publication_deliveries WHERE publication_id = ${publicationId}`,
+      sql`
+        UPDATE schedule_publications SET
+          published_by = ${input.actor},
+          shift_count = ${shifts.length},
+          active_employee_count = ${contacts.length},
+          email_sent_count = 0,
+          email_missing_count = ${emailMissingCount},
+          email_failed_count = 0,
+          email_configured = ${emailConfigured},
+          sms_sent_count = 0,
+          sms_missing_count = 0,
+          sms_failed_count = 0,
+          sms_configured = FALSE,
+          details = ${JSON.stringify({
+            ...baseDetails,
+            recoveredStalledAttempt: true,
+            recoveredAt: new Date().toISOString(),
+          })}::jsonb,
+          delivery_status = 'Pending',
+          published_at = NOW()
+        WHERE id = ${publicationId}
+      `,
+    ]);
   }
 
-  const messageQueries = contacts.map((employee) => sql`
-    INSERT INTO employee_messages (
-      id, business, sender_name, recipient_employee_id, message_type, body
-    ) VALUES (
-      ${crypto.randomUUID()}, ${input.business}, ${input.actor}, ${employee.id}, 'Direct',
-      ${`Your ${input.business} schedule was ${scheduleVerb} for ${rangeLabel}.${hubUrl ? ` Review it in the Employee Portal: ${hubUrl}` : " Review it in the Employee Hub."}`}
-    )
-  `);
+  const messageQueries = contacts.map((employee) => {
+    const messageId = crypto.randomUUID();
+    return sql`
+      WITH inserted AS (
+        INSERT INTO employee_messages (
+          id, business, conversation_key, sender_name,
+          recipient_employee_id, message_type, body
+        ) VALUES (
+          ${messageId}::uuid, ${input.business}, ${`owner:${employee.id}`}, ${input.actor},
+          ${employee.id}::uuid, 'Conversation',
+          ${`Your ${input.business} schedule was ${scheduleVerb} for ${rangeLabel}.${hubUrl ? ` Review it in the Employee Portal: ${hubUrl}` : " Review it in the Employee Hub."}`}
+        )
+        RETURNING id
+      )
+      INSERT INTO employee_message_recipients (message_id, employee_id)
+      SELECT inserted.id, ${employee.id}::uuid
+      FROM inserted
+      ON CONFLICT (message_id, employee_id) DO NOTHING
+    `;
+  });
   const emailJobQueries = emailContacts.map((employee) => sql`
     INSERT INTO schedule_publication_deliveries (
       id, publication_id, employee_id, channel, destination, subject, body, idempotency_key

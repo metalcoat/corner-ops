@@ -180,7 +180,7 @@ export default function WorkforcePage() {
           const delivery = email || sms
             ? [
                 email ? `Email ${email.queued ? `${email.queued} queued` : email.configured === false ? "not configured" : `${email.sent || 0} sent, ${email.failed || 0} failed, ${email.missingEmail || 0} missing`}` : "",
-                sms ? `SMS ${sms.configured === false ? "not configured" : `${sms.sent || 0} sent, ${sms.failed || 0} failed, ${sms.missingPhone || 0} missing, ${sms.notOptedIn || 0} opted out`}` : "",
+                sms ? `SMS ${sms.configured === false ? "unavailable; schedule publication is not blocked" : `${sms.sent || 0} sent, ${sms.failed || 0} failed, ${sms.missingPhone || 0} missing, ${sms.notOptedIn || 0} opted out`}` : "",
               ].filter(Boolean).join(" · ")
             : "";
           setNotice(`${duplicate ? "Schedule publish already processed." : success}${delivery ? ` ${delivery}.` : ""}`);
