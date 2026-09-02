@@ -53,7 +53,7 @@ export function ensureOrderingCustomerSchema(): Promise<void> {
         WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('301champlainstreet','301champlainst') THEN 'Sunoco · Champlain Street'
         WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('1117newyorkavenue','1117newyorkave') THEN 'Sunoco · New York Avenue'
         ELSE label END,updated_at=NOW()
-        WHERE active=TRUE AND lower(trim(label)) IN ('','home','address','delivery','other')`;
+        WHERE active=TRUE AND lower(trim(label)) IN ('','home','address','delivery','other','imported')`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS first_name_snapshot TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS last_name_snapshot TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS phone_snapshot TEXT NOT NULL DEFAULT ''`;
