@@ -1,4 +1,4 @@
-name: Read production onboarding reminder candidates
+name: Verify production onboarding reminder delivery
 
 on:
   push:
@@ -13,25 +13,25 @@ jobs:
   read:
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for production onboarding diagnostic
+      - name: Wait for all three onboarding reminder results
         shell: bash
         run: |
           set -euo pipefail
-          url="https://corner-ops.vercel.app/onboarding-reminder-candidates.json?commit=${GITHUB_SHA}"
+          url="https://corner-ops.vercel.app/onboarding-reminder-send-result.json?commit=${GITHUB_SHA}"
           last=""
-          for attempt in $(seq 1 40); do
+          for attempt in $(seq 1 48); do
             body="$(curl --fail --silent --show-error --header 'Cache-Control: no-cache' "$url" 2>/dev/null || true)"
             if [ -n "$body" ]; then last="$body"; fi
-            if printf '%s' "$body" | grep -q '"newestThree"'; then
-              echo "ONBOARDING_DIAGNOSTIC_BEGIN"
+            if printf '%s' "$body" | grep -q '"sentOrPreviouslySent": 3'; then
+              echo "ONBOARDING_SEND_RESULT_BEGIN"
               printf '%s\n' "$body"
-              echo "ONBOARDING_DIAGNOSTIC_END"
+              echo "ONBOARDING_SEND_RESULT_END"
               exit 0
             fi
             sleep 15
           done
-          echo "ONBOARDING_DIAGNOSTIC_LAST_BEGIN"
+          echo "ONBOARDING_SEND_RESULT_LAST_BEGIN"
           printf '%s\n' "$last"
-          echo "ONBOARDING_DIAGNOSTIC_LAST_END"
-          echo "Production onboarding diagnostic was not available after 10 minutes." >&2
+          echo "ONBOARDING_SEND_RESULT_LAST_END"
+          echo "Production did not confirm all three onboarding reminder texts after 12 minutes." >&2
           exit 1
