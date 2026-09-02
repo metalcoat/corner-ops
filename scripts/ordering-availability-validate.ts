@@ -23,6 +23,9 @@ async function integration() {
   const sql = getSql(), windowId = randomUUID(), closureId = randomUUID();
   try {
     await sql`INSERT INTO ordering_operating_windows(id,business,service_type,weekday,opens_at,closes_at,active,updated_by) VALUES(${windowId},'Corner Deli','pickup',4,'09:00','21:30',TRUE,'availability-test')`;
+    const preOpen = await resolveOrderingAvailability({ business: "Corner Deli", serviceType: "pickup", at: new Date("2026-08-13T12:00:00Z"), allowPreOpenAsap: true });
+    assert.equal(preOpen.orderable, true);
+    assert.equal(preOpen.open, false);
     assert.equal((await resolveOrderingAvailability({ business: "Corner Deli", serviceType: "pickup", at: new Date("2026-08-14T01:29:59Z") })).orderable, true);
     assert.equal((await resolveOrderingAvailability({ business: "Corner Deli", serviceType: "pickup", at: new Date("2026-08-14T01:30:59Z") })).orderable, true);
     assert.equal((await resolveOrderingAvailability({ business: "Corner Deli", serviceType: "pickup", at: new Date("2026-08-14T01:31:00Z") })).orderable, false);

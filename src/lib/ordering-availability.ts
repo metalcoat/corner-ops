@@ -73,6 +73,7 @@ export async function resolveOrderingAvailability(input: {
   serviceType: string;
   at?: Date;
   orderEntryStartedAt?: Date | null;
+  allowPreOpenAsap?: boolean;
 }): Promise<ResolvedOrderingAvailability> {
   await ensureOrderingTimingSchema();
   const sql = getSql();
@@ -133,6 +134,8 @@ export async function resolveOrderingAvailability(input: {
     const opensAt = wallTimeUtc(local, orderingOpen, timezone);
     const cutoffAt = wallTimeUtc(local, cutoff, timezone);
     if (opensAt > at && (!nextOpen || opensAt < nextOpen)) nextOpen = opensAt;
+    if (input.allowPreOpenAsap && currentMinute < orderingOpen)
+      return { open: false, orderable: true, reason: "ASAP order accepted before opening.", opensAt, cutoffAt, nextAvailableAt: opensAt, sourceRule: source, timezone };
     if (open || orderable) return { open, orderable, reason: orderable ? "Ordering is available." : "The store is outside ordering hours.", opensAt, cutoffAt, nextAvailableAt: nextOpen, sourceRule: source, timezone };
   }
   return { open: false, orderable: false, reason: "Same-day ordering is closed. Future ordering may still be available.", opensAt: nextOpen, cutoffAt: null, nextAvailableAt: nextOpen, sourceRule: source, timezone };

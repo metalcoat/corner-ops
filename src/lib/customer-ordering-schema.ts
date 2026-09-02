@@ -37,6 +37,12 @@ export function ensureCustomerOrderingSchema(): Promise<void> {
         used_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_customer_email_codes_lookup_idx ON ordering_customer_email_codes(email,created_at DESC)`;
+      await sql`CREATE TABLE IF NOT EXISTS ordering_customer_phone_codes (
+        id UUID PRIMARY KEY,customer_id UUID NOT NULL REFERENCES ordering_customers(id) ON DELETE CASCADE,
+        normalized_phone TEXT NOT NULL,code_hash TEXT NOT NULL,expires_at TIMESTAMPTZ NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,used_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`;
+      await sql`CREATE INDEX IF NOT EXISTS ordering_customer_phone_codes_lookup_idx ON ordering_customer_phone_codes(customer_id,normalized_phone,created_at DESC)`;
     })().catch((error) => {
       schemaPromise = null;
       throw error;

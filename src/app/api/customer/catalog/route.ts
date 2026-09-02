@@ -24,7 +24,7 @@ export async function GET(request: Request) {
       : "pickup";
     const [raw, availability, delivery] = await Promise.all([
       orderingMenuWithVariants("Corner Deli", "web"),
-      resolveOrderingAvailability({ business: "Corner Deli", serviceType }),
+      resolveOrderingAvailability({ business: "Corner Deli", serviceType, allowPreOpenAsap: true }),
       getDeliveryPricingSettings("Corner Deli"),
     ]);
     const scheduled = await applyScheduledMenuAvailability(

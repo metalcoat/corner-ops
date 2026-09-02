@@ -99,6 +99,7 @@ type Catalog = {
     open: boolean;
     orderable: boolean;
     reason: string;
+    opensAt: string | null;
     nextAvailableAt: string | null;
     timezone: string;
   };
@@ -865,10 +866,7 @@ export default function CustomerOrder() {
         <div>
           <p className="eyebrow">Made your way</p>
           <h1>What sounds good?</h1>
-          <p>
-            Browse the full menu anytime. Prices and choices come directly from
-            the same system used in-store.
-          </p>
+          <p>Browse the full menu anytime.</p>
         </div>
         <div className="fulfillmentControls">
           <section
@@ -903,6 +901,12 @@ export default function CustomerOrder() {
             {catalog.availability.reason} You can still browse and choose an
             available future time.
           </span>
+        </aside>
+      )}
+      {catalog && catalog.availability.orderable && !catalog.availability.open && timing === "asap" && catalog.availability.opensAt && (
+        <aside className="closedNotice preOpenNotice">
+          <strong>ASAP order accepted before opening</strong>
+          <span>We open at {new Date(catalog.availability.opensAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })}. Allow about {serviceType === "delivery" ? "1 hour for delivery" : "30 minutes for pickup"} after we open.</span>
         </aside>
       )}
       {catalog?.promotions.length ? (
@@ -1405,19 +1409,7 @@ export default function CustomerOrder() {
               </fieldset>,
               addressPortal,
             )}
-          {catalog?.customer.authenticated && contactComplete ? (
-            <section className="savedContact" aria-label="Saved contact">
-              <small>Ordering as</small>
-              <strong>{`${firstName} ${lastName}`.trim()}</strong>
-              <span>
-                {phone} · {email}
-              </span>
-              <small>
-                Using the contact information saved to your account.
-              </small>
-            </section>
-          ) : (
-            <fieldset className="customerContact">
+          <fieldset className="customerContact">
               <legend>Contact</legend>
               <input
                 aria-label="First name"
@@ -1453,14 +1445,13 @@ export default function CustomerOrder() {
                   onChange={(event) => setEmail(event.target.value)}
                 />
               )}
-              {catalog?.customer.authenticated && (
+              {catalog?.customer.authenticated && !contactComplete && (
                 <small className="contactHint">
                   Complete the missing contact details once; we’ll save them
                   for future orders.
                 </small>
               )}
-            </fieldset>
-          )}
+          </fieldset>
           {catalog?.checkout.paymentEnabled && (
             <div
               className="paymentOptionRow"

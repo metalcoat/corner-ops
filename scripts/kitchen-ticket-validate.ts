@@ -55,7 +55,7 @@ for (const expected of [
   "DROP-OFF: Lane 14",
   "DELIVERY INSTRUCTIONS: Please ring the side-door bell",
   "QUOTE: 60 MIN",
-  "DUE: Aug 21, 3:00 PM",
+  "DUE: Fri, Aug 21, 3:00 PM",
   "AMOUNT DUE: $24.75",
 ]) {
   if (!delivery.includes(expected))
@@ -65,7 +65,7 @@ if (!paid.includes("PAID") || paid.some((line) => line.includes("AMOUNT DUE")))
   throw new Error("Paid ticket status is incorrect.");
 if (
   !pickupTiming.includes("QUOTE: 30 MIN") ||
-  !futureTiming.some((line) => line.startsWith("DUE: Aug 22, 6:15 PM"))
+  !futureTiming.some((line) => line.startsWith("DUE: Sat, Aug 22, 6:15 PM"))
 )
   throw new Error("Pickup or future timing is incorrect.");
 

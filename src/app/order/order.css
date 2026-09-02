@@ -124,6 +124,17 @@
   color: var(--muted);
   text-transform: capitalize;
 }
+
+.accountCard { max-width: 760px; }
+.accountEditGrid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;margin:0 0 1.25rem; }
+.accountEditGrid label { display:grid;gap:.3rem;font-weight:700; }
+.accountEditGrid input { width:100%;padding:.75rem;border:1px solid #cbd5e1;border-radius:.65rem;font:inherit; }
+.accountEditGrid button { align-self:end;min-height:46px; }
+.accountContactRow { display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.8rem;border:1px solid #dbe3ec;border-radius:.75rem;margin:.5rem 0; }
+.accountContactRow span { display:grid;gap:.2rem; }
+.accountReward { display:grid;gap:.35rem;padding:.8rem;border:1px solid #dbe3ec;border-radius:.75rem;margin:.5rem 0; }
+.accountReward progress { width:100%;height:.8rem; }
+@media(max-width:620px){.accountEditGrid{grid-template-columns:1fr}.accountContactRow{align-items:flex-start}}
 .confirmationButton {
   display: block;
   width: 100%;
@@ -637,6 +648,8 @@
   border: 1px solid var(--line);
   border-radius: 10px;
   background: white;
+  color: #111827;
+  color-scheme: light;
 }
 .deliveryNote {
   font-size: 12px;

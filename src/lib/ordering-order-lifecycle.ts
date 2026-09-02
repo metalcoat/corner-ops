@@ -402,6 +402,7 @@ export async function submitDraftOrder(
       at: availabilityAt,
       orderEntryStartedAt:
         order.timing_mode === "asap" ? new Date(order.created_at) : null,
+      allowPreOpenAsap: order.timing_mode === "asap",
     });
     if (availability.sourceRule !== "unconfigured" && !availability.orderable) {
       const reason = String(override?.reason || "").trim();

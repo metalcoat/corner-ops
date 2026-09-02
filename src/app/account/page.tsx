@@ -1,101 +1,27 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import "../order/order.css";
-const money = (c: number) => `$${(c / 100).toFixed(2)}`;
-export default function Account() {
-  const [data, setData] = useState<any>(null),
-    [error, setError] = useState(""),
-    [range, setRange] = useState("180");
-  useEffect(() => {
-    fetch(`/api/customer/account?range=${range}`, { cache: "no-store" })
-      .then(async (r) => {
-        const b = await r.json();
-        if (r.status === 401) {
-          location.href = "/account/sign-in";
-          return;
-        }
-        if (!r.ok) throw new Error(b.error);
-        setData(b);
-      })
-      .catch((e) => setError(e.message));
-  }, [range]);
-  async function signOut() {
-    await fetch("/api/customer/auth/session", { method: "DELETE" });
-    location.href = "/order";
-  }
-  return (
-    <main className="customerOrder confirmationPage">
-      <section className="confirmationCard">
-        {error ? (
-          <p className="orderError">{error}</p>
-        ) : !data ? (
-          <h1>Loading your account…</h1>
-        ) : (
-          <>
-            <p className="eyebrow">Corner Deli account</p>
-            <h1>
-              Hi, {data.customer.first_name || data.customer.display_name}
-            </h1>
-            <h2>Loyalty</h2>
-            {data.programs.length ? (
-              data.programs.map((p: any) => (
-                <p key={p.programId}>
-                  <strong>{p.name}</strong>: {p.progress} of{" "}
-                  {p.quantityRequired} · {p.rewardsAvailable} rewards available
-                </p>
-              ))
-            ) : (
-              <p>No loyalty activity yet.</p>
-            )}
-            <div className="accountOrderHeading">
-              <h2>Past orders</h2>
-              <label>
-                Show
-                <select value={range} onChange={(event) => setRange(event.target.value)}>
-                  <option value="30">Last 30 days</option>
-                  <option value="180">Last 6 months</option>
-                  <option value="365">Last year</option>
-                  <option value="all">All orders</option>
-                </select>
-              </label>
-            </div>
-            {data.orders.length ? (
-              data.orders.map((o: any) => (
-                <details className="accountOrder" key={o.id}>
-                  <summary>
-                    <span>
-                      Order #{o.display_number} ·{" "}
-                      {new Date(o.created_at).toLocaleDateString()}
-                    </span>
-                    <strong>{money(o.total_cents)}</strong>
-                  </summary>
-                  <div className="accountOrderDetails">
-                    <small>{String(o.service_type).replaceAll("_", " ")} · {String(o.status).replaceAll("_", " ")}</small>
-                    {o.items.map((item: any) => (
-                      <div key={item.id}>
-                        <span><strong>{item.quantity}× {item.name}</strong>{item.variant ? ` · ${item.variant}` : ""}</span>
-                        <span>{money(item.lineTotalCents)}</span>
-                        {item.modifiers.length ? <small>{item.modifiers.join(" · ")}</small> : null}
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              ))
-            ) : (
-              <p>No past orders yet.</p>
-            )}
-            <a className="reviewButton confirmationButton" href="/order">
-              Order again
-            </a>
-            <button
-              className="reviewButton confirmationButton"
-              onClick={() => void signOut()}
-            >
-              Sign out
-            </button>
-          </>
-        )}
-      </section>
-    </main>
-  );
+const money=(c:number)=>`$${(c/100).toFixed(2)}`;
+const emptyAddress={label:"Home",line1:"",line2:"",city:"Ogdensburg",state:"NY",postalCode:"13669",isPrimary:false};
+export default function Account(){
+  const [data,setData]=useState<any>(null),[error,setError]=useState(""),[notice,setNotice]=useState(""),[range,setRange]=useState("180"),[busy,setBusy]=useState(false);
+  const [profile,setProfile]=useState({firstName:"",lastName:""}),[address,setAddress]=useState(emptyAddress),[showAddress,setShowAddress]=useState(false);
+  const [phone,setPhone]=useState(""),[code,setCode]=useState(""),[codeSent,setCodeSent]=useState(false);
+  const load=useCallback(()=>fetch(`/api/customer/account?range=${range}`,{cache:"no-store"}).then(async r=>{const b=await r.json();if(r.status===401){location.href="/account/sign-in";return}if(!r.ok)throw new Error(b.error);setData(b);setProfile({firstName:b.customer.first_name||"",lastName:b.customer.last_name||""})}).catch(e=>setError(e.message)),[range]);
+  useEffect(()=>{void load()},[load]);
+  async function update(payload:Record<string,unknown>){setBusy(true);setNotice("");const response=await fetch("/api/customer/account",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(payload)}),body=await response.json();setBusy(false);if(!response.ok){setNotice(body.error||"Could not update your account.");return false}await load();return true}
+  async function phoneAction(action:"request"|"verify"|"remove",phoneId=""){setBusy(true);setNotice("");const response=await fetch("/api/customer/account/phone",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,phone,code,phoneId})}),body=await response.json();setBusy(false);if(!response.ok){setNotice(body.error||"Could not update phone.");return}if(action==="request"){setCodeSent(true);setNotice("Verification code sent.")}else{setPhone("");setCode("");setCodeSent(false);setNotice(action==="verify"?"Phone verified and added.":"Phone removed.");await load()}}
+  async function signOut(){await fetch("/api/customer/auth/session",{method:"DELETE"});location.href="/order"}
+  return <main className="customerOrder confirmationPage"><section className="confirmationCard accountCard">
+    {error?<p className="orderError">{error}</p>:!data?<h1>Loading your account…</h1>:<>
+      <p className="eyebrow">Corner Deli account</p><h1>Hi, {data.customer.first_name||data.customer.display_name}</h1>{notice&&<p className="contactHint" role="status">{notice}</p>}
+      <h2>Account information</h2><div className="accountEditGrid"><label>First name<input value={profile.firstName} onChange={e=>setProfile({...profile,firstName:e.target.value})}/></label><label>Last name<input value={profile.lastName} onChange={e=>setProfile({...profile,lastName:e.target.value})}/></label><label>Email<input value={data.customer.email||""} disabled/><small>Verified sign-in email</small></label><button disabled={busy||(!profile.firstName.trim()&&!profile.lastName.trim())} onClick={()=>void update({action:"profile",...profile}).then(ok=>ok&&setNotice("Name saved."))}>SAVE NAME</button></div>
+      <h2>Rewards</h2>{data.programs.length?data.programs.map((p:any)=><div className="accountReward" key={p.programId}><strong>{p.name}</strong><span>{p.rewardsAvailable?`${p.rewardsAvailable} free reward${p.rewardsAvailable===1?"":"s"} available`:`${p.progress} / ${p.quantityRequired} until free`}</span><progress max={p.quantityRequired} value={Math.min(p.progress,p.quantityRequired)}/></div>):<p>No loyalty activity yet.</p>}
+      <h2>Phone numbers</h2>{data.phones.map((p:any)=><div className="accountContactRow" key={p.id}><span><strong>{p.display_phone}</strong>{p.is_primary?" · Primary":""}</span><button disabled={busy||data.phones.length<=1} onClick={()=>void phoneAction("remove",p.id)}>REMOVE</button></div>)}<div className="accountEditGrid"><label>New mobile phone<input inputMode="tel" placeholder="315-555-1212" value={phone} onChange={e=>{setPhone(e.target.value);setCodeSent(false)}}/></label>{codeSent&&<label>6-digit code<input inputMode="numeric" maxLength={6} value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,""))}/></label>}<button disabled={busy||phone.replace(/\D/g,"").length!==10} onClick={()=>void phoneAction(codeSent?"verify":"request")}>{codeSent?"VERIFY & ADD":"TEXT A CODE"}</button></div>
+      <h2>Delivery addresses</h2>{data.addresses.map((a:any)=><div className="accountContactRow" key={a.id}><span><strong>{a.label}{a.is_primary?" · Default":""}</strong><small>{[a.line1,a.line2,a.city,a.state,a.postal_code].filter(Boolean).join(", ")}</small></span><button disabled={busy} onClick={()=>void update({action:"removeAddress",addressId:a.id}).then(ok=>ok&&setNotice("Address removed."))}>REMOVE</button></div>)}<button className="choiceButton" onClick={()=>setShowAddress(v=>!v)}>{showAddress?"CANCEL":"+ ADD DELIVERY ADDRESS"}</button>{showAddress&&<div className="accountEditGrid">{(["label","line1","line2","city","state","postalCode"] as const).map(key=><label key={key}>{({label:"Label",line1:"Street address",line2:"Apartment / suite",city:"City",state:"State",postalCode:"ZIP code"})[key]}<input value={address[key] as string} onChange={e=>setAddress({...address,[key]:e.target.value})}/></label>)}<label><input type="checkbox" checked={address.isPrimary} onChange={e=>setAddress({...address,isPrimary:e.target.checked})}/> Make default</label><button disabled={busy||!address.line1.trim()||!address.city.trim()||!address.state.trim()||!address.postalCode.trim()} onClick={()=>void update({action:"addAddress",...address}).then(ok=>{if(ok){setAddress(emptyAddress);setShowAddress(false);setNotice("Address added.")}})}>SAVE ADDRESS</button></div>}
+      <h2>Saved payment methods</h2><div className="accountContactRow"><span><strong>No saved cards</strong><small>Secure MX Merchant card saving will appear here when card vaulting is enabled for this merchant account.</small></span></div>
+      <div className="accountOrderHeading"><h2>Past orders</h2><label>Show<select value={range} onChange={e=>setRange(e.target.value)}><option value="30">Last 30 days</option><option value="180">Last 6 months</option><option value="365">Last year</option><option value="all">All orders</option></select></label></div>{data.orders.length?data.orders.map((o:any)=><details className="accountOrder" key={o.id}><summary><span>Order #{o.display_number} · {new Date(o.created_at).toLocaleDateString()}</span><strong>{money(o.total_cents)}</strong></summary><div className="accountOrderDetails"><small>{String(o.service_type).replaceAll("_"," ")} · {String(o.status).replaceAll("_"," ")}</small>{o.items.map((item:any)=><div key={item.id}><span><strong>{item.quantity}× {item.name}</strong>{item.variant?` · ${item.variant}`:""}</span><span>{money(item.lineTotalCents)}</span>{item.modifiers.length?<small>{item.modifiers.join(" · ")}</small>:null}</div>)}</div></details>):<p>No past orders yet.</p>}
+      <a className="reviewButton confirmationButton" href="/order">Order again</a><button className="reviewButton confirmationButton" onClick={()=>void signOut()}>Sign out</button>
+    </>}
+  </section></main>
 }

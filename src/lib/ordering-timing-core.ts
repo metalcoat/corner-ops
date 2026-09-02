@@ -34,6 +34,8 @@ function positiveMinutes(value: number): number {
 
 function formatTime(value: Date): string {
   return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
     month: "short",
     day: "numeric",
     hour: "numeric",

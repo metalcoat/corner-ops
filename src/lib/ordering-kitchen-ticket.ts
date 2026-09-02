@@ -26,6 +26,7 @@ function serviceName(serviceType: ServiceType): string {
 function formatScheduled(value: Date): string {
   return new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
+    weekday: "short",
     month: "short",
     day: "numeric",
     hour: "numeric",
