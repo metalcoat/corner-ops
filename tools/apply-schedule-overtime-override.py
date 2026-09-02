@@ -1,0 +1,244 @@
+from pathlib import Path
+import re
+
+
+def replace_once(path: str, old: str, new: str) -> None:
+    file = Path(path)
+    text = file.read_text(encoding="utf-8")
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"Expected exactly one match in {path}, found {count}: {old[:100]!r}")
+    file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def replace_regex_once(path: str, pattern: str, replacement: str) -> None:
+    file = Path(path)
+    text = file.read_text(encoding="utf-8")
+    updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+    if count != 1:
+        raise SystemExit(f"Expected exactly one regex match in {path}, found {count}: {pattern}")
+    file.write_text(updated, encoding="utf-8")
+
+
+board = "src/app/ops/workforce/schedule-board.tsx"
+replace_once(
+    board,
+    '''  const missingEmailCount = activeEmployees.filter((employee) => !employee.email.trim()).length;
+
+  const assignmentTimeOff''',
+    '''  const missingEmailCount = activeEmployees.filter((employee) => !employee.email.trim()).length;
+  const hardBlockingIssueCount = Math.max(
+    0,
+    publishAnalysis.blockingIssueCount - publishAnalysis.overForty.length,
+  );
+
+  const assignmentTimeOff''',
+)
+replace_once(
+    board,
+    '''  const pendingTimeOffShiftConflicts = weekShifts.flatMap((shift) =>
+    assignmentTimeOff(shift.employeeId, shift.startsAt, shift.endsAt)
+      .filter((request) => request.status === "Pending")
+      .map((request) => ({ shift, request })),
+  );
+
+  function confirmTimeOffAssignment''',
+    '''  const pendingTimeOffShiftConflicts = weekShifts.flatMap((shift) =>
+    assignmentTimeOff(shift.employeeId, shift.startsAt, shift.endsAt)
+      .filter((request) => request.status === "Pending")
+      .map((request) => ({ shift, request })),
+  );
+  const schedulePublishBlocked = hardBlockingIssueCount > 0 || approvedTimeOffShiftConflicts.length > 0;
+  const overtimeApprovalRequired = !schedulePublishBlocked && publishAnalysis.overForty.length > 0;
+
+  function confirmTimeOffAssignment''',
+)
+
+publish_block = '''  async function publishWeek() {
+    if (approvedTimeOffShiftConflicts.length) {
+      const details = approvedTimeOffShiftConflicts.slice(0, 10).map(({ shift, request }) =>
+        `${request.employee_name}: ${localDateTime(shift.startsAt)}–${localTime(shift.endsAt)} (${timeOffLabel(request)} approved off)`,
+      );
+      window.alert(`The schedule cannot be published/resend yet. Approved time off conflicts with assigned shifts:\\n\\n${details.join("\\n")}\\n\\nReassign those shifts or make them open.`);
+      return;
+    }
+    if (hardBlockingIssueCount > 0) {
+      const details = [
+        ...publishAnalysis.overlaps.map((overlap) => `${overlap.employeeName}: overlap at ${localDateTime(overlap.startsAt)}`),
+        ...publishAnalysis.coverageGaps.map((gap) => `No coverage: ${localDateTime(gap.startsAt)}–${localTime(gap.endsAt)} (${gap.minutes} min)`),
+        ...publishAnalysis.loneWorkerViolations.map((item) => `${item.employeeName}: alone ${item.minutes} minutes at ${localDateTime(item.startsAt)}`),
+        ...publishAnalysis.mealPeriodViolations.map((item) => `${item.employeeName}: ${item.message}`),
+      ];
+      window.alert(`The schedule cannot be published yet.\\n\\n${details.slice(0, 14).join("\\n")}`);
+      return;
+    }
+    if (pendingTimeOffShiftConflicts.length) {
+      const names = Array.from(new Set(pendingTimeOffShiftConflicts.map(({ request }) => `${request.employee_name} (${timeOffLabel(request)})`)));
+      if (!window.confirm(`There are pending time-off requests that overlap assigned shifts:\\n\\n${names.join("\\n")}\\n\\nPublish anyway while those requests are pending?`)) return;
+    }
+
+    const actionLabel = draftCount > 0 ? "Publish week" : "Resend schedule";
+    let allowOvertime = false;
+    if (publishAnalysis.overForty.length) {
+      const overtimeDetails = publishAnalysis.overForty.map((employee) =>
+        `${employee.employeeName}: ${employee.hours.toFixed(1)} paid hours`,
+      );
+      if (!window.confirm(
+        `OVERTIME WARNING\\n\\n${overtimeDetails.join("\\n")}\\n\\n${actionLabel} for ${business} anyway? This records your manager approval. Confirm that the overtime is intentional and will be handled in payroll.`,
+      )) return;
+      allowOvertime = true;
+    } else if (!window.confirm(
+      `${actionLabel} for ${business}? Only employees whose schedule changed will be notified; an explicit resend notifies currently assigned employees again.`,
+    )) return;
+
+    await runAction(
+      { action: "week-publish", weekStart: weekStartKey, allowOvertime },
+      allowOvertime
+        ? "Schedule published with manager overtime approval. Employee Hub and configured notifications were updated."
+        : "Schedule published. Employee Hub and configured notifications were updated.",
+    );
+  }
+
+  function onDragStart'''
+replace_regex_once(
+    board,
+    r'''  async function publishWeek\(\) \{.*?\n  \}\n\n  function onDragStart''',
+    publish_block,
+)
+replace_once(
+    board,
+    '''        <button type="button" className="schedulePrimary" disabled={busy || !weekShifts.length || !publishAnalysis.canPublish || approvedTimeOffShiftConflicts.length > 0} onClick={() => void publishWeek()}>''',
+    '''        <button type="button" className="schedulePrimary" disabled={busy || !weekShifts.length || schedulePublishBlocked} title={overtimeApprovalRequired ? "Publishing requires manager overtime confirmation." : undefined} onClick={() => void publishWeek()}>''',
+)
+replace_once(
+    board,
+    '''    <section className={`scheduleValidation ${publishAnalysis.canPublish ? "ready" : "blocked"}`}>
+      <div className="scheduleValidationHeader">
+        <div><strong>{publishAnalysis.canPublish ? "Schedule checks passed" : "Schedule cannot be published"}</strong><span>Paid hours, overlap, meals, continuous coverage, and business-specific staffing rules.</span></div>''',
+    '''    <section className={`scheduleValidation ${schedulePublishBlocked ? "blocked" : "ready"}`}>
+      <div className="scheduleValidationHeader">
+        <div><strong>{schedulePublishBlocked ? "Schedule cannot be published" : overtimeApprovalRequired ? "Overtime approval required" : "Schedule checks passed"}</strong><span>Paid hours, overlap, meals, continuous coverage, and business-specific staffing rules.</span></div>''',
+)
+replace_once(
+    board,
+    '''<span>{employee.hours.toFixed(1)} paid hours. Reduce before publishing.</span>''',
+    '''<span>{employee.hours.toFixed(1)} paid hours. Manager confirmation required to publish.</span>''',
+)
+
+validator = "src/lib/schedule-publish-validation.ts"
+replace_once(
+    validator,
+    '''export async function publishValidatedScheduleWeek(input: {
+  business: Business;
+  weekStart: string;
+  actor: string;
+}) {''',
+    '''export async function publishValidatedScheduleWeek(input: {
+  business: Business;
+  weekStart: string;
+  actor: string;
+  allowOvertime?: boolean;
+}) {''',
+)
+replace_once(
+    validator,
+    '''  if (analysis.overForty.length) {
+    problems.push(`Over 40 paid hours: ${analysis.overForty.map((employee) => `${employee.employeeName} (${employee.hours.toFixed(1)} hrs)`).join(", ")}`);
+  }''',
+    '''  if (analysis.overForty.length && !input.allowOvertime) {
+    problems.push(`Overtime approval required: ${analysis.overForty.map((employee) => `${employee.employeeName} (${employee.hours.toFixed(1)} hrs)`).join(", ")}. Confirm the overtime in the schedule publisher.`);
+  }''',
+)
+replace_once(
+    validator,
+    '''  const publication = await publishBusinessScheduleWeek({ ...input, weekStart });''',
+    '''  const publication = await publishBusinessScheduleWeek({
+    business: input.business,
+    weekStart,
+    actor: input.actor,
+    overtimeOverride: input.allowOvertime
+      ? analysis.overForty.map((employee) => ({
+          employeeId: employee.employeeId,
+          employeeName: employee.employeeName,
+          hours: employee.hours,
+        }))
+      : [],
+  });''',
+)
+
+route = "src/app/api/workforce/route.ts"
+replace_once(
+    route,
+    '''          weekStart: String(body.weekStart || ""),
+          actor: session.displayName,
+        });''',
+    '''          weekStart: String(body.weekStart || ""),
+          actor: session.displayName,
+          allowOvertime: body.allowOvertime === true,
+        });''',
+)
+
+publication = "src/lib/business-schedule-publication.ts"
+replace_once(
+    publication,
+    '''export async function publishBusinessScheduleWeek(input: {
+  business: Business;
+  weekStart: string;
+  actor: string;
+}) {''',
+    '''export async function publishBusinessScheduleWeek(input: {
+  business: Business;
+  weekStart: string;
+  actor: string;
+  overtimeOverride?: Array<{
+    employeeId: string;
+    employeeName: string;
+    hours: number;
+  }>;
+}) {''',
+)
+replace_once(
+    publication,
+    '''    pinInstruction: accessInstruction,
+  };''',
+    '''    pinInstruction: accessInstruction,
+    overtimeOverride: input.overtimeOverride?.length
+      ? {
+          approvedBy: input.actor,
+          approvedAt: new Date().toISOString(),
+          employees: input.overtimeOverride,
+        }
+      : null,
+  };''',
+)
+
+Path("tests/schedule-overtime-override.test.ts").write_text('''import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const root = process.cwd();
+const source = (path: string) => readFileSync(join(root, path), "utf8");
+
+test("schedule publishing keeps 38-plus hours as a warning and permits explicit overtime approval", () => {
+  const board = source("src/app/ops/workforce/schedule-board.tsx");
+  assert.match(board, /blockingIssueCount - publishAnalysis\\.overForty\\.length/);
+  assert.match(board, /OVERTIME WARNING/);
+  assert.match(board, /allowOvertime/);
+  assert.match(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| schedulePublishBlocked\\}/);
+  assert.match(board, /Manager confirmation required to publish/);
+  assert.doesNotMatch(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| !publishAnalysis\\.canPublish/);
+});
+
+test("server requires and records the manager overtime approval", () => {
+  const validator = source("src/lib/schedule-publish-validation.ts");
+  const route = source("src/app/api/workforce/route.ts");
+  const publication = source("src/lib/business-schedule-publication.ts");
+  assert.match(validator, /analysis\\.overForty\\.length && !input\\.allowOvertime/);
+  assert.match(validator, /overtimeOverride: input\\.allowOvertime/);
+  assert.match(route, /allowOvertime: body\\.allowOvertime === true/);
+  assert.match(publication, /overtimeOverride/);
+  assert.match(publication, /approvedBy: input\\.actor/);
+  assert.match(publication, /approvedAt: new Date\\(\\)\\.toISOString\\(\\)/);
+});
+''', encoding="utf-8")
