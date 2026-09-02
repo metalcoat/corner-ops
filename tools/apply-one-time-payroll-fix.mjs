@@ -32,7 +32,7 @@ try {
       FROM matching
       WHERE (SELECT COUNT(*) FROM matching) = 1
     ),
-    overlaps AS (
+    overlap_rows AS (
       SELECT t.id, t.clock_in, t.clock_out
       FROM time_entries t
       JOIN target employee ON employee.id = t.employee_id
@@ -50,7 +50,7 @@ try {
         'Manager Added', 'Corrected',
         'Manager added by Chris: employee missed both punches for the Aug 29, 2026 shift.'
       FROM target employee
-      WHERE NOT EXISTS (SELECT 1 FROM overlaps)
+      WHERE NOT EXISTS (SELECT 1 FROM overlap_rows)
       ON CONFLICT (id) DO NOTHING
       RETURNING id
     ),
@@ -77,9 +77,9 @@ try {
     )
     SELECT
       (SELECT COUNT(*)::int FROM matching) AS matched_employees,
-      (SELECT COUNT(*)::int FROM overlaps) AS overlapping_entries,
-      (SELECT COUNT(*)::int FROM overlaps WHERE clock_out IS NULL) AS open_overlaps,
-      (SELECT COUNT(*)::int FROM overlaps
+      (SELECT COUNT(*)::int FROM overlap_rows) AS overlapping_entries,
+      (SELECT COUNT(*)::int FROM overlap_rows WHERE clock_out IS NULL) AS open_overlaps,
+      (SELECT COUNT(*)::int FROM overlap_rows
         WHERE clock_in <= ${clockIn}::timestamptz
           AND clock_out >= ${clockOut}::timestamptz) AS covering_overlaps,
       (SELECT COUNT(*)::int FROM inserted) AS inserted_entries,
@@ -88,7 +88,7 @@ try {
   `;
 
   const matched = Number(result?.matched_employees || 0);
-  const overlaps = Number(result?.overlapping_entries || 0);
+  const overlappingEntries = Number(result?.overlapping_entries || 0);
   const openOverlaps = Number(result?.open_overlaps || 0);
   const coveringOverlaps = Number(result?.covering_overlaps || 0);
   const inserted = Number(result?.inserted_entries || 0);
@@ -102,7 +102,7 @@ try {
         ? "existing-shift-covers-request"
         : openOverlaps > 0
           ? "open-overlap"
-          : overlaps > 0
+          : overlappingEntries > 0
             ? "partial-overlap"
             : "not-saved";
 
@@ -110,7 +110,7 @@ try {
     status,
     generatedAt: new Date().toISOString(),
     matchedEmployees: matched,
-    overlappingEntries: overlaps,
+    overlappingEntries,
     openOverlaps,
     coveringOverlaps,
     insertedEntries: inserted,
