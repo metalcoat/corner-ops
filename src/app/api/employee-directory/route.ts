@@ -1,4 +1,5 @@
 import { del, put } from "@vercel/blob";
+import { recordAuditEvent } from "@/lib/audit";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
@@ -115,6 +116,28 @@ export async function POST(request: Request) {
           smsOptIn,
           pin,
         });
+
+      if (onboardingSms) {
+        await recordAuditEvent({
+          business,
+          action: "onboarding-initial-sms",
+          actor: session.email,
+          entityType: "employee",
+          entityId: employee.id,
+          details: {
+            employeeName: employee.name,
+            provider: onboardingSms.provider,
+            configured: onboardingSms.configured,
+            sent: onboardingSms.sent,
+            failed: onboardingSms.failed,
+            missingPhone: onboardingSms.missingPhone,
+            notOptedIn: onboardingSms.notOptedIn,
+            skipped: onboardingSms.skipped,
+            accepted: onboardingSms.accepted,
+            failures: onboardingSms.failures,
+          },
+        });
+      }
 
       return Response.json({ ...employee, onboardingSms }, { status: 201 });
     }
