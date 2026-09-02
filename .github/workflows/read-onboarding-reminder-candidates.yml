@@ -1,0 +1,37 @@
+name: Read production onboarding reminder candidates
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/read-onboarding-reminder-candidates.yml
+
+permissions:
+  contents: read
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for production onboarding diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://corner-ops.vercel.app/onboarding-reminder-candidates.json?commit=${GITHUB_SHA}"
+          last=""
+          for attempt in $(seq 1 40); do
+            body="$(curl --fail --silent --show-error --header 'Cache-Control: no-cache' "$url" 2>/dev/null || true)"
+            if [ -n "$body" ]; then last="$body"; fi
+            if printf '%s' "$body" | grep -q '"newestThree"'; then
+              echo "ONBOARDING_DIAGNOSTIC_BEGIN"
+              printf '%s\n' "$body"
+              echo "ONBOARDING_DIAGNOSTIC_END"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "ONBOARDING_DIAGNOSTIC_LAST_BEGIN"
+          printf '%s\n' "$last"
+          echo "ONBOARDING_DIAGNOSTIC_LAST_END"
+          echo "Production onboarding diagnostic was not available after 10 minutes." >&2
+          exit 1
