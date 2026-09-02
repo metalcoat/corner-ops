@@ -37,6 +37,23 @@ export function ensureOrderingCustomerSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_customer_addresses ADD COLUMN IF NOT EXISTS latitude NUMERIC(10,7)`;
       await sql`ALTER TABLE ordering_customer_addresses ADD COLUMN IF NOT EXISTS longitude NUMERIC(10,7)`;
       await sql`ALTER TABLE ordering_customer_addresses ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ`;
+      await sql`UPDATE ordering_customer_addresses SET label=CASE
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('3000fordstreetextension','3000fordstextension','3000fordstreetext') THEN 'Walmart'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g')='1515knoxstreet' OR regexp_replace(lower(line1),'[^a-z0-9]','','g')='1515knoxst' THEN 'Step by Step'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('830proctoravenue','830proctorave') THEN 'New Ansen'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('100chimneypointdrive','100chimneypointdr') THEN 'Old Ansen'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('214kingstreet','214kingst') THEN 'Claxton-Hepburn Medical Center'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('1chimneypointdrive','1chimneypointdr') THEN 'State Hospital (Psych Center)'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('1121patersonstreet','1121patersonst','1121pattersonstreet','1121pattersonst') THEN 'Ogdensburg Bowl'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('1210patersonstreet','1210patersonst') THEN 'Advance Auto Parts'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('809newyorkavenue','809newyorkave') THEN 'Howie''s Bar'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('17commercestreet','17commercest') THEN 'Shipwreck Bar'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('1110tibbittsdrive','1110tibbittsdr') THEN 'Riverview Correctional Facility'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('728cantonstreet','728cantonst') THEN 'Sunoco · Canton Street'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('301champlainstreet','301champlainst') THEN 'Sunoco · Champlain Street'
+        WHEN regexp_replace(lower(line1),'[^a-z0-9]','','g') IN ('1117newyorkavenue','1117newyorkave') THEN 'Sunoco · New York Avenue'
+        ELSE label END,updated_at=NOW()
+        WHERE active=TRUE AND lower(trim(label)) IN ('','home','address','delivery','other')`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS first_name_snapshot TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS last_name_snapshot TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS phone_snapshot TEXT NOT NULL DEFAULT ''`;
