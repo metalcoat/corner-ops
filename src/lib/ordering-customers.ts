@@ -33,7 +33,7 @@ export async function findCustomers(business: OrderingBusiness, query = "") {
     FROM ordering_customers c
     LEFT JOIN LATERAL (SELECT normalized_phone,display_phone FROM ordering_customer_phones WHERE customer_id=c.id ORDER BY is_primary DESC,created_at LIMIT 1) p ON TRUE
     WHERE c.business=${business} AND c.active=TRUE AND c.merged_into_customer_id IS NULL
-      AND (${q}='' OR c.first_name ILIKE ${like} OR c.last_name ILIKE ${like} OR c.display_name ILIKE ${like}
+      AND (${q}='' OR c.id::text=${q} OR c.first_name ILIKE ${like} OR c.last_name ILIKE ${like} OR c.display_name ILIKE ${like}
         OR EXISTS (SELECT 1 FROM ordering_customer_emails match_email WHERE match_email.customer_id=c.id AND match_email.normalized_email ILIKE ${like})
         OR EXISTS (SELECT 1 FROM ordering_customer_phones match_phone WHERE match_phone.customer_id=c.id AND (match_phone.normalized_phone=${phone} OR (${phonePrefix}<>'' AND match_phone.normalized_phone LIKE ${phonePrefix}))))
     ORDER BY c.last_order_at DESC NULLS LAST,c.display_name LIMIT ${q ? 20 : 100}
@@ -87,6 +87,24 @@ export async function createCustomer(input: {
       duplicate: false,
     };
   });
+}
+
+export async function updateCustomerName(input: {
+  business: OrderingBusiness;
+  customerId: string;
+  firstName: string;
+  lastName?: string;
+}) {
+  await ensureOrderingCustomerSchema();
+  const first = input.firstName.trim();
+  const last = String(input.lastName || "").trim();
+  if (!first && !last) throw new Error("Enter at least a first or last name.");
+  const rows = await getSql()`UPDATE ordering_customers
+    SET first_name=${first},last_name=${last},display_name=${`${first} ${last}`.trim()},updated_at=NOW()
+    WHERE id=${input.customerId} AND business=${input.business} AND active=TRUE AND merged_into_customer_id IS NULL
+    RETURNING id`;
+  if (!rows[0]) throw new Error("Active customer not found.");
+  return (await findCustomers(input.business, String(rows[0].id)))[0];
 }
 
 export async function addCustomerPhone(input: {

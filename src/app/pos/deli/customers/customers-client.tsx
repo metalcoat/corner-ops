@@ -103,6 +103,8 @@ export default function CustomersClient() {
     isPrimary: false,
   });
   const [message, setMessage] = useState("");
+  const [editName, setEditName] = useState({ firstName: "", lastName: "" });
+  const [editNameBusy, setEditNameBusy] = useState(false);
   const [merge, setMerge] = useState<string[]>([]);
   const [importFile, setImportFile] = useState<File | null>(null),
     [importPreview, setImportPreview] = useState<ImportPreview | null>(null),
@@ -140,6 +142,9 @@ export default function CustomersClient() {
 
   const selected =
     customers.find((customer) => customer.id === selectedId) || null;
+  useEffect(() => {
+    setEditName({ firstName: selected?.first_name || "", lastName: selected?.last_name || "" });
+  }, [selected?.id]);
   useEffect(() => {
     if (!selected) {
       setLoyalty([]);
@@ -195,6 +200,22 @@ export default function CustomersClient() {
       setPhone("");
       await load();
     } else setMessage(body.error || "Could not create customer.");
+  }
+  async function saveName() {
+    if (!selected || editNameBusy) return;
+    setEditNameBusy(true);
+    const response = await fetch("/api/ordering/customers", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ customerId: selected.id, ...editName }),
+    });
+    const body = await response.json() as { error?: string };
+    if (!response.ok) setMessage(body.error || "Could not update customer name.");
+    else {
+      setMessage("Customer name updated.");
+      await load();
+    }
+    setEditNameBusy(false);
   }
 
   async function addPhone(allowShared = false) {
@@ -529,6 +550,12 @@ export default function CustomersClient() {
                 <button onClick={() => useForOrder(selected)}>
                   USE FOR CURRENT ORDER
                 </button>
+              </div>
+              <h3>NAME</h3>
+              <div className="customerFormRow">
+                <input aria-label="Customer first name" placeholder="First name" value={editName.firstName} onChange={(event) => setEditName((current) => ({ ...current, firstName: event.target.value }))} />
+                <input aria-label="Customer last name" placeholder="Last name" value={editName.lastName} onChange={(event) => setEditName((current) => ({ ...current, lastName: event.target.value }))} />
+                <button disabled={editNameBusy || (!editName.firstName.trim() && !editName.lastName.trim())} onClick={() => void saveName()}>{editNameBusy ? "SAVING…" : "SAVE NAME"}</button>
               </div>
               <h3>LOYALTY</h3>
               <div className="customerContactList">

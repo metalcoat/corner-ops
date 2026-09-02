@@ -793,6 +793,8 @@ export default function PosClient({
     }),
     [quickCustomerBusy, setQuickCustomerBusy] = useState(false),
     [quickCustomerError, setQuickCustomerError] = useState("");
+  const [customerEdit, setCustomerEdit] = useState({ firstName: "", lastName: "" });
+  const [customerEditBusy, setCustomerEditBusy] = useState(false);
   const [selectedCustomerPhoneId, setSelectedCustomerPhoneId] = useState("");
   const [customerCredit, setCustomerCredit] = useState<CustomerCredit>({ balanceCents: 0, reason: "" });
   const [selectedCustomerAddressId, setSelectedCustomerAddressId] =
@@ -905,6 +907,13 @@ export default function PosClient({
       .catch(() => setLoyalty([]));
     return () => controller.abort();
   }, [customer]);
+  useEffect(() => {
+    setCustomerEdit({
+      firstName: customer?.first_name || "",
+      lastName: customer?.last_name || "",
+    });
+    setQuickCustomerError("");
+  }, [customer?.id]);
   useEffect(() => {
     if (timingMode !== "future" || business !== "Corner Deli") return;
     const controller = new AbortController();
@@ -2048,6 +2057,27 @@ export default function PosClient({
       );
     } finally {
       setQuickCustomerBusy(false);
+    }
+  }
+  async function saveAttachedCustomer(event: React.FormEvent) {
+    event.preventDefault();
+    if (!customer || customerEditBusy) return;
+    setCustomerEditBusy(true);
+    setQuickCustomerError("");
+    try {
+      const response = await fetch("/api/ordering/customers", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ customerId: customer.id, ...customerEdit }),
+      });
+      const payload = await response.json() as { customer?: PosCustomer; error?: string };
+      if (!response.ok || !payload.customer) throw new Error(payload.error || "Could not update this customer.");
+      chooseCustomer(payload.customer);
+      setCustomerOpen(false);
+    } catch (error) {
+      setQuickCustomerError(error instanceof Error ? error.message : "Could not update this customer.");
+    } finally {
+      setCustomerEditBusy(false);
     }
   }
   async function chooseSavedAddress(address: PosCustomerAddress) {
@@ -5879,7 +5909,7 @@ export default function PosClient({
                 Close
               </button>
             </header>
-            {!quickAddCaller && (
+            {!quickAddCaller && !customer && (
               <label>
                 Search existing customer
                 <input
@@ -5900,7 +5930,7 @@ export default function PosClient({
                 />
               </label>
             )}
-            {!quickAddCaller &&
+            {!quickAddCaller && !customer &&
               customerMatches.map((match) => (
                 <button
                   className="posCustomerMatch"
@@ -5926,7 +5956,7 @@ export default function PosClient({
                   )}
                 </button>
               ))}
-            {business === "Corner Deli" && (
+            {business === "Corner Deli" && !customer && (
               <form className="posQuickCustomer" onSubmit={createQuickCustomer}>
                 <h3>Quick add</h3>
                 {quickAddCaller && (
@@ -5998,18 +6028,24 @@ export default function PosClient({
               </form>
             )}
             {customer && (
-              <button
-                className="danger"
-                onClick={() => {
+              <form className="posQuickCustomer" onSubmit={saveAttachedCustomer}>
+                <h3>Edit attached customer</h3>
+                <div>
+                  <label>First name<input autoFocus maxLength={80} value={customerEdit.firstName} onChange={(event) => setCustomerEdit((current) => ({ ...current, firstName: event.target.value }))} /></label>
+                  <label>Last name<input maxLength={80} value={customerEdit.lastName} onChange={(event) => setCustomerEdit((current) => ({ ...current, lastName: event.target.value }))} /></label>
+                </div>
+                <p><strong>Order phone:</strong> {customer.phones?.find((phone) => phone.id === selectedCustomerPhoneId)?.display_phone || customer.display_phone}</p>
+                {quickCustomerError && <p role="alert">{quickCustomerError}</p>}
+                <button className="primary" disabled={customerEditBusy || (!customerEdit.firstName.trim() && !customerEdit.lastName.trim())}>{customerEditBusy ? "SAVING…" : "SAVE CUSTOMER"}</button>
+                <button type="button" className="danger" onClick={() => {
                   setCustomer(null);
+                  setCustomerCredit({ balanceCents: 0, reason: "" });
                   setSelectedCustomerPhoneId("");
                   setSelectedCustomerAddressId("");
                   setCustomerOpen(false);
                   setSavedDraft(null);
-                }}
-              >
-                Clear customer
-              </button>
+                }}>CLEAR CUSTOMER FROM ORDER</button>
+              </form>
             )}
             {business === "Corner Deli" && (
               <Link
