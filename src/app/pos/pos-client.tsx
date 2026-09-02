@@ -770,6 +770,7 @@ export default function PosClient({
   const [activeSuggestion, setActiveSuggestion] = useState(-1);
   const [validatingAddress, setValidatingAddress] = useState(false);
   const [savingCustomerAddress, setSavingCustomerAddress] = useState(false);
+  const [editingCustomerAddressId, setEditingCustomerAddressId] = useState("");
   const [validatedAddress, setValidatedAddress] =
     useState<ValidatedAddress | null>(null);
   const [deliveryValidationToken, setDeliveryValidationToken] = useState("");
@@ -2105,9 +2106,10 @@ export default function PosClient({
       const response = await fetch(
         `/api/ordering/customers/${encodeURIComponent(customer.id)}/addresses`,
         {
-          method: "POST",
+          method: editingCustomerAddressId ? "PATCH" : "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
+            addressId: editingCustomerAddressId || undefined,
             label: deliveryBusinessName || "Delivery",
             line1: validatedAddress.line1,
             line2: deliveryUnit,
@@ -2159,6 +2161,7 @@ export default function PosClient({
           : current,
       );
       setSelectedCustomerAddressId(savedAddress.id);
+      setEditingCustomerAddressId("");
       setSavedDraft(null);
       setCheckoutError("");
       setDeliveryEditorOpen(false);
@@ -2169,6 +2172,18 @@ export default function PosClient({
     } finally {
       setSavingCustomerAddress(false);
     }
+  }
+
+  function editSelectedCustomerAddress() {
+    const address=customer?.addresses.find(candidate=>candidate.id===selectedCustomerAddressId);if(!address)return;
+    setEditingCustomerAddressId(address.id);setDeliveryAddress([address.line1,address.city,address.state,address.postal_code].filter(Boolean).join(", "));
+    setDeliveryUnit(address.line2||"");setDeliveryBusinessName(address.label||"");setValidatedAddress(null);setDeliveryValidationToken("");setDeliveryRoute(null);setAddressError("");setAddressSuggestions([]);setDeliveryEditorOpen(true);
+  }
+  async function deleteSelectedCustomerAddress(){
+    if(!customer||!selectedCustomerAddressId||savingCustomerAddress)return;
+    const address=customer.addresses.find(candidate=>candidate.id===selectedCustomerAddressId);if(!address||!window.confirm(`Delete ${address.label||address.line1} from this customer?`))return;
+    setSavingCustomerAddress(true);setAddressError("");
+    try{const response=await fetch(`/api/ordering/customers/${encodeURIComponent(customer.id)}/addresses?addressId=${encodeURIComponent(address.id)}`,{method:"DELETE"}),payload=await response.json();if(!response.ok)throw new Error(payload.error||"Could not delete this address.");setCustomer(current=>current?{...current,addresses:current.addresses.filter(candidate=>candidate.id!==address.id)}:current);setSelectedCustomerAddressId("");setDeliveryAddress("");setDeliveryUnit("");setDeliveryBusinessName("");setValidatedAddress(null);setDeliveryValidationToken("");setDeliveryRoute(null);setSavedDraft(null)}catch(error){setAddressError(error instanceof Error?error.message:"Could not delete this address.")}finally{setSavingCustomerAddress(false)}
   }
 
   function removeLine(lineId: string) {
@@ -3785,6 +3800,7 @@ export default function PosClient({
                     type="button"
                     className="posAddAddressButton"
                     onClick={() => {
+                      setEditingCustomerAddressId("");
                       setSelectedCustomerAddressId("");
                       setDeliveryAddress("");
                       setDeliveryBusinessName("");
@@ -3800,6 +3816,7 @@ export default function PosClient({
                   >
                     + ADD NEW ADDRESS
                   </button>
+                  {selectedCustomerAddressId&&<><button type="button" className="posAddAddressButton" onClick={editSelectedCustomerAddress}>EDIT</button><button type="button" className="posAddAddressButton danger" disabled={savingCustomerAddress} onClick={()=>void deleteSelectedCustomerAddress()}>DELETE</button></>}
                 </div>
                 {validatedAddress && (
                   <p className="addressResult posAddressResultCompact">
@@ -5871,7 +5888,7 @@ export default function PosClient({
                 {savingCustomerAddress
                   ? "SAVING…"
                   : customer
-                    ? "ADD & USE THIS ADDRESS"
+                    ? editingCustomerAddressId ? "SAVE & USE ADDRESS" : "ADD & USE THIS ADDRESS"
                     : "ADD CUSTOMER FIRST"}
               </button>
             )}
