@@ -166,38 +166,34 @@ export default function MxKeyedPaymentDialog({
             />
           </label>
         </div>
+        {payment.requireAvsStreet && (
+          <label>
+            Billing street address
+            <input
+              autoComplete="address-line1"
+              value={billingStreet}
+              onChange={(e) => setBillingStreet(e.target.value.slice(0, 120))}
+              placeholder="Street address"
+              required
+            />
+          </label>
+        )}
         {payment.requireAvsZip && (
-          <>
-            {payment.requireAvsStreet && (
-              <label>
-                Billing street address
-                <input
-                  autoComplete="address-line1"
-                  value={billingStreet}
-                  onChange={(e) =>
-                    setBillingStreet(e.target.value.slice(0, 120))
-                  }
-                  placeholder="Street address"
-                  required
-                />
-              </label>
-            )}
-            <label>
-              Billing ZIP code
-              <input
-                inputMode="numeric"
-                autoComplete="postal-code"
-                value={billingZip}
-                onChange={(e) =>
-                  setBillingZip(
-                    e.target.value.replace(/[^\d-]/g, "").slice(0, 10),
-                  )
-                }
-                placeholder="ZIP code"
-                required
-              />
-            </label>
-          </>
+          <label>
+            Billing ZIP code
+            <input
+              inputMode="numeric"
+              autoComplete="postal-code"
+              value={billingZip}
+              onChange={(e) =>
+                setBillingZip(
+                  e.target.value.replace(/[^\d-]/g, "").slice(0, 10),
+                )
+              }
+              placeholder="ZIP code"
+              required
+            />
+          </label>
         )}
         <small>
           Card details are sent directly to MX Merchant and never pass through

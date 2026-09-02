@@ -78,8 +78,8 @@ export async function POST(
         customerName: customer?.contactName,
         avsStreet: customer?.billingAddress?.street1,
         avsZip: customer?.billingAddress?.postalCode,
-        requireAvsZip: owner.row.service_type === "pickup",
-        requireAvsStreet: owner.row.service_type === "pickup",
+        requireAvsZip: !customer?.billingAddress?.postalCode,
+        requireAvsStreet: !customer?.billingAddress?.street1,
       });
     }
     if (body.action !== "confirm")

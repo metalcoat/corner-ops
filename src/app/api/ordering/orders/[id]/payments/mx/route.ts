@@ -71,7 +71,8 @@ export async function POST(
         customerName: customer?.contactName,
         avsStreet: customer?.billingAddress?.street1,
         avsZip: customer?.billingAddress?.postalCode || "13669",
-        requireAvsZip: true,
+        requireAvsZip: false,
+        requireAvsStreet: !customer?.billingAddress?.street1,
       });
     }
     if (body.action !== "confirm")
@@ -117,7 +118,10 @@ export async function POST(
       },
     });
     await sql`UPDATE ordering_mx_checkout_sessions SET status='completed',provider_transaction_reference=${reference},completed_at=NOW() WHERE id=${session.id}`;
-    if (result.order.payment_status === "paid" && result.order.status === "draft") {
+    if (
+      result.order.payment_status === "paid" &&
+      result.order.status === "draft"
+    ) {
       await submitDraftOrder(orderId, business, actor);
       await dispatchSubmittedOrderPrintJobs(orderId, business);
     } else {
