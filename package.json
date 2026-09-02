@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "node tools/apply-production-migrations.mjs && node tools/apply-one-time-payroll-fix.mjs && node tools/inspect-onboarding-reminders.mjs && node tools/send-one-time-onboarding-reminders.mjs && next build",
+    "build": "node tools/apply-production-migrations.mjs && next build",
     "start": "next start",
     "db:migrate": "node tools/apply-production-migrations.mjs --force",
     "typecheck": "tsc --noEmit",
