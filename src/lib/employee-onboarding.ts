@@ -40,9 +40,9 @@ export async function sendEmployeeOnboardingSms(input: EmployeeOnboardingSmsInpu
       `${input.business}: Welcome, ${employeeGivenName(input.name)}!`,
       `Sign in to Corner Ops Employee Hub: ${employeeHubUrl}`,
       `Your PIN is ${input.pin}.`,
-      "Corner Ops will ask you for any missing onboarding information, including your email address.",
-      `Complete your new-hire paperwork here after signing in: ${formsUrl}`,
-      "Questions? Send a message in Corner Ops. Do not reply to this text; replies are not monitored.",
+      `Complete your required new-hire forms here: ${formsUrl}`,
+      "This includes your New York pay-rate/payday notice, federal W-4, New York IT-2104, I-9, and meal-period acknowledgment.",
+      "Questions? Send management a message in Corner Ops. Do not reply here except STOP to opt out.",
     ].join("\n"),
   });
 }
