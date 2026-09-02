@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { localValidationEnv } from "./validation-env";
 localValidationEnv();
 const rollback="rollback:driver-cash";
@@ -9,6 +10,8 @@ async function main(){
   await ensureDriverDeliverySchema();
   const cashierId=randomUUID(),actor={business:"Corner Deli",employeeId:cashierId,name:"Cashier Employee",manager:false,driver:false} as any;
   const result:Record<string,boolean>={};
+  const clientSource=readFileSync(new URL("../src/app/pos/deli/drivers/driver-cash-client.tsx",import.meta.url),"utf8");
+  assert.match(clientSource,/DRIVER CASH CHECKOUT/);assert.match(clientSource,/driverCashNumpad/);assert.match(clientSource,/CASH OUT/);result.unifiedNumpadCheckout=true;
   try{await withTransaction(async()=>{
     const sql=getSql(),driverId=randomUUID(),orderId=randomUUID(),deliveryId=randomUUID(),suffix=randomUUID().slice(0,6);
     await sql`INSERT INTO employees(id,business,name,pin_hash,position,role_group,active)VALUES(${driverId},'Corner Deli',${`Cash Driver ${suffix}`},${`driver-${suffix}`},'Driver','Driver',TRUE),(${cashierId},'Corner Deli',${actor.name},${`cashier-${suffix}`},'Cashier','In-House',TRUE)`;
