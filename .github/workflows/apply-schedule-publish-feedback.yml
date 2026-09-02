@@ -46,38 +46,30 @@ jobs:
           board = "src/app/ops/workforce/schedule-board.tsx"
           replace_once(
               board,
-              '''        <button type="button" className="schedulePrimary" disabled={busy || !weekShifts.length || schedulePublishBlocked} title={overtimeApprovalRequired ? "Publishing requires manager overtime confirmation." : undefined} onClick={() => void publishWeek()}>''',
-              '''        <button
-          type="button"
-          className="schedulePrimary"
-          disabled={busy || !weekShifts.length}
-          title={schedulePublishBlocked
-            ? "Click to see the schedule issues preventing publication."
-            : overtimeApprovalRequired
-              ? "Publishing requires manager overtime confirmation."
-              : undefined}
-          onClick={() => void publishWeek()}
-        >''',
+              'disabled={busy || !weekShifts.length || schedulePublishBlocked}',
+              'disabled={busy || !weekShifts.length}',
           )
           replace_once(
               board,
-              '''      {issueCount > 0 && <details className="scheduleIssueDetails">''',
-              '''      {issueCount > 0 && <details className="scheduleIssueDetails" open={schedulePublishBlocked || overtimeApprovalRequired}>''',
+              'title={overtimeApprovalRequired ? "Publishing requires manager overtime confirmation." : undefined}',
+              'title={schedulePublishBlocked ? "Click to see the schedule issues preventing publication." : overtimeApprovalRequired ? "Publishing requires manager overtime confirmation." : undefined}',
+          )
+          replace_once(
+              board,
+              '{issueCount > 0 && <details className="scheduleIssueDetails">',
+              '{issueCount > 0 && <details className="scheduleIssueDetails" open={schedulePublishBlocked || overtimeApprovalRequired}>',
           )
 
           test_path = "tests/schedule-overtime-override.test.ts"
           replace_once(
               test_path,
-              '''  assert.match(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| schedulePublishBlocked\\}/);''',
-              '''  assert.match(board, /disabled=\\{busy \\|\\| !weekShifts\\.length\\}/);''',
+              'assert.match(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| schedulePublishBlocked\\}/);',
+              'assert.match(board, /disabled=\\{busy \\|\\| !weekShifts\\.length\\}/);',
           )
           replace_once(
               test_path,
-              '''  assert.doesNotMatch(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| !publishAnalysis\\.canPublish/);''',
-              '''  assert.doesNotMatch(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| schedulePublishBlocked/);
-  assert.doesNotMatch(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| !publishAnalysis\\.canPublish/);
-  assert.match(board, /Click to see the schedule issues preventing publication/);
-  assert.match(board, /open=\\{schedulePublishBlocked \\|\\| overtimeApprovalRequired\\}/);''',
+              'assert.doesNotMatch(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| !publishAnalysis\\.canPublish/);',
+              'assert.doesNotMatch(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| schedulePublishBlocked/);\n  assert.doesNotMatch(board, /disabled=\\{busy \\|\\| !weekShifts\\.length \\|\\| !publishAnalysis\\.canPublish/);\n  assert.match(board, /Click to see the schedule issues preventing publication/);\n  assert.match(board, /open=\\{schedulePublishBlocked \\|\\| overtimeApprovalRequired\\}/);',
           )
           PY
 
