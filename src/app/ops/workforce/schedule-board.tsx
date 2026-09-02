@@ -371,6 +371,10 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
   const draftCount = weekShifts.filter((shift) => shift.status === "Draft").length;
   const publishedCount = weekShifts.filter((shift) => shift.status === "Published" || shift.status === "Open").length;
   const missingEmailCount = activeEmployees.filter((employee) => !employee.email.trim()).length;
+  const hardBlockingIssueCount = Math.max(
+    0,
+    publishAnalysis.blockingIssueCount - publishAnalysis.overForty.length,
+  );
 
   const assignmentTimeOff = (employeeId: string | null, startsAt: string | Date, endsAt: string | Date) =>
     timeOff.filter((request) => timeOffOverlapsShift(request, employeeId, startsAt, endsAt));
@@ -385,6 +389,8 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       .filter((request) => request.status === "Pending")
       .map((request) => ({ shift, request })),
   );
+  const schedulePublishBlocked = hardBlockingIssueCount > 0 || approvedTimeOffShiftConflicts.length > 0;
+  const overtimeApprovalRequired = !schedulePublishBlocked && publishAnalysis.overForty.length > 0;
 
   function confirmTimeOffAssignment(employeeId: string | null, startsAt: string | Date, endsAt: string | Date) {
     const conflicts = assignmentTimeOff(employeeId, startsAt, endsAt);
@@ -590,13 +596,8 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       window.alert(`The schedule cannot be published/resend yet. Approved time off conflicts with assigned shifts:\n\n${details.join("\n")}\n\nReassign those shifts or make them open.`);
       return;
     }
-    if (pendingTimeOffShiftConflicts.length) {
-      const names = Array.from(new Set(pendingTimeOffShiftConflicts.map(({ request }) => `${request.employee_name} (${timeOffLabel(request)})`)));
-      if (!window.confirm(`There are pending time-off requests that overlap assigned shifts:\n\n${names.join("\n")}\n\nPublish anyway while those requests are pending?`)) return;
-    }
-    if (!publishAnalysis.canPublish) {
+    if (hardBlockingIssueCount > 0) {
       const details = [
-        ...publishAnalysis.overForty.map((employee) => `${employee.employeeName}: ${employee.hours.toFixed(1)} paid hours`),
         ...publishAnalysis.overlaps.map((overlap) => `${overlap.employeeName}: overlap at ${localDateTime(overlap.startsAt)}`),
         ...publishAnalysis.coverageGaps.map((gap) => `No coverage: ${localDateTime(gap.startsAt)}–${localTime(gap.endsAt)} (${gap.minutes} min)`),
         ...publishAnalysis.loneWorkerViolations.map((item) => `${item.employeeName}: alone ${item.minutes} minutes at ${localDateTime(item.startsAt)}`),
@@ -605,11 +606,30 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       window.alert(`The schedule cannot be published yet.\n\n${details.slice(0, 14).join("\n")}`);
       return;
     }
+    if (pendingTimeOffShiftConflicts.length) {
+      const names = Array.from(new Set(pendingTimeOffShiftConflicts.map(({ request }) => `${request.employee_name} (${timeOffLabel(request)})`)));
+      if (!window.confirm(`There are pending time-off requests that overlap assigned shifts:\n\n${names.join("\n")}\n\nPublish anyway while those requests are pending?`)) return;
+    }
+
     const actionLabel = draftCount > 0 ? "Publish week" : "Resend schedule";
-    if (!window.confirm(`${actionLabel} for ${business}? Only employees whose schedule changed will be notified; an explicit resend notifies currently assigned employees again.`)) return;
+    let allowOvertime = false;
+    if (publishAnalysis.overForty.length) {
+      const overtimeDetails = publishAnalysis.overForty.map((employee) =>
+        `${employee.employeeName}: ${employee.hours.toFixed(1)} paid hours`,
+      );
+      if (!window.confirm(
+        `OVERTIME WARNING\n\n${overtimeDetails.join("\n")}\n\n${actionLabel} for ${business} anyway? This records your manager approval. Confirm that the overtime is intentional and will be handled in payroll.`,
+      )) return;
+      allowOvertime = true;
+    } else if (!window.confirm(
+      `${actionLabel} for ${business}? Only employees whose schedule changed will be notified; an explicit resend notifies currently assigned employees again.`,
+    )) return;
+
     await runAction(
-      { action: "week-publish", weekStart: weekStartKey },
-      "Schedule published. Employee Hub and configured notifications were updated.",
+      { action: "week-publish", weekStart: weekStartKey, allowOvertime },
+      allowOvertime
+        ? "Schedule published with manager overtime approval. Employee Hub and configured notifications were updated."
+        : "Schedule published. Employee Hub and configured notifications were updated.",
     );
   }
 
@@ -647,16 +667,16 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
         <button type="button" onClick={() => setWeekStart(addDays(weekStart, -7))}>← Previous</button>
         <button type="button" onClick={() => setWeekStart(startOfMonday(new Date()))}>Today</button>
         <button type="button" onClick={() => setWeekStart(addDays(weekStart, 7))}>Next →</button>
-        <button type="button" className="schedulePrimary" disabled={busy || !weekShifts.length || !publishAnalysis.canPublish || approvedTimeOffShiftConflicts.length > 0} onClick={() => void publishWeek()}>
+        <button type="button" className="schedulePrimary" disabled={busy || !weekShifts.length || schedulePublishBlocked} title={overtimeApprovalRequired ? "Publishing requires manager overtime confirmation." : undefined} onClick={() => void publishWeek()}>
           {draftCount > 0 ? `Publish (${draftCount})` : "Resend"}
         </button>
         <button type="button" className="schedulePrimary" onClick={() => setEditor(defaultEditor(activeEmployees[0]?.id || null, weekStart, activeEmployees[0]))}>+ Shift</button>
       </div>
     </header>
 
-    <section className={`scheduleValidation ${publishAnalysis.canPublish ? "ready" : "blocked"}`}>
+    <section className={`scheduleValidation ${schedulePublishBlocked ? "blocked" : "ready"}`}>
       <div className="scheduleValidationHeader">
-        <div><strong>{publishAnalysis.canPublish ? "Schedule checks passed" : "Schedule cannot be published"}</strong><span>Paid hours, overlap, meals, continuous coverage, and business-specific staffing rules.</span></div>
+        <div><strong>{schedulePublishBlocked ? "Schedule cannot be published" : overtimeApprovalRequired ? "Overtime approval required" : "Schedule checks passed"}</strong><span>Paid hours, overlap, meals, continuous coverage, and business-specific staffing rules.</span></div>
         <div className="scheduleCheckBadges">
           <span className={publishAnalysis.overThirtyEight.length ? "warning" : "clear"}>{publishAnalysis.overThirtyEight.length} over 38</span>
           <span className={publishAnalysis.overForty.length ? "danger" : "clear"}>{publishAnalysis.overForty.length} over 40</span>
@@ -671,7 +691,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
         <summary>View {issueCount} schedule warning{issueCount === 1 ? "" : "s"}</summary>
         <div className="scheduleIssueList">
           {publishAnalysis.overThirtyEight.map((employee) => <div className="scheduleIssue warning" key={`38-${employee.employeeId}`}><strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} paid hours.</span></div>)}
-          {publishAnalysis.overForty.map((employee) => <div className="scheduleIssue danger" key={`40-${employee.employeeId}`}><strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} paid hours. Reduce before publishing.</span></div>)}
+          {publishAnalysis.overForty.map((employee) => <div className="scheduleIssue danger" key={`40-${employee.employeeId}`}><strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} paid hours. Manager confirmation required to publish.</span></div>)}
           {publishAnalysis.overlaps.map((item) => <div className="scheduleIssue danger" key={`${item.firstShiftId}-${item.secondShiftId}`}><strong>{item.employeeName}</strong><span>Overlapping assignments at {localDateTime(item.startsAt)}.</span></div>)}
           {publishAnalysis.coverageGaps.map((gap) => <div className="scheduleIssue danger" key={`${gap.dateKey}-${gap.startsAt}`}><strong>No employee coverage</strong><span>{localDateTime(gap.startsAt)}–{localTime(gap.endsAt)} ({gap.minutes} minutes).</span></div>)}
           {publishAnalysis.mealPeriodViolations.map((item) => <div className="scheduleIssue warning" key={`${item.shiftId}-${item.code}`}><strong>{item.employeeName}</strong><span>{item.message}</span></div>)}

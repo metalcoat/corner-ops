@@ -261,6 +261,11 @@ export async function publishBusinessScheduleWeek(input: {
   business: Business;
   weekStart: string;
   actor: string;
+  overtimeOverride?: Array<{
+    employeeId: string;
+    employeeName: string;
+    hours: number;
+  }>;
 }) {
   await ensureStaffNotificationSchema();
   const weekEnd = addDays(input.weekStart, 6);
@@ -386,6 +391,13 @@ export async function publishBusinessScheduleWeek(input: {
     mode,
     hubUrl,
     pinInstruction: accessInstruction,
+    overtimeOverride: input.overtimeOverride?.length
+      ? {
+          approvedBy: input.actor,
+          approvedAt: new Date().toISOString(),
+          employees: input.overtimeOverride,
+        }
+      : null,
   };
 
   const reserved = await sql`

@@ -37,6 +37,7 @@ export async function publishValidatedScheduleWeek(input: {
   business: Business;
   weekStart: string;
   actor: string;
+  allowOvertime?: boolean;
 }) {
   await ensureScheduleMealSchema();
   const weekStart = validWeekStart(input.weekStart);
@@ -98,8 +99,8 @@ export async function publishValidatedScheduleWeek(input: {
   if (approvedTimeOffConflicts.length) {
     problems.push(`Approved time off conflicts: ${approvedTimeOffConflicts.slice(0, 8).map((item) => `${item.employee_name} at ${localStamp(item.starts_at)}`).join("; ")}. Reassign or open these shifts.`);
   }
-  if (analysis.overForty.length) {
-    problems.push(`Over 40 paid hours: ${analysis.overForty.map((employee) => `${employee.employeeName} (${employee.hours.toFixed(1)} hrs)`).join(", ")}`);
+  if (analysis.overForty.length && !input.allowOvertime) {
+    problems.push(`Overtime approval required: ${analysis.overForty.map((employee) => `${employee.employeeName} (${employee.hours.toFixed(1)} hrs)`).join(", ")}. Confirm the overtime in the schedule publisher.`);
   }
   if (analysis.overlaps.length) {
     problems.push(`Overlapping shifts: ${analysis.overlaps.slice(0, 4).map((overlap) => `${overlap.employeeName} at ${localStamp(overlap.startsAt)}`).join("; ")}`);
@@ -120,7 +121,18 @@ export async function publishValidatedScheduleWeek(input: {
     throw new Error(`Schedule cannot be published. ${problems.join(" | ")}`);
   }
 
-  const publication = await publishBusinessScheduleWeek({ ...input, weekStart });
+  const publication = await publishBusinessScheduleWeek({
+    business: input.business,
+    weekStart,
+    actor: input.actor,
+    overtimeOverride: input.allowOvertime
+      ? analysis.overForty.map((employee) => ({
+          employeeId: employee.employeeId,
+          employeeName: employee.employeeName,
+          hours: employee.hours,
+        }))
+      : [],
+  });
   const duplicate = "duplicate" in publication && publication.duplicate === true;
   const employeeIds = "affectedEmployeeIds" in publication && Array.isArray(publication.affectedEmployeeIds)
     ? publication.affectedEmployeeIds.filter((value): value is string => typeof value === "string" && Boolean(value))

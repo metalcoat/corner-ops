@@ -227,6 +227,7 @@ export async function POST(request: Request) {
           business,
           weekStart: String(body.weekStart || ""),
           actor: session.displayName,
+          allowOvertime: body.allowOvertime === true,
         });
         if (result.publicationId) {
           after(() => processSchedulePublicationDeliveries({ publicationId: String(result.publicationId), limit: 30 }).catch((error) => {
