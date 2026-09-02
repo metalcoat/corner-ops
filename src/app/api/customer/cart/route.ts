@@ -136,6 +136,18 @@ export async function POST(request: Request) {
         allowShared: true,
       });
     }
+    if (customerId) {
+      await sql`UPDATE ordering_customers SET
+        first_name=CASE WHEN trim(first_name)='' THEN ${firstName} ELSE first_name END,
+        last_name=CASE WHEN trim(last_name)='' THEN ${lastName} ELSE last_name END,
+        display_name=CASE WHEN trim(display_name)='' OR display_name=email THEN ${`${firstName} ${lastName}`.trim()} ELSE display_name END,
+        email=CASE WHEN trim(email)='' THEN ${email} ELSE email END,
+        updated_at=NOW()
+        WHERE id=${customerId}`;
+      await sql`INSERT INTO ordering_customer_emails(id,customer_id,normalized_email,display_email,is_primary)
+        SELECT gen_random_uuid(),${customerId},${email},${email},NOT EXISTS(SELECT 1 FROM ordering_customer_emails WHERE customer_id=${customerId})
+        WHERE NOT EXISTS(SELECT 1 FROM ordering_customer_emails WHERE customer_id=${customerId} AND normalized_email=${email})`;
+    }
     if (!customerId) {
       const created = await createCustomer({
         business: "Corner Deli",

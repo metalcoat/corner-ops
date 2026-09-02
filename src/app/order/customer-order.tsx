@@ -384,6 +384,11 @@ export default function CustomerOrder() {
   const populatedCategories =
     catalog?.categories.filter((category) => category.items.length) || [];
   const featuredItems = catalog?.featuredItems || [];
+  const contactComplete = Boolean(
+    firstName.trim() &&
+      phone.replace(/\D/g, "").length === 10 &&
+      /^\S+@\S+\.\S+$/.test(email.trim()),
+  );
   const estimated = cart.reduce((sum, line) => {
     const variant = line.item.variants.find((v) => v.id === line.variantId),
       mods = line.item.modifiers
@@ -1400,8 +1405,7 @@ export default function CustomerOrder() {
               </fieldset>,
               addressPortal,
             )}
-          {catalog?.customer.authenticated &&
-          phone.replace(/\D/g, "").length === 10 ? (
+          {catalog?.customer.authenticated && contactComplete ? (
             <section className="savedContact" aria-label="Saved contact">
               <small>Ordering as</small>
               <strong>{`${firstName} ${lastName}`.trim()}</strong>
@@ -1415,7 +1419,7 @@ export default function CustomerOrder() {
           ) : (
             <fieldset className="customerContact">
               <legend>Contact</legend>
-              {!catalog?.customer.authenticated && (
+              {(!catalog?.customer.authenticated || !firstName.trim()) && (
                 <>
                   <input
                     aria-label="First name"
@@ -1441,7 +1445,8 @@ export default function CustomerOrder() {
                 value={phone}
                 onChange={(event) => setPhone(event.target.value)}
               />
-              {!catalog?.customer.authenticated && (
+              {(!catalog?.customer.authenticated ||
+                !/^\S+@\S+\.\S+$/.test(email.trim())) && (
                 <input
                   aria-label="Email address"
                   autoComplete="email"
@@ -1454,7 +1459,8 @@ export default function CustomerOrder() {
               )}
               {catalog?.customer.authenticated && (
                 <small className="contactHint">
-                  Add your phone once; we’ll save it for future orders.
+                  Complete the missing contact details once; we’ll save them
+                  for future orders.
                 </small>
               )}
             </fieldset>
