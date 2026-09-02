@@ -1,5 +1,6 @@
-import { canAccessBusiness, getSession } from "@/lib/auth";
-import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
+import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
+import { normalizePosition, positionsForBusiness, roleGroupForPosition } from "@/lib/business-positions";
+import { getSql } from "@/lib/db";
 import { apiError, unauthorized } from "@/lib/http";
 import { createManualTimeEntry } from "@/lib/manual-time-entry";
 import type { Business } from "@/lib/types";
@@ -81,10 +82,45 @@ function submittedTimes(body: Record<string, unknown>) {
   };
 }
 
+export async function GET(request: Request) {
+  try {
+    const session = await getSession();
+    if (!session) return unauthorized();
+    requirePermission(session, "workforce.read");
+
+    const business = businessFrom(new URL(request.url).searchParams.get("business"));
+    if (!canAccessBusiness(session, business)) {
+      return Response.json({ error: "Business access denied." }, { status: 403 });
+    }
+
+    const employees = await getSql()`
+      SELECT id, name, position
+      FROM employees
+      WHERE business = ${business} AND active = TRUE
+      ORDER BY name
+    ` as unknown as Array<{ id: string; name: string; position: string }>;
+
+    return Response.json({
+      business,
+      employees: employees.map((employee) => ({
+        id: employee.id,
+        name: employee.name,
+        position: employee.position || (business === "Tiki" ? "Bartender" : ""),
+      })),
+      positions: positionsForBusiness(business),
+    }, {
+      headers: { "Cache-Control": "private, no-store" },
+    });
+  } catch (error) {
+    return apiError(error);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    requirePermission(session, "workforce.write");
 
     const body = await request.json() as Record<string, unknown>;
     const business = businessFrom(body.business);
