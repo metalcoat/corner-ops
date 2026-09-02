@@ -70,7 +70,8 @@ export async function POST(
         replayId,
         customerName: customer?.contactName,
         avsStreet: customer?.billingAddress?.street1,
-        avsZip: customer?.billingAddress?.postalCode,
+        avsZip: customer?.billingAddress?.postalCode || "13669",
+        requireAvsZip: true,
       });
     }
     if (body.action !== "confirm")
