@@ -42,8 +42,8 @@ export function mxMerchantStatus(): PaymentProviderStatus {
 
 function mxApiBase(): string {
   return process.env.MX_ENVIRONMENT?.trim().toLowerCase() === "production"
-    ? "https://api2.mxmerchant.com"
-    : "https://sandbox-api2.mxmerchant.com";
+    ? "https://api.prioritycommerce.com/v1"
+    : "https://sandbox-api.prioritycommerce.com/v1";
 }
 
 type MxTerminal = {
