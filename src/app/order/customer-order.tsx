@@ -14,8 +14,13 @@ import {
 } from "@/lib/ordering-modifier-intensity";
 import { unwrapHelcimPayResponse } from "@/lib/helcim-pay-response";
 import { consolidateQuantities } from "@/lib/cart-line-consolidation";
-import { DELIVERY_LOCATION_PRESETS, deliveryPresetSuggestions } from "@/lib/ordering-delivery-presets";
-import MxKeyedPaymentDialog,{type MxPaymentInitialization}from"@/components/mx-keyed-payment-dialog";
+import {
+  DELIVERY_LOCATION_PRESETS,
+  deliveryPresetSuggestions,
+} from "@/lib/ordering-delivery-presets";
+import MxKeyedPaymentDialog, {
+  type MxPaymentInitialization,
+} from "@/components/mx-keyed-payment-dialog";
 import "@/components/mx-keyed-payment-dialog.css";
 
 function localDateValue(value = new Date()) {
@@ -218,8 +223,6 @@ function cartDetails(line: CartLine) {
       if (names.length) details.push(`${group.name}: ${names.join(", ")}`);
     }
   }
-  if (line.specialInstructions.trim())
-    details.push(`Note: ${line.specialInstructions.trim()}`);
   return details;
 }
 
@@ -247,9 +250,11 @@ export default function CustomerOrder() {
       null,
     ),
     [paymentOpen, setPaymentOpen] = useState(false),
-    [mxPayment,setMxPayment]=useState<MxPaymentInitialization|null>(null),
+    [mxPayment, setMxPayment] = useState<MxPaymentInitialization | null>(null),
     [deliveryAddress, setDeliveryAddress] = useState(""),
     [deliveryUnit, setDeliveryUnit] = useState(""),
+    [deliveryInstructions, setDeliveryInstructions] = useState(""),
+    [deliveryInstructionsOpen, setDeliveryInstructionsOpen] = useState(false),
     [savedAddressId, setSavedAddressId] = useState(""),
     [addingAddress, setAddingAddress] = useState(false),
     [addressLabel, setAddressLabel] = useState("Home"),
@@ -261,7 +266,9 @@ export default function CustomerOrder() {
     [selectedPlaceId, setSelectedPlaceId] = useState(""),
     [selectedDeliveryLocationId, setSelectedDeliveryLocationId] = useState(""),
     [addressValidationToken, setAddressValidationToken] = useState(""),
-    [deliveryDistanceMiles, setDeliveryDistanceMiles] = useState<number | null>(null),
+    [deliveryDistanceMiles, setDeliveryDistanceMiles] = useState<number | null>(
+      null,
+    ),
     [deliveryQuoteCents, setDeliveryQuoteCents] = useState<number | null>(null),
     [addressBusy, setAddressBusy] = useState(false),
     [addressPortal, setAddressPortal] = useState<HTMLElement | null>(null),
@@ -273,7 +280,9 @@ export default function CustomerOrder() {
   useEffect(() => {
     setAddressPortal(document.getElementById("delivery-address-top"));
   }, []);
-  const selectedDeliveryLocation = DELIVERY_LOCATION_PRESETS.find((location) => location.id === selectedDeliveryLocationId);
+  const selectedDeliveryLocation = DELIVERY_LOCATION_PRESETS.find(
+    (location) => location.id === selectedDeliveryLocationId,
+  );
   useEffect(() => {
     setLoading(true);
     fetch(`/api/customer/catalog?serviceType=${serviceType}`, {
@@ -343,7 +352,9 @@ export default function CustomerOrder() {
             ? response.json()
             : Promise.reject(new Error(await failure(response))),
         )
-        .then((body) => setAddressSuggestions([...presets, ...(body.suggestions || [])]))
+        .then((body) =>
+          setAddressSuggestions([...presets, ...(body.suggestions || [])]),
+        )
         .catch(() => setAddressSuggestions(presets));
     }, 250);
     return () => window.clearTimeout(timer);
@@ -422,9 +433,12 @@ export default function CustomerOrder() {
         if (!response.ok) throw new Error(await failure(response));
         return response.json();
       })
-      .then((body) => setDeliveryQuoteCents(Number(body.quote.deliveryFeeCents)))
+      .then((body) =>
+        setDeliveryQuoteCents(Number(body.quote.deliveryFeeCents)),
+      )
       .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (error instanceof DOMException && error.name === "AbortError")
+          return;
         setDeliveryQuoteCents(null);
       });
     return () => controller.abort();
@@ -432,7 +446,10 @@ export default function CustomerOrder() {
   function add(line: Omit<CartLine, "key">) {
     setCart((rows) => {
       const next = { ...line, key: crypto.randomUUID() };
-      return consolidateQuantities([...rows, next], ({ key: _key, quantity: _quantity, ...configuration }) => configuration);
+      return consolidateQuantities(
+        [...rows, next],
+        ({ key: _key, quantity: _quantity, ...configuration }) => configuration,
+      );
     });
     setActive(null);
     setReview(null);
@@ -441,7 +458,15 @@ export default function CustomerOrder() {
     setBusy(true);
     setMessage("");
     try {
-      if (serviceType === "delivery" && selectedDeliveryLocation?.requiresDropoff !== false && selectedDeliveryLocation && !deliveryUnit) throw new Error(`Choose where at ${selectedDeliveryLocation.name} this delivery is going.`);
+      if (
+        serviceType === "delivery" &&
+        selectedDeliveryLocation?.requiresDropoff !== false &&
+        selectedDeliveryLocation &&
+        !deliveryUnit
+      )
+        throw new Error(
+          `Choose where at ${selectedDeliveryLocation.name} this delivery is going.`,
+        );
       const response = await fetch("/api/customer/cart", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -453,6 +478,8 @@ export default function CustomerOrder() {
           lastName,
           phone,
           email,
+          deliveryInstructions:
+            serviceType === "delivery" ? deliveryInstructions : "",
           items: cart.map((line) => ({
             itemId: line.item.id,
             variantId: line.variantId,
@@ -463,7 +490,7 @@ export default function CustomerOrder() {
             pizzaToppings: line.pizzaToppings,
             comboId: line.comboId,
             comboSelections: line.comboSelections,
-            specialInstructions: line.specialInstructions,
+            specialInstructions: "",
           })),
         }),
       });
@@ -538,13 +565,70 @@ export default function CustomerOrder() {
       }));
       setRewardApplied(true);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Reward could not be applied.");
+      setMessage(
+        error instanceof Error ? error.message : "Reward could not be applied.",
+      );
     } finally {
       setBusy(false);
     }
   }
-  async function payWithMx(order=review){if(!order?.id||busy)return;setBusy(true);setMessage("");try{const response=await fetch(`/api/customer/orders/${encodeURIComponent(order.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"initialize"})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not start secure checkout.");setMxPayment(body);setPaymentOpen(true)}catch(e){setMessage(e instanceof Error?e.message:"Could not start secure checkout.");setBusy(false)}}
-  async function confirmMxPayment(replayId:number){if(!review?.id)return;try{const response=await fetch(`/api/customer/orders/${encodeURIComponent(review.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"confirm",replayId})}),result=await response.json();if(!response.ok)throw new Error(result.error||"Payment could not be verified.");setMxPayment(null);setPaymentOpen(false);setCompletedOrder(result.order);setReview(null);setCart([]);window.location.assign(`/order/confirmation?orderId=${encodeURIComponent(result.order.id)}`)}catch(e){setMessage(e instanceof Error?e.message:"Payment could not be verified.");setMxPayment(null);setPaymentOpen(false)}finally{setBusy(false)}}
+  async function payWithMx(order = review) {
+    if (!order?.id || busy) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch(
+          `/api/customer/orders/${encodeURIComponent(order.id)}/payments/mx`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action: "initialize" }),
+          },
+        ),
+        body = await response.json();
+      if (!response.ok)
+        throw new Error(body.error || "Could not start secure checkout.");
+      setMxPayment(body);
+      setPaymentOpen(true);
+    } catch (e) {
+      setMessage(
+        e instanceof Error ? e.message : "Could not start secure checkout.",
+      );
+      setBusy(false);
+    }
+  }
+  async function confirmMxPayment(replayId: number) {
+    if (!review?.id) return;
+    try {
+      const response = await fetch(
+          `/api/customer/orders/${encodeURIComponent(review.id)}/payments/mx`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action: "confirm", replayId }),
+          },
+        ),
+        result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || "Payment could not be verified.");
+      setMxPayment(null);
+      setPaymentOpen(false);
+      setCompletedOrder(result.order);
+      setReview(null);
+      setCart([]);
+      window.location.assign(
+        `/order/confirmation?orderId=${encodeURIComponent(result.order.id)}`,
+      );
+    } catch (e) {
+      setMessage(
+        e instanceof Error ? e.message : "Payment could not be verified.",
+      );
+      setMxPayment(null);
+      setPaymentOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function payWithHelcim(order = review) {
     if (!order?.id || busy) return;
     setBusy(true);
@@ -740,8 +824,18 @@ export default function CustomerOrder() {
   }
   return (
     <main className="customerOrder">
-      {mxPayment&&<MxKeyedPaymentDialog payment={mxPayment} onApproved={confirmMxPayment} onCancel={()=>{setMxPayment(null);setPaymentOpen(false);setBusy(false)}}/>}
-      {paymentOpen&&!mxPayment ? (
+      {mxPayment && (
+        <MxKeyedPaymentDialog
+          payment={mxPayment}
+          onApproved={confirmMxPayment}
+          onCancel={() => {
+            setMxPayment(null);
+            setPaymentOpen(false);
+            setBusy(false);
+          }}
+        />
+      )}
+      {paymentOpen && !mxPayment ? (
         <div className="securePaymentBackdrop" aria-hidden="true" />
       ) : null}
       <header className="orderHero">
@@ -1057,6 +1151,34 @@ export default function CustomerOrder() {
               {catalog.delivery.maxDistanceMiles} miles.
             </p>
           )}
+          {serviceType === "delivery" && (
+            <div className="deliveryInstructions">
+              <button
+                type="button"
+                className="choiceButton"
+                aria-expanded={deliveryInstructionsOpen}
+                onClick={() => setDeliveryInstructionsOpen((open) => !open)}
+              >
+                {deliveryInstructions.trim()
+                  ? "Edit delivery instructions"
+                  : "+ Add delivery instructions"}
+              </button>
+              {deliveryInstructionsOpen && (
+                <label>
+                  Delivery instructions
+                  <textarea
+                    autoFocus
+                    maxLength={500}
+                    value={deliveryInstructions}
+                    onChange={(event) =>
+                      setDeliveryInstructions(event.target.value)
+                    }
+                    placeholder="For example: side door, ring bell, or call on arrival"
+                  />
+                </label>
+              )}
+            </div>
+          )}
           {serviceType === "delivery" &&
             addressPortal &&
             createPortal(
@@ -1106,7 +1228,10 @@ export default function CustomerOrder() {
                                 setValidatedDelivery({
                                   formattedAddress: address.formattedAddress,
                                 });
-                                void validateDeliveryAddressNow(address.formattedAddress, "");
+                                void validateDeliveryAddressNow(
+                                  address.formattedAddress,
+                                  "",
+                                );
                               }}
                             >
                               <strong>
@@ -1155,7 +1280,10 @@ export default function CustomerOrder() {
                                 setValidatedDelivery({
                                   formattedAddress: address.formattedAddress,
                                 });
-                                void validateDeliveryAddressNow(address.formattedAddress, "");
+                                void validateDeliveryAddressNow(
+                                  address.formattedAddress,
+                                  "",
+                                );
                               }
                             }}
                           >
@@ -1185,13 +1313,21 @@ export default function CustomerOrder() {
                                 key={suggestion.id}
                                 onClick={() => {
                                   setDeliveryAddress(suggestion.text);
-                                  setSelectedPlaceId(suggestion.provider === "preset" ? "" : suggestion.id);
-                                  setSelectedDeliveryLocationId(suggestion.deliveryLocationId || "");
+                                  setSelectedPlaceId(
+                                    suggestion.provider === "preset"
+                                      ? ""
+                                      : suggestion.id,
+                                  );
+                                  setSelectedDeliveryLocationId(
+                                    suggestion.deliveryLocationId || "",
+                                  );
                                   setDeliveryUnit("");
                                   setAddressSuggestions([]);
                                   void validateDeliveryAddressNow(
                                     suggestion.text,
-                                    suggestion.provider === "preset" ? "" : suggestion.id,
+                                    suggestion.provider === "preset"
+                                      ? ""
+                                      : suggestion.id,
                                   );
                                 }}
                               >
@@ -1201,7 +1337,31 @@ export default function CustomerOrder() {
                             ))}
                           </div>
                         )}
-                        {selectedDeliveryLocation?.requiresDropoff !== false && selectedDeliveryLocation && <div className="addressSuggestions"><strong>{selectedDeliveryLocation.id==="state-hospital"?"Where at?":`Where at ${selectedDeliveryLocation.name}?`}</strong>{selectedDeliveryLocation.dropoffs.map(dropoff=><button type="button" key={dropoff} className={deliveryUnit===dropoff?"selected":""} onClick={()=>setDeliveryUnit(dropoff)}><strong>{dropoff}</strong></button>)}</div>}
+                        {selectedDeliveryLocation?.requiresDropoff !== false &&
+                          selectedDeliveryLocation && (
+                            <div className="addressSuggestions">
+                              <strong>
+                                {selectedDeliveryLocation.id ===
+                                "state-hospital"
+                                  ? "Where at?"
+                                  : `Where at ${selectedDeliveryLocation.name}?`}
+                              </strong>
+                              {selectedDeliveryLocation.dropoffs.map(
+                                (dropoff) => (
+                                  <button
+                                    type="button"
+                                    key={dropoff}
+                                    className={
+                                      deliveryUnit === dropoff ? "selected" : ""
+                                    }
+                                    onClick={() => setDeliveryUnit(dropoff)}
+                                  >
+                                    <strong>{dropoff}</strong>
+                                  </button>
+                                ),
+                              )}
+                            </div>
+                          )}
                         <input
                           aria-label="Apartment, suite, or delivery note"
                           placeholder="Apartment, suite, or location note (optional)"
@@ -1319,7 +1479,9 @@ export default function CustomerOrder() {
                 aria-pressed={paymentChoice === "pickup"}
                 onClick={() => setPaymentChoice("pickup")}
               >
-                {serviceType === "delivery" ? "Pay at delivery" : "Pay at pickup"}
+                {serviceType === "delivery"
+                  ? "Pay at delivery"
+                  : "Pay at pickup"}
               </button>
             </div>
           )}
@@ -1373,18 +1535,28 @@ export default function CustomerOrder() {
                   {catalog.customer.loyalty
                     ?.filter((program) => program.rewardsAvailable > 0)
                     .map((program) => (
-                      <div className="loyaltyRewardOffer" key={program.programId}>
+                      <div
+                        className="loyaltyRewardOffer"
+                        key={program.programId}
+                      >
                         <div>
                           <strong>Free plain Jumbo Thin available</strong>
-                          <small>Base pizza is free. Added toppings are charged normally.</small>
+                          <small>
+                            Base pizza is free. Added toppings are charged
+                            normally.
+                          </small>
                         </div>
                         <button
                           type="button"
                           className="choiceButton"
                           disabled={busy || rewardApplied}
-                          onClick={() => void applyLoyaltyReward(program.programId)}
+                          onClick={() =>
+                            void applyLoyaltyReward(program.programId)
+                          }
                         >
-                          {rewardApplied ? "Applied — redeemed when placed" : "Apply free pizza"}
+                          {rewardApplied
+                            ? "Applied — redeemed when placed"
+                            : "Apply free pizza"}
                         </button>
                       </div>
                     ))}
@@ -1479,8 +1651,7 @@ function ItemDialog({
       group: Group;
       option: Option;
     } | null>(null),
-    [quantity, setQuantity] = useState(1),
-    [notes, setNotes] = useState("");
+    [quantity, setQuantity] = useState(1);
   const holdTimer = useRef<number | null>(null),
     held = useRef(false);
   const visibleModifiers = item.modifiers.filter(
@@ -1505,11 +1676,16 @@ function ItemDialog({
     });
   const changeOptionQuantity = (group: Group, id: string, delta: number) =>
     setSelected((current) => {
-      const values = current[group.id] || [], count = values.filter((value) => value === id).length;
-      if (delta > 0 && values.length < group.maxSelections) return { ...current, [group.id]: [...values, id] };
+      const values = current[group.id] || [],
+        count = values.filter((value) => value === id).length;
+      if (delta > 0 && values.length < group.maxSelections)
+        return { ...current, [group.id]: [...values, id] };
       if (delta < 0 && count > 0) {
         const index = values.lastIndexOf(id);
-        return { ...current, [group.id]: values.filter((_, valueIndex) => valueIndex !== index) };
+        return {
+          ...current,
+          [group.id]: values.filter((_, valueIndex) => valueIndex !== index),
+        };
       }
       return current;
     });
@@ -1620,8 +1796,11 @@ function ItemDialog({
                 .filter((o) => o.available)
                 .map((option) => {
                   const isSelected = (selected[group.id] || []).includes(
-                    option.id,
-                  ), optionQuantity = (selected[group.id] || []).filter((id) => id === option.id).length;
+                      option.id,
+                    ),
+                    optionQuantity = (selected[group.id] || []).filter(
+                      (id) => id === option.id,
+                    ).length;
                   const supportsIntensity = supportsSubModifierIntensity(
                     Boolean(group.supportsIntensity),
                     option.name,
@@ -1671,10 +1850,27 @@ function ItemDialog({
                         </button>
                       )}
                       {isSelected && group.allowOptionQuantity && (
-                        <div className="customerModifierQty" aria-label={`${option.name} quantity`}>
-                          <button type="button" onClick={() => changeOptionQuantity(group, option.id, -1)}>−</button>
+                        <div
+                          className="customerModifierQty"
+                          aria-label={`${option.name} quantity`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() =>
+                              changeOptionQuantity(group, option.id, -1)
+                            }
+                          >
+                            −
+                          </button>
                           <strong>{optionQuantity}</strong>
-                          <button type="button" onClick={() => changeOptionQuantity(group, option.id, 1)}>+</button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              changeOptionQuantity(group, option.id, 1)
+                            }
+                          >
+                            +
+                          </button>
                         </div>
                       )}
                     </div>
@@ -1774,15 +1970,6 @@ function ItemDialog({
             ))}
           </fieldset>
         )}
-        <label className="notes">
-          Special instructions
-          <textarea
-            maxLength={500}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Optional — please don’t include allergy claims"
-          />
-        </label>
         <div className="dialogAction">
           <div>
             <button onClick={() => setQuantity((q) => Math.max(1, q - 1))}>
@@ -1813,7 +2000,7 @@ function ItemDialog({
                 pizzaToppings,
                 comboId,
                 comboSelections,
-                specialInstructions: notes,
+                specialInstructions: "",
               })
             }
           >

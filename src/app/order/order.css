@@ -7,7 +7,15 @@
   --line: #dedfd7;
   --red: #a33b2b;
 }
-.itemDialog .pizzaSelectedToppings > .pizzaToppingWarning{padding:.7rem;border:1px solid #d97706;border-radius:.6rem;background:#fffbeb;color:#92400e;font-weight:700;line-height:1.35}
+.itemDialog .pizzaSelectedToppings > .pizzaToppingWarning {
+  padding: 0.7rem;
+  border: 1px solid #d97706;
+  border-radius: 0.6rem;
+  background: #fffbeb;
+  color: #92400e;
+  font-weight: 700;
+  line-height: 1.35;
+}
 .customerOrder {
   min-height: 100vh;
   background: var(--cream);
@@ -841,6 +849,28 @@
   padding: 10px;
   font: inherit;
 }
+.deliveryInstructions {
+  display: grid;
+  gap: 8px;
+}
+.deliveryInstructions > button {
+  justify-self: start;
+}
+.deliveryInstructions label {
+  display: grid;
+  gap: 7px;
+  font-weight: 750;
+}
+.deliveryInstructions textarea {
+  width: 100%;
+  min-height: 80px;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  font: inherit;
+}
 .dialogAction {
   position: sticky;
   bottom: -28px;
@@ -1250,4 +1280,19 @@
     transform: none !important;
   }
 }
-.customerModifierQty{display:grid;grid-template-columns:42px 48px 42px;align-items:center;gap:5px;margin-top:6px}.customerModifierQty button{min-height:42px;padding:4px;font-size:1.25rem}.customerModifierQty strong{text-align:center;font-size:1.05rem}
+.customerModifierQty {
+  display: grid;
+  grid-template-columns: 42px 48px 42px;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+.customerModifierQty button {
+  min-height: 42px;
+  padding: 4px;
+  font-size: 1.25rem;
+}
+.customerModifierQty strong {
+  text-align: center;
+  font-size: 1.05rem;
+}

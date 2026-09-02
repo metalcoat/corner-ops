@@ -59,6 +59,7 @@
     "test:loyalty:merge": "tsx scripts/loyalty-validate.ts",
     "test:ordering-availability": "tsx scripts/ordering-availability-validate.ts",
     "test:customer-autocomplete": "tsx scripts/customer-autocomplete-validate.ts",
+    "test:customer-google-auth": "tsx scripts/customer-google-auth-validate.ts",
     "test:scheduled-menu-availability": "tsx scripts/scheduled-menu-availability-validate.ts",
     "test:delivery-pricing": "tsx scripts/delivery-pricing-validate.ts",
     "test:driver-delivery": "tsx scripts/driver-delivery-validate.ts",

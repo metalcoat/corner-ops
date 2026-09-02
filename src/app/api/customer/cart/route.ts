@@ -162,7 +162,13 @@ export async function POST(request: Request) {
       timingMode,
       requestedFor,
     });
-    await sql`UPDATE ordering_orders SET email_snapshot=${email},updated_at=NOW() WHERE id=${order.id}`;
+    const deliveryInstructions =
+      serviceType === "delivery"
+        ? String(body.deliveryInstructions || "")
+            .trim()
+            .slice(0, 500)
+        : "";
+    await sql`UPDATE ordering_orders SET email_snapshot=${email},special_instructions=${deliveryInstructions},updated_at=NOW() WHERE id=${order.id}`;
     await sql`UPDATE ordering_customer_web_carts SET replaced_at=NOW() WHERE session_hash=${sessionHash} AND replaced_at IS NULL`;
     await sql`INSERT INTO ordering_customer_web_carts(order_id,session_hash) VALUES(${order.id},${sessionHash})`;
     const lines =

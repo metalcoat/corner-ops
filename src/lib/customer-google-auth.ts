@@ -4,7 +4,7 @@ import {
   randomUUID,
   timingSafeEqual,
 } from "node:crypto";
-import { getSql } from "@/lib/db";
+import { getSql, withTransaction } from "@/lib/db";
 import { ensureCustomerOrderingSchema } from "@/lib/customer-ordering-schema";
 
 function secret() {
@@ -50,21 +50,55 @@ export async function linkGoogleCustomer(profile: {
   if (!profile.sub || !profile.email_verified)
     throw new Error("Google did not return a verified email address.");
   await ensureCustomerOrderingSchema();
-  const sql = getSql(),
-    email = profile.email.trim().toLowerCase();
-  const identity = (
-    await sql`SELECT customer_id FROM ordering_customer_identities WHERE provider='google' AND provider_subject=${profile.sub}`
-  )[0];
-  let customerId = identity?.customer_id as string | undefined;
-  if (!customerId) {
-    const existing = (
-      await sql`SELECT id FROM ordering_customers WHERE business='Corner Deli' AND lower(email)=${email} AND active=TRUE LIMIT 1`
+  const email = profile.email.trim().toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(email))
+    throw new Error("Google did not return a valid email address.");
+  return withTransaction(async () => {
+    const sql = getSql();
+    await sql`SELECT pg_advisory_xact_lock(hashtext(${`google:${email}`}))`;
+    const identity = (
+      await sql`SELECT customer_id FROM ordering_customer_identities WHERE provider='google' AND provider_subject=${profile.sub}`
     )[0];
-    customerId = String(existing?.id || randomUUID());
-    if (!existing)
-      await sql`INSERT INTO ordering_customers(id,business,display_name,first_name,last_name,email)VALUES(${customerId},'Corner Deli',${profile.name || email},${profile.given_name || ""},${profile.family_name || ""},${email})`;
-    await sql`INSERT INTO ordering_customer_identities(id,customer_id,provider,provider_subject,email)VALUES(${randomUUID()},${customerId},'google',${profile.sub},${email})`;
-  } else
-    await sql`UPDATE ordering_customer_identities SET last_login_at=NOW() WHERE provider='google' AND provider_subject=${profile.sub}`;
-  return customerId;
+    if (identity) {
+      await sql`UPDATE ordering_customer_identities SET last_login_at=NOW(),email=${email} WHERE provider='google' AND provider_subject=${profile.sub}`;
+      return String(identity.customer_id);
+    }
+    const emailIdentity = (
+      await sql`SELECT customer_id FROM ordering_customer_identities WHERE provider='google' AND email=${email}`
+    )[0];
+    if (emailIdentity) {
+      await sql`UPDATE ordering_customer_identities SET provider_subject=${profile.sub},last_login_at=NOW() WHERE provider='google' AND email=${email}`;
+      return String(emailIdentity.customer_id);
+    }
+
+    const matches = await sql`
+      SELECT DISTINCT customer.id
+      FROM ordering_customers customer
+      LEFT JOIN ordering_customer_emails saved_email ON saved_email.customer_id=customer.id
+      WHERE customer.business='Corner Deli' AND customer.active=TRUE
+        AND customer.merged_into_customer_id IS NULL
+        AND (lower(customer.email)=${email} OR saved_email.normalized_email=${email})
+    `;
+    if (matches.length > 1)
+      throw new Error(
+        "More than one customer account uses this email. Please call the deli so we can combine them before Google sign-in.",
+      );
+
+    const customerId = matches[0]?.id ? String(matches[0].id) : randomUUID();
+    if (!matches.length) {
+      const firstName = String(profile.given_name || "").trim();
+      const lastName = String(profile.family_name || "").trim();
+      const displayName =
+        String(profile.name || "").trim() ||
+        `${firstName} ${lastName}`.trim() ||
+        email;
+      await sql`INSERT INTO ordering_customers(id,business,display_name,first_name,last_name,email) VALUES(${customerId},'Corner Deli',${displayName},${firstName},${lastName},${email})`;
+    }
+    await sql`INSERT INTO ordering_customer_emails(id,customer_id,normalized_email,display_email,is_primary)
+      SELECT ${randomUUID()},${customerId},${email},${profile.email.trim()},NOT EXISTS(SELECT 1 FROM ordering_customer_emails WHERE customer_id=${customerId})
+      WHERE NOT EXISTS(SELECT 1 FROM ordering_customer_emails WHERE customer_id=${customerId} AND normalized_email=${email})`;
+    await sql`UPDATE ordering_customers SET email=CASE WHEN trim(email)='' THEN ${profile.email.trim()} ELSE email END,updated_at=NOW() WHERE id=${customerId}`;
+    await sql`INSERT INTO ordering_customer_identities(id,customer_id,provider,provider_subject,email) VALUES(${randomUUID()},${customerId},'google',${profile.sub},${email})`;
+    return customerId;
+  });
 }

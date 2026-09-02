@@ -280,12 +280,15 @@ async function pricedOrder(orderId: string, business: OrderingBusiness) {
     await sql`SELECT id,item_id,item_name_snapshot,variant_id,variant_name_snapshot,quantity,unit_price_cents,modifier_total_cents,combo_total_cents,line_total_cents,special_instructions FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`;
   const promotions =
     await sql`SELECT promotion_id,label_snapshot,discount_cents FROM ordering_order_promotion_applications WHERE order_id=${orderId} ORDER BY application_sequence`;
-  const heavyPizzas=await sql`SELECT item.item_name_snapshot,COUNT(DISTINCT modifier.option_id)::integer topping_count FROM ordering_order_items item JOIN ordering_order_item_modifiers modifier ON modifier.order_item_id=item.id AND modifier.pizza_topping_portion IS NOT NULL WHERE item.order_id=${orderId} GROUP BY item.id,item.item_name_snapshot HAVING COUNT(DISTINCT modifier.option_id)>6`;
+  const heavyPizzas =
+    await sql`SELECT item.item_name_snapshot,COUNT(DISTINCT modifier.option_id)::integer topping_count FROM ordering_order_items item JOIN ordering_order_item_modifiers modifier ON modifier.order_item_id=item.id AND modifier.pizza_topping_portion IS NOT NULL WHERE item.order_id=${orderId} GROUP BY item.id,item.item_name_snapshot HAVING COUNT(DISTINCT modifier.option_id)>6`;
   return {
     ...(rows[0] as Record<string, unknown>),
     lines,
     promotions,
-    warnings:heavyPizzas.map(item=>`${item.item_name_snapshot}: ${PIZZA_TOPPING_COOK_WARNING}`),
+    warnings: heavyPizzas.map(
+      (item) => `${item.item_name_snapshot}: ${PIZZA_TOPPING_COOK_WARNING}`,
+    ),
     pricingAuthority: "corner_ops_server",
     currency: "USD",
   } as Record<string, any>;
@@ -299,10 +302,27 @@ export async function setAiPaymentDetails(input: {
   tipCents: number;
   actor: OrderingActor;
 }) {
-  if (!Number.isSafeInteger(input.tipCents) || input.tipCents < 0 || input.tipCents > 100000)
-    throw new AiToolError("INVALID_INPUT", "The tip amount is invalid.", "Confirm a non-negative driver tip in cents.", 400);
-  if (input.tipCents > 0 && (input.paymentMethod !== "card" || input.service !== "delivery"))
-    throw new AiToolError("INVALID_INPUT", "Driver tips can only be added to delivery orders paid by card.", "Use tipCents 0 for pickup or cash orders.", 400);
+  if (
+    !Number.isSafeInteger(input.tipCents) ||
+    input.tipCents < 0 ||
+    input.tipCents > 100000
+  )
+    throw new AiToolError(
+      "INVALID_INPUT",
+      "The tip amount is invalid.",
+      "Confirm a non-negative driver tip in cents.",
+      400,
+    );
+  if (
+    input.tipCents > 0 &&
+    (input.paymentMethod !== "card" || input.service !== "delivery")
+  )
+    throw new AiToolError(
+      "INVALID_INPUT",
+      "Driver tips can only be added to delivery orders paid by card.",
+      "Use tipCents 0 for pickup or cash orders.",
+      400,
+    );
   await setCheckoutTip({
     orderId: input.orderId,
     business: input.business,
@@ -391,10 +411,7 @@ export const BUSINESS_ITEM_ALIASES: Record<string, string[]> = {
     "battered mushroom",
     "battered mushrooms",
   ],
-  "breaded cauliflower": [
-    "fried cauliflower",
-    "battered cauliflower",
-  ],
+  "breaded cauliflower": ["fried cauliflower", "battered cauliflower"],
 };
 const itemAliases = BUSINESS_ITEM_ALIASES;
 const editDistance = (a: string, b: string) => {
@@ -424,7 +441,10 @@ const similarity = (a: string, b: string) => {
   return 1 - editDistance(a, b) / Math.max(a.length, b.length, 1);
 };
 const modifierAliases = (name: string) => {
-  const withoutPortion = name.replace(/\s*\(\s*\d+(?:\.\d+)?\s*oz\s*\)\s*$/i, ""),
+  const withoutPortion = name.replace(
+      /\s*\(\s*\d+(?:\.\d+)?\s*oz\s*\)\s*$/i,
+      "",
+    ),
     withoutPlacement = name.replace(/\s*\(\s*on salad\s*\)\s*$/i, ""),
     aliases = [name, withoutPortion, withoutPlacement];
   for (const value of [...aliases]) {
@@ -433,7 +453,9 @@ const modifierAliases = (name: string) => {
     if (/^mayo$/i.test(value)) aliases.push("mayonnaise");
     if (/^extra cheese$/i.test(value)) aliases.push("cheese");
   }
-  return [...new Set(aliases.map((value) => value.replace(/\s+/g, " ").trim()))];
+  return [
+    ...new Set(aliases.map((value) => value.replace(/\s+/g, " ").trim())),
+  ];
 };
 function pizzaVariantAlias(value: string) {
   const key = spokenKey(value);
@@ -703,478 +725,502 @@ export async function priceSpokenOrder(input: {
     allItems = catalog
       .flatMap((category) => category.items)
       .filter((item) => item.available);
-  const resolved: AiItemInput[] = consolidateQuantities(input.items.map((requested) => {
-    const initialName = spokenKey(requested.name),
-      initialVariant = spokenKey(requested.variant || ""),
-      poutineRequested = /\b(poutine|pountine|protein)\b/.test(
-        `${initialName} ${initialVariant}`,
-      );
-    if (poutineRequested) {
-      const size =
-          initialName.includes("large") || initialVariant.includes("large")
-            ? "Large"
-            : initialName.includes("small") || initialVariant.includes("small")
-              ? "Small"
-              : "",
-        tots =
-          initialName.includes("tater") ||
-          initialName.includes("tot") ||
-          initialVariant.includes("tater") ||
-          initialVariant.includes("tot");
-      if (!size)
+  const resolved: AiItemInput[] = consolidateQuantities(
+    input.items.map((requested) => {
+      const initialName = spokenKey(requested.name),
+        initialVariant = spokenKey(requested.variant || ""),
+        poutineRequested = /\b(poutine|pountine|protein)\b/.test(
+          `${initialName} ${initialVariant}`,
+        );
+      if (poutineRequested) {
+        const size =
+            initialName.includes("large") || initialVariant.includes("large")
+              ? "Large"
+              : initialName.includes("small") ||
+                  initialVariant.includes("small")
+                ? "Small"
+                : "",
+          tots =
+            initialName.includes("tater") ||
+            initialName.includes("tot") ||
+            initialVariant.includes("tater") ||
+            initialVariant.includes("tot");
+        if (!size)
+          throw new AiToolError(
+            "INVALID_VARIANT",
+            tots ? "Small or large tater tots?" : "Small or large?",
+            "Ask the returned size question.",
+            409,
+            {
+              options: tots
+                ? ["Small Tater Tots", "Large Tater Tots"]
+                : ["Small French Fries", "Large French Fries"],
+              pendingItem: {
+                category: tots ? "tater tot poutine" : "poutine",
+                customerRequest: requested.name,
+                missingRequiredFields: ["size"],
+              },
+            },
+          );
+        requested = {
+          ...requested,
+          name: `${size} ${tots ? "Tater Tots" : "French Fries"}`,
+          variant: undefined,
+          modifiers: [
+            ...(requested.modifiers || []),
+            { name: "Make it Poutine (Cheese & Gravy)" },
+          ],
+        };
+      }
+      const wingRequest = spokenKey(requested.name).includes("wing"),
+        explicitWingCount =
+          /\b(10|12|15|20|24|25|30|40|50)\b/.test(
+            `${spokenKey(requested.name)} ${spokenKey(requested.variant || "")}`,
+          ) ||
+          [10, 12, 15, 20, 24, 25, 30, 40, 50].includes(
+            Number(requested.quantity),
+          );
+      if (wingRequest && !explicitWingCount)
         throw new AiToolError(
           "INVALID_VARIANT",
-          tots ? "Small or large tater tots?" : "Small or large?",
-          "Ask the returned size question.",
+          "How many wings?",
+          "Ask exactly: How many wings?",
           409,
           {
-            options: tots
-              ? ["Small Tater Tots", "Large Tater Tots"]
-              : ["Small French Fries", "Large French Fries"],
+            options: [10, 12, 15, 20, 24, 25, 30, 40, 50],
             pendingItem: {
-              category: tots ? "tater tot poutine" : "poutine",
+              category: "wings",
               customerRequest: requested.name,
-              missingRequiredFields: ["size"],
+              missingRequiredFields: ["quantity"],
             },
           },
         );
-      requested = {
-        ...requested,
-        name: `${size} ${tots ? "Tater Tots" : "French Fries"}`,
-        variant: undefined,
-        modifiers: [
-          ...(requested.modifiers || []),
-          { name: "Make it Poutine (Cheese & Gravy)" },
-        ],
-      };
-    }
-    const wingRequest = spokenKey(requested.name).includes("wing"),
-      explicitWingCount =
-        /\b(10|12|15|20|24|25|30|40|50)\b/.test(
-          `${spokenKey(requested.name)} ${spokenKey(requested.variant || "")}`,
-        ) ||
-        [10, 12, 15, 20, 24, 25, 30, 40, 50].includes(
-          Number(requested.quantity),
+      if (spokenKey(requested.name) === "frie")
+        throw new AiToolError(
+          "INVALID_VARIANT",
+          "Fries require a size.",
+          "Ask: Small or large?",
+          409,
+          { options: ["Small French Fries", "Large French Fries"] },
         );
-    if (wingRequest && !explicitWingCount)
-      throw new AiToolError(
-        "INVALID_VARIANT",
-        "How many wings?",
-        "Ask exactly: How many wings?",
-        409,
-        {
-          options: [10, 12, 15, 20, 24, 25, 30, 40, 50],
-          pendingItem: {
-            category: "wings",
-            customerRequest: requested.name,
-            missingRequiredFields: ["quantity"],
-          },
-        },
-      );
-    if (spokenKey(requested.name) === "frie")
-      throw new AiToolError(
-        "INVALID_VARIANT",
-        "Fries require a size.",
-        "Ask: Small or large?",
-        409,
-        { options: ["Small French Fries", "Large French Fries"] },
-      );
-    const spokenName = spokenKey(requested.name),
-      spokenVariant = spokenKey(requested.variant || ""),
-      wingPhrase = spokenName.includes("wing"),
-      bonelessRequested =
-        wingPhrase &&
-        (spokenName.includes("boneles") || spokenVariant.includes("boneles")),
-      pizzaPhrase =
-        spokenName.includes("pizza") ||
-        ["jumbo", "large", "16 inch", "16 in", "16"].includes(spokenName),
-      varietyPhrase =
-        spokenName.includes("variety") ||
-        spokenName.includes("sampler platter") ||
-        spokenName.includes("appetizer sampler"),
-      varietySize = /\b(?:4|four)\b/.test(spokenName)
-        ? "four"
-        : /\b(?:2|two)\b/.test(spokenName)
-          ? "two"
-          : "";
-    if (varietyPhrase && !varietySize)
-      throw new AiToolError(
-        "INVALID_VARIANT",
-        "The variety basket requires a size.",
-        "Ask: Variety for two or four?",
-        409,
-        { options: ["Variety for TWO", "Variety for Four"] },
-      );
-    const itemQuery = wingPhrase
-        ? bonelessRequested
-          ? "Boneless Wings"
-          : "Wings"
-        : pizzaPhrase
-          ? "Pizza"
-          : varietyPhrase && varietySize === "four"
-            ? "Variety for Four"
-            : varietyPhrase && varietySize === "two"
-              ? "Variety for TWO"
-          : requested.name,
-      item = strictMatch(
-        itemQuery,
-        allItems,
-        (row) => [
-          row.name,
-          ...row.aliases,
-          ...(itemAliases[spokenKey(row.name)] || []),
-        ],
-        "ITEM_NOT_ON_MENU",
-        "Menu item",
-      ),
-      nameVariant =
-        item.name === "Pizza" ? pizzaVariantAlias(spokenName) : undefined,
-      subItem =
-        item.variants.some((row) => spokenKey(row.name) === "full sub") &&
-        item.variants.some((row) => spokenKey(row.name) === "1 2 sub"),
-      subVariant = subItem
-        ? subVariantAlias(
-            spokenVariant || spokenName,
-            spokenName.includes(" sub") || spokenName.includes("big bos"),
+      const spokenName = spokenKey(requested.name),
+        spokenVariant = spokenKey(requested.variant || ""),
+        wingPhrase = spokenName.includes("wing"),
+        bonelessRequested =
+          wingPhrase &&
+          (spokenName.includes("boneles") || spokenVariant.includes("boneles")),
+        pizzaPhrase =
+          spokenName.includes("pizza") ||
+          ["jumbo", "large", "16 inch", "16 in", "16"].includes(spokenName),
+        varietyPhrase =
+          spokenName.includes("variety") ||
+          spokenName.includes("sampler platter") ||
+          spokenName.includes("appetizer sampler"),
+        varietySize = /\b(?:4|four)\b/.test(spokenName)
+          ? "four"
+          : /\b(?:2|two)\b/.test(spokenName)
+            ? "two"
+            : "";
+      if (varietyPhrase && !varietySize)
+        throw new AiToolError(
+          "INVALID_VARIANT",
+          "The variety basket requires a size.",
+          "Ask: Variety for two or four?",
+          409,
+          { options: ["Variety for TWO", "Variety for Four"] },
+        );
+      const itemQuery = wingPhrase
+          ? bonelessRequested
+            ? "Boneless Wings"
+            : "Wings"
+          : pizzaPhrase
+            ? "Pizza"
+            : varietyPhrase && varietySize === "four"
+              ? "Variety for Four"
+              : varietyPhrase && varietySize === "two"
+                ? "Variety for TWO"
+                : requested.name,
+        item = strictMatch(
+          itemQuery,
+          allItems,
+          (row) => [
+            row.name,
+            ...row.aliases,
+            ...(itemAliases[spokenKey(row.name)] || []),
+          ],
+          "ITEM_NOT_ON_MENU",
+          "Menu item",
+        ),
+        nameVariant =
+          item.name === "Pizza" ? pizzaVariantAlias(spokenName) : undefined,
+        subItem =
+          item.variants.some((row) => spokenKey(row.name) === "full sub") &&
+          item.variants.some((row) => spokenKey(row.name) === "1 2 sub"),
+        subVariant = subItem
+          ? subVariantAlias(
+              spokenVariant || spokenName,
+              spokenName.includes(" sub") || spokenName.includes("big bos"),
+            )
+          : undefined,
+        wingCount =
+          [
+            ...spokenName.matchAll(/\b(10|12|15|20|24|25|30|40|50)\b/g),
+            ...spokenVariant.matchAll(/\b(10|12|15|20|24|25|30|40|50)\b/g),
+          ][0]?.[1] ||
+          ((item.name === "Wings" || item.name === "Boneless Wings") &&
+          Number.isInteger(requested.quantity) &&
+          [10, 12, 15, 20, 24, 25, 30, 40, 50].includes(
+            Number(requested.quantity),
           )
-        : undefined,
-      wingCount =
-        [
-          ...spokenName.matchAll(/\b(10|12|15|20|24|25|30|40|50)\b/g),
-          ...spokenVariant.matchAll(/\b(10|12|15|20|24|25|30|40|50)\b/g),
-        ][0]?.[1] ||
-        ((item.name === "Wings" || item.name === "Boneless Wings") &&
-        Number.isInteger(requested.quantity) &&
-        [10, 12, 15, 20, 24, 25, 30, 40, 50].includes(
-          Number(requested.quantity),
-        )
-          ? String(requested.quantity)
-          : ""),
-      rawVariant = wingCount
-        ? `${wingCount} Wings`
-        : subVariant ||
-          (spokenVariant && !/^(bone in|boneles|boneless)$/.test(spokenVariant)
-            ? spokenVariant
-            : nameVariant || ""),
-      pizzaVariantPrefix =
-        item.name === "Pizza" ? pizzaVariantAlias(rawVariant) : undefined,
-      variantWanted = rawVariant;
-    if (
-      !variantWanted &&
-      item.variants.length > 1 &&
-      !item.variants.some((row) => row.defaultVariant)
-    ) {
-      const options = item.variants
-          .filter((row) => row.available !== false)
-          .map((row) => row.name),
-        category = spokenKey(item.name);
-      throw new AiToolError(
-        "INVALID_VARIANT",
-        category === "pizza"
-          ? "What size?"
-          : `${item.name} requires a size or option.`,
-        category === "pizza"
-          ? "Ask exactly: What size?"
-          : "Ask one short size clarification.",
-        409,
-        {
-          options,
-          pendingItem: {
-            category,
-            customerRequest: requested.name,
-            missingRequiredFields: ["size"],
-            actualMenuItemId: item.id,
+            ? String(requested.quantity)
+            : ""),
+        rawVariant = wingCount
+          ? `${wingCount} Wings`
+          : subVariant ||
+            (spokenVariant &&
+            !/^(bone in|boneles|boneless)$/.test(spokenVariant)
+              ? spokenVariant
+              : nameVariant || ""),
+        pizzaVariantPrefix =
+          item.name === "Pizza" ? pizzaVariantAlias(rawVariant) : undefined,
+        variantWanted = rawVariant;
+      if (
+        !variantWanted &&
+        item.variants.length > 1 &&
+        !item.variants.some((row) => row.defaultVariant)
+      ) {
+        const options = item.variants
+            .filter((row) => row.available !== false)
+            .map((row) => row.name),
+          category = spokenKey(item.name);
+        throw new AiToolError(
+          "INVALID_VARIANT",
+          category === "pizza"
+            ? "What size?"
+            : `${item.name} requires a size or option.`,
+          category === "pizza"
+            ? "Ask exactly: What size?"
+            : "Ask one short size clarification.",
+          409,
+          {
+            options,
+            pendingItem: {
+              category,
+              customerRequest: requested.name,
+              missingRequiredFields: ["size"],
+              actualMenuItemId: item.id,
+            },
           },
-        },
-      );
-    }
-    const variant = pizzaVariantPrefix
-      ? item.variants.find((row) =>
-          spokenKey(row.name).startsWith(pizzaVariantPrefix),
-        )
-      : variantWanted
-        ? strictMatch(
-            variantWanted,
-            item.variants,
-            (row) => [row.name, ...row.aliases],
-            "INVALID_VARIANT",
-            "Menu variant",
-          )
-        : item.variants.find((row) => row.defaultVariant) || item.variants[0];
-    if (pizzaVariantPrefix && !variant)
-      throw new AiToolError(
-        "INVALID_VARIANT",
-        `Sorry, ${requested.variant} isn't an available size or option.`,
-        "Ask for a valid pizza size.",
-        409,
-      );
-    const modifierSelections: Record<string, string[]> = Object.fromEntries(
-        item.modifiers
-          .filter((group) => group.presentationBehavior !== "pizza_topping")
-          .map((group) => [
-            group.id,
-            group.options
-              .filter((option) => option.available && option.defaultSelected)
-              .map((option) => option.id),
-          ]),
-      ),
-      pizzaToppings: NonNullable<AiItemInput["pizzaToppings"]> = [],
-      spokenModifiers = [...(requested.modifiers || [])];
-    for (let index = spokenModifiers.length - 1; index >= 0; index--) {
-      const key = spokenKey(spokenModifiers[index].name);
-      if (key === "shaker" || key === "shaker both" || key === "both shaker") {
-        spokenModifiers.splice(
-          index,
-          1,
-          { name: "Parm Shakers" },
-          { name: "Oregano Shakers" },
         );
       }
-      if (
-        key === "all" &&
-        (item.name === "Wings" || item.name === "Boneless Wings")
-      )
-        spokenModifiers.splice(
-          index,
-          1,
-          { name: "Blue Cheese" },
-          { name: "Ranch" },
-          { name: "Celery" },
-        );
-    }
-    const extraWingSauce =
-      (item.name === "Wings" || item.name === "Boneless Wings") &&
-      (/\b(extra sauce|extra saucy|saucy)\b/.test(spokenName) ||
-        spokenModifiers.some((value) =>
-          /^(extra sauce|extra saucy|saucy)$/.test(spokenKey(value.name)),
-        ));
-    if (extraWingSauce) {
-      for (let index = spokenModifiers.length - 1; index >= 0; index--)
-        if (
-          /^(extra sauce|extra saucy|saucy)$/.test(
-            spokenKey(spokenModifiers[index].name),
+      const variant = pizzaVariantPrefix
+        ? item.variants.find((row) =>
+            spokenKey(row.name).startsWith(pizzaVariantPrefix),
           )
-        )
-          spokenModifiers.splice(index, 1);
-      const flavor =
-          spokenModifiers
-            .map((value) => spokenKey(value.name))
-            .find((value) =>
-              [
-                "mild",
-                "medium",
-                "hot",
-                "suicide",
-                "bbq",
-                "sweet and sassy",
-                "sweet and sour",
-                "garlic parmesan",
-                "open pit bbq",
-              ].includes(value),
-            ) ||
-          [
-            "garlic parmesan",
-            "sweet and sassy",
-            "sweet and sour",
-            "open pit bbq",
-            "suicide",
-            "medium",
-            "mild",
-            "hot",
-            "bbq",
-          ].find((value) => spokenName.includes(value)),
-        cup =
-          flavor &&
-          (
-            {
-              mild: "Mild Sauce (4oz)",
-              medium: "Medium (4oz)",
-              hot: "Hot Sauce (4oz)",
-              suicide: "Suicide Sauce (4oz)",
-              bbq: "BBQ Sauce (4oz)",
-              "sweet and sassy": "Sweet & Sassy (4oz)",
-              "sweet and sour": "Sweet & Sour (4oz)",
-              "garlic parmesan": "Garlic Parmesan (4oz)",
-              "open pit bbq": "BBQ Sauce (4oz)",
-            } as Record<string, string>
-          )[flavor];
-      if (
-        cup &&
-        !spokenModifiers.some(
-          (value) => spokenKey(value.name) === spokenKey(cup),
-        )
-      )
-        spokenModifiers.push({ name: cup });
-    }
-    if (
-      (item.name === "Wings" || item.name === "Boneless Wings") &&
-      !spokenModifiers.length
-    ) {
-      const sauce = [
-        "garlic parmesan",
-        "sweet and sassy",
-        "sweet and sour",
-        "open pit bbq",
-        "suicide",
-        "medium",
-        "mild",
-        "hot",
-        "bbq",
-        "plain",
-      ].find((value) => spokenName.includes(value));
-      if (sauce) spokenModifiers.push({ name: sauce });
-    }
-    for (const requestedModifier of spokenModifiers) {
-      const raw = spokenKey(requestedModifier.name),
-        explicitOnItem = /\b(on (it|the|top)|over|melted)\b/i.test(
-          requestedModifier.name,
-        ),
-        mealWithIncludedSalad = item.modifiers.some(
-          (group) => group.name === "Choose a Salad (Dinner)",
-        ),
-        choices = item.modifiers
-          .filter((group) => group.presentationContext !== "hidden")
-          .flatMap((group) =>
-            group.options.map((option) => ({ group, option })),
-          )
-          .filter(({ option }) => option.available),
-        requiredDressingChoices = mealWithIncludedSalad
-          ? choices.filter(
-              ({ group }) =>
-                group.name === "Choose Dressing" &&
-                group.minSelections > 0 &&
-                !(modifierSelections[group.id]?.length || 0),
+        : variantWanted
+          ? strictMatch(
+              variantWanted,
+              item.variants,
+              (row) => [row.name, ...row.aliases],
+              "INVALID_VARIANT",
+              "Menu variant",
             )
-          : [],
-        explicitSideSauce = /^(side of|side)\b|\b(cup|\d+\s*oz)\b/.test(raw),
-        sideSauceKey = raw
-          .replace(/^(side of|side)\s+/, "")
-          .replace(/\s+(cup|\d+\s*oz)$/, ""),
-        wingSauceChoices = choices.filter(
-          ({ group }) => group.name === "Wing Sauce",
-        ),
-        portionedChoices = choices.filter(({ option }) =>
-          /\(\s*\d+(?:\.\d+)?\s*oz\s*\)\s*$/i.test(option.name),
-        ),
-        matchingChoices =
-          requiredDressingChoices.length &&
-          requiredDressingChoices.some(({ option }) =>
-            modifierAliases(option.name).some(
-              (alias) => spokenKey(alias) === raw,
-            ),
-          )
-            ? requiredDressingChoices
-            : explicitSideSauce && portionedChoices.length
-              ? portionedChoices
-              : wingSauceChoices.some(({ option }) =>
-                    modifierAliases(option.name).some(
-                      (alias) => spokenKey(alias) === raw,
-                    ),
-                  )
-                ? wingSauceChoices
-            : choices,
-        hasSideNacho = choices.some(
-          ({ option }) => spokenKey(option.name) === "nacho cheese on side",
-        ),
-        key =
-          raw === "nacho cheese" && !explicitOnItem && hasSideNacho
-            ? "nacho cheese on side"
-            : explicitSideSauce
-              ? sideSauceKey
-              : raw,
-        { group, option } = strictMatch(
-          key,
-          matchingChoices,
-          (row) => [
-            ...modifierAliases(row.option.name),
-            /^russian$/i.test(row.option.name)
-              ? "russian dressing"
-              : row.option.name,
-            /^blue cheese\s*\(4oz\)$/i.test(row.option.name)
-              ? "blue cheese"
-              : row.option.name,
-            /^blue cheese\s*\(4oz\)$/i.test(row.option.name)
-              ? "blue cheese cup"
-              : row.option.name,
-            row.option.name.replace(/\bon side\b/i, "side cup"),
-            row.option.name.replace(/^xtra\b/i, "extra"),
-            mealWithIncludedSalad
-              ? row.option.name.replace(/\s*\(on salad\)\s*$/i, "")
-              : row.option.name,
-            row.option.name
-              .replace(/^add\s+/i, "")
-              .replace(/^mayonnaise$/i, "mayo"),
-            row.group.name === "Burger Toppings" &&
-            /^raw onions$/i.test(row.option.name)
-              ? "onion"
-              : row.option.name,
-            row.group.name === "Burger Toppings" &&
-            /^tomatoes$/i.test(row.option.name)
-              ? "tomato"
-              : row.option.name,
-          ],
-          "INVALID_MODIFIER",
-          "Modifier",
+          : item.variants.find((row) => row.defaultVariant) || item.variants[0];
+      if (pizzaVariantPrefix && !variant)
+        throw new AiToolError(
+          "INVALID_VARIANT",
+          `Sorry, ${requested.variant} isn't an available size or option.`,
+          "Ask for a valid pizza size.",
+          409,
         );
-      if (group.presentationBehavior === "pizza_topping")
-        pizzaToppings.push({
-          modifierOptionId: option.id,
-          portion: requestedModifier.portion || "whole",
-          amount: requestedModifier.amount || "regular",
-        });
-      else
-        modifierSelections[group.id] =
-          group.maxSelections === 1
-            ? [option.id]
-            : [
-                ...new Set([
-                  ...(modifierSelections[group.id] || []),
-                  option.id,
-                ]),
-              ];
-    }
-    const missingRequired = item.modifiers.find(
-      (group) =>
-        group.presentationContext === "ordinary" &&
-        group.minSelections > 0 &&
-        (modifierSelections[group.id]?.length || 0) < group.minSelections,
-    );
-    if (missingRequired) {
-      const choices = missingRequired.options
-          .filter((option) => option.available)
-          .map((option) => option.name),
-        question =
-          missingRequired.name === "Choose Dressing"
+      const modifierSelections: Record<string, string[]> = Object.fromEntries(
+          item.modifiers
+            .filter((group) => group.presentationBehavior !== "pizza_topping")
+            .map((group) => [
+              group.id,
+              group.options
+                .filter((option) => option.available && option.defaultSelected)
+                .map((option) => option.id),
+            ]),
+        ),
+        pizzaToppings: NonNullable<AiItemInput["pizzaToppings"]> = [],
+        spokenModifiers = [...(requested.modifiers || [])];
+      for (let index = spokenModifiers.length - 1; index >= 0; index--) {
+        const key = spokenKey(spokenModifiers[index].name);
+        if (
+          key === "shaker" ||
+          key === "shaker both" ||
+          key === "both shaker"
+        ) {
+          spokenModifiers.splice(
+            index,
+            1,
+            { name: "Parm Shakers" },
+            { name: "Oregano Shakers" },
+          );
+        }
+        if (
+          key === "all" &&
+          (item.name === "Wings" || item.name === "Boneless Wings")
+        )
+          spokenModifiers.splice(
+            index,
+            1,
+            { name: "Blue Cheese" },
+            { name: "Ranch" },
+            { name: "Celery" },
+          );
+      }
+      const extraWingSauce =
+        (item.name === "Wings" || item.name === "Boneless Wings") &&
+        (/\b(extra sauce|extra saucy|saucy)\b/.test(spokenName) ||
+          spokenModifiers.some((value) =>
+            /^(extra sauce|extra saucy|saucy)$/.test(spokenKey(value.name)),
+          ));
+      if (extraWingSauce) {
+        for (let index = spokenModifiers.length - 1; index >= 0; index--)
+          if (
+            /^(extra sauce|extra saucy|saucy)$/.test(
+              spokenKey(spokenModifiers[index].name),
+            )
+          )
+            spokenModifiers.splice(index, 1);
+        const flavor =
+            spokenModifiers
+              .map((value) => spokenKey(value.name))
+              .find((value) =>
+                [
+                  "mild",
+                  "medium",
+                  "hot",
+                  "suicide",
+                  "bbq",
+                  "sweet and sassy",
+                  "sweet and sour",
+                  "garlic parmesan",
+                  "open pit bbq",
+                ].includes(value),
+              ) ||
+            [
+              "garlic parmesan",
+              "sweet and sassy",
+              "sweet and sour",
+              "open pit bbq",
+              "suicide",
+              "medium",
+              "mild",
+              "hot",
+              "bbq",
+            ].find((value) => spokenName.includes(value)),
+          cup =
+            flavor &&
+            (
+              {
+                mild: "Mild Sauce (4oz)",
+                medium: "Medium (4oz)",
+                hot: "Hot Sauce (4oz)",
+                suicide: "Suicide Sauce (4oz)",
+                bbq: "BBQ Sauce (4oz)",
+                "sweet and sassy": "Sweet & Sassy (4oz)",
+                "sweet and sour": "Sweet & Sour (4oz)",
+                "garlic parmesan": "Garlic Parmesan (4oz)",
+                "open pit bbq": "BBQ Sauce (4oz)",
+              } as Record<string, string>
+            )[flavor];
+        if (
+          cup &&
+          !spokenModifiers.some(
+            (value) => spokenKey(value.name) === spokenKey(cup),
+          )
+        )
+          spokenModifiers.push({ name: cup });
+      }
+      if (
+        (item.name === "Wings" || item.name === "Boneless Wings") &&
+        !spokenModifiers.length
+      ) {
+        const sauce = [
+          "garlic parmesan",
+          "sweet and sassy",
+          "sweet and sour",
+          "open pit bbq",
+          "suicide",
+          "medium",
+          "mild",
+          "hot",
+          "bbq",
+          "plain",
+        ].find((value) => spokenName.includes(value));
+        if (sauce) spokenModifiers.push({ name: sauce });
+      }
+      for (const requestedModifier of spokenModifiers) {
+        const raw = spokenKey(requestedModifier.name),
+          explicitOnItem = /\b(on (it|the|top)|over|melted)\b/i.test(
+            requestedModifier.name,
+          ),
+          mealWithIncludedSalad = item.modifiers.some(
+            (group) => group.name === "Choose a Salad (Dinner)",
+          ),
+          choices = item.modifiers
+            .filter((group) => group.presentationContext !== "hidden")
+            .flatMap((group) =>
+              group.options.map((option) => ({ group, option })),
+            )
+            .filter(({ option }) => option.available),
+          requiredDressingChoices = mealWithIncludedSalad
+            ? choices.filter(
+                ({ group }) =>
+                  /^Choose Dressing(?: \(On Salad\))?$/.test(group.name) &&
+                  group.minSelections > 0 &&
+                  (group.presentationContext === "ordinary" ||
+                    !group.parentGroupId ||
+                    (group.parentOptionIds || []).some((optionId: string) =>
+                      (
+                        modifierSelections[String(group.parentGroupId)] || []
+                      ).includes(optionId),
+                    )) &&
+                  !(modifierSelections[group.id]?.length || 0),
+              )
+            : [],
+          explicitSideSauce = /^(side of|side)\b|\b(cup|\d+\s*oz)\b/.test(raw),
+          sideSauceKey = raw
+            .replace(/^(side of|side)\s+/, "")
+            .replace(/\s+(cup|\d+\s*oz)$/, ""),
+          wingSauceChoices = choices.filter(
+            ({ group }) => group.name === "Wing Sauce",
+          ),
+          portionedChoices = choices.filter(({ option }) =>
+            /\(\s*\d+(?:\.\d+)?\s*oz\s*\)\s*$/i.test(option.name),
+          ),
+          matchingChoices =
+            requiredDressingChoices.length &&
+            requiredDressingChoices.some(({ option }) =>
+              modifierAliases(option.name).some(
+                (alias) => spokenKey(alias) === raw,
+              ),
+            )
+              ? requiredDressingChoices
+              : explicitSideSauce && portionedChoices.length
+                ? portionedChoices
+                : wingSauceChoices.some(({ option }) =>
+                      modifierAliases(option.name).some(
+                        (alias) => spokenKey(alias) === raw,
+                      ),
+                    )
+                  ? wingSauceChoices
+                  : choices,
+          hasSideNacho = choices.some(
+            ({ option }) => spokenKey(option.name) === "nacho cheese on side",
+          ),
+          key =
+            raw === "nacho cheese" && !explicitOnItem && hasSideNacho
+              ? "nacho cheese on side"
+              : explicitSideSauce
+                ? sideSauceKey
+                : raw,
+          { group, option } = strictMatch(
+            key,
+            matchingChoices,
+            (row) => [
+              ...modifierAliases(row.option.name),
+              /^russian$/i.test(row.option.name)
+                ? "russian dressing"
+                : row.option.name,
+              /^blue cheese\s*\(4oz\)$/i.test(row.option.name)
+                ? "blue cheese"
+                : row.option.name,
+              /^blue cheese\s*\(4oz\)$/i.test(row.option.name)
+                ? "blue cheese cup"
+                : row.option.name,
+              row.option.name.replace(/\bon side\b/i, "side cup"),
+              row.option.name.replace(/^xtra\b/i, "extra"),
+              mealWithIncludedSalad
+                ? row.option.name.replace(/\s*\(on salad\)\s*$/i, "")
+                : row.option.name,
+              row.option.name
+                .replace(/^add\s+/i, "")
+                .replace(/^mayonnaise$/i, "mayo"),
+              row.group.name === "Burger Toppings" &&
+              /^raw onions$/i.test(row.option.name)
+                ? "onion"
+                : row.option.name,
+              row.group.name === "Burger Toppings" &&
+              /^tomatoes$/i.test(row.option.name)
+                ? "tomato"
+                : row.option.name,
+            ],
+            "INVALID_MODIFIER",
+            "Modifier",
+          );
+        if (group.presentationBehavior === "pizza_topping")
+          pizzaToppings.push({
+            modifierOptionId: option.id,
+            portion: requestedModifier.portion || "whole",
+            amount: requestedModifier.amount || "regular",
+          });
+        else
+          modifierSelections[group.id] =
+            group.maxSelections === 1
+              ? [option.id]
+              : [
+                  ...new Set([
+                    ...(modifierSelections[group.id] || []),
+                    option.id,
+                  ]),
+                ];
+      }
+      const missingRequired = item.modifiers.find(
+        (group) =>
+          (group.presentationContext === "ordinary" ||
+            (group.presentationContext === "dependent" &&
+              Boolean(group.parentGroupId) &&
+              (group.parentOptionIds || []).some((optionId: string) =>
+                (
+                  modifierSelections[String(group.parentGroupId)] || []
+                ).includes(optionId),
+              ))) &&
+          group.minSelections > 0 &&
+          (modifierSelections[group.id]?.length || 0) < group.minSelections,
+      );
+      if (missingRequired) {
+        const choices = missingRequired.options
+            .filter((option) => option.available)
+            .map((option) => option.name),
+          question = /^Choose Dressing(?: \(On Salad\))?$/.test(
+            missingRequired.name,
+          )
             ? "What kind of dressing do you want for your salad?"
             : spokenKey(missingRequired.name).includes("cheese")
               ? `What cheese: ${choices.join(", ")}?`
               : `Choose ${missingRequired.name}: ${choices.join(", ")}?`;
-      throw new AiToolError("INVALID_MODIFIER", question, question, 409, {
-        group: missingRequired.name,
-        options: choices,
-        pendingItem: {
-          category: spokenKey(item.name),
-          customerRequest: requested.name,
-          actualMenuItemId: item.id,
-          actualVariantId: variant?.id || null,
-          missingRequiredFields: [missingRequired.name],
-        },
-      });
-    }
-    const wingCountWasQuantity =
-      Boolean(wingCount) &&
-      Number(requested.quantity) === Number(wingCount) &&
-      (item.name === "Wings" || item.name === "Boneless Wings");
-    return {
-      itemId: item.id,
-      variantId: variant?.id || null,
-      quantity: wingCountWasQuantity
-        ? 1
-        : Math.max(1, Math.trunc(Number(requested.quantity || 1))),
-      modifierSelections,
-      pizzaToppings,
-    };
-  }), ({ quantity: _quantity, ...configuration }) => configuration);
+        throw new AiToolError("INVALID_MODIFIER", question, question, 409, {
+          group: missingRequired.name,
+          options: choices,
+          pendingItem: {
+            category: spokenKey(item.name),
+            customerRequest: requested.name,
+            actualMenuItemId: item.id,
+            actualVariantId: variant?.id || null,
+            missingRequiredFields: [missingRequired.name],
+          },
+        });
+      }
+      const wingCountWasQuantity =
+        Boolean(wingCount) &&
+        Number(requested.quantity) === Number(wingCount) &&
+        (item.name === "Wings" || item.name === "Boneless Wings");
+      return {
+        itemId: item.id,
+        variantId: variant?.id || null,
+        quantity: wingCountWasQuantity
+          ? 1
+          : Math.max(1, Math.trunc(Number(requested.quantity || 1))),
+        modifierSelections,
+        pizzaToppings,
+      };
+    }),
+    ({ quantity: _quantity, ...configuration }) => configuration,
+  );
   if (input.orderId) {
     const current = (
       await getSql()`SELECT version FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business}`
