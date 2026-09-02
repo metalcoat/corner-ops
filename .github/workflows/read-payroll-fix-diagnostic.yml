@@ -13,14 +13,16 @@ jobs:
   read:
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for corrected production diagnostic
+      - name: Wait until Kayli shift and audit are saved
         shell: bash
         run: |
           set -euo pipefail
           url="https://corner-ops.vercel.app/payroll-fix-20260829-kayli.json?commit=${GITHUB_SHA}"
+          last=""
           for attempt in $(seq 1 40); do
             body="$(curl --fail --silent --show-error --header 'Cache-Control: no-cache' "$url" 2>/dev/null || true)"
-            if printf '%s' "$body" | grep -q '"generatedAt"'; then
+            if [ -n "$body" ]; then last="$body"; fi
+            if printf '%s' "$body" | grep -q '"status": "saved"'; then
               echo "PAYROLL_FIX_DIAGNOSTIC_BEGIN"
               printf '%s\n' "$body"
               echo "PAYROLL_FIX_DIAGNOSTIC_END"
@@ -28,5 +30,8 @@ jobs:
             fi
             sleep 15
           done
-          echo "Production diagnostic was not available after 10 minutes." >&2
+          echo "PAYROLL_FIX_LAST_DIAGNOSTIC_BEGIN"
+          printf '%s\n' "$last"
+          echo "PAYROLL_FIX_LAST_DIAGNOSTIC_END"
+          echo "Production did not confirm both the shift and audit after 10 minutes." >&2
           exit 1
