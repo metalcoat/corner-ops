@@ -42,6 +42,7 @@
     "test:driver-cash": "tsx scripts/driver-cash-validate.ts",
     "test:cash-drawer": "tsx scripts/cash-drawer-validate.ts",
     "test:payment-station": "tsx scripts/payment-station-validate.ts",
+    "test:payment-provider": "tsx scripts/payment-provider-validate.ts",
     "test:restaurant-platform": "tsx scripts/restaurant-platform-validate.ts",
     "test:kitchen-ticket": "tsx scripts/kitchen-ticket-validate.ts",
     "test:tiki-pos": "tsx scripts/tiki-pos-validate.ts",
