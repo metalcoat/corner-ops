@@ -21,7 +21,8 @@ export function activePaymentProvider(): PaymentProviderKey {
 export function mxMerchantStatus(): PaymentProviderStatus {
   const required = {
     MX_MERCHANT_ID: process.env.MX_MERCHANT_ID,
-    MX_API_KEY: process.env.MX_API_KEY,
+    MX_CONSUMER_KEY: process.env.MX_CONSUMER_KEY,
+    MX_CONSUMER_SECRET: process.env.MX_CONSUMER_SECRET,
     MX_BUSINESS_ID: process.env.MX_BUSINESS_ID,
   };
   const missing = Object.entries(required)
@@ -42,26 +43,22 @@ export function mxMerchantStatus(): PaymentProviderStatus {
 
 function mxApiBase(): string {
   return process.env.MX_ENVIRONMENT?.trim().toLowerCase() === "production"
-    ? "https://api.prioritycommerce.com/v1"
-    : "https://sandbox-api.prioritycommerce.com/v1";
+    ? "https://api.mxmerchant.com/checkout/v3"
+    : "https://sandbox.api.mxmerchant.com/checkout/v3";
 }
-
-type MxTerminal = {
-  id?: unknown;
-  name?: unknown;
-  description?: unknown;
-  enabled?: unknown;
-};
 
 async function testMxMerchantConnection() {
   const merchantId = process.env.MX_MERCHANT_ID?.trim();
-  const apiKey = process.env.MX_API_KEY?.trim();
-  if (!merchantId || !apiKey) throw new Error("MX Merchant credentials are incomplete.");
+  const consumerKey = process.env.MX_CONSUMER_KEY?.trim();
+  const consumerSecret = process.env.MX_CONSUMER_SECRET?.trim();
+  if (!merchantId || !consumerKey || !consumerSecret)
+    throw new Error("MX Merchant credentials are incomplete.");
+  const authorization = Buffer.from(`${consumerKey}:${consumerSecret}`, "utf8").toString("base64");
   const response = await fetch(
-    `${mxApiBase()}/terminal/v1/merchantid/${encodeURIComponent(merchantId)}?status=enabled`,
+    `${mxApiBase()}/merchant/${encodeURIComponent(merchantId)}`,
     {
       method: "GET",
-      headers: { "x-api-key": apiKey, Accept: "application/json" },
+      headers: { Authorization: `Basic ${authorization}`, Accept: "application/json" },
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
     },
@@ -73,23 +70,13 @@ async function testMxMerchantConnection() {
         : `Priority terminal lookup failed (${response.status}).`,
     );
   }
-  const payload = await response.json() as unknown;
-  const rows = Array.isArray(payload)
-    ? payload
-    : payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)
-      ? (payload as { data: unknown[] }).data
-      : [];
-  const terminals = rows.filter((row): row is MxTerminal => Boolean(row && typeof row === "object"));
+  await response.json();
   return {
     connected: true,
     provider: "mx_merchant" as const,
     environment: process.env.MX_ENVIRONMENT?.trim().toLowerCase() === "production" ? "production" : "sandbox",
-    enabledTerminalCount: terminals.filter((terminal) => terminal.enabled !== false).length,
-    terminals: terminals.map((terminal) => ({
-      id: String(terminal.id || ""),
-      name: String(terminal.name || terminal.description || "MX Terminal"),
-      enabled: terminal.enabled !== false,
-    })),
+    enabledTerminalCount: 0,
+    terminals: [],
   };
 }
 

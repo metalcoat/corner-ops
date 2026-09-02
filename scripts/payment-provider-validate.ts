@@ -5,7 +5,8 @@ async function main() {
   process.env.PAYMENT_PROVIDER = "mx_merchant";
   process.env.MX_ENVIRONMENT = "sandbox";
   process.env.MX_MERCHANT_ID = "test-merchant";
-  process.env.MX_API_KEY = "test-api-key";
+  process.env.MX_CONSUMER_KEY = "test-consumer-key";
+  process.env.MX_CONSUMER_SECRET = "test-consumer-secret";
   process.env.MX_BUSINESS_ID = "test-business";
   process.env.MX_TERMINAL_API_ENABLED = "false";
 
@@ -16,10 +17,10 @@ async function main() {
   assert.equal(status.sandbox, true);
   assert.equal(status.terminalCheckoutEnabled, false);
 
-  delete process.env.MX_API_KEY;
+  delete process.env.MX_CONSUMER_SECRET;
   const missing = paymentProviderStatus();
   assert.equal(missing.configured, false);
-  assert.deepEqual(missing.missing, ["MX_API_KEY"]);
+  assert.deepEqual(missing.missing, ["MX_CONSUMER_SECRET"]);
 
   console.log(JSON.stringify({ priorityCredentialModel: true, safeTerminalGate: true }, null, 2));
 }
