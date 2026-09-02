@@ -76,14 +76,20 @@ async function buildWorkforcePayload(business: Business) {
     })),
     shifts: dashboard.shifts.map((shift) => {
       const meal = mealByShiftId.get(shift.id);
+      const assignedEmployee = shift.employeeId ? contactById.get(shift.employeeId) : undefined;
+      const visibleEmployeeId = assignedEmployee?.active ? shift.employeeId : null;
+      const releasedArchivedAssignment = Boolean(shift.employeeId && !visibleEmployeeId);
       return {
         ...shift,
+        employeeId: visibleEmployeeId,
+        employeeName: releasedArchivedAssignment ? "Open / unassigned" : shift.employeeName,
+        status: releasedArchivedAssignment && shift.status === "Published" ? "Open" : shift.status,
         mealBreakStart: meal?.meal_break_start ? String(meal.meal_break_start) : null,
         mealBreakMinutes: Number(meal?.meal_break_minutes || 0),
         extraMealBreakStart: meal?.extra_meal_break_start ? String(meal.extra_meal_break_start) : null,
         extraMealBreakMinutes: Number(meal?.extra_meal_break_minutes || 0),
-        employeeColor: shift.employeeId ? contactById.get(shift.employeeId)?.scheduleColor || "#64748B" : "#64748B",
-        employeeAvatarSet: shift.employeeId ? contactById.get(shift.employeeId)?.avatarSet || false : false,
+        employeeColor: visibleEmployeeId ? contactById.get(visibleEmployeeId)?.scheduleColor || "#64748B" : "#64748B",
+        employeeAvatarSet: visibleEmployeeId ? contactById.get(visibleEmployeeId)?.avatarSet || false : false,
       };
     }),
     messages: (dashboard.messages as Array<Record<string, unknown>>).map((message) => {

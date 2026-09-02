@@ -184,7 +184,25 @@ export async function updateEmployee(input: {
     WHERE id = ${input.id}
     RETURNING id, business, name, position, role_group, counts_for_tips, hourly_rate, tipped_rate, active, created_at
   ` as unknown as EmployeeRow[];
-  return mapEmployee(rows[0]);
+  const updated = rows[0];
+  if (current.active && updated && !updated.active) {
+    await getSql()`
+      UPDATE schedule_shifts
+      SET employee_id = NULL,
+        status = 'Draft',
+        published_at = NULL,
+        notes = CASE
+          WHEN COALESCE(notes, '') LIKE '%Released after employee was archived.%' THEN notes
+          WHEN BTRIM(COALESCE(notes, '')) = '' THEN 'Released after employee was archived.'
+          ELSE BTRIM(notes) || E'\nReleased after employee was archived.'
+        END,
+        updated_at = NOW()
+      WHERE employee_id = ${input.id}
+        AND status <> 'Cancelled'
+        AND ends_at >= NOW()
+    `;
+  }
+  return mapEmployee(updated);
 }
 
 export async function punchTiki(pin: string, location: LocationInput) {

@@ -159,6 +159,24 @@ await step("index recipient inboxes", () => sql`
     ON public.employee_message_recipients (employee_id, message_id)
 `);
 
+await step("release future shifts assigned to archived employees", () => sql`
+  UPDATE public.schedule_shifts s
+  SET employee_id = NULL,
+    status = 'Draft',
+    published_at = NULL,
+    notes = CASE
+      WHEN COALESCE(s.notes, '') LIKE '%Released after employee was archived.%' THEN s.notes
+      WHEN BTRIM(COALESCE(s.notes, '')) = '' THEN 'Released after employee was archived.'
+      ELSE BTRIM(s.notes) || E'\nReleased after employee was archived.'
+    END,
+    updated_at = NOW()
+  FROM public.employees e
+  WHERE s.employee_id = e.id
+    AND e.active = FALSE
+    AND s.status <> 'Cancelled'
+    AND s.ends_at >= NOW()
+`);
+
 const [result] = await sql`
   SELECT
     COUNT(*)::int AS messages,

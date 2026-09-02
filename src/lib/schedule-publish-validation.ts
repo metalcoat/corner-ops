@@ -42,7 +42,10 @@ export async function publishValidatedScheduleWeek(input: {
   await ensureScheduleMealSchema();
   const weekStart = validWeekStart(input.weekStart);
   const rows = await getSql()`
-    SELECT s.id, s.employee_id, e.name AS employee_name, s.starts_at, s.ends_at,
+    SELECT s.id,
+      CASE WHEN e.active IS TRUE THEN s.employee_id ELSE NULL END AS employee_id,
+      CASE WHEN e.active IS TRUE THEN e.name ELSE 'Open / unassigned' END AS employee_name,
+      s.starts_at, s.ends_at,
       s.meal_break_start, s.meal_break_minutes,
       s.extra_meal_break_start, s.extra_meal_break_minutes,
       s.status
@@ -89,6 +92,7 @@ export async function publishValidatedScheduleWeek(input: {
       AND s.starts_at >= (${weekStart}::date AT TIME ZONE ${TIME_ZONE})
       AND s.starts_at < ((${weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
       AND s.status <> 'Cancelled'
+      AND e.active = TRUE
       AND t.status = 'Approved'
       AND t.starts_on <= ((s.ends_at - INTERVAL '1 millisecond') AT TIME ZONE ${TIME_ZONE})::date
       AND t.ends_on >= (s.starts_at AT TIME ZONE ${TIME_ZONE})::date

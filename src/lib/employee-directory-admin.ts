@@ -184,6 +184,24 @@ export async function updateDirectoryEmployee(input: {
   }
 
   const row = rows[0];
+  if (Boolean(existing.active) && !Boolean(row.active)) {
+    await sql`
+      UPDATE schedule_shifts
+      SET employee_id = NULL,
+        status = 'Draft',
+        published_at = NULL,
+        notes = CASE
+          WHEN COALESCE(notes, '') LIKE '%Released after employee was archived.%' THEN notes
+          WHEN BTRIM(COALESCE(notes, '')) = '' THEN 'Released after employee was archived.'
+          ELSE BTRIM(notes) || E'\nReleased after employee was archived.'
+        END,
+        updated_at = NOW()
+      WHERE employee_id = ${input.id}
+        AND status <> 'Cancelled'
+        AND ends_at >= NOW()
+    `;
+  }
+
   return {
     id: String(row.id), email: String(row.email || ""), phone: String(row.phone || ""),
     smsOptIn: Boolean(row.sms_opt_in), name: String(row.name), position: String(row.position),

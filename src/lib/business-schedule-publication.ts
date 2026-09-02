@@ -272,8 +272,10 @@ export async function publishBusinessScheduleWeek(input: {
   const sql = getSql();
 
   const shifts = await sql`
-    SELECT s.id, s.employee_id, e.name AS employee_name, s.position,
-      s.starts_at, s.ends_at, s.meal_break_start, s.meal_break_minutes,
+    SELECT s.id,
+      CASE WHEN e.active IS TRUE THEN s.employee_id ELSE NULL END AS employee_id,
+      CASE WHEN e.active IS TRUE THEN e.name ELSE 'Open / unassigned' END AS employee_name,
+      s.position, s.starts_at, s.ends_at, s.meal_break_start, s.meal_break_minutes,
       s.extra_meal_break_start, s.extra_meal_break_minutes, s.notes, s.status
     FROM schedule_shifts s
     LEFT JOIN employees e ON e.id = s.employee_id
@@ -459,13 +461,26 @@ export async function publishBusinessScheduleWeek(input: {
   try {
     await sql.transaction([
       sql`
-        UPDATE schedule_shifts SET
-          status = CASE WHEN employee_id IS NULL THEN 'Open' ELSE 'Published' END,
+        UPDATE schedule_shifts s SET
+          employee_id = CASE
+            WHEN s.employee_id IS NULL OR EXISTS (
+              SELECT 1 FROM employees e
+              WHERE e.id = s.employee_id AND e.business = s.business AND e.active = TRUE
+            ) THEN s.employee_id
+            ELSE NULL
+          END,
+          status = CASE
+            WHEN s.employee_id IS NULL OR NOT EXISTS (
+              SELECT 1 FROM employees e
+              WHERE e.id = s.employee_id AND e.business = s.business AND e.active = TRUE
+            ) THEN 'Open'
+            ELSE 'Published'
+          END,
           published_at = NOW(), updated_at = NOW()
-        WHERE business = ${input.business}
-          AND starts_at >= (${input.weekStart}::date AT TIME ZONE ${TIME_ZONE})
-          AND starts_at < ((${input.weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
-          AND status <> 'Cancelled'
+        WHERE s.business = ${input.business}
+          AND s.starts_at >= (${input.weekStart}::date AT TIME ZONE ${TIME_ZONE})
+          AND s.starts_at < ((${input.weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+          AND s.status <> 'Cancelled'
       `,
       ...messageQueries,
       ...emailJobQueries,
