@@ -280,8 +280,8 @@ export async function publishBusinessScheduleWeek(input: {
     FROM schedule_shifts s
     LEFT JOIN employees e ON e.id = s.employee_id
     WHERE s.business = ${input.business}
-      AND s.starts_at >= (${input.weekStart}::date AT TIME ZONE ${TIME_ZONE})
-      AND s.starts_at < ((${input.weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+      AND s.starts_at >= (${input.weekStart}::date::timestamp AT TIME ZONE ${TIME_ZONE})
+      AND s.starts_at < (((${input.weekStart}::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE})
       AND s.status <> 'Cancelled'
     ORDER BY s.starts_at, e.name
   ` as unknown as ScheduleShiftRow[];
@@ -529,8 +529,8 @@ export async function publishBusinessScheduleWeek(input: {
           END,
           published_at = NOW(), updated_at = NOW()
         WHERE s.business = ${input.business}
-          AND s.starts_at >= (${input.weekStart}::date AT TIME ZONE ${TIME_ZONE})
-          AND s.starts_at < ((${input.weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+          AND s.starts_at >= (${input.weekStart}::date::timestamp AT TIME ZONE ${TIME_ZONE})
+          AND s.starts_at < (((${input.weekStart}::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE})
           AND s.status <> 'Cancelled'
       `,
       ...messageQueries,

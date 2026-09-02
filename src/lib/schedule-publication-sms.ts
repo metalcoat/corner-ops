@@ -52,8 +52,8 @@ export async function deliverSchedulePublicationSms(input: {
     SELECT employee_id, position, starts_at, ends_at
     FROM schedule_shifts
     WHERE business = ${input.business}
-      AND starts_at >= (${input.weekStart}::date AT TIME ZONE ${TIME_ZONE})
-      AND starts_at < ((${input.weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+      AND starts_at >= (${input.weekStart}::date::timestamp AT TIME ZONE ${TIME_ZONE})
+      AND starts_at < (((${input.weekStart}::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE})
       AND status <> 'Cancelled'
     ORDER BY starts_at
   ` as unknown as ScheduleSmsShift[];
