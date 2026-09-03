@@ -271,6 +271,16 @@ async function main() {
     "Saucy wings must add the matching cup without narrating the rule.",
   );
   assert.ok(
+    prompt.includes("Preserve the caller's size words") &&
+      prompt.includes("large pepperoni pizza") &&
+      prompt.includes("required_follow_up"),
+    "Readbacks must preserve spoken pizza sizes and required wing follow-ups.",
+  );
+  assert.ok(
+    prompt.includes("REQUEST_SECURE_VOICE_PAYMENT with the confirmed tipCents"),
+    "Secure payment must persist card payment before transferring the call.",
+  );
+  assert.ok(
     prompt.includes("Turkey Big Boss item with Full Sub") &&
       prompt.includes("never reject them or substitute another sandwich"),
     "Turkey sub business aliases must remain authoritative.",

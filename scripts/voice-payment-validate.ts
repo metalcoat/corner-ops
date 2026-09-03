@@ -12,6 +12,8 @@ assert.doesNotMatch(agi,/print\(|logging\.|logger\./);
 assert.match(agi,/card=expiry=cvv=zipcode=""/);
 assert.match(dialplan,/EAGI_AUDIO_FORMAT=slin16/);
 assert.match(dialplan,/corner-ops-voice-payment/);
+assert.match(lib,/`tel:\$\{extension\}`/);
+assert.match(lib,/\?`tel:\$\{explicit\}`:explicit/);
 assert.match(prompt,/must leave the AI audio and transcription path/);
 assert.match(prompt,/Never ask for, repeat, infer, or transcribe a card number/);
 

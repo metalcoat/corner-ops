@@ -26,10 +26,10 @@ export function voicePaymentSandboxReady(){
 
 function voicePaymentTarget(){
   const explicit=process.env.OPENAI_PHONE_VOICE_PAYMENT_TARGET?.trim();
-  if(explicit)return explicit;
+  if(explicit)return /^\d+$/.test(explicit)?`tel:${explicit}`:explicit;
   const handoff=process.env.OPENAI_PHONE_HANDOFF_TARGET?.trim()||"";
   const extension=process.env.ASTERISK_VOICE_PAYMENT_EXTENSION?.trim()||"101";
-  if(/^\d+$/.test(handoff))return extension;
+  if(/^\+?\d+$/.test(handoff))return `tel:${extension}`;
   const sipTarget=handoff.replace(/^(sip:)[^@]+@/i,`$1${extension}@`);
   return sipTarget===handoff?extension:sipTarget;
 }

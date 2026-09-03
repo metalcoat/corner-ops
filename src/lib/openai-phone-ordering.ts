@@ -102,6 +102,12 @@ export const OPENAI_PRICE_ORDER_TOOL = {
         maximum: 100000,
         description: "Confirmed driver tip in cents. Use 0 when a delivery card customer declines. Never add a driver tip to cash or pickup orders.",
       },
+      wingAddOnDecision: {
+        type: "string",
+        enum: ["selected", "declined"],
+        description:
+          "Set only after asking whether the caller wants blue cheese, ranch, or celery.",
+      },
     },
     required: ["serviceType", "items"],
     additionalProperties: false,
@@ -138,7 +144,19 @@ export const OPENAI_VOICE_PAYMENT_TOOL = {
   type: "function" as const,
   name: "request_secure_voice_payment",
   description: "Transfer a confirmed card order out of the AI session and into the isolated local sandbox voice-payment service. Call only after card payment and tip are final.",
-  parameters: { type: "object", properties: {}, additionalProperties: false },
+  parameters: {
+    type: "object",
+    properties: {
+      tipCents: {
+        type: "integer",
+        minimum: 0,
+        maximum: 100000,
+        description: "The already-confirmed driver tip, or zero.",
+      },
+    },
+    required: ["tipCents"],
+    additionalProperties: false,
+  },
 };
 const required = () => ({
   apiKey: Boolean(process.env.OPENAI_API_KEY),

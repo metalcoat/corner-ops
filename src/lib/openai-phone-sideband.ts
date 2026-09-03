@@ -79,6 +79,7 @@ export function startOpenAiSideband(
     customerSpeaking = false,
     customerTurnPending = false,
     toolUsedForTurn = false,
+    lastCustomerTranscript = "",
     lastAssistantTranscript = "",
     completionRetryUsed = false,
     hangupAfterPlayback = false,
@@ -159,6 +160,26 @@ export function startOpenAiSideband(
         string,
         unknown
       >;
+      const spokenItems = Array.isArray(args.items)
+        ? (args.items as SpokenOrderItem[])
+        : [];
+      const sauceMatch = lastCustomerTranscript.match(
+        /\b(mild|medium|hot|suicide|bbq|sweet and sassy|plain|sweet and sour|garlic parmesan|open pit bbq)\b/i,
+      );
+      if (/\bwings?\b/i.test(lastCustomerTranscript) && sauceMatch) {
+        for (const item of spokenItems) {
+          if (!/^(?:boneless )?wings?$/i.test(String(item.name))) continue;
+          const modifiers = Array.isArray(item.modifiers) ? item.modifiers : [];
+          if (
+            !modifiers.some((modifier) =>
+              /^(mild|medium|hot|suicide|bbq|sweet and sassy|plain|sweet and sour|garlic parmesan|open pit bbq)$/i.test(
+                String(modifier.name),
+              ),
+            )
+          )
+            item.modifiers = [...modifiers, { name: sauceMatch[1] }];
+        }
+      }
       const sql = getSql();
       const call = (
         await sql`SELECT id,order_id,caller_phone FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} AND state IN('ai','handoff_pending') LIMIT 1`
@@ -178,9 +199,7 @@ export function startOpenAiSideband(
         business: "Corner Deli",
         actor,
         service: serviceType(args.serviceType),
-        items: Array.isArray(args.items)
-          ? (args.items as SpokenOrderItem[])
-          : [],
+        items: spokenItems,
         orderId: call.order_id || null,
         customerId: String(args.customerId || "") || null,
         callerPhone,
@@ -242,6 +261,20 @@ export function startOpenAiSideband(
         });
         Object.assign(result, paymentResult);
       }
+      const wingNeedsAddOn =
+        args.wingAddOnDecision !== "declined" &&
+        spokenItems.some(
+          (item) =>
+            /^(?:boneless )?wings?$/i.test(String(item.name)) &&
+            !(item.modifiers || []).some((modifier) =>
+              /^(blue cheese|ranch|celery)$/i.test(String(modifier.name)),
+            ),
+        );
+      if (wingNeedsAddOn)
+        Object.assign(result, {
+          required_follow_up:
+            "Would you like blue cheese, ranch, or celery with that?",
+        });
       await auditAiTool({
         business: "Corner Deli",
         requestId,
@@ -373,9 +406,14 @@ export function startOpenAiSideband(
   };
   const executeVoicePayment=async(row:Record<string,any>)=>{
     try{
+      const args=JSON.parse(String(row.arguments||"{}")) as Record<string,unknown>;
+      const sql=getSql(),order=(await sql`SELECT orders.id,orders.service_type FROM ordering_call_sessions call JOIN ordering_orders orders ON orders.id=call.order_id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state='ai' LIMIT 1`)[0];
+      if(!order)throw new Error("A priced AI order was not found for secure payment.");
+      await setAiPaymentDetails({orderId:String(order.id),business:"Corner Deli",service:serviceType(order.service_type),paymentMethod:"card",tipCents:Number(args.tipCents||0),actor:{id:`openai:${callId}`,name:"Corner Deli AI Phone",type:"employee",role:"employee"}});
       await event(callId,`${callId}:voice-payment:${row.call_id}`,"ordering.secure_voice_payment","system","Leaving AI for secure sandbox payment");
       await requestOpenAiVoicePayment(callId);
-    }catch{
+    }catch(error){
+      console.error("OpenAI secure voice payment transfer failed.",{callId,error:error instanceof Error?error.message:"unknown error"});
       socket.send(JSON.stringify({type:"conversation.item.create",item:{type:"function_call_output",call_id:row.call_id,output:JSON.stringify({error:{code:"VOICE_PAYMENT_FAILED",message:"Secure voice payment could not start. Transfer the caller to an employee."}})}}));
       socket.send(JSON.stringify({type:"response.create",response:{output_modalities:["audio"],tool_choice:"auto"}}));
     }
@@ -431,6 +469,7 @@ export function startOpenAiSideband(
         type === "conversation.item.input_audio_transcription.completed"
       ) {
         const value = text(row.transcript);
+        lastCustomerTranscript = value;
         completionRetryUsed = false;
         void transcript(callId, key, "customer", value, {
           languages: row.languages || [],
