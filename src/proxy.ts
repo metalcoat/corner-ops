@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 const COOKIE_NAME = "corner_ops_session";
 const POS_COOKIE_NAME = "corner_ops_pos";
 const POS_NETWORK_COOKIE_NAME = "corner_ops_pos_network";
-const removedVendorPaths = ["/api/square", "/api/rezku", "/api/ordering/import/rezku", "/ops/rezku-monitor"];
+const removedVendorPaths = ["/api/square", "/api/rezku", "/api/rezku-monitor", "/api/ordering/import/rezku", "/ops/rezku-monitor"];
 const selfAuthorizedApiPaths = [
   "/api/health", "/api/auth/session", "/api/auth/password-reset",
   "/api/timeclock", "/api/employee", "/api/employee/session",
