@@ -81,6 +81,7 @@ export async function POST(request: Request) {
     await ensureCustomerOrderingSchema();
     const sql = getSql();
     let needsSavedPhone = false;
+    let authenticatedCustomer = false;
     if (session.customerId && session.authenticatedAt) {
       const saved = (
         await sql`SELECT c.first_name,c.last_name,c.email,p.phone
@@ -92,6 +93,7 @@ export async function POST(request: Request) {
         WHERE c.id=${session.customerId} AND c.active=TRUE LIMIT 1`
       )[0];
       if (saved) {
+        authenticatedCustomer = true;
         firstName = String(saved.first_name || firstName)
           .trim()
           .slice(0, 80);
@@ -116,6 +118,14 @@ export async function POST(request: Request) {
             "Enter your name, a 10-digit phone number, and a valid email address.",
         },
         { status: 400 },
+      );
+    if (!authenticatedCustomer)
+      return Response.json(
+        {
+          error: "Verify your mobile number before placing this order.",
+          code: "sms_verification_required",
+        },
+        { status: 403 },
       );
     const requestedFor =
       timingMode === "future"

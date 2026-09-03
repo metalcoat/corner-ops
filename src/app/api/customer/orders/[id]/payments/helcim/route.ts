@@ -34,7 +34,7 @@ const business = "Corner Deli" as const;
 
 async function ownedCart(request: Request, orderId: string) {
   const session = readCustomerOrderingSession(request);
-  if (!session) return null;
+  if (!session?.customerId || !session.authenticatedAt) return null;
   await ensureCustomerOrderingSchema();
   const hash = customerSessionHash(session.sessionId),
     sql = getSql();

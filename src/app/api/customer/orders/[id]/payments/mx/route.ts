@@ -30,7 +30,7 @@ export const runtime = "nodejs";
 const business = "Corner Deli" as const;
 async function owned(request: Request, id: string) {
   const s = readCustomerOrderingSession(request);
-  if (!s) return null;
+  if (!s?.customerId || !s.authenticatedAt) return null;
   await ensureCustomerOrderingSchema();
   const hash = customerSessionHash(s.sessionId),
     row = (

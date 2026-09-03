@@ -246,6 +246,10 @@ export default function CustomerOrder() {
     [firstName, setFirstName] = useState(""),
     [lastName, setLastName] = useState(""),
     [phone, setPhone] = useState(""),
+    [phoneVerified, setPhoneVerified] = useState(false),
+    [phoneVerifyOpen, setPhoneVerifyOpen] = useState(false),
+    [phoneVerifySent, setPhoneVerifySent] = useState(false),
+    [phoneVerifyCode, setPhoneVerifyCode] = useState(""),
     [email, setEmail] = useState(""),
     [review, setReview] = useState<any>(null),
     [completedOrder, setCompletedOrder] = useState<any>(null),
@@ -544,12 +548,44 @@ export default function CustomerOrder() {
       setBusy(false);
     }
   }
-  async function placeOrder() {
+  async function completePlaceOrder() {
     if (!paymentChoice || busy) return;
     const priced = review || (await price());
     if (!priced) return;
     if (paymentChoice === "card") await payWithMx(priced);
     if (paymentChoice === "pickup") await submitPayLater(priced);
+  }
+  async function placeOrder() {
+    if (!catalog?.customer.authenticated && !phoneVerified) {
+      setPhoneVerifyOpen(true);
+      return;
+    }
+    await completePlaceOrder();
+  }
+  async function verifyOrderPhone() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/customer/auth/phone", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: phoneVerifySent ? "verify" : "request", phone, code: phoneVerifyCode }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Phone verification failed.");
+      if (!phoneVerifySent) { setPhoneVerifySent(true); return; }
+      setPhoneVerified(true);
+      setCatalog(current=>current?{...current,customer:{...current.customer,authenticated:true}}:current);
+      setPhoneVerifyOpen(false);
+      setPhoneVerifySent(false);
+      setPhoneVerifyCode("");
+      setBusy(false);
+      await completePlaceOrder();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Phone verification failed.");
+    } finally {
+      setBusy(false);
+    }
   }
   async function applyLoyaltyReward(programId: string) {
     if (!review?.id || busy) return;
@@ -865,8 +901,9 @@ export default function CustomerOrder() {
           Account
         </a>
       </header>
+      {phoneVerifyOpen&&<div className="fulfillmentModal open phoneVerifyModal"><section role="dialog" aria-modal="true" aria-label="Verify mobile number"><header><div><p className="eyebrow">One quick step</p><h2>Verify your phone</h2></div><button onClick={()=>setPhoneVerifyOpen(false)} aria-label="Close">×</button></header><p>We’ll text a six-digit code to <strong>{phone}</strong>. This confirms we can reach you if there is a question about your order.</p>{message&&<p className="orderError" role="alert">{message}</p>}{phoneVerifySent&&<input className="phoneVerifyInput" inputMode="numeric" autoComplete="one-time-code" aria-label="SMS verification code" placeholder="6-digit code" maxLength={6} value={phoneVerifyCode} onChange={event=>setPhoneVerifyCode(event.target.value.replace(/\D/g,""))}/>}<button className="reviewButton" disabled={busy||phone.replace(/\D/g,"").length!==10||(phoneVerifySent&&phoneVerifyCode.length!==6)} onClick={()=>void verifyOrderPhone()}>{busy?"Please wait…":phoneVerifySent?"VERIFY & PLACE ORDER":"TEXT ME A CODE"}</button>{phoneVerifySent&&<button className="accountLink" onClick={()=>{setPhoneVerifyOpen(false);setPhoneVerifySent(false);setPhoneVerifyCode("")}}>Change phone number</button>}</section></div>}
       <div className="fulfillmentDock">
-        <button className="fulfillmentSummary" onClick={()=>{setSetupVisited(true);setFulfillmentOpen(true)}}><span className="fulfillmentBag" aria-hidden="true">▢</span><strong>{serviceType==="delivery"?"Delivery":serviceType==="curbside"?"Curbside pickup":"In-store pickup"}</strong><span>{timing==="asap"?(catalog&&!catalog.availability.open?"ASAP preorder":"ASAP"):scheduledFor?new Date(scheduledFor).toLocaleString([],{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"Choose future time"}{serviceType==="delivery"&&validatedDelivery?` · ${validatedDelivery.formattedAddress}`:""}</span><em>Change ›</em></button>
+        <button className="fulfillmentSummary" onClick={()=>{setSetupVisited(true);setFulfillmentOpen(true)}}><span className="fulfillmentBag" aria-hidden="true">⌄</span><strong>{serviceType==="delivery"?"Delivery":serviceType==="curbside"?"Curbside pickup":"In-store pickup"}</strong><span>{timing==="asap"?(catalog&&!catalog.availability.open?"ASAP preorder":"ASAP"):scheduledFor?new Date(scheduledFor).toLocaleString([],{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"Choose future time"}{serviceType==="delivery"&&validatedDelivery?` · ${validatedDelivery.formattedAddress}`:""}</span><em>Change ›</em></button>
       </div>
       <div className={`fulfillmentModal ${fulfillmentOpen?"open":""} ${!setupVisited?"fulfillmentCover":""}`} aria-hidden={!fulfillmentOpen} onMouseDown={event=>{if(setupVisited&&event.target===event.currentTarget)setFulfillmentOpen(false)}}>
         {!setupVisited&&<div className="coverBrand"><img src="https://rezku-pos-upload.imgix.net/2e2a0810-d179-474b-a40b-e4104c60d8c1/olo/logo/jO52kF7dMM84upTQGozunTrduBxjbylAFeGYc8r_RT8.png?fit=crop&auto=compress&fmt=png32&h=60" alt="Corner Deli"/><strong>Corner Deli</strong></div>}
@@ -1358,7 +1395,7 @@ export default function CustomerOrder() {
                 inputMode="tel"
                 placeholder="10-digit phone"
                 value={phone}
-                onChange={(event) => setPhone(event.target.value)}
+                onChange={(event) => {setPhone(event.target.value);setPhoneVerified(false)}}
               />
               <input
                 aria-label="Email address"

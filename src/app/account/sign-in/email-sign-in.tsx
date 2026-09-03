@@ -7,7 +7,7 @@ export default function EmailSignIn({
 }) {
   const [email, setEmail] = useState(""),
     [phone, setPhone] = useState(""),
-    [method,setMethod]=useState<"email"|"phone">("email"),
+    [method, setMethod] = useState<"email" | "phone">("email"),
     [code, setCode] = useState(""),
     [sent, setSent] = useState(false),
     [busy, setBusy] = useState(false),
@@ -22,7 +22,7 @@ export default function EmailSignIn({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             action: sent ? "verify" : "request",
-            ...(method==="email"?{email}:{phone}),
+            ...(method === "email" ? { email } : { phone }),
             code,
           }),
         }),
@@ -38,31 +38,26 @@ export default function EmailSignIn({
   }
   return (
     <main className="customerOrder confirmationPage">
-      <section className="confirmationCard">
+      <section className="confirmationCard accountSignInCard">
         <p className="eyebrow">Corner Deli account</p>
         <h1>Sign in</h1>
-        <p>
-          No password needed. Verify your email or mobile number. If you are new, verification creates your account automatically.
-        </p>
+        <p>No password needed. We’ll send you a secure one-time code.</p>
         {error && (
           <p className="orderError" role="alert">
             {error}
           </p>
         )}
-        <a
-          className="reviewButton confirmationButton"
-          href="/api/customer/auth/google"
-        >
-          Continue with Google
-        </a>
-        <div className="authDivider">or</div>
-        <div className="choiceRow" aria-label="Verification method">
-          <button type="button" className="choiceButton" aria-pressed={method==="email"} disabled={sent} onClick={()=>setMethod("email")}>Email</button>
-          <button type="button" className="choiceButton" aria-pressed={method==="phone"} disabled={sent} onClick={()=>setMethod("phone")}>Text message</button>
+        <strong className="authMethodLabel">Log in with</strong>
+        <div className="authMethodGrid" aria-label="Login method">
+          <a className="choiceButton googleAuthChoice" href="/api/customer/auth/google">Google</a>
+          <button type="button" className="choiceButton" aria-pressed={method === "email"} disabled={sent} onClick={() => setMethod("email")}>Email</button>
+          <button type="button" className="choiceButton" aria-pressed={method === "phone"} disabled={sent} onClick={() => setMethod("phone")}>SMS</button>
         </div>
-        <form onSubmit={submit} className="customerContact">
+        <form onSubmit={submit} className="customerContact authContactForm">
+          <label htmlFor="account-login-value">Enter your {method === "email" ? "email" : "mobile phone number"}</label>
           {method === "email" ? (
             <input
+              id="account-login-value"
               type="email"
               autoComplete="email"
               aria-label="Email address"
@@ -74,6 +69,7 @@ export default function EmailSignIn({
             />
           ) : (
             <input
+              id="account-login-value"
               type="tel"
               inputMode="tel"
               autoComplete="tel"
@@ -102,7 +98,7 @@ export default function EmailSignIn({
               ? "Please wait…"
               : sent
                 ? "Verify and sign in"
-                : method==="email"?"Email me a code":"Text me a code"}
+                : method === "email" ? "Email me a code" : "Text me a code"}
           </button>
         </form>
         {sent && (
@@ -113,7 +109,7 @@ export default function EmailSignIn({
               setCode("");
             }}
           >
-            Use a different {method==="email"?"email":"phone number"}
+            Use a different {method === "email" ? "email" : "phone number"}
           </button>
         )}
         <p className="confirmationEmail">

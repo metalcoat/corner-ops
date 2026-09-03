@@ -97,7 +97,7 @@ test("customer catalog is public, customer-safe, and browsable while ordering is
   expect((await quote.json()).quote).toBeTruthy();
 });
 
-test("web cart pricing uses the authoritative backend and initializes secure Helcim checkout", async ({
+test("guest web carts require phone verification before pricing or payment", async ({
   request,
 }) => {
   const catalogResponse = await request.get(
@@ -136,30 +136,10 @@ test("web cart pricing uses the authoritative backend and initializes secure Hel
       ],
     },
   });
-  expect(response.status()).toBe(201);
+  expect(response.status()).toBe(403);
   const body = await response.json();
-  expect(body.cart.status).toBe("draft");
-  expect(body.cart.lines).toHaveLength(1);
-  expect(body.cart.subtotalCents).toBeGreaterThan(0);
-  expect(body.cart.paymentStatus).toBe("unpaid");
-  expect(body.cart).not.toHaveProperty("email");
-  if (catalog.checkout.paymentEnabled) {
-    // Production marks the customer session Secure. Playwright will not retain
-    // that cookie when this suite targets the local HTTP container, so forward
-    // the signed cookie explicitly while preserving the production policy.
-    const sessionCookie = response.headers()["set-cookie"]?.split(";", 1)[0];
-    const payment = await request.post(
-      `/api/customer/orders/${body.cart.id}/payments/helcim`,
-      {
-        data: { action: "initialize" },
-        headers: sessionCookie ? { cookie: sessionCookie } : undefined,
-      },
-    );
-    expect(payment.status()).toBe(200);
-    const initialized = await payment.json();
-    expect(initialized.checkoutToken).toBeTruthy();
-    expect(initialized.secretToken).toBeTruthy();
-  }
+  expect(body.code).toBe("sms_verification_required");
+  expect(body.error).toContain("Verify your mobile number");
 });
 
 test("successful online payment redirects to a dedicated confirmation", async ({
