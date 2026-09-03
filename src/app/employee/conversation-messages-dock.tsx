@@ -3,6 +3,7 @@
 import { canvasToJpegBlob, drawCanvasImage } from "@/app/client-image";
 import { responseMessage } from "@/app/client-http";
 import { firstName } from "@/app/client-text";
+import { useMessageThreadBehavior } from "@/app/use-message-thread-behavior";
 import { ChangeEvent, ClipboardEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "../message-inbox.css";
 
@@ -168,17 +169,18 @@ export default function EmployeeMessagesApp() {
   const [data, setData] = useState<EmployeeData | null>(null);
   const [selectedKey, setSelectedKey] = useState("team");
   const [threadOpen, setThreadOpen] = useState(false);
+  const [wideLayout, setWideLayout] = useState(false);
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<{ file: File; url: string; name: string; size: number } | null>(null);
   const reportedSeen = useRef(new Set<string>());
+  const messageAppRef = useRef<HTMLElement | null>(null);
   const cameraPhotoRef = useRef<HTMLInputElement | null>(null);
   const libraryPhotoRef = useRef<HTMLInputElement | null>(null);
   const photoPreviewUrlRef = useRef<string | null>(null);
   const messageThreadRef = useRef<HTMLDivElement | null>(null);
-  const stickToBottomRef = useRef(true);
 
   const clearPhotoAttachment = useCallback((resetInputs = true) => {
     if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
@@ -189,20 +191,6 @@ export default function EmployeeMessagesApp() {
       if (libraryPhotoRef.current) libraryPhotoRef.current.value = "";
     }
   }, []);
-
-  const scrollThreadToBottom = useCallback(() => {
-    const node = messageThreadRef.current;
-    if (!node) return;
-    window.requestAnimationFrame(() => {
-      node.scrollTop = node.scrollHeight;
-    });
-  }, []);
-
-  function trackThreadScroll() {
-    const node = messageThreadRef.current;
-    if (!node) return;
-    stickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
-  }
 
   function choosePhoto(event: ChangeEvent<HTMLInputElement>, source: "camera" | "library") {
     const file = event.currentTarget.files?.[0] || null;
@@ -256,7 +244,11 @@ export default function EmployeeMessagesApp() {
   }, []);
 
   useEffect(() => {
-    if (window.matchMedia("(min-width: 901px)").matches) setThreadOpen(true);
+    const media = window.matchMedia("(min-width: 901px)");
+    const syncLayout = () => setWideLayout(media.matches);
+    syncLayout();
+    media.addEventListener("change", syncLayout);
+    return () => media.removeEventListener("change", syncLayout);
   }, []);
 
   useEffect(() => {
@@ -358,22 +350,19 @@ export default function EmployeeMessagesApp() {
   const selectedMessages = selectedConversation?.messages || [];
 
   useEffect(() => {
-    if (stickToBottomRef.current) scrollThreadToBottom();
-  }, [selectedKey, selectedMessages.length, scrollThreadToBottom]);
-
-  useEffect(() => {
     if (selectedConversation && selectedConversation.key !== selectedKey) setSelectedKey(selectedConversation.key);
   }, [selectedConversation, selectedKey]);
 
-  useEffect(() => {
-    if (!session || !threadOpen || !selectedMessages.length) return;
-    const ids = selectedMessages
-      .filter((message) => unreadIds.has(message.id))
-      .filter((message) => message.sender_employee_id !== session.employeeId)
-      .map((message) => message.id)
-      .filter((id) => !reportedSeen.current.has(id));
+  const incomingUnreadMessageIds = useMemo(() => selectedMessages
+    .filter((message) => unreadIds.has(message.id))
+    .filter((message) => !session || message.sender_employee_id?.toLowerCase() !== session.employeeId.toLowerCase())
+    .map((message) => message.id), [selectedMessages, session, unreadIds]);
+
+  const reportVisibleMessagesSeen = useCallback((messageIds: string[]) => {
+    if (!session || !messageIds.length) return;
+    const ids = messageIds.filter((id) => !reportedSeen.current.has(id));
     if (!ids.length) return;
-    for (const id of ids) reportedSeen.current.add(id);
+    ids.forEach((id) => reportedSeen.current.add(id));
     void Promise.all(ids.map(async (messageId) => {
       const response = await fetch("/api/employee/message-conversations", {
         method: "POST",
@@ -389,9 +378,27 @@ export default function EmployeeMessagesApp() {
         unreadMessageIds: current.unreadMessageIds.filter((id) => !seen.has(id)),
       } : current);
     }).catch(() => {
-      for (const id of ids) reportedSeen.current.delete(id);
+      ids.forEach((id) => reportedSeen.current.delete(id));
     });
-  }, [selectedMessages, session, threadOpen, unreadIds]);
+  }, [session]);
+
+  const {
+    openingUnreadId,
+    saveThreadPosition,
+    scrollThreadToBottom,
+    stickToBottomRef,
+    trackThreadScroll,
+  } = useMessageThreadBehavior({
+    appRef: messageAppRef,
+    threadRef: messageThreadRef,
+    selectedKey: selectedConversation?.key || selectedKey,
+    messageIds: selectedMessages.map((message) => message.id),
+    unreadMessageIds: incomingUnreadMessageIds,
+    threadOpen: threadOpen || wideLayout,
+    ready: Boolean(data && session),
+    storageScope: session ? `employee:${session.business}:${session.employeeId}` : "employee:unknown",
+    onUnreadVisible: reportVisibleMessagesSeen,
+  });
 
   function senderName(message: Message, useYou = false): string {
     if (!message.sender_employee_id) return "Management";
@@ -401,7 +408,7 @@ export default function EmployeeMessagesApp() {
   }
 
   function chooseConversation(key: string) {
-    stickToBottomRef.current = true;
+    saveThreadPosition();
     setSelectedKey(key);
     setThreadOpen(true);
     setNotice("");
@@ -519,7 +526,7 @@ export default function EmployeeMessagesApp() {
   const current = data?.employee;
   const currentDisplay = current?.chatNickname || firstName(session.name);
 
-  return <main className="messageApp employeeMessageApp">
+  return <main ref={messageAppRef} className="messageApp employeeMessageApp">
     <header className="messageTopBar">
       <div className="messageTopTitle">
         <a className="messageTopIcon" href="/employee" aria-label="Back to Employee Hub">←</a>
@@ -572,7 +579,7 @@ export default function EmployeeMessagesApp() {
       <section className="messageThreadPane" aria-label="Selected conversation">
         {selectedConversation ? <>
           <header className="messageThreadHeader">
-            <button type="button" className="messageBack" aria-label="Back to conversations" onClick={() => setThreadOpen(false)}>←</button>
+            <button type="button" className="messageBack" aria-label="Back to conversations" onClick={() => { saveThreadPosition(); setThreadOpen(false); }}>←</button>
             <div><h2>{selectedConversation.label}</h2><p>{selectedConversation.detail}</p></div>
             <span className={`messageHeaderAvatar ${selectedConversation.kind}`} aria-hidden="true">{selectedConversation.kind === "team" ? "🏪" : selectedConversation.kind === "management" ? "👥" : initials(selectedConversation.label)}</span>
           </header>
@@ -583,8 +590,9 @@ export default function EmployeeMessagesApp() {
               const showDay = !prior || new Date(prior.created_at).toDateString() !== new Date(message.created_at).toDateString();
               const isOwn = message.sender_employee_id?.toLowerCase() === session.employeeId.toLowerCase();
               const displayName = senderName(message);
-              return <div key={message.id}>
+              return <div key={message.id} data-message-id={message.id}>
                 {showDay && <div className="messageDay"><span>{dayLabel(message.created_at)}</span></div>}
+                {openingUnreadId === message.id && <div className="messageUnreadMarker"><span>New messages</span></div>}
                 <article className={`messageBubbleRow ${isOwn ? "own" : "other"}`}>
                   {!isOwn && <span className="messageTinyAvatar" style={{ "--employee-color": message.sender_schedule_color || "#7C3AED" } as CSSProperties}>{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(message.sender_employee_id)} alt="" loading="lazy" /> : initials(displayName)}</span>}
                   <div className="messageBubbleWrap">

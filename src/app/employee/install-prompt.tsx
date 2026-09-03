@@ -1,6 +1,7 @@
 "use client";
 
 import { BeforeInstallPromptEvent, isIos, isStandalone } from "@/app/pwa-platform";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useModalFocus } from "@/app/use-modal-focus";
 import "./install-prompt.css";
@@ -12,11 +13,13 @@ const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
 
 
 export default function EmployeeInstallPrompt() {
+  const pathname = usePathname();
   const [authenticated, setAuthenticated] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [visible, setVisible] = useState(false);
   const [notice, setNotice] = useState("");
-  const installModalRef = useModalFocus<HTMLDivElement>(visible, () => dismiss());
+  const shouldShow = visible && pathname !== "/employee/messages";
+  const installModalRef = useModalFocus<HTMLDivElement>(shouldShow, () => dismiss());
 
   useEffect(() => {
     let cancelled = false;
@@ -93,7 +96,7 @@ export default function EmployeeInstallPrompt() {
     setInstallPrompt(null);
   }
 
-  if (!visible) return null;
+  if (!shouldShow) return null;
 
   const ios = isIos();
   return <div ref={installModalRef} tabIndex={-1} className="employeeInstallOverlay" role="dialog" aria-modal="true" aria-labelledby="employee-install-title">

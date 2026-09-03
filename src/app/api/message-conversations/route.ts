@@ -7,7 +7,7 @@ import {
   TEAM_CONVERSATION_KEY,
 } from "@/lib/message-conversations";
 import { deleteOwnerMessage } from "@/lib/message-deletion";
-import { markAdminMessagesRead } from "@/lib/message-reads";
+import { adminUnreadMessageIds, markAdminConversationMessageSeen } from "@/lib/message-reads";
 import { notifyEmployeesOfOwnerMessage } from "@/lib/push-notifications";
 import type { Business } from "@/lib/types";
 
@@ -81,8 +81,11 @@ export async function GET(request: Request) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
     }
     const viewAsEmployeeId = url.searchParams.get("viewAsEmployeeId") || "";
-    if (!viewAsEmployeeId) await markAdminMessagesRead(session.email, business);
-    return Response.json(await ownerConversationDashboard(business, viewAsEmployeeId), {
+    const dashboard = await ownerConversationDashboard(business, viewAsEmployeeId);
+    const unreadMessageIds = viewAsEmployeeId
+      ? dashboard.unreadMessageIds
+      : await adminUnreadMessageIds(session.email, business);
+    return Response.json({ ...dashboard, unreadMessageIds }, {
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {
@@ -95,10 +98,11 @@ export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
-    requirePermission(session, "workforce.write");
+    requirePermission(session, "workforce.read");
     const contentType = request.headers.get("content-type") || "";
 
     if (contentType.includes("multipart/form-data")) {
+      requirePermission(session, "workforce.write");
       const form = await request.formData();
       const action = String(form.get("action") || "send");
       if (action !== "send") {
@@ -175,6 +179,10 @@ export async function POST(request: Request) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
     }
     const action = String(body.action || "send");
+    if (action === "message-seen") {
+      return Response.json(await markAdminConversationMessageSeen(session.email, business, body.messageId));
+    }
+    requirePermission(session, "workforce.write");
     if (action === "delete") {
       return Response.json(await deleteOwnerMessage({
         id: String(body.id || ""),

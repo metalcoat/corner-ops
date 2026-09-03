@@ -24,7 +24,7 @@
 
 
 /* Message attachment and viewport scrolling repair. */
-.messageApp{position:relative;height:100dvh;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.messageApp{position:relative;height:var(--message-viewport-height,100dvh);min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .messageTopBar,.messageControlBar,.messageImpersonationBanner,.messageNotice,.messageProfilePanel{flex:0 0 auto}
 .messageImpersonationBanner,.messageNotice{width:min(1500px,calc(100% - 1.5rem))}
 .messageShell,.employeeMessageApp .messageShell{width:100%;height:auto;min-height:0;flex:1 1 auto}
@@ -34,3 +34,9 @@
 .messageComposer{position:relative;bottom:auto}
 .messageComposerWithAttachments{grid-template-columns:auto minmax(0,1fr) auto}
 @media(max-width:560px){.messageShell,.employeeMessageApp .messageShell{height:auto;min-height:0}.messageComposerWithAttachments{grid-template-columns:auto minmax(0,1fr) auto}}
+
+
+/* Resume/read marker and mobile keyboard viewport behavior. */
+.messageUnreadMarker{display:flex;align-items:center;gap:.65rem;margin:.8rem 0;color:var(--message-purple);font-size:.72rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.messageUnreadMarker::before,.messageUnreadMarker::after{content:"";height:1px;flex:1;background:color-mix(in srgb,var(--message-purple) 42%,var(--message-line))}.messageUnreadMarker span{white-space:nowrap}.messageThread{overflow-anchor:auto}.messageComposer{z-index:5}
+@media(max-width:900px){.messageApp[data-keyboard-open="true"]{position:fixed;inset-inline:0;top:var(--message-viewport-top,0px);z-index:1500;width:100%;height:var(--message-viewport-height,100dvh);min-height:0;margin:0;overscroll-behavior:none}.messageApp[data-keyboard-open="true"] .messageShell{min-height:0}.messageApp[data-keyboard-open="true"] .messageComposer{padding-bottom:max(.55rem,env(safe-area-inset-bottom))}}
+@media(max-width:560px){.messageComposer textarea{font-size:16px}}

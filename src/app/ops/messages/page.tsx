@@ -3,6 +3,7 @@
 import { responseMessage } from "@/app/client-http";
 import { canvasToJpegBlob, drawCanvasImage } from "@/app/client-image";
 import { firstName } from "@/app/client-text";
+import { useMessageThreadBehavior } from "@/app/use-message-thread-behavior";
 import { ChangeEvent, ClipboardEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../../message-inbox.css";
@@ -173,15 +174,17 @@ export default function MessagesPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [selectedKey, setSelectedKey] = useState("team");
   const [threadOpen, setThreadOpen] = useState(false);
+  const [wideLayout, setWideLayout] = useState(false);
   const [search, setSearch] = useState("");
   const [startOpen, setStartOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<{ file: File; url: string; name: string; size: number } | null>(null);
+  const reportedSeen = useRef(new Set<string>());
+  const messageAppRef = useRef<HTMLElement | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const photoPreviewUrlRef = useRef<string | null>(null);
   const messageThreadRef = useRef<HTMLDivElement | null>(null);
-  const stickToBottomRef = useRef(true);
 
   const clearPhotoAttachment = useCallback((resetInput = true) => {
     if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
@@ -215,19 +218,13 @@ export default function MessagesPage() {
     attachPhoto(file);
   }
 
-  const scrollThreadToBottom = useCallback(() => {
-    const node = messageThreadRef.current;
-    if (!node) return;
-    window.requestAnimationFrame(() => {
-      node.scrollTop = node.scrollHeight;
-    });
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 901px)");
+    const syncLayout = () => setWideLayout(media.matches);
+    syncLayout();
+    media.addEventListener("change", syncLayout);
+    return () => media.removeEventListener("change", syncLayout);
   }, []);
-
-  function trackThreadScroll() {
-    const node = messageThreadRef.current;
-    if (!node) return;
-    stickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
-  }
 
   useEffect(() => {
     fetch("/api/auth/session", { cache: "no-store" })
@@ -357,12 +354,58 @@ export default function MessagesPage() {
     && selectedConversation?.kind !== "direct";
 
   useEffect(() => {
-    if (stickToBottomRef.current) scrollThreadToBottom();
-  }, [selectedKey, selectedMessages.length, scrollThreadToBottom]);
-
-  useEffect(() => {
     if (selectedConversation && selectedConversation.key !== selectedKey) setSelectedKey(selectedConversation.key);
   }, [selectedConversation, selectedKey]);
+
+  const selectedUnreadMessageIds = useMemo(() => selectedMessages
+    .filter((message) => unreadIds.has(message.id))
+    .filter((message) => viewAsEmployeeId
+      ? message.sender_employee_id?.toLowerCase() !== viewAsEmployeeId.toLowerCase()
+      : Boolean(message.sender_employee_id))
+    .map((message) => message.id), [selectedMessages, unreadIds, viewAsEmployeeId]);
+
+  const reportVisibleMessagesSeen = useCallback((messageIds: string[]) => {
+    if (!session?.authenticated || viewAsEmployeeId || !messageIds.length) return;
+    const ids = messageIds.filter((id) => !reportedSeen.current.has(id));
+    if (!ids.length) return;
+    ids.forEach((id) => reportedSeen.current.add(id));
+    void Promise.all(ids.map(async (messageId) => {
+      const response = await fetch("/api/message-conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "message-seen", business, messageId }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      return messageId;
+    })).then((seenIds) => {
+      const seen = new Set(seenIds);
+      setData((current) => current ? {
+        ...current,
+        unreadMessageIds: current.unreadMessageIds.filter((id) => !seen.has(id)),
+      } : current);
+      window.dispatchEvent(new Event("corner-ops-notifications-refresh"));
+    }).catch(() => {
+      ids.forEach((id) => reportedSeen.current.delete(id));
+    });
+  }, [business, session?.authenticated, viewAsEmployeeId]);
+
+  const {
+    openingUnreadId,
+    saveThreadPosition,
+    scrollThreadToBottom,
+    stickToBottomRef,
+    trackThreadScroll,
+  } = useMessageThreadBehavior({
+    appRef: messageAppRef,
+    threadRef: messageThreadRef,
+    selectedKey: selectedConversation?.key || selectedKey,
+    messageIds: selectedMessages.map((message) => message.id),
+    unreadMessageIds: selectedUnreadMessageIds,
+    threadOpen: threadOpen || wideLayout,
+    ready: Boolean(data && data.business === business),
+    storageScope: `management:${session?.email || "signed-in"}:${business}:${viewAsEmployeeId || "management"}`,
+    onUnreadVisible: viewAsEmployeeId ? undefined : reportVisibleMessagesSeen,
+  });
 
   function senderName(message: Message, useYou = false): string {
     if (!message.sender_employee_id) return useYou && !viewAsEmployeeId ? "You" : "Management";
@@ -373,7 +416,7 @@ export default function MessagesPage() {
   }
 
   function chooseConversation(key: string) {
-    stickToBottomRef.current = true;
+    saveThreadPosition();
     setSelectedKey(key);
     setThreadOpen(true);
     setStartOpen(false);
@@ -442,7 +485,7 @@ export default function MessagesPage() {
   if (!session.authenticated) return <main className="messageApp"><div className="messageLoading"><a href="/signin">Sign in to Corner Ops</a></div></main>;
   const allowed = session.businesses?.length ? session.businesses : (["Corner Deli", "Tiki"] as Business[]);
 
-  return <main className="messageApp">
+  return <main ref={messageAppRef} className="messageApp">
     <header className="messageTopBar">
       <div className="messageTopTitle">
         <a className="messageTopIcon" href="/ops/people" aria-label="Open Corner Ops">☰</a>
@@ -505,7 +548,7 @@ export default function MessagesPage() {
       <section className="messageThreadPane" aria-label="Selected conversation">
         {selectedConversation ? <>
           <header className="messageThreadHeader">
-            <button type="button" className="messageBack" aria-label="Back to conversations" onClick={() => setThreadOpen(false)}>←</button>
+            <button type="button" className="messageBack" aria-label="Back to conversations" onClick={() => { saveThreadPosition(); setThreadOpen(false); }}>←</button>
             <div><h2>{selectedConversation.label}</h2><p>{selectedConversation.detail}</p></div>
             <span className={`messageHeaderAvatar ${selectedConversation.kind}`} aria-hidden="true">{selectedConversation.kind === "team" ? "🏪" : initials(selectedConversation.label)}</span>
           </header>
@@ -519,8 +562,9 @@ export default function MessagesPage() {
                 : !message.sender_employee_id;
               const displayName = senderName(message);
               const employeeSender = message.sender_employee_id ? employeesById.get(message.sender_employee_id.toLowerCase()) : null;
-              return <div key={message.id}>
+              return <div key={message.id} data-message-id={message.id}>
                 {showDay && <div className="messageDay"><span>{dayLabel(message.created_at)}</span></div>}
+                {openingUnreadId === message.id && <div className="messageUnreadMarker"><span>New messages</span></div>}
                 <article className={`messageBubbleRow ${isOwn ? "own" : "other"}`}>
                   {!isOwn && <span className="messageTinyAvatar" style={{ "--employee-color": message.sender_schedule_color || employeeSender?.scheduleColor || "#7C3AED" } as CSSProperties}>{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(business, message.sender_employee_id)} alt="" loading="lazy" /> : initials(displayName)}</span>}
                   <div className="messageBubbleWrap">

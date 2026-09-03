@@ -25,7 +25,7 @@ test("employee messages accept clipboard images as well as camera and library up
   assert.equal(page.includes('capture="environment"'), true);
 });
 
-test("message threads own the scrolling area and stay anchored at the newest message", () => {
+test("message threads own the scrolling area and support unread or saved resume positions", () => {
   const owner = source("src/app/ops/messages/page.tsx");
   const employee = source("src/app/employee/conversation-messages-dock.tsx");
   const css = source("src/app/message-inbox.css");
@@ -34,7 +34,46 @@ test("message threads own the scrolling area and stay anchored at the newest mes
     assert.equal(page.includes("scrollThreadToBottom"), true);
     assert.equal(page.includes("onScroll={trackThreadScroll}"), true);
   }
-  assert.equal(css.includes("height:100dvh"), true);
+  assert.equal(css.includes("height:var(--message-viewport-height,100dvh)"), true);
   assert.equal(css.includes(".messageComposer{position:relative;bottom:auto}"), true);
   assert.equal(css.includes(".messageInboxPane,.messageThreadPane{min-height:0;overflow:hidden}"), true);
+});
+
+
+test("message threads resume at unread messages and only mark visible messages read", () => {
+  const owner = source("src/app/ops/messages/page.tsx");
+  const employee = source("src/app/employee/conversation-messages-dock.tsx");
+  const behavior = source("src/app/use-message-thread-behavior.ts");
+  for (const page of [owner, employee]) {
+    assert.equal(page.includes("useMessageThreadBehavior"), true);
+    assert.equal(page.includes("data-message-id={message.id}"), true);
+    assert.equal(page.includes("openingUnreadId === message.id"), true);
+  }
+  assert.equal(behavior.includes("corner-ops-message-position"), true);
+  assert.equal(behavior.includes("window.localStorage.setItem"), true);
+  assert.equal(behavior.includes("IntersectionObserver"), true);
+  assert.equal(behavior.includes("currentlyVisibleUnread"), true);
+});
+
+test("mobile message composer follows the visual viewport and install prompt stays off messages", () => {
+  const behavior = source("src/app/use-message-thread-behavior.ts");
+  const css = source("src/app/message-inbox.css");
+  const installPrompt = source("src/app/employee/install-prompt.tsx");
+  assert.equal(behavior.includes("window.visualViewport"), true);
+  assert.equal(behavior.includes("data-keyboard-open"), true);
+  assert.equal(css.includes('.messageApp[data-keyboard-open="true"]'), true);
+  assert.equal(css.includes("font-size:16px"), true);
+  assert.equal(installPrompt.includes('pathname !== "/employee/messages"'), true);
+  assert.equal(installPrompt.includes("useModalFocus<HTMLDivElement>(shouldShow"), true);
+});
+
+test("management read state is per visible message rather than marking the whole inbox", () => {
+  const route = source("src/app/api/message-conversations/route.ts");
+  const reads = source("src/lib/message-reads.ts");
+  const owner = source("src/app/ops/messages/page.tsx");
+  assert.equal(route.includes("adminUnreadMessageIds"), true);
+  assert.equal(route.includes("markAdminConversationMessageSeen"), true);
+  assert.equal(route.includes("await markAdminMessagesRead"), false);
+  assert.equal(reads.includes("export async function markAdminConversationMessageSeen"), true);
+  assert.equal(owner.includes('action: "message-seen"'), true);
 });

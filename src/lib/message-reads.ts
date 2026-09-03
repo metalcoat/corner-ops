@@ -5,6 +5,7 @@ import type { Business } from "@/lib/types";
 import { ensureMessageAttachmentSchema } from "@/lib/message-attachments";
 
 let readSchemaPromise: Promise<void> | null = null;
+const MESSAGE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function ensureMessageReadSchema(): Promise<void> {
   if (!readSchemaPromise) {
@@ -71,6 +72,58 @@ export async function adminUnreadMessageSummary(readerEmail: string, businesses:
     messages: byBusiness["Corner Deli"] + byBusiness.Tiki,
     byBusiness,
   };
+}
+
+export async function adminUnreadMessageIds(readerEmail: string, business: Business): Promise<string[]> {
+  await ensureMessageReadSchema();
+  const email = normalizedReaderEmail(readerEmail);
+  const startedAt = await notificationStart(email);
+  const rows = await getSql()`
+    SELECT m.id::text AS id
+    FROM employee_messages m
+    WHERE m.business = ${business}
+      AND m.sender_employee_id IS NOT NULL
+      AND m.deleted_at IS NULL
+      AND m.created_at >= ${startedAt}
+      AND NOT EXISTS (
+        SELECT 1
+        FROM owner_message_reads r
+        WHERE r.message_id = m.id AND r.reader_email = ${email}
+      )
+    ORDER BY m.created_at, m.id
+    LIMIT 1000
+  ` as unknown as Array<{ id: string }>;
+  return rows.map((row) => String(row.id));
+}
+
+export async function markAdminConversationMessageSeen(
+  readerEmail: string,
+  business: Business,
+  messageId: unknown,
+) {
+  await ensureMessageReadSchema();
+  const email = normalizedReaderEmail(readerEmail);
+  const id = String(messageId || "").trim().toLowerCase();
+  if (!MESSAGE_UUID_PATTERN.test(id)) throw new Error("Message selection is invalid.");
+  const startedAt = await notificationStart(email);
+  const visible = await getSql()`
+    SELECT id
+    FROM employee_messages
+    WHERE id = ${id}::uuid
+      AND business = ${business}
+      AND sender_employee_id IS NOT NULL
+      AND deleted_at IS NULL
+      AND created_at >= ${startedAt}
+    LIMIT 1
+  ` as unknown as Array<{ id: string }>;
+  if (!visible[0]) throw new Error("Message was not found or is not visible to management.");
+  const inserted = await getSql()`
+    INSERT INTO owner_message_reads (message_id, reader_email)
+    VALUES (${id}::uuid, ${email})
+    ON CONFLICT (message_id, reader_email) DO NOTHING
+    RETURNING read_at
+  ` as unknown as Array<{ read_at: string }>;
+  return { seen: true, firstSeen: inserted[0]?.read_at || null };
 }
 
 export async function markAdminMessagesRead(readerEmail: string, business: Business) {
