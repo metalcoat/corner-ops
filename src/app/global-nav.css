@@ -1,1 +1,198 @@
-.globalOwnerNav{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:18px;padding:11px 20px;background:rgba(6,11,19,.94);backdrop-filter:blur(18px);border-bottom:1px solid var(--color-263244)}.globalNavTopline{display:flex;align-items:center;justify-content:space-between;gap:12px}.globalBrand{font-weight:900;letter-spacing:-.02em;color:var(--color-e7fff6);text-decoration:none;white-space:nowrap}.globalMenuButton{display:none;border:1px solid var(--color-334155);border-radius:999px;background:var(--color-121c2c);color:var(--color-dbe7f5);padding:7px 11px;font-weight:850}.globalNavLinks{display:flex;gap:7px;align-items:center;overflow-x:auto;scrollbar-width:none}.globalNavLinks::-webkit-scrollbar{display:none}.globalNavLinks a{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;text-decoration:none;color:var(--color-aeb9c9);border:1px solid transparent;border-radius:999px;padding:8px 11px;font-size:.84rem}.globalNavLinks a:hover{color:var(--color-f8fafc);background:var(--color-121c2c)}.globalNavLinks a.active{background:var(--color-19362f);color:var(--color-9ff2d5);border-color:var(--color-2f6c5b)}.globalNavBadge{display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:19px;padding:0 5px;border-radius:999px;background:var(--color-ef4444);color:var(--color-ffffff);font-size:.68rem;font-weight:950;line-height:1;box-shadow:0 0 0 2px rgba(6,11,19,.9)}.globalNavLinks a.active .globalNavBadge{box-shadow:0 0 0 2px var(--color-19362f)}@media(max-width:760px){.globalOwnerNav{align-items:stretch;flex-direction:column;gap:0;padding:9px 12px}.globalMenuButton{display:inline-flex}.globalNavLinks{display:none;width:100%;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding-top:9px;overflow:visible}.globalOwnerNav.menuOpen .globalNavLinks{display:grid}.globalNavLinks a{justify-content:center;text-align:center;border-color:var(--color-263244);background:var(--color-0e1726);padding:10px 8px}.globalNavLinks a.active{background:var(--color-19362f)}.globalNavTopline{width:100%}}@media(max-width:390px){.globalNavLinks{grid-template-columns:1fr}}
+.globalOwnerNav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 9px 20px;
+  background: rgba(6, 11, 19, .94);
+  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--color-263244);
+}
+
+.globalNavTopline {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.globalBrand {
+  font-weight: 900;
+  letter-spacing: -.02em;
+  color: var(--color-e7fff6);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.globalBusinessSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border, var(--color-334155));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel, var(--color-121c2c)) 88%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%);
+}
+
+.globalBusinessSwitch button {
+  min-height: 31px;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--muted, var(--color-aeb9c9));
+  font-size: .76rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.globalBusinessSwitch button:hover {
+  color: var(--text, var(--color-f8fafc));
+}
+
+.globalBusinessSwitch button.active {
+  background: var(--accent, var(--color-9ff2d5));
+  color: var(--accent-contrast, var(--color-0f172a));
+  box-shadow: 0 3px 10px rgb(0 0 0 / 24%);
+}
+
+.globalMenuButton {
+  display: none;
+  border: 1px solid var(--color-334155);
+  border-radius: 999px;
+  background: var(--color-121c2c);
+  color: var(--color-dbe7f5);
+  padding: 7px 11px;
+  font-weight: 850;
+}
+
+.globalNavLinks {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 7px;
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.globalNavLinks::-webkit-scrollbar { display: none; }
+
+.globalNavLinks a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  text-decoration: none;
+  color: var(--color-aeb9c9);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 8px 11px;
+  font-size: .84rem;
+}
+
+.globalNavLinks a:hover {
+  color: var(--color-f8fafc);
+  background: var(--color-121c2c);
+}
+
+.globalNavLinks a.active {
+  background: var(--color-19362f);
+  color: var(--color-9ff2d5);
+  border-color: var(--color-2f6c5b);
+}
+
+.globalNavBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--color-ef4444);
+  color: var(--color-ffffff);
+  font-size: .68rem;
+  font-weight: 950;
+  line-height: 1;
+  box-shadow: 0 0 0 2px rgba(6, 11, 19, .9);
+}
+
+.globalNavLinks a.active .globalNavBadge {
+  box-shadow: 0 0 0 2px var(--color-19362f);
+}
+
+html[data-global-business-switcher="true"] .globalBrand::after {
+  display: none !important;
+}
+
+html[data-global-business-switcher="true"] .businessSwitch,
+html[data-global-business-switcher="true"] .wfBusinessSwitch,
+html[data-global-business-switcher="true"] .businessPills,
+html[data-global-business-switcher="true"] .messageBusinessTabs,
+html[data-global-business-switcher="true"] [data-legacy-business-switcher="true"] {
+  display: none !important;
+}
+
+@media (max-width: 760px) {
+  .globalOwnerNav {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0;
+    padding: 8px 10px;
+  }
+
+  .globalNavTopline {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .globalBusinessSwitch {
+    min-width: 0;
+    justify-self: center;
+  }
+
+  .globalBusinessSwitch button {
+    min-height: 30px;
+    padding: 5px 8px;
+    font-size: .72rem;
+  }
+
+  .globalMenuButton { display: inline-flex; }
+
+  .globalNavLinks {
+    display: none;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    padding-top: 9px;
+    overflow: visible;
+  }
+
+  .globalOwnerNav.menuOpen .globalNavLinks { display: grid; }
+
+  .globalNavLinks a {
+    justify-content: center;
+    text-align: center;
+    border-color: var(--color-263244);
+    background: var(--color-0e1726);
+    padding: 10px 8px;
+  }
+
+  .globalNavLinks a.active { background: var(--color-19362f); }
+}
+
+@media (max-width: 390px) {
+  .globalOwnerNav { padding-inline: 7px; }
+  .globalNavTopline { gap: 5px; }
+  .globalBrand { font-size: .84rem; }
+  .globalMenuButton { padding-inline: 8px; font-size: .78rem; }
+  .globalBusinessSwitch button { padding-inline: 6px; font-size: .68rem; }
+  .globalNavLinks { grid-template-columns: 1fr; }
+}
