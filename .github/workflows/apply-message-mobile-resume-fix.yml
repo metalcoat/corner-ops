@@ -1,0 +1,76 @@
+name: Apply mobile message resume and keyboard fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-message-mobile-resume-fix.yml
+      - tools/apply-message-mobile-resume-fix.py
+
+permissions:
+  contents: write
+
+concurrency:
+  group: message-mobile-resume-fix
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply guarded source changes
+        run: python3 tools/apply-message-mobile-resume-fix.py
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Reject runtime schema DDL
+        run: python3 tools/verify_no_runtime_ddl.py
+
+      - name: Dependency security
+        run: python3 tools/verify_dependencies.py
+
+      - name: CODEBASEREVIEW regression guard
+        run: python3 tools/verify_review_regressions.py
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build application
+        run: npm run build
+        env:
+          APP_EMAIL: owner@example.test
+          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+          BLOB_READ_WRITE_TOKEN: vercel_blob_rw_placeholder
+          SESSION_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          EMPLOYMENT_FORMS_ENCRYPTION_KEY: abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+
+      - name: Commit tested message behavior
+        shell: bash
+        run: |
+          rm -f .github/workflows/apply-message-mobile-resume-fix.yml
+          rm -f tools/apply-message-mobile-resume-fix.py
+          rm -f .github/workflows/apply-message-image-scroll-fix.yml
+          rm -f tools/apply-message-image-scroll-fix.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Finish mobile message resume behavior" \
+            -m "Resume conversations at the first unread or saved position, mark only visible messages read, keep the composer above mobile keyboards, and prevent the install reminder from covering Messages."
+          git pull --rebase origin main
+          git push origin HEAD:main
