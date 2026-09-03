@@ -242,6 +242,14 @@ test("top categories, subcategories, and search use the imported hierarchy", asy
   await top
     .getByRole("button", { name: "Appetizers and Sides", exact: true })
     .click();
+  await expect(page.getByRole("heading", { name: "All Appetizers and Sides" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Appetizers", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Side Dishes", exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByLabel("Appetizers and Sides subcategories")
+      .getByRole("button", { name: "All", exact: true }),
+  ).toBeVisible();
   await expect(
     page
       .getByLabel("Appetizers and Sides subcategories")

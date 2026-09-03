@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PosPinGate, { type PosEmployeeSession, type PosSessionView } from "../../pos-pin-gate";
 import { usePosIdleLock } from "../../use-pos-idle-lock";
-import { formatOrderModifier, hasSplitPizzaToppings, kitchenModifierOrder, kitchenPortionName, pizzaToppingColumns } from "@/lib/ordering-line-format";
+import { formatOrderModifier, hasSplitPizzaToppings, kitchenModifierOrder, kitchenPortionName, kitchenProductionTotals, pizzaToppingColumns } from "@/lib/ordering-line-format";
 import type { PizzaToppingAmount, PizzaToppingPortion } from "@/lib/ordering-pizza-toppings";
 
 type KitchenStatus = "sent_to_kitchen" | "in_progress" | "ready" | "completed" | "cancelled";
@@ -162,6 +162,7 @@ export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSecond
           <div><b>{serviceLabels[order.service_type]}</b><time>{elapsed(order.submitted_at, order.server_now, tick)}</time></div>
         </header>
         <div className="kitchenItems">
+          {kitchenProductionTotals(order.items).length > 0 && <section className="kitchenProductionTotals"><strong>PRODUCTION TOTALS</strong>{kitchenProductionTotals(order.items).map((line) => <b key={line}>{line}</b>)}</section>}
           {order.items.map((item) => {
             const orderedModifiers=item.modifiers.filter(modifier=>modifier.print_on_ticket!==false).toSorted((left,right)=>kitchenModifierOrder(item,left)-kitchenModifierOrder(item,right)||left.option_name_snapshot.localeCompare(right.option_name_snapshot));
             const headerModifiers=orderedModifiers.filter(modifier=>modifier.header_modifier_snapshot).map(modifier=>formatOrderModifier(modifier,"ticket"));

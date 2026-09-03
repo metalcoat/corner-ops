@@ -857,6 +857,23 @@
   gap: 10px;
   margin-top: 14px;
 }
+.posItemSections {
+  display: grid;
+  gap: 18px;
+  margin-top: 14px;
+}
+.posItemSections .posItemGrid { margin-top: 0; }
+.posItemSection > h2 {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-left: 5px solid #60a5fa;
+  border-radius: 7px;
+  background: #1e293b;
+  color: #f8fafc;
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
 .posItemButton {
   min-height: 112px;
   padding: 14px;

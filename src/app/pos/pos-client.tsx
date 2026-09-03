@@ -1121,7 +1121,7 @@ export default function PosClient({
     : [];
   const activeCategory =
     menu.find((category) => category.id === categoryId) ||
-    (activePrimary?.presentationOnly ? subcategories[0] : activePrimary);
+    activePrimary;
   const allItems = useMemo(
     () => menu.flatMap((category) => category.items),
     [menu],
@@ -1249,20 +1249,21 @@ export default function PosClient({
       setMappingBusy(false);
     }
   }
-  const visibleItems = useMemo(() => {
+  const visibleSections = useMemo(() => {
     const query = menuSearch.trim().toLowerCase();
-    if (!query) return activeCategory?.items || [];
-    return allItems.filter((item) =>
-      [
-        item.name,
-        item.description,
-        ...item.variants.flatMap((variant) => [
-          variant.name,
-          ...variant.aliases,
-        ]),
-      ].some((value) => value.toLowerCase().includes(query)),
-    );
-  }, [activeCategory, allItems, menuSearch]);
+    if (query) return [{ id: "search", name: "Search results", items: allItems.filter((item) =>
+      [item.name, item.description, ...item.variants.flatMap((variant) => [variant.name, ...variant.aliases])]
+        .some((value) => value.toLowerCase().includes(query))),
+    }];
+    if (!activePrimary) return [];
+    if (activeCategory?.id !== activePrimary.id) return activeCategory ? [{ id: activeCategory.id, name: activeCategory.displayName, items: activeCategory.items }] : [];
+    const sections = [
+      ...(activePrimary.items.length ? [{ id: activePrimary.id, name: activePrimary.displayName, items: activePrimary.items }] : []),
+      ...subcategories.filter((category) => category.items.length).map((category) => ({ id: category.id, name: category.displayName, items: category.items })),
+    ];
+    return sections;
+  }, [activeCategory, activePrimary, allItems, menuSearch, subcategories]);
+  const visibleItems = useMemo(() => visibleSections.flatMap((section) => section.items), [visibleSections]);
   const employeeMealCategoryAllowed = (category: OrderingMenuCategoryWithVariants) => !/candy|catering|dessert|drink|beverage|chip/.test(`${category.name} ${category.displayName}`.toLowerCase());
   const employeeMealItemAllowed = (item: OrderingMenuItemWithVariants) => !/candy|catering|dessert|drink|beverage|soda|pepsi|coke|mountain dew|coffee|tea|water|chip/.test(item.name.toLowerCase());
   const subtotalCents = cart.reduce(
@@ -3902,14 +3903,7 @@ export default function PosClient({
                   onClick={() => {
                     setMenuSearch("");
                     setPrimaryCategoryId(category.id);
-                    const children = menu.filter(
-                      (child) => child.parentId === category.id,
-                    );
-                    setCategoryId(
-                      category.presentationOnly
-                        ? children[0]?.id || ""
-                        : category.id,
-                    );
+                    setCategoryId(category.id);
                   }}
                 >
                   {category.displayName}
@@ -3921,6 +3915,13 @@ export default function PosClient({
                 className="posSubcategories"
                 aria-label={`${activePrimary?.displayName} subcategories`}
               >
+                <button
+                  type="button"
+                  className={activeCategory?.id === activePrimary?.id ? "active" : ""}
+                  onClick={() => activePrimary && setCategoryId(activePrimary.id)}
+                >
+                  All
+                </button>
                 {subcategories.map((category) => (
                   <button
                     type="button"
@@ -3942,7 +3943,9 @@ export default function PosClient({
               <h1>
                 {menuSearch
                   ? `Results for “${menuSearch}”`
-                  : activeCategory?.displayName || "Menu"}
+                  : activeCategory?.id === activePrimary?.id && subcategories.length
+                    ? `All ${activePrimary.displayName}`
+                    : activeCategory?.displayName || "Menu"}
               </h1>
             </div>
             <div className="posStatusPill">
@@ -3981,8 +3984,11 @@ export default function PosClient({
                 : "No active items in this category yet."}
             </div>
           )}
-          <div className="posItemGrid">
-            {visibleItems.map((item) => {
+          <div className="posItemSections">
+            {visibleSections.map((section) => <section className="posItemSection" key={section.id} aria-labelledby={`pos-section-${section.id}`}>
+              {!menuSearch && visibleSections.length > 1 && <h2 id={`pos-section-${section.id}`}>{section.name}</h2>}
+              <div className="posItemGrid">
+            {section.items.map((item) => {
               const availableVariants = item.variants.filter(
                 (variant) => variant.available,
               );
@@ -4021,6 +4027,8 @@ export default function PosClient({
                 </button>
               );
             })}
+              </div>
+            </section>)}
           </div>
         </section>
 

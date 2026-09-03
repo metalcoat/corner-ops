@@ -55,7 +55,15 @@ void (async () => {
     if(wholePizza.join("|")!=="Whole Pizza|  PEPPERONI")throw new Error(`Whole pizza should use the normal ticket list: ${wholePizza.join("|")}`);
     const portions=["Small French Fries (7oz)","Large French Fries (11oz)","Small Curly Fries (6oz)","Large Curly Fries (9oz)","Small Tater Tots (7oz)","Large Tater Tots (11oz)","Onion Rings (7oz)","Small Waffle Fries (6oz)","Large Waffle Fries (9oz)"];
     if(portions.some(value=>kitchenPortionName(value.replace(/ \([^)]*\)$/,""))!==value))throw new Error("Kitchen portion labels failed.");
-    console.log(JSON.stringify({posNameUnchanged:item.name,configuredPrintName:lines[0],descriptionInheritanceModel:true,channelDescriptionOverride:true,headerModifier:true,historicalSnapshotImmutable:true,sharedFormatter:true,kitchenItemGrouping:true,kitchenPortionLabels:true,pizzaMakeLineOrder:true,splitPizzaColumns:true,wholePizzaCompact:true,subMakeLineOrder:true},null,2));
+    const productionTotals=formatKitchenLines([
+      {quantity:2,header:"Small French Fries (7oz)",itemName:"Small French Fries",modifiers:[]},
+      {quantity:1,header:"Large French Fries (11oz)",itemName:"Large French Fries",modifiers:[]},
+      {quantity:1,header:"10 Wings",itemName:"Wings",variantName:"10 Wings",modifiers:[]},
+      {quantity:2,header:"12 Wings",itemName:"Boneless Wings",variantName:"12 Wings",modifiers:[]},
+      {quantity:1,header:"20 Wings",itemName:"Wings",variantName:"20 Wings",modifiers:[]},
+    ]);
+    if(!productionTotals.includes("TOTAL FRENCH FRIES: 25 OZ")||!productionTotals.includes("TOTAL WINGS: 30")||!productionTotals.includes("TOTAL BONELESS WINGS: 24"))throw new Error(`Kitchen production totals failed: ${productionTotals.join(" / ")}`);
+    console.log(JSON.stringify({posNameUnchanged:item.name,configuredPrintName:lines[0],descriptionInheritanceModel:true,channelDescriptionOverride:true,headerModifier:true,historicalSnapshotImmutable:true,sharedFormatter:true,kitchenItemGrouping:true,kitchenPortionLabels:true,kitchenProductionTotals:true,pizzaMakeLineOrder:true,splitPizzaColumns:true,wholePizzaCompact:true,subMakeLineOrder:true},null,2));
   } finally {
     await sql`DELETE FROM ordering_orders WHERE id=${orderId}`;
     await sql`DELETE FROM ordering_item_channel_overrides WHERE item_id=${item.id} AND channel='pos' AND updated_by='validation'`;

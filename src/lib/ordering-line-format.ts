@@ -14,6 +14,51 @@ export function kitchenPortionName(itemName: string) {
   return portion && !itemName.toLocaleLowerCase().includes(portion) ? `${itemName} (${portion})` : itemName;
 }
 
+export type KitchenProductionItem = {
+  item_name_snapshot: string;
+  variant_name_snapshot?: string;
+  item_print_name_snapshot?: string;
+  quantity: number;
+};
+
+/**
+ * Adds make-line totals only when an order contains multiple servings of the
+ * same fried product. Individual ticket lines remain unchanged underneath.
+ */
+export function kitchenProductionTotals(items: KitchenProductionItem[]): string[] {
+  const totals = new Map<string, { amount: number; servings: number; unit: "OZ" | "WINGS" }>();
+  const add = (key: string, amount: number, quantity: number, unit: "OZ" | "WINGS") => {
+    const current = totals.get(key) || { amount: 0, servings: 0, unit };
+    current.amount += amount * quantity;
+    current.servings += quantity;
+    totals.set(key, current);
+  };
+
+  for (const item of items) {
+    const quantity = Math.max(0, Number(item.quantity) || 0);
+    if (!quantity) continue;
+    const itemName = kitchenKey(item.item_name_snapshot);
+    const label = `${item.item_print_name_snapshot || ""} ${item.variant_name_snapshot || ""} ${item.item_name_snapshot}`;
+    const ounces = Number(label.match(/\b(\d+(?:\.\d+)?)\s*oz\b/i)?.[1] || 0)
+      || Number(kitchenPortionName(item.item_name_snapshot).match(/\((\d+(?:\.\d+)?)oz\)/i)?.[1] || 0);
+    if (ounces) {
+      if (itemName.includes("french fries")) add("FRENCH FRIES", ounces, quantity, "OZ");
+      else if (itemName.includes("curly fries")) add("CURLY FRIES", ounces, quantity, "OZ");
+      else if (itemName.includes("waffle fries")) add("WAFFLE FRIES", ounces, quantity, "OZ");
+      else if (itemName.includes("tater tots")) add("TATER TOTS", ounces, quantity, "OZ");
+      else if (itemName.includes("onion rings")) add("ONION RINGS", ounces, quantity, "OZ");
+    }
+    if (itemName.includes("wing")) {
+      const count = Number((item.variant_name_snapshot || item.item_print_name_snapshot || "").match(/\b(\d+)\b/)?.[1] || 0);
+      if (count) add(itemName.includes("boneless") ? "BONELESS WINGS" : "WINGS", count, quantity, "WINGS");
+    }
+  }
+
+  return [...totals.entries()]
+    .filter(([, total]) => total.servings > 1)
+    .map(([name, total]) => `TOTAL ${name}: ${total.amount}${total.unit === "OZ" ? " OZ" : ""}`);
+}
+
 export type OrderModifierPresentation = {
   option_name_snapshot: string;
   quantity: number;
