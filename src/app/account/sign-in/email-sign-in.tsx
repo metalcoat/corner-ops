@@ -6,6 +6,8 @@ export default function EmailSignIn({
   initialError: string;
 }) {
   const [email, setEmail] = useState(""),
+    [phone, setPhone] = useState(""),
+    [method,setMethod]=useState<"email"|"phone">("email"),
     [code, setCode] = useState(""),
     [sent, setSent] = useState(false),
     [busy, setBusy] = useState(false),
@@ -15,12 +17,12 @@ export default function EmailSignIn({
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/customer/auth/email", {
+      const response = await fetch(`/api/customer/auth/${method}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             action: sent ? "verify" : "request",
-            email,
+            ...(method==="email"?{email}:{phone}),
             code,
           }),
         }),
@@ -40,7 +42,7 @@ export default function EmailSignIn({
         <p className="eyebrow">Corner Deli account</p>
         <h1>Sign in</h1>
         <p>
-          No password needed. Use Google or receive a one-time code by email.
+          No password needed. Verify your email or mobile number. If you are new, verification creates your account automatically.
         </p>
         {error && (
           <p className="orderError" role="alert">
@@ -54,17 +56,35 @@ export default function EmailSignIn({
           Continue with Google
         </a>
         <div className="authDivider">or</div>
+        <div className="choiceRow" aria-label="Verification method">
+          <button type="button" className="choiceButton" aria-pressed={method==="email"} disabled={sent} onClick={()=>setMethod("email")}>Email</button>
+          <button type="button" className="choiceButton" aria-pressed={method==="phone"} disabled={sent} onClick={()=>setMethod("phone")}>Text message</button>
+        </div>
         <form onSubmit={submit} className="customerContact">
-          <input
-            type="email"
-            autoComplete="email"
-            aria-label="Email address"
-            placeholder="Email address"
-            required
-            value={email}
-            disabled={sent}
-            onChange={(event) => setEmail(event.target.value)}
-          />
+          {method === "email" ? (
+            <input
+              type="email"
+              autoComplete="email"
+              aria-label="Email address"
+              placeholder="Email address"
+              required
+              value={email}
+              disabled={sent}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          ) : (
+            <input
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              aria-label="Mobile phone number"
+              placeholder="Mobile phone number"
+              required
+              value={phone}
+              disabled={sent}
+              onChange={(event) => setPhone(event.target.value)}
+            />
+          )}
           {sent && (
             <input
               inputMode="numeric"
@@ -82,7 +102,7 @@ export default function EmailSignIn({
               ? "Please wait…"
               : sent
                 ? "Verify and sign in"
-                : "Email me a code"}
+                : method==="email"?"Email me a code":"Text me a code"}
           </button>
         </form>
         {sent && (
@@ -93,7 +113,7 @@ export default function EmailSignIn({
               setCode("");
             }}
           >
-            Use a different email
+            Use a different {method==="email"?"email":"phone number"}
           </button>
         )}
         <p className="confirmationEmail">
