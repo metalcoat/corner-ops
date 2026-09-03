@@ -1,3 +1,4 @@
+import { del, put } from "@vercel/blob";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
@@ -11,6 +12,9 @@ import { notifyEmployeesOfOwnerMessage } from "@/lib/push-notifications";
 import type { Business } from "@/lib/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const MAX_MESSAGE_PHOTO = 4 * 1024 * 1024;
 
 function businessFrom(value: unknown): Business {
   if (value === "Corner Deli" || value === "Tiki") return value;
@@ -23,6 +27,47 @@ function mergePush(results: Array<{ attempted: number; delivered: number; failed
     delivered: total.delivered + Number(result.delivered || 0),
     failed: total.failed + Number(result.failed || 0),
   }), { attempted: 0, delivered: 0, failed: 0 });
+}
+
+function safeFileName(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "photo.jpg";
+}
+
+function ownerMessagePath(business: Business, fileName: string): string {
+  const location = business === "Corner Deli" ? "corner-deli" : "tiki";
+  return `owner-messages/${location}/${Date.now()}-${safeFileName(fileName)}`;
+}
+
+async function sendOwnerPush(input: {
+  business: Business;
+  result: { conversationKey: string; pushRecipientEmployeeIds: string[] };
+  body: string;
+  hasPhoto: boolean;
+  actor: string;
+}) {
+  const messageBody = input.body.trim() || (input.hasPhoto ? "Sent a photo." : "Sent a new message.");
+  const pushResults = input.result.conversationKey === TEAM_CONVERSATION_KEY
+    ? [await notifyEmployeesOfOwnerMessage({
+        business: input.business,
+        recipientEmployeeId: null,
+        body: messageBody,
+        actor: input.actor,
+      }).catch((error: unknown) => {
+        console.error("[api/message-conversations] team push failed", error);
+        return { attempted: 0, delivered: 0, failed: 0 };
+      })]
+    : await Promise.all(input.result.pushRecipientEmployeeIds.map((employeeId: string) =>
+        notifyEmployeesOfOwnerMessage({
+          business: input.business,
+          recipientEmployeeId: employeeId,
+          body: messageBody,
+          actor: input.actor,
+        }).catch((error: unknown) => {
+          console.error("[api/message-conversations] employee push failed", error);
+          return { attempted: 0, delivered: 0, failed: 0 };
+        }),
+      ));
+  return mergePush(pushResults);
 }
 
 export async function GET(request: Request) {
@@ -46,10 +91,84 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let uploadedUrl = "";
   try {
     const session = await getSession();
     if (!session) return unauthorized();
     requirePermission(session, "workforce.write");
+    const contentType = request.headers.get("content-type") || "";
+
+    if (contentType.includes("multipart/form-data")) {
+      const form = await request.formData();
+      const action = String(form.get("action") || "send");
+      if (action !== "send") {
+        return Response.json({ error: "Unknown conversation upload action." }, { status: 400 });
+      }
+      const business = businessFrom(form.get("business"));
+      if (!canAccessBusiness(session, business)) {
+        return Response.json({ error: "Business access denied." }, { status: 403 });
+      }
+      const conversationKey = String(form.get("conversationKey") || TEAM_CONVERSATION_KEY);
+      if (conversationKey.toLowerCase().startsWith("direct:")) {
+        return Response.json({
+          error: "Employee-to-employee conversations are view-only for management. Use an employee conversation or the entire team.",
+        }, { status: 400 });
+      }
+      const body = String(form.get("body") || "");
+      const cameraPhoto = form.get("cameraPhoto");
+      const libraryPhoto = form.get("photo");
+      const photo = cameraPhoto instanceof File && cameraPhoto.size > 0
+        ? cameraPhoto
+        : libraryPhoto instanceof File && libraryPhoto.size > 0
+          ? libraryPhoto
+          : null;
+
+      let attachment: {
+        url: string;
+        pathname: string;
+        name: string;
+        type: string;
+        size: number;
+      } | null = null;
+      if (photo) {
+        if (!photo.type.toLowerCase().startsWith("image/")) {
+          return Response.json({ error: "Message attachments must be image files." }, { status: 415 });
+        }
+        if (photo.size > MAX_MESSAGE_PHOTO) {
+          return Response.json({ error: "Message photos are limited to 4 MB after resizing." }, { status: 413 });
+        }
+        const blob = await put(ownerMessagePath(business, photo.name), photo, {
+          access: "private",
+          addRandomSuffix: true,
+        });
+        uploadedUrl = blob.url;
+        attachment = {
+          url: blob.url,
+          pathname: blob.pathname,
+          name: photo.name,
+          type: photo.type || "application/octet-stream",
+          size: photo.size,
+        };
+      }
+
+      const result = await sendConversationMessage({
+        business,
+        conversationKey,
+        senderName: session.email,
+        body,
+        attachment,
+      });
+      uploadedUrl = "";
+      const push = await sendOwnerPush({
+        business,
+        result,
+        body,
+        hasPhoto: Boolean(photo),
+        actor: session.email,
+      });
+      return Response.json({ ...result, push }, { status: 201 });
+    }
+
     const body = await request.json() as Record<string, unknown>;
     const business = businessFrom(body.business);
     if (!canAccessBusiness(session, business)) {
@@ -75,38 +194,23 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
+    const messageBody = String(body.body || "");
     const result = await sendConversationMessage({
       business,
       conversationKey,
       senderName: session.email,
-      body: body.body,
+      body: messageBody,
     });
-
-    const messageBody = String(body.body || "");
-    const pushResults = result.conversationKey === TEAM_CONVERSATION_KEY
-      ? [await notifyEmployeesOfOwnerMessage({
-          business,
-          recipientEmployeeId: null,
-          body: messageBody,
-          actor: session.email,
-        }).catch((error: unknown) => {
-          console.error("[api/message-conversations] team push failed", error);
-          return { attempted: 0, delivered: 0, failed: 0 };
-        })]
-      : await Promise.all(result.pushRecipientEmployeeIds.map((employeeId: string) =>
-          notifyEmployeesOfOwnerMessage({
-            business,
-            recipientEmployeeId: employeeId,
-            body: messageBody,
-            actor: session.email,
-          }).catch((error: unknown) => {
-            console.error("[api/message-conversations] employee push failed", error);
-            return { attempted: 0, delivered: 0, failed: 0 };
-          }),
-        ));
-
-    return Response.json({ ...result, push: mergePush(pushResults) }, { status: 201 });
+    const push = await sendOwnerPush({
+      business,
+      result,
+      body: messageBody,
+      hasPhoto: false,
+      actor: session.email,
+    });
+    return Response.json({ ...result, push }, { status: 201 });
   } catch (error) {
+    if (uploadedUrl) await del(uploadedUrl).catch(() => undefined);
     return apiError(error);
   }
 }

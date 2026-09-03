@@ -1,8 +1,9 @@
 "use client";
 
 import { responseMessage } from "@/app/client-http";
+import { canvasToJpegBlob, drawCanvasImage } from "@/app/client-image";
 import { firstName } from "@/app/client-text";
-import { ChangeEvent, CSSProperties, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, ClipboardEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../../message-inbox.css";
 
@@ -53,6 +54,68 @@ type Conversation = {
   latest: Message | null;
   unreadCount: number;
 };
+
+const SAFE_FUNCTION_UPLOAD_BYTES = 3.5 * 1024 * 1024;
+const MESSAGE_IMAGE_MAX_DIMENSION = 1920;
+
+function jpegName(fileName: string): string {
+  const base = fileName.replace(/\.[^.]+$/, "").trim() || "photo";
+  return `${base}.jpg`;
+}
+
+async function prepareImageUpload(file: File): Promise<File> {
+  if (file.size <= SAFE_FUNCTION_UPLOAD_BYTES) return file;
+  if (!file.type.toLowerCase().startsWith("image/")) return file;
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = objectUrl;
+    await image.decode();
+    const longest = Math.max(image.naturalWidth, image.naturalHeight);
+    if (!longest) throw new Error("This photo could not be read.");
+    for (const maxDimension of [MESSAGE_IMAGE_MAX_DIMENSION, 1600, 1280]) {
+      const scale = Math.min(1, maxDimension / longest);
+      const width = Math.max(1, Math.round(image.naturalWidth * scale));
+      const height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("This browser could not prepare the photo.");
+      drawCanvasImage(context, image, null, { x: 0, y: 0, width, height });
+      for (const quality of [0.84, 0.74, 0.64, 0.54]) {
+        const blob = await canvasToJpegBlob(canvas, quality, "This photo could not be prepared for upload.");
+        if (blob.size <= SAFE_FUNCTION_UPLOAD_BYTES) {
+          return new File([blob], jpegName(file.name), {
+            type: "image/jpeg",
+            lastModified: Date.now(),
+          });
+        }
+      }
+    }
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+  throw new Error("The photo is still too large after resizing. Choose a smaller photo and try again.");
+}
+
+function pastedImageFile(event: ClipboardEvent<HTMLTextAreaElement>): File | null {
+  const item = Array.from(event.clipboardData.items).find((candidate) =>
+    candidate.kind === "file" && candidate.type.toLowerCase().startsWith("image/"),
+  );
+  const original = item?.getAsFile()
+    || Array.from(event.clipboardData.files).find((candidate) => candidate.type.toLowerCase().startsWith("image/"))
+    || null;
+  if (!original) return null;
+  const extension = original.type.toLowerCase().includes("jpeg") ? "jpg"
+    : original.type.toLowerCase().includes("png") ? "png"
+      : original.type.toLowerCase().includes("webp") ? "webp"
+        : "jpg";
+  return new File([original], `pasted-image-${Date.now()}.${extension}`, {
+    type: original.type || "image/png",
+    lastModified: Date.now(),
+  });
+}
 
 function initials(value: string): string {
   return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "?";
@@ -114,6 +177,57 @@ export default function MessagesPage() {
   const [startOpen, setStartOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<{ file: File; url: string; name: string; size: number } | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const photoPreviewUrlRef = useRef<string | null>(null);
+  const messageThreadRef = useRef<HTMLDivElement | null>(null);
+  const stickToBottomRef = useRef(true);
+
+  const clearPhotoAttachment = useCallback((resetInput = true) => {
+    if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
+    photoPreviewUrlRef.current = null;
+    setPhotoPreview(null);
+    if (resetInput && photoInputRef.current) photoInputRef.current.value = "";
+  }, []);
+
+  const attachPhoto = useCallback((file: File) => {
+    if (!file.type.toLowerCase().startsWith("image/")) {
+      setNotice("Message attachments must be image files.");
+      return;
+    }
+    if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
+    const url = URL.createObjectURL(file);
+    photoPreviewUrlRef.current = url;
+    setPhotoPreview({ file, url, name: file.name || "Photo", size: file.size });
+    setNotice("");
+  }, []);
+
+  function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] || null;
+    if (file) attachPhoto(file);
+  }
+
+  function pastePhoto(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const file = pastedImageFile(event);
+    if (!file) return;
+    event.preventDefault();
+    if (photoInputRef.current) photoInputRef.current.value = "";
+    attachPhoto(file);
+  }
+
+  const scrollThreadToBottom = useCallback(() => {
+    const node = messageThreadRef.current;
+    if (!node) return;
+    window.requestAnimationFrame(() => {
+      node.scrollTop = node.scrollHeight;
+    });
+  }, []);
+
+  function trackThreadScroll() {
+    const node = messageThreadRef.current;
+    if (!node) return;
+    stickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
+  }
 
   useEffect(() => {
     fetch("/api/auth/session", { cache: "no-store" })
@@ -130,6 +244,10 @@ export default function MessagesPage() {
       })
       .catch(() => setNotice("Unable to load the current account."));
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => () => {
+    if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
   }, []);
 
   async function load(activeBusiness = business, activeViewAs = viewAsEmployeeId) {
@@ -239,6 +357,10 @@ export default function MessagesPage() {
     && selectedConversation?.kind !== "direct";
 
   useEffect(() => {
+    if (stickToBottomRef.current) scrollThreadToBottom();
+  }, [selectedKey, selectedMessages.length, scrollThreadToBottom]);
+
+  useEffect(() => {
     if (selectedConversation && selectedConversation.key !== selectedKey) setSelectedKey(selectedConversation.key);
   }, [selectedConversation, selectedKey]);
 
@@ -251,6 +373,7 @@ export default function MessagesPage() {
   }
 
   function chooseConversation(key: string) {
+    stickToBottomRef.current = true;
     setSelectedKey(key);
     setThreadOpen(true);
     setStartOpen(false);
@@ -261,25 +384,32 @@ export default function MessagesPage() {
     event.preventDefault();
     if (!selectedConversation || !canWrite) return;
     const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-    const body = String(form.get("body") || "").trim();
-    if (!body) return;
+    const formValues = new FormData(formElement);
+    const body = String(formValues.get("body") || "").trim();
+    const photo = photoPreview?.file || null;
+    if (!body && !photo) {
+      setNotice("Type a message or attach an image.");
+      return;
+    }
+    const form = new FormData();
+    form.set("action", "send");
+    form.set("business", business);
+    form.set("conversationKey", selectedConversation.key);
+    form.set("body", body);
     setBusy(true);
     setNotice("");
     try {
+      if (photo) form.set("photo", await prepareImageUpload(photo));
       const response = await fetch("/api/message-conversations", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "send",
-          business,
-          conversationKey: selectedConversation.key,
-          body,
-        }),
+        body: form,
       });
       if (!response.ok) throw new Error(await responseMessage(response));
       formElement.reset();
+      clearPhotoAttachment(false);
+      stickToBottomRef.current = true;
       await load();
+      scrollThreadToBottom();
       setNotice(`Message sent to ${selectedConversation.label}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Message could not be sent.");
@@ -380,7 +510,7 @@ export default function MessagesPage() {
             <span className={`messageHeaderAvatar ${selectedConversation.kind}`} aria-hidden="true">{selectedConversation.kind === "team" ? "🏪" : initials(selectedConversation.label)}</span>
           </header>
 
-          <div className="messageThread" aria-live="polite">
+          <div ref={messageThreadRef} className="messageThread" aria-live="polite" onScroll={trackThreadScroll}>
             {selectedMessages.map((message, index) => {
               const prior = selectedMessages[index - 1];
               const showDay = !prior || new Date(prior.created_at).toDateString() !== new Date(message.created_at).toDateString();
@@ -395,7 +525,7 @@ export default function MessagesPage() {
                   {!isOwn && <span className="messageTinyAvatar" style={{ "--employee-color": message.sender_schedule_color || employeeSender?.scheduleColor || "#7C3AED" } as CSSProperties}>{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(business, message.sender_employee_id)} alt="" loading="lazy" /> : initials(displayName)}</span>}
                   <div className="messageBubbleWrap">
                     <div className="messageBubble">
-                      {message.attachment_name && <a className="messagePhoto" href={messagePhotoUrl(business, message.id)} target="_blank" rel="noreferrer"><img src={messagePhotoUrl(business, message.id)} alt={message.body || `Photo from ${displayName}`} loading="lazy" /></a>}
+                      {message.attachment_name && <a className="messagePhoto" href={messagePhotoUrl(business, message.id)} target="_blank" rel="noreferrer"><img src={messagePhotoUrl(business, message.id)} alt={message.body || `Photo from ${displayName}`} loading="lazy" onLoad={() => { if (stickToBottomRef.current) scrollThreadToBottom(); }} /></a>}
                       {message.body && <p>{message.body}</p>}
                     </div>
                     <div className="messageBubbleMeta"><span>{isOwn ? "You" : displayName}</span><time>{messageTime(message.created_at)}</time>{!viewAsEmployeeId && <button type="button" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>}</div>
@@ -410,9 +540,13 @@ export default function MessagesPage() {
             {!selectedMessages.length && <div className="messageThreadEmpty"><strong>No messages here yet.</strong><span>{canWrite ? "Send the first message below." : "There is nothing to review in this conversation."}</span></div>}
           </div>
 
-          {canWrite ? <form className="messageComposer" onSubmit={sendMessage}>
-            <textarea name="body" rows={2} required placeholder="Send a message" aria-label={`Message ${selectedConversation.label}`} />
+          {canWrite ? <form className="messageComposer messageComposerWithAttachments" onSubmit={sendMessage}>
+            <div className="messageAttachControls">
+              <label aria-label="Upload an image" title="Upload an image">🖼<input ref={photoInputRef} name="photo" type="file" accept="image/*" onChange={choosePhoto} /></label>
+            </div>
+            <textarea name="body" rows={2} placeholder="Send a message or paste an image" aria-label={`Message ${selectedConversation.label}`} onPaste={pastePhoto} />
             <button type="submit" disabled={busy} aria-label="Send message">{busy ? "…" : "➤"}</button>
+            {photoPreview && <div className="messageAttachmentPreview"><img src={photoPreview.url} alt="Selected attachment" /><span><strong>{photoPreview.name}</strong><small>{(photoPreview.size / 1024 / 1024).toFixed(1)} MB before resizing · paste or upload</small></span><button type="button" onClick={() => clearPhotoAttachment()} disabled={busy}>Remove</button></div>}
           </form> : <div className="messageReadOnlyComposer"><strong>View only</strong><span>{viewAsEmployeeId ? "Impersonation never sends or marks messages as read." : "Management can review employee-to-employee conversations but cannot post into them."}</span></div>}
         </> : <div className="messageThreadEmpty"><strong>Select a conversation.</strong></div>}
       </section>

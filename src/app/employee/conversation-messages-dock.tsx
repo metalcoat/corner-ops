@@ -3,7 +3,7 @@
 import { canvasToJpegBlob, drawCanvasImage } from "@/app/client-image";
 import { responseMessage } from "@/app/client-http";
 import { firstName } from "@/app/client-text";
-import { ChangeEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, ClipboardEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "../message-inbox.css";
 
 type EmployeeSession = {
@@ -172,11 +172,13 @@ export default function EmployeeMessagesApp() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
-  const [photoPreview, setPhotoPreview] = useState<{ url: string; name: string; size: number } | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<{ file: File; url: string; name: string; size: number } | null>(null);
   const reportedSeen = useRef(new Set<string>());
   const cameraPhotoRef = useRef<HTMLInputElement | null>(null);
   const libraryPhotoRef = useRef<HTMLInputElement | null>(null);
   const photoPreviewUrlRef = useRef<string | null>(null);
+  const messageThreadRef = useRef<HTMLDivElement | null>(null);
+  const stickToBottomRef = useRef(true);
 
   const clearPhotoAttachment = useCallback((resetInputs = true) => {
     if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
@@ -188,6 +190,20 @@ export default function EmployeeMessagesApp() {
     }
   }, []);
 
+  const scrollThreadToBottom = useCallback(() => {
+    const node = messageThreadRef.current;
+    if (!node) return;
+    window.requestAnimationFrame(() => {
+      node.scrollTop = node.scrollHeight;
+    });
+  }, []);
+
+  function trackThreadScroll() {
+    const node = messageThreadRef.current;
+    if (!node) return;
+    stickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
+  }
+
   function choosePhoto(event: ChangeEvent<HTMLInputElement>, source: "camera" | "library") {
     const file = event.currentTarget.files?.[0] || null;
     if (!file) return;
@@ -196,7 +212,33 @@ export default function EmployeeMessagesApp() {
     if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
     const url = URL.createObjectURL(file);
     photoPreviewUrlRef.current = url;
-    setPhotoPreview({ url, name: file.name || "Photo", size: file.size });
+    setPhotoPreview({ file, url, name: file.name || "Photo", size: file.size });
+    setNotice("");
+  }
+
+  function pastePhoto(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const item = Array.from(event.clipboardData.items).find((candidate) =>
+      candidate.kind === "file" && candidate.type.toLowerCase().startsWith("image/"),
+    );
+    const original = item?.getAsFile()
+      || Array.from(event.clipboardData.files).find((candidate) => candidate.type.toLowerCase().startsWith("image/"))
+      || null;
+    if (!original) return;
+    event.preventDefault();
+    if (cameraPhotoRef.current) cameraPhotoRef.current.value = "";
+    if (libraryPhotoRef.current) libraryPhotoRef.current.value = "";
+    if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
+    const extension = original.type.toLowerCase().includes("jpeg") ? "jpg"
+      : original.type.toLowerCase().includes("png") ? "png"
+        : original.type.toLowerCase().includes("webp") ? "webp"
+          : "jpg";
+    const file = new File([original], `pasted-image-${Date.now()}.${extension}`, {
+      type: original.type || "image/png",
+      lastModified: Date.now(),
+    });
+    const url = URL.createObjectURL(file);
+    photoPreviewUrlRef.current = url;
+    setPhotoPreview({ file, url, name: file.name, size: file.size });
     setNotice("");
   }
 
@@ -316,6 +358,10 @@ export default function EmployeeMessagesApp() {
   const selectedMessages = selectedConversation?.messages || [];
 
   useEffect(() => {
+    if (stickToBottomRef.current) scrollThreadToBottom();
+  }, [selectedKey, selectedMessages.length, scrollThreadToBottom]);
+
+  useEffect(() => {
     if (selectedConversation && selectedConversation.key !== selectedKey) setSelectedKey(selectedConversation.key);
   }, [selectedConversation, selectedKey]);
 
@@ -355,6 +401,7 @@ export default function EmployeeMessagesApp() {
   }
 
   function chooseConversation(key: string) {
+    stickToBottomRef.current = true;
     setSelectedKey(key);
     setThreadOpen(true);
     setNotice("");
@@ -366,7 +413,7 @@ export default function EmployeeMessagesApp() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const body = String(form.get("body") || "").trim();
-    let photo = selectedPhoto(form);
+    let photo = photoPreview?.file || selectedPhoto(form);
     if (!body && !photo) {
       setNotice("Type a message or attach a photo.");
       return;
@@ -387,7 +434,9 @@ export default function EmployeeMessagesApp() {
       if (!response.ok) throw new Error(await responseMessage(response));
       formElement.reset();
       clearPhotoAttachment(false);
+      stickToBottomRef.current = true;
       await loadMessages();
+      scrollThreadToBottom();
       setNotice(`Message sent to ${selectedConversation.label}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Message could not be sent.");
@@ -528,7 +577,7 @@ export default function EmployeeMessagesApp() {
             <span className={`messageHeaderAvatar ${selectedConversation.kind}`} aria-hidden="true">{selectedConversation.kind === "team" ? "🏪" : selectedConversation.kind === "management" ? "👥" : initials(selectedConversation.label)}</span>
           </header>
 
-          <div className="messageThread" aria-live="polite">
+          <div ref={messageThreadRef} className="messageThread" aria-live="polite" onScroll={trackThreadScroll}>
             {selectedMessages.map((message, index) => {
               const prior = selectedMessages[index - 1];
               const showDay = !prior || new Date(prior.created_at).toDateString() !== new Date(message.created_at).toDateString();
@@ -540,7 +589,7 @@ export default function EmployeeMessagesApp() {
                   {!isOwn && <span className="messageTinyAvatar" style={{ "--employee-color": message.sender_schedule_color || "#7C3AED" } as CSSProperties}>{message.sender_employee_id && message.sender_avatar_set ? <img src={avatarUrl(message.sender_employee_id)} alt="" loading="lazy" /> : initials(displayName)}</span>}
                   <div className="messageBubbleWrap">
                     <div className="messageBubble">
-                      {message.attachment_name && <a className="messagePhoto" href={photoUrl(message.id)} target="_blank" rel="noreferrer"><img src={photoUrl(message.id)} alt={message.body || `Photo from ${displayName}`} loading="lazy" /></a>}
+                      {message.attachment_name && <a className="messagePhoto" href={photoUrl(message.id)} target="_blank" rel="noreferrer"><img src={photoUrl(message.id)} alt={message.body || `Photo from ${displayName}`} loading="lazy" onLoad={() => { if (stickToBottomRef.current) scrollThreadToBottom(); }} /></a>}
                       {message.body && <p>{message.body}</p>}
                     </div>
                     <div className="messageBubbleMeta"><span>{isOwn ? "You" : displayName}</span><time>{messageTime(message.created_at)}</time>{isOwn && <button type="button" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>}</div>
@@ -557,7 +606,7 @@ export default function EmployeeMessagesApp() {
               <label aria-label="Take a photo">📷<input ref={cameraPhotoRef} name="cameraPhoto" type="file" accept="image/*" capture="environment" onChange={(event: ChangeEvent<HTMLInputElement>) => choosePhoto(event, "camera")} /></label>
               <label aria-label="Choose a photo">＋<input ref={libraryPhotoRef} name="photo" type="file" accept="image/*" onChange={(event: ChangeEvent<HTMLInputElement>) => choosePhoto(event, "library")} /></label>
             </div>
-            <textarea name="body" rows={2} placeholder="Send a message" aria-label={`Message ${selectedConversation.label}`} />
+            <textarea name="body" rows={2} placeholder="Send a message or paste an image" aria-label={`Message ${selectedConversation.label}`} onPaste={pastePhoto} />
             <button type="submit" disabled={busy} aria-label="Send message">{busy ? "…" : "➤"}</button>
             {photoPreview && <div className="messageAttachmentPreview"><img src={photoPreview.url} alt="Selected attachment" /><span><strong>{photoPreview.name}</strong><small>{(photoPreview.size / 1024 / 1024).toFixed(1)} MB before resizing</small></span><button type="button" onClick={() => clearPhotoAttachment()} disabled={busy}>Remove</button></div>}
           </form>
