@@ -1,0 +1,65 @@
+name: Apply message image and scrolling repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-message-image-scroll-fix.yml
+      - tools/apply-message-image-scroll-fix.py
+
+permissions:
+  contents: write
+
+concurrency:
+  group: message-image-scroll-fix
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply guarded source changes
+        run: python3 tools/apply-message-image-scroll-fix.py
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build application
+        run: npm run build
+        env:
+          APP_EMAIL: owner@example.test
+          DATABASE_URL: ""
+          BLOB_READ_WRITE_TOKEN: vercel_blob_rw_placeholder
+          SESSION_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          EMPLOYMENT_FORMS_ENCRYPTION_KEY: abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+
+      - name: Commit tested repair
+        shell: bash
+        run: |
+          rm -f .github/workflows/apply-message-image-scroll-fix.yml
+          rm -f tools/apply-message-image-scroll-fix.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add image paste and reliable message scrolling" \
+            -m "Allow management and employees to paste or upload message images, keep the composer visible, and provide a Latest control for long threads."
+          git pull --rebase origin main
+          git push origin HEAD:main
