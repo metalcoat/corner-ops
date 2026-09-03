@@ -138,6 +138,19 @@ export async function resolveOrderingAvailability(input: {
       return { open: false, orderable: true, reason: "ASAP order accepted before opening.", opensAt, cutoffAt, nextAvailableAt: opensAt, sourceRule: source, timezone };
     if (open || orderable) return { open, orderable, reason: orderable ? "Ordering is available." : "The store is outside ordering hours.", opensAt, cutoffAt, nextAvailableAt: nextOpen, sourceRule: source, timezone };
   }
+  if (input.allowPreOpenAsap) {
+    for (let offset=1;offset<=7;offset+=1) {
+      const futureDate=new Date(Date.UTC(local.year,local.month-1,local.day+offset));
+      const futureWeekday=(local.weekday+offset)%7;
+      const weekly=await sql`SELECT service_type,opens_at::text,closes_at::text,ordering_opens_at::text,ordering_cutoff_at::text,sort_order FROM ordering_operating_windows WHERE business=${input.business} AND weekday=${futureWeekday} AND active=TRUE AND service_type IN ('all',${service}) ORDER BY service_type,sort_order,opens_at` as WindowRow[];
+      const future=chooseRows(weekly,service).rows;
+      if(!future.length)continue;
+      const firstMinute=Math.min(...future.map(row=>minutes(row.ordering_opens_at||row.opens_at)));
+      const candidate=wallTimeUtc({year:futureDate.getUTCFullYear(),month:futureDate.getUTCMonth()+1,day:futureDate.getUTCDate()},firstMinute,timezone);
+      const confirmed=await resolveOrderingAvailability({business:input.business,serviceType:input.serviceType,at:candidate});
+      if(confirmed.orderable)return {open:false,orderable:true,reason:"ASAP order accepted for the next opening.",opensAt:candidate,cutoffAt:null,nextAvailableAt:candidate,sourceRule:confirmed.sourceRule,timezone};
+    }
+  }
   return { open: false, orderable: false, reason: "Same-day ordering is closed. Future ordering may still be available.", opensAt: nextOpen, cutoffAt: null, nextAvailableAt: nextOpen, sourceRule: source, timezone };
 }
 

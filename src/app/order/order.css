@@ -532,6 +532,8 @@
     serif;
   margin-top: 0;
 }
+.checkoutServicePicker { width:100%;margin:0 0 14px; }
+.checkoutServicePicker button { flex:1; }
 .empty {
   padding: 25px 0;
   color: var(--muted);

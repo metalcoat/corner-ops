@@ -94,7 +94,7 @@ export async function quoteTimingForOrder(input: {
 }) {
   const now = input.now ?? new Date();
   const settings = await getFulfillmentTimingSettings(input.business, input.serviceType);
-  const availability = input.mode === "asap" ? await resolveOrderingAvailability({ business: input.business, serviceType: input.serviceType, at: now, allowPreOpenAsap: true }) : null;
+  const availability = await resolveOrderingAvailability({ business: input.business, serviceType: input.serviceType, at: now, allowPreOpenAsap: input.mode === "asap" });
   const preOpenAt = availability?.orderable && !availability.open && availability.opensAt && availability.opensAt > now ? availability.opensAt : null;
   const currentOrdersInBusyWindow = await activeOrdersInBusyWindow(
     input.business,
@@ -111,6 +111,12 @@ export async function quoteTimingForOrder(input: {
   if (preOpenAt && quote.accepted) {
     const opens = new Intl.DateTimeFormat("en-US", { timeZone: availability!.timezone, weekday: "short", hour: "numeric", minute: "2-digit" }).format(preOpenAt);
     quote.customerMessage = `ASAP for the next opening. We open ${opens}; ${quote.customerMessage}`;
+    quote.kitchenLabel = quote.kitchenLabel.replace("*** ASAP ", "*** ASAP PREORDER ");
+    quote.reason = "asap_preorder";
+  } else if (input.mode === "future" && !availability.open && quote.accepted) {
+    quote.customerMessage = `Future preorder. ${quote.customerMessage}`;
+    quote.kitchenLabel = quote.kitchenLabel.replace("*** FUTURE ", "*** FUTURE PREORDER ");
+    quote.reason = "future_preorder";
   }
   return quote;
 }

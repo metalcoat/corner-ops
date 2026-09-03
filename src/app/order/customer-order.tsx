@@ -877,21 +877,6 @@ export default function CustomerOrder() {
                 : "topDeliveryAddress"
             }
           />
-          <div className="servicePicker" aria-label="Fulfillment type">
-            <button
-              className={serviceType === "pickup" ? "selected" : ""}
-              onClick={() => setServiceType("pickup")}
-            >
-              Pickup
-            </button>
-            <button
-              disabled={!catalog?.delivery.enabled}
-              className={serviceType === "delivery" ? "selected" : ""}
-              onClick={() => setServiceType("delivery")}
-            >
-              Delivery
-            </button>
-          </div>
         </div>
       </section>
       {catalog && !catalog.availability.orderable && (
@@ -1023,6 +1008,10 @@ export default function CustomerOrder() {
         </section>
         <aside className="orderCart">
           <h2>Your order</h2>
+          <div className="servicePicker checkoutServicePicker" aria-label="Fulfillment type">
+            <button className={serviceType === "pickup" ? "selected" : ""} onClick={() => setServiceType("pickup")}>Pickup</button>
+            <button disabled={!catalog?.delivery.enabled} className={serviceType === "delivery" ? "selected" : ""} onClick={() => setServiceType("delivery")}>Delivery</button>
+          </div>
           {!cart.length ? (
             <p className="empty">Your cart is ready when you are.</p>
           ) : (
@@ -1096,7 +1085,7 @@ export default function CustomerOrder() {
                   setScheduledFor("");
                 }}
               >
-                ASAP
+                {catalog && !catalog.availability.open ? "ASAP preorder" : "ASAP"}
               </button>
               <button
                 type="button"
@@ -1107,7 +1096,7 @@ export default function CustomerOrder() {
                   setDate((current) => current || localDateValue());
                 }}
               >
-                Future
+                {catalog && !catalog.availability.open ? "Future preorder" : "Future"}
               </button>
             </div>
             {timing === "future" && (
@@ -1469,10 +1458,10 @@ export default function CustomerOrder() {
               </button>
             </div>
           )}
-          {catalog && catalog.availability.orderable && !catalog.availability.open && timing === "asap" && catalog.availability.opensAt && (
+          {catalog && !catalog.availability.open && (
             <aside className="closedNotice preOpenNotice">
-              <strong>ASAP at our next opening</strong>
-              <span>We open at {new Date(catalog.availability.opensAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })}. Your estimated {serviceType === "delivery" ? "delivery time is about 1 hour after opening" : "pickup time is about 30 minutes after opening"}.</span>
+              <strong>{timing === "asap" ? "ASAP preorder" : "Future preorder"}</strong>
+              <span>{timing === "asap" && catalog.availability.opensAt ? <>We open at {new Date(catalog.availability.opensAt).toLocaleString([], { weekday:"short", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })}. Your estimated {serviceType === "delivery" ? "delivery time is about 1 hour after opening" : "pickup time is about 30 minutes after opening"}.</> : "Choose the date and time you want this preorder ready."}</span>
             </aside>
           )}
           <button

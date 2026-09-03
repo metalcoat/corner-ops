@@ -26,6 +26,9 @@ async function integration() {
     const preOpen = await resolveOrderingAvailability({ business: "Corner Deli", serviceType: "pickup", at: new Date("2026-08-13T12:00:00Z"), allowPreOpenAsap: true });
     assert.equal(preOpen.orderable, true);
     assert.equal(preOpen.open, false);
+    const afterClose = await resolveOrderingAvailability({ business: "Corner Deli", serviceType: "pickup", at: new Date("2026-08-14T02:00:00Z"), allowPreOpenAsap: true });
+    assert.equal(afterClose.orderable, true);
+    assert.ok(afterClose.opensAt && afterClose.opensAt > new Date("2026-08-14T02:00:00Z"));
     assert.equal((await resolveOrderingAvailability({ business: "Corner Deli", serviceType: "pickup", at: new Date("2026-08-14T01:29:59Z") })).orderable, true);
     assert.equal((await resolveOrderingAvailability({ business: "Corner Deli", serviceType: "pickup", at: new Date("2026-08-14T01:30:59Z") })).orderable, true);
     assert.equal((await resolveOrderingAvailability({ business: "Corner Deli", serviceType: "pickup", at: new Date("2026-08-14T01:31:00Z") })).orderable, false);
