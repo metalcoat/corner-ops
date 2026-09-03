@@ -79,7 +79,7 @@ async function main() {
   );
   assert.ok(
     webhookSource.includes(
-      "tools:[OPENAI_PRICE_ORDER_TOOL,OPENAI_MENU_SEARCH_TOOL,OPENAI_HUMAN_HANDOFF_TOOL]",
+      "tools:[OPENAI_PRICE_ORDER_TOOL,OPENAI_MENU_SEARCH_TOOL,OPENAI_HUMAN_HANDOFF_TOOL,OPENAI_VOICE_PAYMENT_TOOL]",
     ),
     "Realtime calls must use direct atomic pricing and current-menu lookup functions.",
   );

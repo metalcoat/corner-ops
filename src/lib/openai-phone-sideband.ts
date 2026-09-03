@@ -12,7 +12,7 @@ import {
   type SpokenOrderItem,
 } from "@/lib/ordering-ai-tools";
 import { recordAiRegression } from "@/lib/ordering-ai-regressions";
-import { openAiClient, requestOpenAiHandoff } from "@/lib/openai-phone-ordering";
+import { openAiClient, requestOpenAiHandoff, requestOpenAiVoicePayment } from "@/lib/openai-phone-ordering";
 import { attachSpokenDeliveryAddress } from "@/lib/ordering-delivery-landmarks";
 
 const sockets = new Map<string, WebSocket>();
@@ -346,6 +346,15 @@ export function startOpenAiSideband(
       socket.send(JSON.stringify({ type: "response.create", response: { output_modalities: ["audio"], tool_choice: "auto" } }));
     }
   };
+  const executeVoicePayment=async(row:Record<string,any>)=>{
+    try{
+      await event(callId,`${callId}:voice-payment:${row.call_id}`,"ordering.secure_voice_payment","system","Leaving AI for secure sandbox payment");
+      await requestOpenAiVoicePayment(callId);
+    }catch{
+      socket.send(JSON.stringify({type:"conversation.item.create",item:{type:"function_call_output",call_id:row.call_id,output:JSON.stringify({error:{code:"VOICE_PAYMENT_FAILED",message:"Secure voice payment could not start. Transfer the caller to an employee."}})}}));
+      socket.send(JSON.stringify({type:"response.create",response:{output_modalities:["audio"],tool_choice:"auto"}}));
+    }
+  };
   socket.on("message", (data) => {
     try {
       const row = JSON.parse(String(data)) as Record<string, any>,
@@ -489,6 +498,12 @@ export function startOpenAiSideband(
       ) {
         toolUsedForTurn = true;
         void executeHumanHandoff(row);
+      } else if (
+        type === "response.function_call_arguments.done" &&
+        row.name === "request_secure_voice_payment"
+      ) {
+        toolUsedForTurn = true;
+        void executeVoicePayment(row);
       } else if (type === "response.mcp_call.completed") {
         toolUsedForTurn = true;
         void event(callId, key, type, "tool", "Ordering tool completed");

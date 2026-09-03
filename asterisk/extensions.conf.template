@@ -5,6 +5,13 @@ clearglobalvars=no
 
 [from-three-cx]
 exten => h,1,Hangup()
+exten => ${ASTERISK_VOICE_PAYMENT_EXTENSION},1,NoOp(Isolated local sandbox voice payment)
+ same => n,Answer()
+ same => n,Set(EAGI_AUDIO_FORMAT=slin16)
+ same => n,EAGI(/usr/local/bin/corner-ops-voice-payment)
+ same => n,GotoIf($["${VOICE_PAYMENT_RESULT}"="approved"]?done)
+ same => n,Dial(PJSIP/${ASTERISK_VOICE_PAYMENT_FALLBACK_EXTENSION}@three-cx,45)
+ same => n(done),Hangup()
 exten => _.,1,NoOp(Bridging 3CX call ${CALLERID(num)} to OpenAI Realtime SIP)
  same => n,Dial(${PJSIP_DIAL_CONTACTS(openai,openai,${ASTERISK_OPENAI_PROJECT_ID})},60,b(add-openai-headers^s^1(${CALLERID(num)})))
  same => n,Hangup()

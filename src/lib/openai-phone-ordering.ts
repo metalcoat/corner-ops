@@ -7,7 +7,9 @@ import {
   MENU_SHORTHAND,
   ORDERING_POLICY,
   PHONE_BEHAVIOR,
+  SECURE_VOICE_PAYMENT_POLICY,
 } from "@/lib/openai-phone-prompt";
+import { prepareVoicePayment } from "@/lib/ordering-voice-payment";
 
 export const OPENAI_PHONE_MODEL =
   process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-1.5";
@@ -129,6 +131,12 @@ export const OPENAI_HUMAN_HANDOFF_TOOL = {
     required: ["reason"],
     additionalProperties: false,
   },
+};
+export const OPENAI_VOICE_PAYMENT_TOOL = {
+  type: "function" as const,
+  name: "request_secure_voice_payment",
+  description: "Transfer a confirmed card order out of the AI session and into the isolated local sandbox voice-payment service. Call only after card payment and tip are final.",
+  parameters: { type: "object", properties: {}, additionalProperties: false },
 };
 const required = () => ({
   apiKey: Boolean(process.env.OPENAI_API_KEY),
@@ -254,9 +262,16 @@ export async function requestOpenAiHandoff(callId: string, reason: string) {
   }
   return { handoff: true, target: "configured_3cx_destination" };
 }
+export async function requestOpenAiVoicePayment(callId:string){
+  const payment=await prepareVoicePayment(callId);
+  try{await openAiClient().realtime.calls.refer(callId,{target_uri:payment.target})}
+  catch(error){await getSql()`UPDATE ordering_call_sessions SET state='ai',handoff_reason='',owner_type='ai',owner_id=${`openai:${callId}`},updated_at=NOW() WHERE three_cx_call_id=${callId}`;throw error}
+  return {transferred:true,amountCents:payment.amountCents};
+}
 export const PHONE_INSTRUCTIONS = [
   PHONE_BEHAVIOR,
   ORDERING_POLICY,
   MENU_SHORTHAND,
   HUMAN_HANDOFF_POLICY,
+  SECURE_VOICE_PAYMENT_POLICY,
 ].join("\n\n");

@@ -21,6 +21,7 @@ ca_list_file=/etc/ssl/certs/ca-certificates.crt
 type=endpoint
 transport=transport-3cx-udp
 context=from-three-cx
+aors=three-cx
 disallow=all
 allow=ulaw
 allow=alaw
@@ -31,6 +32,10 @@ force_rport=yes
 rewrite_contact=yes
 rtp_symmetric=yes
 dtmf_mode=rfc4733
+
+[three-cx]
+type=aor
+contact=sip:${ASTERISK_3CX_IP}:5060
 
 [three-cx-identify]
 type=identify

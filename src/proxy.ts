@@ -14,6 +14,7 @@ const selfAuthorizedApiPaths = [
   "/api/cron", "/api/customer", "/api/driver",
   "/api/ordering/store-dashboard", "/api/mobile/android/version",
   "/api/ordering/customer-display",
+  "/api/internal/voice-payment",
 ];
 
 type Token = { email?: string; role?: string; permissions?: string[]; expiresAt?: number };
