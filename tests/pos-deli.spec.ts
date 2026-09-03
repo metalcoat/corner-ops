@@ -237,27 +237,27 @@ test("top categories, subcategories, and search use the imported hierarchy", asy
   await signIn(page);
   const top = page.getByRole("navigation", { name: "Menu categories" });
   await expect(
-    top.getByRole("button", { name: "Appetizers and Sides", exact: true }),
+    top.getByRole("button", { name: "Apps and Sides", exact: true }),
   ).toBeVisible();
   await top
-    .getByRole("button", { name: "Appetizers and Sides", exact: true })
+    .getByRole("button", { name: "Apps and Sides", exact: true })
     .click();
-  await expect(page.getByRole("heading", { name: "All Appetizers and Sides" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "All Apps and Sides" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Appetizers", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Side Dishes", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sides", exact: true })).toBeVisible();
   await expect(
     page
-      .getByLabel("Appetizers and Sides subcategories")
+      .getByLabel("Apps and Sides subcategories")
       .getByRole("button", { name: "All", exact: true }),
   ).toBeVisible();
   await expect(
     page
-      .getByLabel("Appetizers and Sides subcategories")
+      .getByLabel("Apps and Sides subcategories")
       .getByRole("button", { name: "Appetizers" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Side Dishes", exact: true }).click();
+  await page.getByRole("button", { name: "Sides", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Side Dishes" }),
+    page.getByRole("heading", { name: "Sides" }),
   ).toBeVisible();
   await top.getByRole("button", { name: "Candy Bars", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Candy Bars" })).toBeVisible();
