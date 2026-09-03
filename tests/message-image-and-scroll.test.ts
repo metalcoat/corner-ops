@@ -77,3 +77,25 @@ test("management read state is per visible message rather than marking the whole
   assert.equal(reads.includes("export async function markAdminConversationMessageSeen"), true);
   assert.equal(owner.includes('action: "message-seen"'), true);
 });
+
+test("the sticky header owns the only visible business switcher", () => {
+  const nav = source("src/app/global-nav.tsx");
+  const css = source("src/app/global-nav.css");
+  assert.equal(nav.includes("globalBusinessSwitch"), true);
+  assert.equal(nav.includes("corner-ops-business-change"), true);
+  assert.equal(nav.includes("synchronizeLegacyBusinessControls"), true);
+  assert.equal(nav.includes("data-global-business-switcher"), true);
+  assert.equal(css.includes('[data-legacy-business-switcher="true"]'), true);
+  assert.equal(css.includes("display: none !important"), true);
+});
+
+test("management message scrolling reacts to header height and has no install control overlay", () => {
+  const behavior = source("src/app/use-message-thread-behavior.ts");
+  const css = source("src/app/message-inbox.css");
+  const pwa = source("src/app/pwa-client.tsx");
+  assert.equal(behavior.includes("corner-ops-layout-change"), true);
+  assert.equal(css.includes("/* Browser message thread reachability. */"), true);
+  assert.equal(css.includes("flex:1 1 0%"), true);
+  assert.equal(pwa.includes('pathname.startsWith("/ops/messages")'), true);
+  assert.equal(pwa.includes('pathname.startsWith("/employee/messages")'), true);
+});

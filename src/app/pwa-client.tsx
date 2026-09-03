@@ -3,6 +3,7 @@
 import { BeforeInstallPromptEvent, isIos, isStandalone } from "@/app/pwa-platform";
 import { responseMessage } from "@/app/client-http";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 
 type PushStatus = {
   actorType: "owner" | "employee";
@@ -43,6 +44,7 @@ async function registerServiceWorker() {
 }
 
 export default function PwaClient() {
+  const pathname = usePathname();
   const [status, setStatus] = useState<PushStatus | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [installed, setInstalled] = useState(false);
@@ -222,6 +224,7 @@ export default function PwaClient() {
     }
   }
 
+  if (pathname.startsWith("/ops/messages") || pathname.startsWith("/employee/messages")) return null;
   if (!status) return null;
 
   return <div className={`pwaControl ${panelOpen ? "open" : ""}`}>

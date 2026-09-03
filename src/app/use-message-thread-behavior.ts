@@ -181,6 +181,7 @@ export function useMessageThreadBehavior({
     viewport?.addEventListener("resize", updateViewport);
     viewport?.addEventListener("scroll", updateViewport);
     window.addEventListener("resize", updateViewport);
+    window.addEventListener("corner-ops-layout-change", updateViewport);
     document.addEventListener("focusin", delayedUpdate);
     document.addEventListener("focusout", delayedUpdate);
     return () => {
@@ -188,6 +189,7 @@ export function useMessageThreadBehavior({
       viewport?.removeEventListener("resize", updateViewport);
       viewport?.removeEventListener("scroll", updateViewport);
       window.removeEventListener("resize", updateViewport);
+      window.removeEventListener("corner-ops-layout-change", updateViewport);
       document.removeEventListener("focusin", delayedUpdate);
       document.removeEventListener("focusout", delayedUpdate);
       root.removeAttribute("data-keyboard-open");

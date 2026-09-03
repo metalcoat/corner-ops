@@ -40,3 +40,7 @@
 .messageUnreadMarker{display:flex;align-items:center;gap:.65rem;margin:.8rem 0;color:var(--message-purple);font-size:.72rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.messageUnreadMarker::before,.messageUnreadMarker::after{content:"";height:1px;flex:1;background:color-mix(in srgb,var(--message-purple) 42%,var(--message-line))}.messageUnreadMarker span{white-space:nowrap}.messageThread{overflow-anchor:auto}.messageComposer{z-index:5}
 @media(max-width:900px){.messageApp[data-keyboard-open="true"]{position:fixed;inset-inline:0;top:var(--message-viewport-top,0px);z-index:1500;width:100%;height:var(--message-viewport-height,100dvh);min-height:0;margin:0;overscroll-behavior:none}.messageApp[data-keyboard-open="true"] .messageShell{min-height:0}.messageApp[data-keyboard-open="true"] .messageComposer{padding-bottom:max(.55rem,env(safe-area-inset-bottom))}}
 @media(max-width:560px){.messageComposer textarea{font-size:16px}}
+
+/* Browser message thread reachability. */
+.messageThread{flex:1 1 0%;min-height:0;overflow-y:auto;scroll-padding-bottom:1.25rem}
+.messageThreadPane>.messageComposer,.messageThreadPane>.messageReadOnlyComposer{flex:0 0 auto}
