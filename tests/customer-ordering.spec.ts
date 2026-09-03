@@ -57,8 +57,8 @@ test("customer catalog is public, customer-safe, and browsable while ordering is
       },
     });
   });
-  const asap = page.getByRole("button", { name: "ASAP" });
-  const future = page.getByRole("button", { name: "Future" });
+  const asap = page.locator(".fulfillmentModal .choiceButton", { hasText: /^ASAP/ });
+  const future = page.locator(".fulfillmentModal .choiceButton", { hasText: /^Future/ });
   await expect(asap).toHaveAttribute("aria-pressed", "true");
   await expect(future).toHaveAttribute("aria-pressed", "false");
   await future.click();
@@ -346,7 +346,7 @@ test("customer can choose and review a half-pizza topping", async ({
   );
 
   await page.goto("/order");
-  await expect(page.getByRole("button", { name: "ASAP" })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: "ASAP", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -363,14 +363,12 @@ test("customer can choose and review a half-pizza topping", async ({
     .click();
   await dialog.getByRole("button", { name: "Add to order" }).click();
 
-  await expect(page.getByLabel("Saved contact")).toContainText(
-    "Chris Customer",
-  );
-  await expect(page.getByLabel("Phone number")).toHaveCount(0);
+  await expect(page.getByLabel("First name")).toHaveValue("Chris");
+  await expect(page.getByLabel("Last name")).toHaveValue("Customer");
+  await expect(page.getByLabel("Phone number")).toHaveValue("5705550199");
   await expect(page.locator(".orderCart")).toContainText("Left Half Pepperoni");
   await expect(page.locator(".orderCart")).not.toContainText("Regular Cook");
   await expect(page.locator(".orderCart")).not.toContainText("Classic Sauce");
-  await page.getByRole("button", { name: "Continue to checkout" }).click();
   const card = page.getByRole("button", { name: "Credit or debit" });
   const pickup = page.getByRole("button", { name: "Pay at pickup" });
   await expect(card).toHaveAttribute("aria-pressed", "false");
