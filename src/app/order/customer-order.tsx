@@ -862,6 +862,12 @@ export default function CustomerOrder() {
           Account
         </a>
       </header>
+      <div className="fulfillmentDock">
+        <div className="servicePicker" aria-label="Fulfillment type">
+          <button className={serviceType === "pickup" ? "selected" : ""} onClick={() => setServiceType("pickup")}><span aria-hidden="true">▣</span> Pickup</button>
+          <button disabled={!catalog?.delivery.enabled} className={serviceType === "delivery" ? "selected" : ""} onClick={() => setServiceType("delivery")}><span aria-hidden="true">⌂</span> Delivery</button>
+        </div>
+      </div>
       <section className="orderIntro">
         <div>
           <p className="eyebrow">Made your way</p>
@@ -1008,10 +1014,6 @@ export default function CustomerOrder() {
         </section>
         <aside className="orderCart">
           <h2>Your order</h2>
-          <div className="servicePicker checkoutServicePicker" aria-label="Fulfillment type">
-            <button className={serviceType === "pickup" ? "selected" : ""} onClick={() => setServiceType("pickup")}>Pickup</button>
-            <button disabled={!catalog?.delivery.enabled} className={serviceType === "delivery" ? "selected" : ""} onClick={() => setServiceType("delivery")}>Delivery</button>
-          </div>
           {!cart.length ? (
             <p className="empty">Your cart is ready when you are.</p>
           ) : (
