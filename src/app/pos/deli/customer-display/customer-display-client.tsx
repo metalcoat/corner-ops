@@ -380,10 +380,11 @@ export default function CustomerDisplayClient() {
           </div>
         </section>
       ) : data?.status === "checkout" && tipEligible && !tipSubmitted ? (
-        <section className="displayStep">
+        <section className="displayStep displayTipStep">
           <h2>Would you like to leave a tip?</h2>
           <p>Your server or driver receives the tip.</p>
-          <div className="tipChoices">
+          <div className="tipOrderTotal"><span>Order total</span><strong>{money(data?.totalCents ?? 0)}</strong></div>
+          <div className="tipSection"><strong>Choose a percentage</strong><div className="tipChoices tipPercentChoices">
             {[15, 18, 20].map((percent) => (
               <button
                 disabled={busy}
@@ -391,7 +392,7 @@ export default function CustomerDisplayClient() {
                 onClick={() =>
                   void tip(
                     Math.round(
-                      ((data?.amountDueCents ?? data?.totalCents ?? 0) *
+                      ((data?.totalCents ?? 0) *
                         percent) /
                         100,
                     ),
@@ -402,7 +403,7 @@ export default function CustomerDisplayClient() {
                 <span>
                   {money(
                     Math.round(
-                      ((data?.amountDueCents ?? data?.totalCents ?? 0) *
+                      ((data?.totalCents ?? 0) *
                         percent) /
                         100,
                     ),
@@ -410,10 +411,10 @@ export default function CustomerDisplayClient() {
                 </span>
               </button>
             ))}
-            <button disabled={busy} onClick={() => void tip(0)}>
-              NO TIP
-            </button>
-          </div>
+          </div></div>
+          <div className="tipSection"><strong>Or choose an amount</strong><div className="tipChoices tipDollarChoices">
+            {[2, 3, 5, 10].map((amount) => <button disabled={busy} key={amount} onClick={() => void tip(amount * 100)}>${amount}</button>)}
+          </div></div>
           <div className="customTip">
             <label>
               Custom tip
@@ -433,6 +434,7 @@ export default function CustomerDisplayClient() {
               ADD TIP
             </button>
           </div>
+          <button className="secondary noTipButton" disabled={busy} onClick={() => void tip(0)}>NO TIP</button>
         </section>
       ) : data?.status === "checkout" ? (
         <section className="displayStep displayWaiting">

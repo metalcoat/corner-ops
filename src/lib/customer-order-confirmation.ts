@@ -73,6 +73,8 @@ export async function sendCustomerOrderConfirmation(orderId: string) {
         ? `Total paid: ${money(order.paid_cents)}`
         : `Total due at pickup: ${money(order.total_cents)}`,
       "",
+      "No-cancellation policy: Once an order is submitted and sent to Corner Deli, it cannot be cancelled.",
+      "",
       "Corner Deli",
     ].join("\n"),
   });

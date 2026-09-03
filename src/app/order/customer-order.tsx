@@ -1445,6 +1445,10 @@ export default function CustomerOrder() {
               <span>{timing === "asap" && catalog.availability.opensAt ? <>We open at {new Date(catalog.availability.opensAt).toLocaleString([], { weekday:"short", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })}. Your estimated {serviceType === "delivery" ? "delivery time is about 1 hour after opening" : "pickup time is about 30 minutes after opening"}.</> : "Choose the date and time you want this preorder ready."}</span>
             </aside>
           )}
+          <aside className="orderCancellationNotice">
+            <strong>No-cancellation policy</strong>
+            <span>Once you place this order and it is sent to Corner Deli, it cannot be cancelled.</span>
+          </aside>
           <button
             className="reviewButton"
             disabled={
