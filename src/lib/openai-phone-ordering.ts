@@ -108,6 +108,18 @@ export const OPENAI_PRICE_ORDER_TOOL = {
         description:
           "Set only after asking whether the caller wants blue cheese, ranch, or celery.",
       },
+      burgerToppingsDecision: {
+        type: "string",
+        enum: ["selected", "declined"],
+        description:
+          "Set only after asking what the caller wants on a plain burger.",
+      },
+      burgerFriesDecision: {
+        type: "string",
+        enum: ["selected", "declined"],
+        description:
+          "Set only after asking whether the caller wants fries with the burger.",
+      },
     },
     required: ["serviceType", "items"],
     additionalProperties: false,
@@ -248,8 +260,12 @@ export function callerFromSipHeaders(
   for (const name of preferred) {
     const value =
         headers.find((row) => row.name.toLowerCase() === name)?.value || "",
-      normalized = digits(value);
-    if (normalized.length === 10) return normalized;
+      match = value.match(/(?:^|[^0-9])(?:\+?1)?([2-9]\d{9})(?:[^0-9]|$)/);
+    if (match) return match[1];
+    if (/^[+\d\s().-]+$/.test(value)) {
+      const normalized = digits(value);
+      if (normalized.length === 10) return normalized;
+    }
   }
   return "";
 }

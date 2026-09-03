@@ -1113,6 +1113,9 @@ export async function priceSpokenOrder(input: {
           wingSauceChoices = choices.filter(
             ({ group }) => group.name === "Wing Sauce",
           ),
+          burgerToppingChoices = choices.filter(
+            ({ group }) => group.name === "Burger Toppings",
+          ),
           portionedChoices = choices.filter(({ option }) =>
             /\(\s*\d+(?:\.\d+)?\s*oz\s*\)\s*$/i.test(option.name),
           ),
@@ -1124,6 +1127,12 @@ export async function priceSpokenOrder(input: {
               ),
             )
               ? requiredDressingChoices
+              : burgerToppingChoices.some(({ option }) =>
+                    modifierAliases(option.name).some(
+                      (alias) => spokenKey(alias) === raw,
+                    ),
+                  )
+                ? burgerToppingChoices
               : explicitSideSauce && portionedChoices.length
                 ? portionedChoices
                 : wingSauceChoices.some(({ option }) =>

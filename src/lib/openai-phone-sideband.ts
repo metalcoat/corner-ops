@@ -301,10 +301,37 @@ export function startOpenAiSideband(
               /^(blue cheese|ranch|celery)$/i.test(String(modifier.name)),
             ),
         );
+      const burgerItems = spokenItems.filter((item) =>
+          /burger/i.test(String(item.name)),
+        ),
+        burgerHasToppings = burgerItems.some((item) =>
+          (item.modifiers || []).some((modifier) =>
+            /^(lettuce|tomatoes?|raw onions?|onions?|ketchup|mayo|mayonnaise|mustard|pickles?|relish|hot peppers?)$/i.test(
+              String(modifier.name),
+            ),
+          ),
+        ),
+        burgerNeedsToppings =
+          burgerItems.length > 0 &&
+          !burgerHasToppings &&
+          args.burgerToppingsDecision !== "declined",
+        burgerNeedsFries =
+          burgerItems.length > 0 &&
+          !burgerNeedsToppings &&
+          args.burgerFriesDecision !== "declined" &&
+          !spokenItems.some((item) => /fr(?:y|ies)|poutine/i.test(String(item.name)));
       if (wingNeedsAddOn)
         Object.assign(result, {
           required_follow_up:
             "Would you like blue cheese, ranch, or celery with that?",
+        });
+      else if (burgerNeedsToppings)
+        Object.assign(result, {
+          required_follow_up: "Would you like anything on that burger?",
+        });
+      else if (burgerNeedsFries)
+        Object.assign(result, {
+          required_follow_up: "Would you like fries with that burger?",
         });
       await auditAiTool({
         business: "Corner Deli",
@@ -616,6 +643,12 @@ export function startOpenAiSideband(
               lastAssistantTranscript.toLowerCase(),
             ),
           truncated = status === "failed" || unfinished;
+        if (status === "failed")
+          console.error("OpenAI realtime response failed.", {
+            callId,
+            statusDetails: row.response?.status_details || null,
+            transcript: lastAssistantTranscript,
+          });
         if (truncated && !customerSpeaking && !completionRetryUsed) {
           completionRetryUsed = true;
           void recordAiRegression({

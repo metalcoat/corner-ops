@@ -231,11 +231,9 @@ async function main() {
     "Wing accompaniments and the natural-pause fry upsell must remain explicit.",
   );
   assert.ok(
-    prompt.includes("What flavor would you like it dipped in?") &&
+      prompt.includes("What flavor would you like it dipped in?") &&
       prompt.includes("Would you like any cheese on top?") &&
-      prompt.includes(
-        "Would you like any toppings, like lettuce, tomato, onion, ketchup, mayo, or mustard?",
-      ) &&
+      prompt.includes("Would you like anything on that burger?") &&
       prompt.includes("come plain"),
     "Buffalo chicken and plain-burger question flows must remain explicit.",
   );
@@ -277,8 +275,17 @@ async function main() {
     "Readbacks must preserve spoken pizza sizes and required wing follow-ups.",
   );
   assert.ok(
-    prompt.includes("REQUEST_SECURE_VOICE_PAYMENT with the confirmed tipCents"),
-    "Secure payment must persist card payment before transferring the call.",
+    prompt.includes("Never ask whether they want “everything” on a burger") &&
+      prompt.includes("Would you like anything on that burger?") &&
+      prompt.includes("Would you like fries with that burger?") &&
+      prompt.includes("never Fry Option"),
+    "Plain burgers must collect burger toppings and then offer fries.",
+  );
+  assert.ok(
+    prompt.includes("immediately and silently call REQUEST_SECURE_VOICE_PAYMENT") &&
+      prompt.includes("The next voice the caller hears") &&
+      !prompt.includes("I’ll now move you to our secure automated payment line"),
+    "Secure payment must persist card payment and transition silently.",
   );
   assert.ok(
     prompt.includes("Turkey Big Boss item with Full Sub") &&
@@ -448,6 +455,11 @@ async function main() {
       },
       { name: "Wings", variant: "Mild", quantity: 20 },
       { name: "French Fries", variant: "Large", quantity: 1 },
+      {
+        name: "Double Cheeseburger",
+        quantity: 1,
+        modifiers: [{ name: "Ketchup", portion: "whole" }],
+      },
     ],
   });
   try {
@@ -472,6 +484,20 @@ async function main() {
         (row: Record<string, any>) => row.option_name_snapshot === "Mild",
       ),
       "A wing sauce placed in the variant field must normalize to Wing Sauce.",
+    );
+    const burgerLine = malformedRealtimePayload.lines.find(
+      (line: Record<string, any>) =>
+        String(line.item_name_snapshot).includes("Double Cheeseburger"),
+    );
+    const burgerModifiers =
+      await getSql()`SELECT group_name_snapshot,option_name_snapshot FROM ordering_order_item_modifiers WHERE order_item_id=${burgerLine.id}`;
+    assert.ok(
+      burgerModifiers.some(
+        (row: Record<string, any>) =>
+          row.group_name_snapshot === "Burger Toppings" &&
+          row.option_name_snapshot === "Ketchup",
+      ),
+      "Plain ketchup on a burger must resolve to Burger Toppings.",
     );
   } finally {
     await getSql()`DELETE FROM ordering_orders WHERE id=${malformedRealtimePayload.id}`;

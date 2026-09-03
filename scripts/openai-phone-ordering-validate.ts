@@ -22,6 +22,7 @@ async function main(){
   try{
     const caller=phone.callerFromSipHeaders([{name:"From",value:'"Customer" <sip:+13155550188@example.test>'}]);
     const forwardedCaller=phone.callerFromSipHeaders([{name:"X-Corner-Ops-Caller",value:"+1 (315) 555-0199"},{name:"From",value:'<sip:asterisk@example.test>'}]);
+    const pollutedCaller=phone.callerFromSipHeaders([{name:"X-Corner-Ops-Caller",value:"FraryFH"},{name:"P-Asserted-Identity",value:'<sip:proj_12abc345def67890@sip.api.openai.com>'}]);
     const calledDid=phone.calledDidFromSipHeaders([
       {name:"To",value:'<sip:proj_example@sip.api.openai.com>'},
       {name:"P-Called-Party-ID",value:'<sip:+13155550200@example.test>'},
@@ -38,7 +39,7 @@ async function main(){
     const describedItem=await(await invoke({jsonrpc:"2.0",id:8,method:"tools/call",params:{name:"menu_search",arguments:{callId,query:"Turkey Big Boss"}}})).json();
     const pending=(await sql`SELECT pending_item,order_id FROM ordering_call_sessions WHERE three_cx_call_id=${callId}`)[0];
     const result={
-      callerNormalized:caller==="3155550188"&&forwardedCaller==="3155550199",
+      callerNormalized:caller==="3155550188"&&forwardedCaller==="3155550199"&&pollutedCaller==="",
       calledDidRestricted:calledDid==="3155550200"&&phone.testDidAllowed(calledDid)&&!phone.testDidAllowed("3155550201"),
       lineMapped:phone.lineForDid(calledDid)==="TEST LINE",
       englishGreeting:phone.OPENAI_PHONE_GREETING==="Thanks for calling Corner Deli, is this going to be pickup or delivery?"&&phone.PHONE_INSTRUCTIONS.includes("Ask exactly one question at a time"),
