@@ -55,9 +55,11 @@ export async function POST(request: Request) {
     const serviceType =
       body.serviceType === "delivery"
         ? "delivery"
+        : body.serviceType === "curbside"
+          ? "curbside"
         : body.serviceType === "pickup"
           ? "pickup"
-          : null;
+            : null;
     if (!serviceType)
       return Response.json(
         { error: "Choose pickup or delivery." },

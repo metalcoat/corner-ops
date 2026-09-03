@@ -228,9 +228,10 @@ function cartDetails(line: CartLine) {
 }
 
 export default function CustomerOrder() {
-  const [serviceType, setServiceType] = useState<"pickup" | "delivery">(
+  const [serviceType, setServiceType] = useState<"pickup" | "curbside" | "delivery">(
       "pickup",
     ),
+    [fulfillmentOpen,setFulfillmentOpen]=useState(false),
     [catalog, setCatalog] = useState<Catalog | null>(null),
     [loading, setLoading] = useState(true),
     [message, setMessage] = useState(""),
@@ -864,25 +865,26 @@ export default function CustomerOrder() {
       </header>
       <div className="fulfillmentDock">
         <div className="servicePicker" aria-label="Fulfillment type">
-          <button className={serviceType === "pickup" ? "selected" : ""} onClick={() => setServiceType("pickup")}><span aria-hidden="true">▣</span> Pickup</button>
-          <button disabled={!catalog?.delivery.enabled} className={serviceType === "delivery" ? "selected" : ""} onClick={() => setServiceType("delivery")}><span aria-hidden="true">⌂</span> Delivery</button>
+          <button className={serviceType !== "delivery" ? "selected" : ""} onClick={() => {if(serviceType==="delivery")setServiceType("pickup");setFulfillmentOpen(true)}}><span aria-hidden="true">▣</span> Pickup</button>
+          <button disabled={!catalog?.delivery.enabled} className={serviceType === "delivery" ? "selected" : ""} onClick={() => {setServiceType("delivery");setFulfillmentOpen(true)}}><span aria-hidden="true">⌂</span> Delivery</button>
         </div>
+        <button className="fulfillmentSummary" onClick={()=>setFulfillmentOpen(true)}><strong>{serviceType==="delivery"?"Delivery":serviceType==="curbside"?"Curbside pickup":"In-store pickup"}</strong><span>{timing==="asap"?(catalog&&!catalog.availability.open?"ASAP preorder":"ASAP"):scheduledFor?new Date(scheduledFor).toLocaleString([],{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"Choose future time"}{serviceType==="delivery"&&validatedDelivery?` · ${validatedDelivery.formattedAddress}`:""}</span><em>Change</em></button>
+      </div>
+      <div className={`fulfillmentModal ${fulfillmentOpen?"open":""}`} aria-hidden={!fulfillmentOpen} onMouseDown={event=>{if(event.target===event.currentTarget)setFulfillmentOpen(false)}}>
+        <section role="dialog" aria-modal="true" aria-label="Pickup or delivery setup">
+          <header><div><p className="eyebrow">Order setup</p><h2>Pickup or delivery?</h2></div><button onClick={()=>setFulfillmentOpen(false)} aria-label="Close">×</button></header>
+          <div className="servicePicker modalServicePicker"><button className={serviceType!=="delivery"?"selected":""} onClick={()=>setServiceType("pickup")}>▣ Pickup</button><button className={serviceType==="delivery"?"selected":""} onClick={()=>setServiceType("delivery")}>⌂ Delivery</button></div>
+          {serviceType!=="delivery"&&<fieldset><legend>Pickup method</legend><div className="choiceRow"><button className="choiceButton" aria-pressed={serviceType==="pickup"} onClick={()=>setServiceType("pickup")}>In-store</button><button className="choiceButton" aria-pressed={serviceType==="curbside"} onClick={()=>setServiceType("curbside")}>Curbside</button></div></fieldset>}
+          <fieldset><legend>When?</legend><div className="choiceRow"><button className="choiceButton" aria-pressed={timing==="asap"} onClick={()=>{setTiming("asap");setScheduledFor("")}}>{catalog&&!catalog.availability.open?"ASAP preorder":"ASAP"}</button><button className="choiceButton" aria-pressed={timing==="future"} onClick={()=>{setTiming("future");setDate(current=>current||localDateValue())}}>{catalog&&!catalog.availability.open?"Future preorder":"Future"}</button></div>{timing==="future"&&<div className="fulfillmentTimeGrid"><label>Date<input aria-label="Future order date" type="date" value={date} min={localDateValue()} onClick={event=>event.currentTarget.showPicker?.()} onChange={event=>{setDate(event.target.value);setScheduledFor("")}}/></label><label>Time<select aria-label="Future order time" value={scheduledFor} onChange={event=>setScheduledFor(event.target.value)}><option value="">Choose a time</option>{slots.map(slot=><option key={slot} value={slot}>{new Date(slot).toLocaleString([],{weekday:"short",hour:"numeric",minute:"2-digit"})}</option>)}</select></label></div>}</fieldset>
+          <div id="delivery-address-top" className={serviceType==="delivery"?"topDeliveryAddress active":"topDeliveryAddress"}/>
+          <button className="reviewButton" disabled={(timing==="future"&&!scheduledFor)||(serviceType==="delivery"&&!validatedDelivery&&!savedAddressId)} onClick={()=>setFulfillmentOpen(false)}>USE THIS ORDER SETUP</button>
+        </section>
       </div>
       <section className="orderIntro">
         <div>
           <p className="eyebrow">Made your way</p>
           <h1>What sounds good?</h1>
           <p>Browse the full menu anytime.</p>
-        </div>
-        <div className="fulfillmentControls">
-          <section
-            id="delivery-address-top"
-            className={
-              serviceType === "delivery"
-                ? "topDeliveryAddress active"
-                : "topDeliveryAddress"
-            }
-          />
         </div>
       </section>
       {catalog && !catalog.availability.orderable && (
@@ -1075,68 +1077,6 @@ export default function CustomerOrder() {
                 </div>
               )}
           </div>
-          <fieldset>
-            <legend>When?</legend>
-            <div className="choiceRow" role="group" aria-label="Order timing">
-              <button
-                type="button"
-                className="choiceButton"
-                aria-pressed={timing === "asap"}
-                onClick={() => {
-                  setTiming("asap");
-                  setScheduledFor("");
-                }}
-              >
-                {catalog && !catalog.availability.open ? "ASAP preorder" : "ASAP"}
-              </button>
-              <button
-                type="button"
-                className="choiceButton"
-                aria-pressed={timing === "future"}
-                onClick={() => {
-                  setTiming("future");
-                  setDate((current) => current || localDateValue());
-                }}
-              >
-                {catalog && !catalog.availability.open ? "Future preorder" : "Future"}
-              </button>
-            </div>
-            {timing === "future" && (
-              <>
-                <input
-                  aria-label="Future order date"
-                  type="date"
-                  value={date}
-                  min={localDateValue()}
-                  inputMode="none"
-                  onClick={(event) => event.currentTarget.showPicker?.()}
-                  onChange={(e) => {
-                    setDate(e.target.value);
-                    setScheduledFor("");
-                  }}
-                />
-                <select
-                  aria-label="Future order time"
-                  value={scheduledFor}
-                  onChange={(e) => setScheduledFor(e.target.value)}
-                >
-                  <option value="">Choose a time</option>
-                  {slots.map((slot) => (
-                    <option key={slot} value={slot}>
-                      {new Date(slot).toLocaleString([], {
-                        weekday: "short",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </option>
-                  ))}
-                </select>
-                {date && !slots.length && (
-                  <small>No available times on this date.</small>
-                )}
-              </>
-            )}
-          </fieldset>
           {serviceType === "delivery" && catalog && (
             <p className="deliveryNote">
               <strong>About 1 hour</strong> — we’ll get it there as fast as we
