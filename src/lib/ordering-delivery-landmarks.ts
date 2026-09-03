@@ -72,7 +72,13 @@ export function resolveDeliveryLandmark(spoken: string) {
         "Which Sunoco: Canton Street, Champlain Street, or New York Avenue?",
     };
   const match = landmarks.find((row) => row.aliases.test(value));
-  return match ? { address: match.address } : { address: value };
+  if (match) return { address: match.address };
+  const localStreet =
+    !value.includes(",") &&
+    /^\d+[a-z]?\s+.+\b(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|court|ct|boulevard|blvd|place|pl|parkway|pkwy|highway|hwy)\.?$/i.test(
+      value,
+    );
+  return { address: localStreet ? `${value}, Ogdensburg, NY 13669` : value };
 }
 
 export async function attachSpokenDeliveryAddress(

@@ -186,15 +186,33 @@ export function startOpenAiSideband(
         firstName: String(args.firstName || ""),
         lastName: String(args.lastName || ""),
       });
+      await sql`UPDATE ordering_call_sessions SET order_id=${String(result.id)},updated_at=NOW() WHERE id=${call.id}`;
       if (
         args.serviceType === "delivery" &&
         String(args.deliveryAddress || "").trim()
       ) {
-        const delivery = await attachSpokenDeliveryAddress(
-          String(result.id),
-          String(args.deliveryAddress),
-          String(args.deliveryUnit || ""),
-        );
+        let delivery;
+        try {
+          delivery = await attachSpokenDeliveryAddress(
+            String(result.id),
+            String(args.deliveryAddress),
+            String(args.deliveryUnit || ""),
+          );
+        } catch (error) {
+          throw new AiToolError(
+            "INVALID_INPUT",
+            "I couldn't verify that delivery address.",
+            "Ask the caller to repeat the street number and street. For an address outside Ogdensburg, also ask for city, state, and ZIP.",
+            409,
+            {
+              field: "deliveryAddress",
+              reason:
+                error instanceof Error
+                  ? error.message
+                  : "address_validation_failed",
+            },
+          );
+        }
         const updated = (
           await sql`SELECT total_cents,amount_due_cents,delivery_fee_cents FROM ordering_orders WHERE id=${String(result.id)}`
         )[0];
@@ -216,7 +234,6 @@ export function startOpenAiSideband(
         });
         Object.assign(result, paymentResult);
       }
-      await sql`UPDATE ordering_call_sessions SET order_id=${String(result.id)},updated_at=NOW() WHERE id=${call.id}`;
       await auditAiTool({
         business: "Corner Deli",
         requestId,

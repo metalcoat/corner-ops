@@ -99,6 +99,17 @@ async function main() {
     new URL("../src/lib/openai-phone-sideband.ts", import.meta.url),
     "utf8",
   );
+  assert.ok(
+    sidebandSource.indexOf("SET order_id") <
+      sidebandSource.indexOf(
+        "delivery = await attachSpokenDeliveryAddress",
+      ),
+    "The priced draft must be attached to the call before delivery validation can fail.",
+  );
+  assert.ok(
+    sidebandSource.includes("I couldn't verify that delivery address."),
+    "Delivery validation failures must not be reported as missing menu items.",
+  );
   const [callsSource, posSource] = await Promise.all([
     readFile(
       new URL("../src/app/api/ordering/calls/route.ts", import.meta.url),

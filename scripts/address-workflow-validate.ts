@@ -9,6 +9,7 @@ import {
   suggestDeliveryAddresses,
   validateDeliveryAddress,
 } from "../src/lib/ordering-address";
+import { resolveDeliveryLandmark } from "../src/lib/ordering-delivery-landmarks";
 
 try {
   loadEnvFile("/opt/corner-ops/.env");
@@ -85,6 +86,16 @@ const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
 async function main() {
   if (normalizeAddressInput("  12   Main ") !== "12 Main")
     throw new Error("Input normalization failed.");
+  if (
+    resolveDeliveryLandmark("412 J Street").address !==
+    "412 J Street, Ogdensburg, NY 13669"
+  )
+    throw new Error("Bare local street was not completed for AI validation.");
+  if (
+    resolveDeliveryLandmark("412 J Street, Canton, NY 13617").address !==
+    "412 J Street, Canton, NY 13617"
+  )
+    throw new Error("Complete out-of-town address was changed.");
   const before = requests;
   if (
     (
@@ -177,6 +188,7 @@ async function main() {
     JSON.stringify(
       {
         inputNormalization: true,
+        aiLocalStreetCompletion: true,
         shortInput: true,
         providerFailure: true,
         providerResponseNormalization: true,
