@@ -710,6 +710,7 @@ export async function priceSpokenOrder(input: {
   service: ServiceType;
   items: SpokenOrderItem[];
   orderId?: string | null;
+  customerId?: string | null;
   callerPhone?: string;
   firstName?: string;
   lastName?: string;
@@ -1239,6 +1240,7 @@ export async function priceSpokenOrder(input: {
       expectedVersion: Number(current.version),
       service: input.service,
       items: resolved,
+      customerId: input.customerId,
       callerPhone: input.callerPhone,
       firstName: input.firstName,
       lastName: input.lastName,
@@ -1249,6 +1251,7 @@ export async function priceSpokenOrder(input: {
     actor: input.actor,
     service: input.service,
     items: resolved,
+    customerId: input.customerId,
     callerPhone: input.callerPhone,
     firstName: input.firstName,
     lastName: input.lastName,

@@ -89,6 +89,8 @@ export const OPENAI_PRICE_ORDER_TOOL = {
       },
       firstName: { type: "string" },
       lastName: { type: "string" },
+      customerId: { type: "string" },
+      customerAddressId: { type: "string" },
       paymentMethod: {
         type: "string",
         enum: ["cash", "card"],

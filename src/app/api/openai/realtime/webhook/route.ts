@@ -2,6 +2,7 @@ import { calledDidFromSipHeaders,callerFromSipHeaders,lineForDid,openAiClient,op
 import { getAiPhoneSettings,realtimeBusinessContext } from "@/lib/ordering-ai-phone-config";
 import { buildPhoneInstructions } from "@/lib/openai-phone-prompt";
 import { startOpenAiSideband } from "@/lib/openai-phone-sideband";
+import { phoneOrderingCustomerContext } from "@/lib/ordering-customers";
 
 export const runtime="nodejs";
 
@@ -17,7 +18,7 @@ export async function POST(request:Request){
     await client.realtime.calls.reject(callId,{status_code:480});
     return Response.json({received:true,accepted:false,reason:!readiness.ready?"phone_ordering_not_configured":"did_not_allow_test_ai"});
   }
-  const callerPhone=callerFromSipHeaders(headers),lineLabel=lineForDid(calledDid),[settings,business]=await Promise.all([getAiPhoneSettings(),realtimeBusinessContext()]),model=settings.model;
+  const callerPhone=callerFromSipHeaders(headers),lineLabel=lineForDid(calledDid),[settings,business,customer]=await Promise.all([getAiPhoneSettings(),realtimeBusinessContext(),phoneOrderingCustomerContext("Corner Deli",callerPhone)]),model=settings.model;
   if(!settings.enabled){await client.realtime.calls.reject(callId,{status_code:480});return Response.json({received:true,accepted:false,reason:"ai_phone_disabled"})}
   await registerOpenAiCall(callId,callerPhone,calledDid,lineLabel,model,settings.mode);
   try{
@@ -26,7 +27,7 @@ export async function POST(request:Request){
     await client.realtime.calls.accept(callId,{
       type:"realtime",model,output_modalities:["audio"],max_output_tokens:1024,
       audio:{input:{noise_reduction:{type:"far_field"},transcription:{model:"gpt-transcribe",language:"en",prompt:"Corner Deli menu order. Ogdensburger, Big Boss, jumbo, sheet pizza, pep, mozz sticks, wings, medium, extra crispy, blue cheese, ranch, garlic parm, antipasta."},turn_detection:{type:"semantic_vad",eagerness:settings.vadEagerness,create_response:false,interrupt_response:false}},output:{voice:"marin",speed:1.04}},
-      instructions:buildPhoneInstructions({callId,callerPhone,lineLabel,settings,business}),
+      instructions:buildPhoneInstructions({callId,callerPhone,lineLabel,settings,business,customer}),
       tools:[OPENAI_PRICE_ORDER_TOOL,OPENAI_MENU_SEARCH_TOOL,OPENAI_HUMAN_HANDOFF_TOOL,OPENAI_VOICE_PAYMENT_TOOL],
       tool_choice:"auto",tracing:{workflow_name:"corner-deli-phone-ordering-test",group_id:callId,metadata:{business:"Corner Deli",line:lineLabel,model}},
     });

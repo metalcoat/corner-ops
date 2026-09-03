@@ -1,4 +1,5 @@
 import type { AiPhoneSettings } from "@/lib/ordering-ai-phone-config";
+import type { PhoneOrderingCustomerContext } from "@/lib/ordering-customers";
 
 export type RealtimeBusinessContext = {
   pickupWait: string;
@@ -30,6 +31,7 @@ export function buildPhoneInstructions(input: {
   lineLabel: string;
   settings: AiPhoneSettings;
   business: RealtimeBusinessContext;
+  customer?: PhoneOrderingCustomerContext | null;
 }) {
   const mode =
     input.settings.mode === "shadow"
@@ -41,6 +43,9 @@ export function buildPhoneInstructions(input: {
     ? ` Configured upsells: ${input.business.upsells.map((rule) => rule.name).join(", ")}.`
     : "";
   const live = `LIVE BUSINESS STATE: pickup ${input.business.pickupAvailable ? "available" : "unavailable"}, wait ${input.business.pickupWait}; delivery ${input.business.deliveryAvailable ? "available" : "unavailable"}, wait ${input.business.deliveryWait}. Maximum ${input.settings.maxUpsells} relevant upsell attempts. Never offer something already ordered or unavailable.${configuredUpsells}`;
+  const customer = input.customer
+    ? `CALLER ACCOUNT MATCH: Caller ID uniquely matches customerId ${input.customer.customerId}, name ${input.customer.displayName || [input.customer.firstName, input.customer.lastName].filter(Boolean).join(" ")}.${input.customer.address ? ` Their most-used saved delivery address is customerAddressId ${input.customer.address.customerAddressId}; confirm it aloud as ${input.customer.address.spokenAddress}, but use the full address ${input.customer.address.fullAddress} in PRICE_ORDER.` : " They have no saved delivery address."} After pickup or delivery is selected, confirm the matched name and wait. Do not ask them to provide their name unless they say the match is wrong. For delivery, after the name is confirmed, ask whether they are still going to the saved address and wait. If yes, use that exact full saved address and customerAddressId without asking them to repeat it. If no, ask for the delivery address. Include the confirmed customerId in every PRICE_ORDER call. Never speak internal IDs.`
+    : "CALLER ACCOUNT MATCH: No unique customer account matched caller ID. Collect the customer's name normally.";
   return [
     PHONE_BEHAVIOR,
     ORDERING_POLICY,
@@ -56,6 +61,7 @@ export function buildPhoneInstructions(input: {
     SECURE_VOICE_PAYMENT_POLICY,
     mode,
     live,
+    customer,
     `Current callId: ${input.callId}. Caller phone: ${input.callerPhone || "unavailable"}. Line: ${input.lineLabel}. Every tool call must include callId.`,
   ].join("\n\n");
 }

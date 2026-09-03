@@ -85,6 +85,7 @@ export async function attachSpokenDeliveryAddress(
   orderId: string,
   spoken: string,
   line2 = "",
+  customerAddressId: string | null = null,
 ) {
   const resolved = resolveDeliveryLandmark(spoken);
   if (resolved.clarification) throw new Error(resolved.clarification);
@@ -102,7 +103,13 @@ export async function attachSpokenDeliveryAddress(
     distanceMiles: route.distanceMiles,
     merchandiseSubtotalCents: Number(order.subtotal_cents),
   });
-  await saveOrderDeliveryAddress({ orderId, address, line2, route });
+  await saveOrderDeliveryAddress({
+    orderId,
+    address,
+    line2,
+    customerAddressId,
+    route,
+  });
   await sql`UPDATE ordering_orders SET delivery_fee_cents=${quote.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}-paid_cents),version=version+1,updated_at=NOW() WHERE id=${orderId}`;
   return { address, route, quote };
 }

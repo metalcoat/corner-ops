@@ -182,6 +182,7 @@ export function startOpenAiSideband(
           ? (args.items as SpokenOrderItem[])
           : [],
         orderId: call.order_id || null,
+        customerId: String(args.customerId || "") || null,
         callerPhone,
         firstName: String(args.firstName || ""),
         lastName: String(args.lastName || ""),
@@ -193,10 +194,17 @@ export function startOpenAiSideband(
       ) {
         let delivery;
         try {
+          const customerAddress =
+            args.customerId && args.customerAddressId
+              ? (
+                  await sql`SELECT id FROM ordering_customer_addresses WHERE id=${String(args.customerAddressId)} AND customer_id=${String(args.customerId)} AND active=TRUE`
+                )[0]
+              : null;
           delivery = await attachSpokenDeliveryAddress(
             String(result.id),
             String(args.deliveryAddress),
             String(args.deliveryUnit || ""),
+            customerAddress ? String(customerAddress.id) : null,
           );
         } catch (error) {
           throw new AiToolError(

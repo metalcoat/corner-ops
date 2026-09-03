@@ -57,6 +57,85 @@ export async function findPhoneMatches(
   `;
 }
 
+export type PhoneOrderingCustomerContext = {
+  customerId: string;
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  address: null | {
+    customerAddressId: string;
+    line1: string;
+    line2: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    spokenAddress: string;
+    fullAddress: string;
+  };
+};
+
+export async function phoneOrderingCustomerContext(
+  business: OrderingBusiness,
+  callerPhone: string,
+): Promise<PhoneOrderingCustomerContext | null> {
+  const normalized = normalizeCallerPhone(callerPhone);
+  if (!/^\+1\d{10}$/.test(normalized)) return null;
+  await ensureOrderingCustomerSchema();
+  const rows = await getSql()`
+    SELECT c.id,c.first_name,c.last_name,c.display_name,
+      address.id address_id,address.line1,address.line2,address.city,address.state,address.postal_code
+    FROM ordering_customer_phones phone
+    JOIN ordering_customers c ON c.id=phone.customer_id
+    LEFT JOIN LATERAL (
+      SELECT candidate.*
+      FROM ordering_customer_addresses candidate
+      WHERE candidate.customer_id=c.id AND candidate.active=TRUE
+      ORDER BY
+        (SELECT COUNT(*) FROM ordering_order_delivery_addresses used WHERE used.customer_address_id=candidate.id) DESC,
+        candidate.is_primary DESC,
+        candidate.last_used_at DESC NULLS LAST,
+        candidate.created_at DESC
+      LIMIT 1
+    ) address ON TRUE
+    WHERE c.business=${business} AND c.active=TRUE AND c.merged_into_customer_id IS NULL
+      AND phone.normalized_phone=${normalized}
+    ORDER BY phone.is_primary DESC,phone.last_used_at DESC NULLS LAST
+    LIMIT 2
+  `;
+  // A shared number is not enough to choose between two customer accounts.
+  if (rows.length !== 1) return null;
+  const row = rows[0];
+  const line1 = String(row.line1 || "");
+  const line2 = String(row.line2 || "");
+  const city = String(row.city || "");
+  const state = String(row.state || "");
+  const postalCode = String(row.postal_code || "");
+  return {
+    customerId: String(row.id),
+    firstName: String(row.first_name || ""),
+    lastName: String(row.last_name || ""),
+    displayName: String(row.display_name || "").trim(),
+    address: row.address_id
+      ? {
+          customerAddressId: String(row.address_id),
+          line1,
+          line2,
+          city,
+          state,
+          postalCode,
+          spokenAddress: [line1, line2].filter(Boolean).join(", "),
+          fullAddress: [
+            [line1, line2].filter(Boolean).join(", "),
+            city,
+            [state, postalCode].filter(Boolean).join(" "),
+          ]
+            .filter(Boolean)
+            .join(", "),
+        }
+      : null,
+  };
+}
+
 export async function createCustomer(input: {
   business: OrderingBusiness;
   firstName: string;

@@ -37,6 +37,37 @@ async function main() {
     settings,
     business,
   });
+  const returningCustomerPrompt = buildPhoneInstructions({
+    callId: "rtc_returning_customer_validation",
+    callerPhone: "3155550100",
+    lineLabel: "TEST",
+    settings,
+    business,
+    customer: {
+      customerId: "customer-validation-id",
+      firstName: "Pat",
+      lastName: "Customer",
+      displayName: "Pat Customer",
+      address: {
+        customerAddressId: "address-validation-id",
+        line1: "412 J Street",
+        line2: "",
+        city: "Ogdensburg",
+        state: "NY",
+        postalCode: "13669",
+        spokenAddress: "412 J Street",
+        fullAddress: "412 J Street, Ogdensburg, NY 13669",
+      },
+    },
+  });
+  assert.ok(
+    returningCustomerPrompt.includes("confirm the matched name and wait") &&
+      returningCustomerPrompt.includes(
+        "ask whether they are still going to the saved address and wait",
+      ) &&
+      returningCustomerPrompt.includes("Include the confirmed customerId"),
+    "Returning callers must have their name and most-used address confirmed.",
+  );
   for (const phrase of [
     "Hard rules override creativity",
     "Ask exactly one question at a time",
@@ -109,6 +140,11 @@ async function main() {
   assert.ok(
     sidebandSource.includes("I couldn't verify that delivery address."),
     "Delivery validation failures must not be reported as missing menu items.",
+  );
+  assert.ok(
+    sidebandSource.includes("customerId: String(args.customerId") &&
+      sidebandSource.includes("args.customerAddressId"),
+    "Confirmed caller accounts and saved addresses must stay attached to the order.",
   );
   const [callsSource, posSource] = await Promise.all([
     readFile(
