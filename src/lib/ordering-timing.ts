@@ -2,6 +2,7 @@ import { getSql } from "@/lib/db";
 import type { OrderingBusiness, ServiceType } from "@/lib/ordering-core";
 import { quoteOrderTiming, type OrderTimingMode, type TimingQuoteSettings } from "@/lib/ordering-timing-core";
 import { ensureOrderingTimingSchema } from "@/lib/ordering-timing-schema";
+import { resolveOrderingAvailability } from "@/lib/ordering-availability";
 
 type TimingRow = {
   service_type: ServiceType;
@@ -93,16 +94,23 @@ export async function quoteTimingForOrder(input: {
 }) {
   const now = input.now ?? new Date();
   const settings = await getFulfillmentTimingSettings(input.business, input.serviceType);
+  const availability = input.mode === "asap" ? await resolveOrderingAvailability({ business: input.business, serviceType: input.serviceType, at: now, allowPreOpenAsap: true }) : null;
+  const preOpenAt = availability?.orderable && !availability.open && availability.opensAt && availability.opensAt > now ? availability.opensAt : null;
   const currentOrdersInBusyWindow = await activeOrdersInBusyWindow(
     input.business,
     settings.busyWindowMinutes,
     now,
   );
-  return quoteOrderTiming({
-    now,
+  const quote = quoteOrderTiming({
+    now: preOpenAt || now,
     mode: input.mode,
     requestedFor: input.requestedFor,
     settings,
-    currentOrdersInBusyWindow,
+    currentOrdersInBusyWindow: preOpenAt ? 0 : currentOrdersInBusyWindow,
   });
+  if (preOpenAt && quote.accepted) {
+    const opens = new Intl.DateTimeFormat("en-US", { timeZone: availability!.timezone, weekday: "short", hour: "numeric", minute: "2-digit" }).format(preOpenAt);
+    quote.customerMessage = `ASAP for the next opening. We open ${opens}; ${quote.customerMessage}`;
+  }
+  return quote;
 }

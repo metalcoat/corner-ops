@@ -903,12 +903,6 @@ export default function CustomerOrder() {
           </span>
         </aside>
       )}
-      {catalog && catalog.availability.orderable && !catalog.availability.open && timing === "asap" && catalog.availability.opensAt && (
-        <aside className="closedNotice preOpenNotice">
-          <strong>ASAP order accepted before opening</strong>
-          <span>We open at {new Date(catalog.availability.opensAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })}. Allow about {serviceType === "delivery" ? "1 hour for delivery" : "30 minutes for pickup"} after we open.</span>
-        </aside>
-      )}
       {catalog?.promotions.length ? (
         <div className="promotions">
           {catalog.promotions.map((label) => (
@@ -1433,18 +1427,15 @@ export default function CustomerOrder() {
                 value={phone}
                 onChange={(event) => setPhone(event.target.value)}
               />
-              {(!catalog?.customer.authenticated ||
-                !/^\S+@\S+\.\S+$/.test(email.trim())) && (
-                <input
-                  aria-label="Email address"
-                  autoComplete="email"
-                  inputMode="email"
-                  type="email"
-                  placeholder="Email for order confirmation"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                />
-              )}
+              <input
+                aria-label="Email address"
+                autoComplete="email"
+                inputMode="email"
+                type="email"
+                placeholder="Email for order confirmation"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
               {catalog?.customer.authenticated && !contactComplete && (
                 <small className="contactHint">
                   Complete the missing contact details once; we’ll save them
@@ -1477,6 +1468,12 @@ export default function CustomerOrder() {
                   : "Pay at pickup"}
               </button>
             </div>
+          )}
+          {catalog && catalog.availability.orderable && !catalog.availability.open && timing === "asap" && catalog.availability.opensAt && (
+            <aside className="closedNotice preOpenNotice">
+              <strong>ASAP at our next opening</strong>
+              <span>We open at {new Date(catalog.availability.opensAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })}. Your estimated {serviceType === "delivery" ? "delivery time is about 1 hour after opening" : "pickup time is about 30 minutes after opening"}.</span>
+            </aside>
           )}
           <button
             className="reviewButton"
