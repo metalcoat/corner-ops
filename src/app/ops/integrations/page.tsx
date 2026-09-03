@@ -6,7 +6,7 @@ import "./integrations.css";
 
 type Connection = {
   id: string;
-  provider: "Plaid" | "Square" | "CSV";
+  provider: "Plaid" | "CSV";
   business: Business;
   institutionName: string;
   status: string;
@@ -41,8 +41,6 @@ type Dashboard = {
   configuration: {
     plaid: boolean;
     plaidEnvironment: string;
-    square: boolean;
-    squareEnvironment: string;
     cron: boolean;
     alerts: boolean;
   };
@@ -54,7 +52,6 @@ type Dashboard = {
   syncRuns: SyncRun[];
   schedulerRuns: SchedulerRun[];
   payrollRuns: Array<{ id: string; weekStart: string; status: string; generatedAt: string }>;
-  squareSummary: { sales: number; tips: number; payments: number };
 };
 
 type PlaidMetadata = {
@@ -350,7 +347,6 @@ export default function IntegrationsPage() {
 
   const businessConnections = dashboard?.connections.filter((connection) => connection.business === business) || [];
   const plaidConnections = businessConnections.filter((connection) => connection.provider === "Plaid");
-  const squareConnection = dashboard?.connections.find((connection) => connection.provider === "Square");
   const reviewTransactions = dashboard?.transactions.filter((transaction) => transaction.reviewStatus === "Needs Review") || [];
   const totalBalance = useMemo(
     () => (dashboard?.accounts || []).reduce((total, account) => total + Number(account.currentBalance || 0), 0),
@@ -362,7 +358,7 @@ export default function IntegrationsPage() {
 
   return <main className="integrationShell">
     <header className="integrationHeader">
-      <div><p className="eyebrow">Connections and scheduler</p><h1>Automation center</h1><p className="muted">Square, bank and credit-card feeds, categorization, scheduled checks, and sync history.</p></div>
+      <div><p className="eyebrow">Connections and scheduler</p><h1>Automation center</h1><p className="muted">Bank and credit-card feeds, categorization, scheduled checks, and sync history.</p></div>
       <div className="businessSwitch">{(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "selected" : ""} onClick={() => setBusiness(name)}>{name}</button>)}</div>
     </header>
 
@@ -388,21 +384,9 @@ export default function IntegrationsPage() {
       </article>
 
       <article className="panel integrationCard">
-        <div className="panelHeader"><div><p className="eyebrow">Tiki sales source</p><h3>Square</h3></div><span className={`badge ${squareConnection ? "active" : "needsreview"}`}>{squareConnection ? "Connected" : dashboard?.configuration.square ? "Ready to connect" : "Needs Square keys"}</span></div>
-        <div className="integrationBody">
-          {business === "Tiki" ? <>
-            <p>Square supplies Tiki payment and tip activity. Corner Ops time remains the employee time-clock source.</p>
-            <div className="miniStats"><div><span>30-day payments</span><strong>{dashboard?.squareSummary.payments || 0}</strong></div><div><span>Sales</span><strong>{money(dashboard?.squareSummary.sales || 0)}</strong></div><div><span>Tips</span><strong>{money(dashboard?.squareSummary.tips || 0)}</strong></div></div>
-            {!squareConnection && <a className={`primary ${!dashboard?.configuration.square ? "disabledLink" : ""}`} href={dashboard?.configuration.square ? "/api/square/connect" : undefined}>Connect Square</a>}
-            {squareConnection && <button className="secondary" disabled={busy} onClick={() => void runAction({ action: "square-sync", connectionId: squareConnection.id }, "Square synchronized.")}>Sync Square now</button>}
-          </> : <p>Square belongs to Tiki. Switch to Tiki to connect or review it.</p>}
-        </div>
-      </article>
-
-      <article className="panel integrationCard">
         <div className="panelHeader"><div><p className="eyebrow">Nightly automation</p><h3>Scheduler</h3></div><span className={`badge ${dashboard?.configuration.cron ? "active" : "needsreview"}`}>{dashboard?.configuration.cron ? "Configured" : "Needs CRON_SECRET"}</span></div>
         <div className="integrationBody">
-          <p>Runs at 3 AM New York time, checks Tiki open punches, verifies Rezku freshness, syncs all active bank and credit-card connections plus Square, and saves Monday payroll runs.</p>
+          <p>Runs at 3 AM New York time, checks open punches, syncs active bank and credit-card connections, and saves Monday payroll runs.</p>
           <button className="secondary" disabled={busy} onClick={() => void runAction({ action: "scheduler-run" }, "Scheduler completed manually.")}>Run scheduler now</button>
           <div className="compactList">{(dashboard?.schedulerRuns || []).slice(0, 5).map((run) => <div key={run.id}><strong>{run.status} · {run.localDate}</strong><span>{new Date(run.startedAt).toLocaleString()}</span></div>)}</div>
         </div>

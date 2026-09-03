@@ -884,7 +884,7 @@ export default function CustomerOrder() {
       ) : null}
       <header className="orderHero">
         <a className="orderBrand" href="/order">
-          <img src="https://rezku-pos-upload.imgix.net/2e2a0810-d179-474b-a40b-e4104c60d8c1/olo/logo/jO52kF7dMM84upTQGozunTrduBxjbylAFeGYc8r_RT8.png?fit=crop&auto=compress&fmt=png32&h=60" alt="Corner Deli" />
+          <img src="/corner-ops-icon.svg" alt="Corner Deli" />
           <strong>Corner Deli</strong>
         </a>
         <button
@@ -906,7 +906,7 @@ export default function CustomerOrder() {
         <button className="fulfillmentSummary" onClick={()=>{setSetupVisited(true);setFulfillmentOpen(true)}}><span className="fulfillmentBag" aria-hidden="true">⌄</span><strong>{serviceType==="delivery"?"Delivery":serviceType==="curbside"?"Curbside pickup":"In-store pickup"}</strong><span>{timing==="asap"?(catalog&&!catalog.availability.open?"ASAP preorder":"ASAP"):scheduledFor?new Date(scheduledFor).toLocaleString([],{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"Choose future time"}{serviceType==="delivery"&&validatedDelivery?` · ${validatedDelivery.formattedAddress}`:""}</span><em>Change ›</em></button>
       </div>
       <div className={`fulfillmentModal ${fulfillmentOpen?"open":""} ${!setupVisited?"fulfillmentCover":""}`} aria-hidden={!fulfillmentOpen} onMouseDown={event=>{if(setupVisited&&event.target===event.currentTarget)setFulfillmentOpen(false)}}>
-        {!setupVisited&&<div className="coverBrand"><img src="https://rezku-pos-upload.imgix.net/2e2a0810-d179-474b-a40b-e4104c60d8c1/olo/logo/jO52kF7dMM84upTQGozunTrduBxjbylAFeGYc8r_RT8.png?fit=crop&auto=compress&fmt=png32&h=60" alt="Corner Deli"/><strong>Corner Deli</strong></div>}
+        {!setupVisited&&<div className="coverBrand"><img src="/corner-ops-icon.svg" alt="Corner Deli"/><strong>Corner Deli</strong></div>}
         <section role="dialog" aria-modal="true" aria-label="Pickup or delivery setup">
           {setupVisited&&<header><div><p className="eyebrow">Order setup</p><h2>Pickup or delivery?</h2></div><button onClick={()=>setFulfillmentOpen(false)} aria-label="Close">×</button></header>}
           <div className="servicePicker modalServicePicker"><button className={serviceType!=="delivery"?"selected":""} onClick={()=>setServiceType("pickup")}>▣ Pickup</button><button className={serviceType==="delivery"?"selected":""} onClick={()=>setServiceType("delivery")}>⌂ Delivery</button></div>

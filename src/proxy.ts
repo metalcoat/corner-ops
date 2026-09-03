@@ -8,9 +8,9 @@ const selfAuthorizedApiPaths = [
   "/api/health", "/api/auth/session", "/api/auth/password-reset",
   "/api/timeclock", "/api/employee", "/api/employee/session",
   "/api/employee/pin-reset", "/api/pos", "/api/deli-board",
-  "/api/document-scan", "/api/push", "/api/rezku/inbound",
-  "/api/3cx/inbound", "/api/3cx/crm/lookup", "/api/3cx/deli-ring", "/api/openai", "/api/square/callback",
-  "/api/square/webhook", "/api/cron", "/api/customer", "/api/driver",
+  "/api/document-scan", "/api/push",
+  "/api/3cx/inbound", "/api/3cx/crm/lookup", "/api/3cx/deli-ring", "/api/openai",
+  "/api/cron", "/api/customer", "/api/driver",
   "/api/ordering/store-dashboard", "/api/mobile/android/version",
   "/api/ordering/customer-display",
 ];
@@ -91,11 +91,11 @@ function needed(path: string, method: string): string | null {
     "/api/card-statements", "/api/finance-operations"])) {
     return write ? "accounting.write" : "accounting.read";
   }
-  if (anyPath(path, ["/api/payroll-control", "/api/rezku-monitor", "/api/overtime-risk", "/api/operations"])) {
+  if (anyPath(path, ["/api/payroll-control", "/api/overtime-risk", "/api/operations"])) {
     return write ? "payroll.write" : "payroll.read";
   }
   if (matchesPath(path, "/api/users")) return "users.manage";
-  if (anyPath(path, ["/api/integrations", "/api/bank-accounts", "/api/square/connect"])) {
+  if (anyPath(path, ["/api/integrations", "/api/bank-accounts"])) {
     return write ? "integrations.write" : "integrations.read";
   }
   if (anyPath(path, ["/api/messages", "/api/workforce", "/api/employee-directory",

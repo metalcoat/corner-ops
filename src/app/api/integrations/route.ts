@@ -6,7 +6,6 @@ import {
   exchangePlaidPublicToken,
   integrationDashboard,
   syncBankConnection,
-  syncSquareConnection,
 } from "@/lib/integrations";
 import { createPlaidAccountSelectionToken, createResilientPlaidLinkToken } from "@/lib/plaid-link";
 import { runScheduledOperations } from "@/lib/scheduler";
@@ -124,10 +123,6 @@ export async function POST(request: Request) {
 
     if (action === "bank-sync") {
       return Response.json(await syncBankConnection(String(body.connectionId || "")));
-    }
-
-    if (action === "square-sync") {
-      return Response.json(await syncSquareConnection(body.connectionId ? String(body.connectionId) : undefined));
     }
 
     if (action === "transaction-approve") {

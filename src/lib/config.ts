@@ -24,15 +24,6 @@ export function getLocalStoragePath(): string {
   return process.env.LOCAL_STORAGE_PATH?.trim() || "/data/uploads";
 }
 
-export function assertLocalRezkuImportAllowed(): void {
-  const driver = getDatabaseDriver();
-  const localDevelopment = process.env.LOCAL_DEVELOPMENT?.trim().toLowerCase() === "true";
-  const importAllowed = process.env.ALLOW_REZKU_MENU_IMPORT?.trim().toLowerCase() === "true";
-  if (driver !== "postgres" || !localDevelopment || !importAllowed) {
-    throw new ConfigurationError(["DATABASE_DRIVER=postgres", "LOCAL_DEVELOPMENT=true", "ALLOW_REZKU_MENU_IMPORT=true"]);
-  }
-}
-
 function isConfigured(name: (typeof requiredVariables)[number]): boolean {
   if (name === "BLOB_READ_WRITE_TOKEN") {
     if (getStorageDriver() === "local") return true;

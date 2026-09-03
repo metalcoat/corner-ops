@@ -10,7 +10,6 @@ import {
   ensureIntegrationSchema,
   localDateParts,
   syncAllBankConnections,
-  syncSquareConnection,
 } from "@/lib/integrations";
 import type { Business } from "@/lib/types";
 import { syncOperationalWeather } from "@/lib/weather-intelligence";
@@ -45,28 +44,6 @@ async function flagOpenTikiPunches(localDate: string) {
     });
   }
   return rows.length;
-}
-
-async function checkRezkuFreshness(localDate: string) {
-  const rows = await getSql()`
-    SELECT imported_at FROM rezku_import_batches ORDER BY imported_at DESC LIMIT 1
-  ` as unknown as Array<{ imported_at: string }>;
-  const latest = rows[0]?.imported_at ? new Date(rows[0].imported_at).getTime() : 0;
-  if (!latest || Date.now() - latest > 36 * 60 * 60 * 1000) {
-    await createOperationIssue({
-      issueKey: `rezku-stale:${localDate}`,
-      business: "Corner Deli",
-      issueType: "Rezku Import",
-      severity: "Warning",
-      title: "Corner Deli Rezku reports are stale",
-      details: latest
-        ? `The newest Rezku report was imported at ${rows[0].imported_at}.`
-        : "No Rezku reports have been imported yet.",
-      reference: rows[0]?.imported_at || "none",
-    });
-    return false;
-  }
-  return true;
 }
 
 async function capturePayrollRun(business: Business, weekStart: string) {
@@ -139,7 +116,6 @@ export async function runScheduledOperations(input: { force?: boolean; source?: 
   const details: Record<string, unknown> = {};
   try {
     details.openTikiPunches = await flagOpenTikiPunches(local.date);
-    details.rezkuFresh = await checkRezkuFreshness(local.date);
 
     try {
       details.weather = await syncOperationalWeather();
@@ -188,12 +164,6 @@ export async function runScheduledOperations(input: { force?: boolean; source?: 
       });
     } catch (error) {
       details.recurringInvoices = { error: error instanceof Error ? error.message : String(error) };
-    }
-
-    try {
-      details.squareSync = await syncSquareConnection();
-    } catch (error) {
-      details.squareSync = { error: error instanceof Error ? error.message : String(error) };
     }
 
     if (local.weekday === "Mon") {

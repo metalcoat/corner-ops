@@ -1,5 +1,4 @@
 import { getSession, canAccessBusiness } from "@/lib/auth";
-import { getSql } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import {
   accountingSnapshot,
@@ -7,17 +6,9 @@ import {
   createSimpleJournalEntry,
   listEmployees,
   listRecentTimeEntries,
-  listRezkuImports,
   payrollSummary,
   updateEmployee,
 } from "@/lib/operations";
-import { repairExistingRezkuTimesOnce } from "@/lib/rezku-eastern-time";
-import {
-  detectRezkuProductSalesReportType,
-  importRezkuProductSalesReport,
-} from "@/lib/rezku-product-sales";
-import { importSafeRezkuReport } from "@/lib/safe-rezku-import";
-import { detectRezkuVoidReportType, importRezkuVoidReport } from "@/lib/rezku-voids";
 import { apiError, unauthorized } from "@/lib/http";
 import type { Business } from "@/lib/types";
 
@@ -54,7 +45,6 @@ export async function GET(request: Request) {
     if (area === "payroll") {
       return Response.json(await payrollSummary(business, url.searchParams.get("weekStart") || undefined));
     }
-    if (area === "imports") return Response.json({ imports: await listRezkuImports() });
     if (area === "accounting") return Response.json(await accountingSnapshot(business));
 
     return Response.json({ error: "Unknown operations area." }, { status: 400 });
@@ -68,54 +58,8 @@ export async function POST(request: Request) {
     const session = await getSession();
     if (!session) return unauthorized();
 
-    const contentType = request.headers.get("content-type") || "";
-    if (contentType.includes("multipart/form-data")) {
-      const form = await request.formData();
-      const action = String(form.get("action") || "");
-      if (action !== "rezku-import") {
-        return Response.json({ error: "Unknown file operation." }, { status: 400 });
-      }
-      const file = form.get("file");
-      if (!(file instanceof File) || file.size === 0) {
-        return Response.json({ error: "Choose a Rezku Excel report." }, { status: 400 });
-      }
-      if (file.size > 25 * 1024 * 1024) {
-        return Response.json({ error: "Rezku reports are limited to 25 MB." }, { status: 413 });
-      }
-      if (!/\.(xlsx|xls)$/i.test(file.name)) {
-        return Response.json({ error: "Rezku imports must be Excel files." }, { status: 415 });
-      }
-      const requested = String(form.get("reportType") || "") || undefined;
-      const bytes = await file.arrayBuffer();
-      const productSalesType = detectRezkuProductSalesReportType(file.name, requested);
-      const voidType = detectRezkuVoidReportType(file.name, requested);
-      const standardReport = !productSalesType && !voidType;
-      if (standardReport) await ensureEmployeeDirectorySchema();
-      const result = productSalesType
-        ? await importRezkuProductSalesReport(file.name, bytes, productSalesType, session.email)
-        : voidType
-          ? await importRezkuVoidReport(file.name, bytes, voidType, session.email)
-          : await importSafeRezkuReport(file.name, bytes, requested, session.email);
-      return Response.json(result, { status: 201 });
-    }
-
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action || "");
-
-    if (action === "rezku-repair-times") {
-      if (!canAccessBusiness(session, "Corner Deli")) {
-        return Response.json({ error: "Business access denied." }, { status: 403 });
-      }
-      const sql = getSql();
-      await sql`
-        CREATE TABLE IF NOT EXISTS rezku_data_migrations (
-          migration_key TEXT PRIMARY KEY,
-          completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
-      await sql`DELETE FROM rezku_data_migrations WHERE migration_key LIKE 'rezku-wall-times-america-new-york-%'`;
-      return Response.json(await repairExistingRezkuTimesOnce());
-    }
 
     if (action === "employee-create") {
       const business = businessFrom(body.business);

@@ -2,14 +2,11 @@ import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
   accountingControlDashboard,
-  buildSquareDepositSuggestions,
   createOpeningBalance,
   importCodedHistory,
-  postSquareDay,
   reopenBankReconciliation,
   saveBankReconciliation,
   saveTransactionSplits,
-  setSquareDepositMatchStatus,
 } from "@/lib/accounting-control";
 import {
   postAllApprovedFinancialTransactions,
@@ -23,7 +20,6 @@ import {
   receivablesDashboard,
   setRecurringInvoiceTemplateActive,
 } from "@/lib/receivables";
-import { squareOperationsDashboard, syncSquareOperations } from "@/lib/square-control";
 import type { Business } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -40,10 +36,6 @@ export async function GET(request: Request) {
     if (!session) return unauthorized();
     requirePermission(session, "accounting.read");
     const url = new URL(request.url);
-    if (url.searchParams.get("area") === "square") {
-      if (!canAccessBusiness(session, "Tiki")) return Response.json({ error: "Business access denied." }, { status: 403 });
-      return Response.json(await squareOperationsDashboard());
-    }
     const business = businessFrom(url.searchParams.get("business") || "Corner Deli");
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
     const [accounting, receivables] = await Promise.all([
@@ -83,16 +75,6 @@ export async function POST(request: Request) {
 
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action || "");
-    if (action === "square-sync-full") {
-      if (!canAccessBusiness(session, "Tiki")) return Response.json({ error: "Business access denied." }, { status: 403 });
-      return Response.json(await syncSquareOperations());
-    }
-    if (action === "square-match-build") return Response.json(await buildSquareDepositSuggestions(session.email));
-    if (action === "square-match-status") return Response.json(await setSquareDepositMatchStatus({
-      id: String(body.id || ""), status: body.status === "Ignored" ? "Ignored" : "Matched", actor: session.email,
-    }));
-    if (action === "square-day-post") return Response.json(await postSquareDay({ businessDate: String(body.businessDate || ""), actor: session.email }));
-
     const business = businessFrom(body.business);
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
 

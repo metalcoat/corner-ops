@@ -22,7 +22,7 @@ const links: NavLink[] = [
   { label: "Banking", href: "/ops/banking", activePaths: ["/ops/banking", "/ops/accounting-control", "/ops/expense-control", "/ops/bank-accounts", "/ops/card-statements"] },
   { label: "Finance", href: "/ops/finance-operations", exact: true },
   { label: "Invoices", href: "/ops/finance-operations/invoice-ocr" },
-  { label: "People", href: "/ops/people", activePaths: ["/ops/people", "/ops/workforce", "/ops/attendance", "/ops/payroll-control", "/ops/employees", "/ops/employment-forms", "/ops/rezku-monitor"] },
+  { label: "People", href: "/ops/people", activePaths: ["/ops/people", "/ops/workforce", "/ops/attendance", "/ops/payroll-control", "/ops/employees", "/ops/employment-forms"] },
   { label: "Overtime", href: "/ops/overtime" },
   { label: "Messages", href: "/ops/messages" },
   { label: "Settings", href: "/ops/settings", activePaths: ["/ops/settings", "/ops/integrations", "/ops/users"] },
