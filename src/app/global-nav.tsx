@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import type { Business } from "@/lib/types";
 import "./global-nav.css";
@@ -14,6 +14,10 @@ type NavLink = {
 
 type NotificationSummary = {
   messages?: number;
+};
+
+type BusinessChangeDetail = {
+  business: Business;
 };
 
 const links: NavLink[] = [
@@ -31,9 +35,85 @@ const links: NavLink[] = [
 
 const businessNames: Business[] = ["Corner Deli", "Tiki"];
 const hiddenNavPaths = ["/privacy", "/terms", "/sms-help", "/app"];
+const explicitLegacySwitcherSelector = [
+  ".businessSwitch",
+  ".wfBusinessSwitch",
+  ".businessPills",
+  ".messageBusinessTabs",
+  '[data-business-switcher="page"]',
+].join(", ");
 
 function validBusiness(value: string | null | undefined): value is Business {
   return businessNames.includes(value as Business);
+}
+
+function normalizedLabel(value: string | null | undefined): string {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function buttonBusiness(button: HTMLButtonElement | null): Business | null {
+  const label = normalizedLabel(button?.textContent);
+  return validBusiness(label) ? label : null;
+}
+
+function directBusinessButtons(element: HTMLElement): HTMLButtonElement[] {
+  return Array.from(element.children).filter((child): child is HTMLButtonElement => {
+    return child instanceof HTMLButtonElement && Boolean(buttonBusiness(child));
+  });
+}
+
+function legacyBusinessSwitchers(): HTMLElement[] {
+  const explicit = Array.from(document.querySelectorAll<HTMLElement>(explicitLegacySwitcherSelector));
+  const inferred = Array.from(document.querySelectorAll<HTMLElement>("main div, main nav, main header, main section"))
+    .filter((element) => {
+      const allDirectButtons = Array.from(element.children)
+        .filter((child): child is HTMLButtonElement => child instanceof HTMLButtonElement);
+      if (allDirectButtons.length < 2 || allDirectButtons.length > 4) return false;
+      const businesses = new Set(directBusinessButtons(element).map((button) => buttonBusiness(button)));
+      return businesses.has("Corner Deli") && businesses.has("Tiki");
+    });
+  return Array.from(new Set([...explicit, ...inferred]));
+}
+
+function markLegacyBusinessSwitchers(): HTMLElement[] {
+  const switchers = legacyBusinessSwitchers();
+  for (const switcher of switchers) switcher.dataset.legacyBusinessSwitcher = "true";
+  return switchers;
+}
+
+function selectedSwitcherBusiness(switcher: HTMLElement): Business | null {
+  const selectedButton = switcher.querySelector<HTMLButtonElement>(
+    'button.selected, button.active, button[aria-pressed="true"]',
+  );
+  const selected = buttonBusiness(selectedButton);
+  if (selected) return selected;
+  const select = switcher.querySelector<HTMLSelectElement>('select[name="business"]');
+  return validBusiness(select?.value) ? select.value : null;
+}
+
+function detectPageBusiness(): Business | null {
+  for (const switcher of markLegacyBusinessSwitchers()) {
+    const selected = selectedSwitcherBusiness(switcher);
+    if (selected) return selected;
+  }
+  return null;
+}
+
+function synchronizeLegacyBusinessControls(business: Business): boolean {
+  let found = false;
+  for (const switcher of markLegacyBusinessSwitchers()) {
+    const button = Array.from(switcher.querySelectorAll<HTMLButtonElement>("button"))
+      .find((candidate) => buttonBusiness(candidate) === business);
+    if (!button) continue;
+    found = true;
+    if (selectedSwitcherBusiness(switcher) !== business && !button.disabled) button.click();
+  }
+  return found;
+}
+
+function requestedBusiness(): Business | null {
+  const requested = new URLSearchParams(window.location.search).get("business");
+  return validBusiness(requested) ? requested : null;
 }
 
 function linkIsActive(pathname: string, link: NavLink): boolean {
@@ -44,6 +124,8 @@ function linkIsActive(pathname: string, link: NavLink): boolean {
 
 export default function GlobalNav() {
   const pathname = usePathname();
+  const navRef = useRef<HTMLElement | null>(null);
+  const currentBusinessRef = useRef<Business>("Corner Deli");
   const [currentBusiness, setCurrentBusiness] = useState<Business>("Corner Deli");
   const [open, setOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
@@ -53,10 +135,21 @@ export default function GlobalNav() {
     || pathname.startsWith("/deli-board")
     || pathname === "/signin"
     || hiddenNavPaths.includes(pathname);
-  const themeEffectsHidden = pathname === "/clock"
-    || pathname.startsWith("/deli-board")
-    || pathname === "/signin"
-    || hiddenNavPaths.includes(pathname);
+
+  const applyBusiness = useCallback((business: Business, persist: boolean) => {
+    currentBusinessRef.current = business;
+    document.documentElement.dataset.businessTheme = business;
+    if (persist) window.localStorage.setItem("corner-ops-business-theme", business);
+    setCurrentBusiness(business);
+  }, []);
+
+  const chooseBusiness = useCallback((business: Business) => {
+    applyBusiness(business, true);
+    synchronizeLegacyBusinessControls(business);
+    window.dispatchEvent(new CustomEvent<BusinessChangeDetail>("corner-ops-business-change", {
+      detail: { business },
+    }));
+  }, [applyBusiness]);
 
   useEffect(() => setOpen(false), [pathname]);
 
@@ -96,98 +189,100 @@ export default function GlobalNav() {
   }, [navHidden]);
 
   useEffect(() => {
-    if (themeEffectsHidden) return;
-    let restored = false;
+    if (navHidden) {
+      document.documentElement.removeAttribute("data-global-business-switcher");
+      return;
+    }
 
-    const savedBusiness = (): Business | null => {
-      const saved = window.localStorage.getItem("corner-ops-business-theme");
-      return validBusiness(saved) ? saved : null;
+    document.documentElement.dataset.globalBusinessSwitcher = "true";
+    const saved = window.localStorage.getItem("corner-ops-business-theme");
+    const initialBusiness = requestedBusiness()
+      || (validBusiness(saved) ? saved : null)
+      || detectPageBusiness()
+      || currentBusinessRef.current;
+    applyBusiness(initialBusiness, false);
+
+    let frame = 0;
+    const synchronize = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        synchronizeLegacyBusinessControls(currentBusinessRef.current);
+      });
     };
 
-    const applyTheme = (business: Business) => {
-      document.documentElement.dataset.businessTheme = business;
-      window.localStorage.setItem("corner-ops-business-theme", business);
-      setCurrentBusiness(business);
+    synchronize();
+    const observer = new MutationObserver(synchronize);
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["class", "aria-pressed"],
+    });
+
+    const onBusinessChange = (event: Event) => {
+      const business = (event as CustomEvent<BusinessChangeDetail>).detail?.business;
+      if (!validBusiness(business)) return;
+      applyBusiness(business, false);
+      synchronize();
     };
-
-    function restore(): boolean {
-      if (restored) return false;
-
-      if (pathname.startsWith("/employee")) {
-        const select = document.querySelector<HTMLSelectElement>('select[name="business"]');
-        const saved = savedBusiness();
-        if (!select) return false;
-        restored = true;
-        if (saved && select.value !== saved) select.value = saved;
-        if (saved) applyTheme(saved);
-        return false;
-      }
-
-      const switcher = document.querySelector<HTMLElement>(
-        ".businessSwitch, .wfBusinessSwitch, .businessPills",
-      );
-      if (!switcher) return false;
-
-      restored = true;
-      const saved = savedBusiness();
-      if (!saved) return false;
-
-      const selected = switcher.querySelector<HTMLElement>(".selected, .active")?.textContent?.trim();
-      if (selected === saved) return false;
-
-      const button = Array.from(switcher.querySelectorAll<HTMLButtonElement>("button")).find(
-        (item) => item.textContent?.trim() === saved,
-      );
-      if (!button) return false;
-
-      applyTheme(saved);
-      button.click();
-      return true;
-    }
-
-    function detect(): Business {
-      const selected = document
-        .querySelector<HTMLElement>(".businessSwitch .selected, .wfBusinessSwitch .selected, .businessPills .active")
-        ?.textContent?.trim();
-      if (validBusiness(selected)) return selected;
-      const select = document.querySelector<HTMLSelectElement>('select[name="business"]')?.value;
-      if (validBusiness(select)) return select;
-      return savedBusiness() || "Corner Deli";
-    }
-
-    function sync() {
-      if (!restore()) applyTheme(detect());
-    }
-
-    function interaction(event: Event) {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      const text = target.closest("button")?.textContent?.trim();
-      if (validBusiness(text)) applyTheme(text);
-      if (target instanceof HTMLSelectElement && target.name === "business" && validBusiness(target.value)) {
-        applyTheme(target.value);
-      }
-    }
-
-    const observer = new MutationObserver(sync);
-    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
-    document.addEventListener("click", interaction, true);
-    document.addEventListener("change", interaction, true);
-    window.requestAnimationFrame(sync);
+    window.addEventListener("corner-ops-business-change", onBusinessChange);
 
     return () => {
+      window.cancelAnimationFrame(frame);
       observer.disconnect();
-      document.removeEventListener("click", interaction, true);
-      document.removeEventListener("change", interaction, true);
+      window.removeEventListener("corner-ops-business-change", onBusinessChange);
+      document.documentElement.removeAttribute("data-global-business-switcher");
     };
-  }, [pathname, themeEffectsHidden]);
+  }, [applyBusiness, navHidden, pathname]);
+
+  useEffect(() => {
+    if (navHidden) {
+      document.documentElement.style.removeProperty("--global-owner-nav-height");
+      return;
+    }
+    const nav = navRef.current;
+    if (!nav) return;
+    let frame = 0;
+    const updateHeight = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const height = Math.max(0, Math.ceil(nav.getBoundingClientRect().height));
+        document.documentElement.style.setProperty("--global-owner-nav-height", `${height}px`);
+        window.dispatchEvent(new Event("corner-ops-layout-change"));
+      });
+    };
+    updateHeight();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateHeight);
+    observer?.observe(nav);
+    window.addEventListener("resize", updateHeight);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", updateHeight);
+      document.documentElement.style.removeProperty("--global-owner-nav-height");
+      window.dispatchEvent(new Event("corner-ops-layout-change"));
+    };
+  }, [navHidden]);
 
   if (navHidden) return null;
 
   return (
-    <nav className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label="Corner Ops features" data-business={currentBusiness}>
+    <nav ref={navRef} className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label="Corner Ops features" data-business={currentBusiness}>
       <div className="globalNavTopline">
         <a className="globalBrand" href="/ops/people">Corner Ops</a>
+        <div className="globalBusinessSwitch" role="group" aria-label="Current business">
+          {businessNames.map((business) => (
+            <button
+              key={business}
+              type="button"
+              className={currentBusiness === business ? "active" : ""}
+              aria-pressed={currentBusiness === business}
+              onClick={() => chooseBusiness(business)}
+            >
+              {business}
+            </button>
+          ))}
+        </div>
         <button className="globalMenuButton" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
           {open ? "Close" : "Menu"}
         </button>
