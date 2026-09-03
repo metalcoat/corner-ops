@@ -41,8 +41,9 @@ test("customer catalog is public, customer-safe, and browsable while ordering is
   expect(typeof catalog.checkout.paymentEnabled).toBe("boolean");
 
   await page.goto("/order");
+  await expect(page.getByRole("button", { name: "START ORDER" })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "What sounds good?" }),
+    page.getByRole("heading", { name: "Order your favorites" }),
   ).toBeVisible();
   await expect(page.getByLabel("Search menu")).toBeVisible();
   await expect(page.locator(".menuItem").first()).toBeVisible();
@@ -84,8 +85,9 @@ test("customer catalog is public, customer-safe, and browsable while ordering is
   ).toHaveCount(0);
 
   await page.goto("/menu");
+  await page.getByRole("button", { name: "VIEW MENU" }).click();
   await expect(
-    page.getByRole("heading", { name: "What sounds good?" }),
+    page.getByRole("heading", { name: "Order your favorites" }),
   ).toBeVisible();
 
   const quote = await request.post("/api/customer/delivery/quote", {
@@ -348,6 +350,7 @@ test("customer can choose and review a half-pizza topping", async ({
     "aria-pressed",
     "true",
   );
+  await page.getByRole("button", { name: "VIEW MENU" }).click();
   await page.locator(".menuItem").click();
   const dialog = page.getByRole("dialog");
   await dialog

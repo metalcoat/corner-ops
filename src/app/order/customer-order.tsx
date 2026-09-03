@@ -231,7 +231,8 @@ export default function CustomerOrder() {
   const [serviceType, setServiceType] = useState<"pickup" | "curbside" | "delivery">(
       "pickup",
     ),
-    [fulfillmentOpen,setFulfillmentOpen]=useState(false),
+    [fulfillmentOpen,setFulfillmentOpen]=useState(true),
+    [setupVisited,setSetupVisited]=useState(false),
     [catalog, setCatalog] = useState<Catalog | null>(null),
     [loading, setLoading] = useState(true),
     [message, setMessage] = useState(""),
@@ -847,7 +848,8 @@ export default function CustomerOrder() {
       ) : null}
       <header className="orderHero">
         <a className="orderBrand" href="/order">
-          Corner Deli <span>Order online</span>
+          <img src="https://rezku-pos-upload.imgix.net/2e2a0810-d179-474b-a40b-e4104c60d8c1/olo/logo/jO52kF7dMM84upTQGozunTrduBxjbylAFeGYc8r_RT8.png?fit=crop&auto=compress&fmt=png32&h=60" alt="Corner Deli" />
+          <strong>Corner Deli</strong>
         </a>
         <button
           className="cartJump"
@@ -864,27 +866,27 @@ export default function CustomerOrder() {
         </a>
       </header>
       <div className="fulfillmentDock">
-        <div className="servicePicker" aria-label="Fulfillment type">
-          <button className={serviceType !== "delivery" ? "selected" : ""} onClick={() => {if(serviceType==="delivery")setServiceType("pickup");setFulfillmentOpen(true)}}><span aria-hidden="true">▣</span> Pickup</button>
-          <button disabled={!catalog?.delivery.enabled} className={serviceType === "delivery" ? "selected" : ""} onClick={() => {setServiceType("delivery");setFulfillmentOpen(true)}}><span aria-hidden="true">⌂</span> Delivery</button>
-        </div>
-        <button className="fulfillmentSummary" onClick={()=>setFulfillmentOpen(true)}><strong>{serviceType==="delivery"?"Delivery":serviceType==="curbside"?"Curbside pickup":"In-store pickup"}</strong><span>{timing==="asap"?(catalog&&!catalog.availability.open?"ASAP preorder":"ASAP"):scheduledFor?new Date(scheduledFor).toLocaleString([],{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"Choose future time"}{serviceType==="delivery"&&validatedDelivery?` · ${validatedDelivery.formattedAddress}`:""}</span><em>Change</em></button>
+        <button className="fulfillmentSummary" onClick={()=>{setSetupVisited(true);setFulfillmentOpen(true)}}><span className="fulfillmentBag" aria-hidden="true">▢</span><strong>{serviceType==="delivery"?"Delivery":serviceType==="curbside"?"Curbside pickup":"In-store pickup"}</strong><span>{timing==="asap"?(catalog&&!catalog.availability.open?"ASAP preorder":"ASAP"):scheduledFor?new Date(scheduledFor).toLocaleString([],{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"Choose future time"}{serviceType==="delivery"&&validatedDelivery?` · ${validatedDelivery.formattedAddress}`:""}</span><em>Change ›</em></button>
       </div>
-      <div className={`fulfillmentModal ${fulfillmentOpen?"open":""}`} aria-hidden={!fulfillmentOpen} onMouseDown={event=>{if(event.target===event.currentTarget)setFulfillmentOpen(false)}}>
+      <div className={`fulfillmentModal ${fulfillmentOpen?"open":""} ${!setupVisited?"fulfillmentCover":""}`} aria-hidden={!fulfillmentOpen} onMouseDown={event=>{if(setupVisited&&event.target===event.currentTarget)setFulfillmentOpen(false)}}>
+        {!setupVisited&&<div className="coverBrand"><img src="https://rezku-pos-upload.imgix.net/2e2a0810-d179-474b-a40b-e4104c60d8c1/olo/logo/jO52kF7dMM84upTQGozunTrduBxjbylAFeGYc8r_RT8.png?fit=crop&auto=compress&fmt=png32&h=60" alt="Corner Deli"/><strong>Corner Deli</strong></div>}
         <section role="dialog" aria-modal="true" aria-label="Pickup or delivery setup">
-          <header><div><p className="eyebrow">Order setup</p><h2>Pickup or delivery?</h2></div><button onClick={()=>setFulfillmentOpen(false)} aria-label="Close">×</button></header>
+          {setupVisited&&<header><div><p className="eyebrow">Order setup</p><h2>Pickup or delivery?</h2></div><button onClick={()=>setFulfillmentOpen(false)} aria-label="Close">×</button></header>}
           <div className="servicePicker modalServicePicker"><button className={serviceType!=="delivery"?"selected":""} onClick={()=>setServiceType("pickup")}>▣ Pickup</button><button className={serviceType==="delivery"?"selected":""} onClick={()=>setServiceType("delivery")}>⌂ Delivery</button></div>
+          {catalog&&!catalog.availability.open&&<div className="setupNotice">⚠ Restaurant currently closed for {serviceType==="delivery"?"delivery":"pickup"} orders, but open for preorders.</div>}
           {serviceType!=="delivery"&&<fieldset><legend>Pickup method</legend><div className="choiceRow"><button className="choiceButton" aria-pressed={serviceType==="pickup"} onClick={()=>setServiceType("pickup")}>In-store</button><button className="choiceButton" aria-pressed={serviceType==="curbside"} onClick={()=>setServiceType("curbside")}>Curbside</button></div></fieldset>}
           <fieldset><legend>When?</legend><div className="choiceRow"><button className="choiceButton" aria-pressed={timing==="asap"} onClick={()=>{setTiming("asap");setScheduledFor("")}}>{catalog&&!catalog.availability.open?"ASAP preorder":"ASAP"}</button><button className="choiceButton" aria-pressed={timing==="future"} onClick={()=>{setTiming("future");setDate(current=>current||localDateValue())}}>{catalog&&!catalog.availability.open?"Future preorder":"Future"}</button></div>{timing==="future"&&<div className="fulfillmentTimeGrid"><label>Date<input aria-label="Future order date" type="date" value={date} min={localDateValue()} onClick={event=>event.currentTarget.showPicker?.()} onChange={event=>{setDate(event.target.value);setScheduledFor("")}}/></label><label>Time<select aria-label="Future order time" value={scheduledFor} onChange={event=>setScheduledFor(event.target.value)}><option value="">Choose a time</option>{slots.map(slot=><option key={slot} value={slot}>{new Date(slot).toLocaleString([],{weekday:"short",hour:"numeric",minute:"2-digit"})}</option>)}</select></label></div>}</fieldset>
           <div id="delivery-address-top" className={serviceType==="delivery"?"topDeliveryAddress active":"topDeliveryAddress"}/>
-          <button className="reviewButton" disabled={(timing==="future"&&!scheduledFor)||(serviceType==="delivery"&&!validatedDelivery&&!savedAddressId)} onClick={()=>setFulfillmentOpen(false)}>USE THIS ORDER SETUP</button>
+          <button className="reviewButton setupStart" disabled={(timing==="future"&&!scheduledFor)||(serviceType==="delivery"&&!validatedDelivery&&!savedAddressId)} onClick={()=>{setSetupVisited(true);setFulfillmentOpen(false)}}>START ORDER</button>
+          {!setupVisited&&<><button className="setupBrowse" onClick={()=>{setSetupVisited(true);setFulfillmentOpen(false)}}>VIEW MENU</button><a className="setupLogin" href="/account">Log In / Sign Up</a><p className="setupLegal">By using this app you agree to the <a href="/privacy">Privacy Policy</a> &amp; <a href="/terms">Terms &amp; Conditions</a></p></>}
         </section>
+        {!setupVisited&&<footer className="coverFooter"><strong>Corner Deli</strong><a href="tel:+13153932271">(315) 393-2271</a><span>828 Morris St · Ogdensburg, NY 13669</span></footer>}
       </div>
       <section className="orderIntro">
         <div>
-          <p className="eyebrow">Made your way</p>
-          <h1>What sounds good?</h1>
-          <p>Browse the full menu anytime.</p>
+          <p className="eyebrow">Corner Deli menu</p>
+          <h1>Order your favorites</h1>
+          <p>Choose a category or search the menu.</p>
         </div>
       </section>
       {catalog && !catalog.availability.orderable && (
