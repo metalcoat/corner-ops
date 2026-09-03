@@ -191,6 +191,37 @@ export function startOpenAiSideband(
           "Ask the caller to try again.",
           403,
         );
+      if (call.order_id) {
+        const savedWingSauces = await sql`
+          SELECT items.item_name_snapshot,modifier.option_name_snapshot
+          FROM ordering_order_items items
+          JOIN ordering_order_item_modifiers modifier ON modifier.order_item_id=items.id
+          WHERE items.order_id=${String(call.order_id)}
+            AND modifier.group_name_snapshot='Wing Sauce'
+          ORDER BY items.sort_order,modifier.created_at
+        `;
+        for (const item of spokenItems) {
+          if (!/^(?:boneless )?wings?$/i.test(String(item.name))) continue;
+          const modifiers = Array.isArray(item.modifiers) ? item.modifiers : [];
+          const hasSauce = modifiers.some((modifier) =>
+            /^(mild|medium|hot|suicide|bbq|sweet and sassy|plain|sweet and sour|garlic parmesan|open pit bbq)$/i.test(
+              String(modifier.name),
+            ),
+          );
+          if (!hasSauce) {
+            const saved = savedWingSauces.find((entry) =>
+              /boneless/i.test(String(item.name))
+                ? /boneless/i.test(String(entry.item_name_snapshot))
+                : !/boneless/i.test(String(entry.item_name_snapshot)),
+            );
+            if (saved)
+              item.modifiers = [
+                ...modifiers,
+                { name: String(saved.option_name_snapshot) },
+              ];
+          }
+        }
+      }
       const callerPhone = String(call.caller_phone || args.callerPhone || "")
         .replace(/\D/g, "")
         .replace(/^1(?=\d{10}$)/, "")

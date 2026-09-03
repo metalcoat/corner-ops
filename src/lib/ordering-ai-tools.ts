@@ -728,6 +728,29 @@ export async function priceSpokenOrder(input: {
       .filter((item) => item.available);
   const resolved: AiItemInput[] = consolidateQuantities(
     input.items.map((requested) => {
+      const rawName = spokenKey(requested.name),
+        rawInputVariant = spokenKey(requested.variant || "");
+      if (
+        ["frie", "french frie"].includes(rawName) &&
+        /^(small|large)$/.test(rawInputVariant)
+      )
+        requested = {
+          ...requested,
+          name: `${rawInputVariant === "large" ? "Large" : "Small"} French Fries`,
+          variant: undefined,
+        };
+      const wingSauceVariant = /^(mild|medium|hot|suicide|bbq|sweet and sassy|plain|sweet and sour|garlic parmesan|open pit bbq)$/i.exec(
+        String(requested.variant || "").trim(),
+      );
+      if (spokenKey(requested.name).includes("wing") && wingSauceVariant)
+        requested = {
+          ...requested,
+          variant: undefined,
+          modifiers: [
+            ...(requested.modifiers || []),
+            { name: wingSauceVariant[1] },
+          ],
+        };
       const initialName = spokenKey(requested.name),
         initialVariant = spokenKey(requested.variant || ""),
         poutineRequested = /\b(poutine|pountine|protein)\b/.test(

@@ -429,6 +429,53 @@ async function main() {
   } finally {
     await getSql()`DELETE FROM ordering_orders WHERE id=${priced.id}`;
   }
+  const malformedRealtimePayload = await priceSpokenOrder({
+    business: "Corner Deli",
+    actor: {
+      id: "validation",
+      name: "Validation",
+      type: "employee",
+      role: "employee",
+    },
+    service: "pickup",
+    callerPhone: "3155550100",
+    firstName: "Chris",
+    items: [
+      {
+        name: "Pepperoni Pizza",
+        variant: "Jumbo Thin 16 inch",
+        quantity: 1,
+      },
+      { name: "Wings", variant: "Mild", quantity: 20 },
+      { name: "French Fries", variant: "Large", quantity: 1 },
+    ],
+  });
+  try {
+    assert.ok(
+      malformedRealtimePayload.lines.some(
+        (line: Record<string, any>) =>
+          line.item_name_snapshot === "Large French Fries",
+      ),
+      "French Fries with a Large variant must normalize to Large French Fries.",
+    );
+    const wingLine = malformedRealtimePayload.lines.find(
+      (line: Record<string, any>) => line.item_name_snapshot === "Wings",
+    );
+    assert.ok(
+      wingLine?.variant_name_snapshot?.includes("20 Wings"),
+      "A wing quantity with sauce in the variant must retain the wing count.",
+    );
+    const wingModifiers =
+      await getSql()`SELECT option_name_snapshot FROM ordering_order_item_modifiers WHERE order_item_id=${wingLine.id}`;
+    assert.ok(
+      wingModifiers.some(
+        (row: Record<string, any>) => row.option_name_snapshot === "Mild",
+      ),
+      "A wing sauce placed in the variant field must normalize to Wing Sauce.",
+    );
+  } finally {
+    await getSql()`DELETE FROM ordering_orders WHERE id=${malformedRealtimePayload.id}`;
+  }
   const schema =
     await getSql()`SELECT to_regclass('ordering_call_transcript_segments') transcript,to_regclass('ordering_ai_latency_samples') latency,to_regclass('ordering_ai_upsell_events') upsells,to_regclass('ordering_call_reviews') reviews`;
   assert.ok(
