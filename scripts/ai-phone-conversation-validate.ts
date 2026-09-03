@@ -99,8 +99,8 @@ async function main() {
     "GPT-Realtime 1.5 call acceptance must not send reasoning configuration.",
   );
   assert.ok(
-    webhookSource.includes("max_output_tokens:1024"),
-    "Function arguments and complete questions must not be constrained by the old 80-token ceiling.",
+    webhookSource.includes("max_output_tokens:512"),
+    "Function arguments and complete questions need enough output room while staying within the realtime token budget.",
   );
   assert.ok(
     webhookSource.includes('voice:"marin"') &&

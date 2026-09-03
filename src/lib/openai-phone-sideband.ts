@@ -82,6 +82,7 @@ export function startOpenAiSideband(
     lastCustomerTranscript = "",
     lastAssistantTranscript = "",
     completionRetryUsed = false,
+    rateLimitRetryTimer: ReturnType<typeof setTimeout> | undefined,
     hangupAfterPlayback = false,
     hangupRequested = false;
   const hangup = async () => {
@@ -526,6 +527,10 @@ export function startOpenAiSideband(
       } else if (
         type === "conversation.item.input_audio_transcription.completed"
       ) {
+        if (rateLimitRetryTimer) {
+          clearTimeout(rateLimitRetryTimer);
+          rateLimitRetryTimer = undefined;
+        }
         const value = text(row.transcript);
         lastCustomerTranscript = value;
         completionRetryUsed = false;
@@ -637,6 +642,8 @@ export function startOpenAiSideband(
       } else if (type === "response.done") {
         responseActive = false;
         const status = String(row.response?.status || ""),
+          errorCode = String(row.response?.status_details?.error?.code || ""),
+          errorMessage = text(row.response?.status_details?.error?.message),
           unfinished =
             /[,;:\-–—]$/.test(lastAssistantTranscript) ||
             /\b(and|or|with|for|to|the|a|do|does|would|could)$/.test(
@@ -659,26 +666,14 @@ export function startOpenAiSideband(
             payload: { status, transcript: lastAssistantTranscript },
             expected: { retry: true },
           });
-          void event(
-            callId,
-            `${key}:completion-retry`,
-            "response.completion_retry",
-            "system",
-            "Retrying truncated response",
-            `${status}: ${lastAssistantTranscript}`,
-          );
-          socket.send(
-            JSON.stringify({
-              type: "response.create",
-              response: {
-                instructions:
-                  "Complete only the unfinished sentence naturally. Do not restart or repeat completed words.",
-                output_modalities: ["audio"],
-                max_output_tokens: 80,
-                tool_choice: "none",
-              },
-            }),
-          );
+          const secondsMatch=errorMessage.match(/try again in\s+(-?[\d.]+)s/i),millisecondsMatch=errorMessage.match(/try again in\s+(\d+)ms/i),delayMs=errorCode==="rate_limit_exceeded"?Math.max(750,Math.min(12000,secondsMatch?Number(secondsMatch[1])*1000:millisecondsMatch?Number(millisecondsMatch[1]):2500)):0,retryTurn=lastTurnId;
+          void event(callId,`${key}:completion-retry`,"response.completion_retry","system",errorCode==="rate_limit_exceeded"?"Rate limited — retry scheduled":"Retrying truncated response",errorCode==="rate_limit_exceeded"?`Retrying in ${(delayMs/1000).toFixed(1)} seconds`:`${status}: ${lastAssistantTranscript}`);
+          const retry=()=>{
+            rateLimitRetryTimer=undefined;
+            if(socket.readyState!==WebSocket.OPEN||customerSpeaking||responseActive||retryTurn!==lastTurnId)return;
+            socket.send(JSON.stringify({type:"response.create",response:{instructions:"Continue the pending restaurant conversation in one short, complete sentence. Do not repeat completed words.",output_modalities:["audio"],max_output_tokens:128,tool_choice:"none"}}));
+          };
+          if(delayMs){rateLimitRetryTimer=setTimeout(retry,delayMs)}else retry();
         }
       } else if (type === "error") {
         void event(
@@ -715,6 +710,7 @@ export function startOpenAiSideband(
     clearTimeout(hardStop);
     if (turnTimer) clearTimeout(turnTimer);
     if (bargeInTimer) clearTimeout(bargeInTimer);
+    if (rateLimitRetryTimer) clearTimeout(rateLimitRetryTimer);
     if (ping) clearInterval(ping);
     if (sockets.get(callId) === socket) sockets.delete(callId);
     void event(

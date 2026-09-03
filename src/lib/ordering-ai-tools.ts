@@ -375,6 +375,12 @@ export const spokenKey = (value: string) =>
     .replace(/s\b/g, "");
 export const BUSINESS_ITEM_ALIASES: Record<string, string[]> = {
   pizza: ["pie"],
+  "cheeseburger 1 4lb": [
+    "cheeseburger",
+    "quarter pound cheeseburger",
+    "quarter pounder cheeseburger",
+    "cheeseburger quarter pound",
+  ],
   turkey: ["turkey sub", "regular turkey sub"],
   "turkey big bos": [
     "turkey big boss sub",

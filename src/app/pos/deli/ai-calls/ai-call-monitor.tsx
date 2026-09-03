@@ -1,0 +1,13 @@
+"use client";
+import {useCallback,useEffect,useState} from "react";
+
+type Activity={id:string;createdAt:string;role:string;label:string;detail:string;durationMs:number|null};
+type Call={id:string;call_id:string;caller_phone:string;line_number:string;state:string;started_at:string;display_name:string|null;open_order_number:string|null;activities:Activity[]};
+
+const phone=(value:string)=>value.length===10?`(${value.slice(0,3)}) ${value.slice(3,6)}-${value.slice(6)}`:value||"Caller ID pending";
+export default function AiCallMonitor(){
+ const[calls,setCalls]=useState<Call[]>([]),[error,setError]=useState(""),[updated,setUpdated]=useState<Date|null>(null);
+ const load=useCallback(async()=>{try{const response=await fetch("/api/ordering/calls",{cache:"no-store"}),body=await response.json();if(!response.ok)throw new Error(body.error||"Call monitor unavailable.");setCalls(body.aiCalls||[]);setUpdated(new Date());setError("")}catch(reason){setError(reason instanceof Error?reason.message:"Call monitor unavailable.")}},[]);
+ useEffect(()=>{void load();const timer=window.setInterval(()=>void load(),1500);return()=>window.clearInterval(timer)},[load]);
+ return <main className="aiCallMonitor"><header><div><span>AI PHONE</span><h1>Live call monitor</h1></div><aside><b className={error?"error":"live"}>{error?"OFFLINE":"LIVE"}</b><small>{updated?`Updated ${updated.toLocaleTimeString()}`:"Connecting…"}</small><button onClick={()=>void load()}>REFRESH</button></aside></header>{error&&<p role="alert">{error}</p>}{!calls.length&&!error?<section className="empty"><strong>No active AI calls</strong><span>The next call will appear here automatically.</span></section>:<div className="callGrid">{calls.map(call=>{const activities=[...(call.activities||[])].reverse(),latest=activities[0];return <article key={call.id}><header><div><h2>{call.display_name||phone(call.caller_phone)}</h2><span>{call.display_name?phone(call.caller_phone):""}</span></div><b data-state={call.state}>{call.state.replaceAll("_"," ")}</b></header><dl><div><dt>Line</dt><dd>{call.line_number||"—"}</dd></div><div><dt>Started</dt><dd>{new Date(call.started_at).toLocaleTimeString()}</dd></div><div><dt>Order</dt><dd>{call.open_order_number?`#${call.open_order_number}`:"Building"}</dd></div></dl><div className="current"><span>NOW</span><strong>{latest?.label||"Connected"}</strong>{latest?.detail&&<small>{latest.detail}</small>}</div><div className="activity">{activities.map(row=><div className={row.role} key={row.id}><time>{new Date(row.createdAt).toLocaleTimeString([], {hour:"numeric",minute:"2-digit",second:"2-digit"})}</time><p><strong>{row.label}</strong>{row.detail&&<span>{row.detail}</span>}</p></div>)}</div></article>})}</div>}</main>
+}

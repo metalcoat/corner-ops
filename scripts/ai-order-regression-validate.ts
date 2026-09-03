@@ -60,6 +60,11 @@ async function main() {
       expectedModifier: "Nacho Cheese on Side",
     },
     {
+      key: "cheeseburger-short-name",
+      items: [{ name: "cheeseburger", quantity: 1 }],
+      expectedItems: ["Cheeseburger (1/4lbs)"],
+    },
+    {
       key: "lobster-roll",
       items: [{ name: "lobster roll", quantity: 1 }],
       errorCode: "ITEM_NOT_ON_MENU",
