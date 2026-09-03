@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 const COOKIE_NAME = "corner_ops_session";
 const POS_COOKIE_NAME = "corner_ops_pos";
 const POS_NETWORK_COOKIE_NAME = "corner_ops_pos_network";
+const removedVendorPaths = ["/api/square", "/api/rezku", "/api/ordering/import/rezku", "/ops/rezku-monitor"];
 const selfAuthorizedApiPaths = [
   "/api/health", "/api/auth/session", "/api/auth/password-reset",
   "/api/timeclock", "/api/employee", "/api/employee/session",
@@ -127,6 +128,9 @@ function securedResponse(request: NextRequest): NextResponse {
 
 export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
+  if (removedVendorPaths.some((prefix) => matchesPath(path, prefix))) {
+    return new NextResponse("Not Found", { status: 404 });
+  }
   const response = securedResponse(request);
   if (response.status === 421) return response;
 
