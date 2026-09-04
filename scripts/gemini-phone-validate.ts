@@ -96,6 +96,9 @@ async function main() {
   const dialplan = readFileSync("asterisk/extensions.conf.template", "utf8");
   const bridge = readFileSync("asterisk/gemini-phone.py", "utf8");
   const phonePrompt = readFileSync("src/lib/openai-phone-prompt.ts", "utf8");
+  const { callerFromSipHeaders } = await import(
+    "../src/lib/openai-phone-ordering"
+  );
   assert.match(dialplan, /AudioSocket\(\$\{AI_CALL_ID\},127\.0\.0\.1:9092\)/);
   assert.match(bridge, /functionDeclarations/);
   assert.match(bridge, /request_secure_voice_payment/);
@@ -111,6 +114,17 @@ async function main() {
   assert.match(bridge, /def logical_tool_key/);
   assert.match(phonePrompt, /sour cream on the side/);
   assert.match(phonePrompt, /current authoritative totalCents before any tip/);
+  assert.equal(
+    callerFromSipHeaders([
+      {
+        name: "X-Corner-Ops-Caller",
+        value:
+          '"FraryFH"<sip:FraryFH@192.168.1.237:5060>;party=calling',
+      },
+    ]),
+    "",
+    "An internal SIP username/IP must never be converted into a customer phone number.",
+  );
   console.log(
     JSON.stringify({
       status: "passed",

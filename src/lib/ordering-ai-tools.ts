@@ -545,6 +545,13 @@ export const modifierAliases = (name: string, groupName = "") => {
       "side nacho",
       "side of nacho",
     );
+  if (/^gravy$/.test(simple) && /mashed mod/.test(group))
+    aliases.push(
+      "gravy on mashed",
+      "gravy on the mashed",
+      "gravy on mashed potatoes",
+      "gravy on the mashed potatoes",
+    );
   return [
     ...new Set(aliases.map((value) => value.replace(/\s+/g, " ").trim())),
   ];
@@ -1512,6 +1519,20 @@ export async function priceSpokenOrder(input: {
         ].find((value) => spokenName.includes(value));
         if (sauce) spokenModifiers.push({ name: sauce });
       }
+      const dependencyPriority = (modifier: { name: string }) => {
+        const key = spokenKey(modifier.name);
+        if (
+          /mashed|french frie|curly frie|waffle frie|tater tot|onion ring|tossed salad|coleslaw|mac and cheese/.test(
+            key,
+          )
+        )
+          return 0;
+        if (/gravy|nacho/.test(key)) return 2;
+        return 1;
+      };
+      spokenModifiers.sort(
+        (left, right) => dependencyPriority(left) - dependencyPriority(right),
+      );
       for (const requestedModifier of spokenModifiers) {
         const raw = spokenKey(requestedModifier.name),
           explicitOnItem = /\b(on (it|the|top)|over|melted)\b/i.test(

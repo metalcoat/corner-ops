@@ -12,7 +12,7 @@ async function main() {
     import("../src/lib/openai-phone-sideband"),
   ]);
   const { AiToolError, compositeModifierEffects, priceSpokenOrder } = tools;
-  const { applyPendingModifierAnswer } = sideband;
+  const { applyPendingModifierAnswer, incrementalSpokenCart } = sideband;
   await ensureOrderingAiSchema();
   const sql = getSql();
   const actor = {
@@ -131,6 +131,50 @@ async function main() {
     );
     assert.ok(
       result.modifierNames.some((name: string) => /^Gravy$/i.test(name)),
+    );
+
+    const reconstructedMeal = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      items: [
+        {
+          name: "Hot Roast Beef",
+          quantity: 1,
+          modifiers: [
+            { name: "Italian (On Salad)" },
+            { name: "Small Mashed" },
+            { name: "Gravy on Mashed" },
+          ],
+        },
+      ],
+    });
+    created.push(reconstructedMeal.id);
+    const reconstructedWithWings = await incrementalSpokenCart(
+      reconstructedMeal.id,
+      "add",
+      "",
+      [
+        {
+          name: "Boneless Wings",
+          variant: "30 Wings",
+          quantity: 1,
+          modifiers: [{ name: "Mild" }],
+        },
+      ],
+    );
+    const repricedReconstructedMeal = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      orderId: reconstructedMeal.id,
+      items: reconstructedWithWings,
+    });
+    assert.ok(
+      repricedReconstructedMeal.lines.some(
+        (line: Record<string, any>) => line.item_name_snapshot === "Boneless Wings",
+      ),
+      "Reconstructed mashed-and-gravy meals must not poison later cart additions.",
     );
 
     for (const provider of ["openai", "gemini"]) {

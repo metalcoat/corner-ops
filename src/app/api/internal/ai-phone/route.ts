@@ -13,6 +13,7 @@ import {
 } from "@/lib/ordering-voice-payment";
 import { buildPhoneInstructions } from "@/lib/openai-phone-prompt";
 import { phoneOrderingCustomerContext } from "@/lib/ordering-customers";
+import { callerFromSipHeaders } from "@/lib/openai-phone-ordering";
 import { claimCallerFromAiIngress } from "@/lib/three-cx-live-calls";
 
 export const runtime = "nodejs";
@@ -81,7 +82,12 @@ export async function GET(request: Request) {
   if (settings.provider !== "gemini" || !settings.enabled || !readiness.ready)
     return new Response("openai|");
   const id = randomUUID();
-  const sipCaller = digits(String(url.searchParams.get("caller") || ""));
+  const sipCaller = callerFromSipHeaders([
+    {
+      name: "x-corner-ops-caller",
+      value: String(url.searchParams.get("caller") || ""),
+    },
+  ]);
   const callerPhone = sipCaller || (await claimCallerFromAiIngress());
   const did = digits(String(url.searchParams.get("did") || ""));
   await getSql()`INSERT INTO ordering_call_sessions(id,business,three_cx_call_id,caller_phone,called_did,line_label,selected_model,selected_provider,operating_mode,state,owner_type,owner_id,bridge_action) VALUES(${randomUUID()},'Corner Deli',${id},${callerPhone},${did},'GEMINI TEST',${settings.geminiModel},'gemini',${settings.mode},'ai','ai',${`gemini:${id}`},'') ON CONFLICT(three_cx_call_id) DO UPDATE SET caller_phone=EXCLUDED.caller_phone,called_did=EXCLUDED.called_did,selected_model=EXCLUDED.selected_model,selected_provider='gemini',operating_mode=EXCLUDED.operating_mode,state='ai',owner_type='ai',owner_id=EXCLUDED.owner_id,bridge_action='',updated_at=NOW()`;
