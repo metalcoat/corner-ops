@@ -77,7 +77,9 @@ def main():
     agi("ANSWER")
     session=None
     try:
-        session=api({"action":"claim","callerPhone":environment.get("agi_callerid","")})
+        call_id=sys.argv[1].strip() if len(sys.argv)>1 else ""
+        verified_caller=sys.argv[2].strip() if len(sys.argv)>2 else ""
+        session=api({"action":"claim","callId":call_id,"callerPhone":verified_caller or environment.get("agi_callerid","")})
         prompt("welcome")
         card=hear_digits(13,19,"card-number")
         if not card or not confirmed(card[-4:]): raise RuntimeError("recognition")

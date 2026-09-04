@@ -91,7 +91,10 @@ export async function GET(request: Request) {
   const callerPhone = sipCaller || (await claimCallerFromAiIngress());
   const did = digits(String(url.searchParams.get("did") || ""));
   await getSql()`INSERT INTO ordering_call_sessions(id,business,three_cx_call_id,caller_phone,called_did,line_label,selected_model,selected_provider,operating_mode,state,owner_type,owner_id,bridge_action) VALUES(${randomUUID()},'Corner Deli',${id},${callerPhone},${did},'GEMINI TEST',${settings.geminiModel},'gemini',${settings.mode},'ai','ai',${`gemini:${id}`},'') ON CONFLICT(three_cx_call_id) DO UPDATE SET caller_phone=EXCLUDED.caller_phone,called_did=EXCLUDED.called_did,selected_model=EXCLUDED.selected_model,selected_provider='gemini',operating_mode=EXCLUDED.operating_mode,state='ai',owner_type='ai',owner_id=EXCLUDED.owner_id,bridge_action='',updated_at=NOW()`;
-  return new Response(`gemini|${id}`);
+  // Carry the verified customer number through the local AudioSocket handoff.
+  // The SIP channel caller ID can be a 3CX trunk label by this point, so the
+  // payment collector must not rely on it to locate the pending session.
+  return new Response(`gemini|${id}|${callerPhone}`);
 }
 
 export async function POST(request: Request) {

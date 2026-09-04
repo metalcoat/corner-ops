@@ -44,7 +44,7 @@ async function main() {
       ),
     );
     const decision = await routed.text();
-    assert.match(decision, /^gemini\|[0-9a-f-]{36}$/);
+    assert.match(decision, /^gemini\|[0-9a-f-]{36}\|3155550187$/);
     callId = decision.split("|")[1];
     const routedCall = (
       await sql`SELECT caller_phone FROM ordering_call_sessions WHERE three_cx_call_id=${callId}`

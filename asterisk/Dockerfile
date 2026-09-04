@@ -33,10 +33,10 @@ RUN chmod 0755 /usr/local/bin/corner-ops-asterisk-entrypoint /usr/local/bin/corn
       'processing:Please wait while I securely process the sandbox payment.' \
       'approved:Your test payment was approved and your order is complete. Thank you for calling Corner Deli.' \
       'employee-help:I could not complete the secure test payment. I will transfer you to an employee.'; do \
-      name="$${spec%%:*}"; text="$${spec#*:}"; \
-      espeak-ng -s 145 -w "/tmp/$${name}.wav" "$${text}"; \
-      sox "/tmp/$${name}.wav" -r 8000 -c 1 -e signed-integer -b 16 "/usr/share/asterisk/sounds/en/voice-payment/$${name}.wav"; \
-      rm "/tmp/$${name}.wav"; \
+      name="${spec%%:*}"; text="${spec#*:}"; \
+      espeak-ng -s 145 -w "/tmp/${name}.wav" "${text}"; \
+      sox "/tmp/${name}.wav" -r 8000 -c 1 -e signed-integer -b 16 "/usr/share/asterisk/sounds/en/voice-payment/${name}.wav"; \
+      rm "/tmp/${name}.wav"; \
     done
 
 ENTRYPOINT ["/usr/local/bin/corner-ops-asterisk-entrypoint"]

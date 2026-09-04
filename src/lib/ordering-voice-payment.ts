@@ -61,9 +61,12 @@ export async function prepareVoicePayment(callId:string){
   return {target:voicePaymentTarget(),amountCents:amount};
 }
 
-export async function claimVoicePayment(callerPhone:string){
+export async function claimVoicePayment(callerPhone:string,callId=""){
   await ensureVoicePaymentSchema();
-  const normalized=digits(callerPhone).slice(-10),sql=getSql(),row=(await sql`UPDATE ordering_voice_payment_sessions SET status='collecting',claimed_at=NOW(),updated_at=NOW() WHERE id=(SELECT id FROM ordering_voice_payment_sessions WHERE business=${business} AND right(regexp_replace(caller_phone,'[^0-9]','','g'),10)=${normalized} AND status='awaiting_call' AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING id,order_id,amount_cents`)[0];
+  const normalized=digits(callerPhone).slice(-10),sql=getSql();
+  const row=callId
+    ? (await sql`UPDATE ordering_voice_payment_sessions SET status='collecting',claimed_at=NOW(),updated_at=NOW() WHERE id=(SELECT id FROM ordering_voice_payment_sessions WHERE business=${business} AND call_id=${callId} AND status='awaiting_call' AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING id,order_id,amount_cents`)[0]
+    : (await sql`UPDATE ordering_voice_payment_sessions SET status='collecting',claimed_at=NOW(),updated_at=NOW() WHERE id=(SELECT id FROM ordering_voice_payment_sessions WHERE business=${business} AND right(regexp_replace(caller_phone,'[^0-9]','','g'),10)=${normalized} AND status='awaiting_call' AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING id,order_id,amount_cents`)[0];
   if(!row)throw new VoicePaymentError("No pending sandbox payment was found for this caller.");
   return {sessionId:String(row.id),orderId:String(row.order_id),amountCents:Number(row.amount_cents)};
 }
