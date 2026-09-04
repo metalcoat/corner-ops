@@ -10,7 +10,7 @@ const selfAuthorizedApiPaths = [
   "/api/timeclock", "/api/employee", "/api/employee/session",
   "/api/employee/pin-reset", "/api/pos", "/api/deli-board",
   "/api/document-scan", "/api/push",
-  "/api/3cx/inbound", "/api/3cx/crm/lookup", "/api/3cx/deli-ring", "/api/openai",
+  "/api/3cx/inbound", "/api/3cx/crm/lookup", "/api/3cx/deli-ring", "/api/3cx/ai-ring", "/api/openai",
   "/api/cron", "/api/customer", "/api/driver",
   "/api/ordering/store-dashboard", "/api/mobile/android/version",
   "/api/ordering/customer-display",
