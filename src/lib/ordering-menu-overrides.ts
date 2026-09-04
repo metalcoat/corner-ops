@@ -61,13 +61,13 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_menu_override_audit_target_idx ON ordering_menu_override_audit(target_type,target_id,created_at DESC)`;
-      // Nacho Supreme includes its regular salsa as a side cup. Keep the imported
-      // No Salsa and paid Extra Salsa modifiers intact while making the standard
-      // preparation explicit in every channel that reads the shared description.
+      // Nacho Supreme includes salsa on the food and sour cream on the side. Keep
+      // the imported removal and paid-extra modifiers intact while making the
+      // standard preparation explicit in every shared ordering channel.
       await sql`
       INSERT INTO ordering_item_overrides(item_id,description,updated_at,updated_by)
       SELECT item.id,
-        'Chips with meat, cheese, lettuce, tomatoes, onions, black olives, jalapeños, salsa on the side, and sour cream.',
+        'Chips with meat, cheese, lettuce, tomatoes, onions, black olives, jalapeños, and salsa, with sour cream on the side.',
         NOW(),'nacho-supreme-salsa-side'
       FROM ordering_menu_items item
       WHERE item.business='Corner Deli' AND item.name='Nacho Supreme' AND item.active=TRUE

@@ -109,7 +109,7 @@ async function main() {
   assert.match(bridge, /bufferUnderrun/);
   assert.match(bridge, /order_mutation_lock/);
   assert.match(bridge, /def logical_tool_key/);
-  assert.match(phonePrompt, /salsa on the side/);
+  assert.match(phonePrompt, /sour cream on the side/);
   assert.match(phonePrompt, /current authoritative totalCents before any tip/);
   console.log(
     JSON.stringify({
