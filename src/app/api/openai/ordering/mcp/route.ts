@@ -446,6 +446,8 @@ export async function POST(request: Request) {
       ],
       isError: true,
     });
+  if (requestedName === "hold" && !args.orderId && call.order_id)
+    args.orderId = String(call.order_id);
   if (requestedName === "request_human_handoff") {
     try {
       const result = await requestOpenAiHandoff(

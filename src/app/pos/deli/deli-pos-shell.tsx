@@ -92,7 +92,7 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
     window.fetch = async (...args) => {
       const response = await originalFetch(...args);
       const target = typeof args[0] === "string" ? args[0] : args[0] instanceof URL ? args[0].pathname : args[0].url;
-      const protectedConfiguration = target.startsWith("/api/ordering/settings/") || target.startsWith("/api/ordering/reports") || target.startsWith("/api/ordering/barcodes") || target.startsWith("/api/ordering/gift-cards/report");
+      const protectedConfiguration = target.startsWith("/api/ordering/settings/") || target.startsWith("/api/ordering/reports") || target.startsWith("/api/ordering/barcodes") || target.startsWith("/api/ordering/gift-cards/report") || target.startsWith("/api/ordering/calls");
       if (protectedConfiguration && (response.status === 401 || response.status === 403)) {
         if (response.status === 401) window.dispatchEvent(new Event("corner-ops-pos-locked"));
         window.setTimeout(() => router.refresh(), 0);

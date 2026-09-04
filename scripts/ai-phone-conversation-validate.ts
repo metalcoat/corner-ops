@@ -161,6 +161,34 @@ async function main() {
     ),
     readFile(new URL("../src/app/pos/pos-client.tsx", import.meta.url), "utf8"),
   ]);
+  const [mcpSource, internalPhoneSource, monitorSource] = await Promise.all([
+    readFile(
+      new URL("../src/app/api/openai/ordering/mcp/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/app/api/internal/ai-phone/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/app/pos/deli/ai-calls/ai-call-monitor.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
+  assert.ok(
+    mcpSource.includes('requestedName === "hold"') &&
+      mcpSource.includes("args.orderId = String(call.order_id)"),
+    "Gemini hold calls must inherit the active order instead of failing without an orderId.",
+  );
+  assert.ok(
+    internalPhoneSource.includes("Math.round(Math.max(0, Number(body.durationMs)"),
+    "Fractional Gemini telemetry durations must be converted to database integers.",
+  );
+  assert.ok(
+    monitorSource.includes("response.status === 401") &&
+      monitorSource.includes("<PosPinGate"),
+    "An expired call-monitor session must show the PIN gate instead of polling forever.",
+  );
   assert.ok(
     callsSource.includes("variant_name_snapshot variant") &&
       posSource.includes("item.variant"),

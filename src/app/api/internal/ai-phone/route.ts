@@ -117,7 +117,7 @@ export async function POST(request: Request) {
       ).slice(0, 240);
       const label = String(body.label || eventType).slice(0, 160);
       const detail = JSON.stringify(body.detail || {}).slice(0, 2000);
-      await getSql()`INSERT INTO ordering_ai_call_events(id,business,call_id,event_key,event_type,role,label,detail,duration_ms) VALUES(${randomUUID()},'Corner Deli',${callId},${eventKey},${eventType},'system',${label},${detail},${body.durationMs == null ? null : Math.max(0, Number(body.durationMs) || 0)}) ON CONFLICT(business,event_key) DO NOTHING`;
+      await getSql()`INSERT INTO ordering_ai_call_events(id,business,call_id,event_key,event_type,role,label,detail,duration_ms) VALUES(${randomUUID()},'Corner Deli',${callId},${eventKey},${eventType},'system',${label},${detail},${body.durationMs == null ? null : Math.round(Math.max(0, Number(body.durationMs) || 0))}) ON CONFLICT(business,event_key) DO NOTHING`;
       return Response.json({ ok: true });
     }
     if (action === "handoff") {
