@@ -67,6 +67,8 @@
     "test:ai-phone-conversation": "tsx scripts/ai-phone-conversation-validate.ts",
     "test:ai-followup-modifiers": "tsx scripts/ai-followup-modifier-validate.ts",
     "test:ai-order-regressions": "tsx scripts/ai-order-regression-validate.ts",
+    "test:ai-natural-aliases": "tsx scripts/ai-natural-language-alias-validate.ts",
+    "audit:ai-menu-aliases": "tsx scripts/ai-menu-alias-audit.ts",
     "test:ai-ordering": "tsx scripts/ai-ordering-validate.ts",
     "audit:ai-menu-coverage": "tsx scripts/ai-menu-coverage-audit.ts",
     "test:operational-reporting": "tsx scripts/operational-reporting-validate.ts",

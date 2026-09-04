@@ -373,6 +373,18 @@ export const spokenKey = (value: string) =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/s\b/g, "");
+export const normalizedSpokenName = (value: string) =>
+  spokenKey(
+    value
+      .replace(/\b\d+\s*\/\s*\d+\s*(?:lb|lbs|pounds?)\b/gi, " ")
+      .replace(/\(\s*\d+\s*\/\s*\d+\s*(?:lb|lbs|pounds?)\s*\)/gi, " ")
+      .replace(/\(\s*(?:on (?:the )?salad|on (?:the )?side)\s*\)/gi, " ")
+      .replace(/\b(?:on (?:the )?side|side of)\b/gi, " ")
+      .replace(/\b4\s*oz\b|\b2\s*oz\b/gi, " ")
+      .replace(/\bsm\b/gi, " small ")
+      .replace(/\blg\b/gi, " large ")
+      .replace(/\bsal\b/gi, " salad "),
+  );
 export const BUSINESS_ITEM_ALIASES: Record<string, string[]> = {
   pizza: ["pie"],
   "cheeseburger 1 4lb": [
@@ -420,6 +432,43 @@ export const BUSINESS_ITEM_ALIASES: Record<string, string[]> = {
   "breaded cauliflower": ["fried cauliflower", "battered cauliflower"],
 };
 const itemAliases = BUSINESS_ITEM_ALIASES;
+export function generatedItemAliases(name: string) {
+  const canonical = spokenKey(name),
+    simple = normalizedSpokenName(name),
+    aliases = [name, simple];
+  if (/cheeseburger/.test(simple))
+    aliases.push(
+      simple.replace(/\b1 4lb\b|\b1 2lb\b|\b3 4lb\b/g, "").trim(),
+      "cheese burger",
+    );
+  if (simple === "cheeseburger")
+    aliases.push("burger with cheese", "regular cheeseburger");
+  if (/mozzarella stick/.test(simple))
+    aliases.push("mozz sticks", "mozz stick", "cheese sticks", "cheese stick");
+  if (/tater tot/.test(simple))
+    aliases.push(simple.replace("tater ", ""), "tots", "tater tots");
+  if (simple === "wing")
+    aliases.push(
+      "traditional wings",
+      "regular wings",
+      "bone in wings",
+      "chicken wings",
+    );
+  if (simple === "boneles wing") aliases.push("boneless", "boneless wings");
+  if (simple === "small tossed salad")
+    aliases.push("small salad", "side salad");
+  if (simple === "medium mashed potato")
+    aliases.push("medium mashed", "medium mash");
+  if (simple === "small mashed potato")
+    aliases.push("small mashed", "small mash");
+  return [
+    ...new Set(
+      [...aliases, ...(itemAliases[canonical] || [])]
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
 const editDistance = (a: string, b: string) => {
   const row = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) {
@@ -446,23 +495,74 @@ const similarity = (a: string, b: string) => {
     );
   return 1 - editDistance(a, b) / Math.max(a.length, b.length, 1);
 };
-const modifierAliases = (name: string) => {
+export const modifierAliases = (name: string, groupName = "") => {
   const withoutPortion = name.replace(
       /\s*\(\s*\d+(?:\.\d+)?\s*oz\s*\)\s*$/i,
       "",
     ),
     withoutPlacement = name.replace(/\s*\(\s*on salad\s*\)\s*$/i, ""),
-    aliases = [name, withoutPortion, withoutPlacement];
+    aliases = [
+      name,
+      withoutPortion,
+      withoutPlacement,
+      normalizedSpokenName(name),
+    ];
   for (const value of [...aliases]) {
     aliases.push(value.replace(/\bparmesan\b/gi, "parm"));
     aliases.push(value.replace(/\bsauce\b/gi, ""));
     if (/^mayo$/i.test(value)) aliases.push("mayonnaise");
     if (/^extra cheese$/i.test(value)) aliases.push("cheese");
   }
+  const group = spokenKey(groupName),
+    simple = normalizedSpokenName(name);
+  if (/dressing/.test(group))
+    aliases.push(
+      simple.replace(/\bdressing\b/g, "").trim(),
+      `${simple.replace(/\bdressing\b/g, "").trim()} dressing`,
+    );
+  if (/sauce|fry option|mashed mod/.test(group))
+    aliases.push(simple.replace(/\b(?:sauce|cheese|on side)\b/g, "").trim());
+  if (/side/.test(group))
+    aliases.push(simple.replace(/\b(?:frie|potato|tater tot)\b/g, "").trim());
+  if (/crust/.test(group))
+    aliases.push(simple.replace(/\bcrust\b/g, "").trim());
+  if (/blue cheese/.test(simple)) aliases.push("blue", "bleu", "bleu cheese");
+  if (/italian/.test(simple)) aliases.push("italian");
+  if (/mashed/.test(simple)) aliases.push("mashed", "mash");
+  if (/curly frie/.test(simple)) aliases.push("curly");
+  if (/waffle frie/.test(simple)) aliases.push("waffle");
+  if (/nacho cheese/.test(simple))
+    aliases.push(
+      "nacho",
+      "nachos",
+      "cheese sauce",
+      "side nacho",
+      "side of nacho",
+    );
   return [
     ...new Set(aliases.map((value) => value.replace(/\s+/g, " ").trim())),
   ];
 };
+export function compositeModifierEffects(
+  optionNames: string[],
+  intent: string,
+) {
+  const key = spokenKey(intent);
+  if (
+    !/\b(poutine|poutin|pountine|poutene)\b/.test(key) &&
+    !(/\bcheese\b/.test(key) && /\bgravy\b/.test(key))
+  )
+    return [];
+  const dedicated = optionNames.find((name) => /poutine/i.test(name));
+  if (dedicated) return [dedicated];
+  const cheese = optionNames.find((name) =>
+      /^(?:shredded )?cheese$/i.test(name),
+    ),
+    gravy = optionNames.find((name) =>
+      /^gravy(?: on (?:the )?side)?$/i.test(name),
+    );
+  return cheese && gravy ? [cheese, gravy] : [];
+}
 function pizzaVariantAlias(value: string) {
   const key = spokenKey(value);
   if (!key) return undefined;
@@ -502,6 +602,52 @@ function strictMatch<T>(
       "Ask one short clarification question.",
       409,
     );
+  const contained = indexed
+      .map((candidate) => ({
+        ...candidate,
+        best:
+          candidate.terms
+            .filter(
+              (term) =>
+                term.length >= 4 &&
+                term.includes(" ") &&
+                ` ${wanted} `.includes(` ${term} `),
+            )
+            .sort((a, b) => b.length - a.length)[0] || "",
+      }))
+      .filter((candidate) => candidate.best)
+      .sort((a, b) => b.best.length - a.best.length),
+    bestLength = contained[0]?.best.length || 0,
+    bestContained = contained.filter(
+      (candidate) => candidate.best.length === bestLength,
+    );
+  if (bestContained.length === 1) return bestContained[0].row;
+  if (bestContained.length > 1)
+    throw new AiToolError(
+      code,
+      `${kind} is ambiguous: ${query}.`,
+      "Ask one short clarification question.",
+      409,
+    );
+  const partial = indexed.filter(
+    (candidate) =>
+      wanted.length >= 3 &&
+      candidate.terms.some(
+        (term) =>
+          term !== wanted &&
+          (term.startsWith(`${wanted} `) ||
+            term.endsWith(` ${wanted}`) ||
+            term.includes(` ${wanted} `)),
+      ),
+  );
+  if (partial.length === 1) return partial[0].row;
+  if (partial.length > 1)
+    throw new AiToolError(
+      code,
+      `${kind} is ambiguous: ${query}.`,
+      "Ask one short clarification question.",
+      409,
+    );
   const ranked = indexed
       .map((candidate) => ({
         ...candidate,
@@ -510,10 +656,15 @@ function strictMatch<T>(
         ),
       }))
       .sort((a, b) => b.score - a.score),
+    automatic =
+      ranked[0] &&
+      ranked[0].score >= 0.9 &&
+      (!ranked[1] || ranked[0].score - ranked[1].score >= 0.08),
     suggestion =
       ranked[0] && ranked[0].score >= 0.72
         ? terms(ranked[0].row)[0]
         : undefined;
+  if (automatic) return ranked[0].row;
   throw new AiToolError(
     code,
     code === "ITEM_NOT_ON_MENU"
@@ -737,6 +888,47 @@ export async function priceSpokenOrder(input: {
       const rawName = spokenKey(requested.name),
         rawInputVariant = spokenKey(requested.variant || "");
       if (
+        /\b(?:tater\s+)?tot\b/.test(rawName) &&
+        !/\b(?:small|large)\b/.test(rawName) &&
+        !rawInputVariant &&
+        !/\b(?:poutine|poutin|pountine|poutene|protein)\b/.test(rawName)
+      )
+        throw new AiToolError(
+          "INVALID_VARIANT",
+          "Tater tots require a size.",
+          "Ask: Small or large?",
+          409,
+          {
+            options: ["Small Tater Tots", "Large Tater Tots"],
+            pendingItem: {
+              category: "tater tots",
+              customerRequest: requested.name,
+              missingRequiredFields: ["size"],
+            },
+          },
+        );
+      if (
+        /\b(?:frie|french frie)\b/.test(rawName) &&
+        !/\b(?:sandwich|sub|wrap)\b/.test(rawName) &&
+        !/\b(?:small|large)\b/.test(rawName) &&
+        !rawInputVariant &&
+        !/\b(?:poutine|poutin|pountine|poutene|protein)\b/.test(rawName)
+      )
+        throw new AiToolError(
+          "INVALID_VARIANT",
+          "Fries require a size.",
+          "Ask: Small or large?",
+          409,
+          {
+            options: ["Small French Fries", "Large French Fries"],
+            pendingItem: {
+              category: "french fries",
+              customerRequest: requested.name,
+              missingRequiredFields: ["size"],
+            },
+          },
+        );
+      if (
         ["frie", "french frie"].includes(rawName) &&
         /^(small|large)$/.test(rawInputVariant)
       )
@@ -745,9 +937,10 @@ export async function priceSpokenOrder(input: {
           name: `${rawInputVariant === "large" ? "Large" : "Small"} French Fries`,
           variant: undefined,
         };
-      const wingSauceVariant = /^(mild|medium|hot|suicide|bbq|sweet and sassy|plain|sweet and sour|garlic parmesan|open pit bbq)$/i.exec(
-        String(requested.variant || "").trim(),
-      );
+      const wingSauceVariant =
+        /^(mild|medium|hot|suicide|bbq|sweet and sassy|plain|sweet and sour|garlic parmesan|open pit bbq)$/i.exec(
+          String(requested.variant || "").trim(),
+        );
       if (spokenKey(requested.name).includes("wing") && wingSauceVariant)
         requested = {
           ...requested,
@@ -759,7 +952,7 @@ export async function priceSpokenOrder(input: {
         };
       const initialName = spokenKey(requested.name),
         initialVariant = spokenKey(requested.variant || ""),
-        poutineRequested = /\b(poutine|pountine|protein)\b/.test(
+        poutineRequested = /\b(poutine|poutin|pountine|poutene|protein)\b/.test(
           `${initialName} ${initialVariant}`,
         );
       if (poutineRequested) {
@@ -774,19 +967,28 @@ export async function priceSpokenOrder(input: {
             initialName.includes("tater") ||
             initialName.includes("tot") ||
             initialVariant.includes("tater") ||
-            initialVariant.includes("tot");
+            initialVariant.includes("tot"),
+          curly =
+            initialName.includes("curly") || initialVariant.includes("curly"),
+          waffle =
+            initialName.includes("waffle") || initialVariant.includes("waffle"),
+          base = tots
+            ? "Tater Tots"
+            : curly
+              ? "Curly Fries"
+              : waffle
+                ? "Waffle Fries"
+                : "French Fries";
         if (!size)
           throw new AiToolError(
             "INVALID_VARIANT",
-            tots ? "Small or large tater tots?" : "Small or large?",
+            "Small or large?",
             "Ask the returned size question.",
             409,
             {
-              options: tots
-                ? ["Small Tater Tots", "Large Tater Tots"]
-                : ["Small French Fries", "Large French Fries"],
+              options: [`Small ${base}`, `Large ${base}`],
               pendingItem: {
-                category: tots ? "tater tot poutine" : "poutine",
+                category: `${spokenKey(base)} poutine`,
                 customerRequest: requested.name,
                 missingRequiredFields: ["size"],
               },
@@ -794,15 +996,15 @@ export async function priceSpokenOrder(input: {
           );
         requested = {
           ...requested,
-          name: `${size} ${tots ? "Tater Tots" : "French Fries"}`,
+          name: `${size} ${base}`,
           variant: undefined,
-          modifiers: [
-            ...(requested.modifiers || []),
-            { name: "Make it Poutine (Cheese & Gravy)" },
-          ],
+          modifiers: [...(requested.modifiers || []), { name: "poutine" }],
         };
       }
-      const wingRequest = spokenKey(requested.name).includes("wing"),
+      const wingRequest =
+          spokenKey(requested.name).includes("wing") ||
+          (/\b(?:bone in|traditional)\b/.test(spokenKey(requested.name)) &&
+            /\b(10|12|15|20|24|25|30|40|50)\b/.test(spokenKey(requested.name))),
         explicitWingCount =
           /\b(10|12|15|20|24|25|30|40|50)\b/.test(
             `${spokenKey(requested.name)} ${spokenKey(requested.variant || "")}`,
@@ -835,7 +1037,14 @@ export async function priceSpokenOrder(input: {
         );
       const spokenName = spokenKey(requested.name),
         spokenVariant = spokenKey(requested.variant || ""),
-        wingPhrase = spokenName.includes("wing"),
+        hotMealPhrase =
+          /^(hot turkey|hot roast beef|hot hamburger|hamburger steak)\b/.exec(
+            spokenName,
+          )?.[1],
+        wingPhrase =
+          spokenName.includes("wing") ||
+          (/\b(?:bone in|traditional)\b/.test(spokenName) &&
+            /\b(10|12|15|20|24|25|30|40|50)\b/.test(spokenName)),
         bonelessRequested =
           wingPhrase &&
           (spokenName.includes("boneles") || spokenVariant.includes("boneles")),
@@ -859,24 +1068,33 @@ export async function priceSpokenOrder(input: {
           409,
           { options: ["Variety for TWO", "Variety for Four"] },
         );
-      const itemQuery = wingPhrase
-          ? bonelessRequested
-            ? "Boneless Wings"
-            : "Wings"
-          : pizzaPhrase
-            ? "Pizza"
-            : varietyPhrase && varietySize === "four"
-              ? "Variety for Four"
-              : varietyPhrase && varietySize === "two"
-                ? "Variety for TWO"
-                : requested.name,
+      const itemQuery = hotMealPhrase
+          ? hotMealPhrase
+          : wingPhrase
+            ? bonelessRequested
+              ? "Boneless Wings"
+              : "Wings"
+            : pizzaPhrase
+              ? "Pizza"
+              : varietyPhrase && varietySize === "four"
+                ? "Variety for Four"
+                : varietyPhrase && varietySize === "two"
+                  ? "Variety for TWO"
+                  : /\bmozz(?:arella)?\s+stick|\bcheese\s+stick/.test(
+                        spokenName,
+                      )
+                    ? "Mozzarella Sticks"
+                    : /\bsmall\s+(?:tossed\s+)?salad\b/.test(spokenName)
+                      ? "SM Tossed Sal"
+                      : requested.name,
         item = strictMatch(
           itemQuery,
           allItems,
           (row) => [
             row.name,
+            normalizedSpokenName(row.name),
             ...row.aliases,
-            ...(itemAliases[spokenKey(row.name)] || []),
+            ...generatedItemAliases(row.name),
           ],
           "ITEM_NOT_ON_MENU",
           "Menu item",
@@ -951,7 +1169,12 @@ export async function priceSpokenOrder(input: {
           ? strictMatch(
               variantWanted,
               item.variants,
-              (row) => [row.name, ...row.aliases],
+              (row) => [
+                row.name,
+                normalizedSpokenName(row.name),
+                ...row.aliases,
+                ...modifierAliases(row.name, "size"),
+              ],
               "INVALID_VARIANT",
               "Menu variant",
             )
@@ -962,6 +1185,28 @@ export async function priceSpokenOrder(input: {
           `Sorry, ${requested.variant} isn't an available size or option.`,
           "Ask for a valid pizza size.",
           409,
+        );
+      if (
+        /^(hot turkey|hot roast beef|hot hamburger|hamburger steak)/.test(
+          spokenKey(item.name),
+        ) &&
+        /\b(?:mashed|mash)\b/.test(spokenName) &&
+        !/\b(?:small|medium)\s+(?:mashed|mash)\b/.test(spokenName)
+      )
+        throw new AiToolError(
+          "INVALID_MODIFIER",
+          "Small or medium?",
+          "Ask exactly: Small or medium?",
+          409,
+          {
+            options: ["Small Mashed", "Medium Mashed"],
+            pendingItem: {
+              category: spokenKey(item.name),
+              customerRequest: requested.name,
+              actualMenuItemId: item.id,
+              missingRequiredFields: ["mashed size"],
+            },
+          },
         );
       const modifierSelections: Record<string, string[]> = Object.fromEntries(
           item.modifiers
@@ -975,6 +1220,109 @@ export async function priceSpokenOrder(input: {
         ),
         pizzaToppings: NonNullable<AiItemInput["pizzaToppings"]> = [],
         spokenModifiers = [...(requested.modifiers || [])];
+      for (let index = spokenModifiers.length - 1; index >= 0; index--) {
+        const effects = compositeModifierEffects(
+          item.modifiers.flatMap((group) =>
+            group.options
+              .filter((option) => option.available)
+              .map((option) => option.name),
+          ),
+          spokenModifiers[index].name,
+        );
+        if (effects.length)
+          spokenModifiers.splice(
+            index,
+            1,
+            ...effects.map((name) => ({ name })),
+          );
+      }
+      const compositePoutine =
+        /^(?:Small|Large) (?:French|Curly|Waffle) Fries$|^(?:Small|Large) Tater Tots$/.test(
+          item.name,
+        ) &&
+        /\b(?:cheese|cheesy)\b/.test(spokenName) &&
+        /\bgravy\b/.test(spokenName);
+      if (
+        compositePoutine &&
+        !spokenModifiers.some((value) => /poutine/i.test(value.name))
+      ) {
+        const effects = compositeModifierEffects(
+          item.modifiers.flatMap((group) =>
+            group.options
+              .filter((option) => option.available)
+              .map((option) => option.name),
+          ),
+          "poutine",
+        );
+        spokenModifiers.push(...effects.map((name) => ({ name })));
+      }
+      const scratchSelections: Record<string, string[]> = Object.fromEntries(
+        Object.entries(modifierSelections).map(([key, value]) => [
+          key,
+          [...value],
+        ]),
+      );
+      for (const group of item.modifiers.filter(
+        (group) => group.presentationContext !== "hidden",
+      )) {
+        const active =
+          group.presentationContext === "ordinary" ||
+          Boolean(
+            group.parentGroupId &&
+            (group.parentOptionIds || []).some((id: string) =>
+              (scratchSelections[String(group.parentGroupId)] || []).includes(
+                id,
+              ),
+            ),
+          );
+        if (!active) continue;
+        const matches = group.options
+          .filter((option) => option.available)
+          .map((option) => ({
+            option,
+            aliases: modifierAliases(option.name, group.name),
+          }))
+          .map((candidate) => ({
+            ...candidate,
+            best: candidate.aliases
+              .filter((alias) => {
+                const key = spokenKey(alias);
+                return (
+                  key.length >= 3 && ` ${spokenName} `.includes(` ${key} `)
+                );
+              })
+              .sort((a, b) => spokenKey(b).length - spokenKey(a).length)[0],
+          }))
+          .filter((candidate) => candidate.best);
+        if (!matches.length) continue;
+        const longest = Math.max(
+            ...matches.map((candidate) => spokenKey(candidate.best!).length),
+          ),
+          best = matches.filter(
+            (candidate) => spokenKey(candidate.best!).length === longest,
+          ),
+          exactCanonical = best.find(
+            (candidate) =>
+              spokenKey(candidate.option.name) === spokenKey(candidate.best!),
+          ),
+          chosen = exactCanonical || (best.length === 1 ? best[0] : undefined);
+        if (!chosen) continue;
+        if (
+          !spokenModifiers.some(
+            (value) => spokenKey(value.name) === spokenKey(chosen.option.name),
+          )
+        )
+          spokenModifiers.push({ name: chosen.option.name });
+        scratchSelections[group.id] =
+          group.maxSelections === 1
+            ? [chosen.option.id]
+            : [
+                ...new Set([
+                  ...(scratchSelections[group.id] || []),
+                  chosen.option.id,
+                ]),
+              ];
+      }
       for (let index = spokenModifiers.length - 1; index >= 0; index--) {
         const key = spokenKey(spokenModifiers[index].name);
         if (
@@ -1091,12 +1439,29 @@ export async function priceSpokenOrder(input: {
           mealWithIncludedSalad = item.modifiers.some(
             (group) => group.name === "Choose a Salad (Dinner)",
           ),
-          choices = item.modifiers
+          allChoices = item.modifiers
             .filter((group) => group.presentationContext !== "hidden")
             .flatMap((group) =>
               group.options.map((option) => ({ group, option })),
             )
             .filter(({ option }) => option.available),
+          activeChoices = allChoices.filter(
+            ({ group }) =>
+              group.presentationContext === "ordinary" ||
+              !group.parentGroupId ||
+              (group.parentOptionIds || []).some((optionId: string) =>
+                (
+                  modifierSelections[String(group.parentGroupId)] || []
+                ).includes(optionId),
+              ),
+          ),
+          choices = activeChoices.some(({ group, option }) =>
+            modifierAliases(option.name, group.name).some(
+              (alias) => spokenKey(alias) === raw,
+            ),
+          )
+            ? activeChoices
+            : allChoices,
           requiredDressingChoices = mealWithIncludedSalad
             ? choices.filter(
                 ({ group }) =>
@@ -1127,27 +1492,27 @@ export async function priceSpokenOrder(input: {
           ),
           matchingChoices =
             requiredDressingChoices.length &&
-            requiredDressingChoices.some(({ option }) =>
-              modifierAliases(option.name).some(
+            requiredDressingChoices.some(({ option, group }) =>
+              modifierAliases(option.name, group.name).some(
                 (alias) => spokenKey(alias) === raw,
               ),
             )
               ? requiredDressingChoices
-              : burgerToppingChoices.some(({ option }) =>
-                    modifierAliases(option.name).some(
+              : burgerToppingChoices.some(({ option, group }) =>
+                    modifierAliases(option.name, group.name).some(
                       (alias) => spokenKey(alias) === raw,
                     ),
                   )
                 ? burgerToppingChoices
-              : explicitSideSauce && portionedChoices.length
-                ? portionedChoices
-                : wingSauceChoices.some(({ option }) =>
-                      modifierAliases(option.name).some(
-                        (alias) => spokenKey(alias) === raw,
-                      ),
-                    )
-                  ? wingSauceChoices
-                  : choices,
+                : explicitSideSauce && portionedChoices.length
+                  ? portionedChoices
+                  : wingSauceChoices.some(({ option, group }) =>
+                        modifierAliases(option.name, group.name).some(
+                          (alias) => spokenKey(alias) === raw,
+                        ),
+                      )
+                    ? wingSauceChoices
+                    : choices,
           hasSideNacho = choices.some(
             ({ option }) => spokenKey(option.name) === "nacho cheese on side",
           ),
@@ -1161,7 +1526,7 @@ export async function priceSpokenOrder(input: {
             key,
             matchingChoices,
             (row) => [
-              ...modifierAliases(row.option.name),
+              ...modifierAliases(row.option.name, row.group.name),
               /^russian$/i.test(row.option.name)
                 ? "russian dressing"
                 : row.option.name,
@@ -1208,6 +1573,43 @@ export async function priceSpokenOrder(input: {
                   ]),
                 ];
       }
+      const hotMeatMeal =
+          /^(hot turkey|hot roast beef|hot hamburger|hamburger steak)/.test(
+            spokenKey(item.name),
+          ),
+        mashedGroup = item.modifiers.find(
+          (group) => group.name === "Choose a Side",
+        ),
+        mashedSelected = mashedGroup?.options.some(
+          (option) =>
+            /mashed/i.test(option.name) &&
+            (modifierSelections[mashedGroup.id] || []).includes(option.id),
+        ),
+        gravySelected = item.modifiers.some(
+          (group) =>
+            group.name === "Mashed Mods" &&
+            group.options.some(
+              (option) =>
+                /^Gravy$/i.test(option.name) &&
+                (modifierSelections[group.id] || []).includes(option.id),
+            ),
+        );
+      if (hotMeatMeal && mashedSelected && !gravySelected)
+        throw new AiToolError(
+          "INVALID_MODIFIER",
+          "Gravy on the mashed potatoes?",
+          "Ask exactly: Gravy on the mashed potatoes?",
+          409,
+          {
+            pendingItem: {
+              category: spokenKey(item.name),
+              customerRequest: requested.name,
+              actualMenuItemId: item.id,
+              actualVariantId: variant?.id || null,
+              missingRequiredFields: ["mashed gravy preference"],
+            },
+          },
+        );
       const missingRequired = item.modifiers.find(
         (group) =>
           (group.presentationContext === "ordinary" ||
@@ -1271,7 +1673,7 @@ export async function priceSpokenOrder(input: {
         "Create a new priced draft.",
         404,
       );
-    return replaceAiDraft({
+    const result = await replaceAiDraft({
       business: input.business,
       actor: input.actor,
       orderId: input.orderId,
@@ -1283,8 +1685,9 @@ export async function priceSpokenOrder(input: {
       firstName: input.firstName,
       lastName: input.lastName,
     });
+    return result;
   }
-  return createAiDraft({
+  const result = await createAiDraft({
     business: input.business,
     actor: input.actor,
     service: input.service,
@@ -1294,6 +1697,7 @@ export async function priceSpokenOrder(input: {
     firstName: input.firstName,
     lastName: input.lastName,
   });
+  return result;
 }
 
 export async function replaceAiDraft(input: {
