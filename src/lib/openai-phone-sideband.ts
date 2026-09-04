@@ -14,6 +14,7 @@ import {
 import { recordAiRegression } from "@/lib/ordering-ai-regressions";
 import { openAiClient, requestOpenAiHandoff, requestOpenAiVoicePayment } from "@/lib/openai-phone-ordering";
 import { attachSpokenDeliveryAddress } from "@/lib/ordering-delivery-landmarks";
+import { quoteDelivery } from "@/lib/ordering-delivery";
 
 const sockets = new Map<string, WebSocket>();
 
@@ -53,6 +54,32 @@ async function latency(
 }
 const text = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
+
+type CartOperation="add"|"replace_item"|"remove_item"|"replace_order"|"read";
+async function spokenCart(orderId:string):Promise<SpokenOrderItem[]> {
+  const sql=getSql(),lines=await sql`SELECT id,item_name_snapshot,variant_name_snapshot,quantity FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`,modifiers=await sql`SELECT modifier.order_item_id,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${orderId} AND modifier.selection_state IN('selected','extra') AND (modifier.print_on_ticket=TRUE OR modifier.pizza_topping_portion IS NOT NULL) ORDER BY modifier.created_at,modifier.id`;
+  return lines.map(line=>({name:String(line.item_name_snapshot),variant:String(line.variant_name_snapshot||"")||undefined,quantity:Number(line.quantity),modifiers:modifiers.filter(modifier=>String(modifier.order_item_id)===String(line.id)).flatMap(modifier=>Array.from({length:Math.max(1,Number(modifier.quantity||1))},()=>({name:String(modifier.option_name_snapshot),portion:(modifier.pizza_topping_portion||undefined) as SpokenOrderItem["modifiers"] extends Array<infer M>?M extends {portion?:infer P}?P:never:never,amount:(modifier.pizza_topping_amount||undefined) as SpokenOrderItem["modifiers"] extends Array<infer M>?M extends {amount?:infer A}?A:never:never})))}));
+}
+const cartKey=(value:string)=>value.toLowerCase().replace(/[^a-z0-9]+/g," ").trim().replace(/s\b/g,"");
+export async function incrementalSpokenCart(orderId:string|null,operation:CartOperation,targetItem:string,changed:SpokenOrderItem[]){
+  if(!orderId||operation==="replace_order")return changed;
+  const current=await spokenCart(orderId);
+  if(operation==="read")return current;
+  const target=cartKey(targetItem||changed[0]?.name||"");
+  if(operation==="add")return [...current,...changed];
+  const matches=(item:SpokenOrderItem)=>cartKey(item.name)===target;
+  if(operation==="replace_item")return [...current.filter(item=>!matches(item)),...changed];
+  if(operation==="remove_item"){
+    const removeQuantity=Math.max(1,Number(changed[0]?.quantity||1));let remaining=removeQuantity;
+    return current.flatMap(item=>{if(!matches(item)||remaining<=0)return[item];const quantity=Math.max(1,Number(item.quantity||1)),taken=Math.min(quantity,remaining);remaining-=taken;return quantity>taken?[{...item,quantity:quantity-taken}]:[]});
+  }
+  return changed;
+}
+export async function compactPhoneOrderResult(result:Record<string,any>,operation:CartOperation){
+  const sql=getSql(),modifiers=await sql`SELECT modifier.order_item_id,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${String(result.id)} AND modifier.selection_state IN('selected','extra') AND modifier.print_on_ticket=TRUE ORDER BY modifier.created_at,modifier.id`;
+  return{ok:true,operation,orderId:String(result.id),displayNumber:String(result.display_number||""),version:Number(result.version),serviceType:String(result.service_type),totalCents:Number(result.total_cents),amountDueCents:Number(result.amount_due_cents),paymentMethod:String(result.payment_preference||""),tipCents:Number(result.tip_cents||0),lines:(result.lines||[]).map((line:Record<string,any>)=>({name:String(line.item_name_snapshot),variant:String(line.variant_name_snapshot||""),quantity:Number(line.quantity),modifiers:modifiers.filter(modifier=>String(modifier.order_item_id)===String(line.id)).map(modifier=>({name:String(modifier.option_name_snapshot),quantity:Number(modifier.quantity||1),portion:modifier.pizza_topping_portion||undefined,amount:modifier.pizza_topping_amount||undefined}))})),warnings:result.warnings||[],requiredFollowUp:result.required_follow_up||undefined};
+}
+export function compactPhoneMenuResult(result:any[]){return result.slice(0,3).map(category=>({category:category.name,items:(category.items||[]).slice(0,3).map((item:any)=>({name:item.name,description:item.description||"",priceCents:item.basePriceCents,variants:(item.variants||[]).filter((variant:any)=>variant.available!==false).map((variant:any)=>({name:variant.name,priceCents:variant.basePriceCents})),modifierGroups:(item.modifiers||[]).filter((group:any)=>group.presentationContext!=="hidden").map((group:any)=>({name:group.name,required:Number(group.minSelections)>0,options:(group.options||[]).filter((option:any)=>option.available).map((option:any)=>({name:option.name,priceCents:option.priceDeltaCents}))}))}))}))}
 
 export function startOpenAiSideband(
   callId: string,
@@ -161,7 +188,7 @@ export function startOpenAiSideband(
         string,
         unknown
       >;
-      const spokenItems = Array.isArray(args.items)
+      let spokenItems = Array.isArray(args.items)
         ? (args.items as SpokenOrderItem[])
         : [];
       const sauceMatch = lastCustomerTranscript.match(
@@ -183,7 +210,7 @@ export function startOpenAiSideband(
       }
       const sql = getSql();
       const call = (
-        await sql`SELECT id,order_id,caller_phone FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} AND state IN('ai','handoff_pending') LIMIT 1`
+        await sql`SELECT call.id,call.order_id,call.caller_phone,orders.service_type,orders.customer_id,orders.first_name_snapshot,orders.last_name_snapshot,address.route_distance_miles FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=orders.id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
       )[0];
       if (!call)
         throw new AiToolError(
@@ -192,6 +219,7 @@ export function startOpenAiSideband(
           "Ask the caller to try again.",
           403,
         );
+      const operation=(['add','replace_item','remove_item','replace_order','read'].includes(String(args.operation))?String(args.operation):'replace_order') as CartOperation;
       if (call.order_id) {
         const savedWingSauces = await sql`
           SELECT items.item_name_snapshot,modifier.option_name_snapshot
@@ -227,16 +255,18 @@ export function startOpenAiSideband(
         .replace(/\D/g, "")
         .replace(/^1(?=\d{10}$)/, "")
         .slice(-10);
+      const touchedItems=spokenItems;
+      spokenItems=await incrementalSpokenCart(call.order_id?String(call.order_id):null,operation,String(args.targetItem||""),touchedItems);
       const result = await priceSpokenOrder({
         business: "Corner Deli",
         actor,
-        service: serviceType(args.serviceType),
+        service: serviceType(args.serviceType||call.service_type||"undecided"),
         items: spokenItems,
         orderId: call.order_id || null,
-        customerId: String(args.customerId || "") || null,
+        customerId: String(args.customerId || call.customer_id || "") || null,
         callerPhone,
-        firstName: String(args.firstName || ""),
-        lastName: String(args.lastName || ""),
+        firstName: String(args.firstName || call.first_name_snapshot || ""),
+        lastName: String(args.lastName || call.last_name_snapshot || ""),
       });
       await sql`UPDATE ordering_call_sessions SET order_id=${String(result.id)},updated_at=NOW() WHERE id=${call.id}`;
       if (
@@ -281,6 +311,10 @@ export function startOpenAiSideband(
           amount_due_cents: Number(updated.amount_due_cents),
           delivery_fee_cents: Number(updated.delivery_fee_cents),
         });
+      } else if(serviceType(args.serviceType||call.service_type||"undecided")==="delivery"&&call.route_distance_miles!=null){
+        const quote=await quoteDelivery({business:"Corner Deli",distanceMiles:Number(call.route_distance_miles),merchandiseSubtotalCents:Number(result.subtotal_cents)});
+        await sql`UPDATE ordering_orders SET delivery_fee_cents=${quote.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}-paid_cents),version=version+1,updated_at=NOW() WHERE id=${String(result.id)}`;
+        Object.assign(result,(await sql`SELECT delivery_fee_cents,total_cents,amount_due_cents,version FROM ordering_orders WHERE id=${String(result.id)}`)[0]);
       }
       if (args.paymentMethod === "cash" || args.paymentMethod === "card") {
         const paymentResult = await setAiPaymentDetails({
@@ -295,14 +329,14 @@ export function startOpenAiSideband(
       }
       const wingNeedsAddOn =
         args.wingAddOnDecision !== "declined" &&
-        spokenItems.some(
+        touchedItems.some(
           (item) =>
             /^(?:boneless )?wings?$/i.test(String(item.name)) &&
             !(item.modifiers || []).some((modifier) =>
               /^(blue cheese|ranch|celery)$/i.test(String(modifier.name)),
             ),
         );
-      const burgerItems = spokenItems.filter((item) =>
+      const burgerItems = touchedItems.filter((item) =>
           /burger/i.test(String(item.name)),
         ),
         burgerHasToppings = burgerItems.some((item) =>
@@ -350,13 +384,15 @@ export function startOpenAiSideband(
         durationMs: Date.now() - started,
         model,
       });
+      const compactResult=await compactPhoneOrderResult(result,operation);
+      if(result.required_follow_up)compactResult.requiredFollowUp=result.required_follow_up;
       socket.send(
         JSON.stringify({
           type: "conversation.item.create",
           item: {
             type: "function_call_output",
             call_id: row.call_id,
-            output: JSON.stringify(result),
+            output: JSON.stringify(compactResult),
           },
         }),
       );
@@ -422,11 +458,11 @@ export function startOpenAiSideband(
         string,
         unknown
       >;
-      result = await menuCatalog(
+      result = compactPhoneMenuResult(await menuCatalog(
         "Corner Deli",
         new Date(),
         String(args.query || ""),
-      );
+      ));
     } catch {
       result = {
         error: {

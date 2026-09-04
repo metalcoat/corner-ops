@@ -32,10 +32,19 @@ export const OPENAI_PRICE_ORDER_TOOL = {
   type: "function" as const,
   name: "price_order",
   description:
-    "Strictly validate every requested product, size, and modifier against the current Corner Deli catalog, then atomically price the complete order. Never rename a request to a similar item. A failed call means nothing was added.",
+    "Incrementally update the server-side cart and strictly validate each requested product, size, and modifier. Send only changed items; the result contains the authoritative compact cart.",
   parameters: {
     type: "object",
     properties: {
+      operation: {
+        type: "string",
+        enum: ["add", "replace_item", "remove_item", "replace_order", "read"],
+        description: "Use add for new food, replace_item for a correction or modifier to an existing item, remove_item to delete/decrease one item, replace_order only for a full reset, and read when only updating payment/customer details.",
+      },
+      targetItem: {
+        type: "string",
+        description: "Existing canonical cart item name affected by replace_item or remove_item.",
+      },
       serviceType: { type: "string", enum: ["pickup", "delivery"] },
       deliveryAddress: {
         type: "string",
@@ -121,7 +130,7 @@ export const OPENAI_PRICE_ORDER_TOOL = {
           "Set only after asking whether the caller wants fries with the burger.",
       },
     },
-    required: ["serviceType", "items"],
+    required: ["operation", "serviceType", "items"],
     additionalProperties: false,
   },
 };

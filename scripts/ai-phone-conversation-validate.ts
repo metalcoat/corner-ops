@@ -12,12 +12,14 @@ async function main() {
     { ensureOrderingAiSchema },
     { getSql },
     { menuCatalog, priceSpokenOrder },
+    { compactPhoneMenuResult, compactPhoneOrderResult, incrementalSpokenCart },
   ] = await Promise.all([
     import("../src/lib/openai-phone-prompt"),
     import("../src/lib/ordering-ai-phone-config"),
     import("../src/lib/ordering-ai-schema"),
     import("../src/lib/db"),
     import("../src/lib/ordering-ai-tools"),
+    import("../src/lib/openai-phone-sideband"),
   ]);
   await ensureOrderingAiSchema();
   const settings = await getAiPhoneSettings(),
@@ -72,14 +74,14 @@ async function main() {
     "Hard rules override creativity",
     "Ask exactly one question at a time",
     "finish it",
-    "No menu ID means no item",
+    "no menu match means no item",
     "Never invent, infer, substitute",
     "ITEM_NOT_ON_MENU",
     "INVALID_MODIFIER",
     "CATALOG_UNAVAILABLE",
     "after two failed clarification attempts",
     "REQUEST_HUMAN_HANDOFF",
-    "total_cents",
+    "totalCents",
     "SHADOW",
     "Maximum",
   ]) {
@@ -195,11 +197,11 @@ async function main() {
   assert.ok(
     prompt.includes("explicitly asks for the total") &&
       prompt.includes("A requested total never means the order is finished") &&
-      prompt.includes("asking exactly “Anything else?”"),
+      prompt.includes("ask exactly “Anything else?”"),
     "Requested totals must not prematurely end the order.",
   );
   assert.ok(
-    prompt.includes("read the entire authoritative order back once") &&
+    prompt.includes("read the entire authoritative compact cart back once") &&
       prompt.includes("Does that sound right?") &&
       prompt.includes("Only after the caller confirms the readback is correct"),
     "Every completed phone order must receive one confirmed full readback.",
@@ -259,7 +261,7 @@ async function main() {
     "Internal review status must not be spoken to callers.",
   );
   assert.ok(
-    prompt.includes("Never finish an order without a phone number") &&
+    prompt.toLowerCase().includes("never finish an order without a phone number") &&
       prompt.includes("include it as callerPhone"),
     "Missing caller ID must trigger callback-number collection for the POS order.",
   );
@@ -271,7 +273,7 @@ async function main() {
   assert.ok(
     prompt.includes("Preserve the caller's size words") &&
       prompt.includes("large pepperoni pizza") &&
-      prompt.includes("required_follow_up"),
+      prompt.includes("requiredFollowUp"),
     "Readbacks must preserve spoken pizza sizes and required wing follow-ups.",
   );
   assert.ok(
@@ -351,6 +353,8 @@ async function main() {
     "Pizza",
     "A topped jumbo pizza request must resolve in one search.",
   );
+  const compactJumbo=compactPhoneMenuResult(toppedJumbo);
+  assert.ok(JSON.stringify(compactJumbo).length<JSON.stringify(toppedJumbo).length,"Phone menu search must return a category-scoped compact payload.");
   const priced = await priceSpokenOrder({
     business: "Corner Deli",
     actor: {
@@ -433,6 +437,13 @@ async function main() {
         `${defaultName} must remain selected and hidden by default.`,
       );
     }
+    const increment=await incrementalSpokenCart(String(priced.id),"add","",[{name:"cheeseburger",quantity:1}]);
+    assert.equal(increment.length,3,"Incremental add must retain the two server-side cart lines without retransmitting them.");
+    const incremented=await priceSpokenOrder({business:"Corner Deli",actor:{id:"validation",name:"Validation",type:"employee",role:"employee"},service:"pickup",orderId:String(priced.id),callerPhone:"3155550100",firstName:"Chris",items:increment});
+    assert.equal(incremented.lines.length,3,"Incremental cart state must reprice into the same draft.");
+    assert.ok(incremented.lines.some((line:Record<string,any>)=>line.item_name_snapshot==="Cheeseburger (1/4lbs)"),"Incremental shorthand must resolve the quarter-pound cheeseburger.");
+    const compactOrder=await compactPhoneOrderResult(incremented,"add");
+    assert.ok(JSON.stringify(compactOrder).length<JSON.stringify(incremented).length,"Realtime pricing must return a compact cart instead of database-shaped rows.");
   } finally {
     await getSql()`DELETE FROM ordering_orders WHERE id=${priced.id}`;
   }

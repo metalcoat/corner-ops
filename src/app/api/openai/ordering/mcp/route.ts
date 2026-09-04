@@ -18,6 +18,7 @@ import {
   OPENAI_PHONE_MODEL,
   requestOpenAiHandoff,
 } from "@/lib/openai-phone-ordering";
+import { incrementalSpokenCart } from "@/lib/openai-phone-sideband";
 
 export const runtime = "nodejs";
 type Rpc = {
@@ -314,11 +315,13 @@ const tools = [
   {
     name: "price_order",
     description:
-      "PRIMARY phone-order tool. Atomically resolve canonical item/variant/modifier names, create or replace the complete server-priced draft, and return its authoritative total. Call once after each customer ordering turn; include the complete order so far.",
+      "PRIMARY phone-order tool. Incrementally update the server-priced cart. Send only changed items; replace_order is only for an intentional full reset.",
     inputSchema: {
       type: "object",
       properties: {
         ...properties,
+        operation: {type:"string",enum:["add","replace_item","remove_item","replace_order","read"]},
+        targetItem: {type:"string"},
         serviceType: {
           type: "string",
           enum: ["undecided", "pickup", "delivery"],
@@ -333,7 +336,7 @@ const tools = [
         firstName: { type: "string" },
         lastName: { type: "string" },
       },
-      required: ["callId", "serviceType", "items"],
+      required: ["callId", "operation", "serviceType", "items"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false },
@@ -492,13 +495,14 @@ export async function POST(request: Request) {
       role: "employee" as const,
     };
   try {
+    const phoneItems=requestedName==="price_order"?await incrementalSpokenCart(call.order_id?String(call.order_id):null,(["add","replace_item","remove_item","replace_order","read"].includes(String(args.operation))?String(args.operation):"replace_order") as "add"|"replace_item"|"remove_item"|"replace_order"|"read",String(args.targetItem||""),Array.isArray(args.items)?args.items as any:[]):[];
     const result =
       requestedName === "price_order"
         ? await priceSpokenOrder({
             business: "Corner Deli",
             actor,
             service: serviceType(args.serviceType),
-            items: Array.isArray(args.items) ? (args.items as any) : [],
+            items: phoneItems,
             orderId: call.order_id || null,
             callerPhone: String(args.callerPhone || call.caller_phone || ""),
             firstName: String(args.firstName || ""),
