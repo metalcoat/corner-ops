@@ -887,9 +887,41 @@ export async function priceSpokenOrder(input: {
   const catalog = await indexedSpokenCatalog(input.business),
     allItems = catalog
       .flatMap((category) => category.items)
-      .filter((item) => item.available);
+      .filter((item) => item.available),
+    spokenItems = input.items.flatMap((requested) => {
+      const itemName = spokenKey(requested.name),
+        burger =
+          itemName.includes("burger") &&
+          !/hot hamburger|hamburger steak/.test(itemName),
+        fryModifiers = burger
+          ? (requested.modifiers || []).filter((modifier) =>
+              /^(?:(?:small|large) )?(?:french )?(?:frie|fry)$/.test(
+                spokenKey(modifier.name),
+              ),
+            )
+          : [];
+      if (!fryModifiers.length) return [requested];
+      const burgerLine: SpokenOrderItem = {
+          ...requested,
+          modifiers: (requested.modifiers || []).filter(
+            (modifier) => !fryModifiers.includes(modifier),
+          ),
+        },
+        fryLines = fryModifiers.map((modifier): SpokenOrderItem => {
+          const fryName = spokenKey(modifier.name);
+          return {
+            name: fryName.includes("large")
+              ? "Large French Fries"
+              : fryName.includes("small")
+                ? "Small French Fries"
+                : "French Fries",
+            quantity: 1,
+          };
+        });
+      return [burgerLine, ...fryLines];
+    });
   const resolved: AiItemInput[] = consolidateQuantities(
-    input.items.map((requested) => {
+    spokenItems.map((requested) => {
       const rawName = spokenKey(requested.name),
         rawInputVariant = spokenKey(requested.variant || "");
       if (

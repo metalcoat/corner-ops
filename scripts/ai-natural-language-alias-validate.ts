@@ -60,6 +60,34 @@ async function main() {
     let result = await price("cheeseburger");
     assert.equal(result.lines[0].item_name_snapshot, "Cheeseburger (1/4lbs)");
 
+    const burgerWithUpsoldFries = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      items: [
+        {
+          name: "Cactus Burger",
+          quantity: 1,
+          modifiers: [{ name: "Large Fry" }],
+        },
+      ],
+    });
+    created.push(burgerWithUpsoldFries.id);
+    assert.ok(
+      burgerWithUpsoldFries.lines.some(
+        (line: Record<string, any>) =>
+          line.item_name_snapshot === "Cactus Burger",
+      ),
+      "The burger upsell must preserve the Cactus Burger line.",
+    );
+    assert.ok(
+      burgerWithUpsoldFries.lines.some(
+        (line: Record<string, any>) =>
+          line.item_name_snapshot === "Large French Fries",
+      ),
+      "A fry supplied as a burger modifier must become a separate French Fries line.",
+    );
+
     result = await price("large fries with nacho");
     assert.equal(result.lines[0].item_name_snapshot, "Large French Fries");
     assert.ok(result.modifierNames.includes("Nacho Cheese on Side"));
