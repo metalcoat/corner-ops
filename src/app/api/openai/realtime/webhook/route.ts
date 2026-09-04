@@ -3,7 +3,7 @@ import { getAiPhoneSettings,realtimeBusinessContext } from "@/lib/ordering-ai-ph
 import { buildPhoneInstructions } from "@/lib/openai-phone-prompt";
 import { startOpenAiSideband } from "@/lib/openai-phone-sideband";
 import { phoneOrderingCustomerContext } from "@/lib/ordering-customers";
-import { callerFromLivePosFeed } from "@/lib/three-cx-live-calls";
+import { callerFromLivePosFeed,claimCallerFromAiIngress } from "@/lib/three-cx-live-calls";
 
 export const runtime="nodejs";
 
@@ -19,8 +19,8 @@ export async function POST(request:Request){
     await client.realtime.calls.reject(callId,{status_code:480});
     return Response.json({received:true,accepted:false,reason:!readiness.ready?"phone_ordering_not_configured":"did_not_allow_test_ai"});
   }
-  const lineLabel=lineForDid(calledDid),sipCaller=callerFromSipHeaders(headers),callerPhone=sipCaller||await callerFromLivePosFeed(lineLabel),[settings,business,customer]=await Promise.all([getAiPhoneSettings(),realtimeBusinessContext(),phoneOrderingCustomerContext("Corner Deli",callerPhone)]),model=settings.model;
-  console.info("OpenAI caller identity resolved.",{callId,source:sipCaller?"sip":"pos_live_feed",found:Boolean(callerPhone),lineLabel});
+  const lineLabel=lineForDid(calledDid),sipCaller=callerFromSipHeaders(headers),aiIngressCaller=sipCaller?"":await claimCallerFromAiIngress(),callerPhone=sipCaller||aiIngressCaller||await callerFromLivePosFeed(lineLabel),[settings,business,customer]=await Promise.all([getAiPhoneSettings(),realtimeBusinessContext(),phoneOrderingCustomerContext("Corner Deli",callerPhone)]),model=settings.model;
+  console.info("OpenAI caller identity resolved.",{callId,source:sipCaller?"sip":aiIngressCaller?"ai_ingress":"pos_live_feed",found:Boolean(callerPhone),lineLabel});
   if(!settings.enabled){await client.realtime.calls.reject(callId,{status_code:480});return Response.json({received:true,accepted:false,reason:"ai_phone_disabled"})}
   await registerOpenAiCall(callId,callerPhone,calledDid,lineLabel,model,settings.mode);
   try{

@@ -61,6 +61,20 @@ async function spokenCart(orderId:string):Promise<SpokenOrderItem[]> {
   return lines.map(line=>({name:String(line.item_name_snapshot),variant:String(line.variant_name_snapshot||"")||undefined,quantity:Number(line.quantity),modifiers:modifiers.filter(modifier=>String(modifier.order_item_id)===String(line.id)).flatMap(modifier=>Array.from({length:Math.max(1,Number(modifier.quantity||1))},()=>({name:String(modifier.option_name_snapshot),portion:(modifier.pizza_topping_portion||undefined) as SpokenOrderItem["modifiers"] extends Array<infer M>?M extends {portion?:infer P}?P:never:never,amount:(modifier.pizza_topping_amount||undefined) as SpokenOrderItem["modifiers"] extends Array<infer M>?M extends {amount?:infer A}?A:never:never})))}));
 }
 const cartKey=(value:string)=>value.toLowerCase().replace(/[^a-z0-9]+/g," ").trim().replace(/s\b/g,"");
+const modifierKey=(value:string)=>value.toLowerCase().replace(/\(\s*\d+(?:\.\d+)?\s*oz\s*\)/g,"").replace(/\bon side\b/g,"").replace(/^(?:add|extra|xtra)\s+/g,"").replace(/[^a-z0-9]+/g," ").trim();
+export async function attachStandaloneModifierAnswer(orderId:string|null,operation:CartOperation,changed:SpokenOrderItem[]){
+  if(!orderId||operation!=="add"||changed.length!==1||changed[0].variant||changed[0].modifiers?.length)return null;
+  const requested=modifierKey(changed[0].name);
+  if(!requested)return null;
+  const current=await spokenCart(orderId);
+  for(const line of [...current].reverse()){
+    const catalog=await menuCatalog("Corner Deli",new Date(),line.name),item=catalog.flatMap(category=>category.items||[]).find(entry=>cartKey(String(entry.name))===cartKey(line.name));
+    const option=item?.modifiers?.flatMap((group:any)=>group.presentationContext==="hidden"?[]:(group.options||[]).filter((entry:any)=>entry.available)).find((entry:any)=>modifierKey(String(entry.name))===requested);
+    if(!option)continue;
+    return{operation:"replace_item" as CartOperation,targetItem:line.name,items:[{...line,modifiers:[...(line.modifiers||[]),{name:String(option.name)}]}]};
+  }
+  return null;
+}
 export async function incrementalSpokenCart(orderId:string|null,operation:CartOperation,targetItem:string,changed:SpokenOrderItem[]){
   if(!orderId||operation==="replace_order")return changed;
   const current=await spokenCart(orderId);
@@ -219,7 +233,7 @@ export function startOpenAiSideband(
           "Ask the caller to try again.",
           403,
         );
-      const operation=(['add','replace_item','remove_item','replace_order','read'].includes(String(args.operation))?String(args.operation):'replace_order') as CartOperation;
+      let operation=(['add','replace_item','remove_item','replace_order','read'].includes(String(args.operation))?String(args.operation):'replace_order') as CartOperation;
       if (call.order_id) {
         const savedWingSauces = await sql`
           SELECT items.item_name_snapshot,modifier.option_name_snapshot
@@ -251,12 +265,15 @@ export function startOpenAiSideband(
           }
         }
       }
+      let targetItem=String(args.targetItem||"");
+      const attached=await attachStandaloneModifierAnswer(call.order_id?String(call.order_id):null,operation,spokenItems);
+      if(attached){operation=attached.operation;targetItem=attached.targetItem;spokenItems=attached.items}
       const callerPhone = String(call.caller_phone || args.callerPhone || "")
         .replace(/\D/g, "")
         .replace(/^1(?=\d{10}$)/, "")
         .slice(-10);
       const touchedItems=spokenItems;
-      spokenItems=await incrementalSpokenCart(call.order_id?String(call.order_id):null,operation,String(args.targetItem||""),touchedItems);
+      spokenItems=await incrementalSpokenCart(call.order_id?String(call.order_id):null,operation,targetItem,touchedItems);
       const result = await priceSpokenOrder({
         business: "Corner Deli",
         actor,

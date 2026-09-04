@@ -29,7 +29,7 @@ function voicePaymentTarget(){
   if(explicit)return /^\d+$/.test(explicit)?`tel:${explicit}`:explicit;
   const handoff=process.env.OPENAI_PHONE_HANDOFF_TARGET?.trim()||"";
   const extension=process.env.ASTERISK_VOICE_PAYMENT_EXTENSION?.trim()||"101";
-  if(/^\+?\d+$/.test(handoff))return `tel:${extension}`;
+  if(/^\+?\d+$/.test(handoff))throw new VoicePaymentError("OPENAI_PHONE_VOICE_PAYMENT_TARGET must be an explicit SIP URI for the local payment extension.");
   const sipTarget=handoff.replace(/^(sip:)[^@]+@/i,`$1${extension}@`);
   return sipTarget===handoff?extension:sipTarget;
 }

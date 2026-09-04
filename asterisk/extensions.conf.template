@@ -14,9 +14,9 @@ exten => ${ASTERISK_VOICE_PAYMENT_EXTENSION},1,NoOp(Isolated local sandbox voice
  same => n(done),Hangup()
 exten => _.,1,NoOp(Bridging 3CX call ${CALLERID(num)} to OpenAI Realtime SIP)
  same => n,Set(__CORNER_CALLER_IDENTITY=${PJSIP_HEADER(read,P-Asserted-Identity)})
- same => n,ExecIf($["${CORNER_CALLER_IDENTITY}"=""]?Set(__CORNER_CALLER_IDENTITY=${PJSIP_HEADER(read,Remote-Party-ID)}))
- same => n,ExecIf($["${CORNER_CALLER_IDENTITY}"=""]?Set(__CORNER_CALLER_IDENTITY=${PJSIP_HEADER(read,From)}))
- same => n,ExecIf($["${CORNER_CALLER_IDENTITY}"=""]?Set(__CORNER_CALLER_IDENTITY=${CALLERID(num)}))
+ same => n,ExecIf($[${LEN(${CORNER_CALLER_IDENTITY})}=0]?Set(__CORNER_CALLER_IDENTITY=${PJSIP_HEADER(read,Remote-Party-ID)}))
+ same => n,ExecIf($[${LEN(${CORNER_CALLER_IDENTITY})}=0]?Set(__CORNER_CALLER_IDENTITY=${PJSIP_HEADER(read,From)}))
+ same => n,ExecIf($[${LEN(${CORNER_CALLER_IDENTITY})}=0]?Set(__CORNER_CALLER_IDENTITY=${CALLERID(num)}))
  same => n,Dial(${PJSIP_DIAL_CONTACTS(openai,openai,${ASTERISK_OPENAI_PROJECT_ID})},60,b(add-openai-headers^s^1))
  same => n,Hangup()
 

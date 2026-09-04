@@ -65,6 +65,7 @@
     "test:openai-phone": "tsx scripts/openai-phone-ordering-validate.ts",
     "test:voice-payment": "tsx scripts/voice-payment-validate.ts",
     "test:ai-phone-conversation": "tsx scripts/ai-phone-conversation-validate.ts",
+    "test:ai-followup-modifiers": "tsx scripts/ai-followup-modifier-validate.ts",
     "test:ai-order-regressions": "tsx scripts/ai-order-regression-validate.ts",
     "test:ai-ordering": "tsx scripts/ai-ordering-validate.ts",
     "audit:ai-menu-coverage": "tsx scripts/ai-menu-coverage-audit.ts",
