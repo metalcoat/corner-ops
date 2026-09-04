@@ -320,8 +320,11 @@ const tools = [
       type: "object",
       properties: {
         ...properties,
-        operation: {type:"string",enum:["add","replace_item","remove_item","replace_order","read"]},
-        targetItem: {type:"string"},
+        operation: {
+          type: "string",
+          enum: ["add", "replace_item", "remove_item", "replace_order", "read"],
+        },
+        targetItem: { type: "string" },
         serviceType: {
           type: "string",
           enum: ["undecided", "pickup", "delivery"],
@@ -409,7 +412,7 @@ export async function POST(request: Request) {
   delete args.callId;
   await ensureOrderingAiSchema();
   const call = (
-    await getSql()`SELECT id,state,order_id,caller_phone,operating_mode FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} AND state IN('ai','handoff_pending') LIMIT 1`
+    await getSql()`SELECT id,state,order_id,caller_phone,operating_mode,selected_provider,selected_model FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} AND state IN('ai','handoff_pending') LIMIT 1`
   )[0];
   if (!call)
     return reply(rpc.id, {
@@ -488,14 +491,35 @@ export async function POST(request: Request) {
   delete args.customerConfirmed;
   const started = Date.now(),
     requestId = randomUUID(),
+    provider = String(call.selected_provider || "openai"),
     actor = {
-      id: `openai:${callId}`,
-      name: "Corner Deli AI Phone",
+      id: `${provider}:${callId}`,
+      name:
+        provider === "gemini"
+          ? "Corner Deli Gemini Phone"
+          : "Corner Deli AI Phone",
       type: "employee" as const,
       role: "employee" as const,
     };
   try {
-    const phoneItems=requestedName==="price_order"?await incrementalSpokenCart(call.order_id?String(call.order_id):null,(["add","replace_item","remove_item","replace_order","read"].includes(String(args.operation))?String(args.operation):"replace_order") as "add"|"replace_item"|"remove_item"|"replace_order"|"read",String(args.targetItem||""),Array.isArray(args.items)?args.items as any:[]):[];
+    const phoneItems =
+      requestedName === "price_order"
+        ? await incrementalSpokenCart(
+            call.order_id ? String(call.order_id) : null,
+            ([
+              "add",
+              "replace_item",
+              "remove_item",
+              "replace_order",
+              "read",
+            ].includes(String(args.operation))
+              ? String(args.operation)
+              : "replace_order") as
+              "add" | "replace_item" | "remove_item" | "replace_order" | "read",
+            String(args.targetItem || ""),
+            Array.isArray(args.items) ? (args.items as any) : [],
+          )
+        : [];
     const result =
       requestedName === "price_order"
         ? await priceSpokenOrder({
@@ -559,7 +583,7 @@ export async function POST(request: Request) {
             : [],
       },
       durationMs: Date.now() - started,
-      model: OPENAI_PHONE_MODEL,
+      model: String(call.selected_model || OPENAI_PHONE_MODEL),
     });
     return reply(rpc.id, {
       content: [{ type: "text", text: JSON.stringify(result) }],
@@ -589,7 +613,7 @@ export async function POST(request: Request) {
       inputSummary: { customerItems: args.items || [], source: "realtime_mcp" },
       resultSummary: { message: known.message, details: known.details },
       durationMs: Date.now() - started,
-      model: OPENAI_PHONE_MODEL,
+      model: String(call.selected_model || OPENAI_PHONE_MODEL),
     });
     return reply(rpc.id, {
       content: [

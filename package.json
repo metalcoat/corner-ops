@@ -63,6 +63,8 @@
     "test:delivery-route": "tsx scripts/delivery-route-validate.ts",
     "test:3cx-live": "tsx scripts/three-cx-live-call-validate.ts",
     "test:openai-phone": "tsx scripts/openai-phone-ordering-validate.ts",
+    "test:gemini-phone": "tsx scripts/gemini-phone-validate.ts",
+    "test:gemini-phone-routing": "tsx scripts/gemini-phone-routing-validate.ts",
     "test:voice-payment": "tsx scripts/voice-payment-validate.ts",
     "test:ai-phone-conversation": "tsx scripts/ai-phone-conversation-validate.ts",
     "test:ai-followup-modifiers": "tsx scripts/ai-followup-modifier-validate.ts",

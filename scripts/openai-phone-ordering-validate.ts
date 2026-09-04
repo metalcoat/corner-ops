@@ -46,6 +46,8 @@ async function main(){
       menuVocabularyDefaults:phone.PHONE_INSTRUCTIONS.includes("Jumbo Thin 16 inch")&&phone.PHONE_INSTRUCTIONS.includes("Large French Fries")&&phone.PHONE_INSTRUCTIONS.includes("warm, upbeat, enthusiastic"),
       pizzaSizePolicy:phone.PHONE_INSTRUCTIONS.includes("6 slices")&&phone.PHONE_INSTRUCTIONS.includes("8 slices")&&phone.PHONE_INSTRUCTIONS.includes("12 slices")&&phone.PHONE_INSTRUCTIONS.includes("Thin is only large/jumbo"),
       wingWorkflow:phone.PHONE_INSTRUCTIONS.includes("bone-in")&&phone.PHONE_INSTRUCTIONS.includes("What sauce?")&&phone.PHONE_INSTRUCTIONS.includes("Split flavors into separate lines")&&phone.PHONE_INSTRUCTIONS.includes("Blue cheese, ranch, or celery?")&&phone.PHONE_INSTRUCTIONS.includes("Mild and Medium are distinct"),
+      wingExtraSauce:phone.PHONE_INSTRUCTIONS.includes("Extra sauce")&&phone.PHONE_INSTRUCTIONS.includes("4oz side cup matching that wing flavor"),
+      pickupPaymentPolicy:phone.PHONE_INSTRUCTIONS.includes("For pickup, never ask cash or card")&&phone.PHONE_INSTRUCTIONS.includes("independently says they want to pay now"),
       responsiveSpeech:phone.PHONE_INSTRUCTIONS.includes("finish it")&&phone.PHONE_INSTRUCTIONS.includes("Incidental noise"),
       conciseReadback:phone.PHONE_INSTRUCTIONS.includes("Do not narrate work or repeat every item"),
       fullRealtimeDefault:phone.OPENAI_PHONE_MODEL==="gpt-realtime-1.5",

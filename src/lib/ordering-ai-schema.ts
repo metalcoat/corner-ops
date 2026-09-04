@@ -31,6 +31,8 @@ export function ensureOrderingAiSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS claimed_by TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS selected_model TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS selected_provider TEXT NOT NULL DEFAULT 'openai'`;
+      await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS bridge_action TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS operating_mode TEXT NOT NULL DEFAULT 'shadow'`;
       await sql`ALTER TABLE ordering_call_sessions DROP CONSTRAINT IF EXISTS ordering_call_sessions_operating_mode_check`;
       await sql`ALTER TABLE ordering_call_sessions ADD CONSTRAINT ordering_call_sessions_operating_mode_check CHECK(operating_mode IN ('shadow','assisted','autonomous'))`;
@@ -90,6 +92,12 @@ export function ensureOrderingAiSchema(): Promise<void> {
         )
       `;
       await sql`INSERT INTO ordering_ai_phone_settings(business) VALUES('Corner Deli'),('Tiki') ON CONFLICT DO NOTHING`;
+      await sql`ALTER TABLE ordering_ai_phone_settings ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'openai'`;
+      await sql`ALTER TABLE ordering_ai_phone_settings DROP CONSTRAINT IF EXISTS ordering_ai_phone_settings_provider_check`;
+      await sql`ALTER TABLE ordering_ai_phone_settings ADD CONSTRAINT ordering_ai_phone_settings_provider_check CHECK(provider IN ('openai','gemini'))`;
+      await sql`ALTER TABLE ordering_ai_phone_settings ADD COLUMN IF NOT EXISTS openai_model TEXT NOT NULL DEFAULT 'gpt-realtime-1.5'`;
+      await sql`ALTER TABLE ordering_ai_phone_settings ADD COLUMN IF NOT EXISTS gemini_model TEXT NOT NULL DEFAULT 'gemini-3.1-flash-live-preview'`;
+      await sql`UPDATE ordering_ai_phone_settings SET openai_model=model WHERE provider='openai' AND openai_model='gpt-realtime-1.5' AND model<>''`;
       await sql`UPDATE ordering_ai_phone_settings SET model='gpt-realtime-1.5',updated_by='system:model-rollback',updated_at=NOW() WHERE business='Corner Deli' AND model='gpt-realtime-2.1-mini'`;
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_call_transcript_segments (

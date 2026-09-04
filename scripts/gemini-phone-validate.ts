@@ -1,0 +1,105 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import WebSocket from "ws";
+import { localValidationEnv } from "./validation-env";
+
+async function main() {
+  localValidationEnv();
+  const key = process.env.GEMINI_API_KEY || "";
+  assert.ok(key, "GEMINI_API_KEY is required for the live validation.");
+  process.env.OPENAI_ORDERING_MCP_TOKEN = `gemini-validation-${randomUUID()}`;
+  const { POST } = await import("../src/app/api/openai/ordering/mcp/route");
+  const listed = await POST(
+    new Request("http://localhost/api/openai/ordering/mcp", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${process.env.OPENAI_ORDERING_MCP_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "tools",
+        method: "tools/list",
+      }),
+    }),
+  );
+  const listedBody = await listed.json();
+  const geminiSchema = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(geminiSchema);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([key]) => !["$schema", "additionalProperties"].includes(key))
+        .map(([key, entry]) => [key, geminiSchema(entry)]),
+    );
+  };
+  const declarations = (listedBody.result?.tools || []).map(
+    (tool: { name: string; description?: string; inputSchema?: object }) => ({
+      name: tool.name,
+      description: tool.description || "",
+      parameters: geminiSchema(tool.inputSchema || { type: "object" }),
+    }),
+  );
+  assert.ok(declarations.length > 0, "Shared ordering tools were not listed.");
+  const model = "gemini-3.1-flash-live-preview";
+  const socket = new WebSocket(
+    `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(key)}`,
+  );
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Gemini Live setup timed out.")),
+      15_000,
+    );
+    socket.once("open", () => {
+      socket.send(
+        JSON.stringify({
+          setup: {
+            model: `models/${model}`,
+            generationConfig: { responseModalities: ["AUDIO"] },
+            tools: [{ functionDeclarations: declarations }],
+          },
+        }),
+      );
+    });
+    socket.on("message", (raw) => {
+      const message = JSON.parse(String(raw));
+      if (message.setupComplete !== undefined) {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+    socket.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    socket.once("close", (code, reason) => {
+      if (code !== 1000) {
+        clearTimeout(timer);
+        reject(new Error(`Gemini Live closed ${code}: ${String(reason)}`));
+      }
+    });
+  });
+  socket.close();
+  const dialplan = readFileSync("asterisk/extensions.conf.template", "utf8");
+  const bridge = readFileSync("asterisk/gemini-phone.py", "utf8");
+  assert.match(dialplan, /AudioSocket\(\$\{AI_CALL_ID\},127\.0\.0\.1:9092\)/);
+  assert.match(bridge, /functionDeclarations/);
+  assert.match(bridge, /request_secure_voice_payment/);
+  assert.match(bridge, /request_human_handoff/);
+  console.log(
+    JSON.stringify({
+      status: "passed",
+      model,
+      liveWebSocketSetup: true,
+      audioSocketRouting: true,
+      sharedOrderingTools: declarations.length,
+    }),
+  );
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});

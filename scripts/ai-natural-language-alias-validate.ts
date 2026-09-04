@@ -99,6 +99,38 @@ async function main() {
       assert.equal(result.lines[0].variant_name_snapshot, "12 Wings");
       assert.ok(result.modifierNames.includes("Mild"));
     }
+    for (const phrase of [
+      "12 wings mild with blue cheese and celery",
+      "12 wings mild ranch and celery",
+    ]) {
+      result = await price(phrase);
+      assert.equal(result.lines[0].item_name_snapshot, "Wings");
+      assert.ok(result.modifierNames.includes("Mild"));
+      assert.ok(
+        result.modifierNames.some((name: string) => /Celery/i.test(name)),
+      );
+    }
+    result = await price("12 boneless hot with blue cheese");
+    assert.equal(result.lines[0].item_name_snapshot, "Boneless Wings");
+    assert.ok(result.modifierNames.includes("Hot"));
+    assert.ok(
+      result.modifierNames.some((name: string) => /Blue Cheese/i.test(name)),
+    );
+    for (const phrase of [
+      "12 wings mild extra sauce",
+      "12 mild wings make them saucy",
+    ]) {
+      result = await price(phrase);
+      assert.ok(result.modifierNames.includes("Mild"));
+      assert.ok(
+        result.modifierNames.some((name: string) => /Mild.*4oz/i.test(name)),
+      );
+    }
+    result = await price("12 mild wings with extra hot sauce");
+    assert.ok(result.modifierNames.includes("Mild"));
+    assert.ok(
+      result.modifierNames.some((name: string) => /Hot.*4oz/i.test(name)),
+    );
 
     result = await price("large pizza");
     assert.equal(result.lines[0].variant_name_snapshot, 'Jumbo Thin 16"');

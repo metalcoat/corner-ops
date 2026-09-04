@@ -1003,7 +1003,9 @@ export async function priceSpokenOrder(input: {
       }
       const wingRequest =
           spokenKey(requested.name).includes("wing") ||
-          (/\b(?:bone in|traditional)\b/.test(spokenKey(requested.name)) &&
+          (/\b(?:bone in|traditional|boneles)\b/.test(
+            spokenKey(requested.name),
+          ) &&
             /\b(10|12|15|20|24|25|30|40|50)\b/.test(spokenKey(requested.name))),
         explicitWingCount =
           /\b(10|12|15|20|24|25|30|40|50)\b/.test(
@@ -1043,7 +1045,7 @@ export async function priceSpokenOrder(input: {
           )?.[1],
         wingPhrase =
           spokenName.includes("wing") ||
-          (/\b(?:bone in|traditional)\b/.test(spokenName) &&
+          (/\b(?:bone in|traditional|boneles)\b/.test(spokenName) &&
             /\b(10|12|15|20|24|25|30|40|50)\b/.test(spokenName)),
         bonelessRequested =
           wingPhrase &&
@@ -1278,6 +1280,14 @@ export async function priceSpokenOrder(input: {
         if (!active) continue;
         const matches = group.options
           .filter((option) => option.available)
+          .filter(
+            (option) =>
+              group.name !== "Wings Add Ons" ||
+              !/^(?:Mild|Medium|Hot|Suicide|BBQ|Sweet|Garlic|Open Pit).*(?:4oz)/i.test(
+                option.name,
+              ) ||
+              /\b(?:extra|saucy|on (?:the )?side|side of)\b/.test(spokenName),
+          )
           .map((option) => ({
             option,
             aliases: modifierAliases(option.name, group.name),
@@ -1305,21 +1315,24 @@ export async function priceSpokenOrder(input: {
             (candidate) =>
               spokenKey(candidate.option.name) === spokenKey(candidate.best!),
           ),
-          chosen = exactCanonical || (best.length === 1 ? best[0] : undefined);
-        if (!chosen) continue;
-        if (
-          !spokenModifiers.some(
-            (value) => spokenKey(value.name) === spokenKey(chosen.option.name),
+          chosen = exactCanonical || (best.length === 1 ? best[0] : undefined),
+          selected =
+            group.maxSelections === 1 ? (chosen ? [chosen] : []) : matches;
+        if (!selected.length) continue;
+        for (const match of selected)
+          if (
+            !spokenModifiers.some(
+              (value) => spokenKey(value.name) === spokenKey(match.option.name),
+            )
           )
-        )
-          spokenModifiers.push({ name: chosen.option.name });
+            spokenModifiers.push({ name: match.option.name });
         scratchSelections[group.id] =
           group.maxSelections === 1
-            ? [chosen.option.id]
+            ? [selected[0].option.id]
             : [
                 ...new Set([
                   ...(scratchSelections[group.id] || []),
-                  chosen.option.id,
+                  ...selected.map((match) => match.option.id),
                 ]),
               ];
       }
@@ -1363,7 +1376,16 @@ export async function priceSpokenOrder(input: {
             )
           )
             spokenModifiers.splice(index, 1);
-        const flavor =
+        const explicitlyRequestedSideFlavor =
+            /(?:extra|side(?: of)?)\s+(mild|medium|hot|suicide|bbq|sweet and sassy|sweet and sour|garlic parmesan|garlic parm|open pit bbq)(?:\s+sauce)?|\b(mild|medium|hot|suicide|bbq|sweet and sassy|sweet and sour|garlic parmesan|garlic parm|open pit bbq)(?:\s+sauce)?\s+on (?:the )?side\b/i.exec(
+              spokenName,
+            ),
+          explicitFlavor =
+            explicitlyRequestedSideFlavor?.[1] ||
+            explicitlyRequestedSideFlavor?.[2] ||
+            "",
+          flavor =
+            explicitFlavor.replace("garlic parm", "garlic parmesan") ||
             spokenModifiers
               .map((value) => spokenKey(value.name))
               .find((value) =>

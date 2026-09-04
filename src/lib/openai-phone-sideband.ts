@@ -6,13 +6,18 @@ import {
   AiToolError,
   auditAiTool,
   menuCatalog,
+  modifierAliases,
   priceSpokenOrder,
   setAiPaymentDetails,
   serviceType,
   type SpokenOrderItem,
 } from "@/lib/ordering-ai-tools";
 import { recordAiRegression } from "@/lib/ordering-ai-regressions";
-import { openAiClient, requestOpenAiHandoff, requestOpenAiVoicePayment } from "@/lib/openai-phone-ordering";
+import {
+  openAiClient,
+  requestOpenAiHandoff,
+  requestOpenAiVoicePayment,
+} from "@/lib/openai-phone-ordering";
 import { attachSpokenDeliveryAddress } from "@/lib/ordering-delivery-landmarks";
 import { quoteDelivery } from "@/lib/ordering-delivery";
 
@@ -55,45 +60,212 @@ async function latency(
 const text = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
 
-type CartOperation="add"|"replace_item"|"remove_item"|"replace_order"|"read";
-async function spokenCart(orderId:string):Promise<SpokenOrderItem[]> {
-  const sql=getSql(),lines=await sql`SELECT id,item_name_snapshot,variant_name_snapshot,quantity FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`,modifiers=await sql`SELECT modifier.order_item_id,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${orderId} AND modifier.selection_state IN('selected','extra') AND (modifier.print_on_ticket=TRUE OR modifier.pizza_topping_portion IS NOT NULL) ORDER BY modifier.created_at,modifier.id`;
-  return lines.map(line=>({name:String(line.item_name_snapshot),variant:String(line.variant_name_snapshot||"")||undefined,quantity:Number(line.quantity),modifiers:modifiers.filter(modifier=>String(modifier.order_item_id)===String(line.id)).flatMap(modifier=>Array.from({length:Math.max(1,Number(modifier.quantity||1))},()=>({name:String(modifier.option_name_snapshot),portion:(modifier.pizza_topping_portion||undefined) as SpokenOrderItem["modifiers"] extends Array<infer M>?M extends {portion?:infer P}?P:never:never,amount:(modifier.pizza_topping_amount||undefined) as SpokenOrderItem["modifiers"] extends Array<infer M>?M extends {amount?:infer A}?A:never:never})))}));
+type CartOperation =
+  "add" | "replace_item" | "remove_item" | "replace_order" | "read";
+async function spokenCart(orderId: string): Promise<SpokenOrderItem[]> {
+  const sql = getSql(),
+    lines =
+      await sql`SELECT id,item_name_snapshot,variant_name_snapshot,quantity FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`,
+    modifiers =
+      await sql`SELECT modifier.order_item_id,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${orderId} AND modifier.selection_state IN('selected','extra') AND (modifier.print_on_ticket=TRUE OR modifier.pizza_topping_portion IS NOT NULL) ORDER BY modifier.created_at,modifier.id`;
+  return lines.map((line) => ({
+    name: String(line.item_name_snapshot),
+    variant: String(line.variant_name_snapshot || "") || undefined,
+    quantity: Number(line.quantity),
+    modifiers: modifiers
+      .filter((modifier) => String(modifier.order_item_id) === String(line.id))
+      .flatMap((modifier) =>
+        Array.from(
+          { length: Math.max(1, Number(modifier.quantity || 1)) },
+          () => ({
+            name: String(modifier.option_name_snapshot),
+            portion: (modifier.pizza_topping_portion ||
+              undefined) as SpokenOrderItem["modifiers"] extends Array<infer M>
+              ? M extends { portion?: infer P }
+                ? P
+                : never
+              : never,
+            amount: (modifier.pizza_topping_amount ||
+              undefined) as SpokenOrderItem["modifiers"] extends Array<infer M>
+              ? M extends { amount?: infer A }
+                ? A
+                : never
+              : never,
+          }),
+        ),
+      ),
+  }));
 }
-const cartKey=(value:string)=>value.toLowerCase().replace(/[^a-z0-9]+/g," ").trim().replace(/s\b/g,"");
-const modifierKey=(value:string)=>value.toLowerCase().replace(/\(\s*\d+(?:\.\d+)?\s*oz\s*\)/g,"").replace(/\bon side\b/g,"").replace(/^(?:add|extra|xtra)\s+/g,"").replace(/[^a-z0-9]+/g," ").trim();
-export async function attachStandaloneModifierAnswer(orderId:string|null,operation:CartOperation,changed:SpokenOrderItem[]){
-  if(!orderId||operation!=="add"||changed.length!==1||changed[0].variant||changed[0].modifiers?.length)return null;
-  const requested=modifierKey(changed[0].name);
-  if(!requested)return null;
-  const current=await spokenCart(orderId);
-  for(const line of [...current].reverse()){
-    const catalog=await menuCatalog("Corner Deli",new Date(),line.name),item=catalog.flatMap(category=>category.items||[]).find(entry=>cartKey(String(entry.name))===cartKey(line.name));
-    const option=item?.modifiers?.flatMap((group:any)=>group.presentationContext==="hidden"?[]:(group.options||[]).filter((entry:any)=>entry.available)).find((entry:any)=>modifierKey(String(entry.name))===requested);
-    if(!option)continue;
-    return{operation:"replace_item" as CartOperation,targetItem:line.name,items:[{...line,modifiers:[...(line.modifiers||[]),{name:String(option.name)}]}]};
+const cartKey = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/s\b/g, "");
+const modifierKey = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/\(\s*\d+(?:\.\d+)?\s*oz\s*\)/g, "")
+    .replace(/\bon side\b/g, "")
+    .replace(/^(?:add|extra|xtra)\s+/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+export async function attachStandaloneModifierAnswer(
+  orderId: string | null,
+  operation: CartOperation,
+  changed: SpokenOrderItem[],
+) {
+  if (
+    !orderId ||
+    operation !== "add" ||
+    changed.length !== 1 ||
+    changed[0].variant ||
+    changed[0].modifiers?.length
+  )
+    return null;
+  const requestedParts = changed[0].name
+    .split(/\s*(?:,|\band\b)\s*/i)
+    .map(modifierKey)
+    .filter(Boolean);
+  if (!requestedParts.length) return null;
+  const current = await spokenCart(orderId);
+  for (const line of [...current].reverse()) {
+    const catalog = await menuCatalog("Corner Deli", new Date(), line.name),
+      item = catalog
+        .flatMap((category) => category.items || [])
+        .find((entry) => cartKey(String(entry.name)) === cartKey(line.name));
+    const choices =
+      item?.modifiers?.flatMap((group: any) =>
+        group.presentationContext === "hidden"
+          ? []
+          : (group.options || [])
+              .filter((entry: any) => entry.available)
+              .map((entry: any) => ({ group, option: entry })),
+      ) || [];
+    const selected = requestedParts
+      .map(
+        (part) =>
+          choices.find((choice: any) =>
+            modifierAliases(
+              String(choice.option.name),
+              String(choice.group.name),
+            ).some((alias) => modifierKey(alias) === part),
+          )?.option,
+      )
+      .filter(Boolean);
+    if (selected.length !== requestedParts.length) continue;
+    return {
+      operation: "replace_item" as CartOperation,
+      targetItem: line.name,
+      items: [
+        {
+          ...line,
+          modifiers: [
+            ...(line.modifiers || []),
+            ...selected.map((option: any) => ({ name: String(option.name) })),
+          ],
+        },
+      ],
+    };
   }
   return null;
 }
-export async function incrementalSpokenCart(orderId:string|null,operation:CartOperation,targetItem:string,changed:SpokenOrderItem[]){
-  if(!orderId||operation==="replace_order")return changed;
-  const current=await spokenCart(orderId);
-  if(operation==="read")return current;
-  const target=cartKey(targetItem||changed[0]?.name||"");
-  if(operation==="add")return [...current,...changed];
-  const matches=(item:SpokenOrderItem)=>cartKey(item.name)===target;
-  if(operation==="replace_item")return [...current.filter(item=>!matches(item)),...changed];
-  if(operation==="remove_item"){
-    const removeQuantity=Math.max(1,Number(changed[0]?.quantity||1));let remaining=removeQuantity;
-    return current.flatMap(item=>{if(!matches(item)||remaining<=0)return[item];const quantity=Math.max(1,Number(item.quantity||1)),taken=Math.min(quantity,remaining);remaining-=taken;return quantity>taken?[{...item,quantity:quantity-taken}]:[]});
+export async function incrementalSpokenCart(
+  orderId: string | null,
+  operation: CartOperation,
+  targetItem: string,
+  changed: SpokenOrderItem[],
+) {
+  if (!orderId || operation === "replace_order") return changed;
+  const current = await spokenCart(orderId);
+  if (operation === "read") return current;
+  const target = cartKey(targetItem || changed[0]?.name || "");
+  if (operation === "add") return [...current, ...changed];
+  const matches = (item: SpokenOrderItem) => cartKey(item.name) === target;
+  if (operation === "replace_item")
+    return [...current.filter((item) => !matches(item)), ...changed];
+  if (operation === "remove_item") {
+    const removeQuantity = Math.max(1, Number(changed[0]?.quantity || 1));
+    let remaining = removeQuantity;
+    return current.flatMap((item) => {
+      if (!matches(item) || remaining <= 0) return [item];
+      const quantity = Math.max(1, Number(item.quantity || 1)),
+        taken = Math.min(quantity, remaining);
+      remaining -= taken;
+      return quantity > taken ? [{ ...item, quantity: quantity - taken }] : [];
+    });
   }
   return changed;
 }
-export async function compactPhoneOrderResult(result:Record<string,any>,operation:CartOperation){
-  const sql=getSql(),modifiers=await sql`SELECT modifier.order_item_id,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${String(result.id)} AND modifier.selection_state IN('selected','extra') AND modifier.print_on_ticket=TRUE ORDER BY modifier.created_at,modifier.id`;
-  return{ok:true,operation,orderId:String(result.id),displayNumber:String(result.display_number||""),version:Number(result.version),serviceType:String(result.service_type),totalCents:Number(result.total_cents),amountDueCents:Number(result.amount_due_cents),paymentMethod:String(result.payment_preference||""),tipCents:Number(result.tip_cents||0),lines:(result.lines||[]).map((line:Record<string,any>)=>({name:String(line.item_name_snapshot),variant:String(line.variant_name_snapshot||""),quantity:Number(line.quantity),modifiers:modifiers.filter(modifier=>String(modifier.order_item_id)===String(line.id)).map(modifier=>({name:String(modifier.option_name_snapshot),quantity:Number(modifier.quantity||1),portion:modifier.pizza_topping_portion||undefined,amount:modifier.pizza_topping_amount||undefined}))})),warnings:result.warnings||[],requiredFollowUp:result.required_follow_up||undefined};
+export async function compactPhoneOrderResult(
+  result: Record<string, any>,
+  operation: CartOperation,
+) {
+  const sql = getSql(),
+    modifiers =
+      await sql`SELECT modifier.order_item_id,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${String(result.id)} AND modifier.selection_state IN('selected','extra') AND modifier.print_on_ticket=TRUE ORDER BY modifier.created_at,modifier.id`;
+  return {
+    ok: true,
+    operation,
+    orderId: String(result.id),
+    displayNumber: String(result.display_number || ""),
+    version: Number(result.version),
+    serviceType: String(result.service_type),
+    totalCents: Number(result.total_cents),
+    amountDueCents: Number(result.amount_due_cents),
+    paymentMethod: String(result.payment_preference || ""),
+    tipCents: Number(result.tip_cents || 0),
+    lines: (result.lines || []).map((line: Record<string, any>) => ({
+      name: String(line.item_name_snapshot),
+      variant: String(line.variant_name_snapshot || ""),
+      quantity: Number(line.quantity),
+      modifiers: modifiers
+        .filter(
+          (modifier) => String(modifier.order_item_id) === String(line.id),
+        )
+        .map((modifier) => ({
+          name: String(modifier.option_name_snapshot),
+          quantity: Number(modifier.quantity || 1),
+          portion: modifier.pizza_topping_portion || undefined,
+          amount: modifier.pizza_topping_amount || undefined,
+        })),
+    })),
+    warnings: result.warnings || [],
+    requiredFollowUp: result.required_follow_up || undefined,
+  };
 }
-export function compactPhoneMenuResult(result:any[]){return result.slice(0,3).map(category=>({category:category.name,items:(category.items||[]).slice(0,3).map((item:any)=>({name:item.name,description:item.description||"",priceCents:item.basePriceCents,variants:(item.variants||[]).filter((variant:any)=>variant.available!==false).map((variant:any)=>({name:variant.name,priceCents:variant.basePriceCents})),modifierGroups:(item.modifiers||[]).filter((group:any)=>group.presentationContext!=="hidden").map((group:any)=>({name:group.name,required:Number(group.minSelections)>0,options:(group.options||[]).filter((option:any)=>option.available).map((option:any)=>({name:option.name,priceCents:option.priceDeltaCents}))}))}))}))}
+export function compactPhoneMenuResult(result: any[]) {
+  return result
+    .slice(0, 3)
+    .map((category) => ({
+      category: category.name,
+      items: (category.items || [])
+        .slice(0, 3)
+        .map((item: any) => ({
+          name: item.name,
+          description: item.description || "",
+          priceCents: item.basePriceCents,
+          variants: (item.variants || [])
+            .filter((variant: any) => variant.available !== false)
+            .map((variant: any) => ({
+              name: variant.name,
+              priceCents: variant.basePriceCents,
+            })),
+          modifierGroups: (item.modifiers || [])
+            .filter((group: any) => group.presentationContext !== "hidden")
+            .map((group: any) => ({
+              name: group.name,
+              required: Number(group.minSelections) > 0,
+              options: (group.options || [])
+                .filter((option: any) => option.available)
+                .map((option: any) => ({
+                  name: option.name,
+                  priceCents: option.priceDeltaCents,
+                })),
+            })),
+        })),
+    }));
+}
 
 export function startOpenAiSideband(
   callId: string,
@@ -233,7 +405,17 @@ export function startOpenAiSideband(
           "Ask the caller to try again.",
           403,
         );
-      let operation=(['add','replace_item','remove_item','replace_order','read'].includes(String(args.operation))?String(args.operation):'replace_order') as CartOperation;
+      let operation = (
+        [
+          "add",
+          "replace_item",
+          "remove_item",
+          "replace_order",
+          "read",
+        ].includes(String(args.operation))
+          ? String(args.operation)
+          : "replace_order"
+      ) as CartOperation;
       if (call.order_id) {
         const savedWingSauces = await sql`
           SELECT items.item_name_snapshot,modifier.option_name_snapshot
@@ -265,19 +447,34 @@ export function startOpenAiSideband(
           }
         }
       }
-      let targetItem=String(args.targetItem||"");
-      const attached=await attachStandaloneModifierAnswer(call.order_id?String(call.order_id):null,operation,spokenItems);
-      if(attached){operation=attached.operation;targetItem=attached.targetItem;spokenItems=attached.items}
+      let targetItem = String(args.targetItem || "");
+      const attached = await attachStandaloneModifierAnswer(
+        call.order_id ? String(call.order_id) : null,
+        operation,
+        spokenItems,
+      );
+      if (attached) {
+        operation = attached.operation;
+        targetItem = attached.targetItem;
+        spokenItems = attached.items;
+      }
       const callerPhone = String(call.caller_phone || args.callerPhone || "")
         .replace(/\D/g, "")
         .replace(/^1(?=\d{10}$)/, "")
         .slice(-10);
-      const touchedItems=spokenItems;
-      spokenItems=await incrementalSpokenCart(call.order_id?String(call.order_id):null,operation,targetItem,touchedItems);
+      const touchedItems = spokenItems;
+      spokenItems = await incrementalSpokenCart(
+        call.order_id ? String(call.order_id) : null,
+        operation,
+        targetItem,
+        touchedItems,
+      );
       const result = await priceSpokenOrder({
         business: "Corner Deli",
         actor,
-        service: serviceType(args.serviceType||call.service_type||"undecided"),
+        service: serviceType(
+          args.serviceType || call.service_type || "undecided",
+        ),
         items: spokenItems,
         orderId: call.order_id || null,
         customerId: String(args.customerId || call.customer_id || "") || null,
@@ -328,10 +525,23 @@ export function startOpenAiSideband(
           amount_due_cents: Number(updated.amount_due_cents),
           delivery_fee_cents: Number(updated.delivery_fee_cents),
         });
-      } else if(serviceType(args.serviceType||call.service_type||"undecided")==="delivery"&&call.route_distance_miles!=null){
-        const quote=await quoteDelivery({business:"Corner Deli",distanceMiles:Number(call.route_distance_miles),merchandiseSubtotalCents:Number(result.subtotal_cents)});
+      } else if (
+        serviceType(args.serviceType || call.service_type || "undecided") ===
+          "delivery" &&
+        call.route_distance_miles != null
+      ) {
+        const quote = await quoteDelivery({
+          business: "Corner Deli",
+          distanceMiles: Number(call.route_distance_miles),
+          merchandiseSubtotalCents: Number(result.subtotal_cents),
+        });
         await sql`UPDATE ordering_orders SET delivery_fee_cents=${quote.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}-paid_cents),version=version+1,updated_at=NOW() WHERE id=${String(result.id)}`;
-        Object.assign(result,(await sql`SELECT delivery_fee_cents,total_cents,amount_due_cents,version FROM ordering_orders WHERE id=${String(result.id)}`)[0]);
+        Object.assign(
+          result,
+          (
+            await sql`SELECT delivery_fee_cents,total_cents,amount_due_cents,version FROM ordering_orders WHERE id=${String(result.id)}`
+          )[0],
+        );
       }
       if (args.paymentMethod === "cash" || args.paymentMethod === "card") {
         const paymentResult = await setAiPaymentDetails({
@@ -371,7 +581,9 @@ export function startOpenAiSideband(
           burgerItems.length > 0 &&
           !burgerNeedsToppings &&
           args.burgerFriesDecision !== "declined" &&
-          !spokenItems.some((item) => /fr(?:y|ies)|poutine/i.test(String(item.name)));
+          !spokenItems.some((item) =>
+            /fr(?:y|ies)|poutine/i.test(String(item.name)),
+          );
       if (wingNeedsAddOn)
         Object.assign(result, {
           required_follow_up:
@@ -401,8 +613,9 @@ export function startOpenAiSideband(
         durationMs: Date.now() - started,
         model,
       });
-      const compactResult=await compactPhoneOrderResult(result,operation);
-      if(result.required_follow_up)compactResult.requiredFollowUp=result.required_follow_up;
+      const compactResult = await compactPhoneOrderResult(result, operation);
+      if (result.required_follow_up)
+        compactResult.requiredFollowUp = result.required_follow_up;
       socket.send(
         JSON.stringify({
           type: "conversation.item.create",
@@ -475,11 +688,9 @@ export function startOpenAiSideband(
         string,
         unknown
       >;
-      result = compactPhoneMenuResult(await menuCatalog(
-        "Corner Deli",
-        new Date(),
-        String(args.query || ""),
-      ));
+      result = compactPhoneMenuResult(
+        await menuCatalog("Corner Deli", new Date(), String(args.query || "")),
+      );
     } catch {
       result = {
         error: {
@@ -507,27 +718,107 @@ export function startOpenAiSideband(
   };
   const executeHumanHandoff = async (row: Record<string, any>) => {
     try {
-      const args = JSON.parse(String(row.arguments || "{}")) as Record<string, unknown>;
-      const reason = String(args.reason || "Customer requested store assistance.");
-      await event(callId, `${callId}:handoff:${row.call_id}`, "ordering.human_handoff", "system", "Transferring call to store", reason);
+      const args = JSON.parse(String(row.arguments || "{}")) as Record<
+        string,
+        unknown
+      >;
+      const reason = String(
+        args.reason || "Customer requested store assistance.",
+      );
+      await event(
+        callId,
+        `${callId}:handoff:${row.call_id}`,
+        "ordering.human_handoff",
+        "system",
+        "Transferring call to store",
+        reason,
+      );
       await requestOpenAiHandoff(callId, reason);
     } catch (error) {
-      socket.send(JSON.stringify({ type: "conversation.item.create", item: { type: "function_call_output", call_id: row.call_id, output: JSON.stringify({ error: { code: "HANDOFF_FAILED", message: "The call could not be transferred. Ask the caller to stay on the line and retry once." } }) } }));
-      socket.send(JSON.stringify({ type: "response.create", response: { output_modalities: ["audio"], tool_choice: "auto" } }));
+      socket.send(
+        JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: row.call_id,
+            output: JSON.stringify({
+              error: {
+                code: "HANDOFF_FAILED",
+                message:
+                  "The call could not be transferred. Ask the caller to stay on the line and retry once.",
+              },
+            }),
+          },
+        }),
+      );
+      socket.send(
+        JSON.stringify({
+          type: "response.create",
+          response: { output_modalities: ["audio"], tool_choice: "auto" },
+        }),
+      );
     }
   };
-  const executeVoicePayment=async(row:Record<string,any>)=>{
-    try{
-      const args=JSON.parse(String(row.arguments||"{}")) as Record<string,unknown>;
-      const sql=getSql(),order=(await sql`SELECT orders.id,orders.service_type FROM ordering_call_sessions call JOIN ordering_orders orders ON orders.id=call.order_id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state='ai' LIMIT 1`)[0];
-      if(!order)throw new Error("A priced AI order was not found for secure payment.");
-      await setAiPaymentDetails({orderId:String(order.id),business:"Corner Deli",service:serviceType(order.service_type),paymentMethod:"card",tipCents:Number(args.tipCents||0),actor:{id:`openai:${callId}`,name:"Corner Deli AI Phone",type:"employee",role:"employee"}});
-      await event(callId,`${callId}:voice-payment:${row.call_id}`,"ordering.secure_voice_payment","system","Leaving AI for secure sandbox payment");
+  const executeVoicePayment = async (row: Record<string, any>) => {
+    try {
+      const args = JSON.parse(String(row.arguments || "{}")) as Record<
+        string,
+        unknown
+      >;
+      const sql = getSql(),
+        order = (
+          await sql`SELECT orders.id,orders.service_type FROM ordering_call_sessions call JOIN ordering_orders orders ON orders.id=call.order_id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state='ai' LIMIT 1`
+        )[0];
+      if (!order)
+        throw new Error("A priced AI order was not found for secure payment.");
+      await setAiPaymentDetails({
+        orderId: String(order.id),
+        business: "Corner Deli",
+        service: serviceType(order.service_type),
+        paymentMethod: "card",
+        tipCents: Number(args.tipCents || 0),
+        actor: {
+          id: `openai:${callId}`,
+          name: "Corner Deli AI Phone",
+          type: "employee",
+          role: "employee",
+        },
+      });
+      await event(
+        callId,
+        `${callId}:voice-payment:${row.call_id}`,
+        "ordering.secure_voice_payment",
+        "system",
+        "Leaving AI for secure sandbox payment",
+      );
       await requestOpenAiVoicePayment(callId);
-    }catch(error){
-      console.error("OpenAI secure voice payment transfer failed.",{callId,error:error instanceof Error?error.message:"unknown error"});
-      socket.send(JSON.stringify({type:"conversation.item.create",item:{type:"function_call_output",call_id:row.call_id,output:JSON.stringify({error:{code:"VOICE_PAYMENT_FAILED",message:"Secure voice payment could not start. Transfer the caller to an employee."}})}}));
-      socket.send(JSON.stringify({type:"response.create",response:{output_modalities:["audio"],tool_choice:"auto"}}));
+    } catch (error) {
+      console.error("OpenAI secure voice payment transfer failed.", {
+        callId,
+        error: error instanceof Error ? error.message : "unknown error",
+      });
+      socket.send(
+        JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: row.call_id,
+            output: JSON.stringify({
+              error: {
+                code: "VOICE_PAYMENT_FAILED",
+                message:
+                  "Secure voice payment could not start. Transfer the caller to an employee.",
+              },
+            }),
+          },
+        }),
+      );
+      socket.send(
+        JSON.stringify({
+          type: "response.create",
+          response: { output_modalities: ["audio"], tool_choice: "auto" },
+        }),
+      );
     }
   };
   socket.on("message", (data) => {
@@ -719,14 +1010,62 @@ export function startOpenAiSideband(
             payload: { status, transcript: lastAssistantTranscript },
             expected: { retry: true },
           });
-          const secondsMatch=errorMessage.match(/try again in\s+(-?[\d.]+)s/i),millisecondsMatch=errorMessage.match(/try again in\s+(\d+)ms/i),delayMs=errorCode==="rate_limit_exceeded"?Math.max(750,Math.min(12000,secondsMatch?Number(secondsMatch[1])*1000:millisecondsMatch?Number(millisecondsMatch[1]):2500)):0,retryTurn=lastTurnId;
-          void event(callId,`${key}:completion-retry`,"response.completion_retry","system",errorCode==="rate_limit_exceeded"?"Rate limited — retry scheduled":"Retrying truncated response",errorCode==="rate_limit_exceeded"?`Retrying in ${(delayMs/1000).toFixed(1)} seconds`:`${status}: ${lastAssistantTranscript}`);
-          const retry=()=>{
-            rateLimitRetryTimer=undefined;
-            if(socket.readyState!==WebSocket.OPEN||customerSpeaking||responseActive||retryTurn!==lastTurnId)return;
-            socket.send(JSON.stringify({type:"response.create",response:{instructions:"Continue the pending restaurant conversation in one short, complete sentence. Do not repeat completed words.",output_modalities:["audio"],max_output_tokens:128,tool_choice:"none"}}));
+          const secondsMatch = errorMessage.match(
+              /try again in\s+(-?[\d.]+)s/i,
+            ),
+            millisecondsMatch = errorMessage.match(/try again in\s+(\d+)ms/i),
+            delayMs =
+              errorCode === "rate_limit_exceeded"
+                ? Math.max(
+                    750,
+                    Math.min(
+                      12000,
+                      secondsMatch
+                        ? Number(secondsMatch[1]) * 1000
+                        : millisecondsMatch
+                          ? Number(millisecondsMatch[1])
+                          : 2500,
+                    ),
+                  )
+                : 0,
+            retryTurn = lastTurnId;
+          void event(
+            callId,
+            `${key}:completion-retry`,
+            "response.completion_retry",
+            "system",
+            errorCode === "rate_limit_exceeded"
+              ? "Rate limited — retry scheduled"
+              : "Retrying truncated response",
+            errorCode === "rate_limit_exceeded"
+              ? `Retrying in ${(delayMs / 1000).toFixed(1)} seconds`
+              : `${status}: ${lastAssistantTranscript}`,
+          );
+          const retry = () => {
+            rateLimitRetryTimer = undefined;
+            if (
+              socket.readyState !== WebSocket.OPEN ||
+              customerSpeaking ||
+              responseActive ||
+              retryTurn !== lastTurnId
+            )
+              return;
+            socket.send(
+              JSON.stringify({
+                type: "response.create",
+                response: {
+                  instructions:
+                    "Continue the pending restaurant conversation in one short, complete sentence. Do not repeat completed words.",
+                  output_modalities: ["audio"],
+                  max_output_tokens: 128,
+                  tool_choice: "none",
+                },
+              }),
+            );
           };
-          if(delayMs){rateLimitRetryTimer=setTimeout(retry,delayMs)}else retry();
+          if (delayMs) {
+            rateLimitRetryTimer = setTimeout(retry, delayMs);
+          } else retry();
         }
       } else if (type === "error") {
         void event(
