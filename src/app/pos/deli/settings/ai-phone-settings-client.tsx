@@ -107,6 +107,51 @@ export default function AiPhoneSettingsClient() {
       setBusy(false);
     }
   }
+  async function switchProvider(provider: Settings["provider"]) {
+    if (!draft || provider === draft.provider) return;
+    const previous = draft;
+    const next = { ...draft, provider };
+    setDraft(next);
+    setBusy(true);
+    setMessage(
+      `Switching AI phone calls to ${provider === "gemini" ? "Google Gemini" : "OpenAI"}…`,
+    );
+    try {
+      const response = await fetch("/api/ordering/settings/ai-phone", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      const body = await response.json();
+      if (!response.ok)
+        throw new Error(body.error || "Could not switch voice provider.");
+      setDraft(body.settings);
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              settings: body.settings,
+              readiness: {
+                ...current.readiness,
+                ready: current.readiness.providers[provider].ready,
+              },
+            }
+          : current,
+      );
+      setMessage(
+        `AI phone calls will now use ${provider === "gemini" ? "Google Gemini" : "OpenAI"}.`,
+      );
+    } catch (error) {
+      setDraft(previous);
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not switch voice provider.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   if (!draft)
     return (
       <section className="posSettingsCard">
@@ -143,11 +188,9 @@ export default function AiPhoneSettingsClient() {
         <span>Voice provider</span>
         <select
           value={draft.provider}
+          disabled={busy}
           onChange={(event) =>
-            setDraft({
-              ...draft,
-              provider: event.target.value as Settings["provider"],
-            })
+            void switchProvider(event.target.value as Settings["provider"])
           }
         >
           <option value="openai">OpenAI</option>
