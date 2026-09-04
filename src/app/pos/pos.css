@@ -1442,6 +1442,15 @@
   gap: 6px;
   pointer-events: none;
 }
+.posAiClearCalls {
+  justify-self: end;
+  pointer-events: auto;
+  border: 1px solid #fca5a5;
+  background: #7f1d1d;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
 .posAiCallStrip > div {
   display: grid;
   grid-template-columns: 1fr auto;

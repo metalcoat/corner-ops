@@ -2029,6 +2029,20 @@ export default function PosClient({
           ),
     );
   }
+  async function clearTestAiCalls() {
+    const response = await fetch("/api/ordering/calls", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "clear_test_calls" }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      setMenuError(payload.error || "Could not clear the AI test calls.");
+      return;
+    }
+    setAiCalls([]);
+    setCartNotice(`${payload.cleared || 0} AI test call${payload.cleared === 1 ? "" : "s"} cleared.`);
+  }
   async function createQuickCustomer(event: React.FormEvent) {
     event.preventDefault();
     if (quickCustomerBusy) return;
@@ -4322,6 +4336,13 @@ export default function PosClient({
           className="posAiCallStrip"
           aria-label="AI phone ordering activity"
         >
+          <button
+            type="button"
+            className="posAiClearCalls"
+            onClick={() => void clearTestAiCalls()}
+          >
+            CLEAR TEST CALLS
+          </button>
           {aiCalls
             .filter((call) => call.state === "ai")
             .map((call) => (
@@ -4531,6 +4552,12 @@ export default function PosClient({
               Answer and speak on the physical cordless phone. This iPad never
               carries call audio.
             </small>
+            <button
+              type="button"
+              onClick={() => void clearTestAiCalls()}
+            >
+              CLEAR TEST CALLS
+            </button>
           </section>
         </div>
       )}
