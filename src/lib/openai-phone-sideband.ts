@@ -122,7 +122,9 @@ export async function applyPendingModifierAnswer(input: {
   const pending = input.pendingItem;
   if (!input.orderId || !pending) return { ...input };
   const current = await spokenCart(input.orderId);
-  const activeName = String(pending.activeItem || pending.category || "");
+  const activeName = String(
+    pending.activeItem || pending.category || pending.customerRequest || "",
+  );
   const line = [...current]
     .reverse()
     .find((item) => cartKey(item.name) === cartKey(activeName));
@@ -180,6 +182,8 @@ export async function applyPendingModifierAnswer(input: {
 const cartKey = (value: string) =>
   value
     .toLowerCase()
+    .replace(/\(\s*meal\s*\)/g, " ")
+    .replace(/\bmeal\b$/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/s\b/g, "");

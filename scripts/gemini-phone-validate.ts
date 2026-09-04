@@ -105,6 +105,7 @@ async function main() {
   );
   assert.match(bridge, /functionDeclarations/);
   assert.match(bridge, /request_secure_voice_payment/);
+  assert.match(bridge, /if value\.get\("closeBridge"\)/);
   assert.match(
     bridge,
     /if close_requested\.is_set\(\):\s+[\s\S]*?writer\.close\(\)/,

@@ -511,6 +511,7 @@ export const modifierAliases = (name: string, groupName = "") => {
       name,
       withoutPortion,
       withoutPlacement,
+      name.replace(/\s*\(\s*on (?:burger\/?steak|burger|steak)\s*\)\s*$/i, ""),
       normalizedSpokenName(name),
     ];
   for (const value of [...aliases]) {
@@ -542,9 +543,25 @@ export const modifierAliases = (name: string, groupName = "") => {
   if (/sub mod/.test(group) && /^onions?$/.test(simple))
     aliases.push("raw onion", "raw onions", "onion", "onions");
   if (/hamburger.*steak/.test(group) && /^onions?$/.test(simple))
-    aliases.push("cooked onion", "cooked onions", "grilled onion", "grilled onions");
+    aliases.push(
+      "cooked onion",
+      "cooked onions",
+      "grilled onion",
+      "grilled onions",
+      "cooked onions on burger steak",
+    );
   if (/hamburger.*steak/.test(group) && /^peppers?$/.test(simple))
-    aliases.push("sweet pepper", "sweet peppers", "green pepper", "green peppers");
+    aliases.push(
+      "cooked pepper",
+      "cooked peppers",
+      "sweet pepper",
+      "sweet peppers",
+      "green pepper",
+      "green peppers",
+      "cooked peppers on burger steak",
+    );
+  if (/hamburger.*steak/.test(group) && /^mushrooms?$/.test(simple))
+    aliases.push("cooked mushroom", "cooked mushrooms", "mushrooms on burger steak");
   if (/sauce|fry option|mashed mod/.test(group))
     aliases.push(simple.replace(/\b(?:sauce|cheese|on side)\b/g, "").trim());
   if (/side/.test(group))
@@ -1303,6 +1320,17 @@ export async function priceSpokenOrder(input: {
         !spokenModifiers.some((modifier) => /\b(?:mashed|mash)\b/i.test(modifier.name))
       )
         spokenModifiers.push({ name: `${spokenMashed[1]} mashed` });
+      if (
+        /^hamburger steak/.test(spokenKey(item.name)) &&
+        /\b(?:all|all of them|all three|everything)\b/.test(mealIntentText)
+      )
+        for (const name of ["Mushrooms", "Onions", "Peppers"])
+          if (
+            !spokenModifiers.some(
+              (modifier) => spokenKey(modifier.name) === spokenKey(name),
+            )
+          )
+            spokenModifiers.push({ name });
       for (let index = spokenModifiers.length - 1; index >= 0; index--) {
         const key = spokenKey(spokenModifiers[index].name),
           combined = /\b(small|medium)\s+(?:mashed|mash)(?:\s+potatoes?)?\s+(?:with\s+)?gravy\b/.exec(

@@ -103,7 +103,7 @@ export async function POST(request: Request) {
     const callId = String(body.callId || "");
     const action = String(body.action || "");
     const call = (
-      await getSql()`SELECT call.id,call.order_id,orders.service_type FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.selected_provider='gemini' LIMIT 1`
+      await getSql()`SELECT call.id,call.order_id,orders.service_type,orders.payment_preference,orders.amount_due_cents FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.selected_provider='gemini' LIMIT 1`
     )[0];
     if (!call)
       return Response.json(
@@ -160,6 +160,20 @@ export async function POST(request: Request) {
       return Response.json({ closeBridge: true });
     }
     if (action === "complete") {
+      if (
+        call.order_id &&
+        call.service_type === "delivery" &&
+        Number(call.amount_due_cents || 0) > 0
+      ) {
+        const cardSelected = call.payment_preference === "card";
+        return Response.json({
+          closeBridge: false,
+          completionBlocked: true,
+          instruction: cardSelected
+            ? "Card payment is still due. Silently call request_secure_voice_payment before any closing."
+            : "Payment is unresolved for this delivery. Ask exactly: Will you be paying with cash or card? Then persist the answer with price_order before closing.",
+        });
+      }
       await getSql()`UPDATE ordering_call_sessions SET state='ended',bridge_action='complete',ended_at=NOW(),updated_at=NOW() WHERE id=${call.id}`;
       return Response.json({ closeBridge: true });
     }

@@ -648,7 +648,8 @@ async def bridge(reader, writer, call_id):
                             if name == "complete_call":
                                 await playback.wait_until_complete()
                                 value = await app_action(call_id, "complete")
-                                close_requested.set()
+                                if value.get("closeBridge"):
+                                    close_requested.set()
                                 return value
                             return await mcp_call(
                                 call_id,

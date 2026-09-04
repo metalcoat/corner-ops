@@ -245,6 +245,29 @@ async function main() {
       ),
       "Hamburger Steak toppings must resolve through its own multi-select group.",
     );
+    const pendingMashed = await applyPendingModifierAnswer({
+      orderId: hamburgerSteak.id,
+      pendingItem: {
+        customerRequest: "Hamburger Steak",
+        missingRequiredFields: ["mashed size"],
+      },
+      customerText: "small",
+      operation: "add",
+      targetItem: "",
+      items: [
+        {
+          name: "Hamburger Steak",
+          quantity: 1,
+          modifiers: [{ name: "Small Mashed" }],
+        },
+      ],
+    });
+    assert.ok(
+      pendingMashed.items[0].modifiers?.some(
+        (modifier) => modifier.name === "Italian (On Salad)",
+      ),
+      "Mashed-size follow-up must retain the dressing already selected on Hamburger Steak (Meal).",
+    );
 
     const hamburgerSteakMashed = await priceSpokenOrder({
       business: "Corner Deli",
@@ -284,8 +307,9 @@ async function main() {
           modifiers: [
             { name: "Italian" },
             { name: "Small Mashed" },
-            { name: "Cooked Onions" },
-            { name: "Sweet Peppers" },
+            { name: "Mushrooms (On Burger/Steak)" },
+            { name: "Cooked Onions (On Burger/Steak)" },
+            { name: "Cooked Peppers (On Burger/Steak)" },
           ],
         },
       ],
@@ -301,6 +325,33 @@ async function main() {
       naturalToppings.some((row) => String(row.option_name_snapshot) === "Onions") &&
         naturalToppings.some((row) => String(row.option_name_snapshot) === "Peppers"),
       "Hamburger Steak spoken cooked onions and sweet peppers must resolve to canonical options.",
+    );
+
+    const hamburgerSteakAll = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      customerText: "all of them",
+      items: [
+        {
+          name: "Hamburger Steak",
+          quantity: 1,
+          modifiers: [{ name: "Italian" }, { name: "Small Mashed" }],
+        },
+      ],
+    });
+    created.push(hamburgerSteakAll.id);
+    const allToppings = await sql`
+      SELECT modifier.option_name_snapshot
+      FROM ordering_order_item_modifiers modifier
+      JOIN ordering_order_items item ON item.id=modifier.order_item_id
+      WHERE item.order_id=${hamburgerSteakAll.id}
+    `;
+    assert.ok(
+      ["Mushrooms", "Onions", "Peppers"].every((name) =>
+        allToppings.some((row) => String(row.option_name_snapshot) === name),
+      ),
+      "All of them must select all three Hamburger Steak toppings.",
     );
 
     result = await price("small salad ranch");
