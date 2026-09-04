@@ -134,6 +134,12 @@ export const OPENAI_PRICE_ORDER_TOOL = {
         description:
           "Set only after asking whether the caller wants fries with the burger.",
       },
+      hamburgerSteakToppingsDecision: {
+        type: "string",
+        enum: ["selected", "declined"],
+        description:
+          "Set only after asking whether the caller wants mushrooms, onions, or peppers on Hamburger Steak.",
+      },
     },
     required: ["operation", "serviceType", "items"],
     additionalProperties: false,

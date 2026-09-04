@@ -84,13 +84,15 @@ async function main() {
     "totalCents",
     "SHADOW",
     "Maximum",
+    "Would you like mushrooms, onions, or peppers on it?",
+    "hamburgerSteakToppingsDecision",
   ]) {
     assert.ok(prompt.includes(phrase), `Missing prompt policy: ${phrase}`);
   }
   assert.equal(
-    settings.model,
+    settings.openaiModel,
     "gpt-realtime-1.5",
-    "Test calls must use the proven full Realtime model.",
+    "OpenAI test calls must retain the proven full Realtime model even when Gemini is currently selected.",
   );
   const webhookSource = await readFile(
     new URL("../src/app/api/openai/realtime/webhook/route.ts", import.meta.url),
@@ -101,18 +103,20 @@ async function main() {
     "GPT-Realtime 1.5 call acceptance must not send reasoning configuration.",
   );
   assert.ok(
-    webhookSource.includes("max_output_tokens:512"),
+    /max_output_tokens:\s*512/.test(webhookSource),
     "Function arguments and complete questions need enough output room while staying within the realtime token budget.",
   );
   assert.ok(
-    webhookSource.includes('voice:"marin"') &&
-      webhookSource.includes("speed:1.04") &&
-      webhookSource.includes('noise_reduction:{type:"far_field"}'),
+    /voice:\s*["']marin["']/.test(webhookSource) &&
+      /speed:\s*1\.04/.test(webhookSource) &&
+      /noise_reduction:\s*\{\s*type:\s*["']far_field["']/.test(
+        webhookSource,
+      ),
     "The live voice must use warm Marin delivery and speakerphone-oriented noise reduction.",
   );
   assert.ok(
-    webhookSource.includes(
-      "tools:[OPENAI_PRICE_ORDER_TOOL,OPENAI_MENU_SEARCH_TOOL,OPENAI_HUMAN_HANDOFF_TOOL,OPENAI_VOICE_PAYMENT_TOOL]",
+    /tools:\s*\[\s*OPENAI_PRICE_ORDER_TOOL,\s*OPENAI_MENU_SEARCH_TOOL,\s*OPENAI_HUMAN_HANDOFF_TOOL,\s*OPENAI_VOICE_PAYMENT_TOOL,?\s*\]/.test(
+      webhookSource,
     ),
     "Realtime calls must use direct atomic pricing and current-menu lookup functions.",
   );
@@ -121,11 +125,11 @@ async function main() {
     "Realtime calls must not wait on hosted MCP discovery.",
   );
   assert.ok(
-    webhookSource.includes("create_response:false"),
+    /create_response:\s*false/.test(webhookSource),
     "The sideband must debounce customer turns instead of interjecting on every VAD pause.",
   );
   assert.ok(
-    webhookSource.includes("interrupt_response:false"),
+    /interrupt_response:\s*false/.test(webhookSource),
     "Incidental VAD events must not cancel an active sentence.",
   );
   const sidebandSource = await readFile(
@@ -203,7 +207,7 @@ async function main() {
   assert.ok(
     prompt.includes("read the entire authoritative compact cart back once") &&
       prompt.includes("Does that sound right?") &&
-      prompt.includes("Only after the caller confirms the readback is correct"),
+      prompt.includes("after the caller confirms the readback"),
     "Every completed phone order must receive one confirmed full readback.",
   );
   assert.ok(

@@ -520,7 +520,20 @@ export const modifierAliases = (name: string, groupName = "") => {
     if (/^extra cheese$/i.test(value)) aliases.push("cheese");
   }
   const group = spokenKey(groupName),
-    simple = normalizedSpokenName(name);
+    simple = normalizedSpokenName(name),
+    negative = /^(?:no|without|remove|hold|skip)\s+(.+)$/i.exec(simple);
+  if (negative) {
+    const subject = negative[1].trim();
+    aliases.push(
+      `no ${subject}`,
+      `without ${subject}`,
+      `remove ${subject}`,
+      `hold ${subject}`,
+      `skip ${subject}`,
+      `leave off ${subject}`,
+      `take off ${subject}`,
+    );
+  }
   if (/dressing/.test(group))
     aliases.push(
       simple.replace(/\bdressing\b/g, "").trim(),

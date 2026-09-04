@@ -654,8 +654,24 @@ export function startOpenAiSideband(
               /^(blue cheese|ranch|celery)$/i.test(String(modifier.name)),
             ),
         );
-      const burgerItems = touchedItems.filter((item) =>
-          /burger/i.test(String(item.name)),
+      const hamburgerSteakItems = touchedItems.filter((item) =>
+          /^hamburger steak(?:\s*\(meal\))?$/i.test(String(item.name).trim()),
+        ),
+        hamburgerSteakHasToppings = hamburgerSteakItems.some((item) =>
+          (item.modifiers || []).some((modifier) =>
+            /^(mushrooms?|onions?|peppers?)$/i.test(String(modifier.name)),
+          ),
+        ),
+        hamburgerSteakNeedsToppings =
+          hamburgerSteakItems.length > 0 &&
+          !hamburgerSteakHasToppings &&
+          args.hamburgerSteakToppingsDecision !== "declined",
+        burgerItems = touchedItems.filter(
+          (item) =>
+            /burger/i.test(String(item.name)) &&
+            !/^(?:hot hamburger|hamburger steak)/i.test(
+              String(item.name).trim(),
+            ),
         ),
         burgerHasToppings = burgerItems.some((item) =>
           (item.modifiers || []).some((modifier) =>
@@ -679,6 +695,11 @@ export function startOpenAiSideband(
         Object.assign(result, {
           required_follow_up:
             "Would you like blue cheese, ranch, or celery with that?",
+        });
+      else if (hamburgerSteakNeedsToppings)
+        Object.assign(result, {
+          required_follow_up:
+            "Would you like mushrooms, onions, or peppers on it?",
         });
       else if (burgerNeedsToppings)
         Object.assign(result, {

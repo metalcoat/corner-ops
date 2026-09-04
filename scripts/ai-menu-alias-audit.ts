@@ -5,7 +5,7 @@ import { localValidationEnv } from "./validation-env";
 localValidationEnv();
 
 async function main() {
-  const { generatedItemAliases, menuCatalog, modifierAliases } =
+  const { generatedItemAliases, menuCatalog, modifierAliases, spokenKey } =
     await import("../src/lib/ordering-ai-tools");
   const catalogs = await Promise.all(
     Array.from({ length: 7 }, (_, offset) => {
@@ -42,6 +42,17 @@ async function main() {
   }));
   assert.ok(itemRows.every((row) => row.aliases.length > 0));
   assert.ok(modifierRows.every((row) => row.aliases.length > 0));
+  const negativeModifierRows = modifierRows.filter((row) =>
+    /^(?:no|without|remove)\s+/i.test(row.option),
+  );
+  assert.ok(negativeModifierRows.length > 0);
+  for (const row of negativeModifierRows) {
+    const subject = row.option.replace(/^(?:no|without|remove)\s+/i, "");
+    const keys = new Set(row.aliases.map((alias: string) => spokenKey(alias)));
+    assert.ok(keys.has(spokenKey(`no ${subject}`)), row.option);
+    assert.ok(keys.has(spokenKey(`without ${subject}`)), row.option);
+    assert.ok(keys.has(spokenKey(`remove ${subject}`)), row.option);
+  }
 
   const contextualCollisions = new Map<string, Set<string>>();
   for (const row of modifierRows) {
@@ -69,6 +80,7 @@ async function main() {
         0,
       ),
       ambiguousAliasesWithinSameItemAndGroup: ambiguous.length,
+      negativeModifierOptions: negativeModifierRows.length,
     }),
   );
 }

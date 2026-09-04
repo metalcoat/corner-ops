@@ -99,7 +99,10 @@ async function main() {
   const { callerFromSipHeaders } = await import(
     "../src/lib/openai-phone-ordering"
   );
-  assert.match(dialplan, /AudioSocket\(\$\{AI_CALL_ID\},127\.0\.0\.1:9092\)/);
+  assert.match(
+    dialplan,
+    /TryExec\(AudioSocket\(\$\{AI_CALL_ID\},127\.0\.0\.1:9092\)\)/,
+  );
   assert.match(bridge, /functionDeclarations/);
   assert.match(bridge, /request_secure_voice_payment/);
   assert.match(bridge, /request_human_handoff/);

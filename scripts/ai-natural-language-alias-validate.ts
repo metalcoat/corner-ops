@@ -99,6 +99,64 @@ async function main() {
     assert.ok(result.modifierNames.includes("Nacho Cheese on Side"));
     await expectError("fries with nacho", /Small or large/i);
 
+    const nachoWithoutJalapenos = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      items: [
+        {
+          name: "Nacho Supreme",
+          quantity: 1,
+          modifiers: [{ name: "Remove Jalapenos" }],
+        },
+      ],
+    });
+    created.push(nachoWithoutJalapenos.id);
+    const nachoModifiers = await sql`
+      SELECT modifier.option_name_snapshot
+      FROM ordering_order_item_modifiers modifier
+      JOIN ordering_order_items item ON item.id=modifier.order_item_id
+      WHERE item.order_id=${nachoWithoutJalapenos.id}
+    `;
+    assert.ok(
+      nachoModifiers.some(
+        (row) => String(row.option_name_snapshot) === "No Jalapenos",
+      ),
+      "Remove jalapenos must resolve to the canonical No Jalapenos modifier.",
+    );
+
+    const hamburgerSteak = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      items: [
+        {
+          name: "Hamburger Steak",
+          quantity: 1,
+          modifiers: [
+            { name: "Italian" },
+            { name: "Mushrooms" },
+            { name: "Onions" },
+          ],
+        },
+      ],
+    });
+    created.push(hamburgerSteak.id);
+    const hamburgerSteakModifiers = await sql`
+      SELECT modifier.option_name_snapshot
+      FROM ordering_order_item_modifiers modifier
+      JOIN ordering_order_items item ON item.id=modifier.order_item_id
+      WHERE item.order_id=${hamburgerSteak.id}
+    `;
+    assert.ok(
+      ["Mushrooms", "Onions"].every((name) =>
+        hamburgerSteakModifiers.some(
+          (row) => String(row.option_name_snapshot) === name,
+        ),
+      ),
+      "Hamburger Steak toppings must resolve through its own multi-select group.",
+    );
+
     result = await price("small salad ranch");
     assert.equal(result.lines[0].item_name_snapshot, "SM Tossed Sal");
     assert.ok(
