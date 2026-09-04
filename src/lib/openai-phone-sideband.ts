@@ -96,6 +96,85 @@ async function spokenCart(orderId: string): Promise<SpokenOrderItem[]> {
       ),
   }));
 }
+const affirmative = (value: string) =>
+  /^(?:yes|yeah|yep|sure|absolutely|please|yes please|yeah please|yep please)(?:\b|$)/i.test(
+    value.trim(),
+  );
+const negative = (value: string) =>
+  /^(?:no|nope|no thanks|i(?:'| a)?m good)(?:\b|$)/i.test(value.trim());
+
+export async function applyPendingModifierAnswer(input: {
+  orderId: string | null;
+  pendingItem: Record<string, any> | null;
+  customerText: string;
+  operation: CartOperation;
+  targetItem: string;
+  items: SpokenOrderItem[];
+}): Promise<{
+  orderId: string | null;
+  pendingItem: Record<string, any> | null;
+  customerText: string;
+  operation: CartOperation;
+  targetItem: string;
+  items: SpokenOrderItem[];
+  resolvedPendingQuestions?: string[];
+}> {
+  const pending = input.pendingItem;
+  if (!input.orderId || !pending) return { ...input };
+  const current = await spokenCart(input.orderId);
+  const activeName = String(pending.activeItem || pending.category || "");
+  const line = [...current]
+    .reverse()
+    .find((item) => cartKey(item.name) === cartKey(activeName));
+  if (!line) return { ...input };
+  if ((pending.missingRequiredFields || []).includes("mashed size")) {
+    const size = /\b(small|medium)\b/i.exec(input.customerText)?.[1];
+    if (!size) return { ...input };
+    return {
+      ...input,
+      operation: "replace_item" as CartOperation,
+      targetItem: line.name,
+      items: [
+        {
+          ...line,
+          modifiers: [
+            ...(line.modifiers || []).filter(
+              (modifier) =>
+                !/\b(?:small|medium)\s+(?:mashed|french fries|curly fries|waffle fries|tater tots)\b/i.test(
+                  modifier.name,
+                ),
+            ),
+            { name: `${size} mashed` },
+          ],
+        },
+      ],
+    };
+  }
+  if (pending.pendingQuestion === "mashed_gravy") {
+    if (!affirmative(input.customerText) && !negative(input.customerText))
+      return { ...input };
+    return {
+      ...input,
+      operation: "replace_item" as CartOperation,
+      targetItem: line.name,
+      items: [
+        affirmative(input.customerText)
+          ? {
+              ...line,
+              modifiers: [
+                ...(line.modifiers || []).filter(
+                  (modifier) => !/^gravy$/i.test(modifier.name),
+                ),
+                { name: "Gravy" },
+              ],
+            }
+          : line,
+      ],
+      resolvedPendingQuestions: ["mashed_gravy"],
+    };
+  }
+  return { ...input };
+}
 const cartKey = (value: string) =>
   value
     .toLowerCase()
@@ -396,7 +475,7 @@ export function startOpenAiSideband(
       }
       const sql = getSql();
       const call = (
-        await sql`SELECT call.id,call.order_id,call.caller_phone,orders.service_type,orders.customer_id,orders.first_name_snapshot,orders.last_name_snapshot,address.route_distance_miles FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=orders.id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
+        await sql`SELECT call.id,call.order_id,call.caller_phone,call.pending_item,orders.service_type,orders.customer_id,orders.first_name_snapshot,orders.last_name_snapshot,address.route_distance_miles FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=orders.id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
       )[0];
       if (!call)
         throw new AiToolError(
@@ -448,6 +527,17 @@ export function startOpenAiSideband(
         }
       }
       let targetItem = String(args.targetItem || "");
+      const pendingApplied = await applyPendingModifierAnswer({
+        orderId: call.order_id ? String(call.order_id) : null,
+        pendingItem: call.pending_item || null,
+        customerText: lastCustomerTranscript,
+        operation,
+        targetItem,
+        items: spokenItems,
+      });
+      operation = pendingApplied.operation;
+      targetItem = pendingApplied.targetItem;
+      spokenItems = pendingApplied.items;
       const attached = await attachStandaloneModifierAnswer(
         call.order_id ? String(call.order_id) : null,
         operation,
@@ -481,8 +571,9 @@ export function startOpenAiSideband(
         callerPhone,
         firstName: String(args.firstName || call.first_name_snapshot || ""),
         lastName: String(args.lastName || call.last_name_snapshot || ""),
+        resolvedPendingQuestions: pendingApplied.resolvedPendingQuestions,
       });
-      await sql`UPDATE ordering_call_sessions SET order_id=${String(result.id)},updated_at=NOW() WHERE id=${call.id}`;
+      await sql`UPDATE ordering_call_sessions SET order_id=${String(result.id)},pending_item=${result.pending_item ? JSON.stringify(result.pending_item) : null}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
       if (
         args.serviceType === "delivery" &&
         String(args.deliveryAddress || "").trim()
@@ -605,7 +696,12 @@ export function startOpenAiSideband(
         actor,
         orderId: String(result.id),
         outcome: "success",
-        inputSummary: { keys: Object.keys(args), source: "realtime_function" },
+        inputSummary: {
+          customerItems: args.items || [],
+          operation,
+          targetItem,
+          source: "realtime_function",
+        },
         resultSummary: {
           lineCount: result.lines.length,
           totalCents: result.total_cents,
@@ -636,40 +732,59 @@ export function startOpenAiSideband(
               "Ask one precise clarification, then retry.",
               500,
             );
+      const pendingItem = known.details.pendingItem || null;
+      if (pendingItem)
+        await getSql()`UPDATE ordering_call_sessions SET pending_item=${JSON.stringify(pendingItem)}::jsonb,updated_at=NOW() WHERE business='Corner Deli' AND three_cx_call_id=${callId}`;
       await auditAiTool({
         business: "Corner Deli",
         requestId,
         conversationId: callId,
         tool: "price_order",
         actor,
-        outcome: "error",
+        outcome: known.code === "FOLLOW_UP_REQUIRED" ? "blocked" : "error",
         errorCode: known.code,
-        inputSummary: { source: "realtime_function" },
-        resultSummary: { message: known.message },
+        inputSummary: {
+          customerItems: args.items || [],
+          operation: args.operation || "",
+          targetItem: args.targetItem || "",
+          source: "realtime_function",
+        },
+        resultSummary: { message: known.message, details: known.details },
         durationMs: Date.now() - started,
         model,
       });
-      await recordAiRegression({
-        business: "Corner Deli",
-        caseType: "order_resolution",
-        source: `production_tool_${known.code}`,
-        callId,
-        payload: args,
-        expected: { mustResolve: true },
-      });
+      if (known.code !== "FOLLOW_UP_REQUIRED")
+        await recordAiRegression({
+          business: "Corner Deli",
+          caseType: "order_resolution",
+          source: `production_tool_${known.code}`,
+          callId,
+          payload: args,
+          expected: { mustResolve: true },
+        });
       socket.send(
         JSON.stringify({
           type: "conversation.item.create",
           item: {
             type: "function_call_output",
             call_id: row.call_id,
-            output: JSON.stringify({
-              error: {
-                code: known.code,
-                message: known.message,
-                remedy: known.remedy,
-              },
-            }),
+            output: JSON.stringify(
+              known.code === "FOLLOW_UP_REQUIRED"
+                ? {
+                    ok: false,
+                    pending: true,
+                    requiredFollowUp: known.message,
+                    details: known.details,
+                  }
+                : {
+                    error: {
+                      code: known.code,
+                      message: known.message,
+                      remedy: known.remedy,
+                      details: known.details,
+                    },
+                  },
+            ),
           },
         }),
       );
@@ -1055,10 +1170,10 @@ export function startOpenAiSideband(
                 type: "response.create",
                 response: {
                   instructions:
-                    "Continue the pending restaurant conversation in one short, complete sentence. Do not repeat completed words.",
+                    "Continue the same logical turn in one short, complete sentence. Do not repeat completed words. If the caller's latest turn changes the order or answers a pending modifier question, call price_order and wait for success before verbally confirming it.",
                   output_modalities: ["audio"],
                   max_output_tokens: 128,
-                  tool_choice: "none",
+                  tool_choice: "auto",
                 },
               }),
             );

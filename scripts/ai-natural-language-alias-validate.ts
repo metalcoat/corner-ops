@@ -5,12 +5,14 @@ import { localValidationEnv } from "./validation-env";
 localValidationEnv();
 
 async function main() {
-  const [{ ensureOrderingAiSchema }, { getSql }, tools] = await Promise.all([
+  const [{ ensureOrderingAiSchema }, { getSql }, tools, sideband] = await Promise.all([
     import("../src/lib/ordering-ai-schema"),
     import("../src/lib/db"),
     import("../src/lib/ordering-ai-tools"),
+    import("../src/lib/openai-phone-sideband"),
   ]);
   const { AiToolError, compositeModifierEffects, priceSpokenOrder } = tools;
+  const { applyPendingModifierAnswer } = sideband;
   await ensureOrderingAiSchema();
   const sql = getSql();
   const actor = {
@@ -78,9 +80,13 @@ async function main() {
     );
 
     await expectError("hot turkey with mashed", /Small or medium/i);
-    await expectError(
-      "hot turkey with medium mashed",
-      /Gravy on the mashed potatoes/i,
+    result = await price("hot turkey with small salad ranch medium mashed");
+    assert.equal(
+      result.required_follow_up,
+      "Gravy on the mashed potatoes?",
+    );
+    assert.ok(
+      result.modifierNames.some((name: string) => /Medium Mashed/i.test(name)),
     );
     await expectError("hot turkey with medium mashed and gravy", /dressing/i);
     result = await price(
@@ -92,6 +98,89 @@ async function main() {
     assert.ok(
       result.modifierNames.some((name: string) => /^Gravy$/i.test(name)),
     );
+
+    for (const provider of ["openai", "gemini"]) {
+      const initial = await priceSpokenOrder({
+        business: "Corner Deli",
+        actor: { ...actor, id: `${provider}-pending-regression` },
+        service: "pickup",
+        items: [
+          {
+            name: "Hot Turkey",
+            quantity: 1,
+            modifiers: [{ name: "Italian Dressing" }],
+          },
+        ],
+      });
+      created.push(initial.id);
+      let sizePending: Record<string, any> | null = null;
+      await assert.rejects(
+        () =>
+          priceSpokenOrder({
+            business: "Corner Deli",
+            actor,
+            service: "pickup",
+            orderId: initial.id,
+            items: [
+              {
+                name: "Hot Turkey",
+                quantity: 1,
+                modifiers: [
+                  { name: "Italian Dressing" },
+                  { name: "Mashed Potatoes" },
+                ],
+              },
+            ],
+          }),
+        (error: unknown) => {
+          if (!(error instanceof AiToolError)) return false;
+          sizePending = error.details.pendingItem as Record<string, any>;
+          return error.code === "FOLLOW_UP_REQUIRED";
+        },
+      );
+      const sized = await applyPendingModifierAnswer({
+        orderId: initial.id,
+        pendingItem: sizePending,
+        customerText: "Yes, small mashed, yep.",
+        operation: "replace_item",
+        targetItem: "Hot Turkey",
+        items: [],
+      });
+      const withMashed = await priceSpokenOrder({
+        business: "Corner Deli",
+        actor,
+        service: "pickup",
+        orderId: initial.id,
+        items: sized.items,
+      });
+      assert.equal(withMashed.required_follow_up, "Gravy on the mashed potatoes?");
+      const gravy = await applyPendingModifierAnswer({
+        orderId: initial.id,
+        pendingItem: withMashed.pending_item,
+        customerText: "Yes, please.",
+        operation: "replace_item",
+        targetItem: "Hot Turkey",
+        items: [],
+      });
+      const complete = await priceSpokenOrder({
+        business: "Corner Deli",
+        actor,
+        service: "pickup",
+        orderId: initial.id,
+        items: gravy.items,
+        resolvedPendingQuestions: gravy.resolvedPendingQuestions,
+      });
+      assert.equal(complete.pending_item, undefined);
+      const canonical = await sql`
+        SELECT modifier.option_id
+        FROM ordering_order_item_modifiers modifier
+        JOIN ordering_order_items item ON item.id=modifier.order_item_id
+        WHERE item.order_id=${initial.id}
+      `;
+      const ids = canonical.map((row) => String(row.option_id));
+      assert.ok(ids.includes("97782954-b940-44d3-918a-7176cf2ae3c7"));
+      assert.ok(ids.includes("80386108-1095-49d2-907a-ad2b8f1a3997"));
+    }
 
     for (const phrase of ["12 wings mild", "12 bone in mild"]) {
       result = await price(phrase);

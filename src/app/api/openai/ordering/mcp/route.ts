@@ -18,7 +18,10 @@ import {
   OPENAI_PHONE_MODEL,
   requestOpenAiHandoff,
 } from "@/lib/openai-phone-ordering";
-import { incrementalSpokenCart } from "@/lib/openai-phone-sideband";
+import {
+  applyPendingModifierAnswer,
+  incrementalSpokenCart,
+} from "@/lib/openai-phone-sideband";
 
 export const runtime = "nodejs";
 type Rpc = {
@@ -335,6 +338,11 @@ const tools = [
         },
         deliveryUnit: { type: "string" },
         items: { type: "array", items: spokenItemSchema },
+        customerText: {
+          type: "string",
+          description:
+            "The customer's exact latest words. Required when answering a pending size or yes/no modifier question.",
+        },
         callerPhone: { type: "string" },
         firstName: { type: "string" },
         lastName: { type: "string" },
@@ -412,7 +420,7 @@ export async function POST(request: Request) {
   delete args.callId;
   await ensureOrderingAiSchema();
   const call = (
-    await getSql()`SELECT id,state,order_id,caller_phone,operating_mode,selected_provider,selected_model FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} AND state IN('ai','handoff_pending') LIMIT 1`
+    await getSql()`SELECT id,state,order_id,caller_phone,pending_item,operating_mode,selected_provider,selected_model FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} AND state IN('ai','handoff_pending') LIMIT 1`
   )[0];
   if (!call)
     return reply(rpc.id, {
@@ -502,22 +510,38 @@ export async function POST(request: Request) {
       role: "employee" as const,
     };
   try {
-    const phoneItems =
+    const requestedOperation = ([
+        "add",
+        "replace_item",
+        "remove_item",
+        "replace_order",
+        "read",
+      ].includes(String(args.operation))
+        ? String(args.operation)
+        : "replace_order") as
+        | "add"
+        | "replace_item"
+        | "remove_item"
+        | "replace_order"
+        | "read",
+      pendingApplied =
+        requestedName === "price_order"
+          ? await applyPendingModifierAnswer({
+              orderId: call.order_id ? String(call.order_id) : null,
+              pendingItem: call.pending_item || null,
+              customerText: String(args.customerText || ""),
+              operation: requestedOperation,
+              targetItem: String(args.targetItem || ""),
+              items: Array.isArray(args.items) ? (args.items as any) : [],
+            })
+          : null,
+      phoneItems =
       requestedName === "price_order"
         ? await incrementalSpokenCart(
             call.order_id ? String(call.order_id) : null,
-            ([
-              "add",
-              "replace_item",
-              "remove_item",
-              "replace_order",
-              "read",
-            ].includes(String(args.operation))
-              ? String(args.operation)
-              : "replace_order") as
-              "add" | "replace_item" | "remove_item" | "replace_order" | "read",
-            String(args.targetItem || ""),
-            Array.isArray(args.items) ? (args.items as any) : [],
+            pendingApplied!.operation,
+            pendingApplied!.targetItem,
+            pendingApplied!.items,
           )
         : [];
     const result =
@@ -531,6 +555,8 @@ export async function POST(request: Request) {
             callerPhone: String(args.callerPhone || call.caller_phone || ""),
             firstName: String(args.firstName || ""),
             lastName: String(args.lastName || ""),
+            resolvedPendingQuestions:
+              pendingApplied?.resolvedPendingQuestions,
           })
         : await executeAiOrderingTool(name, args, "Corner Deli", actor);
     const orderId = String(
@@ -562,7 +588,7 @@ export async function POST(request: Request) {
       });
     }
     if (orderId)
-      await getSql()`UPDATE ordering_call_sessions SET order_id=${orderId},pending_item=NULL,updated_at=NOW() WHERE id=${call.id}`;
+      await getSql()`UPDATE ordering_call_sessions SET order_id=${orderId},pending_item=${(result as Record<string, any>).pending_item ? JSON.stringify((result as Record<string, any>).pending_item) : null}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
     await auditAiTool({
       business: "Corner Deli",
       requestId,
@@ -615,6 +641,20 @@ export async function POST(request: Request) {
       durationMs: Date.now() - started,
       model: String(call.selected_model || OPENAI_PHONE_MODEL),
     });
+    if (known.code === "FOLLOW_UP_REQUIRED")
+      return reply(rpc.id, {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              ok: false,
+              pending: true,
+              requiredFollowUp: known.message,
+              details: known.details,
+            }),
+          },
+        ],
+      });
     return reply(rpc.id, {
       content: [
         {

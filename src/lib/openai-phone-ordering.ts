@@ -36,6 +36,11 @@ export const OPENAI_PRICE_ORDER_TOOL = {
   parameters: {
     type: "object",
     properties: {
+      customerText: {
+        type: "string",
+        description:
+          "The caller's exact latest words when answering a pending modifier question. The server uses this for provider-independent contextual resolution.",
+      },
       operation: {
         type: "string",
         enum: ["add", "replace_item", "remove_item", "replace_order", "read"],

@@ -58,6 +58,17 @@ async function main() {
           setup: {
             model: `models/${model}`,
             generationConfig: { responseModalities: ["AUDIO"] },
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                disabled: false,
+                startOfSpeechSensitivity: "START_SENSITIVITY_LOW",
+                endOfSpeechSensitivity: "END_SENSITIVITY_LOW",
+                prefixPaddingMs: 40,
+                silenceDurationMs: 350,
+              },
+              activityHandling: "START_OF_ACTIVITY_INTERRUPTS",
+            },
+            inputAudioTranscription: {},
             tools: [{ functionDeclarations: declarations }],
           },
         }),
@@ -88,6 +99,11 @@ async function main() {
   assert.match(bridge, /functionDeclarations/);
   assert.match(bridge, /request_secure_voice_payment/);
   assert.match(bridge, /request_human_handoff/);
+  assert.match(bridge, /server\.get\("interrupted"\) is True/);
+  assert.match(bridge, /START_SENSITIVITY_LOW/);
+  assert.match(bridge, /class SpeechOutput/);
+  assert.match(bridge, /await playback\.drain\(\)/);
+  assert.match(bridge, /audio\/pcm;rate=16000/);
   console.log(
     JSON.stringify({
       status: "passed",

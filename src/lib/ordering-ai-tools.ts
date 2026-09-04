@@ -26,6 +26,7 @@ import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
 import { setCheckoutTip } from "@/lib/ordering-payments";
 
 export type AiToolErrorCode =
+  | "FOLLOW_UP_REQUIRED"
   | "INVALID_INPUT"
   | "ITEM_NOT_ON_MENU"
   | "INVALID_MODIFIER"
@@ -871,6 +872,7 @@ export async function priceSpokenOrder(input: {
   callerPhone?: string;
   firstName?: string;
   lastName?: string;
+  resolvedPendingQuestions?: string[];
 }) {
   if (input.items.length && input.service === "undecided")
     throw new AiToolError(
@@ -879,6 +881,9 @@ export async function priceSpokenOrder(input: {
       "Ask whether this is pickup or delivery and wait for the answer.",
       409,
     );
+  let mashedGravyPending:
+    | { itemId: string; itemName: string; sideOptionId: string }
+    | undefined;
   const catalog = await indexedSpokenCatalog(input.business),
     allItems = catalog
       .flatMap((category) => category.items)
@@ -1192,11 +1197,15 @@ export async function priceSpokenOrder(input: {
         /^(hot turkey|hot roast beef|hot hamburger|hamburger steak)/.test(
           spokenKey(item.name),
         ) &&
-        /\b(?:mashed|mash)\b/.test(spokenName) &&
-        !/\b(?:small|medium)\s+(?:mashed|mash)\b/.test(spokenName)
+        /\b(?:mashed|mash)\b/.test(
+          `${spokenName} ${(requested.modifiers || []).map((value) => spokenKey(value.name)).join(" ")}`,
+        ) &&
+        !/\b(?:small|medium)\s+(?:mashed|mash)\b/.test(
+          `${spokenName} ${(requested.modifiers || []).map((value) => spokenKey(value.name)).join(" ")}`,
+        )
       )
         throw new AiToolError(
-          "INVALID_MODIFIER",
+          "FOLLOW_UP_REQUIRED",
           "Small or medium?",
           "Ask exactly: Small or medium?",
           409,
@@ -1222,6 +1231,19 @@ export async function priceSpokenOrder(input: {
         ),
         pizzaToppings: NonNullable<AiItemInput["pizzaToppings"]> = [],
         spokenModifiers = [...(requested.modifiers || [])];
+      for (let index = spokenModifiers.length - 1; index >= 0; index--) {
+        const key = spokenKey(spokenModifiers[index].name),
+          combined = /\b(small|medium)\s+(?:mashed|mash)(?:\s+potatoes?)?\s+(?:with\s+)?gravy\b/.exec(
+            key,
+          );
+        if (combined)
+          spokenModifiers.splice(
+            index,
+            1,
+            { name: `${combined[1]} mashed` },
+            { name: "gravy" },
+          );
+      }
       for (let index = spokenModifiers.length - 1; index >= 0; index--) {
         const effects = compositeModifierEffects(
           item.modifiers.flatMap((group) =>
@@ -1616,22 +1638,24 @@ export async function priceSpokenOrder(input: {
                 (modifierSelections[group.id] || []).includes(option.id),
             ),
         );
-      if (hotMeatMeal && mashedSelected && !gravySelected)
-        throw new AiToolError(
-          "INVALID_MODIFIER",
-          "Gravy on the mashed potatoes?",
-          "Ask exactly: Gravy on the mashed potatoes?",
-          409,
-          {
-            pendingItem: {
-              category: spokenKey(item.name),
-              customerRequest: requested.name,
-              actualMenuItemId: item.id,
-              actualVariantId: variant?.id || null,
-              missingRequiredFields: ["mashed gravy preference"],
-            },
-          },
+      if (
+        hotMeatMeal &&
+        mashedSelected &&
+        !gravySelected &&
+        !input.resolvedPendingQuestions?.includes("mashed_gravy")
+      ) {
+        const selectedSide = mashedGroup?.options.find(
+          (option) =>
+            /mashed/i.test(option.name) &&
+            (modifierSelections[mashedGroup.id] || []).includes(option.id),
         );
+        if (selectedSide)
+          mashedGravyPending = {
+            itemId: item.id,
+            itemName: item.name,
+            sideOptionId: selectedSide.id,
+          };
+      }
       const missingRequired = item.modifiers.find(
         (group) =>
           (group.presentationContext === "ordinary" ||
@@ -1684,6 +1708,20 @@ export async function priceSpokenOrder(input: {
     }),
     ({ quantity: _quantity, ...configuration }) => configuration,
   );
+  const attachPendingFollowUp = <T extends Record<string, any>>(result: T) => {
+    if (!mashedGravyPending) return result;
+    Object.assign(result, {
+      required_follow_up: "Gravy on the mashed potatoes?",
+      pending_item: {
+        activeItem: mashedGravyPending.itemName,
+        actualMenuItemId: mashedGravyPending.itemId,
+        selectedSideOptionId: mashedGravyPending.sideOptionId,
+        pendingQuestion: "mashed_gravy",
+        missingRequiredFields: ["mashed gravy preference"],
+      },
+    });
+    return result;
+  };
   if (input.orderId) {
     const current = (
       await getSql()`SELECT version FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business}`
@@ -1707,7 +1745,7 @@ export async function priceSpokenOrder(input: {
       firstName: input.firstName,
       lastName: input.lastName,
     });
-    return result;
+    return attachPendingFollowUp(result);
   }
   const result = await createAiDraft({
     business: input.business,
@@ -1719,7 +1757,7 @@ export async function priceSpokenOrder(input: {
     firstName: input.firstName,
     lastName: input.lastName,
   });
-  return result;
+  return attachPendingFollowUp(result);
 }
 
 export async function replaceAiDraft(input: {

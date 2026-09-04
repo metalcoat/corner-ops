@@ -104,6 +104,16 @@ export async function POST(request: Request) {
         { error: "Gemini call not found." },
         { status: 404 },
       );
+    if (action === "event") {
+      const eventType = String(body.eventType || "gemini.voice").slice(0, 120);
+      const eventKey = String(
+        body.eventKey || `${callId}:${eventType}:${randomUUID()}`,
+      ).slice(0, 240);
+      const label = String(body.label || eventType).slice(0, 160);
+      const detail = JSON.stringify(body.detail || {}).slice(0, 2000);
+      await getSql()`INSERT INTO ordering_ai_call_events(id,business,call_id,event_key,event_type,role,label,detail,duration_ms) VALUES(${randomUUID()},'Corner Deli',${callId},${eventKey},${eventType},'system',${label},${detail},${body.durationMs == null ? null : Math.max(0, Number(body.durationMs) || 0)}) ON CONFLICT(business,event_key) DO NOTHING`;
+      return Response.json({ ok: true });
+    }
     if (action === "handoff") {
       await getSql()`UPDATE ordering_call_sessions SET state='handoff_pending',bridge_action='handoff',handoff_reason=${String(body.reason || "Customer requested an employee.").slice(0, 500)},updated_at=NOW() WHERE id=${call.id}`;
       return Response.json({ closeBridge: true });
