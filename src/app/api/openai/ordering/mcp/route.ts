@@ -420,7 +420,7 @@ export async function POST(request: Request) {
   delete args.callId;
   await ensureOrderingAiSchema();
   const call = (
-    await getSql()`SELECT id,state,order_id,caller_phone,pending_item,operating_mode,selected_provider,selected_model FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} AND state IN('ai','handoff_pending') LIMIT 1`
+    await getSql()`SELECT call.id,call.state,call.order_id,call.caller_phone,call.customer_id call_customer_id,call.pending_item,call.operating_mode,call.selected_provider,call.selected_model,orders.customer_id order_customer_id,orders.first_name_snapshot,orders.last_name_snapshot FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
   )[0];
   if (!call)
     return reply(rpc.id, {
@@ -497,6 +497,38 @@ export async function POST(request: Request) {
       ],
     });
   delete args.customerConfirmed;
+  if (requestedName === "price_order") {
+    const placeholder = /^(?:customer|caller|guest|unknown|test|n\/?a)$/i;
+    const customerId = String(
+      args.customerId || call.order_customer_id || call.call_customer_id || "",
+    ).trim();
+    const firstName = String(
+      args.firstName || call.first_name_snapshot || "",
+    ).trim();
+    const lastName = String(args.lastName || call.last_name_snapshot || "").trim();
+    if (
+      !customerId &&
+      (!firstName ||
+        !lastName ||
+        placeholder.test(firstName) ||
+        placeholder.test(lastName))
+    )
+      return reply(rpc.id, {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: {
+                code: "FOLLOW_UP_REQUIRED",
+                message: "What's the first and last name for the order?",
+                retryable: true,
+              },
+            }),
+          },
+        ],
+        isError: true,
+      });
+  }
   const started = Date.now(),
     requestId = randomUUID(),
     provider = String(call.selected_provider || "openai"),
@@ -553,8 +585,19 @@ export async function POST(request: Request) {
             items: phoneItems,
             orderId: call.order_id || null,
             callerPhone: String(args.callerPhone || call.caller_phone || ""),
-            firstName: String(args.firstName || ""),
-            lastName: String(args.lastName || ""),
+            customerId:
+              String(
+                args.customerId ||
+                  call.order_customer_id ||
+                  call.call_customer_id ||
+                  "",
+              ) || undefined,
+            firstName: String(
+              args.firstName || call.first_name_snapshot || "",
+            ),
+            lastName: String(
+              args.lastName || call.last_name_snapshot || "",
+            ),
             resolvedPendingQuestions:
               pendingApplied?.resolvedPendingQuestions,
           })

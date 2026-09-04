@@ -105,6 +105,16 @@ async function main() {
   );
   assert.match(bridge, /functionDeclarations/);
   assert.match(bridge, /request_secure_voice_payment/);
+  assert.match(
+    bridge,
+    /if close_requested\.is_set\(\):\s+[\s\S]*?writer\.close\(\)/,
+    "A committed payment or handoff must immediately release AudioSocket.",
+  );
+  assert.match(
+    bridge,
+    /if responses and not close_requested\.is_set\(\):/,
+    "Gemini must not delay bridge closure by sending a response after handoff.",
+  );
   assert.match(bridge, /request_human_handoff/);
   assert.match(bridge, /server\.get\("interrupted"\) is True/);
   assert.match(bridge, /START_SENSITIVITY_LOW/);

@@ -693,12 +693,15 @@ async def bridge(reader, writer, call_id):
                             "response": {"result": result},
                         }
                     )
-                if responses:
+                if responses and not close_requested.is_set():
                     await gemini.send(
                         json.dumps({"toolResponse": {"functionResponses": responses}})
                     )
                     customer_transcript = ""
                 if close_requested.is_set():
+                    # Release AudioSocket immediately so Asterisk can continue into
+                    # payment/handoff without a silent Gemini cleanup delay.
+                    writer.close()
                     break
 
         tasks = [
@@ -713,7 +716,11 @@ async def bridge(reader, writer, call_id):
             if not task.cancelled():
                 task.result()
         if telemetry_tasks:
-            await asyncio.gather(*telemetry_tasks, return_exceptions=True)
+            if close_requested.is_set():
+                for task in telemetry_tasks:
+                    task.cancel()
+            else:
+                await asyncio.gather(*telemetry_tasks, return_exceptions=True)
 
 
 async def handle(reader, writer):

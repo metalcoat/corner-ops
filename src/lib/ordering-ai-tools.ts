@@ -539,6 +539,8 @@ export const modifierAliases = (name: string, groupName = "") => {
       simple.replace(/\bdressing\b/g, "").trim(),
       `${simple.replace(/\bdressing\b/g, "").trim()} dressing`,
     );
+  if (/sub mod/.test(group) && /^onions?$/.test(simple))
+    aliases.push("raw onion", "raw onions", "onion", "onions");
   if (/sauce|fry option|mashed mod/.test(group))
     aliases.push(simple.replace(/\b(?:sauce|cheese|on side)\b/g, "").trim());
   if (/side/.test(group))

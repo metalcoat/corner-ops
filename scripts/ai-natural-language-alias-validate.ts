@@ -125,6 +125,37 @@ async function main() {
       "Remove jalapenos must resolve to the canonical No Jalapenos modifier.",
     );
 
+    const turkeyWithRawOnions = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      items: [
+        {
+          name: "Turkey",
+          variant: "Full Sub",
+          quantity: 1,
+          modifiers: [
+            { name: "Mayo" },
+            { name: "Raw Onions" },
+            { name: "Provolone" },
+          ],
+        },
+      ],
+    });
+    created.push(turkeyWithRawOnions.id);
+    const turkeyModifiers = await sql`
+      SELECT modifier.option_name_snapshot
+      FROM ordering_order_item_modifiers modifier
+      JOIN ordering_order_items item ON item.id=modifier.order_item_id
+      WHERE item.order_id=${turkeyWithRawOnions.id}
+    `;
+    assert.ok(
+      turkeyModifiers.some(
+        (row) => String(row.option_name_snapshot) === "Onion",
+      ),
+      "Raw onions must resolve directly to the Turkey sub's canonical Onion modifier.",
+    );
+
     const hamburgerSteak = await priceSpokenOrder({
       business: "Corner Deli",
       actor,
