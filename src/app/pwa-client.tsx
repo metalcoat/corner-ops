@@ -2,6 +2,7 @@
 
 import { BeforeInstallPromptEvent, isIos, isStandalone } from "@/app/pwa-platform";
 import { responseMessage } from "@/app/client-http";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type PushStatus = {
@@ -10,7 +11,11 @@ type PushStatus = {
   subscribedDevices: number;
 };
 
+type PwaCorner = "top-right" | "top-left" | "bottom-left" | "bottom-right";
 
+const PWA_CORNER_KEY = "corner-ops-pwa-control-corner";
+const PWA_HIDDEN_KEY = "corner-ops-pwa-control-hidden";
+const CORNERS: PwaCorner[] = ["top-right", "top-left", "bottom-left", "bottom-right"];
 
 function applicationServerKey(value: string): ArrayBuffer {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
@@ -19,8 +24,6 @@ function applicationServerKey(value: string): ArrayBuffer {
   for (let index = 0; index < decoded.length; index += 1) bytes[index] = decoded.charCodeAt(index);
   return bytes.buffer;
 }
-
-
 
 function currentAudience(): "owner" | "employee" {
   return window.location.pathname.startsWith("/employee") ? "employee" : "owner";
@@ -42,7 +45,18 @@ async function registerServiceWorker() {
   return registration;
 }
 
+function savedCorner(pathname: string): PwaCorner {
+  const stored = window.localStorage.getItem(PWA_CORNER_KEY) as PwaCorner | null;
+  if (stored && CORNERS.includes(stored)) return stored;
+  return pathname.includes("/messages") ? "top-right" : "bottom-right";
+}
+
+function cornerLabel(corner: PwaCorner): string {
+  return corner.split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join(" ");
+}
+
 export default function PwaClient() {
+  const pathname = usePathname();
   const [status, setStatus] = useState<PushStatus | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [installed, setInstalled] = useState(false);
@@ -50,6 +64,8 @@ export default function PwaClient() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [corner, setCorner] = useState<PwaCorner>("bottom-right");
+  const [controlHidden, setControlHidden] = useState(false);
   const syncedIdentity = useRef("");
 
   const refresh = useCallback(async () => {
@@ -87,6 +103,11 @@ export default function PwaClient() {
   }, []);
 
   useEffect(() => {
+    setCorner(savedCorner(pathname));
+    setControlHidden(window.localStorage.getItem(PWA_HIDDEN_KEY) === "true");
+  }, [pathname]);
+
+  useEffect(() => {
     setInstalled(isStandalone());
     const onInstallPrompt = (event: Event) => {
       event.preventDefault();
@@ -114,6 +135,20 @@ export default function PwaClient() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [refresh]);
+
+  function moveControl() {
+    const currentIndex = CORNERS.indexOf(corner);
+    const next = CORNERS[(currentIndex + 1) % CORNERS.length];
+    window.localStorage.setItem(PWA_CORNER_KEY, next);
+    setCorner(next);
+    setNotice(`App button moved to ${cornerLabel(next)}.`);
+  }
+
+  function hideControl() {
+    window.localStorage.setItem(PWA_HIDDEN_KEY, "true");
+    setPanelOpen(false);
+    setControlHidden(true);
+  }
 
   async function installApp() {
     setNotice("");
@@ -222,9 +257,9 @@ export default function PwaClient() {
     }
   }
 
-  if (!status) return null;
+  if (!status || controlHidden) return null;
 
-  return <div className={`pwaControl ${panelOpen ? "open" : ""}`}>
+  return <div className={`pwaControl ${panelOpen ? "open" : ""} pwaControl-${corner}`}>
     <button className="pwaControlButton" onClick={() => setPanelOpen((value) => !value)} aria-expanded={panelOpen}>
       <img src="/corner-ops-icon.svg" alt="" />
       <span>{subscribed ? "App notifications on" : "Install app"}</span>
@@ -243,10 +278,12 @@ export default function PwaClient() {
         ? "Install Corner Ops for owner messaging and operational alerts. Tapping a notification opens the relevant management screen."
         : "Install Corner Ops for team messages and employee alerts. Tapping a notification opens your employee portal."}</p>
       <div className="pwaActions">
+        <button onClick={moveControl}>Move app button</button>
         {!installed && <button onClick={() => void installApp()} disabled={busy}>Install Corner Ops</button>}
         {!subscribed && <button className="primary" onClick={() => void enableNotifications()} disabled={busy}>Enable notifications</button>}
         {subscribed && <button className="primary" onClick={() => void testNotifications()} disabled={busy}>Send test notification</button>}
-        {subscribed && <button onClick={() => void disableNotifications()} disabled={busy}>Disable on this device</button>}
+        {subscribed && <button onClick={() => void disableNotifications()} disabled={busy}>Disable notifications on this device</button>}
+        <button className="danger" onClick={hideControl}>Hide app button on this device</button>
       </div>
       {notice && <div className="pwaNotice">{notice}</div>}
     </section>}
