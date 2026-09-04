@@ -6,6 +6,7 @@ import os
 import select
 import sys
 import termios
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -20,7 +21,23 @@ def agi(command):
     sys.stdout.write(command+"\n");sys.stdout.flush()
     return sys.stdin.readline().strip()
 
-def prompt(name): agi(f'STREAM FILE voice-payment/{name} ""')
+def _drain_audio(stop):
+    """Keep EAGI's nonblocking media pipe flowing while Asterisk plays a prompt."""
+    while not stop.is_set():
+        ready,_,_=select.select([3],[],[],0.05)
+        if ready:
+            try: os.read(3,3200)
+            except BlockingIOError: pass
+
+def prompt(name):
+    # STREAM FILE is synchronous, but Asterisk continues writing inbound phone
+    # audio to fd 3. Drain it concurrently so the pipe cannot fill and break
+    # prompt playback. Prompt-time audio is intentionally ignored.
+    stop=threading.Event();worker=threading.Thread(target=_drain_audio,args=(stop,),daemon=True)
+    worker.start()
+    try: agi(f'STREAM FILE voice-payment/{name} ""')
+    finally:
+        stop.set();worker.join(timeout=0.25)
 
 def discard_prompt_echo():
     """Discard audio accumulated on EAGI fd 3 while a prompt was playing."""
@@ -100,24 +117,33 @@ def main():
         if ": " in line:
             key,value=line.split(": ",1);environment[key]=value
     agi("ANSWER")
-    session=None
+    session=None;failure_stage="claim_failed"
     try:
         call_id=sys.argv[1].strip() if len(sys.argv)>1 else ""
         verified_caller=sys.argv[2].strip() if len(sys.argv)>2 else ""
         session=api({"action":"claim","callId":call_id,"callerPhone":verified_caller or environment.get("agi_callerid","")})
+        failure_stage="card_recognition_failed"
         card=hear_card_number()
-        if not card or not confirmed(card[-4:]): raise RuntimeError("recognition")
+        if not card: raise RuntimeError("recognition")
+        failure_stage="card_confirmation_failed"
+        if not confirmed(card[-4:]): raise RuntimeError("recognition")
+        failure_stage="expiration_recognition_failed"
         expiry=hear_digits(4,4,"expiration")
+        if not expiry: raise RuntimeError("recognition")
+        failure_stage="security_code_recognition_failed"
         cvv=hear_digits(3,4,"security-code")
+        if not cvv: raise RuntimeError("recognition")
+        failure_stage="billing_zip_recognition_failed"
         zipcode=hear_digits(5,5,"billing-zip")
-        if not expiry or not cvv or not zipcode: raise RuntimeError("recognition")
+        if not zipcode: raise RuntimeError("recognition")
         prompt("processing")
+        failure_stage="provider_payment_failed"
         api({"action":"charge","sessionId":session["sessionId"],"cardNumber":card,"expiryMonth":expiry[:2],"expiryYear":expiry[2:],"cvv":cvv,"avsZip":zipcode})
         card=expiry=cvv=zipcode=""
         prompt("approved");agi("SET VARIABLE VOICE_PAYMENT_RESULT approved")
     except Exception:
         if session:
-            try: api({"action":"abandon","sessionId":session["sessionId"],"code":"recognition_or_payment_failed"})
+            try: api({"action":"abandon","sessionId":session["sessionId"],"code":failure_stage})
             except Exception: pass
         prompt("employee-help");agi("SET VARIABLE VOICE_PAYMENT_RESULT failed")
 

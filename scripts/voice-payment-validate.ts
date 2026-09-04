@@ -22,6 +22,11 @@ assert.match(agi,/first\.startswith\(\("34","37"\)\)/);
 assert.match(agi,/time\.monotonic\(\)-last_voice>2\.0/);
 assert.match(agi,/def discard_prompt_echo\(\)/);
 assert.match(agi,/termios\.ioctl\(3,termios\.FIONREAD/);
+assert.match(agi,/def _drain_audio\(stop\)/);
+assert.match(agi,/threading\.Thread\(target=_drain_audio/);
+assert.match(agi,/code":failure_stage/);
+for(const stage of ["card_recognition_failed","card_confirmation_failed","expiration_recognition_failed","security_code_recognition_failed","billing_zip_recognition_failed","provider_payment_failed"])
+  assert.match(agi,new RegExp(stage));
 assert.doesNotMatch(agi,/prompt\("welcome"\)/);
 assert.match(dialplan,/AI_CUSTOMER_PHONE/);
 assert.match(readFileSync(`${root}/asterisk/Dockerfile`,"utf8"),/sox "\$\{source\}" -r 8000/);
