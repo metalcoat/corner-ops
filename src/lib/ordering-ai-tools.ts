@@ -1729,6 +1729,70 @@ export async function priceSpokenOrder(input: {
             sideOptionId: selectedSide.id,
           };
       }
+      const subMods = item.modifiers.find(
+          (group) => group.name === "Sub Mods",
+        ),
+        coldSub =
+          Boolean(subMods) &&
+          /(?:sub|wrap)/i.test(String(variant?.name || requested.variant || "")) &&
+          !/big boss/i.test(item.name),
+        selectedSubNames = new Set(
+          (subMods?.options || [])
+            .filter((option) =>
+              (modifierSelections[subMods!.id] || []).includes(option.id),
+            )
+            .map((option) => spokenKey(option.name)),
+        ),
+        condimentsSelected = [...selectedSubNames].some((name) =>
+          /^(?:mayonnaise|mayo|russian|oil|parm shakers|oregano shakers)$/.test(
+            name,
+          ),
+        ),
+        vegetablesSelected = [...selectedSubNames].some((name) =>
+          /^(?:lettuce|tomato|onion|onions|hot peppers)$/.test(name),
+        );
+      if (
+        coldSub &&
+        !condimentsSelected &&
+        !input.resolvedPendingQuestions?.includes("cold_sub_condiments")
+      )
+        throw new AiToolError(
+          "FOLLOW_UP_REQUIRED",
+          "Mayo, Russian, oil, or shakers?",
+          "Ask exactly: Mayo, Russian, oil, or shakers?",
+          409,
+          {
+            pendingItem: {
+              category: spokenKey(item.name),
+              customerRequest: requested.name,
+              actualMenuItemId: item.id,
+              actualVariantId: variant?.id || null,
+              pendingQuestion: "cold_sub_condiments",
+              missingRequiredFields: ["cold sub condiments"],
+            },
+          },
+        );
+      if (
+        coldSub &&
+        !vegetablesSelected &&
+        !input.resolvedPendingQuestions?.includes("cold_sub_vegetables")
+      )
+        throw new AiToolError(
+          "FOLLOW_UP_REQUIRED",
+          "Lettuce, tomato, onions, or hot peppers?",
+          "Ask exactly: Lettuce, tomato, onions, or hot peppers?",
+          409,
+          {
+            pendingItem: {
+              category: spokenKey(item.name),
+              customerRequest: requested.name,
+              actualMenuItemId: item.id,
+              actualVariantId: variant?.id || null,
+              pendingQuestion: "cold_sub_vegetables",
+              missingRequiredFields: ["cold sub vegetables"],
+            },
+          },
+        );
       const missingRequired = item.modifiers.find(
         (group) =>
           (group.presentationContext === "ordinary" ||
@@ -1746,13 +1810,16 @@ export async function priceSpokenOrder(input: {
         const choices = missingRequired.options
             .filter((option) => option.available)
             .map((option) => option.name),
-          question = /^Choose Dressing(?: \(On Salad\))?$/.test(
-            missingRequired.name,
-          )
-            ? "What kind of dressing do you want for your salad?"
-            : spokenKey(missingRequired.name).includes("cheese")
-              ? `What cheese: ${choices.join(", ")}?`
-              : `Choose ${missingRequired.name}: ${choices.join(", ")}?`;
+          question =
+            coldSub && missingRequired.name === "Free Cheese"
+              ? "American, Swiss, or Provolone?"
+              : /^Choose Dressing(?: \(On Salad\))?$/.test(
+                    missingRequired.name,
+                  )
+                ? "What kind of dressing do you want for your salad?"
+                : spokenKey(missingRequired.name).includes("cheese")
+                  ? `What cheese: ${choices.join(", ")}?`
+                  : `Choose ${missingRequired.name}: ${choices.join(", ")}?`;
         throw new AiToolError("INVALID_MODIFIER", question, question, 409, {
           group: missingRequired.name,
           options: choices,

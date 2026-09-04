@@ -140,6 +140,18 @@ export const OPENAI_PRICE_ORDER_TOOL = {
         description:
           "Set only after asking whether the caller wants mushrooms, onions, or peppers on Hamburger Steak.",
       },
+      coldSubCondimentsDecision: {
+        type: "string",
+        enum: ["selected", "declined"],
+        description:
+          "Set after asking Mayo, Russian, oil, or shakers for a cold sub.",
+      },
+      coldSubVegetablesDecision: {
+        type: "string",
+        enum: ["selected", "declined"],
+        description:
+          "Set after asking Lettuce, tomato, onions, or hot peppers for a cold sub.",
+      },
     },
     required: ["operation", "serviceType", "items"],
     additionalProperties: false,

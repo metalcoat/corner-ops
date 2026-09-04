@@ -475,7 +475,7 @@ export function startOpenAiSideband(
       }
       const sql = getSql();
       const call = (
-        await sql`SELECT call.id,call.order_id,call.caller_phone,call.pending_item,orders.service_type,orders.customer_id,orders.first_name_snapshot,orders.last_name_snapshot,address.route_distance_miles FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=orders.id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
+        await sql`SELECT call.id,call.order_id,call.caller_phone,call.pending_item,call.deferred_required_fields,orders.service_type,orders.customer_id,orders.first_name_snapshot,orders.last_name_snapshot,address.route_distance_miles FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=orders.id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
       )[0];
       if (!call)
         throw new AiToolError(
@@ -538,6 +538,17 @@ export function startOpenAiSideband(
       operation = pendingApplied.operation;
       targetItem = pendingApplied.targetItem;
       spokenItems = pendingApplied.items;
+      const resolvedQuestions = new Set<string>(
+        Array.isArray(call.deferred_required_fields)
+          ? call.deferred_required_fields.map(String)
+          : [],
+      );
+      if (args.coldSubCondimentsDecision)
+        resolvedQuestions.add("cold_sub_condiments");
+      if (args.coldSubVegetablesDecision)
+        resolvedQuestions.add("cold_sub_vegetables");
+      for (const question of pendingApplied.resolvedPendingQuestions || [])
+        resolvedQuestions.add(question);
       const attached = await attachStandaloneModifierAnswer(
         call.order_id ? String(call.order_id) : null,
         operation,
@@ -559,6 +570,7 @@ export function startOpenAiSideband(
         targetItem,
         touchedItems,
       );
+      await sql`UPDATE ordering_call_sessions SET deferred_required_fields=${JSON.stringify([...resolvedQuestions])}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
       const result = await priceSpokenOrder({
         business: "Corner Deli",
         actor,
@@ -571,9 +583,11 @@ export function startOpenAiSideband(
         callerPhone,
         firstName: String(args.firstName || call.first_name_snapshot || ""),
         lastName: String(args.lastName || call.last_name_snapshot || ""),
-        resolvedPendingQuestions: pendingApplied.resolvedPendingQuestions,
+        resolvedPendingQuestions: [...resolvedQuestions],
       });
-      await sql`UPDATE ordering_call_sessions SET order_id=${String(result.id)},pending_item=${result.pending_item ? JSON.stringify(result.pending_item) : null}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
+      resolvedQuestions.delete("cold_sub_condiments");
+      resolvedQuestions.delete("cold_sub_vegetables");
+      await sql`UPDATE ordering_call_sessions SET order_id=${String(result.id)},pending_item=${result.pending_item ? JSON.stringify(result.pending_item) : null}::jsonb,deferred_required_fields=${JSON.stringify([...resolvedQuestions])}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
       if (
         args.serviceType === "delivery" &&
         String(args.deliveryAddress || "").trim()

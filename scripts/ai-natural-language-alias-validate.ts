@@ -125,6 +125,64 @@ async function main() {
       "Remove jalapenos must resolve to the canonical No Jalapenos modifier.",
     );
 
+    await assert.rejects(
+      () =>
+        priceSpokenOrder({
+          business: "Corner Deli",
+          actor,
+          service: "pickup",
+          items: [
+            { name: "Turkey", variant: "Full Sub", quantity: 1 },
+          ],
+        }),
+      (error: unknown) =>
+        error instanceof AiToolError &&
+        error.code === "FOLLOW_UP_REQUIRED" &&
+        error.message === "Mayo, Russian, oil, or shakers?",
+      "Cold subs must ask the condiment group first.",
+    );
+    await assert.rejects(
+      () =>
+        priceSpokenOrder({
+          business: "Corner Deli",
+          actor,
+          service: "pickup",
+          items: [
+            {
+              name: "Turkey",
+              variant: "Full Sub",
+              quantity: 1,
+              modifiers: [{ name: "Mayo" }],
+            },
+          ],
+        }),
+      (error: unknown) =>
+        error instanceof AiToolError &&
+        error.code === "FOLLOW_UP_REQUIRED" &&
+        error.message === "Lettuce, tomato, onions, or hot peppers?",
+      "Cold subs must ask vegetables second.",
+    );
+    await assert.rejects(
+      () =>
+        priceSpokenOrder({
+          business: "Corner Deli",
+          actor,
+          service: "pickup",
+          items: [
+            {
+              name: "Turkey",
+              variant: "Full Sub",
+              quantity: 1,
+              modifiers: [{ name: "Mayo" }, { name: "Lettuce" }],
+            },
+          ],
+        }),
+      (error: unknown) =>
+        error instanceof AiToolError &&
+        error.message === "American, Swiss, or Provolone?",
+      "Cold subs must ask the store's cheese question third without unrelated choices.",
+    );
+
     const turkeyWithRawOnions = await priceSpokenOrder({
       business: "Corner Deli",
       actor,

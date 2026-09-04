@@ -346,6 +346,14 @@ const tools = [
         callerPhone: { type: "string" },
         firstName: { type: "string" },
         lastName: { type: "string" },
+        coldSubCondimentsDecision: {
+          type: "string",
+          enum: ["selected", "declined"],
+        },
+        coldSubVegetablesDecision: {
+          type: "string",
+          enum: ["selected", "declined"],
+        },
       },
       required: ["callId", "operation", "serviceType", "items"],
       additionalProperties: false,
@@ -420,7 +428,7 @@ export async function POST(request: Request) {
   delete args.callId;
   await ensureOrderingAiSchema();
   const call = (
-    await getSql()`SELECT call.id,call.state,call.order_id,call.caller_phone,call.customer_id call_customer_id,call.pending_item,call.operating_mode,call.selected_provider,call.selected_model,orders.customer_id order_customer_id,orders.first_name_snapshot,orders.last_name_snapshot FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
+    await getSql()`SELECT call.id,call.state,call.order_id,call.caller_phone,call.customer_id call_customer_id,call.pending_item,call.deferred_required_fields,call.operating_mode,call.selected_provider,call.selected_model,orders.customer_id order_customer_id,orders.first_name_snapshot,orders.last_name_snapshot FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
   )[0];
   if (!call)
     return reply(rpc.id, {
@@ -542,6 +550,17 @@ export async function POST(request: Request) {
       role: "employee" as const,
     };
   try {
+    const resolvedQuestions = new Set<string>(
+      Array.isArray(call.deferred_required_fields)
+        ? call.deferred_required_fields.map(String)
+        : [],
+    );
+    if (args.coldSubCondimentsDecision)
+      resolvedQuestions.add("cold_sub_condiments");
+    if (args.coldSubVegetablesDecision)
+      resolvedQuestions.add("cold_sub_vegetables");
+    if (requestedName === "price_order")
+      await getSql()`UPDATE ordering_call_sessions SET deferred_required_fields=${JSON.stringify([...resolvedQuestions])}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
     const requestedOperation = ([
         "add",
         "replace_item",
@@ -598,8 +617,10 @@ export async function POST(request: Request) {
             lastName: String(
               args.lastName || call.last_name_snapshot || "",
             ),
-            resolvedPendingQuestions:
-              pendingApplied?.resolvedPendingQuestions,
+            resolvedPendingQuestions: [
+              ...resolvedQuestions,
+              ...(pendingApplied?.resolvedPendingQuestions || []),
+            ],
           })
         : await executeAiOrderingTool(name, args, "Corner Deli", actor);
     const orderId = String(
@@ -630,8 +651,11 @@ export async function POST(request: Request) {
         delivery_fee_cents: Number(updated.delivery_fee_cents),
       });
     }
-    if (orderId)
-      await getSql()`UPDATE ordering_call_sessions SET order_id=${orderId},pending_item=${(result as Record<string, any>).pending_item ? JSON.stringify((result as Record<string, any>).pending_item) : null}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
+    if (orderId) {
+      resolvedQuestions.delete("cold_sub_condiments");
+      resolvedQuestions.delete("cold_sub_vegetables");
+      await getSql()`UPDATE ordering_call_sessions SET order_id=${orderId},pending_item=${(result as Record<string, any>).pending_item ? JSON.stringify((result as Record<string, any>).pending_item) : null}::jsonb,deferred_required_fields=${JSON.stringify([...resolvedQuestions])}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
+    }
     await auditAiTool({
       business: "Corner Deli",
       requestId,
