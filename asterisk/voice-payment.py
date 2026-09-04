@@ -5,9 +5,11 @@ import json
 import os
 import select
 import sys
+import termios
 import time
 import urllib.error
 import urllib.request
+from array import array
 from pocketsphinx import Decoder, get_model_path
 
 API=os.environ.get("VOICE_PAYMENT_API_URL","http://127.0.0.1:3000/api/internal/voice-payment")
@@ -19,6 +21,17 @@ def agi(command):
     return sys.stdin.readline().strip()
 
 def prompt(name): agi(f'STREAM FILE voice-payment/{name} ""')
+
+def discard_prompt_echo():
+    """Discard audio accumulated on EAGI fd 3 while a prompt was playing."""
+    for delay in (0,0.2):
+        if delay:time.sleep(delay)
+        pending=array("i",[0]);termios.ioctl(3,termios.FIONREAD,pending,True)
+        remaining=pending[0]
+        while remaining>0:
+            chunk=os.read(3,min(remaining,32000))
+            if not chunk:break
+            remaining-=len(chunk)
 
 def api(payload):
     request=urllib.request.Request(API,data=json.dumps(payload,separators=(",",":")).encode(),headers={"content-type":"application/json","x-voice-payment-secret":SECRET},method="POST")
@@ -57,7 +70,7 @@ def hear_digits(minimum,maximum,prompt_name,attempts=3):
     # PocketSphinx accepts one public rule, so use an inline alternation for streaming digit recognition.
     search="(zero | oh | one | two | three | four | five | six | seven | eight | nine)+"
     for _ in range(attempts):
-        prompt(prompt_name);value="".join(WORDS[word] for word in hear(search) if word in WORDS)
+        prompt(prompt_name);discard_prompt_echo();value="".join(WORDS[word] for word in hear(search) if word in WORDS)
         if minimum<=len(value)<=maximum:return value
         prompt("try-again")
     return ""
@@ -92,7 +105,6 @@ def main():
         call_id=sys.argv[1].strip() if len(sys.argv)>1 else ""
         verified_caller=sys.argv[2].strip() if len(sys.argv)>2 else ""
         session=api({"action":"claim","callId":call_id,"callerPhone":verified_caller or environment.get("agi_callerid","")})
-        prompt("welcome")
         card=hear_card_number()
         if not card or not confirmed(card[-4:]): raise RuntimeError("recognition")
         expiry=hear_digits(4,4,"expiration")

@@ -24,7 +24,7 @@ RUN chmod 0755 /usr/local/bin/corner-ops-asterisk-entrypoint /usr/local/bin/corn
     && mkdir -p /usr/share/asterisk/sounds/en/voice-payment \
     && for spec in \
       'welcome:You are now on the secure automated payment line. Nothing you say here is sent to the ordering assistant or saved in a transcript.' \
-      'card-number:Please say the first four digits of the card number.' \
+      'card-number:Okay, start with the first four numbers.' \
       'next-four:Now say the next four digits.' \
       'last-four:Now say the last four digits.' \
       'next-six:Now say the next six digits.' \

@@ -11,7 +11,7 @@ import wave
 
 PROMPTS={
     "welcome":"You are now on our secure payment line. Your payment information is not sent to the ordering assistant or saved in a transcript.",
-    "card-number":"Please say the first four digits of the card number.",
+    "card-number":"Okay, start with the first four numbers.",
     "next-four":"Now say the next four digits.",
     "last-four":"Now say the last four digits.",
     "next-six":"Now say the next six digits.",
