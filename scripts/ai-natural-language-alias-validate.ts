@@ -88,6 +88,12 @@ async function main() {
       "A fry supplied as a burger modifier must become a separate French Fries line.",
     );
 
+    result = await price("salt and vinegar chips");
+    assert.equal(
+      result.lines[0].item_name_snapshot,
+      "Humpty Dumpty Salt & Vinegar",
+    );
+
     result = await price("large fries with nacho");
     assert.equal(result.lines[0].item_name_snapshot, "Large French Fries");
     assert.ok(result.modifierNames.includes("Nacho Cheese on Side"));

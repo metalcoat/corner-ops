@@ -437,6 +437,11 @@ export function generatedItemAliases(name: string) {
   const canonical = spokenKey(name),
     simple = normalizedSpokenName(name),
     aliases = [name, simple];
+  if (simple.startsWith("humpty dumpty ")) {
+    const flavor = simple.replace(/^humpty dumpty /, "").trim();
+    aliases.push(flavor);
+    if (!flavor.endsWith("chip")) aliases.push(`${flavor} chips`);
+  }
   if (/cheeseburger/.test(simple))
     aliases.push(
       simple.replace(/\b1 4lb\b|\b1 2lb\b|\b3 4lb\b/g, "").trim(),

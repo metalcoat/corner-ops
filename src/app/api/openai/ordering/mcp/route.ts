@@ -615,6 +615,13 @@ export async function POST(request: Request) {
       content: [{ type: "text", text: JSON.stringify(result) }],
     });
   } catch (error) {
+    if (!(error instanceof AiToolError))
+      console.error("AI ordering MCP tool failed unexpectedly.", {
+        callId,
+        tool: requestedName,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
     const known =
       error instanceof AiToolError
         ? error
