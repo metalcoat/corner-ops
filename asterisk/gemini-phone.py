@@ -84,10 +84,33 @@ async def mcp_call(call_id, name, arguments, request_id=None):
     content = result.get("content", [])
     if content and content[0].get("text"):
         try:
-            return json.loads(content[0]["text"])
+            return voice_safe_tool_result(json.loads(content[0]["text"]))
         except json.JSONDecodeError:
             return {"text": content[0]["text"]}
     return body
+
+
+def voice_safe_tool_result(value):
+    """Keep operational draft language out of provider-facing tool results."""
+    safe = scrub_internal_order_language(value)
+    if isinstance(safe, dict):
+        safe["voiceInstruction"] = "Do not narrate internal order state. Continue the customer-facing checkout sequence only."
+    return safe
+
+
+def scrub_internal_order_language(value):
+    if isinstance(value, list):
+        return [scrub_internal_order_language(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    safe = {}
+    for key, item in value.items():
+        if isinstance(item, str) and "draft" in item.lower() and key.lower() in (
+            "status", "message", "instruction"
+        ):
+            continue
+        safe[key] = scrub_internal_order_language(item)
+    return safe
 
 
 async def read_packet(reader):

@@ -21,6 +21,7 @@ assert.match(agi,/first=hear_digits\(4,4,"card-number"\)/);
 assert.match(agi,/first\.startswith\(\("34","37"\)\)/);
 assert.match(agi,/time\.monotonic\(\)-last_voice>2\.0/);
 assert.match(dialplan,/AI_CUSTOMER_PHONE/);
+assert.match(readFileSync(`${root}/asterisk/Dockerfile`,"utf8"),/sox "\$\{source\}" -r 8000/);
 assert.match(lib,/\?`tel:\$\{explicit\}`:explicit/);
 assert.match(lib,/must be an explicit SIP URI for the local payment extension/);
 assert.match(prompt,/must leave the AI audio and transcription path/);

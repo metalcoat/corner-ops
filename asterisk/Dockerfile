@@ -43,6 +43,9 @@ RUN chmod 0755 /usr/local/bin/corner-ops-asterisk-entrypoint /usr/local/bin/corn
       sox "/tmp/${name}.wav" -r 8000 -c 1 -e signed-integer -b 16 "/usr/share/asterisk/sounds/en/voice-payment/${name}.wav"; \
       rm "/tmp/${name}.wav"; \
     done \
-    && find /opt/corner-ops-asterisk/voice-payment-prompts -type f -name '*.wav' -exec cp {} /usr/share/asterisk/sounds/en/voice-payment/ \;
+    && for source in /opt/corner-ops-asterisk/voice-payment-prompts/*.wav; do \
+      name="${source##*/}"; \
+      sox "${source}" -r 8000 -c 1 -e signed-integer -b 16 "/usr/share/asterisk/sounds/en/voice-payment/${name}"; \
+    done
 
 ENTRYPOINT ["/usr/local/bin/corner-ops-asterisk-entrypoint"]

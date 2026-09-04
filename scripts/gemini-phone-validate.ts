@@ -128,6 +128,8 @@ async function main() {
   assert.match(bridge, /generation_complete_and_buffer_drained/);
   assert.match(bridge, /bufferUnderrun/);
   assert.match(bridge, /order_mutation_lock/);
+  assert.match(bridge, /def voice_safe_tool_result/);
+  assert.match(bridge, /Do not narrate internal order state/);
   assert.match(bridge, /def logical_tool_key/);
   assert.match(phonePrompt, /sour cream on the side/);
   assert.match(phonePrompt, /current totalDisplay before any tip/);
