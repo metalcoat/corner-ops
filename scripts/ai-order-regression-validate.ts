@@ -430,7 +430,7 @@ async function main() {
     {
       key: "turkey-sub-needs-cheese",
       items: [{ name: "Turkey Sub", quantity: 1 }],
-      errorCode: "INVALID_MODIFIER",
+      errorCode: "FOLLOW_UP_REQUIRED",
     },
     {
       key: "turkey-sub-alias",

@@ -381,7 +381,7 @@ export const normalizedSpokenName = (value: string) =>
       .replace(/\(\s*\d+\s*\/\s*\d+\s*(?:lb|lbs|pounds?)\s*\)/gi, " ")
       .replace(/\(\s*(?:on (?:the )?salad|on (?:the )?side)\s*\)/gi, " ")
       .replace(/\b(?:on (?:the )?side|side of)\b/gi, " ")
-      .replace(/\b4\s*oz\b|\b2\s*oz\b/gi, " ")
+      .replace(/\b\d+(?:\.\d+)?\s*oz\b/gi, " ")
       .replace(/\bsm\b/gi, " small ")
       .replace(/\blg\b/gi, " large ")
       .replace(/\bsal\b/gi, " salad "),
@@ -431,6 +431,13 @@ export const BUSINESS_ITEM_ALIASES: Record<string, string[]> = {
     "battered mushrooms",
   ],
   "breaded cauliflower": ["fried cauliflower", "battered cauliflower"],
+  "nacho w cheese": [
+    "nachos with cheese",
+    "nacho with cheese",
+    "cheese nachos",
+    "nachos and cheese",
+  ],
+  "pizza log": ["pizza roll", "pizza rolls", "pizza logs"],
 };
 const itemAliases = BUSINESS_ITEM_ALIASES;
 export function generatedItemAliases(name: string) {
@@ -1136,8 +1143,9 @@ export async function priceSpokenOrder(input: {
         bonelessRequested =
           wingPhrase &&
           (spokenName.includes("boneles") || spokenVariant.includes("boneles")),
+        pizzaLogsPhrase = /\bpizza (?:log|roll)\b/.test(spokenName),
         pizzaPhrase =
-          spokenName.includes("pizza") ||
+          (!pizzaLogsPhrase && spokenName.includes("pizza")) ||
           ["jumbo", "large", "16 inch", "16 in", "16"].includes(spokenName),
         varietyPhrase =
           spokenName.includes("variety") ||
@@ -1156,7 +1164,14 @@ export async function priceSpokenOrder(input: {
           409,
           { options: ["Variety for TWO", "Variety for Four"] },
         );
-      const itemQuery = hotMealPhrase
+      const regularMacSalad =
+          /\b(?:mac|macaroni) salad\b/.test(spokenName) &&
+          !/\b(?:party|bulk|pound|lb|feed|people)\b/.test(spokenName),
+        itemQuery = regularMacSalad
+          ? "Mac Salad"
+          : pizzaLogsPhrase
+            ? "Pizza Logs"
+          : hotMealPhrase
           ? hotMealPhrase
           : wingPhrase
             ? bonelessRequested
@@ -1175,9 +1190,18 @@ export async function priceSpokenOrder(input: {
                     : /\bsmall\s+(?:tossed\s+)?salad\b/.test(spokenName)
                       ? "SM Tossed Sal"
                       : requested.name,
+        itemCandidates = regularMacSalad
+          ? allItems.filter(
+              (row) =>
+                spokenKey(row.name) === "mac salad" &&
+                row.variants.some((variant) =>
+                  /^(?:small|medium|large)\b/i.test(variant.name),
+                ),
+            )
+          : allItems,
         item = strictMatch(
           itemQuery,
-          allItems,
+          itemCandidates,
           (row) => [
             row.name,
             normalizedSpokenName(row.name),
@@ -1210,9 +1234,13 @@ export async function priceSpokenOrder(input: {
           )
             ? String(requested.quantity)
             : ""),
+        macSaladSize = regularMacSalad
+          ? /\b(small|medium|large)\b/.exec(spokenName)?.[1] || ""
+          : "",
         rawVariant = wingCount
           ? `${wingCount} Wings`
           : subVariant ||
+            macSaladSize ||
             (spokenVariant &&
             !/^(bone in|boneles|boneless)$/.test(spokenVariant)
               ? spokenVariant
@@ -1308,7 +1336,30 @@ export async function priceSpokenOrder(input: {
             ]),
         ),
         pizzaToppings: NonNullable<AiItemInput["pizzaToppings"]> = [],
-        spokenModifiers = [...(requested.modifiers || [])];
+        spokenModifiers = [...(requested.modifiers || [])],
+        coldSubEverything =
+          subItem &&
+          /(?:sub|wrap)/i.test(String(variant?.name || requested.variant || "")) &&
+          !/big boss/i.test(item.name) &&
+          /\b(?:everything|all of it|all the toppings)\b/.test(mealIntentText);
+      if (coldSubEverything) {
+        for (let index = spokenModifiers.length - 1; index >= 0; index--)
+          if (/^(?:everything|all|all of it|all the toppings)$/.test(spokenKey(spokenModifiers[index].name)))
+            spokenModifiers.splice(index, 1);
+        for (const name of [
+          "Mayonnaise",
+          "Russian",
+          "Oil",
+          "Parm Shakers",
+          "Oregano Shakers",
+          "Lettuce",
+          "Tomato",
+          "Onion",
+          "Hot Peppers",
+        ])
+          if (!spokenModifiers.some((modifier) => spokenKey(modifier.name) === spokenKey(name)))
+            spokenModifiers.push({ name });
+      }
       const spokenMashed = /\b(small|medium)\s+(?:mashed|mash)(?:\s+potatoes?)?\b/.exec(
         mealIntentText,
       );
@@ -1831,6 +1882,32 @@ export async function priceSpokenOrder(input: {
               actualVariantId: variant?.id || null,
               pendingQuestion: "cold_sub_vegetables",
               missingRequiredFields: ["cold sub vegetables"],
+            },
+          },
+        );
+      if (
+        item.name === "Pizza Logs" &&
+        !item.modifiers.some((group) =>
+          group.options.some(
+            (option) =>
+              (modifierSelections[group.id] || []).includes(option.id),
+          ),
+        ) &&
+        !input.resolvedPendingQuestions?.includes("pizza_logs_dipping_sauce")
+      )
+        throw new AiToolError(
+          "FOLLOW_UP_REQUIRED",
+          "What dipping sauce would you like?",
+          "Ask exactly: What dipping sauce would you like?",
+          409,
+          {
+            pendingItem: {
+              category: "pizza logs",
+              customerRequest: requested.name,
+              actualMenuItemId: item.id,
+              actualVariantId: variant?.id || null,
+              pendingQuestion: "pizza_logs_dipping_sauce",
+              missingRequiredFields: ["dipping sauce"],
             },
           },
         );

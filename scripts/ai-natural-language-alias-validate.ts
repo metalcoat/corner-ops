@@ -99,6 +99,22 @@ async function main() {
     assert.ok(result.modifierNames.includes("Nacho Cheese on Side"));
     await expectError("fries with nacho", /Small or large/i);
 
+    await expectError("mac salad", /size or option/i);
+    result = await price("small mac salad");
+    assert.equal(result.lines[0].item_name_snapshot, "Mac Salad");
+    assert.equal(result.lines[0].variant_name_snapshot, "Small 8oz");
+    result = await price("medium macaroni salad");
+    assert.equal(result.lines[0].variant_name_snapshot, "Medium 16oz");
+    result = await price("large mac salad");
+    assert.equal(result.lines[0].variant_name_snapshot, "Large 32oz");
+
+    result = await price("nachos with cheese");
+    assert.equal(result.lines[0].item_name_snapshot, "Nachos w/ Cheese");
+
+    result = await price("pizza rolls");
+    assert.equal(result.lines[0].item_name_snapshot, "Pizza Logs");
+    assert.ok(result.modifierNames.includes("Marinara (4oz)"));
+
     const nachoWithoutJalapenos = await priceSpokenOrder({
       business: "Corner Deli",
       actor,
@@ -182,6 +198,58 @@ async function main() {
         error.message === "American, Swiss, or Provolone?",
       "Cold subs must ask the store's cheese question third without unrelated choices.",
     );
+
+    await assert.rejects(
+      () =>
+        priceSpokenOrder({
+          business: "Corner Deli",
+          actor,
+          service: "pickup",
+          customerText: "everything",
+          items: [
+            {
+              name: "Turkey",
+              variant: "Full Sub",
+              quantity: 1,
+              modifiers: [{ name: "everything" }],
+            },
+          ],
+        }),
+      (error: unknown) =>
+        error instanceof AiToolError &&
+        error.message === "American, Swiss, or Provolone?",
+      "Everything on a cold sub must resolve all standard condiments and vegetables, then ask only cheese.",
+    );
+
+    const turkeyEverything = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      customerText: "everything with provolone",
+      items: [
+        {
+          name: "Turkey",
+          variant: "Full Sub",
+          quantity: 1,
+          modifiers: [{ name: "everything" }, { name: "Provolone" }],
+        },
+      ],
+    });
+    created.push(turkeyEverything.id);
+    const everythingNames = new Set(
+      (
+        await sql`
+          SELECT modifier.option_name_snapshot
+          FROM ordering_order_item_modifiers modifier
+          JOIN ordering_order_items item ON item.id=modifier.order_item_id
+          WHERE item.order_id=${turkeyEverything.id}
+        `
+      ).map((row) => String(row.option_name_snapshot)),
+    );
+    for (const name of [
+      "Mayonnaise", "Russian", "Oil", "Parm Shakers", "Oregano Shakers",
+      "Lettuce", "Tomato", "Onion", "Hot Peppers", "Provolone",
+    ]) assert.ok(everythingNames.has(name), `Cold-sub everything must include ${name}.`);
 
     const turkeyWithRawOnions = await priceSpokenOrder({
       business: "Corner Deli",
