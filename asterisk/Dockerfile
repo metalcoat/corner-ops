@@ -18,12 +18,17 @@ COPY rtp.conf /etc/asterisk/rtp.conf
 COPY entrypoint.sh /usr/local/bin/corner-ops-asterisk-entrypoint
 COPY voice-payment.py /usr/local/bin/corner-ops-voice-payment
 COPY gemini-phone.py /usr/local/bin/corner-ops-gemini-phone
+COPY voice-payment-prompts/ /opt/corner-ops-asterisk/voice-payment-prompts/
 
 RUN chmod 0755 /usr/local/bin/corner-ops-asterisk-entrypoint /usr/local/bin/corner-ops-voice-payment /usr/local/bin/corner-ops-gemini-phone \
     && mkdir -p /usr/share/asterisk/sounds/en/voice-payment \
     && for spec in \
       'welcome:You are now on the secure automated payment line. Nothing you say here is sent to the ordering assistant or saved in a transcript.' \
-      'card-number:Please slowly say the card number, in groups of four digits.' \
+      'card-number:Please say the first four digits of the card number.' \
+      'next-four:Now say the next four digits.' \
+      'last-four:Now say the last four digits.' \
+      'next-six:Now say the next six digits.' \
+      'last-five:Now say the last five digits.' \
       'expiration:Say the two digit expiration month followed by the two digit year.' \
       'security-code:Say the three or four digit security code.' \
       'billing-zip:Say the five digit billing zip code.' \
@@ -37,6 +42,7 @@ RUN chmod 0755 /usr/local/bin/corner-ops-asterisk-entrypoint /usr/local/bin/corn
       espeak-ng -s 145 -w "/tmp/${name}.wav" "${text}"; \
       sox "/tmp/${name}.wav" -r 8000 -c 1 -e signed-integer -b 16 "/usr/share/asterisk/sounds/en/voice-payment/${name}.wav"; \
       rm "/tmp/${name}.wav"; \
-    done
+    done \
+    && find /opt/corner-ops-asterisk/voice-payment-prompts -type f -name '*.wav' -exec cp {} /usr/share/asterisk/sounds/en/voice-payment/ \;
 
 ENTRYPOINT ["/usr/local/bin/corner-ops-asterisk-entrypoint"]

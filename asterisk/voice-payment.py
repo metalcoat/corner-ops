@@ -48,7 +48,7 @@ def hear(search,max_seconds=14):
         level=audioop.rms(chunk,2)
         if level>260: started=True;last_voice=time.monotonic()
         recognizer.process_raw(chunk,False,False)
-        if started and time.monotonic()-last_voice>1.3: break
+        if started and time.monotonic()-last_voice>2.0: break
     recognizer.end_utt();hyp=recognizer.hyp()
     return hyp.hypstr.lower().split() if hyp else []
 
@@ -61,6 +61,18 @@ def hear_digits(minimum,maximum,prompt_name,attempts=3):
         if minimum<=len(value)<=maximum:return value
         prompt("try-again")
     return ""
+
+def hear_card_number():
+    first=hear_digits(4,4,"card-number")
+    if not first:return ""
+    if first.startswith(("34","37")):
+        middle=hear_digits(6,6,"next-six")
+        final=hear_digits(5,5,"last-five")
+        return first+middle+final if middle and final else ""
+    second=hear_digits(4,4,"next-four")
+    third=hear_digits(4,4,"next-four")
+    fourth=hear_digits(4,4,"last-four")
+    return first+second+third+fourth if second and third and fourth else ""
 
 def confirmed(last4):
     prompt("confirm-ending");agi(f'SAY DIGITS {last4} ""');prompt("confirm-yes")
@@ -81,7 +93,7 @@ def main():
         verified_caller=sys.argv[2].strip() if len(sys.argv)>2 else ""
         session=api({"action":"claim","callId":call_id,"callerPhone":verified_caller or environment.get("agi_callerid","")})
         prompt("welcome")
-        card=hear_digits(13,19,"card-number")
+        card=hear_card_number()
         if not card or not confirmed(card[-4:]): raise RuntimeError("recognition")
         expiry=hear_digits(4,4,"expiration")
         cvv=hear_digits(3,4,"security-code")

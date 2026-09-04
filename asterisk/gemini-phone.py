@@ -470,7 +470,14 @@ async def bridge(reader, writer, call_id):
                 {
                     "setup": {
                         "model": f"models/{model}",
-                        "generationConfig": {"responseModalities": ["AUDIO"]},
+                        "generationConfig": {
+                            "responseModalities": ["AUDIO"],
+                            "speechConfig": {
+                                "voiceConfig": {
+                                    "prebuiltVoiceConfig": {"voiceName": "Kore"}
+                                }
+                            },
+                        },
                         "realtimeInputConfig": {
                             "automaticActivityDetection": {
                                 "disabled": False,
