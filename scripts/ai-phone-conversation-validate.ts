@@ -176,7 +176,7 @@ async function main() {
     ),
   ]);
   assert.ok(
-    mcpSource.includes('requestedName === "hold"') &&
+    mcpSource.includes('["hold", "get_draft", "send"]') &&
       mcpSource.includes("args.orderId = String(call.order_id)"),
     "Gemini hold calls must inherit the active order instead of failing without an orderId.",
   );

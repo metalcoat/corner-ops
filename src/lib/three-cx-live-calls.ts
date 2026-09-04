@@ -33,8 +33,8 @@ export async function claimCallerFromAiIngress() {
     WHERE id=(
       SELECT id FROM three_cx_live_calls
       WHERE status='ringing' AND acknowledged_at IS NULL AND raw->>'source'='ai_ingress'
-        AND updated_at>NOW()-INTERVAL '3 minutes'
-      ORDER BY started_at ASC,id ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+        AND updated_at>NOW()-INTERVAL '30 seconds'
+      ORDER BY started_at DESC,id DESC LIMIT 1 FOR UPDATE SKIP LOCKED
     )
     RETURNING caller_phone
   `;

@@ -541,6 +541,10 @@ export const modifierAliases = (name: string, groupName = "") => {
     );
   if (/sub mod/.test(group) && /^onions?$/.test(simple))
     aliases.push("raw onion", "raw onions", "onion", "onions");
+  if (/hamburger.*steak/.test(group) && /^onions?$/.test(simple))
+    aliases.push("cooked onion", "cooked onions", "grilled onion", "grilled onions");
+  if (/hamburger.*steak/.test(group) && /^peppers?$/.test(simple))
+    aliases.push("sweet pepper", "sweet peppers", "green pepper", "green peppers");
   if (/sauce|fry option|mashed mod/.test(group))
     aliases.push(simple.replace(/\b(?:sauce|cheese|on side)\b/g, "").trim());
   if (/side/.test(group))
@@ -900,6 +904,7 @@ export async function priceSpokenOrder(input: {
   firstName?: string;
   lastName?: string;
   resolvedPendingQuestions?: string[];
+  customerText?: string;
 }) {
   if (input.items.length && input.service === "undecided")
     throw new AiToolError(
@@ -1252,16 +1257,13 @@ export async function priceSpokenOrder(input: {
           "Ask for a valid pizza size.",
           409,
         );
+      const mealIntentText = `${spokenName} ${(requested.modifiers || []).map((value) => spokenKey(value.name)).join(" ")} ${input.items.length === 1 ? spokenKey(input.customerText || "") : ""}`;
       if (
         /^(hot turkey|hot roast beef|hot hamburger|hamburger steak)/.test(
           spokenKey(item.name),
         ) &&
-        /\b(?:mashed|mash)\b/.test(
-          `${spokenName} ${(requested.modifiers || []).map((value) => spokenKey(value.name)).join(" ")}`,
-        ) &&
-        !/\b(?:small|medium)\s+(?:mashed|mash)\b/.test(
-          `${spokenName} ${(requested.modifiers || []).map((value) => spokenKey(value.name)).join(" ")}`,
-        )
+        /\b(?:mashed|mash)\b/.test(mealIntentText) &&
+        !/\b(?:small|medium)\s+(?:mashed|mash)\b/.test(mealIntentText)
       )
         throw new AiToolError(
           "FOLLOW_UP_REQUIRED",
@@ -1290,6 +1292,17 @@ export async function priceSpokenOrder(input: {
         ),
         pizzaToppings: NonNullable<AiItemInput["pizzaToppings"]> = [],
         spokenModifiers = [...(requested.modifiers || [])];
+      const spokenMashed = /\b(small|medium)\s+(?:mashed|mash)(?:\s+potatoes?)?\b/.exec(
+        mealIntentText,
+      );
+      if (
+        spokenMashed &&
+        /^(hot turkey|hot roast beef|hot hamburger|hamburger steak)/.test(
+          spokenKey(item.name),
+        ) &&
+        !spokenModifiers.some((modifier) => /\b(?:mashed|mash)\b/i.test(modifier.name))
+      )
+        spokenModifiers.push({ name: `${spokenMashed[1]} mashed` });
       for (let index = spokenModifiers.length - 1; index >= 0; index--) {
         const key = spokenKey(spokenModifiers[index].name),
           combined = /\b(small|medium)\s+(?:mashed|mash)(?:\s+potatoes?)?\s+(?:with\s+)?gravy\b/.exec(
@@ -1988,10 +2001,13 @@ export async function holdDraft(orderId: string, business: OrderingBusiness) {
     ["delivery", "no_contact_delivery"].includes(String(order.service_type))
   ) {
     const address = (
-      await getSql()`SELECT id,route_status,distance_miles FROM ordering_order_delivery_addresses WHERE order_id=${orderId}`
+      await getSql()`SELECT order_id,validation_status,route_distance_miles FROM ordering_order_delivery_addresses WHERE order_id=${orderId}`
     )[0];
     if (!address) missing.push("deliveryAddress");
-    else if (address.route_status !== "routed")
+    else if (
+      address.validation_status !== "validated" ||
+      address.route_distance_miles == null
+    )
       missing.push("deliveryValidation");
   }
   if (!String(order.first_name_snapshot || "").trim())

@@ -246,6 +246,63 @@ async function main() {
       "Hamburger Steak toppings must resolve through its own multi-select group.",
     );
 
+    const hamburgerSteakMashed = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      customerText: "hamburger steak with small mashed potatoes",
+      items: [
+        {
+          name: "Hamburger Steak",
+          quantity: 1,
+          modifiers: [{ name: "Italian" }],
+        },
+      ],
+    });
+    created.push(hamburgerSteakMashed.id);
+    const hamburgerSteakMashedModifiers = await sql`
+      SELECT modifier.option_name_snapshot
+      FROM ordering_order_item_modifiers modifier
+      JOIN ordering_order_items item ON item.id=modifier.order_item_id
+      WHERE item.order_id=${hamburgerSteakMashed.id}
+    `;
+    assert.ok(
+      hamburgerSteakMashedModifiers.some(
+        (row) => String(row.option_name_snapshot) === "Small Mashed",
+      ),
+      "Hamburger Steak must accept mashed potatoes from natural customer wording even if the provider omits the modifier.",
+    );
+
+    const hamburgerSteakNaturalToppings = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      items: [
+        {
+          name: "Hamburger Steak",
+          quantity: 1,
+          modifiers: [
+            { name: "Italian" },
+            { name: "Small Mashed" },
+            { name: "Cooked Onions" },
+            { name: "Sweet Peppers" },
+          ],
+        },
+      ],
+    });
+    created.push(hamburgerSteakNaturalToppings.id);
+    const naturalToppings = await sql`
+      SELECT modifier.option_name_snapshot
+      FROM ordering_order_item_modifiers modifier
+      JOIN ordering_order_items item ON item.id=modifier.order_item_id
+      WHERE item.order_id=${hamburgerSteakNaturalToppings.id}
+    `;
+    assert.ok(
+      naturalToppings.some((row) => String(row.option_name_snapshot) === "Onions") &&
+        naturalToppings.some((row) => String(row.option_name_snapshot) === "Peppers"),
+      "Hamburger Steak spoken cooked onions and sweet peppers must resolve to canonical options.",
+    );
+
     result = await price("small salad ranch");
     assert.equal(result.lines[0].item_name_snapshot, "SM Tossed Sal");
     assert.ok(

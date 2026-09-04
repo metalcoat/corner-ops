@@ -126,19 +126,20 @@ export async function applyPendingModifierAnswer(input: {
   const line = [...current]
     .reverse()
     .find((item) => cartKey(item.name) === cartKey(activeName));
-  if (!line) return { ...input };
   if ((pending.missingRequiredFields || []).includes("mashed size")) {
     const size = /\b(small|medium)\b/i.exec(input.customerText)?.[1];
     if (!size) return { ...input };
+    const target = line || input.items[0];
+    if (!target) return { ...input };
     return {
       ...input,
-      operation: "replace_item" as CartOperation,
-      targetItem: line.name,
+      operation: line ? ("replace_item" as CartOperation) : input.operation,
+      targetItem: line?.name || input.targetItem,
       items: [
         {
-          ...line,
+          ...target,
           modifiers: [
-            ...(line.modifiers || []).filter(
+            ...(target.modifiers || []).filter(
               (modifier) =>
                 !/\b(?:small|medium)\s+(?:mashed|french fries|curly fries|waffle fries|tater tots)\b/i.test(
                   modifier.name,
@@ -150,6 +151,7 @@ export async function applyPendingModifierAnswer(input: {
       ],
     };
   }
+  if (!line) return { ...input };
   if (pending.pendingQuestion === "mashed_gravy") {
     if (!affirmative(input.customerText) && !negative(input.customerText))
       return { ...input };
@@ -259,7 +261,29 @@ export async function incrementalSpokenCart(
   const current = await spokenCart(orderId);
   if (operation === "read") return current;
   const target = cartKey(targetItem || changed[0]?.name || "");
-  if (operation === "add") return [...current, ...changed];
+  if (operation === "add") {
+    if (changed.length === 1) {
+      const incoming = changed[0],
+        incomingModifiers = new Set(
+          (incoming.modifiers || []).map((modifier) => modifierKey(modifier.name)),
+        ),
+        existingIndex = current.findLastIndex(
+          (item) =>
+            cartKey(item.name) === cartKey(incoming.name) &&
+            cartKey(item.variant || "") === cartKey(incoming.variant || "") &&
+            Number(item.quantity || 1) === Number(incoming.quantity || 1) &&
+            (item.modifiers || []).every((modifier) =>
+              incomingModifiers.has(modifierKey(modifier.name)),
+            ) &&
+            incomingModifiers.size > (item.modifiers || []).length,
+        );
+      if (existingIndex >= 0)
+        return current.map((item, index) =>
+          index === existingIndex ? incoming : item,
+        );
+    }
+    return [...current, ...changed];
+  }
   const matches = (item: SpokenOrderItem) => cartKey(item.name) === target;
   if (operation === "replace_item")
     return [...current.filter((item) => !matches(item)), ...changed];
@@ -584,6 +608,7 @@ export function startOpenAiSideband(
         firstName: String(args.firstName || call.first_name_snapshot || ""),
         lastName: String(args.lastName || call.last_name_snapshot || ""),
         resolvedPendingQuestions: [...resolvedQuestions],
+        customerText: lastCustomerTranscript,
       });
       resolvedQuestions.delete("cold_sub_condiments");
       resolvedQuestions.delete("cold_sub_vegetables");

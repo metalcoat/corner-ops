@@ -446,7 +446,11 @@ export async function POST(request: Request) {
       ],
       isError: true,
     });
-  if (requestedName === "hold" && !args.orderId && call.order_id)
+  if (
+    ["hold", "get_draft", "send"].includes(requestedName) &&
+    !args.orderId &&
+    call.order_id
+  )
     args.orderId = String(call.order_id);
   if (requestedName === "request_human_handoff") {
     try {
@@ -623,6 +627,7 @@ export async function POST(request: Request) {
               ...resolvedQuestions,
               ...(pendingApplied?.resolvedPendingQuestions || []),
             ],
+            customerText: String(args.customerText || ""),
           })
         : await executeAiOrderingTool(name, args, "Corner Deli", actor);
     const orderId = String(
