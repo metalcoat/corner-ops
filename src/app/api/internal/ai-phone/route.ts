@@ -115,6 +115,20 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
     if (action === "handoff") {
+      const reason = String(
+        body.reason || "Customer requested an employee.",
+      ).slice(0, 500);
+      if (
+        /(?:system|internal|menu|modifier|item|pricing|tool).*(?:error|fail|problem)|(?:error|fail|problem).*(?:add|find|menu|item|modifier|pricing|tool)/i.test(
+          reason,
+        )
+      )
+        return Response.json({
+          closeBridge: false,
+          handoffBlocked: true,
+          instruction:
+            "This is a recoverable ordering failure. Keep the current cart, ask whether to retry that item or continue, and remain on the call through payment.",
+        });
       await getSql()`UPDATE ordering_call_sessions SET state='handoff_pending',bridge_action='handoff',handoff_reason=${String(body.reason || "Customer requested an employee.").slice(0, 500)},updated_at=NOW() WHERE id=${call.id}`;
       return Response.json({ closeBridge: true });
     }

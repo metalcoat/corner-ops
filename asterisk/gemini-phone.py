@@ -634,7 +634,8 @@ async def bridge(reader, writer, call_id):
                                         "reason", "Employee requested."
                                     ),
                                 )
-                                close_requested.set()
+                                if value.get("closeBridge"):
+                                    close_requested.set()
                                 return value
                             if name == "request_secure_voice_payment":
                                 value = await app_action(
