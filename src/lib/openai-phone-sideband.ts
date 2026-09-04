@@ -1213,20 +1213,66 @@ export function startOpenAiSideband(
       error.message,
     );
   });
-  socket.once("close", () => {
+  socket.once("close", (code, reasonBuffer) => {
     clearTimeout(hardStop);
     if (turnTimer) clearTimeout(turnTimer);
     if (bargeInTimer) clearTimeout(bargeInTimer);
     if (rateLimitRetryTimer) clearTimeout(rateLimitRetryTimer);
     if (ping) clearInterval(ping);
     if (sockets.get(callId) === socket) sockets.delete(callId);
-    void event(
-      callId,
-      `${callId}:sideband-close:${Date.now()}`,
-      "sideband.closed",
-      "system",
-      "Realtime telemetry disconnected",
-      `Connected ${Date.now() - openedAt} ms`,
-    );
+    const connectedMs = Date.now() - openedAt;
+    void (async () => {
+      const call = (
+        await getSql()`SELECT state,bridge_action,handoff_reason FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} LIMIT 1`
+      )[0];
+      const bridgeAction = String(call?.bridge_action || ""),
+        handoffReason = String(call?.handoff_reason || ""),
+        closeReason = reasonBuffer.toString().trim(),
+        expectedPayment =
+          bridgeAction === "payment" ||
+          /secure.*payment|payment/i.test(handoffReason),
+        expectedHandoff =
+          bridgeAction === "handoff" ||
+          ["handoff_pending", "human"].includes(String(call?.state || "")),
+        expectedCompletion = hangupRequested || bridgeAction === "complete";
+      let label = "Realtime connection ended unexpectedly";
+      if (expectedPayment) label = "AI session ended for secure payment";
+      else if (expectedHandoff) label = "AI session handed to the store";
+      else if (expectedCompletion) label = "AI call completed";
+      const durationSeconds = Math.round(connectedMs / 1000),
+        diagnostic = [
+          `Connected ${durationSeconds} seconds`,
+          `close code ${code}`,
+          closeReason ? `reason: ${closeReason}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+      await event(
+        callId,
+        `${callId}:sideband-close:${Date.now()}`,
+        "sideband.closed",
+        expectedPayment || expectedHandoff || expectedCompletion
+          ? "system"
+          : "error",
+        label,
+        diagnostic,
+      );
+      console.info("OpenAI realtime sideband closed.", {
+        callId,
+        code,
+        reason: closeReason,
+        connectedMs,
+        bridgeAction,
+        callState: call?.state || "unknown",
+        expected:
+          expectedPayment || expectedHandoff || expectedCompletion,
+      });
+    })().catch((error) => {
+      console.error("OpenAI realtime close event could not be classified.", {
+        callId,
+        code,
+        error: error instanceof Error ? error.message : "unknown error",
+      });
+    });
   });
 }
