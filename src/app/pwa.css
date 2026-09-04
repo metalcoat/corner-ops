@@ -1,9 +1,27 @@
 .pwaControl {
   position: fixed;
-  right: max(14px, env(safe-area-inset-right));
-  bottom: max(14px, env(safe-area-inset-bottom));
   z-index: 1200;
   font-family: inherit;
+}
+
+.pwaControl-top-right {
+  top: max(14px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+}
+
+.pwaControl-top-left {
+  top: max(14px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+}
+
+.pwaControl-bottom-left {
+  left: max(14px, env(safe-area-inset-left));
+  bottom: max(14px, env(safe-area-inset-bottom));
+}
+
+.pwaControl-bottom-right {
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
 }
 
 .pwaControlButton {
@@ -28,9 +46,9 @@
 }
 
 .pwaPanel {
-  position: absolute;
-  right: 0;
-  bottom: 60px;
+  position: fixed;
+  right: 14px;
+  bottom: 74px;
   width: min(410px, calc(100vw - 28px));
   max-height: min(680px, calc(100svh - 90px));
   overflow: auto;
@@ -130,6 +148,11 @@
   color: var(--color-ffffff);
 }
 
+.pwaActions button.danger {
+  border-color: var(--color-fca5a5);
+  color: var(--color-b91c1c);
+}
+
 .pwaActions button:disabled {
   cursor: wait;
   opacity: 0.58;
@@ -147,7 +170,7 @@
 @media (max-width: 640px) {
   .pwaControlButton span { display: none; }
   .pwaControlButton { padding-right: 7px; }
-  .pwaPanel { position: fixed; right: 14px; bottom: 74px; }
+  .pwaPanel { right: 14px; bottom: 74px; }
   .pwaStatusGrid { grid-template-columns: 1fr; }
 }
 
@@ -163,4 +186,5 @@
   .pwaClose { background: var(--color-334155); color: var(--color-f8fafc); }
   .pwaActions button { border-color: var(--color-475569); background: var(--color-1e293b); color: var(--color-f8fafc); }
   .pwaActions button.primary { border-color: var(--color-f59e0b); background: var(--color-f59e0b); color: var(--color-111827); }
+  .pwaActions button.danger { border-color: var(--color-7f1d1d); color: var(--color-fca5a5); }
 }
