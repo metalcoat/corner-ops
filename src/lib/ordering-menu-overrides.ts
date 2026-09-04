@@ -61,6 +61,21 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_menu_override_audit_target_idx ON ordering_menu_override_audit(target_type,target_id,created_at DESC)`;
+      // Nacho Supreme includes its regular salsa as a side cup. Keep the imported
+      // No Salsa and paid Extra Salsa modifiers intact while making the standard
+      // preparation explicit in every channel that reads the shared description.
+      await sql`
+      INSERT INTO ordering_item_overrides(item_id,description,updated_at,updated_by)
+      SELECT item.id,
+        'Chips with meat, cheese, lettuce, tomatoes, onions, black olives, jalapeños, salsa on the side, and sour cream.',
+        NOW(),'nacho-supreme-salsa-side'
+      FROM ordering_menu_items item
+      WHERE item.business='Corner Deli' AND item.name='Nacho Supreme' AND item.active=TRUE
+      ON CONFLICT(item_id) DO UPDATE SET
+        description=EXCLUDED.description,
+        updated_at=NOW(),
+        updated_by='nacho-supreme-salsa-side'
+    `;
       // The Rezku capture associates these source-ID groups with every meal item,
       // but does not encode its conditional display rules. Preserve the source
       // records and attach the recovered relationship only to items that contain

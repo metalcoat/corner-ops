@@ -4,6 +4,7 @@
 import asyncio
 import audioop
 import base64
+import hashlib
 import json
 import os
 import struct
@@ -119,20 +120,45 @@ class SpeechOutput:
         self.state = "LISTENING"
         self.buffered_ms = 0
         self.sequence = 0
-        self.first_chunk_generations = set()
+        self.generations = {}
+
+    def _new_lifecycle(self, generation_id):
+        return {
+            "generationId": generation_id,
+            "playbackId": generation_id,
+            "generationStarted": True,
+            "generationCompleted": False,
+            "playbackStarted": False,
+            "playbackCompleted": False,
+            "canceled": False,
+            "bufferedChunks": 0,
+            "underrunLogged": False,
+            "completeEvent": asyncio.Event(),
+        }
 
     async def begin_generation(self):
-        if self.active_generation_id is None:
-            self.turn_id += 1
-            self.generation_id += 1
-            self.active_generation_id = self.generation_id
-            self.state = "ASSISTANT_GENERATING"
-            await self.emit("generationStart", self.snapshot())
+        if self.active_generation_id is not None:
+            lifecycle = self.generations[self.active_generation_id]
+            if not lifecycle["generationCompleted"]:
+                return self.active_generation_id
+            if not lifecycle["playbackCompleted"] and not lifecycle["canceled"]:
+                await lifecycle["completeEvent"].wait()
+        self.turn_id += 1
+        self.generation_id += 1
+        self.active_generation_id = self.generation_id
+        self.generations[self.generation_id] = self._new_lifecycle(
+            self.generation_id
+        )
+        self.state = "ASSISTANT_GENERATING"
+        await self.emit("generationStart", self.snapshot())
         return self.active_generation_id
 
     async def enqueue(self, pcm):
         generation_id = await self.begin_generation()
         if generation_id in self.cancelled_generations:
+            return
+        lifecycle = self.generations[generation_id]
+        if lifecycle["generationCompleted"] or lifecycle["playbackCompleted"]:
             return
         for offset in range(0, len(pcm), 320):
             chunk = pcm[offset : offset + 320]
@@ -140,10 +166,11 @@ class SpeechOutput:
                 continue
             self.sequence += 1
             self.buffered_ms += 20
-            await self.queue.put((generation_id, self.sequence, chunk))
-            if generation_id not in self.first_chunk_generations:
-                self.first_chunk_generations.add(generation_id)
+            lifecycle["bufferedChunks"] += 1
+            lifecycle["underrunLogged"] = False
+            if lifecycle["bufferedChunks"] == 1 and not lifecycle["playbackStarted"]:
                 await self.emit("firstAudioChunk", self.snapshot())
+            await self.queue.put((generation_id, self.sequence, chunk))
 
     async def run(self):
         while True:
@@ -151,11 +178,18 @@ class SpeechOutput:
             try:
                 if generation_id in self.cancelled_generations:
                     continue
-                if not self.assistant_speaking:
+                lifecycle = self.generations[generation_id]
+                if lifecycle["playbackCompleted"] or lifecycle["canceled"]:
+                    continue
+                if not lifecycle["playbackStarted"]:
+                    lifecycle["playbackStarted"] = True
                     self.assistant_speaking = True
                     self.active_playback_id = generation_id
                     self.state = "ASSISTANT_SPEAKING"
-                    await self.emit("playbackStart", self.snapshot())
+                    await self.emit(
+                        "playbackStart",
+                        {**self.snapshot(), "eventReason": "first_frame"},
+                    )
                 self.writer.write(
                     bytes([0x10]) + struct.pack(">H", len(chunk)) + chunk
                 )
@@ -163,28 +197,72 @@ class SpeechOutput:
                 await asyncio.sleep(0.02)
             finally:
                 self.buffered_ms = max(0, self.buffered_ms - 20)
+                lifecycle = self.generations.get(generation_id)
+                if lifecycle:
+                    lifecycle["bufferedChunks"] = max(
+                        0, lifecycle["bufferedChunks"] - 1
+                    )
                 self.queue.task_done()
-            if self.queue.empty() and self.assistant_speaking:
-                self.assistant_speaking = False
-                self.active_playback_id = None
-                if self.active_generation_id is None:
-                    self.state = "LISTENING"
-                await self.emit("playbackComplete", self.snapshot())
+            await self._finish_if_ready(generation_id)
+
+    async def _finish_if_ready(self, generation_id):
+        lifecycle = self.generations.get(generation_id)
+        if not lifecycle or lifecycle["playbackCompleted"] or lifecycle["canceled"]:
+            return
+        if lifecycle["bufferedChunks"]:
+            return
+        if not lifecycle["generationCompleted"]:
+            if lifecycle["playbackStarted"] and not lifecycle["underrunLogged"]:
+                lifecycle["underrunLogged"] = True
+                await self.emit(
+                    "bufferUnderrun",
+                    {**self.snapshot(), "eventReason": "waiting_for_more_audio"},
+                )
+            return
+        if not lifecycle["playbackStarted"]:
+            lifecycle["playbackCompleted"] = True
+            lifecycle["completeEvent"].set()
+            if self.active_generation_id == generation_id:
+                self.active_generation_id = None
+            self.state = "LISTENING"
+            return
+        lifecycle["playbackCompleted"] = True
+        self.assistant_speaking = False
+        self.active_playback_id = None
+        if self.active_generation_id == generation_id:
+            self.active_generation_id = None
+        self.state = "LISTENING"
+        lifecycle["completeEvent"].set()
+        await self.emit(
+            "playbackComplete",
+            {
+                **self.snapshot(generation_id),
+                "eventReason": "generation_complete_and_buffer_drained",
+            },
+        )
 
     async def generation_complete(self):
         generation_id = self.active_generation_id
         if generation_id is None:
             return
-        self.active_generation_id = None
+        lifecycle = self.generations[generation_id]
+        if lifecycle["generationCompleted"] or lifecycle["canceled"]:
+            return
+        lifecycle["generationCompleted"] = True
         await self.emit(
-            "generationComplete", {**self.snapshot(), "generationId": generation_id}
+            "generationComplete",
+            {**self.snapshot(generation_id), "eventReason": "server_event"},
         )
+        await self._finish_if_ready(generation_id)
 
     async def interrupt(self, reason="gemini_interrupted"):
         generation_id = self.active_generation_id or self.active_playback_id
         self.state = "INTERRUPTING"
         if generation_id is not None:
             self.cancelled_generations.add(generation_id)
+            lifecycle = self.generations.get(generation_id)
+            if lifecycle:
+                lifecycle["canceled"] = True
         discarded = 0
         while True:
             try:
@@ -194,11 +272,18 @@ class SpeechOutput:
             if queued_generation == generation_id:
                 discarded += 1
                 self.buffered_ms = max(0, self.buffered_ms - 20)
+                queued_lifecycle = self.generations.get(queued_generation)
+                if queued_lifecycle:
+                    queued_lifecycle["bufferedChunks"] = max(
+                        0, queued_lifecycle["bufferedChunks"] - 1
+                    )
             self.queue.task_done()
         self.active_generation_id = None
         self.active_playback_id = None
         self.assistant_speaking = False
         self.state = "USER_SPEAKING"
+        if generation_id is not None and self.generations.get(generation_id):
+            self.generations[generation_id]["completeEvent"].set()
         await self.emit(
             "playbackStopped",
             {**self.snapshot(), "reason": reason, "discardedChunks": discarded},
@@ -207,13 +292,32 @@ class SpeechOutput:
     async def drain(self):
         await self.queue.join()
 
-    def snapshot(self):
+    async def wait_until_complete(self):
+        generation_id = self.active_generation_id or self.active_playback_id
+        if generation_id is None:
+            return
+        await self.generations[generation_id]["completeEvent"].wait()
+
+    def snapshot(self, generation_id=None):
+        generation_id = generation_id or self.active_generation_id or self.active_playback_id
+        lifecycle = self.generations.get(generation_id, {})
         return {
             "turnId": self.turn_id,
-            "generationId": self.active_generation_id,
-            "playbackId": self.active_playback_id,
+            "generationId": generation_id,
+            "playbackId": (
+                lifecycle.get("playbackId")
+                if generation_id is not None and lifecycle.get("playbackStarted")
+                else self.active_playback_id
+            ),
+            "generationStarted": bool(lifecycle.get("generationStarted")),
+            "generationCompleted": bool(lifecycle.get("generationCompleted")),
+            "playbackStarted": bool(lifecycle.get("playbackStarted")),
+            "playbackCompleted": bool(lifecycle.get("playbackCompleted")),
+            "canceled": bool(lifecycle.get("canceled")),
             "assistantSpeaking": self.assistant_speaking,
             "bufferedAudioMs": self.buffered_ms,
+            "queuedChunkCount": self.queue.qsize(),
+            "audioDevicePlaying": self.assistant_speaking,
             "state": self.state,
         }
 
@@ -229,6 +333,16 @@ def gemini_schema(value):
         for key, item in value.items()
         if key not in ("$schema", "additionalProperties")
     }
+
+
+def logical_tool_key(turn_id, name, arguments):
+    hash_arguments = {
+        key: value for key, value in arguments.items() if key != "customerText"
+    }
+    normalized = json.dumps(hash_arguments, sort_keys=True, separators=(",", ":"))
+    return normalized, hashlib.sha256(
+        f"{turn_id}:{name}:{normalized}".encode()
+    ).hexdigest()
 
 
 def declarations(tools):
@@ -332,7 +446,10 @@ async def bridge(reader, writer, call_id):
     playback = SpeechOutput(writer, emit)
     customer_transcript = ""
     tool_results = {}
+    turn_mutation_keys = {}
     user_turn_open = False
+    customer_turn_id = 0
+    order_mutation_lock = asyncio.Lock()
     async with websockets.connect(url, max_size=None, ping_interval=20) as gemini:
         await gemini.send(
             json.dumps(
@@ -407,6 +524,7 @@ async def bridge(reader, writer, call_id):
 
         async def model_audio():
             nonlocal output_state, customer_transcript, user_turn_open
+            nonlocal customer_turn_id
             async for raw in gemini:
                 message = json.loads(raw)
                 server = message.get("serverContent", {})
@@ -414,6 +532,7 @@ async def bridge(reader, writer, call_id):
                 if interrupted:
                     if not user_turn_open:
                         user_turn_open = True
+                        customer_turn_id += 1
                         await emit("userSpeechStart", playback.snapshot())
                     await emit("interrupted", playback.snapshot())
                     await playback.interrupt()
@@ -421,6 +540,7 @@ async def bridge(reader, writer, call_id):
                 if transcription.get("text"):
                     if not user_turn_open:
                         user_turn_open = True
+                        customer_turn_id += 1
                         await emit("userSpeechStart", playback.snapshot())
                     customer_transcript += str(transcription["text"])
                 for part in (
@@ -444,6 +564,9 @@ async def bridge(reader, writer, call_id):
                     await playback.generation_complete()
                 tool_call = message.get("toolCall", {})
                 responses = []
+                if tool_call.get("functionCalls") and user_turn_open:
+                    user_turn_open = False
+                    await emit("userSpeechEnd", playback.snapshot())
                 for call in tool_call.get("functionCalls", []):
                     name = call.get("name", "")
                     arguments = dict(call.get("args", {}))
@@ -452,44 +575,116 @@ async def bridge(reader, writer, call_id):
                     )
                     if name == "price_order" and customer_transcript.strip():
                         arguments["customerText"] = customer_transcript.strip()
+                    normalized_arguments, tool_call_key = logical_tool_key(
+                        customer_turn_id, name, arguments
+                    )
+                    argument_hash = hashlib.sha256(
+                        normalized_arguments.encode()
+                    ).hexdigest()
+                    is_mutation = name in {
+                        "price_order",
+                        "submit_order",
+                        "modify_order",
+                    }
+                    prior_mutation_key = turn_mutation_keys.get(customer_turn_id)
+                    conflicting_mutation = bool(
+                        is_mutation
+                        and prior_mutation_key
+                        and prior_mutation_key != tool_call_key
+                    )
+                    duplicate = tool_call_key in tool_results or conflicting_mutation
+                    if name != "complete_call" and (
+                        playback.active_generation_id is not None
+                        or playback.active_playback_id is not None
+                    ):
+                        await playback.interrupt(
+                            "tool_execution_replaces_unresolved_audio"
+                        )
+                    playback.state = "TOOL_EXECUTING"
                     await emit(
                         "toolCallStart",
-                        {**playback.snapshot(), "tool": name},
+                        {
+                            **playback.snapshot(),
+                            "toolInvocationId": function_call_id,
+                            "customerTurnId": customer_turn_id,
+                            "tool": name,
+                            "argumentHash": argument_hash,
+                            "retryCount": 0,
+                            "isDuplicate": duplicate,
+                        },
                     )
                     tool_started = time.monotonic()
-                    if function_call_id in tool_results:
-                        result = tool_results[function_call_id]
-                    elif name == "request_human_handoff":
-                        result = await app_action(
-                            call_id,
-                            "handoff",
-                            reason=arguments.get("reason", "Employee requested."),
-                        )
-                        close_requested.set()
-                    elif name == "request_secure_voice_payment":
-                        result = await app_action(
-                            call_id,
-                            "payment",
-                            tipCents=arguments.get("tipCents", 0),
-                        )
-                        close_requested.set()
-                    elif name == "complete_call":
-                        await playback.drain()
-                        result = await app_action(call_id, "complete")
-                        close_requested.set()
+                    if conflicting_mutation:
+                        result = {
+                            "error": {
+                                "code": "DUPLICATE_TOOL_CALL",
+                                "message": "Only one order mutation is allowed for this customer turn.",
+                                "retryable": False,
+                            }
+                        }
+                    elif duplicate:
+                        result = tool_results[tool_call_key]
                     else:
-                        result = await mcp_call(
-                            call_id,
-                            name,
-                            arguments,
-                            f"gemini-{call_id}-{function_call_id}",
-                        )
-                    tool_results[function_call_id] = result
+                        async def execute():
+                            if name == "request_human_handoff":
+                                value = await app_action(
+                                    call_id,
+                                    "handoff",
+                                    reason=arguments.get(
+                                        "reason", "Employee requested."
+                                    ),
+                                )
+                                close_requested.set()
+                                return value
+                            if name == "request_secure_voice_payment":
+                                value = await app_action(
+                                    call_id,
+                                    "payment",
+                                    tipCents=arguments.get("tipCents", 0),
+                                )
+                                close_requested.set()
+                                return value
+                            if name == "complete_call":
+                                await playback.wait_until_complete()
+                                value = await app_action(call_id, "complete")
+                                close_requested.set()
+                                return value
+                            return await mcp_call(
+                                call_id,
+                                name,
+                                arguments,
+                                f"gemini-{call_id}-{tool_call_key}",
+                            )
+
+                        if is_mutation:
+                            turn_mutation_keys[customer_turn_id] = tool_call_key
+                            async with order_mutation_lock:
+                                result = await execute()
+                        else:
+                            result = await execute()
+                        tool_results[tool_call_key] = result
                     await emit(
                         "toolCallEnd",
-                        {**playback.snapshot(), "tool": name},
+                        {
+                            **playback.snapshot(),
+                            "toolInvocationId": function_call_id,
+                            "customerTurnId": customer_turn_id,
+                            "tool": name,
+                            "argumentHash": argument_hash,
+                            "retryCount": 0,
+                            "isDuplicate": duplicate,
+                            "result": (
+                                "rejected_duplicate"
+                                if conflicting_mutation
+                                else "cached"
+                                if duplicate
+                                else "completed"
+                            ),
+                        },
                         (time.monotonic() - tool_started) * 1000,
                     )
+                    if not close_requested.is_set():
+                        playback.state = "PROCESSING"
                     responses.append(
                         {
                             "id": call.get("id"),
@@ -498,7 +693,6 @@ async def bridge(reader, writer, call_id):
                         }
                     )
                 if responses:
-                    await playback.drain()
                     await gemini.send(
                         json.dumps({"toolResponse": {"functionResponses": responses}})
                     )
@@ -571,15 +765,45 @@ async def self_test():
     writer = Writer()
     output = SpeechOutput(writer, emit)
     worker = asyncio.create_task(output.run())
+    await output.enqueue(bytes(320))
+    await output.drain()
+    await asyncio.sleep(0.05)
+    assert [name for name, _ in events].count("playbackStart") == 1
+    assert [name for name, _ in events].count("playbackComplete") == 0
+    assert output.assistant_speaking is True
+    assert output.state == "ASSISTANT_SPEAKING"
+    await output.enqueue(bytes(320))
+    await output.drain()
+    assert [name for name, _ in events].count("playbackStart") == 1
+    assert [name for name, _ in events].count("playbackComplete") == 0
+    await output.generation_complete()
+    await output.wait_until_complete()
+    assert [name for name, _ in events].count("playbackComplete") == 1
+    _, first_key = logical_tool_key(
+        7,
+        "price_order",
+        {"operation": "add", "items": [{"name": "Fries"}], "customerText": "fries"},
+    )
+    _, duplicate_key = logical_tool_key(
+        7,
+        "price_order",
+        {"items": [{"name": "Fries"}], "operation": "add"},
+    )
+    _, next_turn_key = logical_tool_key(
+        8,
+        "price_order",
+        {"items": [{"name": "Fries"}], "operation": "add"},
+    )
+    assert first_key == duplicate_key
+    assert first_key != next_turn_key
+    assert output.assistant_speaking is False
+    assert output.state == "LISTENING"
     await output.enqueue(bytes(960))
-    generation = output.active_generation_id
+    interrupted_generation = output.active_generation_id
     await output.interrupt("test_barge_in")
     await output.drain()
-    assert generation in output.cancelled_generations
+    assert interrupted_generation in output.cancelled_generations
     assert output.buffered_ms == 0
-    await output.enqueue(bytes(640))
-    await output.generation_complete()
-    await output.drain()
     assert len(writer.frames) == 2
     assert [name for name, _ in events].count("playbackStart") == 1
     assert [name for name, _ in events].count("playbackComplete") == 1

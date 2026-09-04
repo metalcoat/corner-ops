@@ -95,6 +95,7 @@ async function main() {
   socket.close();
   const dialplan = readFileSync("asterisk/extensions.conf.template", "utf8");
   const bridge = readFileSync("asterisk/gemini-phone.py", "utf8");
+  const phonePrompt = readFileSync("src/lib/openai-phone-prompt.ts", "utf8");
   assert.match(dialplan, /AudioSocket\(\$\{AI_CALL_ID\},127\.0\.0\.1:9092\)/);
   assert.match(bridge, /functionDeclarations/);
   assert.match(bridge, /request_secure_voice_payment/);
@@ -102,8 +103,14 @@ async function main() {
   assert.match(bridge, /server\.get\("interrupted"\) is True/);
   assert.match(bridge, /START_SENSITIVITY_LOW/);
   assert.match(bridge, /class SpeechOutput/);
-  assert.match(bridge, /await playback\.drain\(\)/);
+  assert.match(bridge, /await playback\.wait_until_complete\(\)/);
   assert.match(bridge, /audio\/pcm;rate=16000/);
+  assert.match(bridge, /generation_complete_and_buffer_drained/);
+  assert.match(bridge, /bufferUnderrun/);
+  assert.match(bridge, /order_mutation_lock/);
+  assert.match(bridge, /def logical_tool_key/);
+  assert.match(phonePrompt, /salsa on the side/);
+  assert.match(phonePrompt, /current authoritative totalCents before any tip/);
   console.log(
     JSON.stringify({
       status: "passed",
