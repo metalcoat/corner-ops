@@ -81,7 +81,7 @@ async function main() {
     "CATALOG_UNAVAILABLE",
     "after two failed clarification attempts",
     "REQUEST_HUMAN_HANDOFF",
-    "totalCents",
+    "totalDisplay",
     "SHADOW",
     "Maximum",
     "Would you like mushrooms, onions, or peppers on it?",
@@ -99,6 +99,12 @@ async function main() {
   const webhookSource = await readFile(
     new URL("../src/app/api/openai/realtime/webhook/route.ts", import.meta.url),
     "utf8",
+  );
+  assert.ok(
+    prompt.includes("Whenever speaking money") &&
+      prompt.includes("use the corresponding totalDisplay") &&
+      prompt.includes("never say the raw cents number"),
+    "Phone totals must be spoken as formatted dollars rather than raw cents.",
   );
   assert.ok(
     !webhookSource.includes("reasoning:{effort"),

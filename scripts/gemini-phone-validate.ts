@@ -105,10 +105,13 @@ async function main() {
   );
   assert.match(bridge, /functionDeclarations/);
   assert.match(bridge, /request_secure_voice_payment/);
+  assert.match(bridge, /terminate_audiosocket/);
+  assert.match(bridge, /writer\.write\(b"\\x00\\x00\\x00"\)/);
+  assert.match(bridge, /await writer\.wait_closed\(\)/);
   assert.match(bridge, /if value\.get\("closeBridge"\)/);
   assert.match(
     bridge,
-    /if close_requested\.is_set\(\):\s+[\s\S]*?writer\.close\(\)/,
+    /if close_requested\.is_set\(\):\s+[\s\S]*?await terminate_audiosocket\(writer\)/,
     "A committed payment or handoff must immediately release AudioSocket.",
   );
   assert.match(
@@ -127,7 +130,7 @@ async function main() {
   assert.match(bridge, /order_mutation_lock/);
   assert.match(bridge, /def logical_tool_key/);
   assert.match(phonePrompt, /sour cream on the side/);
-  assert.match(phonePrompt, /current authoritative totalCents before any tip/);
+  assert.match(phonePrompt, /current totalDisplay before any tip/);
   assert.equal(
     callerFromSipHeaders([
       {

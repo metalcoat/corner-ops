@@ -311,6 +311,8 @@ export async function compactPhoneOrderResult(
   const sql = getSql(),
     modifiers =
       await sql`SELECT modifier.order_item_id,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${String(result.id)} AND modifier.selection_state IN('selected','extra') AND modifier.print_on_ticket=TRUE ORDER BY modifier.created_at,modifier.id`;
+  const totalCents = Number(result.total_cents),
+    amountDueCents = Number(result.amount_due_cents);
   return {
     ok: true,
     operation,
@@ -318,8 +320,10 @@ export async function compactPhoneOrderResult(
     displayNumber: String(result.display_number || ""),
     version: Number(result.version),
     serviceType: String(result.service_type),
-    totalCents: Number(result.total_cents),
-    amountDueCents: Number(result.amount_due_cents),
+    totalCents,
+    totalDisplay: `$${(totalCents / 100).toFixed(2)}`,
+    amountDueCents,
+    amountDueDisplay: `$${(amountDueCents / 100).toFixed(2)}`,
     paymentMethod: String(result.payment_preference || ""),
     tipCents: Number(result.tip_cents || 0),
     lines: (result.lines || []).map((line: Record<string, any>) => ({

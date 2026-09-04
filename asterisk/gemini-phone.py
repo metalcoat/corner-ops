@@ -104,6 +104,20 @@ async def write_audio(writer, pcm):
     await writer.drain()
 
 
+async def terminate_audiosocket(writer):
+    """Tell Asterisk the media app is finished, then fully close the TCP stream."""
+    try:
+        writer.write(b"\x00\x00\x00")
+        await writer.drain()
+    except (ConnectionError, BrokenPipeError):
+        pass
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except (ConnectionError, BrokenPipeError):
+        pass
+
+
 class SpeechOutput:
     """Owns the single paced AudioSocket playback stream for one Gemini call."""
 
@@ -702,7 +716,7 @@ async def bridge(reader, writer, call_id):
                 if close_requested.is_set():
                     # Release AudioSocket immediately so Asterisk can continue into
                     # payment/handoff without a silent Gemini cleanup delay.
-                    writer.close()
+                    await terminate_audiosocket(writer)
                     break
 
         tasks = [
