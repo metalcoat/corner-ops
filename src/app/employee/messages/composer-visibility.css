@@ -1,0 +1,31 @@
+/* Keep the employee message composer in its own layout row so viewport/scroll repairs cannot clip it below the thread. */
+.employeeMessageApp .messageThreadPane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.employeeMessageApp .messageThread {
+  min-height: 0;
+  overflow: auto;
+}
+
+.employeeMessageApp .employeeMessageComposer {
+  position: relative;
+  z-index: 20;
+  min-height: 60px;
+  flex: none;
+  visibility: visible;
+}
+
+@media (max-width: 900px) {
+  .employeeMessageApp .messageThreadPane {
+    display: none;
+  }
+
+  .employeeMessageApp .messageShell.threadOpen .messageThreadPane {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100%;
+    min-height: 0;
+  }
+}
