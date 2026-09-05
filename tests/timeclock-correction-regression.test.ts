@@ -28,6 +28,27 @@ test("Tiki clock-out closes every stale open punch for the employee", () => {
   assert.match(tiki, /const entry = result\.find\(\(row\) => row\.id === existing\.id\)/);
 });
 
+test("Tiki clock-out failure is explicit and visually unmistakable", () => {
+  const tiki = source("src/lib/tiki-timeclock.ts");
+  const route = source("src/app/api/timeclock/route.ts");
+  const page = source("src/app/clock/page.tsx");
+  const css = source("src/app/clock/clock.css");
+
+  assert.match(tiki, /class TikiClockOutSaveError extends Error/);
+  assert.match(tiki, /readonly code = "CLOCK_OUT_FAILED"/);
+  assert.match(tiki, /clock-out update failed/);
+  assert.match(tiki, /if \(!entry\) throw new TikiClockOutSaveError\(\)/);
+  assert.match(route, /error instanceof TikiClockOutSaveError/);
+  assert.match(route, /code: error\.code/);
+  assert.match(route, /Your clock-out was not saved\. You are still clocked in\./);
+  assert.match(page, /title: "CLOCK OUT FAILED"/);
+  assert.match(page, /title: "PUNCH NOT CONFIRMED"/);
+  assert.match(page, /role="alert" aria-live="assertive"/);
+  assert.match(page, /Do not keep pressing the button\./);
+  assert.match(css, /\.clockCriticalAlert/);
+  assert.match(css, /border:3px solid var\(--danger\)/);
+});
+
 test("payroll correction only reports success after the punch row is returned", () => {
   const correction = source("src/lib/payroll-punch-correction.ts");
   const route = source("src/app/api/payroll-control/route.ts");

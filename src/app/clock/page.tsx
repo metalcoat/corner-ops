@@ -19,11 +19,16 @@ type ScheduledShift = {
   instructions: string;
 };
 
+type CriticalAlert = {
+  title: "CLOCK OUT FAILED" | "PUNCH NOT CONFIRMED";
+  detail: string;
+};
 
 export default function TikiClockPage() {
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [criticalAlert, setCriticalAlert] = useState<CriticalAlert | null>(null);
   const [instructions, setInstructions] = useState<ScheduledShift | null>(null);
   const [tone, setTone] = useState<"good" | "bad" | "">("");
   const [now, setNow] = useState(new Date());
@@ -60,6 +65,7 @@ export default function TikiClockPage() {
     event.preventDefault();
     setBusy(true);
     setMessage("");
+    setCriticalAlert(null);
     setInstructions(null);
     setTone("");
     let authenticated = false;
@@ -72,23 +78,54 @@ export default function TikiClockPage() {
       if (!login.ok) throw new Error(await responseMessage(login, "PIN not recognized."));
       authenticated = true;
 
-      const response = await fetch("/api/timeclock", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          latitude: position.latitude,
-          longitude: position.longitude,
-          accuracy: position.accuracy,
-        }),
-      });
-      const payload = await response.json() as {
+      let response: Response;
+      try {
+        response = await fetch("/api/timeclock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            latitude: position.latitude,
+            longitude: position.longitude,
+            accuracy: position.accuracy,
+          }),
+        });
+      } catch {
+        setCriticalAlert({
+          title: "PUNCH NOT CONFIRMED",
+          detail: "The time clock lost contact before it could confirm the punch. Do not keep pressing the button. Note the time and tell a manager so the punch can be checked.",
+        });
+        return;
+      }
+
+      let payload: {
         error?: string;
+        code?: string;
         action?: "clocked-in" | "clocked-out";
         employee?: string;
         locationReview?: string | null;
         scheduledShift?: ScheduledShift | null;
       };
-      if (!response.ok) throw new Error(payload.error || "Punch failed.");
+      try {
+        payload = await response.json() as typeof payload;
+      } catch {
+        setCriticalAlert({
+          title: "PUNCH NOT CONFIRMED",
+          detail: "The time clock did not return a usable confirmation. Do not keep pressing the button. Note the time and tell a manager so the punch can be checked.",
+        });
+        return;
+      }
+
+      if (!response.ok) {
+        if (payload.code === "CLOCK_OUT_FAILED") {
+          setCriticalAlert({
+            title: "CLOCK OUT FAILED",
+            detail: "Your clock-out was not saved. You are still clocked in. Try once more. If it fails again, note the time and tell a manager.",
+          });
+          return;
+        }
+        throw new Error(payload.error || "Punch failed.");
+      }
+
       const action = payload.action === "clocked-out" ? "clocked out" : "clocked in";
       setMessage(`${payload.employee} ${action} successfully.${payload.locationReview ? " Location flagged for manager review." : ""}`);
       setInstructions(payload.action === "clocked-in" ? payload.scheduledShift || null : null);
@@ -149,6 +186,10 @@ export default function TikiClockPage() {
         </form>
 
         <p className="locationStatus">{position.status}</p>
+        {criticalAlert && <div className="clockCriticalAlert" role="alert" aria-live="assertive">
+          <strong>{criticalAlert.title}</strong>
+          <span>{criticalAlert.detail}</span>
+        </div>}
         {message && <div className={`clockMessage ${tone}`}>{message}</div>}
         {instructions && <section className="clockInstructions" aria-live="polite">
           <p className="eyebrow">Instructions for this shift</p>

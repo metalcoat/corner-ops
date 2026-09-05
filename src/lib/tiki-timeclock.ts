@@ -19,6 +19,15 @@ type OpenEntryRow = {
   status: string;
 };
 
+export class TikiClockOutSaveError extends Error {
+  readonly code = "CLOCK_OUT_FAILED" as const;
+
+  constructor() {
+    super("Clock-out could not be saved.");
+    this.name = "TikiClockOutSaveError";
+  }
+}
+
 function finite(value: unknown): number | null {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
@@ -93,35 +102,41 @@ export async function punchAuthenticatedTikiEmployee(employeeId: string, locatio
   if (openRows[0]) {
     const existing = openRows[0];
     const duplicateNote = "Automatically closed stale duplicate open punch during clock-out.";
-    const result = await getSql()`
-      UPDATE time_entries SET
-        clock_out = NOW(),
-        clock_out_lat = ${locationCheck.latitude},
-        clock_out_lng = ${locationCheck.longitude},
-        clock_out_accuracy = ${locationCheck.accuracy},
-        status = CASE
-          WHEN id <> ${existing.id}::uuid THEN 'Corrected'
-          WHEN ${existing.status} = 'Needs Review'
-            OR ${locationCheck.needsReview}
-            OR NOW() - clock_in > INTERVAL '16 hours'
-          THEN 'Needs Review'
-          ELSE 'Complete'
-        END,
-        notes = CASE
-          WHEN id <> ${existing.id}::uuid
-          THEN CONCAT_WS(' ', NULLIF(notes, ''), ${duplicateNote})
-          WHEN ${locationCheck.reason} <> ''
-          THEN CONCAT_WS(' ', NULLIF(notes, ''), ${locationCheck.reason})
-          ELSE notes
-        END,
-        updated_at = NOW()
-      WHERE business = 'Tiki'
-        AND employee_id = ${employee.id}::uuid
-        AND clock_out IS NULL
-      RETURNING id, clock_in, clock_out, status
-    ` as unknown as Array<{ id: string; clock_in: string; clock_out: string; status: string }>;
+    let result: Array<{ id: string; clock_in: string; clock_out: string; status: string }>;
+    try {
+      result = await getSql()`
+        UPDATE time_entries SET
+          clock_out = NOW(),
+          clock_out_lat = ${locationCheck.latitude},
+          clock_out_lng = ${locationCheck.longitude},
+          clock_out_accuracy = ${locationCheck.accuracy},
+          status = CASE
+            WHEN id <> ${existing.id}::uuid THEN 'Corrected'
+            WHEN ${existing.status} = 'Needs Review'
+              OR ${locationCheck.needsReview}
+              OR NOW() - clock_in > INTERVAL '16 hours'
+            THEN 'Needs Review'
+            ELSE 'Complete'
+          END,
+          notes = CASE
+            WHEN id <> ${existing.id}::uuid
+            THEN CONCAT_WS(' ', NULLIF(notes, ''), ${duplicateNote})
+            WHEN ${locationCheck.reason} <> ''
+            THEN CONCAT_WS(' ', NULLIF(notes, ''), ${locationCheck.reason})
+            ELSE notes
+          END,
+          updated_at = NOW()
+        WHERE business = 'Tiki'
+          AND employee_id = ${employee.id}::uuid
+          AND clock_out IS NULL
+        RETURNING id, clock_in, clock_out, status
+      ` as unknown as Array<{ id: string; clock_in: string; clock_out: string; status: string }>;
+    } catch (error) {
+      console.error("[timeclock] clock-out update failed", error);
+      throw new TikiClockOutSaveError();
+    }
     const entry = result.find((row) => row.id === existing.id);
-    if (!entry) throw new Error("Clock-out could not be saved. Please try again.");
+    if (!entry) throw new TikiClockOutSaveError();
     return {
       action: "clocked-out" as const,
       employee: employee.name,

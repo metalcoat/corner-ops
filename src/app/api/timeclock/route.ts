@@ -3,7 +3,7 @@ import { ensureWorkforceSchema } from "@/lib/workforce";
 import { getSql } from "@/lib/db";
 import { apiError, AuthenticationError } from "@/lib/http";
 import { evaluateAndNotifyOvertimeRisk } from "@/lib/overtime-risk";
-import { punchAuthenticatedTikiEmployee } from "@/lib/tiki-timeclock";
+import { punchAuthenticatedTikiEmployee, TikiClockOutSaveError } from "@/lib/tiki-timeclock";
 
 export const runtime = "nodejs";
 
@@ -84,6 +84,12 @@ export async function POST(request: Request) {
 
     return Response.json({ ...result, scheduledShift });
   } catch (error) {
+    if (error instanceof TikiClockOutSaveError) {
+      return Response.json({
+        code: error.code,
+        error: "Your clock-out was not saved. You are still clocked in.",
+      }, { status: 500 });
+    }
     return apiError(error);
   }
 }
