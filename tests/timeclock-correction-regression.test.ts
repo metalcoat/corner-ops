@@ -9,23 +9,30 @@ function source(path: string) {
   return readFileSync(join(root, path), "utf8");
 }
 
-test("Tiki clock-out closes every stale open punch for the employee", () => {
+test("Tiki clock-out saves the primary punch before best-effort stale cleanup", () => {
   const tiki = source("src/lib/tiki-timeclock.ts");
 
   assert.match(
     tiki,
     /FROM time_entries[\s\S]*WHERE business = 'Tiki'[\s\S]*AND employee_id = \$\{employee\.id\}::uuid[\s\S]*AND clock_out IS NULL[\s\S]*ORDER BY clock_in DESC, created_at DESC, id DESC/,
   );
-  assert.doesNotMatch(
+  assert.match(
     tiki,
-    /FROM time_entries[\s\S]*AND clock_out IS NULL[\s\S]*ORDER BY clock_in DESC, created_at DESC, id DESC\s*LIMIT 1/,
+    /UPDATE time_entries SET[\s\S]*status = \$\{primaryStatus\}[\s\S]*WHERE id = \$\{existing\.id\}::uuid[\s\S]*AND business = 'Tiki'[\s\S]*AND employee_id = \$\{employee\.id\}::uuid[\s\S]*AND clock_out IS NULL[\s\S]*RETURNING id, clock_in, clock_out, status/,
   );
   assert.match(
     tiki,
-    /UPDATE time_entries SET[\s\S]*WHERE business = 'Tiki'[\s\S]*AND employee_id = \$\{employee\.id\}::uuid[\s\S]*AND clock_out IS NULL[\s\S]*RETURNING id, clock_in, clock_out, status/,
+    /if \(!entry\) \{[\s\S]*AND clock_out IS NOT NULL[\s\S]*LIMIT 1[\s\S]*if \(!entry\) throw new TikiClockOutSaveError\(\)/,
+  );
+  assert.match(
+    tiki,
+    /primary clock-out saved but stale duplicate cleanup failed/,
+  );
+  assert.match(
+    tiki,
+    /AND id <> \$\{existing\.id\}::uuid[\s\S]*AND clock_out IS NULL[\s\S]*RETURNING id/,
   );
   assert.match(tiki, /Automatically closed stale duplicate open punch during clock-out\./);
-  assert.match(tiki, /const entry = result\.find\(\(row\) => row\.id === existing\.id\)/);
 });
 
 test("Tiki clock-out failure is explicit and visually unmistakable", () => {
