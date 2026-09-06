@@ -17,6 +17,14 @@ type OpenEntryRow = {
   id: string;
   clock_in: string;
   status: string;
+  notes: string | null;
+};
+
+type ClosedEntryRow = {
+  id: string;
+  clock_in: string;
+  clock_out: string;
+  status: string;
 };
 
 export class TikiClockOutSaveError extends Error {
@@ -44,6 +52,13 @@ function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number):
   const a = Math.sin(deltaLat / 2) ** 2
     + Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(deltaLng / 2) ** 2;
   return 2 * earthRadius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function appendNote(current: string | null | undefined, addition: string): string | null {
+  const base = (current || "").trim();
+  const note = addition.trim();
+  if (!note || base.includes(note)) return base || null;
+  return base ? `${base} ${note}` : note;
 }
 
 function locationReview(location: LocationInput) {
@@ -91,7 +106,7 @@ export async function punchAuthenticatedTikiEmployee(employeeId: string, locatio
 
   const locationCheck = locationReview(location);
   const openRows = await getSql()`
-    SELECT id, clock_in, status
+    SELECT id, clock_in, status, notes
     FROM time_entries
     WHERE business = 'Tiki'
       AND employee_id = ${employee.id}::uuid
@@ -101,47 +116,87 @@ export async function punchAuthenticatedTikiEmployee(employeeId: string, locatio
 
   if (openRows[0]) {
     const existing = openRows[0];
-    const duplicateNote = "Automatically closed stale duplicate open punch during clock-out.";
-    let result: Array<{ id: string; clock_in: string; clock_out: string; status: string }>;
+    const clockInMs = Date.parse(existing.clock_in);
+    const longShift = !Number.isFinite(clockInMs) || Date.now() - clockInMs > 16 * 60 * 60 * 1000;
+    const primaryStatus = existing.status === "Needs Review" || locationCheck.needsReview || longShift
+      ? "Needs Review"
+      : "Complete";
+    let primaryNotes = appendNote(existing.notes, locationCheck.reason);
+    if (longShift) primaryNotes = appendNote(primaryNotes, "Shift exceeded 16 hours before clock-out.");
+
+    let primaryRows: ClosedEntryRow[];
     try {
-      result = await getSql()`
+      primaryRows = await getSql()`
         UPDATE time_entries SET
           clock_out = NOW(),
           clock_out_lat = ${locationCheck.latitude},
           clock_out_lng = ${locationCheck.longitude},
           clock_out_accuracy = ${locationCheck.accuracy},
-          status = CASE
-            WHEN id <> ${existing.id}::uuid THEN 'Corrected'
-            WHEN ${existing.status} = 'Needs Review'
-              OR ${locationCheck.needsReview}
-              OR NOW() - clock_in > INTERVAL '16 hours'
-            THEN 'Needs Review'
-            ELSE 'Complete'
-          END,
-          notes = CASE
-            WHEN id <> ${existing.id}::uuid
-            THEN CONCAT_WS(' ', NULLIF(notes, ''), ${duplicateNote})
-            WHEN ${locationCheck.reason} <> ''
-            THEN CONCAT_WS(' ', NULLIF(notes, ''), ${locationCheck.reason})
-            ELSE notes
-          END,
+          status = ${primaryStatus},
+          notes = ${primaryNotes},
           updated_at = NOW()
-        WHERE business = 'Tiki'
+        WHERE id = ${existing.id}::uuid
+          AND business = 'Tiki'
           AND employee_id = ${employee.id}::uuid
           AND clock_out IS NULL
         RETURNING id, clock_in, clock_out, status
-      ` as unknown as Array<{ id: string; clock_in: string; clock_out: string; status: string }>;
+      ` as unknown as ClosedEntryRow[];
     } catch (error) {
-      console.error("[timeclock] clock-out update failed", error);
+      console.error("[timeclock] primary clock-out update failed", error);
       throw new TikiClockOutSaveError();
     }
-    const entry = result.find((row) => row.id === existing.id);
+
+    let entry = primaryRows[0];
+    if (!entry) {
+      // A duplicate request can arrive after the first request already closed the row.
+      // Treat that as success instead of telling the employee they are still clocked in.
+      try {
+        const alreadyClosed = await getSql()`
+          SELECT id, clock_in, clock_out, status
+          FROM time_entries
+          WHERE id = ${existing.id}::uuid
+            AND business = 'Tiki'
+            AND employee_id = ${employee.id}::uuid
+            AND clock_out IS NOT NULL
+          LIMIT 1
+        ` as unknown as ClosedEntryRow[];
+        entry = alreadyClosed[0];
+      } catch (error) {
+        console.error("[timeclock] clock-out verification failed", error);
+      }
+    }
     if (!entry) throw new TikiClockOutSaveError();
+
+    const duplicateNote = "Automatically closed stale duplicate open punch during clock-out.";
+    let duplicateOpenPunchesClosed = 0;
+    try {
+      const duplicateRows = await getSql()`
+        UPDATE time_entries SET
+          clock_out = NOW(),
+          clock_out_lat = ${locationCheck.latitude},
+          clock_out_lng = ${locationCheck.longitude},
+          clock_out_accuracy = ${locationCheck.accuracy},
+          status = 'Corrected',
+          notes = CONCAT_WS(' ', NULLIF(notes, ''), ${duplicateNote}::text),
+          updated_at = NOW()
+        WHERE business = 'Tiki'
+          AND employee_id = ${employee.id}::uuid
+          AND id <> ${existing.id}::uuid
+          AND clock_out IS NULL
+        RETURNING id
+      ` as unknown as Array<{ id: string }>;
+      duplicateOpenPunchesClosed = duplicateRows.length;
+    } catch (error) {
+      // The employee's real/current punch is already safely closed. Duplicate cleanup
+      // is bookkeeping and must never turn a successful clock-out into an error.
+      console.error("[timeclock] primary clock-out saved but stale duplicate cleanup failed", error);
+    }
+
     return {
       action: "clocked-out" as const,
       employee: employee.name,
       entry,
-      duplicateOpenPunchesClosed: Math.max(0, result.length - 1),
+      duplicateOpenPunchesClosed,
       locationReview: locationCheck.needsReview ? locationCheck.reason : null,
     };
   }
