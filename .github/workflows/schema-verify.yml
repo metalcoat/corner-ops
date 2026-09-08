@@ -75,3 +75,7 @@ jobs:
           test "$(psql -Atc "SELECT to_regclass('public.deli_board_call_cache') IS NOT NULL")" = "t"
           test "$(psql -Atc "SELECT count(*) FROM deli_wallboard_tasks WHERE created_by='System'")" = "26"
           echo "Post-baseline migrations verified."
+      - name: Exercise transactional time-clock behavior
+        run: psql -v ON_ERROR_STOP=1 -f tests/db/timeclock.sql
+      - name: Exercise simultaneous punch requests
+        run: python3 tools/test_timeclock_concurrency.py

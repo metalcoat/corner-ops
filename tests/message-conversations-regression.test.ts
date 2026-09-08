@@ -65,7 +65,7 @@ test("employees use a dedicated full-page inbox instead of a global message dock
 });
 
 test("production migration runner expands the legacy message-type constraint before converting messages", () => {
-  const runner = source("tools/apply-production-migrations.mjs");
+  const runner = source("db/migrations/0010_release_compatibility.sql");
   assert.match(runner, /allow conversation message type/);
   assert.match(runner, /DROP CONSTRAINT IF EXISTS employee_messages_message_type_check/);
   assert.match(runner, /'Conversation'::text/);

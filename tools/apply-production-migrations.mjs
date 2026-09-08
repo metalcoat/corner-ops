@@ -1,188 +1,44 @@
-import { neon } from "@neondatabase/serverless";
+import { Client } from "@neondatabase/serverless";
+import { readFile, readdir } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { applyMigrations, FIRST_MANAGED_MIGRATION, migrationChecksum } from "./migration-runner.mjs";
 
-const force = process.argv.includes("--force");
-const productionBuild = process.env.VERCEL_ENV === "production";
-const databaseUrl = process.env.DATABASE_URL?.trim();
-
-if (!databaseUrl) {
-  if (force) throw new Error("DATABASE_URL is required to apply database migrations.");
-  console.log("Database migration skipped: DATABASE_URL is not configured in this build environment.");
-  process.exit(0);
+const args = new Set(process.argv.slice(2));
+if (!args.has("--apply") && !args.has("--check")) throw new Error("Use --check or --apply. Database migrations never run as part of a build.");
+if (args.has("--apply") && args.has("--check")) throw new Error("Choose --apply or --check, not both.");
+if (args.has("--apply") && process.env.VERCEL_ENV === "production" && !args.has("--production")) {
+  throw new Error("A production migration requires the explicit --production flag.");
 }
-
-if (!productionBuild && !force) {
-  console.log("Database migration skipped outside a production Vercel build. Run npm run db:migrate for a local database.");
-  process.exit(0);
+const connectionString = process.env.MIGRATION_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim();
+if (!connectionString) throw new Error("MIGRATION_DATABASE_URL or DATABASE_URL is required.");
+const directory = fileURLToPath(new URL("../db/migrations/", import.meta.url));
+const names = (await readdir(directory)).filter((name) => /^\d{4}_.+\.sql$/.test(name) && name >= FIRST_MANAGED_MIGRATION).sort();
+const migrations = await Promise.all(names.map(async (name) => ({ name, sql: await readFile(`${directory}/${name}`, "utf8") })));
+const client = new Client({ connectionString });
+try {
+  await client.connect();
+  const baseline = await client.query("SELECT to_regclass('public.employees') AS employees, to_regclass('public.employee_messages') AS messages, to_regclass('public.bank_accounts') AS accounts");
+  if (!baseline.rows[0]?.employees || !baseline.rows[0]?.messages || !baseline.rows[0]?.accounts) {
+    throw new Error("Historical schema baseline is missing. Initialize the documented 0001-0009 baseline before applying managed releases.");
+  }
+  if (args.has("--check")) {
+    const table = await client.query("SELECT to_regclass('public.corner_ops_schema_migrations') AS ledger");
+    const rows = table.rows[0]?.ledger ? (await client.query("SELECT name, checksum FROM public.corner_ops_schema_migrations")).rows : [];
+    const applied = new Map(rows.map((row) => [row.name, row.checksum]));
+    for (const migration of migrations) {
+      const checksum = applied.get(migration.name);
+      if (checksum && checksum !== migrationChecksum(migration.sql)) throw new Error(`Applied migration changed: ${migration.name}`);
+      console.log(`${checksum ? "Applied" : "Pending"}: ${migration.name}`);
+    }
+  } else {
+    const applied = await applyMigrations(client, migrations);
+    console.log(`Committed ${applied.length} migration(s): ${applied.join(", ") || "none"}`);
+  }
+} catch (error) {
+  // Do not print connection strings, SQL bindings, or provider error detail.
+  console.error("Migration failed. No release should be promoted until migration status is verified.");
+  console.error(error instanceof Error ? error.message.replace(/postgres(?:ql)?:\/\/\S+/gi, "[redacted database URL]") : "Unknown migration error");
+  process.exitCode = 1;
+} finally {
+  await client.end().catch(() => undefined);
 }
-
-const sql = neon(databaseUrl);
-
-async function step(label, query) {
-  process.stdout.write(`Migration: ${label}... `);
-  await query();
-  console.log("done");
-}
-
-console.log("Applying Corner Ops database migrations...");
-
-// These steps are intentionally sequential and idempotent. Neon's HTTP batch
-// transaction can parse later statements before an earlier DDL statement has
-// created the referenced column/table. Sequential execution also lets a failed
-// deployment resume safely on the next build.
-await step("add conversation key", () => sql`
-  ALTER TABLE public.employee_messages
-    ADD COLUMN IF NOT EXISTS conversation_key text
-`);
-
-await step("backfill conversation keys", () => sql`
-  UPDATE public.employee_messages
-  SET conversation_key = CASE
-    WHEN message_type IN ('Team', 'Announcement') THEN 'team'
-    WHEN sender_employee_id IS NULL AND recipient_employee_id IS NOT NULL
-      THEN 'owner:' || recipient_employee_id::text
-    WHEN sender_employee_id IS NOT NULL AND recipient_employee_id IS NOT NULL
-      THEN 'direct:' || LEAST(sender_employee_id::text, recipient_employee_id::text)
-        || ':' || GREATEST(sender_employee_id::text, recipient_employee_id::text)
-    WHEN sender_employee_id IS NOT NULL
-      THEN 'owner:' || sender_employee_id::text
-    ELSE 'legacy:' || id::text
-  END
-  WHERE conversation_key IS NULL OR conversation_key = ''
-`);
-
-await step("require conversation keys", () => sql`
-  ALTER TABLE public.employee_messages
-    ALTER COLUMN conversation_key SET NOT NULL
-`);
-
-await step("create recipient snapshots", () => sql`
-  CREATE TABLE IF NOT EXISTS public.employee_message_recipients (
-    message_id uuid NOT NULL,
-    employee_id uuid NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-  )
-`);
-
-await step("create recipient primary key", () => sql`
-  DO $$
-  BEGIN
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_constraint
-      WHERE conname = 'employee_message_recipients_pkey'
-        AND conrelid = 'public.employee_message_recipients'::regclass
-    ) THEN
-      ALTER TABLE ONLY public.employee_message_recipients
-        ADD CONSTRAINT employee_message_recipients_pkey PRIMARY KEY (message_id, employee_id);
-    END IF;
-  END $$
-`);
-
-await step("create message recipient relationship", () => sql`
-  DO $$
-  BEGIN
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_constraint
-      WHERE conname = 'employee_message_recipients_message_fkey'
-        AND conrelid = 'public.employee_message_recipients'::regclass
-    ) THEN
-      ALTER TABLE ONLY public.employee_message_recipients
-        ADD CONSTRAINT employee_message_recipients_message_fkey
-        FOREIGN KEY (message_id) REFERENCES public.employee_messages(id) ON DELETE CASCADE;
-    END IF;
-  END $$
-`);
-
-await step("create employee recipient relationship", () => sql`
-  DO $$
-  BEGIN
-    IF NOT EXISTS (
-      SELECT 1 FROM pg_constraint
-      WHERE conname = 'employee_message_recipients_employee_fkey'
-        AND conrelid = 'public.employee_message_recipients'::regclass
-    ) THEN
-      ALTER TABLE ONLY public.employee_message_recipients
-        ADD CONSTRAINT employee_message_recipients_employee_fkey
-        FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
-    END IF;
-  END $$
-`);
-
-await step("snapshot historic team recipients", () => sql`
-  INSERT INTO public.employee_message_recipients (message_id, employee_id)
-  SELECT m.id, e.id
-  FROM public.employee_messages m
-  JOIN public.employees e
-    ON e.business = m.business
-   AND e.created_at <= m.created_at
-  WHERE m.conversation_key = 'team'
-  ON CONFLICT (message_id, employee_id) DO NOTHING
-`);
-
-await step("snapshot historic direct recipients", () => sql`
-  INSERT INTO public.employee_message_recipients (message_id, employee_id)
-  SELECT m.id, participant.employee_id
-  FROM public.employee_messages m
-  CROSS JOIN LATERAL (
-    VALUES (m.sender_employee_id), (m.recipient_employee_id)
-  ) AS participant(employee_id)
-  WHERE participant.employee_id IS NOT NULL
-    AND m.conversation_key <> 'team'
-  ON CONFLICT (message_id, employee_id) DO NOTHING
-`);
-
-await step("allow conversation message type", () => sql`
-  ALTER TABLE ONLY public.employee_messages
-    DROP CONSTRAINT IF EXISTS employee_messages_message_type_check,
-    ADD CONSTRAINT employee_messages_message_type_check
-    CHECK (message_type = ANY (ARRAY[
-      'Team'::text,
-      'Direct'::text,
-      'Announcement'::text,
-      'Conversation'::text
-    ]))
-`);
-
-await step("retire dynamic team visibility", () => sql`
-  UPDATE public.employee_messages
-  SET message_type = 'Conversation'
-  WHERE message_type IN ('Team', 'Announcement')
-`);
-
-await step("index conversations", () => sql`
-  CREATE INDEX IF NOT EXISTS employee_messages_conversation_idx
-    ON public.employee_messages (business, conversation_key, created_at, id)
-    WHERE deleted_at IS NULL
-`);
-
-await step("index recipient inboxes", () => sql`
-  CREATE INDEX IF NOT EXISTS employee_message_recipients_employee_idx
-    ON public.employee_message_recipients (employee_id, message_id)
-`);
-
-await step("release future shifts assigned to archived employees", () => sql`
-  UPDATE public.schedule_shifts s
-  SET employee_id = NULL,
-    status = 'Draft',
-    published_at = NULL,
-    notes = CASE
-      WHEN COALESCE(s.notes, '') LIKE '%Released after employee was archived.%' THEN s.notes
-      WHEN BTRIM(COALESCE(s.notes, '')) = '' THEN 'Released after employee was archived.'
-      ELSE BTRIM(s.notes) || E'\nReleased after employee was archived.'
-    END,
-    updated_at = NOW()
-  FROM public.employees e
-  WHERE s.employee_id = e.id
-    AND e.active = FALSE
-    AND s.status <> 'Cancelled'
-    AND s.ends_at >= NOW()
-`);
-
-const [result] = await sql`
-  SELECT
-    COUNT(*)::int AS messages,
-    (SELECT COUNT(*)::int FROM public.employee_message_recipients) AS recipient_snapshots
-  FROM public.employee_messages
-  WHERE conversation_key IS NOT NULL
-`;
-
-console.log(`Database migrations complete: ${result?.messages || 0} messages and ${result?.recipient_snapshots || 0} recipient snapshots ready.`);
