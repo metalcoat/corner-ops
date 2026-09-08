@@ -1,11 +1,22 @@
+import { after } from "next/server";
+import { parsePunchCommand } from "@/lib/timeclock-contract";
 import { getEmployeeSession } from "@/lib/employee-auth";
 import { ensureWorkforceSchema } from "@/lib/workforce";
 import { getSql } from "@/lib/db";
 import { apiError, AuthenticationError } from "@/lib/http";
 import { evaluateAndNotifyOvertimeRisk } from "@/lib/overtime-risk";
-import { punchAuthenticatedTikiEmployee, TikiClockOutSaveError } from "@/lib/tiki-timeclock";
+import { punchAuthenticatedTikiEmployee, getTikiClockState, TikiPunchStateError, TikiPunchUnconfirmedError } from "@/lib/tiki-timeclock";
 
 export const runtime = "nodejs";
+
+export async function GET() {
+  try {
+    const session = await getEmployeeSession();
+    if (!session || session.business !== "Tiki") throw new AuthenticationError("Tiki employee sign-in required.");
+    return Response.json({ employeeId: session.employeeId, employee: session.name,
+      ...await getTikiClockState(session.employeeId) }, { headers: { "Cache-Control": "private, no-store" } });
+  } catch (error) { return apiError(error); }
+}
 
 export async function POST(request: Request) {
   try {
@@ -17,25 +28,22 @@ export async function POST(request: Request) {
       accuracy?: number | null;
     };
 
+    const command = parsePunchCommand(body);
+    if (!command) return Response.json({ code: "PUNCH_CLIENT_OUTDATED",
+      error: "Refresh the time clock. An explicit action and request ID are required." }, { status: 409 });
     const result = await punchAuthenticatedTikiEmployee(session.employeeId, {
       latitude: body.latitude,
       longitude: body.longitude,
       accuracy: body.accuracy,
-    });
+    }, command);
 
     if (result.action === "clocked-out") {
-      const overtimeRisk = await evaluateAndNotifyOvertimeRisk({
-        business: "Tiki",
-        source: `Tiki clock-out by ${result.employee}`,
-        notify: true,
-      }).then((dashboard) => ({
-        warning: dashboard.summary.warning,
-        overtime: dashboard.summary.overtime,
-      })).catch((error) => {
-        console.error("[timeclock] punch saved but overtime check failed", error);
-        return null;
+      if (!result.replayed) after(async () => {
+        try {
+          await evaluateAndNotifyOvertimeRisk({ business: "Tiki", source: `Tiki clock-out by ${result.employee}`, notify: true });
+        } catch { console.error("[timeclock] punch saved but overtime check failed"); }
       });
-      return Response.json({ ...result, overtimeRisk });
+      return Response.json(result, { headers: { "Cache-Control": "private, no-store" } });
     }
 
     let scheduledShift: {
@@ -84,11 +92,11 @@ export async function POST(request: Request) {
 
     return Response.json({ ...result, scheduledShift });
   } catch (error) {
-    if (error instanceof TikiClockOutSaveError) {
-      return Response.json({
-        code: error.code,
-        error: "Your clock-out was not saved. You are still clocked in.",
-      }, { status: 500 });
+    if (error instanceof TikiPunchStateError) {
+      return Response.json({ code: error.code, error: error.message }, { status: error.code === "PUNCH_UNAUTHORIZED" ? 401 : 409 });
+    }
+    if (error instanceof TikiPunchUnconfirmedError) {
+      return Response.json({ code: error.code, error: error.message }, { status: 503 });
     }
     return apiError(error);
   }
