@@ -152,7 +152,7 @@ export async function GET(request: NextRequest) {
     if (!canAccessBusiness(session, business)) return NextResponse.json({ error: "Business access denied." }, { status: 403 });
     const id = request.nextUrl.searchParams.get("id");
     if (id) {
-      const form = await getEmploymentForm(id);
+      const form = await getEmploymentForm(id, { business });
       if (!form || form.business !== business) return NextResponse.json({ error: "Employment form was not found." }, { status: 404 });
       const audit = await formAudit(id);
       return NextResponse.json({ form: redactEmploymentSensitiveData({ ...form, ...audit }) });

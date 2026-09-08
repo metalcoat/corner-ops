@@ -1,6 +1,7 @@
 "use client";
 
 import { responseMessage } from "@/app/client-http";
+import { DEFAULT_PUNCH_CORRECTION_REASON, normalizePunchCorrectionReason } from "@/lib/punch-correction-reason";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -151,6 +152,7 @@ export default function PayrollControlPage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Punch | null>(null);
+  const [correctionReason, setCorrectionReason] = useState(DEFAULT_PUNCH_CORRECTION_REASON);
 
   useEffect(() => {
     fetch("/api/auth/session", { cache: "no-store" })
@@ -232,7 +234,7 @@ export default function PayrollControlPage() {
 
   async function correct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editing) return;
+    if (!editing || busy) return;
     const form = new FormData(event.currentTarget);
     const clockIn = String(form.get("clockIn") || "");
     const clockOut = String(form.get("clockOut") || "");
@@ -245,7 +247,7 @@ export default function PayrollControlPage() {
           position: form.get("position"),
           clockInWall: clockIn,
           clockOutWall: clockOut,
-          reason: form.get("reason"),
+          reason: normalizePunchCorrectionReason(form.get("reason")),
         });
         const punch = result.punch as Record<string, unknown> | undefined;
         setEditing(null);
@@ -262,7 +264,7 @@ export default function PayrollControlPage() {
         position: form.get("position"),
         clockInWall: clockIn,
         clockOutWall: clockOut,
-        reason: form.get("reason"),
+        reason: normalizePunchCorrectionReason(form.get("reason")),
       });
       setEditing(null);
       setNotice("Shift corrected in Eastern Time. Payroll hours and tip allocation were recalculated immediately.");
@@ -328,7 +330,7 @@ export default function PayrollControlPage() {
         <p>Correct shifts, recalculate hours and tips, allocate exceptions, version payroll, and lock the final run without visiting a duplicate dashboard.</p>
       </div>
       <div className="controlActions">
-        <div className="businessPills">{(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => { setBusiness(name); setEditing(null); }}>{name}</button>)}</div>
+        <div className="businessPills">{(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => { setBusiness(name); setEditing(null); setCorrectionReason(DEFAULT_PUNCH_CORRECTION_REASON); }}>{name}</button>)}</div>
         <label>Payroll week<input type="date" value={weekStart} onChange={(event) => { setWeekStart(event.target.value); setEditing(null); }} /></label>
         <button className="primary" onClick={() => void recalculate()} disabled={busy}>Recalculate payroll & tips</button>
       </div>
@@ -407,12 +409,12 @@ export default function PayrollControlPage() {
       {editing && <section className="controlCard modalish">
         <p className="eyebrow">Shift correction · Eastern Time</p>
         <h2>{editing.employeeName}</h2>
-        <form className="controlForm" onSubmit={correct}>
+        <form key={editing.id} className="controlForm" onSubmit={correct}>
           <label>Employee<input name="employeeName" defaultValue={editing.employeeName} /></label>
           <label>Position<input name="position" defaultValue={editing.position} /></label>
           <label>Clock in (ET)<input name="clockIn" type="datetime-local" defaultValue={easternInputValue(editing.clockIn)} required /></label>
           <label>Clock out (ET)<input name="clockOut" type="datetime-local" defaultValue={easternInputValue(editing.clockOut)} /></label>
-          <label className="wide">Reason <small>Optional</small><textarea name="reason" placeholder="Leave blank for Owner time correction" /></label>
+          <label className="wide">Reason <small>Optional</small><textarea name="reason" value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} maxLength={1000} placeholder="Leave blank for Owner time correction" /><small>No typing required. Blank notes use Owner time correction; your note is kept for the next edit on this page.</small></label>
           <div className="controlActions wide"><button className="primary" disabled={busy}>{busy ? "Saving…" : "Save & recalculate"}</button><button type="button" onClick={() => setEditing(null)} disabled={busy}>Cancel</button></div>
         </form>
       </section>}

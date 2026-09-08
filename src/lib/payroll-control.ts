@@ -150,70 +150,8 @@ export async function controlledPayrollSummary(business: Business, weekStart: st
   };
 }
 
-export async function correctPunch(input: {
-  business: Business;
-  sourceType: "Tiki" | "Rezku";
-  sourceId: string;
-  employeeName?: string;
-  position?: string;
-  clockIn: string;
-  clockOut?: string | null;
-  reason: string;
-  actor: string;
-}) {
-  await ensurePayrollControlSchema();
-  const clockIn = new Date(input.clockIn);
-  const clockOut = input.clockOut ? new Date(input.clockOut) : null;
-  if (Number.isNaN(clockIn.getTime())) throw new Error("Enter a valid clock-in time.");
-  if (clockOut && Number.isNaN(clockOut.getTime())) throw new Error("Enter a valid clock-out time.");
-  if (clockOut && clockOut < clockIn) throw new Error("Clock-out cannot precede clock-in.");
-  const reason = clean(input.reason, 1000);
-  if (reason.length < 3) throw new Error("A correction reason is required.");
-
-  const table = input.sourceType === "Tiki" ? "time_entries" : "rezku_shifts";
-  const beforeRows = input.sourceType === "Tiki"
-    ? await getSql()`SELECT * FROM time_entries WHERE id = ${input.sourceId} AND business = ${input.business} LIMIT 1`
-    : await getSql()`SELECT * FROM rezku_shifts WHERE id = ${input.sourceId} LIMIT 1`;
-  const before = (beforeRows as unknown as Array<Record<string, unknown>>)[0];
-  if (!before) throw new Error("Punch record was not found.");
-
-  if (input.sourceType === "Tiki") {
-    await getSql()`
-      UPDATE time_entries SET
-        employee_name = ${clean(input.employeeName || before.employee_name, 120)},
-        position = ${clean(input.position || before.position, 100)},
-        clock_in = ${clockIn.toISOString()}, clock_out = ${clockOut?.toISOString() || null},
-        status = 'Corrected',
-        notes = CONCAT(notes, CASE WHEN notes = '' THEN '' ELSE E'\n' END, ${`Correction: ${reason}`}),
-        updated_at = NOW()
-      WHERE id = ${input.sourceId}
-    `;
-  } else {
-    const hours = clockOut ? Math.max(0, (clockOut.getTime() - clockIn.getTime()) / 3_600_000) : numberValue(before.reported_hours);
-    await getSql()`
-      UPDATE rezku_shifts SET
-        employee_name = ${clean(input.employeeName || before.employee_name, 120)},
-        position = ${clean(input.position || before.position, 100)},
-        clock_in = ${clockIn.toISOString()}, clock_out = ${clockOut?.toISOString() || null},
-        reported_hours = ${hours},
-        raw = raw || ${JSON.stringify({ correctionReason: reason, correctedBy: input.actor, correctedAt: new Date().toISOString() })}::jsonb
-      WHERE id = ${input.sourceId}
-    `;
-  }
-  const afterRows = input.sourceType === "Tiki"
-    ? await getSql()`SELECT * FROM time_entries WHERE id = ${input.sourceId} LIMIT 1`
-    : await getSql()`SELECT * FROM rezku_shifts WHERE id = ${input.sourceId} LIMIT 1`;
-  const after = (afterRows as unknown as Array<Record<string, unknown>>)[0];
-  await getSql()`
-    INSERT INTO time_entry_adjustments (
-      id, business, source_type, source_id, before_state, after_state, reason, actor
-    ) VALUES (
-      ${crypto.randomUUID()}, ${input.business}, ${input.sourceType}, ${input.sourceId},
-      ${JSON.stringify(before)}::jsonb, ${JSON.stringify(after)}::jsonb, ${reason}, ${input.actor}
-    )
-  `;
-  return { corrected: true, source: table };
-}
+// Keep older callers on the same validated, optional-note correction implementation.
+export { correctPunch } from "./payroll-punch-correction";
 
 export async function createTipOverride(input: {
   business: Business;
