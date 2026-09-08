@@ -12,7 +12,7 @@ function source(path: string) {
 test("owner punch corrections do not require a typed reason", () => {
   const correction = source("src/lib/payroll-punch-correction.ts");
   assert.match(correction, /reason\?: string/);
-  assert.match(correction, /clean\(input\.reason, 1000\) \|\| "Owner time correction"/);
+  assert.match(correction, /normalizePunchCorrectionReason\(input\.reason\)/);
   assert.doesNotMatch(correction, /A correction reason is required/);
 });
 

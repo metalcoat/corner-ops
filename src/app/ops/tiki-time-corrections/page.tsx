@@ -1,6 +1,7 @@
 "use client";
 
 import { responseMessage } from "@/app/client-http";
+import { DEFAULT_PUNCH_CORRECTION_REASON, normalizePunchCorrectionReason } from "@/lib/punch-correction-reason";
 import { FormEvent, useEffect, useState } from "react";
 import "../control-center.css";
 
@@ -86,6 +87,7 @@ export default function TikiTimeCorrectionsPage() {
   const [weekStart, setWeekStart] = useState(previousMonday());
   const [data, setData] = useState<Dashboard | null>(null);
   const [editing, setEditing] = useState<Punch | null>(null);
+  const [correctionReason, setCorrectionReason] = useState(DEFAULT_PUNCH_CORRECTION_REASON);
   const [notice, setNotice] = useState("");
   const [saveError, setSaveError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -126,7 +128,7 @@ export default function TikiTimeCorrectionsPage() {
 
   async function saveCorrection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editing) return;
+    if (!editing || busy) return;
     const form = new FormData(event.currentTarget);
     setSaveError("");
     try {
@@ -137,7 +139,7 @@ export default function TikiTimeCorrectionsPage() {
         position: form.get("position"),
         clockInWall: form.get("clockIn"),
         clockOutWall: form.get("clockOut"),
-        reason: form.get("reason"),
+        reason: normalizePunchCorrectionReason(form.get("reason")),
       }) as CorrectionResult;
       const savedOut = result.punch?.clockOutEastern || "Open";
       const cleaned = Number(result.staleOpenPunchesResolved || 0);
@@ -210,12 +212,12 @@ export default function TikiTimeCorrectionsPage() {
       {editing && <section className="controlCard modalish">
         <p className="eyebrow">Owner correction · Eastern Time</p>
         <h2>{editing.employeeName}</h2>
-        <form className="controlForm" onSubmit={saveCorrection}>
+        <form key={editing.id} className="controlForm" onSubmit={saveCorrection}>
           <label>Employee<input name="employeeName" defaultValue={editing.employeeName} /></label>
           <label>Position<input name="position" defaultValue={editing.position} /></label>
           <label>Clock in (ET)<input name="clockIn" type="datetime-local" defaultValue={easternInputValue(editing.clockIn)} required /></label>
           <label>Clock out (ET)<input name="clockOut" type="datetime-local" defaultValue={easternInputValue(editing.clockOut)} /></label>
-          <label className="wide">Reason <small>Optional</small><textarea name="reason" placeholder="Leave blank for Owner time correction" /></label>
+          <label className="wide">Reason <small>Optional</small><textarea name="reason" value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} maxLength={1000} placeholder="Leave blank for Owner time correction" /><small>No typing required. Blank notes use Owner time correction; your note is kept for the next edit on this page.</small></label>
           {saveError && <div className="noticeBar wide"><strong>Save failed:</strong> {saveError}</div>}
           <div className="controlActions wide">
             <button className="primary" disabled={busy}>{busy ? "Saving…" : "Save correction"}</button>

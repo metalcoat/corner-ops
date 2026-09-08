@@ -2,6 +2,7 @@ import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { getSql } from "@/lib/db";
 import { apiError, unauthorized, ValidationError } from "@/lib/http";
 import { payrollWeekBounds } from "@/lib/payroll-week";
+import { normalizePunchCorrectionReason } from "@/lib/punch-correction-reason";
 
 export const runtime = "nodejs";
 
@@ -54,7 +55,7 @@ function easternLabel(value: unknown) {
 }
 
 function correctionReason(value: unknown) {
-  return String(value || "").trim().slice(0, 1000) || "Owner time correction";
+  return normalizePunchCorrectionReason(value);
 }
 
 function clean(value: unknown, max: number) {

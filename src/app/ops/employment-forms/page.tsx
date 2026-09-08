@@ -1,6 +1,8 @@
 "use client";
 
 import { responseMessage } from "@/app/client-http";
+import CompletedFormView from "./completed-form-view";
+import { canViewCompletedEmploymentForms } from "@/lib/employment-form-display";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -114,6 +116,8 @@ export default function EmploymentFormsPage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [review, setReview] = useState<FormDetail | null>(null);
+  const [completedTarget, setCompletedTarget] = useState<{ id: string; business: Business } | null>(null);
+  const canViewCompleted = canViewCompletedEmploymentForms(session?.permissions);
   const [rateEmployeeId, setRateEmployeeId] = useState("");
   const [rateHourly, setRateHourly] = useState("0");
   const [rateTipped, setRateTipped] = useState("0");
@@ -141,6 +145,7 @@ export default function EmploymentFormsPage() {
   useEffect(() => {
     if (!session?.authenticated) return;
     setReview(null);
+    setCompletedTarget(null);
     setNotice("");
     void load(business).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -282,9 +287,9 @@ export default function EmploymentFormsPage() {
         </form></article>
       </section>
 
-      <section className="controlCard employmentRecords"><div className="employmentRecordsHeader"><div><p className="eyebrow">Signature and review queue</p><h2>Employment form records</h2></div><span>{data.forms.length} total</span></div><div className="tableWrap"><table><thead><tr><th>Employee</th><th>Form</th><th>Version</th><th>Effective</th><th>Status</th><th>Assigned</th><th>Action</th></tr></thead><tbody>{data.forms.map((form) => <tr key={form.id}><td>{form.employeeName}</td><td>{form.title}</td><td>{form.templateVersion}</td><td>{dateLabel(form.effectiveDate)}</td><td><span className={`employmentStatus ${form.status.replace(/\s+/g, "").toLowerCase()}`}>{form.status}</span></td><td><strong>{dateTimeLabel(form.assignedAt)}</strong><small>by {form.assignedBy || "Unknown account"}</small></td><td><div className="employmentRowActions"><button disabled={busy} onClick={() => void openReview(form.id)}>{form.status === "Employer Review" ? "Complete I-9" : "Review"}</button>{form.status === "Assigned" && <button className="employmentUnassign" disabled={busy} onClick={() => void unassignForm(form)}>Unassign</button>}</div></td></tr>)}{!data.forms.length && <tr><td colSpan={7}>No employment forms assigned yet.</td></tr>}</tbody></table></div></section>
+      <section className="controlCard employmentRecords"><div className="employmentRecordsHeader"><div><p className="eyebrow">Signature and review queue</p><h2>Employment form records</h2></div><span>{data.forms.length} total</span></div><div className="tableWrap"><table><thead><tr><th>Employee</th><th>Form</th><th>Version</th><th>Effective</th><th>Status</th><th>Assigned</th><th>Action</th></tr></thead><tbody>{data.forms.map((form) => <tr key={form.id}><td>{form.employeeName}</td><td>{form.title}</td><td>{form.templateVersion}</td><td>{dateLabel(form.effectiveDate)}</td><td><span className={`employmentStatus ${form.status.replace(/\s+/g, "").toLowerCase()}`}>{form.status}</span></td><td><strong>{dateTimeLabel(form.assignedAt)}</strong><small>by {form.assignedBy || "Unknown account"}</small></td><td><div className="employmentRowActions"><button disabled={busy} onClick={() => void openReview(form.id)}>{form.status === "Employer Review" ? "Complete I-9" : "Review"}</button>{canViewCompleted && form.employeeSignedAt && <button disabled={busy} onClick={() => setCompletedTarget({ id: form.id, business })}>View completed form</button>}{form.status === "Assigned" && <button className="employmentUnassign" disabled={busy} onClick={() => void unassignForm(form)}>Unassign</button>}</div></td></tr>)}{!data.forms.length && <tr><td colSpan={7}>No employment forms assigned yet.</td></tr>}</tbody></table></div></section>
 
-      {review && <section className="controlCard employmentReview"><div className="employmentRecordsHeader"><div><p className="eyebrow">Secure record</p><h2>{review.employeeName} · {review.title}</h2><p>{review.status} · {review.templateVersion}</p></div><div className="employmentRowActions"><a href={review.sourceUrl} target="_blank" rel="noreferrer">Official form</a><button onClick={() => setReview(null)}>Close</button></div></div>
+      {review && <section className="controlCard employmentReview"><div className="employmentRecordsHeader"><div><p className="eyebrow">Secure record</p><h2>{review.employeeName} · {review.title}</h2><p>{review.status} · {review.templateVersion}</p></div><div className="employmentRowActions"><a href={review.sourceUrl} target="_blank" rel="noreferrer">Blank official template</a>{canViewCompleted && review.employeeSignedAt && <button onClick={() => setCompletedTarget({ id: review.id, business })}>View completed form (includes SSN)</button>}<button onClick={() => setReview(null)}>Close</button></div></div>
         <section className="employmentAuditSummary"><div><span>Assigned by</span><strong>{review.assignedBy || "Unknown account"}</strong></div><div><span>Assigned at</span><strong>{dateTimeLabel(review.assignedAt)}</strong></div><div><span>Current status</span><strong>{review.status}</strong></div>{review.status === "Assigned" && <button className="employmentUnassign" disabled={busy} onClick={() => void unassignForm(review)}>Unassign this form</button>}</section>
 
         <section>
@@ -313,5 +318,8 @@ export default function EmploymentFormsPage() {
         </form>}
       </section>}
     </>}
+    {completedTarget && completedTarget.business === business && canViewCompleted && <CompletedFormView
+      key={`${completedTarget.business}:${completedTarget.id}`}
+      id={completedTarget.id} business={completedTarget.business} onClose={() => setCompletedTarget(null)} />}
   </main>;
 }

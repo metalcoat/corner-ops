@@ -336,9 +336,17 @@ export async function listEmploymentForms(business: Business, employeeId?: strin
   return rows.map(summary);
 }
 
-export async function getEmploymentForm(id: string): Promise<EmploymentFormDetail | null> {
+export async function getEmploymentForm(
+  id: string,
+  scope: { business: Business; employeeId?: string },
+): Promise<EmploymentFormDetail | null> {
   await ensureEmploymentFormsSchema();
-  const rows = await getSql()`SELECT * FROM employment_forms WHERE id = ${id} LIMIT 1` as unknown as FormRow[];
+  const rows = await getSql()`
+    SELECT * FROM employment_forms
+    WHERE id = ${id} AND business = ${scope.business}
+      AND (${scope.employeeId || null}::uuid IS NULL OR employee_id = ${scope.employeeId || null}::uuid)
+    LIMIT 1
+  ` as unknown as FormRow[];
   return rows[0] ? { ...summary(rows[0]), payload: decryptPayload(rows[0].encrypted_payload) } : null;
 }
 

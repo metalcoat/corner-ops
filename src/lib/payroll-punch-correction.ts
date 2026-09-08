@@ -1,5 +1,6 @@
 import { ensureSchema, getSql } from "@/lib/db";
 import type { Business } from "@/lib/types";
+import { normalizePunchCorrectionReason } from "./punch-correction-reason";
 
 function clean(value: unknown, max = 255): string {
   return String(value ?? "").trim().slice(0, max);
@@ -27,7 +28,7 @@ export async function correctPunch(input: {
   if (Number.isNaN(clockIn.getTime())) throw new Error("Enter a valid clock-in time.");
   if (clockOut && Number.isNaN(clockOut.getTime())) throw new Error("Enter a valid clock-out time.");
   if (clockOut && clockOut < clockIn) throw new Error("Clock-out cannot precede clock-in.");
-  const reason = clean(input.reason, 1000) || "Owner time correction";
+  const reason = normalizePunchCorrectionReason(input.reason);
 
   const beforeRows = input.sourceType === "Tiki"
     ? await getSql()`SELECT * FROM time_entries WHERE id = ${input.sourceId} AND business = ${input.business} LIMIT 1`
