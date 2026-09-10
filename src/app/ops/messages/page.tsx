@@ -403,6 +403,7 @@ export default function MessagesPage() {
     unreadMessageIds: selectedUnreadMessageIds,
     threadOpen: threadOpen || wideLayout,
     ready: Boolean(data && data.business === business),
+    viewportReady: Boolean(session?.authenticated),
     storageScope: `management:${session?.email || "signed-in"}:${business}:${viewAsEmployeeId || "management"}`,
     onUnreadVisible: viewAsEmployeeId ? undefined : reportVisibleMessagesSeen,
   });
@@ -485,7 +486,7 @@ export default function MessagesPage() {
   if (!session.authenticated) return <main className="messageApp"><div className="messageLoading"><a href="/signin">Sign in to Corner Ops</a></div></main>;
   const allowed = session.businesses?.length ? session.businesses : (["Corner Deli", "Tiki"] as Business[]);
 
-  return <main ref={messageAppRef} className="messageApp">
+  return <main ref={messageAppRef} className="messageApp" data-message-business={business}>
     <header className="messageTopBar">
       <div className="messageTopTitle">
         <a className="messageTopIcon" href="/ops/people" aria-label="Open Corner Ops">☰</a>
@@ -588,7 +589,8 @@ export default function MessagesPage() {
             <div className="messageAttachControls">
               <label aria-label="Upload an image" title="Upload an image">🖼<input ref={photoInputRef} name="photo" type="file" accept="image/*" onChange={choosePhoto} /></label>
             </div>
-            <textarea name="body" rows={2} placeholder="Send a message or paste an image" aria-label={`Message ${selectedConversation.label}`} onPaste={pastePhoto} />
+            <label className="messageComposerLabel" htmlFor="owner-message-body">Message {selectedConversation.label}</label>
+            <textarea id="owner-message-body" name="body" rows={2} placeholder="Type your message here…" aria-label={`Message ${selectedConversation.label}`} onPaste={pastePhoto} />
             <button type="submit" disabled={busy} aria-label="Send message">{busy ? "…" : "➤"}</button>
             {photoPreview && <div className="messageAttachmentPreview"><img src={photoPreview.url} alt="Selected attachment" /><span><strong>{photoPreview.name}</strong><small>{(photoPreview.size / 1024 / 1024).toFixed(1)} MB before resizing · paste or upload</small></span><button type="button" onClick={() => clearPhotoAttachment()} disabled={busy}>Remove</button></div>}
           </form> : <div className="messageReadOnlyComposer"><strong>View only</strong><span>{viewAsEmployeeId ? "Impersonation never sends or marks messages as read." : "Management can review employee-to-employee conversations but cannot post into them."}</span></div>}

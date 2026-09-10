@@ -16,6 +16,7 @@ type MessageThreadBehaviorOptions = {
   unreadMessageIds: string[];
   threadOpen: boolean;
   ready: boolean;
+  viewportReady: boolean;
   storageScope: string;
   onUnreadVisible?: (messageIds: string[]) => void;
 };
@@ -82,6 +83,7 @@ export function useMessageThreadBehavior({
   unreadMessageIds,
   threadOpen,
   ready,
+  viewportReady,
   storageScope,
   onUnreadVisible,
 }: MessageThreadBehaviorOptions) {
@@ -136,6 +138,7 @@ export function useMessageThreadBehavior({
   }, [saveThreadPosition, threadRef]);
 
   useEffect(() => {
+    if (!viewportReady) return;
     const root = appRef.current;
     if (!root) return;
     let frame = 0;
@@ -164,10 +167,11 @@ export function useMessageThreadBehavior({
         const rootTop = root.getBoundingClientRect().top;
         const availableHeight = keyboardOpen
           ? currentHeight
-          : Math.max(320, Math.round(visibleBottom - Math.max(rootTop, viewportTop)));
+          : Math.max(1, Math.round(visibleBottom - Math.max(rootTop, viewportTop)));
         root.style.setProperty("--message-viewport-height", `${availableHeight}px`);
         root.style.setProperty("--message-viewport-top", `${viewportTop}px`);
-        root.toggleAttribute("data-keyboard-open", keyboardOpen);
+        if (keyboardOpen) root.setAttribute("data-keyboard-open", "true");
+        else root.removeAttribute("data-keyboard-open");
       });
     };
 
@@ -178,6 +182,15 @@ export function useMessageThreadBehavior({
     };
 
     updateViewport();
+    // Navigation and prompts above the app can resize after the session loads.
+    const layoutObserver = new ResizeObserver(updateViewport);
+    let ancestor: HTMLElement | null = root;
+    while (ancestor && ancestor !== document.body) {
+      for (const sibling of Array.from(ancestor.parentElement?.children || [])) {
+        if (sibling !== ancestor) layoutObserver.observe(sibling);
+      }
+      ancestor = ancestor.parentElement;
+    }
     viewport?.addEventListener("resize", updateViewport);
     viewport?.addEventListener("scroll", updateViewport);
     window.addEventListener("resize", updateViewport);
@@ -185,6 +198,7 @@ export function useMessageThreadBehavior({
     document.addEventListener("focusout", delayedUpdate);
     return () => {
       window.cancelAnimationFrame(frame);
+      layoutObserver.disconnect();
       viewport?.removeEventListener("resize", updateViewport);
       viewport?.removeEventListener("scroll", updateViewport);
       window.removeEventListener("resize", updateViewport);
@@ -194,7 +208,7 @@ export function useMessageThreadBehavior({
       root.style.removeProperty("--message-viewport-height");
       root.style.removeProperty("--message-viewport-top");
     };
-  }, [appRef]);
+  }, [appRef, viewportReady]);
 
   useEffect(() => {
     if (!ready) return;
