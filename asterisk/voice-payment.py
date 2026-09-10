@@ -109,16 +109,18 @@ def hear_digits(minimum,maximum,prompt_name,attempts=3):
     return ""
 
 def hear_card_number():
-    first=hear_digits(4,4,"card-number")
-    if not first:return ""
-    if first.startswith(("34","37")):
-        middle=hear_digits(6,6,"next-six")
-        final=hear_digits(5,5,"last-five")
-        return first+middle+final if middle and final else ""
-    second=hear_digits(4,4,"next-four")
-    third=hear_digits(4,4,"next-four")
-    fourth=hear_digits(4,4,"last-four")
-    return first+second+third+fourth if second and third and fourth else ""
+    # A caller may continue past the first four at their natural pace. If they
+    # pause, retain everything already heard and collect only what remains.
+    card=hear_digits(4,19,"card-number")
+    if not card:return ""
+    target=15 if card.startswith(("34","37")) else 16
+    while len(card)<target:
+        remaining=target-len(card)
+        prompt_name="last-five" if remaining==5 else "last-four" if remaining<=4 else "next-six" if remaining==6 else "next-four"
+        group=hear_digits(1,remaining,prompt_name)
+        if not group:return ""
+        card+=group
+    return card if len(card)==target else ""
 
 def confirmed(last4):
     prompt("confirm-ending");agi(f'SAY DIGITS {last4} ""');prompt("confirm-yes")
