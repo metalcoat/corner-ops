@@ -809,6 +809,22 @@ export default function PosClient({
   const [incomingCalls, setIncomingCalls] = useState<IncomingDeliCall[]>([]);
   const [callClock, setCallClock] = useState(() => Date.now());
   const [aiCalls, setAiCalls] = useState<AiDeliCall[]>([]);
+  const [dismissedAiCallIds, setDismissedAiCallIds] = useState<string[]>([]);
+  const [aiCallStripOffset, setAiCallStripOffset] = useState({ x: 0, y: 0 });
+  const [aiCallSwipe, setAiCallSwipe] = useState<{ id: string; x: number } | null>(null);
+  const aiCallDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+  const aiCallSwipeRef = useRef<{
+    id: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+  } | null>(null);
   const [posEmployeeId, setPosEmployeeId] = useState("");
   const intervention = aiCalls.find((call) => call.state !== "ai") || null;
   const [mappingItemId, setMappingItemId] = useState("");
@@ -2041,7 +2057,61 @@ export default function PosClient({
       return;
     }
     setAiCalls([]);
+    setDismissedAiCallIds([]);
     setCartNotice(`${payload.cleared || 0} AI test call${payload.cleared === 1 ? "" : "s"} cleared.`);
+  }
+  function startAiCallStripDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    aiCallDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: aiCallStripOffset.x,
+      originY: aiCallStripOffset.y,
+    };
+  }
+  function moveAiCallStrip(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = aiCallDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setAiCallStripOffset({
+      x: drag.originX + event.clientX - drag.startX,
+      y: drag.originY + event.clientY - drag.startY,
+    });
+  }
+  function stopAiCallStripDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    if (aiCallDragRef.current?.pointerId === event.pointerId)
+      aiCallDragRef.current = null;
+  }
+  function startAiCallSwipe(event: React.PointerEvent<HTMLDivElement>, id: string) {
+    if ((event.target as HTMLElement).closest("button, a, input, textarea, select")) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    aiCallSwipeRef.current = {
+      id,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+    setAiCallSwipe({ id, x: 0 });
+  }
+  function moveAiCallSwipe(event: React.PointerEvent<HTMLDivElement>) {
+    const swipe = aiCallSwipeRef.current;
+    if (!swipe || swipe.pointerId !== event.pointerId) return;
+    const x = event.clientX - swipe.startX;
+    const y = event.clientY - swipe.startY;
+    if (Math.abs(y) > Math.abs(x) && Math.abs(x) < 12) return;
+    event.preventDefault();
+    setAiCallSwipe({ id: swipe.id, x });
+  }
+  function stopAiCallSwipe(event: React.PointerEvent<HTMLDivElement>) {
+    const swipe = aiCallSwipeRef.current;
+    if (!swipe || swipe.pointerId !== event.pointerId) return;
+    const distance = event.clientX - swipe.startX;
+    if (Math.abs(distance) >= 90)
+      setDismissedAiCallIds((current) =>
+        current.includes(swipe.id) ? current : [...current, swipe.id],
+      );
+    aiCallSwipeRef.current = null;
+    setAiCallSwipe(null);
   }
   async function createQuickCustomer(event: React.FormEvent) {
     event.preventDefault();
@@ -4331,23 +4401,69 @@ export default function PosClient({
           </button>
         </div>
       )}
-      {aiCalls.some((call) => call.state === "ai") && (
+      {aiCalls.some(
+        (call) => call.state === "ai" && !dismissedAiCallIds.includes(call.id),
+      ) && (
         <aside
           className="posAiCallStrip"
           aria-label="AI phone ordering activity"
+          style={{
+            transform: `translate3d(${aiCallStripOffset.x}px, ${aiCallStripOffset.y}px, 0)`,
+          }}
         >
-          <button
-            type="button"
-            className="posAiClearCalls"
-            onClick={() => void clearTestAiCalls()}
-          >
-            CLEAR TEST CALLS
-          </button>
+          <div className="posAiCallControls">
+            <button
+              type="button"
+              className="posAiMoveCalls"
+              aria-label="Drag AI call popup"
+              onPointerDown={startAiCallStripDrag}
+              onPointerMove={moveAiCallStrip}
+              onPointerUp={stopAiCallStripDrag}
+              onPointerCancel={stopAiCallStripDrag}
+            >
+              ☰ MOVE
+            </button>
+            <button
+              type="button"
+              className="posAiClearCalls"
+              onClick={() => void clearTestAiCalls()}
+            >
+              CLEAR TEST CALLS
+            </button>
+          </div>
           {aiCalls
-            .filter((call) => call.state === "ai")
+            .filter(
+              (call) =>
+                call.state === "ai" && !dismissedAiCallIds.includes(call.id),
+            )
             .map((call) => (
-              <div key={call.id}>
+              <div
+                className="posAiCallCard"
+                key={call.id}
+                onPointerDown={(event) => startAiCallSwipe(event, call.id)}
+                onPointerMove={moveAiCallSwipe}
+                onPointerUp={stopAiCallSwipe}
+                onPointerCancel={stopAiCallSwipe}
+                style={
+                  aiCallSwipe?.id === call.id
+                    ? {
+                        transform: `translate3d(${aiCallSwipe.x}px, 0, 0)`,
+                        opacity: Math.max(0.25, 1 - Math.abs(aiCallSwipe.x) / 220),
+                      }
+                    : undefined
+                }
+              >
                 <strong>AI ORDERING · LINE {call.line_number || "TEST"}</strong>
+                <button
+                  type="button"
+                  className="posAiDismissCall"
+                  aria-label={`Hide AI call from ${call.display_name || call.caller_phone || "unknown caller"}`}
+                  onClick={() =>
+                    setDismissedAiCallIds((current) => [...current, call.id])
+                  }
+                >
+                  ×
+                </button>
                 <span>
                   {call.display_name || "Unknown caller"}
                   {call.caller_phone ? ` · ${call.caller_phone}` : ""}

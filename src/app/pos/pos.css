@@ -1440,18 +1440,33 @@
   width: min(410px, calc(100vw - 24px));
   display: grid;
   gap: 6px;
-  pointer-events: none;
-}
-.posAiClearCalls {
-  justify-self: end;
   pointer-events: auto;
+  will-change: transform;
+}
+.posAiCallControls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.posAiMoveCalls,
+.posAiClearCalls {
   border: 1px solid #fca5a5;
   background: #7f1d1d;
   color: #fff;
   font-size: 0.72rem;
   font-weight: 800;
 }
-.posAiCallStrip > div {
+.posAiMoveCalls {
+  flex: 1;
+  border-color: #7dd3fc;
+  background: #0c4a6e;
+  cursor: grab;
+  touch-action: none;
+}
+.posAiMoveCalls:active {
+  cursor: grabbing;
+}
+.posAiCallCard {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 3px 12px;
@@ -1461,14 +1476,27 @@
   background: #082f49f2;
   color: #f0f9ff;
   box-shadow: 0 8px 24px #0007;
+  touch-action: pan-y;
+  transition: transform 140ms ease, opacity 140ms ease;
+  user-select: none;
 }
-.posAiCallStrip > div > strong {
-  grid-column: 1/-1;
+.posAiCallCard > strong {
   color: #7dd3fc;
   font-size: 0.76rem;
   letter-spacing: 0.05em;
 }
-.posAiCallStrip > div > span:last-of-type {
+.posAiDismissCall {
+  width: 30px;
+  min-height: 30px;
+  margin: -5px -7px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 1.45rem;
+  line-height: 1;
+}
+.posAiCallCard > span:last-of-type {
   color: #bae6fd;
   text-align: right;
 }
