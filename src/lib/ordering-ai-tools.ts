@@ -438,6 +438,7 @@ export const BUSINESS_ITEM_ALIASES: Record<string, string[]> = {
     "nachos and cheese",
   ],
   "pizza log": ["pizza roll", "pizza rolls", "pizza logs"],
+  ogdensburger: ["ogdens burger", "ogden burger", "ogdens"],
 };
 const itemAliases = BUSINESS_ITEM_ALIASES;
 export function generatedItemAliases(name: string) {
@@ -577,6 +578,8 @@ export const modifierAliases = (name: string, groupName = "") => {
     aliases.push(simple.replace(/\bcrust\b/g, "").trim());
   if (/blue cheese/.test(simple)) aliases.push("blue", "bleu", "bleu cheese");
   if (/italian/.test(simple)) aliases.push("italian");
+  if (/russian.*thousand island|thousand island.*russian/.test(simple))
+    aliases.push("russian", "russian dressing", "thousand island", "thousand islands");
   if (/mashed/.test(simple)) aliases.push("mashed", "mash");
   if (/curly frie/.test(simple)) aliases.push("curly");
   if (/waffle frie/.test(simple)) aliases.push("waffle");
@@ -588,6 +591,10 @@ export const modifierAliases = (name: string, groupName = "") => {
       "side nacho",
       "side of nacho",
     );
+  if (/^un cooked$/.test(simple))
+    aliases.push("uncooked", "uncooked pizza", "not cooked", "take and bake");
+  if (/sweet and sassy/.test(simple))
+    aliases.push("sexy sweet", "sassy sweet", "sweet sassy");
   if (/^gravy$/.test(simple) && /mashed mod/.test(group))
     aliases.push(
       "gravy on mashed",
@@ -1156,6 +1163,21 @@ export async function priceSpokenOrder(input: {
           : /\b(?:2|two)\b/.test(spokenName)
             ? "two"
             : "";
+      if (/\bgarden salad\b/.test(spokenName))
+        throw new AiToolError(
+          "FOLLOW_UP_REQUIRED",
+          "Would you like a Julienne salad, a fried or grilled chicken salad, or a large tossed salad?",
+          "Ask exactly: Would you like a Julienne salad, a fried or grilled chicken salad, or a large tossed salad?",
+          409,
+          {
+            options: [
+              "Julienne Sal",
+              "Fried Chicken Sal",
+              "Grilled Chicken Sal",
+              "LG Tossed Sal",
+            ],
+          },
+        );
       if (varietyPhrase && !varietySize)
         throw new AiToolError(
           "INVALID_VARIANT",
@@ -1686,6 +1708,18 @@ export async function priceSpokenOrder(input: {
                   !(modifierSelections[group.id]?.length || 0),
               )
             : [],
+          saladDressingChoices = /salad/i.test(item.name)
+            ? choices.filter(({ group }) =>
+                /^(?:Choose Dressing(?: \(On Salad\))?|Dressing\/Options)$/.test(
+                  group.name,
+                ),
+              )
+            : [],
+          freeSubCheeseChoices = item.variants.some(
+            (candidate) => spokenKey(candidate.name) === "full sub",
+          )
+            ? choices.filter(({ group }) => group.name === "Free Cheese")
+            : [],
           explicitSideSauce = /^(side of|side)\b|\b(cup|\d+\s*oz)\b/.test(raw),
           sideSauceKey = raw
             .replace(/^(side of|side)\s+/, "")
@@ -1707,6 +1741,18 @@ export async function priceSpokenOrder(input: {
               ),
             )
               ? requiredDressingChoices
+              : saladDressingChoices.some(({ option, group }) =>
+                    modifierAliases(option.name, group.name).some(
+                      (alias) => spokenKey(alias) === raw,
+                    ),
+                  )
+                ? saladDressingChoices
+                : freeSubCheeseChoices.some(({ option, group }) =>
+                      modifierAliases(option.name, group.name).some(
+                        (alias) => spokenKey(alias) === raw,
+                      ),
+                    )
+                  ? freeSubCheeseChoices
               : burgerToppingChoices.some(({ option, group }) =>
                     modifierAliases(option.name, group.name).some(
                       (alias) => spokenKey(alias) === raw,

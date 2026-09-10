@@ -97,7 +97,27 @@ async function main() {
     result = await price("large fries with nacho");
     assert.equal(result.lines[0].item_name_snapshot, "Large French Fries");
     assert.ok(result.modifierNames.includes("Nacho Cheese on Side"));
+    result = await price("large fries with cheese sauce");
+    assert.equal(result.lines[0].item_name_snapshot, "Large French Fries");
+    assert.ok(result.modifierNames.includes("Nacho Cheese on Side"));
     await expectError("fries with nacho", /Small or large/i);
+
+    result = await price("Ogdens burger");
+    assert.equal(result.lines[0].item_name_snapshot, "Ogdensburger");
+
+    await assert.rejects(
+      () => price("garden salad"),
+      (error: unknown) =>
+        error instanceof AiToolError &&
+        error.code === "FOLLOW_UP_REQUIRED" &&
+        /Julienne salad.*fried or grilled chicken salad.*large tossed salad/i.test(
+          error.message,
+        ),
+      "Garden salad must offer real salad choices instead of inventing an item.",
+    );
+
+    result = await price("large uncooked pizza");
+    assert.ok(result.modifierNames.includes("Un Cooked"));
 
     await expectError("mac salad", /size or option/i);
     result = await price("small mac salad");
@@ -250,6 +270,36 @@ async function main() {
       "Mayonnaise", "Russian", "Oil", "Parm Shakers", "Oregano Shakers",
       "Lettuce", "Tomato", "Onion", "Hot Peppers", "Provolone",
     ]) assert.ok(everythingNames.has(name), `Cold-sub everything must include ${name}.`);
+
+    for (const cheese of ["American", "Swiss", "Provolone"]) {
+      const roastBeef = await priceSpokenOrder({
+        business: "Corner Deli",
+        actor,
+        service: "pickup",
+        customerText: `everything with ${cheese}`,
+        items: [
+          {
+            name: "Roast Beef",
+            variant: "Full Sub",
+            quantity: 1,
+            modifiers: [{ name: "everything" }, { name: cheese }],
+          },
+        ],
+      });
+      created.push(roastBeef.id);
+      const cheeseNames = await sql`
+        SELECT modifier.option_name_snapshot
+        FROM ordering_order_item_modifiers modifier
+        JOIN ordering_order_items item ON item.id=modifier.order_item_id
+        WHERE item.order_id=${roastBeef.id}
+      `;
+      assert.ok(
+        cheeseNames.some(
+          (row) => String(row.option_name_snapshot) === cheese,
+        ),
+        `Roast Beef must resolve ${cheese} through its Free Cheese group.`,
+      );
+    }
 
     const turkeyWithRawOnions = await priceSpokenOrder({
       business: "Corner Deli",
@@ -435,6 +485,13 @@ async function main() {
         /Italian.*On Salad/i.test(name),
       ),
     );
+    result = await price("small salad russian");
+    assert.ok(
+      result.modifierNames.some((name: string) =>
+        /Russian.*On Salad/i.test(name),
+      ),
+      "Russian on a salad must resolve as salad dressing, not a sub condiment.",
+    );
 
     await expectError("hot turkey with mashed", /Small or medium/i);
     result = await price("hot turkey with small salad ranch medium mashed");
@@ -589,6 +646,9 @@ async function main() {
       assert.equal(result.lines[0].variant_name_snapshot, "12 Wings");
       assert.ok(result.modifierNames.includes("Mild"));
     }
+    result = await price("12 wings sexy sweet");
+    assert.equal(result.lines[0].item_name_snapshot, "Wings");
+    assert.ok(result.modifierNames.includes("Sweet and Sassy"));
     for (const phrase of [
       "12 wings mild with blue cheese and celery",
       "12 wings mild ranch and celery",
