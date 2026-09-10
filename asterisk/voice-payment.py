@@ -39,15 +39,19 @@ def _drain_audio(stop):
             try: os.read(3,3200)
             except BlockingIOError: pass
 
-def prompt(name):
-    # STREAM FILE is synchronous, but Asterisk continues writing inbound phone
-    # audio to fd 3. Drain it concurrently so the pipe cannot fill and break
-    # prompt playback. Prompt-time audio is intentionally ignored.
+def playback(command):
+    """Run any synchronous Asterisk playback while draining EAGI input."""
     stop=threading.Event();worker=threading.Thread(target=_drain_audio,args=(stop,),daemon=True)
     worker.start()
-    try: agi(f'STREAM FILE voice-payment/{name} ""')
+    try:return agi(command)
     finally:
         stop.set();worker.join(timeout=0.25)
+
+def prompt(name):
+    return playback(f'STREAM FILE voice-payment/{name} ""')
+
+def say_digits(value):
+    return playback(f'SAY DIGITS {value} ""')
 
 def discard_prompt_echo():
     """Discard only bytes already queued when a prompt ends.
@@ -118,10 +122,10 @@ def hear_digits(minimum,maximum,prompt_name,attempts=3,accepted_lengths=None):
         prompt("try-again")
     return ""
 
-def hear_card_number():
+def hear_card_number(allow_full=True):
     # A caller may continue past the first four at their natural pace. If they
     # pause, retain everything already heard and collect only what remains.
-    card=hear_digits(4,19,"card-number",accepted_lengths=[4,15,16])
+    card=hear_digits(4,19,"card-number",accepted_lengths=[4,15,16] if allow_full else [4])
     if not card:return ""
     target=15 if card.startswith(("34","37")) else 16
     while len(card)<target:
@@ -133,8 +137,9 @@ def hear_card_number():
     return card if len(card)==target else ""
 
 def confirmed(last4):
-    prompt("confirm-ending");agi(f'SAY DIGITS {last4} ""');prompt("confirm-yes")
+    prompt("confirm-ending");say_digits(last4);prompt("confirm-yes");discard_prompt_echo()
     words=hear("yes | correct | no | incorrect",7)
+    debug_recognition("card-confirmation"," ".join(words))
     return any(word in ("yes","correct") for word in words) and not any(word in ("no","incorrect") for word in words)
 
 def main():
@@ -150,11 +155,16 @@ def main():
         call_id=sys.argv[1].strip() if len(sys.argv)>1 else ""
         verified_caller=sys.argv[2].strip() if len(sys.argv)>2 else ""
         session=api({"action":"claim","callId":call_id,"callerPhone":verified_caller or environment.get("agi_callerid","")})
-        failure_stage="card_recognition_failed"
-        card=hear_card_number()
-        if not card: raise RuntimeError("recognition")
-        failure_stage="card_confirmation_failed"
-        if not confirmed(card[-4:]): raise RuntimeError("recognition")
+        card=""
+        for card_attempt in range(3):
+            failure_stage="card_recognition_failed"
+            card=hear_card_number(allow_full=card_attempt==0)
+            if not card:continue
+            failure_stage="card_confirmation_failed"
+            if confirmed(card[-4:]):break
+            card=""
+            prompt("try-again")
+        if not card:raise RuntimeError("recognition")
         failure_stage="expiration_recognition_failed"
         expiry=hear_digits(4,4,"expiration")
         if not expiry: raise RuntimeError("recognition")
