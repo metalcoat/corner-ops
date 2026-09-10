@@ -213,6 +213,17 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
       ON CONFLICT(item_id,group_id) DO NOTHING
     `;
       await sql`UPDATE ordering_modifier_options option SET active=FALSE,available=FALSE,updated_at=NOW() FROM ordering_modifier_groups groups WHERE option.group_id=groups.id AND groups.business='Corner Deli' AND groups.name='Burger Toppings' AND option.name='Bacon'`;
+      // Every Big Boss comes with Swiss by default and uses Big Boss mods for
+      // free American/Provolone substitutions. Salami alone inherited the
+      // ordinary required sub-cheese group from the source import, which made
+      // it ask a different cheese question than the other three Big Bosses.
+      await sql`
+      DELETE FROM ordering_menu_item_modifier_groups link
+      USING ordering_menu_items item, ordering_modifier_groups groups
+      WHERE link.item_id=item.id AND link.group_id=groups.id
+        AND item.business='Corner Deli' AND item.name='Salami Big Boss'
+        AND groups.business='Corner Deli' AND groups.name='Free Cheese'
+    `;
       // Pizza Sub has six distinct free toppings; the imported maximum of five
       // prevented selecting the complete free build.
       await sql`UPDATE ordering_modifier_groups groups SET max_selections=9,updated_at=NOW() WHERE groups.business='Corner Deli' AND groups.name='Pizza Sub Toppings' AND EXISTS(SELECT 1 FROM ordering_menu_item_modifier_groups link JOIN ordering_menu_items item ON item.id=link.item_id WHERE link.group_id=groups.id AND item.name='Pizza Sub')`;

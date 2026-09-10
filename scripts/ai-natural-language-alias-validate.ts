@@ -5,8 +5,9 @@ import { localValidationEnv } from "./validation-env";
 localValidationEnv();
 
 async function main() {
-  const [{ ensureOrderingAiSchema }, { getSql }, tools, sideband] = await Promise.all([
+  const [{ ensureOrderingAiSchema }, { ensureOrderingMenuOverrideSchema }, { getSql }, tools, sideband] = await Promise.all([
     import("../src/lib/ordering-ai-schema"),
+    import("../src/lib/ordering-menu-overrides"),
     import("../src/lib/db"),
     import("../src/lib/ordering-ai-tools"),
     import("../src/lib/openai-phone-sideband"),
@@ -14,6 +15,7 @@ async function main() {
   const { AiToolError, compositeModifierEffects, priceSpokenOrder } = tools;
   const { applyPendingModifierAnswer, incrementalSpokenCart } = sideband;
   await ensureOrderingAiSchema();
+  await ensureOrderingMenuOverrideSchema();
   const sql = getSql();
   const actor = {
     id: "natural-alias-regression",
@@ -22,6 +24,30 @@ async function main() {
     role: "employee" as const,
   };
   const created: string[] = [];
+
+  const bigBossGroups = await sql`
+    SELECT item.name,
+      array_agg(groups.name ORDER BY groups.name) AS modifier_groups
+    FROM ordering_menu_items item
+    JOIN ordering_menu_item_modifier_groups link ON link.item_id=item.id
+    JOIN ordering_modifier_groups groups ON groups.id=link.group_id
+    WHERE item.business='Corner Deli'
+      AND item.name IN ('Ham Big Boss','Pig Big Boss','Salami Big Boss','Turkey Big Boss')
+    GROUP BY item.name
+    ORDER BY item.name
+  `;
+  assert.equal(bigBossGroups.length, 4);
+  const expectedBigBossGroups = JSON.stringify(bigBossGroups[0].modifier_groups);
+  for (const row of bigBossGroups)
+    assert.equal(
+      JSON.stringify(row.modifier_groups),
+      expectedBigBossGroups,
+      `${row.name} must use the same modifier groups as every other Big Boss.`,
+    );
+  assert.ok(
+    !(bigBossGroups[0].modifier_groups as string[]).includes("Free Cheese"),
+    "Big Bosses must use their default Swiss/substitution choices instead of ordinary Free Cheese.",
+  );
 
   async function price(name: string): Promise<Record<string, any>> {
     const result = await priceSpokenOrder({
