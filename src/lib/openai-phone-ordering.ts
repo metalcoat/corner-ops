@@ -154,6 +154,7 @@ export const OPENAI_PRICE_ORDER_TOOL = {
       },
       steakStyleCondimentDecision: { type: "string", enum: ["selected", "declined"] },
       steakStyleToppingsDecision: { type: "string", enum: ["selected", "declined"] },
+      steakStyleCheeseDecision: { type: "string", enum: ["selected", "declined"] },
       steakStyleDoubleMeatDecision: { type: "string", enum: ["selected", "declined"] },
     },
     required: ["operation", "serviceType", "items"],

@@ -248,15 +248,11 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
         AND groups.business='Corner Deli' AND groups.name='Free Cheese'
     `;
       await sql`
-      INSERT INTO ordering_menu_item_modifier_defaults(id,item_id,option_id,default_selected,included_quantity,active)
-      SELECT gen_random_uuid(),item.id,option.id,TRUE,1,TRUE
-      FROM ordering_menu_items item
-      JOIN ordering_menu_item_modifier_groups link ON link.item_id=item.id
-      JOIN ordering_modifier_groups groups ON groups.id=link.group_id
-      JOIN ordering_modifier_options option ON option.group_id=groups.id
-      WHERE item.business='Corner Deli' AND item.name IN ('Steak','Chicken Fajita','Hot Sausage') AND item.active=TRUE
-        AND groups.name='Free Cheese' AND option.name='American'
-      ON CONFLICT(item_id,option_id) DO UPDATE SET default_selected=TRUE,included_quantity=1,active=TRUE,updated_at=NOW()
+      UPDATE ordering_menu_item_modifier_defaults defaults SET default_selected=FALSE,updated_at=NOW()
+      FROM ordering_menu_items item,ordering_modifier_options option,ordering_modifier_groups groups
+      WHERE defaults.item_id=item.id AND defaults.option_id=option.id AND option.group_id=groups.id
+        AND item.business='Corner Deli' AND item.name IN ('Steak','Chicken Fajita','Hot Sausage')
+        AND groups.name='Free Cheese'
     `;
       // Pizza Sub has six distinct free toppings; the imported maximum of five
       // prevented selecting the complete free build.

@@ -356,6 +356,7 @@ const tools = [
         },
         steakStyleCondimentDecision: { type: "string", enum: ["selected", "declined"] },
         steakStyleToppingsDecision: { type: "string", enum: ["selected", "declined"] },
+        steakStyleCheeseDecision: { type: "string", enum: ["selected", "declined"] },
         steakStyleDoubleMeatDecision: { type: "string", enum: ["selected", "declined"] },
       },
       required: ["callId", "operation", "serviceType", "items"],
@@ -583,6 +584,7 @@ export async function POST(request: Request) {
       resolvedQuestions.add("cold_sub_vegetables");
     if (args.steakStyleCondimentDecision) resolvedQuestions.add("steak_style_condiment");
     if (args.steakStyleToppingsDecision) resolvedQuestions.add("steak_style_toppings");
+    if (args.steakStyleCheeseDecision) resolvedQuestions.add("steak_style_cheese");
     if (args.steakStyleDoubleMeatDecision) resolvedQuestions.add("steak_style_double_meat");
     if (requestedName === "price_order")
       await getSql()`UPDATE ordering_call_sessions SET deferred_required_fields=${JSON.stringify([...resolvedQuestions])}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
