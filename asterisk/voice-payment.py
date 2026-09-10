@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Isolated sandbox voice-card AGI. Never log recognized speech or request bodies."""
+"""Isolated voice-card AGI. Recognition text is visible only in explicit sandbox debug mode."""
 import audioop
 import fcntl
 import json
@@ -16,7 +16,16 @@ from pocketsphinx import Decoder, get_model_path
 
 API=os.environ.get("VOICE_PAYMENT_API_URL","http://127.0.0.1:3000/api/internal/voice-payment")
 SECRET=os.environ.get("VOICE_PAYMENT_INTERNAL_SECRET","")
+SANDBOX=os.environ.get("MX_ENVIRONMENT","sandbox").strip().lower()!="production"
+DEBUG_RECOGNITION=SANDBOX and os.environ.get("VOICE_PAYMENT_DEBUG_RECOGNITION","").strip().lower() in ("1","true","yes","on")
 WORDS={"zero":"0","oh":"0","one":"1","two":"2","three":"3","four":"4","five":"5","six":"6","seven":"7","eight":"8","nine":"9"}
+
+def debug_recognition(stage,value):
+    if DEBUG_RECOGNITION:
+        # stderr is the Asterisk container log, never the AGI command channel.
+        # This deliberately exposes sandbox test digits only; production forces this off.
+        sys.stderr.write(f"VOICE_PAYMENT_SANDBOX_RECOGNITION stage={stage} heard={value or '[nothing]'}\n")
+        sys.stderr.flush()
 
 def agi(command):
     sys.stdout.write(command+"\n");sys.stdout.flush()
@@ -41,15 +50,17 @@ def prompt(name):
         stop.set();worker.join(timeout=0.25)
 
 def discard_prompt_echo():
-    """Discard audio accumulated on EAGI fd 3 while a prompt was playing."""
-    for delay in (0,0.2):
-        if delay:time.sleep(delay)
-        pending=array("i",[0]);fcntl.ioctl(3,termios.FIONREAD,pending,True)
-        remaining=pending[0]
-        while remaining>0:
-            chunk=os.read(3,min(remaining,32000))
-            if not chunk:break
-            remaining-=len(chunk)
+    """Discard only bytes already queued when a prompt ends.
+
+    Never sleep and drain again: callers commonly begin their answer immediately,
+    and the old delayed drain was deleting the beginning of the next digit group.
+    """
+    pending=array("i",[0]);fcntl.ioctl(3,termios.FIONREAD,pending,True)
+    remaining=pending[0]
+    while remaining>0:
+        chunk=os.read(3,min(remaining,32000))
+        if not chunk:break
+        remaining-=len(chunk)
 
 def api(payload):
     request=urllib.request.Request(API,data=json.dumps(payload,separators=(",",":")).encode(),headers={"content-type":"application/json","x-voice-payment-secret":SECRET},method="POST")
@@ -77,9 +88,12 @@ def hear(search,max_seconds=14):
         chunk=os.read(3,3200)
         if not chunk: break
         level=audioop.rms(chunk,2)
-        if level>260: started=True;last_voice=time.monotonic()
+        # Narrow-band phone callers routinely arrive below the old 260 RMS
+        # threshold. PocketSphinx's constrained grammar still does recognition;
+        # this threshold controls only when silence ends the answer.
+        if level>120: started=True;last_voice=time.monotonic()
         recognizer.process_raw(chunk,False,False)
-        if started and time.monotonic()-last_voice>2.0: break
+        if started and time.monotonic()-last_voice>2.4: break
     recognizer.end_utt();hyp=recognizer.hyp()
     return hyp.hypstr.lower().split() if hyp else []
 
@@ -87,8 +101,9 @@ def hear_digits(minimum,maximum,prompt_name,attempts=3):
     sequence="(<digit>)+";grammar="<digit> = zero | oh | one | two | three | four | five | six | seven | eight | nine; public <input> = "+sequence
     # PocketSphinx accepts one public rule, so use an inline alternation for streaming digit recognition.
     search="(zero | oh | one | two | three | four | five | six | seven | eight | nine)+"
-    for _ in range(attempts):
+    for attempt in range(attempts):
         prompt(prompt_name);discard_prompt_echo();value="".join(WORDS[word] for word in hear(search) if word in WORDS)
+        debug_recognition(f"{prompt_name}:{attempt+1}",value)
         if minimum<=len(value)<=maximum:return value
         prompt("try-again")
     return ""
