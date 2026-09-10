@@ -63,7 +63,16 @@ async function main() {
     },
   });
   assert.ok(
-    returningCustomerPrompt.includes("confirm the matched name and wait") &&
+    returningCustomerPrompt.includes("ask once whether the matched name is correct and wait") &&
+      returningCustomerPrompt.includes(
+        "immediately call PRICE_ORDER silently with operation read, no items",
+      ) &&
+      returningCustomerPrompt.includes(
+        "the identity step is permanently complete for this call",
+      ) &&
+      returningCustomerPrompt.includes(
+        "never ask for their first name, last name, full name, or name again",
+      ) &&
       returningCustomerPrompt.includes(
         "ask whether they are still going to the saved address and wait",
       ) &&
@@ -280,9 +289,11 @@ async function main() {
     "Buffalo chicken and plain-burger question flows must remain explicit.",
   );
   assert.ok(
-    business.pickupWait === "Give us 30 minutes for pickup." &&
-      business.deliveryWait.includes("40 to 45 minutes"),
-    "Live normal timing must be 30-minute pickup and 40-to-45-minute delivery.",
+    Boolean(business.pickupWait) &&
+      Boolean(business.deliveryWait) &&
+      prompt.includes(`wait ${business.pickupWait}`) &&
+      prompt.includes(`wait ${business.deliveryWait}`),
+    "The phone prompt must use the current configured pickup and delivery timing.",
   );
   assert.ok(
     prompt.includes("never ask bone-in or boneless") &&
