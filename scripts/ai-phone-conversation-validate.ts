@@ -176,7 +176,7 @@ async function main() {
     ),
     readFile(new URL("../src/app/pos/pos-client.tsx", import.meta.url), "utf8"),
   ]);
-  const [mcpSource, internalPhoneSource, monitorSource] = await Promise.all([
+  const [mcpSource, internalPhoneSource, monitorSource, orderingToolSource] = await Promise.all([
     readFile(
       new URL("../src/app/api/openai/ordering/mcp/route.ts", import.meta.url),
       "utf8",
@@ -187,6 +187,10 @@ async function main() {
     ),
     readFile(
       new URL("../src/app/pos/deli/ai-calls/ai-call-monitor.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/lib/openai-phone-ordering.ts", import.meta.url),
       "utf8",
     ),
   ]);
@@ -377,11 +381,17 @@ async function main() {
     "Nacho Supreme and chicken-salad clarification rules must remain authoritative.",
   );
   assert.ok(
-    prompt.includes("Thanks for calling—see you then!") &&
+    prompt.includes("Your pickup should be ready in") &&
+      prompt.includes("and then call COMPLETE_CALL") &&
       prompt.includes(
         "hang up only after that complete closing audio finishes",
       ),
-    "The completed order must end with the deterministic hangup phrase.",
+    "An ASAP pickup must state its current wait and then complete deterministically.",
+  );
+  assert.ok(
+    !orderingToolSource.match(/enum: \["add", "replace_item", "remove_item", "replace_order"/) &&
+      mcpSource.includes("An active phone cart cannot be reset wholesale."),
+    "Voice providers must not be able to silently discard an active cart.",
   );
   const jumbo = await menuCatalog("Corner Deli", new Date(), "jumbo thin");
   assert.equal(

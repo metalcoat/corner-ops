@@ -76,6 +76,18 @@ export function ensureOrderingMenuOverrideSchema(): Promise<void> {
         updated_at=NOW(),
         updated_by='nacho-supreme-salsa-side'
     `;
+      await sql`
+      INSERT INTO ordering_menu_item_modifier_defaults(id,item_id,option_id,default_selected,included_quantity,active)
+      SELECT gen_random_uuid(),item.id,option.id,TRUE,1,TRUE
+      FROM ordering_menu_items item
+      JOIN ordering_menu_item_modifier_groups link ON link.item_id=item.id
+      JOIN ordering_modifier_groups groups ON groups.id=link.group_id
+      JOIN ordering_modifier_options option ON option.group_id=groups.id
+      WHERE item.business='Corner Deli' AND item.name='Nacho Supreme' AND item.active=TRUE
+        AND groups.name='Nacho Supreme Options' AND option.name='Side of Sour Cream'
+        AND groups.active=TRUE AND option.active=TRUE AND option.available=TRUE
+      ON CONFLICT(item_id,option_id) DO UPDATE SET default_selected=TRUE,included_quantity=1,active=TRUE,updated_at=NOW()
+    `;
       // The Rezku capture associates these source-ID groups with every meal item,
       // but does not encode its conditional display rules. Preserve the source
       // records and attach the recovered relationship only to items that contain

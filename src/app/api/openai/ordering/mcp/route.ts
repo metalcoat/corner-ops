@@ -325,7 +325,7 @@ const tools = [
         ...properties,
         operation: {
           type: "string",
-          enum: ["add", "replace_item", "remove_item", "replace_order", "read"],
+          enum: ["add", "replace_item", "remove_item", "read"],
         },
         targetItem: { type: "string" },
         serviceType: {
@@ -601,6 +601,17 @@ export async function POST(request: Request) {
             pendingApplied!.items,
           )
         : [];
+    if (
+      requestedName === "price_order" &&
+      requestedOperation === "replace_order" &&
+      call.order_id
+    )
+      throw new AiToolError(
+        "INVALID_INPUT",
+        "An active phone cart cannot be reset wholesale.",
+        "Use add, replace_item, or remove_item so existing requested items are preserved.",
+        409,
+      );
     const result =
       requestedName === "price_order"
         ? await priceSpokenOrder({

@@ -187,6 +187,35 @@ async function main() {
       "Remove jalapenos must resolve to the canonical No Jalapenos modifier.",
     );
 
+    const standardNacho = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      items: [
+        {
+          name: "Nacho Supreme",
+          quantity: 1,
+          modifiers: [
+            { name: "Salsa" },
+            { name: "Black Olives" },
+            { name: "Jalapenos" },
+          ],
+        },
+      ],
+    });
+    created.push(standardNacho.id);
+    const standardNachoModifiers = await sql`
+      SELECT modifier.option_name_snapshot
+      FROM ordering_order_item_modifiers modifier
+      JOIN ordering_order_items item ON item.id=modifier.order_item_id
+      WHERE item.order_id=${standardNacho.id}
+    `;
+    assert.deepEqual(
+      standardNachoModifiers.map((row) => String(row.option_name_snapshot)),
+      ["Side of Sour Cream"],
+      "Standard Nacho Supreme ingredients must not become ambiguous modifiers, and sour cream must remain the default side.",
+    );
+
     await assert.rejects(
       () =>
         priceSpokenOrder({

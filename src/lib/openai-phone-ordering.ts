@@ -43,8 +43,8 @@ export const OPENAI_PRICE_ORDER_TOOL = {
       },
       operation: {
         type: "string",
-        enum: ["add", "replace_item", "remove_item", "replace_order", "read"],
-        description: "Use add for new food, replace_item for a correction or modifier to an existing item, remove_item to delete/decrease one item, replace_order only for a full reset, and read when only updating payment/customer details.",
+        enum: ["add", "replace_item", "remove_item", "read"],
+        description: "Use add for new food, replace_item for a correction or modifier to an existing item, remove_item to delete/decrease one item, and read when only updating payment/customer details.",
       },
       targetItem: {
         type: "string",

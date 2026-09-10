@@ -1364,6 +1364,12 @@ export async function priceSpokenOrder(input: {
           /(?:sub|wrap)/i.test(String(variant?.name || requested.variant || "")) &&
           !/big boss/i.test(item.name) &&
           /\b(?:everything|all of it|all the toppings)\b/.test(mealIntentText);
+      if (item.name === "Nacho Supreme") {
+        const standardIngredients = /^(?:salsa|cheese|lettuce|tomato(?:es)?|onions?|black olives?|jalapenos?)$/;
+        for (let index = spokenModifiers.length - 1; index >= 0; index--)
+          if (standardIngredients.test(spokenKey(spokenModifiers[index].name)))
+            spokenModifiers.splice(index, 1);
+      }
       if (coldSubEverything) {
         for (let index = spokenModifiers.length - 1; index >= 0; index--)
           if (/^(?:everything|all|all of it|all the toppings)$/.test(spokenKey(spokenModifiers[index].name)))
