@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Isolated sandbox voice-card AGI. Never log recognized speech or request bodies."""
 import audioop
+import fcntl
 import json
 import os
 import select
@@ -43,7 +44,7 @@ def discard_prompt_echo():
     """Discard audio accumulated on EAGI fd 3 while a prompt was playing."""
     for delay in (0,0.2):
         if delay:time.sleep(delay)
-        pending=array("i",[0]);termios.ioctl(3,termios.FIONREAD,pending,True)
+        pending=array("i",[0]);fcntl.ioctl(3,termios.FIONREAD,pending,True)
         remaining=pending[0]
         while remaining>0:
             chunk=os.read(3,min(remaining,32000))

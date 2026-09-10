@@ -98,5 +98,6 @@ export async function chargeVoicePayment(input:{sessionId:string;cardNumber:stri
 
 export async function abandonVoicePayment(sessionId:string,code="recognition_failed"){
   await ensureVoicePaymentSchema();
-  await getSql()`UPDATE ordering_voice_payment_sessions SET status='failed',failure_code=${code.slice(0,80)},completed_at=NOW(),updated_at=NOW() WHERE id=${sessionId} AND status IN('awaiting_call','collecting')`;
+  const sql=getSql(),failed=(await sql`UPDATE ordering_voice_payment_sessions SET status='failed',failure_code=${code.slice(0,80)},completed_at=NOW(),updated_at=NOW() WHERE id=${sessionId} AND status IN('awaiting_call','collecting') RETURNING call_id`)[0];
+  if(failed?.call_id)await sql`UPDATE ordering_call_sessions SET state='ended',handoff_reason=${`Secure payment failed: ${code.slice(0,80)}`},owner_type='none',owner_id='',claimed_by='',claimed_at=NULL,ended_at=COALESCE(ended_at,NOW()),updated_at=NOW() WHERE business=${business} AND three_cx_call_id=${String(failed.call_id)} AND state='handoff_pending'`;
 }
