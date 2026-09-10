@@ -396,6 +396,7 @@ export default function EmployeeMessagesApp() {
     unreadMessageIds: incomingUnreadMessageIds,
     threadOpen: threadOpen || wideLayout,
     ready: Boolean(data && session),
+    viewportReady: Boolean(session),
     storageScope: session ? `employee:${session.business}:${session.employeeId}` : "employee:unknown",
     onUnreadVisible: reportVisibleMessagesSeen,
   });
@@ -526,7 +527,7 @@ export default function EmployeeMessagesApp() {
   const current = data?.employee;
   const currentDisplay = current?.chatNickname || firstName(session.name);
 
-  return <main ref={messageAppRef} className="messageApp employeeMessageApp">
+  return <main ref={messageAppRef} className="messageApp employeeMessageApp" data-message-business={session.business}>
     <header className="messageTopBar">
       <div className="messageTopTitle">
         <a className="messageTopIcon" href="/employee" aria-label="Back to Employee Hub">←</a>
@@ -614,7 +615,8 @@ export default function EmployeeMessagesApp() {
               <label aria-label="Take a photo">📷<input ref={cameraPhotoRef} name="cameraPhoto" type="file" accept="image/*" capture="environment" onChange={(event: ChangeEvent<HTMLInputElement>) => choosePhoto(event, "camera")} /></label>
               <label aria-label="Choose a photo">＋<input ref={libraryPhotoRef} name="photo" type="file" accept="image/*" onChange={(event: ChangeEvent<HTMLInputElement>) => choosePhoto(event, "library")} /></label>
             </div>
-            <textarea name="body" rows={2} placeholder="Send a message or paste an image" aria-label={`Message ${selectedConversation.label}`} onPaste={pastePhoto} />
+            <label className="messageComposerLabel" htmlFor="employee-message-body">Message {selectedConversation.label}</label>
+            <textarea id="employee-message-body" name="body" rows={2} placeholder="Type your message here…" aria-label={`Message ${selectedConversation.label}`} onPaste={pastePhoto} />
             <button type="submit" disabled={busy} aria-label="Send message">{busy ? "…" : "➤"}</button>
             {photoPreview && <div className="messageAttachmentPreview"><img src={photoPreview.url} alt="Selected attachment" /><span><strong>{photoPreview.name}</strong><small>{(photoPreview.size / 1024 / 1024).toFixed(1)} MB before resizing</small></span><button type="button" onClick={() => clearPhotoAttachment()} disabled={busy}>Remove</button></div>}
           </form>
