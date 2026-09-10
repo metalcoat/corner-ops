@@ -21,7 +21,10 @@ assert.match(dialplan,/corner-ops-voice-payment,\$\{AI_CALL_ID\},\$\{AI_CUSTOMER
 assert.match(agi,/"callId":call_id/);
 assert.match(lib,/call_id=\$\{callId\}/);
 assert.match(agi,/def hear_card_number\(\)/);
-assert.match(agi,/card=hear_digits\(4,19,"card-number"\)/);
+assert.match(agi,/card=hear_digits\(4,19,"card-number",accepted_lengths=\[4,15,16\]\)/);
+assert.match(agi,/accepted_lengths=\[4,15,16\]/);
+assert.match(agi,/def digit_search\(lengths\)/);
+assert.match(agi,/chunk=audioop\.mul\(chunk,2,min\(6\.0,max\(1\.0,1800\.0\/level\)\)\)/);
 assert.match(agi,/target=15 if card\.startswith\(\("34","37"\)\) else 16/);
 assert.match(agi,/while len\(card\)<target/);
 assert.match(agi,/hear_digits\(1,remaining,prompt_name\)/);

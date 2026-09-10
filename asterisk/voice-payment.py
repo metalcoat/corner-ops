@@ -92,15 +92,25 @@ def hear(search,max_seconds=14):
         # threshold. PocketSphinx's constrained grammar still does recognition;
         # this threshold controls only when silence ends the answer.
         if level>120: started=True;last_voice=time.monotonic()
+        # Normalize quiet narrow-band calls before recognition. Limit gain to
+        # avoid turning restaurant noise into speech or clipping loud callers.
+        if level>0:
+            chunk=audioop.mul(chunk,2,min(6.0,max(1.0,1800.0/level)))
         recognizer.process_raw(chunk,False,False)
         if started and time.monotonic()-last_voice>2.4: break
     recognizer.end_utt();hyp=recognizer.hyp()
     return hyp.hypstr.lower().split() if hyp else []
 
-def hear_digits(minimum,maximum,prompt_name,attempts=3):
-    sequence="(<digit>)+";grammar="<digit> = zero | oh | one | two | three | four | five | six | seven | eight | nine; public <input> = "+sequence
-    # PocketSphinx accepts one public rule, so use an inline alternation for streaming digit recognition.
-    search="(zero | oh | one | two | three | four | five | six | seven | eight | nine)+"
+def digit_search(lengths):
+    digit="(zero | oh | one | two | three | four | five | six | seven | eight | nine)"
+    return "("+" | ".join(" ".join([digit]*length) for length in lengths)+")"
+
+def hear_digits(minimum,maximum,prompt_name,attempts=3,accepted_lengths=None):
+    # Exact-length alternatives prevent PocketSphinx from inserting a fifth
+    # digit into a four-digit answer. The opening accepts either one group or a
+    # complete common card length so callers can still speak continuously.
+    lengths=accepted_lengths or list(range(minimum,maximum+1))
+    search=digit_search(lengths)
     for attempt in range(attempts):
         prompt(prompt_name);discard_prompt_echo();value="".join(WORDS[word] for word in hear(search) if word in WORDS)
         debug_recognition(f"{prompt_name}:{attempt+1}",value)
@@ -111,7 +121,7 @@ def hear_digits(minimum,maximum,prompt_name,attempts=3):
 def hear_card_number():
     # A caller may continue past the first four at their natural pace. If they
     # pause, retain everything already heard and collect only what remains.
-    card=hear_digits(4,19,"card-number")
+    card=hear_digits(4,19,"card-number",accepted_lengths=[4,15,16])
     if not card:return ""
     target=15 if card.startswith(("34","37")) else 16
     while len(card)<target:
