@@ -152,6 +152,9 @@ export const OPENAI_PRICE_ORDER_TOOL = {
         description:
           "Set after asking Lettuce, tomato, onions, or hot peppers for a cold sub.",
       },
+      steakStyleCondimentDecision: { type: "string", enum: ["selected", "declined"] },
+      steakStyleToppingsDecision: { type: "string", enum: ["selected", "declined"] },
+      steakStyleDoubleMeatDecision: { type: "string", enum: ["selected", "declined"] },
     },
     required: ["operation", "serviceType", "items"],
     additionalProperties: false,

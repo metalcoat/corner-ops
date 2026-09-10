@@ -216,6 +216,20 @@ async function main() {
       "Standard Nacho Supreme ingredients must not become ambiguous modifiers, and sour cream must remain the default side.",
     );
 
+    for (const name of ["Steak", "Chicken Fajita", "Hot Sausage"]) {
+      const sub = await priceSpokenOrder({
+        business: "Corner Deli",
+        actor,
+        service: "pickup",
+        items: [{ name, variant: "Full Sub", quantity: 1, modifiers: [{ name: "Mayo" }, { name: "Mushrooms" }] }],
+        resolvedPendingQuestions: ["steak_style_condiment", "steak_style_toppings", "steak_style_double_meat"],
+      });
+      created.push(sub.id);
+      const subModifiers = await sql`SELECT modifier.option_name_snapshot FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${sub.id}`;
+      assert.ok(subModifiers.some((row) => String(row.option_name_snapshot) === "American"), `${name} must retain standard American cheese without asking.`);
+      assert.ok(!subModifiers.some((row) => String(row.option_name_snapshot) === "Lettuce"), `${name} must not inherit ordinary cold-sub vegetables.`);
+    }
+
     await assert.rejects(
       () =>
         priceSpokenOrder({

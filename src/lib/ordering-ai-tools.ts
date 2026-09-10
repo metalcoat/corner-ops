@@ -1736,6 +1736,9 @@ export async function priceSpokenOrder(input: {
           burgerToppingChoices = choices.filter(
             ({ group }) => group.name === "Burger Toppings",
           ),
+          steakToppingChoices = ["Steak", "Chicken Fajita", "Hot Sausage"].includes(item.name)
+            ? choices.filter(({ group }) => group.name === "Stk Sub mod (3 for free)")
+            : [],
           portionedChoices = choices.filter(({ option }) =>
             /\(\s*\d+(?:\.\d+)?\s*oz\s*\)\s*$/i.test(option.name),
           ),
@@ -1747,6 +1750,12 @@ export async function priceSpokenOrder(input: {
               ),
             )
               ? requiredDressingChoices
+              : steakToppingChoices.some(({ option, group }) =>
+                    modifierAliases(option.name, group.name).some(
+                      (alias) => spokenKey(alias) === raw,
+                    ),
+                  )
+                ? steakToppingChoices
               : saladDressingChoices.some(({ option, group }) =>
                     modifierAliases(option.name, group.name).some(
                       (alias) => spokenKey(alias) === raw,
@@ -1879,7 +1888,8 @@ export async function priceSpokenOrder(input: {
         coldSub =
           Boolean(subMods) &&
           /(?:sub|wrap)/i.test(String(variant?.name || requested.variant || "")) &&
-          !/big boss/i.test(item.name),
+          !/big boss/i.test(item.name) &&
+          !["Steak", "Chicken Fajita", "Hot Sausage"].includes(item.name),
         selectedSubNames = new Set(
           (subMods?.options || [])
             .filter((option) =>
@@ -1937,6 +1947,15 @@ export async function priceSpokenOrder(input: {
             },
           },
         );
+      if (["Steak", "Chicken Fajita", "Hot Sausage"].includes(item.name)) {
+        const selected = new Set(spokenModifiers.map((modifier) => spokenKey(modifier.name)));
+        if (!input.resolvedPendingQuestions?.includes("steak_style_condiment") && !["mayonnaise", "mayo", "russian"].some((name) => selected.has(name)))
+          throw new AiToolError("FOLLOW_UP_REQUIRED", "Mayo or Russian?", "Ask exactly: Mayo or Russian?", 409, { pendingItem: { category: spokenKey(item.name), customerRequest: requested.name, actualMenuItemId: item.id, actualVariantId: variant?.id || null, pendingQuestion: "steak_style_condiment", missingRequiredFields: ["steak-style condiment"] } });
+        if (!input.resolvedPendingQuestions?.includes("steak_style_toppings") && !["mushrooms", "onions", "peppers"].some((name) => selected.has(name)))
+          throw new AiToolError("FOLLOW_UP_REQUIRED", "Mushrooms, onions, or peppers?", "Ask exactly: Mushrooms, onions, or peppers?", 409, { pendingItem: { category: spokenKey(item.name), customerRequest: requested.name, actualMenuItemId: item.id, actualVariantId: variant?.id || null, pendingQuestion: "steak_style_toppings", missingRequiredFields: ["steak-style toppings"] } });
+        if (!input.resolvedPendingQuestions?.includes("steak_style_double_meat") && !selected.has("double meat"))
+          throw new AiToolError("FOLLOW_UP_REQUIRED", "Do you want double meat?", "Ask exactly: Do you want double meat?", 409, { pendingItem: { category: spokenKey(item.name), customerRequest: requested.name, actualMenuItemId: item.id, actualVariantId: variant?.id || null, pendingQuestion: "steak_style_double_meat", missingRequiredFields: ["steak-style double meat"] } });
+      }
       if (
         item.name === "Pizza Logs" &&
         !item.modifiers.some((group) =>

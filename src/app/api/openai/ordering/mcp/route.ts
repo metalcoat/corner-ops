@@ -354,6 +354,9 @@ const tools = [
           type: "string",
           enum: ["selected", "declined"],
         },
+        steakStyleCondimentDecision: { type: "string", enum: ["selected", "declined"] },
+        steakStyleToppingsDecision: { type: "string", enum: ["selected", "declined"] },
+        steakStyleDoubleMeatDecision: { type: "string", enum: ["selected", "declined"] },
       },
       required: ["callId", "operation", "serviceType", "items"],
       additionalProperties: false,
@@ -446,6 +449,19 @@ export async function POST(request: Request) {
       ],
       isError: true,
     });
+  if (
+    requestedName === "price_order" &&
+    !args.customerId &&
+    !call.order_customer_id &&
+    !call.call_customer_id &&
+    call.caller_phone
+  ) {
+    const matches = await getSql()`SELECT DISTINCT customer.id FROM ordering_customer_phones phone JOIN ordering_customers customer ON customer.id=phone.customer_id WHERE customer.business='Corner Deli' AND customer.active=TRUE AND customer.merged_into_customer_id IS NULL AND right(phone.normalized_phone,10)=right(regexp_replace(${String(call.caller_phone)},'[^0-9]','','g'),10) LIMIT 2`;
+    if (matches.length === 1) {
+      args.customerId = String(matches[0].id);
+      await getSql()`UPDATE ordering_call_sessions SET customer_id=${String(matches[0].id)},updated_at=NOW() WHERE id=${call.id}`;
+    }
+  }
   if (
     ["hold", "get_draft", "send"].includes(requestedName) &&
     !args.orderId &&
@@ -565,6 +581,9 @@ export async function POST(request: Request) {
       resolvedQuestions.add("cold_sub_condiments");
     if (args.coldSubVegetablesDecision)
       resolvedQuestions.add("cold_sub_vegetables");
+    if (args.steakStyleCondimentDecision) resolvedQuestions.add("steak_style_condiment");
+    if (args.steakStyleToppingsDecision) resolvedQuestions.add("steak_style_toppings");
+    if (args.steakStyleDoubleMeatDecision) resolvedQuestions.add("steak_style_double_meat");
     if (requestedName === "price_order")
       await getSql()`UPDATE ordering_call_sessions SET deferred_required_fields=${JSON.stringify([...resolvedQuestions])}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
     const requestedOperation = ([

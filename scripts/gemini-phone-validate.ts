@@ -69,6 +69,7 @@ async function main() {
               activityHandling: "START_OF_ACTIVITY_INTERRUPTS",
             },
             inputAudioTranscription: {},
+            outputAudioTranscription: {},
             tools: [{ functionDeclarations: declarations }],
           },
         }),
@@ -124,6 +125,9 @@ async function main() {
   assert.match(bridge, /START_SENSITIVITY_LOW/);
   assert.match(bridge, /class SpeechOutput/);
   assert.match(bridge, /await playback\.wait_until_complete\(\)/);
+  assert.match(bridge, /outputAudioTranscription/);
+  assert.match(bridge, /pickup should be ready/);
+  assert.match(bridge, /await app_action\(call_id, "complete"\)/);
   assert.match(bridge, /audio\/pcm;rate=16000/);
   assert.match(bridge, /generation_complete_and_buffer_drained/);
   assert.match(bridge, /bufferUnderrun/);

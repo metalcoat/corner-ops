@@ -436,6 +436,7 @@ async def bridge(reader, writer, call_id):
     close_requested = asyncio.Event()
     output_state = None
     input_state = None
+    assistant_transcript = ""
     telemetry_tasks = set()
     event_sequence = 0
 
@@ -512,6 +513,7 @@ async def bridge(reader, writer, call_id):
                             "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
                         },
                         "inputAudioTranscription": {},
+                        "outputAudioTranscription": {},
                         "systemInstruction": {
                             "parts": [{"text": session["instructions"]}]
                         },
@@ -569,6 +571,7 @@ async def bridge(reader, writer, call_id):
         async def model_audio():
             nonlocal output_state, customer_transcript, user_turn_open
             nonlocal customer_turn_id
+            nonlocal assistant_transcript
             async for raw in gemini:
                 message = json.loads(raw)
                 server = message.get("serverContent", {})
@@ -587,6 +590,9 @@ async def bridge(reader, writer, call_id):
                         customer_turn_id += 1
                         await emit("userSpeechStart", playback.snapshot())
                     customer_transcript += str(transcription["text"])
+                output_transcription = server.get("outputTranscription", {})
+                if output_transcription.get("text"):
+                    assistant_transcript += str(output_transcription["text"])
                 for part in (
                     []
                     if interrupted
@@ -606,6 +612,13 @@ async def bridge(reader, writer, call_id):
                     await playback.generation_complete()
                 if server.get("turnComplete") is True:
                     await playback.generation_complete()
+                    closing = assistant_transcript.lower()
+                    assistant_transcript = ""
+                    if "pickup should be ready" in closing and ("thanks for calling" in closing or "see you then" in closing):
+                        await playback.wait_until_complete()
+                        value = await app_action(call_id, "complete")
+                        if value.get("closeBridge"):
+                            close_requested.set()
                 tool_call = message.get("toolCall", {})
                 responses = []
                 if tool_call.get("functionCalls") and user_turn_open:
