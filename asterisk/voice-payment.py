@@ -136,6 +136,22 @@ def hear_card_number(allow_full=True):
         card+=group
     return card if len(card)==target else ""
 
+def valid_luhn(value):
+    total=0;alternate=False
+    for character in reversed(value):
+        number=int(character)
+        if alternate:
+            number*=2
+            if number>9:number-=9
+        total+=number;alternate=not alternate
+    return total%10==0
+
+def hear_expiration():
+    for _ in range(3):
+        value=hear_digits(4,4,"expiration",attempts=1)
+        if len(value)==4 and 1<=int(value[:2])<=12:return value
+    return ""
+
 def confirmed(last4):
     prompt("confirm-ending");say_digits(last4);prompt("confirm-yes");discard_prompt_echo()
     words=hear("yes | correct | no | incorrect",7)
@@ -159,14 +175,18 @@ def main():
         for card_attempt in range(3):
             failure_stage="card_recognition_failed"
             card=hear_card_number(allow_full=card_attempt==0)
-            if not card:continue
+            if not card or not valid_luhn(card):
+                debug_recognition("card-validation","valid" if card and valid_luhn(card) else "invalid-luhn")
+                card=""
+                prompt("try-again")
+                continue
             failure_stage="card_confirmation_failed"
             if confirmed(card[-4:]):break
             card=""
             prompt("try-again")
         if not card:raise RuntimeError("recognition")
         failure_stage="expiration_recognition_failed"
-        expiry=hear_digits(4,4,"expiration")
+        expiry=hear_expiration()
         if not expiry: raise RuntimeError("recognition")
         failure_stage="security_code_recognition_failed"
         cvv=hear_digits(3,4,"security-code")

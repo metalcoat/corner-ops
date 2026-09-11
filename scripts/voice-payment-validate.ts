@@ -40,6 +40,11 @@ assert.match(agi,/def say_digits\(value\)/);
 assert.match(agi,/prompt\("confirm-ending"\);say_digits\(last4\)/);
 assert.match(agi,/for card_attempt in range\(3\)/);
 assert.match(agi,/hear_card_number\(allow_full=card_attempt==0\)/);
+assert.match(agi,/def valid_luhn\(value\)/);
+assert.match(agi,/not valid_luhn\(card\)/);
+assert.match(agi,/debug_recognition\("card-validation"/);
+assert.match(agi,/def hear_expiration\(\)/);
+assert.match(agi,/1<=int\(value\[:2\]\)<=12/);
 assert.match(agi,/debug_recognition\("card-confirmation"/);
 assert.match(agi,/code":failure_stage/);
 for(const stage of ["card_recognition_failed","card_confirmation_failed","expiration_recognition_failed","security_code_recognition_failed","billing_zip_recognition_failed","provider_payment_failed"])
