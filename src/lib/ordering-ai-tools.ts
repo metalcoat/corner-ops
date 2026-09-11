@@ -438,6 +438,18 @@ export const BUSINESS_ITEM_ALIASES: Record<string, string[]> = {
     "nachos and cheese",
   ],
   "pizza log": ["pizza roll", "pizza rolls", "pizza logs"],
+  "mac and cheese bite 6": [
+    "mac bites",
+    "mac and cheese bites",
+    "mac n cheese bites",
+    "macaroni and cheese bites",
+  ],
+  "deep fried cheese curd": [
+    "fried cheese curd",
+    "fried cheese curds",
+    "cheese curd",
+    "cheese curds",
+  ],
   ogdensburger: ["ogdens burger", "ogden burger", "ogdens"],
 };
 const itemAliases = BUSINESS_ITEM_ALIASES;
@@ -458,7 +470,14 @@ export function generatedItemAliases(name: string) {
   if (simple === "cheeseburger")
     aliases.push("burger with cheese", "regular cheeseburger");
   if (/mozzarella stick/.test(simple))
-    aliases.push("mozz sticks", "mozz stick", "cheese sticks", "cheese stick");
+    aliases.push(
+      "mozz sticks",
+      "mozz stick",
+      "mop sticks",
+      "mop stick",
+      "cheese sticks",
+      "cheese stick",
+    );
   if (/tater tot/.test(simple))
     aliases.push(simple.replace("tater ", ""), "tots", "tater tots");
   if (simple === "wing")
@@ -595,6 +614,8 @@ export const modifierAliases = (name: string, groupName = "") => {
     aliases.push("uncooked", "uncooked pizza", "not cooked", "take and bake");
   if (/sweet and sassy/.test(simple))
     aliases.push("sexy sweet", "sassy sweet", "sweet sassy");
+  if (/^light sauce$/.test(simple))
+    aliases.push("light red sauce", "light pizza sauce", "easy sauce");
   if (/^gravy$/.test(simple) && /mashed mod/.test(group))
     aliases.push(
       "gravy on mashed",
@@ -1101,16 +1122,17 @@ export async function priceSpokenOrder(input: {
           modifiers: [...(requested.modifiers || []), { name: "poutine" }],
         };
       }
-      const wingRequest =
-          spokenKey(requested.name).includes("wing") ||
+      const wingSpeech = `${spokenKey(requested.name)} ${spokenKey(requested.variant || "")}`
+          .replace(/\btwo dozen\b/g, "24")
+          .replace(/\b(?:a |one )?dozen\b/g, "12"),
+        wingRequest =
+          wingSpeech.includes("wing") ||
           (/\b(?:bone in|traditional|boneles)\b/.test(
-            spokenKey(requested.name),
+            wingSpeech,
           ) &&
-            /\b(10|12|15|20|24|25|30|40|50)\b/.test(spokenKey(requested.name))),
+            /\b(10|12|15|20|24|25|30|40|50)\b/.test(wingSpeech)),
         explicitWingCount =
-          /\b(10|12|15|20|24|25|30|40|50)\b/.test(
-            `${spokenKey(requested.name)} ${spokenKey(requested.variant || "")}`,
-          ) ||
+          /\b(10|12|15|20|24|25|30|40|50)\b/.test(wingSpeech) ||
           [10, 12, 15, 20, 24, 25, 30, 40, 50].includes(
             Number(requested.quantity),
           );
@@ -1246,8 +1268,7 @@ export async function priceSpokenOrder(input: {
           : undefined,
         wingCount =
           [
-            ...spokenName.matchAll(/\b(10|12|15|20|24|25|30|40|50)\b/g),
-            ...spokenVariant.matchAll(/\b(10|12|15|20|24|25|30|40|50)\b/g),
+            ...wingSpeech.matchAll(/\b(10|12|15|20|24|25|30|40|50)\b/g),
           ][0]?.[1] ||
           ((item.name === "Wings" || item.name === "Boneless Wings") &&
           Number.isInteger(requested.quantity) &&

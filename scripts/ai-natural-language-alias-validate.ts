@@ -760,6 +760,16 @@ async function main() {
       result = await price(phrase);
       assert.equal(result.lines[0].item_name_snapshot, "Mozzarella Sticks");
     }
+    result = await price("mop sticks");
+    assert.equal(result.lines[0].item_name_snapshot, "Mozzarella Sticks");
+    result = await price("mac bites");
+    assert.equal(result.lines[0].item_name_snapshot, "Mac & Cheese Bites (6)");
+    result = await price("fried cheese curds");
+    assert.equal(result.lines[0].item_name_snapshot, "Deep Fried Cheese Curd");
+    result = await price("a dozen mild wings");
+    assert.equal(result.lines[0].item_name_snapshot, "Wings");
+    assert.equal(result.lines[0].variant_name_snapshot, "12 Wings");
+    assert.ok(result.modifierNames.includes("Mild"));
     await expectError("tots", /Small or large/i);
 
     await expectError("poutine", /Small or large/i);
