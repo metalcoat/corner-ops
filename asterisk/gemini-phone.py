@@ -488,6 +488,34 @@ async def bridge(reader, writer, call_id):
     user_turn_open = False
     customer_turn_id = 0
     order_mutation_lock = asyncio.Lock()
+
+    async def save_transcript(speaker, text, turn_id):
+        value = " ".join(str(text or "").split()).strip()
+        if not value:
+            return
+        await app_action(
+            call_id,
+            "transcript",
+            speaker=speaker,
+            transcript=value,
+            turnId=turn_id,
+            eventKey=f"{call_id}:gemini:transcript:{speaker}:{turn_id}",
+        )
+
+    async def flush_customer_transcript():
+        nonlocal customer_transcript
+        value = customer_transcript
+        customer_transcript = ""
+        if value.strip():
+            await save_transcript("customer", value, customer_turn_id)
+
+    async def flush_assistant_transcript():
+        nonlocal assistant_transcript
+        value = assistant_transcript
+        assistant_transcript = ""
+        if value.strip():
+            await save_transcript("assistant", value, playback.turn_id)
+
     async with websockets.connect(url, max_size=None, ping_interval=20) as gemini:
         await gemini.send(
             json.dumps(
@@ -603,6 +631,7 @@ async def bridge(reader, writer, call_id):
                         if user_turn_open:
                             user_turn_open = False
                             await emit("userSpeechEnd", playback.snapshot())
+                            await flush_customer_transcript()
                         pcm24 = base64.b64decode(inline["data"])
                         pcm8, output_state = audioop.ratecv(
                             pcm24, 2, 1, 24000, 8000, output_state
@@ -613,7 +642,7 @@ async def bridge(reader, writer, call_id):
                 if server.get("turnComplete") is True:
                     await playback.generation_complete()
                     closing = assistant_transcript.lower()
-                    assistant_transcript = ""
+                    await flush_assistant_transcript()
                     if "pickup should be ready" in closing and ("thanks for calling" in closing or "see you then" in closing):
                         await playback.wait_until_complete()
                         value = await app_action(call_id, "complete")
@@ -755,7 +784,7 @@ async def bridge(reader, writer, call_id):
                     await gemini.send(
                         json.dumps({"toolResponse": {"functionResponses": responses}})
                     )
-                    customer_transcript = ""
+                    await flush_customer_transcript()
                 if close_requested.is_set():
                     # Release AudioSocket immediately so Asterisk can continue into
                     # payment/handoff without a silent Gemini cleanup delay.
@@ -779,6 +808,10 @@ async def bridge(reader, writer, call_id):
                     task.cancel()
             else:
                 await asyncio.gather(*telemetry_tasks, return_exceptions=True)
+        # Preserve a final partial utterance if the caller disconnects before
+        # Gemini emits another model turn or tool call.
+        await flush_customer_transcript()
+        await flush_assistant_transcript()
 
 
 async def handle(reader, writer):

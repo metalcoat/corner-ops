@@ -132,6 +132,10 @@ async function main() {
   assert.match(bridge, /await app_action\(call_id, "disconnect"\)/);
   assert.match(internalRoute, /action === "disconnect"/);
   assert.match(internalRoute, /AND state='ai'/i);
+  assert.match(internalRoute, /action === "transcript"/);
+  assert.match(internalRoute, /ordering_call_transcript_segments/);
+  assert.match(bridge, /await flush_customer_transcript\(\)/);
+  assert.match(bridge, /await flush_assistant_transcript\(\)/);
   assert.match(bridge, /audio\/pcm;rate=16000/);
   assert.match(bridge, /generation_complete_and_buffer_drained/);
   assert.match(bridge, /bufferUnderrun/);

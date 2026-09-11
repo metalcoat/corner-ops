@@ -123,6 +123,22 @@ export async function POST(request: Request) {
       await getSql()`INSERT INTO ordering_ai_call_events(id,business,call_id,event_key,event_type,role,label,detail,duration_ms) VALUES(${randomUUID()},'Corner Deli',${callId},${eventKey},${eventType},'system',${label},${detail},${body.durationMs == null ? null : Math.round(Math.max(0, Number(body.durationMs) || 0))}) ON CONFLICT(business,event_key) DO NOTHING`;
       return Response.json({ ok: true });
     }
+    if (action === "transcript") {
+      const speaker = String(body.speaker || "");
+      if (!["customer", "assistant"].includes(speaker))
+        return Response.json(
+          { error: "Invalid transcript speaker." },
+          { status: 400 },
+        );
+      const transcript = String(body.transcript || "").trim().slice(0, 5000);
+      if (!transcript) return Response.json({ ok: true, saved: false });
+      const turnId = Math.max(0, Math.trunc(Number(body.turnId) || 0));
+      const eventKey = String(
+        body.eventKey || `${callId}:gemini:transcript:${speaker}:${turnId}`,
+      ).slice(0, 240);
+      await getSql()`INSERT INTO ordering_call_transcript_segments(id,business,call_id,event_key,speaker,transcript,metadata) VALUES(${randomUUID()},'Corner Deli',${callId},${eventKey},${speaker},${transcript},${JSON.stringify({ provider: "gemini", turnId })}::jsonb) ON CONFLICT(business,event_key) DO NOTHING`;
+      return Response.json({ ok: true, saved: true });
+    }
     if (action === "handoff") {
       const reason = String(
         body.reason || "Customer requested an employee.",
