@@ -801,6 +801,13 @@ async def handle(reader, writer):
             except Exception:
                 pass
     finally:
+        if call_id:
+            try:
+                # This is a no-op after payment or human handoff. The backend
+                # ends only calls that are still owned by the AI.
+                await app_action(call_id, "disconnect")
+            except Exception:
+                pass
         writer.close()
         await writer.wait_closed()
 

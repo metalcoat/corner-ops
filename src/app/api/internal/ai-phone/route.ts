@@ -180,6 +180,10 @@ export async function POST(request: Request) {
       await getSql()`UPDATE ordering_call_sessions SET state='ended',bridge_action='complete',ended_at=NOW(),updated_at=NOW() WHERE id=${call.id}`;
       return Response.json({ closeBridge: true });
     }
+    if (action === "disconnect") {
+      const ended = await getSql()`UPDATE ordering_call_sessions SET state='ended',bridge_action='disconnected',handoff_reason=CASE WHEN handoff_reason='' THEN 'Caller disconnected.' ELSE handoff_reason END,owner_type='none',owner_id='',ended_at=COALESCE(ended_at,NOW()),updated_at=NOW() WHERE id=${call.id} AND state='ai' RETURNING id`;
+      return Response.json({ ok: true, ended: Boolean(ended[0]) });
+    }
     return Response.json({ error: "Unknown action." }, { status: 400 });
   } catch (error) {
     return Response.json(

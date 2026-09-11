@@ -97,6 +97,7 @@ async function main() {
   const dialplan = readFileSync("asterisk/extensions.conf.template", "utf8");
   const bridge = readFileSync("asterisk/gemini-phone.py", "utf8");
   const phonePrompt = readFileSync("src/lib/openai-phone-prompt.ts", "utf8");
+  const internalRoute = readFileSync("src/app/api/internal/ai-phone/route.ts", "utf8");
   const { callerFromSipHeaders } = await import(
     "../src/lib/openai-phone-ordering"
   );
@@ -128,6 +129,9 @@ async function main() {
   assert.match(bridge, /outputAudioTranscription/);
   assert.match(bridge, /pickup should be ready/);
   assert.match(bridge, /await app_action\(call_id, "complete"\)/);
+  assert.match(bridge, /await app_action\(call_id, "disconnect"\)/);
+  assert.match(internalRoute, /action === "disconnect"/);
+  assert.match(internalRoute, /AND state='ai'/i);
   assert.match(bridge, /audio\/pcm;rate=16000/);
   assert.match(bridge, /generation_complete_and_buffer_drained/);
   assert.match(bridge, /bufferUnderrun/);
