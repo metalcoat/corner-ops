@@ -43,6 +43,17 @@ RUN chmod 0755 /usr/local/bin/corner-ops-asterisk-entrypoint /usr/local/bin/corn
       sox "/tmp/${name}.wav" -r 8000 -c 1 -e signed-integer -b 16 "/usr/share/asterisk/sounds/en/voice-payment/${name}.wav"; \
       rm "/tmp/${name}.wav"; \
     done \
+    && for spec in \
+      'dtmf-card-number:Please enter your full card number using the telephone keypad, then press pound.' \
+      'dtmf-expiration:Enter the two digit expiration month followed by the two digit year.' \
+      'dtmf-security-code:Enter the three or four digit security code, then press pound.' \
+      'dtmf-billing-zip:Enter the five digit billing zip code.' \
+      'dtmf-confirm:Press 1 if that is correct, or press 2 to try again.'; do \
+      name="${spec%%:*}"; text="${spec#*:}"; \
+      espeak-ng -s 145 -w "/tmp/${name}.wav" "${text}"; \
+      sox "/tmp/${name}.wav" -r 8000 -c 1 -e signed-integer -b 16 "/usr/share/asterisk/sounds/en/voice-payment/${name}.wav"; \
+      rm "/tmp/${name}.wav"; \
+    done \
     && for source in /opt/corner-ops-asterisk/voice-payment-prompts/*.wav; do \
       name="${source##*/}"; \
       sox "${source}" -r 8000 -c 1 -e signed-integer -b 16 "/usr/share/asterisk/sounds/en/voice-payment/${name}"; \
