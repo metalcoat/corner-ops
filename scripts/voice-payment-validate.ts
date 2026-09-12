@@ -5,6 +5,8 @@ const root=process.cwd(),lib=readFileSync(`${root}/src/lib/ordering-voice-paymen
 
 assert.match(lib,/MX_ENVIRONMENT.*production/);
 assert.match(mx,/Voice-card testing is locked to the MX sandbox/);
+assert.match(mx,/randomInt\(1,2_147_483_647\)/);
+assert.doesNotMatch(mx,/Date\.now\(\).*Math\.random/);
 assert.match(route,/x-voice-payment-secret/);
 assert.match(proxy,/\/api\/internal\/voice-payment/);
 assert.doesNotMatch(lib,/card_number\s+TEXT|cvv\s+TEXT|expiry_month\s+TEXT/i);
