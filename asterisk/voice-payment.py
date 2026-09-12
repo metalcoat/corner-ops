@@ -130,8 +130,12 @@ def hear_card_number(allow_full=True):
     target=15 if card.startswith(("34","37")) else 16
     while len(card)<target:
         remaining=target-len(card)
-        prompt_name="last-five" if remaining==5 else "last-four" if remaining<=4 else "next-six" if remaining==6 else "next-four"
-        group=hear_digits(1,remaining,prompt_name)
+        # Never accept a partial group. A short recognition used to shift every
+        # following group and could accidentally form a different Luhn-valid
+        # number before the caller rejected the read-back.
+        group_size=6 if remaining==11 else 5 if remaining==5 else min(4,remaining)
+        prompt_name="next-six" if group_size==6 else "last-five" if group_size==5 else "last-four" if remaining<=4 else "next-four"
+        group=hear_digits(group_size,group_size,prompt_name,accepted_lengths=[group_size])
         if not group:return ""
         card+=group
     return card if len(card)==target else ""
@@ -202,7 +206,11 @@ def main():
     except Exception:
         if session:
             try: api({"action":"abandon","sessionId":session["sessionId"],"code":failure_stage})
-            except Exception: pass
+            except Exception as cleanup_error:
+                # Never include exception text: an upstream library could place
+                # request data in it. The type is enough to diagnose cleanup.
+                sys.stderr.write(f"VOICE_PAYMENT_CLEANUP_ERROR type={type(cleanup_error).__name__}\n")
+                sys.stderr.flush()
         prompt("employee-help");agi("SET VARIABLE VOICE_PAYMENT_RESULT failed")
 
 if __name__=="__main__": main()

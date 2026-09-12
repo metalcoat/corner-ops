@@ -626,6 +626,50 @@ async function main() {
       "Reconstructed mashed-and-gravy meals must not poison later cart additions.",
     );
 
+    const wingBase = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      items: [{
+        name: "Wings",
+        variant: "10 Wings",
+        quantity: 1,
+        modifiers: [{ name: "Mild" }],
+      }],
+    });
+    created.push(wingBase.id);
+    const wingWithAddons = await incrementalSpokenCart(
+      wingBase.id,
+      "replace_item",
+      "Wings",
+      [{
+        name: "Wings",
+        variant: "10 Wings",
+        quantity: 1,
+        modifiers: [{ name: "Blue Cheese" }, { name: "Celery" }],
+      }],
+    );
+    assert.ok(wingWithAddons[0].modifiers?.some((modifier) => modifier.name === "Mild"));
+    const repricedWingAddons = await priceSpokenOrder({
+      business: "Corner Deli",
+      actor,
+      service: "pickup",
+      orderId: wingBase.id,
+      items: wingWithAddons,
+    });
+    const wingAddonRows = await sql`
+      SELECT modifier.option_name_snapshot
+      FROM ordering_order_item_modifiers modifier
+      JOIN ordering_order_items item ON item.id=modifier.order_item_id
+      WHERE item.order_id=${repricedWingAddons.id}
+    `;
+    const wingAddonNames = wingAddonRows.map((row) =>
+      String(row.option_name_snapshot),
+    );
+    assert.ok(wingAddonNames.includes("Mild"));
+    assert.ok(wingAddonNames.some((name: string) => /Blue Cheese/i.test(name)));
+    assert.ok(wingAddonNames.some((name: string) => /Celery/i.test(name)));
+
     for (const provider of ["openai", "gemini"]) {
       const initial = await priceSpokenOrder({
         business: "Corner Deli",

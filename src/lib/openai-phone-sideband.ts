@@ -265,6 +265,38 @@ export async function incrementalSpokenCart(
   const current = await spokenCart(orderId);
   if (operation === "read") return current;
   const target = cartKey(targetItem || changed[0]?.name || "");
+  if (changed.length === 1 && (operation === "add" || operation === "replace_item")) {
+    const incoming = changed[0],
+      wingFlavor = /^(plain|mild|medium|hot|bbq|barbecue|garlic parmesan|honey mustard|cajun|sweet and sassy)$/i,
+      incomingHasFlavor = (incoming.modifiers || []).some((modifier) =>
+        wingFlavor.test(modifier.name.trim()),
+      ),
+      existingIndex = current.findLastIndex(
+        (item) =>
+          /wings?$/i.test(item.name.trim()) &&
+          cartKey(item.name) === cartKey(incoming.name) &&
+          cartKey(item.variant || "") === cartKey(incoming.variant || "") &&
+          (item.modifiers || []).some((modifier) =>
+            wingFlavor.test(modifier.name.trim()),
+          ),
+      );
+    // Gemini commonly sends only newly requested wing add-ons on the follow-up
+    // turn. Preserve the already selected required flavor instead of replacing
+    // it and producing INVALID_MODIFIER: Wing Sauce.
+    if (!incomingHasFlavor && existingIndex >= 0) {
+      const existing = current[existingIndex], seen = new Set<string>();
+      const modifiers = [...(existing.modifiers || []), ...(incoming.modifiers || [])]
+        .filter((modifier) => {
+          const key = modifierKey(modifier.name);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      return current.map((item, index) =>
+        index === existingIndex ? { ...existing, ...incoming, modifiers } : item,
+      );
+    }
+  }
   if (operation === "add") {
     if (changed.length === 1) {
       const incoming = changed[0],
