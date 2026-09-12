@@ -81,7 +81,8 @@ export async function chargeVoicePayment(input:{sessionId:string;cardNumber:stri
   const sql=getSql(),session=(await sql`UPDATE ordering_voice_payment_sessions SET attempt_count=attempt_count+1,updated_at=NOW() WHERE id=${input.sessionId} AND business=${business} AND status='collecting' AND expires_at>NOW() RETURNING *`)[0];
   if(!session)throw new VoicePaymentError("The sandbox payment session is unavailable or expired.");
   try{
-    const data=await submitMxVoicePayment({amountCents:Number(session.amount_cents),replayId:Number(session.replay_id),cardNumber:card,expiryMonth:month,expiryYear:year.length===2?`20${year}`:year,cvv,avsZip:zip});
+    const delivery=(await sql`SELECT line1 FROM ordering_order_delivery_addresses WHERE order_id=${session.order_id} LIMIT 1`)[0];
+    const data=await submitMxVoicePayment({amountCents:Number(session.amount_cents),replayId:Number(session.replay_id),cardNumber:card,expiryMonth:month,expiryYear:year.length===2?`20${year}`:year,cvv,avsZip:zip,avsStreet:String(delivery?.line1||"828 Morris St")});
     const account=data.cardAccount&&typeof data.cardAccount==="object"?data.cardAccount as Record<string,unknown>:{};
     const reference=String(data.id||data.reference||"");
     if(!reference)throw new MxMerchantError("MX did not return a transaction reference.");
@@ -98,6 +99,6 @@ export async function chargeVoicePayment(input:{sessionId:string;cardNumber:stri
 
 export async function abandonVoicePayment(sessionId:string,code="recognition_failed"){
   await ensureVoicePaymentSchema();
-  const sql=getSql(),failed=(await sql`UPDATE ordering_voice_payment_sessions SET status='failed',failure_code=${code.slice(0,80)},completed_at=NOW(),updated_at=NOW() WHERE id=${sessionId} AND status IN('awaiting_call','collecting') RETURNING call_id`)[0];
+  const sql=getSql(),failed=(await sql`UPDATE ordering_voice_payment_sessions SET status='failed',failure_code=CASE WHEN failure_code<>'' THEN failure_code ELSE ${code.slice(0,80)} END,completed_at=NOW(),updated_at=NOW() WHERE id=${sessionId} AND status IN('awaiting_call','collecting') RETURNING call_id`)[0];
   if(failed?.call_id)await sql`UPDATE ordering_call_sessions SET state='ended',handoff_reason=${`Secure payment failed: ${code.slice(0,80)}`},owner_type='none',owner_id='',claimed_by='',claimed_at=NULL,ended_at=COALESCE(ended_at,NOW()),updated_at=NOW() WHERE business=${business} AND three_cx_call_id=${String(failed.call_id)} AND state='handoff_pending'`;
 }

@@ -40,7 +40,14 @@ def say_digits(value):
 
 def keypad(prompt_name,timeout_ms,max_digits):
     """Collect keypad digits without logging or exposing the returned value."""
-    response=agi(f'GET DATA voice-payment/{prompt_name} {timeout_ms} {max_digits}')
+    # EAGI continues writing inbound media to fd 3 while GET DATA listens for
+    # DTMF. Drain that unused audio or its pipe fills and Asterisk can no longer
+    # play the prompt or reliably wait for digits.
+    stop=threading.Event();worker=threading.Thread(target=_drain_audio,args=(stop,),daemon=True)
+    worker.start()
+    try:response=agi(f'GET DATA voice-payment/{prompt_name} {timeout_ms} {max_digits}')
+    finally:
+        stop.set();worker.join(timeout=0.25)
     match=re.search(r'result=([0-9]*)',response)
     return match.group(1) if match else ""
 

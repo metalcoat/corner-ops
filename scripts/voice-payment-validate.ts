@@ -19,6 +19,7 @@ assert.match(agi,/"callId":call_id/);
 assert.match(lib,/call_id=\$\{callId\}/);
 assert.match(agi,/def enter_card_number\(\)/);
 assert.match(agi,/GET DATA voice-payment\/\{prompt_name\}/);
+assert.match(agi,/threading\.Thread\(target=_drain_audio,args=\(stop,\),daemon=True\)/);
 assert.match(agi,/len\(value\) in \(15,16\)/);
 assert.match(agi,/def _drain_audio\(stop\)/);
 assert.match(agi,/threading\.Thread\(target=_drain_audio/);
@@ -39,6 +40,9 @@ for(const stage of ["card_recognition_failed","card_confirmation_failed","expira
   assert.match(agi,new RegExp(stage));
 assert.match(lib,/Secure payment failed:/);
 assert.match(lib,/state='ended'/);
+assert.match(mx,/avsStreet:input\.avsStreet/);
+assert.match(lib,/delivery\?\.line1\|\|"828 Morris St"/);
+assert.match(lib,/CASE WHEN failure_code<>'' THEN failure_code ELSE/);
 assert.doesNotMatch(agi,/prompt\("welcome"\)/);
 assert.match(dialplan,/AI_CUSTOMER_PHONE/);
 assert.equal((dialplan.match(/Set\(AGISIGHUP=no\)/g) || []).length,2);
