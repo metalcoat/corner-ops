@@ -10,10 +10,10 @@ export const PIZZA_SIZES: Record<PizzaSize, { label: string; inches: number; sau
 };
 
 export const TOPPINGS: Record<Topping, { label: string; color: string; target: number }> = {
-  pepperoni: { label: "Pepperoni", color: "#9e2f27", target: 24 }, sausage: { label: "Sausage", color: "#70452f", target: 18 },
-  mushrooms: { label: "Mushrooms", color: "#d8c7a7", target: 16 }, onions: { label: "Onions", color: "#eee4cf", target: 15 },
-  peppers: { label: "Green Peppers", color: "#4f8d45", target: 15 }, olives: { label: "Black Olives", color: "#292929", target: 15 },
-  "hot-peppers": { label: "Hot Peppers", color: "#b9b83b", target: 14 }, "extra-cheese": { label: "Extra Cheese", color: "#f5d56b", target: 18 },
+  pepperoni: { label: "Pepperoni", color: "#9e2f27", target: 16 }, sausage: { label: "Sausage", color: "#70452f", target: 12 },
+  mushrooms: { label: "Mushrooms", color: "#d8c7a7", target: 11 }, onions: { label: "Onions", color: "#eee4cf", target: 10 },
+  peppers: { label: "Green Peppers", color: "#4f8d45", target: 10 }, olives: { label: "Black Olives", color: "#292929", target: 10 },
+  "hot-peppers": { label: "Hot Peppers", color: "#b9b83b", target: 10 }, "extra-cheese": { label: "Extra Cheese", color: "#f5d56b", target: 12 },
 };
 
 export const STAGES: StageConfig[] = [

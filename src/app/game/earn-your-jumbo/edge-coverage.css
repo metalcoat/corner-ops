@@ -1,0 +1,5 @@
+.arcade-pizza .coverage{inset:2.5%}
+.arcade-pizza .mark:not(.sauce):not(.cheese){width:10%}
+.arcade-pizza .mark.onions,.arcade-pizza .mark.olives{border-width:4px}
+.arcade-pizza .mark.hot-peppers{width:13%;height:4%}
+.arcade-pizza .mark.extra-cheese{width:13%;height:3%}
