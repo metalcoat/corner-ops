@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
+  DELIVERY_CAR_CRASHES,
   DELIVERY_COMPLAINTS,
   DELIVERY_FAILURES,
   DELIVERY_PRIZE,
@@ -424,7 +425,9 @@ export default function DeliveryGame() {
             }
             if (n.type === "car") {
               setFailure(
-                "You hit a car. The other driver had no plates, no insurance, and somehow already knew your manager. Route over.",
+                DELIVERY_CAR_CRASHES[
+                  Math.floor(Math.random() * DELIVERY_CAR_CRASHES.length)
+                ],
               );
               setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
               setMode("lost");
@@ -497,7 +500,9 @@ export default function DeliveryGame() {
               ) {
                 setFailure(
                   n.kind === "abandoned"
-                  ? "You hit a parked Pontiac that has not moved since the 1998 ice storm. Ogdensburg finally found a use for it: ending your shift."
+                    ? DELIVERY_CAR_CRASHES[
+                        Math.floor(Math.random() * DELIVERY_CAR_CRASHES.length)
+                      ]
                     : "You drove into an occupied tent. Ogdensburg located the incident paperwork faster than it has located a solution to literally anything else.",
                 );
                 setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
