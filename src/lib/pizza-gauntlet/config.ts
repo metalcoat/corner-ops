@@ -17,12 +17,12 @@ export const TOPPINGS: Record<Topping, { label: string; color: string; target: n
 };
 
 export const STAGES: StageConfig[] = [
-  { id: 1, name: "Training Shift", subtitle: "The scale still tells the truth.", ordersRequired: 8, concurrentTickets: 1, guidance: "full", ticketSeconds: 150, eventChance: .08 },
-  { id: 2, name: "Dinner Rush", subtitle: "Two hands. Four pizzas. Good luck.", ordersRequired: 14, concurrentTickets: 3, guidance: "partial", ticketSeconds: 125, eventChance: .14 },
-  { id: 3, name: "Friday Night", subtitle: "The phone has discovered free will.", ordersRequired: 20, concurrentTickets: 5, guidance: "partial", ticketSeconds: 105, eventChance: .2 },
-  { id: 4, name: "Football Sunday", subtitle: "Nobody planned ahead. This is your fault.", ordersRequired: 24, concurrentTickets: 6, guidance: "none", ticketSeconds: 90, eventChance: .25, boss: "Little League Team" },
-  { id: 5, name: "Full Collapse", subtitle: "Printer offline. Spirit also offline.", ordersRequired: 28, concurrentTickets: 6, guidance: "none", ticketSeconds: 78, eventChance: .32, boss: "Sunday Football" },
-  { id: 6, name: "Final Rush", subtitle: "7:52 PM. The phone rings.", ordersRequired: 34, concurrentTickets: 7, guidance: "none", ticketSeconds: 68, eventChance: .38, boss: "The Fourteen-Pizza Farewell" },
+  { id: 1, name: "Training Shift", subtitle: "The scale still tells the truth.", ordersRequired: 8, concurrentTickets: 1, guidance: "full", ticketSeconds: 70, eventChance: .12 },
+  { id: 2, name: "Dinner Rush", subtitle: "Two hands. Four pizzas. Good luck.", ordersRequired: 14, concurrentTickets: 3, guidance: "partial", ticketSeconds: 58, eventChance: .2 },
+  { id: 3, name: "Friday Night", subtitle: "The phone has discovered free will.", ordersRequired: 20, concurrentTickets: 5, guidance: "partial", ticketSeconds: 50, eventChance: .28 },
+  { id: 4, name: "Football Sunday", subtitle: "Nobody planned ahead. This is your fault.", ordersRequired: 24, concurrentTickets: 6, guidance: "none", ticketSeconds: 44, eventChance: .36, boss: "Little League Team" },
+  { id: 5, name: "Full Collapse", subtitle: "Printer offline. Spirit also offline.", ordersRequired: 28, concurrentTickets: 6, guidance: "none", ticketSeconds: 38, eventChance: .44, boss: "Sunday Football" },
+  { id: 6, name: "Final Rush", subtitle: "7:52 PM. The phone rings.", ordersRequired: 34, concurrentTickets: 7, guidance: "none", ticketSeconds: 34, eventChance: .52, boss: "The Fourteen-Pizza Farewell" },
 ];
 
 const rawEvents: Array<[string,string,number,number,Partial<GauntletEvent["effects"]>]> = [
@@ -71,6 +71,21 @@ const rawEvents: Array<[string,string,number,number,Partial<GauntletEvent["effec
  ["Perfect Timing","Three orders arrive exactly when their food is boxed.",2,2,{reputation:4,tips:5,sanity:5}],
  ["Receipt Roll","The replacement roll is the wrong width, despite living in the right box.",3,3,{sanity:-4}],
  ["Extra Crispy","A customer asks for wings ‘crispy but not dry, wet but not soggy.’",4,3,{sanity:-5}],
+ ["DoorDash Oracle","The driver says the app told him the pizza would be ready before it was ordered.",2,4,{sanity:-4}],
+ ["Structural Ranch Failure","Customer says the ranch cup felt emotionally underfilled.",2,3,{sanity:-4,reputation:-1}],
+ ["Crust Lawsuit","They did not eat the crust and would now like a refund for the unused perimeter.",2,3,{profit:-4,sanity:-5}],
+ ["Invisible Pepperoni","Customer removed every pepperoni, photographed the cheese underneath, and has evidence.",3,3,{reputation:-3,sanity:-7,unfairComplaints:1}],
+ ["Temperature Research","Customer drove around for 48 minutes and discovered the pizza is no longer oven temperature.",2,4,{sanity:-5,complaints:1}],
+ ["Cheese Orientation","The cheese slid to one side when they held the box vertically. This is a kitchen issue.",3,3,{sanity:-7,reputation:-2}],
+ ["The Old Price","They remember this pizza costing six dollars. Follow-up questions reveal this was 1989.",2,3,{sanity:-4}],
+ ["Parking Lot Summoning","Curbside customer refuses to describe their vehicle because ‘you should see me.’",3,4,{sanity:-5}],
+ ["One Star Physics","Review: ‘Pizza was hot. Had to wait for it to cool. One star.’",3,3,{reputation:-4,sanity:-6,unfairComplaints:1}],
+ ["Garlic Emergency","They asked for no garlic after eating the entire garlic pizza.",3,3,{profit:-10,sanity:-6,complaints:1}],
+ ["Owner's Cousin's Dentist","A powerful new relationship has been invoked. The discount remains fictional.",4,3,{sanity:-6}],
+ ["Closing-Time Mathematics","At 7:59, a customer explains that fourteen pizzas is technically one order.",4,4,{sanity:-9}],
+ ["Box Too Square","The pizza is round. The box is square. Customer suspects cost cutting.",3,3,{sanity:-5,unfairComplaints:1}],
+ ["Slice Disagreement","Eight slices is apparently less food than six larger slices.",2,4,{sanity:-4}],
+ ["Sauce Witness","Customer can tell by looking that the sauce was applied counterclockwise.",4,2,{sanity:-8,unfairComplaints:1}],
 ];
 
 export const EVENTS: GauntletEvent[] = rawEvents.map((e,i)=>({id:`event-${i+1}`,title:e[0],message:e[1],minStage:e[2],weight:e[3],cooldown:3,effects:e[4]}));
