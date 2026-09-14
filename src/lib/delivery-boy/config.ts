@@ -32,4 +32,5 @@ export const DELIVERY_COMPLAINTS=[
  "Customer says the sub is too long for lunch but somehow not long enough for dinner.",
  "Customer's dog ate the order before the door closed. They would like to know what we plan to do about our accomplice.",
  "Customer says you delivered to the correct address suspiciously, as if you had been there before.",
+ "Customer says delivery was too fast: there is no way this was made today. They believe it was cryogenically frozen at peak perfection last week and thawed to order. They ate 75% while investigating and now demand a full refund.",
 ] as const;
