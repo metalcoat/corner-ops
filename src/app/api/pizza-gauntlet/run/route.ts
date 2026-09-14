@@ -1,0 +1,4 @@
+import { checkpointRun, completeRun, startRun } from "@/lib/pizza-gauntlet/server";
+import type { RunCheckpoint } from "@/lib/pizza-gauntlet/types";
+export const runtime="nodejs";
+export async function POST(request:Request){try{const body=await request.json() as Record<string,unknown>,action=String(body.action||"start");if(action==="start")return Response.json(await startRun(String(body.playerName||"")),{status:201});const token=String(body.token||"");if(action==="checkpoint")return Response.json(await checkpointRun(body.checkpoint as RunCheckpoint,token));if(action==="complete")return Response.json(await completeRun(String(body.runId||""),token));return Response.json({error:"Unknown action."},{status:400})}catch(error){return Response.json({error:error instanceof Error?error.message:"Run update failed."},{status:409})}}

@@ -14,6 +14,7 @@ const selfAuthorizedApiPaths = [
   "/api/cron", "/api/customer", "/api/driver",
   "/api/ordering/store-dashboard", "/api/mobile/android/version",
   "/api/ordering/customer-display",
+  "/api/pizza-gauntlet/run", "/api/pizza-gauntlet/leaderboard",
   "/api/internal/voice-payment", "/api/internal/ai-phone",
 ];
 

@@ -1,8 +1,8 @@
 # Roadmap: Earn Your Jumbo / The Corner Deli Pizza Gauntlet
 
-Status: **Planning only — do not implement or deploy until explicitly approved.**
+Status: **Initial approved scope is in active development. New ideas remain roadmap-only unless explicitly approved for implementation.**
 
-This document is the running backlog for a difficult but beatable Corner Deli browser game. Continue adding ideas here until the owner explicitly says to build it.
+This document is the running backlog for a difficult but beatable Corner Deli browser game. The original complete-game request is authorized for implementation. Ideas added afterward should be recorded here without interrupting or expanding the current build unless the owner explicitly says to add them now.
 
 ## Product goal
 
