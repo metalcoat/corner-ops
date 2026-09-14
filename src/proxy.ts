@@ -132,7 +132,7 @@ function securedResponse(request: NextRequest): NextResponse {
 export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const insecureForward = request.headers.get("x-forwarded-proto") === "http" || request.headers.get("cf-visitor")?.includes('"scheme":"http"');
-  if (insecureForward && !request.nextUrl.hostname.match(/^(localhost|127\.|192\.168\.)/)) {
+  if (path !== "/api/health" && insecureForward && !request.nextUrl.hostname.match(/^(localhost|127\.|192\.168\.)/)) {
     const secure = request.nextUrl.clone();
     secure.protocol = "https:";
     return NextResponse.redirect(secure, 308);

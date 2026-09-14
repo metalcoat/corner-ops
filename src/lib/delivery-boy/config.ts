@@ -34,3 +34,15 @@ export const DELIVERY_COMPLAINTS=[
  "Customer says you delivered to the correct address suspiciously, as if you had been there before.",
  "Customer says delivery was too fast: there is no way this was made today. They believe it was cryogenically frozen at peak perfection last week and thawed to order. They ate 75% while investigating and now demand a full refund.",
 ] as const;
+export const DELIVERY_FAILURES=[
+ "The neighborhood cat had nine lives. It has three left since you started driving. The cat's attorney is requesting your insurance information.",
+ "Animal control asks whether you can stop hitting wildlife. This is a delivery route, not an extremely confused buffet.",
+ "You hit so many squirrels that they have unionized and established a roadblock. Their demands include acorns and your immediate resignation.",
+ "The deer was standing in the road illegally. Unfortunately, the deer has witnesses and you do not.",
+ "You ran out of time while parked directly in front of the correct house. The customer watched the timer expire through the blinds.",
+ "The delivery car is fine. The mailbox, decorative goose, recycling bin, and neighborhood association are less fine.",
+ "Your route has been canceled after the GPS filed a hostile-work-environment complaint.",
+ "Dispatch has reviewed the footage and would like to know why you attempted to pass a squirrel on the inside lane.",
+ "The car is now shaped like a sub and the sub is shaped like an insurance claim.",
+ "You have been removed from the route after describing three separate collisions as 'roadside customer engagement.'",
+] as const;
