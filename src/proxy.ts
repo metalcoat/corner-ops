@@ -131,10 +131,17 @@ function securedResponse(request: NextRequest): NextResponse {
 
 export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
+  const insecureForward = request.headers.get("x-forwarded-proto") === "http" || request.headers.get("cf-visitor")?.includes('"scheme":"http"');
+  if (insecureForward && !request.nextUrl.hostname.match(/^(localhost|127\.|192\.168\.)/)) {
+    const secure = request.nextUrl.clone();
+    secure.protocol = "https:";
+    return NextResponse.redirect(secure, 308);
+  }
   if (removedVendorPaths.some((prefix) => matchesPath(path, prefix))) {
     return new NextResponse("Not Found", { status: 404 });
   }
   const response = securedResponse(request);
+  response.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   if (response.status === 421) return response;
 
   const posAccessRoute = matchesPath(path, "/api/pos/access") || path === "/pos/access";
