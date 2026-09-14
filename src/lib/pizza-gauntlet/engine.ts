@@ -12,7 +12,7 @@ export function scorePizza(build:PizzaBuild,ticket:PizzaTicket){
  const correct=[...requested].filter(x=>supplied.has(x)).length, extras=[...supplied].filter(x=>!requested.has(x)).length;
  const topping=requested.size?clamp((correct/requested.size)*100-extras*30):supplied.size?0:100;
  const distribution=requested.size?[...requested].reduce((n,t)=>n+(build.toppings[t]?.spread||0),0)/requested.size:100;
- const targetBake=recipe.bake+(ticket.wellDone?3:0), bake=closeness(build.bakeSeconds,targetBake,8), cut=build.slices===ticket.slices?100:Math.max(0,100-Math.abs((build.slices||0)-ticket.slices)*20);
+ const targetBake=recipe.bake+(ticket.wellDone?2:0), bake=closeness(build.bakeSeconds,targetBake,3), cut=build.slices===ticket.slices?100:Math.max(0,100-Math.abs((build.slices||0)-ticket.slices)*20);
  const accuracy=Math.round(selected*.15+dough*.1+sauce*.15+cheese*.15+topping*.18+distribution*.1+bake*.12+cut*.05);
  return {accuracy,perfect:accuracy>=96,parts:{size:selected,dough:Math.round(dough),sauce:Math.round(sauce),cheese:Math.round(cheese),toppings:Math.round(topping),distribution:Math.round(distribution),bake:Math.round(bake),cut:Math.round(cut)}};
 }

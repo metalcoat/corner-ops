@@ -4,9 +4,9 @@ export const GAME_TITLE = "The Corner Deli Pizza Gauntlet";
 export const PRIZE = { name: "One Free Jumbo Cheese Pizza", toppings: "Additional toppings regular price", expiresDays: 30 };
 
 export const PIZZA_SIZES: Record<PizzaSize, { label: string; inches: number; sauce: number; cheese: number; bake: number; price: number; slices: number }> = {
-  small: { label: "Small", inches: 12, sauce: 4, cheese: 7, bake: 12, price: 12.49, slices: 8 },
-  regular: { label: "Regular", inches: 14, sauce: 5, cheese: 8.5, bake: 15, price: 14.49, slices: 8 },
-  jumbo: { label: "Jumbo", inches: 16, sauce: 6, cheese: 10, bake: 18, price: 16.49, slices: 8 },
+  small: { label: "Small", inches: 12, sauce: 4, cheese: 7, bake: 4, price: 12.49, slices: 8 },
+  regular: { label: "Regular", inches: 14, sauce: 5, cheese: 8.5, bake: 5, price: 14.49, slices: 8 },
+  jumbo: { label: "Jumbo", inches: 16, sauce: 6, cheese: 10, bake: 6, price: 16.49, slices: 8 },
 };
 
 export const TOPPINGS: Record<Topping, { label: string; color: string; target: number }> = {
