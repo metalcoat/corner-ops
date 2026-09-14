@@ -497,7 +497,7 @@ export default function DeliveryGame() {
               ) {
                 setFailure(
                   n.kind === "abandoned"
-                    ? "You hit a parked Pontiac that has not moved since the 2008 ice storm. Ogdensburg finally found a use for it: ending your shift."
+                  ? "You hit a parked Pontiac that has not moved since the 1998 ice storm. Ogdensburg finally found a use for it: ending your shift."
                     : "You drove into an occupied tent. Ogdensburg located the incident paperwork faster than it has located a solution to literally anything else.",
                 );
                 setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
