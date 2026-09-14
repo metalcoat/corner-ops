@@ -317,6 +317,30 @@
   padding: 2px 5px;
 }
 
+.spread-tools {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.spread-tools button {
+  min-height: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.spread-tools small {
+  color: #cbd5d8;
+  margin-top: 4px;
+  font-size: .66rem;
+}
+
+.spread-tools .sauce-tool.chosen { box-shadow: inset 0 -5px #b52f25; }
+.spread-tools .cheese-tool.chosen { box-shadow: inset 0 -5px #f0c94f; }
+.gesture-hint { color: #bdc8ca; font-size: .72rem; line-height: 1.35; }
+
 .work {
   color: #141718;
   background: repeating-linear-gradient(100deg, #929da0 0, #b8c1c3 2px, #8d979a 4px, #b9c1c2 70px);
@@ -364,6 +388,58 @@
   position: absolute;
   translate: -50% -50%;
   box-shadow: 1px 2px 2px #0006;
+}
+
+.pizza .food-mark {
+  z-index: 1;
+  pointer-events: none;
+  animation: ingredient-land .18s cubic-bezier(.2,1.8,.5,1) both;
+}
+
+.pizza .food-mark.sauce {
+  width: 15%;
+  border-radius: 47% 53% 55% 45%;
+  background: #b82f25;
+  opacity: .82;
+  filter: blur(1px);
+  box-shadow: 0 0 8px #8b1e19;
+}
+
+.pizza .food-mark.cheese {
+  width: 9%;
+  height: 2.2%;
+  border-radius: 8px;
+  background: #f4d968;
+  box-shadow: 0 1px 2px #8b6720;
+}
+
+.pizza .cut-line {
+  position: absolute;
+  z-index: 4;
+  left: 4%;
+  top: calc(50% - 1px);
+  width: 92%;
+  height: 3px;
+  border-radius: 0;
+  background: #6f4828;
+  box-shadow: 0 1px #f6d98b;
+  transform-origin: center;
+  pointer-events: none;
+  animation: cut-appear .2s ease-out both;
+}
+
+.pizza.tool-sauce { cursor: crosshair; }
+.pizza.tool-cheese { cursor: grab; }
+.pizza.cut { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Ccircle cx='13' cy='18' r='9' fill='%23d8e0e2' stroke='%23333' stroke-width='2'/%3E%3Cpath d='M18 10L27 2' stroke='%23333' stroke-width='4'/%3E%3C/svg%3E") 13 18, crosshair; }
+
+@keyframes ingredient-land {
+  from { transform: translate(-50%,-50%) scale(.25); opacity: 0; }
+  to { transform: translate(-50%,-50%) scale(1); }
+}
+
+@keyframes cut-appear {
+  from { scale: 0 1; }
+  to { scale: 1 1; }
 }
 
 .status {

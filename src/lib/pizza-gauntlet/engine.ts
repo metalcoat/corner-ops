@@ -7,7 +7,7 @@ const closeness=(actual:number,target:number,tolerance:number)=>clamp(100-(Math.
 
 export function scorePizza(build:PizzaBuild,ticket:PizzaTicket){
  const recipe=PIZZA_SIZES[ticket.size], selected=build.size===ticket.size?100:0;
- const dough=closeness(build.dough,100,40), sauce=closeness(build.sauceOz,recipe.sauce,recipe.sauce*.5), cheese=closeness(build.cheeseOz,recipe.cheese,recipe.cheese*.45);
+ const dough=closeness(build.dough,100,40), sauce=closeness(build.sauceOz,recipe.sauce,recipe.sauce*.5)*.75+(build.sauceSpread??100)*.25, cheese=closeness(build.cheeseOz,recipe.cheese,recipe.cheese*.45)*.75+(build.cheeseSpread??100)*.25;
  const requested=new Set<string>(ticket.toppings), supplied=new Set<string>(Object.keys(build.toppings).filter(k=>build.toppings[k].count>0));
  const correct=[...requested].filter(x=>supplied.has(x)).length, extras=[...supplied].filter(x=>!requested.has(x)).length;
  const topping=requested.size?clamp((correct/requested.size)*100-extras*30):supplied.size?0:100;
