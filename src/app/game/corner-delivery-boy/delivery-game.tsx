@@ -809,7 +809,11 @@ export default function DeliveryGame() {
                 className={`driver ${boost ? "boost" : ""}`}
                 style={{ left: `${lane * 50}%` }}
               >
-                <span>🚙</span>
+                <img
+                  src="/games/delivery-boy/equinox-ev-rear-v1.png"
+                  alt=""
+                  draggable={false}
+                />
                 <b className="wrapped-sub">SUB</b>
               </div>
               {thrown && (
