@@ -405,11 +405,21 @@ export default function DeliveryGame() {
       setThings((a) => {
         const next: Thing[] = [];
         for (const x of a) {
-          const n = { ...x, y: x.y + dt * speed * 36 };
+          const n = { ...x, y: x.y + dt * speed * 36 },
+            collisionRadius =
+              n.type === "car" || n.type === "cow"
+                ? 0.4
+                : n.type === "deer"
+                  ? 0.32
+                  : n.type === "dog"
+                    ? 0.22
+                    : n.type === "squirrel"
+                      ? 0.12
+                      : 0.26;
           if (
             n.y > 78 &&
             n.y < 91 &&
-            Math.abs(n.lane - playerLane.current) < 0.3
+            Math.abs(n.lane - playerLane.current) < collisionRadius
           ) {
             if (n.type === "boost" || n.type === "slow") {
               if (n.type === "boost") {
@@ -423,18 +433,31 @@ export default function DeliveryGame() {
               beep("coin");
               continue;
             }
-            if (n.type === "car") {
+            if (n.type === "car" || n.type === "cow") {
               setFailure(
-                DELIVERY_CAR_CRASHES[
-                  Math.floor(Math.random() * DELIVERY_CAR_CRASHES.length)
-                ],
+                n.type === "car"
+                  ? DELIVERY_CAR_CRASHES[
+                      Math.floor(Math.random() * DELIVERY_CAR_CRASHES.length)
+                    ]
+                  : "You hit a cow outside Lisbon. The cow walked away. Your Equinox, employment, and relationship with agriculture did not.",
               );
               setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
               setMode("lost");
               beep("hit");
               continue;
             }
-            setHealth((h) => Math.max(0, h - 1));
+            if (n.type === "squirrel") {
+              setStats((s) => ({
+                ...s,
+                score: Math.max(0, s.score - 100),
+                hits: s.hits + 1,
+                combo: 0,
+              }));
+              pop("SQUIRREL TAP! -100. IT HAS RETAINED COUNSEL.");
+              beep("hit");
+              continue;
+            }
+            setHealth((h) => Math.max(0, h - (n.type === "deer" ? 2 : 1)));
             setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
             pop(
               n.type === "deer"
