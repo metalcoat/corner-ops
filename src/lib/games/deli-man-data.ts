@@ -7,7 +7,32 @@ export type StageDef = {
   intro: string;
   hazards: string[];
   lines: string[];
+  location: string;
+  bossId?: keyof typeof BOSSES;
 };
+export type BossDef = {
+  name: string;
+  health: number;
+  speed: number;
+  attack: "charge" | "bounce" | "throw";
+  reward: string;
+};
+export const BOSSES = {
+  donCherry: {
+    name: "DON CHERRY",
+    health: 18,
+    speed: 72,
+    attack: "throw",
+    reward: "CHERRY PEPPER BURST",
+  },
+  tikiBouncer: {
+    name: "TIKI BOUNCER",
+    health: 22,
+    speed: 88,
+    attack: "charge",
+    reward: "RIVER DECK WAVE",
+  },
+} satisfies Record<string, BossDef>;
 export const STAGES: StageDef[] = [
   {
     id: "fryer",
@@ -19,6 +44,8 @@ export const STAGES: StageDef[] = [
       "FATHEAD HAS ENTERED THE CHAT.\nHE HAS REQUESTED A MANAGER.\nTHERE IS NO MANAGER. GOOD LUCK.",
     hazards: ["FRY GOBLIN", "ROGUE TOT", "FRY BASKET"],
     lines: ["CAUTION: GREASE HAS ACQUIRED SENTIENCE"],
+    location: "WEST RIVER STREET FIRE RUINS",
+    bossId: "donCherry",
   },
   {
     id: "phone",
@@ -32,6 +59,7 @@ export const STAGES: StageDef[] = [
       "CAN I GET A LARGE MEDIUM PIZZA?",
       "TRANSLATION ENGINE ENGAGED. GOD HAS ABANDONED US.",
     ],
+    location: "FORD STREET PHONE EXCHANGE",
   },
   {
     id: "route",
@@ -45,6 +73,7 @@ export const STAGES: StageDef[] = [
       "GPS: YOU HAVE ARRIVED.",
       "WILDLIFE DETECTED. CRAIG PROTOCOL DISABLED.",
     ],
+    location: "OGDENSBURG WATERFRONT ROUTE",
   },
   {
     id: "walkin",
@@ -55,6 +84,7 @@ export const STAGES: StageDef[] = [
     intro: "IF FOUND FROZEN IN HERE\nCLOCK ME OUT FIRST.",
     hazards: ["FROZEN BOX", "FROST", "CHICKEN"],
     lines: ["THE EMPLOYEE BREAK ROOM: ONE CHAIR. NO QUESTIONS."],
+    location: "THE FROZEN WATERFRONT WALK-IN",
   },
   {
     id: "friday",
@@ -69,6 +99,7 @@ export const STAGES: StageDef[] = [
       "5:03 PM — SOMEONE ORDERED 14 JUMBOS.",
       "ORDER WAS PLACED 11 SECONDS AGO.",
     ],
+    location: "WEST RIVER STREET DINNER RUSH",
   },
   {
     id: "tiki",
@@ -79,6 +110,8 @@ export const STAGES: StageDef[] = [
     intro: "NORTHERN NEW YORK WEATHER ENGINE\nOPERATING WITHIN SPECIFICATIONS.",
     hazards: ["WIND", "COOLER", "BOAT"],
     lines: ["HOURS SUBJECT TO WEATHER, STAFFING, BOATS, ACTS OF GOD."],
+    location: "WATERFRONT TIKI AWNING DECK",
+    bossId: "tikiBouncer",
   },
   {
     id: "service",
@@ -93,6 +126,7 @@ export const STAGES: StageDef[] = [
       "THESE USED TO BE LOADED.",
       "HISTORICAL LOADEDNESS RECORDS NOT FOUND.",
     ],
+    location: "CITY HALL COMPLAINT BASEMENT",
   },
   {
     id: "closing",
@@ -107,6 +141,7 @@ export const STAGES: StageDef[] = [
       "HEY ARE YOU GUYS STILL OPEN?",
       "+ 2 JUMBOS · + 50 WINGS · ACTUALLY MAKE THAT 100",
     ],
+    location: "CLOSING TIME ON FORD STREET",
   },
 ];
 export const INCIDENTS = [

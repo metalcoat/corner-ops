@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type Phaser from "phaser";
-import { STAGES } from "@/lib/games/deli-man-data";
+import { BOSSES, STAGES } from "@/lib/games/deli-man-data";
 export default function DeliMan() {
   const host = useRef<HTMLDivElement>(null),
     game = useRef<Phaser.Game | null>(null),
@@ -21,6 +21,7 @@ export default function DeliMan() {
     void import("phaser").then((P) => {
       if (!alive || !host.current) return;
       const def = STAGES[stageIndex];
+      const bossProfile = def.bossId ? BOSSES[def.bossId] : null;
       class Scene extends P.Scene {
         player!: Phaser.Physics.Arcade.Sprite;
         cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -31,7 +32,7 @@ export default function DeliMan() {
         hp = 8;
         score = 0;
         distance = 0;
-        boss = 12 + stageIndex * 3;
+        boss = bossProfile?.health ?? 12 + stageIndex * 3;
         checkpoint = 0;
         invuln = 0;
         facing = 1;
@@ -41,6 +42,10 @@ export default function DeliMan() {
         jumpQueuedAt = 0;
         lastShotAt = 0;
         respawnX = 100;
+        controlLockedUntil = 0;
+        cameraFurthestX = 0;
+        playerState: "idle" | "run" | "jump" | "fall" | "climb" | "hurt" =
+          "idle";
         bossSprite!: Phaser.Physics.Arcade.Sprite;
         exitDoor!: Phaser.GameObjects.Rectangle;
         ladders: Array<{ x: number; top: number; bottom: number }> = [];
@@ -325,7 +330,6 @@ export default function DeliMan() {
           heroArt.generateTexture("deli-man", 38, 58);
           heroArt.destroy();
           this.player.setTexture("deli-man");
-          this.cameras.main.startFollow(this.player, true, 0.09, 0.09);
           this.cameras.main.setBounds(0, 0, 5000, 720);
           this.cursors = this.input.keyboard!.createCursorKeys();
           this.keys = this.input.keyboard!.addKeys(
@@ -439,7 +443,7 @@ export default function DeliMan() {
             .setScrollFactor(0)
             .setDepth(20);
           this.add
-            .text(100, 120, def.intro, {
+            .text(100, 120, `${def.location}\n\n${def.intro}`, {
               fontFamily: "monospace",
               fontSize: "24px",
               align: "center",
@@ -478,10 +482,11 @@ export default function DeliMan() {
         }
         cutJump() {
           const body = this.player.body as Phaser.Physics.Arcade.Body;
-          if (body.velocity.y < -180) this.player.setVelocityY(-180);
+          if (body.velocity.y < 0) this.player.setVelocityY(0);
         }
         fire() {
           if (this.time.now - this.lastShotAt < 175) return;
+          if (this.shots.countActive(true) >= 3) return;
           this.lastShotAt = this.time.now;
           const b = this.shots.create(
             this.player.x + this.facing * 32,
@@ -495,10 +500,19 @@ export default function DeliMan() {
         }
         damage() {
           if (this.time.now < this.invuln) return;
-          this.invuln = this.time.now + 900;
+          this.invuln = this.time.now + 1500;
+          this.controlLockedUntil = this.time.now + 320;
+          this.playerState = "hurt";
           this.hp--;
-          this.player.setTint(0xffffff).setVelocity(-180, -260);
-          this.time.delayedCall(200, () => this.player.clearTint());
+          this.player.setTint(0xffffff).setVelocity(-this.facing * 260, -300);
+          this.tweens.add({
+            targets: this.player,
+            alpha: 0.12,
+            duration: 65,
+            yoyo: true,
+            repeat: 10,
+            onComplete: () => this.player.setAlpha(1).clearTint(),
+          });
           if (this.hp <= 0) {
             this.hp = 8;
             this.player.setPosition(this.respawnX, 540).setVelocity(0, 0);
@@ -532,20 +546,27 @@ export default function DeliMan() {
               this.cursors.right.isDown ||
               this.keys.D.isDown ||
               touch.current.right;
+          const controlsLocked = this.time.now < this.controlLockedUntil;
           if (left) this.facing = -1;
           if (right) this.facing = 1;
           this.player.setFlipX(this.facing < 0);
-          this.player.setVelocityX(left ? -230 : right ? 230 : 0);
+          if (!controlsLocked)
+            this.player.setVelocityX(left ? -245 : right ? 245 : 0);
           const ladder = this.ladders.some(
             (r) =>
               Math.abs(this.player.x - r.x - 24) < 42 &&
               this.player.y > r.top - 24 &&
               this.player.y < r.bottom + 20,
           );
-          if (ladder && (this.cursors.up.isDown || this.keys.W.isDown)) {
+          if (
+            !controlsLocked &&
+            ladder &&
+            (this.cursors.up.isDown || this.keys.W.isDown)
+          ) {
             body.setAllowGravity(false);
             this.player.setVelocityY(-190);
           } else if (
+            !controlsLocked &&
             ladder &&
             (this.cursors.down.isDown || this.keys.S.isDown)
           ) {
@@ -553,9 +574,10 @@ export default function DeliMan() {
             this.player.setVelocityY(190);
           } else body.setAllowGravity(true);
           if (
-            P.Input.Keyboard.JustDown(this.cursors.up) ||
-            P.Input.Keyboard.JustDown(this.keys.W) ||
-            touch.current.jumpPressed
+            !controlsLocked &&
+            (P.Input.Keyboard.JustDown(this.cursors.up) ||
+              P.Input.Keyboard.JustDown(this.keys.W) ||
+              touch.current.jumpPressed)
           ) {
             touch.current.jumpPressed = false;
             this.jump();
@@ -571,6 +593,7 @@ export default function DeliMan() {
             this.fire();
           }
           if (
+            !controlsLocked &&
             this.jumpQueuedAt &&
             this.time.now - this.jumpQueuedAt < 120 &&
             this.time.now - this.lastGroundedAt < 125
@@ -579,6 +602,7 @@ export default function DeliMan() {
             this.jump();
           }
           if (
+            !controlsLocked &&
             !body.blocked.down &&
             body.velocity.y > 0 &&
             (body.blocked.left || body.blocked.right) &&
@@ -587,17 +611,33 @@ export default function DeliMan() {
             this.player.setVelocity(body.blocked.left ? 330 : -330, -470);
           }
           if (
+            !controlsLocked &&
             (this.cursors.down.isDown || this.keys.SHIFT.isDown) &&
             body.blocked.down
           )
             this.player.setVelocityX((left ? -1 : 1) * 390);
           const pad = this.input.gamepad?.getPad(0);
-          if (pad) {
+          if (pad && !controlsLocked) {
             this.player.setVelocityX(pad.leftStick.x * 260);
             if (pad.A) this.jump();
             if (pad.X) this.fire();
           }
           this.distance = Math.max(this.distance, this.player.x);
+          const desiredCameraX = P.Math.Clamp(
+            this.player.x - this.scale.width * 0.38,
+            0,
+            5000 - this.scale.width,
+          );
+          this.cameraFurthestX = Math.max(this.cameraFurthestX, desiredCameraX);
+          this.cameras.main.scrollX = this.cameraFurthestX;
+          if (this.player.x < this.cameraFurthestX + 20)
+            this.player.x = this.cameraFurthestX + 20;
+          if (controlsLocked) this.playerState = "hurt";
+          else if (ladder && !body.allowGravity) this.playerState = "climb";
+          else if (!body.blocked.down)
+            this.playerState = body.velocity.y < 0 ? "jump" : "fall";
+          else if (body.velocity.x !== 0) this.playerState = "run";
+          else this.playerState = "idle";
           this.checkpoint = Math.max(
             this.checkpoint,
             Math.floor(this.player.x / 1000),
@@ -615,7 +655,7 @@ export default function DeliMan() {
               this.physics.moveToObject(
                 this.bossSprite,
                 this.player,
-                45 + stageIndex * 6,
+                bossProfile?.speed ?? 45 + stageIndex * 6,
               );
               if (
                 P.Math.Distance.BetweenPoints(this.player, this.bossSprite) < 88
@@ -634,7 +674,7 @@ export default function DeliMan() {
             }
           }
           this.tip.setText(
-            `PATIENCE ${"■".repeat(this.hp)}  TIP CHANGE $${this.score}\n${def.name} · CHECKPOINT ${this.checkpoint + 1}${this.bossActive ? `\n${def.boss}: ${"★".repeat(Math.max(0, this.boss))}${this.bossDefeated ? "  DELIVER TO GREEN DOOR" : ""}` : ""}`,
+            `PATIENCE ${"■".repeat(this.hp)}  TIP CHANGE $${this.score}  ${this.playerState.toUpperCase()}\n${def.name} · CHECKPOINT ${this.checkpoint + 1}${this.bossActive ? `\n${bossProfile?.name ?? def.boss}: ${"★".repeat(Math.max(0, this.boss))}${this.bossDefeated ? "  DELIVER TO GREEN DOOR" : ""}` : ""}`,
           );
         }
       }
@@ -647,7 +687,7 @@ export default function DeliMan() {
         render: { pixelArt: true, antialias: false, roundPixels: true },
         physics: {
           default: "arcade",
-          arcade: { gravity: { x: 0, y: 1200 }, debug: false },
+          arcade: { gravity: { x: 0, y: 1750 }, debug: false },
         },
         scale: { mode: P.Scale.FIT, autoCenter: P.Scale.CENTER_BOTH },
         scene: Scene,
