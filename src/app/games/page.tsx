@@ -26,9 +26,9 @@ const games = [
     color: "delivery",
   },
   {
-    href: "/game/cheese-pull",
+    href: "/game/deli-man",
     icon: "🥪",
-    title: "Delivery Blaster",
+    title: "DELI MAN: The Last Jumbo",
     tag: "RUN · JUMP · BLAST",
     copy: "Blast absurd obstacles with wrapped subs, defeat complaint bosses, and deliver the food.",
     prize: "3 ESCALATING ROUTES",
@@ -64,12 +64,6 @@ export default function Games() {
             <span>PLAY NOW →</span>
           </Link>
         ))}
-        <article>
-          <div>🔒</div>
-          <small>COMING SOON</small>
-          <h2>Next Shift</h2>
-          <p>Something else at the deli will inevitably go wrong.</p>
-        </article>
       </section>
       <footer>
         Prizes require a completed validated run. One-time codes. See each game

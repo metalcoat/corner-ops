@@ -1052,6 +1052,9 @@ export default function DeliveryGame() {
           >
             🏆 DRIVER LEADERBOARD
           </button>
+          <a className="return-games" href="/games">
+            ← ALL GAMES
+          </a>
           <small>← → or swipe to steer · SPACE or DELIVER to throw</small>
           <div className="sub-prize">
             WIN: {DELIVERY_PRIZE.name.toUpperCase()}
@@ -1350,12 +1353,18 @@ export default function DeliveryGame() {
               "The subs survived. Your dignity did not."}
           </div>
           <button onClick={() => location.reload()}>DRIVE AGAIN</button>
+          <a className="return-games" href="/games">
+            ← ALL GAMES
+          </a>
           <button
             className="driver-leaderboard-button"
             onClick={openLeaderboard}
           >
             🏆 DRIVER LEADERBOARD
           </button>
+          <a className="return-games" href="/games">
+            ← ALL GAMES
+          </a>
         </section>
       )}
       {mode === "won" && (

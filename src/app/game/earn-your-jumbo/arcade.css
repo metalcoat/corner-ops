@@ -646,6 +646,12 @@
   background: linear-gradient(#276e88, #164558);
   box-shadow: 0 7px #092632;
 }
+.return-games {
+  display: block;
+  margin: 18px auto 4px;
+  color: #78eaff;
+  font-weight: 900;
+}
 .leaderboard-modal {
   position: fixed;
   z-index: 100;

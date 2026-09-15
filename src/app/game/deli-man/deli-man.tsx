@@ -1,0 +1,254 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import type Phaser from "phaser";
+import { STAGES } from "@/lib/games/deli-man-data";
+export default function DeliMan() {
+  const host = useRef<HTMLDivElement>(null),
+    game = useRef<Phaser.Game | null>(null);
+  const [stage, setStage] = useState<number | null>(null),
+    [sound, setSound] = useState(true);
+  useEffect(() => {
+    if (stage === null || !host.current) return;
+    const stageIndex = stage;
+    let alive = true;
+    void import("phaser").then((P) => {
+      if (!alive || !host.current) return;
+      const def = STAGES[stageIndex];
+      class Scene extends P.Scene {
+        player!: Phaser.Physics.Arcade.Sprite;
+        cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+        keys!: Record<string, Phaser.Input.Keyboard.Key>;
+        enemies!: Phaser.Physics.Arcade.Group;
+        shots!: Phaser.Physics.Arcade.Group;
+        tip!: Phaser.GameObjects.Text;
+        hp = 8;
+        score = 0;
+        distance = 0;
+        boss = 12 + stageIndex * 3;
+        checkpoint = 0;
+        invuln = 0;
+        create() {
+          this.cameras.main.setBackgroundColor(def.theme);
+          const g = this.add.graphics();
+          g.fillStyle(0x192129).fillRect(0, 610, 5000, 110);
+          g.fillStyle(0xffffff, 0.25);
+          for (let x = 0; x < 5000; x += 260) g.fillRect(x, 675, 120, 7);
+          this.physics.world.setBounds(0, 0, 5000, 720);
+          const ground = this.physics.add.staticGroup();
+          ground.create(2500, 650).setDisplaySize(5000, 80).refreshBody();
+          g.generateTexture("ground", 8, 8);
+          const make = (key: string, color: number, w: number, h: number) => {
+            const q = this.make.graphics({ x: 0, y: 0 }, false);
+            q.fillStyle(color).fillRect(0, 0, w, h);
+            q.lineStyle(3, 0xffffff).strokeRect(0, 0, w, h);
+            q.generateTexture(key, w, h);
+            q.destroy();
+          };
+          make("hero", 0xf04435, 38, 58);
+          make("enemy", 0x272016, 40, 40);
+          make("shot", 0xffd638, 22, 10);
+          this.player = this.physics.add
+            .sprite(100, 560, "hero")
+            .setCollideWorldBounds(true);
+          this.player.body!.setSize(34, 56);
+          this.cameras.main.startFollow(this.player, true, 0.09, 0.09);
+          this.cameras.main.setBounds(0, 0, 5000, 720);
+          this.cursors = this.input.keyboard!.createCursorKeys();
+          this.keys = this.input.keyboard!.addKeys(
+            "W,A,S,D,X,F,SHIFT,ESC",
+          ) as Record<string, Phaser.Input.Keyboard.Key>;
+          this.enemies = this.physics.add.group();
+          this.shots = this.physics.add.group();
+          for (let x = 520; x < 4300; x += 330 - stageIndex * 15) {
+            const e = this.enemies.create(
+              x,
+              570,
+              "enemy",
+            ) as Phaser.Physics.Arcade.Sprite;
+            e.setData(
+              "name",
+              def.hazards[Math.floor(Math.random() * def.hazards.length)],
+            );
+            e.setVelocityX(-30 - stageIndex * 8);
+          }
+          this.physics.add.collider(this.player, this.enemies, () =>
+            this.damage(),
+          );
+          this.physics.add.overlap(this.shots, this.enemies, (a, b) => {
+            a.destroy();
+            b.destroy();
+            this.score += 100;
+          });
+          this.physics.add.collider(this.player, ground);
+          this.tip = this.add
+            .text(16, 16, "", {
+              fontFamily: "monospace",
+              fontSize: "18px",
+              color: "#fff",
+              backgroundColor: "#000c",
+              padding: { x: 10, y: 8 },
+            })
+            .setScrollFactor(0)
+            .setDepth(20);
+          this.add
+            .text(100, 120, def.intro, {
+              fontFamily: "monospace",
+              fontSize: "24px",
+              align: "center",
+              color: "#fff",
+            })
+            .setOrigin(0);
+          def.lines.forEach((l, i) =>
+            this.add.text(900 + i * 1050, 420, l, {
+              fontFamily: "monospace",
+              fontSize: "18px",
+              color: "#ffe36a",
+              backgroundColor: "#111d",
+              padding: { x: 8, y: 6 },
+            }),
+          );
+          this.input.keyboard!.on("keydown-X", () => this.fire());
+          this.input.keyboard!.on("keydown-F", () => this.fire());
+          this.input.gamepad?.once("connected", () => {});
+          this.input.on("pointerdown", (p: Phaser.Input.Pointer) =>
+            p.x > this.scale.width * 0.55 ? this.fire() : this.jump(),
+          );
+        }
+        jump() {
+          if ((this.player.body as Phaser.Physics.Arcade.Body).blocked.down)
+            this.player.setVelocityY(-520);
+        }
+        fire() {
+          const b = this.shots.create(
+            this.player.x + 32,
+            this.player.y,
+            "shot",
+          ) as Phaser.Physics.Arcade.Sprite;
+          b.setVelocityX(620);
+        }
+        damage() {
+          if (this.time.now < this.invuln) return;
+          this.invuln = this.time.now + 900;
+          this.hp--;
+          this.player.setTint(0xffffff).setVelocity(-180, -260);
+          this.time.delayedCall(200, () => this.player.clearTint());
+          if (this.hp <= 0) this.scene.restart();
+        }
+        update(_: number, dt: number) {
+          const body = this.player.body as Phaser.Physics.Arcade.Body;
+          const left = this.cursors.left.isDown || this.keys.A.isDown,
+            right = this.cursors.right.isDown || this.keys.D.isDown;
+          this.player.setVelocityX(left ? -230 : right ? 230 : 0);
+          if (
+            P.Input.Keyboard.JustDown(this.cursors.up) ||
+            P.Input.Keyboard.JustDown(this.keys.W)
+          )
+            this.jump();
+          if (
+            (this.cursors.down.isDown || this.keys.SHIFT.isDown) &&
+            body.blocked.down
+          )
+            this.player.setVelocityX((left ? -1 : 1) * 390);
+          const pad = this.input.gamepad?.getPad(0);
+          if (pad) {
+            this.player.setVelocityX(pad.leftStick.x * 260);
+            if (pad.A) this.jump();
+            if (pad.X) this.fire();
+          }
+          this.distance = Math.max(this.distance, this.player.x);
+          this.checkpoint = Math.max(
+            this.checkpoint,
+            Math.floor(this.player.x / 1000),
+          );
+          if (this.player.x > 4550) {
+            this.player.setVelocityX(0);
+            this.tip.setText(
+              `BOSS: ${def.boss}\n${"★".repeat(Math.max(0, this.boss))}`,
+            );
+            if (
+              P.Input.Keyboard.JustDown(this.keys.X) ||
+              this.input.activePointer.isDown
+            )
+              this.boss--;
+            if (this.boss <= 0) {
+              const save = JSON.parse(
+                localStorage.getItem("deli-man-save") || "{}",
+              );
+              save[def.id] = true;
+              save[def.ability] = true;
+              localStorage.setItem("deli-man-save", JSON.stringify(save));
+              this.game.destroy(true);
+              setStage(null);
+            }
+          }
+          this.tip.setText(
+            `PATIENCE ${"■".repeat(this.hp)}  TIP CHANGE $${this.score}\n${def.name} · CHECKPOINT ${this.checkpoint + 1}`,
+          );
+        }
+      }
+      game.current = new P.Game({
+        type: P.AUTO,
+        parent: host.current,
+        width: 1280,
+        height: 720,
+        backgroundColor: def.theme,
+        physics: {
+          default: "arcade",
+          arcade: { gravity: { x: 0, y: 1200 }, debug: false },
+        },
+        scale: { mode: P.Scale.FIT, autoCenter: P.Scale.CENTER_BOTH },
+        scene: Scene,
+        audio: { noAudio: !sound },
+        input: { gamepad: true },
+      });
+    });
+    return () => {
+      alive = false;
+      game.current?.destroy(true);
+      game.current = null;
+    };
+  }, [sound, stage]);
+  return (
+    <main className="deli-man">
+      {stage === null ? (
+        <section>
+          <small>AN ORIGINAL CORNER DELI GAME</small>
+          <h1>
+            DELI MAN:<i>THE LAST JUMBO</i>
+          </h1>
+          <div className="stage-grid">
+            {STAGES.map((s, i) => (
+              <button key={s.id} onClick={() => setStage(i)}>
+                <b>
+                  {i + 1}. {s.name}
+                </b>
+                <span>BOSS: {s.boss}</span>
+                <em>GET: {s.ability}</em>
+              </button>
+            ))}
+            <button className="locked">
+              <b>THE OWNER&apos;S OFFICE</b>
+              <span>DEFEAT ALL EIGHT</span>
+            </button>
+          </div>
+          <footer>
+            <button onClick={() => setSound(!sound)}>
+              {sound ? "🔊 SOUND ON" : "🔇 SOUND OFF"}
+            </button>
+            <a href="/games">ALL GAMES</a>
+          </footer>
+        </section>
+      ) : (
+        <>
+          <div ref={host} />
+          <nav>
+            <button onPointerDown={() => {}}>◀ MOVE</button>
+            <button>JUMP</button>
+            <button>SAUCE BLASTER</button>
+            <button onClick={() => setStage(null)}>PAUSE / STAGES</button>
+          </nav>
+        </>
+      )}
+    </main>
+  );
+}

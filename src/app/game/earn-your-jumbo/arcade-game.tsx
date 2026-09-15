@@ -621,6 +621,9 @@ export default function Game() {
           <button className="leaderboard-button" onClick={openLeaderboard}>
             🏆 LEADERBOARD
           </button>
+          <a className="return-games" href="/games">
+            ← ALL GAMES
+          </a>
           {startError && <strong className="start-error">{startError}</strong>}
           <small>← DOUGH · ↓ SAUCE · → CHEESE · TAP PIZZA FOR TOPPINGS</small>
         </section>
@@ -774,6 +777,9 @@ export default function Game() {
           <button className="leaderboard-button" onClick={openLeaderboard}>
             🏆 LEADERBOARD
           </button>
+          <a className="return-games" href="/games">
+            ← ALL GAMES
+          </a>
         </section>
       )}
       {mode === "won" && (
@@ -791,6 +797,9 @@ export default function Game() {
           <button className="leaderboard-button" onClick={openLeaderboard}>
             🏆 LEADERBOARD
           </button>
+          <a className="return-games" href="/games">
+            ← ALL GAMES
+          </a>
         </section>
       )}
       {showLeaders && (
