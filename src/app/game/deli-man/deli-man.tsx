@@ -4,7 +4,14 @@ import type Phaser from "phaser";
 import { STAGES } from "@/lib/games/deli-man-data";
 export default function DeliMan() {
   const host = useRef<HTMLDivElement>(null),
-    game = useRef<Phaser.Game | null>(null);
+    game = useRef<Phaser.Game | null>(null),
+    touch = useRef({
+      left: false,
+      right: false,
+      jump: false,
+      jumpPressed: false,
+      fire: false,
+    });
   const [stage, setStage] = useState<number | null>(null),
     [sound, setSound] = useState(true);
   useEffect(() => {
@@ -45,6 +52,7 @@ export default function DeliMan() {
         }
         create() {
           this.cameras.main.setBackgroundColor(def.theme);
+          this.cameras.main.setRoundPixels(true);
           for (let x = 0; x < 6000; x += 2040)
             this.add
               .image(x, 0, "ogdensburg")
@@ -516,8 +524,14 @@ export default function DeliMan() {
             return true;
           });
           if (body.blocked.down) this.lastGroundedAt = this.time.now;
-          const left = this.cursors.left.isDown || this.keys.A.isDown,
-            right = this.cursors.right.isDown || this.keys.D.isDown;
+          const left =
+              this.cursors.left.isDown ||
+              this.keys.A.isDown ||
+              touch.current.left,
+            right =
+              this.cursors.right.isDown ||
+              this.keys.D.isDown ||
+              touch.current.right;
           if (left) this.facing = -1;
           if (right) this.facing = 1;
           this.player.setFlipX(this.facing < 0);
@@ -540,9 +554,22 @@ export default function DeliMan() {
           } else body.setAllowGravity(true);
           if (
             P.Input.Keyboard.JustDown(this.cursors.up) ||
-            P.Input.Keyboard.JustDown(this.keys.W)
-          )
+            P.Input.Keyboard.JustDown(this.keys.W) ||
+            touch.current.jumpPressed
+          ) {
+            touch.current.jumpPressed = false;
             this.jump();
+          }
+          if (
+            !touch.current.jump &&
+            !this.cursors.up.isDown &&
+            !this.keys.W.isDown
+          )
+            this.cutJump();
+          if (touch.current.fire) {
+            touch.current.fire = false;
+            this.fire();
+          }
           if (
             this.jumpQueuedAt &&
             this.time.now - this.jumpQueuedAt < 120 &&
@@ -617,6 +644,7 @@ export default function DeliMan() {
         width: 1280,
         height: 720,
         backgroundColor: def.theme,
+        render: { pixelArt: true, antialias: false, roundPixels: true },
         physics: {
           default: "arcade",
           arcade: { gravity: { x: 0, y: 1200 }, debug: false },
@@ -631,6 +659,13 @@ export default function DeliMan() {
       alive = false;
       game.current?.destroy(true);
       game.current = null;
+      touch.current = {
+        left: false,
+        right: false,
+        jump: false,
+        jumpPressed: false,
+        fire: false,
+      };
     };
   }, [sound, stage]);
   return (
@@ -665,12 +700,70 @@ export default function DeliMan() {
         </section>
       ) : (
         <>
-          <div ref={host} />
-          <nav>
-            <button onPointerDown={() => {}}>◀ MOVE</button>
-            <button>JUMP</button>
-            <button>SAUCE BLASTER</button>
-            <button onClick={() => setStage(null)}>PAUSE / STAGES</button>
+          <div className="game-shell">
+            <div ref={host} className="game-container" />
+            <div className="scanlines" aria-hidden="true" />
+          </div>
+          <nav className="mobile-controls" aria-label="Game controls">
+            <div className="d-pad">
+              <button
+                className="control-btn"
+                aria-label="Move left"
+                onContextMenu={(event) => event.preventDefault()}
+                onPointerDown={(event) => {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  touch.current.left = true;
+                }}
+                onPointerUp={() => (touch.current.left = false)}
+                onPointerCancel={() => (touch.current.left = false)}
+                onPointerLeave={() => (touch.current.left = false)}
+              >
+                ◀
+              </button>
+              <button
+                className="control-btn"
+                aria-label="Move right"
+                onContextMenu={(event) => event.preventDefault()}
+                onPointerDown={(event) => {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  touch.current.right = true;
+                }}
+                onPointerUp={() => (touch.current.right = false)}
+                onPointerCancel={() => (touch.current.right = false)}
+                onPointerLeave={() => (touch.current.right = false)}
+              >
+                ▶
+              </button>
+            </div>
+            <div className="action-buttons">
+              <button
+                className="control-btn pizza-control"
+                aria-label="Throw pizza"
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  touch.current.fire = true;
+                }}
+              >
+                🍕
+              </button>
+              <button
+                className="control-btn"
+                aria-label="Jump"
+                onPointerDown={(event) => {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  touch.current.jump = true;
+                  touch.current.jumpPressed = true;
+                }}
+                onPointerUp={() => (touch.current.jump = false)}
+                onPointerCancel={() => (touch.current.jump = false)}
+                onPointerLeave={() => (touch.current.jump = false)}
+              >
+                ▲
+              </button>
+              <button className="pause-control" onClick={() => setStage(null)}>
+                PAUSE
+              </button>
+            </div>
           </nav>
         </>
       )}

@@ -54,27 +54,98 @@
 .deli-man a {
   color: #6eeaff;
 }
-.deli-man > div {
+.deli-man .game-shell {
+  position: relative;
   width: 100vw;
-  height: calc(100dvh - 74px);
+  height: 100dvh;
+  overflow: hidden;
+  background: #111;
+}
+.deli-man .game-container {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border: clamp(2px, 0.5vw, 6px) solid #182233;
+  background: #5c94fc;
+  box-shadow: inset 0 0 45px rgba(0, 0, 0, 0.48);
 }
 .deli-man canvas {
   width: 100% !important;
   height: 100% !important;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
 }
-.deli-man nav {
-  height: 74px;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-  padding: 6px;
-  background: #090d17;
+.deli-man img,
+.deli-man .pixel-sprite {
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
 }
-.deli-man nav button {
-  border: 3px solid #fff;
-  background: #203251;
+.deli-man .scanlines {
+  position: absolute;
+  z-index: 60;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.16) 50%);
+  background-size: 100% 4px;
+  mix-blend-mode: multiply;
+}
+.deli-man .mobile-controls {
+  position: fixed;
+  z-index: 100;
+  inset: auto 0 max(14px, env(safe-area-inset-bottom));
+  height: auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 18px;
+  padding: 0 clamp(12px, 4vw, 42px);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.d-pad,
+.action-buttons {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  pointer-events: auto;
+}
+.deli-man .control-btn {
+  width: clamp(62px, 14vw, 82px);
+  height: clamp(62px, 14vw, 82px);
+  border: 3px solid rgba(255, 255, 255, 0.78);
+  border-radius: 50%;
+  background: rgba(20, 42, 74, 0.78);
   color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: clamp(1.35rem, 5vw, 2rem);
   font-weight: 900;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.65);
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.deli-man .control-btn:active {
+  translate: 0 4px;
+  box-shadow: 0 1px 0 #000;
+  background: rgba(255, 212, 56, 0.9);
+  color: #101724;
+}
+.deli-man .pizza-control {
+  background: rgba(166, 42, 31, 0.86);
+}
+.deli-man .pause-control {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 2px solid #fff;
+  border-radius: 8px;
+  background: rgba(8, 11, 19, 0.86);
+  color: white;
+  font-weight: 900;
+  touch-action: manipulation;
 }
 @media (max-width: 700px) {
   .stage-grid {
@@ -87,7 +158,16 @@
   .deli-man h1 {
     font-size: 3.3rem;
   }
-  .deli-man nav {
-    font-size: 0.58rem;
+  .deli-man .mobile-controls {
+    padding-inline: 10px;
+    gap: 8px;
+  }
+  .d-pad,
+  .action-buttons {
+    gap: 7px;
+  }
+  .deli-man .pause-control {
+    padding-inline: 7px;
+    font-size: 0.62rem;
   }
 }
