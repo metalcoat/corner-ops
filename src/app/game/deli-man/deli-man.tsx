@@ -290,7 +290,17 @@ export default function DeliMan() {
           makePerson("roofer", 0xf08324, true);
           makePerson("customer", 0x7d45a8);
           makePerson("pedestrian", 0x3a78a8);
-          make("shot", 0xffd638, 22, 10);
+          const pizzaShot = this.make.graphics({ x: 0, y: 0 }, false);
+          pizzaShot.fillStyle(0xd89a43).fillCircle(12, 12, 11);
+          pizzaShot.fillStyle(0xf2cf5b).fillCircle(12, 12, 8);
+          pizzaShot
+            .fillStyle(0xc9382e)
+            .fillCircle(8, 8, 2)
+            .fillCircle(16, 11, 2)
+            .fillCircle(11, 17, 2);
+          pizzaShot.lineStyle(2, 0xffe28a).strokeCircle(12, 12, 10);
+          pizzaShot.generateTexture("pizza-shot", 24, 24);
+          pizzaShot.destroy();
           this.player = this.physics.add
             .sprite(100, 560, "hero")
             .setCollideWorldBounds(true);
@@ -325,13 +335,16 @@ export default function DeliMan() {
               "name",
               def.hazards[Math.floor(Math.random() * def.hazards.length)],
             );
+            e.setData("patrolSpeed", 45 + stageIndex * 8);
             this.add.text(x - 26, 515, String(e.getData("name")), {
               fontFamily: "monospace",
               fontSize: "10px",
               color: "#ffef73",
               backgroundColor: "#111c",
             });
-            e.setVelocityX(-30 - stageIndex * 8);
+            e.setVelocityX(-45 - stageIndex * 8)
+              .setCollideWorldBounds(true)
+              .setBounce(1, 0);
             this.tweens.add({
               targets: e,
               scaleY: 0.9,
@@ -403,6 +416,8 @@ export default function DeliMan() {
             }
           });
           this.physics.add.collider(this.player, ground);
+          this.physics.add.collider(this.enemies, ground);
+          this.physics.add.collider(this.enemies, platforms);
           this.physics.add.collider(this.bossSprite, ground);
           this.physics.add.collider(this.player, platforms);
           this.tip = this.add
@@ -463,9 +478,12 @@ export default function DeliMan() {
           const b = this.shots.create(
             this.player.x + this.facing * 32,
             this.player.y,
-            "shot",
+            "pizza-shot",
           ) as Phaser.Physics.Arcade.Sprite;
           b.setVelocityX(this.facing * 620);
+          (b.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
+          b.setAngularVelocity(this.facing * 720);
+          b.setData("bornAt", this.time.now);
         }
         damage() {
           if (this.time.now < this.invuln) return;
@@ -480,6 +498,23 @@ export default function DeliMan() {
         }
         update(_: number, dt: number) {
           const body = this.player.body as Phaser.Physics.Arcade.Body;
+          this.enemies.children.iterate((child) => {
+            const enemy = child as Phaser.Physics.Arcade.Sprite;
+            const enemyBody = enemy.body as Phaser.Physics.Arcade.Body | null;
+            if (!enemyBody) return true;
+            if (enemyBody.blocked.left)
+              enemy.setVelocityX(Number(enemy.getData("patrolSpeed")));
+            else if (enemyBody.blocked.right)
+              enemy.setVelocityX(-Number(enemy.getData("patrolSpeed")));
+            enemy.setFlipX(enemyBody.velocity.x > 0);
+            return true;
+          });
+          this.shots.children.iterate((child) => {
+            const shot = child as Phaser.Physics.Arcade.Sprite;
+            if (this.time.now - Number(shot.getData("bornAt")) > 1200)
+              shot.destroy();
+            return true;
+          });
           if (body.blocked.down) this.lastGroundedAt = this.time.now;
           const left = this.cursors.left.isDown || this.keys.A.isDown,
             right = this.cursors.right.isDown || this.keys.D.isDown;
