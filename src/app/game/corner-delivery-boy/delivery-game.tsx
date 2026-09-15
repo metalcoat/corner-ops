@@ -3,15 +3,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   DELIVERY_CAR_CRASHES,
+  DELIVERY_COLLISION_FAILURES,
   DELIVERY_COMPLAINTS,
   DELIVERY_FAILURES,
   DELIVERY_PRIZE,
+  DELIVERY_ROUTE_SUCCESSES,
   DELIVERY_STAGES,
 } from "@/lib/delivery-boy/config";
+import { deliveryAudio } from "@/lib/games/delivery-audio";
 type Thing = {
   id: number;
   type:
-    "deer" | "dog" | "squirrel" | "cow" | "car" | "pothole" | "boost" | "slow";
+    "deer" | "dog" | "squirrel" | "cow" | "person" | "car" | "pothole" | "boost" | "slow";
   lane: number;
   y: number;
 };
@@ -50,11 +53,20 @@ const icons: Record<Thing["type"], string> = {
   dog: "🐕",
   squirrel: "🐿️",
   cow: "🐄",
+  person: "🚶",
   car: "🚗",
   pothole: "◉",
   boost: "⚡",
   slow: "❄️",
 };
+const communities = [
+  { name: "LISBON", warning: "WATCH FOR COWS" },
+  { name: "HEUVELTON", warning: "TRACTORS HAVE RIGHT OF WAY. THEY DECIDED." },
+  { name: "MORRISTOWN", warning: "RIVER WIND MAY RELOCATE SUBS" },
+  { name: "WADDINGTON", warning: "UNMARKED DRIVEWAYS AHEAD" },
+  { name: "RENSSELAER FALLS", warning: "GPS HAS LEFT THE CHAT" },
+  { name: "MADRID", warning: "MAILBOXES MAY BE STRUCTURAL" },
+] as const;
 const quips = [
   "SUB SECURED",
   "PORCH PERFECT",
@@ -107,17 +119,24 @@ export default function DeliveryGame() {
     [stats, setStats] = useState(fresh),
     [toast, setToast] = useState(""),
     [complaint, setComplaint] = useState(""),
+    [successMessage, setSuccessMessage] = useState(""),
     [failure, setFailure] = useState(""),
     [run, setRun] = useState<Run | null>(null),
     [sequence, setSequence] = useState(0),
     [reward, setReward] = useState<any>(null),
     [muted, setMuted] = useState(false),
     [boost, setBoost] = useState(0),
-    [slow, setSlow] = useState(0);
+    [slow, setSlow] = useState(0),
+    [community, setCommunity] = useState<(typeof communities)[number]>(communities[0]),
+    [ammo, setAmmo] = useState(8),
+    [shaking, setShaking] = useState(false),
+    [skidding, setSkidding] = useState(false),
+    [particles, setParticles] = useState<{ id: number; side: "left" | "right"; y: number }[]>([]);
   const keys = useRef(new Set<string>()),
     last = useRef(0),
     spawn = useRef(0),
     deliveryGap = useRef(0),
+    impactFailure = useRef(""),
     playerLane = useRef(1),
     state = useRef<{
       mode: string;
@@ -141,34 +160,12 @@ export default function DeliveryGame() {
     playerLane.current = lane;
   }, [lane]);
   const beep = useCallback(
-    (kind: "throw" | "hit" | "coin" | "start") => {
-      if (muted) return;
-      const A = window.AudioContext || window.webkitAudioContext;
-      if (!A) return;
-      const c = new A(),
-        o = c.createOscillator(),
-        g = c.createGain();
-      o.type = kind === "hit" ? "sawtooth" : "square";
-      o.frequency.setValueAtTime(
-        kind === "coin"
-          ? 900
-          : kind === "throw"
-            ? 440
-            : kind === "start"
-              ? 330
-              : 100,
-        c.currentTime,
-      );
-      o.frequency.exponentialRampToValueAtTime(
-        kind === "hit" ? 45 : kind === "coin" ? 1500 : 660,
-        c.currentTime + 0.14,
-      );
-      g.gain.setValueAtTime(0.06, c.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.18);
-      o.connect(g);
-      g.connect(c.destination);
-      o.start();
-      o.stop(c.currentTime + 0.2);
+    (kind: "throw" | "delivery" | "hit" | "coin" | "start" | "yelp" | "ouch" | "victory") => {
+      deliveryAudio.setMuted(muted);
+      if (kind === "delivery" || kind === "coin") deliveryAudio.play("delivery");
+      else if (kind === "hit") deliveryAudio.play("crash");
+      else if (kind === "start") deliveryAudio.transition("action");
+      else deliveryAudio.play(kind);
     },
     [muted],
   );
@@ -245,12 +242,7 @@ export default function DeliveryGame() {
     audio.current = s;
   }
   useEffect(() => {
-    if (audio.current)
-      audio.current.gain.gain.setTargetAtTime(
-        muted ? 0 : 0.045,
-        audio.current.ctx.currentTime,
-        0.05,
-      );
+    deliveryAudio.setMuted(muted);
   }, [muted]);
   useEffect(
     () => () => {
@@ -258,6 +250,7 @@ export default function DeliveryGame() {
         clearInterval(audio.current.timer);
         void audio.current.ctx.close();
       }
+      deliveryAudio.stop();
     },
     [],
   );
@@ -265,14 +258,31 @@ export default function DeliveryGame() {
     setToast(message);
     window.setTimeout(() => setToast(""), 850);
   }
+  const impact = useCallback(() => {
+    setShaking(true);
+    window.setTimeout(() => setShaking(false), 210);
+  }, []);
   const move = useCallback(
-    (d: number) => setLane((v) => Math.max(-0.18, Math.min(2.18, v + d))),
+    (d: number) => {
+      if (Math.abs(d) >= 0.18) {
+        setSkidding(true);
+        window.setTimeout(() => setSkidding(false), 230);
+      }
+      setLane((v) => Math.max(-0.18, Math.min(2.18, v + d)));
+    },
     [],
   );
   const deliver = useCallback(() => {
     const t = state.current.target;
     if (state.current.mode !== "play" || !t.active) return;
-    setThrown({ id: Date.now(), side: t.side, start: playerLane.current });
+    if (ammo <= 0) {
+      pop("NO SUBS LEFT. YOU DELIVERED THE INVENTORY TO SHRUBS.");
+      return;
+    }
+    const throwId = Date.now();
+    setAmmo((count) => Math.max(0, count - 1));
+    setThrown({ id: throwId, side: t.side, start: playerLane.current });
+    beep("throw");
     window.setTimeout(() => setThrown(null), 650);
     const timed = t.y >= 60 && t.y <= 88,
       correctSide =
@@ -283,6 +293,11 @@ export default function DeliveryGame() {
       const perfect = t.y >= 70 && t.y <= 80;
       setTarget((x) => ({ ...x, active: false }));
       setRouteDelivered((n) => n + 1);
+      setParticles((items) => [...items, { id: throwId, side: t.side, y: t.y }]);
+      window.setTimeout(
+        () => setParticles((items) => items.filter((item) => item.id !== throwId)),
+        750,
+      );
       setStats((s) => {
         const combo = s.combo + 1,
           score =
@@ -300,7 +315,7 @@ export default function DeliveryGame() {
           ? quips[Math.floor(Math.random() * quips.length)]
           : "RIGHT HOUSE. QUESTIONABLE THROW.",
       );
-      beep("throw");
+      window.setTimeout(() => beep("delivery"), 190);
     } else {
       setStats((s) => ({ ...s, score: Math.max(0, s.score - 200), combo: 0 }));
       pop(
@@ -310,9 +325,15 @@ export default function DeliveryGame() {
             ? "TOO EARLY! SUB IN SHRUB"
             : "MISSED THE ADDRESS!",
       );
+      impact();
       beep("hit");
     }
-  }, [beep]);
+  }, [ammo, beep, impact]);
+  useEffect(() => {
+    const speedRatio = Math.min(1, (cfg.speed + (boost > 0 ? 65 : 0)) / 330);
+    const urgencyRatio = Math.max(0, Math.min(1, (20 - time) / 20));
+    deliveryAudio.setIntensity(speedRatio, urgencyRatio);
+  }, [cfg.speed, boost, time]);
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       keys.current.add(e.key);
@@ -363,10 +384,9 @@ export default function DeliveryGame() {
             "deer",
             "dog",
             "squirrel",
+            "person",
             "car",
             "pothole",
-            "boost",
-            "slow",
           ],
           roll = Math.random(),
           type =
@@ -374,7 +394,7 @@ export default function DeliveryGame() {
               ? "slow"
               : roll < 0.17
                 ? "boost"
-                : types[Math.floor(Math.random() * 5)];
+                : types[Math.floor(Math.random() * types.length)];
         setThings((a) => [
           ...a,
           {
@@ -408,14 +428,16 @@ export default function DeliveryGame() {
           const n = { ...x, y: x.y + dt * speed * 36 },
             collisionRadius =
               n.type === "car" || n.type === "cow"
-                ? 0.4
+                ? 0.29
                 : n.type === "deer"
-                  ? 0.32
+                  ? 0.21
                   : n.type === "dog"
-                    ? 0.22
+                    ? 0.13
                     : n.type === "squirrel"
-                      ? 0.12
-                      : 0.26;
+                      ? 0.07
+                      : n.type === "person"
+                        ? 0.13
+                        : 0.18;
           if (
             n.y > 78 &&
             n.y < 91 &&
@@ -433,17 +455,21 @@ export default function DeliveryGame() {
               beep("coin");
               continue;
             }
-            if (n.type === "car" || n.type === "cow") {
-              setFailure(
+            if (n.type === "car" || n.type === "cow" || n.type === "person") {
+              const reason =
                 n.type === "car"
                   ? DELIVERY_CAR_CRASHES[
                       Math.floor(Math.random() * DELIVERY_CAR_CRASHES.length)
                     ]
-                  : "You hit a cow outside Lisbon. The cow walked away. Your Equinox, employment, and relationship with agriculture did not.",
-              );
+                  : DELIVERY_COLLISION_FAILURES[n.type][
+                      Math.floor(Math.random() * DELIVERY_COLLISION_FAILURES[n.type].length)
+                    ];
+              impactFailure.current = reason;
+              setFailure(reason);
               setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
               setMode("lost");
-              beep("hit");
+              impact();
+              beep(n.type === "person" ? "ouch" : "hit");
               continue;
             }
             if (n.type === "squirrel") {
@@ -457,6 +483,10 @@ export default function DeliveryGame() {
               beep("hit");
               continue;
             }
+            const collisionType =
+              n.type === "deer" ? "deer" : n.type === "dog" ? "dog" : "pothole";
+            const reasonPool = DELIVERY_COLLISION_FAILURES[collisionType];
+            impactFailure.current = reasonPool[Math.floor(Math.random() * reasonPool.length)];
             setHealth((h) => Math.max(0, h - (n.type === "deer" ? 2 : 1)));
             setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
             pop(
@@ -464,7 +494,8 @@ export default function DeliveryGame() {
                 ? "YOU HIT A DEER. THE DEER IS ANGRY."
                 : `${n.type.toUpperCase()} INCIDENT!`,
             );
-            beep("hit");
+            impact();
+            beep(n.type === "dog" ? "yelp" : "hit");
             continue;
           }
           if (n.y < 112) next.push(n);
@@ -473,7 +504,7 @@ export default function DeliveryGame() {
       });
       setTarget((t) => {
         if (!t.active) return t;
-        const y = t.y + dt * speed * 28;
+        const y = t.y + dt * speed * 36;
         if (y > 108) {
           setStats((s) => ({ ...s, missed: s.missed + 1, combo: 0 }));
           pop(`MISSED ${t.address}. CUSTOMER ALREADY CALLED.`);
@@ -481,11 +512,39 @@ export default function DeliveryGame() {
         }
         return { ...t, y };
       });
+      setScenery((items) => {
+        const next: Scenery[] = [];
+        for (const x of items) {
+          const n = { ...x, y: x.y + dt * speed * 36 },
+            onLeftCurb = playerLane.current < -0.04 && n.side === "left",
+            onRightCurb = playerLane.current > 2.04 && n.side === "right";
+          if (
+            n.y > 82 &&
+            n.y < 91 &&
+            (onLeftCurb || onRightCurb) &&
+            (n.kind === "abandoned" || n.kind === "tent")
+          ) {
+            const reason =
+              n.kind === "abandoned"
+                ? DELIVERY_CAR_CRASHES[Math.floor(Math.random() * DELIVERY_CAR_CRASHES.length)]
+                : "You drove into an occupied roadside tent. The person yelled OUCH; dispatch has replaced your route map with a coloring book.";
+            impactFailure.current = reason;
+            setFailure(reason);
+            setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
+            setMode("lost");
+            impact();
+            beep(n.kind === "tent" ? "ouch" : "hit");
+            continue;
+          }
+          if (n.y < 112) next.push(n);
+        }
+        return next;
+      });
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [mode, boost, slow, beep]);
+  }, [mode, boost, slow, beep, impact]);
   useEffect(() => {
     if (mode !== "play") return;
     const id = setInterval(() => {
@@ -507,39 +566,7 @@ export default function DeliveryGame() {
         "trash",
       ],
       ruralKinds: Scenery["kind"][] = ["house", "house", "trash"];
-    const moveId = window.setInterval(
-        () =>
-          setScenery((items) => {
-            const next: Scenery[] = [];
-            for (const x of items) {
-              const n = { ...x, y: x.y + 1.25 + stage * 0.12 },
-                onLeftCurb = playerLane.current < 0.18 && n.side === "left",
-                onRightCurb = playerLane.current > 1.82 && n.side === "right";
-              if (
-                n.y > 75 &&
-                n.y < 94 &&
-                (onLeftCurb || onRightCurb) &&
-                (n.kind === "abandoned" || n.kind === "tent")
-              ) {
-                setFailure(
-                  n.kind === "abandoned"
-                    ? DELIVERY_CAR_CRASHES[
-                        Math.floor(Math.random() * DELIVERY_CAR_CRASHES.length)
-                      ]
-                    : "You drove into an occupied tent. Ogdensburg located the incident paperwork faster than it has located a solution to literally anything else.",
-                );
-                setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
-                setMode("lost");
-                beep("hit");
-                continue;
-              }
-              if (n.y < 112) next.push(n);
-            }
-            return next;
-          }),
-        50,
-      ),
-      spawnId = window.setInterval(
+    const spawnId = window.setInterval(
         () => {
           const kinds = zone === "rural" ? ruralKinds : cityKinds,
             kind = kinds[Math.floor(Math.random() * kinds.length)];
@@ -556,15 +583,25 @@ export default function DeliveryGame() {
         zone === "rural" ? 2600 : 900,
       );
     return () => {
-      clearInterval(moveId);
       clearInterval(spawnId);
     };
-  }, [mode, stage, zone, beep]);
+  }, [mode, zone]);
   useEffect(() => {
     if (mode !== "play") return;
-    setZone(stage >= 3 ? "rural" : "city");
+    const startsRural = stage >= 3;
+    setZone(startsRural ? "rural" : "city");
+    if (startsRural)
+      setCommunity(communities[Math.floor(Math.random() * communities.length)]);
     const id = window.setInterval(
-      () => setZone((z) => (z === "city" ? "rural" : "city")),
+      () =>
+        setZone((current) => {
+          const next = current === "city" ? "rural" : "city";
+          if (next === "rural")
+            setCommunity(
+              communities[Math.floor(Math.random() * communities.length)],
+            );
+          return next;
+        }),
       Math.max(9000, 15000 - stage * 900),
     );
     return () => clearInterval(id);
@@ -589,7 +626,9 @@ export default function DeliveryGame() {
   useEffect(() => {
     if (mode === "play" && (health <= 0 || time <= 0)) {
       setFailure(
-        DELIVERY_FAILURES[Math.floor(Math.random() * DELIVERY_FAILURES.length)],
+        health <= 0 && impactFailure.current
+          ? impactFailure.current
+          : DELIVERY_FAILURES[Math.floor(Math.random() * DELIVERY_FAILURES.length)],
       );
       setMode("lost");
       beep("hit");
@@ -600,7 +639,6 @@ export default function DeliveryGame() {
     void finishRoute();
   }, [routeDelivered, mode, cfg.deliveries]);
   async function start() {
-    soundtrack();
     beep("start");
     const r = await fetch("/api/delivery-boy/run", {
         method: "POST",
@@ -623,11 +661,16 @@ export default function DeliveryGame() {
     setThings([]);
     setScenery([]);
     setTarget(emptyTarget);
+    setAmmo(DELIVERY_STAGES[n - 1].deliveries + 4);
+    setFailure("");
+    impactFailure.current = "";
     setLane(1);
+    deliveryAudio.transition("action");
     setMode("play");
   }
   async function finishRoute() {
     setMode("between");
+    deliveryAudio.transition("menu");
     const nextSeq = sequence + 1,
       checkpoint = {
         runId: run?.runId,
@@ -653,15 +696,25 @@ export default function DeliveryGame() {
       });
       if (r.ok) setSequence(nextSeq);
     }
-    if (Math.random() < 0.72)
+    if (Math.random() < 0.58) {
       setComplaint(
         DELIVERY_COMPLAINTS[
           Math.floor(Math.random() * DELIVERY_COMPLAINTS.length)
         ],
       );
+      setSuccessMessage("");
+    } else {
+      setComplaint("");
+      setSuccessMessage(
+        DELIVERY_ROUTE_SUCCESSES[
+          Math.floor(Math.random() * DELIVERY_ROUTE_SUCCESSES.length)
+        ],
+      );
+    }
   }
   async function nextRoute() {
     setComplaint("");
+    setSuccessMessage("");
     if (stage < DELIVERY_STAGES.length) {
       begin(stage + 1);
       return;
@@ -678,6 +731,7 @@ export default function DeliveryGame() {
       }),
       d = await r.json();
     setReward(d);
+    if (r.ok) beep("victory");
     setMode(r.ok ? "won" : "lost");
   }
   function touchEnd(e: React.TouchEvent) {
@@ -742,9 +796,13 @@ export default function DeliveryGame() {
               <small>SCORE</small>
               <b>{stats.score}</b>
             </div>
-            <div>
+            <div className={`combo-hud combo-${Math.min(4, stats.combo)}`}>
               <small>COMBO</small>
               <b>{stats.combo}×</b>
+            </div>
+            <div className={ammo < 3 ? "ammo-hud critical" : "ammo-hud"}>
+              <small>SUBS</small>
+              <b>🥪 {ammo}</b>
             </div>
             {slow > 0 && (
               <div className="slow-hud">
@@ -757,7 +815,7 @@ export default function DeliveryGame() {
             </button>
           </header>
           <section
-            className={`delivery-world zone-${zone} ${time < 16 ? "panic" : ""} ${stage >= 4 ? "night" : ""} ${slow ? "slow-motion" : ""}`}
+            className={`delivery-world zone-${zone} ${time < 16 ? "panic" : ""} ${stage >= 4 ? "night" : ""} ${slow ? "slow-motion" : ""} ${shaking ? "impact-shake" : ""}`}
             onTouchStart={(e) =>
               (touch.current = {
                 x: e.touches[0].clientX,
@@ -768,6 +826,15 @@ export default function DeliveryGame() {
             onTouchMove={touchMove}
             onTouchEnd={touchEnd}
           >
+            <div className="horizon-layer" />
+            <div className="midground-layer" />
+            {zone === "rural" && (
+              <div className="community-sign" key={`${community.name}-${stage}`}>
+                <small>ENTERING</small>
+                <b>{community.name}</b>
+                <span>{community.warning}</span>
+              </div>
+            )}
             {target.active && (
               <div className="address-ticket">
                 <small>DELIVER TO</small>
@@ -787,7 +854,12 @@ export default function DeliveryGame() {
               {scenery.map((x) => (
                 <i
                   className={`scenery ${x.kind} ${x.side}`}
-                  style={{ top: `${x.y}%` }}
+                  style={
+                    {
+                      top: `${x.y}%`,
+                      "--depth": Math.max(0.48, Math.min(1.08, 0.48 + x.y / 175)),
+                    } as CSSProperties
+                  }
                   key={x.id}
                 >
                   {x.kind === "house"
@@ -805,14 +877,24 @@ export default function DeliveryGame() {
                 <>
                   <div
                     className={`house decoy ${target.side === "left" ? "right" : "left"}`}
-                    style={{ top: `${target.y + 7}%` }}
+                    style={
+                      {
+                        top: `${target.y + 7}%`,
+                        "--depth": Math.max(0.5, Math.min(1.08, 0.5 + target.y / 170)),
+                      } as CSSProperties
+                    }
                   >
                     <span>🏠</span>
                     <b>{target.neighbor}</b>
                   </div>
                   <div
                     className={`house target ${target.side} ${target.y >= 60 && target.y <= 88 ? "in-range" : ""}`}
-                    style={{ top: `${target.y}%` }}
+                    style={
+                      {
+                        top: `${target.y}%`,
+                        "--depth": Math.max(0.5, Math.min(1.08, 0.5 + target.y / 170)),
+                      } as CSSProperties
+                    }
                   >
                     <span>🏠</span>
                     <b>{target.address}</b>
@@ -828,13 +910,19 @@ export default function DeliveryGame() {
                 <i
                   className={`hazard ${x.type}`}
                   key={x.id}
-                  style={{ left: `${16.66 + x.lane * 33.33}%`, top: `${x.y}%` }}
+                  style={
+                    {
+                      left: `${16.66 + x.lane * 33.33}%`,
+                      top: `${x.y}%`,
+                      "--depth": Math.max(0.45, Math.min(1.12, 0.45 + x.y / 145)),
+                    } as CSSProperties
+                  }
                 >
                   {icons[x.type]}
                 </i>
               ))}
               <div
-                className={`driver ${boost ? "boost" : ""}`}
+                className={`driver ${boost ? "boost" : ""} ${skidding ? "skidding" : ""}`}
                 style={{ left: `${lane * 50}%` }}
               >
                 <img
@@ -844,6 +932,7 @@ export default function DeliveryGame() {
                 />
                 <b className="wrapped-sub">SUB</b>
               </div>
+              {skidding && <i className="skid-trail" />}
               {thrown && (
                 <i
                   key={thrown.id}
@@ -855,6 +944,15 @@ export default function DeliveryGame() {
                   ▰
                 </i>
               )}
+              {particles.map((particle) => (
+                <i
+                  key={particle.id}
+                  className={`delivery-particles ${particle.side}`}
+                  style={{ top: `${particle.y}%` }}
+                >
+                  ✦ ✧ ✦ · ✧
+                </i>
+              ))}
             </div>
             {stage >= 4 && <div className="headlights" />}
             {toast && <div className="delivery-toast">{toast}</div>}
@@ -875,10 +973,9 @@ export default function DeliveryGame() {
       {mode === "between" && (
         <section className="delivery-summary">
           <small>ROUTE {stage} CLEAR</small>
-          <h1>{complaint ? "CUSTOMER FEEDBACK" : "MIRACLE: NO COMPLAINT"}</h1>
+          <h1>{complaint ? "CUSTOMER FEEDBACK" : "ROUTE LEGEND"}</h1>
           <div className="complaint-card">
-            {complaint ||
-              "Everything was great. This event has a 0.0004% historical occurrence rate."}
+            {complaint || successMessage}
           </div>
           <div className="route-stats">
             <b>

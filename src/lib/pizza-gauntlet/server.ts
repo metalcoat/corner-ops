@@ -36,6 +36,24 @@ export async function completeRun(runId:string,token:string){
  await getSql()`UPDATE pizza_gauntlet_runs SET status='won',completed_at=NOW(),updated_at=NOW() WHERE id=${runId}`;
  return(await getSql()`INSERT INTO pizza_gauntlet_rewards(id,run_id,code,prize_type,terms,completion_stats,expires_at)VALUES(${randomUUID()},${runId},${rewardCode},${PRIZE.name},${JSON.stringify(PRIZE)}::jsonb,${JSON.stringify(stats)}::jsonb,${expires}) RETURNING code,prize_type,issued_at,expires_at`)[0];
 }
+export async function checkpointArcadeRun(data:{runId:string;sequence:number;elapsed:number;score:number;delivered:number;perfects:number;ruined:number},token:string){
+ const run=await authenticatedRun(data.runId,token);if(!run)throw new Error("Run credentials are invalid.");if(run.status!=="active")throw new Error("This run is already closed.");
+ if(data.sequence!==Number(run.sequence)+1)throw new Error("Checkpoint sequence is stale.");
+ const previous=run.stats||{},elapsed=Math.floor(data.elapsed),delivered=Math.floor(data.delivered),score=Math.floor(data.score),perfects=Math.floor(data.perfects),ruined=Math.floor(data.ruined);
+ if(elapsed<Number(run.active_seconds)||elapsed-Number(run.active_seconds)>15||elapsed>65)throw new Error("Impossible arcade elapsed time.");
+ if(delivered<Number(previous.delivered||0)||delivered-Number(previous.delivered||0)>12||perfects>delivered*3+6||score<0||score>250000||ruined<0||ruined>1)throw new Error("Impossible arcade progression.");
+ const stats={mode:"arcade60",score,delivered,perfects,ruined};const entry={at:new Date().toISOString(),sequence:data.sequence,activeSeconds:elapsed,score,delivered,perfects,ruined};
+ await getSql()`UPDATE pizza_gauntlet_runs SET sequence=${data.sequence},active_seconds=${elapsed},stats=${JSON.stringify(stats)}::jsonb,checkpoints=(checkpoints||'[]'::jsonb)||${JSON.stringify([entry])}::jsonb,updated_at=NOW() WHERE id=${data.runId}`;return{ok:true};
+}
+export async function completeArcadeRun(data:{runId:string;score:number;delivered:number;perfects:number;ruined:number},token:string){
+ const run=await authenticatedRun(data.runId,token);if(!run)throw new Error("Run credentials are invalid.");if(run.status==="won")return(await getSql()`SELECT code,prize_type,issued_at,expires_at FROM pizza_gauntlet_rewards WHERE run_id=${data.runId}`)[0];
+ const wallSeconds=(Date.now()-new Date(String(run.started_at)).getTime())/1000,stats=run.stats||{},checks=Array.isArray(run.checkpoints)?run.checkpoints.length:0;
+ if(wallSeconds<55||Number(run.active_seconds)<55||checks<5)throw new Error("The 60-second shift has not been validated yet.");
+ if(data.ruined!==0||Number(stats.ruined)!==0||data.delivered<3||data.delivered!==Number(stats.delivered)||data.score!==Number(stats.score))throw new Error("This arcade result is not prize eligible.");
+ const rewardCode=code(),expires=new Date(Date.now()+PRIZE.expiresDays*86400000).toISOString(),finalStats={...stats,score:data.score,delivered:data.delivered,perfects:data.perfects,ruined:0};
+ await getSql()`UPDATE pizza_gauntlet_runs SET status='won',stats=${JSON.stringify(finalStats)}::jsonb,completed_at=NOW(),updated_at=NOW() WHERE id=${data.runId}`;
+ return(await getSql()`INSERT INTO pizza_gauntlet_rewards(id,run_id,code,prize_type,terms,completion_stats,expires_at)VALUES(${randomUUID()},${data.runId},${rewardCode},${PRIZE.name},${JSON.stringify(PRIZE)}::jsonb,${JSON.stringify(finalStats)}::jsonb,${expires}) RETURNING code,prize_type,issued_at,expires_at`)[0];
+}
 export async function leaderboard(){await ensureGauntletSchema();return getSql()`SELECT player_name,completed_at,active_seconds,(stats->>'profit')::numeric profit,(stats->>'accuracy')::numeric accuracy,(stats->>'pizzasMade')::int pizzas_made,(stats->>'highestCombo')::int highest_combo,(stats->>'remakes')::int remakes,(stats->>'unfairComplaints')::int unfair_complaints FROM pizza_gauntlet_runs WHERE status='won' ORDER BY (stats->>'profit')::numeric DESC NULLS LAST LIMIT 50`;}
 export async function findRewards(query:string){await ensureGauntletSchema();const q=`%${query.trim()}%`;return getSql()`SELECT reward.*,run.player_name,run.active_seconds FROM pizza_gauntlet_rewards reward JOIN pizza_gauntlet_runs run ON run.id=reward.run_id WHERE ${query.trim()===""} OR reward.code ILIKE ${q} OR run.player_name ILIKE ${q} ORDER BY reward.issued_at DESC LIMIT 50`;}
 export async function redeemReward(codeValue:string,actor:string,note:string){await ensureGauntletSchema();const rows=await getSql()`UPDATE pizza_gauntlet_rewards SET redeemed_at=NOW(),redeemed_by=${actor},redemption_note=${note.slice(0,300)} WHERE code=${codeValue.trim().toUpperCase()} AND redeemed_at IS NULL AND(expires_at IS NULL OR expires_at>NOW()) RETURNING *`;if(!rows[0])throw new Error("Code is invalid, expired, or already redeemed.");return rows[0];}

@@ -1,79 +1,486 @@
 "use client";
-import { useEffect,useRef,useState } from "react";
-import { EVENTS,GAME_TITLE,PIZZA_SIZES,PRIZE,STAGES,TOPPINGS } from "@/lib/pizza-gauntlet/config";
-import { comboMultiplier,INITIAL_STATS,randomTicket,scorePizza } from "@/lib/pizza-gauntlet/engine";
-import type { GauntletStats,PizzaBuild,PizzaSize,PizzaTicket,RunCheckpoint,Topping } from "@/lib/pizza-gauntlet/types";
-
-type Phase="size"|"sauce"|"cheese"|"toppings"|"oven"|"cut"|"box"|"result";
-type Mark={id:number;kind:"sauce"|"cheese"|Topping;x:number;y:number;r:number};
-type Run={runId:string;token:string};
-type Result={accuracy:number;perfect:boolean;parts:Record<string,number>;earned:number;damage:number;headline:string};
-type Complaint={title:string;message:string;controlled:boolean;effects:Partial<GauntletStats>};
-type RushChoice={label:string;sanity?:number;profit?:number;seconds?:number;reply:string};
-type RushEvent={id:string;icon:string;title:string;message:string;choices:[RushChoice,RushChoice]};
-const RUSHES:RushEvent[]=[
- {id:"phone",icon:"☎",title:"PHONE!",message:"They want to know every topping while you are holding cheese.",choices:[{label:"ANSWER IT",seconds:5,reply:"They begin with: ‘So what do you have?’"},{label:"LET IT RING",sanity:-5,reply:"It immediately rings again."}]},
- {id:"driver",icon:"◉",title:"DRIVER STARE",message:"A delivery driver is 19 minutes early and has selected direct eye contact.",choices:[{label:"STARE BACK",sanity:2,reply:"You have established dominance."},{label:"SAY 20 MINUTES",seconds:-4,reply:"They ask again in eleven seconds."}]},
- {id:"printer",icon:"▤",title:"PRINTER SCREAMING",message:"It has paper. It has ink. It has chosen violence.",choices:[{label:"UNPLUG / REPLUG",seconds:4,reply:"Ancient ritual successful."},{label:"HIT IT",profit:-3,reply:"Percussive maintenance was not covered."}]},
- {id:"counter",icon:"!",title:"COUNTER CUSTOMER",message:"They are ready to order but have not looked at the menu.",choices:[{label:"WAIT PATIENTLY",sanity:-2,seconds:3,reply:"‘Give me just a minute.’"},{label:"SUGGEST CHEESE",profit:2,reply:"You have sold a pizza through force of will."}]},
- {id:"oven",icon:"♨",title:"SOMETHING BEEPED",message:"Nobody knows which timer. Everyone looks at you.",choices:[{label:"CHECK THE OVEN",seconds:-2,sanity:2,reply:"Not yours. Still: responsible."},{label:"YELL WHOSE IS THAT",sanity:-4,reply:"Silence has won."}]},
- {id:"online",icon:"⚡",title:"ONLINE ORDER!",message:"Notes: EXTRA CRISPY. NOT DRY. LOTS OF SAUCE. NOT MESSY.",choices:[{label:"ACCEPT REALITY",sanity:-2,profit:3,reply:"The machine prints another copy."},{label:"READ IT AGAIN",seconds:-5,reply:"It did not improve."}]},
- {id:"owner",icon:"★",title:"KNOWS THE OWNER",message:"They cannot recall the owner's name, but the bond is apparently profound.",choices:[{label:"FAKE DISCOUNT",profit:-5,reply:"They expected more."},{label:"CONGRATULATE THEM",sanity:3,reply:"Friendship acknowledged. Discount denied."}]},
-]; 
-const SAVE="earn-your-jumbo-arcade-v2";
-const fresh=(id:string):PizzaBuild=>({ticketId:id,dough:100,sauceOz:0,cheeseOz:0,sauceSpread:0,cheeseSpread:0,toppings:{},bakeSeconds:0,boxed:false});
-const dollars=(n:number)=>`$${n.toFixed(2)}`;
-function sound(type:"tap"|"good"|"bad"|"ticket",mute:boolean){if(mute)return;const A=window.AudioContext||window.webkitAudioContext;if(!A)return;const c=new A(),o=c.createOscillator(),g=c.createGain(),duration=type==="ticket"?.72:.18;o.type=type==="bad"?"sawtooth":"square";o.frequency.value=type==="good"?880:type==="bad"?145:type==="ticket"?720:420;if(type==="ticket"){o.frequency.setValueAtTime(720,c.currentTime);o.frequency.setValueAtTime(520,c.currentTime+.14);o.frequency.setValueAtTime(720,c.currentTime+.38);o.frequency.setValueAtTime(520,c.currentTime+.52)}g.gain.value=type==="ticket"?.075:.055;g.gain.exponentialRampToValueAtTime(.001,c.currentTime+duration);o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+duration)}
-declare global{interface Window{webkitAudioContext?:typeof AudioContext}}
-
-export default function ArcadeGame(){
- const [mode,setMode]=useState<"home"|"play"|"won"|"lost">("home"),[phase,setPhase]=useState<Phase>("size"),[stage,setStage]=useState(1),[stageDone,setStageDone]=useState(0),[stats,setStats]=useState({...INITIAL_STATS});
- const [ticket,setTicket]=useState<PizzaTicket>(()=>randomTicket(1,0)),[build,setBuild]=useState<PizzaBuild>(()=>fresh("")),[marks,setMarks]=useState<Mark[]>([]),[cuts,setCuts]=useState<number[]>([]),[selectedTop,setSelectedTop]=useState<Topping>("pepperoni");
- const [time,setTime]=useState(STAGES[0].ticketSeconds),[active,setActive]=useState(0),[ovenAt,setOvenAt]=useState(0),[result,setResult]=useState<Result|null>(null),[complaint,setComplaint]=useState<Complaint|null>(null),[rush,setRush]=useState<RushEvent|null>(null),[rushReply,setRushReply]=useState(""),[run,setRun]=useState<Run|null>(null),[sequence,setSequence]=useState(0),[muted,setMuted]=useState(false),[shake,setShake]=useState(false),[reward,setReward]=useState<any>(null),[name,setName]=useState("");
- const pizza=useRef<HTMLDivElement>(null),drag=useRef({down:false,x:0,y:0,sx:0,sy:0}),coverage=useRef({sauce:new Set<string>(),cheese:new Set<string>(),toppings:{} as Record<string,Set<string>>}),music=useRef<{ctx:AudioContext;gain:GainNode;timer:number;step:number;urgency:number;stopped:boolean}|null>(null),cfg=STAGES[stage-1],recipe=PIZZA_SIZES[ticket.size];
- const instruction:Record<Phase,string>={size:"Pick the ticket size",sauce:"Drag sauce in circles",cheese:"Drag cheese across the whole pie",toppings:"Place exactly what the ticket wants",oven:"Watch the bake—pull it at the right second",cut:`Swipe through the center · need ${ticket.slices} slices`,box:"Tap the box to finish",result:""};
-
- useEffect(()=>{if(mode!=="play"||phase==="result")return;const id=setInterval(()=>{setActive(v=>v+1);setTime(v=>Math.max(0,v-1))},1000);return()=>clearInterval(id)},[mode,phase]);
- useEffect(()=>{if(mode!=="play"||phase==="result"||phase==="size"||rush)return;const id=window.setTimeout(()=>{const next=RUSHES[Math.floor(Math.random()*RUSHES.length)];setRush(next);setRushReply("");sound(next.id==="phone"?"ticket":"bad",muted)},Math.max(5000,11000-stage*900+Math.random()*5000));return()=>window.clearTimeout(id)},[mode,phase,rush,stage,muted]);
- useEffect(()=>{if(!rush)return;const id=window.setTimeout(()=>{setStats(s=>({...s,sanity:Math.max(0,s.sanity-6)}));setRushReply("Too slow. Somehow this was also your fault.");flash(false);window.setTimeout(()=>setRush(null),900)},Math.max(2600,4800-stage*250));return()=>window.clearTimeout(id)},[rush,stage]);
- useEffect(()=>{if(music.current)music.current.gain.gain.setTargetAtTime(muted?0:.055,music.current.ctx.currentTime,.05)},[muted]);
- useEffect(()=>{if(music.current)music.current.urgency=Math.max(0,Math.min(1,(28-time)/28))},[time]);
- useEffect(()=>()=>{if(music.current){music.current.stopped=true;window.clearTimeout(music.current.timer);void music.current.ctx.close()}},[]);
- useEffect(()=>{if(phase!=="oven"||!ovenAt)return;const id=setInterval(()=>setBuild(b=>({...b,bakeSeconds:(Date.now()-ovenAt)/1000})),50);return()=>clearInterval(id)},[phase,ovenAt]);
- useEffect(()=>{if(mode==="play"&&time===0){setMode("lost");flash(false)}},[time,mode]);
- function flash(good:boolean){sound(good?"good":"bad",muted);setShake(true);setTimeout(()=>setShake(false),400)}
- function startMusic(){if(music.current)return;const A=window.AudioContext||window.webkitAudioContext;if(!A)return;const ctx=new A(),gain=ctx.createGain(),filter=ctx.createBiquadFilter();gain.gain.value=muted?0:.055;filter.type="lowpass";filter.frequency.value=2600;gain.connect(filter);filter.connect(ctx.destination);const scale=[220,261.63,293.66,329.63,392,440,392,329.63,196,246.94,293.66,369.99,392,369.99,293.66,246.94],bass=[110,110,98,98,130.81,130.81,123.47,123.47],state={ctx,gain,timer:0,step:0,urgency:0,stopped:false};const note=(frequency:number,type:OscillatorType,volume:number,length:number,when=0)=>{const now=ctx.currentTime+when,o=ctx.createOscillator(),v=ctx.createGain();o.type=type;o.frequency.setValueAtTime(frequency,now);v.gain.setValueAtTime(volume,now);v.gain.exponentialRampToValueAtTime(.001,now+length);o.connect(v);v.connect(gain);o.start(now);o.stop(now+length)};const drum=(high=false)=>{const now=ctx.currentTime,o=ctx.createOscillator(),v=ctx.createGain();o.type="square";o.frequency.setValueAtTime(high?150:75,now);o.frequency.exponentialRampToValueAtTime(high?70:38,now+.07);v.gain.setValueAtTime(high?.16:.32,now);v.gain.exponentialRampToValueAtTime(.001,now+.08);o.connect(v);v.connect(gain);o.start();o.stop(now+.09)};const tick=()=>{if(state.stopped)return;const s=state.step++,urgent=state.urgency,beat=s%16;note(scale[beat],beat%4===0?"square":"triangle",.34,.11);if(beat%2===0)note(bass[Math.floor(beat/2)],"square",.2,.13);if(beat%4===0)drum();else if(beat%4===2)drum(true);if(urgent>.35&&beat%2===1)note(scale[beat]*2,"sine",.1,.055);if(urgent>.72){note(880+(beat%2)*220,"square",.07,.045,.035);filter.frequency.setTargetAtTime(3600,ctx.currentTime,.05)}else filter.frequency.setTargetAtTime(2600,ctx.currentTime,.1);const delay=Math.round(185-urgent*82);state.timer=window.setTimeout(tick,delay)};music.current=state;tick()}
- function newPizza(nextStage=stage){const t=randomTicket(nextStage,stats.ordersCompleted+1);setTicket(t);setBuild(fresh(t.id));setMarks([]);setCuts([]);coverage.current={sauce:new Set(),cheese:new Set(),toppings:{}};setPhase("size");setTime(STAGES[nextStage-1].ticketSeconds);setResult(null);sound("ticket",muted)}
- async function clockIn(){startMusic();const r=await fetch("/api/pizza-gauntlet/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"start",playerName:name})}),d=await r.json();if(!r.ok)return;setRun(d);setMode("play");newPizza(1)}
- function pizzaPoint(e:React.PointerEvent){if(!pizza.current)return null;const r=pizza.current.getBoundingClientRect(),x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;return Math.hypot(x-.5,y-.5)<.47?{x,y,r}:null}
- function paint(e:React.PointerEvent){const p=pizzaPoint(e);if(!p)return;const kind=phase==="sauce"?"sauce":phase==="cheese"?"cheese":phase==="toppings"?selectedTop:null;if(!kind)return;setMarks(m=>[...m.slice(-299),{id:Date.now()+Math.random(),kind,x:p.x,y:p.y,r:Math.random()*180}]);const cell=`${Math.floor(p.x*5)}-${Math.floor(p.y*5)}`;if(kind==="sauce"||kind==="cheese"){const amount=kind==="sauce"?"sauceOz":"cheeseOz",spread=kind==="sauce"?"sauceSpread":"cheeseSpread";coverage.current[kind].add(cell);setBuild(b=>({...b,[amount]:Number((b[amount]+(kind==="sauce"?.1:.16)).toFixed(2)),[spread]:Math.min(100,Math.round(coverage.current[kind].size/17*100))}))}else{coverage.current.toppings[kind]??=new Set();coverage.current.toppings[kind].add(cell);setBuild(b=>{const old=b.toppings[kind]||{count:0,spread:0};return{...b,toppings:{...b.toppings,[kind]:{count:old.count+1,spread:Math.min(100,Math.round(coverage.current.toppings[kind].size/10*100))}}}})}}
- function down(e:React.PointerEvent){e.currentTarget.setPointerCapture(e.pointerId);drag.current={down:true,x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY};paint(e)}
- function move(e:React.PointerEvent){if(!drag.current.down||Math.hypot(e.clientX-drag.current.x,e.clientY-drag.current.y)<8)return;drag.current.x=e.clientX;drag.current.y=e.clientY;paint(e)}
- function up(e:React.PointerEvent){if(!drag.current.down)return;drag.current.down=false;if(phase!=="cut"||!pizza.current)return;const r=pizza.current.getBoundingClientRect(),dx=e.clientX-drag.current.sx,dy=e.clientY-drag.current.sy;if(Math.hypot(dx,dy)<r.width*.55){flash(false);return}setCuts(c=>{const n=[...c,Math.atan2(dy,dx)*180/Math.PI];setBuild(b=>({...b,slices:n.length*2}));return n});sound("tap",muted)}
- function next(){sound("tap",muted);if(phase==="sauce"&&build.sauceOz<1){flash(false);return}if(phase==="cheese"&&build.cheeseOz<2){flash(false);return}if(phase==="toppings"){setPhase("oven");setOvenAt(Date.now());return}const order:Phase[]=["size","sauce","cheese","toppings","oven","cut","box","result"];setPhase(order[order.indexOf(phase)+1])}
- function chooseSize(s:PizzaSize){setBuild(b=>({...b,size:s,dough:100}));setPhase("sauce");sound("tap",muted)}
- function pull(){setOvenAt(0);setPhase("cut");sound("tap",muted)}
- function maybeComplaint(accuracy:number){if(Math.random()>=Math.min(.55,.16+stage*.065))return;const controlled=accuracy<78,choices=EVENTS.filter(e=>e.minStage<=stage&&Object.values(e.effects).some(v=>Number(v)<0)),ev=choices[Math.floor(Math.random()*choices.length)],lines=["The toppings are gathered in one emotional-support corner.","The crust has entered a charcoal-based phase of its life.","This pizza appears to have been cut during an earthquake.","Customer found the one square inch without cheese and has retained counsel."];window.setTimeout(()=>setComplaint({title:controlled?"OKAY, THIS ONE'S ON YOU":ev.title,message:controlled?lines[Math.floor(Math.random()*lines.length)]:ev.message,controlled,effects:controlled?{sanity:-4,reputation:-3,complaints:1}:{...ev.effects,complaints:Number(ev.effects.complaints||0)+1,unfairComplaints:Number(ev.effects.unfairComplaints||0)+1}}),650)}
- function dismissComplaint(){if(!complaint)return;setStats(s=>{const n={...s};for(const[k,v]of Object.entries(complaint.effects))if(typeof v==="number")n[k as keyof GauntletStats]=Number(n[k as keyof GauntletStats])+v;if(!complaint.controlled)n.combo=0;return{...n,sanity:Math.max(0,Math.min(100,n.sanity)),reputation:Math.max(0,Math.min(100,n.reputation))}});setComplaint(null)}
- function answerRush(choice:RushChoice){setStats(s=>({...s,sanity:Math.max(0,Math.min(100,s.sanity+(choice.sanity||0))),profit:Number((s.profit+(choice.profit||0)).toFixed(2))}));setTime(t=>Math.max(0,t+(choice.seconds||0)));setRushReply(choice.reply);sound((choice.sanity||0)>0||(choice.profit||0)>0||(choice.seconds||0)>0?"good":"bad",muted);window.setTimeout(()=>setRush(null),750)}
- async function finish(){const scored=scorePizza({...build,boxed:true},ticket),late=Math.max(0,Math.round((cfg.ticketSeconds-time)/cfg.ticketSeconds*3)),damage=scored.accuracy<65?10+late:0,combo=scored.perfect?stats.combo+1:0,earned=Number((recipe.price*scored.accuracy/100*comboMultiplier(combo)).toFixed(2));const nextStats:GauntletStats={...stats,profit:Number((stats.profit+earned-(damage?recipe.price:0)).toFixed(2)),sanity:Math.max(0,stats.sanity-damage),reputation:Math.max(0,Math.min(100,stats.reputation+(scored.accuracy>=90?2:-5))),accuracy:Math.round((stats.accuracy*stats.ordersCompleted+scored.accuracy)/(stats.ordersCompleted+1)),ordersCompleted:stats.ordersCompleted+1,pizzasMade:stats.pizzasMade+1,combo,highestCombo:Math.max(stats.highestCombo,combo),remakes:stats.remakes+(damage?1:0),waste:stats.waste+(damage?1:0)};setStats(nextStats);setResult({...scored,earned,damage,headline:scored.perfect?"PERFECT PIE!":scored.accuracy>=85?"NICE SAVE!":scored.accuracy>=65?"IT'LL EAT":"REMAKE!"});setPhase("result");flash(scored.accuracy>=85);maybeComplaint(scored.accuracy);if(run){const seq=sequence+1,cp:RunCheckpoint={runId:run.runId,stage,stats:nextStats,activeSeconds:active,stageOrders:stageDone+1,sequence:seq};const r=await fetch("/api/pizza-gauntlet/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"checkpoint",token:run.token,checkpoint:cp})});if(r.ok)setSequence(seq)}}
- async function continueRun(){if(stats.sanity<=0||stats.reputation<=0||stats.profit<=0){setMode("lost");return}const done=stageDone+1;if(done>=cfg.ordersRequired){if(stage===STAGES.length&&run){const r=await fetch("/api/pizza-gauntlet/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"complete",runId:run.runId,token:run.token})}),d=await r.json();setReward(d);setMode("won");return}const n=stage+1;setStage(n);setStageDone(0);newPizza(n)}else{setStageDone(done);newPizza()}}
- const requested=new Set(ticket.toppings);
- return <main className={`arcade ${shake?"impact":""}`}>
-  {mode==="home"&&<section className="arcade-home"><div className="arcade-logo">CORNER DELI</div><h1>{GAME_TITLE}</h1><p>Make it right. Make it fast. Survive the shift.</p><div className="prize-burst">WIN A<br/><b>JUMBO CHEESE PIZZA</b><small>{PRIZE.toppings}</small></div><input value={name} onChange={e=>setName(e.target.value)} placeholder="Cook name"/><button className="arcade-start" onClick={clockIn}>START SHIFT</button></section>}
-  {mode==="play"&&<><header className="arcade-hud"><div><small>STAGE {stage}</small><b>{cfg.name}</b></div><div className={`rush-time ${time<25?"danger":""}`}>{time}s</div><div><small>PROFIT</small><b>{dollars(stats.profit)}</b></div><div><small>SANITY</small><b>{stats.sanity}%</b></div><div><small>COMBO</small><b>{comboMultiplier(stats.combo)}×</b></div><button onClick={()=>setMuted(!muted)}>{muted?"🔇":"🔊"}</button></header>
-   <section className="arcade-ticket"><span>ORDER #{100+stats.ordersCompleted+1}</span><strong>{PIZZA_SIZES[ticket.size].label} {ticket.toppings.length?ticket.toppings.map(t=>TOPPINGS[t].label).join(" + "):"Cheese Pizza"}</strong><em>{ticket.wellDone?"WELL DONE · ":""}CUT {ticket.slices}</em></section>
-   <section className="arcade-stage"><div className="stepper">{["SIZE","SAUCE","CHEESE","TOP","BAKE","CUT","BOX"].map((x,i)=><i className={i<=["size","sauce","cheese","toppings","oven","cut","box"].indexOf(phase)?"active":""} key={x}>{x}</i>)}</div><h2>{instruction[phase]}</h2>
-    {phase==="size"&&<div className="big-choices">{(Object.keys(PIZZA_SIZES) as PizzaSize[]).map(s=><button key={s} onClick={()=>chooseSize(s)}><b>{PIZZA_SIZES[s].inches}″</b>{PIZZA_SIZES[s].label}</button>)}</div>}
-    {!(["size","result"] as Phase[]).includes(phase)&&<><div className={`arcade-pizza phase-${phase}`} ref={pizza} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}><div className="coverage sauce-cover" style={{opacity:Math.min(.94,(build.sauceSpread||0)/100),scale:`${.35+(build.sauceSpread||0)/155}`}}/><div className="coverage cheese-cover" style={{opacity:Math.min(.95,(build.cheeseSpread||0)/100),scale:`${.35+(build.cheeseSpread||0)/155}`}}/>{marks.map(m=><i key={m.id} className={`mark ${m.kind}`} style={{left:`${m.x*100}%`,top:`${m.y*100}%`,rotate:`${m.r}deg`}}/>)}{cuts.map((r,i)=><i className="slice-line" style={{rotate:`${r}deg`}} key={i}/>)}{phase==="oven"&&<div className={`oven-clock ${build.bakeSeconds>recipe.bake+5?"burn":""}`}>{build.bakeSeconds.toFixed(1)}<small>target {recipe.bake+(ticket.wellDone?3:0)}s</small></div>}</div>
-     {phase==="sauce"&&<div className="live-meter"><span style={{width:`${Math.min(100,build.sauceOz/recipe.sauce*100)}%`}}/><b>{cfg.guidance==="full"?`${build.sauceOz.toFixed(1)} / ${recipe.sauce} oz`:"Sauce by feel"}</b></div>}{phase==="cheese"&&<div className="live-meter cheese-meter"><span style={{width:`${Math.min(100,build.cheeseOz/recipe.cheese*100)}%`}}/><b>{cfg.guidance==="full"?`${build.cheeseOz.toFixed(1)} / ${recipe.cheese} oz`:"Cheese by feel"}</b></div>}
-     {phase==="toppings"&&<div className="arcade-toppings">{(Object.keys(TOPPINGS) as Topping[]).map(t=><button className={`${selectedTop===t?"selected":""} ${requested.has(t)?"wanted":""}`} onClick={()=>setSelectedTop(t)} key={t}>{TOPPINGS[t].label}<small>{build.toppings[t]?.count||0}</small></button>)}</div>}
-     <div className="arcade-action">{["sauce","cheese","toppings"].includes(phase)&&<button onClick={next}>{phase==="toppings"?"SEND TO OVEN":"NEXT"} →</button>}{phase==="oven"&&<button className="pull" onClick={pull}>PULL IT!</button>}{phase==="cut"&&<button disabled={!build.slices} onClick={next}>DONE CUTTING ({build.slices||0})</button>}{phase==="box"&&<button className="box-button" onClick={finish}>📦 BOX & SERVE</button>}</div></>}
-    {phase==="result"&&result&&<section className={`instant-result ${result.accuracy>=85?"good":"bad"}`}><div className="score-ring"><b>{result.accuracy}</b><small>ACCURACY</small></div><h2>{result.headline}</h2><div className="score-parts">{Object.entries(result.parts).map(([k,v])=><span key={k}><small>{k}</small><b>{v}%</b></span>)}</div><div className="payout"><b>+{dollars(result.earned)}</b>{result.damage>0&&<strong>−{result.damage} sanity · REMAKE</strong>}{result.perfect&&<strong>COMBO {comboMultiplier(stats.combo)}×</strong>}</div><button onClick={continueRun}>NEXT TICKET →</button></section>}
-   </section><footer className="arcade-progress"><span style={{width:`${stageDone/cfg.ordersRequired*100}%`}}/><b>{stageDone}/{cfg.ordersRequired} pizzas this shift</b></footer></>}
-  {complaint&&<div className={`complaint-pop ${complaint.controlled?"controlled":"uncontrolled"}`}><article><small>{complaint.controlled?"CONTROLLABLE · YOUR MISTAKE":"UNCONTROLLABLE · CUSTOMER LOGIC"}</small><h2>{complaint.title}</h2><p>{complaint.message}</p><div>{Object.entries(complaint.effects).map(([k,v])=><b key={k}>{k} {Number(v)>0?"+":""}{v}</b>)}</div><button onClick={dismissComplaint}>{complaint.controlled?"OWN IT & REMAKE":"ABSORB COMPLAINT"}</button></article></div>}
-  {rush&&<aside className="rush-interrupt"><div className="rush-icon">{rush.icon}</div><small>DECIDE NOW</small><h2>{rush.title}</h2><p>{rushReply||rush.message}</p>{!rushReply&&<div>{rush.choices.map(c=><button key={c.label} onClick={()=>answerRush(c)}>{c.label}</button>)}</div>}<i/> </aside>}
-  {mode==="lost"&&<section className="arcade-home"><h1>SHIFT OVER</h1><p>The restaurant won this round.</p><button className="arcade-start" onClick={()=>location.reload()}>TRY AGAIN</button></section>}
-  {mode==="won"&&<section className="arcade-home"><div className="arcade-logo">YOU SURVIVED</div><h1>JUMBO EARNED</h1><div className="prize-burst"><b>{reward?.code||reward?.error||"VALIDATING RUN"}</b></div></section>}
- </main>
+import { useCallback, useEffect, useRef, useState } from "react";
+type Layer = "dough" | "sauce" | "cheese";
+type Tray = {
+  id: number;
+  x: number;
+  step: number;
+  crisis: boolean;
+  fire: boolean;
+};
+type Burst = { id: number; x: number; layer: Layer; bad?: boolean };
+type Run = { runId: string; token: string };
+const LAYERS: Layer[] = ["dough", "sauce", "cheese"],
+  KEYS: Record<string, Layer> = {
+    ArrowLeft: "dough",
+    ArrowDown: "sauce",
+    ArrowRight: "cheese",
+    a: "dough",
+    s: "sauce",
+    d: "cheese",
+  },
+  ICON = { dough: "◯", sauce: "●", cheese: "▰" };
+class Audio {
+  ctx: AudioContext | null = null;
+  master: GainNode | null = null;
+  timer = 0;
+  step = 0;
+  frantic = false;
+  start() {
+    if (this.ctx) return;
+    const C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return;
+    this.ctx = new C();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.45;
+    this.master.connect(this.ctx.destination);
+    this.tick();
+  }
+  note(f: number, d = 0.09, v = 0.09, type: OscillatorType = "square", at = 0) {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime + at,
+      o = this.ctx.createOscillator(),
+      g = this.ctx.createGain();
+    o.type = type;
+    o.frequency.value = f * (this.frantic ? 2 : 1);
+    g.gain.setValueAtTime(v, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g);
+    g.connect(this.master);
+    o.start(t);
+    o.stop(t + d + 0.01);
+  }
+  tick() {
+    this.timer = window.setInterval(
+      () => {
+        const b = [110, 147, 165, 147, 123, 165, 196, 165],
+          l = [440, 494, 523, 659, 587, 523, 494, 392];
+        this.note(b[this.step % 8], 0.12, 0.065, "triangle");
+        if (this.step % 2 === 0) this.note(l[(this.step / 2) % 8], 0.08, 0.05);
+        if (this.step % 4 === 2) this.note(1200, 0.025, 0.025);
+        this.step++;
+      },
+      this.frantic ? 72 : 90,
+    );
+  }
+  frenzy() {
+    if (this.frantic) return;
+    this.frantic = true;
+    clearInterval(this.timer);
+    this.tick();
+    this.note(523, 0.12, 0.12);
+    this.note(1046, 0.2, 0.12, "square", 0.12);
+  }
+  sfx(k: "splat" | "error" | "perfect" | "victory") {
+    if (k === "splat") {
+      this.note(180, 0.08, 0.12, "sawtooth");
+      this.note(110, 0.1, 0.08, "triangle", 0.03);
+    } else if (k === "error") {
+      this.note(155, 0.3, 0.16, "sawtooth");
+      this.note(110, 0.3, 0.14, "square", 0.06);
+    } else if (k === "perfect") {
+      [659, 784, 988].forEach((n, i) =>
+        this.note(n, 0.15, 0.12, "square", i * 0.045),
+      );
+    } else {
+      clearInterval(this.timer);
+      [392, 440, 494, 523, 659, 587, 659, 784, 1046].forEach((n, i) =>
+        this.note(n, 0.28, 0.14, i % 2 ? "triangle" : "square", i * 0.1),
+      );
+    }
+  }
+  stop() {
+    clearInterval(this.timer);
+    void this.ctx?.close();
+    this.ctx = null;
+    this.master = null;
+  }
+}
+export default function Game() {
+  const [mode, setMode] = useState<"home" | "play" | "won" | "lost">("home"),
+    [name, setName] = useState(""),
+    [time, setTime] = useState(60),
+    [score, setScore] = useState(0),
+    [perfects, setPerfects] = useState(0),
+    [combo, setCombo] = useState(0),
+    [delivered, setDelivered] = useState(0),
+    [ruined, setRuined] = useState(0),
+    [trays, setTrays] = useState<Tray[]>([]),
+    [bursts, setBursts] = useState<Burst[]>([]),
+    [flash, setFlash] = useState(""),
+    [startError, setStartError] = useState(""),
+    [reward, setReward] = useState<{ code?: string; error?: string } | null>(
+      null,
+    ),
+    [muted, setMuted] = useState(false);
+  const state = useRef({
+      mode: "home",
+      time: 60,
+      score: 0,
+      perfects: 0,
+      combo: 0,
+      delivered: 0,
+      ruined: 0,
+      trays: [] as Tray[],
+      last: 0,
+      nextId: 1,
+      lastSpawn: 0,
+      speed: 13,
+      boostUntil: 0,
+      run: null as Run | null,
+      checkpoints: 0,
+    }),
+    audio = useRef(new Audio());
+  const sync = useCallback(() => {
+    const s = state.current;
+    setTime(Math.max(0, Math.ceil(s.time)));
+    setScore(s.score);
+    setPerfects(s.perfects);
+    setCombo(s.combo);
+    setDelivered(s.delivered);
+    setRuined(s.ruined);
+    setTrays([...s.trays]);
+  }, []);
+  const burst = (x: number, layer: Layer, bad = false) => {
+    const id = Date.now() + Math.random();
+    setBursts((v) => [...v, { id, x, layer, bad }]);
+    setTimeout(() => setBursts((v) => v.filter((p) => p.id !== id)), 460);
+  };
+  const fail = useCallback((message: string) => {
+    const s = state.current;
+    if (s.mode !== "play") return;
+    s.ruined++;
+    s.combo = 0;
+    s.mode = "lost";
+    setRuined(s.ruined);
+    setFlash(message);
+    setMode("lost");
+    audio.current.sfx("error");
+  }, []);
+  const act = useCallback(
+    (layer: Layer) => {
+      const s = state.current;
+      if (s.mode !== "play") return;
+      const tray = s.trays
+        .filter((t) => t.step < 3)
+        .sort((a, b) => Math.abs(a.x - 50) - Math.abs(b.x - 50))[0];
+      if (!tray || Math.abs(tray.x - 50) > 20 || LAYERS[tray.step] !== layer) {
+        burst(tray?.x ?? 50, layer, true);
+        fail(
+          `WRONG DROP — ${layer.toUpperCase()} HIT THE WRONG PART OF THE LINE!`,
+        );
+        return;
+      }
+      const perfect = Math.abs(tray.x - 50) <= 5;
+      tray.step++;
+      tray.crisis = false;
+      if (perfect) {
+        s.combo++;
+        s.perfects++;
+        s.boostUntil = performance.now() + 650;
+        s.score += 100 * (s.combo >= 5 ? 2 : 1);
+        tray.fire = s.combo >= 5;
+        setFlash("PERFECT! +5% SPEED");
+        audio.current.sfx("perfect");
+      } else {
+        s.combo = 0;
+        s.score += 45;
+        setFlash("GOOD!");
+        audio.current.sfx("splat");
+      }
+      burst(tray.x, layer);
+      setTimeout(() => setFlash(""), 280);
+      sync();
+    },
+    [fail, sync],
+  );
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      const l = KEYS[e.key];
+      if (l) {
+        e.preventDefault();
+        act(l);
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [act]);
+  const checkpoint = useCallback(async () => {
+    const s = state.current;
+    if (!s.run) return;
+    s.checkpoints++;
+    await fetch("/api/pizza-gauntlet/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "arcade_checkpoint",
+        runId: s.run.runId,
+        token: s.run.token,
+        elapsed: 60 - s.time,
+        score: s.score,
+        delivered: s.delivered,
+        perfects: s.perfects,
+        ruined: s.ruined,
+        sequence: s.checkpoints,
+      }),
+    });
+  }, []);
+  const win = useCallback(async () => {
+    const s = state.current;
+    if (s.mode !== "play") return;
+    s.mode = "won";
+    s.time = 0;
+    sync();
+    setMode("won");
+    audio.current.sfx("victory");
+    if (!s.run) return;
+    await checkpoint();
+    const r = await fetch("/api/pizza-gauntlet/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "arcade_complete",
+          runId: s.run.runId,
+          token: s.run.token,
+          score: s.score,
+          delivered: s.delivered,
+          perfects: s.perfects,
+          ruined: s.ruined,
+        }),
+      }),
+      d = await r.json();
+    setReward(r.ok ? d : { error: d.error || "Prize validation failed." });
+  }, [checkpoint, sync]);
+  useEffect(() => {
+    if (mode !== "play") return;
+    let raf = 0;
+    const frame = (now: number) => {
+      const s = state.current;
+      if (s.mode !== "play") return;
+      if (!s.last) s.last = now;
+      const dt = Math.min(0.04, (now - s.last) / 1000);
+      s.last = now;
+      s.time -= dt;
+      if (s.time <= 15) audio.current.frenzy();
+      s.speed =
+        13 *
+        (1 + Math.floor(s.delivered / 3) * 0.05) *
+        (s.time <= 15 ? 1.2 : 1) *
+        (now < s.boostUntil ? 1.05 : 1);
+      if (now - s.lastSpawn > Math.max(760, 1450 - s.delivered * 20)) {
+        s.trays.push({
+          id: s.nextId++,
+          x: -9,
+          step: 0,
+          crisis: false,
+          fire: false,
+        });
+        s.lastSpawn = now;
+      }
+      s.trays.forEach((t) => {
+        t.x += s.speed * dt;
+        if (t.x > 85 && t.step < 3) t.crisis = true;
+      });
+      const out = s.trays.find((t) => t.x >= 108);
+      if (out) {
+        if (out.step < 3) {
+          fail(
+            "AN INCOMPLETE PIZZA LEFT THE BELT. THE CUSTOMER SAW EVERYTHING.",
+          );
+          return;
+        }
+        s.delivered++;
+        s.score += 250 * (s.combo >= 5 ? 2 : 1);
+        s.trays = s.trays.filter((t) => t.id !== out.id);
+      }
+      if (s.time <= 0) {
+        void win();
+        return;
+      }
+      sync();
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [mode, fail, sync, win]);
+  useEffect(() => {
+    if (mode !== "play") return;
+    const id = setInterval(() => void checkpoint(), 10000);
+    return () => clearInterval(id);
+  }, [mode, checkpoint]);
+  useEffect(() => () => audio.current.stop(), []);
+  async function begin() {
+    setStartError("");
+    audio.current.stop();
+    audio.current = new Audio();
+    audio.current.start();
+    const r = await fetch("/api/pizza-gauntlet/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "start", playerName: name }),
+    });
+    if (!r.ok) {
+      const problem = await r
+        .json()
+        .catch(() => ({ error: "Game service is unavailable." }));
+      setStartError(problem.error || "Game service is unavailable.");
+      audio.current.stop();
+      return;
+    }
+    const run = (await r.json()) as Run;
+    state.current = {
+      mode: "play",
+      time: 60,
+      score: 0,
+      perfects: 0,
+      combo: 0,
+      delivered: 0,
+      ruined: 0,
+      trays: [],
+      last: 0,
+      nextId: 1,
+      lastSpawn: 0,
+      speed: 13,
+      boostUntil: 0,
+      run,
+      checkpoints: 0,
+    };
+    setReward(null);
+    setFlash("");
+    setMode("play");
+    sync();
+  }
+  function toggle() {
+    const n = !muted;
+    setMuted(n);
+    if (audio.current.master) audio.current.master.gain.value = n ? 0 : 0.45;
+  }
+  return (
+    <main
+      className={`gauntlet ${time <= 15 && mode === "play" ? "final-frenzy" : ""}`}
+    >
+      {mode === "home" && (
+        <section className="gauntlet-home">
+          <div className="cabinet-logo">CORNER DELI ARCADE</div>
+          <h1>
+            THE PIZZA
+            <br />
+            <i>GAUNTLET</i>
+          </h1>
+          <p>60 seconds. Three ingredients. Zero ruined pizzas.</p>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="PLAYER NAME"
+            maxLength={40}
+          />
+          <button onClick={begin}>PRESS START</button>
+          {startError && <strong className="start-error">{startError}</strong>}
+          <small>← DOUGH &nbsp; ↓ SAUCE &nbsp; → CHEESE</small>
+        </section>
+      )}
+      {mode === "play" && (
+        <>
+          <header className="chalk-hud">
+            <div>
+              <small>SHIFT</small>
+              <b>{String(time).padStart(2, "0")}</b>
+            </div>
+            <div>
+              <small>SCORE</small>
+              <b>{String(score).padStart(6, "0")}</b>
+            </div>
+            <div className={`fire-meter ${combo >= 5 ? "lit" : ""}`}>
+              <small>COMBO FIRE</small>
+              <b>×{Math.max(1, combo)}</b>
+            </div>
+            <button onClick={toggle}>{muted ? "🔇" : "🔊"}</button>
+          </header>
+          <div className="customers">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <i key={i}>
+                {time > 40 ? "🙂" : time > 15 ? (i % 2 ? "😒" : "😠") : "🤯"}
+              </i>
+            ))}
+          </div>
+          <section className="conveyor">
+            <div className="sweet-zone">
+              <b>PERFECT</b>
+            </div>
+            {trays.map((t) => (
+              <article
+                key={t.id}
+                className={`tray ${t.crisis ? "crisis" : ""} ${t.fire ? "combo-fire" : ""}`}
+                style={{ left: `${t.x}%` }}
+              >
+                <div className="recipe-chain">
+                  {LAYERS.map((l, i) => (
+                    <span className={i < t.step ? "done" : ""} key={l}>
+                      {ICON[l]}
+                    </span>
+                  ))}
+                </div>
+                <div className={`pizza step-${t.step}`}>
+                  {t.step > 1 && <i className="sauce" />}
+                  {t.step > 2 && <i className="cheese" />}
+                </div>
+              </article>
+            ))}
+            {bursts.map((p) => (
+              <i
+                key={p.id}
+                className={`splat ${p.layer} ${p.bad ? "bad" : ""}`}
+                style={{ left: `${p.x}%` }}
+              >
+                ✦
+              </i>
+            ))}
+            <div className="belt-teeth" />
+          </section>
+          <div
+            className={`timing-callout ${flash.includes("WRONG") ? "bad" : ""}`}
+          >
+            {flash}
+          </div>
+          <section className="lane-controls">
+            {LAYERS.map((l, i) => (
+              <button key={l} onPointerDown={() => act(l)}>
+                <kbd>{["←", "↓", "→"][i]}</kbd>
+                <span>{ICON[l]}</span>
+                <b>{l}</b>
+              </button>
+            ))}
+          </section>
+          <footer>
+            <span>DELIVERED {delivered}</span>
+            <span>PERFECT {perfects}</span>
+            <span>RUINED {ruined}</span>
+          </footer>
+        </>
+      )}
+      {mode === "lost" && (
+        <section className="end-card lost">
+          <div className="ruined-pizza">🍕</div>
+          <h1>SHIFT DESTROYED</h1>
+          <p>{flash}</p>
+          <b>One ruined pizza means the Jumbo lives to see another day.</b>
+          <button onClick={begin}>RUN IT BACK</button>
+        </section>
+      )}
+      {mode === "won" && (
+        <section className="end-card won">
+          <div className="confetti">✦ ◆ ● ★ ✦ ◆ ● ★ ✦ ◆</div>
+          <h1>SHIFT SURVIVED!</h1>
+          <p>{delivered} pizzas escaped the line. Not one was ruined.</p>
+          <b>YOU EARNED A FREE JUMBO CHEESE PIZZA</b>
+          {reward?.code ? (
+            <code>{reward.code}</code>
+          ) : (
+            <small>{reward?.error || "VALIDATING RUN…"}</small>
+          )}
+          <button onClick={begin}>PLAY AGAIN</button>
+        </section>
+      )}
+    </main>
+  );
 }
