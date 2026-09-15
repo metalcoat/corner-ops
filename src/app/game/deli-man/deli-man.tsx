@@ -31,7 +31,7 @@ export default function DeliMan() {
         preload() {
           this.load.image(
             "ogdensburg",
-            "/games/deli-man/ogdensburg-river-v1.png",
+            "/games/deli-man/ogdensburg-waterfront-v2.png",
           );
         }
         create() {
@@ -44,6 +44,46 @@ export default function DeliMan() {
               .setScrollFactor(0.18)
               .setAlpha(stageIndex === 3 ? 0.5 : 0.82);
           const g = this.add.graphics();
+          for (let x = 350; x < 4900; x += 620) {
+            g.fillStyle(x % 1240 ? 0x6f5545 : 0x8a6a50).fillRect(
+              x,
+              385,
+              310,
+              225,
+            );
+            g.fillStyle(0x352b29).fillTriangle(
+              x - 25,
+              385,
+              x + 155,
+              270,
+              x + 335,
+              385,
+            );
+            g.fillStyle(0x181717)
+              .fillRect(x + 45, 455, 65, 80)
+              .fillRect(x + 195, 455, 65, 80);
+            if (x % 1240 === 350) {
+              g.fillStyle(0xd6c5a0).fillRect(x + 138, 195, 34, 190);
+              g.fillTriangle(x + 120, 195, x + 155, 125, x + 190, 195);
+              this.add.text(x + 70, 350, "ROOF CREW:\nBACK NEXT SPRING", {
+                fontFamily: "monospace",
+                fontSize: "13px",
+                color: "#ffdf54",
+                backgroundColor: "#111d",
+              });
+            } else
+              this.add.text(
+                x + 70,
+                520,
+                x % 1860 ? "+59% TAX\nINCREASE" : "GREG STILL\nHAS THE KEYS",
+                {
+                  fontFamily: "monospace",
+                  fontSize: "14px",
+                  color: "#ffec60",
+                  backgroundColor: "#651b16dd",
+                },
+              );
+          }
           g.fillStyle(0x192129).fillRect(0, 610, 5000, 110);
           g.fillStyle(0xffffff, 0.25);
           for (let x = 0; x < 5000; x += 260) g.fillRect(x, 675, 120, 7);
@@ -78,7 +118,23 @@ export default function DeliMan() {
             q.destroy();
           };
           make("hero", 0xf04435, 38, 58);
-          make("enemy", 0x272016, 40, 40);
+          const enemyArt = this.make.graphics({ x: 0, y: 0 }, false);
+          enemyArt.fillStyle(0x43842f).fillCircle(25, 25, 23);
+          enemyArt
+            .fillStyle(0xffe73f)
+            .fillCircle(16, 19, 5)
+            .fillCircle(34, 19, 5);
+          enemyArt
+            .fillStyle(0x111111)
+            .fillCircle(17, 20, 2)
+            .fillCircle(33, 20, 2);
+          enemyArt.fillStyle(0x8c1b17).fillRect(12, 32, 26, 7);
+          enemyArt
+            .fillStyle(0x26351e)
+            .fillRect(2, 42, 14, 8)
+            .fillRect(34, 42, 14, 8);
+          enemyArt.generateTexture("enemy", 50, 50);
+          enemyArt.destroy();
           make("shot", 0xffd638, 22, 10);
           this.player = this.physics.add
             .sprite(100, 560, "hero")
