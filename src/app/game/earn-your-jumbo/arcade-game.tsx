@@ -20,6 +20,7 @@ type Leader = {
   perfects: number;
   completed_at: string;
   status: string;
+  game_version: string;
 };
 const LAYERS: Layer[] = ["dough", "sauce", "cheese"],
   KEYS: Record<string, Layer> = {
@@ -642,6 +643,7 @@ export default function Game() {
                       {Number(leader.score).toLocaleString()} PTS
                       <small>
                         {leader.pizzas_made} PIZZAS · {leader.perfects} PERFECT
+                        · {leader.game_version}
                       </small>
                     </span>
                   </li>

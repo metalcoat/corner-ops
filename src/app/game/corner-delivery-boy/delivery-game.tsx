@@ -44,6 +44,7 @@ type Run = { runId: string; token: string };
 type DeliveryLeader = {
   player_name: string;
   status: string;
+  game_version: string;
   stage: number;
   score: number;
   delivered: number;
@@ -146,6 +147,7 @@ export default function DeliveryGame() {
     [muted, setMuted] = useState(false),
     [boost, setBoost] = useState(0),
     [slow, setSlow] = useState(0),
+    [damaged, setDamaged] = useState(0),
     [community, setCommunity] = useState<(typeof communities)[number]>(
       communities[0],
     ),
@@ -332,13 +334,18 @@ export default function DeliveryGame() {
     setShaking(true);
     window.setTimeout(() => setShaking(false), 210);
   }, []);
-  const move = useCallback((d: number) => {
-    if (Math.abs(d) >= 0.18) {
-      setSkidding(true);
-      window.setTimeout(() => setSkidding(false), 230);
-    }
-    setLane((v) => Math.max(-0.18, Math.min(2.18, v + d)));
-  }, []);
+  const move = useCallback(
+    (d: number) => {
+      if (Math.abs(d) >= 0.18) {
+        setSkidding(true);
+        window.setTimeout(() => setSkidding(false), 230);
+      }
+      setLane((v) =>
+        Math.max(-0.18, Math.min(2.18, v + d * (damaged ? 0.58 : 1))),
+      );
+    },
+    [damaged],
+  );
   const deliver = useCallback(() => {
     const t = state.current.target;
     if (state.current.mode !== "play" || !t.active) return;
@@ -440,7 +447,13 @@ export default function DeliveryGame() {
           keys.current.has("D");
       if (left !== right)
         setLane((v) =>
-          Math.max(-0.18, Math.min(2.18, v + (right ? 1 : -1) * dt * 1.7)),
+          Math.max(
+            -0.18,
+            Math.min(
+              2.18,
+              v + (right ? 1 : -1) * dt * 1.7 * (damaged ? 0.58 : 1),
+            ),
+          ),
         );
       const speed = Math.max(
         0.65,
@@ -498,17 +511,19 @@ export default function DeliveryGame() {
         for (const x of a) {
           const n = { ...x, y: x.y + dt * speed * 36 },
             collisionRadius =
-              n.type === "car" || n.type === "cow"
-                ? 0.29
-                : n.type === "deer"
-                  ? 0.21
-                  : n.type === "dog"
-                    ? 0.13
-                    : n.type === "squirrel"
-                      ? 0.07
-                      : n.type === "person"
-                        ? 0.13
-                        : 0.18;
+              n.type === "car"
+                ? 0.36
+                : n.type === "cow"
+                  ? 0.29
+                  : n.type === "deer"
+                    ? 0.21
+                    : n.type === "dog"
+                      ? 0.13
+                      : n.type === "squirrel"
+                        ? 0.07
+                        : n.type === "person"
+                          ? 0.13
+                          : 0.18;
           if (
             n.y > 78 &&
             n.y < 91 &&
@@ -524,6 +539,25 @@ export default function DeliveryGame() {
               }
               setStats((s) => ({ ...s, score: s.score + 350 }));
               beep("coin");
+              continue;
+            }
+            if (
+              n.type === "car" &&
+              Math.abs(n.lane - playerLane.current) >= 0.17
+            ) {
+              setDamaged(4);
+              setHealth((health) => Math.max(0, health - 1));
+              setStats((stats) => ({
+                ...stats,
+                score: Math.max(0, stats.score - 500),
+                hits: stats.hits + 1,
+                combo: 0,
+              }));
+              pop(
+                "SIDESWIPE! -500. ALIGNMENT NOW PROVIDED BY A SHOPPING CART.",
+              );
+              impact();
+              beep("hit");
               continue;
             }
             if (n.type === "car" || n.type === "cow" || n.type === "person") {
@@ -621,13 +655,14 @@ export default function DeliveryGame() {
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [mode, boost, slow, beep, impact]);
+  }, [mode, boost, slow, damaged, beep, impact]);
   useEffect(() => {
     if (mode !== "play") return;
     const id = setInterval(() => {
       setTime((t) => Math.max(0, t - 1));
       setBoost((b) => Math.max(0, b - 1));
       setSlow((s) => Math.max(0, s - 1));
+      setDamaged((seconds) => Math.max(0, seconds - 1));
     }, 1000);
     return () => clearInterval(id);
   }, [mode]);
@@ -745,6 +780,7 @@ export default function DeliveryGame() {
     setFailure("");
     impactFailure.current = "";
     setLane(1);
+    setDamaged(0);
     deliveryAudio.transition("action");
     setMode("play");
   }
@@ -1030,7 +1066,7 @@ export default function DeliveryGame() {
                 </i>
               ))}
               <div
-                className={`driver ${boost ? "boost" : ""} ${skidding ? "skidding" : ""}`}
+                className={`driver ${boost ? "boost" : ""} ${skidding ? "skidding" : ""} ${damaged ? "damaged" : ""}`}
                 style={{ left: `${lane * 50}%` }}
               >
                 <img
@@ -1167,7 +1203,7 @@ export default function DeliveryGame() {
                       {Number(leader.score).toLocaleString()} PTS
                       <small>
                         {leader.delivered} DELIVERED · {leader.hits} HITS ·{" "}
-                        {leader.missed} MISSED
+                        {leader.game_version} · {leader.missed} MISSED
                       </small>
                     </span>
                   </li>

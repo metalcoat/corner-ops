@@ -1084,7 +1084,7 @@
   }
 }
 .delivery-world .scenery.house {
-  font-size: clamp(3.2rem, 7vw, 6rem);
+  font-size: clamp(3.8rem, 8vw, 7rem);
   filter: drop-shadow(0 7px 4px #0008);
 }
 .delivery-world .scenery.tent {
@@ -1097,10 +1097,10 @@
   display: none;
 }
 .zone-rural .scenery.house {
-  font-size: clamp(3rem, 6vw, 5.2rem);
+  font-size: clamp(3.6rem, 7vw, 6.2rem);
 }
 .driver {
-  width: clamp(86px, 11vw, 128px);
+  width: clamp(98px, 13vw, 148px);
   height: auto;
   font-size: 0;
   transform-origin: 50% 85%;
@@ -1134,6 +1134,25 @@
 .driver.boost img {
   filter: drop-shadow(0 0 13px #55c8ff) drop-shadow(0 10px 5px #0009);
 }
+.driver.damaged {
+  animation: damaged-equinox 0.18s ease-in-out infinite alternate;
+  filter: drop-shadow(0 0 11px #ff792e);
+}
+.driver.damaged:before {
+  content: "⚠ SIDESWIPED";
+  position: absolute;
+  left: 50%;
+  bottom: 102%;
+  translate: -50% 0;
+  width: max-content;
+  padding: 4px 7px;
+  background: #ffd63d;
+  border: 2px solid #15100a;
+  color: #15100a;
+  font:
+    900 0.62rem/1 Arial,
+    sans-serif;
+}
 @keyframes equinox-road-bob {
   from {
     translate: -50% 0;
@@ -1154,6 +1173,16 @@
     scale: 1.04;
   }
 }
+@keyframes damaged-equinox {
+  from {
+    translate: -53% 0;
+    rotate: -5deg;
+  }
+  to {
+    translate: -47% -2px;
+    rotate: 5deg;
+  }
+}
 @keyframes ev-brake-glow {
   to {
     opacity: 0.9;
@@ -1161,19 +1190,19 @@
   }
 }
 .hazard.squirrel {
-  font-size: clamp(1rem, 2vw, 1.7rem);
+  font-size: clamp(1.2rem, 2.4vw, 2rem);
 }
 .hazard.dog {
-  font-size: clamp(1.8rem, 3.5vw, 3rem);
+  font-size: clamp(2.2rem, 4.2vw, 3.6rem);
 }
 .hazard.deer {
-  font-size: clamp(2.8rem, 5.5vw, 4.8rem);
+  font-size: clamp(3.3rem, 6.3vw, 5.6rem);
 }
 .hazard.cow {
-  font-size: clamp(4rem, 8vw, 7rem);
+  font-size: clamp(4.6rem, 9vw, 8rem);
 }
 .hazard.car {
-  font-size: clamp(3.7rem, 7vw, 6rem);
+  font-size: clamp(4.3rem, 8vw, 7rem);
 }
 .hazard.pothole {
   width: clamp(32px, 5vw, 58px);

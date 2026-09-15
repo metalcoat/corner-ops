@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { PRIZE, STAGES } from "./config";
 import type { RunCheckpoint } from "./types";
+import { PIZZA_GAME_VERSION } from "@/lib/games/versions";
 
 let schema: Promise<void> | null = null;
 export function ensureGauntletSchema() {
@@ -9,6 +10,7 @@ export function ensureGauntletSchema() {
     schema = (async () => {
       const sql = getSql();
       await sql`CREATE TABLE IF NOT EXISTS pizza_gauntlet_runs(id UUID PRIMARY KEY,token_hash TEXT NOT NULL,player_name TEXT NOT NULL DEFAULT 'Anonymous Cook',status TEXT NOT NULL DEFAULT 'active' CHECK(status IN('active','won','lost','abandoned')),stage INTEGER NOT NULL DEFAULT 1,stage_orders INTEGER NOT NULL DEFAULT 0,sequence INTEGER NOT NULL DEFAULT 0,active_seconds INTEGER NOT NULL DEFAULT 0,stats JSONB NOT NULL DEFAULT '{}'::jsonb,checkpoints JSONB NOT NULL DEFAULT '[]'::jsonb,started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),completed_at TIMESTAMPTZ)`;
+      await sql`ALTER TABLE pizza_gauntlet_runs ADD COLUMN IF NOT EXISTS game_version TEXT NOT NULL DEFAULT 'legacy'`;
       await sql`CREATE INDEX IF NOT EXISTS pizza_gauntlet_runs_board_idx ON pizza_gauntlet_runs(status,completed_at DESC)`;
       await sql`CREATE TABLE IF NOT EXISTS pizza_gauntlet_rewards(id UUID PRIMARY KEY,run_id UUID NOT NULL UNIQUE REFERENCES pizza_gauntlet_runs(id),code TEXT NOT NULL UNIQUE,prize_type TEXT NOT NULL,terms JSONB NOT NULL,completion_stats JSONB NOT NULL,issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),expires_at TIMESTAMPTZ,redeemed_at TIMESTAMPTZ,redeemed_by TEXT,redemption_note TEXT NOT NULL DEFAULT '')`;
     })();
@@ -21,8 +23,8 @@ export async function startRun(playerName: string) {
   await ensureGauntletSchema();
   const id = randomUUID(),
     token = randomBytes(32).toString("base64url");
-  await getSql()`INSERT INTO pizza_gauntlet_runs(id,token_hash,player_name)VALUES(${id},${digest(token)},${playerName.trim().slice(0, 40) || "Anonymous Cook"})`;
-  return { runId: id, token };
+  await getSql()`INSERT INTO pizza_gauntlet_runs(id,token_hash,player_name,game_version)VALUES(${id},${digest(token)},${playerName.trim().slice(0, 40) || "Anonymous Cook"},${PIZZA_GAME_VERSION})`;
+  return { runId: id, token, gameVersion: PIZZA_GAME_VERSION };
 }
 export async function authenticatedRun(runId: string, token: string) {
   await ensureGauntletSchema();
@@ -229,7 +231,7 @@ export async function recordArcadeLoss(
 }
 export async function leaderboard() {
   await ensureGauntletSchema();
-  return getSql()`SELECT player_name,status,completed_at,active_seconds,COALESCE((stats->>'score')::numeric,(stats->>'profit')::numeric,0) score,COALESCE((stats->>'delivered')::int,(stats->>'pizzasMade')::int,0) pizzas_made,COALESCE((stats->>'perfects')::int,0) perfects,COALESCE((stats->>'highestCombo')::int,0) highest_combo FROM pizza_gauntlet_runs WHERE status IN('won','lost') ORDER BY CASE WHEN status='won' THEN 1 ELSE 0 END DESC,COALESCE((stats->>'delivered')::int,(stats->>'pizzasMade')::int,0) DESC,COALESCE((stats->>'score')::numeric,(stats->>'profit')::numeric,0) DESC,completed_at ASC NULLS LAST LIMIT 50`;
+  return getSql()`SELECT player_name,status,game_version,completed_at,active_seconds,COALESCE((stats->>'score')::numeric,(stats->>'profit')::numeric,0) score,COALESCE((stats->>'delivered')::int,(stats->>'pizzasMade')::int,0) pizzas_made,COALESCE((stats->>'perfects')::int,0) perfects,COALESCE((stats->>'highestCombo')::int,0) highest_combo FROM pizza_gauntlet_runs WHERE status IN('won','lost') ORDER BY CASE WHEN status='won' THEN 1 ELSE 0 END DESC,COALESCE((stats->>'delivered')::int,(stats->>'pizzasMade')::int,0) DESC,COALESCE((stats->>'score')::numeric,(stats->>'profit')::numeric,0) DESC,completed_at ASC NULLS LAST LIMIT 50`;
 }
 export async function findRewards(query: string) {
   await ensureGauntletSchema();

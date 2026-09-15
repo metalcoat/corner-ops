@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { DELIVERY_PRIZE, DELIVERY_STAGES } from "./config";
+import { DELIVERY_GAME_VERSION } from "@/lib/games/versions";
 let schema: Promise<void> | null = null;
 const digest = (s: string) => createHash("sha256").update(s).digest("hex");
 export function ensureDeliverySchema() {
@@ -8,6 +9,7 @@ export function ensureDeliverySchema() {
     schema = (async () => {
       const sql = getSql();
       await sql`CREATE TABLE IF NOT EXISTS delivery_boy_runs(id UUID PRIMARY KEY,token_hash TEXT NOT NULL,player_name TEXT NOT NULL DEFAULT 'Anonymous Driver',status TEXT NOT NULL DEFAULT 'active',stage INTEGER NOT NULL DEFAULT 1,sequence INTEGER NOT NULL DEFAULT 0,active_seconds INTEGER NOT NULL DEFAULT 0,score INTEGER NOT NULL DEFAULT 0,delivered INTEGER NOT NULL DEFAULT 0,missed INTEGER NOT NULL DEFAULT 0,hits INTEGER NOT NULL DEFAULT 0,checkpoints JSONB NOT NULL DEFAULT '[]'::jsonb,started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),completed_at TIMESTAMPTZ)`;
+      await sql`ALTER TABLE delivery_boy_runs ADD COLUMN IF NOT EXISTS game_version TEXT NOT NULL DEFAULT 'legacy'`;
       await sql`CREATE TABLE IF NOT EXISTS delivery_boy_rewards(id UUID PRIMARY KEY,run_id UUID NOT NULL UNIQUE REFERENCES delivery_boy_runs(id),code TEXT NOT NULL UNIQUE,prize_type TEXT NOT NULL,terms JSONB NOT NULL,completion_stats JSONB NOT NULL,issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),expires_at TIMESTAMPTZ,redeemed_at TIMESTAMPTZ,redeemed_by TEXT,redemption_note TEXT NOT NULL DEFAULT '')`;
     })();
   return schema;
@@ -16,8 +18,8 @@ export async function startDeliveryRun(name: string) {
   await ensureDeliverySchema();
   const id = randomUUID(),
     token = randomBytes(32).toString("base64url");
-  await getSql()`INSERT INTO delivery_boy_runs(id,token_hash,player_name)VALUES(${id},${digest(token)},${name.trim().slice(0, 40) || "Anonymous Driver"})`;
-  return { runId: id, token };
+  await getSql()`INSERT INTO delivery_boy_runs(id,token_hash,player_name,game_version)VALUES(${id},${digest(token)},${name.trim().slice(0, 40) || "Anonymous Driver"},${DELIVERY_GAME_VERSION})`;
+  return { runId: id, token, gameVersion: DELIVERY_GAME_VERSION };
 }
 async function auth(id: string, token: string) {
   await ensureDeliverySchema();
@@ -129,5 +131,5 @@ export async function redeemDeliveryReward(code: string, actor: string) {
 }
 export async function deliveryLeaderboard() {
   await ensureDeliverySchema();
-  return getSql()`SELECT player_name,status,stage,score,delivered,missed,hits,active_seconds,completed_at FROM delivery_boy_runs WHERE status IN('won','lost') ORDER BY CASE WHEN status='won' THEN 1 ELSE 0 END DESC,stage DESC,delivered DESC,score DESC,missed ASC,hits ASC,completed_at ASC LIMIT 50`;
+  return getSql()`SELECT player_name,status,game_version,stage,score,delivered,missed,hits,active_seconds,completed_at FROM delivery_boy_runs WHERE status IN('won','lost') ORDER BY CASE WHEN status='won' THEN 1 ELSE 0 END DESC,stage DESC,delivered DESC,score DESC,missed ASC,hits ASC,completed_at ASC LIMIT 50`;
 }
