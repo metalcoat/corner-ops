@@ -752,6 +752,7 @@ export default function DeliveryGame() {
     <main className="delivery-boy">
       {mode === "home" && (
         <section className="delivery-home">
+          <img className="game-corner-logo" src="https://rezku-pos-upload.imgix.net/2e2a0810-d179-474b-a40b-e4104c60d8c1/olo/logo/jO52kF7dMM84upTQGozunTrduBxjbylAFeGYc8r_RT8.png?fit=max&auto=compress&fmt=png32&h=180" alt="Corner Deli" />
           <div className="delivery-brand">CORNER DELI PRESENTS</div>
           <h1>
             CORNER

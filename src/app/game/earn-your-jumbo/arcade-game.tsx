@@ -379,6 +379,7 @@ export default function Game() {
     >
       {mode === "home" && (
         <section className="gauntlet-home">
+          <img className="game-corner-logo" src="https://rezku-pos-upload.imgix.net/2e2a0810-d179-474b-a40b-e4104c60d8c1/olo/logo/jO52kF7dMM84upTQGozunTrduBxjbylAFeGYc8r_RT8.png?fit=max&auto=compress&fmt=png32&h=180" alt="Corner Deli" />
           <div className="cabinet-logo">CORNER DELI ARCADE</div>
           <h1>
             THE PIZZA
