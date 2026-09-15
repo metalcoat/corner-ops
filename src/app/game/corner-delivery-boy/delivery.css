@@ -68,6 +68,21 @@
   border-radius: 8px;
   color: #fff;
 }
+.initials-entry {
+  display: grid;
+  grid-template-columns: 1fr 92px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  color: var(--yellow);
+  font-weight: 1000;
+  letter-spacing: 0.08em;
+  text-align: left;
+}
+.initials-entry input {
+  text-align: center;
+  letter-spacing: 0.2em;
+}
 .delivery-home > button,
 .delivery-summary > button {
   display: block;
@@ -362,6 +377,126 @@
   white-space: normal;
   text-align: center;
   animation: toast-pop 0.8s both;
+}
+.route-progress {
+  position: absolute;
+  z-index: 29;
+  top: 7px;
+  left: 50%;
+  translate: -50% 0;
+  width: min(360px, 42vw);
+  height: 17px;
+  overflow: hidden;
+  background: #101722e8;
+  border: 2px solid #fff;
+  border-radius: 10px;
+}
+.route-progress i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #54d853, #ffe349);
+  transition: width 0.25s;
+}
+.route-progress b {
+  position: absolute;
+  inset: 0;
+  text-align: center;
+  font-size: 0.62rem;
+  line-height: 17px;
+  text-shadow: 1px 1px #000;
+}
+.score-burst {
+  position: absolute;
+  z-index: 40;
+  left: 50%;
+  top: 49%;
+  translate: -50% 0;
+  color: #6cff72;
+  font:
+    1000 clamp(1.2rem, 4vw, 2.7rem)/1 Arial,
+    sans-serif;
+  text-shadow: 3px 3px #07300b;
+  pointer-events: none;
+  animation: score-rise 0.9s ease-out both;
+}
+.score-burst.bad {
+  color: #ff584f;
+  text-shadow: 3px 3px #450805;
+}
+.pause-card {
+  position: absolute;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  background: #090f1dcc;
+  text-align: center;
+}
+.pause-card b {
+  color: var(--yellow);
+  font-size: clamp(2rem, 7vw, 5rem);
+  text-shadow: 5px 5px #000;
+}
+.pause-card span {
+  font-weight: 900;
+}
+.window-shatter:after {
+  content: "";
+  position: absolute;
+  z-index: 55;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-conic-gradient(
+    from 11deg at 50% 50%,
+    transparent 0 12deg,
+    #dff7ffcc 13deg 14deg
+  );
+  animation: shatter-flash 0.42s ease-out both;
+}
+.hazard-warning {
+  position: absolute;
+  z-index: 33;
+  top: 11%;
+  translate: -50% 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #ffd63d;
+  border: 4px solid #1a1406;
+  color: #1a1406;
+  text-align: center;
+  font:
+    1000 1.8rem/34px Arial,
+    sans-serif;
+  animation: warning-pulse 0.18s steps(2) infinite;
+}
+.hazard.goose,
+.hazard.raccoon {
+  font-size: clamp(2.2rem, 4.6vw, 4rem);
+}
+.hazard.mower,
+.hazard.van {
+  font-size: clamp(3.6rem, 7.5vw, 6.5rem);
+}
+@keyframes score-rise {
+  to {
+    translate: -50% -90px;
+    scale: 1.25;
+    opacity: 0;
+  }
+}
+@keyframes warning-pulse {
+  50% {
+    scale: 1.2;
+    background: #ff7a27;
+  }
+}
+@keyframes shatter-flash {
+  to {
+    opacity: 0;
+    scale: 1.08;
+  }
 }
 .hearts {
   position: absolute;
@@ -1615,5 +1750,12 @@
   }
   .delivery-hud > div {
     flex: 0 0 auto;
+  }
+  .active-order-hud {
+    min-width: 118px;
+  }
+  .route-progress {
+    top: 66px;
+    width: 58vw;
   }
 }

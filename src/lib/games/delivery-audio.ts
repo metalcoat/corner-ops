@@ -117,6 +117,51 @@ class DeliveryAudioManager {
     source.start(at);
   }
 
+  private percussion(
+    at: number,
+    kind: "kick" | "snare" | "hat",
+    destination: AudioNode,
+  ) {
+    const context = this.context;
+    if (!context) return;
+    if (kind === "kick") {
+      const oscillator = context.createOscillator();
+      const envelope = context.createGain();
+      oscillator.type = "triangle";
+      oscillator.frequency.setValueAtTime(145, at);
+      oscillator.frequency.exponentialRampToValueAtTime(48, at + 0.11);
+      envelope.gain.setValueAtTime(0.12, at);
+      envelope.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
+      oscillator.connect(envelope);
+      envelope.connect(destination);
+      oscillator.start(at);
+      oscillator.stop(at + 0.14);
+      return;
+    }
+    const frames = Math.floor(
+      context.sampleRate * (kind === "snare" ? 0.1 : 0.035),
+    );
+    const buffer = context.createBuffer(1, frames, context.sampleRate);
+    const samples = buffer.getChannelData(0);
+    for (let index = 0; index < frames; index++)
+      samples[index] = Math.random() * 2 - 1;
+    const source = context.createBufferSource();
+    const filter = context.createBiquadFilter();
+    const envelope = context.createGain();
+    source.buffer = buffer;
+    filter.type = "highpass";
+    filter.frequency.value = kind === "snare" ? 950 : 4200;
+    envelope.gain.setValueAtTime(kind === "snare" ? 0.07 : 0.026, at);
+    envelope.gain.exponentialRampToValueAtTime(
+      0.0001,
+      at + (kind === "snare" ? 0.1 : 0.035),
+    );
+    source.connect(filter);
+    filter.connect(envelope);
+    envelope.connect(destination);
+    source.start(at);
+  }
+
   private scheduleStep(at: number) {
     if (!this.menuBus || !this.actionBus) return;
     const menuLead = [261.63, 329.63, 392, 329.63, 293.66, 349.23, 440, 349.23];
@@ -152,6 +197,19 @@ class DeliveryAudioManager {
         "triangle",
       );
     }
+    if (position % 4 === 0) this.percussion(at, "kick", this.actionBus);
+    if (position % 8 === 4) this.percussion(at, "snare", this.actionBus);
+    if (position % 2 === 1) this.percussion(at, "hat", this.actionBus);
+    if (this.intensity > 0.62 && position % 4 === 3)
+      this.fmNote(
+        actionLead[(position + 3) % actionLead.length] * 2,
+        at,
+        0.07,
+        this.actionBus,
+        0.032,
+        modulation,
+        "triangle",
+      );
     if (position === 4 || position === 12)
       this.fmNote(
         783.99,

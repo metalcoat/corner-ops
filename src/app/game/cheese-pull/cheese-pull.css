@@ -1,0 +1,200 @@
+.cheese-game {
+  min-height: 100dvh;
+  background: #100b20;
+  color: #fff;
+  font-family: "Courier New", monospace;
+  overflow: hidden;
+  user-select: none;
+  touch-action: none;
+}
+.cheese-card {
+  width: min(680px, calc(100% - 28px));
+  margin: 5vh auto;
+  text-align: center;
+}
+.cheese-card small,
+.cheese-over small {
+  color: #ffd43b;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+}
+.cheese-card h1 {
+  font:
+    1000 clamp(2.7rem, 9vw, 6.3rem)/0.84 Arial,
+    sans-serif;
+  text-shadow: 7px 7px #000;
+  margin: 24px 0;
+}
+.cheese-card h1 i {
+  color: #ff8a2d;
+  font-style: normal;
+}
+.cheese-card p {
+  font-size: 1.1rem;
+  line-height: 1.45;
+}
+.cheese-card > button,
+.cheese-over button {
+  display: block;
+  width: 100%;
+  padding: 17px;
+  margin: 18px 0;
+  border: 0;
+  border-radius: 8px;
+  background: #ee3e32;
+  color: #fff;
+  box-shadow: 0 7px #7e120d;
+  font-weight: 1000;
+  font-size: 1.15rem;
+}
+.cheese-card a,
+.cheese-over a {
+  color: #78eaff;
+  font-weight: 900;
+}
+.cheese-hud {
+  height: 66px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 14px;
+  background: #080611;
+  border-bottom: 4px solid #ff9b2f;
+}
+.cheese-hud b {
+  font-size: 1.25rem;
+}
+.cheese-hud span {
+  padding: 8px 16px;
+  background: #f2382b;
+  border-radius: 8px;
+  font: 1000 1.5rem Arial;
+}
+.cheese-hud i {
+  text-align: right;
+  color: #65efff;
+  font-style: normal;
+  font-weight: 1000;
+}
+.cheese-stage {
+  position: relative;
+  height: calc(100dvh - 70px);
+  overflow: hidden;
+}
+.cheese-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.cheese-gauges {
+  position: absolute;
+  left: 14px;
+  top: 15px;
+  width: min(270px, 38vw);
+  display: grid;
+  gap: 9px;
+}
+.cheese-gauges label {
+  position: relative;
+  height: 24px;
+  background: #171421;
+  border: 3px solid #fff;
+  overflow: hidden;
+  font-size: 0.7rem;
+  font-weight: 1000;
+  line-height: 24px;
+  padding-left: 7px;
+  text-shadow: 1px 1px #000;
+}
+.cheese-gauges i {
+  position: absolute;
+  z-index: -1;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, #4edf68, #ffd438, #f13a2d);
+  transition: width 0.08s;
+}
+.crust-qte,
+.cheese-over,
+.cheese-claim {
+  position: absolute;
+  z-index: 20;
+  inset: 50% auto auto 50%;
+  translate: -50% -50%;
+  width: min(620px, calc(100% - 30px));
+  box-sizing: border-box;
+  padding: 24px;
+  background: #120c24ed;
+  border: 5px solid #ffd43b;
+  box-shadow: 10px 10px #000;
+  text-align: center;
+}
+.crust-qte b {
+  display: block;
+  font: 1000 clamp(2.2rem, 8vw, 5rem)/1 Arial;
+  color: #ff8d2e;
+}
+.crust-qte span {
+  font-size: 1.5rem;
+  font-weight: 1000;
+}
+.cheese-over h2 {
+  font-size: clamp(1rem, 3vw, 1.5rem);
+  line-height: 1.25;
+}
+.cheese-over > button {
+  margin: 10px 0;
+  padding: 12px;
+}
+.cheese-claim {
+  z-index: 30;
+  background: #fff4cf;
+  color: #24170b;
+}
+.cheese-claim > button {
+  float: right;
+  border: 0;
+  background: #e53b31;
+  color: #fff;
+  font-size: 1.5rem;
+}
+.cheese-claim small {
+  display: block;
+  color: #b21c15;
+  font-weight: 1000;
+}
+.cheese-claim input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px;
+  margin: 10px 0;
+}
+.cheese-claim > b {
+  display: block;
+  padding: 12px;
+  background: #17111f;
+  color: #ffd43b;
+  font-size: 1.3rem;
+}
+@media (max-width: 650px) {
+  .cheese-hud {
+    height: 80px;
+    grid-template-columns: 1fr auto;
+  }
+  .cheese-hud i {
+    grid-column: 1/-1;
+    text-align: center;
+    font-size: 0.72rem;
+  }
+  .cheese-stage {
+    height: calc(100dvh - 84px);
+  }
+  .cheese-gauges {
+    width: 44vw;
+  }
+  .cheese-card {
+    margin-top: 2vh;
+  }
+  .cheese-card h1 {
+    font-size: 3.2rem;
+  }
+}

@@ -25,6 +25,15 @@ const games = [
     prize: "FREE REGULAR SUB",
     color: "delivery",
   },
+  {
+    href: "/game/cheese-pull",
+    icon: "🧀",
+    title: "Cheese Pull: The Meltdown",
+    tag: "MOZZARELLA PANIC",
+    copy: "Balance heat and tension without turning cheese into construction material.",
+    prize: "TEST COUPON TIERS",
+    color: "pizza",
+  },
 ];
 export default function Games() {
   return (

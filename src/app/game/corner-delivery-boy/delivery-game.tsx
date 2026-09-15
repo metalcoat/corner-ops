@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   DELIVERY_CAR_CRASHES,
@@ -18,6 +18,10 @@ type Thing = {
     | "deer"
     | "dog"
     | "cat"
+    | "goose"
+    | "raccoon"
+    | "mower"
+    | "van"
     | "squirrel"
     | "cow"
     | "person"
@@ -27,6 +31,7 @@ type Thing = {
     | "slow";
   lane: number;
   y: number;
+  speed?: number;
 };
 type Target = {
   y: number;
@@ -61,6 +66,7 @@ type Stats = {
   combo: number;
   bestCombo: number;
 };
+type ScoreBurst = { id: number; text: string; tone: "good" | "bad" };
 const fresh: Stats = {
   score: 0,
   delivered: 0,
@@ -73,6 +79,10 @@ const icons: Record<Thing["type"], string> = {
   deer: "🦌",
   dog: "🐕",
   cat: "🐈",
+  goose: "🪿",
+  raccoon: "🦝",
+  mower: "🏎️",
+  van: "🚐",
   squirrel: "🐿️",
   cow: "🐄",
   person: "🚶",
@@ -106,6 +116,14 @@ const addresses = [
   "609 PATTERSON ST",
   "1401 GREEN ST",
   "28 RIVERSIDE DR",
+];
+const orderPayloads = [
+  "Italian Sub",
+  "Big Boss Sub",
+  "Chicken Parm Sub",
+  "Jumbo Pizza Box",
+  "Steak Sub",
+  "Turkey Sub",
 ];
 declare global {
   interface Window {
@@ -150,6 +168,11 @@ export default function DeliveryGame() {
     [boost, setBoost] = useState(0),
     [slow, setSlow] = useState(0),
     [damaged, setDamaged] = useState(0),
+    [paused, setPaused] = useState(false),
+    [orderPayload, setOrderPayload] = useState(orderPayloads[0]),
+    [brokenWindow, setBrokenWindow] = useState(false),
+    [scoreBursts, setScoreBursts] = useState<ScoreBurst[]>([]),
+    [initials, setInitials] = useState("AAA"),
     [community, setCommunity] = useState<(typeof communities)[number]>(
       communities[0],
     ),
@@ -222,6 +245,21 @@ export default function DeliveryGame() {
   useEffect(() => {
     playerLane.current = lane;
   }, [lane]);
+  useEffect(() => {
+    const savedInitials = localStorage.getItem("corner-delivery-initials");
+    if (savedInitials) setInitials(savedInitials.slice(0, 3).toUpperCase());
+  }, []);
+  useEffect(() => {
+    if (mode !== "lost" && mode !== "won") return;
+    const previous = Number(
+      localStorage.getItem("corner-delivery-high-score") || 0,
+    );
+    localStorage.setItem(
+      "corner-delivery-high-score",
+      String(Math.max(previous, stats.score)),
+    );
+    localStorage.setItem("corner-delivery-initials", initials);
+  }, [mode, stats.score, initials]);
   const beep = useCallback(
     (
       kind:
@@ -336,6 +374,19 @@ export default function DeliveryGame() {
     setToast(message);
     window.setTimeout(() => setToast(""), 850);
   }
+  const scoreBurst = useCallback((text: string, tone: "good" | "bad") => {
+    const id = Date.now() + Math.random();
+    setScoreBursts((bursts) => [...bursts, { id, text, tone }]);
+    window.setTimeout(
+      () =>
+        setScoreBursts((bursts) => bursts.filter((burst) => burst.id !== id)),
+      900,
+    );
+  }, []);
+  const vibrate = useCallback((pattern: number | number[]) => {
+    if (typeof navigator !== "undefined" && "vibrate" in navigator)
+      navigator.vibrate(pattern);
+  }, []);
   const impact = useCallback(() => {
     setShaking(true);
     window.setTimeout(() => setShaking(false), 210);
@@ -354,7 +405,7 @@ export default function DeliveryGame() {
   );
   const deliver = useCallback(() => {
     const t = state.current.target;
-    if (state.current.mode !== "play" || !t.active) return;
+    if (state.current.mode !== "play" || paused || !t.active) return;
     if (ammo <= 0) {
       pop("NO SUBS LEFT. YOU DELIVERED THE INVENTORY TO SHRUBS.");
       return;
@@ -370,9 +421,12 @@ export default function DeliveryGame() {
           ? playerLane.current < 0.72
           : playerLane.current > 1.28;
     if (timed && correctSide) {
-      const perfect = t.y >= 70 && t.y <= 80;
+      const perfect = t.y >= 71 && t.y <= 79;
       setTarget((x) => ({ ...x, active: false }));
       setRouteDelivered((n) => n + 1);
+      setOrderPayload(
+        orderPayloads[Math.floor(Math.random() * orderPayloads.length)],
+      );
       setParticles((items) => [
         ...items,
         { id: throwId, side: t.side, y: t.y },
@@ -384,8 +438,8 @@ export default function DeliveryGame() {
       );
       setStats((s) => {
         const combo = s.combo + 1,
-          score =
-            s.score + (perfect ? 1000 : 600) * Math.min(5, 1 + combo * 0.1);
+          multiplier = Math.min(4, Math.max(1, combo)),
+          score = s.score + (perfect ? 200 : 100) * multiplier;
         return {
           ...s,
           delivered: s.delivered + 1,
@@ -394,6 +448,14 @@ export default function DeliveryGame() {
           score: Math.round(score),
         };
       });
+      if (perfect) setBoost(2);
+      scoreBurst(
+        perfect
+          ? `PERFECT +${200 * Math.min(4, stats.combo + 1)}`
+          : `GOOD +${100 * Math.min(4, stats.combo + 1)}`,
+        "good",
+      );
+      vibrate([15, 30]);
       pop(
         perfect
           ? quips[Math.floor(Math.random() * quips.length)]
@@ -401,7 +463,11 @@ export default function DeliveryGame() {
       );
       window.setTimeout(() => beep("delivery"), 190);
     } else {
-      setStats((s) => ({ ...s, score: Math.max(0, s.score - 200), combo: 0 }));
+      setStats((s) => ({ ...s, score: Math.max(0, s.score - 50), combo: 0 }));
+      setBrokenWindow(true);
+      window.setTimeout(() => setBrokenWindow(false), 420);
+      scoreBurst("BROKEN WINDOW -50", "bad");
+      vibrate([45, 25, 45]);
       pop(
         !correctSide
           ? `WRONG HOUSE! THAT WAS ${t.neighbor}`
@@ -412,7 +478,7 @@ export default function DeliveryGame() {
       impact();
       beep("hit");
     }
-  }, [ammo, beep, impact]);
+  }, [ammo, beep, impact, paused, scoreBurst, stats.combo, vibrate]);
   useEffect(() => {
     const speedRatio = Math.min(1, (cfg.speed + (boost > 0 ? 65 : 0)) / 330);
     const urgencyRatio = Math.max(0, Math.min(1, (20 - time) / 20));
@@ -420,8 +486,16 @@ export default function DeliveryGame() {
   }, [cfg.speed, boost, time]);
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      if (
+        (e.key === "p" || e.key === "P" || e.key === "Escape") &&
+        mode === "play"
+      ) {
+        e.preventDefault();
+        setPaused((value) => !value);
+        return;
+      }
       keys.current.add(e.key);
-      if ([" ", "Enter"].includes(e.key)) {
+      if ([" ", "Enter", "w", "W"].includes(e.key) && !paused) {
         e.preventDefault();
         deliver();
       }
@@ -433,9 +507,9 @@ export default function DeliveryGame() {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [deliver]);
+  }, [deliver, mode, paused]);
   useEffect(() => {
-    if (mode !== "play") return;
+    if (mode !== "play" || paused) return;
     let raf = 0;
     last.current = performance.now();
     const loop = (now: number) => {
@@ -468,17 +542,27 @@ export default function DeliveryGame() {
           (slow > 0 ? 120 : 0)) /
           100,
       );
+      const elapsed =
+          DELIVERY_STAGES[state.current.stage - 1].time - state.current.time,
+        speedRamp = 1 + Math.floor(Math.max(0, elapsed) / 30) * 0.08;
       if (spawn.current > Math.max(0.36, 1.05 - state.current.stage * 0.09)) {
         spawn.current = 0;
-        const types: Thing["type"][] = [
-            "deer",
-            "dog",
-            "cat",
-            "squirrel",
-            "person",
-            "car",
-            "pothole",
-          ],
+        const types: Thing["type"][] =
+            state.current.stage <= 1
+              ? ["squirrel", "cat", "pothole", "pothole"]
+              : state.current.stage <= 3
+                ? ["dog", "cat", "raccoon", "person", "car", "pothole", "mower"]
+                : [
+                    "deer",
+                    "dog",
+                    "goose",
+                    "cow",
+                    "person",
+                    "car",
+                    "van",
+                    "pothole",
+                    "mower",
+                  ],
           roll = Math.random(),
           type =
             roll < 0.08
@@ -493,6 +577,8 @@ export default function DeliveryGame() {
             type,
             lane: Math.random() * 2,
             y: -12,
+            speed:
+              type === "mower" || type === "van" || type === "goose" ? 1.35 : 1,
           },
         ]);
       }
@@ -516,9 +602,12 @@ export default function DeliveryGame() {
       setThings((a) => {
         const next: Thing[] = [];
         for (const x of a) {
-          const n = { ...x, y: x.y + dt * speed * 36 },
+          const n = {
+              ...x,
+              y: x.y + dt * speed * speedRamp * 36 * (x.speed || 1),
+            },
             collisionRadius =
-              n.type === "car"
+              n.type === "car" || n.type === "van"
                 ? 0.36
                 : n.type === "cow"
                   ? 0.29
@@ -526,13 +615,17 @@ export default function DeliveryGame() {
                     ? 0.21
                     : n.type === "dog"
                       ? 0.13
-                      : n.type === "cat"
+                      : n.type === "cat" || n.type === "raccoon"
                         ? 0.11
-                        : n.type === "squirrel"
-                          ? 0.07
-                          : n.type === "person"
-                            ? 0.13
-                            : 0.18;
+                        : n.type === "goose"
+                          ? 0.15
+                          : n.type === "mower"
+                            ? 0.2
+                            : n.type === "squirrel"
+                              ? 0.07
+                              : n.type === "person"
+                                ? 0.13
+                                : 0.18;
           if (
             n.y > 78 &&
             n.y < 91 &&
@@ -551,7 +644,7 @@ export default function DeliveryGame() {
               continue;
             }
             if (
-              n.type === "car" &&
+              (n.type === "car" || n.type === "van") &&
               Math.abs(n.lane - playerLane.current) >= 0.17
             ) {
               setDamaged(4);
@@ -569,9 +662,15 @@ export default function DeliveryGame() {
               beep("hit");
               continue;
             }
-            if (n.type === "car" || n.type === "cow" || n.type === "person") {
+            if (
+              n.type === "car" ||
+              n.type === "van" ||
+              n.type === "cow" ||
+              n.type === "person" ||
+              n.type === "mower"
+            ) {
               const reason =
-                n.type === "car"
+                n.type === "car" || n.type === "van" || n.type === "mower"
                   ? DELIVERY_CAR_CRASHES[
                       Math.floor(Math.random() * DELIVERY_CAR_CRASHES.length)
                     ]
@@ -613,6 +712,23 @@ export default function DeliveryGame() {
               pop("CAT INCIDENT! -175. IT WILL BE REVIEWING THIS RIDE ONLINE.");
               impact();
               beep("meow");
+              continue;
+            }
+            if (n.type === "goose" || n.type === "raccoon") {
+              setHealth((health) => Math.max(0, health - 1));
+              setStats((stats) => ({
+                ...stats,
+                score: Math.max(0, stats.score - 150),
+                hits: stats.hits + 1,
+                combo: 0,
+              }));
+              pop(
+                n.type === "goose"
+                  ? "GOOSE INCIDENT! IT HAS CLAIMED THE LANE AND YOUR INSURANCE."
+                  : "RACCOON INCIDENT! THE SUB HAS BEEN RECLASSIFIED AS TRASH.",
+              );
+              impact();
+              beep("hit");
               continue;
             }
             const collisionType =
@@ -679,9 +795,9 @@ export default function DeliveryGame() {
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [mode, boost, slow, damaged, beep, impact]);
+  }, [mode, paused, boost, slow, damaged, beep, impact]);
   useEffect(() => {
-    if (mode !== "play") return;
+    if (mode !== "play" || paused) return;
     const id = setInterval(() => {
       setTime((t) => Math.max(0, t - 1));
       setBoost((b) => Math.max(0, b - 1));
@@ -689,7 +805,7 @@ export default function DeliveryGame() {
       setDamaged((seconds) => Math.max(0, seconds - 1));
     }, 1000);
     return () => clearInterval(id);
-  }, [mode]);
+  }, [mode, paused]);
   useEffect(() => {
     if (mode !== "play") return;
     const cityKinds: Scenery["kind"][] = [
@@ -802,6 +918,10 @@ export default function DeliveryGame() {
     setTarget(emptyTarget);
     setAmmo(DELIVERY_STAGES[n - 1].deliveries + 4);
     setFailure("");
+    setPaused(false);
+    setOrderPayload(
+      orderPayloads[Math.floor(Math.random() * orderPayloads.length)],
+    );
     impactFailure.current = "";
     setLane(1);
     setDamaged(0);
@@ -899,8 +1019,6 @@ export default function DeliveryGame() {
           />
           <div className="delivery-brand">CORNER DELI PRESENTS</div>
           <h1>
-            CORNER
-            <br />
             <i>DELIVERY BOY</i>
           </h1>
           <div className="van-hero">
@@ -914,6 +1032,19 @@ export default function DeliveryGame() {
             onChange={(e) => setName(e.target.value)}
             placeholder="Driver name"
           />
+          <label className="initials-entry">
+            ARCADE INITIALS
+            <input
+              value={initials}
+              maxLength={3}
+              inputMode="text"
+              onChange={(event) =>
+                setInitials(
+                  event.target.value.replace(/[^a-z]/gi, "").toUpperCase(),
+                )
+              }
+            />
+          </label>
           <button onClick={start}>START THE CAR</button>
           <button
             className="driver-leaderboard-button"
@@ -931,8 +1062,18 @@ export default function DeliveryGame() {
         <>
           <header className="delivery-hud">
             <div>
-              <small>ROUTE {stage}</small>
-              <b>{cfg.name}</b>
+              <small>
+                {stage <= 1
+                  ? "SUBURBAN"
+                  : stage <= 3
+                    ? "DOWNTOWN / MAIN ST"
+                    : "RUSH HOUR / RIVER RD"}
+              </small>
+              <b>ROUTE {stage}</b>
+            </div>
+            <div className="active-order-hud">
+              <small>TOSS</small>
+              <b>{orderPayload}</b>
             </div>
             <div>
               <small>DELIVERED</small>
@@ -949,8 +1090,12 @@ export default function DeliveryGame() {
               <b>{stats.score}</b>
             </div>
             <div className={`combo-hud combo-${Math.min(4, stats.combo)}`}>
-              <small>COMBO</small>
-              <b>{stats.combo}×</b>
+              <small>TIP STREAK</small>
+              <b>
+                {stats.combo >= 4
+                  ? "DELI HERO ×4"
+                  : `×${Math.max(1, stats.combo)}`}
+              </b>
             </div>
             <div className={ammo < 3 ? "ammo-hud critical" : "ammo-hud"}>
               <small>SUBS</small>
@@ -967,7 +1112,7 @@ export default function DeliveryGame() {
             </button>
           </header>
           <section
-            className={`delivery-world zone-${zone} ${time < 16 ? "panic" : ""} ${stage >= 4 ? "night" : ""} ${slow ? "slow-motion" : ""} ${shaking ? "impact-shake" : ""}`}
+            className={`delivery-world zone-${zone} ${time < 16 ? "panic" : ""} ${stage >= 4 ? "night" : ""} ${slow ? "slow-motion" : ""} ${shaking ? "impact-shake" : ""} ${brokenWindow ? "window-shatter" : ""} ${paused ? "paused" : ""}`}
             onTouchStart={(e) =>
               (touch.current = {
                 x: e.touches[0].clientX,
@@ -979,6 +1124,16 @@ export default function DeliveryGame() {
             onTouchEnd={touchEnd}
           >
             <MenuAdTicker overlay roadside />
+            <div className="route-progress" aria-label="Route progress">
+              <i
+                style={{
+                  width: `${Math.min(100, (routeDelivered / cfg.deliveries) * 100)}%`,
+                }}
+              />
+              <b>
+                {routeDelivered}/{cfg.deliveries} TO FINISH
+              </b>
+            </div>
             <div className="horizon-layer" />
             <div className="midground-layer" />
             {zone === "rural" && (
@@ -1072,22 +1227,31 @@ export default function DeliveryGame() {
                 </>
               )}
               {things.map((x) => (
-                <i
-                  className={`hazard ${x.type}`}
-                  key={x.id}
-                  style={
-                    {
-                      left: `${16.66 + x.lane * 33.33}%`,
-                      top: `${x.y}%`,
-                      "--depth": Math.max(
-                        0.45,
-                        Math.min(1.12, 0.45 + x.y / 145),
-                      ),
-                    } as CSSProperties
-                  }
-                >
-                  {icons[x.type]}
-                </i>
+                <Fragment key={x.id}>
+                  {(x.speed || 1) > 1 && x.y < 18 && (
+                    <i
+                      className="hazard-warning"
+                      style={{ left: `${16.66 + x.lane * 33.33}%` }}
+                    >
+                      !
+                    </i>
+                  )}
+                  <i
+                    className={`hazard ${x.type}`}
+                    style={
+                      {
+                        left: `${16.66 + x.lane * 33.33}%`,
+                        top: `${x.y}%`,
+                        "--depth": Math.max(
+                          0.45,
+                          Math.min(1.12, 0.45 + x.y / 145),
+                        ),
+                      } as CSSProperties
+                    }
+                  >
+                    {icons[x.type]}
+                  </i>
+                </Fragment>
               ))}
               <div
                 className={`driver ${boost ? "boost" : ""} ${skidding ? "skidding" : ""} ${damaged ? "damaged" : ""}`}
@@ -1126,6 +1290,17 @@ export default function DeliveryGame() {
               )}
             </div>
             {toast && <div className="delivery-toast">{toast}</div>}
+            {scoreBursts.map((burst) => (
+              <div className={`score-burst ${burst.tone}`} key={burst.id}>
+                {burst.text}
+              </div>
+            ))}
+            {paused && (
+              <div className="pause-card">
+                <b>ROUTE PAUSED</b>
+                <span>Press P or Esc to keep disappointing customers.</span>
+              </div>
+            )}
             <div className="hearts">
               {"❤️".repeat(health)}
               {"🖤".repeat(3 - health)}
