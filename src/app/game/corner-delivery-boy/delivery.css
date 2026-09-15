@@ -1,22 +1,1451 @@
-.delivery-boy{--red:#ec372c;--yellow:#ffd63d;min-height:100dvh;background:#101724;color:#fff;font-family:Arial,sans-serif;overflow:hidden;user-select:none}.delivery-boy button,.delivery-boy input{font:inherit}.delivery-home,.delivery-summary{width:min(680px,calc(100% - 30px));margin:5vh auto;text-align:center}.delivery-brand{display:inline-block;padding:8px 14px;background:var(--red);font-weight:1000;letter-spacing:.16em;box-shadow:6px 6px var(--yellow)}.delivery-home h1{font-size:clamp(3rem,9vw,6.5rem);line-height:.78;margin:35px 0 22px;text-shadow:6px 7px #000}.delivery-home h1 i{color:var(--yellow);font-style:normal}.van-hero{font-size:5rem;position:relative;height:105px;animation:van-bob .35s infinite alternate}.van-hero span{font-size:6rem}.van-hero b{font-size:3rem}.delivery-home p{font-size:1.3rem}.delivery-home input{display:block;width:100%;box-sizing:border-box;padding:14px;background:#090e18;border:2px solid #68758c;border-radius:8px;color:#fff}.delivery-home>button,.delivery-summary>button{display:block;width:100%;margin:10px 0;padding:18px;border:0;border-radius:8px;background:linear-gradient(#f25448,#b91d17);box-shadow:0 7px #6b0b08;color:#fff;font-weight:1000;font-size:1.25rem;letter-spacing:.08em}.delivery-home>small{display:block;color:#adb9c9;margin:20px}.sub-prize{padding:15px;border:3px dashed var(--yellow);color:var(--yellow);font-weight:1000}.delivery-hud{height:62px;display:flex;gap:5px;align-items:stretch;background:#090d15;padding:7px;box-sizing:border-box;position:relative;z-index:20}.delivery-hud>div{min-width:86px;padding:4px 10px;background:#171f2c;text-align:center}.delivery-hud>div:first-child{margin-right:auto;text-align:left}.delivery-hud small,.delivery-hud b{display:block}.delivery-hud small{font-size:.58rem;color:#aab5c6}.delivery-hud b{font-size:1.15rem}.delivery-hud .hot{background:var(--red);animation:timer-pulse .35s infinite alternate}.delivery-hud button{background:#293348;border:1px solid #748099;color:#fff;border-radius:7px}.delivery-world{position:relative;height:calc(100dvh - 62px);overflow:hidden;background:linear-gradient(#62b9e8 0 20%,#76a64d 20%);touch-action:none}.sky{position:absolute;z-index:2;top:0;left:0;right:0;height:20%;background:linear-gradient(#3d9fe0,#a7e4ff);overflow:hidden}.sky:after{content:"☁️     ☁️                ☁️       ☁️";position:absolute;font-size:2.3rem;white-space:pre;animation:clouds 10s linear infinite}.sky span{position:absolute;bottom:-9px;left:5%;font-size:4.5rem}.sky i{position:absolute;right:5%;top:25%;font-size:clamp(1.2rem,4vw,2.4rem);font-weight:1000;color:#fff;text-shadow:3px 3px #205078;transform:rotate(-3deg)}.road{position:absolute;inset:19% 13% 0;overflow:visible;background:#3c4248;clip-path:polygon(35% 0,65% 0,100% 100%,0 100%);box-shadow:inset 0 0 30px #111}.road:before,.road:after{content:"";position:absolute;top:0;bottom:0;width:9%;background:#777}.road:before{left:0}.road:after{right:0}.lane-lines{position:absolute;inset:0;background:linear-gradient(75deg,transparent 0 37%,#f6ecb9 38% 39%,transparent 40% 61%,#f6ecb9 62% 63%,transparent 64%);opacity:.8}.speed-lines{position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent 0 70px,#fff3 72px 75px);animation:road-move .35s linear infinite}.panic .speed-lines{animation-duration:.18s}.driver{position:absolute;z-index:8;bottom:5%;left:50%;translate:-50%;font-size:4.6rem;transition:left .13s cubic-bezier(.2,1.7,.4,1);filter:drop-shadow(0 8px 5px #0008)}.driver.lane-0{left:27%}.driver.lane-1{left:50%}.driver.lane-2{left:73%}.driver b{position:absolute;font-size:1.6rem;left:35%;top:-8%;animation:sub-bounce .3s infinite alternate}.driver.boost{filter:drop-shadow(0 0 15px #ffe600);animation:boost-shake .12s infinite}.hazard{position:absolute;z-index:7;translate:-50% -50%;font-style:normal;font-size:clamp(2rem,5vw,4rem);filter:drop-shadow(0 5px 3px #0008)}.hazard.pothole{color:#080808;width:55px;height:18px;border-radius:50%;background:#080808}.hazard.boost{color:var(--yellow);text-shadow:0 0 12px #fff}.house{position:absolute;z-index:10;translate:0 -50%;font-size:clamp(3rem,7vw,6rem);filter:drop-shadow(0 6px 3px #0007)}.house.left{right:96%;text-align:right}.house.right{left:96%}.house b{display:block;background:#151a23;color:#fff;padding:4px;font-size:.65rem;white-space:nowrap}.house.in-range{animation:house-ready .3s infinite alternate}.house.in-range b{background:var(--red);color:#fff}.delivery-toast{position:absolute;z-index:30;top:26%;left:50%;translate:-50%;font-size:clamp(1.4rem,5vw,3.3rem);font-weight:1000;color:var(--yellow);text-shadow:4px 4px #94160f;white-space:nowrap;animation:toast-pop .8s both}.hearts{position:absolute;z-index:15;left:12px;top:12px;font-size:1.5rem}.touch-controls{position:absolute;z-index:18;bottom:12px;left:50%;translate:-50%;display:grid;grid-template-columns:70px minmax(150px,260px) 70px;gap:8px}.touch-controls button{border:2px solid #fff8;border-radius:12px;background:#151b27db;color:#fff;font-size:1.5rem;font-weight:1000;min-height:62px}.touch-controls .deliver{background:var(--red);font-size:1rem}.delivery-summary{padding-top:7vh}.delivery-summary>small{color:var(--yellow);font-weight:1000;letter-spacing:.18em}.delivery-summary h1{font-size:clamp(2.3rem,7vw,5rem);margin:20px 0}.complaint-card{padding:25px;background:#fff5d8;color:#20170e;border:4px solid var(--red);box-shadow:8px 8px #000;font-size:1.25rem;font-weight:800;transform:rotate(-1deg)}.route-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:28px 0}.route-stats b{background:#090d14;padding:17px;font-size:1.7rem}.route-stats small{display:block;color:#9eabba;font-size:.55rem}.reward-code{padding:25px;border:4px dashed var(--yellow);color:var(--yellow);font-size:clamp(2rem,8vw,4.5rem);font-weight:1000}.win:before{content:"🥪";display:block;font-size:7rem;animation:van-bob .3s infinite alternate}@keyframes road-move{to{background-position:0 75px}}@keyframes clouds{from{left:-30%}to{left:100%}}@keyframes van-bob{to{translate:0 -8px;rotate:2deg}}@keyframes sub-bounce{to{translate:0 -6px;rotate:12deg}}@keyframes boost-shake{to{translate:-52% 2px}}@keyframes timer-pulse{to{scale:1.12}}@keyframes house-ready{to{scale:1.13;filter:drop-shadow(0 0 15px var(--yellow))}}@keyframes toast-pop{0%{scale:.2;opacity:0}25%{scale:1.2;opacity:1}100%{translate:-50% -80px;opacity:0}}
-@media(max-width:700px){.delivery-hud>div{min-width:54px;padding:4px}.delivery-hud>div:first-child{display:none}.delivery-hud b{font-size:.95rem}.road{inset:19% 4% 0}.touch-controls{width:calc(100% - 20px);grid-template-columns:64px 1fr 64px}.house.left{right:92%}.house.right{left:92%}.delivery-home{margin-top:3vh}.delivery-home h1{margin:25px 0 15px}.route-stats{grid-template-columns:1fr}}
-.delivery-world{perspective:700px}.road{transform:rotateX(3deg)}.driver{transition:left .05s linear}.house b,.house em{display:block;background:#151a23;color:#fff;padding:4px;font-size:.65rem;white-space:nowrap;font-style:normal}.house.target em{background:var(--yellow);color:#111;font-weight:1000}.house.decoy{opacity:.8;scale:.78}.address-ticket{position:absolute;z-index:25;top:12px;left:50%;translate:-50%;padding:8px 20px;background:#fff1c8;color:#1e170d;border:3px solid var(--red);box-shadow:5px 5px #0008;text-align:center}.address-ticket small,.address-ticket b,.address-ticket i{display:block}.address-ticket b{font-size:1.25rem}.address-ticket i{font-size:.65rem;font-weight:900;color:#9c1b15}.night{background:#101b20}.night .sky{background:linear-gradient(#07101e,#1f3150)}.night .sky:after{content:"✦       ·         ✦         ·        ✦";color:#fff}.night:after{content:"";position:absolute;z-index:19;inset:20% 0 0;pointer-events:none;background:radial-gradient(ellipse 31% 62% at 50% 93%,transparent 0 40%,#030508e8 79%)}.night .house:not(.in-range){filter:brightness(.3);opacity:.55}.night .house b{color:#747474;background:#080808}.headlights{position:absolute;z-index:20;pointer-events:none;bottom:0;left:50%;translate:-50%;width:58%;height:67%;clip-path:polygon(45% 100%,55% 100%,82% 0,18% 0);background:linear-gradient(0deg,#fff7b42b,transparent)}.touch-controls{z-index:28}
-.delivery-world .road{clip-path:none;background:transparent;box-shadow:none}.delivery-world .road:before{display:block;inset:0;width:auto;background:#3c4248;clip-path:polygon(35% 0,65% 0,100% 100%,0 100%);z-index:-1}.delivery-world .road:after{display:none}.delivery-world .lane-lines,.delivery-world .speed-lines{clip-path:polygon(35% 0,65% 0,100% 100%,0 100%)}.house span{display:block;filter:none}
-.delivery-world{background-image:linear-gradient(#58a9d544,#6f984522),url('/games/delivery-boy/route-background-v1.png');background-size:cover;background-position:center 36%;background-blend-mode:multiply}.delivery-world .sky{background:#4aa8df55;backdrop-filter:saturate(1.15)}.delivery-world .road:before{background:#303942d9}.sidewalk{position:absolute;z-index:1;top:0;bottom:0;width:13%;background:repeating-linear-gradient(0deg,#bcb7aa 0 55px,#8e8a80 57px 60px);box-shadow:inset 0 0 8px #4d4b47}.sidewalk.left-walk{left:0}.sidewalk.right-walk{right:0}.scenery{position:absolute;z-index:6;font-style:normal;font-size:clamp(2rem,5vw,4.5rem);translate:0 -50%;filter:drop-shadow(0 7px 4px #0008)}.scenery.left{right:100%}.scenery.right{left:100%}.scenery.abandoned{filter:grayscale(.75) brightness(.65) drop-shadow(0 7px 4px #0008)}.scenery.tent{font-size:clamp(2.5rem,6vw,5rem)}.wrapped-sub{display:grid!important;place-items:center;width:52px;height:20px;left:50%!important;top:-12px!important;background:linear-gradient(135deg,#fff,#85898e 48%,#eceff1 52%,#777);border:2px solid #34383d;border-radius:3px!important;color:#b52018;font:bold 9px Arial;box-shadow:0 3px 5px #0009;rotate:-5deg}.flying-sub{--start:50%;position:absolute;z-index:24;left:var(--start);bottom:12%;font-style:normal;font-size:2.4rem;color:#d9dde0;text-shadow:1px 1px #555;filter:drop-shadow(0 5px 3px #0008)}.flying-sub.left{animation:throw-left .62s cubic-bezier(.15,.7,.35,1) forwards}.flying-sub.right{animation:throw-right .62s cubic-bezier(.15,.7,.35,1) forwards}@keyframes throw-left{0%{left:var(--start);bottom:14%;rotate:0;scale:.8}48%{bottom:46%;rotate:-240deg;scale:1.25}100%{left:-12%;bottom:64%;rotate:-480deg;scale:.55;opacity:.2}}@keyframes throw-right{0%{left:var(--start);bottom:14%;rotate:0;scale:.8}48%{bottom:46%;rotate:240deg;scale:1.25}100%{left:106%;bottom:64%;rotate:480deg;scale:.55;opacity:.2}}.night{background-image:linear-gradient(#020613c9,#07101bba),url('/games/delivery-boy/route-background-v1.png');background-blend-mode:multiply}.night .sky{background:#020711bb}.night .sidewalk{filter:brightness(.28)}
-.delivery-world .sidewalk{width:6%;opacity:.78}.driver>span{display:block;width:74px;height:42px;font-size:0;background:linear-gradient(90deg,#b31319,#ee3e36 50%,#a40e13);border-radius:16px 16px 9px 9px;border:3px solid #5b080b;box-shadow:inset 0 8px #89c7dc,0 8px 7px #0008}.driver>span:before{content:"";position:absolute;left:5px;right:5px;bottom:-6px;height:12px;border-radius:6px;background:linear-gradient(90deg,#111 0 18%,transparent 18% 82%,#111 82%)}.driver>span:after{content:"CORNER DELI";position:absolute;left:12px;right:12px;bottom:5px;padding:2px;background:#fff;color:#b31319;font:bold 7px Arial;text-align:center;border-radius:2px}.flying-sub{width:50px;height:18px;font-size:0;background:linear-gradient(135deg,#fff,#777 45%,#f3f3f3 52%,#888);border:2px solid #34383d;border-radius:4px;box-shadow:0 4px 5px #0008}.flying-sub:after{content:"SUB";display:grid;place-items:center;height:100%;color:#ba1d18;font:bold 8px Arial}
-.delivery-world .driver{bottom:13%}
-.delivery-world,.delivery-world .road,.delivery-world .sky{transition:background-image 1.2s,background-color 1.2s,filter 1.2s}.delivery-world .road,.delivery-world .road:before{clip-path:none!important;transform:none}.delivery-world .lane-lines,.delivery-world .speed-lines{clip-path:none}.delivery-world .road{inset:19% 19% 0}.zone-rural{background-image:linear-gradient(#7cb14f22,#7cb14f22),url('/games/delivery-boy/rural-route-v1.png');background-position:center 32%;background-blend-mode:multiply}.zone-rural .sky{background:#72b4e122}.zone-rural .sidewalk{display:none}.zone-rural .road:before{background:#353a3ecc}.zone-rural .scenery{display:none}.zone-rural .sky:before{content:"ENTERING  LISBON\A WATCH FOR COWS";white-space:pre;position:absolute;z-index:8;left:8%;bottom:4px;padding:8px 16px;background:#e9e2c2;color:#172114;border:4px solid #31502b;border-radius:4px;text-align:center;font:bold 13px Arial;line-height:1.25;box-shadow:4px 4px #0007;animation:sign-pass 3.2s ease-in both}.zone-rural.night{background-image:linear-gradient(#020613c9,#07101bba),url('/games/delivery-boy/rural-route-v1.png');background-blend-mode:multiply}.hazard.cow{font-size:clamp(3rem,7vw,6rem)}@keyframes sign-pass{0%{translate:0 -120%;scale:.5;opacity:0}25%{translate:0 0;scale:1;opacity:1}80%{translate:0 0;opacity:1}100%{translate:-70% 100%;scale:1.4;opacity:0}}@media(max-width:700px){.delivery-world .road{inset:19% 8% 0}.zone-rural .sky:before{left:2%;font-size:10px;padding:6px}}
-.delivery-world{background-image:none!important;background-color:#68a94c;background-size:auto;perspective:none}.delivery-world:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,#6ead50 0 58px,#659f49 59px 116px);animation:ground-scroll .72s linear infinite}.delivery-world .sky{display:none}.delivery-world .road{inset:0 19%;transform:skewX(-3deg)!important;background:#3b4145;box-shadow:-14px 0 #8f8e84,14px 0 #8f8e84,0 0 0 22px #c5c0af}.delivery-world .road:before{background:repeating-linear-gradient(0deg,#3d4448 0 74px,#353b3f 75px 148px);animation:ground-scroll .9s linear infinite}.delivery-world .lane-lines{background:linear-gradient(90deg,transparent 0 49.4%,#efd65c 49.5% 50.5%,transparent 50.6%);opacity:.9}.delivery-world .speed-lines{background:repeating-linear-gradient(0deg,transparent 0 72px,#ffffff1f 73px 76px);animation:road-move .38s linear infinite}.delivery-world .sidewalk{display:block;top:0;bottom:0;width:9%;background:repeating-linear-gradient(0deg,#c8c3b6 0 57px,#8f8c84 58px 61px);animation:ground-scroll .76s linear infinite}.delivery-world .sidewalk.left-walk{left:-13%}.delivery-world .sidewalk.right-walk{right:-13%}.zone-rural{background-image:none!important;background-color:#75aa48}.zone-rural:before{background:repeating-linear-gradient(0deg,#78ad4c 0 45px,#6b9e42 46px 90px),repeating-linear-gradient(90deg,transparent 0 80px,#e6d95a33 81px 84px);animation:ground-scroll .58s linear infinite}.zone-rural .road{box-shadow:-8px 0 #d1c39b,8px 0 #d1c39b}.zone-rural .road:before{background:repeating-linear-gradient(0deg,#414548 0 82px,#383d40 83px 164px)}.zone-rural .sidewalk{display:none}.zone-rural:after{content:"ENTERING LISBON\A WATCH FOR COWS";white-space:pre;position:absolute;z-index:18;left:3%;top:20%;padding:10px;background:#ece6c8;color:#192816;border:4px solid #34582d;text-align:center;font:bold 12px Arial;box-shadow:5px 6px #0006;animation:roadside-sign 5s linear both}.night{background-color:#111d22!important}.night:before{filter:brightness(.22) saturate(.7)}.night .road{filter:brightness(.38)}.night .house,.night .scenery{filter:brightness(.4)}.house{transform:skewX(3deg)}.driver{transform:skewX(3deg)}@keyframes ground-scroll{to{background-position:0 116px}}@keyframes roadside-sign{0%{top:-15%;scale:.55}100%{top:115%;scale:1.25}}@media(max-width:700px){.delivery-world .road{inset:0 10%}.delivery-world .sidewalk.left-walk{left:-10%}.delivery-world .sidewalk.right-walk{right:-10%}}
-.delivery-world .scenery.house{font-size:clamp(3.2rem,7vw,6rem);filter:drop-shadow(0 7px 4px #0008)}.delivery-world .scenery.tent{white-space:nowrap}.zone-rural .scenery{display:block}.zone-rural .scenery:not(.house):not(.trash){display:none}.zone-rural .scenery.house{font-size:clamp(3rem,6vw,5.2rem)}
-.driver{width:clamp(86px,11vw,128px);height:auto;font-size:0;transform-origin:50% 85%;animation:equinox-road-bob .22s ease-in-out infinite alternate}.driver img{display:block;width:100%;height:auto;pointer-events:none;user-select:none;filter:drop-shadow(0 10px 5px #0009)}.driver:after{content:"";position:absolute;z-index:-1;left:17%;right:17%;bottom:18%;height:13%;border-radius:50%;background:#ff201dcc;filter:blur(9px);opacity:.5;animation:ev-brake-glow 1.2s ease-in-out infinite alternate}.driver.boost{animation:equinox-boost .09s linear infinite alternate}.driver.boost img{filter:drop-shadow(0 0 13px #55c8ff) drop-shadow(0 10px 5px #0009)}@keyframes equinox-road-bob{from{translate:-50% 0;rotate:-.8deg}to{translate:-50% -3px;rotate:.8deg}}@keyframes equinox-boost{from{translate:-52% 1px;scale:1.04}to{translate:-48% -2px;scale:1.04}}@keyframes ev-brake-glow{to{opacity:.9;filter:blur(12px)}}
-.hazard.squirrel{font-size:clamp(1rem,2vw,1.7rem)}.hazard.dog{font-size:clamp(1.8rem,3.5vw,3rem)}.hazard.deer{font-size:clamp(2.8rem,5.5vw,4.8rem)}.hazard.cow{font-size:clamp(4rem,8vw,7rem)}.hazard.car{font-size:clamp(3.7rem,7vw,6rem)}.hazard.pothole{width:clamp(32px,5vw,58px);height:clamp(10px,1.7vw,20px)}
+.delivery-boy {
+  --red: #ec372c;
+  --yellow: #ffd63d;
+  min-height: 100dvh;
+  background: #101724;
+  color: #fff;
+  font-family: Arial, sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+.delivery-boy button,
+.delivery-boy input {
+  font: inherit;
+}
+.delivery-home,
+.delivery-summary {
+  width: min(680px, calc(100% - 30px));
+  margin: 5vh auto;
+  text-align: center;
+}
+.delivery-brand {
+  display: inline-block;
+  padding: 8px 14px;
+  background: var(--red);
+  font-weight: 1000;
+  letter-spacing: 0.16em;
+  box-shadow: 6px 6px var(--yellow);
+}
+.delivery-home h1 {
+  font-size: clamp(3rem, 9vw, 6.5rem);
+  line-height: 0.78;
+  margin: 35px 0 22px;
+  text-shadow: 6px 7px #000;
+}
+.delivery-home h1 i {
+  color: var(--yellow);
+  font-style: normal;
+}
+.van-hero {
+  font-size: 5rem;
+  position: relative;
+  height: 105px;
+  animation: van-bob 0.35s infinite alternate;
+}
+.van-hero span {
+  font-size: 6rem;
+}
+.van-hero b {
+  font-size: 3rem;
+}
+.delivery-home p {
+  font-size: 1.3rem;
+}
+.delivery-home input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px;
+  background: #090e18;
+  border: 2px solid #68758c;
+  border-radius: 8px;
+  color: #fff;
+}
+.delivery-home > button,
+.delivery-summary > button {
+  display: block;
+  width: 100%;
+  margin: 10px 0;
+  padding: 18px;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(#f25448, #b91d17);
+  box-shadow: 0 7px #6b0b08;
+  color: #fff;
+  font-weight: 1000;
+  font-size: 1.25rem;
+  letter-spacing: 0.08em;
+}
+.delivery-home > small {
+  display: block;
+  color: #adb9c9;
+  margin: 20px;
+}
+.sub-prize {
+  padding: 15px;
+  border: 3px dashed var(--yellow);
+  color: var(--yellow);
+  font-weight: 1000;
+}
+.delivery-hud {
+  height: 62px;
+  display: flex;
+  gap: 5px;
+  align-items: stretch;
+  background: #090d15;
+  padding: 7px;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 20;
+}
+.delivery-hud > div {
+  min-width: 86px;
+  padding: 4px 10px;
+  background: #171f2c;
+  text-align: center;
+}
+.delivery-hud > div:first-child {
+  margin-right: auto;
+  text-align: left;
+}
+.delivery-hud small,
+.delivery-hud b {
+  display: block;
+}
+.delivery-hud small {
+  font-size: 0.58rem;
+  color: #aab5c6;
+}
+.delivery-hud b {
+  font-size: 1.15rem;
+}
+.delivery-hud .hot {
+  background: var(--red);
+  animation: timer-pulse 0.35s infinite alternate;
+}
+.delivery-hud button {
+  background: #293348;
+  border: 1px solid #748099;
+  color: #fff;
+  border-radius: 7px;
+}
+.delivery-world {
+  position: relative;
+  height: calc(100dvh - 62px);
+  overflow: hidden;
+  background: linear-gradient(#62b9e8 0 20%, #76a64d 20%);
+  touch-action: none;
+}
+.sky {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 20%;
+  background: linear-gradient(#3d9fe0, #a7e4ff);
+  overflow: hidden;
+}
+.sky:after {
+  content: "☁️     ☁️                ☁️       ☁️";
+  position: absolute;
+  font-size: 2.3rem;
+  white-space: pre;
+  animation: clouds 10s linear infinite;
+}
+.sky span {
+  position: absolute;
+  bottom: -9px;
+  left: 5%;
+  font-size: 4.5rem;
+}
+.sky i {
+  position: absolute;
+  right: 5%;
+  top: 25%;
+  font-size: clamp(1.2rem, 4vw, 2.4rem);
+  font-weight: 1000;
+  color: #fff;
+  text-shadow: 3px 3px #205078;
+  transform: rotate(-3deg);
+}
+.road {
+  position: absolute;
+  inset: 19% 13% 0;
+  overflow: visible;
+  background: #3c4248;
+  clip-path: polygon(35% 0, 65% 0, 100% 100%, 0 100%);
+  box-shadow: inset 0 0 30px #111;
+}
+.road:before,
+.road:after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9%;
+  background: #777;
+}
+.road:before {
+  left: 0;
+}
+.road:after {
+  right: 0;
+}
+.lane-lines {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    75deg,
+    transparent 0 37%,
+    #f6ecb9 38% 39%,
+    transparent 40% 61%,
+    #f6ecb9 62% 63%,
+    transparent 64%
+  );
+  opacity: 0.8;
+}
+.speed-lines {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0 70px,
+    #fff3 72px 75px
+  );
+  animation: road-move 0.35s linear infinite;
+}
+.panic .speed-lines {
+  animation-duration: 0.18s;
+}
+.driver {
+  position: absolute;
+  z-index: 8;
+  bottom: 5%;
+  left: 50%;
+  translate: -50%;
+  font-size: 4.6rem;
+  transition: left 0.13s cubic-bezier(0.2, 1.7, 0.4, 1);
+  filter: drop-shadow(0 8px 5px #0008);
+}
+.driver.lane-0 {
+  left: 27%;
+}
+.driver.lane-1 {
+  left: 50%;
+}
+.driver.lane-2 {
+  left: 73%;
+}
+.driver b {
+  position: absolute;
+  font-size: 1.6rem;
+  left: 35%;
+  top: -8%;
+  animation: sub-bounce 0.3s infinite alternate;
+}
+.driver.boost {
+  filter: drop-shadow(0 0 15px #ffe600);
+  animation: boost-shake 0.12s infinite;
+}
+.hazard {
+  position: absolute;
+  z-index: 7;
+  translate: -50% -50%;
+  font-style: normal;
+  font-size: clamp(2rem, 5vw, 4rem);
+  filter: drop-shadow(0 5px 3px #0008);
+}
+.hazard.pothole {
+  color: #080808;
+  width: 55px;
+  height: 18px;
+  border-radius: 50%;
+  background: #080808;
+}
+.hazard.boost {
+  color: var(--yellow);
+  text-shadow: 0 0 12px #fff;
+}
+.house {
+  position: absolute;
+  z-index: 10;
+  translate: 0 -50%;
+  font-size: clamp(3rem, 7vw, 6rem);
+  filter: drop-shadow(0 6px 3px #0007);
+}
+.house.left {
+  right: 96%;
+  text-align: right;
+}
+.house.right {
+  left: 96%;
+}
+.house b {
+  display: block;
+  background: #151a23;
+  color: #fff;
+  padding: 4px;
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+.house.in-range {
+  animation: house-ready 0.3s infinite alternate;
+}
+.house.in-range b {
+  background: var(--red);
+  color: #fff;
+}
+.delivery-toast {
+  position: absolute;
+  z-index: 30;
+  top: 26%;
+  left: 50%;
+  translate: -50%;
+  font-size: clamp(1.4rem, 5vw, 3.3rem);
+  font-weight: 1000;
+  color: var(--yellow);
+  text-shadow: 4px 4px #94160f;
+  white-space: nowrap;
+  animation: toast-pop 0.8s both;
+}
+.hearts {
+  position: absolute;
+  z-index: 15;
+  left: 12px;
+  top: 12px;
+  font-size: 1.5rem;
+}
+.touch-controls {
+  position: absolute;
+  z-index: 18;
+  bottom: 12px;
+  left: 50%;
+  translate: -50%;
+  display: grid;
+  grid-template-columns: 70px minmax(150px, 260px) 70px;
+  gap: 8px;
+}
+.touch-controls button {
+  border: 2px solid #fff8;
+  border-radius: 12px;
+  background: #151b27db;
+  color: #fff;
+  font-size: 1.5rem;
+  font-weight: 1000;
+  min-height: 62px;
+}
+.touch-controls .deliver {
+  background: var(--red);
+  font-size: 1rem;
+}
+.delivery-summary {
+  padding-top: 7vh;
+}
+.delivery-summary > small {
+  color: var(--yellow);
+  font-weight: 1000;
+  letter-spacing: 0.18em;
+}
+.delivery-summary h1 {
+  font-size: clamp(2.3rem, 7vw, 5rem);
+  margin: 20px 0;
+}
+.complaint-card {
+  padding: 25px;
+  background: #fff5d8;
+  color: #20170e;
+  border: 4px solid var(--red);
+  box-shadow: 8px 8px #000;
+  font-size: 1.25rem;
+  font-weight: 800;
+  transform: rotate(-1deg);
+}
+.route-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 28px 0;
+}
+.route-stats b {
+  background: #090d14;
+  padding: 17px;
+  font-size: 1.7rem;
+}
+.route-stats small {
+  display: block;
+  color: #9eabba;
+  font-size: 0.55rem;
+}
+.reward-code {
+  padding: 25px;
+  border: 4px dashed var(--yellow);
+  color: var(--yellow);
+  font-size: clamp(2rem, 8vw, 4.5rem);
+  font-weight: 1000;
+}
+.win:before {
+  content: "🥪";
+  display: block;
+  font-size: 7rem;
+  animation: van-bob 0.3s infinite alternate;
+}
+@keyframes road-move {
+  to {
+    background-position: 0 75px;
+  }
+}
+@keyframes clouds {
+  from {
+    left: -30%;
+  }
+  to {
+    left: 100%;
+  }
+}
+@keyframes van-bob {
+  to {
+    translate: 0 -8px;
+    rotate: 2deg;
+  }
+}
+@keyframes sub-bounce {
+  to {
+    translate: 0 -6px;
+    rotate: 12deg;
+  }
+}
+@keyframes boost-shake {
+  to {
+    translate: -52% 2px;
+  }
+}
+@keyframes timer-pulse {
+  to {
+    scale: 1.12;
+  }
+}
+@keyframes house-ready {
+  to {
+    scale: 1.13;
+    filter: drop-shadow(0 0 15px var(--yellow));
+  }
+}
+@keyframes toast-pop {
+  0% {
+    scale: 0.2;
+    opacity: 0;
+  }
+  25% {
+    scale: 1.2;
+    opacity: 1;
+  }
+  100% {
+    translate: -50% -80px;
+    opacity: 0;
+  }
+}
+@media (max-width: 700px) {
+  .delivery-hud > div {
+    min-width: 54px;
+    padding: 4px;
+  }
+  .delivery-hud > div:first-child {
+    display: none;
+  }
+  .delivery-hud b {
+    font-size: 0.95rem;
+  }
+  .road {
+    inset: 19% 4% 0;
+  }
+  .touch-controls {
+    width: calc(100% - 20px);
+    grid-template-columns: 64px 1fr 64px;
+  }
+  .house.left {
+    right: 92%;
+  }
+  .house.right {
+    left: 92%;
+  }
+  .delivery-home {
+    margin-top: 3vh;
+  }
+  .delivery-home h1 {
+    margin: 25px 0 15px;
+  }
+  .route-stats {
+    grid-template-columns: 1fr;
+  }
+}
+.delivery-world {
+  perspective: 700px;
+}
+.road {
+  transform: rotateX(3deg);
+}
+.driver {
+  transition: left 0.05s linear;
+}
+.house b,
+.house em {
+  display: block;
+  background: #151a23;
+  color: #fff;
+  padding: 4px;
+  font-size: 0.65rem;
+  white-space: nowrap;
+  font-style: normal;
+}
+.house.target em {
+  background: var(--yellow);
+  color: #111;
+  font-weight: 1000;
+}
+.house.decoy {
+  opacity: 0.8;
+  scale: 0.78;
+}
+.address-ticket {
+  position: absolute;
+  z-index: 25;
+  top: 12px;
+  left: 50%;
+  translate: -50%;
+  padding: 8px 20px;
+  background: #fff1c8;
+  color: #1e170d;
+  border: 3px solid var(--red);
+  box-shadow: 5px 5px #0008;
+  text-align: center;
+}
+.address-ticket small,
+.address-ticket b,
+.address-ticket i {
+  display: block;
+}
+.address-ticket b {
+  font-size: 1.25rem;
+}
+.address-ticket i {
+  font-size: 0.65rem;
+  font-weight: 900;
+  color: #9c1b15;
+}
+.night {
+  background: #101b20;
+}
+.night .sky {
+  background: linear-gradient(#07101e, #1f3150);
+}
+.night .sky:after {
+  content: "✦       ·         ✦         ·        ✦";
+  color: #fff;
+}
+.night:after {
+  content: "";
+  position: absolute;
+  z-index: 19;
+  inset: 20% 0 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 31% 62% at 50% 93%,
+    transparent 0 40%,
+    #030508e8 79%
+  );
+}
+.night .house:not(.in-range) {
+  z-index: 21;
+  filter: brightness(0.72);
+  opacity: 0.88;
+}
+.night .house.target {
+  filter: brightness(0.9) drop-shadow(0 0 8px #fff4a855);
+}
+.night .house b {
+  color: #747474;
+  background: #080808;
+}
+.headlights {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  bottom: -2%;
+  translate: -50%;
+  width: 72%;
+  height: 84%;
+  clip-path: polygon(43% 100%, 57% 100%, 94% 0, 6% 0);
+  background: radial-gradient(ellipse at 50% 85%, #fffbd850 0, #fff7b42b 42%, transparent 74%);
+  transition: left 0.05s linear;
+  filter: drop-shadow(0 0 13px #fff7a655);
+}
+.touch-controls {
+  z-index: 28;
+}
+.delivery-world .road {
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+}
+.delivery-world .road:before {
+  display: block;
+  inset: 0;
+  width: auto;
+  background: #3c4248;
+  clip-path: polygon(35% 0, 65% 0, 100% 100%, 0 100%);
+  z-index: -1;
+}
+.delivery-world .road:after {
+  display: none;
+}
+.delivery-world .lane-lines,
+.delivery-world .speed-lines {
+  clip-path: polygon(35% 0, 65% 0, 100% 100%, 0 100%);
+}
+.house span {
+  display: block;
+  filter: none;
+}
+.delivery-world {
+  background-image:
+    linear-gradient(#58a9d544, #6f984522),
+    url("/games/delivery-boy/route-background-v1.png");
+  background-size: cover;
+  background-position: center 36%;
+  background-blend-mode: multiply;
+}
+.delivery-world .sky {
+  background: #4aa8df55;
+  backdrop-filter: saturate(1.15);
+}
+.delivery-world .road:before {
+  background: #303942d9;
+}
+.sidewalk {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  width: 13%;
+  background: repeating-linear-gradient(
+    0deg,
+    #bcb7aa 0 55px,
+    #8e8a80 57px 60px
+  );
+  box-shadow: inset 0 0 8px #4d4b47;
+}
+.sidewalk.left-walk {
+  left: 0;
+}
+.sidewalk.right-walk {
+  right: 0;
+}
+.scenery {
+  position: absolute;
+  z-index: 6;
+  font-style: normal;
+  font-size: clamp(2rem, 5vw, 4.5rem);
+  translate: 0 -50%;
+  filter: drop-shadow(0 7px 4px #0008);
+}
+.scenery.left {
+  right: 100%;
+}
+.scenery.right {
+  left: 100%;
+}
+.scenery.abandoned {
+  filter: grayscale(0.75) brightness(0.65) drop-shadow(0 7px 4px #0008);
+}
+.scenery.tent {
+  font-size: clamp(2.5rem, 6vw, 5rem);
+}
+.wrapped-sub {
+  display: grid !important;
+  place-items: center;
+  width: 52px;
+  height: 20px;
+  left: 50% !important;
+  top: -12px !important;
+  background: linear-gradient(135deg, #fff, #85898e 48%, #eceff1 52%, #777);
+  border: 2px solid #34383d;
+  border-radius: 3px !important;
+  color: #b52018;
+  font: bold 9px Arial;
+  box-shadow: 0 3px 5px #0009;
+  rotate: -5deg;
+}
+.flying-sub {
+  --start: 50%;
+  position: absolute;
+  z-index: 24;
+  left: var(--start);
+  bottom: 12%;
+  font-style: normal;
+  font-size: 2.4rem;
+  color: #d9dde0;
+  text-shadow: 1px 1px #555;
+  filter: drop-shadow(0 5px 3px #0008);
+}
+.flying-sub.left {
+  animation: throw-left 0.62s cubic-bezier(0.15, 0.7, 0.35, 1) forwards;
+}
+.flying-sub.right {
+  animation: throw-right 0.62s cubic-bezier(0.15, 0.7, 0.35, 1) forwards;
+}
+@keyframes throw-left {
+  0% {
+    left: var(--start);
+    bottom: 14%;
+    rotate: 0;
+    scale: 0.8;
+  }
+  48% {
+    bottom: 46%;
+    rotate: -240deg;
+    scale: 1.25;
+  }
+  100% {
+    left: -12%;
+    bottom: 64%;
+    rotate: -480deg;
+    scale: 0.55;
+    opacity: 0.2;
+  }
+}
+@keyframes throw-right {
+  0% {
+    left: var(--start);
+    bottom: 14%;
+    rotate: 0;
+    scale: 0.8;
+  }
+  48% {
+    bottom: 46%;
+    rotate: 240deg;
+    scale: 1.25;
+  }
+  100% {
+    left: 106%;
+    bottom: 64%;
+    rotate: 480deg;
+    scale: 0.55;
+    opacity: 0.2;
+  }
+}
+.night {
+  background-image:
+    linear-gradient(#020613c9, #07101bba),
+    url("/games/delivery-boy/route-background-v1.png");
+  background-blend-mode: multiply;
+}
+.night .sky {
+  background: #020711bb;
+}
+.night .sidewalk {
+  filter: brightness(0.28);
+}
+.delivery-world .sidewalk {
+  width: 6%;
+  opacity: 0.78;
+}
+.driver > span {
+  display: block;
+  width: 74px;
+  height: 42px;
+  font-size: 0;
+  background: linear-gradient(90deg, #b31319, #ee3e36 50%, #a40e13);
+  border-radius: 16px 16px 9px 9px;
+  border: 3px solid #5b080b;
+  box-shadow:
+    inset 0 8px #89c7dc,
+    0 8px 7px #0008;
+}
+.driver > span:before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  bottom: -6px;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #111 0 18%, transparent 18% 82%, #111 82%);
+}
+.driver > span:after {
+  content: "CORNER DELI";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 5px;
+  padding: 2px;
+  background: #fff;
+  color: #b31319;
+  font: bold 7px Arial;
+  text-align: center;
+  border-radius: 2px;
+}
+.flying-sub {
+  width: 50px;
+  height: 18px;
+  font-size: 0;
+  background: linear-gradient(135deg, #fff, #777 45%, #f3f3f3 52%, #888);
+  border: 2px solid #34383d;
+  border-radius: 4px;
+  box-shadow: 0 4px 5px #0008;
+}
+.flying-sub:after {
+  content: "SUB";
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: #ba1d18;
+  font: bold 8px Arial;
+}
+.delivery-world .driver {
+  bottom: 13%;
+}
+.delivery-world,
+.delivery-world .road,
+.delivery-world .sky {
+  transition:
+    background-image 1.2s,
+    background-color 1.2s,
+    filter 1.2s;
+}
+.delivery-world .road,
+.delivery-world .road:before {
+  clip-path: none !important;
+  transform: none;
+}
+.delivery-world .lane-lines,
+.delivery-world .speed-lines {
+  clip-path: none;
+}
+.delivery-world .road {
+  inset: 19% 19% 0;
+}
+.zone-rural {
+  background-image:
+    linear-gradient(#7cb14f22, #7cb14f22),
+    url("/games/delivery-boy/rural-route-v1.png");
+  background-position: center 32%;
+  background-blend-mode: multiply;
+}
+.zone-rural .sky {
+  background: #72b4e122;
+}
+.zone-rural .sidewalk {
+  display: none;
+}
+.zone-rural .road:before {
+  background: #353a3ecc;
+}
+.zone-rural .scenery {
+  display: none;
+}
+.zone-rural .sky:before {
+  content: "ENTERING  LISBON\A WATCH FOR COWS";
+  white-space: pre;
+  position: absolute;
+  z-index: 8;
+  left: 8%;
+  bottom: 4px;
+  padding: 8px 16px;
+  background: #e9e2c2;
+  color: #172114;
+  border: 4px solid #31502b;
+  border-radius: 4px;
+  text-align: center;
+  font: bold 13px Arial;
+  line-height: 1.25;
+  box-shadow: 4px 4px #0007;
+  animation: sign-pass 3.2s ease-in both;
+}
+.zone-rural.night {
+  background-image:
+    linear-gradient(#020613c9, #07101bba),
+    url("/games/delivery-boy/rural-route-v1.png");
+  background-blend-mode: multiply;
+}
+.hazard.cow {
+  font-size: clamp(3rem, 7vw, 6rem);
+}
+@keyframes sign-pass {
+  0% {
+    translate: 0 -120%;
+    scale: 0.5;
+    opacity: 0;
+  }
+  25% {
+    translate: 0 0;
+    scale: 1;
+    opacity: 1;
+  }
+  80% {
+    translate: 0 0;
+    opacity: 1;
+  }
+  100% {
+    translate: -70% 100%;
+    scale: 1.4;
+    opacity: 0;
+  }
+}
+@media (max-width: 700px) {
+  .delivery-world .road {
+    inset: 19% 8% 0;
+  }
+  .zone-rural .sky:before {
+    left: 2%;
+    font-size: 10px;
+    padding: 6px;
+  }
+}
+.delivery-world {
+  background-image: none !important;
+  background-color: #68a94c;
+  background-size: auto;
+  perspective: none;
+}
+.delivery-world:before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    #6ead50 0 58px,
+    #659f49 59px 116px
+  );
+  animation: ground-scroll 0.72s linear infinite;
+}
+.delivery-world .sky {
+  display: none;
+}
+.delivery-world .road {
+  inset: 0 19%;
+  transform: skewX(-3deg) !important;
+  background: #3b4145;
+  box-shadow:
+    -14px 0 #8f8e84,
+    14px 0 #8f8e84,
+    0 0 0 22px #c5c0af;
+}
+.delivery-world .road:before {
+  background: repeating-linear-gradient(
+    0deg,
+    #3d4448 0 74px,
+    #353b3f 75px 148px
+  );
+  animation: ground-scroll 0.9s linear infinite;
+}
+.delivery-world .lane-lines {
+  background: linear-gradient(
+    90deg,
+    transparent 0 49.4%,
+    #efd65c 49.5% 50.5%,
+    transparent 50.6%
+  );
+  opacity: 0.9;
+}
+.delivery-world .speed-lines {
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0 72px,
+    #ffffff1f 73px 76px
+  );
+  animation: road-move 0.38s linear infinite;
+}
+.delivery-world .sidewalk {
+  display: block;
+  top: 0;
+  bottom: 0;
+  width: 9%;
+  background: repeating-linear-gradient(
+    0deg,
+    #c8c3b6 0 57px,
+    #8f8c84 58px 61px
+  );
+  animation: ground-scroll 0.76s linear infinite;
+}
+.delivery-world .sidewalk.left-walk {
+  left: -13%;
+}
+.delivery-world .sidewalk.right-walk {
+  right: -13%;
+}
+.zone-rural {
+  background-image: none !important;
+  background-color: #75aa48;
+}
+.zone-rural:before {
+  background:
+    repeating-linear-gradient(0deg, #78ad4c 0 45px, #6b9e42 46px 90px),
+    repeating-linear-gradient(90deg, transparent 0 80px, #e6d95a33 81px 84px);
+  animation: ground-scroll 0.58s linear infinite;
+}
+.zone-rural .road {
+  box-shadow:
+    -8px 0 #d1c39b,
+    8px 0 #d1c39b;
+}
+.zone-rural .road:before {
+  background: repeating-linear-gradient(
+    0deg,
+    #414548 0 82px,
+    #383d40 83px 164px
+  );
+}
+.zone-rural .sidewalk {
+  display: none;
+}
+.zone-rural:after {
+  content: "ENTERING LISBON\A WATCH FOR COWS";
+  white-space: pre;
+  position: absolute;
+  z-index: 18;
+  left: 3%;
+  top: 20%;
+  padding: 10px;
+  background: #ece6c8;
+  color: #192816;
+  border: 4px solid #34582d;
+  text-align: center;
+  font: bold 12px Arial;
+  box-shadow: 5px 6px #0006;
+  animation: roadside-sign 5s linear both;
+}
+.night {
+  background-color: #111d22 !important;
+}
+.night:before {
+  filter: brightness(0.22) saturate(0.7);
+}
+.night .road {
+  filter: brightness(0.38);
+}
+.night .house,
+.night .scenery {
+  filter: brightness(0.4);
+}
+.house {
+  transform: skewX(3deg);
+}
+.driver {
+  transform: skewX(3deg);
+}
+@keyframes ground-scroll {
+  to {
+    background-position: 0 116px;
+  }
+}
+@keyframes roadside-sign {
+  0% {
+    top: -15%;
+    scale: 0.55;
+  }
+  100% {
+    top: 115%;
+    scale: 1.25;
+  }
+}
+@media (max-width: 700px) {
+  .delivery-world .road {
+    inset: 0 10%;
+  }
+  .delivery-world .sidewalk.left-walk {
+    left: -10%;
+  }
+  .delivery-world .sidewalk.right-walk {
+    right: -10%;
+  }
+}
+.delivery-world .scenery.house {
+  font-size: clamp(3.2rem, 7vw, 6rem);
+  filter: drop-shadow(0 7px 4px #0008);
+}
+.delivery-world .scenery.tent {
+  white-space: nowrap;
+}
+.zone-rural .scenery {
+  display: block;
+}
+.zone-rural .scenery:not(.house):not(.trash) {
+  display: none;
+}
+.zone-rural .scenery.house {
+  font-size: clamp(3rem, 6vw, 5.2rem);
+}
+.driver {
+  width: clamp(86px, 11vw, 128px);
+  height: auto;
+  font-size: 0;
+  transform-origin: 50% 85%;
+  animation: equinox-road-bob 0.22s ease-in-out infinite alternate;
+}
+.driver img {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 10px 5px #0009);
+}
+.driver:after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 17%;
+  right: 17%;
+  bottom: 18%;
+  height: 13%;
+  border-radius: 50%;
+  background: #ff201dcc;
+  filter: blur(9px);
+  opacity: 0.5;
+  animation: ev-brake-glow 1.2s ease-in-out infinite alternate;
+}
+.driver.boost {
+  animation: equinox-boost 0.09s linear infinite alternate;
+}
+.driver.boost img {
+  filter: drop-shadow(0 0 13px #55c8ff) drop-shadow(0 10px 5px #0009);
+}
+@keyframes equinox-road-bob {
+  from {
+    translate: -50% 0;
+    rotate: -0.8deg;
+  }
+  to {
+    translate: -50% -3px;
+    rotate: 0.8deg;
+  }
+}
+@keyframes equinox-boost {
+  from {
+    translate: -52% 1px;
+    scale: 1.04;
+  }
+  to {
+    translate: -48% -2px;
+    scale: 1.04;
+  }
+}
+@keyframes ev-brake-glow {
+  to {
+    opacity: 0.9;
+    filter: blur(12px);
+  }
+}
+.hazard.squirrel {
+  font-size: clamp(1rem, 2vw, 1.7rem);
+}
+.hazard.dog {
+  font-size: clamp(1.8rem, 3.5vw, 3rem);
+}
+.hazard.deer {
+  font-size: clamp(2.8rem, 5.5vw, 4.8rem);
+}
+.hazard.cow {
+  font-size: clamp(4rem, 8vw, 7rem);
+}
+.hazard.car {
+  font-size: clamp(3.7rem, 7vw, 6rem);
+}
+.hazard.pothole {
+  width: clamp(32px, 5vw, 58px);
+  height: clamp(10px, 1.7vw, 20px);
+}
 
 /* Route juice and compact Northern New York highway signage. */
-.zone-rural:after,.zone-rural .sky:before{display:none!important;content:none!important}
-.community-sign{position:absolute;z-index:24;top:-22%;left:3%;width:clamp(150px,19vw,245px);box-sizing:border-box;padding:7px 12px 9px;background:#176b3a;color:#fff;border:4px solid #fff;border-radius:7px;outline:2px solid #173e28;box-shadow:-5px 8px 0 #173e28,0 12px 12px #0007;text-align:center;text-transform:uppercase;font-family:Arial,Helvetica,sans-serif;line-height:1;letter-spacing:.08em;pointer-events:none;animation:nny-sign-pass 4.3s linear both}.community-sign small,.community-sign b,.community-sign span{display:block}.community-sign small{font-size:.55rem;margin-bottom:4px}.community-sign b{font-size:clamp(1rem,2.2vw,1.65rem);letter-spacing:.04em}.community-sign span{margin-top:7px;padding-top:6px;border-top:2px solid #fff;font-size:.55rem;line-height:1.2;letter-spacing:.04em}.community-sign:before,.community-sign:after{content:"";position:absolute;z-index:-1;top:100%;width:7px;height:62px;background:#a7afb1;border:1px solid #60686a}.community-sign:before{left:18%}.community-sign:after{right:18%}
-.horizon-layer,.midground-layer{position:absolute;inset:0;pointer-events:none}.horizon-layer{z-index:0;opacity:.42;background:linear-gradient(180deg,#79c9f0 0 15%,transparent 35%),repeating-linear-gradient(90deg,transparent 0 11%,#365f31 11.5% 14%,transparent 14.5% 24%);animation:horizon-drift 12s linear infinite}.midground-layer{z-index:1;opacity:.38;background:repeating-linear-gradient(0deg,transparent 0 86px,#e6dfbc66 88px 91px,transparent 93px 172px);animation:midground-scroll 1.35s linear infinite}
-.hazard:not(.pothole),.scenery{transform:scale(var(--depth,1));transform-origin:50% 100%;filter:drop-shadow(-7px 10px 4px #0008)}.hazard:not(.car):not(.pothole):not(.boost){animation:wildlife-walk .42s steps(4) infinite}.scenery.abandoned,.scenery.tent,.scenery.cart{animation:roadside-wobble .55s steps(2) infinite}.house{transform:skewX(3deg) scale(var(--depth,1));transform-origin:50% 100%}.driver img{filter:drop-shadow(-8px 12px 5px #0009)}
-.impact-shake{animation:impact-shake .21s linear}.combo-hud{transition:transform .16s,color .16s,filter .16s}.combo-2{color:#ffe35c;transform:scale(1.06)}.combo-3{color:#ff9a38;transform:scale(1.13);filter:drop-shadow(0 0 5px #ff9a38)}.combo-4{color:#67edff;transform:scale(1.2);filter:drop-shadow(0 0 8px #67edff)}.ammo-hud.critical{color:#fff;background:#b71313!important;animation:ammo-critical .3s infinite alternate}.skid-trail{position:absolute;z-index:6;bottom:9%;left:50%;width:54px;height:70px;translate:-50%;border-left:5px solid #17171799;border-right:5px solid #17171799;filter:blur(1px);animation:skid-fade .5s both}.delivery-particles{position:absolute;z-index:25;font-style:normal;color:#ffe151;font-size:1.3rem;text-shadow:0 0 7px #fff;animation:delivery-burst .65s both}.delivery-particles.left{right:91%}.delivery-particles.right{left:91%}
-.flying-sub{filter:drop-shadow(-9px 13px 4px #0009)}
-@keyframes nny-sign-pass{0%{top:-22%;transform:scale(.62);opacity:0}8%{opacity:1}55%{transform:scale(.9)}100%{top:112%;transform:scale(1.12);opacity:.9}}@keyframes horizon-drift{to{background-position:40px 0}}@keyframes midground-scroll{to{background-position:0 172px}}@keyframes wildlife-walk{0%{rotate:-4deg;translate:-50% -50%}50%{rotate:4deg;translate:-50% -54%}100%{rotate:-4deg;translate:-50% -50%}}@keyframes roadside-wobble{to{rotate:2deg}}@keyframes impact-shake{0%,100%{transform:translate(0)}20%{transform:translate(-10px,4px) rotate(-.6deg)}40%{transform:translate(8px,-5px) rotate(.5deg)}65%{transform:translate(-5px,3px)}85%{transform:translate(3px,-2px)}}@keyframes ammo-critical{to{transform:scale(1.09);filter:drop-shadow(0 0 8px #ff2626)}}@keyframes skid-fade{0%{opacity:.8;transform:skewX(-8deg)}100%{opacity:0;transform:translateY(55px) skewX(8deg)}}@keyframes delivery-burst{0%{opacity:0;transform:scale(.2)}30%{opacity:1;transform:scale(1.4)}100%{opacity:0;transform:translateY(-45px) scale(.7)}}
-@media(max-width:700px){.community-sign{left:2%;width:145px;padding:6px 8px}.community-sign b{font-size:1rem}.community-sign span{font-size:.48rem}.delivery-hud{overflow-x:auto}.delivery-hud>div{flex:0 0 auto}}
+.zone-rural:after,
+.zone-rural .sky:before {
+  display: none !important;
+  content: none !important;
+}
+.community-sign {
+  position: absolute;
+  z-index: 24;
+  top: -22%;
+  left: 3%;
+  width: clamp(150px, 19vw, 245px);
+  box-sizing: border-box;
+  padding: 7px 12px 9px;
+  background: #176b3a;
+  color: #fff;
+  border: 4px solid #fff;
+  border-radius: 7px;
+  outline: 2px solid #173e28;
+  box-shadow:
+    -5px 8px 0 #173e28,
+    0 12px 12px #0007;
+  text-align: center;
+  text-transform: uppercase;
+  font-family: Arial, Helvetica, sans-serif;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  animation: nny-sign-pass 4.3s linear both;
+}
+.community-sign small,
+.community-sign b,
+.community-sign span {
+  display: block;
+}
+.community-sign small {
+  font-size: 0.55rem;
+  margin-bottom: 4px;
+}
+.community-sign b {
+  font-size: clamp(1rem, 2.2vw, 1.65rem);
+  letter-spacing: 0.04em;
+}
+.community-sign span {
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 2px solid #fff;
+  font-size: 0.55rem;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+}
+.community-sign:before,
+.community-sign:after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 100%;
+  width: 7px;
+  height: 62px;
+  background: #a7afb1;
+  border: 1px solid #60686a;
+}
+.community-sign:before {
+  left: 18%;
+}
+.community-sign:after {
+  right: 18%;
+}
+.horizon-layer,
+.midground-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.horizon-layer {
+  z-index: 0;
+  opacity: 0.42;
+  background:
+    linear-gradient(180deg, #79c9f0 0 15%, transparent 35%),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 11%,
+      #365f31 11.5% 14%,
+      transparent 14.5% 24%
+    );
+  animation: horizon-drift 12s linear infinite;
+}
+.midground-layer {
+  z-index: 1;
+  opacity: 0.38;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0 86px,
+    #e6dfbc66 88px 91px,
+    transparent 93px 172px
+  );
+  animation: midground-scroll 1.35s linear infinite;
+}
+.hazard:not(.pothole),
+.scenery {
+  transform: scale(var(--depth, 1));
+  transform-origin: 50% 100%;
+  filter: drop-shadow(-7px 10px 4px #0008);
+}
+.hazard:not(.car):not(.pothole):not(.boost) {
+  animation: wildlife-walk 0.42s steps(4) infinite;
+}
+.scenery.abandoned,
+.scenery.tent,
+.scenery.cart {
+  animation: roadside-wobble 0.55s steps(2) infinite;
+}
+.house {
+  transform: skewX(3deg) scale(var(--depth, 1));
+  transform-origin: 50% 100%;
+}
+.driver img {
+  filter: drop-shadow(-8px 12px 5px #0009);
+}
+.impact-shake {
+  animation: impact-shake 0.21s linear;
+}
+.combo-hud {
+  transition:
+    transform 0.16s,
+    color 0.16s,
+    filter 0.16s;
+}
+.combo-2 {
+  color: #ffe35c;
+  transform: scale(1.06);
+}
+.combo-3 {
+  color: #ff9a38;
+  transform: scale(1.13);
+  filter: drop-shadow(0 0 5px #ff9a38);
+}
+.combo-4 {
+  color: #67edff;
+  transform: scale(1.2);
+  filter: drop-shadow(0 0 8px #67edff);
+}
+.ammo-hud.critical {
+  color: #fff;
+  background: #b71313 !important;
+  animation: ammo-critical 0.3s infinite alternate;
+}
+.skid-trail {
+  position: absolute;
+  z-index: 6;
+  bottom: 9%;
+  left: 50%;
+  width: 54px;
+  height: 70px;
+  translate: -50%;
+  border-left: 5px solid #17171799;
+  border-right: 5px solid #17171799;
+  filter: blur(1px);
+  animation: skid-fade 0.5s both;
+}
+.delivery-particles {
+  position: absolute;
+  z-index: 25;
+  font-style: normal;
+  color: #ffe151;
+  font-size: 1.3rem;
+  text-shadow: 0 0 7px #fff;
+  animation: delivery-burst 0.65s both;
+}
+.delivery-particles.left {
+  right: 91%;
+}
+.delivery-particles.right {
+  left: 91%;
+}
+.flying-sub {
+  filter: drop-shadow(-9px 13px 4px #0009);
+}
+@keyframes nny-sign-pass {
+  0% {
+    top: -22%;
+    transform: scale(0.62);
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  55% {
+    transform: scale(0.9);
+  }
+  100% {
+    top: 112%;
+    transform: scale(1.12);
+    opacity: 0.9;
+  }
+}
+@keyframes horizon-drift {
+  to {
+    background-position: 40px 0;
+  }
+}
+@keyframes midground-scroll {
+  to {
+    background-position: 0 172px;
+  }
+}
+@keyframes wildlife-walk {
+  0% {
+    rotate: -4deg;
+    translate: -50% -50%;
+  }
+  50% {
+    rotate: 4deg;
+    translate: -50% -54%;
+  }
+  100% {
+    rotate: -4deg;
+    translate: -50% -50%;
+  }
+}
+@keyframes roadside-wobble {
+  to {
+    rotate: 2deg;
+  }
+}
+@keyframes impact-shake {
+  0%,
+  100% {
+    transform: translate(0);
+  }
+  20% {
+    transform: translate(-10px, 4px) rotate(-0.6deg);
+  }
+  40% {
+    transform: translate(8px, -5px) rotate(0.5deg);
+  }
+  65% {
+    transform: translate(-5px, 3px);
+  }
+  85% {
+    transform: translate(3px, -2px);
+  }
+}
+@keyframes ammo-critical {
+  to {
+    transform: scale(1.09);
+    filter: drop-shadow(0 0 8px #ff2626);
+  }
+}
+@keyframes skid-fade {
+  0% {
+    opacity: 0.8;
+    transform: skewX(-8deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(55px) skewX(8deg);
+  }
+}
+@keyframes delivery-burst {
+  0% {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.4);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-45px) scale(0.7);
+  }
+}
+@media (max-width: 700px) {
+  .community-sign {
+    left: 2%;
+    width: 145px;
+    padding: 6px 8px;
+  }
+  .community-sign b {
+    font-size: 1rem;
+  }
+  .community-sign span {
+    font-size: 0.48rem;
+  }
+  .delivery-hud {
+    overflow-x: auto;
+  }
+  .delivery-hud > div {
+    flex: 0 0 auto;
+  }
+}

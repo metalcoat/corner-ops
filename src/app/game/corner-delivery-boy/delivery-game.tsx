@@ -953,8 +953,10 @@ export default function DeliveryGame() {
                   ✦ ✧ ✦ · ✧
                 </i>
               ))}
+              {stage >= 4 && (
+                <div className="headlights" style={{ left: `${lane * 50}%` }} />
+              )}
             </div>
-            {stage >= 4 && <div className="headlights" />}
             {toast && <div className="delivery-toast">{toast}</div>}
             <div className="hearts">
               {"❤️".repeat(health)}

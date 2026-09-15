@@ -10,6 +10,13 @@ type Tray = {
 };
 type Burst = { id: number; x: number; layer: Layer; bad?: boolean };
 type Run = { runId: string; token: string };
+type Leader = {
+  player_name: string;
+  score: number | string;
+  pizzas_made: number;
+  perfects: number;
+  completed_at: string;
+};
 const LAYERS: Layer[] = ["dough", "sauce", "cheese"],
   KEYS: Record<string, Layer> = {
     ArrowLeft: "dough",
@@ -113,6 +120,9 @@ export default function Game() {
       null,
     ),
     [muted, setMuted] = useState(false);
+  const [showLeaders, setShowLeaders] = useState(false),
+    [leaders, setLeaders] = useState<Leader[]>([]),
+    [leadersLoading, setLeadersLoading] = useState(false);
   const state = useRef({
       mode: "home",
       time: 60,
@@ -164,14 +174,14 @@ export default function Game() {
       const tray = s.trays
         .filter((t) => t.step < 3)
         .sort((a, b) => Math.abs(a.x - 50) - Math.abs(b.x - 50))[0];
-      if (!tray || Math.abs(tray.x - 50) > 20 || LAYERS[tray.step] !== layer) {
+      if (!tray || Math.abs(tray.x - 50) > 30 || LAYERS[tray.step] !== layer) {
         burst(tray?.x ?? 50, layer, true);
         fail(
           `WRONG DROP — ${layer.toUpperCase()} HIT THE WRONG PART OF THE LINE!`,
         );
         return;
       }
-      const perfect = Math.abs(tray.x - 50) <= 5;
+      const perfect = Math.abs(tray.x - 50) <= 8;
       tray.step++;
       tray.crisis = false;
       if (perfect) {
@@ -263,11 +273,11 @@ export default function Game() {
       s.time -= dt;
       if (s.time <= 15) audio.current.frenzy();
       s.speed =
-        13 *
+        9.5 *
         (1 + Math.floor(s.delivered / 3) * 0.05) *
         (s.time <= 15 ? 1.2 : 1) *
         (now < s.boostUntil ? 1.05 : 1);
-      if (now - s.lastSpawn > Math.max(760, 1450 - s.delivered * 20)) {
+      if (now - s.lastSpawn > Math.max(1400, 2500 - s.delivered * 25)) {
         s.trays.push({
           id: s.nextId++,
           x: -9,
@@ -279,7 +289,7 @@ export default function Game() {
       }
       s.trays.forEach((t) => {
         t.x += s.speed * dt;
-        if (t.x > 85 && t.step < 3) t.crisis = true;
+        if (t.x > 78 && t.step < 3) t.crisis = true;
       });
       const out = s.trays.find((t) => t.x >= 108);
       if (out) {
@@ -355,6 +365,14 @@ export default function Game() {
     setMuted(n);
     if (audio.current.master) audio.current.master.gain.value = n ? 0 : 0.45;
   }
+  async function openLeaderboard() {
+    setShowLeaders(true);
+    setLeadersLoading(true);
+    const response = await fetch("/api/pizza-gauntlet/leaderboard");
+    const data = await response.json();
+    setLeaders(Array.isArray(data.leaders) ? data.leaders : []);
+    setLeadersLoading(false);
+  }
   return (
     <main
       className={`gauntlet ${time <= 15 && mode === "play" ? "final-frenzy" : ""}`}
@@ -375,6 +393,9 @@ export default function Game() {
             maxLength={40}
           />
           <button onClick={begin}>PRESS START</button>
+          <button className="leaderboard-button" onClick={openLeaderboard}>
+            🏆 LEADERBOARD
+          </button>
           {startError && <strong className="start-error">{startError}</strong>}
           <small>← DOUGH &nbsp; ↓ SAUCE &nbsp; → CHEESE</small>
         </section>
@@ -465,6 +486,9 @@ export default function Game() {
           <p>{flash}</p>
           <b>One ruined pizza means the Jumbo lives to see another day.</b>
           <button onClick={begin}>RUN IT BACK</button>
+          <button className="leaderboard-button" onClick={openLeaderboard}>
+            🏆 LEADERBOARD
+          </button>
         </section>
       )}
       {mode === "won" && (
@@ -479,6 +503,45 @@ export default function Game() {
             <small>{reward?.error || "VALIDATING RUN…"}</small>
           )}
           <button onClick={begin}>PLAY AGAIN</button>
+          <button className="leaderboard-button" onClick={openLeaderboard}>
+            🏆 LEADERBOARD
+          </button>
+        </section>
+      )}
+      {showLeaders && (
+        <section className="leaderboard-modal" role="dialog" aria-modal="true">
+          <div>
+            <button
+              className="leaderboard-close"
+              onClick={() => setShowLeaders(false)}
+            >
+              ×
+            </button>
+            <small>CORNER DELI HIGH SCORES</small>
+            <h2>PIZZA LEGENDS</h2>
+            {leadersLoading ? (
+              <p>LOADING SCORES…</p>
+            ) : leaders.length === 0 ? (
+              <p>No winners yet. The board is waiting.</p>
+            ) : (
+              <ol>
+                {leaders.map((leader, index) => (
+                  <li
+                    key={`${leader.player_name}-${leader.completed_at}-${index}`}
+                  >
+                    <b>{index + 1}</b>
+                    <strong>{leader.player_name}</strong>
+                    <span>
+                      {Number(leader.score).toLocaleString()} PTS
+                      <small>
+                        {leader.pizzas_made} PIZZAS · {leader.perfects} PERFECT
+                      </small>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
         </section>
       )}
     </main>
