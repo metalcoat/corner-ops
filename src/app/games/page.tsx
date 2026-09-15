@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { MenuAdTicker } from "./components/menu-ad-ticker";
 import "./games.css";
 export const metadata: Metadata = {
   title: "Corner Deli Arcade",
@@ -29,7 +30,11 @@ export default function Games() {
   return (
     <main className="games-hub">
       <header>
-        <img className="games-logo" src="https://rezku-pos-upload.imgix.net/2e2a0810-d179-474b-a40b-e4104c60d8c1/olo/logo/jO52kF7dMM84upTQGozunTrduBxjbylAFeGYc8r_RT8.png?fit=max&auto=compress&fmt=png32&h=180" alt="Corner Deli" />
+        <img
+          className="games-logo"
+          src="https://rezku-pos-upload.imgix.net/2e2a0810-d179-474b-a40b-e4104c60d8c1/olo/logo/jO52kF7dMM84upTQGozunTrduBxjbylAFeGYc8r_RT8.png?fit=max&auto=compress&fmt=png32&h=180"
+          alt="Corner Deli"
+        />
         <small>CORNER DELI PRESENTS</small>
         <h1>
           THE CORNER
@@ -37,6 +42,7 @@ export default function Games() {
           <i>ARCADE</i>
         </h1>
         <p>Play hard. Survive the shift. Earn actual food.</p>
+        <MenuAdTicker />
       </header>
       <section>
         {games.map((g) => (

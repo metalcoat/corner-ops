@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { MenuAdTicker } from "@/app/games/components/menu-ad-ticker";
 type Layer = "dough" | "sauce" | "cheese";
 type Tray = {
   id: number;
@@ -379,7 +380,11 @@ export default function Game() {
     >
       {mode === "home" && (
         <section className="gauntlet-home">
-          <img className="game-corner-logo" src="https://rezku-pos-upload.imgix.net/2e2a0810-d179-474b-a40b-e4104c60d8c1/olo/logo/jO52kF7dMM84upTQGozunTrduBxjbylAFeGYc8r_RT8.png?fit=max&auto=compress&fmt=png32&h=180" alt="Corner Deli" />
+          <img
+            className="game-corner-logo"
+            src="https://rezku-pos-upload.imgix.net/2e2a0810-d179-474b-a40b-e4104c60d8c1/olo/logo/jO52kF7dMM84upTQGozunTrduBxjbylAFeGYc8r_RT8.png?fit=max&auto=compress&fmt=png32&h=180"
+            alt="Corner Deli"
+          />
           <div className="cabinet-logo">CORNER DELI ARCADE</div>
           <h1>
             THE PIZZA
@@ -387,6 +392,7 @@ export default function Game() {
             <i>GAUNTLET</i>
           </h1>
           <p>60 seconds. Three ingredients. Zero ruined pizzas.</p>
+          <MenuAdTicker />
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -426,6 +432,7 @@ export default function Game() {
             ))}
           </div>
           <section className="conveyor">
+            <MenuAdTicker overlay />
             <div className="sweet-zone">
               <b>PERFECT</b>
             </div>
