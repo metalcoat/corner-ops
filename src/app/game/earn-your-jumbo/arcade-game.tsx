@@ -2,12 +2,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MenuAdTicker } from "@/app/games/components/menu-ad-ticker";
 type Layer = "dough" | "sauce" | "cheese";
+type Topping = "pepperoni" | "mushroom" | "pepper";
 type Tray = {
   id: number;
   x: number;
   step: number;
   crisis: boolean;
   fire: boolean;
+  topping: Topping;
 };
 type Burst = { id: number; x: number; layer: Layer; bad?: boolean };
 type Run = { runId: string; token: string };
@@ -28,6 +30,23 @@ const LAYERS: Layer[] = ["dough", "sauce", "cheese"],
     d: "cheese",
   },
   ICON = { dough: "◯", sauce: "●", cheese: "▰" };
+const TOPPING_ICON: Record<Topping, string> = {
+    pepperoni: "●",
+    mushroom: "♠",
+    pepper: "◆",
+  },
+  TOPPINGS: Topping[] = ["pepperoni", "mushroom", "pepper"],
+  UNFAIR_PENALTIES = [
+    "Customer saw a full moon and believes the pizza is possessed. -1",
+    "Customer says the cheese looked at them with an attitude. -1",
+    "Customer heard the crust whisper their legal name. -1",
+    "Mercury is in retrograde. Somehow this is the pizza's fault. -1",
+    "Customer counted eleven pepperoni in a dream and expected us to honor it. -1",
+    "Pizza arrived facing north. Customer requested emotional south. -1",
+    "Customer's horoscope specifically warned against circles today. -1",
+    "A cousin who once visited Italy felt a disturbance. -1",
+    "Customer says the pizza was suspiciously pizza-shaped. -1",
+  ];
 class Audio {
   ctx: AudioContext | null = null;
   master: GainNode | null = null;
@@ -175,14 +194,15 @@ export default function Game() {
       const tray = s.trays
         .filter((t) => t.step < 3)
         .sort((a, b) => Math.abs(a.x - 50) - Math.abs(b.x - 50))[0];
-      if (!tray || Math.abs(tray.x - 50) > 30 || LAYERS[tray.step] !== layer) {
+      if (!tray || Math.abs(tray.x - 50) > 38 || LAYERS[tray.step] !== layer) {
         burst(tray?.x ?? 50, layer, true);
         fail(
           `WRONG DROP — ${layer.toUpperCase()} HIT THE WRONG PART OF THE LINE!`,
         );
         return;
       }
-      const perfect = Math.abs(tray.x - 50) <= 8;
+      // Touch input can arrive one rendered frame behind the mutable game clock.
+      const perfect = Math.abs(tray.x - 50) <= 13;
       tray.step++;
       tray.crisis = false;
       if (perfect) {
@@ -205,8 +225,37 @@ export default function Game() {
     },
     [fail, sync],
   );
+  const topTray = useCallback(
+    (id: number) => {
+      const s = state.current,
+        t = s.trays.find((x) => x.id === id);
+      if (!t || s.mode !== "play") return;
+      if (t.step < 3) {
+        setFlash("DOUGH, SAUCE, AND CHEESE FIRST!");
+        setTimeout(() => setFlash(""), 500);
+        return;
+      }
+      if (t.step > 3) return;
+      t.step = 4;
+      s.score += 75 * (s.combo >= 5 ? 2 : 1);
+      setFlash(`${t.topping.toUpperCase()}!`);
+      audio.current.sfx("splat");
+      burst(t.x, "cheese");
+      setTimeout(() => setFlash(""), 350);
+      sync();
+    },
+    [sync],
+  );
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        e.preventDefault();
+        const t = state.current.trays
+          .filter((x) => x.step === 3)
+          .sort((a, b) => Math.abs(a.x - 50) - Math.abs(b.x - 50))[0];
+        if (t) topTray(t.id);
+        return;
+      }
       const l = KEYS[e.key];
       if (l) {
         e.preventDefault();
@@ -215,7 +264,7 @@ export default function Game() {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [act]);
+  }, [act, topTray]);
   const checkpoint = useCallback(async () => {
     const s = state.current;
     if (!s.run) return;
@@ -285,16 +334,17 @@ export default function Game() {
           step: 0,
           crisis: false,
           fire: false,
+          topping: TOPPINGS[Math.floor(Math.random() * TOPPINGS.length)],
         });
         s.lastSpawn = now;
       }
       s.trays.forEach((t) => {
         t.x += s.speed * dt;
-        if (t.x > 78 && t.step < 3) t.crisis = true;
+        if (t.x > 78 && t.step < 4) t.crisis = true;
       });
       const out = s.trays.find((t) => t.x >= 108);
       if (out) {
-        if (out.step < 3) {
+        if (out.step < 4) {
           fail(
             "AN INCOMPLETE PIZZA LEFT THE BELT. THE CUSTOMER SAW EVERYTHING.",
           );
@@ -302,6 +352,15 @@ export default function Game() {
         }
         s.delivered++;
         s.score += 250 * (s.combo >= 5 ? 2 : 1);
+        if (Math.random() < 0.28) {
+          const complaint =
+            UNFAIR_PENALTIES[
+              Math.floor(Math.random() * UNFAIR_PENALTIES.length)
+            ];
+          s.score = Math.max(0, s.score - 1);
+          setFlash(complaint);
+          setTimeout(() => setFlash(""), 1700);
+        }
         s.trays = s.trays.filter((t) => t.id !== out.id);
       }
       if (s.time <= 0) {
@@ -441,6 +500,10 @@ export default function Game() {
                 key={t.id}
                 className={`tray ${t.crisis ? "crisis" : ""} ${t.fire ? "combo-fire" : ""}`}
                 style={{ left: `${t.x}%` }}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  topTray(t.id);
+                }}
               >
                 <div className="recipe-chain">
                   {LAYERS.map((l, i) => (
@@ -448,10 +511,30 @@ export default function Game() {
                       {ICON[l]}
                     </span>
                   ))}
+                  <span
+                    className={
+                      t.step > 3 ? "done topping-order" : "topping-order"
+                    }
+                  >
+                    {TOPPING_ICON[t.topping]}
+                  </span>
                 </div>
                 <div className={`pizza step-${t.step}`}>
                   {t.step > 1 && <i className="sauce" />}
                   {t.step > 2 && <i className="cheese" />}
+                  {t.step > 3 && (
+                    <>
+                      <b className={`pizza-topping ${t.topping} one`}>
+                        {TOPPING_ICON[t.topping]}
+                      </b>
+                      <b className={`pizza-topping ${t.topping} two`}>
+                        {TOPPING_ICON[t.topping]}
+                      </b>
+                      <b className={`pizza-topping ${t.topping} three`}>
+                        {TOPPING_ICON[t.topping]}
+                      </b>
+                    </>
+                  )}
                 </div>
               </article>
             ))}

@@ -18,7 +18,13 @@
   margin: 5vh auto;
   text-align: center;
 }
-.game-corner-logo{display:block;width:clamp(82px,12vw,135px);height:auto;margin:0 auto 14px;filter:drop-shadow(0 8px 9px #0009)}
+.game-corner-logo {
+  display: block;
+  width: clamp(82px, 12vw, 135px);
+  height: auto;
+  margin: 0 auto 14px;
+  filter: drop-shadow(0 8px 9px #0009);
+}
 .delivery-brand {
   display: inline-block;
   padding: 8px 14px;
@@ -577,7 +583,12 @@
   width: 72%;
   height: 84%;
   clip-path: polygon(43% 100%, 57% 100%, 94% 0, 6% 0);
-  background: radial-gradient(ellipse at 50% 85%, #fffbd850 0, #fff7b42b 42%, transparent 74%);
+  background: radial-gradient(
+    ellipse at 50% 85%,
+    #fffbd850 0,
+    #fff7b42b 42%,
+    transparent 74%
+  );
   transition: left 0.05s linear;
   filter: drop-shadow(0 0 13px #fff7a655);
 }
@@ -1430,6 +1441,80 @@
     opacity: 0;
     transform: translateY(-45px) scale(0.7);
   }
+}
+.driver-leaderboard-button {
+  margin-top: 12px !important;
+  background: linear-gradient(#286c88, #154457) !important;
+  box-shadow: 0 7px #092632 !important;
+}
+.driver-leaderboard {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #020508e8;
+}
+.driver-leaderboard > div {
+  position: relative;
+  width: min(650px, 100%);
+  max-height: 86dvh;
+  overflow: auto;
+  padding: 28px;
+  background: #13282e;
+  border: 5px solid #ffd63d;
+  box-shadow: 9px 9px #000;
+}
+.driver-leaderboard > div > small {
+  color: #ffd63d;
+  font-weight: 900;
+}
+.driver-leaderboard h2 {
+  font: 900 clamp(2rem, 7vw, 4rem)/1 Arial;
+  margin: 10px 0 20px;
+}
+.driver-board-close {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 42px;
+  height: 42px;
+  border: 2px solid #fff;
+  background: #a9211b;
+  color: #fff;
+  font-size: 1.7rem;
+}
+.driver-leaderboard ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.driver-leaderboard li {
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  border-bottom: 2px dashed #ffffff35;
+}
+.driver-leaderboard li > b {
+  color: #ffd63d;
+  font-size: 1.3rem;
+}
+.driver-leaderboard li > strong {
+  text-transform: uppercase;
+}
+.driver-leaderboard li > span {
+  text-align: right;
+  color: #70eaff;
+  font-weight: 900;
+}
+.driver-leaderboard li small {
+  display: block;
+  color: #a9bbb5;
+  font-size: 0.55rem;
+  margin-top: 3px;
 }
 @media (max-width: 700px) {
   .community-sign {

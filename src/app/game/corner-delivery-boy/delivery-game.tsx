@@ -41,6 +41,14 @@ type Scenery = {
   y: number;
 };
 type Run = { runId: string; token: string };
+type DeliveryLeader = {
+  player_name: string;
+  score: number;
+  delivered: number;
+  missed: number;
+  hits: number;
+  completed_at: string;
+};
 type Stats = {
   score: number;
   delivered: number;
@@ -145,6 +153,9 @@ export default function DeliveryGame() {
     [particles, setParticles] = useState<
       { id: number; side: "left" | "right"; y: number }[]
     >([]);
+  const [showLeaders, setShowLeaders] = useState(false),
+    [leaders, setLeaders] = useState<DeliveryLeader[]>([]),
+    [leadersLoading, setLeadersLoading] = useState(false);
   const keys = useRef(new Set<string>()),
     last = useRef(0),
     spawn = useRef(0),
@@ -166,6 +177,14 @@ export default function DeliveryGame() {
     } | null>(null),
     touch = useRef({ x: 0, y: 0, moved: false });
   const cfg = DELIVERY_STAGES[stage - 1];
+  async function openLeaderboard() {
+    setShowLeaders(true);
+    setLeadersLoading(true);
+    const response = await fetch("/api/delivery-boy/leaderboard");
+    const data = await response.json();
+    setLeaders(Array.isArray(data.leaders) ? data.leaders : []);
+    setLeadersLoading(false);
+  }
   useEffect(() => {
     state.current = { mode, time, health, stage, target };
   }, [mode, time, health, stage, target]);
@@ -808,6 +827,12 @@ export default function DeliveryGame() {
             placeholder="Driver name"
           />
           <button onClick={start}>START THE CAR</button>
+          <button
+            className="driver-leaderboard-button"
+            onClick={openLeaderboard}
+          >
+            🏆 DRIVER LEADERBOARD
+          </button>
           <small>← → or swipe to steer · SPACE or DELIVER to throw</small>
           <div className="sub-prize">
             WIN: {DELIVERY_PRIZE.name.toUpperCase()}
@@ -1062,6 +1087,12 @@ export default function DeliveryGame() {
               "The subs survived. Your dignity did not."}
           </div>
           <button onClick={() => location.reload()}>DRIVE AGAIN</button>
+          <button
+            className="driver-leaderboard-button"
+            onClick={openLeaderboard}
+          >
+            🏆 DRIVER LEADERBOARD
+          </button>
         </section>
       )}
       {mode === "won" && (
@@ -1070,6 +1101,49 @@ export default function DeliveryGame() {
           <h1>FREE SUB EARNED</h1>
           <div className="reward-code">{reward?.code}</div>
           <p>{DELIVERY_PRIZE.terms}</p>
+          <button
+            className="driver-leaderboard-button"
+            onClick={openLeaderboard}
+          >
+            🏆 DRIVER LEADERBOARD
+          </button>
+        </section>
+      )}
+      {showLeaders && (
+        <section className="driver-leaderboard" role="dialog" aria-modal="true">
+          <div>
+            <button
+              className="driver-board-close"
+              onClick={() => setShowLeaders(false)}
+            >
+              ×
+            </button>
+            <small>CORNER DELI ROUTE RECORDS</small>
+            <h2>DELIVERY LEGENDS</h2>
+            {leadersLoading ? (
+              <p>LOADING ROUTES…</p>
+            ) : leaders.length === 0 ? (
+              <p>No winning drivers yet. The deer remain undefeated.</p>
+            ) : (
+              <ol>
+                {leaders.map((leader, index) => (
+                  <li
+                    key={`${leader.player_name}-${leader.completed_at}-${index}`}
+                  >
+                    <b>{index + 1}</b>
+                    <strong>{leader.player_name}</strong>
+                    <span>
+                      {Number(leader.score).toLocaleString()} PTS
+                      <small>
+                        {leader.delivered} DELIVERED · {leader.hits} HITS ·{" "}
+                        {leader.missed} MISSED
+                      </small>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
         </section>
       )}
     </main>
