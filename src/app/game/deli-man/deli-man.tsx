@@ -30,6 +30,10 @@ export default function DeliMan() {
         facing = 1;
         bossActive = false;
         bossDefeated = false;
+        lastGroundedAt = 0;
+        jumpQueuedAt = 0;
+        lastShotAt = 0;
+        respawnX = 100;
         bossSprite!: Phaser.Physics.Arcade.Sprite;
         exitDoor!: Phaser.GameObjects.Rectangle;
         ladders: Array<{ x: number; top: number; bottom: number }> = [];
@@ -269,6 +273,23 @@ export default function DeliMan() {
           bossArt.fillStyle(0xf04435).fillRect(30, 82, 64, 14);
           bossArt.generateTexture("boss", 124, 124);
           bossArt.destroy();
+          const makePerson = (key: string, shirt: number, hat = false) => {
+            const p = this.make.graphics({ x: 0, y: 0 }, false);
+            if (hat) p.fillStyle(0xf0ad20).fillRect(9, 0, 28, 8);
+            p.fillStyle(0xb87548).fillCircle(23, 15, 12);
+            p.fillStyle(shirt).fillRect(8, 27, 30, 31);
+            p.fillStyle(0x172432)
+              .fillRect(8, 56, 12, 24)
+              .fillRect(27, 56, 12, 24);
+            p.fillStyle(0x1b1110)
+              .fillRect(5, 76, 17, 7)
+              .fillRect(25, 76, 17, 7);
+            p.generateTexture(key, 46, 84);
+            p.destroy();
+          };
+          makePerson("roofer", 0xf08324, true);
+          makePerson("customer", 0x7d45a8);
+          makePerson("pedestrian", 0x3a78a8);
           make("shot", 0xffd638, 22, 10);
           this.player = this.physics.add
             .sprite(100, 560, "hero")
@@ -328,6 +349,38 @@ export default function DeliMan() {
             .rectangle(4925, 535, 72, 150, 0x163f27)
             .setStrokeStyle(6, 0x73ff86)
             .setVisible(false);
+          [1010, 2140, 3360].forEach((x, i) => {
+            const npc = this.add.sprite(
+              x,
+              560,
+              i === 0 ? "roofer" : i === 1 ? "customer" : "pedestrian",
+            );
+            this.tweens.add({
+              targets: npc,
+              y: 555,
+              duration: 420 + i * 80,
+              yoyo: true,
+              repeat: -1,
+            });
+          });
+          const pickups = this.physics.add.staticGroup();
+          [640, 1450, 2260, 3180, 4140].forEach((x) => {
+            const coin = this.add
+              .circle(x, 500, 11, 0xffd438)
+              .setStrokeStyle(3, 0xffffff);
+            pickups.add(coin);
+            this.tweens.add({
+              targets: coin,
+              y: 486,
+              duration: 500,
+              yoyo: true,
+              repeat: -1,
+            });
+          });
+          this.physics.add.overlap(this.player, pickups, (_, item) => {
+            item.destroy();
+            this.score += 50;
+          });
           this.physics.add.collider(this.player, this.enemies, () =>
             this.damage(),
           );
@@ -381,16 +434,32 @@ export default function DeliMan() {
           );
           this.input.keyboard!.on("keydown-X", () => this.fire());
           this.input.keyboard!.on("keydown-F", () => this.fire());
+          this.input.keyboard!.on(
+            "keydown-UP",
+            () => (this.jumpQueuedAt = this.time.now),
+          );
+          this.input.keyboard!.on(
+            "keydown-W",
+            () => (this.jumpQueuedAt = this.time.now),
+          );
+          this.input.keyboard!.on("keyup-UP", () => this.cutJump());
+          this.input.keyboard!.on("keyup-W", () => this.cutJump());
           this.input.gamepad?.once("connected", () => {});
           this.input.on("pointerdown", (p: Phaser.Input.Pointer) =>
             p.x > this.scale.width * 0.55 ? this.fire() : this.jump(),
           );
         }
         jump() {
-          if ((this.player.body as Phaser.Physics.Arcade.Body).blocked.down)
+          if (this.time.now - this.lastGroundedAt < 125)
             this.player.setVelocityY(-520);
         }
+        cutJump() {
+          const body = this.player.body as Phaser.Physics.Arcade.Body;
+          if (body.velocity.y < -180) this.player.setVelocityY(-180);
+        }
         fire() {
+          if (this.time.now - this.lastShotAt < 175) return;
+          this.lastShotAt = this.time.now;
           const b = this.shots.create(
             this.player.x + this.facing * 32,
             this.player.y,
@@ -404,10 +473,14 @@ export default function DeliMan() {
           this.hp--;
           this.player.setTint(0xffffff).setVelocity(-180, -260);
           this.time.delayedCall(200, () => this.player.clearTint());
-          if (this.hp <= 0) this.scene.restart();
+          if (this.hp <= 0) {
+            this.hp = 8;
+            this.player.setPosition(this.respawnX, 540).setVelocity(0, 0);
+          }
         }
         update(_: number, dt: number) {
           const body = this.player.body as Phaser.Physics.Arcade.Body;
+          if (body.blocked.down) this.lastGroundedAt = this.time.now;
           const left = this.cursors.left.isDown || this.keys.A.isDown,
             right = this.cursors.right.isDown || this.keys.D.isDown;
           if (left) this.facing = -1;
@@ -436,6 +509,22 @@ export default function DeliMan() {
           )
             this.jump();
           if (
+            this.jumpQueuedAt &&
+            this.time.now - this.jumpQueuedAt < 120 &&
+            this.time.now - this.lastGroundedAt < 125
+          ) {
+            this.jumpQueuedAt = 0;
+            this.jump();
+          }
+          if (
+            !body.blocked.down &&
+            body.velocity.y > 0 &&
+            (body.blocked.left || body.blocked.right) &&
+            (this.cursors.up.isDown || this.keys.W.isDown)
+          ) {
+            this.player.setVelocity(body.blocked.left ? 330 : -330, -470);
+          }
+          if (
             (this.cursors.down.isDown || this.keys.SHIFT.isDown) &&
             body.blocked.down
           )
@@ -451,6 +540,8 @@ export default function DeliMan() {
             this.checkpoint,
             Math.floor(this.player.x / 1000),
           );
+          if (this.player.x > this.respawnX + 950)
+            this.respawnX = Math.floor(this.player.x / 1000) * 1000 + 80;
           if (this.player.x > 4550) {
             if (!this.bossActive) {
               this.bossActive = true;
