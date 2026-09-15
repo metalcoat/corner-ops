@@ -27,16 +27,49 @@ export default function DeliMan() {
         boss = 12 + stageIndex * 3;
         checkpoint = 0;
         invuln = 0;
+        ladders = [820, 1760, 2920, 3890];
+        preload() {
+          this.load.image(
+            "ogdensburg",
+            "/games/deli-man/ogdensburg-river-v1.png",
+          );
+        }
         create() {
           this.cameras.main.setBackgroundColor(def.theme);
+          for (let x = 0; x < 6000; x += 2040)
+            this.add
+              .image(x, 0, "ogdensburg")
+              .setOrigin(0)
+              .setDisplaySize(2048, 680)
+              .setScrollFactor(0.18)
+              .setAlpha(stageIndex === 3 ? 0.5 : 0.82);
           const g = this.add.graphics();
           g.fillStyle(0x192129).fillRect(0, 610, 5000, 110);
           g.fillStyle(0xffffff, 0.25);
           for (let x = 0; x < 5000; x += 260) g.fillRect(x, 675, 120, 7);
+          g.generateTexture("ground", 8, 8);
           this.physics.world.setBounds(0, 0, 5000, 720);
           const ground = this.physics.add.staticGroup();
           ground.create(2500, 650).setDisplaySize(5000, 80).refreshBody();
-          g.generateTexture("ground", 8, 8);
+          const platforms = this.physics.add.staticGroup();
+          this.ladders.forEach((x, index) => {
+            platforms
+              .create(x + 110, 390, "ground")
+              .setDisplaySize(310, 24)
+              .refreshBody();
+            g.lineStyle(8, 0xd3b56f);
+            g.lineBetween(x, 610, x, 400);
+            g.lineBetween(x + 48, 610, x + 48, 400);
+            for (let y = 420; y < 610; y += 27) g.lineBetween(x, y, x + 48, y);
+            g.fillStyle(0x5b2d18).fillRect(x + 65, 280, 95, 110);
+            g.fillStyle(0xffd447).fillCircle(x + 140, 335, 6);
+            this.add.text(x + 69, 250, `CUSTOMER ${index + 1}`, {
+              fontFamily: "monospace",
+              fontSize: "13px",
+              color: "#fff",
+              backgroundColor: "#111d",
+            });
+          });
           const make = (key: string, color: number, w: number, h: number) => {
             const q = this.make.graphics({ x: 0, y: 0 }, false);
             q.fillStyle(color).fillRect(0, 0, w, h);
@@ -51,6 +84,18 @@ export default function DeliMan() {
             .sprite(100, 560, "hero")
             .setCollideWorldBounds(true);
           this.player.body!.setSize(34, 56);
+          const heroArt = this.add.graphics();
+          heroArt.fillStyle(0xd92f27).fillRect(2, 0, 34, 12);
+          heroArt.fillStyle(0xf1b783).fillRect(8, 12, 24, 14);
+          heroArt.fillStyle(0x162f50).fillRect(4, 26, 30, 20);
+          heroArt.fillStyle(0xead4a0).fillRect(9, 29, 20, 25);
+          heroArt
+            .fillStyle(0x111820)
+            .fillRect(3, 48, 13, 10)
+            .fillRect(23, 48, 13, 10);
+          heroArt.generateTexture("deli-man", 38, 58);
+          heroArt.destroy();
+          this.player.setTexture("deli-man");
           this.cameras.main.startFollow(this.player, true, 0.09, 0.09);
           this.cameras.main.setBounds(0, 0, 5000, 720);
           this.cursors = this.input.keyboard!.createCursorKeys();
@@ -69,6 +114,12 @@ export default function DeliMan() {
               "name",
               def.hazards[Math.floor(Math.random() * def.hazards.length)],
             );
+            this.add.text(x - 26, 515, String(e.getData("name")), {
+              fontFamily: "monospace",
+              fontSize: "10px",
+              color: "#ffef73",
+              backgroundColor: "#111c",
+            });
             e.setVelocityX(-30 - stageIndex * 8);
           }
           this.physics.add.collider(this.player, this.enemies, () =>
@@ -80,6 +131,7 @@ export default function DeliMan() {
             this.score += 100;
           });
           this.physics.add.collider(this.player, ground);
+          this.physics.add.collider(this.player, platforms);
           this.tip = this.add
             .text(16, 16, "", {
               fontFamily: "monospace",
@@ -139,6 +191,19 @@ export default function DeliMan() {
           const left = this.cursors.left.isDown || this.keys.A.isDown,
             right = this.cursors.right.isDown || this.keys.D.isDown;
           this.player.setVelocityX(left ? -230 : right ? 230 : 0);
+          const ladder = this.ladders.some(
+            (x) => Math.abs(this.player.x - x - 24) < 42 && this.player.y > 370,
+          );
+          if (ladder && (this.cursors.up.isDown || this.keys.W.isDown)) {
+            body.setAllowGravity(false);
+            this.player.setVelocityY(-190);
+          } else if (
+            ladder &&
+            (this.cursors.down.isDown || this.keys.S.isDown)
+          ) {
+            body.setAllowGravity(false);
+            this.player.setVelocityY(190);
+          } else body.setAllowGravity(true);
           if (
             P.Input.Keyboard.JustDown(this.cursors.up) ||
             P.Input.Keyboard.JustDown(this.keys.W)
