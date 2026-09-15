@@ -147,7 +147,7 @@ export async function checkpointArcadeRun(
     score < 0 ||
     score > 250000 ||
     ruined < 0 ||
-    ruined > 1
+    ruined > 3
   )
     throw new Error("Impossible arcade progression.");
   const stats = { mode: "arcade60", score, delivered, perfects, ruined };
@@ -186,8 +186,8 @@ export async function completeArcadeRun(
   if (wallSeconds < 55 || Number(run.active_seconds) < 55 || checks < 5)
     throw new Error("The 60-second shift has not been validated yet.");
   if (
-    data.ruined !== 0 ||
-    Number(stats.ruined) !== 0 ||
+    data.ruined > 2 ||
+    Number(stats.ruined) > 2 ||
     data.delivered < 6 ||
     data.delivered !== Number(stats.delivered) ||
     data.score !== Number(stats.score)
@@ -200,7 +200,7 @@ export async function completeArcadeRun(
       score: data.score,
       delivered: data.delivered,
       perfects: data.perfects,
-      ruined: 0,
+      ruined: data.ruined,
     };
   await getSql()`UPDATE pizza_gauntlet_runs SET status='won',stats=${JSON.stringify(finalStats)}::jsonb,completed_at=NOW(),updated_at=NOW() WHERE id=${data.runId}`;
   return (

@@ -4,7 +4,7 @@ import { MenuAdTicker } from "@/app/games/components/menu-ad-ticker";
 type Layer = "dough" | "sauce" | "cheese";
 type Topping = "pepperoni" | "mushroom" | "pepper";
 type PizzaSize = "SMALL" | "REGULAR" | "JUMBO";
-type Bake = "REGULAR BAKE" | "WELL DONE";
+type Chaos = { title: string; detail: string; choices: [string, string] };
 type Tray = {
   id: number;
   x: number;
@@ -15,8 +15,6 @@ type Tray = {
   toppingHits: number;
   toppingTarget: number;
   size: PizzaSize;
-  bake: Bake;
-  slices: 6 | 8 | 10;
   note: string;
 };
 type Burst = { id: number; x: number; layer: Layer; bad?: boolean };
@@ -72,18 +70,51 @@ const TOPPING_ICON: Record<Topping, string> = {
     "IF THE MOON IS FULL, ROTATE BOX COUNTERCLOCKWISE",
   ],
   SIZES: PizzaSize[] = ["SMALL", "REGULAR", "JUMBO"];
+const CHAOS_EVENTS: Chaos[] = [
+  {
+    title: "PHONE RINGING",
+    detail: "Caller wants to know if pizza contains pizza.",
+    choices: ["ANSWER IT", "UNPLUG PHONE"],
+  },
+  {
+    title: "PRINTER JAM",
+    detail: "It printed seventeen inches of emotional damage.",
+    choices: ["CLEAR JAM", "BLAME WIFI"],
+  },
+  {
+    title: "OVEN ALARM",
+    detail: "The oven has entered its attention-seeking era.",
+    choices: ["CHECK OVEN", "TURN UP MUSIC"],
+  },
+  {
+    title: "PICKUP CUSTOMER",
+    detail: "They arrived twelve minutes early and are staring professionally.",
+    choices: ["GREET THEM", "BECOME INVISIBLE"],
+  },
+  {
+    title: "DRIVER AT WINDOW",
+    detail:
+      "The order arrived eight seconds ago. They have checked four times.",
+    choices: ["ACKNOWLEDGE", "RELEASE GEESE"],
+  },
+  {
+    title: "CHEESE EMERGENCY",
+    detail: "Someone put the scoop in the wrong bin. Society is collapsing.",
+    choices: ["FIX SCOOP", "CLOSE FOREVER"],
+  },
+];
 const LEVELS = [
   { name: "TRAINING WHEELS", speed: 1, timing: 38, perfect: 13, toppings: 1 },
-  { name: "DINNER RUSH", speed: 1.12, timing: 35, perfect: 12, toppings: 1 },
-  { name: "FRIDAY NIGHT", speed: 1.27, timing: 32, perfect: 10, toppings: 2 },
+  { name: "DINNER RUSH", speed: 1.06, timing: 36, perfect: 12, toppings: 1 },
+  { name: "FRIDAY NIGHT", speed: 1.12, timing: 34, perfect: 11, toppings: 1 },
   {
     name: "KITCHEN MELTDOWN",
-    speed: 1.43,
-    timing: 29,
-    perfect: 9,
+    speed: 1.2,
+    timing: 32,
+    perfect: 10,
     toppings: 2,
   },
-  { name: "LAST CALL PANIC", speed: 1.62, timing: 27, perfect: 8, toppings: 3 },
+  { name: "LAST CALL PANIC", speed: 1.3, timing: 30, perfect: 9, toppings: 2 },
 ] as const;
 const levelForTime = (remaining: number) =>
   Math.min(LEVELS.length - 1, Math.floor((60 - remaining) / 12));
@@ -179,7 +210,8 @@ export default function Game() {
     [reward, setReward] = useState<{ code?: string; error?: string } | null>(
       null,
     ),
-    [muted, setMuted] = useState(false);
+    [muted, setMuted] = useState(false),
+    [chaos, setChaos] = useState<Chaos | null>(null);
   const [showLeaders, setShowLeaders] = useState(false),
     [leaders, setLeaders] = useState<Leader[]>([]),
     [leadersLoading, setLeadersLoading] = useState(false);
@@ -199,8 +231,11 @@ export default function Game() {
       boostUntil: 0,
       run: null as Run | null,
       checkpoints: 0,
+      chaosAt: 51,
+      chaosDeadline: 0,
     }),
-    audio = useRef(new Audio());
+    audio = useRef(new Audio()),
+    chaosRef = useRef<Chaos | null>(null);
   const sync = useCallback(() => {
     const s = state.current;
     setTime(Math.max(0, Math.ceil(s.time)));
@@ -216,43 +251,52 @@ export default function Game() {
     setBursts((v) => [...v, { id, x, layer, bad }]);
     setTimeout(() => setBursts((v) => v.filter((p) => p.id !== id)), 460);
   };
-  const fail = useCallback((message: string) => {
-    const s = state.current;
-    if (s.mode !== "play") return;
-    s.ruined++;
-    s.combo = 0;
-    s.mode = "lost";
-    setRuined(s.ruined);
-    setFlash(message);
-    setMode("lost");
-    audio.current.sfx("error");
-    if (s.run)
-      void fetch("/api/pizza-gauntlet/run", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "arcade_loss",
-          runId: s.run.runId,
-          token: s.run.token,
-          score: s.score,
-          delivered: s.delivered,
-          perfects: s.perfects,
-          ruined: s.ruined,
-        }),
-      });
-  }, []);
+  const fail = useCallback(
+    (message: string) => {
+      const s = state.current;
+      if (s.mode !== "play") return;
+      s.ruined++;
+      s.combo = 0;
+      setRuined(s.ruined);
+      setFlash(message);
+      audio.current.sfx("error");
+      if (s.ruined < 3) {
+        s.trays = s.trays.filter((tray) => tray.x < 75);
+        setTimeout(() => setFlash(""), 900);
+        sync();
+        return;
+      }
+      s.mode = "lost";
+      setMode("lost");
+      if (s.run)
+        void fetch("/api/pizza-gauntlet/run", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "arcade_loss",
+            runId: s.run.runId,
+            token: s.run.token,
+            score: s.score,
+            delivered: s.delivered,
+            perfects: s.perfects,
+            ruined: s.ruined,
+          }),
+        });
+    },
+    [sync],
+  );
   const act = useCallback(
     (layer: Layer) => {
       const s = state.current;
       if (s.mode !== "play") return;
       const tray = s.trays
-        .filter((t) => t.step >= 1 && t.step < 4)
+        .filter((t) => t.step < 3)
         .sort((a, b) => Math.abs(a.x - 50) - Math.abs(b.x - 50))[0];
       const level = LEVELS[levelForTime(s.time)];
       if (
         !tray ||
         Math.abs(tray.x - 50) > level.timing ||
-        LAYERS[tray.step - 1] !== layer
+        LAYERS[tray.step] !== layer
       ) {
         burst(tray?.x ?? 50, layer, true);
         fail(
@@ -284,61 +328,43 @@ export default function Game() {
     },
     [fail, sync],
   );
-  const ticketAction = useCallback(
-    (action: string) => {
+  const answerChaos = useCallback(
+    (choice: number) => {
       const s = state.current;
-      if (s.mode !== "play") return;
-      const tray = s.trays
-        .filter((t) => t.step !== 8)
-        .sort((a, b) => Math.abs(a.x - 50) - Math.abs(b.x - 50))[0];
-      if (
-        !tray ||
-        Math.abs(tray.x - 50) > LEVELS[levelForTime(s.time)].timing
-      ) {
-        fail("WRONG TICKET — YOU JUST PREPPED A PIZZA IN ANOTHER ZIP CODE!");
-        return;
+      if (!chaosRef.current) return;
+      if (choice === 0) {
+        s.score += 200;
+        setFlash("CRISIS HANDLED +200");
+        audio.current.sfx("perfect");
+      } else {
+        s.score = Math.max(0, s.score - 125);
+        s.combo = 0;
+        setFlash("QUESTIONABLE MANAGEMENT -125");
+        audio.current.sfx("error");
       }
-      const expected =
-        tray.step === 0
-          ? tray.size
-          : tray.step === 5
-            ? tray.bake
-            : tray.step === 6
-              ? `CUT ${tray.slices}`
-              : tray.step === 7
-                ? "BOX"
-                : "";
-      if (!expected || action !== expected) {
-        fail(
-          `TICKET VIOLATION — NEEDED ${expected || "INGREDIENTS FIRST"}, NOT ${action}!`,
-        );
-        return;
-      }
-      tray.step++;
-      s.score += tray.step === 8 ? 125 : 55;
-      setFlash(`${action}!`);
-      audio.current.sfx(tray.step === 8 ? "perfect" : "splat");
-      setTimeout(() => setFlash(""), 350);
+      chaosRef.current = null;
+      setChaos(null);
+      setTimeout(() => setFlash(""), 650);
       sync();
     },
-    [fail, sync],
+    [sync],
   );
   const topTray = useCallback(
     (id: number) => {
       const s = state.current,
         t = s.trays.find((x) => x.id === id);
       if (!t || s.mode !== "play") return;
-      if (t.step < 4) {
+      if (t.step < 3) {
         setFlash("DOUGH, SAUCE, AND CHEESE FIRST!");
         setTimeout(() => setFlash(""), 500);
         return;
       }
-      if (t.step !== 4) return;
+      if (t.step !== 3) return;
       t.toppingHits++;
       s.score += 75 * (s.combo >= 5 ? 2 : 1);
-      if (t.toppingHits >= t.toppingTarget) t.step = 5;
+      if (t.toppingHits >= t.toppingTarget) t.step = 4;
       setFlash(
-        t.step === 5
+        t.step === 4
           ? `${t.topping.toUpperCase()} COMPLETE!`
           : `${t.topping.toUpperCase()} ${t.toppingHits}/${t.toppingTarget}`,
       );
@@ -354,7 +380,7 @@ export default function Game() {
       if (e.code === "Space") {
         e.preventDefault();
         const t = state.current.trays
-          .filter((x) => x.step === 4)
+          .filter((x) => x.step === 3)
           .sort((a, b) => Math.abs(a.x - 50) - Math.abs(b.x - 50))[0];
         if (t) topTray(t.id);
         return;
@@ -365,23 +391,11 @@ export default function Game() {
         act(l);
         return;
       }
-      const command: Record<string, string> = {
-        "1": "SMALL",
-        "2": "REGULAR",
-        "3": "JUMBO",
-        b: "REGULAR BAKE",
-        w: "WELL DONE",
-        "6": "CUT 6",
-        "8": "CUT 8",
-        "0": "CUT 10",
-        x: "BOX",
-      };
-      if (command[e.key.toLowerCase()])
-        ticketAction(command[e.key.toLowerCase()]);
+      if (e.key === "1" || e.key === "2") answerChaos(Number(e.key) - 1);
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [act, ticketAction, topTray]);
+  }, [act, answerChaos, topTray]);
   const checkpoint = useCallback(async () => {
     const s = state.current;
     if (!s.run) return;
@@ -456,19 +470,17 @@ export default function Game() {
           toppingHits: 0,
           toppingTarget: LEVELS[levelForTime(s.time)].toppings,
           size: SIZES[Math.floor(Math.random() * SIZES.length)],
-          bake: Math.random() < 0.24 ? "WELL DONE" : "REGULAR BAKE",
-          slices: ([6, 8, 10] as const)[Math.floor(Math.random() * 3)],
           note: TICKET_NOTES[Math.floor(Math.random() * TICKET_NOTES.length)],
         });
         s.lastSpawn = now;
       }
       s.trays.forEach((t) => {
         t.x += s.speed * dt;
-        if (t.x > 78 && t.step < 8) t.crisis = true;
+        if (t.x > 78 && t.step < 4) t.crisis = true;
       });
       const out = s.trays.find((t) => t.x >= 108);
       if (out) {
-        if (out.step < 8) {
+        if (out.step < 4) {
           fail(
             "AN INCOMPLETE PIZZA LEFT THE BELT. THE CUSTOMER SAW EVERYTHING.",
           );
@@ -486,6 +498,22 @@ export default function Game() {
           setTimeout(() => setFlash(""), 1700);
         }
         s.trays = s.trays.filter((t) => t.id !== out.id);
+      }
+      if (s.time <= s.chaosAt && !chaosRef.current) {
+        const event =
+          CHAOS_EVENTS[Math.floor(Math.random() * CHAOS_EVENTS.length)];
+        chaosRef.current = event;
+        setChaos(event);
+        s.chaosAt -= 8 + Math.random() * 3;
+        s.chaosDeadline = now + 5000;
+      } else if (chaosRef.current && now > s.chaosDeadline) {
+        s.score = Math.max(0, s.score - 175);
+        s.combo = 0;
+        chaosRef.current = null;
+        setChaos(null);
+        setFlash("CRISIS IGNORED -175");
+        audio.current.sfx("error");
+        setTimeout(() => setFlash(""), 650);
       }
       if (s.time <= 0) {
         void win();
@@ -538,7 +566,11 @@ export default function Game() {
       boostUntil: 0,
       run,
       checkpoints: 0,
+      chaosAt: 51,
+      chaosDeadline: 0,
     };
+    chaosRef.current = null;
+    setChaos(null);
     setReward(null);
     setFlash("");
     setMode("play");
@@ -574,7 +606,10 @@ export default function Game() {
             <br />
             <i>GAUNTLET</i>
           </h1>
-          <p>60 seconds. Three ingredients. Zero ruined pizzas.</p>
+          <p>
+            60 seconds. Build pizzas, handle the restaurant, survive three
+            strikes.
+          </p>
           <MenuAdTicker />
           <input
             value={name}
@@ -587,7 +622,7 @@ export default function Game() {
             🏆 LEADERBOARD
           </button>
           {startError && <strong className="start-error">{startError}</strong>}
-          <small>READ TICKET → SIZE → BUILD → BAKE → CUT → BOX</small>
+          <small>← DOUGH · ↓ SAUCE · → CHEESE · TAP PIZZA FOR TOPPINGS</small>
         </section>
       )}
       {mode === "play" && (
@@ -633,9 +668,8 @@ export default function Game() {
                 }}
               >
                 <div className="recipe-chain">
-                  <span className={t.step > 0 ? "done" : ""}>📏</span>
                   {LAYERS.map((l, i) => (
-                    <span className={i + 1 < t.step ? "done" : ""} key={l}>
+                    <span className={i < t.step ? "done" : ""} key={l}>
                       {ICON[l]}
                     </span>
                   ))}
@@ -651,9 +685,6 @@ export default function Game() {
                       {TOPPING_ICON[t.topping]}
                     </span>
                   ))}
-                  <span className={t.step > 5 ? "done" : ""}>🔥</span>
-                  <span className={t.step > 6 ? "done" : ""}>✂</span>
-                  <span className={t.step > 7 ? "done" : ""}>□</span>
                 </div>
                 <div className="kitchen-ticket">
                   <b>
@@ -662,14 +693,11 @@ export default function Game() {
                   <span>
                     {t.toppingTarget}× {t.topping.toUpperCase()}
                   </span>
-                  <span>
-                    {t.bake} · CUT {t.slices}
-                  </span>
                   <em>{t.note}</em>
                 </div>
                 <div className={`pizza step-${t.step}`}>
-                  {t.step > 2 && <i className="sauce" />}
-                  {t.step > 3 && <i className="cheese" />}
+                  {t.step > 1 && <i className="sauce" />}
+                  {t.step > 2 && <i className="cheese" />}
                   {t.toppingHits > 0 && (
                     <>
                       <b className={`pizza-topping ${t.topping} one`}>
@@ -715,28 +743,20 @@ export default function Game() {
               </button>
             ))}
           </section>
-          <section className="ticket-controls">
-            {SIZES.map((size, i) => (
-              <button key={size} onPointerDown={() => ticketAction(size)}>
-                <kbd>{i + 1}</kbd> {size}
-              </button>
-            ))}
-            <button onPointerDown={() => ticketAction("REGULAR BAKE")}>
-              🔥 REG BAKE
-            </button>
-            <button onPointerDown={() => ticketAction("WELL DONE")}>
-              🔥 WELL DONE
-            </button>
-            {[6, 8, 10].map((slices) => (
-              <button
-                key={slices}
-                onPointerDown={() => ticketAction(`CUT ${slices}`)}
-              >
-                ✂ CUT {slices}
-              </button>
-            ))}
-            <button onPointerDown={() => ticketAction("BOX")}>📦 BOX</button>
-          </section>
+          {chaos && (
+            <aside className="chaos-card">
+              <small>RESTAURANT EMERGENCY</small>
+              <h2>{chaos.title}</h2>
+              <p>{chaos.detail}</p>
+              <div>
+                {chaos.choices.map((choice, index) => (
+                  <button key={choice} onPointerDown={() => answerChaos(index)}>
+                    <kbd>{index + 1}</kbd> {choice}
+                  </button>
+                ))}
+              </div>
+            </aside>
+          )}
           <footer>
             <span>DELIVERED {delivered}</span>
             <span>PERFECT {perfects}</span>
@@ -749,7 +769,7 @@ export default function Game() {
           <div className="ruined-pizza">🍕</div>
           <h1>SHIFT DESTROYED</h1>
           <p>{flash}</p>
-          <b>One ruined pizza means the Jumbo lives to see another day.</b>
+          <b>Three kitchen strikes. The Jumbo lives to see another day.</b>
           <button onClick={begin}>RUN IT BACK</button>
           <button className="leaderboard-button" onClick={openLeaderboard}>
             🏆 LEADERBOARD
