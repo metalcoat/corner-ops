@@ -656,6 +656,403 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Delivery Boy presentation v2: cosmetic only; simulation geometry is unchanged. */
+.delivery-boy,
+.delivery-boy * {
+  image-rendering: pixelated;
+}
+.delivery-world {
+  --road-dark: #252b31;
+  --road-mid: #343b40;
+  --road-light: #424a4f;
+  background-color: #487b36 !important;
+}
+.delivery-world::before {
+  background:
+    repeating-linear-gradient(90deg, transparent 0 94px, #315f2d 94px 98px),
+    repeating-linear-gradient(0deg, #50853b 0 68px, #477a35 68px 136px) !important;
+}
+.delivery-world .road::before {
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0 16%,
+      #20262b 16% 17%,
+      transparent 17% 82%,
+      #4a5053 82% 83%,
+      transparent 83%
+    ),
+    repeating-linear-gradient(
+      0deg,
+      var(--road-mid) 0 48px,
+      var(--road-light) 48px 51px,
+      var(--road-dark) 51px 102px
+    ) !important;
+  box-shadow:
+    inset 14px 0 #282e33,
+    inset -14px 0 #282e33;
+}
+.delivery-world .lane-lines {
+  background: linear-gradient(
+    90deg,
+    transparent 0 49.55%,
+    #d3b846 49.55% 50.45%,
+    transparent 50.45%
+  ) !important;
+}
+.delivery-world .sidewalk {
+  background:
+    linear-gradient(90deg, #77766e 0 8%, #b5b2a6 8% 92%, #706f68 92%),
+    repeating-linear-gradient(0deg, transparent 0 55px, #77766e 55px 59px) !important;
+  border-inline: 3px solid #575952;
+}
+.van-hero {
+  height: 180px;
+  animation: vehicle-idle 0.55s steps(2) infinite alternate;
+}
+.van-hero img {
+  height: 100%;
+  max-width: 90%;
+  object-fit: contain;
+  filter: drop-shadow(0 12px 0 #05080b99);
+}
+.driver {
+  width: clamp(110px, 13vw, 170px);
+  height: clamp(92px, 11vw, 145px);
+  transform-origin: 50% 100%;
+  animation: vehicle-idle 0.42s steps(2) infinite alternate;
+  filter: drop-shadow(0 12px 3px #06090bbb) !important;
+}
+.driver img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+.driver.skidding {
+  rotate: -3deg;
+}
+.driver.damaged img {
+  filter: sepia(0.28) saturate(0.8) brightness(0.78);
+  animation: damage-wobble 0.18s steps(2) infinite;
+}
+.driver.damaged::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  right: 23%;
+  top: 7%;
+  background: #73777a;
+  box-shadow:
+    8px -9px #a7aaab,
+    13px -20px #555a5c;
+  animation: exhaust-puff 0.8s steps(3) infinite;
+}
+.wrapped-sub,
+.flying-sub,
+.sub-ammo-icon {
+  background: linear-gradient(
+    180deg,
+    #f5e7b1 0 24%,
+    #8f311e 24% 34%,
+    #4f8a38 34% 48%,
+    #d8a84c 48% 72%,
+    #8a5a25 72%
+  ) !important;
+  border: 3px solid #241b13 !important;
+  border-radius: 45% 45% 28% 28% !important;
+  box-shadow:
+    inset 0 3px #fff2c5,
+    3px 4px 0 #1118 !important;
+}
+.wrapped-sub {
+  width: 46px !important;
+  height: 16px !important;
+  top: -3px !important;
+}
+.sub-ammo-icon {
+  display: inline-block;
+  width: 20px;
+  height: 8px;
+  vertical-align: middle;
+  border-width: 1px !important;
+}
+.flying-sub {
+  width: 48px;
+  height: 17px;
+}
+.flying-sub::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-top: 2px solid #fff9;
+  transform: skewX(-24deg);
+}
+.scenery,
+.house-sprite,
+.hazard {
+  color: transparent !important;
+  text-shadow: none !important;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+.scenery {
+  width: clamp(78px, 12vw, 154px);
+  height: clamp(78px, 12vw, 154px);
+  background-image: url("/games/delivery-boy/roadside-atlas-v2.png");
+  background-size: 400% 200%;
+  transform: translateY(-50%) scale(var(--depth));
+  transform-origin: 50% 100%;
+}
+.scenery.house {
+  background-position: 0 0;
+}
+.scenery.abandoned {
+  background-position: 33.333% 100%;
+}
+.scenery.tent {
+  background-position: 66.667% 100%;
+}
+.scenery.cart {
+  background-position: 66.667% 0;
+}
+.scenery.trash {
+  background-position: 0 100%;
+}
+.house-sprite {
+  display: block;
+  width: clamp(110px, 15vw, 190px);
+  height: clamp(95px, 13vw, 165px);
+  background-image: url("/games/delivery-boy/roadside-atlas-v2.png");
+  background-size: 400% 200%;
+  background-position: 0 0;
+}
+.house.in-range .house-sprite {
+  filter: drop-shadow(0 0 4px #f7ff9e) drop-shadow(0 0 9px #62ff75);
+}
+.hazard {
+  width: clamp(45px, 6vw, 82px);
+  height: clamp(45px, 6vw, 82px);
+  background-image: url("/games/delivery-boy/wildlife-atlas-v2.png");
+  background-size: 400% 200%;
+  transform: translate(-50%, -50%) scale(var(--depth));
+  transform-origin: 50% 100%;
+  animation: wildlife-run 0.28s steps(2) infinite alternate;
+}
+.hazard.squirrel {
+  background-position: 0 0;
+}
+.hazard.cat {
+  background-position: 33.333% 0;
+}
+.hazard.dog {
+  background-position: 66.667% 0;
+}
+.hazard.raccoon {
+  background-position: 100% 0;
+}
+.hazard.goose {
+  background-position: 0 100%;
+}
+.hazard.deer {
+  background-position: 33.333% 100%;
+  width: clamp(65px, 8vw, 110px);
+  height: clamp(65px, 8vw, 110px);
+}
+.hazard.cow {
+  background-position: 66.667% 100%;
+  width: clamp(80px, 10vw, 135px);
+  height: clamp(70px, 9vw, 120px);
+}
+.hazard.person {
+  background-position: 100% 100%;
+}
+.hazard.car,
+.hazard.van {
+  background-image: url("/games/delivery-boy/delivery-suv-pixel-v2.png");
+  background-size: contain;
+  background-position: center;
+  width: clamp(75px, 9vw, 130px);
+  height: clamp(65px, 8vw, 112px);
+  animation: vehicle-idle 0.4s steps(2) infinite alternate;
+}
+.hazard.van {
+  filter: hue-rotate(125deg) saturate(0.7) drop-shadow(0 6px 2px #0008);
+}
+.hazard.mower {
+  width: clamp(60px, 7vw, 100px);
+  height: clamp(34px, 4vw, 58px);
+  background: #a92420 !important;
+  border: 5px solid #31120e;
+  box-shadow:
+    inset 0 8px #e14f31,
+    -18px 20px 0 -10px #14191c,
+    18px 20px 0 -10px #14191c;
+  animation: vehicle-idle 0.2s steps(2) infinite alternate;
+}
+.hazard.pothole {
+  background-image: none;
+}
+.hazard.boost,
+.hazard.slow {
+  background-image: none;
+  width: 45px;
+  height: 45px;
+  border: 4px solid #1c2023;
+  box-shadow:
+    inset 0 0 0 5px #f6dc45,
+    0 5px 0 #1118;
+  background-color: #d43b2f;
+  rotate: 45deg;
+}
+.hazard.slow {
+  background-color: #71c7dc;
+}
+.delivery-particles {
+  width: 5px;
+  height: 5px;
+  background: #fff4a8;
+  box-shadow:
+    -18px -8px #ffdc42,
+    15px -15px #fff,
+    24px 4px #73ef86,
+    -27px 10px #fff;
+  animation: pixel-burst 0.7s steps(5) both;
+}
+.hearts {
+  display: flex;
+  gap: 5px;
+}
+.hearts i {
+  width: 20px;
+  height: 16px;
+  background: #dd342d;
+  border: 3px solid #57120f;
+  clip-path: polygon(
+    0 0,
+    40% 0,
+    50% 20%,
+    60% 0,
+    100% 0,
+    100% 55%,
+    50% 100%,
+    0 55%
+  );
+}
+.hearts i.empty {
+  background: #333a42;
+  border-color: #16191d;
+}
+.pixel-moon,
+.pixel-store {
+  width: 55px;
+  height: 55px;
+  background: #f7dc65;
+  border: 6px solid #b6742c;
+}
+.pixel-store {
+  background: #b52d27;
+  box-shadow:
+    18px 15px #f2dd9c,
+    36px 0 #8d201e;
+}
+.audio-panel {
+  position: absolute;
+  z-index: 80;
+  right: 10px;
+  top: 72px;
+  width: min(270px, calc(100% - 20px));
+  padding: 12px;
+  background: #111925f2;
+  border: 4px solid #e9cf56;
+  box-shadow: 6px 6px 0 #05080c;
+}
+.audio-panel b,
+.audio-panel label {
+  display: block;
+  margin: 5px 0;
+}
+.audio-panel input[type="range"] {
+  width: 100%;
+  accent-color: #e83a30;
+}
+.reduced-effects * {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .delivery-world * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+.win::before {
+  content: "";
+  width: 180px;
+  height: 65px;
+  margin: 0 auto 18px;
+  display: block;
+  background: linear-gradient(
+    180deg,
+    #f5e7b1 0 24%,
+    #8f311e 24% 34%,
+    #4f8a38 34% 48%,
+    #d8a84c 48% 72%,
+    #8a5a25 72%
+  );
+  border: 7px solid #241b13;
+  border-radius: 45% 45% 28% 28%;
+  animation: victory-sub 0.5s steps(2) infinite alternate;
+}
+@keyframes wildlife-run {
+  to {
+    translate: -1px 1px;
+  }
+}
+@keyframes vehicle-idle {
+  to {
+    translate: 0 2px;
+  }
+}
+@keyframes damage-wobble {
+  to {
+    translate: 3px 0;
+  }
+}
+@keyframes exhaust-puff {
+  to {
+    translate: 8px -22px;
+    opacity: 0;
+  }
+}
+@keyframes pixel-burst {
+  to {
+    scale: 2.2;
+    opacity: 0;
+  }
+}
+@keyframes victory-sub {
+  to {
+    translate: 0 -7px;
+    rotate: 2deg;
+  }
+}
+
+@media (max-width: 700px) {
+  .driver {
+    width: 105px;
+    height: 90px;
+  }
+  .house-sprite {
+    width: 105px;
+    height: 92px;
+  }
+  .audio-panel {
+    top: 65px;
+  }
+}
 .delivery-world {
   perspective: 700px;
 }
@@ -1742,5 +2139,161 @@
   .route-progress {
     top: 66px;
     width: 58vw;
+  }
+}
+
+/* Final art-layer precedence. The legacy stylesheet is intentionally retained
+   while the gameplay presentation is migrated independently of simulation. */
+.delivery-world::before {
+  background:
+    repeating-linear-gradient(90deg, transparent 0 94px, #315f2d 94px 98px),
+    repeating-linear-gradient(0deg, #50853b 0 68px, #477a35 68px 136px) !important;
+}
+.delivery-world .road::before {
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0 16%,
+      #20262b 16% 17%,
+      transparent 17% 82%,
+      #4a5053 82% 83%,
+      transparent 83%
+    ),
+    repeating-linear-gradient(
+      0deg,
+      #343b40 0 48px,
+      #424a4f 48px 51px,
+      #252b31 51px 102px
+    ) !important;
+  box-shadow:
+    inset 14px 0 #282e33,
+    inset -14px 0 #282e33 !important;
+}
+.delivery-world .lane-lines {
+  background: linear-gradient(
+    90deg,
+    transparent 0 49.55%,
+    #d3b846 49.55% 50.45%,
+    transparent 50.45%
+  ) !important;
+}
+.delivery-world .driver {
+  width: clamp(110px, 13vw, 170px) !important;
+  height: clamp(92px, 11vw, 145px) !important;
+  transform-origin: 50% 100%;
+  animation: vehicle-idle 0.42s steps(2) infinite alternate;
+}
+.delivery-world .driver img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  filter: none !important;
+}
+.delivery-world .scenery {
+  display: block;
+  width: clamp(78px, 12vw, 154px) !important;
+  height: clamp(78px, 12vw, 154px) !important;
+  font-size: 0 !important;
+  background-image: url("/games/delivery-boy/roadside-atlas-v2.png") !important;
+  background-size: 400% 200% !important;
+  transform: translateY(-50%) scale(var(--depth)) !important;
+}
+.delivery-world .scenery.house {
+  background-position: 0 0 !important;
+}
+.delivery-world .scenery.abandoned {
+  background-position: 33.333% 100% !important;
+}
+.delivery-world .scenery.tent {
+  background-position: 66.667% 100% !important;
+}
+.delivery-world .scenery.cart {
+  background-position: 66.667% 0 !important;
+}
+.delivery-world .scenery.trash {
+  background-position: 0 100% !important;
+}
+.delivery-world .house span.house-sprite {
+  display: block !important;
+  width: clamp(110px, 15vw, 190px) !important;
+  height: clamp(95px, 13vw, 165px) !important;
+  font-size: 0 !important;
+  background: url("/games/delivery-boy/roadside-atlas-v2.png") 0 0 / 400% 200%
+    no-repeat !important;
+}
+.delivery-world
+  .hazard:not(.pothole):not(.car):not(.van):not(.mower):not(.boost):not(.slow) {
+  display: block !important;
+  width: clamp(45px, 6vw, 82px) !important;
+  height: clamp(45px, 6vw, 82px) !important;
+  font-size: 0 !important;
+  background-image: url("/games/delivery-boy/wildlife-atlas-v2.png") !important;
+  background-size: 400% 200% !important;
+  transform: translate(-50%, -50%) scale(var(--depth)) !important;
+  filter: drop-shadow(0 6px 2px #0008) !important;
+}
+.delivery-world .hazard.squirrel {
+  background-position: 0 0 !important;
+}
+.delivery-world .hazard.cat {
+  background-position: 33.333% 0 !important;
+}
+.delivery-world .hazard.dog {
+  background-position: 66.667% 0 !important;
+}
+.delivery-world .hazard.raccoon {
+  background-position: 100% 0 !important;
+}
+.delivery-world .hazard.goose {
+  background-position: 0 100% !important;
+}
+.delivery-world .hazard.deer {
+  background-position: 33.333% 100% !important;
+  width: clamp(65px, 8vw, 110px) !important;
+  height: clamp(65px, 8vw, 110px) !important;
+}
+.delivery-world .hazard.cow {
+  background-position: 66.667% 100% !important;
+  width: clamp(80px, 10vw, 135px) !important;
+  height: clamp(70px, 9vw, 120px) !important;
+}
+.delivery-world .hazard.person {
+  background-position: 100% 100% !important;
+}
+.delivery-world .hazard.car,
+.delivery-world .hazard.van {
+  font-size: 0 !important;
+  background: url("/games/delivery-boy/delivery-suv-pixel-v2.png") center /
+    contain no-repeat !important;
+  width: clamp(75px, 9vw, 130px) !important;
+  height: clamp(65px, 8vw, 112px) !important;
+}
+.delivery-world .flying-sub {
+  font-size: 0 !important;
+}
+.delivery-world .delivery-particles {
+  font-size: 0 !important;
+}
+.delivery-world.reduced-effects * {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .delivery-world * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+@media (max-width: 700px) {
+  .delivery-world .driver {
+    width: 105px !important;
+    height: 90px !important;
+  }
+  .delivery-world > .menu-ad-ticker.overlay.roadside {
+    z-index: 4;
+    width: 92px;
+    right: 1px;
+    padding: 4px;
+    font-size: .43rem;
   }
 }

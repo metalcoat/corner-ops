@@ -75,22 +75,6 @@ const fresh: Stats = {
   combo: 0,
   bestCombo: 0,
 };
-const icons: Record<Thing["type"], string> = {
-  deer: "🦌",
-  dog: "🐕",
-  cat: "🐈",
-  goose: "🪿",
-  raccoon: "🦝",
-  mower: "🏎️",
-  van: "🚐",
-  squirrel: "🐿️",
-  cow: "🐄",
-  person: "🚶",
-  car: "🚗",
-  pothole: "",
-  boost: "⚡",
-  slow: "❄️",
-};
 const communities = [
   { name: "LISBON", warning: "WATCH FOR COWS" },
   { name: "HEUVELTON", warning: "TRACTORS HAVE RIGHT OF WAY. THEY DECIDED." },
@@ -164,7 +148,12 @@ export default function DeliveryGame() {
     [run, setRun] = useState<Run | null>(null),
     [sequence, setSequence] = useState(0),
     [reward, setReward] = useState<any>(null),
-    [muted, setMuted] = useState(false),
+    [muted, setMuted] = useState(() => deliveryAudio.getSettings().muted),
+    [audioSettings, setAudioSettings] = useState(() =>
+      deliveryAudio.getSettings(),
+    ),
+    [showAudio, setShowAudio] = useState(false),
+    [reducedEffects, setReducedEffects] = useState(false),
     [boost, setBoost] = useState(0),
     [slow, setSlow] = useState(0),
     [damaged, setDamaged] = useState(0),
@@ -189,6 +178,7 @@ export default function DeliveryGame() {
     spawn = useRef(0),
     deliveryGap = useRef(0),
     impactFailure = useRef(""),
+    cosmeticId = useRef(0),
     lossSaved = useRef(false),
     playerLane = useRef(1),
     state = useRef<{
@@ -259,9 +249,13 @@ export default function DeliveryGame() {
       kind:
         | "throw"
         | "delivery"
+        | "miss"
         | "hit"
         | "coin"
         | "start"
+        | "steer"
+        | "gameover"
+        | "menu"
         | "yelp"
         | "bark"
         | "meow"
@@ -274,8 +268,10 @@ export default function DeliveryGame() {
       if (kind === "delivery" || kind === "coin")
         deliveryAudio.play("delivery");
       else if (kind === "hit") deliveryAudio.play("crash");
-      else if (kind === "start") deliveryAudio.transition("action");
-      else deliveryAudio.play(kind);
+      else if (kind === "start") {
+        deliveryAudio.play("start");
+        deliveryAudio.transition("action");
+      } else deliveryAudio.play(kind);
     },
     [muted],
   );
@@ -364,12 +360,24 @@ export default function DeliveryGame() {
     },
     [],
   );
+  useEffect(() => {
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const saved = localStorage.getItem("corner-delivery-reduced-effects");
+    setReducedEffects(saved === null ? motion.matches : saved === "true");
+    const visibility = () =>
+      document.hidden || paused || mode !== "play"
+        ? deliveryAudio.suspend()
+        : deliveryAudio.resume();
+    document.addEventListener("visibilitychange", visibility);
+    visibility();
+    return () => document.removeEventListener("visibilitychange", visibility);
+  }, [mode, paused]);
   function pop(message: string) {
     setToast(message);
     window.setTimeout(() => setToast(""), 850);
   }
   const scoreBurst = useCallback((text: string, tone: "good" | "bad") => {
-    const id = Date.now() + Math.random();
+    const id = ++cosmeticId.current;
     setScoreBursts((bursts) => [...bursts, { id, text, tone }]);
     window.setTimeout(
       () =>
@@ -390,12 +398,13 @@ export default function DeliveryGame() {
       if (Math.abs(d) >= 0.18) {
         setSkidding(true);
         window.setTimeout(() => setSkidding(false), 230);
+        beep("steer");
       }
       setLane((v) =>
         Math.max(-0.18, Math.min(2.18, v + d * (damaged ? 0.58 : 1))),
       );
     },
-    [damaged],
+    [beep, damaged],
   );
   const deliver = useCallback(() => {
     const t = state.current.target;
@@ -470,7 +479,7 @@ export default function DeliveryGame() {
             : "MISSED THE ADDRESS!",
       );
       impact();
-      beep("hit");
+      beep("miss");
     }
   }, [ammo, beep, impact, paused, scoreBurst, stats.combo, vibrate]);
   useEffect(() => {
@@ -879,7 +888,7 @@ export default function DeliveryGame() {
             ],
       );
       setMode("lost");
-      beep("hit");
+      beep("gameover");
     }
   }, [mode, health, time, beep]);
   useEffect(() => {
@@ -1016,8 +1025,10 @@ export default function DeliveryGame() {
             <i>DELIVERY BOY</i>
           </h1>
           <div className="van-hero">
-            🥪<span>🚗</span>
-            <b>💨</b>
+            <img
+              src="/games/delivery-boy/delivery-suv-pixel-v2.png"
+              alt="Corner Deli delivery car"
+            />
           </div>
           <p>Deliver subs. Dodge wildlife. Survive customer logic.</p>
           <MenuAdTicker />
@@ -1031,7 +1042,7 @@ export default function DeliveryGame() {
             className="driver-leaderboard-button"
             onClick={openLeaderboard}
           >
-            🏆 DRIVER LEADERBOARD
+            DRIVER LEADERBOARD
           </button>
           <a className="return-games" href="/games">
             ← ALL GAMES
@@ -1083,7 +1094,9 @@ export default function DeliveryGame() {
             </div>
             <div className={ammo < 3 ? "ammo-hud critical" : "ammo-hud"}>
               <small>SUBS</small>
-              <b>🥪 {ammo}</b>
+              <b>
+                <i className="sub-ammo-icon" /> {ammo}
+              </b>
             </div>
             {slow > 0 && (
               <div className="slow-hud">
@@ -1091,12 +1104,15 @@ export default function DeliveryGame() {
                 <b>{slow}s</b>
               </div>
             )}
-            <button onClick={() => setMuted(!muted)}>
-              {muted ? "🔇" : "🔊"}
+            <button
+              aria-label="Audio settings"
+              onClick={() => setShowAudio(!showAudio)}
+            >
+              {muted ? "SOUND OFF" : "SOUND"}
             </button>
           </header>
           <section
-            className={`delivery-world zone-${zone} ${time < 16 ? "panic" : ""} ${stage >= 4 ? "night" : ""} ${slow ? "slow-motion" : ""} ${shaking ? "impact-shake" : ""} ${brokenWindow ? "window-shatter" : ""} ${paused ? "paused" : ""}`}
+            className={`delivery-world zone-${zone} ${time < 16 ? "panic" : ""} ${stage >= 4 ? "night" : ""} ${slow ? "slow-motion" : ""} ${shaking && !reducedEffects ? "impact-shake" : ""} ${brokenWindow && !reducedEffects ? "window-shatter" : ""} ${paused ? "paused" : ""} ${reducedEffects ? "reduced-effects" : ""}`}
             onTouchStart={(e) =>
               (touch.current = {
                 x: e.touches[0].clientX,
@@ -1138,7 +1154,7 @@ export default function DeliveryGame() {
               </div>
             )}
             <div className="sky">
-              <span>{stage >= 4 ? "🌙" : "🏪"}</span>
+              <span className={stage >= 4 ? "pixel-moon" : "pixel-store"} />
               <i>ROUTE {stage}</i>
             </div>
             <div className="road">
@@ -1159,17 +1175,7 @@ export default function DeliveryGame() {
                     } as CSSProperties
                   }
                   key={x.id}
-                >
-                  {x.kind === "house"
-                    ? "🏠"
-                    : x.kind === "abandoned"
-                      ? "🚘"
-                      : x.kind === "tent"
-                        ? "⛺🧍"
-                        : x.kind === "cart"
-                          ? "🛒"
-                          : "🗑️"}
-                </i>
+                />
               ))}
               {target.active && (
                 <>
@@ -1185,7 +1191,7 @@ export default function DeliveryGame() {
                       } as CSSProperties
                     }
                   >
-                    <span>🏠</span>
+                    <span className="house-sprite" />
                     <b>{target.neighbor}</b>
                   </div>
                   <div
@@ -1200,7 +1206,7 @@ export default function DeliveryGame() {
                       } as CSSProperties
                     }
                   >
-                    <span>🏠</span>
+                    <span className="house-sprite" />
                     <b>{target.address}</b>
                     <em>
                       {target.y >= 60 && target.y <= 88
@@ -1232,9 +1238,7 @@ export default function DeliveryGame() {
                         ),
                       } as CSSProperties
                     }
-                  >
-                    {icons[x.type]}
-                  </i>
+                  />
                 </Fragment>
               ))}
               <div
@@ -1242,11 +1246,11 @@ export default function DeliveryGame() {
                 style={{ left: `${lane * 50}%` }}
               >
                 <img
-                  src="/games/delivery-boy/equinox-ev-rear-v1.png"
+                  src="/games/delivery-boy/delivery-suv-pixel-v2.png"
                   alt=""
                   draggable={false}
                 />
-                <b className="wrapped-sub">SUB</b>
+                <b className="wrapped-sub" aria-hidden="true" />
               </div>
               {skidding && <i className="skid-trail" />}
               {thrown && (
@@ -1256,18 +1260,14 @@ export default function DeliveryGame() {
                   style={
                     { "--start": `${thrown.start * 50}%` } as CSSProperties
                   }
-                >
-                  ▰
-                </i>
+                />
               )}
               {particles.map((particle) => (
                 <i
                   key={particle.id}
                   className={`delivery-particles ${particle.side}`}
                   style={{ top: `${particle.y}%` }}
-                >
-                  ✦ ✧ ✦ · ✧
-                </i>
+                />
               ))}
               {stage >= 4 && (
                 <div className="headlights" style={{ left: `${lane * 50}%` }} />
@@ -1285,10 +1285,58 @@ export default function DeliveryGame() {
                 <span>Press P or Esc to keep disappointing customers.</span>
               </div>
             )}
-            <div className="hearts">
-              {"❤️".repeat(health)}
-              {"🖤".repeat(3 - health)}
+            <div className="hearts" aria-label={`${health} condition points`}>
+              {[0, 1, 2].map((point) => (
+                <i className={point < health ? "full" : "empty"} key={point} />
+              ))}
             </div>
+            {showAudio && (
+              <aside className="audio-panel">
+                <b>AUDIO MIX</b>
+                {(["master", "music", "effects"] as const).map((channel) => (
+                  <label key={channel}>
+                    {channel.toUpperCase()}
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={audioSettings[channel]}
+                      onChange={(event) => {
+                        const next = {
+                          ...audioSettings,
+                          [channel]: Number(event.target.value),
+                        };
+                        setAudioSettings(next);
+                        deliveryAudio.setLevels({ [channel]: next[channel] });
+                      }}
+                    />
+                  </label>
+                ))}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={muted}
+                    onChange={(event) => setMuted(event.target.checked)}
+                  />{" "}
+                  MUTE
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={reducedEffects}
+                    onChange={(event) => {
+                      setReducedEffects(event.target.checked);
+                      localStorage.setItem(
+                        "corner-delivery-reduced-effects",
+                        String(event.target.checked),
+                      );
+                    }}
+                  />{" "}
+                  REDUCED EFFECTS
+                </label>
+              </aside>
+            )}
             <div className="touch-controls">
               <button onPointerDown={() => move(-0.25)}>◀</button>
               <button className="deliver" onPointerDown={deliver}>
@@ -1341,7 +1389,7 @@ export default function DeliveryGame() {
             className="driver-leaderboard-button"
             onClick={openLeaderboard}
           >
-            🏆 DRIVER LEADERBOARD
+            DRIVER LEADERBOARD
           </button>
           <a className="return-games" href="/games">
             ← ALL GAMES
@@ -1358,7 +1406,7 @@ export default function DeliveryGame() {
             className="driver-leaderboard-button"
             onClick={openLeaderboard}
           >
-            🏆 DRIVER LEADERBOARD
+            DRIVER LEADERBOARD
           </button>
         </section>
       )}
@@ -1387,7 +1435,7 @@ export default function DeliveryGame() {
                     <strong>{leader.player_name}</strong>
                     <span>
                       {leader.status === "won"
-                        ? "🏆 FINISHED · "
+                        ? "FINISHED · "
                         : `ROUTE ${leader.stage} · `}
                       {Number(leader.score).toLocaleString()} PTS
                       <small>
