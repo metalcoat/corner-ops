@@ -18,10 +18,14 @@ export default function DeliMan() {
     if (stage === null || !host.current) return;
     const stageIndex = stage;
     let alive = true;
+    let instance: Phaser.Game | null = null;
     void import("phaser").then((P) => {
       if (!alive || !host.current) return;
       const def = STAGES[stageIndex];
       const bossProfile = def.bossId ? BOSSES[def.bossId] : null;
+      const developerMode =
+        window.location.hostname.startsWith("dev.") ||
+        process.env.NODE_ENV !== "production";
       class Scene extends P.Scene {
         player!: Phaser.Physics.Arcade.Sprite;
         cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -44,6 +48,20 @@ export default function DeliMan() {
         respawnX = 100;
         controlLockedUntil = 0;
         cameraFurthestX = 0;
+        gameState:
+          | "PLAYING"
+          | "BOSS_INTRO"
+          | "BOSS_FIGHT"
+          | "BOSS_DEFEATED"
+          | "REWARD"
+          | "COMPLETE" = "PLAYING";
+        stateStartedAt = 0;
+        levelCompleteQueued = false;
+        lastLoopErrorAt = -5000;
+        debugVisible = false;
+        debugText!: Phaser.GameObjects.Text;
+        bossGate!: Phaser.Physics.Arcade.StaticGroup;
+        entranceGate!: Phaser.GameObjects.Rectangle;
         playerState: "idle" | "run" | "jump" | "fall" | "climb" | "hurt" =
           "idle";
         bossSprite!: Phaser.Physics.Arcade.Sprite;
@@ -56,6 +74,10 @@ export default function DeliMan() {
           );
         }
         create() {
+          console.info("[DELI MAN] LEVEL START", {
+            level: def.id,
+            location: def.location,
+          });
           this.cameras.main.setBackgroundColor(def.theme);
           this.cameras.main.setRoundPixels(true);
           for (let x = 0; x < 6000; x += 2040)
@@ -204,10 +226,38 @@ export default function DeliMan() {
               padding: { x: 5, y: 3 },
             });
           });
-          g.fillStyle(0x192129).fillRect(0, 610, 5000, 110);
-          g.fillStyle(0xffffff, 0.25);
-          for (let x = 0; x < 5000; x += 260) g.fillRect(x, 675, 120, 7);
-          g.generateTexture("ground", 8, 8);
+          const terrain = [
+            { top: 0x8f682f, face: 0x3b2518, detail: 0xff8a22 },
+            { top: 0xd4c6a0, face: 0x45414a, detail: 0xffd43b },
+            { top: 0x73777a, face: 0x25292d, detail: 0xf4f0cf },
+            { top: 0xc7eafa, face: 0x507583, detail: 0xffffff },
+            { top: 0xd7c4a2, face: 0x4a3730, detail: 0xf04435 },
+            { top: 0xaa713f, face: 0x49301f, detail: 0x42d6db },
+            { top: 0x77717e, face: 0x27232c, detail: 0xffd438 },
+            { top: 0x476075, face: 0x151c29, detail: 0x9ed8e6 },
+            { top: 0x6a2130, face: 0x1d1720, detail: 0xf0c34b },
+          ][stageIndex];
+          g.fillStyle(terrain.face).fillRect(0, 610, 5000, 110);
+          g.fillStyle(terrain.top).fillRect(0, 610, 5000, 18);
+          g.fillStyle(0x080b13, 0.45).fillRect(0, 628, 5000, 10);
+          for (let x = 20; x < 5000; x += 96) {
+            g.fillStyle(x % 288 ? terrain.detail : 0x161616, 0.48).fillRect(
+              x,
+              646 + ((x / 96) % 2) * 18,
+              34,
+              5,
+            );
+            g.lineStyle(2, 0x050505, 0.38).lineBetween(
+              x + 50,
+              628,
+              x + 64,
+              638,
+            );
+          }
+          const collisionTexture = this.make.graphics({ x: 0, y: 0 }, false);
+          collisionTexture.fillStyle(0xffffff, 0.001).fillRect(0, 0, 8, 8);
+          collisionTexture.generateTexture("ground", 8, 8);
+          collisionTexture.destroy();
           this.physics.world.setBounds(0, 0, 5000, 720);
           const ground = this.physics.add.staticGroup();
           ground.create(2500, 650).setDisplaySize(5000, 80).refreshBody();
@@ -224,6 +274,30 @@ export default function DeliMan() {
               .create(route.x + route.width / 2 - 18, route.top, "ground")
               .setDisplaySize(route.width, 24)
               .refreshBody();
+            g.fillStyle(terrain.face).fillRect(
+              route.x - 18,
+              route.top,
+              route.width,
+              34,
+            );
+            g.fillStyle(terrain.top).fillRect(
+              route.x - 18,
+              route.top - 10,
+              route.width,
+              14,
+            );
+            g.fillStyle(0x050505, 0.35).fillRect(
+              route.x - 18,
+              route.top + 24,
+              route.width,
+              10,
+            );
+            g.lineStyle(3, terrain.detail, 0.6).lineBetween(
+              route.x,
+              route.top + 8,
+              route.x + route.width - 36,
+              route.top + 8,
+            );
             g.lineStyle(8, 0xd3b56f);
             g.lineBetween(route.x, 610, route.x, route.top);
             g.lineBetween(route.x + 48, 610, route.x + 48, route.top);
@@ -369,7 +443,14 @@ export default function DeliMan() {
             .sprite(4680, 530, "boss")
             .setImmovable(true)
             .setVisible(false);
-          this.bossSprite.body!.enable = false;
+          this.bossSprite.disableBody(false, false);
+          this.entranceGate = this.add
+            .rectangle(4475, 500, 28, 220, 0xc83a2c)
+            .setStrokeStyle(4, 0xffd438)
+            .setVisible(false);
+          this.physics.add.existing(this.entranceGate, true);
+          (this.entranceGate.body as Phaser.Physics.Arcade.StaticBody).enable =
+            false;
           this.exitDoor = this.add
             .rectangle(4925, 535, 72, 150, 0x163f27)
             .setStrokeStyle(6, 0x73ff86)
@@ -389,14 +470,20 @@ export default function DeliMan() {
             });
           });
           const pickups = this.physics.add.staticGroup();
-          [640, 1450, 2260, 3180, 4140].forEach((x) => {
+          [
+            { x: 640, y: 500 },
+            ...authoredRoutes.map((route) => ({
+              x: route.x + route.width - 70,
+              y: route.top - 45,
+            })),
+          ].forEach(({ x, y }) => {
             const coin = this.add
-              .circle(x, 500, 11, 0xffd438)
+              .circle(x, y, 11, 0xffd438)
               .setStrokeStyle(3, 0xffffff);
             pickups.add(coin);
             this.tweens.add({
               targets: coin,
-              y: 486,
+              y: y - 14,
               duration: 500,
               yoyo: true,
               repeat: -1,
@@ -414,16 +501,18 @@ export default function DeliMan() {
             b.destroy();
             this.score += 100;
           });
-          this.physics.add.overlap(this.shots, this.bossSprite, (a) => {
-            a.destroy();
-            if (!this.bossActive || this.bossDefeated) return;
+          this.physics.add.overlap(this.shots, this.bossSprite, (a, b) => {
+            const shot = (a === this.bossSprite ? b : a) as
+              Phaser.Physics.Arcade.Sprite | undefined;
+            if (shot?.active) shot.destroy();
+            if (this.gameState !== "BOSS_FIGHT" || this.bossDefeated) return;
             this.boss--;
             this.bossSprite.setTint(0xffffff);
             this.time.delayedCall(70, () => this.bossSprite.clearTint());
             if (this.boss <= 0) {
               this.bossDefeated = true;
+              this.setGameState("BOSS_DEFEATED");
               this.bossSprite.disableBody(true, true);
-              this.exitDoor.setVisible(true);
               this.score += 2500;
             }
           });
@@ -431,7 +520,19 @@ export default function DeliMan() {
           this.physics.add.collider(this.enemies, ground);
           this.physics.add.collider(this.enemies, platforms);
           this.physics.add.collider(this.bossSprite, ground);
-          this.physics.add.collider(this.player, platforms);
+          this.physics.add.collider(this.player, platforms, undefined, () => {
+            const climbingUp =
+              this.cursors?.up.isDown ||
+              this.keys?.W.isDown ||
+              touch.current.jump;
+            const route = this.ladders.find(
+              (ladder) =>
+                Math.abs(this.player.x - ladder.x - 24) < 50 &&
+                this.player.y > ladder.top,
+            );
+            return !(climbingUp && route);
+          });
+          this.physics.add.collider(this.player, this.entranceGate);
           this.tip = this.add
             .text(16, 16, "", {
               fontFamily: "monospace",
@@ -442,6 +543,17 @@ export default function DeliMan() {
             })
             .setScrollFactor(0)
             .setDepth(20);
+          this.debugText = this.add
+            .text(16, 112, "", {
+              fontFamily: "monospace",
+              fontSize: "13px",
+              color: "#73ff86",
+              backgroundColor: "#000d",
+              padding: { x: 8, y: 6 },
+            })
+            .setScrollFactor(0)
+            .setDepth(100)
+            .setVisible(false);
           this.add
             .text(100, 120, `${def.location}\n\n${def.intro}`, {
               fontFamily: "monospace",
@@ -471,6 +583,60 @@ export default function DeliMan() {
           );
           this.input.keyboard!.on("keyup-UP", () => this.cutJump());
           this.input.keyboard!.on("keyup-W", () => this.cutJump());
+          this.input.keyboard!.on("keydown-BACKTICK", () => {
+            if (!developerMode) return;
+            this.debugVisible = !this.debugVisible;
+            this.debugText.setVisible(this.debugVisible);
+          });
+          this.input.keyboard!.on("keydown-B", () => {
+            if (developerMode) this.player.setPosition(4560, 520);
+          });
+          this.input.keyboard!.on("keydown-K", () => {
+            if (developerMode && this.gameState === "BOSS_FIGHT") this.boss = 1;
+          });
+          this.input.keyboard!.on("keydown-H", () => {
+            if (developerMode && this.gameState === "BOSS_FIGHT") {
+              this.hp = 1;
+              this.damage();
+            }
+          });
+          this.input.keyboard!.on("keydown", (event: KeyboardEvent) => {
+            if (!developerMode) return;
+            const destination = Number(event.key) - 1;
+            if (destination >= 0 && destination < STAGES.length) {
+              console.info("[DELI MAN] DEV LEVEL JUMP", {
+                from: def.id,
+                to: STAGES[destination].id,
+              });
+              setStage(destination);
+            }
+          });
+          if (developerMode)
+            (
+              window as typeof window & {
+                __DELI_MAN_DEBUG__?: () => Record<string, unknown>;
+              }
+            ).__DELI_MAN_DEBUG__ = () => ({
+              level: def.id,
+              gameState: this.gameState,
+              player: { x: this.player.x, y: this.player.y, hp: this.hp },
+              velocity: {
+                x: (this.player.body as Phaser.Physics.Arcade.Body).velocity.x,
+                y: (this.player.body as Phaser.Physics.Arcade.Body).velocity.y,
+              },
+              blocked: {
+                left: (this.player.body as Phaser.Physics.Arcade.Body).blocked
+                  .left,
+                right: (this.player.body as Phaser.Physics.Arcade.Body).blocked
+                  .right,
+                down: (this.player.body as Phaser.Physics.Arcade.Body).blocked
+                  .down,
+              },
+              cameraX: this.cameras.main.scrollX,
+              enemies: this.enemies.countActive(true),
+              bossHealth: this.boss,
+              projectiles: this.shots.countActive(true),
+            });
           this.input.gamepad?.once("connected", () => {});
           this.input.on("pointerdown", (p: Phaser.Input.Pointer) =>
             p.x > this.scale.width * 0.55 ? this.fire() : this.jump(),
@@ -515,10 +681,71 @@ export default function DeliMan() {
           });
           if (this.hp <= 0) {
             this.hp = 8;
-            this.player.setPosition(this.respawnX, 540).setVelocity(0, 0);
+            this.player
+              .setPosition(this.bossActive ? 4520 : this.respawnX, 540)
+              .setVelocity(0, 0);
+            if (this.bossActive) {
+              this.boss = bossProfile?.health ?? 12 + stageIndex * 3;
+              this.bossDefeated = false;
+              this.bossSprite
+                .enableBody(true, 4680, 530, true, true)
+                .setVelocity(0, 0);
+              this.bossSprite.disableBody(false, false);
+              this.setGameState("BOSS_INTRO");
+            }
           }
         }
+        setGameState(next: typeof this.gameState) {
+          if (this.gameState === next) return;
+          this.gameState = next;
+          this.stateStartedAt = this.time.now;
+          if (developerMode)
+            console.info(`[DELI MAN] ${next.replaceAll("_", " ")}`, {
+              level: def.id,
+              boss: bossProfile?.name ?? def.boss,
+            });
+        }
+        completeLevel() {
+          if (this.levelCompleteQueued) return;
+          this.levelCompleteQueued = true;
+          this.setGameState("COMPLETE");
+          const save = JSON.parse(
+            localStorage.getItem("deli-man-save") || "{}",
+          );
+          save[def.id] = true;
+          save[def.ability] = true;
+          localStorage.setItem("deli-man-save", JSON.stringify(save));
+          Promise.resolve().then(() => {
+            if (!alive) return;
+            const next = stageIndex + 1;
+            if (next < STAGES.length) {
+              console.info("[DELI MAN] NEXT LEVEL", {
+                from: def.id,
+                to: STAGES[next].id,
+              });
+              setStage(next);
+            } else setStage(null);
+          });
+        }
         update(_: number, dt: number) {
+          try {
+            this.tick(dt);
+          } catch (error) {
+            if (this.time.now - this.lastLoopErrorAt > 1000) {
+              this.lastLoopErrorAt = this.time.now;
+              console.error("[DELI MAN] RECOVERED GAME LOOP ERROR", {
+                level: def.id,
+                state: this.gameState,
+                error,
+              });
+            }
+            if (this.gameState === "BOSS_INTRO")
+              this.setGameState("BOSS_FIGHT");
+            else if (this.gameState === "BOSS_DEFEATED")
+              this.setGameState("REWARD");
+          }
+        }
+        tick(_dt: number) {
           const body = this.player.body as Phaser.Physics.Arcade.Body;
           this.enemies.children.iterate((child) => {
             const enemy = child as Phaser.Physics.Arcade.Sprite;
@@ -552,17 +779,23 @@ export default function DeliMan() {
           this.player.setFlipX(this.facing < 0);
           if (!controlsLocked)
             this.player.setVelocityX(left ? -245 : right ? 245 : 0);
-          const ladder = this.ladders.some(
+          const activeLadder = this.ladders.find(
             (r) =>
               Math.abs(this.player.x - r.x - 24) < 42 &&
               this.player.y > r.top - 24 &&
               this.player.y < r.bottom + 20,
           );
+          const ladder = Boolean(activeLadder);
           if (
             !controlsLocked &&
             ladder &&
             (this.cursors.up.isDown || this.keys.W.isDown)
           ) {
+            this.player.x = P.Math.Linear(
+              this.player.x,
+              activeLadder!.x + 24,
+              0.28,
+            );
             body.setAllowGravity(false);
             this.player.setVelocityY(-190);
           } else if (
@@ -570,6 +803,11 @@ export default function DeliMan() {
             ladder &&
             (this.cursors.down.isDown || this.keys.S.isDown)
           ) {
+            this.player.x = P.Math.Linear(
+              this.player.x,
+              activeLadder!.x + 24,
+              0.28,
+            );
             body.setAllowGravity(false);
             this.player.setVelocityY(190);
           } else body.setAllowGravity(true);
@@ -644,14 +882,29 @@ export default function DeliMan() {
           );
           if (this.player.x > this.respawnX + 950)
             this.respawnX = Math.floor(this.player.x / 1000) * 1000 + 80;
-          if (this.player.x > 4550) {
+          if (this.player.x > 4550 || this.bossActive) {
             if (!this.bossActive) {
               this.bossActive = true;
+              this.setGameState("BOSS_INTRO");
+              console.info("[DELI MAN] BOSS TRIGGER", { level: def.id });
+              this.enemies.clear(true, true);
+              this.shots.clear(true, true);
               this.bossSprite.setVisible(true);
-              this.bossSprite.body!.enable = true;
+              this.entranceGate.setVisible(true);
+              (
+                this.entranceGate.body as Phaser.Physics.Arcade.StaticBody
+              ).enable = true;
               this.cameras.main.flash(250, 255, 70, 30);
             }
-            if (!this.bossDefeated) {
+            if (
+              this.gameState === "BOSS_INTRO" &&
+              this.time.now - this.stateStartedAt > 850
+            ) {
+              this.bossSprite.enableBody(false, 4680, 530, true, true);
+              this.setGameState("BOSS_FIGHT");
+              console.info("[DELI MAN] BOSS SPAWN", { level: def.id });
+            }
+            if (this.gameState === "BOSS_FIGHT") {
               this.physics.moveToObject(
                 this.bossSprite,
                 this.player,
@@ -662,23 +915,36 @@ export default function DeliMan() {
               )
                 this.damage();
             }
-            if (this.bossDefeated && this.player.x > 4870) {
-              const save = JSON.parse(
-                localStorage.getItem("deli-man-save") || "{}",
-              );
-              save[def.id] = true;
-              save[def.ability] = true;
-              localStorage.setItem("deli-man-save", JSON.stringify(save));
-              this.game.destroy(true);
-              setStage(null);
+            if (
+              this.gameState === "BOSS_DEFEATED" &&
+              this.time.now - this.stateStartedAt > 650
+            ) {
+              this.setGameState("REWARD");
+              this.exitDoor.setVisible(true);
+              console.info("[DELI MAN] BOSS DEFEATED", { level: def.id });
             }
+            if (this.gameState === "REWARD" && this.player.x > 4870)
+              this.completeLevel();
+            if (
+              (this.gameState === "BOSS_INTRO" ||
+                this.gameState === "BOSS_DEFEATED") &&
+              this.time.now - this.stateStartedAt > 5000
+            )
+              this.setGameState(
+                this.gameState === "BOSS_INTRO" ? "BOSS_FIGHT" : "REWARD",
+              );
           }
           this.tip.setText(
             `PATIENCE ${"■".repeat(this.hp)}  TIP CHANGE $${this.score}  ${this.playerState.toUpperCase()}\n${def.name} · CHECKPOINT ${this.checkpoint + 1}${this.bossActive ? `\n${bossProfile?.name ?? def.boss}: ${"★".repeat(Math.max(0, this.boss))}${this.bossDefeated ? "  DELIVER TO GREEN DOOR" : ""}` : ""}`,
           );
+          if (this.debugVisible)
+            this.debugText.setText(
+              `FPS ${Math.round(this.game.loop.actualFps)} | LEVEL ${stageIndex + 1}/9 | ${this.gameState}\nPLAYER ${Math.round(this.player.x)},${Math.round(this.player.y)} | CAMERA ${Math.round(this.cameras.main.scrollX)},${Math.round(this.cameras.main.scrollY)}\nENEMIES ${this.enemies.countActive(true)} | BOSS ${this.bossActive ? this.boss : "OFF"} | PIZZAS ${this.shots.countActive(true)}\nTRANSITION ${this.gameState.includes("INTRO") || this.gameState === "BOSS_DEFEATED" ? 1 : 0} | EFFECTS ${this.tweens.getTweens().length}\nDEV: B=BOSS  K=ONE-HIT  H=DEATH  ` +
+                "`=DEBUG",
+            );
         }
       }
-      game.current = new P.Game({
+      instance = new P.Game({
         type: P.AUTO,
         parent: host.current,
         width: 1280,
@@ -694,11 +960,12 @@ export default function DeliMan() {
         audio: { noAudio: !sound },
         input: { gamepad: true },
       });
+      game.current = instance;
     });
     return () => {
       alive = false;
-      game.current?.destroy(true);
-      game.current = null;
+      instance?.destroy(true);
+      if (game.current === instance) game.current = null;
       touch.current = {
         left: false,
         right: false,
@@ -726,10 +993,6 @@ export default function DeliMan() {
                 <em>GET: {s.ability}</em>
               </button>
             ))}
-            <button className="locked">
-              <b>THE OWNER&apos;S OFFICE</b>
-              <span>DEFEAT ALL EIGHT</span>
-            </button>
           </div>
           <footer>
             <button onClick={() => setSound(!sound)}>
@@ -751,7 +1014,11 @@ export default function DeliMan() {
                 aria-label="Move left"
                 onContextMenu={(event) => event.preventDefault()}
                 onPointerDown={(event) => {
-                  event.currentTarget.setPointerCapture(event.pointerId);
+                  try {
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                  } catch {
+                    // Some embedded/mobile browsers do not expose pointer capture.
+                  }
                   touch.current.left = true;
                 }}
                 onPointerUp={() => (touch.current.left = false)}
@@ -765,7 +1032,11 @@ export default function DeliMan() {
                 aria-label="Move right"
                 onContextMenu={(event) => event.preventDefault()}
                 onPointerDown={(event) => {
-                  event.currentTarget.setPointerCapture(event.pointerId);
+                  try {
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                  } catch {
+                    // Movement still works through pointer up/cancel handlers.
+                  }
                   touch.current.right = true;
                 }}
                 onPointerUp={() => (touch.current.right = false)}
@@ -790,7 +1061,11 @@ export default function DeliMan() {
                 className="control-btn"
                 aria-label="Jump"
                 onPointerDown={(event) => {
-                  event.currentTarget.setPointerCapture(event.pointerId);
+                  try {
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                  } catch {
+                    // Jump remains responsive without pointer capture.
+                  }
                   touch.current.jump = true;
                   touch.current.jumpPressed = true;
                 }}

@@ -32,6 +32,13 @@ export const BOSSES = {
     attack: "charge",
     reward: "RIVER DECK WAVE",
   },
+  theMargin: {
+    name: "THE MARGIN",
+    health: 30,
+    speed: 96,
+    attack: "bounce",
+    reward: "FOURTEEN DOLLAR PROFIT",
+  },
 } satisfies Record<string, BossDef>;
 export const STAGES: StageDef[] = [
   {
@@ -142,6 +149,22 @@ export const STAGES: StageDef[] = [
       "+ 2 JUMBOS · + 50 WINGS · ACTUALLY MAKE THAT 100",
     ],
     location: "CLOSING TIME ON FORD STREET",
+  },
+  {
+    id: "owner-office",
+    name: "THE OWNER'S OFFICE",
+    theme: 0x281529,
+    boss: "THE MARGIN",
+    bossId: "theMargin",
+    ability: "FOURTEEN DOLLAR PROFIT",
+    intro:
+      "SALES LOOK GREAT.\nFOOD COST. PAYROLL. UTILITIES. FEES. TAX.\nNET PROFIT: $14.63",
+    hazards: ["PROCESSING FEE", "PAYROLL", "UNEXPECTED EXPENSE"],
+    lines: [
+      "AN UNEXPECTED EXPENSE HAS OCCURRED.",
+      "THE DELIVERY CAR HAS ENTERED THROUGH THE CEILING.",
+    ],
+    location: "THE OWNER'S OFFICE — FINAL LEDGER",
   },
 ];
 export const INCIDENTS = [
