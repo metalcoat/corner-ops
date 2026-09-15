@@ -38,23 +38,24 @@
 .delivery-world > .menu-ad-ticker.overlay.roadside {
   top: -24%;
   right: 1.5%;
-  width: clamp(150px, 18vw, 235px);
-  padding: 10px 12px 12px;
-  background: #ffd83d;
-  border: 5px solid #17130a;
+  width: clamp(190px, 22vw, 285px);
+  padding: 13px 15px 15px;
+  background: #ffea35;
+  border: 6px solid #090803;
   border-radius: 5px;
   box-shadow:
-    0 0 0 3px #ffd83d,
-    7px 9px 0 #0008;
+    0 0 0 4px #ffea35,
+    0 0 22px #fff45acc,
+    8px 10px 0 #0009;
   color: #17130a;
   text-align: center;
-  font-size: clamp(0.64rem, 1.05vw, 0.86rem);
-  line-height: 1.18;
-  animation: roadside-ad-pass 6.2s linear both;
+  font-size: clamp(0.75rem, 1.25vw, 1rem);
+  line-height: 1.22;
+  animation: roadside-ad-pass 7.4s linear both;
 }
 .delivery-world > .menu-ad-ticker.overlay.roadside b {
   color: #17130a;
-  font-size: clamp(0.56rem, 0.9vw, 0.72rem);
+  font-size: clamp(0.67rem, 1.05vw, 0.84rem);
   letter-spacing: 0.05em;
   border-bottom: 2px solid #17130a;
   padding-bottom: 5px;
@@ -111,9 +112,9 @@
   }
   .delivery-world > .menu-ad-ticker.overlay.roadside {
     right: 1%;
-    width: 138px;
-    padding: 7px;
-    font-size: 0.58rem;
+    width: 168px;
+    padding: 9px;
+    font-size: 0.68rem;
   }
   .menu-ad-ticker b {
     font-size: 0.43rem;

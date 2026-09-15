@@ -17,6 +17,7 @@ type Thing = {
   type:
     | "deer"
     | "dog"
+    | "cat"
     | "squirrel"
     | "cow"
     | "person"
@@ -71,11 +72,12 @@ const fresh: Stats = {
 const icons: Record<Thing["type"], string> = {
   deer: "🦌",
   dog: "🐕",
+  cat: "🐈",
   squirrel: "🐿️",
   cow: "🐄",
   person: "🚶",
   car: "🚗",
-  pothole: "◉",
+  pothole: "",
   boost: "⚡",
   slow: "❄️",
 };
@@ -229,6 +231,10 @@ export default function DeliveryGame() {
         | "coin"
         | "start"
         | "yelp"
+        | "bark"
+        | "meow"
+        | "moo"
+        | "squish"
         | "ouch"
         | "victory",
     ) => {
@@ -467,6 +473,7 @@ export default function DeliveryGame() {
         const types: Thing["type"][] = [
             "deer",
             "dog",
+            "cat",
             "squirrel",
             "person",
             "car",
@@ -519,11 +526,13 @@ export default function DeliveryGame() {
                     ? 0.21
                     : n.type === "dog"
                       ? 0.13
-                      : n.type === "squirrel"
-                        ? 0.07
-                        : n.type === "person"
-                          ? 0.13
-                          : 0.18;
+                      : n.type === "cat"
+                        ? 0.11
+                        : n.type === "squirrel"
+                          ? 0.07
+                          : n.type === "person"
+                            ? 0.13
+                            : 0.18;
           if (
             n.y > 78 &&
             n.y < 91 &&
@@ -577,7 +586,9 @@ export default function DeliveryGame() {
               setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
               setMode("lost");
               impact();
-              beep(n.type === "person" ? "ouch" : "hit");
+              beep(
+                n.type === "person" ? "ouch" : n.type === "cow" ? "moo" : "hit",
+              );
               continue;
             }
             if (n.type === "squirrel") {
@@ -588,7 +599,20 @@ export default function DeliveryGame() {
                 combo: 0,
               }));
               pop("SQUIRREL TAP! -100. IT HAS RETAINED COUNSEL.");
-              beep("hit");
+              beep("squish");
+              continue;
+            }
+            if (n.type === "cat") {
+              setHealth((health) => Math.max(0, health - 1));
+              setStats((stats) => ({
+                ...stats,
+                score: Math.max(0, stats.score - 175),
+                hits: stats.hits + 1,
+                combo: 0,
+              }));
+              pop("CAT INCIDENT! -175. IT WILL BE REVIEWING THIS RIDE ONLINE.");
+              impact();
+              beep("meow");
               continue;
             }
             const collisionType =
@@ -604,7 +628,7 @@ export default function DeliveryGame() {
                 : `${n.type.toUpperCase()} INCIDENT!`,
             );
             impact();
-            beep(n.type === "dog" ? "yelp" : "hit");
+            beep(n.type === "dog" ? "bark" : "hit");
             continue;
           }
           if (n.y < 112) next.push(n);

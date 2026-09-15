@@ -1,7 +1,17 @@
 "use client";
 
 type Theme = "menu" | "action";
-type DeliverySfx = "throw" | "delivery" | "crash" | "yelp" | "ouch" | "victory";
+type DeliverySfx =
+  | "throw"
+  | "delivery"
+  | "crash"
+  | "yelp"
+  | "bark"
+  | "meow"
+  | "moo"
+  | "squish"
+  | "ouch"
+  | "victory";
 
 class DeliveryAudioManager {
   private context: AudioContext | null = null;
@@ -91,7 +101,8 @@ class DeliveryAudioManager {
     const frames = Math.max(1, Math.floor(context.sampleRate * duration));
     const buffer = context.createBuffer(1, frames, context.sampleRate);
     const data = buffer.getChannelData(0);
-    for (let index = 0; index < frames; index++) data[index] = Math.random() * 2 - 1;
+    for (let index = 0; index < frames; index++)
+      data[index] = Math.random() * 2 - 1;
     const source = context.createBufferSource();
     const filter = context.createBiquadFilter();
     const envelope = context.createGain();
@@ -114,12 +125,43 @@ class DeliveryAudioManager {
     const position = this.step % 16;
     const modulation = 0.8 + this.intensity * 1.7;
     if (position % 2 === 0) {
-      this.fmNote(menuLead[(position / 2) % menuLead.length], at, 0.2, this.menuBus, 0.055, 0.7, "triangle");
-      this.fmNote(actionLead[(position / 2) % actionLead.length], at, 0.14, this.actionBus, 0.075, modulation);
-      this.fmNote(actionBass[(position / 2) % actionBass.length], at, 0.2, this.actionBus, 0.065, 0.55, "triangle");
+      this.fmNote(
+        menuLead[(position / 2) % menuLead.length],
+        at,
+        0.2,
+        this.menuBus,
+        0.055,
+        0.7,
+        "triangle",
+      );
+      this.fmNote(
+        actionLead[(position / 2) % actionLead.length],
+        at,
+        0.14,
+        this.actionBus,
+        0.075,
+        modulation,
+      );
+      this.fmNote(
+        actionBass[(position / 2) % actionBass.length],
+        at,
+        0.2,
+        this.actionBus,
+        0.065,
+        0.55,
+        "triangle",
+      );
     }
     if (position === 4 || position === 12)
-      this.fmNote(783.99, at, 0.08, this.actionBus, 0.025, modulation, "triangle");
+      this.fmNote(
+        783.99,
+        at,
+        0.08,
+        this.actionBus,
+        0.025,
+        modulation,
+        "triangle",
+      );
     this.step += 1;
   }
 
@@ -143,22 +185,37 @@ class DeliveryAudioManager {
     this.menuBus.gain.cancelScheduledValues(at);
     this.actionBus.gain.cancelScheduledValues(at);
     this.menuBus.gain.setTargetAtTime(theme === "menu" ? 1 : 0.0001, at, 0.22);
-    this.actionBus.gain.setTargetAtTime(theme === "action" ? 1 : 0.0001, at, 0.22);
+    this.actionBus.gain.setTargetAtTime(
+      theme === "action" ? 1 : 0.0001,
+      at,
+      0.22,
+    );
   }
 
   setIntensity(speedRatio: number, urgencyRatio: number) {
-    this.intensity = Math.max(0, Math.min(1, speedRatio * 0.62 + urgencyRatio * 0.38));
+    this.intensity = Math.max(
+      0,
+      Math.min(1, speedRatio * 0.62 + urgencyRatio * 0.38),
+    );
     if (this.context && this.motor && this.motorGain) {
       const at = this.context.currentTime;
       this.motor.frequency.setTargetAtTime(48 + this.intensity * 94, at, 0.08);
-      this.motorGain.gain.setTargetAtTime(0.012 + this.intensity * 0.025, at, 0.08);
+      this.motorGain.gain.setTargetAtTime(
+        0.012 + this.intensity * 0.025,
+        at,
+        0.08,
+      );
     }
   }
 
   setMuted(muted: boolean) {
     this.muted = muted;
     if (this.master && this.context)
-      this.master.gain.setTargetAtTime(muted ? 0 : 0.7, this.context.currentTime, 0.04);
+      this.master.gain.setTargetAtTime(
+        muted ? 0 : 0.7,
+        this.context.currentTime,
+        0.04,
+      );
   }
 
   play(effect: DeliverySfx) {
@@ -191,6 +248,21 @@ class DeliveryAudioManager {
     } else if (effect === "yelp") {
       this.fmNote(430, at, 0.1, this.master, 0.16, 1.6, "sawtooth");
       this.fmNote(780, at + 0.07, 0.18, this.master, 0.18, 2, "triangle");
+    } else if (effect === "bark") {
+      this.noise(at, 0.08, 0.2);
+      this.fmNote(185, at, 0.09, this.master, 0.19, 2.2, "sawtooth");
+      this.noise(at + 0.12, 0.07, 0.17);
+      this.fmNote(155, at + 0.12, 0.1, this.master, 0.17, 2, "sawtooth");
+    } else if (effect === "meow") {
+      this.fmNote(620, at, 0.15, this.master, 0.16, 1.8, "triangle");
+      this.fmNote(870, at + 0.1, 0.2, this.master, 0.13, 2.4, "sine");
+    } else if (effect === "moo") {
+      this.fmNote(105, at, 0.42, this.master, 0.22, 3.2, "sawtooth");
+      this.fmNote(82, at + 0.24, 0.5, this.master, 0.2, 2.6, "triangle");
+    } else if (effect === "squish") {
+      this.noise(at, 0.09, 0.28);
+      this.fmNote(240, at, 0.08, this.master, 0.2, 3.4, "square");
+      this.fmNote(72, at + 0.055, 0.2, this.master, 0.24, 1.7, "sawtooth");
     } else if (effect === "ouch") {
       const voice = new SpeechSynthesisUtterance("Ouch!");
       voice.rate = 1.35;
@@ -199,8 +271,17 @@ class DeliveryAudioManager {
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(voice);
     } else {
-      [261.63, 329.63, 392, 523.25, 659.25, 783.99, 1046.5].forEach((note, index) =>
-        this.fmNote(note, at + index * 0.09, 0.32, this.master!, 0.15, 1.35, index % 2 ? "triangle" : "square"),
+      [261.63, 329.63, 392, 523.25, 659.25, 783.99, 1046.5].forEach(
+        (note, index) =>
+          this.fmNote(
+            note,
+            at + index * 0.09,
+            0.32,
+            this.master!,
+            0.15,
+            1.35,
+            index % 2 ? "triangle" : "square",
+          ),
       );
     }
   }
