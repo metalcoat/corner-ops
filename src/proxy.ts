@@ -39,6 +39,7 @@ const selfAuthorizedApiPaths = [
   "/api/delivery-boy/run",
   "/api/delivery-boy/leaderboard",
   "/api/games/leaderboard",
+  "/api/games/analytics",
   "/api/internal/voice-payment",
   "/api/internal/ai-phone",
 ];
