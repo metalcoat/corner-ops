@@ -10,6 +10,8 @@ type Tray = {
   crisis: boolean;
   fire: boolean;
   topping: Topping;
+  toppingHits: number;
+  toppingTarget: number;
 };
 type Burst = { id: number; x: number; layer: Layer; bad?: boolean };
 type Run = { runId: string; token: string };
@@ -49,6 +51,21 @@ const TOPPING_ICON: Record<Topping, string> = {
     "A cousin who once visited Italy felt a disturbance. -1",
     "Customer says the pizza was suspiciously pizza-shaped. -1",
   ];
+const LEVELS = [
+  { name: "TRAINING WHEELS", speed: 1, timing: 38, perfect: 13, toppings: 1 },
+  { name: "DINNER RUSH", speed: 1.12, timing: 35, perfect: 12, toppings: 1 },
+  { name: "FRIDAY NIGHT", speed: 1.27, timing: 32, perfect: 10, toppings: 2 },
+  {
+    name: "KITCHEN MELTDOWN",
+    speed: 1.43,
+    timing: 29,
+    perfect: 9,
+    toppings: 2,
+  },
+  { name: "LAST CALL PANIC", speed: 1.62, timing: 27, perfect: 8, toppings: 3 },
+] as const;
+const levelForTime = (remaining: number) =>
+  Math.min(LEVELS.length - 1, Math.floor((60 - remaining) / 12));
 class Audio {
   ctx: AudioContext | null = null;
   master: GainNode | null = null;
@@ -210,7 +227,12 @@ export default function Game() {
       const tray = s.trays
         .filter((t) => t.step < 3)
         .sort((a, b) => Math.abs(a.x - 50) - Math.abs(b.x - 50))[0];
-      if (!tray || Math.abs(tray.x - 50) > 38 || LAYERS[tray.step] !== layer) {
+      const level = LEVELS[levelForTime(s.time)];
+      if (
+        !tray ||
+        Math.abs(tray.x - 50) > level.timing ||
+        LAYERS[tray.step] !== layer
+      ) {
         burst(tray?.x ?? 50, layer, true);
         fail(
           `WRONG DROP — ${layer.toUpperCase()} HIT THE WRONG PART OF THE LINE!`,
@@ -218,7 +240,7 @@ export default function Game() {
         return;
       }
       // Touch input can arrive one rendered frame behind the mutable game clock.
-      const perfect = Math.abs(tray.x - 50) <= 13;
+      const perfect = Math.abs(tray.x - 50) <= level.perfect;
       tray.step++;
       tray.crisis = false;
       if (perfect) {
@@ -252,9 +274,14 @@ export default function Game() {
         return;
       }
       if (t.step > 3) return;
-      t.step = 4;
+      t.toppingHits++;
       s.score += 75 * (s.combo >= 5 ? 2 : 1);
-      setFlash(`${t.topping.toUpperCase()}!`);
+      if (t.toppingHits >= t.toppingTarget) t.step = 4;
+      setFlash(
+        t.step === 4
+          ? `${t.topping.toUpperCase()} COMPLETE!`
+          : `${t.topping.toUpperCase()} ${t.toppingHits}/${t.toppingTarget}`,
+      );
       audio.current.sfx("splat");
       burst(t.x, "cheese");
       setTimeout(() => setFlash(""), 350);
@@ -340,6 +367,7 @@ export default function Game() {
       if (s.time <= 15) audio.current.frenzy();
       s.speed =
         9.5 *
+        LEVELS[levelForTime(s.time)].speed *
         (1 + Math.floor(s.delivered / 3) * 0.05) *
         (s.time <= 15 ? 1.2 : 1) *
         (now < s.boostUntil ? 1.05 : 1);
@@ -351,6 +379,8 @@ export default function Game() {
           crisis: false,
           fire: false,
           topping: TOPPINGS[Math.floor(Math.random() * TOPPINGS.length)],
+          toppingHits: 0,
+          toppingTarget: LEVELS[levelForTime(s.time)].toppings,
         });
         s.lastSpawn = now;
       }
@@ -484,6 +514,9 @@ export default function Game() {
       )}
       {mode === "play" && (
         <>
+          <div className="level-banner" key={levelForTime(time)}>
+            LEVEL {levelForTime(time) + 1}: {LEVELS[levelForTime(time)].name}
+          </div>
           <header className="chalk-hud">
             <div>
               <small>SHIFT</small>
@@ -527,28 +560,37 @@ export default function Game() {
                       {ICON[l]}
                     </span>
                   ))}
-                  <span
-                    className={
-                      t.step > 3 ? "done topping-order" : "topping-order"
-                    }
-                  >
-                    {TOPPING_ICON[t.topping]}
-                  </span>
+                  {Array.from({ length: t.toppingTarget }, (_, i) => (
+                    <span
+                      className={
+                        i < t.toppingHits
+                          ? "done topping-order"
+                          : "topping-order"
+                      }
+                      key={`topping-${i}`}
+                    >
+                      {TOPPING_ICON[t.topping]}
+                    </span>
+                  ))}
                 </div>
                 <div className={`pizza step-${t.step}`}>
                   {t.step > 1 && <i className="sauce" />}
                   {t.step > 2 && <i className="cheese" />}
-                  {t.step > 3 && (
+                  {t.toppingHits > 0 && (
                     <>
                       <b className={`pizza-topping ${t.topping} one`}>
                         {TOPPING_ICON[t.topping]}
                       </b>
-                      <b className={`pizza-topping ${t.topping} two`}>
-                        {TOPPING_ICON[t.topping]}
-                      </b>
-                      <b className={`pizza-topping ${t.topping} three`}>
-                        {TOPPING_ICON[t.topping]}
-                      </b>
+                      {t.toppingHits > 1 && (
+                        <b className={`pizza-topping ${t.topping} two`}>
+                          {TOPPING_ICON[t.topping]}
+                        </b>
+                      )}
+                      {t.toppingHits > 2 && (
+                        <b className={`pizza-topping ${t.topping} three`}>
+                          {TOPPING_ICON[t.topping]}
+                        </b>
+                      )}
                     </>
                   )}
                 </div>
