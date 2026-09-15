@@ -68,21 +68,6 @@
   border-radius: 8px;
   color: #fff;
 }
-.initials-entry {
-  display: grid;
-  grid-template-columns: 1fr 92px;
-  align-items: center;
-  gap: 12px;
-  margin-top: 10px;
-  color: var(--yellow);
-  font-weight: 1000;
-  letter-spacing: 0.08em;
-  text-align: left;
-}
-.initials-entry input {
-  text-align: center;
-  letter-spacing: 0.2em;
-}
 .delivery-home > button,
 .delivery-summary > button {
   display: block;

@@ -1,21 +1,46 @@
 .deli-man {
   min-height: 100dvh;
-  background: #080b13;
+  background:
+    radial-gradient(circle at 50% 15%, rgba(250, 67, 39, 0.24), transparent 31rem),
+    linear-gradient(180deg, #101827, #05070c 78%);
   color: #fff;
   font-family: "Courier New", monospace;
   text-align: center;
   overflow: hidden;
 }
 .deli-man > section {
+  min-height: 100dvh;
   padding: 22px;
+  background:
+    linear-gradient(#07101db8, #07080ee8),
+    url("/games/deli-man/backgrounds/fryer-hell-v3.png") center/cover fixed;
 }
-.deli-man h1 {
-  font: 1000 clamp(3rem, 8vw, 7rem)/0.8 Arial;
-  text-shadow: 7px 7px #000;
+.deli-man .title-logo {
+  width: fit-content;
+  margin: 8px auto 22px;
+  transform: skew(-4deg);
+  font: 1000 clamp(3rem, 8vw, 7rem)/0.78 Impact, Haettenschweiler, sans-serif;
+  letter-spacing: -0.035em;
+  filter: drop-shadow(0 10px 0 #05070b) drop-shadow(0 0 22px #ff482a80);
+  -webkit-text-stroke: clamp(1px, 0.18vw, 3px) #111826;
 }
-.deli-man h1 i {
+.deli-man .title-logo span {
   display: block;
+  padding-inline: 0.12em;
+  color: #f5f7f8;
+  background: linear-gradient(#fff, #b9d3dc 72%, #718690);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.deli-man .title-logo i {
+  display: block;
+  padding: 0.08em 0.2em 0.13em;
   color: #ffd438;
+  background: linear-gradient(#ffdd42, #f0442d 85%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
   font-style: normal;
 }
 .stage-grid {
@@ -26,13 +51,41 @@
   margin: auto;
 }
 .stage-grid button {
-  min-height: 105px;
-  padding: 12px;
-  border: 4px solid #6eeaff;
-  background: #172138;
+  position: relative;
+  isolation: isolate;
+  min-height: 130px;
+  overflow: hidden;
+  padding: 0;
+  border: 4px solid #bcecff;
+  background-color: #172138;
+  background-position: center;
+  background-size: cover;
   color: #fff;
   text-align: left;
-  box-shadow: 5px 5px #000;
+  box-shadow: 6px 7px #020307, inset 0 0 0 2px #203751;
+  cursor: pointer;
+  transition: translate 100ms ease, filter 100ms ease, border-color 100ms ease;
+}
+.stage-grid button::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  content: "";
+  background: linear-gradient(90deg, #07101df5 0 38%, #07101d9c 72%, transparent);
+}
+.stage-grid button:hover,
+.stage-grid button:focus-visible {
+  translate: 0 -5px;
+  border-color: #ffd438;
+  filter: saturate(1.2) brightness(1.13);
+}
+.stage-grid .stage-copy {
+  display: flex;
+  min-height: 122px;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 13px;
+  text-shadow: 2px 2px 0 #000, 0 0 8px #000;
 }
 .stage-grid b,
 .stage-grid span,

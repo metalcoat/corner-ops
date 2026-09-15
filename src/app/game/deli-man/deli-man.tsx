@@ -2,6 +2,11 @@
 import { useEffect, useRef, useState } from "react";
 import type Phaser from "phaser";
 import { BOSSES, STAGES } from "@/lib/games/deli-man-data";
+import { getDeliManArt } from "@/lib/games/deli-man-art";
+import {
+  createDeliManTextures,
+  renderDeliManStage,
+} from "@/lib/games/deli-man-renderer";
 export default function DeliMan() {
   const host = useRef<HTMLDivElement>(null),
     game = useRef<Phaser.Game | null>(null),
@@ -22,6 +27,7 @@ export default function DeliMan() {
     void import("phaser").then((P) => {
       if (!alive || !host.current) return;
       const def = STAGES[stageIndex];
+      const art = getDeliManArt(def.id);
       const bossProfile = def.bossId ? BOSSES[def.bossId] : null;
       const developerMode =
         window.location.hostname.startsWith("dev.") ||
@@ -60,6 +66,7 @@ export default function DeliMan() {
         lastLoopErrorAt = -5000;
         debugVisible = false;
         debugText!: Phaser.GameObjects.Text;
+        bossWarning!: Phaser.GameObjects.Text;
         bossGate!: Phaser.Physics.Arcade.StaticGroup;
         entranceGate!: Phaser.GameObjects.Rectangle;
         playerState: "idle" | "run" | "jump" | "fall" | "climb" | "hurt" =
@@ -68,10 +75,7 @@ export default function DeliMan() {
         exitDoor!: Phaser.GameObjects.Rectangle;
         ladders: Array<{ x: number; top: number; bottom: number }> = [];
         preload() {
-          this.load.image(
-            "ogdensburg",
-            "/games/deli-man/ogdensburg-waterfront-v2.png",
-          );
+          this.load.image("stage-backdrop", art.background);
         }
         create() {
           console.info("[DELI MAN] LEVEL START", {
@@ -80,14 +84,16 @@ export default function DeliMan() {
           });
           this.cameras.main.setBackgroundColor(def.theme);
           this.cameras.main.setRoundPixels(true);
-          for (let x = 0; x < 6000; x += 2040)
-            this.add
-              .image(x, 0, "ogdensburg")
-              .setOrigin(0)
-              .setDisplaySize(2048, 680)
-              .setScrollFactor(0.18)
-              .setAlpha(stageIndex === 3 ? 0.5 : 0.82);
-          const g = this.add.graphics();
+          const authoredRoutes = [
+            { x: 720, top: 420, width: 300 },
+            { x: 1740, top: 350, width: 360 },
+            { x: 2860, top: 430, width: 330 },
+            { x: 4020, top: 330, width: 390 },
+          ];
+          const g = renderDeliManStage(this, art, authoredRoutes);
+          /* Northern NY street scenery is reserved for Delivery Route 666.
+             Other stages now use their own art-directed backdrop and props. */
+          if (art.prop === "street") {
           const buildings = [
             {
               x: 250,
@@ -226,33 +232,6 @@ export default function DeliMan() {
               padding: { x: 5, y: 3 },
             });
           });
-          const terrain = [
-            { top: 0x8f682f, face: 0x3b2518, detail: 0xff8a22 },
-            { top: 0xd4c6a0, face: 0x45414a, detail: 0xffd43b },
-            { top: 0x73777a, face: 0x25292d, detail: 0xf4f0cf },
-            { top: 0xc7eafa, face: 0x507583, detail: 0xffffff },
-            { top: 0xd7c4a2, face: 0x4a3730, detail: 0xf04435 },
-            { top: 0xaa713f, face: 0x49301f, detail: 0x42d6db },
-            { top: 0x77717e, face: 0x27232c, detail: 0xffd438 },
-            { top: 0x476075, face: 0x151c29, detail: 0x9ed8e6 },
-            { top: 0x6a2130, face: 0x1d1720, detail: 0xf0c34b },
-          ][stageIndex];
-          g.fillStyle(terrain.face).fillRect(0, 610, 5000, 110);
-          g.fillStyle(terrain.top).fillRect(0, 610, 5000, 18);
-          g.fillStyle(0x080b13, 0.45).fillRect(0, 628, 5000, 10);
-          for (let x = 20; x < 5000; x += 96) {
-            g.fillStyle(x % 288 ? terrain.detail : 0x161616, 0.48).fillRect(
-              x,
-              646 + ((x / 96) % 2) * 18,
-              34,
-              5,
-            );
-            g.lineStyle(2, 0x050505, 0.38).lineBetween(
-              x + 50,
-              628,
-              x + 64,
-              638,
-            );
           }
           const collisionTexture = this.make.graphics({ x: 0, y: 0 }, false);
           collisionTexture.fillStyle(0xffffff, 0.001).fillRect(0, 0, 8, 8);
@@ -260,119 +239,41 @@ export default function DeliMan() {
           collisionTexture.destroy();
           this.physics.world.setBounds(0, 0, 5000, 720);
           const ground = this.physics.add.staticGroup();
-          ground.create(2500, 650).setDisplaySize(5000, 80).refreshBody();
+          ground
+            .create(2500, 650)
+            .setDisplaySize(5000, 80)
+            .setVisible(false)
+            .refreshBody();
           const platforms = this.physics.add.staticGroup();
-          const authoredRoutes = [
-            { x: 720, top: 420, width: 300 },
-            { x: 1740, top: 350, width: 360 },
-            { x: 2860, top: 430, width: 330 },
-            { x: 4020, top: 330, width: 390 },
-          ];
           authoredRoutes.forEach((route) => {
             this.ladders.push({ x: route.x, top: route.top, bottom: 610 });
             platforms
               .create(route.x + route.width / 2 - 18, route.top, "ground")
               .setDisplaySize(route.width, 24)
+              .setVisible(false)
               .refreshBody();
-            g.fillStyle(terrain.face).fillRect(
-              route.x - 18,
-              route.top,
-              route.width,
-              34,
-            );
-            g.fillStyle(terrain.top).fillRect(
-              route.x - 18,
-              route.top - 10,
-              route.width,
-              14,
-            );
-            g.fillStyle(0x050505, 0.35).fillRect(
-              route.x - 18,
-              route.top + 24,
-              route.width,
-              10,
-            );
-            g.lineStyle(3, terrain.detail, 0.6).lineBetween(
-              route.x,
-              route.top + 8,
-              route.x + route.width - 36,
-              route.top + 8,
-            );
-            g.lineStyle(8, 0xd3b56f);
-            g.lineBetween(route.x, 610, route.x, route.top);
-            g.lineBetween(route.x + 48, 610, route.x + 48, route.top);
-            for (let y = route.top + 12; y < 610; y += 27)
-              g.lineBetween(route.x, y, route.x + 48, y);
           });
-          const make = (key: string, color: number, w: number, h: number) => {
-            const q = this.make.graphics({ x: 0, y: 0 }, false);
-            q.fillStyle(color).fillRect(0, 0, w, h);
-            q.lineStyle(3, 0xffffff).strokeRect(0, 0, w, h);
-            q.generateTexture(key, w, h);
-            q.destroy();
-          };
-          make("hero", 0xf04435, 38, 58);
-          const enemyArt = this.make.graphics({ x: 0, y: 0 }, false);
-          enemyArt.fillStyle(0x43842f).fillCircle(25, 25, 23);
-          enemyArt
-            .fillStyle(0xffe73f)
-            .fillCircle(16, 19, 5)
-            .fillCircle(34, 19, 5);
-          enemyArt
-            .fillStyle(0x111111)
-            .fillCircle(17, 20, 2)
-            .fillCircle(33, 20, 2);
-          enemyArt.fillStyle(0x8c1b17).fillRect(12, 32, 26, 7);
-          enemyArt
-            .fillStyle(0x26351e)
-            .fillRect(2, 42, 14, 8)
-            .fillRect(34, 42, 14, 8);
-          enemyArt.generateTexture("enemy", 50, 50);
-          enemyArt.destroy();
-          const enemyWalk = this.make.graphics({ x: 0, y: 0 }, false);
-          enemyWalk.fillStyle(0x58a13d).fillCircle(25, 24, 23);
-          enemyWalk
-            .fillStyle(0xffe73f)
-            .fillCircle(16, 18, 5)
-            .fillCircle(34, 18, 5);
-          enemyWalk
-            .fillStyle(0x111111)
-            .fillCircle(17, 19, 2)
-            .fillCircle(33, 19, 2);
-          enemyWalk.fillStyle(0x8c1b17).fillRect(12, 31, 26, 7);
-          enemyWalk
-            .fillStyle(0x26351e)
-            .fillRect(8, 42, 14, 8)
-            .fillRect(29, 39, 14, 8);
-          enemyWalk.generateTexture("enemy-walk", 50, 50);
-          enemyWalk.destroy();
-          const bossArt = this.make.graphics({ x: 0, y: 0 }, false);
-          bossArt.fillStyle(0x5d1820).fillCircle(62, 63, 58);
-          bossArt.fillStyle(0xffca39).fillRect(17, 18, 90, 25);
-          bossArt
-            .fillStyle(0xffffff)
-            .fillCircle(42, 56, 10)
-            .fillCircle(82, 56, 10);
-          bossArt
-            .fillStyle(0x111111)
-            .fillCircle(44, 58, 4)
-            .fillCircle(84, 58, 4);
-          bossArt.fillStyle(0xf04435).fillRect(30, 82, 64, 14);
-          bossArt.generateTexture("boss", 124, 124);
-          bossArt.destroy();
+          createDeliManTextures(this, art);
           const makePerson = (key: string, shirt: number, hat = false) => {
             const p = this.make.graphics({ x: 0, y: 0 }, false);
-            if (hat) p.fillStyle(0xf0ad20).fillRect(9, 0, 28, 8);
-            p.fillStyle(0xb87548).fillCircle(23, 15, 12);
+            p.fillStyle(0x15131a).fillCircle(23, 15, 14).fillRect(6, 26, 34, 34);
+            if (hat) p.fillStyle(0xf0ad20).fillRect(7, 0, 32, 9).fillRect(13, 7, 31, 5);
+            p.fillStyle(0xb87548).fillCircle(23, 16, 11);
+            p.fillStyle(0xf4cfac).fillRect(15, 11, 13, 4);
+            p.fillStyle(0x111111).fillRect(28, 16, 3, 3);
             p.fillStyle(shirt).fillRect(8, 27, 30, 31);
-            p.fillStyle(0x172432)
-              .fillRect(8, 56, 12, 24)
-              .fillRect(27, 56, 12, 24);
-            p.fillStyle(0x1b1110)
-              .fillRect(5, 76, 17, 7)
-              .fillRect(25, 76, 17, 7);
+            p.fillStyle(shadeColor(shirt, 42)).fillRect(11, 29, 21, 6);
+            p.fillStyle(0xb87548).fillRect(2, 31, 7, 24).fillRect(38, 31, 7, 24);
+            p.fillStyle(0x172432).fillRect(8, 56, 12, 24).fillRect(27, 56, 12, 24);
+            p.fillStyle(0x1b1110).fillRect(4, 76, 18, 7).fillRect(25, 76, 18, 7);
             p.generateTexture(key, 46, 84);
             p.destroy();
+          };
+          const shadeColor = (color: number, amount: number) => {
+            const r = Math.min(255, (color >> 16) + amount);
+            const gg = Math.min(255, ((color >> 8) & 255) + amount);
+            const b = Math.min(255, (color & 255) + amount);
+            return (r << 16) | (gg << 8) | b;
           };
           makePerson("roofer", 0xf08324, true);
           makePerson("customer", 0x7d45a8);
@@ -389,21 +290,9 @@ export default function DeliMan() {
           pizzaShot.generateTexture("pizza-shot", 24, 24);
           pizzaShot.destroy();
           this.player = this.physics.add
-            .sprite(100, 560, "hero")
+            .sprite(100, 560, "hero-idle")
             .setCollideWorldBounds(true);
           this.player.body!.setSize(34, 56);
-          const heroArt = this.add.graphics();
-          heroArt.fillStyle(0xd92f27).fillRect(2, 0, 34, 12);
-          heroArt.fillStyle(0xf1b783).fillRect(8, 12, 24, 14);
-          heroArt.fillStyle(0x162f50).fillRect(4, 26, 30, 20);
-          heroArt.fillStyle(0xead4a0).fillRect(9, 29, 20, 25);
-          heroArt
-            .fillStyle(0x111820)
-            .fillRect(3, 48, 13, 10)
-            .fillRect(23, 48, 13, 10);
-          heroArt.generateTexture("deli-man", 38, 58);
-          heroArt.destroy();
-          this.player.setTexture("deli-man");
           this.cameras.main.setBounds(0, 0, 5000, 720);
           this.cursors = this.input.keyboard!.createCursorKeys();
           this.keys = this.input.keyboard!.addKeys(
@@ -497,6 +386,8 @@ export default function DeliMan() {
             this.damage(),
           );
           this.physics.add.overlap(this.shots, this.enemies, (a, b) => {
+            const enemy = b as Phaser.Physics.Arcade.Sprite;
+            this.impactBurst(enemy.x, enemy.y, art.accent);
             a.destroy();
             b.destroy();
             this.score += 100;
@@ -507,6 +398,7 @@ export default function DeliMan() {
             if (shot?.active) shot.destroy();
             if (this.gameState !== "BOSS_FIGHT" || this.bossDefeated) return;
             this.boss--;
+            this.impactBurst(this.bossSprite.x, this.bossSprite.y, art.glow);
             this.bossSprite.setTint(0xffffff);
             this.time.delayedCall(70, () => this.bossSprite.clearTint());
             if (this.boss <= 0) {
@@ -554,6 +446,45 @@ export default function DeliMan() {
             .setScrollFactor(0)
             .setDepth(100)
             .setVisible(false);
+          this.bossWarning = this.add
+            .text(640, 260, "", {
+              fontFamily: "monospace",
+              fontSize: "44px",
+              fontStyle: "bold",
+              align: "center",
+              color: "#fff6b0",
+              stroke: "#35040b",
+              strokeThickness: 10,
+              backgroundColor: "#9f122be8",
+              padding: { x: 38, y: 20 },
+            })
+            .setOrigin(0.5)
+            .setScrollFactor(0)
+            .setDepth(90)
+            .setVisible(false);
+          const stageIntro = this.add
+            .text(640, 300, `STAGE ${stageIndex + 1}\n${def.name}\n\nBOSS: ${def.boss}`, {
+              fontFamily: "monospace",
+              fontSize: "36px",
+              fontStyle: "bold",
+              align: "center",
+              color: "#ffffff",
+              stroke: "#080b13",
+              strokeThickness: 9,
+              backgroundColor: "#08111ee8",
+              padding: { x: 42, y: 26 },
+            })
+            .setOrigin(0.5)
+            .setScrollFactor(0)
+            .setDepth(85);
+          this.tweens.add({
+            targets: stageIntro,
+            alpha: 0,
+            y: 280,
+            delay: 850,
+            duration: 360,
+            onComplete: () => stageIntro.destroy(),
+          });
           this.add
             .text(100, 120, `${def.location}\n\n${def.intro}`, {
               fontFamily: "monospace",
@@ -618,6 +549,7 @@ export default function DeliMan() {
               }
             ).__DELI_MAN_DEBUG__ = () => ({
               level: def.id,
+              fps: Math.round(this.game.loop.actualFps),
               gameState: this.gameState,
               player: { x: this.player.x, y: this.player.y, hp: this.hp },
               velocity: {
@@ -634,6 +566,8 @@ export default function DeliMan() {
               },
               cameraX: this.cameras.main.scrollX,
               enemies: this.enemies.countActive(true),
+              displayObjects: this.children.list.length,
+              activeTweens: this.tweens.getTweens().length,
               bossHealth: this.boss,
               projectiles: this.shots.countActive(true),
             });
@@ -663,6 +597,23 @@ export default function DeliMan() {
           (b.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
           b.setAngularVelocity(this.facing * 720);
           b.setData("bornAt", this.time.now);
+        }
+        impactBurst(x: number, y: number, color: number) {
+          for (let i = 0; i < 9; i++) {
+            const spark = this.add
+              .rectangle(x, y, 4 + (i % 3) * 2, 4, i % 2 ? color : 0xffffff)
+              .setDepth(15)
+              .setAngle(i * 40);
+            this.tweens.add({
+              targets: spark,
+              x: x + Math.cos((i / 9) * Math.PI * 2) * (34 + (i % 3) * 8),
+              y: y + Math.sin((i / 9) * Math.PI * 2) * (28 + (i % 2) * 7),
+              alpha: 0,
+              scale: 0.3,
+              duration: 220,
+              onComplete: () => spark.destroy(),
+            });
+          }
         }
         damage() {
           if (this.time.now < this.invuln) return;
@@ -876,6 +827,21 @@ export default function DeliMan() {
             this.playerState = body.velocity.y < 0 ? "jump" : "fall";
           else if (body.velocity.x !== 0) this.playerState = "run";
           else this.playerState = "idle";
+          const firedRecently = this.time.now - this.lastShotAt < 150;
+          const heroTexture =
+            this.playerState === "hurt"
+              ? "hero-hurt"
+              : firedRecently
+                ? "hero-shoot"
+                : this.playerState === "jump" || this.playerState === "fall"
+                  ? "hero-jump"
+                  : this.playerState === "run"
+                    ? Math.floor(this.time.now / 105) % 2
+                      ? "hero-run-a"
+                      : "hero-run-b"
+                    : "hero-idle";
+          if (this.player.texture.key !== heroTexture)
+            this.player.setTexture(heroTexture);
           this.checkpoint = Math.max(
             this.checkpoint,
             Math.floor(this.player.x / 1000),
@@ -886,6 +852,19 @@ export default function DeliMan() {
             if (!this.bossActive) {
               this.bossActive = true;
               this.setGameState("BOSS_INTRO");
+              this.bossWarning
+                .setText(`⚠ WARNING ⚠\n${bossProfile?.name ?? def.boss}`)
+                .setScale(0.72)
+                .setAlpha(0)
+                .setVisible(true);
+              this.tweens.add({
+                targets: this.bossWarning,
+                alpha: 1,
+                scale: 1,
+                duration: 180,
+                yoyo: true,
+                hold: 420,
+              });
               console.info("[DELI MAN] BOSS TRIGGER", { level: def.id });
               this.enemies.clear(true, true);
               this.shots.clear(true, true);
@@ -901,6 +880,7 @@ export default function DeliMan() {
               this.time.now - this.stateStartedAt > 850
             ) {
               this.bossSprite.enableBody(false, 4680, 530, true, true);
+              this.bossWarning.setVisible(false);
               this.setGameState("BOSS_FIGHT");
               console.info("[DELI MAN] BOSS SPAWN", { level: def.id });
             }
@@ -920,6 +900,8 @@ export default function DeliMan() {
               this.time.now - this.stateStartedAt > 650
             ) {
               this.setGameState("REWARD");
+              this.cameras.main.shake(380, 0.012);
+              this.cameras.main.flash(180, 255, 210, 55);
               this.exitDoor.setVisible(true);
               console.info("[DELI MAN] BOSS DEFEATED", { level: def.id });
             }
@@ -980,17 +962,21 @@ export default function DeliMan() {
       {stage === null ? (
         <section>
           <small>AN ORIGINAL CORNER DELI GAME</small>
-          <h1>
-            DELI MAN:<i>THE LAST JUMBO</i>
+          <h1 className="title-logo">
+            <span>DELI MAN</span><i>THE LAST JUMBO</i>
           </h1>
           <div className="stage-grid">
             {STAGES.map((s, i) => (
-              <button key={s.id} onClick={() => setStage(i)}>
-                <b>
-                  {i + 1}. {s.name}
-                </b>
-                <span>BOSS: {s.boss}</span>
-                <em>GET: {s.ability}</em>
+              <button
+                key={s.id}
+                onClick={() => setStage(i)}
+                style={{ backgroundImage: `url(${getDeliManArt(s.id).background})` }}
+              >
+                <span className="stage-copy">
+                  <b>{i + 1}. {s.name}</b>
+                  <span>BOSS: {s.boss}</span>
+                  <em>GET: {s.ability}</em>
+                </span>
               </button>
             ))}
           </div>

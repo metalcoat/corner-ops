@@ -172,7 +172,6 @@ export default function DeliveryGame() {
     [orderPayload, setOrderPayload] = useState(orderPayloads[0]),
     [brokenWindow, setBrokenWindow] = useState(false),
     [scoreBursts, setScoreBursts] = useState<ScoreBurst[]>([]),
-    [initials, setInitials] = useState("AAA"),
     [community, setCommunity] = useState<(typeof communities)[number]>(
       communities[0],
     ),
@@ -246,10 +245,6 @@ export default function DeliveryGame() {
     playerLane.current = lane;
   }, [lane]);
   useEffect(() => {
-    const savedInitials = localStorage.getItem("corner-delivery-initials");
-    if (savedInitials) setInitials(savedInitials.slice(0, 3).toUpperCase());
-  }, []);
-  useEffect(() => {
     if (mode !== "lost" && mode !== "won") return;
     const previous = Number(
       localStorage.getItem("corner-delivery-high-score") || 0,
@@ -258,8 +253,7 @@ export default function DeliveryGame() {
       "corner-delivery-high-score",
       String(Math.max(previous, stats.score)),
     );
-    localStorage.setItem("corner-delivery-initials", initials);
-  }, [mode, stats.score, initials]);
+  }, [mode, stats.score]);
   const beep = useCallback(
     (
       kind:
@@ -1032,19 +1026,6 @@ export default function DeliveryGame() {
             onChange={(e) => setName(e.target.value)}
             placeholder="Driver name"
           />
-          <label className="initials-entry">
-            ARCADE INITIALS
-            <input
-              value={initials}
-              maxLength={3}
-              inputMode="text"
-              onChange={(event) =>
-                setInitials(
-                  event.target.value.replace(/[^a-z]/gi, "").toUpperCase(),
-                )
-              }
-            />
-          </label>
           <button onClick={start}>START THE CAR</button>
           <button
             className="driver-leaderboard-button"
