@@ -35,6 +35,43 @@
 .delivery-world > .menu-ad-ticker.overlay {
   top: 72px;
 }
+.delivery-world > .menu-ad-ticker.overlay.roadside {
+  top: -24%;
+  right: 1.5%;
+  width: clamp(150px, 18vw, 235px);
+  padding: 10px 12px 12px;
+  background: #ffd83d;
+  border: 5px solid #17130a;
+  border-radius: 5px;
+  box-shadow:
+    0 0 0 3px #ffd83d,
+    7px 9px 0 #0008;
+  color: #17130a;
+  text-align: center;
+  font-size: clamp(0.64rem, 1.05vw, 0.86rem);
+  line-height: 1.18;
+  animation: roadside-ad-pass 6.2s linear both;
+}
+.delivery-world > .menu-ad-ticker.overlay.roadside b {
+  color: #17130a;
+  font-size: clamp(0.56rem, 0.9vw, 0.72rem);
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid #17130a;
+  padding-bottom: 5px;
+  margin-bottom: 6px;
+}
+.delivery-world > .menu-ad-ticker.overlay.roadside:after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 8px;
+  height: 74px;
+  translate: -50% 0;
+  background: #6d6d64;
+  border: 2px solid #2d2d28;
+  z-index: -1;
+}
 .conveyor > .menu-ad-ticker.overlay {
   top: 9px;
   right: 12px;
@@ -48,6 +85,22 @@
     translate: 0;
   }
 }
+@keyframes roadside-ad-pass {
+  0% {
+    top: -24%;
+    scale: 0.7;
+    opacity: 0;
+  }
+  10%,
+  72% {
+    opacity: 1;
+  }
+  100% {
+    top: 108%;
+    scale: 1.12;
+    opacity: 0;
+  }
+}
 @media (max-width: 650px) {
   .menu-ad-ticker {
     font-size: 0.64rem;
@@ -55,6 +108,12 @@
   .menu-ad-ticker.overlay {
     width: 58%;
     padding: 6px 8px;
+  }
+  .delivery-world > .menu-ad-ticker.overlay.roadside {
+    right: 1%;
+    width: 138px;
+    padding: 7px;
+    font-size: 0.58rem;
   }
   .menu-ad-ticker b {
     font-size: 0.43rem;

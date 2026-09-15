@@ -918,7 +918,7 @@ export default function DeliveryGame() {
             onTouchMove={touchMove}
             onTouchEnd={touchEnd}
           >
-            <MenuAdTicker overlay />
+            <MenuAdTicker overlay roadside />
             <div className="horizon-layer" />
             <div className="midground-layer" />
             {zone === "rural" && (
