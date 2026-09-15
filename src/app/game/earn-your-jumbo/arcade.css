@@ -652,6 +652,483 @@
   color: #78eaff;
   font-weight: 900;
 }
+
+/* Pizza-station rebuild */
+.station-hud {
+  position: relative;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: 1.25fr repeat(4, 1fr) auto;
+  gap: 5px;
+  min-height: 72px;
+  padding: 7px;
+  border-bottom: 8px solid #70451f;
+  background: #121914;
+  box-shadow: 0 6px 0 #050505;
+}
+.station-hud div {
+  display: grid;
+  place-content: center;
+  border: 2px solid #e7ddad;
+  background: #17372f;
+  text-align: center;
+}
+.station-hud small,
+.station-hud b {
+  display: block;
+}
+.station-hud small {
+  font-size: 0.58rem;
+  color: #c8d3c6;
+}
+.station-hud b {
+  color: #ffe04a;
+  font-size: clamp(0.8rem, 2vw, 1.45rem);
+}
+.station-hud button {
+  border: 2px solid #e7ddad;
+  background: #243630;
+  color: #fff;
+  font-weight: 900;
+}
+.pizza-station {
+  display: grid;
+  grid-template-columns: minmax(190px, 24vw) 1fr;
+  height: calc(100dvh - 72px);
+  background: #171b1d;
+}
+.ticket-rail {
+  overflow: auto;
+  padding: 9px;
+  background: #3b2619;
+  border-right: 8px solid #15100c;
+  box-shadow: inset -5px 0 #80582c;
+}
+.ticket-rail h2 {
+  margin: 0 0 8px;
+  color: #ffe04a;
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+}
+.ticket-rail > button {
+  position: relative;
+  display: grid;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 9px;
+  border: 3px solid #16110c;
+  background: #f4e7c3;
+  color: #16110c;
+  text-align: left;
+  box-shadow: 4px 4px #070707;
+  touch-action: manipulation;
+}
+.ticket-rail > button.active {
+  translate: 6px 0;
+  border-color: #ef4035;
+  box-shadow: 0 0 0 3px #ffe04a;
+}
+.ticket-rail > button.boss-ticket {
+  animation: boss-ticket 0.32s steps(2) infinite;
+  background: #ffe7b5;
+}
+.ticket-rail span,
+.ticket-rail em,
+.ticket-rail small {
+  display: block;
+}
+.ticket-rail em {
+  color: #a21b16;
+  font-style: normal;
+  font-weight: 900;
+}
+.ticket-rail small {
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  color: #a21b16;
+  font-weight: 900;
+}
+.prep-area {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(260px, 1fr) auto auto;
+  min-width: 0;
+  overflow: hidden;
+  background: linear-gradient(
+    90deg,
+    #71787a 0 2px,
+    #949a99 2px 4px,
+    #697174 4px 100%
+  );
+  touch-action: none;
+}
+.prep-area:before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    105deg,
+    transparent 0 63px,
+    #343a3c44 64px 65px
+  );
+}
+.size-row {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+}
+.size-row button {
+  min-width: 95px;
+  padding: 9px;
+  border: 3px solid #25282a;
+  background: #4d5557;
+  color: #fff;
+  font-weight: 900;
+  box-shadow: 0 4px #1d2021;
+  touch-action: manipulation;
+}
+.size-row button.selected {
+  background: #b62b23;
+  border-color: #ffe04a;
+  translate: 0 3px;
+  box-shadow: 0 1px #1d2021;
+}
+.pizza-board {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 5px;
+}
+.build-pizza {
+  position: relative;
+  width: min(57vh, 68vw, 520px);
+  aspect-ratio: 1;
+  border: clamp(15px, 2.5vw, 27px) solid #b77637;
+  border-radius: 50%;
+  background: #e2ad5d;
+  box-shadow:
+    0 13px 0 #6d3c20,
+    0 20px 18px #0009,
+    inset 0 0 0 5px #f0c47b;
+  overflow: hidden;
+  touch-action: none;
+  cursor: crosshair;
+}
+.build-pizza.well-done {
+  border-color: #925021;
+  background: #cf9348;
+}
+.half-guide {
+  position: absolute;
+  z-index: 7;
+  left: 50%;
+  top: 6%;
+  bottom: 6%;
+  border-left: 2px dashed #4c2d1e66;
+  pointer-events: none;
+}
+.mark {
+  position: absolute;
+  translate: -50% -50%;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: ingredient-land 0.14s steps(2);
+}
+.sauce-mark {
+  z-index: 1;
+  width: 18%;
+  height: 18%;
+  background: #b62e24;
+  box-shadow: inset 3px 3px #e95236;
+}
+.cheese-mark {
+  z-index: 2;
+  width: 13%;
+  height: 13%;
+  background: #f3d151;
+  clip-path: polygon(50% 0, 100% 32%, 82% 100%, 12% 86%, 0 25%);
+}
+.placed-topping {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  translate: -50% -50%;
+  width: clamp(20px, 3.2vw, 35px);
+  height: clamp(20px, 3.2vw, 35px);
+  font-style: normal;
+  font-weight: 900;
+  font-size: clamp(1rem, 2.5vw, 1.8rem);
+  filter: drop-shadow(2px 3px #0007);
+  animation: topping-drop 0.2s steps(3);
+}
+.placed-topping.pepperoni {
+  border-radius: 50%;
+  background: #b92522;
+  color: #e85d3c;
+}
+.placed-topping.sausage {
+  color: #70371f;
+}
+.placed-topping.mushroom {
+  color: #ddd0a5;
+}
+.placed-topping.pepper {
+  color: #2b963f;
+}
+.placed-topping.onion {
+  color: #f1e5cb;
+}
+.placed-topping.olive {
+  color: #181512;
+}
+.placed-topping.bacon {
+  color: #b72e22;
+}
+.cut-line {
+  position: absolute;
+  z-index: 8;
+  height: 3px;
+  transform-origin: left center;
+  background: #f7e1aa;
+  box-shadow: 0 1px #6e421d;
+  pointer-events: none;
+}
+.tool-tray {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 5px;
+  padding: 7px;
+  background: #303638;
+  border-block: 5px solid #111;
+}
+.tool-tray button {
+  min-width: 0;
+  min-height: 56px;
+  padding: 4px;
+  border: 3px solid #111;
+  background: #e5e3d3;
+  color: #191919;
+  text-transform: uppercase;
+  font-size: clamp(0.46rem, 0.75vw, 0.7rem);
+  font-weight: 900;
+  touch-action: manipulation;
+}
+.tool-tray button i {
+  display: block;
+  font-size: 1.35rem;
+  font-style: normal;
+}
+.tool-tray button.active {
+  translate: 0 -6px;
+  border-color: #ffe04a;
+  background: #b62e24;
+  color: #fff;
+  box-shadow: 0 6px #111;
+}
+.send-pizza {
+  position: relative;
+  z-index: 2;
+  margin: 7px auto 12px;
+  width: min(620px, 94%);
+  padding: 14px;
+  border: 4px solid #111;
+  background: #b32921;
+  color: #fff;
+  font-weight: 1000;
+  font-size: clamp(0.8rem, 2vw, 1.2rem);
+  box-shadow: 0 6px #56100c;
+  touch-action: manipulation;
+}
+.send-pizza:active {
+  translate: 0 5px;
+  box-shadow: 0 1px #56100c;
+}
+.send-pizza:disabled {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+.nonsense-card,
+.inspection {
+  position: fixed;
+  z-index: 70;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  width: min(520px, calc(100% - 24px));
+  padding: 20px;
+  border: 6px solid #ffe04a;
+  background: #18120ef5;
+  color: #fff;
+  box-shadow: 10px 10px #000;
+  animation: card-hit 0.2s steps(3);
+}
+.nonsense-card small,
+.inspection small {
+  color: #ffe04a;
+  font-weight: 900;
+}
+.nonsense-card h2,
+.inspection h2 {
+  margin: 8px 0;
+  color: #ff675b;
+}
+.nonsense-card button,
+.inspection button {
+  width: calc(50% - 6px);
+  min-height: 50px;
+  margin: 3px;
+  padding: 7px;
+  border: 3px solid #fff;
+  background: #17372f;
+  color: #fff;
+  font-weight: 900;
+  touch-action: manipulation;
+}
+.inspection dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 10px 0;
+}
+.inspection dl div {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px;
+  border-bottom: 2px dashed #ffffff55;
+}
+.inspection dd {
+  margin: 0;
+  color: #ffe04a;
+  font-weight: 900;
+}
+.inspection > strong {
+  display: block;
+  text-align: center;
+  font-size: clamp(3.5rem, 11vw, 7rem);
+  line-height: 0.9;
+  color: #ffe04a;
+  text-shadow: 5px 5px #a21b16;
+}
+.inspection > button {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  background: #b32921;
+}
+.boss-order-banner {
+  position: fixed;
+  z-index: 60;
+  left: 50%;
+  top: 18%;
+  translate: -50%;
+  width: min(850px, 94%);
+  padding: 20px;
+  border: 7px double #ffe04a;
+  background: #9b1711;
+  color: #fff;
+  text-align: center;
+  font-size: clamp(1rem, 3vw, 2rem);
+  font-weight: 1000;
+  animation: boss-ticket 0.25s steps(2) infinite;
+}
+@keyframes ingredient-land {
+  from {
+    scale: 0.3;
+  }
+  to {
+    scale: 1;
+  }
+}
+@keyframes topping-drop {
+  0% {
+    translate: -50% -150%;
+    scale: 1.6;
+  }
+  70% {
+    translate: -50% -42%;
+    scale: 0.9;
+  }
+  100% {
+    translate: -50% -50%;
+    scale: 1;
+  }
+}
+@keyframes card-hit {
+  from {
+    scale: 0.7;
+  }
+  to {
+    scale: 1;
+  }
+}
+@keyframes boss-ticket {
+  to {
+    filter: brightness(1.25);
+  }
+}
+@media (max-width: 720px) {
+  .station-hud {
+    grid-template-columns: repeat(5, 1fr);
+    min-height: 64px;
+  }
+  .station-hud button {
+    position: absolute;
+    right: 3px;
+    bottom: -35px;
+    height: 30px;
+  }
+  .pizza-station {
+    grid-template-columns: 1fr;
+    height: calc(100dvh - 64px);
+  }
+  .ticket-rail {
+    display: flex;
+    gap: 6px;
+    min-height: 112px;
+    max-height: 126px;
+    padding: 6px;
+    border-right: 0;
+    border-bottom: 6px solid #111;
+  }
+  .ticket-rail h2 {
+    display: none;
+  }
+  .ticket-rail > button {
+    flex: 0 0 145px;
+    margin: 0;
+    font-size: 0.63rem;
+  }
+  .prep-area {
+    grid-template-rows: auto minmax(220px, 1fr) auto auto;
+  }
+  .build-pizza {
+    width: min(43vh, 82vw, 390px);
+  }
+  .tool-tray {
+    grid-template-columns: repeat(5, 1fr);
+    max-height: 135px;
+    overflow: auto;
+  }
+  .tool-tray button {
+    min-height: 48px;
+  }
+  .size-row button {
+    min-width: 0;
+    flex: 1;
+  }
+  .nonsense-card button {
+    width: 100%;
+  }
+}
 .leaderboard-modal {
   position: fixed;
   z-index: 100;

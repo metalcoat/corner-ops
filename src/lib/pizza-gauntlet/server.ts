@@ -137,7 +137,7 @@ export async function checkpointArcadeRun(
   if (
     elapsed < Number(run.active_seconds) ||
     elapsed - Number(run.active_seconds) > 15 ||
-    elapsed > 65
+    elapsed > 130
   )
     throw new Error("Impossible arcade elapsed time.");
   if (
@@ -183,12 +183,12 @@ export async function completeArcadeRun(
       (Date.now() - new Date(String(run.started_at)).getTime()) / 1000,
     stats = run.stats || {},
     checks = Array.isArray(run.checkpoints) ? run.checkpoints.length : 0;
-  if (wallSeconds < 55 || Number(run.active_seconds) < 55 || checks < 5)
-    throw new Error("The 60-second shift has not been validated yet.");
+  if (wallSeconds < 100 || Number(run.active_seconds) < 100 || checks < 9)
+    throw new Error("The full pizza-station shift has not been validated yet.");
   if (
     data.ruined > 2 ||
     Number(stats.ruined) > 2 ||
-    data.delivered < 6 ||
+    data.delivered < 8 ||
     data.delivered !== Number(stats.delivered) ||
     data.score !== Number(stats.score)
   )

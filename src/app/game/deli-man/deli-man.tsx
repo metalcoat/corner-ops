@@ -94,144 +94,144 @@ export default function DeliMan() {
           /* Northern NY street scenery is reserved for Delivery Route 666.
              Other stages now use their own art-directed backdrop and props. */
           if (art.prop === "street") {
-          const buildings = [
-            {
-              x: 250,
-              w: 360,
-              h: 205,
-              color: 0x7e553e,
-              roof: 0x3b2924,
-              kind: "duplex",
-              sign: "+59% TAX\nINCREASE",
-            },
-            {
-              x: 760,
-              w: 300,
-              h: 255,
-              color: 0xb89b72,
-              roof: 0x49352c,
-              kind: "church",
-              sign: "ROOF FUND\nSTILL PENDING",
-            },
-            {
-              x: 1240,
-              w: 430,
-              h: 180,
-              color: 0x6f7c80,
-              roof: 0x292d30,
-              kind: "row",
-              sign: "GREG STILL\nHAS THE KEYS",
-            },
-            {
-              x: 1880,
-              w: 340,
-              h: 235,
-              color: 0x8f5b45,
-              roof: 0x43302a,
-              kind: "roof",
-              sign: "NEW ROOF\nEST. 2029",
-            },
-            {
-              x: 2420,
-              w: 460,
-              h: 195,
-              color: 0x596d73,
-              roof: 0x272f31,
-              kind: "dump",
-              sign: "PORCH LOAD\nBEARING-ISH",
-            },
-            {
-              x: 3080,
-              w: 320,
-              h: 265,
-              color: 0xc4ad82,
-              roof: 0x3d332c,
-              kind: "church",
-              sign: "POTHOLE VIEW\nAPARTMENTS",
-            },
-            {
-              x: 3600,
-              w: 420,
-              h: 215,
-              color: 0x73513f,
-              roof: 0x332720,
-              kind: "roof",
-              sign: "CITY VALUE ↑\nROOF VALUE ?",
-            },
-          ];
-          buildings.forEach((b, i) => {
-            const y = 610 - b.h;
-            g.fillStyle(b.color).fillRect(b.x, y, b.w, b.h);
-            if (b.kind === "church") {
-              g.fillStyle(b.roof).fillTriangle(
-                b.x - 20,
-                y,
-                b.x + b.w / 2,
-                y - 125,
-                b.x + b.w + 20,
-                y,
-              );
-              g.fillStyle(0xd5c59e).fillRect(
-                b.x + b.w / 2 - 17,
-                y - 170,
-                34,
-                80,
-              );
-              g.fillTriangle(
-                b.x + b.w / 2 - 28,
-                y - 170,
-                b.x + b.w / 2,
-                y - 225,
-                b.x + b.w / 2 + 28,
-                y - 170,
-              );
-            } else {
-              g.fillStyle(b.roof).fillTriangle(
-                b.x - 20,
-                y,
-                b.x + b.w / 2,
-                y - 75 - (i % 2) * 25,
-                b.x + b.w + 20,
-                y,
-              );
-            }
-            for (let wx = b.x + 35; wx < b.x + b.w - 35; wx += 92) {
-              g.fillStyle(i % 2 ? 0x9bd2e6 : 0x99b5bf).fillRect(
-                wx,
-                y + 55,
-                42,
-                52,
-              );
-              g.lineStyle(3, 0x272727).strokeRect(wx, y + 55, 42, 52);
-            }
-            // Every destination door is at street/porch level, never on a roof.
-            g.fillStyle(0x4b2519).fillRect(b.x + b.w - 82, 610 - 92, 54, 92);
-            g.fillStyle(0xffd447).fillCircle(b.x + b.w - 40, 565, 5);
-            if (b.kind === "roof") {
-              g.fillStyle(0xf3a826).fillRect(b.x + 60, y - 45, 120, 12);
-              g.fillStyle(0xf6d04d)
-                .fillCircle(b.x + 88, y - 55, 10)
-                .fillCircle(b.x + 150, y - 55, 10);
-              this.add.text(
-                b.x + 45,
-                y - 92,
-                "ROOF CREW: 2 WORKING\n5 SUPERVISING",
-                {
-                  fontFamily: "monospace",
-                  fontSize: "12px",
-                  color: "#fff36c",
-                  backgroundColor: "#111d",
-                },
-              );
-            }
-            this.add.text(b.x + 12, 574, b.sign, {
-              fontFamily: "monospace",
-              fontSize: "13px",
-              color: "#ffec60",
-              backgroundColor: "#651b16dd",
-              padding: { x: 5, y: 3 },
+            const buildings = [
+              {
+                x: 250,
+                w: 360,
+                h: 205,
+                color: 0x7e553e,
+                roof: 0x3b2924,
+                kind: "duplex",
+                sign: "+59% TAX\nINCREASE",
+              },
+              {
+                x: 760,
+                w: 300,
+                h: 255,
+                color: 0xb89b72,
+                roof: 0x49352c,
+                kind: "church",
+                sign: "ROOF FUND\nSTILL PENDING",
+              },
+              {
+                x: 1240,
+                w: 430,
+                h: 180,
+                color: 0x6f7c80,
+                roof: 0x292d30,
+                kind: "row",
+                sign: "GREG STILL\nHAS THE KEYS",
+              },
+              {
+                x: 1880,
+                w: 340,
+                h: 235,
+                color: 0x8f5b45,
+                roof: 0x43302a,
+                kind: "roof",
+                sign: "NEW ROOF\nEST. 2029",
+              },
+              {
+                x: 2420,
+                w: 460,
+                h: 195,
+                color: 0x596d73,
+                roof: 0x272f31,
+                kind: "dump",
+                sign: "PORCH LOAD\nBEARING-ISH",
+              },
+              {
+                x: 3080,
+                w: 320,
+                h: 265,
+                color: 0xc4ad82,
+                roof: 0x3d332c,
+                kind: "church",
+                sign: "POTHOLE VIEW\nAPARTMENTS",
+              },
+              {
+                x: 3600,
+                w: 420,
+                h: 215,
+                color: 0x73513f,
+                roof: 0x332720,
+                kind: "roof",
+                sign: "CITY VALUE ↑\nROOF VALUE ?",
+              },
+            ];
+            buildings.forEach((b, i) => {
+              const y = 610 - b.h;
+              g.fillStyle(b.color).fillRect(b.x, y, b.w, b.h);
+              if (b.kind === "church") {
+                g.fillStyle(b.roof).fillTriangle(
+                  b.x - 20,
+                  y,
+                  b.x + b.w / 2,
+                  y - 125,
+                  b.x + b.w + 20,
+                  y,
+                );
+                g.fillStyle(0xd5c59e).fillRect(
+                  b.x + b.w / 2 - 17,
+                  y - 170,
+                  34,
+                  80,
+                );
+                g.fillTriangle(
+                  b.x + b.w / 2 - 28,
+                  y - 170,
+                  b.x + b.w / 2,
+                  y - 225,
+                  b.x + b.w / 2 + 28,
+                  y - 170,
+                );
+              } else {
+                g.fillStyle(b.roof).fillTriangle(
+                  b.x - 20,
+                  y,
+                  b.x + b.w / 2,
+                  y - 75 - (i % 2) * 25,
+                  b.x + b.w + 20,
+                  y,
+                );
+              }
+              for (let wx = b.x + 35; wx < b.x + b.w - 35; wx += 92) {
+                g.fillStyle(i % 2 ? 0x9bd2e6 : 0x99b5bf).fillRect(
+                  wx,
+                  y + 55,
+                  42,
+                  52,
+                );
+                g.lineStyle(3, 0x272727).strokeRect(wx, y + 55, 42, 52);
+              }
+              // Every destination door is at street/porch level, never on a roof.
+              g.fillStyle(0x4b2519).fillRect(b.x + b.w - 82, 610 - 92, 54, 92);
+              g.fillStyle(0xffd447).fillCircle(b.x + b.w - 40, 565, 5);
+              if (b.kind === "roof") {
+                g.fillStyle(0xf3a826).fillRect(b.x + 60, y - 45, 120, 12);
+                g.fillStyle(0xf6d04d)
+                  .fillCircle(b.x + 88, y - 55, 10)
+                  .fillCircle(b.x + 150, y - 55, 10);
+                this.add.text(
+                  b.x + 45,
+                  y - 92,
+                  "ROOF CREW: 2 WORKING\n5 SUPERVISING",
+                  {
+                    fontFamily: "monospace",
+                    fontSize: "12px",
+                    color: "#fff36c",
+                    backgroundColor: "#111d",
+                  },
+                );
+              }
+              this.add.text(b.x + 12, 574, b.sign, {
+                fontFamily: "monospace",
+                fontSize: "13px",
+                color: "#ffec60",
+                backgroundColor: "#651b16dd",
+                padding: { x: 5, y: 3 },
+              });
             });
-          });
           }
           const collisionTexture = this.make.graphics({ x: 0, y: 0 }, false);
           collisionTexture.fillStyle(0xffffff, 0.001).fillRect(0, 0, 8, 8);
@@ -256,16 +256,27 @@ export default function DeliMan() {
           createDeliManTextures(this, art);
           const makePerson = (key: string, shirt: number, hat = false) => {
             const p = this.make.graphics({ x: 0, y: 0 }, false);
-            p.fillStyle(0x15131a).fillCircle(23, 15, 14).fillRect(6, 26, 34, 34);
-            if (hat) p.fillStyle(0xf0ad20).fillRect(7, 0, 32, 9).fillRect(13, 7, 31, 5);
+            p.fillStyle(0x15131a)
+              .fillCircle(23, 15, 14)
+              .fillRect(6, 26, 34, 34);
+            if (hat)
+              p.fillStyle(0xf0ad20)
+                .fillRect(7, 0, 32, 9)
+                .fillRect(13, 7, 31, 5);
             p.fillStyle(0xb87548).fillCircle(23, 16, 11);
             p.fillStyle(0xf4cfac).fillRect(15, 11, 13, 4);
             p.fillStyle(0x111111).fillRect(28, 16, 3, 3);
             p.fillStyle(shirt).fillRect(8, 27, 30, 31);
             p.fillStyle(shadeColor(shirt, 42)).fillRect(11, 29, 21, 6);
-            p.fillStyle(0xb87548).fillRect(2, 31, 7, 24).fillRect(38, 31, 7, 24);
-            p.fillStyle(0x172432).fillRect(8, 56, 12, 24).fillRect(27, 56, 12, 24);
-            p.fillStyle(0x1b1110).fillRect(4, 76, 18, 7).fillRect(25, 76, 18, 7);
+            p.fillStyle(0xb87548)
+              .fillRect(2, 31, 7, 24)
+              .fillRect(38, 31, 7, 24);
+            p.fillStyle(0x172432)
+              .fillRect(8, 56, 12, 24)
+              .fillRect(27, 56, 12, 24);
+            p.fillStyle(0x1b1110)
+              .fillRect(4, 76, 18, 7)
+              .fillRect(25, 76, 18, 7);
             p.generateTexture(key, 46, 84);
             p.destroy();
           };
@@ -463,17 +474,22 @@ export default function DeliMan() {
             .setDepth(90)
             .setVisible(false);
           const stageIntro = this.add
-            .text(640, 300, `STAGE ${stageIndex + 1}\n${def.name}\n\nBOSS: ${def.boss}`, {
-              fontFamily: "monospace",
-              fontSize: "36px",
-              fontStyle: "bold",
-              align: "center",
-              color: "#ffffff",
-              stroke: "#080b13",
-              strokeThickness: 9,
-              backgroundColor: "#08111ee8",
-              padding: { x: 42, y: 26 },
-            })
+            .text(
+              640,
+              300,
+              `STAGE ${stageIndex + 1}\n${def.name}\n\nBOSS: ${def.boss}`,
+              {
+                fontFamily: "monospace",
+                fontSize: "36px",
+                fontStyle: "bold",
+                align: "center",
+                color: "#ffffff",
+                stroke: "#080b13",
+                strokeThickness: 9,
+                backgroundColor: "#08111ee8",
+                padding: { x: 42, y: 26 },
+              },
+            )
             .setOrigin(0.5)
             .setScrollFactor(0)
             .setDepth(85);
@@ -853,7 +869,7 @@ export default function DeliMan() {
               this.bossActive = true;
               this.setGameState("BOSS_INTRO");
               this.bossWarning
-                .setText(`⚠ WARNING ⚠\n${bossProfile?.name ?? def.boss}`)
+                .setText(`!! WARNING !!\n${bossProfile?.name ?? def.boss}`)
                 .setScale(0.72)
                 .setAlpha(0)
                 .setVisible(true);
@@ -963,17 +979,22 @@ export default function DeliMan() {
         <section>
           <small>AN ORIGINAL CORNER DELI GAME</small>
           <h1 className="title-logo">
-            <span>DELI MAN</span><i>THE LAST JUMBO</i>
+            <span>DELI MAN</span>
+            <i>THE LAST JUMBO</i>
           </h1>
           <div className="stage-grid">
             {STAGES.map((s, i) => (
               <button
                 key={s.id}
                 onClick={() => setStage(i)}
-                style={{ backgroundImage: `url(${getDeliManArt(s.id).background})` }}
+                style={{
+                  backgroundImage: `url(${getDeliManArt(s.id).background})`,
+                }}
               >
                 <span className="stage-copy">
-                  <b>{i + 1}. {s.name}</b>
+                  <b>
+                    {i + 1}. {s.name}
+                  </b>
                   <span>BOSS: {s.boss}</span>
                   <em>GET: {s.ability}</em>
                 </span>
@@ -982,7 +1003,7 @@ export default function DeliMan() {
           </div>
           <footer>
             <button onClick={() => setSound(!sound)}>
-              {sound ? "🔊 SOUND ON" : "🔇 SOUND OFF"}
+              {sound ? "SOUND: ON" : "SOUND: OFF"}
             </button>
             <a href="/games">ALL GAMES</a>
           </footer>
@@ -991,7 +1012,6 @@ export default function DeliMan() {
         <>
           <div className="game-shell">
             <div ref={host} className="game-container" />
-            <div className="scanlines" aria-hidden="true" />
           </div>
           <nav className="mobile-controls" aria-label="Game controls">
             <div className="d-pad">

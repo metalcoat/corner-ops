@@ -1,7 +1,11 @@
 .deli-man {
   min-height: 100dvh;
   background:
-    radial-gradient(circle at 50% 15%, rgba(250, 67, 39, 0.24), transparent 31rem),
+    radial-gradient(
+      circle at 50% 15%,
+      rgba(250, 67, 39, 0.24),
+      transparent 31rem
+    ),
     linear-gradient(180deg, #101827, #05070c 78%);
   color: #fff;
   font-family: "Courier New", monospace;
@@ -13,13 +17,16 @@
   padding: 22px;
   background:
     linear-gradient(#07101db8, #07080ee8),
-    url("/games/deli-man/backgrounds/fryer-hell-v3.png") center/cover fixed;
+    url("/games/deli-man/backgrounds/fryer-hell-snes.png") center/cover fixed;
 }
 .deli-man .title-logo {
   width: fit-content;
   margin: 8px auto 22px;
   transform: skew(-4deg);
-  font: 1000 clamp(3rem, 8vw, 7rem)/0.78 Impact, Haettenschweiler, sans-serif;
+  font:
+    1000 clamp(3rem, 8vw, 7rem)/0.78 Impact,
+    Haettenschweiler,
+    sans-serif;
   letter-spacing: -0.035em;
   filter: drop-shadow(0 10px 0 #05070b) drop-shadow(0 0 22px #ff482a80);
   -webkit-text-stroke: clamp(1px, 0.18vw, 3px) #111826;
@@ -62,16 +69,26 @@
   background-size: cover;
   color: #fff;
   text-align: left;
-  box-shadow: 6px 7px #020307, inset 0 0 0 2px #203751;
+  box-shadow:
+    6px 7px #020307,
+    inset 0 0 0 2px #203751;
   cursor: pointer;
-  transition: translate 100ms ease, filter 100ms ease, border-color 100ms ease;
+  transition:
+    translate 100ms ease,
+    filter 100ms ease,
+    border-color 100ms ease;
 }
 .stage-grid button::before {
   position: absolute;
   z-index: -1;
   inset: 0;
   content: "";
-  background: linear-gradient(90deg, #07101df5 0 38%, #07101d9c 72%, transparent);
+  background: linear-gradient(
+    90deg,
+    #07101df5 0 38%,
+    #07101d9c 72%,
+    transparent
+  );
 }
 .stage-grid button:hover,
 .stage-grid button:focus-visible {
@@ -85,7 +102,9 @@
   flex-direction: column;
   justify-content: flex-end;
   padding: 13px;
-  text-shadow: 2px 2px 0 #000, 0 0 8px #000;
+  text-shadow:
+    2px 2px 0 #000,
+    0 0 8px #000;
 }
 .stage-grid b,
 .stage-grid span,
@@ -134,15 +153,6 @@
   image-rendering: -moz-crisp-edges;
   image-rendering: crisp-edges;
   image-rendering: pixelated;
-}
-.deli-man .scanlines {
-  position: absolute;
-  z-index: 60;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.16) 50%);
-  background-size: 100% 4px;
-  mix-blend-mode: multiply;
 }
 .deli-man .mobile-controls {
   position: fixed;
