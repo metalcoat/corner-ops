@@ -27,11 +27,11 @@ const games = [
   },
   {
     href: "/game/cheese-pull",
-    icon: "🧀",
-    title: "Cheese Pull: The Meltdown",
-    tag: "MOZZARELLA PANIC",
-    copy: "Balance heat and tension without turning cheese into construction material.",
-    prize: "TEST COUPON TIERS",
+    icon: "🥪",
+    title: "Delivery Blaster",
+    tag: "RUN · JUMP · BLAST",
+    copy: "Blast absurd obstacles with wrapped subs, defeat complaint bosses, and deliver the food.",
+    prize: "3 ESCALATING ROUTES",
     color: "pizza",
   },
 ];

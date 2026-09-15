@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MenuAdTicker } from "@/app/games/components/menu-ad-ticker";
 type Layer = "dough" | "sauce" | "cheese";
 type Topping = "pepperoni" | "mushroom" | "pepper";
+type PizzaSize = "SMALL" | "REGULAR" | "JUMBO";
+type Bake = "REGULAR BAKE" | "WELL DONE";
 type Tray = {
   id: number;
   x: number;
@@ -12,6 +14,10 @@ type Tray = {
   topping: Topping;
   toppingHits: number;
   toppingTarget: number;
+  size: PizzaSize;
+  bake: Bake;
+  slices: 6 | 8 | 10;
+  note: string;
 };
 type Burst = { id: number; x: number; layer: Layer; bad?: boolean };
 type Run = { runId: string; token: string };
@@ -50,7 +56,22 @@ const TOPPING_ICON: Record<Topping, string> = {
     "Customer's horoscope specifically warned against circles today. -1",
     "A cousin who once visited Italy felt a disturbance. -1",
     "Customer says the pizza was suspiciously pizza-shaped. -1",
-  ];
+  ],
+  TICKET_NOTES = [
+    "DO NOT LET THE CHEESE KNOW I CALLED",
+    "CUT EVENLY. CUSTOMER OWNS A PROTRACTOR.",
+    "PLEASE MAKE IT ROUND THIS TIME",
+    "CUSTOMER REQUESTS A CONFIDENT CRUST",
+    "DO NOT PLACE BOX FACING MAGNETIC NORTH",
+    "MAKE IT LOOK EXPENSIVE. IT IS FOR AN EX.",
+    "CUSTOMER WILL ARRIVE EARLY AND ACT SURPRISED",
+    "NO BAD VIBES WITHIN SIX FEET OF THE OVEN",
+    "CUSTOMER SAYS LAST PIZZA WAS TOO DELICIOUS TO TRUST",
+    "THE PEPPERONI MUST NOT FORM A CONSTELLATION",
+    "DELIVERY DRIVER IS ALREADY STARING THROUGH THE WINDOW",
+    "IF THE MOON IS FULL, ROTATE BOX COUNTERCLOCKWISE",
+  ],
+  SIZES: PizzaSize[] = ["SMALL", "REGULAR", "JUMBO"];
 const LEVELS = [
   { name: "TRAINING WHEELS", speed: 1, timing: 38, perfect: 13, toppings: 1 },
   { name: "DINNER RUSH", speed: 1.12, timing: 35, perfect: 12, toppings: 1 },
@@ -225,13 +246,13 @@ export default function Game() {
       const s = state.current;
       if (s.mode !== "play") return;
       const tray = s.trays
-        .filter((t) => t.step < 3)
+        .filter((t) => t.step >= 1 && t.step < 4)
         .sort((a, b) => Math.abs(a.x - 50) - Math.abs(b.x - 50))[0];
       const level = LEVELS[levelForTime(s.time)];
       if (
         !tray ||
         Math.abs(tray.x - 50) > level.timing ||
-        LAYERS[tray.step] !== layer
+        LAYERS[tray.step - 1] !== layer
       ) {
         burst(tray?.x ?? 50, layer, true);
         fail(
@@ -263,22 +284,61 @@ export default function Game() {
     },
     [fail, sync],
   );
+  const ticketAction = useCallback(
+    (action: string) => {
+      const s = state.current;
+      if (s.mode !== "play") return;
+      const tray = s.trays
+        .filter((t) => t.step !== 8)
+        .sort((a, b) => Math.abs(a.x - 50) - Math.abs(b.x - 50))[0];
+      if (
+        !tray ||
+        Math.abs(tray.x - 50) > LEVELS[levelForTime(s.time)].timing
+      ) {
+        fail("WRONG TICKET — YOU JUST PREPPED A PIZZA IN ANOTHER ZIP CODE!");
+        return;
+      }
+      const expected =
+        tray.step === 0
+          ? tray.size
+          : tray.step === 5
+            ? tray.bake
+            : tray.step === 6
+              ? `CUT ${tray.slices}`
+              : tray.step === 7
+                ? "BOX"
+                : "";
+      if (!expected || action !== expected) {
+        fail(
+          `TICKET VIOLATION — NEEDED ${expected || "INGREDIENTS FIRST"}, NOT ${action}!`,
+        );
+        return;
+      }
+      tray.step++;
+      s.score += tray.step === 8 ? 125 : 55;
+      setFlash(`${action}!`);
+      audio.current.sfx(tray.step === 8 ? "perfect" : "splat");
+      setTimeout(() => setFlash(""), 350);
+      sync();
+    },
+    [fail, sync],
+  );
   const topTray = useCallback(
     (id: number) => {
       const s = state.current,
         t = s.trays.find((x) => x.id === id);
       if (!t || s.mode !== "play") return;
-      if (t.step < 3) {
+      if (t.step < 4) {
         setFlash("DOUGH, SAUCE, AND CHEESE FIRST!");
         setTimeout(() => setFlash(""), 500);
         return;
       }
-      if (t.step > 3) return;
+      if (t.step !== 4) return;
       t.toppingHits++;
       s.score += 75 * (s.combo >= 5 ? 2 : 1);
-      if (t.toppingHits >= t.toppingTarget) t.step = 4;
+      if (t.toppingHits >= t.toppingTarget) t.step = 5;
       setFlash(
-        t.step === 4
+        t.step === 5
           ? `${t.topping.toUpperCase()} COMPLETE!`
           : `${t.topping.toUpperCase()} ${t.toppingHits}/${t.toppingTarget}`,
       );
@@ -294,7 +354,7 @@ export default function Game() {
       if (e.code === "Space") {
         e.preventDefault();
         const t = state.current.trays
-          .filter((x) => x.step === 3)
+          .filter((x) => x.step === 4)
           .sort((a, b) => Math.abs(a.x - 50) - Math.abs(b.x - 50))[0];
         if (t) topTray(t.id);
         return;
@@ -303,11 +363,25 @@ export default function Game() {
       if (l) {
         e.preventDefault();
         act(l);
+        return;
       }
+      const command: Record<string, string> = {
+        "1": "SMALL",
+        "2": "REGULAR",
+        "3": "JUMBO",
+        b: "REGULAR BAKE",
+        w: "WELL DONE",
+        "6": "CUT 6",
+        "8": "CUT 8",
+        "0": "CUT 10",
+        x: "BOX",
+      };
+      if (command[e.key.toLowerCase()])
+        ticketAction(command[e.key.toLowerCase()]);
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [act, topTray]);
+  }, [act, ticketAction, topTray]);
   const checkpoint = useCallback(async () => {
     const s = state.current;
     if (!s.run) return;
@@ -381,16 +455,20 @@ export default function Game() {
           topping: TOPPINGS[Math.floor(Math.random() * TOPPINGS.length)],
           toppingHits: 0,
           toppingTarget: LEVELS[levelForTime(s.time)].toppings,
+          size: SIZES[Math.floor(Math.random() * SIZES.length)],
+          bake: Math.random() < 0.24 ? "WELL DONE" : "REGULAR BAKE",
+          slices: ([6, 8, 10] as const)[Math.floor(Math.random() * 3)],
+          note: TICKET_NOTES[Math.floor(Math.random() * TICKET_NOTES.length)],
         });
         s.lastSpawn = now;
       }
       s.trays.forEach((t) => {
         t.x += s.speed * dt;
-        if (t.x > 78 && t.step < 4) t.crisis = true;
+        if (t.x > 78 && t.step < 8) t.crisis = true;
       });
       const out = s.trays.find((t) => t.x >= 108);
       if (out) {
-        if (out.step < 4) {
+        if (out.step < 8) {
           fail(
             "AN INCOMPLETE PIZZA LEFT THE BELT. THE CUSTOMER SAW EVERYTHING.",
           );
@@ -509,7 +587,7 @@ export default function Game() {
             🏆 LEADERBOARD
           </button>
           {startError && <strong className="start-error">{startError}</strong>}
-          <small>← DOUGH &nbsp; ↓ SAUCE &nbsp; → CHEESE</small>
+          <small>READ TICKET → SIZE → BUILD → BAKE → CUT → BOX</small>
         </section>
       )}
       {mode === "play" && (
@@ -555,8 +633,9 @@ export default function Game() {
                 }}
               >
                 <div className="recipe-chain">
+                  <span className={t.step > 0 ? "done" : ""}>📏</span>
                   {LAYERS.map((l, i) => (
-                    <span className={i < t.step ? "done" : ""} key={l}>
+                    <span className={i + 1 < t.step ? "done" : ""} key={l}>
                       {ICON[l]}
                     </span>
                   ))}
@@ -572,10 +651,25 @@ export default function Game() {
                       {TOPPING_ICON[t.topping]}
                     </span>
                   ))}
+                  <span className={t.step > 5 ? "done" : ""}>🔥</span>
+                  <span className={t.step > 6 ? "done" : ""}>✂</span>
+                  <span className={t.step > 7 ? "done" : ""}>□</span>
+                </div>
+                <div className="kitchen-ticket">
+                  <b>
+                    #{String(t.id).padStart(3, "0")} {t.size}
+                  </b>
+                  <span>
+                    {t.toppingTarget}× {t.topping.toUpperCase()}
+                  </span>
+                  <span>
+                    {t.bake} · CUT {t.slices}
+                  </span>
+                  <em>{t.note}</em>
                 </div>
                 <div className={`pizza step-${t.step}`}>
-                  {t.step > 1 && <i className="sauce" />}
-                  {t.step > 2 && <i className="cheese" />}
+                  {t.step > 2 && <i className="sauce" />}
+                  {t.step > 3 && <i className="cheese" />}
                   {t.toppingHits > 0 && (
                     <>
                       <b className={`pizza-topping ${t.topping} one`}>
@@ -620,6 +714,28 @@ export default function Game() {
                 <b>{l}</b>
               </button>
             ))}
+          </section>
+          <section className="ticket-controls">
+            {SIZES.map((size, i) => (
+              <button key={size} onPointerDown={() => ticketAction(size)}>
+                <kbd>{i + 1}</kbd> {size}
+              </button>
+            ))}
+            <button onPointerDown={() => ticketAction("REGULAR BAKE")}>
+              🔥 REG BAKE
+            </button>
+            <button onPointerDown={() => ticketAction("WELL DONE")}>
+              🔥 WELL DONE
+            </button>
+            {[6, 8, 10].map((slices) => (
+              <button
+                key={slices}
+                onPointerDown={() => ticketAction(`CUT ${slices}`)}
+              >
+                ✂ CUT {slices}
+              </button>
+            ))}
+            <button onPointerDown={() => ticketAction("BOX")}>📦 BOX</button>
           </section>
           <footer>
             <span>DELIVERED {delivered}</span>

@@ -1396,10 +1396,10 @@
   position: absolute;
   z-index: 24;
   top: -22%;
-  left: 3%;
-  width: clamp(215px, 25vw, 320px);
+  left: 0.75%;
+  width: clamp(150px, 16vw, 215px);
   box-sizing: border-box;
-  padding: 7px 12px 9px;
+  padding: 5px 8px 7px;
   background: #176b3a;
   color: #fff;
   border: 4px solid #fff;
@@ -1422,18 +1422,18 @@
   display: block;
 }
 .community-sign small {
-  font-size: clamp(0.65rem, 1vw, 0.8rem);
-  margin-bottom: 4px;
+  font-size: clamp(0.52rem, 0.75vw, 0.66rem);
+  margin-bottom: 3px;
 }
 .community-sign b {
-  font-size: clamp(1.35rem, 2.7vw, 2rem);
+  font-size: clamp(1rem, 1.65vw, 1.4rem);
   letter-spacing: 0.04em;
 }
 .community-sign span {
-  margin-top: 7px;
-  padding-top: 6px;
+  margin-top: 5px;
+  padding-top: 4px;
   border-top: 2px solid #fff;
-  font-size: clamp(0.68rem, 1.15vw, 0.9rem);
+  font-size: clamp(0.52rem, 0.78vw, 0.68rem);
   line-height: 1.15;
   letter-spacing: 0.04em;
 }
@@ -1735,15 +1735,15 @@
 }
 @media (max-width: 700px) {
   .community-sign {
-    left: 2%;
-    width: 190px;
-    padding: 7px 9px;
+    left: 1%;
+    width: 132px;
+    padding: 5px 6px;
   }
   .community-sign b {
-    font-size: 1.25rem;
+    font-size: 0.94rem;
   }
   .community-sign span {
-    font-size: 0.62rem;
+    font-size: 0.49rem;
   }
   .delivery-hud {
     overflow-x: auto;

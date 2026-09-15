@@ -219,6 +219,36 @@
   translate: -50% -50%;
   width: clamp(105px, 14vw, 170px);
 }
+.kitchen-ticket {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 36px);
+  translate: -50%;
+  width: clamp(155px, 17vw, 220px);
+  padding: 6px;
+  background: #f5e9c9;
+  color: #17120d;
+  border: 3px solid #17120d;
+  box-shadow: 4px 4px #0008;
+  text-align: left;
+  font-size: clamp(0.46rem, 0.75vw, 0.68rem);
+}
+.kitchen-ticket b,
+.kitchen-ticket span,
+.kitchen-ticket em {
+  display: block;
+}
+.kitchen-ticket b {
+  border-bottom: 2px dashed #402e20;
+  font-size: 1.15em;
+}
+.kitchen-ticket em {
+  margin-top: 3px;
+  color: #a21d16;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.05;
+}
 .recipe-chain {
   display: flex;
   justify-content: center;
@@ -360,6 +390,27 @@
   gap: 8px;
   width: min(850px, calc(100% - 20px));
   margin: 12px auto;
+}
+.ticket-controls {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 5px;
+  width: min(1100px, calc(100% - 18px));
+  margin: 9px auto;
+}
+.ticket-controls button {
+  min-height: 43px;
+  padding: 4px;
+  border: 3px solid #9ba4a8;
+  background: #30241b;
+  color: #fff;
+  font-size: clamp(0.48rem, 0.8vw, 0.69rem);
+  font-weight: 900;
+  touch-action: manipulation;
+}
+.ticket-controls button:active {
+  background: #c9362b;
+  translate: 0 3px;
 }
 .lane-controls button {
   min-height: 82px;
@@ -511,8 +562,15 @@
     height: 60px;
   }
   .conveyor {
-    height: 42vh;
+    height: 39vh;
     min-height: 260px;
+  }
+  .ticket-controls {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  .kitchen-ticket {
+    width: 140px;
+    font-size: 0.43rem;
   }
   .lane-controls button {
     min-height: 74px;

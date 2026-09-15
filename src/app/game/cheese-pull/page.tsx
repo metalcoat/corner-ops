@@ -3,9 +3,9 @@ import CheesePullGame from "./cheese-pull-game";
 import "./cheese-pull.css";
 
 export const metadata: Metadata = {
-  title: "Cheese Pull: The Meltdown | Corner Deli",
+  title: "Delivery Blaster | Corner Deli",
   description:
-    "Keep the mozzarella hot, stretchy, and away from airborne deli hazards.",
+    "Blast through absurd Northern New York delivery obstacles and get the food to the customer.",
 };
 
 export default function CheesePullPage() {

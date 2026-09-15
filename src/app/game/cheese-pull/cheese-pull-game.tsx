@@ -2,533 +2,396 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type Mode = "home" | "play" | "qte" | "over";
-type Hazard = {
-  id: number;
-  kind: "frost" | "grease";
+type Mode = "home" | "play" | "over" | "won";
+type Shot = { x: number; y: number };
+type Enemy = { id: number; x: number; y: number; kind: string; hp: number };
+type State = {
   x: number;
   y: number;
-  vx: number;
-};
-type Spark = { x: number; y: number; life: number; color: string };
-type GameState = {
-  tension: number;
-  temperature: number;
+  vy: number;
+  level: number;
+  distance: number;
+  health: number;
   score: number;
-  height: number;
-  seconds: number;
-  midpoint: number;
-  pulling: boolean;
-  wobble: number;
-  hazards: Hazard[];
-  sparks: Spark[];
-  nextHazard: number;
-  qteAt: number;
+  ammo: number;
+  combo: number;
+  bossHp: number;
+  shots: Shot[];
+  enemies: Enemy[];
+  nextEnemy: number;
   last: number;
+  message: string;
 };
-
-const ROUND_SECONDS = 40;
-const fresh = (): GameState => ({
-  tension: 32,
-  temperature: 100,
+const fresh = (): State => ({
+  x: 120,
+  y: 0,
+  vy: 0,
+  level: 1,
+  distance: 0,
+  health: 5,
   score: 0,
-  height: 0,
-  seconds: ROUND_SECONDS,
-  midpoint: 0,
-  pulling: false,
-  wobble: 0,
-  hazards: [],
-  sparks: [],
-  nextHazard: 1.3,
-  qteAt: 2500,
+  ammo: 18,
+  combo: 0,
+  bossHp: 0,
+  shots: [],
+  enemies: [],
+  nextEnemy: 1.4,
   last: 0,
+  message: "GET THE FOOD THERE WHILE IT IS STILL LEGALLY WARM",
 });
-
-class CheeseAudio {
-  context: AudioContext | null = null;
-  hum: OscillatorNode | null = null;
-  humGain: GainNode | null = null;
-  get ctx() {
-    if (!this.context) this.context = new AudioContext();
-    if (this.context.state === "suspended") void this.context.resume();
-    return this.context;
+const ENEMIES = [
+  "GOOSE",
+  "POTHOLE",
+  "PARKING CONE",
+  "ANGRY RACCOON",
+  "ROGUE LAWNMOWER",
+  "FACEBOOK COMMENT",
+];
+const LEVELS = [
+  "OGDENSBURG SIDE STREETS",
+  "HEUVELTON AFTER DARK",
+  "LISBON COMPLAINT DISTRICT",
+];
+const QUIPS = [
+  "THE GOOSE HAS BEEN INFORMED THIS IS A DELIVERY VEHICLE.",
+  "DPW SAYS THE POTHOLE IS A HISTORIC LANDMARK.",
+  "THE RACCOON DEMANDED EXTRA BLUE CHEESE.",
+  "THE LAWNMOWER HAD NO INSURANCE.",
+  "THE FACEBOOK COMMENT WAS POSTED BEFORE THE FOOD WAS ORDERED.",
+  "CUSTOMER SAW YOU ARRIVE AND ASKED WHERE YOU WERE.",
+];
+class Audio {
+  ctx: AudioContext | null = null;
+  timer = 0;
+  tone(f: number, d = 0.09, v = 0.08, delay = 0) {
+    if (!this.ctx) this.ctx = new AudioContext();
+    const c = this.ctx,
+      o = c.createOscillator(),
+      g = c.createGain(),
+      t = c.currentTime + delay;
+    o.type = "square";
+    o.frequency.value = f;
+    g.gain.setValueAtTime(v, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g);
+    g.connect(c.destination);
+    o.start(t);
+    o.stop(t + d);
   }
-  tone(
-    from: number,
-    to: number,
-    duration: number,
-    volume = 0.12,
-    type: OscillatorType = "square",
-  ) {
-    const ctx = this.ctx,
-      oscillator = ctx.createOscillator(),
-      gain = ctx.createGain();
-    oscillator.type = type;
-    oscillator.frequency.setValueAtTime(from, ctx.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(
-      Math.max(20, to),
-      ctx.currentTime + duration,
-    );
-    gain.gain.setValueAtTime(volume, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
-    oscillator.connect(gain);
-    gain.connect(ctx.destination);
-    oscillator.start();
-    oscillator.stop(ctx.currentTime + duration);
+  start() {
+    this.stop();
+    let n = 0;
+    this.timer = window.setInterval(() => {
+      this.tone([131, 165, 196, 262][n % 4], 0.08, 0.035);
+      if (n % 2 === 0) this.tone([523, 659, 784, 659][n % 4], 0.05, 0.025);
+      n++;
+    }, 110);
   }
-  noise(duration: number, volume: number) {
-    const ctx = this.ctx,
-      buffer = ctx.createBuffer(1, ctx.sampleRate * duration, ctx.sampleRate),
-      data = buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-    const source = ctx.createBufferSource(),
-      filter = ctx.createBiquadFilter(),
-      gain = ctx.createGain();
-    source.buffer = buffer;
-    filter.type = "bandpass";
-    filter.frequency.value = 1100;
-    gain.gain.setValueAtTime(volume, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
-    source.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-    source.start();
+  shoot() {
+    this.tone(620, 0.06, 0.12);
+    this.tone(260, 0.09, 0.08, 0.035);
   }
-  stretch(tension: number) {
-    this.tone(170 + tension * 2.5, 230 + tension * 4, 0.09, 0.045, "triangle");
+  hit() {
+    this.tone(100, 0.25, 0.16);
   }
-  ding() {
-    this.tone(1046.5, 1568, 0.14, 0.12);
-    window.setTimeout(() => this.tone(1568, 2093, 0.18, 0.1), 80);
+  win() {
+    [523, 659, 784, 1047].forEach((n, i) => this.tone(n, 0.2, 0.12, i * 0.09));
   }
-  snap() {
-    this.noise(0.2, 0.28);
-    this.tone(760, 68, 0.34, 0.2, "sawtooth");
-  }
-  crunch() {
-    this.noise(0.34, 0.3);
-    this.tone(130, 42, 0.26, 0.16, "square");
-  }
-  fanfare() {
-    [523, 659, 784, 1047, 1319].forEach((note, i) =>
-      window.setTimeout(() => this.tone(note, note * 1.03, 0.28, 0.12), i * 90),
-    );
+  stop() {
+    clearInterval(this.timer);
   }
 }
+const audio = new Audio();
 
-const audio = new CheeseAudio();
-
-export default function CheesePullGame() {
+export default function DeliveryBlaster() {
   const canvas = useRef<HTMLCanvasElement>(null),
     game = useRef(fresh()),
-    frame = useRef(0),
-    qteTimer = useRef(0);
+    frame = useRef(0);
   const [mode, setMode] = useState<Mode>("home"),
     [view, setView] = useState(fresh()),
-    [reason, setReason] = useState(""),
-    [high, setHigh] = useState(0),
-    [qteTaps, setQteTaps] = useState(0),
-    [claimName, setClaimName] = useState(""),
-    [showClaim, setShowClaim] = useState(false);
-
+    [high, setHigh] = useState(0);
   useEffect(
-    () => setHigh(Number(localStorage.getItem("cheese-pull-high") || 0)),
+    () => setHigh(Number(localStorage.getItem("delivery-blaster-high") || 0)),
     [],
   );
-  const particles = useCallback((x: number, y: number, color: string) => {
-    for (let i = 0; i < 12; i++)
-      game.current.sparks.push({
-        x: x + (Math.random() - 0.5) * 30,
-        y: y + (Math.random() - 0.5) * 30,
-        life: 1,
-        color,
-      });
+  const finish = useCallback((won: boolean) => {
+    const s = game.current;
+    setMode(won ? "won" : "over");
+    audio.stop();
+    if (won) audio.win();
+    else audio.hit();
+    const old = Number(localStorage.getItem("delivery-blaster-high") || 0);
+    if (s.score > old) {
+      localStorage.setItem("delivery-blaster-high", String(s.score));
+      setHigh(s.score);
+    }
   }, []);
-  const end = useCallback(
-    (message: string, sound: "snap" | "crunch" | "win") => {
-      setReason(message);
-      setMode("over");
-      game.current.pulling = false;
-      if (sound === "snap") audio.snap();
-      else if (sound === "crunch") audio.crunch();
-      else audio.fanfare();
-      const score = Math.floor(game.current.score),
-        previous = Number(localStorage.getItem("cheese-pull-high") || 0);
-      localStorage.setItem(
-        "cheese-pull-high",
-        String(Math.max(score, previous)),
-      );
-      setHigh(Math.max(score, previous));
-    },
-    [],
-  );
   const start = useCallback(() => {
     game.current = fresh();
     setView(game.current);
-    setReason("");
-    setQteTaps(0);
-    setShowClaim(false);
     setMode("play");
-    void audio.ctx.resume();
+    audio.start();
   }, []);
-  const pull = useCallback(
-    (active: boolean) => {
-      if (mode === "play") {
-        game.current.pulling = active;
-        if (active) audio.stretch(game.current.tension);
-      }
-    },
-    [mode],
-  );
-  const punch = useCallback(() => {
-    if (mode !== "qte") return;
-    setQteTaps((taps) => {
-      const next = taps + 1;
-      audio.tone(240 + next * 45, 340 + next * 55, 0.06, 0.07);
-      if (next >= 8) {
-        window.clearTimeout(qteTimer.current);
-        game.current.qteAt = (Math.floor(game.current.score / 2500) + 1) * 2500;
-        particles(0, 0, "#ffd74a");
-        setMode("play");
-        audio.ding();
-        return 0;
-      }
-      return next;
-    });
-  }, [mode, particles]);
-
+  const jump = useCallback(() => {
+    const s = game.current;
+    if (mode === "play" && s.y === 0) s.vy = 630;
+  }, [mode]);
+  const shoot = useCallback(() => {
+    const s = game.current;
+    if (mode !== "play" || s.ammo <= 0) return;
+    s.ammo--;
+    s.shots.push({ x: s.x + 55, y: s.y + 76 });
+    audio.shoot();
+  }, [mode]);
   useEffect(() => {
-    const down = (event: KeyboardEvent) => {
-      if (
-        mode === "qte" &&
-        (event.code === "Space" || event.code === "ArrowUp")
-      ) {
-        event.preventDefault();
-        punch();
-        return;
+    const down = (e: KeyboardEvent) => {
+      if (["Space", "ArrowUp", "KeyW"].includes(e.code)) {
+        e.preventDefault();
+        jump();
       }
-      if (event.code === "Space" || event.code === "ArrowUp") {
-        event.preventDefault();
-        pull(true);
+      if (["KeyX", "KeyF", "Enter"].includes(e.code)) {
+        e.preventDefault();
+        shoot();
       }
-      if (event.code === "ArrowDown") game.current.pulling = false;
-      if (event.code === "ArrowLeft")
-        game.current.midpoint = Math.max(-0.8, game.current.midpoint - 0.12);
-      if (event.code === "ArrowRight")
-        game.current.midpoint = Math.min(0.8, game.current.midpoint + 0.12);
-    };
-    const up = (event: KeyboardEvent) => {
-      if (event.code === "Space" || event.code === "ArrowUp") pull(false);
     };
     window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
-    return () => {
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
-    };
-  }, [mode, pull, punch]);
-
+    return () => window.removeEventListener("keydown", down);
+  }, [jump, shoot]);
   useEffect(() => {
     if (mode !== "play") return;
     const loop = (now: number) => {
-      const state = game.current,
-        dt = Math.min(0.033, Math.max(0, (now - (state.last || now)) / 1000));
-      state.last = now;
-      const level = Math.floor(state.score / 1000),
-        pullRate = 22 * Math.pow(1.15, level),
-        cooling = 5.7 + level * 1.15;
-      state.seconds -= dt;
-      state.nextHazard -= dt;
-      state.wobble = Math.max(0, state.wobble - dt);
-      if (state.pulling) {
-        state.tension += pullRate * dt;
-        state.height += (9 + level * 1.4) * dt;
-      } else state.tension -= 29 * dt;
-      state.tension = Math.max(5, state.tension);
-      state.temperature -= cooling * dt;
-      const sweetLow = 75 + Math.min(10, level * 2),
-        sweet = state.tension >= sweetLow && state.tension <= 95;
-      const multiplier = sweet ? Math.min(5, 2 + level) : 1;
-      state.score += (state.pulling ? 48 : 8) * multiplier * dt;
-      if (sweet && Math.random() < 0.25)
-        particles(0, 0, Math.random() > 0.5 ? "#ff6b24" : "#62e9ff");
-      if (state.nextHazard <= 0) {
-        state.nextHazard = Math.max(0.65, 1.7 - level * 0.12);
-        state.hazards.push({
-          id: Date.now(),
-          kind: Math.random() > 0.5 ? "frost" : "grease",
-          x: Math.random() * 0.8 + 0.1,
-          y: -0.08,
-          vx: (Math.random() - 0.5) * 0.13,
+      const s = game.current,
+        dt = Math.min(0.035, (now - (s.last || now)) / 1000),
+        speed = 230 + s.level * 42;
+      s.last = now;
+      s.distance += speed * dt;
+      s.nextEnemy -= dt;
+      s.y = Math.max(0, s.y + s.vy * dt);
+      s.vy -= 1400 * dt;
+      if (s.y === 0 && s.vy < 0) s.vy = 0;
+      if (s.nextEnemy <= 0 && s.bossHp === 0) {
+        s.nextEnemy = Math.max(0.55, 1.5 - s.level * 0.22);
+        s.enemies.push({
+          id: Date.now() + Math.random(),
+          x: 1100,
+          y: 0,
+          kind: ENEMIES[Math.floor(Math.random() * ENEMIES.length)],
+          hp: 1,
         });
       }
-      const canvasWidth = canvas.current?.width || 700,
-        strandX =
-          canvasWidth *
-          (0.5 +
-            state.midpoint * 0.23 +
-            (state.wobble ? Math.sin(now / 55) * 0.12 : 0));
-      state.hazards = state.hazards.filter((hazard) => {
-        hazard.y += dt * (0.23 + level * 0.025);
-        hazard.x += hazard.vx * dt;
-        if (
-          hazard.y > 0.25 &&
-          hazard.y < 0.8 &&
-          Math.abs(hazard.x * canvasWidth - strandX) < 38
-        ) {
-          if (hazard.kind === "frost") {
-            state.temperature = Math.max(0, state.temperature - 40);
-            audio.crunch();
-          } else {
-            state.wobble = 2.5;
-            audio.noise(0.12, 0.1);
+      s.enemies.forEach((e) => (e.x -= speed * dt));
+      s.shots.forEach((b) => (b.x += 660 * dt));
+      for (const shot of s.shots)
+        for (const enemy of s.enemies)
+          if (
+            enemy.hp > 0 &&
+            Math.abs(shot.x - enemy.x) < 48 &&
+            Math.abs(shot.y - (enemy.y + 50)) < 70
+          ) {
+            enemy.hp = 0;
+            shot.x = 9999;
+            s.combo++;
+            s.score += 100 * Math.min(5, s.combo);
+            s.message = QUIPS[Math.floor(Math.random() * QUIPS.length)];
+            audio.shoot();
           }
-          particles(
-            hazard.x * canvasWidth,
-            hazard.y * (canvas.current?.height || 700),
-            hazard.kind === "frost" ? "#8deaff" : "#ffbd28",
-          );
-          return false;
+      const crash = s.enemies.find(
+        (e) => e.hp > 0 && e.x < 190 && e.x > 70 && s.y < 70,
+      );
+      if (crash) {
+        crash.hp = 0;
+        s.health--;
+        s.combo = 0;
+        s.message = `HIT ${crash.kind}. ${QUIPS[Math.floor(Math.random() * QUIPS.length)]}`;
+        audio.hit();
+        navigator.vibrate?.([40, 30, 40]);
+        if (s.health <= 0) {
+          finish(false);
+          return;
         }
-        return hazard.y < 1.1;
-      });
-      state.sparks.forEach((spark) => {
-        spark.y -= dt * 35;
-        spark.life -= dt * 1.8;
-      });
-      state.sparks = state.sparks.filter((spark) => spark.life > 0);
-      if (state.score >= state.qteAt) {
-        state.qteAt = Number.POSITIVE_INFINITY;
-        setMode("qte");
-        setQteTaps(0);
-        qteTimer.current = window.setTimeout(
-          () =>
-            end(
-              "THE CRUST WON. THE CHEESE HAS FILED FOR WORKERS' COMP.",
-              "crunch",
-            ),
-          2000,
-        );
-      } else if (state.tension >= 100)
-        end("SNAP! YOU PULLED LIKE THE MOZZARELLA OWED YOU MONEY.", "snap");
-      else if (state.temperature <= 0)
-        end("THE CHEESE COOLED INTO A LOAD-BEARING STRUCTURE.", "crunch");
-      else if (state.seconds <= 0)
-        end("SHIFT SURVIVED. THE CHEESE IS NOW VISIBLE FROM SPACE.", "win");
-      setView({
-        ...state,
-        hazards: [...state.hazards],
-        sparks: [...state.sparks],
-      });
+      }
+      s.enemies = s.enemies.filter((e) => e.hp > 0 && e.x > -100);
+      s.shots = s.shots.filter((b) => b.x < 1200);
+      const goal = s.level * 2400;
+      if (s.distance >= goal && s.bossHp === 0) {
+        s.bossHp = 4 + s.level * 2;
+        s.message =
+          "BOSS: CUSTOMER CLAIMS YOU NEVER ARRIVED WHILE WATCHING YOU ARRIVE";
+      }
+      if (s.bossHp > 0) {
+        const bossX = 930;
+        for (const shot of s.shots)
+          if (shot.x > bossX) {
+            shot.x = 9999;
+            s.bossHp--;
+            s.score += 250;
+            audio.hit();
+          }
+        if (s.bossHp <= 0) {
+          s.score += 1000;
+          s.ammo += 12;
+          if (s.level === 3) {
+            s.message =
+              "FOOD DELIVERED. CUSTOMER COMPLAINED IT WAS TOO ON TIME.";
+            finish(true);
+            return;
+          }
+          s.level++;
+          s.distance = (s.level - 1) * 2400;
+          s.message = `LEVEL ${s.level}: ${LEVELS[s.level - 1]}`;
+        }
+      }
+      if (s.ammo === 0 && !s.shots.length && s.bossHp > 0) {
+        s.message = "OUT OF SUBS. THE CUSTOMER HAS WON THE ARGUMENT.";
+        finish(false);
+        return;
+      }
+      setView({ ...s, enemies: [...s.enemies], shots: [...s.shots] });
       frame.current = requestAnimationFrame(loop);
     };
     frame.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame.current);
-  }, [mode, end, particles]);
-
+  }, [finish, mode]);
   useEffect(() => {
-    const element = canvas.current;
-    if (!element) return;
-    const resize = () => {
-      const box = element.getBoundingClientRect(),
-        ratio = Math.min(2, devicePixelRatio || 1);
-      element.width = box.width * ratio;
-      element.height = box.height * ratio;
-      draw();
-    };
+    const el = canvas.current;
+    if (!el) return;
     const draw = () => {
-      const ctx = element.getContext("2d");
-      if (!ctx) return;
-      const w = element.width,
-        h = element.height,
-        s = game.current;
-      ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = "#19142d";
-      ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = "#2b2350";
-      for (let y = 0; y < h; y += 48) ctx.fillRect(0, y, w, 3);
-      const wobble = s.wobble ? Math.sin(performance.now() / 55) * w * 0.1 : 0,
-        midX = w * (0.5 + s.midpoint * 0.23) + wobble;
-      ctx.lineCap = "round";
-      ctx.strokeStyle = "#fff0a5";
-      ctx.shadowColor = "#ffb31f";
-      ctx.shadowBlur = 24;
-      ctx.lineWidth = Math.max(10, w * 0.025 - s.height * 0.05);
-      ctx.beginPath();
-      ctx.moveTo(w * 0.5, h * 0.17);
-      ctx.bezierCurveTo(midX, h * 0.34, midX, h * 0.66, w * 0.5, h * 0.83);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-      const stick = (y: number, flip: boolean) => {
-        ctx.save();
-        ctx.translate(w * 0.5, y);
-        if (flip) ctx.rotate(Math.PI);
-        ctx.fillStyle = "#b45a20";
-        ctx.strokeStyle = "#ffca58";
-        ctx.lineWidth = 8;
-        ctx.beginPath();
-        ctx.roundRect(-w * 0.19, -h * 0.055, w * 0.38, h * 0.11, 22);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = "#f89b32";
-        ctx.fillRect(-w * 0.13, -h * 0.022, w * 0.26, h * 0.025);
-        ctx.restore();
-      };
-      stick(h * 0.11, false);
-      stick(h * 0.89, true);
-      s.hazards.forEach((hazard) => {
-        ctx.font = `${Math.max(34, w * 0.07)}px sans-serif`;
-        ctx.textAlign = "center";
-        ctx.fillText(
-          hazard.kind === "frost" ? "❄️" : "🟠",
-          hazard.x * w,
-          hazard.y * h,
+      const c = el.getContext("2d");
+      if (!c) return;
+      const box = el.getBoundingClientRect(),
+        r = Math.min(2, devicePixelRatio || 1);
+      if (el.width !== box.width * r) {
+        el.width = box.width * r;
+        el.height = box.height * r;
+      }
+      const w = el.width,
+        h = el.height,
+        s = game.current,
+        ground = h * 0.78;
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.fillStyle = s.level === 2 ? "#10152d" : "#69b9df";
+      c.fillRect(0, 0, w, h);
+      c.fillStyle = "#405238";
+      c.fillRect(0, ground, w, h - ground);
+      c.fillStyle = "#46494d";
+      c.fillRect(0, ground + 35, w, h - ground);
+      c.fillStyle = "#fff4aa";
+      for (let x = -(s.distance % 180); x < w; x += 180)
+        c.fillRect(x, ground + 90, 85, 8);
+      for (let x = 100 - ((s.distance * 0.22) % 330); x < w; x += 330) {
+        c.fillStyle = "#d5b172";
+        c.fillRect(x, ground - 165, 190, 165);
+        c.fillStyle = "#7e3026";
+        c.beginPath();
+        c.moveTo(x - 20, ground - 165);
+        c.lineTo(x + 95, ground - 250);
+        c.lineTo(x + 210, ground - 165);
+        c.fill();
+        c.fillStyle = "#83d9ff";
+        c.fillRect(x + 28, ground - 120, 48, 55);
+        c.fillRect(x + 116, ground - 120, 48, 55);
+      }
+      c.font = `900 ${Math.max(18, w * 0.022)}px monospace`;
+      c.fillStyle = "#fff";
+      c.fillText(LEVELS[s.level - 1], 20, 38);
+      c.save();
+      c.translate(s.x * r, ground - s.y * r);
+      c.fillStyle = "#575f66";
+      c.fillRect(0, -105 * r, 76 * r, 105 * r);
+      c.fillStyle = "#e8fbff";
+      c.fillRect(12 * r, -92 * r, 52 * r, 32 * r);
+      c.fillStyle = "#ffd84b";
+      c.fillRect(57 * r, -42 * r, 28 * r, 13 * r);
+      c.restore();
+      s.enemies.forEach((e) => {
+        c.font = `${55 * r}px sans-serif`;
+        c.fillText(
+          e.kind === "GOOSE"
+            ? "🪿"
+            : e.kind === "POTHOLE"
+              ? "🕳️"
+              : e.kind === "ANGRY RACCOON"
+                ? "🦝"
+                : e.kind === "ROGUE LAWNMOWER"
+                  ? "🏎️"
+                  : e.kind === "FACEBOOK COMMENT"
+                    ? "💬"
+                    : "🚧",
+          e.x * r,
+          ground,
         );
       });
-      s.sparks.forEach((spark) => {
-        ctx.globalAlpha = spark.life;
-        ctx.fillStyle = spark.color;
-        ctx.fillRect(
-          (spark.x || midX) + (Math.random() - 0.5) * 55,
-          (spark.y || h * 0.5) + (Math.random() - 0.5) * 50,
-          8,
-          8,
-        );
+      s.shots.forEach((b) => {
+        c.font = `${34 * r}px sans-serif`;
+        c.fillText("🥪", b.x * r, ground - b.y * r);
       });
-      ctx.globalAlpha = 1;
+      if (s.bossHp > 0) {
+        c.font = `${100 * r}px sans-serif`;
+        c.fillText("😡", 900 * r, ground);
+        c.fillStyle = "#e32f27";
+        c.fillRect(
+          880 * r,
+          ground - 140 * r,
+          Math.max(0, s.bossHp) * 22 * r,
+          12 * r,
+        );
+      }
     };
-    resize();
-    let paintFrame = 0;
+    let id = 0;
     const paint = () => {
       draw();
-      paintFrame = requestAnimationFrame(paint);
+      id = requestAnimationFrame(paint);
     };
-    paintFrame = requestAnimationFrame(paint);
-    window.addEventListener("resize", resize);
-    return () => {
-      cancelAnimationFrame(paintFrame);
-      window.removeEventListener("resize", resize);
-    };
+    paint();
+    return () => cancelAnimationFrame(id);
   }, [mode]);
-
-  const tier =
-    view.score >= 5000
-      ? "LEGENDARY CHEESE PULL"
-      : view.score >= 2500
-        ? "SOLID PULL"
-        : "LIMP CHEESE";
   return (
-    <main className="cheese-game">
+    <main className="blaster-game">
       {mode === "home" ? (
-        <section className="cheese-card">
+        <section className="blaster-card">
           <small>CORNER DELI ARCADE</small>
           <h1>
-            CHEESE PULL:
-            <br />
-            <i>THE MELTDOWN</i>
+            DELIVERY <i>BLASTER</i>
           </h1>
           <p>
-            Pull fast enough to stay hot. Not so fast that it snaps. This is
-            apparently a job now.
+            Jump the nonsense. Blast obstacles with wrapped subs. Defeat the
+            customer complaint at the end of every route. Deliver the food.
           </p>
           <b>HIGH SCORE {high.toLocaleString()}</b>
-          <button onClick={start}>START PULLING</button>
+          <button onClick={start}>START ROUTE</button>
           <a href="/games">← ALL GAMES</a>
         </section>
       ) : (
         <>
-          <header className="cheese-hud">
-            <b>{Math.floor(view.score).toLocaleString()} PTS</b>
-            <span>{Math.max(0, Math.ceil(view.seconds))}s</span>
-            <i>
-              {view.tension >= 75 && view.tension <= 95
-                ? `SUPER STRETCH ×${Math.min(5, 2 + Math.floor(view.score / 1000))}`
-                : "KEEP IT MELTY"}
-            </i>
+          <header className="blaster-hud">
+            <b>{view.score.toLocaleString()} PTS</b>
+            <span>{"❤️".repeat(view.health)}</span>
+            <i>SUB AMMO {view.ammo}</i>
+            <strong>LEVEL {view.level}/3</strong>
           </header>
-          <section
-            className="cheese-stage"
-            onPointerDown={(e) => {
-              if (mode === "qte") punch();
-              else {
-                pull(true);
-                const rect = e.currentTarget.getBoundingClientRect();
-                game.current.midpoint = Math.max(
-                  -0.8,
-                  Math.min(
-                    0.8,
-                    ((e.clientX - rect.left) / rect.width - 0.5) * 2,
-                  ),
-                );
-              }
-            }}
-            onPointerMove={(e) => {
-              if (!e.buttons) return;
-              const rect = e.currentTarget.getBoundingClientRect();
-              game.current.midpoint = Math.max(
-                -0.8,
-                Math.min(0.8, ((e.clientX - rect.left) / rect.width - 0.5) * 2),
-              );
-            }}
-            onPointerUp={() => pull(false)}
-            onPointerCancel={() => pull(false)}
-          >
+          <section className="blaster-stage">
             <canvas ref={canvas} />
-            <div className="cheese-gauges">
-              <label>
-                TENSION{" "}
-                <i style={{ width: `${Math.min(100, view.tension)}%` }} />
-              </label>
-              <label>
-                TEMP{" "}
-                <i style={{ width: `${Math.max(0, view.temperature)}%` }} />
-              </label>
+            <div className="boss-message">{view.message}</div>
+            <div className="route-meter">
+              <i
+                style={{
+                  width: `${Math.min(100, (view.distance / (view.level * 2400)) * 100)}%`,
+                }}
+              />
             </div>
-            {mode === "qte" && (
-              <div className="crust-qte">
-                <b>CRUST CRUNCH!</b>
-                <span>TAP! {qteTaps}/8</span>
-              </div>
-            )}
-            {mode === "over" && (
-              <div className="cheese-over">
-                <small>{tier}</small>
-                <h2>{reason}</h2>
-                <p>
-                  You pulled {Math.max(1, Math.floor(view.height))} feet of
-                  melted cheese.
-                </p>
-                <b>{Math.floor(view.score).toLocaleString()} POINTS</b>
-                {view.score >= 2500 && (
-                  <button onClick={() => setShowClaim(true)}>
-                    {view.score >= 5000
-                      ? "VIEW TEST MOZZ STICK VOUCHER"
-                      : "VIEW TEST DIP / SODA COUPON"}
-                  </button>
-                )}
-                <button onClick={start}>PULL AGAIN</button>
+            <div className="blaster-controls">
+              <button onPointerDown={jump}>⬆ JUMP</button>
+              <button onPointerDown={shoot}>🥪 FIRE SUB</button>
+            </div>
+            {(mode === "over" || mode === "won") && (
+              <div className="blaster-over">
+                <small>
+                  {mode === "won" ? "ALL FOOD DELIVERED" : "ROUTE FAILED"}
+                </small>
+                <h2>{view.message}</h2>
+                <b>{view.score.toLocaleString()} POINTS</b>
+                <button onClick={start}>PLAY AGAIN</button>
                 <a href="/games">ALL GAMES</a>
-              </div>
-            )}
-            {showClaim && (
-              <div className="cheese-claim">
-                <button onClick={() => setShowClaim(false)}>×</button>
-                <small>DEVELOPMENT TEST COUPON — NOT REDEEMABLE</small>
-                <h2>
-                  {view.score >= 5000
-                    ? "FREE MOZZARELLA STICKS / CAKE"
-                    : "FREE DIP / SODA"}
-                </h2>
-                <input
-                  value={claimName}
-                  onChange={(e) => setClaimName(e.target.value)}
-                  placeholder="Customer name"
-                />
-                <b>CHEESE-TEST-{Math.floor(view.score)}</b>
-                <p>
-                  Real redemption remains disabled until server-side validation
-                  is added.
-                </p>
               </div>
             )}
           </section>

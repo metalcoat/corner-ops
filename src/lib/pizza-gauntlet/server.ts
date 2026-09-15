@@ -188,7 +188,7 @@ export async function completeArcadeRun(
   if (
     data.ruined !== 0 ||
     Number(stats.ruined) !== 0 ||
-    data.delivered < 3 ||
+    data.delivered < 6 ||
     data.delivered !== Number(stats.delivered) ||
     data.score !== Number(stats.score)
   )
