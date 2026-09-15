@@ -19,6 +19,7 @@ type Leader = {
   pizzas_made: number;
   perfects: number;
   completed_at: string;
+  status: string;
 };
 const LAYERS: Layer[] = ["dough", "sauce", "cheese"],
   KEYS: Record<string, Layer> = {
@@ -186,6 +187,20 @@ export default function Game() {
     setFlash(message);
     setMode("lost");
     audio.current.sfx("error");
+    if (s.run)
+      void fetch("/api/pizza-gauntlet/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "arcade_loss",
+          runId: s.run.runId,
+          token: s.run.token,
+          score: s.score,
+          delivered: s.delivered,
+          perfects: s.perfects,
+          ruined: s.ruined,
+        }),
+      });
   }, []);
   const act = useCallback(
     (layer: Layer) => {
@@ -623,6 +638,7 @@ export default function Game() {
                     <b>{index + 1}</b>
                     <strong>{leader.player_name}</strong>
                     <span>
+                      {leader.status === "won" ? "🏆 FINISHED · " : "🍕 ​"}
                       {Number(leader.score).toLocaleString()} PTS
                       <small>
                         {leader.pizzas_made} PIZZAS · {leader.perfects} PERFECT

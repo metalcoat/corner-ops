@@ -97,6 +97,23 @@ export async function completeDeliveryRun(id: string, token: string) {
     await getSql()`INSERT INTO delivery_boy_rewards(id,run_id,code,prize_type,terms,completion_stats,expires_at)VALUES(${randomUUID()},${id},${code},${DELIVERY_PRIZE.name},${JSON.stringify(DELIVERY_PRIZE)}::jsonb,${JSON.stringify(stats)}::jsonb,${expires}) RETURNING code,prize_type,expires_at`
   )[0];
 }
+export async function recordDeliveryLoss(
+  body: {
+    runId: string;
+    stage: number;
+    activeSeconds: number;
+    score: number;
+    delivered: number;
+    missed: number;
+    hits: number;
+  },
+  token: string,
+) {
+  const run = await auth(body.runId, token);
+  if (!run || run.status !== "active") return { ok: false };
+  await getSql()`UPDATE delivery_boy_runs SET status='lost',stage=GREATEST(stage,${Math.max(1, Math.floor(body.stage))}),active_seconds=GREATEST(active_seconds,${Math.max(0, Math.floor(body.activeSeconds))}),score=GREATEST(score,${Math.max(0, Math.floor(body.score))}),delivered=GREATEST(delivered,${Math.max(0, Math.floor(body.delivered))}),missed=GREATEST(missed,${Math.max(0, Math.floor(body.missed))}),hits=GREATEST(hits,${Math.max(0, Math.floor(body.hits))}),completed_at=NOW(),updated_at=NOW() WHERE id=${body.runId}`;
+  return { ok: true };
+}
 export async function findDeliveryRewards(query: string) {
   await ensureDeliverySchema();
   const q = `%${query.trim()}%`;
@@ -112,5 +129,5 @@ export async function redeemDeliveryReward(code: string, actor: string) {
 }
 export async function deliveryLeaderboard() {
   await ensureDeliverySchema();
-  return getSql()`SELECT player_name,score,delivered,missed,hits,active_seconds,completed_at FROM delivery_boy_runs WHERE status='won' ORDER BY score DESC,missed ASC,hits ASC,completed_at ASC LIMIT 50`;
+  return getSql()`SELECT player_name,status,stage,score,delivered,missed,hits,active_seconds,completed_at FROM delivery_boy_runs WHERE status IN('won','lost') ORDER BY CASE WHEN status='won' THEN 1 ELSE 0 END DESC,stage DESC,delivered DESC,score DESC,missed ASC,hits ASC,completed_at ASC LIMIT 50`;
 }

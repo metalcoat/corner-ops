@@ -43,6 +43,8 @@ type Scenery = {
 type Run = { runId: string; token: string };
 type DeliveryLeader = {
   player_name: string;
+  status: string;
+  stage: number;
   score: number;
   delivered: number;
   missed: number;
@@ -161,6 +163,7 @@ export default function DeliveryGame() {
     spawn = useRef(0),
     deliveryGap = useRef(0),
     impactFailure = useRef(""),
+    lossSaved = useRef(false),
     playerLane = useRef(1),
     state = useRef<{
       mode: string;
@@ -188,6 +191,30 @@ export default function DeliveryGame() {
   useEffect(() => {
     state.current = { mode, time, health, stage, target };
   }, [mode, time, health, stage, target]);
+  useEffect(() => {
+    if (mode !== "lost" || !run || lossSaved.current) return;
+    lossSaved.current = true;
+    const activeSeconds =
+      DELIVERY_STAGES.slice(0, stage - 1).reduce(
+        (total, route) => total + route.time,
+        0,
+      ) + Math.max(0, DELIVERY_STAGES[stage - 1].time - time);
+    void fetch("/api/delivery-boy/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "loss",
+        token: run.token,
+        runId: run.runId,
+        stage,
+        activeSeconds,
+        score: stats.score,
+        delivered: stats.delivered,
+        missed: stats.missed,
+        hits: stats.hits,
+      }),
+    });
+  }, [mode, run, stage, stats, time]);
   useEffect(() => {
     playerLane.current = lane;
   }, [lane]);
@@ -691,6 +718,7 @@ export default function DeliveryGame() {
     void finishRoute();
   }, [routeDelivered, mode, cfg.deliveries]);
   async function start() {
+    lossSaved.current = false;
     beep("start");
     const r = await fetch("/api/delivery-boy/run", {
         method: "POST",
@@ -1133,6 +1161,9 @@ export default function DeliveryGame() {
                     <b>{index + 1}</b>
                     <strong>{leader.player_name}</strong>
                     <span>
+                      {leader.status === "won"
+                        ? "🏆 FINISHED · "
+                        : `ROUTE ${leader.stage} · `}
                       {Number(leader.score).toLocaleString()} PTS
                       <small>
                         {leader.delivered} DELIVERED · {leader.hits} HITS ·{" "}

@@ -205,9 +205,31 @@ export async function completeArcadeRun(
     await getSql()`INSERT INTO pizza_gauntlet_rewards(id,run_id,code,prize_type,terms,completion_stats,expires_at)VALUES(${randomUUID()},${data.runId},${rewardCode},${PRIZE.name},${JSON.stringify(PRIZE)}::jsonb,${JSON.stringify(finalStats)}::jsonb,${expires}) RETURNING code,prize_type,issued_at,expires_at`
   )[0];
 }
+export async function recordArcadeLoss(
+  data: {
+    runId: string;
+    score: number;
+    delivered: number;
+    perfects: number;
+    ruined: number;
+  },
+  token: string,
+) {
+  const run = await authenticatedRun(data.runId, token);
+  if (!run || run.status !== "active") return { ok: false };
+  const stats = {
+    mode: "arcade60",
+    score: Math.max(0, Math.floor(data.score)),
+    delivered: Math.max(0, Math.floor(data.delivered)),
+    perfects: Math.max(0, Math.floor(data.perfects)),
+    ruined: Math.max(1, Math.floor(data.ruined)),
+  };
+  await getSql()`UPDATE pizza_gauntlet_runs SET status='lost',stats=${JSON.stringify(stats)}::jsonb,active_seconds=LEAST(60,GREATEST(active_seconds,EXTRACT(EPOCH FROM(NOW()-started_at))::int)),updated_at=NOW(),completed_at=NOW() WHERE id=${data.runId}`;
+  return { ok: true };
+}
 export async function leaderboard() {
   await ensureGauntletSchema();
-  return getSql()`SELECT player_name,completed_at,active_seconds,COALESCE((stats->>'score')::numeric,(stats->>'profit')::numeric,0) score,COALESCE((stats->>'delivered')::int,(stats->>'pizzasMade')::int,0) pizzas_made,COALESCE((stats->>'perfects')::int,0) perfects,COALESCE((stats->>'highestCombo')::int,0) highest_combo FROM pizza_gauntlet_runs WHERE status='won' ORDER BY COALESCE((stats->>'score')::numeric,(stats->>'profit')::numeric,0) DESC,completed_at ASC NULLS LAST LIMIT 50`;
+  return getSql()`SELECT player_name,status,completed_at,active_seconds,COALESCE((stats->>'score')::numeric,(stats->>'profit')::numeric,0) score,COALESCE((stats->>'delivered')::int,(stats->>'pizzasMade')::int,0) pizzas_made,COALESCE((stats->>'perfects')::int,0) perfects,COALESCE((stats->>'highestCombo')::int,0) highest_combo FROM pizza_gauntlet_runs WHERE status IN('won','lost') ORDER BY CASE WHEN status='won' THEN 1 ELSE 0 END DESC,COALESCE((stats->>'delivered')::int,(stats->>'pizzasMade')::int,0) DESC,COALESCE((stats->>'score')::numeric,(stats->>'profit')::numeric,0) DESC,completed_at ASC NULLS LAST LIMIT 50`;
 }
 export async function findRewards(query: string) {
   await ensureGauntletSchema();
