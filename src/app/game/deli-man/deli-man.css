@@ -50,14 +50,46 @@
   -webkit-text-fill-color: transparent;
   font-style: normal;
 }
-.stage-grid {
+.world-map {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   width: min(1100px, 100%);
   margin: auto;
+  padding: 28px;
+  border: 5px solid #38566d;
+  background:
+    linear-gradient(#071422d9, #10283ee8),
+    repeating-linear-gradient(45deg, transparent 0 28px, #2d779122 28px 31px);
+  box-shadow:
+    8px 8px 0 #020307,
+    inset 0 0 0 3px #08101a;
 }
-.stage-grid button {
+.world-map .map-route {
+  position: absolute;
+  z-index: 0;
+  height: 6px;
+  background: repeating-linear-gradient(
+    90deg,
+    #6bb8c8 0 14px,
+    #d8f5ee 14px 20px
+  );
+  box-shadow: 0 3px #07111d;
+  transform-origin: left;
+  pointer-events: none;
+}
+.world-map .map-route-a {
+  top: 34%;
+  left: 14%;
+  width: 72%;
+}
+.world-map .map-route-b {
+  top: 67%;
+  left: 14%;
+  width: 72%;
+}
+.world-map button {
   position: relative;
   isolation: isolate;
   min-height: 130px;
@@ -78,7 +110,7 @@
     filter 100ms ease,
     border-color 100ms ease;
 }
-.stage-grid button::before {
+.world-map button::before {
   position: absolute;
   z-index: -1;
   inset: 0;
@@ -90,13 +122,13 @@
     transparent
   );
 }
-.stage-grid button:hover,
-.stage-grid button:focus-visible {
+.world-map button:hover,
+.world-map button:focus-visible {
   translate: 0 -5px;
   border-color: #ffd438;
   filter: saturate(1.2) brightness(1.13);
 }
-.stage-grid .stage-copy {
+.world-map .stage-copy {
   display: flex;
   min-height: 122px;
   flex-direction: column;
@@ -106,16 +138,26 @@
     2px 2px 0 #000,
     0 0 8px #000;
 }
-.stage-grid b,
-.stage-grid span,
-.stage-grid em {
+.world-map b,
+.world-map span,
+.world-map em {
   display: block;
 }
-.stage-grid em {
+.world-map em {
   color: #ffd438;
 }
-.stage-grid .locked {
-  filter: grayscale(1);
+.world-map .complete {
+  border-color: #7dff9b;
+}
+.world-map .complete::after {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  padding: 3px 6px;
+  content: "CLEARED";
+  background: #145429;
+  color: #baffc8;
+  font-weight: 900;
 }
 .deli-man footer {
   display: flex;
@@ -199,6 +241,11 @@
 }
 .deli-man .pizza-control {
   background: rgba(166, 42, 31, 0.86);
+  font-size: clamp(0.62rem, 2vw, 0.82rem);
+}
+.deli-man .dash-control {
+  background: rgba(28, 107, 136, 0.9);
+  font-size: clamp(0.55rem, 2vw, 0.75rem);
 }
 .deli-man .pause-control {
   min-height: 44px;
@@ -211,10 +258,11 @@
   touch-action: manipulation;
 }
 @media (max-width: 700px) {
-  .stage-grid {
+  .world-map {
     grid-template-columns: 1fr 1fr;
+    padding: 10px;
   }
-  .stage-grid button {
+  .world-map button {
     min-height: 86px;
     font-size: 0.65rem;
   }

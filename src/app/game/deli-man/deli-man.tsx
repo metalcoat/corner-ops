@@ -2,6 +2,12 @@
 import { useEffect, useRef, useState } from "react";
 import type Phaser from "phaser";
 import { BOSSES, STAGES } from "@/lib/games/deli-man-data";
+import {
+  buildStageRooms,
+  completeDeliManStage,
+  loadDeliManSave,
+  type DeliManSave,
+} from "@/lib/games/deli-man-campaign";
 import { getDeliManArt } from "@/lib/games/deli-man-art";
 import {
   createDeliManTextures,
@@ -16,9 +22,20 @@ export default function DeliMan() {
       jump: false,
       jumpPressed: false,
       fire: false,
+      fireHeld: false,
+      fireReleased: false,
+      dashPressed: false,
+      mapPressed: false,
     });
   const [stage, setStage] = useState<number | null>(null),
-    [sound, setSound] = useState(true);
+    [sound, setSound] = useState(true),
+    [progress, setProgress] = useState<DeliManSave | null>(null);
+  useEffect(() => {
+    const sync = () => setProgress(loadDeliManSave());
+    sync();
+    window.addEventListener("deli-man-save", sync);
+    return () => window.removeEventListener("deli-man-save", sync);
+  }, []);
   useEffect(() => {
     if (stage === null || !host.current) return;
     const stageIndex = stage;
@@ -51,6 +68,9 @@ export default function DeliMan() {
         lastGroundedAt = 0;
         jumpQueuedAt = 0;
         lastShotAt = 0;
+        chargeStartedAt = 0;
+        dashUntil = 0;
+        dashCooldownUntil = 0;
         respawnX = 100;
         controlLockedUntil = 0;
         cameraFurthestX = 0;
@@ -67,10 +87,20 @@ export default function DeliMan() {
         debugVisible = false;
         debugText!: Phaser.GameObjects.Text;
         bossWarning!: Phaser.GameObjects.Text;
+        mapOverlay!: Phaser.GameObjects.Container;
+        mapVisible = false;
+        visitedRooms = new Set<string>();
         bossGate!: Phaser.Physics.Arcade.StaticGroup;
         entranceGate!: Phaser.GameObjects.Rectangle;
-        playerState: "idle" | "run" | "jump" | "fall" | "climb" | "hurt" =
-          "idle";
+        playerState:
+          | "grounded"
+          | "run"
+          | "airborne"
+          | "wall_slide"
+          | "dashing"
+          | "climbing"
+          | "hurt"
+          | "dead" = "grounded";
         bossSprite!: Phaser.Physics.Arcade.Sprite;
         exitDoor!: Phaser.GameObjects.Rectangle;
         ladders: Array<{ x: number; top: number; bottom: number }> = [];
@@ -406,9 +436,13 @@ export default function DeliMan() {
           this.physics.add.overlap(this.shots, this.bossSprite, (a, b) => {
             const shot = (a === this.bossSprite ? b : a) as
               Phaser.Physics.Arcade.Sprite | undefined;
+            const shotDamage = Math.max(
+              1,
+              Number(shot?.getData("damage")) || 1,
+            );
             if (shot?.active) shot.destroy();
             if (this.gameState !== "BOSS_FIGHT" || this.bossDefeated) return;
-            this.boss--;
+            this.boss -= shotDamage;
             this.impactBurst(this.bossSprite.x, this.bossSprite.y, art.glow);
             this.bossSprite.setTint(0xffffff);
             this.time.delayedCall(70, () => this.bossSprite.clearTint());
@@ -457,6 +491,7 @@ export default function DeliMan() {
             .setScrollFactor(0)
             .setDepth(100)
             .setVisible(false);
+          this.createMapOverlay();
           this.bossWarning = this.add
             .text(640, 260, "", {
               fontFamily: "monospace",
@@ -518,8 +553,20 @@ export default function DeliMan() {
               padding: { x: 8, y: 6 },
             }),
           );
-          this.input.keyboard!.on("keydown-X", () => this.fire());
-          this.input.keyboard!.on("keydown-F", () => this.fire());
+          const beginCharge = () => {
+            if (!this.chargeStartedAt) this.chargeStartedAt = this.time.now;
+          };
+          const releaseCharge = () => {
+            if (!this.chargeStartedAt) return;
+            this.fire(this.time.now - this.chargeStartedAt >= 650);
+            this.chargeStartedAt = 0;
+          };
+          this.input.keyboard!.on("keydown-X", beginCharge);
+          this.input.keyboard!.on("keydown-F", beginCharge);
+          this.input.keyboard!.on("keyup-X", releaseCharge);
+          this.input.keyboard!.on("keyup-F", releaseCharge);
+          this.input.keyboard!.on("keydown-SHIFT", () => this.dash());
+          this.input.keyboard!.on("keydown-ESC", () => this.toggleMap());
           this.input.keyboard!.on(
             "keydown-UP",
             () => (this.jumpQueuedAt = this.time.now),
@@ -596,11 +643,80 @@ export default function DeliMan() {
           if (this.time.now - this.lastGroundedAt < 125)
             this.player.setVelocityY(-520);
         }
+        createMapOverlay() {
+          const rooms = buildStageRooms(def.id);
+          const panel = this.add
+            .rectangle(640, 360, 840, 430, 0x07101d, 0.97)
+            .setStrokeStyle(6, 0x8dd8e8);
+          const title = this.add
+            .text(640, 185, `${def.name}\nSERVICE MAP`, {
+              fontFamily: "monospace",
+              fontSize: "26px",
+              fontStyle: "bold",
+              align: "center",
+              color: "#fff5a8",
+            })
+            .setOrigin(0.5);
+          const parts: Phaser.GameObjects.GameObject[] = [panel, title];
+          rooms.forEach((room) => {
+            const x = 385 + room.column * 130;
+            const y = 315 + room.row * 92;
+            room.exits.forEach((exitId) => {
+              const exit = rooms.find((candidate) => candidate.id === exitId);
+              if (!exit || exit.column < room.column) return;
+              parts.push(
+                this.add
+                  .rectangle(
+                    (x + (385 + exit.column * 130)) / 2,
+                    (y + (315 + exit.row * 92)) / 2,
+                    Math.max(8, Math.abs(exit.column - room.column) * 130),
+                    5,
+                    0x44768b,
+                  )
+                  .setAngle(exit.row === room.row ? 0 : -35),
+              );
+            });
+            const discovered = room.kind !== "secret";
+            const box = this.add
+              .rectangle(x, y, 104, 54, discovered ? 0x183b55 : 0x111923)
+              .setStrokeStyle(3, room.kind === "boss" ? 0xff5a4c : 0x8dd8e8)
+              .setData("roomId", room.id);
+            const label = this.add
+              .text(x, y, discovered ? room.name : "?", {
+                fontFamily: "monospace",
+                fontSize: "11px",
+                align: "center",
+                color: discovered ? "#ffffff" : "#65727e",
+              })
+              .setOrigin(0.5)
+              .setData("roomLabel", room.id);
+            parts.push(box, label);
+          });
+          parts.push(
+            this.add
+              .text(640, 535, "ESC / MAP TO RETURN · VISITED ROOMS LIGHT UP", {
+                fontFamily: "monospace",
+                fontSize: "15px",
+                color: "#9fffb4",
+              })
+              .setOrigin(0.5),
+          );
+          this.mapOverlay = this.add
+            .container(0, 0, parts)
+            .setScrollFactor(0)
+            .setDepth(200)
+            .setVisible(false);
+        }
+        toggleMap() {
+          this.mapVisible = !this.mapVisible;
+          this.mapOverlay.setVisible(this.mapVisible);
+          if (this.mapVisible) this.player.setVelocity(0, 0);
+        }
         cutJump() {
           const body = this.player.body as Phaser.Physics.Arcade.Body;
           if (body.velocity.y < 0) this.player.setVelocityY(0);
         }
-        fire() {
+        fire(charged = false) {
           if (this.time.now - this.lastShotAt < 175) return;
           if (this.shots.countActive(true) >= 3) return;
           this.lastShotAt = this.time.now;
@@ -613,6 +729,25 @@ export default function DeliMan() {
           (b.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
           b.setAngularVelocity(this.facing * 720);
           b.setData("bornAt", this.time.now);
+          b.setData("damage", charged ? 3 : 1);
+          if (charged) {
+            b.setScale(1.65);
+            b.setTint(0xffef72);
+            this.cameras.main.flash(55, 255, 210, 70, false);
+          }
+        }
+        dash() {
+          const body = this.player.body as Phaser.Physics.Arcade.Body;
+          if (
+            this.time.now < this.dashCooldownUntil ||
+            this.time.now < this.controlLockedUntil ||
+            !body.blocked.down
+          )
+            return;
+          this.dashUntil = this.time.now + 210;
+          this.dashCooldownUntil = this.time.now + 480;
+          this.playerState = "dashing";
+          this.player.setVelocityX(this.facing * 465);
         }
         impactBurst(x: number, y: number, color: number) {
           for (let i = 0; i < 9; i++) {
@@ -676,12 +811,7 @@ export default function DeliMan() {
           if (this.levelCompleteQueued) return;
           this.levelCompleteQueued = true;
           this.setGameState("COMPLETE");
-          const save = JSON.parse(
-            localStorage.getItem("deli-man-save") || "{}",
-          );
-          save[def.id] = true;
-          save[def.ability] = true;
-          localStorage.setItem("deli-man-save", JSON.stringify(save));
+          completeDeliManStage(def.id, def.ability, this.score);
           Promise.resolve().then(() => {
             if (!alive) return;
             const next = stageIndex + 1;
@@ -714,6 +844,14 @@ export default function DeliMan() {
         }
         tick(_dt: number) {
           const body = this.player.body as Phaser.Physics.Arcade.Body;
+          if (touch.current.mapPressed) {
+            touch.current.mapPressed = false;
+            this.toggleMap();
+          }
+          if (this.mapVisible) {
+            this.stateStartedAt += _dt;
+            return;
+          }
           this.enemies.children.iterate((child) => {
             const enemy = child as Phaser.Physics.Arcade.Sprite;
             const enemyBody = enemy.body as Phaser.Physics.Arcade.Body | null;
@@ -744,8 +882,10 @@ export default function DeliMan() {
           if (left) this.facing = -1;
           if (right) this.facing = 1;
           this.player.setFlipX(this.facing < 0);
-          if (!controlsLocked)
+          if (!controlsLocked && this.time.now >= this.dashUntil)
             this.player.setVelocityX(left ? -245 : right ? 245 : 0);
+          else if (!controlsLocked && this.time.now < this.dashUntil)
+            this.player.setVelocityX(this.facing * 465);
           const activeLadder = this.ladders.find(
             (r) =>
               Math.abs(this.player.x - r.x - 24) < 42 &&
@@ -793,9 +933,21 @@ export default function DeliMan() {
             !this.keys.W.isDown
           )
             this.cutJump();
-          if (touch.current.fire) {
-            touch.current.fire = false;
-            this.fire();
+          if (touch.current.fire && !this.chargeStartedAt)
+            this.chargeStartedAt = this.time.now;
+          if (touch.current.fireReleased) {
+            touch.current.fireReleased = false;
+            this.fire(
+              Boolean(
+                this.chargeStartedAt &&
+                this.time.now - this.chargeStartedAt >= 650,
+              ),
+            );
+            this.chargeStartedAt = 0;
+          }
+          if (touch.current.dashPressed) {
+            touch.current.dashPressed = false;
+            this.dash();
           }
           if (
             !controlsLocked &&
@@ -806,26 +958,27 @@ export default function DeliMan() {
             this.jumpQueuedAt = 0;
             this.jump();
           }
-          if (
+          const wallSliding =
             !controlsLocked &&
             !body.blocked.down &&
             body.velocity.y > 0 &&
-            (body.blocked.left || body.blocked.right) &&
-            (this.cursors.up.isDown || this.keys.W.isDown)
+            (body.blocked.left || body.blocked.right);
+          if (wallSliding)
+            this.player.setVelocityY(Math.min(body.velocity.y, 105));
+          if (
+            wallSliding &&
+            (P.Input.Keyboard.JustDown(this.cursors.up) ||
+              P.Input.Keyboard.JustDown(this.keys.W) ||
+              touch.current.jumpPressed)
           ) {
             this.player.setVelocity(body.blocked.left ? 330 : -330, -470);
           }
-          if (
-            !controlsLocked &&
-            (this.cursors.down.isDown || this.keys.SHIFT.isDown) &&
-            body.blocked.down
-          )
-            this.player.setVelocityX((left ? -1 : 1) * 390);
           const pad = this.input.gamepad?.getPad(0);
           if (pad && !controlsLocked) {
             this.player.setVelocityX(pad.leftStick.x * 260);
             if (pad.A) this.jump();
             if (pad.X) this.fire();
+            if (pad.B) this.dash();
           }
           this.distance = Math.max(this.distance, this.player.x);
           const desiredCameraX = P.Math.Clamp(
@@ -838,18 +991,20 @@ export default function DeliMan() {
           if (this.player.x < this.cameraFurthestX + 20)
             this.player.x = this.cameraFurthestX + 20;
           if (controlsLocked) this.playerState = "hurt";
-          else if (ladder && !body.allowGravity) this.playerState = "climb";
-          else if (!body.blocked.down)
-            this.playerState = body.velocity.y < 0 ? "jump" : "fall";
+          else if (this.time.now < this.dashUntil) this.playerState = "dashing";
+          else if (ladder && !body.allowGravity) this.playerState = "climbing";
+          else if (wallSliding) this.playerState = "wall_slide";
+          else if (!body.blocked.down) this.playerState = "airborne";
           else if (body.velocity.x !== 0) this.playerState = "run";
-          else this.playerState = "idle";
+          else this.playerState = "grounded";
           const firedRecently = this.time.now - this.lastShotAt < 150;
           const heroTexture =
             this.playerState === "hurt"
               ? "hero-hurt"
               : firedRecently
                 ? "hero-shoot"
-                : this.playerState === "jump" || this.playerState === "fall"
+                : this.playerState === "airborne" ||
+                    this.playerState === "wall_slide"
                   ? "hero-jump"
                   : this.playerState === "run"
                     ? Math.floor(this.time.now / 105) % 2
@@ -862,6 +1017,24 @@ export default function DeliMan() {
             this.checkpoint,
             Math.floor(this.player.x / 1000),
           );
+          const roomIndex = Math.min(4, Math.floor(this.player.x / 1000));
+          const room = buildStageRooms(def.id).filter(
+            (candidate) => candidate.kind !== "secret",
+          )[roomIndex];
+          if (room) {
+            this.visitedRooms.add(room.id);
+            this.mapOverlay.list.forEach((item) => {
+              const gameObject = item as Phaser.GameObjects.GameObject & {
+                getData?: (key: string) => unknown;
+                setFillStyle?: (color: number) => unknown;
+                setColor?: (color: string) => unknown;
+              };
+              if (gameObject.getData?.("roomId") === room.id)
+                gameObject.setFillStyle?.(0x257143);
+              if (gameObject.getData?.("roomLabel") === room.id)
+                gameObject.setColor?.("#d8ffe0");
+            });
+          }
           if (this.player.x > this.respawnX + 950)
             this.respawnX = Math.floor(this.player.x / 1000) * 1000 + 80;
           if (this.player.x > 4550 || this.bossActive) {
@@ -970,6 +1143,10 @@ export default function DeliMan() {
         jump: false,
         jumpPressed: false,
         fire: false,
+        fireHeld: false,
+        fireReleased: false,
+        dashPressed: false,
+        mapPressed: false,
       };
     };
   }, [sound, stage]);
@@ -982,10 +1159,13 @@ export default function DeliMan() {
             <span>DELI MAN</span>
             <i>THE LAST JUMBO</i>
           </h1>
-          <div className="stage-grid">
+          <div className="world-map" aria-label="Deli Man stage map">
+            <div className="map-route map-route-a" />
+            <div className="map-route map-route-b" />
             {STAGES.map((s, i) => (
               <button
                 key={s.id}
+                className={`${progress?.completedStages.includes(s.id) ? "complete" : ""} map-node map-node-${i + 1}`}
                 onClick={() => setStage(i)}
                 style={{
                   backgroundImage: `url(${getDeliManArt(s.id).background})`,
@@ -997,6 +1177,11 @@ export default function DeliMan() {
                   </b>
                   <span>BOSS: {s.boss}</span>
                   <em>GET: {s.ability}</em>
+                  <small>
+                    {progress?.completedStages.includes(s.id)
+                      ? `CLEARED · BEST ${progress.bestScores[s.id] || 0}`
+                      : `${buildStageRooms(s.id).length} ROOMS · SECRET UNKNOWN`}
+                  </small>
                 </span>
               </button>
             ))}
@@ -1055,13 +1240,24 @@ export default function DeliMan() {
             <div className="action-buttons">
               <button
                 className="control-btn pizza-control"
-                aria-label="Throw pizza"
+                aria-label="Fire pizza blaster; hold to charge"
                 onPointerDown={(event) => {
                   event.preventDefault();
                   touch.current.fire = true;
+                  touch.current.fireHeld = true;
+                }}
+                onPointerUp={() => {
+                  touch.current.fire = false;
+                  touch.current.fireHeld = false;
+                  touch.current.fireReleased = true;
+                }}
+                onPointerCancel={() => {
+                  touch.current.fire = false;
+                  touch.current.fireHeld = false;
+                  touch.current.fireReleased = true;
                 }}
               >
-                🍕
+                FIRE
               </button>
               <button
                 className="control-btn"
@@ -1081,8 +1277,23 @@ export default function DeliMan() {
               >
                 ▲
               </button>
-              <button className="pause-control" onClick={() => setStage(null)}>
-                PAUSE
+              <button
+                className="control-btn dash-control"
+                aria-label="Dash"
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  touch.current.dashPressed = true;
+                }}
+              >
+                DASH
+              </button>
+              <button
+                className="pause-control"
+                onClick={() => {
+                  touch.current.mapPressed = true;
+                }}
+              >
+                MAP
               </button>
             </div>
           </nav>
