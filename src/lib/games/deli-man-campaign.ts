@@ -23,6 +23,59 @@ export type StageRoom = {
   kind: "entry" | "combat" | "vertical" | "secret" | "checkpoint" | "boss";
 };
 
+export type DeliWeapon = {
+  id: string;
+  label: string;
+  color: number;
+  energyCost: number;
+  damage: number;
+  worldUse: string;
+};
+
+export const BASIC_WEAPON: DeliWeapon = {
+  id: "JUMBO BLASTER",
+  label: "JUMBO",
+  color: 0xffd438,
+  energyCost: 0,
+  damage: 1,
+  worldUse: "CHARGED SHOTS POWER STANDARD BREAKERS",
+};
+
+export const DELI_WEAPONS: DeliWeapon[] = STAGES.slice(0, 8).map(
+  (stage, index) => ({
+    id: stage.ability,
+    label: stage.ability.split(" ")[0],
+    color: [
+      0xff633f, 0xaa78ff, 0xe4a13d, 0x8cecff, 0xffe052, 0x55ddd3, 0xef6681,
+      0x7ee7ff,
+    ][index],
+    energyCost: 1,
+    damage: 2,
+    worldUse: [
+      "MELTS MARKED BARRIERS",
+      "POWERS ALIAS RECEIVERS",
+      "BREAKS MARKED ROAD BLOCKS",
+      "FREEZES WATER JETS",
+      "OVERCLOCKS RUSH CIRCUITS",
+      "CROSSES SPRAY ZONES",
+      "BREAKS COMPLAINT MASONRY",
+      "POWERS SERVICE ELEVATORS",
+    ][index],
+  }),
+);
+
+export const SECRET_WEAPON_BY_STAGE: Record<string, string> = {
+  fryer: "CHICKEN SHIELD",
+  phone: "ONE-STAR BEAM",
+  route: "TIKI WAVE",
+  walkin: "BUFFALO BURST",
+  friday: "ALIAS CANNON",
+  tiki: "VENISON DASH",
+  service: "LAST CALL",
+  closing: "RUSH MODE",
+  "owner-office": "RECEIPT SPARK",
+};
+
 const EMPTY_SAVE: DeliManSave = {
   version: DELI_MAN_SAVE_VERSION,
   completedStages: [],
@@ -87,6 +140,16 @@ export function completeDeliManStage(
   save.worldFlags = [...new Set([...save.worldFlags, `${stageId}:restored`])];
   save.bestScores[stageId] = Math.max(save.bestScores[stageId] || 0, score);
   save.lastStage = stageId;
+  writeDeliManSave(save);
+  window.dispatchEvent(new CustomEvent("deli-man-save", { detail: save }));
+  return save;
+}
+
+export function unlockDeliManSecret(stageId: string, upgradeId: string) {
+  const save = loadDeliManSave();
+  const secretId = `${stageId}:service-access`;
+  save.secrets = [...new Set([...save.secrets, secretId])];
+  save.upgrades = [...new Set([...save.upgrades, upgradeId])];
   writeDeliManSave(save);
   window.dispatchEvent(new CustomEvent("deli-man-save", { detail: save }));
   return save;

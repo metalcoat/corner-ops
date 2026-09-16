@@ -18,19 +18,61 @@ export type BossDef = {
   reward: string;
 };
 export const BOSSES = {
-  donCherry: {
-    name: "DON CHERRY",
+  fathead: {
+    name: "FATHEAD",
     health: 18,
     speed: 72,
     attack: "throw",
-    reward: "CHERRY PEPPER BURST",
+    reward: "BUFFALO BURST",
   },
-  tikiBouncer: {
-    name: "TIKI BOUNCER",
+  invalidModifier: {
+    name: "INVALID MODIFIER",
+    health: 20,
+    speed: 78,
+    attack: "bounce",
+    reward: "ALIAS CANNON",
+  },
+  theDoe: {
+    name: "THE DOE",
+    health: 22,
+    speed: 105,
+    attack: "charge",
+    reward: "VENISON DASH",
+  },
+  freezerBurn: {
+    name: "FREEZER BURN",
+    health: 24,
+    speed: 68,
+    attack: "bounce",
+    reward: "CHICKEN SHIELD",
+  },
+  theRush: {
+    name: "THE RUSH",
+    health: 26,
+    speed: 92,
+    attack: "throw",
+    reward: "RUSH MODE",
+  },
+  lakeOntario: {
+    name: "LAKE ONTARIO",
     health: 22,
     speed: 88,
     attack: "charge",
-    reward: "RIVER DECK WAVE",
+    reward: "TIKI WAVE",
+  },
+  theReviewer: {
+    name: "THE REVIEWER",
+    health: 28,
+    speed: 74,
+    attack: "throw",
+    reward: "ONE-STAR BEAM",
+  },
+  lastMinuteOrder: {
+    name: "LAST MINUTE ORDER",
+    health: 30,
+    speed: 82,
+    attack: "bounce",
+    reward: "LAST CALL",
   },
   theMargin: {
     name: "THE MARGIN",
@@ -52,7 +94,7 @@ export const STAGES: StageDef[] = [
     hazards: ["FRY GOBLIN", "ROGUE TOT", "FRY BASKET"],
     lines: ["CAUTION: GREASE HAS ACQUIRED SENTIENCE"],
     location: "WEST RIVER STREET FIRE RUINS",
-    bossId: "donCherry",
+    bossId: "fathead",
   },
   {
     id: "phone",
@@ -67,6 +109,7 @@ export const STAGES: StageDef[] = [
       "TRANSLATION ENGINE ENGAGED. GOD HAS ABANDONED US.",
     ],
     location: "FORD STREET PHONE EXCHANGE",
+    bossId: "invalidModifier",
   },
   {
     id: "route",
@@ -81,6 +124,7 @@ export const STAGES: StageDef[] = [
       "WILDLIFE DETECTED. CRAIG PROTOCOL DISABLED.",
     ],
     location: "OGDENSBURG WATERFRONT ROUTE",
+    bossId: "theDoe",
   },
   {
     id: "walkin",
@@ -92,6 +136,7 @@ export const STAGES: StageDef[] = [
     hazards: ["FROZEN BOX", "FROST", "CHICKEN"],
     lines: ["THE EMPLOYEE BREAK ROOM: ONE CHAIR. NO QUESTIONS."],
     location: "THE FROZEN WATERFRONT WALK-IN",
+    bossId: "freezerBurn",
   },
   {
     id: "friday",
@@ -107,6 +152,7 @@ export const STAGES: StageDef[] = [
       "ORDER WAS PLACED 11 SECONDS AGO.",
     ],
     location: "WEST RIVER STREET DINNER RUSH",
+    bossId: "theRush",
   },
   {
     id: "tiki",
@@ -118,7 +164,7 @@ export const STAGES: StageDef[] = [
     hazards: ["WIND", "COOLER", "BOAT"],
     lines: ["HOURS SUBJECT TO WEATHER, STAFFING, BOATS, ACTS OF GOD."],
     location: "WATERFRONT TIKI AWNING DECK",
-    bossId: "tikiBouncer",
+    bossId: "lakeOntario",
   },
   {
     id: "service",
@@ -134,6 +180,7 @@ export const STAGES: StageDef[] = [
       "HISTORICAL LOADEDNESS RECORDS NOT FOUND.",
     ],
     location: "CITY HALL COMPLAINT BASEMENT",
+    bossId: "theReviewer",
   },
   {
     id: "closing",
@@ -149,6 +196,7 @@ export const STAGES: StageDef[] = [
       "+ 2 JUMBOS · + 50 WINGS · ACTUALLY MAKE THAT 100",
     ],
     location: "CLOSING TIME ON FORD STREET",
+    bossId: "lastMinuteOrder",
   },
   {
     id: "owner-office",

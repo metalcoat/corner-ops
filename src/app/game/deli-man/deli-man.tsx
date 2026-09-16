@@ -3,19 +3,25 @@ import { useEffect, useRef, useState } from "react";
 import type Phaser from "phaser";
 import { BOSSES, STAGES } from "@/lib/games/deli-man-data";
 import {
+  BASIC_WEAPON,
   buildStageRooms,
   completeDeliManStage,
+  DELI_WEAPONS,
   loadDeliManSave,
+  SECRET_WEAPON_BY_STAGE,
   type DeliManSave,
+  unlockDeliManSecret,
 } from "@/lib/games/deli-man-campaign";
 import { getDeliManArt } from "@/lib/games/deli-man-art";
 import {
   createDeliManTextures,
   renderDeliManStage,
 } from "@/lib/games/deli-man-renderer";
+import { DeliManAudio } from "@/lib/games/deli-man-audio";
 export default function DeliMan() {
   const host = useRef<HTMLDivElement>(null),
     game = useRef<Phaser.Game | null>(null),
+    audio = useRef<DeliManAudio | null>(null),
     touch = useRef({
       left: false,
       right: false,
@@ -26,16 +32,32 @@ export default function DeliMan() {
       fireReleased: false,
       dashPressed: false,
       mapPressed: false,
+      weaponPressed: false,
     });
   const [stage, setStage] = useState<number | null>(null),
     [sound, setSound] = useState(true),
-    [progress, setProgress] = useState<DeliManSave | null>(null);
+    [progress, setProgress] = useState<DeliManSave | null>(null),
+    [ending, setEnding] = useState<{
+      score: number;
+      stages: number;
+      secrets: number;
+    } | null>(null);
   useEffect(() => {
     const sync = () => setProgress(loadDeliManSave());
     sync();
     window.addEventListener("deli-man-save", sync);
     return () => window.removeEventListener("deli-man-save", sync);
   }, []);
+  useEffect(() => {
+    audio.current?.setMuted(!sound);
+  }, [sound]);
+  useEffect(
+    () => () => {
+      audio.current?.stop();
+      audio.current = null;
+    },
+    [],
+  );
   useEffect(() => {
     if (stage === null || !host.current) return;
     const stageIndex = stage;
@@ -44,6 +66,7 @@ export default function DeliMan() {
     void import("phaser").then((P) => {
       if (!alive || !host.current) return;
       const def = STAGES[stageIndex];
+      void audio.current?.start(stageIndex, !sound);
       const art = getDeliManArt(def.id);
       const bossProfile = def.bossId ? BOSSES[def.bossId] : null;
       const developerMode =
@@ -55,6 +78,7 @@ export default function DeliMan() {
         keys!: Record<string, Phaser.Input.Keyboard.Key>;
         enemies!: Phaser.Physics.Arcade.Group;
         shots!: Phaser.Physics.Arcade.Group;
+        bossShots!: Phaser.Physics.Arcade.Group;
         tip!: Phaser.GameObjects.Text;
         hp = 8;
         score = 0;
@@ -90,6 +114,20 @@ export default function DeliMan() {
         mapOverlay!: Phaser.GameObjects.Container;
         mapVisible = false;
         visitedRooms = new Set<string>();
+        availableWeapons = [BASIC_WEAPON];
+        weaponIndex = 0;
+        weaponEnergy = new Map<string, number>();
+        circuitGate!: Phaser.GameObjects.Rectangle;
+        circuitSwitch!: Phaser.GameObjects.Rectangle;
+        secretWall!: Phaser.GameObjects.Rectangle;
+        secretPickup!: Phaser.GameObjects.Arc;
+        circuitOpen = false;
+        secretOpen = false;
+        secretClaimed = false;
+        bossAttackStartedAt = 0;
+        bossAttackIndex = 0;
+        bossAction: "INTRO" | "TELEGRAPH" | "ATTACK" | "RECOVERY" | "DEFEATED" =
+          "INTRO";
         bossGate!: Phaser.Physics.Arcade.StaticGroup;
         entranceGate!: Phaser.GameObjects.Rectangle;
         playerState:
@@ -112,6 +150,19 @@ export default function DeliMan() {
             level: def.id,
             location: def.location,
           });
+          const campaign = loadDeliManSave();
+          this.availableWeapons = [
+            BASIC_WEAPON,
+            ...DELI_WEAPONS.filter((weapon) =>
+              campaign.weapons.includes(weapon.id),
+            ),
+          ];
+          this.availableWeapons.forEach((weapon) =>
+            this.weaponEnergy.set(weapon.id, weapon.energyCost ? 12 : 99),
+          );
+          this.secretClaimed = campaign.secrets.includes(
+            `${def.id}:service-access`,
+          );
           this.cameras.main.setBackgroundColor(def.theme);
           this.cameras.main.setRoundPixels(true);
           const authoredRoutes = [
@@ -337,10 +388,11 @@ export default function DeliMan() {
           this.cameras.main.setBounds(0, 0, 5000, 720);
           this.cursors = this.input.keyboard!.createCursorKeys();
           this.keys = this.input.keyboard!.addKeys(
-            "W,A,S,D,X,F,SHIFT,ESC",
+            "W,A,S,D,X,F,Q,E,SHIFT,ESC",
           ) as Record<string, Phaser.Input.Keyboard.Key>;
           this.enemies = this.physics.add.group();
           this.shots = this.physics.add.group();
+          this.bossShots = this.physics.add.group();
           for (let x = 520; x < 4300; x += 330 - stageIndex * 15) {
             const e = this.enemies.create(
               x,
@@ -385,6 +437,93 @@ export default function DeliMan() {
             .rectangle(4925, 535, 72, 150, 0x163f27)
             .setStrokeStyle(6, 0x73ff86)
             .setVisible(false);
+          this.circuitSwitch = this.add
+            .rectangle(1280, 548, 38, 52, 0x20374a)
+            .setStrokeStyle(5, art.glow)
+            .setData("mechanism", "circuit");
+          this.physics.add.existing(this.circuitSwitch, true);
+          this.add.text(1200, 485, "CHARGE / WEAPON\nSERVICE BREAKER", {
+            fontFamily: "monospace",
+            fontSize: "12px",
+            align: "center",
+            color: "#fff3a2",
+            backgroundColor: "#07101dcc",
+            padding: { x: 5, y: 3 },
+          });
+          this.circuitGate = this.add
+            .rectangle(1545, 510, 34, 188, art.shadow)
+            .setStrokeStyle(5, art.edge)
+            .setData("mechanism", "gate");
+          this.physics.add.existing(this.circuitGate, true);
+          this.secretWall = this.add
+            .rectangle(3190, 530, 44, 148, art.face)
+            .setStrokeStyle(5, art.accent)
+            .setData("mechanism", "secret-wall");
+          this.physics.add.existing(this.secretWall, true);
+          this.add.text(
+            3070,
+            430,
+            `MARKED SERVICE WALL\n${SECRET_WEAPON_BY_STAGE[def.id] || "SPECIAL WEAPON"}`,
+            {
+              fontFamily: "monospace",
+              fontSize: "11px",
+              align: "center",
+              color: "#ffd0a2",
+              backgroundColor: "#07101dcc",
+              padding: { x: 5, y: 3 },
+            },
+          );
+          this.secretPickup = this.add
+            .circle(3280, 545, 17, this.secretClaimed ? 0x45505a : 0x7dff9b)
+            .setStrokeStyle(4, 0xffffff)
+            .setVisible(!this.secretClaimed);
+          this.physics.add.existing(this.secretPickup, true);
+          const lift = this.physics.add
+            .sprite(2440, 520, "ground")
+            .setDisplaySize(150, 22)
+            .setImmovable(true);
+          (lift.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
+          this.tweens.add({
+            targets: lift,
+            y: 360,
+            duration: 1700,
+            ease: "Sine.inOut",
+            yoyo: true,
+            repeat: -1,
+          });
+          this.physics.add.collider(this.player, lift);
+          this.physics.add.collider(this.player, this.circuitGate);
+          this.physics.add.collider(this.player, this.secretWall);
+          this.physics.add.overlap(this.player, this.secretPickup, () => {
+            if (this.secretClaimed || !this.secretPickup.visible) return;
+            this.secretClaimed = true;
+            this.secretPickup.setVisible(false);
+            unlockDeliManSecret(def.id, `${def.id}:patience-extension`);
+            audio.current?.sfx("secret");
+            this.hp = Math.min(10, this.hp + 2);
+            this.score += 750;
+            this.showNotice("SECRET FOUND\nPATIENCE EXTENSION");
+          });
+          this.physics.add.overlap(this.shots, this.circuitSwitch, (shot) => {
+            const projectile = shot as Phaser.Physics.Arcade.Sprite;
+            const charged = Boolean(projectile.getData("charged"));
+            const weaponId = String(projectile.getData("weaponId") || "");
+            projectile.destroy();
+            if (!charged && weaponId === BASIC_WEAPON.id) return;
+            this.openCircuit();
+          });
+          this.physics.add.overlap(this.shots, this.secretWall, (shot) => {
+            const projectile = shot as Phaser.Physics.Arcade.Sprite;
+            const weaponId = String(projectile.getData("weaponId") || "");
+            projectile.destroy();
+            if (weaponId !== SECRET_WEAPON_BY_STAGE[def.id]) {
+              this.showNotice(
+                `NO EFFECT\nNEEDS ${SECRET_WEAPON_BY_STAGE[def.id] || "A SPECIAL WEAPON"}`,
+              );
+              return;
+            }
+            this.openSecret();
+          });
           [1010, 2140, 3360].forEach((x, i) => {
             const npc = this.add.sprite(
               x,
@@ -443,15 +582,15 @@ export default function DeliMan() {
             if (shot?.active) shot.destroy();
             if (this.gameState !== "BOSS_FIGHT" || this.bossDefeated) return;
             this.boss -= shotDamage;
+            audio.current?.sfx("boss-hit");
             this.impactBurst(this.bossSprite.x, this.bossSprite.y, art.glow);
             this.bossSprite.setTint(0xffffff);
             this.time.delayedCall(70, () => this.bossSprite.clearTint());
-            if (this.boss <= 0) {
-              this.bossDefeated = true;
-              this.setGameState("BOSS_DEFEATED");
-              this.bossSprite.disableBody(true, true);
-              this.score += 2500;
-            }
+            if (this.boss <= 0) this.defeatBoss();
+          });
+          this.physics.add.overlap(this.player, this.bossShots, (_, shot) => {
+            shot.destroy();
+            this.damage();
           });
           this.physics.add.collider(this.player, ground);
           this.physics.add.collider(this.enemies, ground);
@@ -566,6 +705,8 @@ export default function DeliMan() {
           this.input.keyboard!.on("keyup-X", releaseCharge);
           this.input.keyboard!.on("keyup-F", releaseCharge);
           this.input.keyboard!.on("keydown-SHIFT", () => this.dash());
+          this.input.keyboard!.on("keydown-Q", () => this.cycleWeapon(-1));
+          this.input.keyboard!.on("keydown-E", () => this.cycleWeapon(1));
           this.input.keyboard!.on("keydown-ESC", () => this.toggleMap());
           this.input.keyboard!.on(
             "keydown-UP",
@@ -632,16 +773,51 @@ export default function DeliMan() {
               displayObjects: this.children.list.length,
               activeTweens: this.tweens.getTweens().length,
               bossHealth: this.boss,
+              bossAction: this.bossAction,
+              bossProjectiles: this.bossShots.countActive(true),
               projectiles: this.shots.countActive(true),
+              circuitOpen: this.circuitOpen,
+              secretOpen: this.secretOpen,
+              weapon: this.availableWeapons[this.weaponIndex].id,
+              weaponEnergy: this.weaponEnergy.get(
+                this.availableWeapons[this.weaponIndex].id,
+              ),
             });
+          if (developerMode)
+            (
+              window as typeof window & {
+                __DELI_MAN_DEV__?: {
+                  teleport: (x: number, y?: number) => void;
+                  equip: (weaponId: string) => boolean;
+                  openCircuit: () => void;
+                  openSecret: () => void;
+                  defeatBoss: () => void;
+                };
+              }
+            ).__DELI_MAN_DEV__ = {
+              teleport: (x, y = 540) => this.player.setPosition(x, y),
+              equip: (weaponId) => {
+                const index = this.availableWeapons.findIndex(
+                  (weapon) => weapon.id === weaponId,
+                );
+                if (index < 0) return false;
+                this.weaponIndex = index;
+                return true;
+              },
+              openCircuit: () => this.openCircuit(),
+              openSecret: () => this.openSecret(),
+              defeatBoss: () => this.defeatBoss(),
+            };
           this.input.gamepad?.once("connected", () => {});
           this.input.on("pointerdown", (p: Phaser.Input.Pointer) =>
             p.x > this.scale.width * 0.55 ? this.fire() : this.jump(),
           );
         }
         jump() {
-          if (this.time.now - this.lastGroundedAt < 125)
+          if (this.time.now - this.lastGroundedAt < 125) {
             this.player.setVelocityY(-520);
+            audio.current?.sfx("jump");
+          }
         }
         createMapOverlay() {
           const rooms = buildStageRooms(def.id);
@@ -712,6 +888,146 @@ export default function DeliMan() {
           this.mapOverlay.setVisible(this.mapVisible);
           if (this.mapVisible) this.player.setVelocity(0, 0);
         }
+        showNotice(message: string) {
+          const notice = this.add
+            .text(640, 170, message, {
+              fontFamily: "monospace",
+              fontSize: "24px",
+              fontStyle: "bold",
+              align: "center",
+              color: "#fff4a8",
+              stroke: "#07101d",
+              strokeThickness: 7,
+              backgroundColor: "#07101ddd",
+              padding: { x: 20, y: 12 },
+            })
+            .setOrigin(0.5)
+            .setScrollFactor(0)
+            .setDepth(180);
+          this.tweens.add({
+            targets: notice,
+            alpha: 0,
+            y: 145,
+            delay: 650,
+            duration: 280,
+            onComplete: () => notice.destroy(),
+          });
+        }
+        openCircuit() {
+          if (this.circuitOpen) return;
+          this.circuitOpen = true;
+          audio.current?.sfx("switch");
+          (this.circuitGate.body as Phaser.Physics.Arcade.StaticBody).enable =
+            false;
+          this.circuitSwitch.setFillStyle(0x37a85b);
+          this.tweens.add({
+            targets: this.circuitGate,
+            y: 340,
+            alpha: 0.25,
+            duration: 420,
+          });
+          this.showNotice("SERVICE CIRCUIT ONLINE\nGATE OPEN");
+        }
+        openSecret() {
+          if (this.secretOpen) return;
+          this.secretOpen = true;
+          audio.current?.sfx("secret");
+          (this.secretWall.body as Phaser.Physics.Arcade.StaticBody).enable =
+            false;
+          this.tweens.add({
+            targets: this.secretWall,
+            alpha: 0,
+            scaleX: 0.1,
+            duration: 260,
+          });
+          this.showNotice("SERVICE ACCESS REVEALED");
+        }
+        cycleWeapon(direction: number) {
+          if (this.availableWeapons.length < 2) return;
+          this.weaponIndex =
+            (this.weaponIndex + direction + this.availableWeapons.length) %
+            this.availableWeapons.length;
+          const weapon = this.availableWeapons[this.weaponIndex];
+          this.showNotice(`${weapon.id}\n${weapon.worldUse}`);
+        }
+        updateBossAttack() {
+          if (!this.bossSprite.active || this.bossDefeated) return;
+          const maxHealth = bossProfile?.health ?? 12 + stageIndex * 3;
+          const phaseTwo = this.boss <= Math.ceil(maxHealth / 2);
+          const cycle = phaseTwo ? 1250 : 1650;
+          const elapsed = this.time.now - this.bossAttackStartedAt;
+          const preferredAttack =
+            bossProfile?.attack === "charge"
+              ? 0
+              : bossProfile?.attack === "bounce"
+                ? 1
+                : 2;
+          if (!this.bossAttackStartedAt || elapsed >= cycle) {
+            this.bossAttackIndex = this.bossAttackStartedAt
+              ? (this.bossAttackIndex + 1) % 3
+              : preferredAttack;
+            this.bossAttackStartedAt = this.time.now;
+            this.bossAction = "TELEGRAPH";
+            this.bossSprite.setTint(
+              this.bossAttackIndex === 0
+                ? 0xffd75a
+                : this.bossAttackIndex === 1
+                  ? 0x75eaff
+                  : 0xff5575,
+            );
+            this.time.delayedCall(240, () => {
+              if (this.gameState === "BOSS_FIGHT") {
+                this.bossAction = "ATTACK";
+                this.bossSprite.clearTint();
+              }
+            });
+          }
+          if (this.bossAction !== "ATTACK") return;
+          const attackElapsed = this.time.now - this.bossAttackStartedAt;
+          if (this.bossAttackIndex === 0) {
+            this.physics.moveToObject(
+              this.bossSprite,
+              this.player,
+              (bossProfile?.speed ?? 70) * (phaseTwo ? 1.65 : 1.2),
+            );
+          } else if (this.bossAttackIndex === 1 && attackElapsed < 310) {
+            this.bossSprite.setVelocity(
+              this.player.x < this.bossSprite.x ? -170 : 170,
+              -410,
+            );
+          } else if (
+            this.bossAttackIndex === 2 &&
+            attackElapsed > 260 &&
+            attackElapsed % (phaseTwo ? 210 : 330) < 18 &&
+            this.bossShots.countActive(true) < (phaseTwo ? 6 : 4)
+          ) {
+            const shot = this.bossShots.create(
+              this.bossSprite.x,
+              this.bossSprite.y,
+              "pizza-shot",
+            ) as Phaser.Physics.Arcade.Sprite;
+            shot.setTint(art.accent).setScale(0.75);
+            (shot.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
+            this.physics.moveToObject(shot, this.player, phaseTwo ? 310 : 250);
+            this.time.delayedCall(2200, () => shot.active && shot.destroy());
+          }
+          if (attackElapsed > cycle - 260) {
+            this.bossAction = "RECOVERY";
+            this.bossSprite.setVelocityX(0);
+          }
+        }
+        defeatBoss() {
+          if (this.gameState !== "BOSS_FIGHT" || this.bossDefeated) return;
+          this.boss = 0;
+          this.bossDefeated = true;
+          audio.current?.sfx("boss-down");
+          audio.current?.setBoss(false);
+          this.bossAction = "DEFEATED";
+          this.setGameState("BOSS_DEFEATED");
+          this.bossSprite.disableBody(true, true);
+          this.bossShots.clear(true, true);
+          this.score += 2500;
+        }
         cutJump() {
           const body = this.player.body as Phaser.Physics.Arcade.Body;
           if (body.velocity.y < 0) this.player.setVelocityY(0);
@@ -720,6 +1036,14 @@ export default function DeliMan() {
           if (this.time.now - this.lastShotAt < 175) return;
           if (this.shots.countActive(true) >= 3) return;
           this.lastShotAt = this.time.now;
+          const weapon = this.availableWeapons[this.weaponIndex];
+          const energy = this.weaponEnergy.get(weapon.id) ?? 0;
+          if (weapon.energyCost && energy < weapon.energyCost) {
+            this.showNotice("WEAPON ENERGY EMPTY");
+            return;
+          }
+          if (weapon.energyCost)
+            this.weaponEnergy.set(weapon.id, energy - weapon.energyCost);
           const b = this.shots.create(
             this.player.x + this.facing * 32,
             this.player.y,
@@ -729,12 +1053,16 @@ export default function DeliMan() {
           (b.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
           b.setAngularVelocity(this.facing * 720);
           b.setData("bornAt", this.time.now);
-          b.setData("damage", charged ? 3 : 1);
+          b.setData("damage", charged ? weapon.damage + 2 : weapon.damage);
+          b.setData("charged", charged);
+          b.setData("weaponId", weapon.id);
+          b.setTint(weapon.color);
           if (charged) {
+            audio.current?.sfx("charge");
             b.setScale(1.65);
             b.setTint(0xffef72);
             this.cameras.main.flash(55, 255, 210, 70, false);
-          }
+          } else audio.current?.sfx("shot");
         }
         dash() {
           const body = this.player.body as Phaser.Physics.Arcade.Body;
@@ -748,6 +1076,7 @@ export default function DeliMan() {
           this.dashCooldownUntil = this.time.now + 480;
           this.playerState = "dashing";
           this.player.setVelocityX(this.facing * 465);
+          audio.current?.sfx("dash");
         }
         impactBurst(x: number, y: number, color: number) {
           for (let i = 0; i < 9; i++) {
@@ -771,6 +1100,7 @@ export default function DeliMan() {
           this.invuln = this.time.now + 1500;
           this.controlLockedUntil = this.time.now + 320;
           this.playerState = "hurt";
+          audio.current?.sfx("hurt");
           this.hp--;
           this.player.setTint(0xffffff).setVelocity(-this.facing * 260, -300);
           this.tweens.add({
@@ -787,8 +1117,12 @@ export default function DeliMan() {
               .setPosition(this.bossActive ? 4520 : this.respawnX, 540)
               .setVelocity(0, 0);
             if (this.bossActive) {
+              audio.current?.setBoss(true);
+              this.bossShots.clear(true, true);
               this.boss = bossProfile?.health ?? 12 + stageIndex * 3;
               this.bossDefeated = false;
+              this.bossAttackStartedAt = 0;
+              this.bossAction = "INTRO";
               this.bossSprite
                 .enableBody(true, 4680, 530, true, true)
                 .setVelocity(0, 0);
@@ -811,17 +1145,24 @@ export default function DeliMan() {
           if (this.levelCompleteQueued) return;
           this.levelCompleteQueued = true;
           this.setGameState("COMPLETE");
-          completeDeliManStage(def.id, def.ability, this.score);
+          const completedSave = completeDeliManStage(
+            def.id,
+            def.ability,
+            this.score,
+          );
           Promise.resolve().then(() => {
             if (!alive) return;
-            const next = stageIndex + 1;
-            if (next < STAGES.length) {
-              console.info("[DELI MAN] NEXT LEVEL", {
-                from: def.id,
-                to: STAGES[next].id,
+            console.info("[DELI MAN] RETURN TO WORLD MAP", {
+              from: def.id,
+            });
+            audio.current?.setBoss(false);
+            if (def.id === "owner-office")
+              setEnding({
+                score: this.score,
+                stages: completedSave.completedStages.length,
+                secrets: completedSave.secrets.length,
               });
-              setStage(next);
-            } else setStage(null);
+            setStage(null);
           });
         }
         update(_: number, dt: number) {
@@ -847,6 +1188,10 @@ export default function DeliMan() {
           if (touch.current.mapPressed) {
             touch.current.mapPressed = false;
             this.toggleMap();
+          }
+          if (touch.current.weaponPressed) {
+            touch.current.weaponPressed = false;
+            this.cycleWeapon(1);
           }
           if (this.mapVisible) {
             this.stateStartedAt += _dt;
@@ -1040,6 +1385,7 @@ export default function DeliMan() {
           if (this.player.x > 4550 || this.bossActive) {
             if (!this.bossActive) {
               this.bossActive = true;
+              audio.current?.setBoss(true);
               this.setGameState("BOSS_INTRO");
               this.bossWarning
                 .setText(`!! WARNING !!\n${bossProfile?.name ?? def.boss}`)
@@ -1069,16 +1415,14 @@ export default function DeliMan() {
               this.time.now - this.stateStartedAt > 850
             ) {
               this.bossSprite.enableBody(false, 4680, 530, true, true);
+              this.bossAttackStartedAt = 0;
+              this.bossAction = "TELEGRAPH";
               this.bossWarning.setVisible(false);
               this.setGameState("BOSS_FIGHT");
               console.info("[DELI MAN] BOSS SPAWN", { level: def.id });
             }
             if (this.gameState === "BOSS_FIGHT") {
-              this.physics.moveToObject(
-                this.bossSprite,
-                this.player,
-                bossProfile?.speed ?? 45 + stageIndex * 6,
-              );
+              this.updateBossAttack();
               if (
                 P.Math.Distance.BetweenPoints(this.player, this.bossSprite) < 88
               )
@@ -1106,11 +1450,11 @@ export default function DeliMan() {
               );
           }
           this.tip.setText(
-            `PATIENCE ${"■".repeat(this.hp)}  TIP CHANGE $${this.score}  ${this.playerState.toUpperCase()}\n${def.name} · CHECKPOINT ${this.checkpoint + 1}${this.bossActive ? `\n${bossProfile?.name ?? def.boss}: ${"★".repeat(Math.max(0, this.boss))}${this.bossDefeated ? "  DELIVER TO GREEN DOOR" : ""}` : ""}`,
+            `PATIENCE ${"■".repeat(this.hp)}  TIP CHANGE $${this.score}  ${this.playerState.toUpperCase()}\n${this.availableWeapons[this.weaponIndex].label} ${this.availableWeapons[this.weaponIndex].energyCost ? "■".repeat(this.weaponEnergy.get(this.availableWeapons[this.weaponIndex].id) || 0) : "∞"} · ${def.name} · CHECKPOINT ${this.checkpoint + 1}${this.bossActive ? `\n${bossProfile?.name ?? def.boss}: ${"★".repeat(Math.max(0, this.boss))}${this.bossDefeated ? "  DELIVER TO GREEN DOOR" : ""}` : ""}`,
           );
           if (this.debugVisible)
             this.debugText.setText(
-              `FPS ${Math.round(this.game.loop.actualFps)} | LEVEL ${stageIndex + 1}/9 | ${this.gameState}\nPLAYER ${Math.round(this.player.x)},${Math.round(this.player.y)} | CAMERA ${Math.round(this.cameras.main.scrollX)},${Math.round(this.cameras.main.scrollY)}\nENEMIES ${this.enemies.countActive(true)} | BOSS ${this.bossActive ? this.boss : "OFF"} | PIZZAS ${this.shots.countActive(true)}\nTRANSITION ${this.gameState.includes("INTRO") || this.gameState === "BOSS_DEFEATED" ? 1 : 0} | EFFECTS ${this.tweens.getTweens().length}\nDEV: B=BOSS  K=ONE-HIT  H=DEATH  ` +
+              `FPS ${Math.round(this.game.loop.actualFps)} | LEVEL ${stageIndex + 1}/9 | ${this.gameState}\nPLAYER ${Math.round(this.player.x)},${Math.round(this.player.y)} | CAMERA ${Math.round(this.cameras.main.scrollX)},${Math.round(this.cameras.main.scrollY)}\nENEMIES ${this.enemies.countActive(true)} | BOSS ${this.bossActive ? `${this.boss} ${this.bossAction}` : "OFF"} | PIZZAS ${this.shots.countActive(true)} / HOSTILE ${this.bossShots.countActive(true)}\nTRANSITION ${this.gameState.includes("INTRO") || this.gameState === "BOSS_DEFEATED" ? 1 : 0} | EFFECTS ${this.tweens.getTweens().length}\nDEV: B=BOSS  K=ONE-HIT  H=DEATH  ` +
                 "`=DEBUG",
             );
         }
@@ -1136,6 +1480,18 @@ export default function DeliMan() {
     return () => {
       alive = false;
       instance?.destroy(true);
+      delete (
+        window as typeof window & {
+          __DELI_MAN_DEBUG__?: unknown;
+          __DELI_MAN_DEV__?: unknown;
+        }
+      ).__DELI_MAN_DEBUG__;
+      delete (
+        window as typeof window & {
+          __DELI_MAN_DEBUG__?: unknown;
+          __DELI_MAN_DEV__?: unknown;
+        }
+      ).__DELI_MAN_DEV__;
       if (game.current === instance) game.current = null;
       touch.current = {
         left: false,
@@ -1147,13 +1503,47 @@ export default function DeliMan() {
         fireReleased: false,
         dashPressed: false,
         mapPressed: false,
+        weaponPressed: false,
       };
     };
   }, [sound, stage]);
+  const startStage = (index: number) => {
+    if (!audio.current) audio.current = new DeliManAudio();
+    void audio.current.start(index, !sound);
+    setStage(index);
+  };
   return (
     <main className="deli-man">
       {stage === null ? (
         <section>
+          {ending && (
+            <div className="campaign-ending" role="dialog" aria-modal="true">
+              <small>THE OWNER&apos;S OFFICE HAS FALLEN</small>
+              <h2>
+                THE LAST JUMBO
+                <br />
+                HAS BEEN RECOVERED.
+              </h2>
+              <p>Someone wanted it cut differently.</p>
+              <dl>
+                <div>
+                  <dt>FINAL SCORE</dt>
+                  <dd>{ending.score}</dd>
+                </div>
+                <div>
+                  <dt>STAGES CLEARED</dt>
+                  <dd>{ending.stages}/9</dd>
+                </div>
+                <div>
+                  <dt>SECRETS FOUND</dt>
+                  <dd>{ending.secrets}/9</dd>
+                </div>
+              </dl>
+              <button onClick={() => setEnding(null)}>
+                RETURN TO WORLD MAP
+              </button>
+            </div>
+          )}
           <small>AN ORIGINAL CORNER DELI GAME</small>
           <h1 className="title-logo">
             <span>DELI MAN</span>
@@ -1162,29 +1552,47 @@ export default function DeliMan() {
           <div className="world-map" aria-label="Deli Man stage map">
             <div className="map-route map-route-a" />
             <div className="map-route map-route-b" />
-            {STAGES.map((s, i) => (
-              <button
-                key={s.id}
-                className={`${progress?.completedStages.includes(s.id) ? "complete" : ""} map-node map-node-${i + 1}`}
-                onClick={() => setStage(i)}
-                style={{
-                  backgroundImage: `url(${getDeliManArt(s.id).background})`,
-                }}
-              >
-                <span className="stage-copy">
-                  <b>
-                    {i + 1}. {s.name}
-                  </b>
-                  <span>BOSS: {s.boss}</span>
-                  <em>GET: {s.ability}</em>
-                  <small>
-                    {progress?.completedStages.includes(s.id)
-                      ? `CLEARED · BEST ${progress.bestScores[s.id] || 0}`
-                      : `${buildStageRooms(s.id).length} ROOMS · SECRET UNKNOWN`}
-                  </small>
-                </span>
-              </button>
-            ))}
+            {STAGES.map((s, i) => {
+              const completed = Boolean(
+                progress?.completedStages.includes(s.id),
+              );
+              const locked =
+                s.id === "owner-office" &&
+                (progress?.completedStages.filter((id) =>
+                  STAGES.slice(0, 8).some((stage) => stage.id === id),
+                ).length || 0) < 8;
+              return (
+                <button
+                  key={s.id}
+                  className={`${completed ? "complete" : ""} ${locked ? "locked" : ""} map-node map-node-${i + 1}`}
+                  onClick={() => startStage(i)}
+                  disabled={locked}
+                  title={
+                    locked ? "Defeat all eight district bosses first." : s.name
+                  }
+                  style={{
+                    backgroundImage: `url(${getDeliManArt(s.id).background})`,
+                  }}
+                >
+                  <span className="stage-copy">
+                    <b>
+                      {i + 1}. {s.name}
+                    </b>
+                    <span>BOSS: {s.boss}</span>
+                    <em>
+                      {locked
+                        ? "LOCKED: CLEAR 8 DISTRICTS"
+                        : `GET: ${s.ability}`}
+                    </em>
+                    <small>
+                      {completed
+                        ? `CLEARED · BEST ${progress?.bestScores[s.id] || 0}`
+                        : `${buildStageRooms(s.id).length} ROOMS · SECRET UNKNOWN`}
+                    </small>
+                  </span>
+                </button>
+              );
+            })}
           </div>
           <footer>
             <button onClick={() => setSound(!sound)}>
@@ -1294,6 +1702,14 @@ export default function DeliMan() {
                 }}
               >
                 MAP
+              </button>
+              <button
+                className="pause-control weapon-control"
+                onClick={() => {
+                  touch.current.weaponPressed = true;
+                }}
+              >
+                WEAPON
               </button>
             </div>
           </nav>
