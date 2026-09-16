@@ -109,6 +109,15 @@ const orderPayloads = [
   "Steak Sub",
   "Turkey Sub",
 ];
+const recentFailures = new Map<string, string[]>();
+function pickFailure(key: string, pool: readonly string[]) {
+  const recent = recentFailures.get(key) || [];
+  const available = pool.filter((line) => !recent.includes(line));
+  const choices = available.length ? available : [...pool];
+  const selected = choices[Math.floor(Math.random() * choices.length)];
+  recentFailures.set(key, [...recent.slice(-4), selected]);
+  return selected;
+}
 declare global {
   interface Window {
     webkitAudioContext?: typeof AudioContext;
@@ -673,16 +682,9 @@ export default function DeliveryGame() {
               n.type === "mower"
             ) {
               const reason =
-                n.type === "car" || n.type === "van" || n.type === "mower"
-                  ? DELIVERY_CAR_CRASHES[
-                      Math.floor(Math.random() * DELIVERY_CAR_CRASHES.length)
-                    ]
-                  : DELIVERY_COLLISION_FAILURES[n.type][
-                      Math.floor(
-                        Math.random() *
-                          DELIVERY_COLLISION_FAILURES[n.type].length,
-                      )
-                    ];
+                n.type === "car"
+                  ? pickFailure("car", DELIVERY_CAR_CRASHES)
+                  : pickFailure(n.type, DELIVERY_COLLISION_FAILURES[n.type]);
               impactFailure.current = reason;
               setFailure(reason);
               setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
@@ -694,6 +696,10 @@ export default function DeliveryGame() {
               continue;
             }
             if (n.type === "squirrel") {
+              impactFailure.current = pickFailure(
+                "squirrel",
+                DELIVERY_COLLISION_FAILURES.squirrel,
+              );
               setStats((s) => ({
                 ...s,
                 score: Math.max(0, s.score - 100),
@@ -705,6 +711,10 @@ export default function DeliveryGame() {
               continue;
             }
             if (n.type === "cat") {
+              impactFailure.current = pickFailure(
+                "cat",
+                DELIVERY_COLLISION_FAILURES.cat,
+              );
               setHealth((health) => Math.max(0, health - 1));
               setStats((stats) => ({
                 ...stats,
@@ -718,6 +728,10 @@ export default function DeliveryGame() {
               continue;
             }
             if (n.type === "goose" || n.type === "raccoon") {
+              impactFailure.current = pickFailure(
+                n.type,
+                DELIVERY_COLLISION_FAILURES[n.type],
+              );
               setHealth((health) => Math.max(0, health - 1));
               setStats((stats) => ({
                 ...stats,
@@ -737,8 +751,7 @@ export default function DeliveryGame() {
             const collisionType =
               n.type === "deer" ? "deer" : n.type === "dog" ? "dog" : "pothole";
             const reasonPool = DELIVERY_COLLISION_FAILURES[collisionType];
-            impactFailure.current =
-              reasonPool[Math.floor(Math.random() * reasonPool.length)];
+            impactFailure.current = pickFailure(collisionType, reasonPool);
             setHealth((h) => Math.max(0, h - (n.type === "deer" ? 2 : 1)));
             setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
             pop(
@@ -778,10 +791,11 @@ export default function DeliveryGame() {
           ) {
             const reason =
               n.kind === "abandoned"
-                ? DELIVERY_CAR_CRASHES[
-                    Math.floor(Math.random() * DELIVERY_CAR_CRASHES.length)
-                  ]
-                : "You drove into an occupied roadside tent. The person yelled OUCH; dispatch has replaced your route map with a coloring book.";
+                ? pickFailure(
+                    "abandoned",
+                    DELIVERY_COLLISION_FAILURES.abandoned,
+                  )
+                : pickFailure("tent", DELIVERY_COLLISION_FAILURES.tent);
             impactFailure.current = reason;
             setFailure(reason);
             setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
@@ -883,9 +897,7 @@ export default function DeliveryGame() {
       setFailure(
         health <= 0 && impactFailure.current
           ? impactFailure.current
-          : DELIVERY_FAILURES[
-              Math.floor(Math.random() * DELIVERY_FAILURES.length)
-            ],
+          : pickFailure("route", DELIVERY_FAILURES),
       );
       setMode("lost");
       beep("gameover");
