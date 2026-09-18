@@ -2,6 +2,7 @@ import { del, put } from "@vercel/blob";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
+  linkedMessageEmployeeIdForOwner,
   ownerConversationDashboard,
   sendConversationMessage,
   TEAM_CONVERSATION_KEY,
@@ -82,10 +83,13 @@ export async function GET(request: Request) {
     }
     const viewAsEmployeeId = url.searchParams.get("viewAsEmployeeId") || "";
     const dashboard = await ownerConversationDashboard(business, viewAsEmployeeId);
+    const linkedEmployeeId = viewAsEmployeeId
+      ? null
+      : await linkedMessageEmployeeIdForOwner(business, session.userId);
     const unreadMessageIds = viewAsEmployeeId
       ? dashboard.unreadMessageIds
       : await adminUnreadMessageIds(session.email, business);
-    return Response.json({ ...dashboard, unreadMessageIds }, {
+    return Response.json({ ...dashboard, unreadMessageIds, linkedEmployeeId }, {
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {
@@ -113,11 +117,6 @@ export async function POST(request: Request) {
         return Response.json({ error: "Business access denied." }, { status: 403 });
       }
       const conversationKey = String(form.get("conversationKey") || TEAM_CONVERSATION_KEY);
-      if (conversationKey.toLowerCase().startsWith("direct:")) {
-        return Response.json({
-          error: "Employee-to-employee conversations are view-only for management. Use an employee conversation or the entire team.",
-        }, { status: 400 });
-      }
       const body = String(form.get("body") || "");
       const cameraPhoto = form.get("cameraPhoto");
       const libraryPhoto = form.get("photo");
@@ -158,7 +157,10 @@ export async function POST(request: Request) {
       const result = await sendConversationMessage({
         business,
         conversationKey,
-        senderName: session.email,
+        senderOwnerUserId: session.userId,
+        senderOwnerUserId: session.userId,
+        senderOwnerUserId: session.userId,
+      senderName: session.email,
         body,
         attachment,
       });
@@ -196,12 +198,6 @@ export async function POST(request: Request) {
     }
 
     const conversationKey = String(body.conversationKey || TEAM_CONVERSATION_KEY);
-    if (conversationKey.toLowerCase().startsWith("direct:")) {
-      return Response.json({
-        error: "Employee-to-employee conversations are view-only for management. Use an employee conversation or the entire team.",
-      }, { status: 400 });
-    }
-
     const messageBody = String(body.body || "");
     const result = await sendConversationMessage({
       business,
