@@ -158,9 +158,7 @@ export async function POST(request: Request) {
         business,
         conversationKey,
         senderOwnerUserId: session.userId,
-        senderOwnerUserId: session.userId,
-        senderOwnerUserId: session.userId,
-      senderName: session.email,
+        senderName: session.email,
         body,
         attachment,
       });
@@ -202,6 +200,7 @@ export async function POST(request: Request) {
     const result = await sendConversationMessage({
       business,
       conversationKey,
+      senderOwnerUserId: session.userId,
       senderName: session.email,
       body: messageBody,
     });
