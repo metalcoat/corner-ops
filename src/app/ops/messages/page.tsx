@@ -43,6 +43,7 @@ type Payload = {
   messages: Message[];
   unreadMessageIds: string[];
   viewAsEmployee: Employee | null;
+  linkedEmployeeId: string | null;
 };
 
 type ConversationKind = "team" | "management" | "direct";
@@ -308,7 +309,13 @@ export default function MessagesPage() {
           ? people.filter((person) => person.id.toLowerCase() !== viewAsEmployeeId.toLowerCase())
           : people;
         label = otherPeople.map((person) => person.chatNickname || person.name).join(" ↔ ") || "Employee conversation";
-        detail = viewAsEmployeeId ? "Employee conversation" : "Employee-to-employee · View only";
+        const linkedDirect = Boolean(data?.linkedEmployeeId)
+          && ids.includes(String(data?.linkedEmployeeId || "").toLowerCase());
+        detail = viewAsEmployeeId
+          ? "Employee conversation"
+          : linkedDirect
+            ? "Chris conversation · Management can reply"
+            : "Employee-to-employee · View only";
       }
       const messages = (data?.messages || [])
         .filter((message) => (message.conversationKey || "team") === key)
@@ -334,7 +341,7 @@ export default function MessagesPage() {
       if (aTime !== bTime) return bTime - aTime;
       return a.label.localeCompare(b.label);
     });
-  }, [data?.employees, data?.messages, employeesById, unreadIds, viewAsEmployeeId]);
+  }, [data?.employees, data?.messages, data?.linkedEmployeeId, employeesById, unreadIds, viewAsEmployeeId]);
 
   const filteredConversations = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -351,7 +358,14 @@ export default function MessagesPage() {
   const selectedMessages = selectedConversation?.messages || [];
   const canWrite = Boolean(selectedConversation)
     && !viewAsEmployeeId
-    && selectedConversation?.kind !== "direct";
+    && (
+      selectedConversation?.kind !== "direct"
+      || Boolean(
+        data?.linkedEmployeeId
+        && selectedConversation
+        && directIds(selectedConversation.key).includes(data.linkedEmployeeId.toLowerCase())
+      )
+    );
 
   useEffect(() => {
     if (selectedConversation && selectedConversation.key !== selectedKey) setSelectedKey(selectedConversation.key);
