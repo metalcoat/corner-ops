@@ -41,6 +41,7 @@ type Message = {
 };
 
 type EmployeeData = {
+  linkedManagementAccess: boolean;
   employee: DirectoryEmployee;
   messages: Message[];
   directory: DirectoryEmployee[];
@@ -297,6 +298,13 @@ export default function EmployeeMessagesApp() {
         kind = "management";
         label = "Management";
         detail = "Private conversation with management";
+      } else if (key.startsWith("owner:")) {
+        if (!data?.linkedManagementAccess) return null;
+        const employee = employeesById.get(key.slice(6).toLowerCase());
+        if (!employee) return null;
+        kind = "management";
+        label = `${employee.chatNickname || employee.name} · Management`;
+        detail = "Management conversation · reply as Chris";
       } else if (key.startsWith("direct:")) {
         kind = "direct";
         const ids = directIds(key);
@@ -333,7 +341,7 @@ export default function EmployeeMessagesApp() {
       if (aTime !== bTime) return bTime - aTime;
       return a.label.localeCompare(b.label);
     });
-  }, [data?.directory, data?.messages, employeesById, session, unreadIds]);
+  }, [data?.directory, data?.messages, data?.linkedManagementAccess, employeesById, session, unreadIds]);
 
   const filteredConversations = useMemo(() => {
     const needle = search.trim().toLowerCase();

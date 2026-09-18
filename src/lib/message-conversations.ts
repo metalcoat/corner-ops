@@ -5,6 +5,10 @@ import type { Business } from "@/lib/types";
 
 export const TEAM_CONVERSATION_KEY = "team";
 
+const LINKED_OWNER_USER_ID = "076af52a-5002-4a8c-bf12-2222e9707441";
+const LINKED_CHRIS_EMPLOYEE_ID = "221b3fca-1033-4372-9021-145338760aba";
+const LINKED_IDENTITY_BUSINESS: Business = "Corner Deli";
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type ConversationKind = "team" | "owner" | "direct";
@@ -76,6 +80,55 @@ function uuid(value: unknown, label = "Employee"): string {
   return result.toLowerCase();
 }
 
+async function linkedIdentityActive(input: {
+  business: Business;
+  ownerUserId?: string | null;
+  employeeId?: string | null;
+}): Promise<boolean> {
+  if (input.business !== LINKED_IDENTITY_BUSINESS) return false;
+  const ownerMatches = input.ownerUserId
+    ? String(input.ownerUserId).toLowerCase() === LINKED_OWNER_USER_ID
+    : true;
+  const employeeMatches = input.employeeId
+    ? String(input.employeeId).toLowerCase() === LINKED_CHRIS_EMPLOYEE_ID
+    : true;
+  if (!ownerMatches || !employeeMatches) return false;
+
+  const rows = await getSql()`
+    SELECT u.id AS owner_user_id, u.active AS owner_active, u.role AS owner_role,
+      u.businesses AS owner_businesses,
+      e.id AS employee_id, e.active AS employee_active, e.business AS employee_business
+    FROM app_users u
+    JOIN employees e ON e.id = ${LINKED_CHRIS_EMPLOYEE_ID}::uuid
+    WHERE u.id = ${LINKED_OWNER_USER_ID}::uuid
+    LIMIT 1
+  ` as unknown as Array<{
+    owner_user_id: string;
+    owner_active: boolean;
+    owner_role: string;
+    owner_businesses: Business[] | string;
+    employee_id: string;
+    employee_active: boolean;
+    employee_business: Business;
+  }>;
+  const row = rows[0];
+  if (!row?.owner_active || !row.employee_active || row.owner_role !== "Owner") return false;
+  const businesses = Array.isArray(row.owner_businesses)
+    ? row.owner_businesses
+    : String(row.owner_businesses || "").replace(/[{}"]/g, "").split(",").map((value) => value.trim());
+  return String(row.owner_user_id).toLowerCase() === LINKED_OWNER_USER_ID
+    && String(row.employee_id).toLowerCase() === LINKED_CHRIS_EMPLOYEE_ID
+    && row.employee_business === LINKED_IDENTITY_BUSINESS
+    && businesses.includes(LINKED_IDENTITY_BUSINESS);
+}
+
+export async function linkedMessageEmployeeIdForOwner(
+  business: Business,
+  ownerUserId?: string | null,
+): Promise<string | null> {
+  return await linkedIdentityActive({ business, ownerUserId }) ? LINKED_CHRIS_EMPLOYEE_ID : null;
+}
+
 export function ownerConversationKey(employeeId: string): string {
   return `owner:${uuid(employeeId)}`;
 }
@@ -116,6 +169,7 @@ export function conversationIsVisibleToActiveRoster(
   value: unknown,
   activeEmployeeIds: Iterable<string>,
   viewerEmployeeId?: string | null,
+  linkedManagementAccess = false,
 ): boolean {
   let descriptor: ConversationDescriptor;
   try {
@@ -129,7 +183,7 @@ export function conversationIsVisibleToActiveRoster(
   if (descriptor.kind === "team") return true;
   if (descriptor.employeeIds.some((id) => !active.has(id))) return false;
   if (!viewer) return true;
-  if (descriptor.kind === "owner") return descriptor.employeeIds[0] === viewer;
+  if (descriptor.kind === "owner") return linkedManagementAccess || descriptor.employeeIds[0] === viewer;
   return descriptor.employeeIds.includes(viewer);
 }
 
@@ -163,7 +217,14 @@ async function resolveConversation(input: {
   business: Business;
   conversationKey?: unknown;
   senderEmployeeId?: string | null;
-}): Promise<{ descriptor: ConversationDescriptor; members: ActiveEmployee[]; recipientEmployeeId: string | null }> {
+  senderOwnerUserId?: string | null;
+}): Promise<{
+  descriptor: ConversationDescriptor;
+  members: ActiveEmployee[];
+  recipientEmployeeId: string | null;
+  effectiveSenderEmployeeId: string | null;
+  linkedManagementSide: boolean;
+}> {
   const descriptor = parseConversationKey(input.conversationKey);
   const senderEmployeeId = input.senderEmployeeId ? uuid(input.senderEmployeeId, "Sender") : null;
   const members = descriptor.kind === "team"
@@ -172,8 +233,21 @@ async function resolveConversation(input: {
 
   if (!members.length) throw new Error("This conversation has no active employee recipients.");
   const memberIds = new Set(members.map((member) => String(member.id).toLowerCase()));
+  const linkedOwner = !senderEmployeeId && descriptor.kind === "direct"
+    ? await linkedIdentityActive({ business: input.business, ownerUserId: input.senderOwnerUserId })
+    : false;
+  const linkedEmployee = Boolean(senderEmployeeId)
+    && senderEmployeeId === LINKED_CHRIS_EMPLOYEE_ID
+    && await linkedIdentityActive({ business: input.business, employeeId: senderEmployeeId });
+  const linkedManagementSide = Boolean(
+    senderEmployeeId
+    && descriptor.kind === "owner"
+    && descriptor.employeeIds[0] !== senderEmployeeId
+    && linkedEmployee
+  );
+
   if (senderEmployeeId) {
-    if (descriptor.kind === "owner" && descriptor.employeeIds[0] !== senderEmployeeId) {
+    if (descriptor.kind === "owner" && descriptor.employeeIds[0] !== senderEmployeeId && !linkedManagementSide) {
       throw new Error("Employees can only use their own management conversation.");
     }
     if (descriptor.kind === "direct" && !memberIds.has(senderEmployeeId)) {
@@ -182,31 +256,45 @@ async function resolveConversation(input: {
     if (descriptor.kind === "team" && !memberIds.has(senderEmployeeId)) {
       throw new Error("Employee is not active for this location.");
     }
+  } else if (descriptor.kind === "direct") {
+    if (!linkedOwner || !memberIds.has(LINKED_CHRIS_EMPLOYEE_ID)) {
+      throw new Error("Management can only reply to employee conversations involving Chris.");
+    }
   }
 
+  if (linkedManagementSide && !memberIds.has(LINKED_CHRIS_EMPLOYEE_ID)) {
+    const linked = await activeEmployees(input.business, [LINKED_CHRIS_EMPLOYEE_ID]);
+    members.push(...linked);
+    memberIds.add(LINKED_CHRIS_EMPLOYEE_ID);
+  }
+
+  const effectiveSenderEmployeeId = senderEmployeeId
+    || (descriptor.kind === "direct" && linkedOwner ? LINKED_CHRIS_EMPLOYEE_ID : null);
   let recipientEmployeeId: string | null = null;
   if (descriptor.kind === "owner") {
-    recipientEmployeeId = senderEmployeeId ? null : descriptor.employeeIds[0];
-  } else if (descriptor.kind === "direct" && senderEmployeeId) {
-    recipientEmployeeId = descriptor.employeeIds.find((id) => id !== senderEmployeeId) || null;
+    recipientEmployeeId = senderEmployeeId && !linkedManagementSide ? null : descriptor.employeeIds[0];
+  } else if (descriptor.kind === "direct" && effectiveSenderEmployeeId) {
+    recipientEmployeeId = descriptor.employeeIds.find((id) => id !== effectiveSenderEmployeeId) || null;
   }
 
-  return { descriptor, members, recipientEmployeeId };
+  return { descriptor, members, recipientEmployeeId, effectiveSenderEmployeeId, linkedManagementSide };
 }
 
 export async function sendConversationMessage(input: {
   business: Business;
   conversationKey?: unknown;
   senderEmployeeId?: string | null;
+  senderOwnerUserId?: string | null;
   senderName: string;
   body?: unknown;
   attachment?: AttachmentInput | null;
 }) {
   const senderEmployeeId = input.senderEmployeeId ? uuid(input.senderEmployeeId, "Sender") : null;
-  const { descriptor, members, recipientEmployeeId } = await resolveConversation({
+  const { descriptor, members, recipientEmployeeId, effectiveSenderEmployeeId, linkedManagementSide } = await resolveConversation({
     business: input.business,
     conversationKey: input.conversationKey,
     senderEmployeeId,
+    senderOwnerUserId: input.senderOwnerUserId,
   });
   const messageBody = clean(input.body, 3000) || (input.attachment ? "Photo attached." : "");
   if (!messageBody && !input.attachment) throw new Error("Type a message or attach a photo.");
@@ -256,8 +344,8 @@ export async function sendConversationMessage(input: {
     conversationKind: descriptor.kind,
     recipientEmployeeId,
     recipientEmployeeIds: memberIds,
-    pushRecipientEmployeeIds: memberIds.filter((employeeId) => employeeId !== senderEmployeeId),
-    notifyOwnersOnly: descriptor.kind === "owner" && Boolean(senderEmployeeId),
+    pushRecipientEmployeeIds: memberIds.filter((employeeId) => employeeId !== effectiveSenderEmployeeId),
+    notifyOwnersOnly: descriptor.kind === "owner" && Boolean(senderEmployeeId) && !linkedManagementSide,
   };
 }
 
@@ -303,15 +391,21 @@ function visibleMessages(
   messages: DecoratedMessage[],
   activeEmployeeIds: Iterable<string>,
   viewerEmployeeId?: string | null,
+  linkedManagementAccess = false,
 ): DecoratedMessage[] {
   return messages.filter((message) => conversationIsVisibleToActiveRoster(
     message.conversationKey,
     activeEmployeeIds,
     viewerEmployeeId,
+    linkedManagementAccess,
   ));
 }
 
-async function recentMessageRows(business: Business, employeeId?: string | null): Promise<MessageRow[]> {
+async function recentMessageRows(
+  business: Business,
+  employeeId?: string | null,
+  linkedManagementAccess = false,
+): Promise<MessageRow[]> {
   if (employeeId) {
     return await getSql()`
       SELECT m.id, m.business, m.conversation_key, m.sender_employee_id, m.sender_name,
@@ -322,11 +416,16 @@ async function recentMessageRows(business: Business, employeeId?: string | null)
         m.message_type, m.body, m.attachment_name, m.attachment_type,
         m.attachment_size, m.created_at
       FROM employee_messages m
-      JOIN employee_message_recipients visible
-        ON visible.message_id = m.id AND visible.employee_id = ${employeeId}::uuid
       LEFT JOIN employees sender ON sender.id = m.sender_employee_id
       LEFT JOIN employees recipient ON recipient.id = m.recipient_employee_id
       WHERE m.business = ${business} AND m.deleted_at IS NULL
+        AND (
+          EXISTS (
+            SELECT 1 FROM employee_message_recipients visible
+            WHERE visible.message_id = m.id AND visible.employee_id = ${employeeId}::uuid
+          )
+          OR (${linkedManagementAccess} AND m.conversation_key LIKE 'owner:%')
+        )
       ORDER BY m.created_at DESC, m.id DESC
       LIMIT 500
     ` as unknown as MessageRow[];
@@ -348,7 +447,11 @@ async function recentMessageRows(business: Business, employeeId?: string | null)
   ` as unknown as MessageRow[];
 }
 
-async function receiptRows(business: Business, employeeId?: string | null) {
+async function receiptRows(
+  business: Business,
+  employeeId?: string | null,
+  linkedManagementAccess = false,
+) {
   const visibility = employeeId
     ? await getSql()`
         SELECT mr.message_id, mr.employee_id, e.name
@@ -356,9 +459,12 @@ async function receiptRows(business: Business, employeeId?: string | null) {
         JOIN employee_messages m ON m.id = mr.message_id
         JOIN employees e ON e.id = mr.employee_id AND e.active = TRUE
         WHERE m.business = ${business} AND m.deleted_at IS NULL
-          AND EXISTS (
-            SELECT 1 FROM employee_message_recipients own
-            WHERE own.message_id = m.id AND own.employee_id = ${employeeId}::uuid
+          AND (
+            EXISTS (
+              SELECT 1 FROM employee_message_recipients own
+              WHERE own.message_id = m.id AND own.employee_id = ${employeeId}::uuid
+            )
+            OR (${linkedManagementAccess} AND m.conversation_key LIKE 'owner:%')
           )
         ORDER BY m.created_at DESC
         LIMIT 6000
@@ -379,9 +485,12 @@ async function receiptRows(business: Business, employeeId?: string | null) {
         JOIN employee_messages m ON m.id = r.message_id
         JOIN employees e ON e.id = r.employee_id AND e.active = TRUE
         WHERE m.business = ${business} AND m.deleted_at IS NULL
-          AND EXISTS (
-            SELECT 1 FROM employee_message_recipients own
-            WHERE own.message_id = m.id AND own.employee_id = ${employeeId}::uuid
+          AND (
+            EXISTS (
+              SELECT 1 FROM employee_message_recipients own
+              WHERE own.message_id = m.id AND own.employee_id = ${employeeId}::uuid
+            )
+            OR (${linkedManagementAccess} AND m.conversation_key LIKE 'owner:%')
           )
         ORDER BY r.read_at
         LIMIT 6000
@@ -452,22 +561,26 @@ export async function ownerConversationDashboard(business: Business, viewAsEmplo
 }
 
 export async function employeeConversationDashboard(session: EmployeeSession) {
+  const linkedManagementAccess = session.employeeId.toLowerCase() === LINKED_CHRIS_EMPLOYEE_ID
+    && await linkedIdentityActive({ business: session.business, employeeId: session.employeeId });
   const employees = await activeEmployees(session.business);
   const employee = employees.find((item) => String(item.id).toLowerCase() === session.employeeId.toLowerCase());
   if (!employee) throw new Error("Employee is archived or no longer active for this location.");
   const [messages, receipts] = await Promise.all([
-    recentMessageRows(session.business, session.employeeId),
-    receiptRows(session.business, session.employeeId),
+    recentMessageRows(session.business, session.employeeId, linkedManagementAccess),
+    receiptRows(session.business, session.employeeId, linkedManagementAccess),
   ]);
   const activeIds = employees.map((item) => String(item.id).toLowerCase());
   const decorated = visibleMessages(
     decorateMessages(messages, receipts.recipients, receipts.reads),
     activeIds,
     session.employeeId,
+    linkedManagementAccess,
   );
 
   return {
     employee: mapEmployee(employee),
+    linkedManagementAccess,
     directory: employees.map(mapEmployee),
     messages: decorated,
     unreadMessageIds: unreadMessageIdsForViewer(decorated, receipts.reads, session.employeeId),
@@ -475,15 +588,22 @@ export async function employeeConversationDashboard(session: EmployeeSession) {
 }
 
 export async function markConversationMessageSeen(session: EmployeeSession, messageId: unknown) {
+  const linkedManagementAccess = session.employeeId.toLowerCase() === LINKED_CHRIS_EMPLOYEE_ID
+    && await linkedIdentityActive({ business: session.business, employeeId: session.employeeId });
   const id = uuid(messageId, "Message");
   const rows = await getSql()`
     SELECT m.id, m.sender_employee_id
     FROM employee_messages m
-    JOIN employee_message_recipients recipient
-      ON recipient.message_id = m.id AND recipient.employee_id = ${session.employeeId}::uuid
     WHERE m.id = ${id}::uuid
       AND m.business = ${session.business}
       AND m.deleted_at IS NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM employee_message_recipients recipient
+          WHERE recipient.message_id = m.id AND recipient.employee_id = ${session.employeeId}::uuid
+        )
+        OR (${linkedManagementAccess} AND m.conversation_key LIKE 'owner:%')
+      )
     LIMIT 1
   ` as unknown as Array<{ id: string; sender_employee_id: string | null }>;
   const message = rows[0];
@@ -528,14 +648,21 @@ export async function ownerConversationAttachment(business: Business, messageId:
 }
 
 export async function employeeConversationAttachment(session: EmployeeSession, messageId: unknown) {
+  const linkedManagementAccess = session.employeeId.toLowerCase() === LINKED_CHRIS_EMPLOYEE_ID
+    && await linkedIdentityActive({ business: session.business, employeeId: session.employeeId });
   const id = uuid(messageId, "Message");
   const rows = await getSql()`
     SELECT m.attachment_pathname, m.attachment_name, m.attachment_type, m.attachment_size
     FROM employee_messages m
-    JOIN employee_message_recipients recipient
-      ON recipient.message_id = m.id AND recipient.employee_id = ${session.employeeId}::uuid
     WHERE m.id = ${id}::uuid AND m.business = ${session.business}
       AND m.deleted_at IS NULL AND m.attachment_pathname <> ''
+      AND (
+        EXISTS (
+          SELECT 1 FROM employee_message_recipients recipient
+          WHERE recipient.message_id = m.id AND recipient.employee_id = ${session.employeeId}::uuid
+        )
+        OR (${linkedManagementAccess} AND m.conversation_key LIKE 'owner:%')
+      )
     LIMIT 1
   ` as unknown as Array<Record<string, unknown>>;
   return attachment(rows[0]);

@@ -36,16 +36,25 @@ test("archived employees disappear from normal inboxes and receipts", () => {
   assert.match(conversations, /visibleMessages\(/);
 });
 
-test("management messaging is an inbox with read-only employee impersonation", () => {
+test("management messaging keeps read-only impersonation while linking only Chris reply paths", () => {
   const owner = source("src/app/ops/messages/page.tsx");
+  const employee = source("src/app/employee/conversation-messages-dock.tsx");
   const route = source("src/app/api/message-conversations/route.ts");
+  const conversations = source("src/lib/message-conversations.ts");
   assert.match(owner, /Entire team/);
   assert.match(owner, /View as/);
   assert.match(owner, /Read-only impersonation/);
   assert.match(owner, /messageConversationRow/);
   assert.match(owner, /Employee-to-employee · View only/);
+  assert.match(owner, /Chris conversation · Management can reply/);
   assert.match(route, /viewAsEmployeeId/);
-  assert.match(route, /Employee-to-employee conversations are view-only for management/);
+  assert.match(route, /linkedMessageEmployeeIdForOwner/);
+  assert.doesNotMatch(route, /Employee-to-employee conversations are view-only for management/);
+  assert.match(employee, /linkedManagementAccess/);
+  assert.match(employee, /Management conversation · reply as Chris/);
+  assert.match(conversations, /LINKED_OWNER_USER_ID/);
+  assert.match(conversations, /LINKED_CHRIS_EMPLOYEE_ID/);
+  assert.match(conversations, /Management can only reply to employee conversations involving Chris/);
 });
 
 test("employees use a dedicated full-page inbox instead of a global message dock", () => {
