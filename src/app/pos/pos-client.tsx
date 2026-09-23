@@ -866,6 +866,12 @@ export default function PosClient({
   >([]);
 
   useEffect(() => {
+    if (!cartNotice) return;
+    const timer = window.setTimeout(() => setCartNotice(""), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [cartNotice]);
+
+  useEffect(() => {
     document.documentElement.dataset.businessTheme = business;
     window.localStorage.setItem("corner-ops-business-theme", business);
     fetch(
@@ -4045,9 +4051,16 @@ export default function PosClient({
           </div>
         )}
       {cartNotice && (
-        <div className="posCartToast" aria-live="polite">
-          {cartNotice}
-        </div>
+        <button
+          type="button"
+          className="posCartToast"
+          aria-live="polite"
+          aria-label={`${cartNotice}. Tap to dismiss.`}
+          onClick={() => setCartNotice("")}
+        >
+          <span>{cartNotice}</span>
+          <small>TAP TO DISMISS</small>
+        </button>
       )}
 
       <section className="posWorkspace">

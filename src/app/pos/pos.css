@@ -1876,15 +1876,25 @@
 .posCartToast {
   position: fixed;
   z-index: 120;
-  right: 24px;
-  bottom: 24px;
+  top: max(76px, calc(env(safe-area-inset-top) + 62px));
+  left: 50%;
+  width: min(560px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
   padding: 13px 18px;
   border-radius: 12px;
+  border: 2px solid #4ade80;
   background: #166534;
   color: #fff;
   font-weight: 900;
+  text-align: left;
+  cursor: pointer;
   box-shadow: 0 12px 35px rgba(0, 0, 0, 0.4);
 }
+.posCartToast small{flex:0 0 auto;color:#bbf7d0;font-size:.65rem;letter-spacing:.06em}.posCartToast:active{transform:translateX(-50%) scale(.98)}
 .posItemNotes {
   display: grid;
   gap: 7px;
