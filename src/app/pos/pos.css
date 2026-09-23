@@ -1170,6 +1170,7 @@
   place-items: center;
   padding: 18px;
 }
+.posWingSidePromptBackdrop{z-index:180}.posWingSidePrompt{width:min(520px,94vw);border:3px solid #fbbf24;padding:24px;text-align:center;box-shadow:0 22px 70px #0009}.posWingSidePrompt h2,.posWingSidePrompt p{margin:0}.posWingSidePrompt h2{color:#fde68a;font-size:clamp(1.55rem,4vw,2.15rem)}.posWingSidePrompt p{font-size:clamp(1.05rem,2.5vw,1.35rem);line-height:1.45}.posWingSidePrompt>small{color:#cbd5e1}.posWingSidePromptEyebrow{color:#fbbf24;font-size:.8rem;font-weight:900;letter-spacing:.14em}.posWingSidePromptActions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}.posWingSidePromptActions button{min-height:58px;font-weight:900}@media(max-width:560px){.posWingSidePromptActions{grid-template-columns:1fr}}
 .posCheckoutSideBackdrop {
   position: fixed;
   inset: 0;

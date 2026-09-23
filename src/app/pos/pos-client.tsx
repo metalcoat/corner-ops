@@ -85,6 +85,8 @@ function cartLineConfiguration(line: CartLine) {
 function appendOrIncrementCartLine(current: CartLine[], line: CartLine) {
   return consolidateQuantities([...current, line], cartLineConfiguration);
 }
+function isWingItemName(name:string){return /^(?:traditional\s+)?wings$|^boneless\s+wings$/i.test(name.trim())}
+function hasWingSideSelection(item:OrderingMenuItemWithVariants,selections:Record<string,string[]>){return item.modifiers.some(group=>group.options.some(option=>(selections[group.id]||[]).includes(option.id)&&/^(?:blue|bleu) cheese(?:\s|\(|$)|^ranch(?:\s|\(|$)|^celery(?:\s|\(|$)/i.test(option.name.trim())))}
 function sodaLogoUrl(name:string){if(/(?:cherry pepsi|pepsi (?:wild )?cherry)/i.test(name))return "/api/ordering/brand-logo/cherry_pepsi";if(/diet pepsi/i.test(name))return "/api/ordering/brand-logo/diet_pepsi";if(/pepsi/i.test(name))return "/api/ordering/brand-logo/pepsi";if(/baja blast/i.test(name))return "/api/ordering/brand-logo/baja_blast";if(/code red/i.test(name))return "/api/ordering/brand-logo/code_red";if(/diet (?:mountain|mtn) dew/i.test(name))return "/api/ordering/brand-logo/diet_mountain_dew";if(/mountain dew|mtn dew/i.test(name))return "/api/ordering/brand-logo/mountain_dew";if(/starry/i.test(name))return "/api/ordering/brand-logo/starry";if(/brisk/i.test(name))return "/api/ordering/brand-logo/brisk";if(/mug root beer/i.test(name))return "/api/ordering/brand-logo/root_beer";return ""}
 
 type MenuPayload = {
@@ -511,6 +513,7 @@ export default function PosClient({
   const [cart, setCart] = useState<CartLine[]>([]);
   const [configuringItem, setConfiguringItem] =
     useState<OrderingMenuItemWithVariants | null>(null);
+  const [wingSidePromptOpen,setWingSidePromptOpen]=useState(false);
   const [selectedVariantId, setSelectedVariantId] = useState("");
   const [partySaladGuests, setPartySaladGuests] = useState("1");
   const [modifierSelections, setModifierSelections] = useState<
@@ -1692,6 +1695,7 @@ export default function PosClient({
     setEditingLineId(line?.id || null);
     setCheckoutError("");
     setConfigurationMessage("");
+    setWingSidePromptOpen(false);
   }
 
   function selectItem(item: OrderingMenuItemWithVariants) {
@@ -1847,7 +1851,7 @@ export default function PosClient({
     });
   }
 
-  function addConfiguredItem() {
+  function addConfiguredItem(skipWingSidePrompt=false) {
     if (!configuringItem) return;
     if (!configuration.valid) {
       setConfigurationMessage(
@@ -1861,6 +1865,7 @@ export default function PosClient({
           ?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
+    if(!skipWingSidePrompt&&isWingItemName(configuringItem.name)&&!hasWingSideSelection(configuringItem,modifierSelections)){setWingSidePromptOpen(true);return}
     const line: CartLine = {
       id: editingLineId || clientId(),
       itemId: configuringItem.id,
@@ -1889,6 +1894,7 @@ export default function PosClient({
     );
     if(employeeMealSelecting){setEmployeeMealSelecting(false);setEmployeeMealOpen(true);}
     setConfiguringItem(null);
+    setWingSidePromptOpen(false);
     setSelectedVariantId("");
     setEditingLineId(null);
     invalidateEditableDraft();
@@ -5819,7 +5825,7 @@ export default function PosClient({
                   type="button"
                   className={`primary ${configuration.valid ? "" : "invalid"}`}
                   aria-disabled={!configuration.valid}
-                  onClick={addConfiguredItem}
+                  onClick={() => addConfiguredItem()}
                 >
                   {editingLineId ? "UPDATE ITEM" : "ADD TO ORDER"}
                 </button>
@@ -5828,6 +5834,7 @@ export default function PosClient({
           </section>
         </div>
       )}
+      {wingSidePromptOpen&&configuringItem&&<div className="posModalBackdrop posWingSidePromptBackdrop"><section className="posCustomerDialog posWingSidePrompt" role="alertdialog" aria-modal="true" aria-labelledby="wing-side-prompt-title" aria-describedby="wing-side-prompt-description"><span className="posWingSidePromptEyebrow">WING ORDER CHECK</span><h2 id="wing-side-prompt-title">ASK THE CUSTOMER</h2><p id="wing-side-prompt-description">Would you like <strong>blue cheese, ranch, or celery</strong> with your wings?</p><small>None of these wing-side modifiers have been selected yet.</small><div className="posWingSidePromptActions"><button type="button" className="primary" onClick={()=>{setWingSidePromptOpen(false);window.setTimeout(()=>{const group=configuringItem.modifiers.find(candidate=>candidate.options.some(option=>/^(?:blue|bleu) cheese(?:\s|\(|$)|^ranch(?:\s|\(|$)|^celery(?:\s|\(|$)/i.test(option.name.trim())));if(group)document.getElementById(`modifier-${group.id}`)?.scrollIntoView({behavior:"smooth",block:"center"})},0)}}>CHOOSE WING SIDES</button><button type="button" onClick={()=>addConfiguredItem(true)}>CUSTOMER DECLINED — ADD ITEM</button></div></section></div>}
       {intensityChoice && (
         <div
           className="posIntensityPopover"
