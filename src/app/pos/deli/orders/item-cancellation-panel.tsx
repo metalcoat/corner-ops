@@ -1,7 +1,118 @@
 "use client";
-import {useEffect,useState} from "react";
-type Item={id:string;item_name_snapshot:string;quantity:number;cancelled_quantity?:number};
-type Tender={id:string;tender_type:string;transaction_type:string;status:string;amount_cents:number;related_transaction_id?:string|null};
-type Quote={orderReductionCents:number;refundRequiredCents:number;discountCents:number;taxCents:number};
-const money=(c:number)=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(c/100);
-export default function ItemCancellationPanel({orderId,item,onDone,onClose}:{orderId:string;item:Item;onDone:()=>Promise<void>;onClose:()=>void}){const available=Number(item.quantity)-Number(item.cancelled_quantity||0),[quantity,setQuantity]=useState(1),[reason,setReason]=useState(""),[quote,setQuote]=useState<Quote|null>(null),[tenders,setTenders]=useState<Tender[]>([]),[tenderId,setTenderId]=useState(""),[refundMethod,setRefundMethod]=useState<"original"|"store_credit">("original"),[creditAmount,setCreditAmount]=useState(""),[error,setError]=useState(""),[busy,setBusy]=useState(false);useEffect(()=>{setQuote(null);const timer=setTimeout(async()=>{try{const [q,p]=await Promise.all([fetch(`/api/ordering/order-center/${orderId}/items/cancel`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"quote",itemId:item.id,quantity})}),fetch(`/api/ordering/orders/${orderId}/payments?business=Corner%20Deli`)]),qb=await q.json(),pb=await p.json();if(!q.ok)throw new Error(qb.error||"Cancellation could not be priced.");setQuote(qb);setCreditAmount((Number(qb.refundRequiredCents||0)/100).toFixed(2));const payments=(pb.tenders||[]).filter((row:Tender)=>row.transaction_type==="payment"&&row.status==="approved");setTenders(payments);setTenderId(current=>current||payments[0]?.id||"");setError("")}catch(e){setError(e instanceof Error?e.message:"Cancellation could not be priced.")}},150);return()=>clearTimeout(timer)},[item.id,orderId,quantity]);const creditCents=Math.round(Number(creditAmount||0)*100);async function submit(e:React.FormEvent){e.preventDefault();if(!quote)return;setBusy(true);try{const response=await fetch(`/api/ordering/order-center/${orderId}/items/cancel`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({itemId:item.id,quantity,reason,paymentTransactionId:quote.refundRequiredCents?tenderId:undefined,refundMethod,storeCreditCents:refundMethod==="store_credit"?creditCents:undefined,clientMutationId:crypto.randomUUID()})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Item cancellation failed.");await onDone()}catch(e){setError(e instanceof Error?e.message:"Item cancellation failed.")}finally{setBusy(false)}}const invalidCredit=refundMethod==="store_credit"&&Boolean(quote?.refundRequiredCents)&&(creditCents<1||creditCents>Number(quote?.refundRequiredCents));return <form className="ocItemCancel" onSubmit={submit}><h3>Remove & refund item</h3><strong>{item.item_name_snapshot}</strong><label>Quantity<select value={quantity} onChange={e=>setQuantity(Number(e.target.value))}>{Array.from({length:available},(_,i)=><option key={i+1}>{i+1}</option>)}</select></label><label>Reason<textarea autoFocus maxLength={500} value={reason} onChange={e=>setReason(e.target.value)} placeholder="Forgotten, unavailable, made incorrectly…"/></label>{quote&&<div className="cancelQuote"><span>Checkout adjustment <b>−{money(quote.orderReductionCents)}</b></span><span>Includes tax adjustment <b>{money(quote.taxCents)}</b></span><span>Maximum refund <b>{money(quote.refundRequiredCents)}</b></span></div>}{quote&&quote.refundRequiredCents>0&&<><label>Refund option<select value={refundMethod} onChange={e=>setRefundMethod(e.target.value as "original"|"store_credit")}><option value="original">Return to original card / cash / gift card</option><option value="store_credit">Credit for the customer’s next order</option></select></label><label>Payment being corrected<select value={tenderId} onChange={e=>setTenderId(e.target.value)}><option value="">Choose original payment</option>{tenders.map(t=><option key={t.id} value={t.id}>{t.tender_type.replaceAll("_"," ")} · {money(t.amount_cents)}</option>)}</select></label>{refundMethod==="store_credit"&&<label>Customer credit amount (maximum {money(quote.refundRequiredCents)})<input type="number" inputMode="decimal" min="0.01" max={(quote.refundRequiredCents/100).toFixed(2)} step="0.01" value={creditAmount} onChange={e=>setCreditAmount(e.target.value)}/><small>This may be reduced, but can never exceed what this item qualifies for.</small></label>}</>}{error&&<p className="ocDialogError" role="alert">{error}</p>}<div><button type="button" disabled={busy} onClick={onClose}>BACK</button><button className="danger" disabled={busy||reason.trim().length<3||!quote||(quote.refundRequiredCents>0&&!tenderId)||invalidCredit}>{busy?"SAVING…":quote?.refundRequiredCents?refundMethod==="store_credit"?"REMOVE & ISSUE CREDIT":"REMOVE & REFUND":"REMOVE ITEM"}</button></div></form>}
+
+import { useEffect, useMemo, useState } from "react";
+
+type Item = { id: string; item_name_snapshot: string; quantity: number; cancelled_quantity?: number };
+type Tender = { id: string; tender_type: string; transaction_type: string; status: string; amount_cents: number };
+type Quote = { orderReductionCents: number; refundRequiredCents: number; discountCents: number; taxCents: number; customerId?: string | null };
+type Resolution = "forgot" | "full_refund" | "minor" | "medium" | "large";
+
+const money = (c: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(c / 100);
+const creditPercent: Partial<Record<Resolution, number>> = { minor: 10, medium: 30, large: 60 };
+const resolutionReason: Record<Resolution, string> = {
+  forgot: "Item was forgotten",
+  full_refund: "Full item refund",
+  minor: "Minor item issue — 10% future-order credit",
+  medium: "Medium item issue — 30% future-order credit",
+  large: "Large item issue — 60% future-order credit",
+};
+
+export default function ItemCancellationPanel({ orderId, item, onDone, onClose }: {
+  orderId: string;
+  item: Item;
+  onDone: (result?: { kind: "cancelled" | "courtesy_credit"; creditCents?: number }) => Promise<void>;
+  onClose: () => void;
+}) {
+  const available = Number(item.quantity) - Number(item.cancelled_quantity || 0);
+  const [quantity, setQuantity] = useState(1);
+  const [resolution, setResolution] = useState<Resolution>("forgot");
+  const [reason, setReason] = useState(resolutionReason.forgot);
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [tenders, setTenders] = useState<Tender[]>([]);
+  const [tenderId, setTenderId] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setQuote(null);
+    const timer = window.setTimeout(async () => {
+      try {
+        const [quoteResponse, paymentResponse] = await Promise.all([
+          fetch(`/api/ordering/order-center/${orderId}/items/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "quote", itemId: item.id, quantity }) }),
+          fetch(`/api/ordering/orders/${orderId}/payments?business=Corner%20Deli`),
+        ]);
+        const quoteBody = await quoteResponse.json();
+        const paymentBody = await paymentResponse.json();
+        if (!quoteResponse.ok) throw new Error(quoteBody.error || "The item resolution could not be priced.");
+        setQuote(quoteBody);
+        const payments = (paymentBody.tenders || []).filter((row: Tender) => row.transaction_type === "payment" && row.status === "approved");
+        setTenders(payments);
+        setTenderId((current) => current || payments[0]?.id || "");
+        setError("");
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "The item resolution could not be priced.");
+      }
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [item.id, orderId, quantity]);
+
+  const courtesyCreditCents = useMemo(() => {
+    const percent = creditPercent[resolution];
+    if (!quote || !percent) return 0;
+    const rounded = Math.round((quote.orderReductionCents * percent / 100) / 25) * 25;
+    return Math.min(quote.orderReductionCents, Math.max(25, rounded));
+  }, [quote, resolution]);
+  const courtesyCredit = courtesyCreditCents > 0;
+
+  function choose(next: Resolution) {
+    setResolution(next);
+    setReason(resolutionReason[next]);
+    setError("");
+  }
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!quote) return;
+    setBusy(true);
+    setError("");
+    try {
+      if (courtesyCredit) {
+        if (!quote.customerId) throw new Error("Attach this order to a customer before issuing future-order credit.");
+        const response = await fetch("/api/ordering/customer-credits", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ customerId: quote.customerId, orderId, amountCents: courtesyCreditCents, reason }) });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "The future-order credit could not be issued.");
+        await onDone({ kind: "courtesy_credit", creditCents: courtesyCreditCents });
+        return;
+      }
+      const response = await fetch(`/api/ordering/order-center/${orderId}/items/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ itemId: item.id, quantity, reason, paymentTransactionId: quote.refundRequiredCents ? tenderId : undefined, refundMethod: "original", clientMutationId: crypto.randomUUID() }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "The item refund could not be completed.");
+      await onDone({ kind: "cancelled" });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The item resolution could not be completed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="ocItemCancel" onSubmit={submit}>
+      <h3>Resolve item problem</h3>
+      <strong>{item.item_name_snapshot}</strong>
+      <label>Quantity<select value={quantity} onChange={(event) => setQuantity(Number(event.target.value))}>{Array.from({ length: available }, (_, index) => <option key={index + 1}>{index + 1}</option>)}</select></label>
+      <div className="ocResolutionChoices" role="group" aria-label="Item resolution">
+        <button type="button" className={resolution === "forgot" ? "selected" : ""} onClick={() => choose("forgot")}><strong>WE FORGOT IT</strong><span>Remove item and refund it</span></button>
+        <button type="button" className={resolution === "full_refund" ? "selected" : ""} onClick={() => choose("full_refund")}><strong>FULL REFUND</strong><span>Remove and refund full item charge</span></button>
+        <button type="button" className={resolution === "minor" ? "selected" : ""} onClick={() => choose("minor")}><strong>MINOR · 10%</strong><span>{money(courtesyCreditCents)} future credit</span></button>
+        <button type="button" className={resolution === "medium" ? "selected" : ""} onClick={() => choose("medium")}><strong>MEDIUM · 30%</strong><span>{money(courtesyCreditCents)} future credit</span></button>
+        <button type="button" className={resolution === "large" ? "selected" : ""} onClick={() => choose("large")}><strong>LARGE · 60%</strong><span>{money(courtesyCreditCents)} future credit</span></button>
+      </div>
+      <label>Reason<textarea autoFocus maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+      {quote && <div className="cancelQuote"><span>Item charge with tax <b>{money(quote.orderReductionCents)}</b></span>{courtesyCredit ? <span>Future-order credit <b>{money(courtesyCreditCents)}</b></span> : <><span>Checkout adjustment <b>−{money(quote.orderReductionCents)}</b></span><span>Refund required <b>{money(quote.refundRequiredCents)}</b></span></>}</div>}
+      {!courtesyCredit && quote && quote.refundRequiredCents > 0 && <label>Payment being refunded<select value={tenderId} onChange={(event) => setTenderId(event.target.value)}><option value="">Choose original payment</option>{tenders.map((tender) => <option key={tender.id} value={tender.id}>{tender.tender_type.replaceAll("_", " ")} · {money(tender.amount_cents)}</option>)}</select></label>}
+      {courtesyCredit && !quote?.customerId && <p className="ocDialogError">A customer account is required for future-order credit.</p>}
+      {error && <p className="ocDialogError" role="alert">{error}</p>}
+      <div><button type="button" disabled={busy} onClick={onClose}>BACK</button><button className={courtesyCredit ? "primary" : "danger"} disabled={busy || reason.trim().length < 3 || !quote || (courtesyCredit ? !quote.customerId : quote.refundRequiredCents > 0 && !tenderId)}>{busy ? "SAVING…" : courtesyCredit ? `ISSUE ${money(courtesyCreditCents)} CREDIT` : "REMOVE & REFUND ITEM"}</button></div>
+    </form>
+  );
+}

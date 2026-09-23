@@ -824,6 +824,9 @@ export default function PosClient({
   const [loyalty, setLoyalty] = useState<LoyaltyStatus[]>([]),
     [redeeming, setRedeeming] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const menuPanelRef = useRef<HTMLElement>(null);
+  const menuPanRef = useRef<{ pointerId: number; startY: number; scrollTop: number } | null>(null);
+  const menuPanMovedRef = useRef(false);
   const [scanNotice, setScanNotice] = useState("");
   const [unknownBarcode, setUnknownBarcode] = useState("");
   const [incomingCalls, setIncomingCalls] = useState<IncomingDeliCall[]>([]);
@@ -864,6 +867,32 @@ export default function PosClient({
       line_total_cents: number;
     }>
   >([]);
+
+  function startMenuPan(event: React.PointerEvent<HTMLElement>) {
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
+    if ((event.target as HTMLElement).closest("input, textarea, select")) return;
+    menuPanMovedRef.current = false;
+    menuPanRef.current = { pointerId: event.pointerId, startY: event.clientY, scrollTop: event.currentTarget.scrollTop };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveMenuPan(event: React.PointerEvent<HTMLElement>) {
+    const pan = menuPanRef.current;
+    if (!pan || pan.pointerId !== event.pointerId) return;
+    const distance = event.clientY - pan.startY;
+    if (Math.abs(distance) > 5) {
+      menuPanMovedRef.current = true;
+      if (item86Timer.current !== null) window.clearTimeout(item86Timer.current);
+      item86Timer.current = null;
+      event.currentTarget.scrollTop = pan.scrollTop - distance;
+    }
+  }
+
+  function finishMenuPan(event: React.PointerEvent<HTMLElement>) {
+    if (menuPanRef.current?.pointerId !== event.pointerId) return;
+    menuPanRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
 
   useEffect(() => {
     if (!cartNotice) return;
@@ -4064,7 +4093,14 @@ export default function PosClient({
       )}
 
       <section className="posWorkspace">
-        <section className="posMenuPanel">
+        <section
+          ref={menuPanelRef}
+          className="posMenuPanel"
+          onPointerDown={startMenuPan}
+          onPointerMove={moveMenuPan}
+          onPointerUp={finishMenuPan}
+          onPointerCancel={finishMenuPan}
+        >
           <nav className="posMenuNavigation" aria-label="Menu categories">
             <div className="posPrimaryCategories">
               {primaryCategories.map((category) => (
@@ -4184,7 +4220,7 @@ export default function PosClient({
                   onPointerUp={() => { if (item86Timer.current !== null) window.clearTimeout(item86Timer.current); item86Timer.current = null; }}
                   onPointerCancel={() => { if (item86Timer.current !== null) window.clearTimeout(item86Timer.current); item86Timer.current = null; }}
                   onPointerLeave={() => { if (item86Timer.current !== null) window.clearTimeout(item86Timer.current); item86Timer.current = null; }}
-                  onClick={(event) => { if (item86Triggered.current) { event.preventDefault(); item86Triggered.current = false; return; } if(item.available)selectItem(item); }}
+                  onClick={(event) => { if (menuPanMovedRef.current) { event.preventDefault(); menuPanMovedRef.current = false; return; } if (item86Triggered.current) { event.preventDefault(); item86Triggered.current = false; return; } if(item.available)selectItem(item); }}
                 >
                   {(item.imageUrl || sodaLogoUrl(item.name)) && (
                     <img
@@ -4781,11 +4817,13 @@ export default function PosClient({
               orderId={savedDraft.id}
               item={reopenedCancelItem}
               onClose={() => setReopenedCancelItem(null)}
-              onDone={async () => {
+              onDone={async (result) => {
                 setReopenedCancelItem(null);
                 await refreshReopenedOrder(savedDraft.id);
                 setCartNotice(
-                  `Item voided from order #${savedDraft.displayNumber}.`,
+                  result?.kind === "courtesy_credit"
+                    ? `${money(result.creditCents || 0)} future-order credit issued for order #${savedDraft.displayNumber}.`
+                    : `Item voided from order #${savedDraft.displayNumber}.`,
                 );
               }}
             />

@@ -368,6 +368,8 @@
   padding: 9px 12px;
   overflow-x: auto;
   scrollbar-width: thin;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
 }
 .posSubcategories {
   padding-top: 0;
@@ -835,7 +837,12 @@
   padding: 10px;
   min-width: 0;
   overflow-y: auto;
+  touch-action: pan-y;
+  overscroll-behavior-y: contain;
+  cursor: grab;
 }
+.posMenuPanel:active{cursor:grabbing}.posMenuPanel input,.posMenuPanel textarea,.posMenuPanel select,.posMenuPanel button{cursor:pointer}
+.posItemGrid,.posItemButton{touch-action:pan-y}
 .posPanelHeading,
 .posCartHeading,
 .posLineTop,
@@ -1058,6 +1065,7 @@
   display: flex;
   justify-content: space-between;
 }
+.ocResolutionChoices{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.ocResolutionChoices button{display:grid;gap:3px;min-height:64px;padding:8px;text-align:left;background:#172033;border:2px solid #475569}.ocResolutionChoices button.selected{background:#1d4ed8;border-color:#93c5fd}.ocResolutionChoices button span{font-size:.72rem;color:#cbd5e1}.ocResolutionChoices button:last-child{grid-column:1/-1}@media(max-width:560px){.ocResolutionChoices{grid-template-columns:1fr}.ocResolutionChoices button:last-child{grid-column:auto}}
 .ocDialogError {
   color: #fecaca;
 }
