@@ -830,6 +830,7 @@ export default function PosClient({
   const [scanNotice, setScanNotice] = useState("");
   const [unknownBarcode, setUnknownBarcode] = useState("");
   const [incomingCalls, setIncomingCalls] = useState<IncomingDeliCall[]>([]);
+  const [incomingCallBusyId, setIncomingCallBusyId] = useState("");
   const [callClock, setCallClock] = useState(() => Date.now());
   const [aiCalls, setAiCalls] = useState<AiDeliCall[]>([]);
   const [dismissedAiCallIds, setDismissedAiCallIds] = useState<string[]>([]);
@@ -2027,9 +2028,17 @@ export default function PosClient({
     }
   }
 
-  function chooseCustomer(next: PosCustomer) {
+  function chooseCustomer(next: PosCustomer, preferredPhone = "") {
     setCustomer(next);
+    const preferredDigits = preferredPhone.replace(/\D/g, "").slice(-10);
     const phone =
+      (preferredDigits
+        ? next.phones?.find(
+            (candidate) =>
+              candidate.display_phone.replace(/\D/g, "").slice(-10) ===
+              preferredDigits,
+          )
+        : undefined) ||
       next.phones?.find((candidate) => candidate.is_primary) ||
       next.phones?.[0];
     setSelectedCustomerPhoneId(phone?.id || "");
@@ -2063,27 +2072,45 @@ export default function PosClient({
     setPaymentBusy(true);setCheckoutError("");
     try{const response=await fetch("/api/ordering/customer-credits",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"redeem",orderId:draft.id,checkId:selectedCheckId})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not apply customer credit.");setCustomerCredit(body.credit);await selectCheck(selectedCheckId||payableChecks[0]?.id);const checksResponse=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/checks`),checksBody=await checksResponse.json();if(checksResponse.ok)setPayableChecks(checksBody.checks||[])}catch(cause){setCheckoutError(cause instanceof Error?cause.message:"Could not apply customer credit.")}finally{setPaymentBusy(false)}
   }
-  async function acknowledgeIncomingCall(
-    call: IncomingDeliCall,
-    useCaller = false,
-  ) {
-    if (useCaller) {
-      const response = await fetch(
-          `/api/ordering/customers?q=${encodeURIComponent(call.caller_phone)}`,
-        ),
-        body = (await response.json()) as { customers?: PosCustomer[] };
-      if (body.customers?.[0]) chooseCustomer(body.customers[0]);
-      else {
-        setQuickCustomer((current) => ({
-          ...current,
-          phone: call.caller_phone,
-        }));
-        setCustomerQuery("");
-        setCustomerMatches([]);
-        setQuickAddCaller(true);
-        setCustomerOpen(true);
-      }
-    }
+  function resetOrderWorkspaceForIncomingCall() {
+    localStorage.removeItem("corner-ops-reopened-order");
+    localStorage.removeItem("corner-ops-checkout-order");
+    setCart([]);
+    setSavedDraft(null);
+    setReopenedItems([]);
+    setReopenedCancelItem(null);
+    setActiveTab(null);
+    setActiveTabItems([]);
+    setTabName("");
+    setCheckoutOpen(false);
+    setCheckoutMoreOpen(false);
+    setCheckoutState(null);
+    setPayableChecks([]);
+    setSelectedCheckId(null);
+    setSplitOpen(false);
+    setSubmittedOrder(null);
+    setConfiguringItem(null);
+    setEditingLineId(null);
+    setCartNotice("");
+    setCheckoutError("");
+    setCustomer(null);
+    setCustomerCredit({ balanceCents: 0, reason: "" });
+    setSelectedCustomerPhoneId("");
+    setSelectedCustomerAddressId("");
+    setDeliveryAddress("");
+    setDeliveryUnit("");
+    setDeliveryBusinessName("");
+    setSelectedDeliveryLocationId("");
+    setValidatedAddress(null);
+    setDeliveryValidationToken("");
+    setDeliveryValidatedInput("");
+    setDeliveryRoute(null);
+    setTimingMode("asap");
+    setScheduledFor("");
+    setOrderOrigin("phone");
+  }
+
+  async function dismissIncomingCall(call: IncomingDeliCall) {
     await fetch("/api/ordering/calls", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -2092,6 +2119,83 @@ export default function PosClient({
     setIncomingCalls((current) =>
       current.filter((candidate) => candidate.id !== call.id),
     );
+  }
+
+  async function startNewOrderFromCallerId(call: IncomingDeliCall) {
+    if (incomingCallBusyId) return;
+    setIncomingCallBusyId(call.id);
+    resetOrderWorkspaceForIncomingCall();
+    try {
+      const response = await fetch(
+          `/api/ordering/customers?q=${encodeURIComponent(call.caller_phone)}`,
+        ),
+        body = (await response.json()) as { customers?: PosCustomer[] };
+      const callerDigits = call.caller_phone.replace(/\D/g, "").slice(-10);
+      const matchedCustomer =
+        body.customers?.find((candidate) => candidate.id === call.customer_id) ||
+        body.customers?.find((candidate) =>
+          candidate.phones?.some(
+            (phone) =>
+              phone.display_phone.replace(/\D/g, "").slice(-10) === callerDigits,
+          ),
+        );
+      if (matchedCustomer) chooseCustomer(matchedCustomer, call.caller_phone);
+      else {
+        setQuickCustomer({ firstName: "", lastName: "", phone: call.caller_phone });
+        setCustomerQuery("");
+        setCustomerMatches([]);
+        setQuickAddCaller(true);
+        setCustomerOpen(true);
+      }
+      await dismissIncomingCall(call);
+    } catch (error) {
+      setMenuError(
+        error instanceof Error
+          ? error.message
+          : "Could not start a new order from caller ID.",
+      );
+    } finally {
+      setIncomingCallBusyId("");
+    }
+  }
+
+  async function openIncomingCallerOrder(call: IncomingDeliCall) {
+    if (!call.open_order_id || incomingCallBusyId) return;
+    setIncomingCallBusyId(call.id);
+    resetOrderWorkspaceForIncomingCall();
+    try {
+      const response = await fetch(
+        `/api/ordering/order-center/${encodeURIComponent(call.open_order_id)}/reopen`,
+        { method: "POST" },
+      );
+      const body = await response.json();
+      if (!response.ok)
+        throw new Error(body.error || "Could not open the caller's order.");
+      localStorage.setItem(
+        "corner-ops-reopened-order",
+        JSON.stringify({
+          id: call.open_order_id,
+          displayNumber: body.order.display_number || call.open_order_number,
+          totalCents: Number(body.order.total_cents),
+          deliveryFeeCents: Number(body.order.delivery_fee_cents || 0),
+          timingMessage: body.order.timing_message_snapshot || "",
+          kitchenTimingLabel: body.order.kitchen_timing_label_snapshot || "",
+          scheduledFor: body.order.scheduled_for,
+          orderItemIds: body.orderItemIds || [],
+          serviceType: body.order.service_type,
+          originalServiceType: body.order.service_type,
+          openCheckout: true,
+        }),
+      );
+      await dismissIncomingCall(call);
+      window.dispatchEvent(new Event("corner-ops-order-reopened"));
+    } catch (error) {
+      setMenuError(
+        error instanceof Error ? error.message : "Could not open the caller's order.",
+      );
+    } finally {
+      setIncomingCallBusyId("");
+    }
   }
   async function updateAiCall(
     call: AiDeliCall,
@@ -4887,36 +4991,45 @@ export default function PosClient({
                     )}
                   </div>
                   {call.open_order_id ? (
-                    <>
-                      <p>
-                        Existing order #{call.open_order_number} ·{" "}
-                        {call.open_order_status?.replaceAll("_", " ")}
-                      </p>
-                      <a
-                        className="primary"
-                        href={`/pos/deli/orders?orderId=${encodeURIComponent(call.open_order_id)}`}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          const href = event.currentTarget.href;
-                          void acknowledgeIncomingCall(call).then(() => {
-                            window.location.href = href;
-                          });
-                        }}
-                      >
-                        OPEN EXISTING ORDER
-                      </a>
-                    </>
+                    <div className="posCallerOrderDecision">
+                      <strong>
+                        Are they calling about order #{call.open_order_number}?
+                      </strong>
+                      <span>
+                        {call.open_order_status?.replaceAll("_", " ")} · matched by
+                        caller ID
+                      </span>
+                      <div>
+                        <button
+                          className="primary"
+                          disabled={Boolean(incomingCallBusyId)}
+                          onClick={() => void openIncomingCallerOrder(call)}
+                        >
+                          YES — OPEN #{call.open_order_number}
+                        </button>
+                        <button
+                          disabled={Boolean(incomingCallBusyId)}
+                          onClick={() => void startNewOrderFromCallerId(call)}
+                        >
+                          NO — START NEW ORDER
+                        </button>
+                      </div>
+                    </div>
                   ) : (
                     <button
                       className="primary"
-                      onClick={() => void acknowledgeIncomingCall(call, true)}
+                      disabled={Boolean(incomingCallBusyId)}
+                      onClick={() => void startNewOrderFromCallerId(call)}
                     >
                       {call.customer_id
-                        ? "USE CUSTOMER / START ORDER"
-                        : "ADD CALLER / START ORDER"}
+                        ? "START NEW ORDER FOR THIS CALLER"
+                        : "ADD CALLER / START NEW ORDER"}
                     </button>
                   )}
-                  <button onClick={() => void acknowledgeIncomingCall(call)}>
+                  <button
+                    disabled={Boolean(incomingCallBusyId)}
+                    onClick={() => void dismissIncomingCall(call)}
+                  >
                     ANSWERED / DISMISS THIS LINE
                   </button>
                 </article>
