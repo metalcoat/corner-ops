@@ -265,6 +265,7 @@ type PosCustomerAddress = {
   longitude: number | null;
   is_primary: boolean;
   last_used_at: string | null;
+  delivery_order_count?: number;
 };
 type PosCustomer = {
   id: string;
@@ -1993,6 +1994,26 @@ export default function PosClient({
     setSavedDraft(null);
     void fetch(`/api/ordering/customer-credits?customerId=${encodeURIComponent(next.id)}`,{cache:"no-store"}).then(async response=>{const body=await response.json();if(response.ok)setCustomerCredit({balanceCents:Number(body.balanceCents||0),reason:String(body.reason||"")})});
   }
+
+  useEffect(() => {
+    if (
+      serviceType !== "delivery" ||
+      !customer?.addresses?.length ||
+      selectedCustomerAddressId ||
+      validatedAddress ||
+      validatingAddress
+    ) return;
+    // The API returns addresses ordered by actual delivery usage. If no address
+    // has usage history, the first saved address is the deterministic fallback.
+    void chooseSavedAddress(customer.addresses[0]);
+  }, [
+    serviceType,
+    customer?.id,
+    customer?.addresses,
+    selectedCustomerAddressId,
+    validatedAddress,
+    validatingAddress,
+  ]);
 
   async function applyCustomerCredit() {
     const draft=savedDraft||activeTab;

@@ -29,7 +29,7 @@ export async function findCustomers(business: OrderingBusiness, query = "") {
       p.normalized_phone,p.display_phone,
       COALESCE((SELECT json_agg(phone ORDER BY phone.is_primary DESC,phone.last_used_at DESC NULLS LAST,phone.created_at) FROM ordering_customer_phones phone WHERE phone.customer_id=c.id),'[]') phones,
       COALESCE((SELECT json_agg(email ORDER BY email.is_primary DESC,email.created_at) FROM ordering_customer_emails email WHERE email.customer_id=c.id),'[]') emails,
-      COALESCE((SELECT json_agg(a ORDER BY a.is_primary DESC,a.last_used_at DESC NULLS LAST,a.created_at DESC) FROM ordering_customer_addresses a WHERE a.customer_id=c.id AND a.active=TRUE),'[]') addresses
+      COALESCE((SELECT json_agg(address_row ORDER BY address_row.delivery_order_count DESC,address_row.is_primary DESC,address_row.last_used_at DESC NULLS LAST,address_row.created_at DESC) FROM (SELECT a.*,(SELECT COUNT(*)::integer FROM ordering_order_delivery_addresses used WHERE used.customer_address_id=a.id) delivery_order_count FROM ordering_customer_addresses a WHERE a.customer_id=c.id AND a.active=TRUE) address_row),'[]') addresses
     FROM ordering_customers c
     LEFT JOIN LATERAL (SELECT normalized_phone,display_phone FROM ordering_customer_phones WHERE customer_id=c.id ORDER BY is_primary DESC,created_at LIMIT 1) p ON TRUE
     WHERE c.business=${business} AND c.active=TRUE AND c.merged_into_customer_id IS NULL
