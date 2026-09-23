@@ -2286,6 +2286,7 @@ export default function PosClient({
   }
   function startLineSwipe(event: React.PointerEvent<HTMLElement>, lineId: string) {
     if (!event.isPrimary) return;
+    if(event.target instanceof Element&&event.target.closest("button, a, input, select, textarea, [role='button']"))return;
     event.currentTarget.setPointerCapture(event.pointerId);
     setSwipeDrag({ id: lineId, startX: event.clientX, startY: event.clientY, offsetX: 0 });
   }
