@@ -403,6 +403,23 @@ export async function submitDraftOrder(
       return { order, alreadySubmitted: true };
     if (order.status !== "draft")
       throw new OrderConflictError("Only a draft order can be submitted.");
+    const reopenRows =
+      await sql`SELECT id,details,created_at FROM ordering_order_events WHERE order_id=${orderId} AND event_type='order_reopened_for_additions' AND NOT EXISTS(SELECT 1 FROM ordering_order_events later WHERE later.order_id=${orderId} AND later.event_type='order_addition_submitted' AND later.created_at>ordering_order_events.created_at) ORDER BY created_at DESC LIMIT 1`;
+    const reopenDetails = reopenRows[0]?.details as
+      { existingItemIds?: string[]; previousTotalCents?: number; previousStatus?: string } | undefined;
+    const existingIds = new Set((reopenDetails?.existingItemIds || []).map(String));
+    const currentIds = await sql`SELECT id FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`;
+    const addedItemIds = reopenDetails ? currentIds.map((row) => String(row.id)).filter((id) => !existingIds.has(id)) : [];
+    const adjustmentEvents = reopenRows[0]
+      ? await sql`SELECT event_type,details FROM ordering_order_events WHERE order_id=${orderId} AND created_at>=${reopenRows[0].created_at} AND event_type IN('order_item_cancelled','order_fulfillment_changed') ORDER BY created_at,id`
+      : [];
+    if (reopenDetails && !addedItemIds.length && !adjustmentEvents.length) {
+      const priorStatus = ["sent_to_kitchen", "in_progress", "ready", "completed"].includes(String(reopenDetails.previousStatus)) ? String(reopenDetails.previousStatus) : "sent_to_kitchen";
+      const restored = await sql`UPDATE ordering_orders SET status=${priorStatus},locked_at=NOW(),version=version+1,updated_at=NOW() WHERE id=${orderId} AND business=${business} AND status='draft' AND version=${order.version} RETURNING *`;
+      if (!restored.length) throw new OrderConflictError("This order changed while checkout was opening. Refresh and try again.");
+      await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${restored[0].version},'order_reopen_closed_no_changes',${actor.type},${actor.id},${JSON.stringify({restoredStatus:priorStatus,reason:"payment_only",actorName:actor.name})}::jsonb)`;
+      return { order: restored[0], alreadySubmitted: false };
+    }
     const availabilityAt =
       order.timing_mode === "future" && order.scheduled_for
         ? new Date(order.scheduled_for)
@@ -517,27 +534,6 @@ export async function submitDraftOrder(
       );
     }
     await revalidateDraft(order);
-    const reopenRows =
-      await sql`SELECT id,details,created_at FROM ordering_order_events WHERE order_id=${orderId} AND event_type='order_reopened_for_additions' AND NOT EXISTS(SELECT 1 FROM ordering_order_events later WHERE later.order_id=${orderId} AND later.event_type='order_addition_submitted' AND later.created_at>ordering_order_events.created_at) ORDER BY created_at DESC LIMIT 1`;
-    const reopenDetails = reopenRows[0]?.details as
-      { existingItemIds?: string[]; previousTotalCents?: number } | undefined;
-    const existingIds = new Set(
-      (reopenDetails?.existingItemIds || []).map(String),
-    );
-    const currentIds =
-      await sql`SELECT id FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`;
-    const addedItemIds = reopenDetails
-      ? currentIds
-          .map((row) => String(row.id))
-          .filter((id) => !existingIds.has(id))
-      : [];
-    const adjustmentEvents = reopenRows[0]
-      ? await sql`SELECT event_type,details FROM ordering_order_events WHERE order_id=${orderId} AND created_at>=${reopenRows[0].created_at} AND event_type IN('order_item_cancelled','order_fulfillment_changed') ORDER BY created_at,id`
-      : [];
-    if (reopenDetails && !addedItemIds.length && !adjustmentEvents.length)
-      throw new OrderConflictError(
-        "Add, remove, or change something before sending this order again.",
-      );
     const ticketLines = reopenDetails
       ? (addedItemIds.length ? await snapshotAndFormatOrder(orderId, addedItemIds) : [])
       : await snapshotAndFormatOrder(orderId);

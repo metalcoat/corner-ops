@@ -57,6 +57,6 @@ export async function getOrderDetail(business: OrderingBusiness, id: string) {
   for (const item of order.items) {
     item.modifiers = await sql`SELECT * FROM ordering_order_item_modifiers WHERE order_item_id=${item.id} ORDER BY created_at`;
   }
-  order.events = await sql`SELECT event_type,actor_type,actor_id,details,created_at FROM ordering_order_events WHERE order_id=${id} ORDER BY created_at`;
+  order.events = await sql`SELECT event.event_type,event.actor_type,event.actor_id,event.details,event.created_at,COALESCE(NULLIF(event.details->>'actorName',''),employee.name,event.actor_id) actor_name FROM ordering_order_events event LEFT JOIN employees employee ON employee.id::text=event.actor_id WHERE event.order_id=${id} ORDER BY event.created_at`;
   return order;
 }

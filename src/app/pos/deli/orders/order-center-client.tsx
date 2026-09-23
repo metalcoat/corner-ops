@@ -482,13 +482,13 @@ export default function OrderCenterClient() {
             {(selected.events || []).map((e: any, i) => (
               <p key={i}>
                 <time>{new Date(e.created_at).toLocaleString()}</time> ·{" "}
-                {label(e.event_type)} · {e.actor_id}
+                {label(e.event_type)} · {e.actor_name || e.actor_id}
               </p>
             ))}
             {!selected.voided_at && (
               <div className="ocDetailActions">
                 {["draft", "sent_to_kitchen", "in_progress", "ready", "completed"].includes(selected.status) && (
-                  <button disabled={reopenBusy} onClick={() => void reopen(selected)}>{reopenBusy ? "OPENING…" : "OPEN IN POS · EDIT / PAY"}</button>
+                  <button disabled={reopenBusy} onClick={() => void reopen(selected)}>{reopenBusy ? "OPENING…" : !["paid", "refunded"].includes(selected.payment_status) ? "OPEN IN POS · CASH OUT / EDIT" : "OPEN IN POS · EDIT / REFUND"}</button>
                 )}
               </div>
             )}
