@@ -4446,7 +4446,7 @@ export default function PosClient({
               type="button"
               className="primary"
               disabled={
-                (!cart.length && !activeTab) ||
+                (!cart.length && !activeTab && !savedDraft) ||
                 savingDraft ||
                 Boolean(sendRequirement)
               }
