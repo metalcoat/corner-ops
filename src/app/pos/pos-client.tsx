@@ -106,10 +106,18 @@ type SavedDraft = {
   orderItemIds: string[];
   loyalty: Array<{ label: string; discountCents: number }>;
   reopened?: boolean;
+  originalServiceType?: PosServiceType;
   checkoutOnly?: boolean;
   checkId?: string | null;
   paymentQueue?: boolean;
   offlinePayload?: { mutationId: string; orderBody: Record<string, unknown> };
+};
+type CashSettlementPrompt = {
+  orderId: string;
+  displayNumber: string;
+  amountDueCents: number;
+  cashReceivedCents: number;
+  changeDueCents: number;
 };
 type ReopenedOrderItem = {
   id: string;
@@ -653,6 +661,7 @@ export default function PosClient({
   const [splitSelectedItemId, setSplitSelectedItemId] = useState("");
   const [splitDrag, setSplitDrag] = useState<SplitDrag | null>(null);
   const [paidReceiptPrompt, setPaidReceiptPrompt] = useState<PaidReceiptPrompt | null>(null);
+  const [cashSettlementPrompt, setCashSettlementPrompt] = useState<CashSettlementPrompt | null>(null);
   const [employeeMealOpen, setEmployeeMealOpen] = useState(false);
   const [, setEmployeeMealLines] = useState<Array<{ itemId: string; name: string; quantity: number }>>([]);
   const [employeeMealNote, setEmployeeMealNote] = useState("");
@@ -2321,7 +2330,7 @@ export default function PosClient({
   }
 
   async function saveDraft(): Promise<SavedDraft | null> {
-    if (!cart.length || savingDraft) return null;
+    if ((!cart.length && !savedDraft?.reopened) || savingDraft) return null;
     if (timingMode === "future" && !scheduledFor) {
       setCheckoutError(
         "Choose the future pickup/delivery time before saving the order.",
@@ -2431,6 +2440,7 @@ export default function PosClient({
         orderItemIds: (payload.orderItems || []).map((row) => row.id),
         loyalty: [],
         reopened: Boolean(reopenedDraft),
+        originalServiceType: reopenedDraft?.originalServiceType,
       };
       setSavedDraft(draft);
       if (reopenedDraft) {
@@ -2550,7 +2560,7 @@ export default function PosClient({
       business === "Corner Deli" &&
       serviceType === "delivery" &&
       !validatedAddress &&
-      !savedDraft?.reopened
+      (!savedDraft?.reopened || savedDraft.originalServiceType !== "delivery")
     ) {
       setCheckoutError(
         "Enter and validate the delivery address before sending this order.",
@@ -2570,7 +2580,9 @@ export default function PosClient({
       );
       return;
     }
-    if (business === "Tiki" && activeTab && cart.length)
+    if (savedDraft?.reopened)
+      draft = await saveDraft();
+    else if (business === "Tiki" && activeTab && cart.length)
       draft = await saveDraft();
     if (!draft) draft = activeTab || (await saveDraft());
     if (!draft) return;
@@ -2639,7 +2651,9 @@ export default function PosClient({
     }
     const draft =
       draftOverride ||
-      (business === "Tiki" && activeTab && cart.length
+      (savedDraft?.reopened
+        ? await saveDraft()
+        : business === "Tiki" && activeTab && cart.length
         ? await saveDraft()
         : savedDraft || activeTab || (await saveDraft()));
     if (!draft) return;
@@ -2877,17 +2891,39 @@ export default function PosClient({
     setCashTender((amountCents / 100).toFixed(2));
   }
 
-  function closePaidCheckout(draft: SavedDraft, state: CheckoutState, changeDueCents = 0) {
+  function closePaidCheckout(
+    draft: SavedDraft,
+    state: CheckoutState,
+    cash?: { amountDueCents: number; cashReceivedCents: number; changeDueCents: number },
+  ) {
     if (state.order.payment_status !== "paid") return false;
     setCheckoutOpen(false);
     setSplitOpen(false);
     setCdsTenderType("");
     setLastChangeDueCents(null);
-    setPaidReceiptPrompt({ orderId: draft.id, displayNumber: draft.displayNumber, changeDueCents });
+    if (cash) {
+      setCashSettlementPrompt({
+        orderId: draft.id,
+        displayNumber: draft.displayNumber,
+        ...cash,
+      });
+    } else {
+      setPaidReceiptPrompt({ orderId: draft.id, displayNumber: draft.displayNumber, changeDueCents: 0 });
+    }
     setCart([]);
     setSavedDraft(null);
     setActiveTab(null);
     return true;
+  }
+
+  function acknowledgeCashSettlement() {
+    if (!cashSettlementPrompt) return;
+    setPaidReceiptPrompt({
+      orderId: cashSettlementPrompt.orderId,
+      displayNumber: cashSettlementPrompt.displayNumber,
+      changeDueCents: cashSettlementPrompt.changeDueCents,
+    });
+    setCashSettlementPrompt(null);
   }
 
   async function printFinalReceipt(itemized = false) {
@@ -2967,8 +3003,13 @@ export default function PosClient({
               tender.transaction_type === "payment" &&
               tender.tender_type === "cash",
           );
-        setLastChangeDueCents(Number(latest?.change_due_cents || 0));
-        if (closePaidCheckout(draft, payload, Number(latest?.change_due_cents || 0))) return;
+        const changeDueCents = Number(latest?.change_due_cents || 0);
+        setLastChangeDueCents(changeDueCents);
+        if (closePaidCheckout(draft, payload, {
+          amountDueCents: due,
+          cashReceivedCents: amountTenderedCents,
+          changeDueCents,
+        })) return;
       }
       if (tenderType !== "cash" && closePaidCheckout(draft, payload)) return;
       setCashTender("");
@@ -3531,13 +3572,14 @@ export default function PosClient({
     (location) => location.id === selectedDeliveryLocationId,
   );
   const sendRequirement =
-    business === "Corner Deli" && !customer
+    business === "Corner Deli" && !savedDraft?.reopened && !customer
       ? "Customer name and phone required"
-      : business === "Corner Deli" && !selectedCustomerPhoneId
+      : business === "Corner Deli" && !savedDraft?.reopened && !selectedCustomerPhoneId
         ? "Choose customer phone"
         : business === "Corner Deli" &&
             serviceType === "delivery" &&
-            !validatedAddress
+            !validatedAddress &&
+            (!savedDraft?.reopened || savedDraft.originalServiceType !== "delivery")
           ? "Validated delivery address required"
           : business === "Corner Deli" &&
               serviceType === "delivery" &&
@@ -3677,7 +3719,7 @@ export default function PosClient({
             className={serviceType === service ? "active" : ""}
             onClick={() => {
               setServiceType(service);
-              setSavedDraft(null);
+              invalidateEditableDraft();
               setDeliveryEditorOpen(false);
               if (service !== "bar") {
                 setActiveTab(null);
@@ -3699,7 +3741,7 @@ export default function PosClient({
               className={`futureOrderButton ${timingMode === "asap" ? "active" : ""}`}
               onClick={() => {
                 setTimingMode("asap");
-                setSavedDraft(null);
+                invalidateEditableDraft();
               }}
             >
               <span>ASAP</span>
@@ -3712,7 +3754,7 @@ export default function PosClient({
                 setTimingMode("future");
                 setFutureDate(deliBusinessDate());
                 setScheduledFor("");
-                setSavedDraft(null);
+                invalidateEditableDraft();
               }}
             >
               <span>Future</span>
@@ -3729,7 +3771,7 @@ export default function PosClient({
                   onChange={(event) => {
                     setFutureDate(event.target.value);
                     setScheduledFor("");
-                    setSavedDraft(null);
+                    invalidateEditableDraft();
                   }}
                 />
                 <select
@@ -3738,7 +3780,7 @@ export default function PosClient({
                   disabled={futureSlotsLoading || !futureSlots.length}
                   onChange={(event) => {
                     setScheduledFor(event.target.value);
-                    setSavedDraft(null);
+                    invalidateEditableDraft();
                   }}
                 >
                   <option value="">
@@ -5260,6 +5302,28 @@ export default function PosClient({
           <button type="button" disabled={paymentBusy} onClick={() => void printFinalReceipt(true)}>PRINT ITEMIZED</button>
           <button type="button" disabled={paymentBusy} onClick={() => setPaidReceiptPrompt(null)}>NO RECEIPT</button>
         </aside>
+      )}
+      {cashSettlementPrompt && (
+        <div className="posChangeBackdrop">
+          <section
+            className="posChangeWindow posCashSettlementWindow"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="cash-settlement-title"
+          >
+            <small id="cash-settlement-title">CASH SETTLEMENT · ORDER #{cashSettlementPrompt.displayNumber}</small>
+            <div className="posCashSettlementRows">
+              <span><b>TOTAL DUE</b><strong>{money(cashSettlementPrompt.amountDueCents)}</strong></span>
+              <span><b>CASH RECEIVED</b><strong>{money(cashSettlementPrompt.cashReceivedCents)}</strong></span>
+            </div>
+            <span className="posCashChangeLabel">CHANGE TO GIVE BACK</span>
+            <strong>{money(cashSettlementPrompt.changeDueCents)}</strong>
+            {cashSettlementPrompt.changeDueCents === 0 && <span>Exact cash received — no change.</span>}
+            <button type="button" autoFocus onClick={acknowledgeCashSettlement}>
+              CHANGE GIVEN · FINISH
+            </button>
+          </section>
+        </div>
       )}
       {employeeMealOpen && (
         <div className="posModalBackdrop posTopModalBackdrop" role="presentation" onMouseDown={(event)=>{if(event.target===event.currentTarget)setEmployeeMealOpen(false)}}>

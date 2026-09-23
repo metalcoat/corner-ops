@@ -111,8 +111,19 @@ export async function reopenOrderForAdditions(
       await sql`SELECT id,display_number,status,total_cents,paid_cents,amount_due_cents,service_type,timing_mode,scheduled_for,timing_message_snapshot,kitchen_timing_label_snapshot,delivery_fee_cents,version FROM ordering_orders WHERE id=${orderId} AND business=${business} FOR UPDATE`;
     const order = rows[0];
     if (!order) throw new OrderConflictError("Order was not found.");
-    if (order.status === "draft")
-      throw new OrderConflictError("This order is already open for editing.");
+    if (order.status === "draft") {
+      const openReopen = (
+        await sql`SELECT details FROM ordering_order_events WHERE order_id=${orderId} AND event_type='order_reopened_for_additions' AND NOT EXISTS(SELECT 1 FROM ordering_order_events later WHERE later.order_id=${orderId} AND later.event_type='order_addition_submitted' AND later.created_at>ordering_order_events.created_at) ORDER BY created_at DESC LIMIT 1`
+      )[0];
+      if (openReopen) {
+        const details = openReopen.details as { existingItemIds?: string[] };
+        return { order, orderItemIds: (details.existingItemIds || []).map(String) };
+      }
+      const existingItems =
+        await sql`SELECT id FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`;
+      await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${order.version},'order_reopened_for_additions',${actor.type},${actor.id},${JSON.stringify({ previousStatus: "draft", previousTotalCents: Number(order.total_cents), previousPaidCents: Number(order.paid_cents), existingItemIds: existingItems.map((row) => String(row.id)), actorName: actor.name })}::jsonb)`;
+      return { order, orderItemIds: existingItems.map((row) => String(row.id)) };
+    }
     if (
       !["sent_to_kitchen", "in_progress", "ready", "completed"].includes(
         String(order.status),
@@ -507,7 +518,7 @@ export async function submitDraftOrder(
     }
     await revalidateDraft(order);
     const reopenRows =
-      await sql`SELECT details FROM ordering_order_events WHERE order_id=${orderId} AND event_type='order_reopened_for_additions' AND NOT EXISTS(SELECT 1 FROM ordering_order_events later WHERE later.order_id=${orderId} AND later.event_type='order_addition_submitted' AND later.created_at>ordering_order_events.created_at) ORDER BY created_at DESC LIMIT 1`;
+      await sql`SELECT id,details,created_at FROM ordering_order_events WHERE order_id=${orderId} AND event_type='order_reopened_for_additions' AND NOT EXISTS(SELECT 1 FROM ordering_order_events later WHERE later.order_id=${orderId} AND later.event_type='order_addition_submitted' AND later.created_at>ordering_order_events.created_at) ORDER BY created_at DESC LIMIT 1`;
     const reopenDetails = reopenRows[0]?.details as
       { existingItemIds?: string[]; previousTotalCents?: number } | undefined;
     const existingIds = new Set(
@@ -520,14 +531,23 @@ export async function submitDraftOrder(
           .map((row) => String(row.id))
           .filter((id) => !existingIds.has(id))
       : [];
-    if (reopenDetails && !addedItemIds.length)
+    const adjustmentEvents = reopenRows[0]
+      ? await sql`SELECT event_type,details FROM ordering_order_events WHERE order_id=${orderId} AND created_at>=${reopenRows[0].created_at} AND event_type IN('order_item_cancelled','order_fulfillment_changed') ORDER BY created_at,id`
+      : [];
+    if (reopenDetails && !addedItemIds.length && !adjustmentEvents.length)
       throw new OrderConflictError(
-        "Add at least one item before sending this order again.",
+        "Add, remove, or change something before sending this order again.",
       );
-    const ticketLines = await snapshotAndFormatOrder(
-      orderId,
-      reopenDetails ? addedItemIds : undefined,
-    );
+    const ticketLines = reopenDetails
+      ? (addedItemIds.length ? await snapshotAndFormatOrder(orderId, addedItemIds) : [])
+      : await snapshotAndFormatOrder(orderId);
+    for (const event of adjustmentEvents) {
+      const details = (event.details || {}) as Record<string, unknown>;
+      if (event.event_type === "order_item_cancelled")
+        ticketLines.push(`VOID/REMOVE: ${Number(details.quantity || 1)}x ${String(details.itemName || "ITEM").toUpperCase()}`);
+      if (event.event_type === "order_fulfillment_changed")
+        ticketLines.push(`SERVICE CHANGE: ${String(details.from || "").toUpperCase()} -> ${String(details.to || "").toUpperCase()}`);
+    }
 
     const updated = await sql`
       UPDATE ordering_orders
@@ -558,7 +578,7 @@ export async function submitDraftOrder(
         ${randomUUID()}, ${business}, ${orderId}, 'kitchen_production', ${reopenDetails ? "order_addition" : "initial_send"}, 'not_configured', ${Boolean(reopenDetails)},
         ${actor.type}, ${actor.id}, 'Kitchen printer not configured.',
         CAST(${JSON.stringify({
-          heading: reopenDetails ? "ORDER ADDITION" : "KITCHEN ORDER",
+          heading: reopenDetails ? "ADD ON" : "KITCHEN ORDER",
           orderNumber: String(order.display_number),
           customerName,
           phone: String(order.phone_snapshot || ""),

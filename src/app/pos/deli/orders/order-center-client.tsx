@@ -119,33 +119,13 @@ export default function OrderCenterClient() {
       const response = await fetch(`/api/ordering/order-center/${encodeURIComponent(order.id)}/reopen`, { method: "POST" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not reopen this order.");
-      localStorage.setItem("corner-ops-reopened-order", JSON.stringify({ id: order.id, displayNumber: order.display_number, totalCents: Number(body.order.total_cents), deliveryFeeCents: Number(body.order.delivery_fee_cents || 0), timingMessage: body.order.timing_message_snapshot || "", kitchenTimingLabel: body.order.kitchen_timing_label_snapshot || "", scheduledFor: body.order.scheduled_for, orderItemIds: body.orderItemIds || [], serviceType: body.order.service_type }));
+      localStorage.setItem("corner-ops-reopened-order", JSON.stringify({ id: order.id, displayNumber: order.display_number, totalCents: Number(body.order.total_cents), deliveryFeeCents: Number(body.order.delivery_fee_cents || 0), timingMessage: body.order.timing_message_snapshot || "", kitchenTimingLabel: body.order.kitchen_timing_label_snapshot || "", scheduledFor: body.order.scheduled_for, orderItemIds: body.orderItemIds || [], serviceType: body.order.service_type, originalServiceType: body.order.service_type }));
       setSelected(null);
       router.push("/pos/deli");
       window.dispatchEvent(new Event("corner-ops-order-reopened"));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not reopen this order.");
     } finally { setReopenBusy(false); }
-  }
-  function openCheckout(order: Order) {
-    const itemIds = (order.items || [])
-      .map((item) => String(item.id || ""))
-      .filter(Boolean);
-    localStorage.setItem("corner-ops-checkout-order", JSON.stringify({
-      id: order.id,
-      displayNumber: order.display_number,
-      totalCents: Number(order.total_cents),
-      deliveryFeeCents: Number((order as any).delivery_fee_cents || 0),
-      timingMessage: String((order as any).timing_message_snapshot || ""),
-      kitchenTimingLabel: String((order as any).kitchen_timing_label_snapshot || ""),
-      scheduledFor: order.scheduled_for,
-      promotions: [],
-      loyalty: [],
-      orderItemIds: itemIds,
-      checkoutOnly: true,
-    }));
-    setSelected(null);
-    window.location.assign("/pos/deli");
   }
   async function advance(order: Order) {
     const draft = order.status === "draft";
@@ -495,9 +475,8 @@ export default function OrderCenterClient() {
             ))}
             {!selected.voided_at && (
               <div className="ocDetailActions">
-                <button onClick={() => openCheckout(selected)}>OPEN CHECKOUT / PAY</button>
-                {["sent_to_kitchen", "in_progress", "ready", "completed"].includes(selected.status) && (
-                  <button disabled={reopenBusy} onClick={() => void reopen(selected)}>{reopenBusy ? "REOPENING…" : "REOPEN / ADD ITEMS"}</button>
+                {["draft", "sent_to_kitchen", "in_progress", "ready", "completed"].includes(selected.status) && (
+                  <button disabled={reopenBusy} onClick={() => void reopen(selected)}>{reopenBusy ? "OPENING…" : "OPEN IN POS · EDIT / PAY"}</button>
                 )}
               </div>
             )}

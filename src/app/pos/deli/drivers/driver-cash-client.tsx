@@ -15,12 +15,21 @@ type Order = {
   delivered_at: string;
   delivery_status: string | null;
 };
+type SettlementSummary = {
+  orderCount: number;
+  expectedCashCents: number;
+  turnedInCashCents: number;
+  overShortCents: number;
+  handledByName?: string;
+  posted: boolean;
+};
 export default function DriverCashClient() {
   const [data, setData] = useState<any>(null),
     [selected, setSelected] = useState<string[]>([]),
     [turnedIn, setTurnedIn] = useState(""),
     [message, setMessage] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [settlement, setSettlement] = useState<SettlementSummary | null>(null);
   async function load() {
     const response = await fetch("/api/ordering/driver-cash", {
         cache: "no-store",
@@ -61,6 +70,16 @@ export default function DriverCashClient() {
   function setQuickCash(amountCents: number) {
     setTurnedIn((amountCents / 100).toFixed(2));
   }
+  function reviewSettlement() {
+    if (!selected.length || !turnedIn || !Number.isFinite(Number(turnedIn))) return;
+    setSettlement({
+      orderCount: selected.length,
+      expectedCashCents: expected,
+      turnedInCashCents: turnedInCents,
+      overShortCents: turnedInCents - expected,
+      posted: false,
+    });
+  }
   async function post() {
     setBusy(true);
     setMessage("");
@@ -82,6 +101,14 @@ export default function DriverCashClient() {
       setMessage(
         `${body.handledByName}: ${body.orderCount} orders posted · ${money(body.expectedCashCents)} expected · ${money(body.overShortCents)} over/short.`,
       );
+      setSettlement({
+        orderCount: Number(body.orderCount),
+        expectedCashCents: Number(body.expectedCashCents),
+        turnedInCashCents: Number(body.turnedInCashCents ?? turnedInCents),
+        overShortCents: Number(body.overShortCents),
+        handledByName: String(body.handledByName || ""),
+        posted: true,
+      });
       setSelected([]);
       setTurnedIn("");
       await load();
@@ -187,12 +214,37 @@ export default function DriverCashClient() {
           <button
             className="driverCashPost"
             disabled={busy || !selected.length || !turnedIn || !Number.isFinite(Number(turnedIn))}
-            onClick={() => void post()}
+            onClick={reviewSettlement}
           >
             {busy ? "POSTING…" : `CASH OUT ${selected.length || ""} ${selected.length === 1 ? "ORDER" : "ORDERS"}`}
           </button>
         </section>
       </div>
+      {settlement && (
+        <div className="driverSettlementBackdrop">
+          <section className="driverSettlementModal" role="alertdialog" aria-modal="true" aria-labelledby="driver-settlement-title">
+            <small id="driver-settlement-title">{settlement.posted ? "DRIVER CASH SETTLED" : "CONFIRM DRIVER CASH"}</small>
+            <strong>{settlement.orderCount} {settlement.orderCount === 1 ? "ORDER" : "ORDERS"}</strong>
+            <div><span>EXPECTED FROM ORDERS</span><b>{money(settlement.expectedCashCents)}</b></div>
+            <div><span>CASH RECEIVED</span><b>{money(settlement.turnedInCashCents)}</b></div>
+            {settlement.overShortCents > 0 ? (
+              <div className="return"><span>CASH TO GIVE BACK TO DRIVER</span><b>{money(settlement.overShortCents)}</b></div>
+            ) : settlement.overShortCents < 0 ? (
+              <div className="short"><span>DRIVER IS SHORT</span><b>{money(Math.abs(settlement.overShortCents))}</b></div>
+            ) : (
+              <div className="exact"><span>SETTLEMENT</span><b>EXACT CASH</b></div>
+            )}
+            {settlement.posted ? (
+              <button type="button" autoFocus onClick={() => setSettlement(null)}>DONE</button>
+            ) : (
+              <footer>
+                <button type="button" onClick={() => setSettlement(null)}>BACK</button>
+                <button type="button" className="confirm" disabled={busy} onClick={() => void post()}>{busy ? "POSTING…" : "CONFIRM & POST SETTLEMENT"}</button>
+              </footer>
+            )}
+          </section>
+        </div>
+      )}
       {data?.settlements?.length > 0 && (
         <section>
           <h2>Recent settlements</h2>
@@ -205,6 +257,7 @@ export default function DriverCashClient() {
           ))}
         </section>
       )}
+      <style jsx>{`.driverSettlementBackdrop{position:fixed;z-index:300;inset:0;display:grid;place-items:center;padding:20px;background:#020617e8}.driverSettlementModal{width:min(520px,96vw);display:grid;gap:12px;padding:24px;border:3px solid #4ade80;border-radius:16px;background:#0b1220;color:#fff;box-shadow:0 24px 80px #000}.driverSettlementModal>small{color:#bbf7d0;font-weight:950;letter-spacing:.12em}.driverSettlementModal>strong{font-size:1.5rem}.driverSettlementModal>div{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:12px;border:1px solid #475569;border-radius:9px;background:#020617}.driverSettlementModal>div span{font-size:.76rem;font-weight:900;color:#cbd5e1}.driverSettlementModal>div b{font-size:1.35rem}.driverSettlementModal>div.return{border-color:#facc15;color:#fde68a}.driverSettlementModal>div.short{border-color:#f87171;color:#fecaca}.driverSettlementModal>div.exact{border-color:#4ade80;color:#bbf7d0}.driverSettlementModal footer{display:grid;grid-template-columns:1fr 2fr;gap:9px}.driverSettlementModal button{min-height:58px;font-weight:950}.driverSettlementModal .confirm,.driverSettlementModal>button{background:#15803d;border-color:#4ade80}`}</style>
       <style jsx>{`.driverCashWorkspace{display:grid;grid-template-columns:minmax(0,1fr) minmax(310px,390px);align-items:start;gap:16px}.driverCashOrders,.driverCashCheckout{min-width:0;padding:14px;border:1px solid #475569;border-radius:12px;background:#0b1220;color:#fff}.driverCashSectionTitle{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.driverCashSectionTitle h2{margin:0}.driverCashSectionTitle small{color:#94a3b8}.cashSelectAll{display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid #475569;border-radius:8px;background:#172033;color:#fff;font-weight:900}.cashSelectAll input{width:20px;height:20px}.driverCashGrid{overflow:hidden;border:1px solid #475569;border-radius:10px;background:#0f172a;color:#fff}.driverCashHead,.driverCashRow{display:grid;grid-template-columns:24px minmax(80px,.65fr) minmax(190px,2fr) minmax(100px,.8fr) minmax(80px,.6fr);align-items:center;gap:10px}.driverCashHead{grid-template-columns:minmax(80px,.65fr) minmax(190px,2fr) minmax(100px,.8fr) minmax(80px,.6fr);margin-left:34px;padding:9px 12px;background:#1e293b;color:#94a3b8;font-size:.7rem;font-weight:900;letter-spacing:.08em}.driverCashGrid article{margin:0;padding:0;border:0;border-top:1px solid #334155;border-radius:0;background:#111827}.driverCashGrid article.selected{background:#12345a;box-shadow:inset 5px 0 #3b82f6}.driverCashRow{min-height:66px;padding:8px 12px;cursor:pointer}.driverCashRow:hover{background:#1e293b}.driverCashRow span{display:flex;min-width:0;flex-direction:column;gap:3px}.driverCashRow small{overflow:hidden;color:#cbd5e1;text-overflow:ellipsis;white-space:nowrap}.driverCashRow>span:nth-last-child(2){text-transform:capitalize;color:#bfdbfe}.driverCashRow>input{width:20px;height:20px}.driverCashRow>b:last-child{text-align:right;color:#86efac;font-size:1.05rem}.driverCashCheckout{position:sticky;top:12px;display:grid;gap:10px}.driverCashCheckoutHeader{display:grid;grid-template-columns:1fr auto;align-items:end;padding-bottom:10px;border-bottom:1px solid #334155}.driverCashCheckoutHeader small{font-weight:950;letter-spacing:.08em;color:#93c5fd}.driverCashCheckoutHeader strong{grid-row:span 2;font-size:1.8rem;color:#86efac}.driverCashCheckoutHeader span{color:#cbd5e1}.driverCashAmount{display:grid;gap:4px}.driverCashAmount small{font-weight:900;color:#cbd5e1}.driverCashAmount output{padding:12px;border:2px solid #60a5fa;border-radius:10px;background:#020617;text-align:right;font-size:2rem;font-weight:950}.driverCashQuick{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.driverCashQuick button{min-height:44px;background:#1e3a5f}.driverCashNumpad{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.driverCashNumpad button{min-height:54px;font-size:1.2rem;font-weight:900}.driverCashNumpad button.zero{grid-column:span 2}.driverCashVariance{display:flex;justify-content:space-between;padding:10px 12px;border-radius:8px;background:#172033;font-weight:900}.driverCashVariance.short{color:#fca5a5}.driverCashVariance.over{color:#fde68a}.driverCashVariance.exact{color:#86efac}.driverCashPost{min-height:58px;background:#15803d;border-color:#4ade80;font-size:1.05rem;font-weight:950}.driverCashPost:disabled{background:#334155;border-color:#475569}@media(max-width:980px){.driverCashWorkspace{grid-template-columns:1fr}.driverCashCheckout{position:static}}@media(max-width:700px){.driverCashHead{display:none}.driverCashRow{grid-template-columns:24px 78px minmax(140px,1fr) 78px}.driverCashRow>span:nth-last-child(2){display:none}.driverCashOrders,.driverCashCheckout{padding:10px}.driverCashSectionTitle{align-items:flex-start;flex-direction:column}.cashSelectAll{width:100%}}`}</style>
     </main>
   );

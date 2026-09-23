@@ -630,6 +630,34 @@
   font-size: 1.15rem;
   font-weight: 950;
 }
+.posCashSettlementRows {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.posCashSettlementRows span {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #475569;
+  border-radius: 10px;
+  background: #020617;
+}
+.posCashSettlementRows b,
+.posCashChangeLabel {
+  color: #cbd5e1;
+  font-size: .75rem;
+  font-weight: 950;
+  letter-spacing: .08em;
+}
+.posCashSettlementRows strong {
+  color: #fff;
+  font-size: 1.5rem;
+}
+.posCashSettlementWindow > .posCashChangeLabel {
+  margin-bottom: -8px;
+  color: #bbf7d0;
+}
 @media (max-width: 720px) {
   .posCheckoutPaymentGrid {
     grid-template-columns: 1fr;
