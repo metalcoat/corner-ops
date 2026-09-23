@@ -23,6 +23,7 @@ type Order = {
   delivery_address: string | null;
   delivery_unit: string | null;
   overdue_unpaid?: boolean;
+  pickup_attention?: boolean;
   voided_at?: string | null;
   void_reason?: string;
   items?: Array<Record<string, unknown>>;
@@ -57,6 +58,7 @@ export default function OrderCenterClient() {
     [clearEnabled, setClearEnabled] = useState(false),
     [clearBusy, setClearBusy] = useState(false),
     [cancelItem, setCancelItem] = useState<any>(null);
+  const [clock, setClock] = useState(() => Date.now());
   const [creditAmount,setCreditAmount]=useState(""),[creditReason,setCreditReason]=useState(""),[creditBusy,setCreditBusy]=useState(false);
   useEffect(() => {
     fetch("/api/pos/session", { cache: "no-store" })
@@ -67,6 +69,10 @@ export default function OrderCenterClient() {
     const locked = () => setSession({ authenticated: false });
     window.addEventListener("corner-ops-pos-locked", locked);
     return () => window.removeEventListener("corner-ops-pos-locked", locked);
+  }, []);
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
   }, []);
   const load = useCallback(async () => {
     if (!session?.authenticated) return;
@@ -241,8 +247,12 @@ export default function OrderCenterClient() {
         <span>{list.length}</span>
       </h2>
       {list.length === 0 && <p className="ocEmpty">No matching orders.</p>}
-      {list.map((o) => (
-        <button className="ocOrder" key={o.id} onClick={() => void details(o)}>
+      <div className="ocOrderGrid">
+      {list.map((o) => {
+        const unpaid = !["paid", "refunded"].includes(o.payment_status);
+        const pickupAttention = unpaid && o.service_type === "pickup" && o.status !== "cancelled" && clock - new Date(o.created_at).getTime() >= 40 * 60 * 1000;
+        return (
+        <button className={`ocOrder ${pickupAttention ? "pickupAttention" : ""}`} key={o.id} onClick={() => void details(o)}>
           {o.overdue_unpaid && (
             <em>
               UNPAID FROM{" "}
@@ -253,20 +263,20 @@ export default function OrderCenterClient() {
               }).format(new Date(o.created_at))}
             </em>
           )}
-          <strong>#{o.display_number}</strong>
-          <b>{label(o.service_type)}</b>
+          <header><strong>#{o.display_number}</strong><b>{label(o.service_type)}</b></header>
+          <span className={`paymentBadge ${unpaid ? "unpaid" : "paid"}`}>{unpaid ? "UNPAID" : label(o.payment_status)}</span>
           <span className="customer">
             {o.customer_name}{o.customer_phone ? ` · ${o.customer_phone}` : ""}
           </span>
-          {o.delivery_address && (
-            <small className="address">
+          <small className="address">
+            {o.delivery_address ? <>
               {o.delivery_address}
               {o.delivery_unit ? ` · ${o.delivery_unit}` : ""}
-            </small>
-          )}
-          <span>{o.voided_at ? "VOIDED" : label(o.status)}</span>
+            </> : "PICKUP · NO DELIVERY ADDRESS"}
+          </small>
+          <span className="orderStatus">{o.voided_at ? "VOIDED" : label(o.status)}</span>
           <span className="payment">
-            {label(o.payment_status)} · {money(o.amount_due_cents)} DUE
+            {money(o.total_cents)} TOTAL · {money(o.amount_due_cents)} DUE
           </span>
           <time>
             {new Intl.DateTimeFormat("en-US", {
@@ -295,8 +305,10 @@ export default function OrderCenterClient() {
           <small className="source">
             {label(o.order_origin || o.source)} → {label(o.service_type)}
           </small>
+          {pickupAttention && <em className="pickupAlert">PICKUP UNPAID 40+ MINUTES</em>}
         </button>
-      ))}
+      )})}
+      </div>
     </section>
   );
   return (

@@ -29,7 +29,8 @@ export async function listOrders(input: { business: OrderingBusiness; date?: str
       COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),NULLIF(c.display_name,''),'Guest') customer_name,
       COALESCE(NULLIF(o.phone_snapshot,''),p.display_phone,o.caller_phone) customer_phone,
       a.formatted_address delivery_address,a.line2 delivery_unit,
-      ((o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.payment_status NOT IN ('paid','refunded') AND o.status <> 'cancelled') overdue_unpaid
+      ((o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.payment_status NOT IN ('paid','refunded') AND o.status <> 'cancelled') overdue_unpaid,
+      (o.service_type='pickup' AND o.payment_status NOT IN ('paid','refunded') AND o.status<>'cancelled' AND o.created_at<=NOW()-INTERVAL '40 minutes') pickup_attention
     FROM ordering_orders o
     LEFT JOIN ordering_customers c ON c.id=o.customer_id
     LEFT JOIN LATERAL (SELECT display_phone FROM ordering_customer_phones WHERE customer_id=c.id ORDER BY is_primary DESC,created_at LIMIT 1) p ON TRUE
