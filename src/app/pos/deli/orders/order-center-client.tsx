@@ -125,7 +125,7 @@ export default function OrderCenterClient() {
       const response = await fetch(`/api/ordering/order-center/${encodeURIComponent(order.id)}/reopen`, { method: "POST" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not reopen this order.");
-      localStorage.setItem("corner-ops-reopened-order", JSON.stringify({ id: order.id, displayNumber: order.display_number, totalCents: Number(body.order.total_cents), deliveryFeeCents: Number(body.order.delivery_fee_cents || 0), timingMessage: body.order.timing_message_snapshot || "", kitchenTimingLabel: body.order.kitchen_timing_label_snapshot || "", scheduledFor: body.order.scheduled_for, orderItemIds: body.orderItemIds || [], serviceType: body.order.service_type, originalServiceType: body.order.service_type }));
+      localStorage.setItem("corner-ops-reopened-order", JSON.stringify({ id: order.id, displayNumber: order.display_number, totalCents: Number(body.order.total_cents), deliveryFeeCents: Number(body.order.delivery_fee_cents || 0), timingMessage: body.order.timing_message_snapshot || "", kitchenTimingLabel: body.order.kitchen_timing_label_snapshot || "", scheduledFor: body.order.scheduled_for, orderItemIds: body.orderItemIds || [], serviceType: body.order.service_type, originalServiceType: body.order.service_type, openCheckout: true }));
       setSelected(null);
       router.push("/pos/deli");
       window.dispatchEvent(new Event("corner-ops-order-reopened"));
@@ -252,7 +252,7 @@ export default function OrderCenterClient() {
         const unpaid = !["paid", "refunded"].includes(o.payment_status);
         const pickupAttention = unpaid && o.service_type === "pickup" && o.status !== "cancelled" && clock - new Date(o.created_at).getTime() >= 40 * 60 * 1000;
         return (
-        <button className={`ocOrder ${pickupAttention ? "pickupAttention" : ""}`} key={o.id} onClick={() => void details(o)}>
+        <button className={`ocOrder ${pickupAttention ? "pickupAttention" : ""}`} key={o.id} onClick={() => void (o.voided_at || o.status === "cancelled" ? details(o) : reopen(o))}>
           {o.overdue_unpaid && (
             <em>
               UNPAID FROM{" "}

@@ -1230,6 +1230,7 @@
   border-top: 2px solid #334155;
   box-shadow: 0 -10px 30px #0008;
 }
+.posCheckoutMore{display:grid;gap:7px;margin:8px 0 12px}.posCheckoutMoreToggle{min-height:48px;background:#334155;border-color:#94a3b8;font-weight:950}.posCheckoutMoreMenu{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:9px;border:2px solid #64748b;border-radius:10px;background:#0f172a}.posCheckoutMoreMenu button{min-height:54px;padding:8px;font-size:.78rem;font-weight:900}.posCheckoutMoreMenu button:nth-child(2){background:#92400e;border-color:#fbbf24}.posCheckoutMoreMenu button:nth-child(3){background:#7f1d1d;border-color:#fca5a5}@media(max-width:700px){.posCheckoutMoreMenu{grid-template-columns:1fr}}
 .posEvenSplit {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) repeat(3, auto);

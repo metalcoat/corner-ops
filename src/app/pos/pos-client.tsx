@@ -590,12 +590,13 @@ export default function PosClient({
         const raw = localStorage.getItem("corner-ops-reopened-order");
         if (!raw) return;
         const value = JSON.parse(raw);
-        setSavedDraft({
+        const reopenedDraft: SavedDraft = {
           ...value,
           promotions: [],
           loyalty: [],
           reopened: true,
-        });
+        };
+        setSavedDraft(reopenedDraft);
         setServiceType(value.serviceType || "pickup");
         setCart([]);
         void refreshReopenedOrder(value.id).catch((error) =>
@@ -605,9 +606,14 @@ export default function PosClient({
               : "Could not load the reopened order.",
           ),
         );
-        setCartNotice(
-          `Order #${value.displayNumber} reopened. Existing items are locked; swipe or tap VOID to cancel one.`,
-        );
+        setCartNotice("");
+        if (value.openCheckout) {
+          localStorage.setItem(
+            "corner-ops-reopened-order",
+            JSON.stringify({ ...value, openCheckout: false }),
+          );
+          void openCheckout(reopenedDraft);
+        }
       } catch {
         /* Ignore a damaged local handoff value. */
       }
@@ -651,6 +657,7 @@ export default function PosClient({
     null,
   );
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [checkoutMoreOpen, setCheckoutMoreOpen] = useState(false);
   const [checkoutState, setCheckoutState] = useState<CheckoutState | null>(
     null,
   );
@@ -2666,7 +2673,7 @@ export default function PosClient({
 
   async function openCheckout(draftOverride?: SavedDraft) {
     setLastChangeDueCents(null);
-    if (sendRequirement) {
+    if (sendRequirement && !draftOverride?.reopened && !draftOverride?.checkoutOnly) {
       setCheckoutError(sendRequirement);
       return;
     }
@@ -2715,11 +2722,13 @@ export default function PosClient({
         ) / 100
       ).toFixed(2),
     );
+    setCheckoutMoreOpen(false);
     setCheckoutOpen(true);
   }
 
   function closeCheckout() {
     setCheckoutOpen(false);
+    setCheckoutMoreOpen(false);
     setCdsTenderType("");
     if (!savedDraft?.checkoutOnly) return;
     setCheckoutState(null);
@@ -4896,6 +4905,58 @@ export default function PosClient({
             <h2 id="checkout-title">
               Checkout · Order #{(savedDraft || activeTab)!.displayNumber}
             </h2>
+            {savedDraft?.reopened && (
+              <section className="posCheckoutMore">
+                <button
+                  type="button"
+                  className="posCheckoutMoreToggle"
+                  aria-expanded={checkoutMoreOpen}
+                  onClick={() => setCheckoutMoreOpen((open) => !open)}
+                >
+                  MORE {checkoutMoreOpen ? "▲" : "▼"}
+                </button>
+                {checkoutMoreOpen && (
+                  <div className="posCheckoutMoreMenu">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCheckoutMoreOpen(false);
+                        setCheckoutOpen(false);
+                        setSavedDraft((current) =>
+                          current ? { ...current, checkoutOnly: false } : current,
+                        );
+                        setCartNotice("");
+                      }}
+                    >
+                      ADD ITEMS / EDIT ORDER
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCheckoutMoreOpen(false);
+                        setCheckoutOpen(false);
+                        setSavedDraft((current) =>
+                          current ? { ...current, checkoutOnly: false } : current,
+                        );
+                        setCartNotice("");
+                      }}
+                    >
+                      VOID ITEM / PARTIAL REFUND
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        window.location.assign(
+                          `/pos/deli/orders?orderId=${encodeURIComponent(savedDraft.id)}`,
+                        )
+                      }
+                    >
+                      CREDIT / HISTORY / VOID ORDER
+                    </button>
+                  </div>
+                )}
+              </section>
+            )}
             <nav className="posCheckTabs" aria-label="Payable checks">
               {payableChecks.map((check) => (
                 <button
