@@ -9,48 +9,27 @@ function source(path: string) {
   return readFileSync(join(root, path), "utf8");
 }
 
-test("Tiki clock-out saves the primary punch before best-effort stale cleanup", () => {
-  const tiki = source("src/lib/tiki-timeclock.ts");
-
-  assert.match(
-    tiki,
-    /FROM time_entries[\s\S]*WHERE business = 'Tiki'[\s\S]*AND employee_id = \$\{employee\.id\}::uuid[\s\S]*AND clock_out IS NULL[\s\S]*ORDER BY clock_in DESC, created_at DESC, id DESC/,
-  );
-  assert.match(
-    tiki,
-    /UPDATE time_entries SET[\s\S]*status = \$\{primaryStatus\}[\s\S]*WHERE id = \$\{existing\.id\}::uuid[\s\S]*AND business = 'Tiki'[\s\S]*AND employee_id = \$\{employee\.id\}::uuid[\s\S]*AND clock_out IS NULL[\s\S]*RETURNING id, clock_in, clock_out, status/,
-  );
-  assert.match(
-    tiki,
-    /if \(!entry\) \{[\s\S]*AND clock_out IS NOT NULL[\s\S]*LIMIT 1[\s\S]*if \(!entry\) throw new TikiClockOutSaveError\(\)/,
-  );
-  assert.match(
-    tiki,
-    /primary clock-out saved but stale duplicate cleanup failed/,
-  );
-  assert.match(
-    tiki,
-    /AND id <> \$\{existing\.id\}::uuid[\s\S]*AND clock_out IS NULL[\s\S]*RETURNING id/,
-  );
-  assert.match(tiki, /Automatically closed stale duplicate open punch during clock-out\./);
+test("Tiki primary save and receipt are atomic, with isolated stale cleanup", () => {
+  const sql = source("db/migrations/0012_timeclock_idempotency.sql");
+  assert.match(sql, /pg_advisory_xact_lock/);
+  assert.match(sql, /prior\.response.*replayed/);
+  assert.match(sql, /id = p_entry_id AND business = 'Tiki' AND employee_id = p_employee_id FOR UPDATE/);
+  assert.match(sql, /AND id <> punch\.id AND clock_out IS NULL AND clock_in <= punch\.clock_in/);
+  assert.match(sql, /EXCEPTION WHEN OTHERS THEN[\s\S]*Primary clock-out saved but stale duplicate cleanup failed/);
+  assert.match(sql, /INSERT INTO public\.timeclock_punch_requests/);
 });
 
-test("Tiki clock-out failure is explicit and visually unmistakable", () => {
+test("uncertain punches are unmistakable and never falsely described as unsaved", () => {
   const tiki = source("src/lib/tiki-timeclock.ts");
   const route = source("src/app/api/timeclock/route.ts");
   const page = source("src/app/clock/page.tsx");
   const css = source("src/app/clock/clock.css");
-
-  assert.match(tiki, /class TikiClockOutSaveError extends Error/);
-  assert.match(tiki, /readonly code = "CLOCK_OUT_FAILED"/);
-  assert.match(tiki, /clock-out update failed/);
-  assert.match(tiki, /if \(!entry\) throw new TikiClockOutSaveError\(\)/);
-  assert.match(route, /error instanceof TikiClockOutSaveError/);
-  assert.match(route, /code: error\.code/);
-  assert.match(route, /Your clock-out was not saved\. You are still clocked in\./);
-  assert.match(page, /title: "CLOCK OUT FAILED"/);
-  assert.match(page, /title: "PUNCH NOT CONFIRMED"/);
+  assert.match(tiki, /TikiPunchUnconfirmedError/);
+  assert.match(route, /PUNCH_CLIENT_OUTDATED/);
+  assert.doesNotMatch(route, /Your clock-out was not saved/);
+  assert.match(page, /PUNCH NOT CONFIRMED/);
   assert.match(page, /role="alert" aria-live="assertive"/);
+  assert.match(page, /Retry same punch/);
   assert.match(page, /Do not keep pressing the button\./);
   assert.match(css, /\.clockCriticalAlert/);
   assert.match(css, /border:3px solid var\(--danger\)/);

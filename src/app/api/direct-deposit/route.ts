@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
+import { apiError } from "@/lib/http";
+import { recordAuditEvent } from "@/lib/audit";
 import {
   getDirectDepositAudit,
   listDirectDepositAudit,
@@ -39,12 +41,18 @@ export async function GET(request: NextRequest) {
     if (!canAccessBusiness(session, business)) return NextResponse.json({ error: "Business access denied." }, { status: 403 });
     const id = request.nextUrl.searchParams.get("id");
     if (id) {
+      // Summary access must never grant access to routing/account numbers.
+      requirePermission(session, "direct_deposit.sensitive.read");
       const [election, audit] = await Promise.all([
-        getDirectDepositElection(id),
+        getDirectDepositElection(id, { business }),
         getDirectDepositAudit(id),
       ]);
       if (!election || election.business !== business) return NextResponse.json({ error: "Direct-deposit record was not found." }, { status: 404 });
-      return NextResponse.json({ election: withAudit(election, audit) });
+      await recordAuditEvent({
+        business, action: "Sensitive direct-deposit record viewed", actor: session.email,
+        entityType: "direct-deposit", entityId: id,
+      });
+      return NextResponse.json({ election: withAudit(election, audit) }, { headers: { "Cache-Control": "private, no-store" } });
     }
     const [employees, elections, audits] = await Promise.all([
       listDirectDepositEmployees(business),
@@ -58,7 +66,7 @@ export async function GET(request: NextRequest) {
       elections: elections.map((item) => withAudit(item, auditById.get(item.id) || null)),
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Direct-deposit records could not be loaded." }, { status: 400 });
+    return apiError(error);
   }
 }
 
@@ -94,6 +102,6 @@ export async function POST(request: NextRequest) {
 
     throw new Error("Unknown direct-deposit action.");
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Direct-deposit action could not be completed." }, { status: 400 });
+    return apiError(error);
   }
 }

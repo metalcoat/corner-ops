@@ -327,73 +327,7 @@ export async function ensureOvertimeRiskSchema(): Promise<void> {
       await ensureSchema();
       await ensureIntegrationSchema();
       const sql = getSql();
-      await sql`
-        CREATE OR REPLACE FUNCTION corner_ops_log_schedule_shift_change()
-        RETURNS trigger
-        LANGUAGE plpgsql
-        AS $$
-        DECLARE
-          old_name TEXT := '';
-          new_name TEXT := '';
-          kind TEXT := '';
-          prior_employee UUID := NULL;
-          prior_start TIMESTAMPTZ := NULL;
-          prior_end TIMESTAMPTZ := NULL;
-          prior_status TEXT := NULL;
-        BEGIN
-          IF TG_OP = 'UPDATE' THEN
-            IF OLD.employee_id IS NOT DISTINCT FROM NEW.employee_id
-               AND OLD.starts_at IS NOT DISTINCT FROM NEW.starts_at
-               AND OLD.ends_at IS NOT DISTINCT FROM NEW.ends_at
-               AND OLD.status IS NOT DISTINCT FROM NEW.status THEN
-              RETURN NEW;
-            END IF;
-            prior_employee := OLD.employee_id;
-            prior_start := OLD.starts_at;
-            prior_end := OLD.ends_at;
-            prior_status := OLD.status;
-          END IF;
 
-          IF TG_OP = 'INSERT' THEN
-            kind := CASE WHEN NEW.employee_id IS NULL THEN 'Created open shift' ELSE 'Created assignment' END;
-          ELSIF prior_employee IS DISTINCT FROM NEW.employee_id THEN
-            kind := CASE
-              WHEN prior_employee IS NULL THEN 'Assigned open shift'
-              WHEN NEW.employee_id IS NULL THEN 'Unassigned shift'
-              ELSE 'Reassigned shift'
-            END;
-          ELSIF prior_start IS DISTINCT FROM NEW.starts_at OR prior_end IS DISTINCT FROM NEW.ends_at THEN
-            kind := 'Changed shift time';
-          ELSE
-            kind := 'Changed shift status';
-          END IF;
-
-          IF prior_employee IS NOT NULL THEN
-            SELECT name INTO old_name FROM employees WHERE id = prior_employee;
-          END IF;
-          IF NEW.employee_id IS NOT NULL THEN
-            SELECT name INTO new_name FROM employees WHERE id = NEW.employee_id;
-          END IF;
-
-          INSERT INTO shift_change_log (
-            id, business, shift_id, change_type, prior_employee_id, prior_employee_name,
-            new_employee_id, new_employee_name, starts_at, ends_at, details
-          ) VALUES (
-            gen_random_uuid(), NEW.business, NEW.id, kind,
-            prior_employee, COALESCE(old_name, ''), NEW.employee_id, COALESCE(new_name, ''),
-            NEW.starts_at, NEW.ends_at,
-            jsonb_build_object(
-              'priorStartsAt', prior_start,
-              'priorEndsAt', prior_end,
-              'priorStatus', prior_status,
-              'newStatus', NEW.status,
-              'position', NEW.position
-            )
-          );
-          RETURN NEW;
-        END;
-        $$;
-      `;
     })().catch((error) => {
       overtimeSchemaPromise = null;
       throw error;

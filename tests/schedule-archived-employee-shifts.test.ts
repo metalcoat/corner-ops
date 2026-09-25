@@ -24,7 +24,7 @@ test("publishing never assigns or notifies an archived employee", () => {
 test("archiving an employee releases future shifts and the production migration repairs old assignments", () => {
   const directory = source("src/lib/employee-directory-admin.ts");
   const operations = source("src/lib/operations.ts");
-  const migrations = source("tools/apply-production-migrations.mjs");
+  const migrations = source("db/migrations/0010_release_compatibility.sql");
   for (const text of [directory, operations, migrations]) {
     assert.match(text, /Released after employee was archived/);
     assert.match(text, /employee_id = NULL/);

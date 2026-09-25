@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
 
     const id = request.nextUrl.searchParams.get("id");
     if (id) {
-      const election = await getDirectDepositElection(id);
+      const election = await getDirectDepositElection(id, { business: session.business, employeeId: session.employeeId });
       if (!election || election.employeeId !== session.employeeId || election.business !== session.business || election.status === "Superseded") {
         return NextResponse.json({ error: "Direct-deposit form was not found." }, { status: 404 });
       }

@@ -198,28 +198,7 @@ export function ensureExpenseControlSchema(): Promise<void> {
     schemaPromise = (async () => {
       await ensureAccountingControlSchema();
       const sql = getSql();
-      await sql`
-        CREATE UNIQUE INDEX IF NOT EXISTS card_transfer_active_bank_unique
-        ON credit_card_transfer_matches (bank_transaction_id)
-        WHERE status <> 'Ignored'
-      `;
-      await sql`
-        CREATE UNIQUE INDEX IF NOT EXISTS card_transfer_active_card_unique
-        ON credit_card_transfer_matches (card_transaction_id)
-        WHERE status <> 'Ignored'
-      `;
 
-
-      await sql`
-        CREATE UNIQUE INDEX IF NOT EXISTS receipt_active_document_unique
-        ON receipt_transaction_matches (receipt_id)
-        WHERE status <> 'Ignored'
-      `;
-      await sql`
-        CREATE UNIQUE INDEX IF NOT EXISTS receipt_active_transaction_unique
-        ON receipt_transaction_matches (bank_transaction_id)
-        WHERE status = 'Matched'
-      `;
     })().catch((error) => {
       schemaPromise = null;
       throw error;

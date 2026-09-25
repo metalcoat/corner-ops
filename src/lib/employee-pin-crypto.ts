@@ -1,17 +1,20 @@
 import { createHmac, randomBytes, scryptSync } from "node:crypto";
-import { legacySessionSecret, purposeSecret } from "./security-keys";
+import { historicalPurposeKey, legacySessionSecret, purposeSecret } from "./security-keys";
+import { isProductionEnvironment } from "./production-security";
 
 export const EMPLOYEE_PIN_HASH_VERSION = 2;
 
 function pepperCandidates(): [string, string, string] {
-  return [
-    purposeSecret("employee-pin-pepper", {
-      envName: "EMPLOYEE_PIN_PEPPER",
-      fallbackEnvName: "EMPLOYMENT_FORMS_ENCRYPTION_KEY",
-    }),
-    purposeSecret("employee-pin-pepper", { envName: "EMPLOYMENT_FORMS_ENCRYPTION_KEY" }),
-    purposeSecret("employee-pin-pepper"),
+  const current = purposeSecret("employee-pin-pepper", {
+    envName: "EMPLOYEE_PIN_PEPPER", fallbackEnvName: "EMPLOYMENT_FORMS_ENCRYPTION_KEY",
+  });
+  const production = isProductionEnvironment();
+  const roots = [
+    process.env.LEGACY_EMPLOYEE_PIN_PEPPER || (!production ? process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY : ""),
+    process.env.LEGACY_EMPLOYEE_PIN_PEPPER_2 || (!production ? process.env.SESSION_SECRET : ""),
   ];
+  return [current, ...roots.map((root) => root?.trim()
+    ? historicalPurposeKey("employee-pin-pepper", root).toString("base64url") : current)] as [string, string, string];
 }
 
 function pepper(): string {

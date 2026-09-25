@@ -48,7 +48,7 @@ export function ensureEmployeeHandbookSchema(): Promise<void> {
   if (!handbookSchemaPromise) {
     handbookSchemaPromise = (async () => {
       await ensureSchema();
-      await getSql()`CREATE UNIQUE INDEX IF NOT EXISTS employee_handbook_ack_employee_hash_unique ON employee_handbook_acknowledgments (employee_id, handbook_version, content_hash)`;
+
     })().catch((error) => {
       handbookSchemaPromise = null;
       throw error;

@@ -221,12 +221,13 @@ export async function listDirectDepositElections(business: Business, employeeId?
   return rows.map(summary);
 }
 
-export async function getDirectDepositElection(id: string): Promise<DirectDepositDetail | null> {
+export async function getDirectDepositElection(id: string, scope: { business: Business; employeeId?: string }): Promise<DirectDepositDetail | null> {
   await ensureDirectDepositSchema();
   const rows = await getSql()`
     SELECT id, business, employee_id, employee_name, status, encrypted_payload, assigned_at, signed_at
     FROM direct_deposit_elections
-    WHERE id = ${id}
+    WHERE id = ${id} AND business = ${scope.business}
+      AND (${scope.employeeId || null}::uuid IS NULL OR employee_id = ${scope.employeeId || null}::uuid)
     LIMIT 1
   ` as unknown as ElectionRow[];
   return rows[0] ? { ...summary(rows[0]), payload: decrypt(rows[0].encrypted_payload) } : null;
@@ -280,9 +281,12 @@ export async function submitDirectDepositElection(input: {
     SET status = 'Completed', encrypted_payload = ${encrypt(signed)},
         employee_signature_name = ${input.signatureName.trim()}, signed_at = NOW(),
         signature_ip = ${input.ipAddress}, signature_user_agent = ${input.userAgent}, updated_at = NOW()
-    WHERE id = ${row.id}
+    WHERE id = ${row.id} AND business = ${input.business}
+      AND employee_id = ${input.employeeId} AND status = 'Assigned'
     RETURNING id, business, employee_id, employee_name, status, encrypted_payload, assigned_at, signed_at
   ` as unknown as ElectionRow[];
+
+  if (!updated[0]) throw new Error("This election changed before submission. Reload the form before trying again.");
 
   const direct = input.payload.paymentChoice === "direct-deposit";
   await notifyOwner({
