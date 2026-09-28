@@ -3,9 +3,17 @@ import { isTeamHost, teamRoute } from "@/lib/team-domain-routing";
 import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "corner_ops_session";
+const PRODUCTION_HOSTS = new Set([
+  "ops.ordercornerdeli.com",
+  "team.ordercornerdeli.com",
+  "team.atthedocks.com",
+  "localhost",
+  "127.0.0.1",
+]);
 
 const selfAuthorizedApiPaths = [
   "/api/auth/session",
+  "/api/health",
   "/api/auth/password-reset",
   "/api/timeclock",
   "/api/employee",
@@ -113,8 +121,13 @@ function unauthorizedApi() {
 
 export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
+  const hostname = (request.headers.get("host") || "").split(":", 1)[0].toLowerCase();
 
-  if (isTeamHost(request.nextUrl.hostname)) {
+  if (process.env.APP_ENV === "production" && !PRODUCTION_HOSTS.has(hostname)) {
+    return new Response(null, { status: 404 });
+  }
+
+  if (isTeamHost(hostname)) {
     const route = teamRoute(path);
     if (route === "deny") return new Response(null, { status: 404 });
     if (route === "home") return NextResponse.redirect(new URL("/team", request.url));

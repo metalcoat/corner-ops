@@ -228,7 +228,7 @@ export default function Home() {
           <h1>Connect storage and secrets</h1>
           <p className="muted">The app is built, but these environment variables are still missing:</p>
           <div className="missingList">{session.missing.map((name) => <code key={name}>{name}</code>)}</div>
-          <p className="muted">Add them in Vercel or <code>.env.local</code>, then reload.</p>
+          <p className="muted">Add them to the app environment, then reload.</p>
         </section>
       </main>
     );

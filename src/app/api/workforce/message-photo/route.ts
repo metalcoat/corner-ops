@@ -1,4 +1,4 @@
-import { get } from "@vercel/blob";
+import { get } from "@/lib/storage";
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { ownerMessageAttachment } from "@/lib/message-attachments";
 import { apiError, unauthorized } from "@/lib/http";

@@ -3,7 +3,7 @@ import { decryptIntegrationSecret as decryptSecret } from "@/lib/integration-cry
 import type { Business } from "@/lib/types";
 
 const PLAID_PRODUCTS = ["transactions"];
-const CANONICAL_OAUTH_REDIRECT = "https://corner-ops.vercel.app/ops/integrations";
+const CANONICAL_OAUTH_REDIRECT = "https://ops.ordercornerdeli.com/ops/integrations";
 
 type PlaidErrorPayload = {
   error_code?: string;

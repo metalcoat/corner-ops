@@ -98,7 +98,9 @@ async function directAttempt(rawUrl: string, fileName: string, method: string, h
 
 async function edgeAttempt(rawUrl: string, fileName: string): Promise<DownloadResult | DownloadAttempt | null> {
   const secret = process.env.CRON_SECRET?.trim();
-  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() || process.env.VERCEL_URL?.trim();
+  const host = process.env.APP_URL?.trim()
+    || process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
+    || process.env.VERCEL_URL?.trim();
   if (!secret || !host) return null;
 
   const endpoint = `https://${host.replace(/^https?:\/\//, "").replace(/\/$/, "")}/api/rezku/download-proxy`;

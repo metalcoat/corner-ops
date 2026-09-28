@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "node tools/apply-production-migrations.mjs && next build",
+    "build": "next build",
     "start": "next start",
     "db:migrate": "node tools/apply-production-migrations.mjs --force",
     "typecheck": "tsc --noEmit",
@@ -17,6 +17,7 @@
     "@neondatabase/serverless": "^1.0.2",
     "@vercel/blob": "^2.3.0",
     "next": "^16.3.3",
+    "pg": "^8.23.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "resend": "^6.9.0",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.21.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.2.0",
     "typescript": "^5.7.0"

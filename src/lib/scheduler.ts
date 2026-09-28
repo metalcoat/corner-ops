@@ -267,5 +267,5 @@ export async function handleCronRequest(request: Request) {
   if (!safeBearer(request.headers.get("authorization") || "", `Bearer ${expected}`)) {
     return Response.json({ error: "Unauthorized scheduler request." }, { status: 401 });
   }
-  return Response.json(await runScheduledOperations({ source: "Vercel Cron" }));
+  return Response.json(await runScheduledOperations({ source: "Corner Ops Cron" }));
 }

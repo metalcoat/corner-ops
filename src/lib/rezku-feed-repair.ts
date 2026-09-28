@@ -52,7 +52,7 @@ export async function repairRezkuFeed(actor: string, options: { maxEmails?: numb
   let webhookReenabled = false;
   if (webhook.status !== "enabled") {
     const updated = await resend.webhooks.update(webhook.id, {
-      endpoint: webhook.endpoint || `https://corner-ops.vercel.app${REZKU_WEBHOOK_PATH}`,
+      endpoint: webhook.endpoint || `https://ops.ordercornerdeli.com${REZKU_WEBHOOK_PATH}`,
       events: ["email.received"],
       status: "enabled",
     });

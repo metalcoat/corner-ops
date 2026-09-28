@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await repairRezkuFeed("Vercel Rezku repair cron", { maxEmails: 2 });
+    const result = await repairRezkuFeed("Corner Ops Rezku repair cron", { maxEmails: 2 });
     return Response.json({ ok: true, ...result });
   } catch (error) {
     console.error("[cron/rezku-repair] repair failed", error);
