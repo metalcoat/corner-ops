@@ -8,6 +8,10 @@ const OWNER_BRAND: SiteBrand = { name: "Corner Ops", icon: "/corner-ops-icon.svg
 
 export function siteBrandForHost(hostname: string): SiteBrand {
   switch (hostname.toLowerCase().split(":")[0]) {
+    case "ops.ordercornerdeli.com":
+      return { name: "Corner Deli", icon: "/corner-deli-logo.png", teamHost: false };
+    case "ops.atthedocks.com":
+      return { name: "At the Docks", icon: "/at-the-docks-logo.svg", teamHost: false };
     case "team.ordercornerdeli.com":
       return { name: "Corner Deli", icon: "/corner-deli-logo.png", teamHost: true };
     case "team.atthedocks.com":

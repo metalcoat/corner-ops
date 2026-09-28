@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 const COOKIE_NAME = "corner_ops_session";
 const PRODUCTION_HOSTS = new Set([
   "ops.ordercornerdeli.com",
+  "ops.atthedocks.com",
   "team.ordercornerdeli.com",
   "team.atthedocks.com",
   "localhost",

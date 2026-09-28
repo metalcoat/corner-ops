@@ -194,10 +194,10 @@ export default function GlobalNav({ teamHost = false, brand }: { teamHost?: bool
   if (navHidden) return null;
 
   return (
-    <nav className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label={teamHost ? "Team features" : "Corner Ops features"} data-business={currentBusiness}>
+    <nav className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label={teamHost ? "Team features" : "Operations features"} data-business={currentBusiness}>
       <div className="globalNavTopline">
-        <a className="globalBrand" href={teamHost ? "/team" : "/ops/people"}>
-          {teamHost && <img src={brand.icon} alt="" />}{brand.name}
+        <a className={`globalBrand ${teamHost ? "" : "globalBrandIconOnly"}`} href={teamHost ? "/team" : "/ops/people"} aria-label={`${brand.name} ${teamHost ? "team" : "operations"} home`}>
+          <img src={brand.icon} alt="" />{teamHost && brand.name}
         </a>
         <button className="globalMenuButton" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
           {open ? "Close" : "Menu"}

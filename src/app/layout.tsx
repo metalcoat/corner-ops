@@ -13,12 +13,13 @@ const THEME_BOOTSTRAP = `try{var b=localStorage.getItem("corner-ops-business-the
 
 export async function generateMetadata(): Promise<Metadata> {
   const brand = siteBrandForHost((await headers()).get("host") || "");
+  const appName = brand.teamHost ? brand.name : "Ops";
   return {
-    title: brand.name,
+    title: appName,
     description: brand.teamHost ? `${brand.name} team workspace` : "Internal operations for Corner Deli and Tiki",
     manifest: "/manifest.webmanifest",
-    applicationName: brand.name,
-    appleWebApp: { capable: true, title: brand.name, statusBarStyle: "black-translucent" },
+    applicationName: appName,
+    appleWebApp: { capable: true, title: appName, statusBarStyle: "black-translucent" },
     icons: { icon: brand.icon, apple: brand.icon },
   };
 }

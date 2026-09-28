@@ -4,12 +4,13 @@ import { siteBrandForHost } from "@/lib/site-brand";
 
 export default async function manifest(): Promise<MetadataRoute.Manifest> {
   const brand = siteBrandForHost((await headers()).get("host") || "");
+  const appName = brand.teamHost ? brand.name : "Ops";
   const iconSizes = brand.icon.endsWith(".png") ? "512x512" : "any";
   const iconType = brand.icon.endsWith(".png") ? "image/png" : "image/svg+xml";
   return {
     id: "/app",
-    name: brand.name,
-    short_name: brand.name,
+    name: appName,
+    short_name: appName,
     description: brand.teamHost ? `${brand.name} team messages, schedules, and employee information.` : "Messaging, schedules, time, payroll, documents, and operations for Corner Deli and Tiki.",
     start_url: "/app",
     scope: "/",
@@ -35,7 +36,7 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
       {
         name: brand.teamHost ? "Team messages" : "Owner messages",
         short_name: "Messages",
-        description: `Open ${brand.name} messaging.`,
+        description: `Open ${appName} messaging.`,
         url: "/ops/messages",
         icons: [{ src: brand.icon, sizes: iconSizes, type: iconType }],
       },

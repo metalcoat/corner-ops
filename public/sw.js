@@ -1,8 +1,12 @@
-const APP_CACHE = "corner-ops-shell-v3";
+const APP_CACHE = "corner-ops-shell-v4";
 const BRAND = self.location.hostname === "team.ordercornerdeli.com"
   ? { name: "Corner Deli", icon: "/corner-deli-logo.png" }
   : self.location.hostname === "team.atthedocks.com"
     ? { name: "At the Docks", icon: "/at-the-docks-logo.svg" }
+    : self.location.hostname === "ops.ordercornerdeli.com"
+      ? { name: "Ops", icon: "/corner-deli-logo.png" }
+      : self.location.hostname === "ops.atthedocks.com"
+        ? { name: "Ops", icon: "/at-the-docks-logo.svg" }
     : { name: "Corner Ops", icon: "/corner-ops-icon.svg" };
 const APP_SHELL = ["/app", BRAND.icon];
 

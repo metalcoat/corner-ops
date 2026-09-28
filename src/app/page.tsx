@@ -1,6 +1,7 @@
 "use client";
 
 import { responseMessage } from "@/app/client-http";
+import { useSiteBrand } from "@/app/brand-context";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   businesses,
@@ -35,6 +36,7 @@ function formatEvent(event: AuditEvent): string {
 
 
 export default function Home() {
+  const brand = useSiteBrand();
   const [session, setSession] = useState<SessionView | null>(null);
   const [business, setBusiness] = useState<Business>("Corner Deli");
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
@@ -217,7 +219,7 @@ export default function Home() {
   }
 
   if (!session) {
-    return <main className="centered"><div className="loginCard"><p className="eyebrow">Corner Ops</p><h1>Loading</h1><p className="muted">Checking the filing cabinet for signs of life.</p></div></main>;
+    return <main className="centered"><div className="loginCard"><img src={brand.icon} alt="" style={{width:64,height:64,objectFit:"contain"}}/><h1>Loading</h1><p className="muted">Checking the filing cabinet for signs of life.</p></div></main>;
   }
 
   if (!session.configured) {
@@ -239,7 +241,8 @@ export default function Home() {
       <main className="centered">
         <form className="loginCard" onSubmit={login}>
           <p className="eyebrow">Internal operations</p>
-          <h1>Corner Ops</h1>
+          <img src={brand.icon} alt="" style={{width:64,height:64,objectFit:"contain"}}/>
+          <h1>Operations sign-in</h1>
           <p className="muted">One password between you and the paperwork. Civilization remains fragile.</p>
           <label>Password<input name="password" type="password" autoComplete="current-password" required autoFocus /></label>
           {message && <p className="formMessage errorMessage">{message}</p>}
@@ -255,7 +258,7 @@ export default function Home() {
   return (
     <main className="shell">
       <aside className="sidebar">
-        <div><p className="eyebrow">Internal operations</p><h1>Corner Ops</h1></div>
+        <div><p className="eyebrow">Internal operations</p><img src={brand.icon} alt="" style={{width:64,height:64,objectFit:"contain"}}/><h1>Documents</h1></div>
         <nav>
           <button className="navItem active">Documents</button>
           <button className="navItem" disabled>Tasks <span>Soon</span></button>
