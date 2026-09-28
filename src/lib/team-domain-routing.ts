@@ -1,7 +1,7 @@
 const TEAM_HOSTS = new Set(["team.ordercornerdeli.com", "team.atthedocks.com"]);
 
 const TEAM_PAGES = [
-  "/team", "/employee", "/clock", "/scan", "/signin", "/forgot-password",
+  "/app", "/team", "/employee", "/clock", "/scan", "/signin", "/forgot-password",
   "/reset-password", "/privacy", "/terms", "/sms-help",
   "/ops/attendance", "/ops/direct-deposit", "/ops/employee-handbook",
   "/ops/employees", "/ops/employment-forms", "/ops/messages",
