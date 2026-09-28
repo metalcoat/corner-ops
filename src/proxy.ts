@@ -1,4 +1,5 @@
 import { constantTimeEqual, hmacSignature, legacySessionHmac } from "@/lib/security-keys";
+import { isTeamHost, teamRoute } from "@/lib/team-domain-routing";
 import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "corner_ops_session";
@@ -113,6 +114,12 @@ function unauthorizedApi() {
 export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
+  if (isTeamHost(request.nextUrl.hostname)) {
+    const route = teamRoute(path);
+    if (route === "deny") return new Response(null, { status: 404 });
+    if (route === "home") return NextResponse.redirect(new URL("/team", request.url));
+  }
+
   if (path.startsWith("/api/")) {
     if (selfAuthorizedApiPaths.some((prefix) => matchesPath(path, prefix))) return NextResponse.next();
 
@@ -141,4 +148,4 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/api/:path*", "/ops/:path*"] };
+export const config = { matcher: ["/:path*"] };
