@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { Resend } from "resend";
+import { publicTeamBaseUrl } from "@/lib/public-team-url";
 import { getSql } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import type { EmployeeSession } from "@/lib/employee-auth";
@@ -165,7 +166,7 @@ async function reconcileCases() {
 async function sendMissedShiftEmail(row: MissedShiftRow) {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   const from = process.env.EMPLOYEE_NOTIFICATION_FROM_EMAIL?.trim() || process.env.ALERT_FROM_EMAIL?.trim();
-  const appUrl = (process.env.EMPLOYEE_APP_URL?.trim() || process.env.APP_URL?.trim() || "").replace(/\/$/, "");
+  const appUrl = publicTeamBaseUrl(row.business);
   if (!row.employee_email) return { sent: false, reason: "Employee email is missing." };
   if (!apiKey || !from) return { sent: false, reason: "Employee email delivery is not configured." };
   if (!appUrl) return { sent: false, reason: "Employee Hub URL is not configured." };

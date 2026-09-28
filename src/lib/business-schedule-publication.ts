@@ -5,6 +5,7 @@ import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import { ensureStaffNotificationSchema } from "@/lib/staff-notifications";
 import type { SmsRecipient } from "@/lib/sms-notifications";
 import type { Business } from "@/lib/types";
+import { publicEmployeeHubUrl } from "@/lib/public-team-url";
 
 const TIME_ZONE = "America/New_York";
 
@@ -115,16 +116,7 @@ function compactShiftLabel(shift: ScheduleShiftRow): string {
 }
 
 function employeeHubUrl(business: Business): string {
-  const configured = process.env.EMPLOYEE_APP_URL?.trim() || process.env.APP_URL?.trim();
-  const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() || process.env.VERCEL_URL?.trim();
-  const root = configured
-    ? configured.replace(/\/$/, "")
-    : vercelUrl
-      ? `https://${vercelUrl.replace(/\/$/, "")}`
-      : "";
-  if (!root) return "";
-  const hub = root.endsWith("/employee") ? root : `${root}/employee`;
-  return `${hub}?business=${encodeURIComponent(business)}`;
+  return publicEmployeeHubUrl(business);
 }
 
 function pinInstruction(business: Business): string {

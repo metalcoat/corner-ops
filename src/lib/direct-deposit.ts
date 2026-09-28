@@ -117,12 +117,13 @@ function noticePayload(business: Business, person: EmployeeRow, employer: Record
 }
 
 async function notifyOwner(input: {
+  business: Business;
   subject: string;
   lines: string[];
 }): Promise<void> {
   const recipients = ownerNotificationEmails();
   if (!recipients.length) return;
-  const base = cornerOpsBaseUrl();
+  const base = cornerOpsBaseUrl(input.business);
   try {
     await sendTransactionalEmail({
       to: recipients,
@@ -163,6 +164,7 @@ export async function assignDirectDepositElection(input: {
     RETURNING id, business, employee_id, employee_name, status, encrypted_payload, assigned_at, signed_at
   ` as unknown as ElectionRow[];
   await notifyOwner({
+    business: input.business,
     subject: `[Corner Ops] Payment-method form assigned: ${person.name}`,
     lines: [
       `${person.name} (${input.business}) was assigned a new direct-deposit or paper-check election.`,
@@ -286,6 +288,7 @@ export async function submitDirectDepositElection(input: {
 
   const direct = input.payload.paymentChoice === "direct-deposit";
   await notifyOwner({
+    business: input.business,
     subject: `[Corner Ops] Payroll payment change: ${row.employee_name}`,
     lines: direct ? [
       `${row.employee_name} (${input.business}) submitted a new DIRECT DEPOSIT election.`,

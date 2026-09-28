@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import { notifyOwnersOfOperationalPush } from "@/lib/push-notifications";
 import type { Business } from "@/lib/types";
+import { publicTeamBaseUrl } from "@/lib/public-team-url";
 
 type AlertInput = {
   business: Business;
@@ -15,7 +16,7 @@ async function deliverEmail(input: AlertInput) {
   const from = process.env.ALERT_FROM_EMAIL?.trim();
   const to = process.env.ALERT_TO_EMAIL?.trim() || process.env.APP_EMAIL?.trim();
   if (!apiKey || !from || !to) return { configured: false, sent: false };
-  const base = process.env.APP_URL?.trim() || process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  const base = publicTeamBaseUrl(input.business);
   const pageUrl = base
     ? `${base.startsWith("http") ? base : `https://${base}`}${input.url}`
     : input.url;

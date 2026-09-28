@@ -16,7 +16,7 @@ function employeeGivenName(value: string): string {
 }
 
 export async function sendEmployeeOnboardingSms(input: EmployeeOnboardingSmsInput) {
-  const baseUrl = cornerOpsBaseUrl();
+  const baseUrl = cornerOpsBaseUrl(input.business);
   if (!baseUrl) {
     return {
       provider: "telnyx" as const,
