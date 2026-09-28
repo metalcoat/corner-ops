@@ -20,7 +20,7 @@ export function isTeamHost(hostname: string): boolean {
 export function teamRoute(pathname: string): "allow" | "home" | "deny" {
   if (pathname === "/" || pathname === "/ops" || pathname === "/ops/people") return "home";
   if (pathname.startsWith("/_next/") || pathname.startsWith("/icons/")) return "allow";
-  if (["/favicon.ico", "/corner-ops-icon.svg", "/manifest.webmanifest", "/sw.js"].includes(pathname)) return "allow";
+  if (["/favicon.ico", "/corner-ops-icon.svg", "/corner-deli-logo.png", "/at-the-docks-logo.svg", "/manifest.webmanifest", "/sw.js"].includes(pathname)) return "allow";
   // API handlers keep their existing authentication and business checks. Never
   // expose a future POS or ordering API through a team host before migration.
   if (pathname.startsWith("/api/")) {

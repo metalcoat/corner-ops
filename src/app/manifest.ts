@@ -1,11 +1,16 @@
 import type { MetadataRoute } from "next";
+import { headers } from "next/headers";
+import { siteBrandForHost } from "@/lib/site-brand";
 
-export default function manifest(): MetadataRoute.Manifest {
+export default async function manifest(): Promise<MetadataRoute.Manifest> {
+  const brand = siteBrandForHost((await headers()).get("host") || "");
+  const iconSizes = brand.icon.endsWith(".png") ? "512x512" : "any";
+  const iconType = brand.icon.endsWith(".png") ? "image/png" : "image/svg+xml";
   return {
     id: "/app",
-    name: "Corner Ops",
-    short_name: "Corner Ops",
-    description: "Messaging, schedules, time, payroll, documents, and operations for Corner Deli and Tiki.",
+    name: brand.name,
+    short_name: brand.name,
+    description: brand.teamHost ? `${brand.name} team messages, schedules, and employee information.` : "Messaging, schedules, time, payroll, documents, and operations for Corner Deli and Tiki.",
     start_url: "/app",
     scope: "/",
     display: "standalone",
@@ -14,32 +19,32 @@ export default function manifest(): MetadataRoute.Manifest {
     orientation: "portrait-primary",
     icons: [
       {
-        src: "/corner-ops-icon.svg",
-        sizes: "any",
-        type: "image/svg+xml",
+        src: brand.icon,
+        sizes: iconSizes,
+        type: iconType,
         purpose: "any",
       },
       {
-        src: "/corner-ops-icon.svg",
-        sizes: "any",
-        type: "image/svg+xml",
+        src: brand.icon,
+        sizes: iconSizes,
+        type: iconType,
         purpose: "maskable",
       },
     ],
     shortcuts: [
       {
-        name: "Owner messages",
+        name: brand.teamHost ? "Team messages" : "Owner messages",
         short_name: "Messages",
-        description: "Open Corner Ops owner messaging.",
+        description: `Open ${brand.name} messaging.`,
         url: "/ops/messages",
-        icons: [{ src: "/corner-ops-icon.svg", sizes: "any", type: "image/svg+xml" }],
+        icons: [{ src: brand.icon, sizes: iconSizes, type: iconType }],
       },
       {
         name: "Employee portal",
         short_name: "Employee",
         description: "Open the employee schedule and messaging portal.",
         url: "/employee",
-        icons: [{ src: "/corner-ops-icon.svg", sizes: "any", type: "image/svg+xml" }],
+        icons: [{ src: brand.icon, sizes: iconSizes, type: iconType }],
       },
     ],
   };

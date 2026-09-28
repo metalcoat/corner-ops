@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSiteBrand } from "@/app/brand-context";
 import "./app.css";
 
 type SessionState = { authenticated?: boolean };
 
 export default function AppLauncherPage() {
+  const brand = useSiteBrand();
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
@@ -33,13 +35,13 @@ export default function AppLauncherPage() {
 
   return <main className="appLauncher">
     <section className="appLauncherCard">
-      <img src="/corner-ops-icon.svg" alt="" />
-      <p className="eyebrow">Corner Ops app</p>
+      <img src={brand.icon} alt="" />
+      <p className="eyebrow">{brand.name} app</p>
       <h1>{checking ? "Opening your workspace…" : "Choose your sign-in"}</h1>
       {checking ? <p>Checking whether this phone belongs to management or an employee. A surprisingly important distinction.</p> : <>
         <p>The same installed app serves the owner and employees. Sign in once and future launches will open the correct workspace automatically.</p>
         <div className="appLauncherActions">
-          <a href="/">Owner sign-in</a>
+          <a href={brand.teamHost ? "/signin" : "/"}>Owner sign-in</a>
           <a href="/employee">Employee sign-in</a>
         </div>
       </>}

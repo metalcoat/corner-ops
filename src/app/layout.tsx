@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
-import { isTeamHost } from "@/lib/team-domain-routing";
+import { siteBrandForHost } from "@/lib/site-brand";
+import { BrandProvider } from "./brand-context";
 import GlobalNav from "./global-nav";
 import PwaClient from "./pwa-client";
 import "./color-tokens.css";
@@ -10,21 +11,17 @@ import "./pwa.css";
 
 const THEME_BOOTSTRAP = `try{var b=localStorage.getItem("corner-ops-business-theme");if(b==="Corner Deli"||b==="Tiki")document.documentElement.dataset.businessTheme=b}catch(e){}`;
 
-export const metadata: Metadata = {
-  title: "Corner Ops",
-  description: "Internal operations for Corner Deli and Tiki",
-  manifest: "/manifest.webmanifest",
-  applicationName: "Corner Ops",
-  appleWebApp: {
-    capable: true,
-    title: "Corner Ops",
-    statusBarStyle: "black-translucent",
-  },
-  icons: {
-    icon: "/corner-ops-icon.svg",
-    apple: "/corner-ops-icon.svg",
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const brand = siteBrandForHost((await headers()).get("host") || "");
+  return {
+    title: brand.name,
+    description: brand.teamHost ? `${brand.name} team workspace` : "Internal operations for Corner Deli and Tiki",
+    manifest: "/manifest.webmanifest",
+    applicationName: brand.name,
+    appleWebApp: { capable: true, title: brand.name, statusBarStyle: "black-translucent" },
+    icons: { icon: brand.icon, apple: brand.icon },
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: "#0f172a",
@@ -32,14 +29,16 @@ export const viewport: Viewport = {
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const hostname = (await headers()).get("host")?.split(":")[0] || "";
+  const brand = siteBrandForHost((await headers()).get("host") || "");
   return (
-    <html lang="en" data-business-theme="Corner Deli" suppressHydrationWarning>
+    <html lang="en" data-business-theme="Corner Deli" data-site-brand={brand.name} suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} /></head>
       <body>
-        <GlobalNav teamHost={isTeamHost(hostname)} />
-        {children}
-        <PwaClient />
+        <BrandProvider value={brand}>
+          <GlobalNav teamHost={brand.teamHost} brand={brand} />
+          {children}
+          <PwaClient />
+        </BrandProvider>
       </body>
     </html>
   );

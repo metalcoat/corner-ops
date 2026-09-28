@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import type { Business } from "@/lib/types";
+import type { SiteBrand } from "@/lib/site-brand";
 import "./global-nav.css";
 
 type NavLink = {
@@ -50,7 +51,7 @@ function linkIsActive(pathname: string, link: NavLink): boolean {
   return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
 
-export default function GlobalNav({ teamHost = false }: { teamHost?: boolean }) {
+export default function GlobalNav({ teamHost = false, brand }: { teamHost?: boolean; brand: SiteBrand }) {
   const pathname = usePathname();
   const [currentBusiness, setCurrentBusiness] = useState<Business>("Corner Deli");
   const [open, setOpen] = useState(false);
@@ -195,7 +196,9 @@ export default function GlobalNav({ teamHost = false }: { teamHost?: boolean }) 
   return (
     <nav className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label={teamHost ? "Team features" : "Corner Ops features"} data-business={currentBusiness}>
       <div className="globalNavTopline">
-        <a className="globalBrand" href={teamHost ? "/team" : "/ops/people"}>Corner Ops</a>
+        <a className="globalBrand" href={teamHost ? "/team" : "/ops/people"}>
+          {teamHost && <img src={brand.icon} alt="" />}{brand.name}
+        </a>
         <button className="globalMenuButton" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
           {open ? "Close" : "Menu"}
         </button>

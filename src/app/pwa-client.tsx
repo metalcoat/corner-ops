@@ -2,6 +2,7 @@
 
 import { BeforeInstallPromptEvent, isIos, isStandalone } from "@/app/pwa-platform";
 import { responseMessage } from "@/app/client-http";
+import { useSiteBrand } from "@/app/brand-context";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -56,6 +57,7 @@ function cornerLabel(corner: PwaCorner): string {
 }
 
 export default function PwaClient() {
+  const brand = useSiteBrand();
   const pathname = usePathname();
   const [status, setStatus] = useState<PushStatus | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -116,7 +118,7 @@ export default function PwaClient() {
     const onInstalled = () => {
       setInstalled(true);
       setInstallPrompt(null);
-      setNotice("Corner Ops is installed on this device.");
+      setNotice(`${brand.name} is installed on this device.`);
     };
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") void refresh();
@@ -134,7 +136,7 @@ export default function PwaClient() {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [refresh]);
+  }, [refresh, brand.name]);
 
   function moveControl() {
     const currentIndex = CORNERS.indexOf(corner);
@@ -153,19 +155,19 @@ export default function PwaClient() {
   async function installApp() {
     setNotice("");
     if (installed) {
-      setNotice("Corner Ops is already installed on this device.");
+      setNotice(`${brand.name} is already installed on this device.`);
       return;
     }
     if (installPrompt) {
       await installPrompt.prompt();
       const choice = await installPrompt.userChoice;
-      if (choice.outcome === "accepted") setNotice("Corner Ops is being installed.");
+      if (choice.outcome === "accepted") setNotice(`${brand.name} is being installed.`);
       else setNotice("Installation was dismissed. The browser remains emotionally resilient.");
       setInstallPrompt(null);
       return;
     }
     if (isIos()) {
-      setNotice("On iPhone or iPad: tap Share, choose Add to Home Screen, then open Corner Ops from the new icon.");
+      setNotice(`On iPhone or iPad: tap Share, choose Add to Home Screen, then open ${brand.name} from the new icon.`);
       return;
     }
     setNotice("Open the browser menu and choose Install app or Add to Home Screen.");
@@ -178,7 +180,7 @@ export default function PwaClient() {
     try {
       if (!("Notification" in window) || !("PushManager" in window)) throw new Error("This browser does not support push notifications.");
       if (isIos() && !isStandalone()) {
-        throw new Error("On iPhone or iPad, add Corner Ops to the Home Screen and open the installed app before enabling notifications.");
+        throw new Error(`On iPhone or iPad, add ${brand.name} to the Home Screen and open the installed app before enabling notifications.`);
       }
       const permission = await Notification.requestPermission();
       if (permission !== "granted") throw new Error("Notification permission was not granted. It can be changed in the phone's site or app settings.");
@@ -203,7 +205,7 @@ export default function PwaClient() {
       if (!response.ok) throw new Error(await responseMessage(response));
       syncedIdentity.current = `${audience}:${subscription.endpoint}`;
       setSubscribed(true);
-      setNotice("Notifications are enabled for this phone. Messages can now arrive while Corner Ops is closed.");
+      setNotice(`Notifications are enabled for this phone. Messages can now arrive while ${brand.name} is closed.`);
       await refresh();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Notifications could not be enabled.");
@@ -261,12 +263,12 @@ export default function PwaClient() {
 
   return <div className={`pwaControl ${panelOpen ? "open" : ""} pwaControl-${corner}`}>
     <button className="pwaControlButton" onClick={() => setPanelOpen((value) => !value)} aria-expanded={panelOpen}>
-      <img src="/corner-ops-icon.svg" alt="" />
+      <img src={brand.icon} alt="" />
       <span>{subscribed ? "App notifications on" : "Install app"}</span>
     </button>
-    {panelOpen && <section className="pwaPanel" aria-label="Corner Ops app and notifications">
+    {panelOpen && <section className="pwaPanel" aria-label={`${brand.name} app and notifications`}>
       <header>
-        <div><p className="eyebrow">{status.actorType === "owner" ? "Owner app" : "Employee app"}</p><h2>Corner Ops on this phone</h2></div>
+        <div><p className="eyebrow">{status.actorType === "owner" ? "Owner app" : "Employee app"}</p><h2>{brand.name} on this phone</h2></div>
         <button className="pwaClose" onClick={() => setPanelOpen(false)} aria-label="Close">×</button>
       </header>
       <div className="pwaStatusGrid">
@@ -275,11 +277,11 @@ export default function PwaClient() {
         <div><span>Registered devices</span><strong>{status.subscribedDevices}</strong></div>
       </div>
       <p>{status.actorType === "owner"
-        ? "Install Corner Ops for owner messaging and operational alerts. Tapping a notification opens the relevant management screen."
-        : "Install Corner Ops for team messages and employee alerts. Tapping a notification opens your employee portal."}</p>
+        ? `Install ${brand.name} for owner messaging and operational alerts. Tapping a notification opens the relevant management screen.`
+        : `Install ${brand.name} for team messages and employee alerts. Tapping a notification opens your employee portal.`}</p>
       <div className="pwaActions">
         <button onClick={moveControl}>Move app button</button>
-        {!installed && <button onClick={() => void installApp()} disabled={busy}>Install Corner Ops</button>}
+        {!installed && <button onClick={() => void installApp()} disabled={busy}>Install {brand.name}</button>}
         {!subscribed && <button className="primary" onClick={() => void enableNotifications()} disabled={busy}>Enable notifications</button>}
         {subscribed && <button className="primary" onClick={() => void testNotifications()} disabled={busy}>Send test notification</button>}
         {subscribed && <button onClick={() => void disableNotifications()} disabled={busy}>Disable notifications on this device</button>}

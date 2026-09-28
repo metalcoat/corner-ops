@@ -1,6 +1,7 @@
 "use client";
 
 import { responseMessage } from "@/app/client-http";
+import { useSiteBrand } from "@/app/brand-context";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business } from "@/lib/types";
 import "./attendance.css";
@@ -63,6 +64,7 @@ function local(value: string | null) {
 }
 
 export default function EmployeeAttendancePage() {
+  const brand = useSiteBrand();
   const [session, setSession] = useState<EmployeeSession | null>(null);
   const [checked, setChecked] = useState(false);
   const [data, setData] = useState<AttendancePayload | null>(null);
@@ -221,7 +223,7 @@ export default function EmployeeAttendancePage() {
 
   if (!session) {
     return <main className="attendanceEmployeeShell"><section className="attendanceEmployeeCard login">
-      <p className="attendanceEyebrow">Corner Ops Employee Hub</p>
+      <p className="attendanceEyebrow">{brand.name} Employee Hub</p>
       <h1>Attendance</h1>
       <p>Sign in with your normal five-digit Employee Hub PIN.</p>
       {notice && <div className="attendanceNotice">{notice}</div>}
