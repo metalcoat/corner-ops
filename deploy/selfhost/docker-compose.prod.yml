@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: cornerops
       POSTGRES_USER: cornerops
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Pass --env-file /opt/corner-ops/production/.env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -29,7 +29,7 @@ services:
       NODE_ENV: production
       APP_ENV: production
       DATABASE_DRIVER: postgres
-      DATABASE_URL: postgresql://cornerops:${POSTGRES_PASSWORD}@postgres:5432/cornerops
+      DATABASE_URL: postgresql://cornerops:${POSTGRES_PASSWORD:?Pass --env-file /opt/corner-ops/production/.env}@postgres:5432/cornerops
       STORAGE_DRIVER: local
       LOCAL_STORAGE_PATH: /data/uploads
       HEALTHCHECK_DATABASE: "true"
