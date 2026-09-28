@@ -1,4 +1,4 @@
-import { canAccessBusiness, getSession } from "@/lib/auth";
+import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { ensureIntegrationSchema } from "@/lib/integrations";
 import { getSql } from "@/lib/db";
 import { apiError, unauthorized } from "@/lib/http";
@@ -11,43 +11,17 @@ function businessFrom(value: unknown): Business {
   throw new Error("Unknown business.");
 }
 
-async function ensureAccountFilterTrigger(): Promise<void> {
-  const sql = getSql();
-  await sql`
-    CREATE OR REPLACE FUNCTION corner_ops_filter_inactive_bank_account()
-    RETURNS TRIGGER AS $$
-    DECLARE
-      account_is_active BOOLEAN;
-    BEGIN
-      SELECT active INTO account_is_active
-      FROM bank_accounts
-      WHERE external_account_id = NEW.external_account_id
-      LIMIT 1;
-
-      IF account_is_active = FALSE THEN
-        NEW.review_status := 'Ignored';
-        NEW.user_override := TRUE;
-        NEW.classification_source := 'Excluded bank account';
-      END IF;
-
-      RETURN NEW;
-    END;
-    $$ LANGUAGE plpgsql
-  `;
-
-}
-
 export async function GET(request: Request) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    requirePermission(session, "integrations.read");
     const business = businessFrom(new URL(request.url).searchParams.get("business"));
     if (!canAccessBusiness(session, business)) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
     }
 
     await ensureIntegrationSchema();
-    await ensureAccountFilterTrigger();
     const rows = await getSql()`
       SELECT
         c.id AS connection_id,
@@ -117,6 +91,7 @@ export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    requirePermission(session, "integrations.write");
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action || "");
     if (action !== "select-account" && action !== "set-active-accounts") {
@@ -139,7 +114,6 @@ export async function POST(request: Request) {
     }
 
     await ensureIntegrationSchema();
-    await ensureAccountFilterTrigger();
     const sql = getSql();
     const accountRows = await sql`
       SELECT a.id, a.external_account_id

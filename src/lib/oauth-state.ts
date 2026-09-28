@@ -13,7 +13,7 @@ function decode(value: string): Record<string, unknown> {
 }
 
 function signature(encoded: string): string {
-  return hmacSignature(encoded, "square-oauth-state", { envName: "OAUTH_STATE_SECRET" });
+  return hmacSignature(encoded, "square-oauth-state", { envName: "SQUARE_OAUTH_STATE_SECRET" });
 }
 
 function nonceHash(value: string): string {
@@ -47,7 +47,7 @@ export async function consumeOAuthState(value: string, purpose = "square"): Prom
   const payload = decode(encoded);
   if (Number(payload.expiresAt || 0) < Date.now()) throw new Error("Integration authorization state expired.");
   const nonce = String(payload.nonce || "");
-  if (!nonce) return payload; // Legacy in-flight state created before nonce enforcement.
+  if (!nonce) throw new Error("Integration authorization state must include a one-time nonce.");
   const rows = await getSql()`
     UPDATE oauth_state_nonces SET used_at = NOW()
     WHERE nonce_hash = ${nonceHash(nonce)} AND purpose = ${purpose}

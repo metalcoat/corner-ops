@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { legacySessionSecret, purposeKey } from "@/lib/security-keys";
+import { historicalPurposeKey, legacySessionSecret, purposeKey } from "@/lib/security-keys";
 
 function currentKey(): Buffer {
   return purposeKey("integration-credentials", {
@@ -34,7 +34,11 @@ export function decryptIntegrationSecret(value: string): string {
   const parts = value.split(".");
   if (parts[0] === "v2") {
     if (parts.length !== 4) throw new Error("Stored integration credential is invalid.");
-    return openParts(currentKey(), parts[1], parts[2], parts[3]);
+    try { return openParts(currentKey(), parts[1], parts[2], parts[3]); } catch (error) {
+      const historical = process.env.LEGACY_INTEGRATION_ENCRYPTION_KEY?.trim();
+      if (!historical) throw error;
+      return openParts(historicalPurposeKey("integration-credentials", historical), parts[1], parts[2], parts[3]);
+    }
   }
   if (parts.length !== 3) throw new Error("Stored integration credential is invalid.");
   return openParts(legacyKey(), parts[0], parts[1], parts[2]);

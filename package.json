@@ -7,11 +7,12 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "node tools/apply-production-migrations.mjs && next build",
+    "build": "next build",
     "start": "next start",
-    "db:migrate": "node tools/apply-production-migrations.mjs --force",
+    "db:migrate": "node tools/apply-production-migrations.mjs --apply",
     "typecheck": "tsc --noEmit",
-    "test": "node -e \"require('fs').rmSync('.test-dist',{recursive:true,force:true})\" && tsc -p tsconfig.tests.json && node --test .test-dist/tests/**/*.test.js"
+    "test": "node -e \"require('fs').rmSync('.test-dist',{recursive:true,force:true})\" && tsc -p tsconfig.tests.json && node --test .test-dist/tests/**/*.test.js && node --test tools/migration-runner.test.mjs && python3 tools/test_runtime_ddl.py",
+    "db:status": "node tools/apply-production-migrations.mjs --check"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
