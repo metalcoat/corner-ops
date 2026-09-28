@@ -85,6 +85,7 @@ html[data-business-theme] .globalBrand::after {
 }
 html[data-business-theme="Corner Deli"] .globalBrand::after { content: "Corner Deli"; }
 html[data-business-theme="Tiki"] .globalBrand::after { content: "Tiki"; }
+.globalOwnerNav[aria-label="Team features"] .globalBrand::after { display: none; }
 html[data-business-theme] .globalNavLinks a:hover { background: var(--panel-2); color: var(--text); }
 html[data-business-theme] .globalNavLinks a.active {
   background: var(--accent-soft);
