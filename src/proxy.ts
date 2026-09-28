@@ -14,6 +14,7 @@ const PRODUCTION_HOSTS = new Set([
 
 const selfAuthorizedApiPaths = [
   "/api/auth/session",
+  "/api/auth/ops-switch",
   "/api/health",
   "/api/auth/password-reset",
   "/api/timeclock",

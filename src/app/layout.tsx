@@ -9,7 +9,7 @@ import "./globals.css";
 import "./business-theme.css";
 import "./pwa.css";
 
-const THEME_BOOTSTRAP = `try{var b=localStorage.getItem("corner-ops-business-theme");if(b==="Corner Deli"||b==="Tiki")document.documentElement.dataset.businessTheme=b}catch(e){}`;
+const THEME_BOOTSTRAP = `try{var h=location.hostname;var b=h==="ops.atthedocks.com"?"Tiki":h==="ops.ordercornerdeli.com"?"Corner Deli":localStorage.getItem("corner-ops-business-theme");if(b==="Corner Deli"||b==="Tiki"){document.documentElement.dataset.businessTheme=b;localStorage.setItem("corner-ops-business-theme",b)}}catch(e){}`;
 
 export async function generateMetadata(): Promise<Metadata> {
   const brand = siteBrandForHost((await headers()).get("host") || "");
