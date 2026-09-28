@@ -1,5 +1,7 @@
 "use client";
 
+import { responseMessage } from "@/app/client-http";
+import { DEFAULT_PUNCH_CORRECTION_REASON, normalizePunchCorrectionReason } from "@/lib/punch-correction-reason";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -182,6 +184,7 @@ export default function PayrollControlPage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Punch | null>(null);
+  const [correctionReason, setCorrectionReason] = useState(DEFAULT_PUNCH_CORRECTION_REASON);
 
   useEffect(() => {
     fetch("/api/auth/session", { cache: "no-store" })
@@ -227,6 +230,27 @@ export default function PayrollControlPage() {
     }
   }
 
+  async function postTikiCorrection(body: Record<string, unknown>) {
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/tiki-time-corrections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      const result = await response.json();
+      await load("Tiki", weekStart);
+      return result as Record<string, unknown>;
+    } catch (error) {
+      setNotice(`Save failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function recalculate() {
     setBusy(true);
     setNotice("");
@@ -242,23 +266,54 @@ export default function PayrollControlPage() {
 
   async function correct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editing) return;
+    if (!editing || busy) return;
     const form = new FormData(event.currentTarget);
     const clockIn = String(form.get("clockIn") || "");
     const clockOut = String(form.get("clockOut") || "");
-    await post({
-      action: "punch-correct",
-      business,
-      sourceType: business === "Tiki" ? "Tiki" : "Rezku",
-      sourceId: editing.id,
-      employeeName: form.get("employeeName"),
-      position: form.get("position"),
-      clockIn: easternInputToIso(clockIn),
-      clockOut: clockOut ? easternInputToIso(clockOut) : null,
-      reason: form.get("reason"),
-    });
-    setEditing(null);
-    setNotice("Shift corrected in Eastern Time. Payroll hours and tip allocation were recalculated immediately.");
+    try {
+      if (business === "Tiki") {
+        const result = await postTikiCorrection({
+          action: "correct",
+          sourceId: editing.id,
+          employeeName: form.get("employeeName"),
+          position: form.get("position"),
+          clockInWall: clockIn,
+          clockOutWall: clockOut,
+          reason: normalizePunchCorrectionReason(form.get("reason")),
+        });
+        const punch = result.punch as Record<string, unknown> | undefined;
+        setEditing(null);
+        setNotice(`Saved ${editing.employeeName}: ${String(punch?.clockInEastern || "clock-in saved")} to ${String(punch?.clockOutEastern || "Open")}. Payroll and the live Tiki clock now use this correction.`);
+        return;
+      }
+
+      await post({
+        action: "punch-correct",
+        business,
+        sourceType: "Rezku",
+        sourceId: editing.id,
+        employeeName: form.get("employeeName"),
+        position: form.get("position"),
+        clockInWall: clockIn,
+        clockOutWall: clockOut,
+        reason: normalizePunchCorrectionReason(form.get("reason")),
+      });
+      setEditing(null);
+      setNotice("Shift corrected in Eastern Time. Payroll hours and tip allocation were recalculated immediately.");
+    } catch {
+      // post/postTikiCorrection already put the useful error on screen.
+    }
+  }
+
+  async function tikiUseAsPriorOut(punch: Punch) {
+    if (!window.confirm(`${punch.employeeName}: use ${easternDateTime(punch.clockIn, punch.clockInEastern)} as the previous shift's clock-out and zero this mistaken IN?`)) return;
+    try {
+      const result = await postTikiCorrection({ action: "use-in-as-prior-out", sourceId: punch.id });
+      setEditing(null);
+      setNotice(`Corrected ${punch.employeeName}: the mistaken IN became the prior shift's OUT. ${Number(result.staleOpenPunchesResolved || 0) ? `Also cleared ${Number(result.staleOpenPunchesResolved)} stale open punch(es).` : "The live clock state is reconciled."}`);
+    } catch {
+      // Error is already displayed by postTikiCorrection.
+    }
   }
 
   async function tipOverride(event: FormEvent<HTMLFormElement>) {
@@ -307,7 +362,7 @@ export default function PayrollControlPage() {
         <p>Correct shifts, recalculate hours and tips, allocate exceptions, version payroll, and lock the final run without visiting a duplicate dashboard.</p>
       </div>
       <div className="controlActions">
-        <div className="businessPills">{(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => { setBusiness(name); setEditing(null); }}>{name}</button>)}</div>
+        <div className="businessPills">{(["Corner Deli", "Tiki"] as Business[]).map((name) => <button key={name} className={business === name ? "active" : ""} onClick={() => { setBusiness(name); setEditing(null); setCorrectionReason(DEFAULT_PUNCH_CORRECTION_REASON); }}>{name}</button>)}</div>
         <label>Payroll week<input type="date" value={weekStart} onChange={(event) => { setWeekStart(event.target.value); setEditing(null); }} /></label>
         <button className="primary" onClick={() => void recalculate()} disabled={busy}>Recalculate payroll & tips</button>
       </div>
@@ -324,7 +379,9 @@ export default function PayrollControlPage() {
           <div className="metric"><span>Net tips paid</span><strong>{dollars(totals.tips)}</strong></div>
           <div className="metric"><span>{business === "Corner Deli" ? "Days needing review" : "Unmatched tips"}</span><strong>{business === "Corner Deli" ? dailyTotals.review : data?.summary.unmatchedTips.length || 0}</strong></div>
         </div>
-        <p className="reportNote">Every saved shift correction and tip override is included the next time totals load. Corner Deli tips are reconciled by business day before the 3.5% deduction, so rounding cannot quietly create extra payroll.</p>
+        <p className="reportNote">{business === "Corner Deli"
+          ? "Every saved shift correction and tip override is included the next time totals load. Corner Deli tips are reconciled by business day before the 3.5% deduction, so rounding cannot quietly create extra payroll."
+          : "Square tips are split equally among tip-eligible Tiki employees clocked in when the payment was created. Tiki corrections on this page also reconcile the live employee clock state."}</p>
       </section>
 
       {business === "Corner Deli" && <section className="controlCard">
@@ -374,23 +431,23 @@ export default function PayrollControlPage() {
       <section className="controlCard">
         <p className="eyebrow">Shift corrections · Eastern Time</p>
         <h2>Punches used for this payroll week</h2>
-        <p>Every displayed and entered time is interpreted as America/New_York. The corrected times are then used for payroll and tip allocation.</p>
+        <p>{business === "Tiki" ? "Correct Tiki punches here. Save updates payroll and the live employee clock state. If a lunch IN was actually the prior OUT, use the button beside that punch." : "Every displayed and entered time is interpreted as America/New_York. The corrected times are then used for payroll and tip allocation."}</p>
         <div className="tableWrap"><table className="controlTable">
           <thead><tr><th>Employee</th><th>Clock in</th><th>Clock out</th><th>Source</th><th>Status</th><th></th></tr></thead>
-          <tbody>{data?.punches.map((punch) => <tr key={punch.id}><td><strong>{punch.employeeName}</strong><small>{punch.position}</small></td><td>{easternDateTime(punch.clockIn, punch.clockInEastern)}</td><td>{punch.clockOut ? easternDateTime(punch.clockOut, punch.clockOutEastern) : "Open"}</td><td>{punch.source}</td><td><span className={`badge ${punch.status === "Complete" ? "good" : "warn"}`}>{punch.status}</span></td><td><button onClick={() => setEditing(punch)}>Correct shift</button></td></tr>)}</tbody>
+          <tbody>{data?.punches.map((punch) => <tr key={punch.id}><td><strong>{punch.employeeName}</strong><small>{punch.position}</small></td><td>{easternDateTime(punch.clockIn, punch.clockInEastern)}</td><td>{punch.clockOut ? easternDateTime(punch.clockOut, punch.clockOutEastern) : "Open"}</td><td>{punch.source}</td><td><span className={`badge ${punch.status === "Complete" || punch.status === "Corrected" ? "good" : "warn"}`}>{punch.status}</span></td><td><div className="controlActions"><button onClick={() => setEditing(punch)} disabled={busy}>Correct shift</button>{business === "Tiki" && <button onClick={() => void tikiUseAsPriorOut(punch)} disabled={busy || !punch.clockIn}>This IN was prior OUT</button>}</div></td></tr>)}</tbody>
         </table></div>
       </section>
 
       {editing && <section className="controlCard modalish">
         <p className="eyebrow">Shift correction · Eastern Time</p>
         <h2>{editing.employeeName}</h2>
-        <form className="controlForm" onSubmit={correct}>
+        <form key={editing.id} className="controlForm" onSubmit={correct}>
           <label>Employee<input name="employeeName" defaultValue={editing.employeeName} /></label>
           <label>Position<input name="position" defaultValue={editing.position} /></label>
           <label>Clock in (ET)<input name="clockIn" type="datetime-local" defaultValue={easternInputValue(editing.clockIn)} required /></label>
           <label>Clock out (ET)<input name="clockOut" type="datetime-local" defaultValue={easternInputValue(editing.clockOut)} /></label>
-          <label className="wide">Reason<textarea name="reason" required /></label>
-          <div className="controlActions wide"><button className="primary" disabled={busy}>Save & recalculate</button><button type="button" onClick={() => setEditing(null)}>Cancel</button></div>
+          <label className="wide">Reason <small>Optional</small><textarea name="reason" value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} maxLength={1000} placeholder="Leave blank for Owner time correction" /><small>No typing required. Blank notes use Owner time correction; your note is kept for the next edit on this page.</small></label>
+          <div className="controlActions wide"><button className="primary" disabled={busy}>{busy ? "Saving…" : "Save & recalculate"}</button><button type="button" onClick={() => setEditing(null)} disabled={busy}>Cancel</button></div>
         </form>
       </section>}
 

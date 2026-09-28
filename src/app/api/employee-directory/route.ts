@@ -1,4 +1,5 @@
 import { del, put } from "@/lib/storage";
+import { recordAuditEvent } from "@/lib/audit";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
@@ -7,6 +8,7 @@ import {
   listDirectoryEmployees,
   updateDirectoryEmployee,
 } from "@/lib/employee-directory-admin";
+import { sendEmployeeOnboardingSms } from "@/lib/employee-onboarding";
 import { setEmployeeProfilePhoto } from "@/lib/employee-profile";
 import type { Business } from "@/lib/types";
 import { recordEmployeePinAudit } from "@/lib/employee-pin-audit";
@@ -89,21 +91,57 @@ export async function POST(request: Request) {
 
     const action = String(body.action || "create");
     if (action === "create") {
+      const pin = String(body.pin || "");
+      const smsOptIn = body.smsOptIn === true;
       const employee = await createDirectoryEmployee({
         business,
         email: body.email ? String(body.email) : "",
         phone: body.phone ? String(body.phone) : "",
-        smsOptIn: body.smsOptIn === true,
+        smsOptIn,
         name: String(body.name || ""),
-        pin: String(body.pin || ""),
+        pin,
         position: String(body.position || ""),
         roleGroup: roleGroupFrom(body.roleGroup) || "In-House",
         countsForTips: body.countsForTips !== false,
         hourlyRate: Number(body.hourlyRate || 0),
         tippedRate: Number(body.tippedRate || 0),
       });
-      await recordEmployeePinAudit({employeeId:employee.id,business,action:"pin_assigned",actor:session.email});
-      return Response.json(employee, { status: 201 });
+      await recordEmployeePinAudit({ employeeId: employee.id, business, action: "pin_assigned", actor: session.email });
+
+      const onboardingSms = body.sendOnboardingSms === false
+        ? null
+        : await sendEmployeeOnboardingSms({
+          id: employee.id,
+          business,
+          name: employee.name,
+          phone: employee.phone,
+          smsOptIn,
+          pin,
+        });
+
+      if (onboardingSms) {
+        await recordAuditEvent({
+          business,
+          action: "onboarding-initial-sms",
+          actor: session.email,
+          entityType: "employee",
+          entityId: employee.id,
+          details: {
+            employeeName: employee.name,
+            provider: onboardingSms.provider,
+            configured: onboardingSms.configured,
+            sent: onboardingSms.sent,
+            failed: onboardingSms.failed,
+            missingPhone: onboardingSms.missingPhone,
+            notOptedIn: onboardingSms.notOptedIn,
+            skipped: onboardingSms.skipped,
+            accepted: onboardingSms.accepted,
+            failures: onboardingSms.failures,
+          },
+        });
+      }
+
+      return Response.json({ ...employee, onboardingSms }, { status: 201 });
     }
 
     if (action === "bulk-pin-update") {

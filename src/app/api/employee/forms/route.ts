@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
     if (!session) return NextResponse.json({ error: "Employee sign-in required." }, { status: 401 });
     const id = request.nextUrl.searchParams.get("id");
     if (id) {
-      const form = await getEmploymentForm(id);
+      const form = await getEmploymentForm(id, { business: session.business, employeeId: session.employeeId });
       if (!form || form.employeeId !== session.employeeId || form.business !== session.business) {
         return NextResponse.json({ error: "Employment form was not found." }, { status: 404 });
       }
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
     if (!session) return NextResponse.json({ error: "Employee sign-in required." }, { status: 401 });
     const body = await request.json() as Record<string, unknown>;
     const id = String(body.id || "");
-    const form = await getEmploymentForm(id);
+    const form = await getEmploymentForm(id, { business: session.business, employeeId: session.employeeId });
     if (!form || form.employeeId !== session.employeeId || form.business !== session.business) throw new Error("Employment form was not found.");
     const payload = typeof body.payload === "object" && body.payload ? body.payload as Record<string, unknown> : {};
     validateSubmission(form.formType, payload);

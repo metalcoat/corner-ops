@@ -5,12 +5,75 @@ import type { Business } from "@/lib/types";
 import { ensureMessageAttachmentSchema } from "@/lib/message-attachments";
 
 let readSchemaPromise: Promise<void> | null = null;
+const MESSAGE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function ensureMessageReadSchema(): Promise<void> {
   if (!readSchemaPromise) {
     readSchemaPromise = (async () => {
       await Promise.all([ensureMessageAttachmentSchema(), ensureEmployeeProfileSchema()]);
       const sql = getSql();
+      // The local dev database predates recipient-snapshotted conversations.
+      // Keep this additive and repeatable so a runtime update can open the inbox
+      // without first running the Neon-only production migration by hand.
+      await sql`ALTER TABLE employee_messages ADD COLUMN IF NOT EXISTS conversation_key TEXT`;
+      await sql`
+        UPDATE employee_messages
+        SET conversation_key = CASE
+          WHEN message_type IN ('Team', 'Announcement') THEN 'team'
+          WHEN sender_employee_id IS NULL AND recipient_employee_id IS NOT NULL
+            THEN 'owner:' || recipient_employee_id::text
+          WHEN sender_employee_id IS NOT NULL AND recipient_employee_id IS NOT NULL
+            THEN 'direct:' || LEAST(sender_employee_id::text, recipient_employee_id::text)
+              || ':' || GREATEST(sender_employee_id::text, recipient_employee_id::text)
+          WHEN sender_employee_id IS NOT NULL THEN 'owner:' || sender_employee_id::text
+          ELSE 'legacy:' || id::text
+        END
+        WHERE conversation_key IS NULL OR conversation_key = ''
+      `;
+      await sql`ALTER TABLE employee_messages ALTER COLUMN conversation_key SET NOT NULL`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS employee_message_recipients (
+          message_id UUID NOT NULL REFERENCES employee_messages(id) ON DELETE CASCADE,
+          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (message_id, employee_id)
+        )
+      `;
+      await sql`
+        INSERT INTO employee_message_recipients (message_id, employee_id)
+        SELECT m.id, e.id
+        FROM employee_messages m
+        JOIN employees e ON e.business = m.business AND e.created_at <= m.created_at
+        WHERE m.message_type IN ('Team', 'Announcement')
+        ON CONFLICT (message_id, employee_id) DO NOTHING
+      `;
+      await sql`
+        INSERT INTO employee_message_recipients (message_id, employee_id)
+        SELECT m.id, participant.employee_id
+        FROM employee_messages m
+        CROSS JOIN LATERAL (VALUES (m.sender_employee_id), (m.recipient_employee_id)) AS participant(employee_id)
+        WHERE participant.employee_id IS NOT NULL
+          AND m.message_type NOT IN ('Team', 'Announcement')
+        ON CONFLICT (message_id, employee_id) DO NOTHING
+      `;
+      await sql`ALTER TABLE employee_messages DROP CONSTRAINT IF EXISTS employee_messages_message_type_check`;
+      await sql`
+        ALTER TABLE employee_messages ADD CONSTRAINT employee_messages_message_type_check
+        CHECK (message_type IN ('Team', 'Direct', 'Announcement', 'Conversation'))
+      `;
+      await sql`
+        UPDATE employee_messages SET message_type = 'Conversation'
+        WHERE message_type IN ('Team', 'Announcement')
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS employee_messages_conversation_idx
+        ON employee_messages (business, conversation_key, created_at, id)
+        WHERE deleted_at IS NULL
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS employee_message_recipients_employee_idx
+        ON employee_message_recipients (employee_id, message_id)
+      `;
     })().catch((error) => {
       readSchemaPromise = null;
       throw error;
@@ -71,6 +134,58 @@ export async function adminUnreadMessageSummary(readerEmail: string, businesses:
     messages: byBusiness["Corner Deli"] + byBusiness.Tiki,
     byBusiness,
   };
+}
+
+export async function adminUnreadMessageIds(readerEmail: string, business: Business): Promise<string[]> {
+  await ensureMessageReadSchema();
+  const email = normalizedReaderEmail(readerEmail);
+  const startedAt = await notificationStart(email);
+  const rows = await getSql()`
+    SELECT m.id::text AS id
+    FROM employee_messages m
+    WHERE m.business = ${business}
+      AND m.sender_employee_id IS NOT NULL
+      AND m.deleted_at IS NULL
+      AND m.created_at >= ${startedAt}
+      AND NOT EXISTS (
+        SELECT 1
+        FROM owner_message_reads r
+        WHERE r.message_id = m.id AND r.reader_email = ${email}
+      )
+    ORDER BY m.created_at, m.id
+    LIMIT 1000
+  ` as unknown as Array<{ id: string }>;
+  return rows.map((row) => String(row.id));
+}
+
+export async function markAdminConversationMessageSeen(
+  readerEmail: string,
+  business: Business,
+  messageId: unknown,
+) {
+  await ensureMessageReadSchema();
+  const email = normalizedReaderEmail(readerEmail);
+  const id = String(messageId || "").trim().toLowerCase();
+  if (!MESSAGE_UUID_PATTERN.test(id)) throw new Error("Message selection is invalid.");
+  const startedAt = await notificationStart(email);
+  const visible = await getSql()`
+    SELECT id
+    FROM employee_messages
+    WHERE id = ${id}::uuid
+      AND business = ${business}
+      AND sender_employee_id IS NOT NULL
+      AND deleted_at IS NULL
+      AND created_at >= ${startedAt}
+    LIMIT 1
+  ` as unknown as Array<{ id: string }>;
+  if (!visible[0]) throw new Error("Message was not found or is not visible to management.");
+  const inserted = await getSql()`
+    INSERT INTO owner_message_reads (message_id, reader_email)
+    VALUES (${id}::uuid, ${email})
+    ON CONFLICT (message_id, reader_email) DO NOTHING
+    RETURNING read_at
+  ` as unknown as Array<{ read_at: string }>;
+  return { seen: true, firstSeen: inserted[0]?.read_at || null };
 }
 
 export async function markAdminMessagesRead(readerEmail: string, business: Business) {

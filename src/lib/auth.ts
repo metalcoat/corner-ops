@@ -10,6 +10,7 @@ const COOKIE_NAME = "corner_ops_session";
 const SESSION_SECONDS = 60 * 60 * 12;
 
 export type SessionPayload = {
+  userId: string;
   email: string;
   displayName: string;
   role: AppRole;
@@ -52,12 +53,13 @@ function createToken(payload: SessionPayload): string {
 }
 
 function normalizePayload(value: Partial<SessionPayload>): SessionPayload | null {
-  if (!value.email || !value.role || !appRoles.includes(value.role as AppRole)) return null;
+  if (!value.userId || !value.email || !value.role || !appRoles.includes(value.role as AppRole)) return null;
   if (!Array.isArray(value.businesses) || !Array.isArray(value.permissions) || !value.permissions.length) return null;
   if (Number(value.expiresAt || 0) <= Date.now()) return null;
   const validBusinesses = value.businesses.filter((business): business is Business => businesses.includes(business as Business));
   if (!validBusinesses.length) return null;
   return {
+    userId: value.userId,
     email: value.email,
     displayName: displayName(value.displayName, value.email),
     role: value.role as AppRole,
@@ -84,6 +86,7 @@ export function isValidPassword(candidate: string): boolean {
 
 export async function createSession(identity: AppUserIdentity): Promise<SessionPayload> {
   const payload: SessionPayload = {
+    userId: identity.id,
     email: identity.email,
     displayName: displayName(identity.displayName, identity.email),
     role: identity.role,
