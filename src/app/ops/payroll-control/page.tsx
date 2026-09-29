@@ -65,6 +65,7 @@ type Version = {
 type Dashboard = {
   summary: {
     source: string;
+    processingFeeReviewCount?: number;
     weekStart: string;
     weekEnd: string;
     rows: PayrollRow[];
@@ -360,7 +361,8 @@ export default function PayrollControlPage() {
         </div>
         <p className="reportNote">{business === "Corner Deli"
           ? "Every saved shift correction and tip override is included the next time totals load. Corner Deli tips are reconciled by business day before the 3.5% deduction, so rounding cannot quietly create extra payroll."
-          : "Square tips are split equally among tip-eligible Tiki employees clocked in when the payment was created. Tiki corrections on this page also reconcile the live employee clock state."}</p>
+          : "Square tips are split equally among tip-eligible At the Docks employees clocked in when the payment was created. The tip's share of Square's recorded processing fee is deducted, up to 3.5%. Shift corrections on this page also reconcile the live employee clock state."}</p>
+        {business === "Tiki" && Boolean(data?.summary.processingFeeReviewCount) && <p className="reportNote"><strong>Review processing fees:</strong> {data?.summary.processingFeeReviewCount} Square payment(s) have no usable fee information. Their tips remain gross until Square's fee is available.</p>}
       </section>
 
       {business === "Corner Deli" && <section className="controlCard">
@@ -386,7 +388,7 @@ export default function PayrollControlPage() {
 
       <section className="controlCard">
         <div className="controlActions">
-          <button className="primary" onClick={() => void post({ action: "draft-create", business, weekStart }).then((result) => setNotice(`Payroll draft version ${result.version} created from the current corrected totals.`))} disabled={busy}>Create payroll draft</button>
+          <button className="primary" onClick={() => void post({ action: "draft-create", business, weekStart }).then((result) => setNotice(`Payroll draft version ${result.version} created from the current corrected totals.`))} disabled={busy || (business === "Tiki" && Boolean(data?.summary.processingFeeReviewCount))}>Create payroll draft</button>
         </div>
         <p className="eyebrow">Calculated summary</p>
         <h2>{data?.summary.source}</h2>
@@ -401,8 +403,8 @@ export default function PayrollControlPage() {
               return <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.pickupTipsBeforeFee || 0)}</td><td>{dollars(row.deliveryTipsBeforeFee || 0)}</td><td><strong>{dollars(gross)}</strong></td><td>{dollars(gross - automaticNet)}</td><td>{dollars(manual)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>;
             })}</tbody>
           </> : <>
-            <thead><tr><th>Employee</th><th>Total</th><th>Regular</th><th>OT</th><th>Tipped hours</th><th>Automatic tips</th><th>Manual</th><th>Total tips</th></tr></thead>
-            <tbody>{data?.summary.rows.map((row) => <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.tips - (row.manualTips || 0))}</td><td>{dollars(row.manualTips || 0)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>)}</tbody>
+            <thead><tr><th>Employee</th><th>Total</th><th>Regular</th><th>OT</th><th>Tipped hours</th><th>Gross tips</th><th>Card fee</th><th>Automatic net</th><th>Manual</th><th>Net paid</th></tr></thead>
+            <tbody>{data?.summary.rows.map((row) => { const automaticNet = row.tips - (row.manualTips || 0); return <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.tipsBeforeFee || 0)}</td><td>{dollars((row.tipsBeforeFee || 0) - automaticNet)}</td><td>{dollars(automaticNet)}</td><td>{dollars(row.manualTips || 0)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>; })}</tbody>
           </>}
         </table></div>
       </section>

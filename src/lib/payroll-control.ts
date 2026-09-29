@@ -1,4 +1,5 @@
 import { ensureSchema, getSql } from "@/lib/db";
+import { ValidationError } from "@/lib/http";
 import { payrollSummary } from "@/lib/payroll-summary-rules";
 import { payrollWeekBounds as weekBounds } from "@/lib/payroll-week";
 import type { Business } from "@/lib/types";
@@ -20,6 +21,7 @@ type PayrollRow = {
 type PayrollSnapshot = {
   business: Business;
   source: string;
+  processingFeeReviewCount?: number;
   weekStart: string;
   weekEnd: string;
   rows: PayrollRow[];
@@ -207,6 +209,9 @@ export async function deleteTipOverride(id: string, actor: string) {
 export async function createPayrollDraft(input: { business: Business; weekStart: string; actor: string; reopenedFromId?: string }) {
   await ensurePayrollControlSchema();
   const summary = await controlledPayrollSummary(input.business, input.weekStart);
+  if (input.business === "Tiki" && summary.processingFeeReviewCount) {
+    throw new ValidationError(`Square processing fees are missing for ${summary.processingFeeReviewCount} tipped payment(s). Sync Square and recalculate before creating a payroll draft.`);
+  }
   const versions = await getSql()`
     SELECT COALESCE(MAX(version), 0)::INTEGER AS version
     FROM payroll_run_versions WHERE business = ${input.business} AND week_start = ${input.weekStart}
