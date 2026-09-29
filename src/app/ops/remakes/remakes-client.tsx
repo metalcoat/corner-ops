@@ -30,6 +30,14 @@ export default function ManagerRemakesClient() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<Result | null>(null);
+  const [printEnabled, setPrintEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    void fetch("/api/ordering/manager-remakes?settings", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Could not load print settings.")))
+      .then((body) => setPrintEnabled(Boolean(body.printSettings.externalKitchenAutoPrint)))
+      .catch(() => setPrintEnabled(null));
+  }, []);
 
   useEffect(() => {
     if (query.trim().length < 2) { setMatches([]); return; }
@@ -82,22 +90,23 @@ export default function ManagerRemakesClient() {
   const selectedCount = Object.values(quantities).reduce((sum, quantity) => sum + quantity, 0);
   return <main className="remakePage">
     <header><p className="eyebrow">CORNER DELI · MANAGER</p><h1>Complaint remakes</h1><p>Send only the items that need to be remade. The new zero-charge order is linked to the original and enters the kitchen and delivery queues.</p></header>
+    {printEnabled === false && <p className="remakeError" role="status"><strong>Kitchen printing is paused.</strong> Saving a remake here will not print a ticket. Dev test orders still appear in the kitchen and delivery queues.</p>}
     <section className="remakeSearch"><label htmlFor="remake-query">Find the original order</label><input id="remake-query" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Order number, customer, phone, or address" />
       {query.trim().length >= 2 && <div className="remakeMatches">{matches.length ? matches.slice(0, 40).map((match) => <button type="button" key={match.id} onClick={() => void selectOrder(match)} aria-current={order?.id === match.id ? "true" : undefined}><strong>#{match.display_number} · {match.customer_name}</strong><span>{dateLabel(match.created_at)} · {match.service_type.replaceAll("_", " ")} · {match.status.replaceAll("_", " ")}</span></button>) : <p>No matching orders from the last year.</p>}</div>}
     </section>
     {error && <p className="remakeError" role="alert">{error}</p>}
-    {result && <section className="remakeResult" role="status"><h2>Remake order #{result.orderNumber} created</h2><p>The remake was saved and linked to original order #{order?.display_number}.</p><p>Kitchen print: <strong>{result.printStatus.replaceAll("_", " ")}</strong>{result.printMessage ? ` · ${result.printMessage}` : ""}</p><p>{result.printStatus === "succeeded" ? "The kitchen ticket was sent." : "Check the kitchen printer or hardware settings before assuming the ticket arrived."}</p></section>}
+    {result && <section className="remakeResult" role="status"><h2>Remake order #{result.orderNumber} created</h2><p>The remake was saved and linked to original order #{order?.display_number}.</p><p>Kitchen print: <strong>{result.printStatus.replaceAll("_", " ")}</strong>{result.printMessage ? ` · ${result.printMessage}` : ""}</p><p>{result.printStatus === "succeeded" ? "The kitchen ticket was sent." : result.printMessage.includes("paused") ? "No kitchen ticket was printed." : "Check the kitchen printer or hardware settings before assuming the ticket arrived."}</p></section>}
     {order && !result && <form onSubmit={(event) => void submit(event)} className="remakeForm">
       <h2>Remake from order #{order.display_number}</h2><p>{order.customer_name} · {dateLabel(order.created_at)}</p>
       <fieldset><legend>Items to remake</legend>{(order.items || []).map((item) => { const available = Math.max(0, Number(item.quantity) - Number(item.cancelled_quantity || 0)); return <label className="remakeItem" key={item.id}><span><strong>{itemLabel(item)}</strong><small>{item.modifiers?.filter((modifier) => modifier.print_on_ticket !== false).map((modifier) => modifier.option_name_snapshot).join(" · ")}</small><small>{available} on original order</small></span><input type="number" aria-label={`Remake quantity for ${itemLabel(item)}`} min={0} max={available} step={1} value={quantities[item.id] || 0} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: Math.max(0, Math.min(available, Number(event.target.value) || 0)) }))} /></label>; })}</fieldset>
-      <label>Special item or instruction to print<textarea value={specialItem} maxLength={300} onChange={(event) => setSpecialItem(event.target.value)} placeholder="Example: Make 4 mozzarella sticks only" /></label>
+      <label>Special item or instruction<textarea value={specialItem} maxLength={300} onChange={(event) => setSpecialItem(event.target.value)} placeholder="Example: Make 4 mozzarella sticks only" /></label>
       <label>What went wrong?<textarea required minLength={3} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Example: Mozzarella sticks were overcooked" /></label>
       <fieldset><legend>Fulfillment</legend><div className="remakeChoices"><label><input type="radio" checked={serviceType === "pickup"} onChange={() => setServiceType("pickup")} /> Pickup</label><label><input type="radio" checked={serviceType === "delivery"} onChange={() => setServiceType("delivery")} /> Delivery</label></div></fieldset>
       <div className="remakeGrid"><label>Customer name<input required value={customerName} onChange={(event) => setCustomerName(event.target.value)} /></label><label>Phone<input required type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} /></label></div>
       {serviceType === "delivery" && <><div className="remakeGrid"><label>Delivery address<input required value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Street, city, state, ZIP" /></label><label>Apartment or unit<input value={unit} onChange={(event) => setUnit(event.target.value)} /></label></div><label>Delivery instructions<input value={deliveryNotes} maxLength={300} onChange={(event) => setDeliveryNotes(event.target.value)} placeholder="Drop-off details for the driver" /></label></>}
       <fieldset><legend>When?</legend><div className="remakeChoices"><label><input type="radio" checked={timing === "asap"} onChange={() => setTiming("asap")} /> As soon as possible</label><label><input type="radio" checked={timing === "scheduled"} onChange={() => setTiming("scheduled")} /> Set a time</label></div>{timing === "scheduled" && <label>Pickup or delivery time (Eastern time)<input required type="datetime-local" value={scheduled} onChange={(event) => setScheduled(event.target.value)} /></label>}</fieldset>
       <section className="remakeReview"><h3>Review before sending</h3><p>{selectedCount ? `${selectedCount} selected item${selectedCount === 1 ? "" : "s"}` : "No original items selected"}{specialItem ? ` · Special: ${specialItem}` : ""}</p><p>{serviceType === "delivery" ? `Deliver to ${address || "an address"}${unit ? `, ${unit}` : ""}` : "Customer pickup"} · {timing === "asap" ? "ASAP" : scheduled ? `${scheduled.replace("T", " ")} ET` : "Choose a time"}</p><strong>No customer charge</strong></section>
-      <button className="remakeSubmit" disabled={busy || (!selectedCount && !specialItem.trim()) || !reason.trim() || (timing === "scheduled" && !scheduled)}>{busy ? "SENDING…" : "SEND REMAKE TO KITCHEN"}</button>
+      <button className="remakeSubmit" disabled={busy || (!selectedCount && !specialItem.trim()) || !reason.trim() || (timing === "scheduled" && !scheduled)}>{busy ? "SAVING…" : printEnabled === false ? "SAVE REMAKE · NO PRINT" : "SAVE REMAKE"}</button>
     </form>}
   </main>;
 }

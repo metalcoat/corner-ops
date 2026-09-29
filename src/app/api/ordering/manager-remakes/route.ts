@@ -1,5 +1,6 @@
 import { apiError } from "@/lib/http";
 import { createManagerRemake, remakeManager, remakeOrderDetail, remakeSearch } from "@/lib/ordering-remakes";
+import { externalPrintSettings } from "@/lib/ordering-auto-print";
 
 export const runtime = "nodejs";
 
@@ -7,6 +8,7 @@ export async function GET(request: Request) {
   try {
     if (!await remakeManager()) return Response.json({ error: "Manager access required." }, { status: 403 });
     const url = new URL(request.url);
+    if (url.searchParams.has("settings")) return Response.json({ printSettings: await externalPrintSettings("Corner Deli") });
     const id = url.searchParams.get("id");
     if (id) {
       const order = await remakeOrderDetail(id);
