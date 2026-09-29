@@ -53,9 +53,10 @@ function linkIsActive(pathname: string, link: NavLink): boolean {
 
 export default function GlobalNav({ teamHost = false, brand }: { teamHost?: boolean; brand: SiteBrand }) {
   const pathname = usePathname();
-  const opsBusiness: Business | null = !teamHost && brand.name === "At the Docks" ? "Tiki"
-    : !teamHost && brand.name === "Corner Deli" ? "Corner Deli" : null;
-  const [currentBusiness, setCurrentBusiness] = useState<Business>(opsBusiness || "Corner Deli");
+  const siteBusiness: Business | null = brand.name === "At the Docks" ? "Tiki"
+    : brand.name === "Corner Deli" ? "Corner Deli" : null;
+  const opsBusiness = teamHost ? null : siteBusiness;
+  const [currentBusiness, setCurrentBusiness] = useState<Business>(siteBusiness || "Corner Deli");
   const [availableBusinesses, setAvailableBusinesses] = useState<Business[]>([]);
   const [switchingBusiness, setSwitchingBusiness] = useState(false);
   const [open, setOpen] = useState(false);
@@ -195,7 +196,7 @@ export default function GlobalNav({ teamHost = false, brand }: { teamHost?: bool
       if (!switcher) return false;
 
       restored = true;
-      const saved = savedBusiness();
+      const saved = siteBusiness || savedBusiness();
       if (!saved) return false;
 
       const selected = switcher.querySelector<HTMLElement>(".selected, .active")?.textContent?.trim();
@@ -218,7 +219,7 @@ export default function GlobalNav({ teamHost = false, brand }: { teamHost?: bool
       if (validBusiness(selected)) return selected;
       const select = document.querySelector<HTMLSelectElement>('select[name="business"]')?.value;
       if (validBusiness(select)) return select;
-      return savedBusiness() || "Corner Deli";
+      return siteBusiness || savedBusiness() || "Corner Deli";
     }
 
     function sync() {
@@ -246,7 +247,7 @@ export default function GlobalNav({ teamHost = false, brand }: { teamHost?: bool
       document.removeEventListener("click", interaction, true);
       document.removeEventListener("change", interaction, true);
     };
-  }, [pathname, themeEffectsHidden]);
+  }, [pathname, themeEffectsHidden, siteBusiness]);
 
   if (navHidden) return null;
 

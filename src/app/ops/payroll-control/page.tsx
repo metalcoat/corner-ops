@@ -1,8 +1,9 @@
 "use client";
 
 import { responseMessage } from "@/app/client-http";
+import { useSiteBrand } from "@/app/brand-context";
 import { DEFAULT_PUNCH_CORRECTION_REASON, normalizePunchCorrectionReason } from "@/lib/punch-correction-reason";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
 
@@ -145,10 +146,14 @@ function easternInputValue(value: string | null) {
 }
 
 export default function PayrollControlPage() {
+  const brand = useSiteBrand();
+  const siteBusiness: Business = brand.name === "At the Docks" ? "Tiki" : "Corner Deli";
   const [session, setSession] = useState<SessionView | null>(null);
-  const [business, setBusiness] = useState<Business>("Corner Deli");
+  const [business, setBusiness] = useState<Business>(siteBusiness);
   const [weekStart, setWeekStart] = useState(previousMonday());
-  const [data, setData] = useState<Dashboard | null>(null);
+  const [dashboard, setDashboard] = useState<{ business: Business; weekStart: string; value: Dashboard } | null>(null);
+  const requestId = useRef(0);
+  const data = dashboard?.business === business && dashboard.weekStart === weekStart ? dashboard.value : null;
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Punch | null>(null);
@@ -162,18 +167,24 @@ export default function PayrollControlPage() {
   }, []);
 
   async function load(activeBusiness = business, activeWeek = weekStart) {
+    const currentRequest = ++requestId.current;
     const response = await fetch(
       `/api/payroll-control?business=${encodeURIComponent(activeBusiness)}&weekStart=${encodeURIComponent(activeWeek)}&displayVersion=20260804-3`,
       { cache: "no-store", headers: { "Cache-Control": "no-cache" } },
     );
     if (!response.ok) throw new Error(await responseMessage(response));
-    setData(await response.json() as Dashboard);
+    const value = await response.json() as Dashboard;
+    if (currentRequest === requestId.current) setDashboard({ business: activeBusiness, weekStart: activeWeek, value });
   }
 
   useEffect(() => {
     if (!session?.authenticated) return;
     setNotice("");
-    void load(business, weekStart).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
+    const activeRequest = requestId.current + 1;
+    void load(business, weekStart).catch((error) => {
+      if (activeRequest === requestId.current) setNotice(error instanceof Error ? error.message : String(error));
+    });
+    return () => { requestId.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.authenticated, business, weekStart]);
 
