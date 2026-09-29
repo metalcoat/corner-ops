@@ -117,6 +117,20 @@ export function useOnlineOrderAlert(
       } else if (selected.sound === "wooden_tap") {
         strike(start, 349.23, 0.2, [[1, 0.55], [2.35, 0.11], [3.8, 0.035]]);
         strike(start + 0.34, 440, 0.24, [[1, 0.5], [2.35, 0.1], [3.8, 0.03]]);
+      } else if (selected.sound === "phone_ring") {
+        for (const delay of [0, 0.23, 0.74, 0.97]) {
+          strike(start + delay, 440, 0.17, [[1, 0.22]]);
+          strike(start + delay, 480, 0.17, [[1, 0.22]]);
+        }
+      } else if (selected.sound === "mellow_horn") {
+        for (const delay of [0, 0.62]) {
+          strike(start + delay, 220, 0.42, [[1, 0.3], [2, 0.11], [3, 0.035]]);
+          strike(start + delay, 293.66, 0.42, [[1, 0.24], [2, 0.06]]);
+        }
+      } else if (selected.sound === "register_chime") {
+        strike(start, 523.25, 0.28, [[1, 0.27], [2.02, 0.045]]);
+        strike(start + 0.12, 783.99, 0.46, [[1, 0.26], [2.02, 0.04]]);
+        strike(start + 0.42, 1046.5, 0.58, [[1, 0.22], [2.02, 0.025]]);
       } else {
         strike(start, 523.25, 0.64, [[1, 0.4], [2.01, 0.1], [3.88, 0.025]]);
         strike(start + 0.26, 659.25, 0.76, [[1, 0.4], [2.01, 0.1], [3.88, 0.025]]);

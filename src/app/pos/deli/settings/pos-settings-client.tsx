@@ -13,6 +13,9 @@ const sounds: { value: OnlineOrderAlertSound; label: string }[] = [
   { value: "warm_chime", label: "Warm two-note chime" },
   { value: "gentle_bell", label: "Gentle bell" },
   { value: "wooden_tap", label: "Wooden tap" },
+  { value: "phone_ring", label: "Soft phone ring" },
+  { value: "mellow_horn", label: "Mellow horn" },
+  { value: "register_chime", label: "Register chime" },
   { value: "off", label: "Off" },
 ];
 

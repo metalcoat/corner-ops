@@ -7,6 +7,9 @@ export const ONLINE_ORDER_ALERT_SOUNDS = [
   "warm_chime",
   "gentle_bell",
   "wooden_tap",
+  "phone_ring",
+  "mellow_horn",
+  "register_chime",
   "off",
 ] as const;
 export type OnlineOrderAlertSound = (typeof ONLINE_ORDER_ALERT_SOUNDS)[number];
