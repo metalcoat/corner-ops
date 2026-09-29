@@ -285,6 +285,12 @@ export function proxy(request: NextRequest) {
   if (path.startsWith("/api/")) {
     if (selfAuthorizedApiPaths.some((prefix) => matchesPath(path, prefix)))
       return response;
+    if (matchesPath(path, "/api/ordering/manager-remakes")) {
+      const session = token(request);
+      return session && ["Owner", "Co-Owner", "Manager"].includes(String(session.role))
+        ? response
+        : NextResponse.json({ error: "Manager access required." }, { status: 403 });
+    }
     if (isDeliPosApi(path) && posToken(request)) return response;
     const session = token(request);
     if (!session)

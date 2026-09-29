@@ -18,6 +18,7 @@ type NotificationSummary = {
 
 const links: NavLink[] = [
   { label: "POS", href: "/pos" },
+  { label: "Remakes", href: "/ops/remakes" },
   { label: "Reports", href: "/ops/reports", activePaths: ["/ops/reports", "/ops/weather"] },
   { label: "Banking", href: "/ops/banking", activePaths: ["/ops/banking", "/ops/accounting-control", "/ops/expense-control", "/ops/bank-accounts", "/ops/card-statements"] },
   { label: "Finance", href: "/ops/finance-operations", exact: true },

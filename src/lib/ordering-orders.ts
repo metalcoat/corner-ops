@@ -29,7 +29,7 @@ export type CreateDraftOrderInput = {
   callerPhone?: string;
   customerFirstName?: string;
   customerLastName?: string;
-  orderOrigin?: "pos" | "phone" | "web" | "ai";
+  orderOrigin?: "pos" | "phone" | "web" | "ai" | "complaint_remake";
   createdBy: string;
   createdByName?: string;
   items?: ConfiguredOrderItemInput[];
