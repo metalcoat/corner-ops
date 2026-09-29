@@ -10,7 +10,7 @@ import { validateDeliveryAddress, routeDeliveryAddress } from "@/lib/ordering-ad
 import { createDraftOrder } from "@/lib/ordering-orders";
 import { snapshotAndFormatOrder } from "@/lib/ordering-print-format";
 import { kitchenTicketTimingLines } from "@/lib/ordering-kitchen-ticket";
-import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
+import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { getOrderDetail, listOrders } from "@/lib/ordering-order-center";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 
@@ -170,7 +170,7 @@ export async function createManagerRemake(value: unknown, actor: OrderingActor) 
     await recordRemakeInventory(order.id, actor);
     return { orderId: order.id, alreadyCreated: false };
   });
-  if (!created.alreadyCreated) await dispatchSubmittedOrderPrintJobs(created.orderId, BUSINESS);
+  if (!created.alreadyCreated) await dispatchOrderPrintJobs(created.orderId, BUSINESS);
   return remakeResult(created.orderId, created.alreadyCreated);
 }
 
