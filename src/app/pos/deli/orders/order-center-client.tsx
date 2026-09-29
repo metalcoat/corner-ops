@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import PosPinGate, { type PosSessionView } from "../../pos-pin-gate";
 import ItemCancellationPanel from "./item-cancellation-panel";
+import BulkCashVoidPanel from "./bulk-cash-void-panel";
 import { formatOrderModifier } from "@/lib/ordering-line-format";
 type Order = {
   id: string;
@@ -57,6 +58,7 @@ export default function OrderCenterClient() {
     [reopenBusy, setReopenBusy] = useState(false),
     [clearEnabled, setClearEnabled] = useState(false),
     [clearBusy, setClearBusy] = useState(false),
+    [bulkCashOpen, setBulkCashOpen] = useState(false),
     [cancelItem, setCancelItem] = useState<any>(null);
   const [clock, setClock] = useState(() => Date.now());
   const [creditAmount,setCreditAmount]=useState(""),[creditReason,setCreditReason]=useState(""),[creditBusy,setCreditBusy]=useState(false);
@@ -366,12 +368,16 @@ export default function OrderCenterClient() {
           placeholder="Order, customer, phone, address"
         />
         {clearEnabled && session.session?.posRole !== "employee" && (
+          <button type="button" onClick={() => setBulkCashOpen(true)}>BULK VOID CASH ORDERS</button>
+        )}
+        {clearEnabled && session.session?.posRole !== "employee" && (
           <button className="danger clearTestOrders" disabled={clearBusy} onClick={() => void clearTestOrders()}>
             {clearBusy ? "CLEARING…" : "CLEAR ACTIVE TEST ORDERS"}
           </button>
         )}
       </div>
       {error && !selected && <p role="alert">{error}</p>}
+      {bulkCashOpen && <BulkCashVoidPanel onClose={() => setBulkCashOpen(false)} onComplete={load} />}
       {searchingHistory ? section("SEARCH RESULTS · LAST 60 DAYS", orders) : view === "future" ? <>
         {section("FUTURE · UNPAID", futureUnpaid)}
         {section("FUTURE · PAID", futurePaid, true)}
