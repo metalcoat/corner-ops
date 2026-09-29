@@ -79,90 +79,49 @@ export function useOnlineOrderAlert(
       const selected = override || preference.current;
       if (selected.sound === "off") return;
       const start = context.currentTime;
-      const compressor = context.createDynamicsCompressor();
-      compressor.threshold.value = -18;
-      compressor.knee.value = 12;
-      compressor.ratio.value = 8;
-      compressor.attack.value = 0.003;
-      compressor.release.value = 0.2;
-      compressor.connect(context.destination);
-      const volume = Math.max(0.1, Math.min(1, selected.volume / 100));
+      // Gentle sine partials and decaying envelopes avoid the sharp edges of
+      // square waves and horns. The master gain caps the peak on every preset.
+      const master = context.createGain();
+      master.gain.value = Math.max(0.02, Math.min(0.24, selected.volume / 100 * 0.24));
+      const limiter = context.createDynamicsCompressor();
+      limiter.threshold.value = -18;
+      limiter.knee.value = 18;
+      limiter.ratio.value = 4;
+      limiter.attack.value = 0.012;
+      limiter.release.value = 0.18;
+      master.connect(limiter).connect(context.destination);
 
-      const tone = (
+      const strike = (
         begins: number,
-        duration: number,
         frequency: number,
-        endFrequency: number,
-        type: OscillatorType,
-        level: number,
+        duration: number,
+        partials: readonly (readonly [number, number])[],
       ) => {
-        const oscillator = context.createOscillator();
-        const gain = context.createGain();
-        const ends = begins + duration;
-        oscillator.type = type;
-        oscillator.frequency.setValueAtTime(frequency, begins);
-        oscillator.frequency.linearRampToValueAtTime(endFrequency, ends);
-        gain.gain.setValueAtTime(0.0001, begins);
-        gain.gain.exponentialRampToValueAtTime(
-          Math.max(0.0001, level * volume),
-          begins + 0.018,
-        );
-        gain.gain.setValueAtTime(Math.max(0.0001, level * volume), ends - 0.08);
-        gain.gain.exponentialRampToValueAtTime(0.0001, ends);
-        oscillator.connect(gain).connect(compressor);
-        oscillator.start(begins);
-        oscillator.stop(ends + 0.01);
+        for (const [multiple, level] of partials) {
+          const oscillator = context.createOscillator();
+          const envelope = context.createGain();
+          oscillator.type = "sine";
+          oscillator.frequency.setValueAtTime(frequency * multiple, begins);
+          envelope.gain.setValueAtTime(0.0001, begins);
+          envelope.gain.linearRampToValueAtTime(level, begins + Math.min(0.022, duration / 5));
+          envelope.gain.exponentialRampToValueAtTime(0.0001, begins + duration);
+          oscillator.connect(envelope).connect(master);
+          oscillator.start(begins);
+          oscillator.stop(begins + duration + 0.01);
+        }
       };
 
-      if (selected.sound === "kitchen_ring") {
-        [0, 0.72].forEach((delay) => {
-          tone(start + delay, 0.52, 640, 675, "square", 0.48);
-          tone(start + delay, 0.52, 880, 915, "triangle", 0.62);
-        });
-      } else if (selected.sound === "horn") {
-        [0, 0.62].forEach((delay) => {
-          tone(start + delay, 0.45, 310, 285, "sawtooth", 0.62);
-          tone(start + delay, 0.45, 415, 390, "square", 0.4);
-        });
-      } else if (selected.sound === "air_horn") {
-        [0, 0.78].forEach((delay) => {
-          tone(start + delay, 0.62, 190, 145, "sawtooth", 0.78);
-          tone(start + delay, 0.62, 255, 205, "square", 0.58);
-          tone(start + delay, 0.62, 380, 315, "sawtooth", 0.38);
-        });
-      } else if (selected.sound === "cha_ching") {
-        [0, 0.055, 0.11, 0.165, 0.42, 0.49].forEach((delay, index) =>
-          tone(
-            start + delay,
-            index < 4 ? 0.12 : 0.28,
-            index < 4 ? 1250 + index * 310 : 2100,
-            index < 4 ? 1420 + index * 310 : 2650,
-            index < 4 ? "square" : "sine",
-            index < 4 ? 0.32 : 0.64,
-          ),
-        );
-      } else if (selected.sound === "buzzer") {
-        [0, 0.35, 0.7].forEach((delay) => {
-          tone(start + delay, 0.24, 175, 155, "square", 0.72);
-          tone(start + delay, 0.24, 350, 310, "sawtooth", 0.4);
-        });
-      } else if (selected.sound === "telephone") {
-        [0, 0.22, 0.7, 0.92].forEach((delay) => {
-          tone(start + delay, 0.17, 440, 440, "square", 0.42);
-          tone(start + delay, 0.17, 480, 480, "sine", 0.58);
-        });
+      if (selected.sound === "gentle_bell") {
+        strike(start, 587.33, 0.9, [[1, 0.45], [2.76, 0.1], [4.07, 0.035]]);
+        strike(start + 0.55, 739.99, 0.9, [[1, 0.4], [2.76, 0.09], [4.07, 0.03]]);
+      } else if (selected.sound === "wooden_tap") {
+        strike(start, 349.23, 0.2, [[1, 0.55], [2.35, 0.11], [3.8, 0.035]]);
+        strike(start + 0.34, 440, 0.24, [[1, 0.5], [2.35, 0.1], [3.8, 0.03]]);
       } else {
-        [0, 0.24, 0.48].forEach((delay, index) =>
-          tone(
-            start + delay,
-            0.2,
-            index === 1 ? 988 : 784,
-            index === 1 ? 988 : 784,
-            "sine",
-            0.34,
-          ),
-        );
+        strike(start, 523.25, 0.64, [[1, 0.4], [2.01, 0.1], [3.88, 0.025]]);
+        strike(start + 0.26, 659.25, 0.76, [[1, 0.4], [2.01, 0.1], [3.88, 0.025]]);
       }
+      window.setTimeout(() => { master.disconnect(); limiter.disconnect(); }, 2_000);
     },
     [unlockAudio],
   );

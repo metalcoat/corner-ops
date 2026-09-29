@@ -10,21 +10,17 @@ type Settings = {
   businessTimezone: string;
 };
 const sounds: { value: OnlineOrderAlertSound; label: string }[] = [
-  { value: "kitchen_ring", label: "Loud kitchen ring" },
-  { value: "horn", label: "Horn" },
-  { value: "air_horn", label: "Air horn / honk" },
-  { value: "cha_ching", label: "Cash register cha-ching" },
-  { value: "buzzer", label: "Kitchen buzzer" },
-  { value: "telephone", label: "Telephone ring" },
-  { value: "soft_chime", label: "Soft chime" },
+  { value: "warm_chime", label: "Warm two-note chime" },
+  { value: "gentle_bell", label: "Gentle bell" },
+  { value: "wooden_tap", label: "Wooden tap" },
   { value: "off", label: "Off" },
 ];
 
 export default function PosSettingsClient() {
   const [settings, setSettings] = useState<Settings | null>(null),
     [value, setValue] = useState(60),
-    [sound, setSound] = useState<OnlineOrderAlertSound>("kitchen_ring"),
-    [volume, setVolume] = useState(100),
+    [sound, setSound] = useState<OnlineOrderAlertSound>("warm_chime"),
+    [volume, setVolume] = useState(65),
     [confirm, setConfirm] = useState(false),
     [message, setMessage] = useState("");
   useEffect(() => {
@@ -107,7 +103,8 @@ export default function PosSettingsClient() {
         </div>
         <p className="posSettingsHint">
           Plays once when a new online, kiosk, or AI phone order reaches every
-          open POS and KDS. Device volume still controls maximum loudness.
+          open POS and KDS. Sounds have a gentle attack and capped peak level.
+          Use Test Sound on this device, then adjust its volume as needed.
         </p>
       </section>
       <section className="posSettingsCard">

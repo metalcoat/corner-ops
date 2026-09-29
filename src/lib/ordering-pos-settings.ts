@@ -4,13 +4,9 @@ import type { OrderingBusiness } from "@/lib/ordering-core";
 
 export const BUSINESS_TIMEZONE = "America/New_York";
 export const ONLINE_ORDER_ALERT_SOUNDS = [
-  "kitchen_ring",
-  "horn",
-  "air_horn",
-  "cha_ching",
-  "buzzer",
-  "telephone",
-  "soft_chime",
+  "warm_chime",
+  "gentle_bell",
+  "wooden_tap",
   "off",
 ] as const;
 export type OnlineOrderAlertSound = (typeof ONLINE_ORDER_ALERT_SOUNDS)[number];
@@ -19,16 +15,14 @@ export async function getPosSettings(business: OrderingBusiness) {
   await ensureOrderingCustomerSchema();
   const rows =
     await getSql()`SELECT pos_idle_lock_seconds,online_order_alert_sound,online_order_alert_volume,business_timezone,updated_at FROM ordering_business_settings WHERE business=${business}`;
-  const sound = String(rows[0]?.online_order_alert_sound || "kitchen_ring");
+  const sound = String(rows[0]?.online_order_alert_sound || "warm_chime");
+  const supportedSound = ONLINE_ORDER_ALERT_SOUNDS.includes(sound as OnlineOrderAlertSound);
+  const storedVolume = Number(rows[0]?.online_order_alert_volume ?? 65);
   return {
     business,
     posIdleLockSeconds: Number(rows[0]?.pos_idle_lock_seconds ?? 60),
-    onlineOrderAlertSound: (ONLINE_ORDER_ALERT_SOUNDS.includes(
-      sound as OnlineOrderAlertSound,
-    )
-      ? sound
-      : "kitchen_ring") as OnlineOrderAlertSound,
-    onlineOrderAlertVolume: Number(rows[0]?.online_order_alert_volume ?? 100),
+    onlineOrderAlertSound: (supportedSound ? sound : "warm_chime") as OnlineOrderAlertSound,
+    onlineOrderAlertVolume: supportedSound ? storedVolume : Math.min(storedVolume, 65),
     businessTimezone: String(rows[0]?.business_timezone || BUSINESS_TIMEZONE),
     updatedAt: rows[0]?.updated_at,
   };
@@ -46,7 +40,7 @@ export async function savePosSettings(
     throw new Error(
       "Auto-lock must be disabled or between 15 and 3600 seconds.",
     );
-  const sound = String(soundValue || "kitchen_ring") as OnlineOrderAlertSound;
+  const sound = String(soundValue || "warm_chime") as OnlineOrderAlertSound;
   if (!ONLINE_ORDER_ALERT_SOUNDS.includes(sound))
     throw new Error("Choose a valid online-order alert sound.");
   const volume = Math.trunc(Number(volumeValue));
