@@ -5,7 +5,7 @@ import { canvasToJpegBlob, drawCanvasImage } from "@/app/client-image";
 import { firstName } from "@/app/client-text";
 import { useMessageThreadBehavior } from "@/app/use-message-thread-behavior";
 import MessageReactions from "@/app/message-reactions";
-import type { MessageReactionCount } from "@/lib/message-reaction-options";
+import type { MessageReactionCount, MessageReactionKey } from "@/lib/message-reaction-options";
 import { ChangeEvent, ClipboardEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../../message-inbox.css";
@@ -37,6 +37,7 @@ type Message = {
   seenBy: SeenBy[];
   unseenNames: string[];
   reactions: MessageReactionCount[];
+  myReaction: MessageReactionKey | null;
   created_at: string;
 };
 
@@ -183,6 +184,7 @@ export default function MessagesPage() {
   const [startOpen, setStartOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reactionBusyId, setReactionBusyId] = useState<string | null>(null);
   const [photoPreview, setPhotoPreview] = useState<{ file: File; url: string; name: string; size: number } | null>(null);
   const reportedSeen = useRef(new Set<string>());
   const messageAppRef = useRef<HTMLElement | null>(null);
@@ -499,9 +501,35 @@ export default function MessagesPage() {
     }
   }
 
+  async function reactToMessage(message: Message, reaction: MessageReactionKey) {
+    if (!session?.authenticated || viewAsEmployeeId || reactionBusyId) return;
+    setReactionBusyId(message.id);
+    setNotice("");
+    try {
+      const response = await fetch("/api/message-conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reaction", business, messageId: message.id, reaction }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      const result = await response.json() as { reactions: MessageReactionCount[]; myReaction: MessageReactionKey | null };
+      setData((current) => current ? {
+        ...current,
+        messages: current.messages.map((item) => item.id === message.id
+          ? { ...item, reactions: result.reactions, myReaction: result.myReaction }
+          : item),
+      } : current);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Reaction could not be saved.");
+    } finally {
+      setReactionBusyId(null);
+    }
+  }
+
   if (!session) return <main className="messageApp"><div className="messageLoading">Loading messages…</div></main>;
   if (!session.authenticated) return <main className="messageApp"><div className="messageLoading"><a href="/signin">Sign in to Corner Ops</a></div></main>;
   const allowed = session.businesses?.length ? session.businesses : (["Corner Deli", "Tiki"] as Business[]);
+  const canReact = !viewAsEmployeeId && Boolean(session.permissions?.includes("*") || session.permissions?.includes("workforce.write"));
 
   return <main ref={messageAppRef} className="messageApp" data-message-business={business}>
     <header className="messageTopBar">
@@ -591,7 +619,7 @@ export default function MessagesPage() {
                       {message.body && <p>{message.body}</p>}
                     </div>
                     <div className="messageBubbleMeta"><span>{isOwn ? "You" : displayName}</span><time>{messageTime(message.created_at)}</time>{!viewAsEmployeeId && <button type="button" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>}</div>
-                    <MessageReactions counts={message.reactions || []} />
+                    <MessageReactions counts={message.reactions || []} mine={message.myReaction} disabled={reactionBusyId === message.id} onSelect={canReact ? (reaction) => void reactToMessage(message, reaction) : undefined} />
                     <details className="messageReceipt">
                       <summary>{message.expectedCount === 0 ? "Sent to management" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary>
                       <div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {new Date(read.readAt).toLocaleString()}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}{message.expectedCount > 0 && !message.unseenNames.length && <p>Everyone still active on this message has seen it.</p>}</div>
@@ -611,7 +639,7 @@ export default function MessagesPage() {
             <textarea id="owner-message-body" name="body" rows={2} placeholder="Type your message here…" aria-label={`Message ${selectedConversation.label}`} onPaste={pastePhoto} />
             <button type="submit" disabled={busy} aria-label="Send message">{busy ? "…" : "➤"}</button>
             {photoPreview && <div className="messageAttachmentPreview"><img src={photoPreview.url} alt="Selected attachment" /><span><strong>{photoPreview.name}</strong><small>{(photoPreview.size / 1024 / 1024).toFixed(1)} MB before resizing · paste or upload</small></span><button type="button" onClick={() => clearPhotoAttachment()} disabled={busy}>Remove</button></div>}
-          </form> : <div className="messageReadOnlyComposer"><strong>View only</strong><span>{viewAsEmployeeId ? "Impersonation never sends or marks messages as read." : "Management can review employee-to-employee conversations but cannot post into them."}</span></div>}
+          </form> : <div className="messageReadOnlyComposer"><strong>View only</strong><span>{viewAsEmployeeId ? "Impersonation never sends, reacts, or marks messages as read." : "Management can react to employee conversations but cannot post into them."}</span></div>}
         </> : <div className="messageThreadEmpty"><strong>Select a conversation.</strong></div>}
       </section>
     </div>

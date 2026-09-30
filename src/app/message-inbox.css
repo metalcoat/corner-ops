@@ -110,6 +110,7 @@ html[data-business-theme] .messageApp :is(input, textarea, select):focus {
 .messageReactions { display: flex; gap: 5px; flex-wrap: wrap; margin: 4px 0 2px; }
 .messageReactions button { min-width: 34px; min-height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 3px 7px; border: 1px solid var(--message-line); border-radius: 999px; background: var(--message-input); color: var(--message-ink); font-size: .82rem; cursor: pointer; }
 .messageReactions button span:first-child { font-size: 1rem; line-height: 1; }
+.messagePenisIcon { display: block; flex: none; }
 .messageReactions button.selected { border-color: var(--message-accent); background: color-mix(in srgb, var(--message-accent) 19%, var(--message-input)); font-weight: 800; }
 .messageReactions button:disabled { cursor: default; opacity: .72; }
 .messageReceipt { font-size: .78rem; }

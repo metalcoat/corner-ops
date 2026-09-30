@@ -6,6 +6,7 @@ import {
   ownerConversationDashboard,
   sendConversationMessage,
   TEAM_CONVERSATION_KEY,
+  toggleOwnerConversationReaction,
 } from "@/lib/message-conversations";
 import { deleteOwnerMessage } from "@/lib/message-deletion";
 import { adminUnreadMessageIds, markAdminConversationMessageSeen } from "@/lib/message-reads";
@@ -82,7 +83,7 @@ export async function GET(request: Request) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
     }
     const viewAsEmployeeId = url.searchParams.get("viewAsEmployeeId") || "";
-    const dashboard = await ownerConversationDashboard(business, viewAsEmployeeId);
+    const dashboard = await ownerConversationDashboard(business, viewAsEmployeeId, session.userId);
     const linkedEmployeeId = viewAsEmployeeId
       ? null
       : await linkedMessageEmployeeIdForOwner(business, session.userId);
@@ -183,6 +184,9 @@ export async function POST(request: Request) {
       return Response.json(await markAdminConversationMessageSeen(session.email, business, body.messageId));
     }
     requirePermission(session, "workforce.write");
+    if (action === "reaction") {
+      return Response.json(await toggleOwnerConversationReaction(business, session.userId, body.messageId, body.reaction));
+    }
     if (action === "delete") {
       return Response.json(await deleteOwnerMessage({
         id: String(body.id || ""),

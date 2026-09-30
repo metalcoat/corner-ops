@@ -404,19 +404,24 @@ function visibleMessages(
   ));
 }
 
-async function withReactions(messages: DecoratedMessage[], viewerEmployeeId?: string | null) {
+type ReactionViewer = { kind: "employee" | "management"; id: string };
+
+async function withReactions(messages: DecoratedMessage[], viewer?: ReactionViewer) {
   if (!messages.length) return messages.map((message) => ({ ...message, reactions: [] as MessageReactionCount[], myReaction: null as MessageReactionKey | null }));
   const ids = JSON.stringify(messages.map((message) => message.id));
   const rows = await getSql()`
-    SELECT message_id, employee_id, reaction
-    FROM employee_message_reactions
-    WHERE message_id IN (SELECT value::uuid FROM jsonb_array_elements_text(${ids}::jsonb))
-  ` as unknown as Array<{ message_id: string; employee_id: string; reaction: MessageReactionKey }>;
+    WITH visible AS (SELECT value::uuid AS id FROM jsonb_array_elements_text(${ids}::jsonb))
+    SELECT message_id, employee_id::text AS actor_id, 'employee' AS actor_kind, reaction
+    FROM employee_message_reactions WHERE message_id IN (SELECT id FROM visible)
+    UNION ALL
+    SELECT message_id, user_id::text AS actor_id, 'management' AS actor_kind, reaction
+    FROM owner_message_reactions WHERE message_id IN (SELECT id FROM visible)
+  ` as unknown as Array<{ message_id: string; actor_id: string; actor_kind: ReactionViewer["kind"]; reaction: MessageReactionKey }>;
   const byMessage = new Map<string, { counts: Map<MessageReactionKey, number>; mine: MessageReactionKey | null }>();
   for (const row of rows) {
     const item = byMessage.get(row.message_id) || { counts: new Map<MessageReactionKey, number>(), mine: null };
     item.counts.set(row.reaction, (item.counts.get(row.reaction) || 0) + 1);
-    if (viewerEmployeeId && row.employee_id.toLowerCase() === viewerEmployeeId.toLowerCase()) item.mine = row.reaction;
+    if (viewer && row.actor_kind === viewer.kind && row.actor_id.toLowerCase() === viewer.id.toLowerCase()) item.mine = row.reaction;
     byMessage.set(row.message_id, item);
   }
   return messages.map((message) => {
@@ -562,7 +567,7 @@ function unreadMessageIdsForViewer(messages: DecoratedMessage[], reads: ReceiptR
     .map((message) => message.id);
 }
 
-export async function ownerConversationDashboard(business: Business, viewAsEmployeeId?: unknown) {
+export async function ownerConversationDashboard(business: Business, viewAsEmployeeId?: unknown, ownerUserId?: string) {
   await ensureMessageReadSchema();
   const employees = await activeEmployees(business);
   const activeIds = employees.map((employee) => String(employee.id).toLowerCase());
@@ -586,7 +591,7 @@ export async function ownerConversationDashboard(business: Business, viewAsEmplo
   return {
     business,
     employees: employees.map(mapEmployee),
-    messages: await withReactions(decorated),
+    messages: await withReactions(decorated, viewerId || !ownerUserId ? undefined : { kind: "management", id: ownerUserId }),
     unreadMessageIds: viewerId ? unreadMessageIdsForViewer(decorated, receipts.reads, viewerId) : [],
     viewAsEmployee: viewer ? mapEmployee(viewer) : null,
   };
@@ -615,7 +620,7 @@ export async function employeeConversationDashboard(session: EmployeeSession) {
     employee: mapEmployee(employee),
     linkedManagementAccess,
     directory: employees.map(mapEmployee),
-    messages: await withReactions(decorated, session.employeeId),
+    messages: await withReactions(decorated, { kind: "employee", id: session.employeeId }),
     unreadMessageIds: unreadMessageIdsForViewer(decorated, receipts.reads, session.employeeId),
   };
 }
@@ -644,7 +649,36 @@ export async function toggleConversationReaction(session: EmployeeSession, messa
       ON CONFLICT (message_id, employee_id) DO UPDATE SET reaction=EXCLUDED.reaction, created_at=NOW()
     `;
   }
-  const updated = (await withReactions([message], session.employeeId))[0];
+  const updated = (await withReactions([message], { kind: "employee", id: session.employeeId }))[0];
+  return { messageId: id, reactions: updated.reactions, myReaction: updated.myReaction };
+}
+
+export async function toggleOwnerConversationReaction(business: Business, ownerUserId: string, messageId: unknown, reactionValue: unknown) {
+  const id = uuid(messageId, "Message");
+  const userId = uuid(ownerUserId, "Management account");
+  if (!isMessageReactionKey(reactionValue)) throw new Error("Choose a supported reaction.");
+  const dashboard = await ownerConversationDashboard(business);
+  const message = dashboard.messages.find((item) => item.id.toLowerCase() === id);
+  if (!message) throw new Error("This message is not available in your conversations.");
+  const sql = getSql();
+  const current = (await sql`
+    SELECT reaction FROM owner_message_reactions
+    WHERE message_id=${id}::uuid AND user_id=${userId}::uuid
+  `)[0];
+  if (current?.reaction === reactionValue) {
+    await sql`
+      DELETE FROM owner_message_reactions
+      WHERE message_id=${id}::uuid AND user_id=${userId}::uuid AND reaction=${reactionValue}
+    `;
+  } else {
+    await sql`
+      INSERT INTO owner_message_reactions (message_id, user_id, reaction)
+      SELECT m.id, ${userId}::uuid, ${reactionValue}
+      FROM employee_messages m WHERE m.id=${id}::uuid AND m.business=${business} AND m.deleted_at IS NULL
+      ON CONFLICT (message_id, user_id) DO UPDATE SET reaction=EXCLUDED.reaction, created_at=NOW()
+    `;
+  }
+  const updated = (await withReactions([message], { kind: "management", id: userId }))[0];
   return { messageId: id, reactions: updated.reactions, myReaction: updated.myReaction };
 }
 
