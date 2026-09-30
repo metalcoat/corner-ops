@@ -4,6 +4,8 @@ import { responseMessage } from "@/app/client-http";
 import { canvasToJpegBlob, drawCanvasImage } from "@/app/client-image";
 import { firstName } from "@/app/client-text";
 import { useMessageThreadBehavior } from "@/app/use-message-thread-behavior";
+import MessageReactions from "@/app/message-reactions";
+import type { MessageReactionCount } from "@/lib/message-reaction-options";
 import { ChangeEvent, ClipboardEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../../message-inbox.css";
@@ -34,6 +36,7 @@ type Message = {
   seenCount: number;
   seenBy: SeenBy[];
   unseenNames: string[];
+  reactions: MessageReactionCount[];
   created_at: string;
 };
 
@@ -588,6 +591,7 @@ export default function MessagesPage() {
                       {message.body && <p>{message.body}</p>}
                     </div>
                     <div className="messageBubbleMeta"><span>{isOwn ? "You" : displayName}</span><time>{messageTime(message.created_at)}</time>{!viewAsEmployeeId && <button type="button" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>}</div>
+                    <MessageReactions counts={message.reactions || []} />
                     <details className="messageReceipt">
                       <summary>{message.expectedCount === 0 ? "Sent to management" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary>
                       <div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {new Date(read.readAt).toLocaleString()}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}{message.expectedCount > 0 && !message.unseenNames.length && <p>Everyone still active on this message has seen it.</p>}</div>

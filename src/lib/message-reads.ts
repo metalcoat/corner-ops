@@ -74,6 +74,19 @@ export function ensureMessageReadSchema(): Promise<void> {
         CREATE INDEX IF NOT EXISTS employee_message_recipients_employee_idx
         ON employee_message_recipients (employee_id, message_id)
       `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS employee_message_reactions (
+          message_id UUID NOT NULL REFERENCES employee_messages(id) ON DELETE CASCADE,
+          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+          reaction TEXT NOT NULL CHECK (reaction IN ('thumbs_up', 'thumbs_down', 'heart', 'laugh', 'eggplant_mouth')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (message_id, employee_id)
+        )
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS employee_message_reactions_message_idx
+        ON employee_message_reactions (message_id, reaction)
+      `;
     })().catch((error) => {
       readSchemaPromise = null;
       throw error;
