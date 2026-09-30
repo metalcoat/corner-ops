@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useId, useRef, useState } from "react";
 import { MESSAGE_REACTION_OPTIONS, type MessageReactionCount, type MessageReactionKey } from "@/lib/message-reaction-options";
 
 function PenisIcon() {
@@ -12,6 +13,11 @@ function PenisIcon() {
   </svg>;
 }
 
+function ReactionIcon({ reaction }: { reaction: MessageReactionKey }) {
+  const option = MESSAGE_REACTION_OPTIONS.find((item) => item.key === reaction);
+  return <span aria-hidden="true">{reaction === "eggplant_mouth" ? <PenisIcon /> : option?.emoji}</span>;
+}
+
 export default function MessageReactions({
   counts, mine, onSelect, disabled,
 }: {
@@ -20,21 +26,53 @@ export default function MessageReactions({
   onSelect?: (reaction: MessageReactionKey) => void;
   disabled?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
   if (!onSelect && !counts.length) return null;
-  return <div className="messageReactions" aria-label="Message reactions">
-    {MESSAGE_REACTION_OPTIONS.map((option) => {
-      const count = counts.find((item) => item.key === option.key)?.count || 0;
-      if (!onSelect && !count) return null;
-      return <button
+
+  return <div ref={rootRef} className="messageReactions" aria-label="Message reactions">
+    {onSelect && <button
+      type="button"
+      className="messageReactionTrigger"
+      aria-label="React to message"
+      aria-expanded={open}
+      aria-controls={menuId}
+      disabled={disabled}
+      onClick={() => setOpen((current) => !current)}
+    ><span aria-hidden="true">☺</span> React <span aria-hidden="true">▾</span></button>}
+    {counts.map((count) => <span
+      key={count.key}
+      className={`messageReactionCount${mine === count.key ? " selected" : ""}`}
+      aria-label={`${MESSAGE_REACTION_OPTIONS.find((item) => item.key === count.key)?.label}: ${count.count} reaction${count.count === 1 ? "" : "s"}`}
+    ><ReactionIcon reaction={count.key} /><span aria-hidden="true">{count.count}</span></span>)}
+    {onSelect && open && <div id={menuId} className="messageReactionMenu" role="group" aria-label="Choose a reaction">
+      {MESSAGE_REACTION_OPTIONS.map((option) => <button
         key={option.key}
         type="button"
         className={mine === option.key ? "selected" : ""}
-        aria-label={`${option.label}: ${count} reaction${count === 1 ? "" : "s"}`}
-        aria-pressed={onSelect ? mine === option.key : undefined}
-        title={option.label}
-        disabled={!onSelect || disabled}
-        onClick={() => onSelect?.(option.key)}
-      ><span aria-hidden="true">{option.key === "eggplant_mouth" ? <PenisIcon /> : option.emoji}</span>{count > 0 && <span>{count}</span>}</button>;
-    })}
+        aria-label={option.label}
+        aria-pressed={mine === option.key}
+        disabled={disabled}
+        onClick={() => { onSelect(option.key); setOpen(false); }}
+      ><ReactionIcon reaction={option.key} /><span>{option.label}</span></button>)}
+    </div>}
   </div>;
 }
