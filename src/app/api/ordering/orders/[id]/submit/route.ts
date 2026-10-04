@@ -26,7 +26,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     try { paused = (await dispatchSubmittedOrderPrintJobs(id, business)).paused === true; }
     catch (error) { dispatchError = error instanceof Error ? error.message : "Kitchen print dispatch failed."; }
     const kitchen = await kitchenPrintStatus(id, business).catch(() => ({ status: "none" as const, printed: false, message: "" }));
-    const print = { ...kitchen, paused, message: dispatchError || kitchen.message, warning: result.kitchenTicketCreated === true && !paused && !kitchen.printed && kitchen.status !== "none" };
+    const print = { ...kitchen, paused, message: dispatchError || kitchen.message, warning: result.kitchenTicketCreated === true && !paused && kitchen.status === "failed" };
     return Response.json({ ...result, print });
   } catch (error) {
     if (error instanceof OrderConflictError) return Response.json({ error: error.message }, { status: 409 });

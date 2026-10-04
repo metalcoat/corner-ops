@@ -175,6 +175,8 @@ async function main() {
         Number(gift.tenders.at(-1)?.amount_cents) !== 3500
       )
         throw new Error("Partial gift-card redemption failed.");
+      // Station-less cash is only accepted while no payment station is configured (rolled back below).
+      await sql`UPDATE ordering_payment_stations SET active=FALSE WHERE business='Corner Deli'`;
       await commitTender({
         orderId,
         business: "Corner Deli",

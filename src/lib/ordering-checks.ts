@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { getSql, withTransaction } from "@/lib/db";
 import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
+import { ensureOrderingTipSchema } from "@/lib/ordering-tip-schema";
+import { splitShared } from "@/lib/ordering-check-math";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 
@@ -34,14 +36,29 @@ async function refreshCheckTotals(orderId: string) {
       await sql`UPDATE ordering_check_line_assignments SET allocated_cents=${unit * Number(assignment.quantity) + extra} WHERE check_id=${assignment.check_id} AND order_item_id=${item.id}`;
     }
   }
-  await sql`
-    UPDATE ordering_checks checks SET total_cents=totals.total_cents,
-      amount_due_cents=GREATEST(0,totals.total_cents-checks.paid_cents),
-      status=CASE WHEN checks.paid_cents=0 THEN 'open' WHEN checks.paid_cents>=totals.total_cents THEN 'paid' ELSE 'partially_paid' END,
-      updated_at=NOW()
-    FROM (SELECT check_id,COALESCE(SUM(allocated_cents),0)::integer total_cents FROM ordering_check_line_assignments GROUP BY check_id) totals
-    WHERE checks.id=totals.check_id AND checks.order_id=${orderId}
+  // Each check is its items, plus an even share of everything else on the
+  // order (tax, delivery fee, any order-level tip), plus its own tip. This
+  // matches assignChecks so the checks always add up to the order total.
+  const order = (
+    await sql`SELECT total_cents FROM ordering_orders WHERE id=${orderId}`
+  )[0];
+  const checks = await sql`
+    SELECT checks.id,checks.paid_cents,checks.tip_cents,COALESCE(SUM(assignment.allocated_cents),0)::integer items_cents
+    FROM ordering_checks checks LEFT JOIN ordering_check_line_assignments assignment ON assignment.check_id=checks.id
+    WHERE checks.order_id=${orderId} GROUP BY checks.id ORDER BY checks.display_sequence,checks.id
   `;
+  if (!order || !checks.length) return;
+  const shares = splitShared(
+    Number(order.total_cents) -
+      checks.reduce((sum, check) => sum + Number(check.items_cents) + Number(check.tip_cents), 0),
+    checks.length,
+  );
+  for (const [index, check] of checks.entries()) {
+    const total = Math.max(0, Number(check.items_cents) + shares[index] + Number(check.tip_cents)),
+      paid = Number(check.paid_cents);
+    await sql`UPDATE ordering_checks SET total_cents=${total},amount_due_cents=${Math.max(0, total - paid)},
+      status=${paid === 0 ? "open" : paid >= total ? "paid" : "partially_paid"},updated_at=NOW() WHERE id=${check.id}`;
+  }
 }
 
 export async function ensureInitialCheck(
@@ -78,6 +95,8 @@ export async function splitCheck(input: {
   actor: OrderingActor;
 }) {
   await ensureInitialCheck(input.orderId, input.business, input.actor);
+  // Check tips (ordering_checks.tip_cents) feed the recalculated totals.
+  await ensureOrderingTipSchema();
   if (!input.lines.length)
     throw new CheckConflictError("Select at least one item quantity to split.");
   return withTransaction(async () => {
