@@ -22,7 +22,34 @@ type EmployeePinRow = {
   pin_hash_version: number;
   pin_fingerprint: string;
   session_version: number;
+  role_group: string;
+  pos_role: string;
 };
+
+let pinColumnsReady: Promise<void> | null = null;
+/** The salted-PIN columns (migration 0005), so fresh databases work too. */
+export function ensureEmployeePinColumns(): Promise<void> {
+  pinColumnsReady ??= (async () => {
+    const sql = getSql();
+    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin_salt TEXT NOT NULL DEFAULT ''`;
+    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin_hash_version INTEGER NOT NULL DEFAULT 1`;
+    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin_fingerprint TEXT NOT NULL DEFAULT ''`;
+    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1`;
+  })().catch((error) => {
+    pinColumnsReady = null;
+    throw error;
+  });
+  return pinColumnsReady;
+}
+
+/**
+ * Column values for saving a new PIN. Every place that changes a PIN must use
+ * these, so the stored hash and its format markers always agree.
+ */
+export function employeePinUpdate(business: Business, suppliedPin: unknown, employeeName = "Employee") {
+  const record = createEmployeePinRecord(business, suppliedPin, employeeName);
+  return { pin: record.pin, hash: record.hash, salt: record.salt, version: record.version, fingerprint: record.fingerprint };
+}
 
 export function createEmployeePinRecord(business: Business, suppliedPin: unknown, employeeName = "Employee") {
   const pin = validateEmployeePin(business, suppliedPin, employeeName);
@@ -45,6 +72,7 @@ export async function assertEmployeePinAvailable(input: {
   const fingerprint = employeePinFingerprint(input.business, pin);
   const legacyHash = legacyEmployeePinHash(input.business, pin);
   const exclude = input.excludeEmployeeId || null;
+  await ensureEmployeePinColumns();
   const rows = await getSql()`
     SELECT id FROM employees
     WHERE business = ${input.business}
@@ -79,23 +107,39 @@ async function upgradeLegacyPin(row: EmployeePinRow, pin: string): Promise<void>
       WHERE id = ${row.id} AND business = ${row.business}
     `;
   } catch (error) {
-    if (isEmployeePinUniqueViolation(error)) {
-      throw new Error("That PIN is already assigned to another active employee.");
-    }
-    throw error;
+    // The old hash still works, so a failed upgrade must not block sign-in.
+    console.error("Employee PIN upgrade failed", isEmployeePinUniqueViolation(error) ? "duplicate PIN fingerprint" : error);
   }
 }
 
-export async function employeeByPin(business: Business, suppliedPin: unknown): Promise<EmployeePinRow | null> {
+/**
+ * The one PIN lookup for every sign-in (POS, employee app, deli board, Tiki
+ * punch). It accepts both the salted format and the old one, finds the row by
+ * fingerprint or old hash instead of hashing every employee, and upgrades old
+ * PINs on the way in.
+ */
+export async function employeeByPin(
+  business: Business,
+  suppliedPin: unknown,
+  options: { requirePinEnabled?: boolean } = {},
+): Promise<EmployeePinRow | null> {
   const pin = validateEmployeePin(business, suppliedPin, business);
+  await ensureEmployeePinColumns();
+  const requireEnabled = options.requirePinEnabled !== false;
+  const fingerprint = employeePinFingerprint(business, pin);
+  const legacyHash = legacyEmployeePinHash(business, pin);
   const rows = await getSql()`
     SELECT id, business, name, position, pin_hash, pin_salt, pin_hash_version,
-      pin_fingerprint, session_version
+      pin_fingerprint, session_version, COALESCE(role_group, '') role_group,
+      COALESCE(to_jsonb(employees) ->> 'pos_role', 'employee') pos_role
     FROM employees
-    WHERE business = ${business} AND active = TRUE AND pin_enabled = TRUE
+    WHERE business = ${business} AND active = TRUE
+      AND (${!requireEnabled} OR pin_enabled = TRUE)
+      AND (pin_fingerprint = ${fingerprint} OR pin_hash = ${legacyHash})
     ORDER BY name
   ` as unknown as EmployeePinRow[];
-  const employee = rows.find((row) => matches(row, pin)) || null;
-  if (employee) await upgradeLegacyPin(employee, pin);
-  return employee;
+  const matched = rows.filter((row) => matches(row, pin));
+  if (matched.length !== 1) return null;
+  await upgradeLegacyPin(matched[0], pin);
+  return matched[0];
 }

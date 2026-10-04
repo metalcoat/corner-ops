@@ -1,10 +1,11 @@
-import { createHash, createHmac, randomBytes, randomUUID, scryptSync } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
+import { assertEmployeePinAvailable, employeePinUpdate } from "@/lib/employee-pin-security";
 import { ensureSchema, getSql } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import { cornerOpsBaseUrl, sendTransactionalEmail } from "@/lib/transactional-email";
 import { ensureUserSchema } from "@/lib/users";
 import type { Business } from "@/lib/types";
-import { validateEmployeePin, employeePinLabel } from "@/lib/employee-pin";
+import { employeePinLabel } from "@/lib/employee-pin";
 import { recordEmployeePinAudit } from "@/lib/employee-pin-audit";
 
 const RESET_MINUTES = 30;
@@ -39,13 +40,6 @@ function passwordRecord(password: string): { salt: string; hash: string } {
   if (password.length < 10) throw new Error("Passwords must contain at least 10 characters.");
   const salt = randomBytes(18).toString("base64url");
   return { salt, hash: scryptSync(password, salt, 64).toString("base64url") };
-}
-
-function employeePinHash(business: Business, pin: string): string {
-  const validPin = validateEmployeePin(business, pin);
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required.");
-  return createHmac("sha256", secret).update(`${business}:${validPin}`).digest("hex");
 }
 
 export function ensureCredentialResetSchema(): Promise<void> {
@@ -210,13 +204,13 @@ export async function requestEmployeePinReset(input: {
 export async function completeEmployeePinReset(input: { token: string; pin: string }): Promise<void> {
   const reset = await activeReset("employee-pin", clean(input.token, 500));
   if (!reset.business) throw new Error("The employee reset record is incomplete.");
-  const hash = employeePinHash(reset.business, String(input.pin || ""));
   const sql = getSql();
-  const duplicate = await sql`SELECT id FROM employees WHERE business=${reset.business} AND id<>${reset.subject_id} AND pin_hash=${hash} LIMIT 1`;
-  if(duplicate[0]) throw new Error("That PIN is already assigned at this location.");
+  await assertEmployeePinAvailable({business:reset.business,pin:String(input.pin || ""),excludeEmployeeId:String(reset.subject_id)});
+  const next = employeePinUpdate(reset.business, String(input.pin || ""));
   const updated = await sql`
     UPDATE employees
-    SET pin_hash = ${hash}, pin_enabled = TRUE, updated_at = NOW()
+    SET pin_hash = ${next.hash}, pin_salt = ${next.salt}, pin_hash_version = ${next.version},
+      pin_fingerprint = ${next.fingerprint}, pin_enabled = TRUE, updated_at = NOW()
     WHERE id = ${reset.subject_id} AND business = ${reset.business} AND active = TRUE
     RETURNING id
   ` as unknown as Array<{ id: string }>;

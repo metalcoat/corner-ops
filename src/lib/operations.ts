@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
+import { assertEmployeePinAvailable, employeeByPin, employeePinUpdate } from "@/lib/employee-pin-security";
 import * as XLSX from "xlsx";
 import { ensureSchema, getSql } from "@/lib/db";
 import type { Business } from "@/lib/types";
@@ -196,10 +197,9 @@ export async function updateEmployee(input: {
   const current = currentRows[0];
   if (!current) throw new Error("Employee not found.");
 
-  const nextPinHash = input.pin
-    ? pinHash(current.business, input.pin)
-    : null;
   if (input.pin && !/^\d{5}$/.test(input.pin)) throw new Error("Employee PINs must contain exactly five digits.");
+  if (input.pin) await assertEmployeePinAvailable({ business: current.business, pin: input.pin, employeeName: current.name, excludeEmployeeId: current.id });
+  const next = input.pin ? employeePinUpdate(current.business, input.pin, current.name) : null;
 
   const rows = await getSql()`
     UPDATE employees SET
@@ -210,7 +210,10 @@ export async function updateEmployee(input: {
       hourly_rate = ${Math.max(0, input.hourlyRate ?? Number(current.hourly_rate))},
       tipped_rate = ${Math.max(0, input.tippedRate ?? Number(current.tipped_rate))},
       active = ${input.active ?? current.active},
-      pin_hash = COALESCE(${nextPinHash}, pin_hash),
+      pin_hash = COALESCE(${next?.hash ?? null}, pin_hash),
+      pin_salt = COALESCE(${next?.salt ?? null}, pin_salt),
+      pin_hash_version = COALESCE(${next?.version ?? null}::int, pin_hash_version),
+      pin_fingerprint = COALESCE(${next?.fingerprint ?? null}, pin_fingerprint),
       updated_at = NOW()
     WHERE id = ${input.id}
     RETURNING id, business, name, position, role_group, counts_for_tips, hourly_rate, tipped_rate, active, created_at
@@ -222,12 +225,12 @@ export async function punchTiki(pin: string, location: LocationInput) {
   await ensureSchema();
   if (!/^\d{5}$/.test(pin)) throw new Error("Enter your five-digit PIN.");
 
-  const employeeRows = await getSql()`
+  const match = await employeeByPin("Tiki", pin, { requirePinEnabled: false });
+  const employeeRows = match ? await getSql()`
     SELECT id, business, name, position, role_group, counts_for_tips, hourly_rate, tipped_rate, active, created_at
     FROM employees
-    WHERE business = 'Tiki' AND pin_hash = ${pinHash("Tiki", pin)} AND active = TRUE
-    LIMIT 1
-  ` as unknown as EmployeeRow[];
+    WHERE id = ${match.id}
+  ` as unknown as EmployeeRow[] : [];
   const employee = employeeRows[0];
   if (!employee) throw new Error("PIN not recognized.");
 

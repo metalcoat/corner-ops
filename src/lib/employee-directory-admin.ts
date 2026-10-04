@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { assertEmployeePinAvailable, employeePinUpdate } from "@/lib/employee-pin-security";
 import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
 import { ensureEmployeeDirectorySchema, upsertDirectoryEmployees, type DirectoryEmployeeInput } from "@/lib/employee-directory";
 import { ensureEmployeeProfileSchema, scheduleColorFromId, validScheduleColor } from "@/lib/employee-profile";
@@ -89,12 +90,13 @@ export async function bulkUpdateDirectoryPins(input: { business: Business; lines
   for (const entry of parsed) {
     const target = await sql`SELECT id FROM employees WHERE business=${input.business} AND LOWER(BTRIM(name))=LOWER(BTRIM(${entry.name})) LIMIT 1`;
     if(target[0]){
-      const collision=await sql`SELECT id FROM employees WHERE business=${input.business} AND id<>${target[0].id} AND pin_hash=${pinHash(input.business,entry.pin)} LIMIT 1`;
-      if(collision[0]) throw new Error("A supplied PIN is already assigned at this location.");
+      await assertEmployeePinAvailable({business:input.business,pin:entry.pin,employeeName:entry.name,excludeEmployeeId:String(target[0].id)});
     }
+    const bulkPin = employeePinUpdate(input.business, entry.pin, entry.name);
     const rows = await sql`
       UPDATE employees
-      SET pin_hash = ${pinHash(input.business, entry.pin)}, pin_enabled = TRUE,
+      SET pin_hash = ${bulkPin.hash}, pin_salt = ${bulkPin.salt}, pin_hash_version = ${bulkPin.version},
+        pin_fingerprint = ${bulkPin.fingerprint}, pin_enabled = TRUE,
         active = TRUE, updated_at = NOW()
       WHERE business = ${input.business}
         AND LOWER(BTRIM(name)) = LOWER(BTRIM(${entry.name}))
@@ -161,12 +163,9 @@ export async function updateDirectoryEmployee(input: {
   const pin = input.pin ? validateEmployeePin(input.business, input.pin, name) : "";
 
   if (pin) {
-    const pinDuplicate = await sql`
-      SELECT id FROM employees
-      WHERE business = ${input.business} AND id <> ${input.id} AND pin_hash = ${pinHash(input.business, pin)} LIMIT 1
-    `;
-    if (pinDuplicate[0]) throw new Error("That PIN is already assigned at this location.");
+    await assertEmployeePinAvailable({ business: input.business, pin, employeeName: name, excludeEmployeeId: input.id });
   }
+  const newPin = pin ? employeePinUpdate(input.business, pin, name) : null;
 
   const duplicate = await sql`
     SELECT id FROM employees
@@ -181,7 +180,10 @@ export async function updateDirectoryEmployee(input: {
       name = ${name}, position = ${position}, role_group = ${roleGroup},
       counts_for_tips = ${countsForTips}, hourly_rate = ${hourlyRate}, tipped_rate = ${tippedRate},
       active = ${active}, schedule_color = ${scheduleColor},
-      pin_hash = CASE WHEN ${pin} <> '' THEN ${pin ? pinHash(input.business, pin) : ""} ELSE pin_hash END,
+      pin_hash = COALESCE(${newPin?.hash ?? null}, pin_hash),
+      pin_salt = COALESCE(${newPin?.salt ?? null}, pin_salt),
+      pin_hash_version = COALESCE(${newPin?.version ?? null}::int, pin_hash_version),
+      pin_fingerprint = COALESCE(${newPin?.fingerprint ?? null}, pin_fingerprint),
       pin_enabled = CASE WHEN ${pin} <> '' THEN TRUE ELSE pin_enabled END, updated_at = NOW()
     WHERE id = ${input.id} AND business = ${input.business}
     RETURNING id, email, phone, sms_opt_in, name, position, role_group, counts_for_tips,

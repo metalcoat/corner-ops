@@ -1,4 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { employeeByPin } from "@/lib/employee-pin-security";
 import { cookies } from "next/headers";
 import { ensureSchema, getSql, withTransaction } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
@@ -123,12 +124,8 @@ export async function authenticateDeliPosPin(suppliedPin: unknown, attemptKeys: 
     await recordFailure();
     throw error;
   }
-  const rows = await getSql()`
-    SELECT id, business, name, position, pos_role
-    FROM employees
-    WHERE business = 'Corner Deli' AND pin_hash = ${hashEmployeePin("Corner Deli", pin)}
-      AND pin_enabled = TRUE AND active = TRUE
-  ` as EmployeeRow[];
+  const employee = await employeeByPin("Corner Deli", pin);
+  const rows = employee ? [employee] as unknown as EmployeeRow[] : [];
   if (rows.length !== 1) {
     await recordFailure();
     throw new Error("PIN not recognized for this location.");

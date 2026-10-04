@@ -1,7 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { employeeByPin } from "@/lib/employee-pin-security";
 import { cookies } from "next/headers";
 import { ensureSchema, getSql } from "@/lib/db";
-import { validateEmployeePin } from "@/lib/employee-pin";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import type { Business } from "@/lib/types";
 import { secureCookies } from "@/lib/cookie-security";
@@ -45,10 +45,6 @@ function sign(value: string): string {
   return createHmac("sha256", secret()).update(value).digest("base64url");
 }
 
-function pinHash(business: Business, pin: string): string {
-  return createHmac("sha256", secret()).update(`${business}:${pin}`).digest("hex");
-}
-
 function encode(payload: EmployeeSession): string {
   const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
   return `${body}.${sign(body)}`;
@@ -70,15 +66,8 @@ export async function createEmployeeSession(business: Business, suppliedPin: str
   await ensureSchema();
   await ensureEmployeeDirectorySchema();
   await getSql()`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pos_role TEXT NOT NULL DEFAULT 'employee'`;
-  const pin = validateEmployeePin(business, suppliedPin, business);
-  const rows = await getSql()`
-    SELECT id, business, name, position, role_group, COALESCE(pos_role,'employee') pos_role
-    FROM employees
-    WHERE business = ${business}
-      AND pin_hash = ${pinHash(business, pin)}
-      AND pin_enabled = TRUE AND active = TRUE
-    LIMIT 1
-  ` as unknown as EmployeeRow[];
+  const match = await employeeByPin(business, suppliedPin);
+  const rows = match ? [match] as unknown as EmployeeRow[] : [];
   const employee = rows[0];
   if (!employee) throw new Error("PIN not recognized for this location.");
 

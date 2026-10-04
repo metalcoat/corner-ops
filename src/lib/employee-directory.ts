@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { assertEmployeePinAvailable, employeePinUpdate } from "@/lib/employee-pin-security";
 import { ensureSchema, getSql } from "@/lib/db";
 import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
 import { validateEmployeePin } from "@/lib/employee-pin";
@@ -273,10 +274,13 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
     ` as unknown as Array<{ id: string }>;
 
     if (existing[0]) {
+      await assertEmployeePinAvailable({ business, pin, employeeName: name, excludeEmployeeId: existing[0].id });
+      const updatedPin = employeePinUpdate(business, pin, name);
       const rows = await sql`
         UPDATE employees SET
           email = ${email}, phone = ${phone}, sms_opt_in = ${smsOptIn}, name = ${name},
-          pin_hash = ${pinHash(business, pin)}, pin_enabled = TRUE,
+          pin_hash = ${updatedPin.hash}, pin_salt = ${updatedPin.salt}, pin_hash_version = ${updatedPin.version},
+          pin_fingerprint = ${updatedPin.fingerprint}, pin_enabled = TRUE,
           position = ${position}, role_group = ${roleGroup}, counts_for_tips = ${countsForTips},
           hourly_rate = ${hourlyRate}, tipped_rate = ${tippedRate}, active = TRUE, updated_at = NOW()
         WHERE id = ${existing[0].id}
