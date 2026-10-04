@@ -1,16 +1,20 @@
 // The Corner Deli Facebook page parody shown between shifts.
 import {
   DELIVERY_COMPLAINTS,
-  DELIVERY_FACEBOOK_COMMENTS,
   DELIVERY_FACEBOOK_DELIVERED,
-  DELIVERY_FACEBOOK_MISSED,
-  DELIVERY_FACEBOOK_PEOPLE,
-  DELIVERY_FACEBOOK_PERFECT,
-  DELIVERY_FACEBOOK_REPLIES,
-  DELIVERY_FACEBOOK_SAMPLES,
   DELIVERY_FACEBOOK_URL,
   DELIVERY_ROUTE_SUCCESSES,
 } from "@/lib/delivery-boy/config";
+import {
+  FB_COMMENTS,
+  FB_DELIVERED,
+  FB_MISSED,
+  FB_PEOPLE,
+  FB_PERFECT,
+  FB_REPLIES,
+  FB_SAMPLES,
+  type FbReplyKind,
+} from "@/lib/delivery-boy/facebook-content";
 import type { House } from "./street-model";
 import { randomComplaint } from "@/lib/games/complaints";
 
@@ -23,8 +27,6 @@ export type FacebookPost = {
   reactions: { like: number; haha: number; angry: number };
   comments: { author: string; text: string; page?: boolean }[];
 };
-const pick = <T,>(items: readonly T[]) =>
-  items[Math.floor(Math.random() * items.length)];
 const shuffle = <T,>(items: T[]) => {
   for (let i = items.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -34,54 +36,60 @@ const shuffle = <T,>(items: T[]) => {
 };
 const fill = (text: string, values: Record<string, string>) =>
   text.replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? "");
+// Remember what was shown recently so lines don't repeat shift after shift.
+const recent = new Map<readonly string[], string[]>();
+function fresh(pool: readonly string[], memory = Math.floor(pool.length * 0.7)) {
+  const seen = recent.get(pool) ?? [];
+  const options = pool.filter((line) => !seen.includes(line));
+  const line = (options.length ? options : pool)[Math.floor(Math.random() * (options.length || pool.length))];
+  recent.set(pool, [...seen, line].slice(-memory));
+  return line;
+}
 export const reactions = (heat: number) => ({
   like: Math.floor(Math.random() * 40) + 3,
   haha: Math.floor(Math.random() * 180 * heat) + 12,
   angry: Math.floor(Math.random() * 25 * heat),
 });
+const DELIVERED_POSTS = [...FB_DELIVERED, ...DELIVERY_FACEBOOK_DELIVERED];
 /**
  * The Corner Deli Facebook page after a shift: the page brags, then the
  * customers complain anyway, including the ones whose food landed perfectly.
+ * Comments and the deli's replies are addressed to the people in the thread.
  */
 export function buildFeed(log: House[], shiftCleared: boolean): FacebookPost[] {
   let id = 0;
-  const people = shuffle([...DELIVERY_FACEBOOK_PEOPLE]);
-  const someone = () => people[id++ % people.length];
-  const comments = (count: number) =>
-    Array.from({ length: count }, () => {
-      const author = someone();
-      return {
-        author,
-        text: fill(pick(DELIVERY_FACEBOOK_COMMENTS), { name: someone() }),
-      };
-    });
+  const people = shuffle([...FB_PEOPLE]);
+  let next = 0;
+  const someone = () => people[next++ % people.length];
+  const thread = (author: string, count: number, replies: FbReplyKind | null) => {
+    const comments: FacebookPost["comments"] = [];
+    let prev = author;
+    for (let i = 0; i < count; i++) {
+      const commenter = someone();
+      comments.push({ author: commenter, text: fill(fresh(FB_COMMENTS), { author, prev }) });
+      prev = commenter;
+    }
+    if (replies && Math.random() < 0.75)
+      comments.push({ author: "Corner Deli", text: fill(fresh(FB_REPLIES[replies]), { author }), page: true });
+    return comments;
+  };
   const post = (
-    text: string,
+    pool: readonly string[],
+    replies: FbReplyKind,
     house: House | null,
     heat: number,
     stars?: number,
-  ): FacebookPost => ({
-    id: ++id,
-    author: someone(),
-    text: fill(text, {
-      item: house?.item ?? "sub",
-      address: house?.address ?? "my house",
-    }),
-    stars,
-    reactions: reactions(heat),
-    comments: [
-      ...comments(1 + Math.floor(Math.random() * 2)),
-      ...(Math.random() < 0.6
-        ? [
-            {
-              author: "Corner Deli",
-              text: pick(DELIVERY_FACEBOOK_REPLIES),
-              page: true,
-            },
-          ]
-        : []),
-    ],
-  });
+  ): FacebookPost => {
+    const author = someone();
+    return {
+      id: ++id,
+      author,
+      text: fill(fresh(pool), { item: house?.item ?? "sub", address: house?.address ?? "my house" }),
+      stars,
+      reactions: reactions(heat),
+      comments: thread(author, 1 + Math.floor(Math.random() * 3), replies),
+    };
+  };
   const delivered = shuffle(log.filter((h) => h.state === "delivered")),
     missed = shuffle(log.filter((h) => h.state === "missed")),
     sampled = shuffle(log.filter((h) => h.state === "sampled")),
@@ -92,24 +100,15 @@ export function buildFeed(log: House[], shiftCleared: boolean): FacebookPost[] {
       author: "Corner Deli",
       page: true,
       // Even a flawless shift gets a ridiculous complaint pinned to the page.
-      text: `Shift complete! ${pick(DELIVERY_ROUTE_SUCCESSES)} Pinned complaint of the day: ${Math.random() < 0.6 ? randomComplaint() : pick(DELIVERY_COMPLAINTS)}`,
+      text: `Shift complete! ${fresh(DELIVERY_ROUTE_SUCCESSES)} Pinned complaint of the day: ${Math.random() < 0.6 ? randomComplaint() : fresh(DELIVERY_COMPLAINTS)}`,
       reactions: reactions(0.6),
-      comments: comments(1),
+      comments: thread("Corner Deli", 1 + Math.floor(Math.random() * 2), null),
     });
-  if (!missed.length && delivered.length)
-    feed.push(post(pick(DELIVERY_FACEBOOK_PERFECT), null, 1, 4));
+  if (!missed.length && delivered.length) feed.push(post(FB_PERFECT, "delivered", null, 1, 4));
   for (const house of delivered.slice(0, missed.length ? 1 : 2))
-    feed.push(
-      post(
-        pick(DELIVERY_FACEBOOK_DELIVERED),
-        house,
-        1,
-        1 + Math.floor(Math.random() * 3),
-      ),
-    );
-  for (const house of missed.slice(0, 2))
-    feed.push(post(pick(DELIVERY_FACEBOOK_MISSED), house, 1.4, 1));
-  if (sampled[0]) feed.push(post(pick(DELIVERY_FACEBOOK_SAMPLES), sampled[0], 1.2, 1));
+    feed.push(post(DELIVERED_POSTS, "delivered", house, 1, 1 + Math.floor(Math.random() * 3)));
+  for (const house of missed.slice(0, 2)) feed.push(post(FB_MISSED, "missed", house, 1.4, 1));
+  if (sampled[0]) feed.push(post(FB_SAMPLES, "sample", sampled[0], 1.2, 1));
   return feed;
 }
 export function FacebookFeed({ posts }: { posts: FacebookPost[] }) {

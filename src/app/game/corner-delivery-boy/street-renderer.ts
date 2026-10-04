@@ -486,18 +486,21 @@ export function drawStreet(
     R(ctx, 0, PLAY_Y, SCREEN_W, PLAY_H, `rgba(255,255,255,${0.5 - (now - fx.flashAt) / 320})`);
   if (overlay.countdown !== null) {
     R(ctx, 0, PLAY_Y, SCREEN_W, PLAY_H, "rgba(8,10,24,0.55)");
-    box(ctx, 56, 140, 400, 152);
-    drawText(ctx, f.dayName, SCREEN_W / 2, 156, "#f8d848", { align: "center", scale: 2 });
-    drawText(ctx, `${f.street} · OGDENSBURG`, SCREEN_W / 2, 176, "#c8c8c0", { align: "center" });
-    drawText(ctx, overlay.countdown === 0 ? "GO!" : String(overlay.countdown), SCREEN_W / 2, 192, "#f4f4ec",
+    const bx = SCREEN_W / 2 - 200,
+      by = PLAY_Y + (PLAY_H - 152) / 2;
+    box(ctx, bx, by, 400, 152);
+    drawText(ctx, f.dayName, SCREEN_W / 2, by + 16, "#f8d848", { align: "center", scale: 2 });
+    drawText(ctx, `${f.street} · OGDENSBURG`, SCREEN_W / 2, by + 36, "#c8c8c0", { align: "center" });
+    drawText(ctx, overlay.countdown === 0 ? "GO!" : String(overlay.countdown), SCREEN_W / 2, by + 52, "#f4f4ec",
       { align: "center", scale: 7, shadow: "#14141c" });
-    drawText(ctx, `${f.deliveries} ORDERS · NEED ${f.quota} · ${f.ammo} SUBS`, SCREEN_W / 2, 262, "#f4f4ec",
+    drawText(ctx, `${f.deliveries} ORDERS · NEED ${f.quota} · ${f.ammo} SUBS`, SCREEN_W / 2, by + 122, "#f4f4ec",
       { align: "center", scale: 2 });
   }
   if (overlay.wrecked) {
     R(ctx, 0, PLAY_Y, SCREEN_W, PLAY_H, "rgba(200,20,10,0.28)");
-    box(ctx, 76, 194, 360, 54);
-    drawText(ctx, overlay.wrecked === "fired" ? "YOU'RE FIRED" : "SHIFT OVER", SCREEN_W / 2, 204, "#ff6050",
+    const wy = PLAY_Y + PLAY_H / 2 - 40;
+    box(ctx, SCREEN_W / 2 - 180, wy, 360, 54);
+    drawText(ctx, overlay.wrecked === "fired" ? "YOU'RE FIRED" : "SHIFT OVER", SCREEN_W / 2, wy + 10, "#ff6050",
       { align: "center", scale: 4, shadow: "#14141c" });
   }
   ctx.restore();

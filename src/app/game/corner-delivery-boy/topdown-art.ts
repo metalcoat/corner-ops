@@ -19,6 +19,7 @@ function rounded(g: G, x: number, y: number, w: number, h: number, r: number, c:
   g.fill();
 }
 
+export const CAR_SCALE = 0.88;
 export const PAINTS = ["#2a5ea8", "#8a2a2a", "#d8d4c8", "#2f2f34", "#6a7a3a", "#b08a3a", "#5a5f66", "#c8c2b0", "#7a2f5a"];
 
 export type CarOptions = {
@@ -47,6 +48,8 @@ export function drawCarTop(g: G, cx: number, cy: number, o: CarOptions) {
   g.save();
   g.translate(Math.round(cx), Math.round(cy));
   g.rotate(o.angle);
+  // Cars are drawn a little under full scale so the street feels roomy.
+  g.scale(CAR_SCALE, CAR_SCALE);
   // Shadow, offset down-right in screen space.
   g.save();
   g.rotate(-o.angle);
@@ -139,7 +142,7 @@ export function drawCarTop(g: G, cx: number, cy: number, o: CarOptions) {
 
 /** Headlight beams for a vehicle (draw with "lighter" compositing at night). */
 export function headlightBeams(g: G, cx: number, cy: number, angle: number, length: number, kind: CarOptions["kind"] = "car") {
-  const { l } = carSize(kind);
+  const l = carSize(kind).l * CAR_SCALE;
   g.save();
   g.translate(cx, cy);
   g.rotate(angle);

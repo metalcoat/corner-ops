@@ -796,13 +796,21 @@ export default function DeliveryGame() {
       );
 
     // Traffic, critters and pickups.
-    if (s.spawnTimer > Math.max(0.55, 1.25 - s.stage * 0.12)) {
+    // Monday is gentle; it gets busier through the week. Nothing spawns in
+    // the first few seconds of a shift.
+    const calm = elapsed < 3.5;
+    if (calm) {
+      s.spawnTimer = 0;
+      s.parkedTimer = 0;
+      s.potholeTimer = 0;
+    }
+    if (s.spawnTimer > [2.1, 1.6, 1.3, 1.05, 0.85][s.stage - 1]) {
       s.spawnTimer = 0;
       const crowded =
         s.things.filter((x) => x.y < 8 && !PICKUPS.has(x.type)).length >= 2;
       const types: HazardType[] =
           s.stage <= 1
-            ? ["squirrel", "cat", "dog", "goose", "ebike", "tarpcar"]
+            ? ["squirrel", "cat", "dog", "goose", "squirrel", "ebike"]
             : s.stage <= 3
               ? ["dog", "cat", "raccoon", "person", "car", "mower", "goose", "ebike", "ebike", "tarpcar"]
               : ["deer", "deer", "dog", "goose", "cow", "person", "car", "van", "mower", "ebike", "tarpcar"],
@@ -841,7 +849,7 @@ export default function DeliveryGame() {
                   : 2.3
                 : HAZARD_LANE_MIN + Math.random() * HAZARD_LANE_SPAN),
             y: crossing ? 8 + Math.random() * 25 : -12,
-            vx: crossing ? (fromLeft ? 1 : -1) * (0.45 + Math.random() * 0.45) : 0,
+            vx: crossing ? (fromLeft ? 1 : -1) * ((s.stage === 1 ? 0.32 : 0.45) + Math.random() * 0.4) : 0,
             speed:
               type === "car"
                 ? 1.6
@@ -860,7 +868,7 @@ export default function DeliveryGame() {
     }
     // Cars parked along both curbs narrow the street.
     s.parkedTimer += dt;
-    if (s.parkedTimer > 1.4 + Math.random() * 2.2) {
+    if (s.parkedTimer > [3.2, 2.4, 1.8, 1.5, 1.3][s.stage - 1] + Math.random() * 2) {
       s.parkedTimer = 0;
       const side = Math.random() < 0.5 ? "left" : "right",
         lane = PARKED_LANE[side],
@@ -903,7 +911,7 @@ export default function DeliveryGame() {
     }
     // Ogdensburg potholes: random, frequent, all sizes.
     s.potholeTimer += dt;
-    if (s.potholeTimer > 0.9 + Math.random() * 1.6) {
+    if (s.potholeTimer > [2.6, 2, 1.6, 1.3, 1.1][s.stage - 1] + Math.random() * 1.6) {
       s.potholeTimer = 0;
       s.things = [
         ...s.things,
@@ -1009,7 +1017,7 @@ export default function DeliveryGame() {
         if (!gone) things.push(n);
         continue;
       }
-      if ((n.type === "car" || n.type === "van" || n.type === "racer") && Math.abs(n.lane - s.lane) >= 0.17) {
+      if ((n.type === "car" || n.type === "van" || n.type === "racer") && Math.abs(n.lane - s.lane) >= 0.12) {
         s.damaged = 4;
         hit(1, 500, pickFailure("car", DELIVERY_CAR_CRASHES),
           "SIDESWIPE! -500. ALIGNMENT NOW PROVIDED BY A SHOPPING CART.", "crash");

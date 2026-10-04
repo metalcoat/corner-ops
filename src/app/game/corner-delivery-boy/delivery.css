@@ -699,8 +699,8 @@
   margin-top: 10px;
 }
 .paperboy-screen canvas {
-  width: 512px;
-  height: 448px;
+  width: 544px;
+  height: 576px;
 }
 .practice-days {
   display: flex;

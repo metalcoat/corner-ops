@@ -49,6 +49,8 @@ class DeliveryAudioManager {
   private settings = DEFAULT_SETTINGS;
   private lastPlayed = new Map<DeliverySfx, number>();
   private noiseSeed = 0x51f15e;
+  private echo: DelayNode | null = null;
+  private noiseBuffer: AudioBuffer | null = null;
 
   private nextNoise() {
     this.noiseSeed = (this.noiseSeed * 1664525 + 1013904223) >>> 0;
@@ -94,7 +96,40 @@ class DeliveryAudioManager {
       motor.connect(motorGain);
       motorGain.connect(actionBus);
       motor.start();
-      master.connect(context.destination);
+      // Glue the mix: a gentle compressor and a short room reverb.
+      const compressor = context.createDynamicsCompressor();
+      compressor.threshold.value = -16;
+      compressor.ratio.value = 3.5;
+      compressor.attack.value = 0.006;
+      compressor.release.value = 0.18;
+      const reverb = context.createConvolver();
+      const length = Math.floor(context.sampleRate * 1.1);
+      const impulse = context.createBuffer(2, length, context.sampleRate);
+      for (let channel = 0; channel < 2; channel++) {
+        const data = impulse.getChannelData(channel);
+        for (let i = 0; i < length; i++)
+          data[i] = (this.nextNoise() * 2 - 1) * Math.pow(1 - i / length, 3);
+      }
+      reverb.buffer = impulse;
+      const wet = context.createGain();
+      wet.gain.value = 0.16;
+      master.connect(compressor);
+      master.connect(reverb);
+      reverb.connect(wet);
+      wet.connect(compressor);
+      compressor.connect(context.destination);
+      // A tempo-ish echo for the lead line.
+      const echo = context.createDelay(1);
+      echo.delayTime.value = 0.32;
+      const feedback = context.createGain();
+      feedback.gain.value = 0.28;
+      const echoOut = context.createGain();
+      echoOut.gain.value = 0.35;
+      echo.connect(feedback);
+      feedback.connect(echo);
+      echo.connect(echoOut);
+      echoOut.connect(actionBus);
+      this.echo = echo;
       this.context = context;
       this.master = master;
       this.menuBus = menuBus;
@@ -164,109 +199,193 @@ class DeliveryAudioManager {
     source.start(at);
   }
 
-  private percussion(
-    at: number,
-    kind: "kick" | "snare" | "hat",
-    destination: AudioNode,
-  ) {
+  /** One shared second of white noise for drums. */
+  private noiseSource(at: number, duration: number) {
+    const context = this.context!;
+    if (!this.noiseBuffer) {
+      const frames = context.sampleRate;
+      this.noiseBuffer = context.createBuffer(1, frames, context.sampleRate);
+      const data = this.noiseBuffer.getChannelData(0);
+      for (let i = 0; i < frames; i++) data[i] = this.nextNoise() * 2 - 1;
+    }
+    const source = context.createBufferSource();
+    source.buffer = this.noiseBuffer;
+    source.start(at, Math.random() * 0.5, duration + 0.05);
+    return source;
+  }
+
+  private drum(at: number, kind: "kick" | "snare" | "ghost" | "hat" | "open" | "clap", out: AudioNode, level = 1) {
     const context = this.context;
     if (!context) return;
     if (kind === "kick") {
-      const oscillator = context.createOscillator();
-      const envelope = context.createGain();
-      oscillator.type = "triangle";
-      oscillator.frequency.setValueAtTime(145, at);
-      oscillator.frequency.exponentialRampToValueAtTime(48, at + 0.11);
-      envelope.gain.setValueAtTime(0.12, at);
-      envelope.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
-      oscillator.connect(envelope);
-      envelope.connect(destination);
-      oscillator.start(at);
-      oscillator.stop(at + 0.14);
+      const body = context.createOscillator(),
+        env = context.createGain();
+      body.type = "sine";
+      body.frequency.setValueAtTime(160, at);
+      body.frequency.exponentialRampToValueAtTime(42, at + 0.14);
+      env.gain.setValueAtTime(0.0001, at);
+      env.gain.exponentialRampToValueAtTime(0.34 * level, at + 0.004);
+      env.gain.exponentialRampToValueAtTime(0.0001, at + 0.32);
+      body.connect(env);
+      env.connect(out);
+      body.start(at);
+      body.stop(at + 0.34);
+      const click = this.noiseSource(at, 0.012),
+        clickEnv = context.createGain();
+      clickEnv.gain.setValueAtTime(0.08 * level, at);
+      clickEnv.gain.exponentialRampToValueAtTime(0.0001, at + 0.012);
+      click.connect(clickEnv);
+      clickEnv.connect(out);
       return;
     }
-    const frames = Math.floor(
-      context.sampleRate * (kind === "snare" ? 0.1 : 0.035),
-    );
-    const buffer = context.createBuffer(1, frames, context.sampleRate);
-    const samples = buffer.getChannelData(0);
-    for (let index = 0; index < frames; index++)
-      samples[index] = this.nextNoise() * 2 - 1;
-    const source = context.createBufferSource();
-    const filter = context.createBiquadFilter();
-    const envelope = context.createGain();
-    source.buffer = buffer;
-    filter.type = "highpass";
-    filter.frequency.value = kind === "snare" ? 950 : 4200;
-    envelope.gain.setValueAtTime(kind === "snare" ? 0.07 : 0.026, at);
-    envelope.gain.exponentialRampToValueAtTime(
-      0.0001,
-      at + (kind === "snare" ? 0.1 : 0.035),
-    );
+    const tone = kind === "snare" || kind === "ghost" || kind === "clap";
+    const length = kind === "open" ? 0.22 : kind === "hat" ? 0.04 : kind === "clap" ? 0.16 : kind === "ghost" ? 0.06 : 0.18;
+    const source = this.noiseSource(at, length),
+      filter = context.createBiquadFilter(),
+      env = context.createGain();
+    filter.type = tone ? "bandpass" : "highpass";
+    filter.frequency.value = tone ? 1900 : 7600;
+    filter.Q.value = tone ? 0.8 : 0.7;
+    const peak = (kind === "snare" ? 0.2 : kind === "clap" ? 0.16 : kind === "ghost" ? 0.05 : kind === "open" ? 0.06 : 0.05) * level;
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.exponentialRampToValueAtTime(peak, at + 0.002);
+    env.gain.exponentialRampToValueAtTime(0.0001, at + length);
     source.connect(filter);
-    filter.connect(envelope);
-    envelope.connect(destination);
-    source.start(at);
+    filter.connect(env);
+    env.connect(out);
+    if (kind === "snare") {
+      const body = context.createOscillator(),
+        bodyEnv = context.createGain();
+      body.type = "triangle";
+      body.frequency.setValueAtTime(220, at);
+      body.frequency.exponentialRampToValueAtTime(150, at + 0.08);
+      bodyEnv.gain.setValueAtTime(0.12 * level, at);
+      bodyEnv.gain.exponentialRampToValueAtTime(0.0001, at + 0.1);
+      body.connect(bodyEnv);
+      bodyEnv.connect(out);
+      body.start(at);
+      body.stop(at + 0.12);
+    }
   }
+
+  /** A filtered synth voice: detuned oscillators through a moving lowpass. */
+  private voice(
+    midi: number,
+    at: number,
+    duration: number,
+    out: AudioNode,
+    o: { wave: OscillatorType; level: number; cutoff: number; sweep?: number; detune?: number; vibrato?: boolean; attack?: number },
+  ) {
+    const context = this.context;
+    if (!context) return;
+    const frequency = 440 * Math.pow(2, (midi - 69) / 12),
+      filter = context.createBiquadFilter(),
+      env = context.createGain();
+    filter.type = "lowpass";
+    filter.Q.value = 4;
+    filter.frequency.setValueAtTime(o.cutoff * (o.sweep ?? 1), at);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(80, o.cutoff), at + Math.min(duration, 0.18));
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.exponentialRampToValueAtTime(o.level, at + (o.attack ?? 0.006));
+    env.gain.setTargetAtTime(o.level * 0.6, at + 0.03, duration * 0.4);
+    env.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+    filter.connect(env);
+    env.connect(out);
+    for (const cents of o.detune ? [-o.detune, o.detune] : [0]) {
+      const osc = context.createOscillator();
+      osc.type = o.wave;
+      osc.frequency.setValueAtTime(frequency, at);
+      osc.detune.value = cents;
+      if (o.vibrato && duration > 0.2) {
+        const lfo = context.createOscillator(),
+          depth = context.createGain();
+        lfo.frequency.value = 5.5;
+        depth.gain.setValueAtTime(0, at);
+        depth.gain.linearRampToValueAtTime(frequency * 0.012, at + duration * 0.6);
+        lfo.connect(depth);
+        depth.connect(osc.frequency);
+        lfo.start(at);
+        lfo.stop(at + duration + 0.05);
+      }
+      osc.connect(filter);
+      osc.start(at);
+      osc.stop(at + duration + 0.05);
+    }
+  }
+
+  // A sixteen-bar song: two progressions with a hooky lead, 16 steps a bar.
+  private static readonly CHORDS = [
+    [60, 64, 67], [57, 60, 64], [53, 57, 60], [55, 59, 62],
+    [60, 64, 67], [57, 60, 64], [53, 57, 60], [55, 59, 62],
+    [53, 57, 60], [55, 59, 62], [52, 55, 59], [57, 60, 64],
+    [53, 57, 60], [55, 59, 62], [60, 64, 67], [55, 59, 62],
+  ];
+  private static readonly LEAD: (number | null)[][] = [
+    [72, null, 76, null, 79, null, 76, 74, 72, null, null, 74, 76, null, 79, null],
+    [81, null, 79, null, 76, null, 74, 72, 74, null, 76, null, null, 72, 69, null],
+    [77, null, 76, null, 74, null, 72, null, 69, null, 72, 74, 77, null, 76, null],
+    [74, null, 76, 77, 79, null, null, 77, 76, null, 74, null, 71, null, 74, null],
+    [72, null, 76, null, 79, null, 84, null, 83, null, 79, null, 76, null, 79, null],
+    [81, null, 79, 81, 84, null, 81, null, 79, null, 76, null, 74, null, 76, null],
+    [77, null, 81, null, 84, null, 81, 79, 77, null, 76, null, 74, null, 72, null],
+    [74, 76, 77, 79, 81, null, 79, null, 77, null, 74, null, 79, null, null, null],
+    [72, null, 69, null, 72, null, 74, null, 77, null, 76, null, 74, null, 72, null],
+    [74, null, 71, null, 74, null, 76, null, 79, null, 77, null, 76, null, 74, null],
+    [76, null, 72, null, 71, null, 72, null, 76, null, 79, null, 83, null, 79, null],
+    [81, null, null, 79, 76, null, 72, null, 76, null, 79, null, 81, null, null, null],
+    [77, null, 77, 79, 81, null, 77, null, 72, null, 77, null, 81, null, 84, null],
+    [83, null, 81, null, 79, null, 77, null, 74, null, 79, null, 83, null, 86, null],
+    [84, null, null, null, 79, null, 76, null, 72, null, 76, null, 79, null, 84, null],
+    [83, null, 79, null, 77, null, 74, null, 71, null, 74, null, 79, null, null, null],
+  ];
 
   private scheduleStep(at: number) {
     if (!this.menuBus || !this.actionBus) return;
-    const menuLead = [261.63, 329.63, 392, 329.63, 293.66, 349.23, 440, 349.23];
-    const actionLead = [329.63, 392, 493.88, 659.25, 587.33, 493.88, 440, 392];
-    const actionBass = [82.41, 82.41, 98, 110, 73.42, 73.42, 98, 123.47];
-    const position = this.step % 16;
-    const modulation = 0.8 + this.intensity * 1.7;
-    if (position % 2 === 0) {
-      this.fmNote(
-        menuLead[(position / 2) % menuLead.length],
-        at,
-        0.2,
-        this.menuBus,
-        0.055,
-        0.7,
-        "triangle",
-      );
-      this.fmNote(
-        actionLead[(position / 2) % actionLead.length],
-        at,
-        0.14,
-        this.actionBus,
-        0.075,
-        modulation,
-      );
-      this.fmNote(
-        actionBass[(position / 2) % actionBass.length],
-        at,
-        0.2,
-        this.actionBus,
-        0.065,
-        0.55,
-        "triangle",
-      );
+    const step = this.step % 256,
+      bar = Math.floor(step / 16),
+      beat = step % 16,
+      chord = DeliveryAudioManager.CHORDS[bar],
+      root = chord[0] - 24,
+      urgent = this.intensity > 0.62,
+      action = this.actionBus,
+      menu = this.menuBus;
+
+    // ---- action theme: driving funk ----
+    if ([0, 7, 8, 10].includes(beat) || (urgent && beat === 14)) this.drum(at, "kick", action, beat === 0 ? 1 : 0.8);
+    if (beat === 4 || beat === 12) this.drum(at, "snare", action);
+    if (beat === 12 && bar % 4 === 3) this.drum(at, "clap", action);
+    if ([3, 6, 9, 15].includes(beat)) this.drum(at, "ghost", action);
+    if (beat % 2 === 0) this.drum(at, beat % 4 === 2 ? "open" : "hat", action, beat % 4 === 0 ? 0.8 : 1);
+    else if (urgent || bar >= 8) this.drum(at, "hat", action, 0.6);
+    // Bass: root, octave pops and walk-ups.
+    const bassLine = [0, null, 12, null, 0, 0, null, 7, 0, null, 12, 10, null, 7, 5, null];
+    const bassNote = bassLine[beat];
+    if (bassNote !== null)
+      this.voice(root + bassNote, at, beat % 4 === 0 ? 0.22 : 0.13, action, { wave: "sawtooth", level: 0.16, cutoff: 420, sweep: 4, detune: 6 });
+    // Offbeat chord stabs.
+    if (beat % 4 === 2)
+      for (const note of chord) this.voice(note, at, 0.12, action, { wave: "square", level: 0.035, cutoff: 1800, sweep: 2, detune: 8 });
+    // The hook.
+    const lead = DeliveryAudioManager.LEAD[bar][beat];
+    if (lead !== null) {
+      let length = 1;
+      while (beat + length < 16 && DeliveryAudioManager.LEAD[bar][beat + length] === null && length < 4) length++;
+      const duration = (length * 60) / (112 + this.intensity * 40) / 4;
+      this.voice(lead, at, duration * 0.95, action, { wave: "square", level: 0.07, cutoff: 2600, sweep: 1.5, detune: 5, vibrato: true });
+      if (this.echo) this.voice(lead, at, duration * 0.9, this.echo, { wave: "triangle", level: 0.05, cutoff: 2200 });
+      if (urgent) this.voice(lead + 12, at, duration * 0.6, action, { wave: "triangle", level: 0.025, cutoff: 3000 });
     }
-    if (position % 4 === 0) this.percussion(at, "kick", this.actionBus);
-    if (position % 8 === 4) this.percussion(at, "snare", this.actionBus);
-    if (position % 2 === 1) this.percussion(at, "hat", this.actionBus);
-    if (this.intensity > 0.62 && position % 4 === 3)
-      this.fmNote(
-        actionLead[(position + 3) % actionLead.length] * 2,
-        at,
-        0.07,
-        this.actionBus,
-        0.032,
-        modulation,
-        "triangle",
-      );
-    if (position === 4 || position === 12)
-      this.fmNote(
-        783.99,
-        at,
-        0.08,
-        this.actionBus,
-        0.025,
-        modulation,
-        "triangle",
-      );
+
+    // ---- menu theme: mellow electric piano over a soft beat ----
+    if (beat === 0) this.drum(at, "kick", menu, 0.5);
+    if (beat === 8) this.drum(at, "snare", menu, 0.35);
+    if (beat % 4 === 2) this.drum(at, "hat", menu, 0.5);
+    if (beat === 0 || beat === 10) this.voice(root + 12, at, 0.4, menu, { wave: "triangle", level: 0.1, cutoff: 600 });
+    if (beat % 2 === 0) {
+      const arp = [0, 1, 2, 1][(beat / 2) % 4];
+      this.voice(chord[arp] + 12, at, 0.35, menu, { wave: "sine", level: 0.06, cutoff: 3000, attack: 0.004 });
+      this.voice(chord[arp] + 24, at, 0.2, menu, { wave: "triangle", level: 0.015, cutoff: 3000 });
+    }
     this.step += 1;
   }
 
@@ -277,8 +396,9 @@ class DeliveryAudioManager {
       if (!context) return;
       while (this.nextStepAt < context.currentTime + 0.12) {
         this.scheduleStep(this.nextStepAt);
-        const bpm = 102 + this.intensity * 82;
-        this.nextStepAt += 60 / bpm / 4;
+        const bpm = 112 + this.intensity * 40;
+        // A little swing on the off-sixteenths.
+        this.nextStepAt += (60 / bpm / 4) * (this.step % 2 ? 1.12 : 0.88);
       }
     }, 25);
   }

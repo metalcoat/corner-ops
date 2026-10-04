@@ -1,5 +1,5 @@
 // Shared game model for Delivery Boy: simulation types, tuning, and the
-// 256×224 screen geometry the renderer and the simulation both use.
+// 544×576 screen geometry the renderer and the simulation both use.
 
 export type HazardType =
   | "deer"
@@ -84,9 +84,9 @@ export type Stats = {
   bestCombo: number;
 };
 
-// ---- screen geometry (SNES hi-res 512×448) ----
-export const SCREEN_W = 512;
-export const SCREEN_H = 448;
+// ---- screen geometry (544×576) ----
+export const SCREEN_W = 544;
+export const SCREEN_H = 576;
 export const HUD_H = 40;
 export const PLAY_Y = HUD_H;
 export const PLAY_H = SCREEN_H - HUD_H;
@@ -94,31 +94,32 @@ export const PLAY_H = SCREEN_H - HUD_H;
 // (parked cars narrow it) | curb | sidewalk | lots.
 export const LOT_SPAN = 116;
 export const ROAD_LEFT = 136;
-export const ROAD_RIGHT = 376;
-export const SIDEWALK = { left: [116, 132], right: [380, 396] } as const;
+export const ROAD_RIGHT = 408;
+export const SIDEWALK = { left: [116, 132], right: [412, 428] } as const;
 export const LANE_PX = (ROAD_RIGHT - ROAD_LEFT) / 2;
 export const laneX = (lane: number) => ROAD_LEFT + lane * LANE_PX;
 export const pctY = (y: number) => PLAY_Y + (y / 100) * PLAY_H;
-export const PLAYER_Y = 84;
+/** The car sits low on the screen so you can see plenty of road ahead. */
+export const PLAYER_Y = 86;
 
 // ---- tuning ----
 // The driver can roam from curb to curb; hazards stay on the asphalt.
 export const LANE_MIN = -0.12;
 export const LANE_MAX = 2.12;
 /** You drive in the right lane; oncoming traffic keeps to the left lane. */
-export const START_LANE = 1.45;
-export const ONCOMING_LANE = { min: 0.58, max: 0.72 };
+export const START_LANE = 1.5;
+export const ONCOMING_LANE = { min: 0.44, max: 0.58 };
 /** Where parked cars sit against each curb (tyres at the curb). */
 export const PARKED_LANE = { left: 0.12, right: 1.88 };
 export const HAZARD_LANE_MIN = 0.15;
 export const HAZARD_LANE_SPAN = 1.7;
 export const STEER_RATE = 1.7;
 /** Percent of the screen per second, per 100 points of route speed. */
-export const SCROLL_RATE = 18;
+export const SCROLL_RATE = 13.7;
 export const THROW_WINDOW = { start: 58, end: 90 };
 export const PORCH_WINDOW = { start: 69, end: 81 };
 /** Distance (in screen %) between houses on the same side of the street. */
-export const LOT_SPACING = 32;
+export const LOT_SPACING = 25;
 export const LOT_JITTER = 6;
 export const HOUSE_SPAWN_Y = -12;
 export const INVULNERABLE_SECONDS = 1.2;
@@ -159,43 +160,46 @@ export const STREETS = [
 ] as const;
 
 /**
- * How close (in lanes, 120 px each) a thing's centre must be to the car's
+ * How close (in lanes, 136 px each) a thing's centre must be to the car's
  * centre to touch it: half its drawn width plus most of the car's half-width.
  */
 export function collisionRadius(type: Thing["type"], size = 1) {
+  // Half the thing's drawn width plus most of the car's half-width, in lanes.
   switch (type) {
     case "car":
     case "van":
     case "tarpcar":
     case "parked":
     case "racer":
-      return 0.4;
+      return 0.26;
     case "cow":
-      return 0.4;
+      return 0.32;
     case "deer":
-      return 0.36;
-    case "person":
+      return 0.28;
     case "mower":
-      return 0.3;
-    case "ebike":
-    case "dog":
-      return 0.27;
-    case "goose":
       return 0.25;
+    case "person":
+      return 0.22;
+    case "dog":
+      return 0.21;
+    case "ebike":
+      return 0.2;
+    case "goose":
+      return 0.19;
     case "cat":
     case "raccoon":
-      return 0.24;
+      return 0.18;
     case "squirrel":
-      return 0.21;
+      return 0.15;
     case "pothole":
-      return (15 * size + 18) / 120;
+      return (15 * size + 12) / 136;
     default:
-      return 0.26;
+      return 0.2;
   }
 }
 
 /** The car's half-length plus a thing's half-length, in screen %, for collisions. */
-export const PLAYER_HALF = 9.3;
+export const PLAYER_HALF = 6.2;
 export function halfLength(type: Thing["type"]) {
   switch (type) {
     case "car":
@@ -203,21 +207,21 @@ export function halfLength(type: Thing["type"]) {
     case "parked":
     case "tarpcar":
     case "racer":
-      return 10;
+      return 6;
     case "pothole":
-      return 2.5;
+      return 1.8;
     case "ebike":
     case "mower":
     case "deer":
     case "cow":
     case "person":
-      return 6;
+      return 4.5;
     default:
-      return 4;
+      return 3;
   }
 }
 export const touchesPlayer = (type: Thing["type"], y: number) =>
-  Math.abs(y - PLAYER_Y) < PLAYER_HALF + halfLength(type) - 3;
+  Math.abs(y - PLAYER_Y) < PLAYER_HALF + halfLength(type) - 2;
 
 /** Cosmetic effects the renderer animates; times are performance.now() ms. */
 export type Fx = {
