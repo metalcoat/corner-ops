@@ -49,6 +49,14 @@ export function getSql(): SqlClient {
   return queryClient;
 }
 
+/**
+ * Runs queries on the shared connection even inside withTransaction, so a
+ * record (like a processor refund that already happened) survives a rollback.
+ */
+export function outsideTransaction<T>(operation: () => T): T {
+  return transactionClient.exit(operation);
+}
+
 export async function withTransaction<T>(operation: () => Promise<T>): Promise<T> {
   assertConfigured("DATABASE_URL");
   if (getDatabaseDriver() !== "postgres") {

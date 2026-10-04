@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { markMxReversalApplied, reverseMxPayment, unappliedMxReversalCents, type MxReversalResult } from "@/lib/mx-refunds";
 import { getSql, withTransaction } from "@/lib/db";
 import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
@@ -119,18 +120,33 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     const sql = getSql();
     const duplicate = await sql`SELECT id,order_id,transaction_type,related_transaction_id FROM ordering_payment_transactions WHERE business=${input.business} AND client_mutation_id=${input.clientMutationId}`;
     if (duplicate[0]) {
-      if (duplicate[0].order_id !== input.orderId || duplicate[0].transaction_type !== "void" || duplicate[0].related_transaction_id !== input.transactionId) throw new PaymentConflictError("That reversal request ID was already used for another operation.");
+      if (duplicate[0].order_id !== input.orderId || !["void", "refund"].includes(String(duplicate[0].transaction_type)) || duplicate[0].related_transaction_id !== input.transactionId) throw new PaymentConflictError("That reversal request ID was already used for another operation.");
       return { ...(await checkoutState(input.orderId, input.business)), duplicate: true };
     }
     const source = (await sql`SELECT * FROM ordering_payment_transactions WHERE id=${input.transactionId} AND order_id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
     if (!source || source.transaction_type !== "payment" || source.status !== "approved") throw new PaymentConflictError("Approved payment tender was not found.");
-    if (source.tender_type === "card" && source.provider && source.provider !== "test") throw new PaymentConflictError(`${source.provider === "mx_merchant" ? "Dharma / MX Merchant" : "Helcim"} card reversals must be approved by the processor before the local payment record is updated.`);
+    const viaMx = source.tender_type === "card" && source.provider === "mx_merchant";
+    if (source.tender_type === "card" && source.provider && source.provider !== "test" && !viaMx) throw new PaymentConflictError("Helcim card reversals must be done in Helcim; the POS cannot send them yet.");
     const reversed = Number((await sql`SELECT COALESCE(SUM(amount_cents),0) amount FROM ordering_payment_transactions WHERE related_transaction_id=${source.id} AND transaction_type IN ('void','refund') AND status='approved'`)[0].amount);
-    if (amount > Number(source.amount_cents) - reversed) throw new PaymentConflictError("Reversal exceeds the tender's unreversed amount.");
+    const inFlightAtMx = viaMx ? await unappliedMxReversalCents(String(source.id), amount) : 0;
+    if (amount > Number(source.amount_cents) - reversed - inFlightAtMx) throw new PaymentConflictError("Reversal exceeds the tender's unreversed amount.");
+    // Card payments taken through Dharma / MX are refunded at MX first; the order only changes once MX approves.
+    let mx: MxReversalResult | null = null;
+    if (viaMx) {
+      try {
+        mx = await reverseMxPayment({ business: input.business, orderId: input.orderId, sourceTransactionId: String(source.id), sourceReference: String(source.provider_transaction_reference || ""), amountCents: amount, fullReversal: reversed === 0 && amount === Number(source.amount_cents), actorId: input.actor.id });
+      } catch (error) {
+        throw new PaymentConflictError(error instanceof Error ? error.message : "MX Merchant could not process the refund.");
+      }
+    }
     const order = (await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
     if (!order) throw new PaymentConflictError("Order was not found.");
     const reversalId = randomUUID();
-    await sql`INSERT INTO ordering_payment_transactions(id,business,order_id,check_id,customer_id,tender_type,transaction_type,status,amount_cents,amount_tendered_cents,provider,related_transaction_id,client_mutation_id,created_by,approved_at,reason,details) VALUES(${reversalId},${input.business},${input.orderId},${source.check_id},${source.customer_id},${source.tender_type},'void','approved',${amount},${amount},${source.provider},${source.id},${input.clientMutationId},${input.actor.id},NOW(),${reversalReason},${JSON.stringify({actorName:input.actor.name,actorRole:input.actor.role,partial:amount<Number(source.amount_cents)-reversed})}::jsonb)`;
+    await sql`INSERT INTO ordering_payment_transactions(id,business,order_id,check_id,customer_id,tender_type,transaction_type,status,amount_cents,amount_tendered_cents,provider,related_transaction_id,client_mutation_id,created_by,approved_at,reason,details) VALUES(${reversalId},${input.business},${input.orderId},${source.check_id},${source.customer_id},${source.tender_type},${mx?.kind ?? "void"},'approved',${amount},${amount},${source.provider},${source.id},${input.clientMutationId},${input.actor.id},NOW(),${reversalReason},${JSON.stringify({actorName:input.actor.name,actorRole:input.actor.role,partial:amount<Number(source.amount_cents)-reversed,...(mx?{mx:mx.details,mxAttemptId:mx.attemptId}:{})})}::jsonb)`;
+    if (mx) {
+      await sql`UPDATE ordering_payment_transactions SET provider_transaction_reference=${mx.reference},brand=${source.brand},last4=${source.last4} WHERE id=${reversalId}`;
+      await markMxReversalApplied(mx.attemptId);
+    }
     if (source.tender_type === "gift_card") {
       const ledger = (await sql`SELECT ledger.*,card.current_balance_cents,card.status FROM ordering_gift_card_ledger ledger JOIN ordering_gift_cards card ON card.id=ledger.gift_card_id WHERE ledger.payment_transaction_id=${source.id} AND ledger.entry_type='redeem' FOR UPDATE OF card`)[0];
       if (!ledger) throw new PaymentConflictError("Gift-card redemption ledger was not found.");
