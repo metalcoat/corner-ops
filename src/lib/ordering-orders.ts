@@ -411,14 +411,15 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
 
 export async function recalculateOrder(orderId: string): Promise<void> {
   const sql = getSql();
+  // Same total formula as submitDraftOrder: subtotal - discount + tax + tip + delivery fee.
   await sql`
     UPDATE ordering_orders
     SET subtotal_cents = totals.subtotal_cents,
-        total_cents = GREATEST(0, totals.subtotal_cents - discount_cents + tax_cents + tip_cents),
-        amount_due_cents = GREATEST(0, totals.subtotal_cents - discount_cents + tax_cents + tip_cents - paid_cents),
+        total_cents = GREATEST(0, totals.subtotal_cents - discount_cents + tax_cents + tip_cents + delivery_fee_cents),
+        amount_due_cents = GREATEST(0, totals.subtotal_cents - discount_cents + tax_cents + tip_cents + delivery_fee_cents - paid_cents),
         payment_status = CASE
           WHEN paid_cents <= 0 THEN 'unpaid'
-          WHEN paid_cents >= GREATEST(0, totals.subtotal_cents - discount_cents + tax_cents + tip_cents) THEN 'paid'
+          WHEN paid_cents >= GREATEST(0, totals.subtotal_cents - discount_cents + tax_cents + tip_cents + delivery_fee_cents) THEN 'paid'
           ELSE 'partially_paid'
         END,
         version = version + 1,

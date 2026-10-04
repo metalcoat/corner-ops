@@ -5,12 +5,14 @@ import {
   ensureDriverDeliverySchema,
   type DriverActor,
 } from "@/lib/ordering-driver-delivery";
+import { driverSettlementError } from "@/lib/ordering-payment-rules";
 
 export async function driverCashDashboard(actor: DriverActor) {
+  if (!actor.manager && !actor.driver) throw new Error("Driver or manager access is required for cash-out.");
   await ensureDriverDeliverySchema();
   const sql = getSql();
   const [orders, settlements] = await Promise.all([
-    sql`SELECT o.id order_id,o.display_number,o.amount_due_cents,o.total_cents,dispatch.driver_employee_id,dispatch.status delivery_status,dispatch.delivered_at,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,COALESCE(address.formatted_address,address.line1,'') delivery_address,COALESCE(address.line2,'') delivery_unit FROM ordering_orders o LEFT JOIN LATERAL(SELECT d.driver_employee_id,d.status,d.delivered_at FROM ordering_delivery_assignments d WHERE d.order_id=o.id AND d.business=o.business ORDER BY d.updated_at DESC,d.created_at DESC LIMIT 1)dispatch ON TRUE LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=o.id WHERE o.business=${actor.business} AND o.service_type='delivery' AND o.status IN('confirmed','sent_to_kitchen','in_progress','ready','completed') AND (o.timing_mode<>'future' OR o.scheduled_for<=NOW()) AND o.amount_due_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_driver_cash_settlement_orders so JOIN ordering_driver_cash_settlements s ON s.id=so.settlement_id WHERE so.order_id=o.id AND s.status='posted') ORDER BY COALESCE(dispatch.delivered_at,o.completed_at,o.ready_at,o.submitted_at,o.created_at),o.display_number`,
+    sql`SELECT o.id order_id,o.display_number,o.amount_due_cents,o.total_cents,dispatch.driver_employee_id,dispatch.status delivery_status,dispatch.delivered_at,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,COALESCE(address.formatted_address,address.line1,'') delivery_address,COALESCE(address.line2,'') delivery_unit FROM ordering_orders o LEFT JOIN LATERAL(SELECT d.driver_employee_id,d.status,d.delivered_at FROM ordering_delivery_assignments d WHERE d.order_id=o.id AND d.business=o.business ORDER BY d.updated_at DESC,d.created_at DESC LIMIT 1)dispatch ON TRUE LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=o.id WHERE o.business=${actor.business} AND o.service_type='delivery' AND o.status IN('confirmed','sent_to_kitchen','in_progress','ready','completed') AND (o.timing_mode<>'future' OR o.scheduled_for<=NOW()) AND o.amount_due_cents>0 AND (${actor.manager} OR dispatch.driver_employee_id=${actor.employeeId}) AND NOT EXISTS(SELECT 1 FROM ordering_driver_cash_settlement_orders so JOIN ordering_driver_cash_settlements s ON s.id=so.settlement_id WHERE so.order_id=o.id AND s.status='posted') ORDER BY COALESCE(dispatch.delivered_at,o.completed_at,o.ready_at,o.submitted_at,o.created_at),o.display_number`,
     sql`SELECT s.id,s.business_date,s.order_count,s.expected_cash_cents,s.turned_in_cash_cents,s.over_short_cents,s.posted_at,e.name handled_by_name FROM ordering_driver_cash_settlements s JOIN employees e ON e.id=s.driver_employee_id WHERE s.business=${actor.business} AND s.status='posted' ORDER BY s.posted_at DESC LIMIT 30`,
   ]);
   return { orders, settlements, handledBy: actor.name };
@@ -34,10 +36,12 @@ export async function postDriverCashSettlement(
     throw new Error("Enter a valid cash amount turned in.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.businessDate))
     throw new Error("Choose a valid business date.");
+  const accessError = driverSettlementError({ isDriver: actor.driver, isManager: actor.manager, expectedCents: 0, turnedInCents: 0, unassignedOrderCount: 0 });
+  if (accessError) throw new Error(accessError);
   return withTransaction(async () => {
     const sql = getSql();
     const orders =
-      await sql`SELECT o.id,o.display_number,o.amount_due_cents FROM ordering_orders o WHERE o.business=${actor.business} AND o.service_type='delivery' AND o.status IN('confirmed','sent_to_kitchen','in_progress','ready','completed') AND (o.timing_mode<>'future' OR o.scheduled_for<=NOW()) AND o.id=ANY(${orderIds}::uuid[]) AND o.amount_due_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_driver_cash_settlement_orders so JOIN ordering_driver_cash_settlements s ON s.id=so.settlement_id WHERE so.order_id=o.id AND s.status='posted') FOR UPDATE OF o`;
+      await sql`SELECT o.id,o.display_number,o.amount_due_cents,(SELECT d.driver_employee_id FROM ordering_delivery_assignments d WHERE d.order_id=o.id AND d.business=o.business ORDER BY d.updated_at DESC,d.created_at DESC LIMIT 1) driver_employee_id FROM ordering_orders o WHERE o.business=${actor.business} AND o.service_type='delivery' AND o.status IN('confirmed','sent_to_kitchen','in_progress','ready','completed') AND (o.timing_mode<>'future' OR o.scheduled_for<=NOW()) AND o.id=ANY(${orderIds}::uuid[]) AND o.amount_due_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_driver_cash_settlement_orders so JOIN ordering_driver_cash_settlements s ON s.id=so.settlement_id WHERE so.order_id=o.id AND s.status='posted') FOR UPDATE OF o`;
     if (orders.length !== orderIds.length)
       throw new Error(
         "One or more orders are no longer eligible. Refresh and review the cash-out.",
@@ -46,6 +50,14 @@ export async function postDriverCashSettlement(
       (sum, order) => sum + Number(order.amount_due_cents),
       0,
     );
+    const settlementError = driverSettlementError({
+      isDriver: actor.driver,
+      isManager: actor.manager,
+      expectedCents: expected,
+      turnedInCents: input.turnedInCashCents,
+      unassignedOrderCount: orders.filter((order) => String(order.driver_employee_id || "") !== actor.employeeId).length,
+    });
+    if (settlementError) throw new Error(settlementError);
     const settlementId = randomUUID();
     await sql`INSERT INTO ordering_driver_cash_settlements(id,business,driver_employee_id,business_date,status,order_count,expected_cash_cents,turned_in_cash_cents,over_short_cents,created_by,approved_by,posted_at) VALUES(${settlementId},${actor.business},${actor.employeeId},${input.businessDate},'posted',${orders.length},${expected},${input.turnedInCashCents},${input.turnedInCashCents - expected},${actor.employeeId},${actor.employeeId},NOW())`;
     for (const order of orders) {

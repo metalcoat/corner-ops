@@ -4,6 +4,8 @@ import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { canManagePos, type OrderingActor } from "@/lib/ordering-route-auth";
 import { reverseLoyaltyForOrder } from "@/lib/ordering-loyalty";
+import { reconcileOrderTips } from "@/lib/ordering-tips";
+import { ensureOrderingTipSchema } from "@/lib/ordering-tip-schema";
 
 export class OrderVoidError extends Error {}
 
@@ -13,6 +15,7 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
   if (reason.length < 3) throw new OrderVoidError("A void reason is required.");
   if (reason.length > 500) throw new OrderVoidError("Void reason must be 500 characters or fewer.");
   await ensureOrderingAccountSchema();
+  await ensureOrderingTipSchema();
   return withTransaction(async () => {
     const sql = getSql();
     const rows = await sql`
@@ -34,6 +37,7 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
     `;
     if (!updated[0]) throw new OrderVoidError("This order changed while the void was being recorded.");
     await reverseLoyaltyForOrder(input.orderId,input.actor,reason);
+    await reconcileOrderTips(input.orderId,input.business);
     await sql`
       INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)
       VALUES(${randomUUID()},${input.orderId},${updated[0].version},'order_voided',${input.actor.type},${input.actor.id},
