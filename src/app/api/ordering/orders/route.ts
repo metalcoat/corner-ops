@@ -7,7 +7,9 @@ import type { OrderTimingMode } from "@/lib/ordering-timing-core";
 import { orderingActor } from "@/lib/ordering-route-auth";
 import { addressForOrder, routeDeliveryAddress } from "@/lib/ordering-address";
 import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
-import { getSql } from "@/lib/db";
+import { getSql, withTransaction } from "@/lib/db";
+import { ensureOrderingTimingSchema } from "@/lib/ordering-timing-schema";
+import { readIdempotencyKey } from "@/lib/pos-offline-sync-policy";
 import { quoteDelivery } from "@/lib/ordering-delivery";
 
 export const runtime = "nodejs";
@@ -44,6 +46,12 @@ function cashierOrderError(error: unknown): Response | null {
     || message.endsWith(" is currently unavailable.");
   if (!safeOrderError) return null;
   return Response.json({ error: message }, { status: 409 });
+}
+
+async function orderResponse(order: { id: unknown }, status: number) {
+  const promotions = await getSql()`SELECT label_snapshot label,discount_cents FROM ordering_order_promotion_applications WHERE order_id=${order.id} ORDER BY application_sequence`;
+  const orderItems=await getSql()`SELECT id,sort_order FROM ordering_order_items WHERE order_id=${order.id} ORDER BY sort_order,created_at,id`;
+  return Response.json({ order, promotions, orderItems }, { status });
 }
 
 export async function POST(request: Request) {
@@ -102,7 +110,7 @@ export async function POST(request: Request) {
       try { validatedAddress = addressForOrder(serviceType, String(body.deliveryValidationToken || ""), enteredAddress); }
       catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Validate the delivery address." }, { status: 409 }); }
     }
-    let order = await createTimedDraftOrder({
+    const draftInput: Parameters<typeof createTimedDraftOrder>[0] = {
       business,
       source: "pos",
       serviceType,
@@ -117,7 +125,26 @@ export async function POST(request: Request) {
       items,
       timingMode,
       requestedFor: readRequestedFor(body.scheduledFor, timingMode),
-    });
+    };
+    const idempotencyKey = readIdempotencyKey(body.idempotencyKey);
+    let order: Awaited<ReturnType<typeof createTimedDraftOrder>>;
+    if (idempotencyKey) {
+      // A retried POST (lost response, offline replay) returns the order the first attempt created.
+      await ensureOrderingTimingSchema();
+      const outcome = await withTransaction(async () => {
+        const sql = getSql();
+        await sql`SELECT pg_advisory_xact_lock(hashtext(${`order-create:${business}:${idempotencyKey}`}))`;
+        const prior = (await sql`SELECT * FROM ordering_orders WHERE business=${business} AND idempotency_key=${idempotencyKey} LIMIT 1`)[0];
+        if (prior) return { prior };
+        const created = await createTimedDraftOrder(draftInput);
+        await sql`UPDATE ordering_orders SET idempotency_key=${idempotencyKey} WHERE id=${created.id}`;
+        return { created };
+      });
+      if (outcome.prior) return orderResponse(outcome.prior as { id: unknown }, 200);
+      order = outcome.created!;
+    } else {
+      order = await createTimedDraftOrder(draftInput);
+    }
     if(body.tableSessionId){const sessionId=String(body.tableSessionId);const linked=await getSql()`UPDATE restaurant_table_sessions session SET order_id=${order.id},status='ordering',updated_at=NOW() FROM restaurant_tables table_row JOIN restaurant_floor_plans floor ON floor.id=table_row.floor_plan_id JOIN restaurant_locations location ON location.id=floor.location_id JOIN restaurant_concepts concept ON concept.id=location.concept_id WHERE session.id=${sessionId} AND session.table_id=table_row.id AND session.order_id IS NULL AND session.status='open' AND concept.legacy_business=${business} RETURNING session.id,table_row.label`;if(!linked.length){await getSql()`DELETE FROM ordering_orders WHERE id=${order.id}`;return Response.json({error:"The table session is no longer available."},{status:409})}await getSql()`UPDATE ordering_orders SET first_name_snapshot=${String(linked[0].label)},updated_at=NOW() WHERE id=${order.id}`}
     if (validatedAddress) {
       let route = null;
@@ -129,9 +156,7 @@ export async function POST(request: Request) {
         order = rows[0] as typeof order;
       }
     }
-    const promotions = await getSql()`SELECT label_snapshot label,discount_cents FROM ordering_order_promotion_applications WHERE order_id=${order.id} ORDER BY application_sequence`;
-    const orderItems=await getSql()`SELECT id,sort_order FROM ordering_order_items WHERE order_id=${order.id} ORDER BY sort_order,created_at,id`;
-    return Response.json({ order, promotions, orderItems }, { status: 201 });
+    return orderResponse(order, 201);
   } catch (error) {
     return cashierOrderError(error) || apiError(error);
   }

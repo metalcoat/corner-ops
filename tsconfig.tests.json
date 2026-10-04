@@ -15,6 +15,7 @@
     "src/lib/accounting-import-utils.ts",
     "src/lib/journal-integrity.ts",
     "src/lib/helcim.ts",
+    "src/lib/pos-offline-sync-policy.ts",
     "tests/**/*.ts"
   ]
 }
