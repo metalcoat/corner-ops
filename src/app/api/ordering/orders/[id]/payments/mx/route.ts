@@ -20,6 +20,7 @@ import {
 } from "@/lib/mx-merchant";
 import { helcimCustomerForOrder } from "@/lib/ordering-helcim-customer";
 export const runtime = "nodejs";
+import { settleOpenTerminalSales, TerminalSaleRecordedError } from "@/lib/mx-terminal-payments";
 const business = "Corner Deli" as const;
 export async function GET() {
   try {
@@ -47,6 +48,8 @@ export async function POST(
     await ensureMxPaymentSchema();
     if (body.action === "initialize") {
       await assertOrderReadyForCheckout(orderId, business);
+      // A terminal sale on this order may still charge the card; settle it before keying another card.
+      await settleOpenTerminalSales({ business, orderId, actor });
       const checkId = body.checkId ? String(body.checkId) : null,
         state = await checkoutState(orderId, business, checkId),
         remaining = Number(
@@ -132,6 +135,7 @@ export async function POST(
     }
     return Response.json(result, { status: 201 });
   } catch (e) {
+    if (e instanceof TerminalSaleRecordedError) return Response.json({ error: e.message, checkout: e.checkout }, { status: 409 });
     if (e instanceof MxMerchantError || e instanceof PaymentConflictError)
       return Response.json({ error: e.message }, { status: 409 });
     return apiError(e);

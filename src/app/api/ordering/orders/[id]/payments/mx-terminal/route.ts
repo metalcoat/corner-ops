@@ -1,15 +1,15 @@
 import { apiError, unauthorized } from "@/lib/http";
 import { PaymentConflictError } from "@/lib/ordering-payments";
 import { orderingActor } from "@/lib/ordering-route-auth";
-import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
-import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
-import { submitPaidDraft } from "@/lib/ordering-paid-draft-submit";
 import { MxMerchantError } from "@/lib/mx-merchant";
 import {
   abandonTerminalPayment,
   checkTerminalPayment,
+  completeTerminalPayment,
+  finishTerminalApproval,
   startTerminalPayment,
   type TerminalPaymentOutcome,
+  voidTerminalAuthorization,
 } from "@/lib/mx-terminal-payments";
 export const runtime = "nodejs";
 const business = "Corner Deli" as const;
@@ -27,6 +27,10 @@ export async function POST(
       await abandonTerminalPayment({ business, orderId, sessionId: String(body.sessionId || "") });
       return Response.json({ ok: true });
     }
+    if (body.action === "void") {
+      await voidTerminalAuthorization({ business, orderId, sessionId: String(body.sessionId || "") });
+      return Response.json({ ok: true });
+    }
     let outcome: TerminalPaymentOutcome;
     if (body.action === "start")
       outcome = await startTerminalPayment({
@@ -39,19 +43,13 @@ export async function POST(
       });
     else if (body.action === "status")
       outcome = await checkTerminalPayment({ business, orderId, actor, sessionId: String(body.sessionId || "") });
+    // The customer chose a tip after the card was approved (0 for none).
+    else if (body.action === "complete")
+      outcome = await completeTerminalPayment({ business, orderId, actor, sessionId: String(body.sessionId || ""), tipCents: Math.round(Number(body.tipCents)) });
     else throw new MxMerchantError("Unknown terminal payment action.");
+    // Pending, authorized (ask for the tip), declined, failed, and needs_review are all normal answers; the dialog decides what to show.
     if (outcome.state !== "approved") return Response.json(outcome);
-    // Same follow-up as a keyed MX approval, once per recorded tender.
-    if (!outcome.checkout.duplicate) {
-      if (outcome.checkout.order.payment_status === "paid" && outcome.checkout.order.status === "draft") {
-        const unsent = await submitPaidDraft(orderId, business, actor);
-        if (unsent) return unsent;
-        await dispatchSubmittedOrderPrintJobs(orderId, business);
-      } else {
-        await dispatchOrderPrintJobs(orderId, business, { includeKitchenProduction: false });
-      }
-    }
-    return Response.json(outcome, { status: 201 });
+    return Response.json(await finishTerminalApproval(outcome, orderId, business, actor), { status: 201 });
   } catch (e) {
     if (e instanceof MxMerchantError || e instanceof PaymentConflictError)
       return Response.json({ error: e.message }, { status: 409 });

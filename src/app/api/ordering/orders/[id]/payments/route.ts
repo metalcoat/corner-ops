@@ -9,6 +9,7 @@ import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
 import { localDevToolsAllowed } from "@/lib/local-dev-tools";
 
 export const runtime = "nodejs";
+import { settleOpenTerminalSales, TerminalSaleRecordedError } from "@/lib/mx-terminal-payments";
 
 function businessFrom(value: unknown): OrderingBusiness {
   if (value === "Corner Deli" || value === "Tiki") return value;
@@ -48,6 +49,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (body.action === "reprint") {const result=await reprintPaymentReceipt({orderId:id,business,transactionId:String(body.transactionId||""),reason:String(body.reason||""),actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});return Response.json(result,{status:201})}
     if (body.action === "print_paid_receipt") {const result=await printPaidReceipt({orderId:id,business,itemized:body.itemized===true,receiptPrinterId:body.receiptPrinterId?String(body.receiptPrinterId):undefined,actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false,jobId:result.printJobId});return Response.json(result,{status:201})}
     if (body.action === "set_tip") {await assertOrderReadyForCheckout(id,business);return Response.json(await setCheckoutTip({orderId:id,business,checkId:body.checkId?String(body.checkId):null,tipCents:Number(body.tipCents),actor}),{status:200});}
+    // A terminal sale on this order may still charge the card; settle it before taking cash or a gift card.
+    await settleOpenTerminalSales({ business, orderId: id, actor });
     const result=await commitTender({
       orderId: id,
       business,
@@ -76,6 +79,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }else await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});
     return Response.json(result,{status:201});
   } catch (error) {
+    if (error instanceof TerminalSaleRecordedError) return Response.json({ error: error.message, checkout: error.checkout }, { status: 409 });
     if (error instanceof PaymentConflictError || error instanceof PaymentStationError) return Response.json({ error: error.message }, { status: 409 });
     return apiError(error);
   }

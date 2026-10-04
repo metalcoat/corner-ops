@@ -714,6 +714,7 @@ export default function PosClient({
   const [stationProfile, setStationProfile] =
     useState<PosStationProfile | null>(null);
   const [assignedStationKey, setAssignedStationKey] = useState("");
+  // The tip question goes to the customer display only when this station has one; otherwise the POS asks.
   useEffect(() => {
     if (business !== "Corner Deli") return;
     fetch("/api/ordering/hardware/status", { cache: "no-store" })
@@ -2882,6 +2883,11 @@ export default function PosClient({
     );
     setCheckoutMoreOpen(false);
     setCheckoutOpen(true);
+    // With a card terminal the balance goes to it as checkout opens, so the customer can tap right away.
+    // Split checks are charged one check at a time instead.
+    const due = Number(payload.check?.amount_due_cents ?? payload.order.amount_due_cents);
+    if (stationProfile?.mx_terminal_ready && checksPayload.checks.length === 1 && due > 0)
+      window.setTimeout(() => void startMxPayment(due, payload, checkId, draft), 0);
   }
 
   function closeCheckout() {
@@ -3179,9 +3185,12 @@ export default function PosClient({
       );
       const payload = (await response.json()) as CheckoutState & {
         error?: string;
+        checkout?: CheckoutState;
       };
-      if (!response.ok)
+      if (!response.ok) {
+        if (payload.checkout) applyMxApproval(draft, payload.checkout);
         throw new Error(payload.error || "Payment could not be committed.");
+      }
       setCheckoutState(payload);
       if (tenderType === "cash") {
         const latest = [...payload.tenders]
@@ -3391,7 +3400,9 @@ export default function PosClient({
       const initialized = (await response.json()) as {
         checkoutToken?: string;
         error?: string;
+        checkout?: CheckoutState;
       };
+      if (!response.ok && initialized.checkout) applyMxApproval(draft, initialized.checkout);
       if (
         !response.ok ||
         !initialized.checkoutToken
@@ -3488,9 +3499,9 @@ export default function PosClient({
     }
   }
 
-  async function startMxPayment(requestedOverride?:number,stateOverride?:CheckoutState,checkIdOverride?:string){const draft=savedDraft||activeTab,activeCheckout=stateOverride||checkoutState;if(!draft||!activeCheckout||paymentBusy)return;setPaymentBusy(true);setCheckoutError("");try{const due=Number(activeCheckout.check?.amount_due_cents??activeCheckout.order.amount_due_cents),requested=requestedOverride??(cashTender.trim()?Math.round(Number(cashTender)*100):due);if(!Number.isSafeInteger(requested)||requested<=0||requested>due)throw new Error("Enter a card amount within the remaining balance.");if(stationProfile?.mx_terminal_ready){const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx-terminal`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"start",checkId:checkIdOverride||selectedCheckId||null,amountCents:requested,stationKey:stationProfile.station_key})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not send the sale to the card terminal.");if(body.state==="approved"){applyMxApproval(draft,body.checkout);setCheckoutError("An earlier card sale on the terminal went through and was added to this order. Check the balance before charging again.");setPaymentBusy(false);return}setMxTerminalSale({orderId:draft.id,sessionId:body.sessionId,amountCents:requested,message:body.message||""});return}const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"initialize",checkId:checkIdOverride||selectedCheckId,amountCents:requested})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not start MX checkout.");setMxPayment(body)}catch(e){setCheckoutError(e instanceof Error?e.message:"Could not start MX checkout.");setPaymentBusy(false)}}
+  async function startMxPayment(requestedOverride?:number,stateOverride?:CheckoutState,checkIdOverride?:string,draftOverride?:SavedDraft){const draft=draftOverride||savedDraft||activeTab,activeCheckout=stateOverride||checkoutState;if(!draft||!activeCheckout||paymentBusy)return;setPaymentBusy(true);setCheckoutError("");try{const due=Number(activeCheckout.check?.amount_due_cents??activeCheckout.order.amount_due_cents),requested=requestedOverride??(cashTender.trim()?Math.round(Number(cashTender)*100):due);if(!Number.isSafeInteger(requested)||requested<=0||requested>due)throw new Error("Enter a card amount within the remaining balance.");if(stationProfile?.mx_terminal_ready){const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx-terminal`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"start",checkId:checkIdOverride||selectedCheckId||null,amountCents:requested,stationKey:stationProfile.station_key})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not send the sale to the card terminal.");if(body.state==="approved"){applyMxApproval(draft,body.checkout);setCheckoutError(body.kitchenWarning||"An earlier card sale on the terminal went through and was added to this order. Check the balance before charging again.");setPaymentBusy(false);return}setMxTerminalSale({orderId:draft.id,sessionId:body.sessionId,amountCents:body.state==="authorized"?Number(body.amountCents):requested,message:body.message||"",state:body.state==="authorized"?"authorized":"pending"});return}const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"initialize",checkId:checkIdOverride||selectedCheckId,amountCents:requested})}),body=await response.json();if(!response.ok){if(body.checkout)applyMxApproval(draft,body.checkout);throw new Error(body.error||"Could not start MX checkout.")}setMxPayment(body)}catch(e){setCheckoutError(e instanceof Error?e.message:"Could not start MX checkout.");setPaymentBusy(false)}}
   function applyMxApproval(draft:SavedDraft,result:CheckoutState){setCheckoutState(result);setCashTender((Number(result.check?.amount_due_cents??result.order.amount_due_cents)/100).toFixed(2));setPayableChecks(checks=>checks.map(check=>result.check&&check.id===result.check.id?{...check,...result.check}:check));closePaidCheckout(draft,result)}
-  function finishMxTerminalSale(checkout:unknown){const draft=savedDraft||activeTab;setMxTerminalSale(null);setPaymentBusy(false);if(draft&&checkout)applyMxApproval(draft,checkout as CheckoutState)}
+  function finishMxTerminalSale(checkout:unknown,kitchenWarning?:string){const draft=savedDraft||activeTab;setMxTerminalSale(null);setPaymentBusy(false);if(draft&&checkout)applyMxApproval(draft,checkout as CheckoutState);if(kitchenWarning)setCheckoutError(kitchenWarning)}
   async function confirmMxPayment(replayId:number){const draft=savedDraft||activeTab;if(!draft)return;try{const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"confirm",replayId})}),result=await response.json();if(!response.ok)throw new Error(result.error||"MX payment could not be verified.");setMxPayment(null);applyMxApproval(draft,result)}catch(e){setCheckoutError(e instanceof Error?e.message:"MX payment could not be verified.");setMxPayment(null)}finally{setPaymentBusy(false)}}
 
   async function paySplitCheck(check: PayableCheck, tenderType: "cash" | "card" | "gift_card") {
@@ -3499,7 +3510,7 @@ export default function PosClient({
     if (!state) return;
     const due = Number(state.check?.amount_due_cents ?? state.order.amount_due_cents);
     setCashTender((due / 100).toFixed(2));
-    setCdsTenderType(tenderType);
+    if (!(tenderType === "card" && stationProfile?.mx_terminal_ready)) setCdsTenderType(tenderType);
     if (tenderType === "cash") {
       await commitPayment("cash", state, due, check.id);
       return;
@@ -3509,7 +3520,12 @@ export default function PosClient({
       giftCardInputRef.current?.focus();
       return;
     }
-    if (assignedStationKey) return;
+    // Terminal sales go straight to the terminal; the tip is asked once the card is approved.
+    if (tenderType === "card" && stationProfile?.mx_terminal_ready) {
+      await startMxPayment(due, state, check.id);
+      return;
+    }
+    if (assignedStationKey && stationProfile?.customer_display_enabled) return;
     if (tenderType === "card" && stationProfile?.payment_terminal_id) {
       await startMxPayment(due, state, check.id);
       return;
@@ -3589,8 +3605,13 @@ export default function PosClient({
       );
       return;
     }
+    // Terminal sales go straight to the terminal; the tip is asked once the card is approved.
+    if (stationProfile?.mx_terminal_ready) {
+      void startMxPayment();
+      return;
+    }
     setCdsTenderType("card");
-    if (assignedStationKey) return;
+    if (assignedStationKey && stationProfile?.customer_display_enabled) return;
     if (stationProfile?.payment_terminal_id) {
       void startMxPayment();
       return;
@@ -5423,7 +5444,7 @@ export default function PosClient({
                         return;
                       }
                       setCdsTenderType("gift_card");
-                      if (!assignedStationKey) setTipPromptOpen(true);
+                      if (!(assignedStationKey && stationProfile?.customer_display_enabled)) setTipPromptOpen(true);
                     }}
                   >
                     GIFT CARD

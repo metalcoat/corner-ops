@@ -3,6 +3,8 @@ import { getSql } from "@/lib/db";
 import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
 
 export class MxMerchantError extends Error {}
+/** MX's answer never arrived (timeout, dropped connection, gateway error): the request may or may not have taken effect. */
+export class MxMerchantUnreachableError extends MxMerchantError {}
 function base(){if(process.env.MX_ENVIRONMENT?.trim().toLowerCase()==="production")return"https://api.mxmerchant.com/checkout/v3";
   // Test-only override for a local stand-in of the MX sandbox; ignored in production.
   return process.env.MX_TEST_API_BASE_URL?.trim()||"https://sandbox.api.mxmerchant.com/checkout/v3"}
@@ -10,6 +12,22 @@ function credentials(){const merchantId=process.env.MX_MERCHANT_ID?.trim(),key=p
 async function mxFetch(path:string,init:RequestInit={}){const {authorization}=credentials();const response=await fetch(`${base()}${path}`,{...init,headers:{authorization,accept:"application/json",...init.headers},cache:"no-store",signal:AbortSignal.timeout(12000)});if(!response.ok)throw new MxMerchantError(`MX Merchant request failed (${response.status}).`);return response}
 export async function initializeMxPayment(){const {merchantId}=credentials();const response=await mxFetch(`/auth/token/${encodeURIComponent(merchantId)}`,{method:"POST"});const token=await response.json();if(typeof token!=="string"||!token)throw new MxMerchantError("MX Merchant did not issue a payment token.");return{token,merchantId,paymentUrl:`${base()}/payment`}}
 export async function retrieveMxPayment(replayId:number){const {merchantId}=credentials();const response=await mxFetch(`/payment?merchantId=${encodeURIComponent(merchantId)}&replayId=${encodeURIComponent(replayId)}`);const data=await response.json() as Record<string,unknown>;if(!String(data.status||"").toLowerCase().includes("approve"))throw new MxMerchantError("MX Merchant did not approve this payment.");return data}
+/** The payment MX holds for a replayId, or null when MX has none (it answers 404). Unlike retrieveMxPayment, any status is returned. */
+export async function findMxPaymentByReplayId(replayId:number){const {merchantId,authorization}=credentials();const response=await fetch(`${base()}/payment?merchantId=${encodeURIComponent(merchantId)}&replayId=${encodeURIComponent(replayId)}`,{headers:{authorization,accept:"application/json"},cache:"no-store",signal:AbortSignal.timeout(12000)});if(response.status===404)return null;if(!response.ok)throw new MxMerchantError(`MX Merchant payment lookup failed (${response.status}).`);const text=await response.text();if(!text.trim())return null;const data=JSON.parse(text) as Record<string,unknown>;const records=Array.isArray(data.records)?data.records as Record<string,unknown>[]:null;return records?records[0]||null:data}
+/**
+ * Captures an authorization with the final amount, tip included (https://developer.mxmerchant.com/docs/making-an-adjustment):
+ * a sale on the authorization's card token and auth code with authOnly false. The replayId makes a retry safe to look up.
+ */
+export async function completeMxAuthorization(input:{paymentToken:string;authCode:string;amountCents:number;tipCents:number;replayId:number}){
+  const {merchantId,authorization}=credentials();let response:Response;
+  try{response=await fetch(`${base()}/payment?echo=true`,{method:"POST",headers:{authorization,accept:"application/json","content-type":"application/json"},cache:"no-store",signal:AbortSignal.timeout(20_000),
+    body:JSON.stringify({merchantId,tenderType:"Card",amount:(input.amountCents/100).toFixed(2),tip:(input.tipCents/100).toFixed(2),paymentToken:input.paymentToken,authCode:input.authCode,authOnly:false,replayId:input.replayId,source:"API"})})}
+  catch(error){throw new MxMerchantUnreachableError(error instanceof Error&&error.name==="TimeoutError"?"MX did not answer in time.":"Could not reach MX.")}
+  if([502,503,504].includes(response.status))throw new MxMerchantUnreachableError(`MX is not responding (${response.status}).`);
+  const data=await response.json().catch(()=>null) as Record<string,unknown>|null;
+  if(!response.ok||!data||!String(data.status||"").toLowerCase().includes("approve"))throw new MxMerchantError(String(data?.authMessage||data?.message||`MX declined the final card amount (${response.status}).`));
+  return data;
+}
 export async function submitMxVoicePayment(input:{amountCents:number;replayId:number;cardNumber:string;expiryMonth:string;expiryYear:string;cvv:string;avsZip:string;avsStreet:string}){
   if(process.env.MX_ENVIRONMENT?.trim().toLowerCase()==="production")throw new MxMerchantError("Voice-card testing is locked to the MX sandbox.");
   const {merchantId}=credentials(),initialized=await initializeMxPayment(),response=await fetch(`${initialized.paymentUrl}?token=${encodeURIComponent(initialized.token)}&echo=true`,{

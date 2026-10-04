@@ -134,7 +134,7 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     let mx: MxReversalResult | null = null;
     if (viaMx) {
       try {
-        mx = await reverseMxPayment({ business: input.business, orderId: input.orderId, sourceTransactionId: String(source.id), sourceReference: String(source.provider_transaction_reference || ""), amountCents: amount, fullReversal: reversed === 0 && amount === Number(source.amount_cents), actorId: input.actor.id });
+        mx = await reverseMxPayment({ business: input.business, orderId: input.orderId, sourceTransactionId: String(source.id), sourceReference: String(source.provider_transaction_reference || ""), amountCents: amount, fullReversal: reversed === 0 && amount === Number(source.amount_cents), actorId: input.actor.id, authorizationReference: String(source.details?.authorizationReference || "") });
       } catch (error) {
         throw new PaymentConflictError(error instanceof Error ? error.message : "MX Merchant could not process the refund.");
       }

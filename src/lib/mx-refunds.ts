@@ -65,6 +65,8 @@ export async function reverseMxPayment(input: {
   amountCents: number;
   fullReversal: boolean;
   actorId: string;
+  /** For a terminal payment, the authorization its charge completed. */
+  authorizationReference?: string;
 }): Promise<MxReversalResult> {
   await ensureSchema();
   if (!input.sourceReference) throw new MxMerchantError("This card payment has no MX transaction reference, so it must be refunded in MX Merchant.");
@@ -85,7 +87,16 @@ export async function reverseMxPayment(input: {
     const payment = result.payment;
     // A full void keeps the original MX id; give the local record its own unique reference.
     const reference = String((result.kind === "refund" && !input.fullReversal && payment.id) || `${input.sourceReference}:${result.kind}:${attemptId.slice(0, 8)}`);
-    const summary = { status: payment.status ?? null, id: payment.id ?? null, authCode: payment.authCode ?? null, amount: payment.amount ?? null };
+    // Voiding a terminal charge puts its authorization's hold back on the card (seen in the MX sandbox), so release that too.
+    // The charge is already voided; a failure here only leaves a hold that MX drops after 7 days.
+    let authorizationReleased: boolean | null = null;
+    if (result.kind === "void" && input.authorizationReference) {
+      authorizationReleased = await voidOrRefundMxPayment(input.authorizationReference).then(() => true, (error) => {
+        console.error(`MX authorization ${input.authorizationReference} was not released after voiding ${input.sourceReference}`, error);
+        return false;
+      });
+    }
+    const summary = { status: payment.status ?? null, id: payment.id ?? null, authCode: payment.authCode ?? null, amount: payment.amount ?? null, authorizationReleased };
     await outside(() => getSql()`UPDATE ordering_mx_reversal_attempts SET status='approved',kind=${result.kind},mx_reference=${reference},mx_response=${JSON.stringify(summary)}::jsonb,updated_at=NOW() WHERE id=${attemptId}`);
     return { attemptId, kind: result.kind, reference, details: { mx: summary, replayId } };
   } catch (error) {

@@ -7,7 +7,14 @@
 // the POS polls its status, and the approved payment is then read back from
 // the Checkout API by replayId, so the amount and card come from MX itself.
 import { randomInt } from "node:crypto";
-import { MxMerchantError } from "@/lib/mx-merchant";
+import { MxMerchantError, MxMerchantUnreachableError } from "@/lib/mx-merchant";
+
+/**
+ * MX's answer never arrived (timeout, dropped connection, gateway error), so a
+ * sale may or may not have reached the terminal. Callers must look the sale up
+ * by replayId before treating it as failed.
+ */
+export class MxTerminalUnreachableError extends MxMerchantUnreachableError {}
 
 const production = () => process.env.MX_ENVIRONMENT?.trim().toLowerCase() === "production";
 function api2Base() {
@@ -70,10 +77,17 @@ async function errorText(response: Response) {
 }
 
 async function terminalFetch(path: string, init: RequestInit = {}, retried = false): Promise<Response> {
-  const response = await fetch(`${api2Base()}/terminal/v1${path}`, {
-    ...init, headers: { authorization: `Bearer ${await jwt(retried)}`, accept: "application/json", ...init.headers }, cache: "no-store", signal: AbortSignal.timeout(20_000),
-  });
+  const authorization = `Bearer ${await jwt(retried)}`;
+  let response: Response;
+  try {
+    response = await fetch(`${api2Base()}/terminal/v1${path}`, {
+      ...init, headers: { authorization, accept: "application/json", ...init.headers }, cache: "no-store", signal: AbortSignal.timeout(20_000),
+    });
+  } catch (error) {
+    throw new MxTerminalUnreachableError(error instanceof Error && error.name === "TimeoutError" ? "MX did not answer in time." : "Could not reach MX.");
+  }
   if (response.status === 401 && !retried) return terminalFetch(path, init, true);
+  if ([502, 503, 504].includes(response.status)) throw new MxTerminalUnreachableError(`MX is not responding (${response.status}).`);
   if (!response.ok) {
     const detail = (await errorText(response)).trim().slice(0, 300);
     if (/not connected/i.test(detail)) throw new MxMerchantError("The card terminal is not connected. Check that it is powered on and online, then try again.");
@@ -96,15 +110,18 @@ export async function listMxTerminals(): Promise<MxTerminal[]> {
   }));
 }
 
-/** Sends a sale to the terminal. Resolves once MX has handed it to the device; the card is not read yet. */
-export async function sendMxTerminalSale(input: { terminalId: string; amountCents: number; replayId: number }) {
+/**
+ * Sends a sale, or an authorization to be completed with a tip later, to the terminal.
+ * Resolves once MX has handed it to the device; the card is not read yet.
+ */
+export async function sendMxTerminalSale(input: { terminalId: string; amountCents: number; replayId: number; type?: "Sale" | "Authorization" }) {
   const terminalId = normalizeMxTerminalId(input.terminalId);
   if (!terminalId) throw new MxMerchantError("This payment terminal has no valid MX terminal ID. Fix it in POS settings → Hardware.");
   if (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0) throw new MxMerchantError("Enter a card amount above $0.00.");
   const { merchantId } = credentials();
   const response = await terminalFetch(`/transaction/merchantid/${encodeURIComponent(merchantId)}/terminalid/${terminalId}`, {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ amount: Number((input.amountCents / 100).toFixed(2)), type: "Sale", replayId: String(input.replayId).padStart(15, "0") }),
+    body: JSON.stringify({ amount: Number((input.amountCents / 100).toFixed(2)), type: input.type ?? "Sale", replayId: String(input.replayId).padStart(15, "0") }),
   });
   const data = await response.json().catch(() => null) as Record<string, any> | null;
   const terminalPaymentId = String(data?.prioritypaymentsystems?.mxmerchant?.merchant?.devicePaymentAuditId || "");

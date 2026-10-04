@@ -21,6 +21,7 @@ import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { helcimCustomerForOrder } from "@/lib/ordering-helcim-customer";
 
 export const runtime = "nodejs";
+import { settleOpenTerminalSales, TerminalSaleRecordedError } from "@/lib/mx-terminal-payments";
 const business = "Corner Deli" as const;
 
 export async function GET(_request: Request) {
@@ -47,6 +48,8 @@ export async function POST(
     const sql = getSql();
     if (body.action === "initialize") {
       await assertOrderReadyForCheckout(orderId, business);
+      // A terminal sale on this order may still charge the card; settle it before taking another card.
+      await settleOpenTerminalSales({ business, orderId, actor });
       const checkId = body.checkId ? String(body.checkId) : null;
       const state = await checkoutState(orderId, business, checkId);
       const remainingCents = Number(
@@ -118,6 +121,7 @@ export async function POST(
     });
     return Response.json(result, { status: 201 });
   } catch (error) {
+    if (error instanceof TerminalSaleRecordedError) return Response.json({ error: error.message, checkout: error.checkout }, { status: 409 });
     if (error instanceof HelcimError || error instanceof PaymentConflictError)
       return Response.json({ error: error.message }, { status: 409 });
     return apiError(error);

@@ -33,6 +33,15 @@ type Job = {
   is_reprint: boolean;
 };
 type PaymentStation={id:string;name:string;station_key:string;station_mode:"payment"|"order_taker";phone_card_payments_enabled:boolean;customer_display_enabled:boolean;shared_register_key:string;receipt_printer_id?:string|null;payment_terminal_id?:string|null;gift_card_reader_id?:string|null;receipt_printer_name?:string|null;payment_terminal_name?:string|null;gift_card_reader_name?:string|null};
+type TerminalReview = {
+  id: string;
+  order_id: string;
+  display_number: string;
+  amount_cents: number;
+  provider_transaction_reference: string;
+  status_message: string;
+  created_at: string;
+};
 export default function HardwareSettingsClient() {
   const [data, setData] = useState<{
       locations: Location[];
@@ -79,13 +88,17 @@ export default function HardwareSettingsClient() {
     [targetType, setTargetType] = useState("all"),
     [targetId, setTargetId] = useState(""),
     [paymentProvider, setPaymentProvider] = useState<{ provider:string;label:string;configured:boolean;onlineCheckoutEnabled:boolean;terminalCheckoutEnabled:boolean;sandbox:boolean;missing:string[] } | null>(null),
-    [paymentProviderBusy, setPaymentProviderBusy] = useState(false);
+    [paymentProviderBusy, setPaymentProviderBusy] = useState(false),
+    [terminalReviews, setTerminalReviews] = useState<TerminalReview[]>([]),
+    [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   async function load() {
-    const [response, paymentResponse] = await Promise.all([
+    const [response, paymentResponse, reviewResponse] = await Promise.all([
       fetch("/api/ordering/settings/hardware", { cache: "no-store" }),
       fetch("/api/ordering/payments/status", { cache: "no-store" }),
+      fetch("/api/ordering/payments/mx-terminal-review", { cache: "no-store" }),
     ]),
-      [body, paymentBody] = await Promise.all([response.json(), paymentResponse.json()]);
+      [body, paymentBody, reviewBody] = await Promise.all([response.json(), paymentResponse.json(), reviewResponse.json().catch(() => ({}))]);
+    if (reviewResponse.ok) setTerminalReviews(Array.isArray(reviewBody.sales) ? reviewBody.sales : []);
     if (!response.ok)
       throw new Error(body.error || "Could not load hardware configuration.");
     setData(body);
@@ -202,6 +215,31 @@ export default function HardwareSettingsClient() {
             </li>
           ))}
         </ul>
+      )}
+      {terminalReviews.length > 0 && (
+        <>
+          <h3>Card terminal charges to review</h3>
+          <p>The terminal charged these cards, but the POS could not put the charge on the order. Refund or record each one in MX Merchant, then mark it resolved. Until then the order cannot take another payment.</p>
+          <ul className="mxTerminalList">
+            {terminalReviews.map((sale) => (
+              <li key={sale.id}>
+                <strong>Order #{sale.display_number} · ${(Number(sale.amount_cents) / 100).toFixed(2)} sent</strong> · {new Date(sale.created_at).toLocaleString()}
+                {sale.provider_transaction_reference && <> · MX payment <code>{sale.provider_transaction_reference}</code></>}
+                <br />{sale.status_message}
+                <label>
+                  WHAT WAS DONE IN MX
+                  <input value={reviewNotes[sale.id] || ""} placeholder="Refunded in MX" onChange={(e) => setReviewNotes((notes) => ({ ...notes, [sale.id]: e.target.value }))} />
+                </label>
+                <button type="button" disabled={(reviewNotes[sale.id] || "").trim().length < 3} onClick={() => {
+                  setMessage("");
+                  void fetch("/api/ordering/payments/mx-terminal-review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: sale.id, note: reviewNotes[sale.id] }) })
+                    .then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body.error || "Could not resolve the charge."); setTerminalReviews(body.sales || []); setMessage(`Order #${sale.display_number}'s terminal charge marked resolved.`); })
+                    .catch((error) => setMessage(error instanceof Error ? error.message : "Could not resolve the charge."));
+                }}>MARK RESOLVED</button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
       <h3>Automatic kitchen tickets</h3>
       <div className="autoPrintControl">
