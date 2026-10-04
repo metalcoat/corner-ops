@@ -58,7 +58,8 @@ export default function CustomerDisplayClient() {
     [showInstall, setShowInstall] = useState(false),
     [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null),
     canvas = useRef<HTMLCanvasElement>(null),
-    drawing = useRef(false);
+    drawing = useRef(false),
+    networkRefreshed = useRef(false);
   useEffect(() => {
     const standalone =
       window.matchMedia("(display-mode: standalone)").matches ||
@@ -122,6 +123,20 @@ export default function CustomerDisplayClient() {
             { cache: "no-store" },
           ),
           body = await response.json();
+        if (response.status === 403) {
+          // The display API is limited to approved POS networks. Refresh this
+          // device's network pass once (set when its IP is approved).
+          if (!networkRefreshed.current) {
+            networkRefreshed.current = true;
+            await fetch("/api/pos/access/status", { cache: "no-store" }).catch(
+              () => undefined,
+            );
+          }
+          throw new Error(
+            "This display's network is not approved for POS access. Open /pos/access on this device to request approval.",
+          );
+        }
+        networkRefreshed.current = false;
         if (!response.ok) {
           if (response.status === 400) {
             localStorage.removeItem("corner-ops-cds-station-key");

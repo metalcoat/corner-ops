@@ -8,9 +8,15 @@ import { getSql } from "@/lib/db";
 import {
   AiToolError,
   auditAiTool,
+  callerCustomerLookup,
   priceSpokenOrder,
   serviceType,
 } from "@/lib/ordering-ai-tools";
+import {
+  bindPhoneOrderId,
+  isPhoneMcpTool,
+  resolvePhoneCustomerId,
+} from "@/lib/ordering-ai-phone-guard";
 import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
 import { attachSpokenDeliveryAddress } from "@/lib/ordering-delivery-landmarks";
 import {
@@ -182,7 +188,7 @@ const schemas: Record<AiOrderingToolName, Record<string, unknown>> = {
   customer_lookup: {
     type: "object",
     properties: { ...properties, query: { type: "string" } },
-    required: ["callId", "query"],
+    required: ["callId"],
     additionalProperties: false,
   },
   create_draft: {
@@ -297,7 +303,8 @@ const descriptions: Record<AiOrderingToolName, string> = {
     "Check whether ordering is available for a service and time.",
   future_slots: "List valid future fulfillment slots.",
   promotions: "List currently active promotion descriptions.",
-  customer_lookup: "Find ordering-safe customer matches by name or phone.",
+  customer_lookup:
+    "Check whether this call's caller ID matches a saved customer. Returns only an opaque customerId, first name, and last four phone digits; spoken names or numbers are not searched.",
   create_draft: "Create a server-priced phone order draft.",
   update_draft: "Replace a draft using optimistic version control.",
   get_draft: "Read the authoritative current draft and total.",
@@ -422,10 +429,13 @@ export async function POST(request: Request) {
         ? rpc.params.arguments
         : {}) as Record<string, unknown>),
     };
+  // Only the advertised phone tools may run; staff-only tools such as
+  // create_draft/update_draft/attach_delivery_address are not reachable here.
   if (
-    !AI_ORDERING_TOOL_NAMES.includes(name) &&
-    requestedName !== "request_human_handoff" &&
-    requestedName !== "price_order"
+    !isPhoneMcpTool(requestedName) ||
+    (!AI_ORDERING_TOOL_NAMES.includes(name) &&
+      requestedName !== "request_human_handoff" &&
+      requestedName !== "price_order")
   )
     return failure(rpc.id, -32602, "Unknown ordering tool.");
   const callId = String(args.callId || "");
@@ -450,25 +460,55 @@ export async function POST(request: Request) {
       ],
       isError: true,
     });
-  if (
-    requestedName === "price_order" &&
-    !args.customerId &&
-    !call.order_customer_id &&
-    !call.call_customer_id &&
-    call.caller_phone
-  ) {
-    const matches = await getSql()`SELECT DISTINCT customer.id FROM ordering_customer_phones phone JOIN ordering_customers customer ON customer.id=phone.customer_id WHERE customer.business='Corner Deli' AND customer.active=TRUE AND customer.merged_into_customer_id IS NULL AND right(phone.normalized_phone,10)=right(regexp_replace(${String(call.caller_phone)},'[^0-9]','','g'),10) LIMIT 2`;
-    if (matches.length === 1) {
-      args.customerId = String(matches[0].id);
-      await getSql()`UPDATE ordering_call_sessions SET customer_id=${String(matches[0].id)},updated_at=NOW() WHERE id=${call.id}`;
-    }
+  // Order and customer are bound to the call row, never to model input.
+  const orderBound = bindPhoneOrderId(requestedName, args, call.order_id).ok;
+  if (requestedName === "customer_lookup") {
+    const customers = await callerCustomerLookup(
+      "Corner Deli",
+      String(call.caller_phone || ""),
+    );
+    return reply(rpc.id, {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            customers,
+            privacy:
+              "Matches only this call's caller ID. Caller ID is not proof of identity; confirm the name before using it and never read other details aloud.",
+          }),
+        },
+      ],
+    });
   }
-  if (
-    ["hold", "get_draft", "send"].includes(requestedName) &&
-    !args.orderId &&
-    call.order_id
-  )
-    args.orderId = String(call.order_id);
+  if (requestedName === "price_order") {
+    const callerMatchIds =
+      call.order_customer_id || call.call_customer_id || !call.caller_phone
+        ? []
+        : (
+            await callerCustomerLookup(
+              "Corner Deli",
+              String(call.caller_phone),
+            )
+          ).map((match) => match.customerId);
+    const customerId = resolvePhoneCustomerId(args.customerId, {
+      orderCustomerId: call.order_customer_id,
+      callCustomerId: call.call_customer_id,
+      callerMatchIds,
+    });
+    const autoMatched =
+      !customerId && callerMatchIds.length === 1 ? callerMatchIds[0] : "";
+    if (customerId) args.customerId = customerId;
+    else if (autoMatched) args.customerId = autoMatched;
+    else delete args.customerId;
+    if (
+      args.customerId &&
+      !call.order_customer_id &&
+      !call.call_customer_id
+    ) {
+      await getSql()`UPDATE ordering_call_sessions SET customer_id=${String(args.customerId)},updated_at=NOW() WHERE id=${call.id}`;
+      call.call_customer_id = String(args.customerId);
+    }
+  } else delete args.customerId;
   if (requestedName === "request_human_handoff") {
     try {
       const result = await requestOpenAiHandoff(
@@ -526,6 +566,22 @@ export async function POST(request: Request) {
           }),
         },
       ],
+    });
+  if (!orderBound)
+    return reply(rpc.id, {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            error: {
+              code: "NOT_FOUND",
+              message: "This call does not have an order draft yet.",
+              remedy: "Use price_order to start the order first.",
+            },
+          }),
+        },
+      ],
+      isError: true,
     });
   delete args.customerConfirmed;
   if (requestedName === "price_order") {

@@ -17,6 +17,11 @@ import {
   quoteDelivery,
 } from "@/lib/ordering-delivery";
 import { findCustomers } from "@/lib/ordering-customers";
+import {
+  redactCallerCustomer,
+  tenDigitPhone,
+  type CallerCustomerRow,
+} from "@/lib/ordering-ai-phone-guard";
 import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
 import {
   submitDraftOrder,
@@ -2261,6 +2266,20 @@ export async function customerLookup(
       400,
     );
   return findCustomers(business, query);
+}
+/**
+ * Phone-line lookup: only an exact match on the call's own caller ID, redacted
+ * to an opaque id, first name, and last four phone digits. Spoken names or
+ * numbers are never searched, so callers cannot enumerate other customers.
+ */
+export async function callerCustomerLookup(
+  business: OrderingBusiness,
+  callerPhone: string,
+) {
+  const local = tenDigitPhone(callerPhone);
+  if (!local) return [];
+  const rows = await getSql()`SELECT DISTINCT ON (customer.id) customer.id,customer.first_name,phone.normalized_phone FROM ordering_customer_phones phone JOIN ordering_customers customer ON customer.id=phone.customer_id WHERE customer.business=${business} AND customer.active=TRUE AND customer.merged_into_customer_id IS NULL AND phone.normalized_phone=${`+1${local}`} ORDER BY customer.id LIMIT 3`;
+  return rows.map((row) => redactCallerCustomer(row as CallerCustomerRow));
 }
 export async function promotions(business: OrderingBusiness) {
   await ensureOrderingPromotionSchema();

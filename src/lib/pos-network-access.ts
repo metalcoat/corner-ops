@@ -1,16 +1,10 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getSql } from "@/lib/db";
+import { localIp } from "@/lib/pos-access-guard";
+
+export { localIp, requestIp } from "@/lib/pos-access-guard";
 
 export const POS_NETWORK_COOKIE = "corner_ops_pos_network";
-
-export function requestIp(headers: Headers): string {
-  return (headers.get("cf-connecting-ip") || headers.get("x-forwarded-for")?.split(",")[0] || headers.get("x-real-ip") || "")
-    .trim().replace(/^::ffff:/, "").slice(0, 80);
-}
-
-export function localIp(ip: string): boolean {
-  return ip === "127.0.0.1" || ip === "::1" || ip.startsWith("10.") || ip.startsWith("192.168.") || /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
-}
 
 function secret(): string {
   const value = process.env.SESSION_SECRET;

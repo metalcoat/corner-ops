@@ -32,7 +32,9 @@ async function main(){
     const unauthorized=await invoke({jsonrpc:"2.0",id:1,method:"tools/list"},"Bearer wrong");
     const initialized=await(await invoke({jsonrpc:"2.0",id:2,method:"initialize",params:{}})).json();
     const listed=await(await invoke({jsonrpc:"2.0",id:3,method:"tools/list"})).json();
-    const called=await(await invoke({jsonrpc:"2.0",id:4,method:"tools/call",params:{name:"describe_capabilities",arguments:{callId}}})).json();
+    const called=await(await invoke({jsonrpc:"2.0",id:4,method:"tools/call",params:{name:"menu_search",arguments:{callId,query:"Pizza"}}})).json();
+    const unadvertised=await(await invoke({jsonrpc:"2.0",id:10,method:"tools/call",params:{name:"create_draft",arguments:{callId,serviceType:"pickup",items:[]}}})).json();
+    const foreignLookup=await(await invoke({jsonrpc:"2.0",id:11,method:"tools/call",params:{name:"customer_lookup",arguments:{callId,query:"315"}}})).json();
     const blocked=await(await invoke({jsonrpc:"2.0",id:5,method:"tools/call",params:{name:"send",arguments:{callId,orderId:randomUUID(),customerConfirmed:false}}})).json();
     const shadowed=await(await invoke({jsonrpc:"2.0",id:6,method:"tools/call",params:{name:"send",arguments:{callId,orderId:randomUUID(),customerConfirmed:true}}})).json();
     const namelessOrder=await(await invoke({jsonrpc:"2.0",id:7,method:"tools/call",params:{name:"price_order",arguments:{callId,serviceType:"pickup",items:[{name:"Pizza",quantity:1}]}}})).json();
@@ -57,7 +59,9 @@ async function main(){
       toolsListed:listed.result?.tools?.some((tool:{name:string})=>tool.name==="price_order")&&listed.result?.tools?.some((tool:{name:string})=>tool.name==="menu_search"),
       handoffToolListed:listed.result?.tools?.some((tool:{name:string})=>tool.name==="request_human_handoff"),
       handoffPolicy:phone.PHONE_INSTRUCTIONS.includes("after two failed clarification attempts")&&phone.PHONE_INSTRUCTIONS.includes("asks for a person"),
-      callBound:called.result?.content?.[0]?.text?.includes("pricingAuthority")||called.result?.content?.[0]?.text?.includes("serviceTypes"),
+      callBound:called.result?.isError!==true&&called.result?.content?.[0]?.text?.includes("categories"),
+      unadvertisedToolRejected:unadvertised.error?.code===-32602,
+      lookupLimitedToCallerId:Array.isArray(JSON.parse(foreignLookup.result?.content?.[0]?.text||"{}").customers)&&!String(foreignLookup.result?.content?.[0]?.text||"").includes("email"),
       unconfirmedSendBlocked:blocked.result?.isError===true,
       shadowSendHeld:shadowed.result?.content?.[0]?.text?.includes("ORDER_REVIEW_PENDING")===true,
       namelessOrderBlocked:namelessOrder.result?.isError===true&&namelessOrder.result?.content?.[0]?.text?.includes("first and last name"),

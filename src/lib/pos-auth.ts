@@ -4,6 +4,7 @@ import { ensureSchema, getSql, withTransaction } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import { validateEmployeePin } from "@/lib/employee-pin";
 import { secureCookies } from "@/lib/cookie-security";
+import { POS_PIN_BUSINESS_MAX_FAILURES, POS_PIN_IP_MAX_FAILURES } from "@/lib/pos-access-guard";
 
 export const POS_COOKIE = "corner_ops_pos";
 export const POS_SESSION_SECONDS = 60 * 60 * 12;
@@ -80,35 +81,46 @@ async function ensurePosAuthSchema(): Promise<void> {
   return posAuthSchemaPromise;
 }
 
-async function enforceAttemptLimit(key: string): Promise<void> {
+async function enforceAttemptLimit(key: string, message: string): Promise<void> {
   const rows = await getSql()`SELECT failed_count, window_started_at, locked_until FROM pos_pin_attempts WHERE attempt_key = ${key}`;
   const row = rows[0];
   if (row?.locked_until && new Date(row.locked_until).getTime() > Date.now()) {
-    throw new Error("Too many attempts. Wait one minute and try again.");
+    throw new Error(message);
   }
 }
 
-async function recordFailedAttempt(key: string): Promise<void> {
+async function recordFailedAttempt(key: string, maxFailures: number, lockMinutes: number): Promise<void> {
   await getSql()`
     INSERT INTO pos_pin_attempts (attempt_key, failed_count, window_started_at, locked_until, updated_at)
     VALUES (${key}, 1, NOW(), NULL, NOW())
     ON CONFLICT (attempt_key) DO UPDATE SET
       failed_count = CASE WHEN pos_pin_attempts.window_started_at < NOW() - INTERVAL '10 minutes' THEN 1 ELSE pos_pin_attempts.failed_count + 1 END,
       window_started_at = CASE WHEN pos_pin_attempts.window_started_at < NOW() - INTERVAL '10 minutes' THEN NOW() ELSE pos_pin_attempts.window_started_at END,
-      locked_until = CASE WHEN (CASE WHEN pos_pin_attempts.window_started_at < NOW() - INTERVAL '10 minutes' THEN 1 ELSE pos_pin_attempts.failed_count + 1 END) >= 8 THEN NOW() + INTERVAL '1 minute' ELSE NULL END,
+      locked_until = CASE WHEN (CASE WHEN pos_pin_attempts.window_started_at < NOW() - INTERVAL '10 minutes' THEN 1 ELSE pos_pin_attempts.failed_count + 1 END) >= ${maxFailures} THEN NOW() + (${lockMinutes} * INTERVAL '1 minute') ELSE NULL END,
       updated_at = NOW()
   `;
 }
 
-export async function authenticateDeliPosPin(suppliedPin: unknown, attemptKey: string): Promise<PosSession> {
+/**
+ * attemptKeys.ipKey limits one client; attemptKeys.businessKey is a shared
+ * ceiling across all clients so rotating IPs cannot brute-force PINs.
+ */
+export async function authenticateDeliPosPin(suppliedPin: unknown, attemptKeys: string | { ipKey: string; businessKey: string }): Promise<PosSession> {
   await ensurePosAuthSchema();
-  const key = String(attemptKey || "unknown").slice(0, 160);
-  await enforceAttemptLimit(key);
+  const keys = typeof attemptKeys === "string" ? { ipKey: attemptKeys, businessKey: "" } : attemptKeys;
+  const key = String(keys.ipKey || "unknown").slice(0, 160);
+  const businessKey = String(keys.businessKey || "business:Corner Deli").slice(0, 160);
+  await enforceAttemptLimit(key, "Too many attempts. Wait one minute and try again.");
+  await enforceAttemptLimit(businessKey, "Too many failed PIN attempts at this location. Wait 15 minutes or ask a manager.");
+  const recordFailure = async () => {
+    await recordFailedAttempt(key, POS_PIN_IP_MAX_FAILURES, 1);
+    await recordFailedAttempt(businessKey, POS_PIN_BUSINESS_MAX_FAILURES, 15);
+  };
   let pin: string;
   try {
     pin = validateEmployeePin("Corner Deli", suppliedPin, "Corner Deli");
   } catch (error) {
-    await recordFailedAttempt(key);
+    await recordFailure();
     throw error;
   }
   const rows = await getSql()`
@@ -118,7 +130,7 @@ export async function authenticateDeliPosPin(suppliedPin: unknown, attemptKey: s
       AND pin_enabled = TRUE AND active = TRUE
   ` as EmployeeRow[];
   if (rows.length !== 1) {
-    await recordFailedAttempt(key);
+    await recordFailure();
     throw new Error("PIN not recognized for this location.");
   }
   await getSql()`DELETE FROM pos_pin_attempts WHERE attempt_key = ${key}`;

@@ -14,6 +14,8 @@
     "src/lib/payroll-week.ts",
     "src/lib/accounting-import-utils.ts",
     "src/lib/journal-integrity.ts",
+    "src/lib/ordering-ai-phone-guard.ts",
+    "src/lib/pos-access-guard.ts",
     "src/lib/helcim.ts",
     "src/lib/ordering-payment-rules.ts",
     "src/lib/local-dev-tools.ts",

@@ -5,6 +5,7 @@ import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
 import {
   AiToolError,
   auditAiTool,
+  callerCustomerLookup,
   menuCatalog,
   modifierAliases,
   priceSpokenOrder,
@@ -13,6 +14,7 @@ import {
   type SpokenOrderItem,
 } from "@/lib/ordering-ai-tools";
 import { recordAiRegression } from "@/lib/ordering-ai-regressions";
+import { resolvePhoneCustomerId } from "@/lib/ordering-ai-phone-guard";
 import {
   openAiClient,
   requestOpenAiHandoff,
@@ -539,7 +541,7 @@ export function startOpenAiSideband(
       }
       const sql = getSql();
       const call = (
-        await sql`SELECT call.id,call.order_id,call.caller_phone,call.pending_item,call.deferred_required_fields,orders.service_type,orders.customer_id,orders.first_name_snapshot,orders.last_name_snapshot,address.route_distance_miles FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=orders.id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
+        await sql`SELECT call.id,call.order_id,call.caller_phone,call.customer_id call_customer_id,call.pending_item,call.deferred_required_fields,orders.service_type,orders.customer_id,orders.first_name_snapshot,orders.last_name_snapshot,address.route_distance_miles FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=orders.id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
       )[0];
       if (!call)
         throw new AiToolError(
@@ -635,6 +637,22 @@ export function startOpenAiSideband(
         touchedItems,
       );
       await sql`UPDATE ordering_call_sessions SET deferred_required_fields=${JSON.stringify([...resolvedQuestions])}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
+      // A model-supplied customerId is honored only when it matches the
+      // call's bound customer or this call's own caller ID.
+      const customerId =
+        resolvePhoneCustomerId(args.customerId, {
+          orderCustomerId: call.customer_id,
+          callCustomerId: call.call_customer_id,
+          callerMatchIds:
+            args.customerId && call.caller_phone
+              ? (
+                  await callerCustomerLookup(
+                    "Corner Deli",
+                    String(call.caller_phone),
+                  )
+                ).map((match) => match.customerId)
+              : [],
+        }) || null;
       const result = await priceSpokenOrder({
         business: "Corner Deli",
         actor,
@@ -643,7 +661,7 @@ export function startOpenAiSideband(
         ),
         items: spokenItems,
         orderId: call.order_id || null,
-        customerId: String(args.customerId || call.customer_id || "") || null,
+        customerId,
         callerPhone,
         firstName: String(args.firstName || call.first_name_snapshot || ""),
         lastName: String(args.lastName || call.last_name_snapshot || ""),
@@ -660,9 +678,9 @@ export function startOpenAiSideband(
         let delivery;
         try {
           const customerAddress =
-            args.customerId && args.customerAddressId
+            customerId && args.customerAddressId
               ? (
-                  await sql`SELECT id FROM ordering_customer_addresses WHERE id=${String(args.customerAddressId)} AND customer_id=${String(args.customerId)} AND active=TRUE`
+                  await sql`SELECT id FROM ordering_customer_addresses WHERE id=${String(args.customerAddressId)} AND customer_id=${customerId} AND active=TRUE`
                 )[0]
               : null;
           delivery = await attachSpokenDeliveryAddress(
