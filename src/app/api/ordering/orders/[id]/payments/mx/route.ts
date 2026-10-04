@@ -10,7 +10,7 @@ import {
 import { orderingActor } from "@/lib/ordering-route-auth";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
-import { submitDraftOrder } from "@/lib/ordering-order-lifecycle";
+import { submitPaidDraft } from "@/lib/ordering-paid-draft-submit";
 import {
   ensureMxPaymentSchema,
   initializeMxPayment,
@@ -122,7 +122,8 @@ export async function POST(
       result.order.payment_status === "paid" &&
       result.order.status === "draft"
     ) {
-      await submitDraftOrder(orderId, business, actor);
+      const unsent = await submitPaidDraft(orderId, business, actor);
+      if (unsent) return unsent;
       await dispatchSubmittedOrderPrintJobs(orderId, business);
     } else {
       await dispatchOrderPrintJobs(orderId, business, {

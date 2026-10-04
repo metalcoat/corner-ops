@@ -56,6 +56,21 @@ type TimedOrderRow = {
   updated_at: string | Date;
 };
 
+/**
+ * Schemas createTimedDraftOrder touches. Callers that wrap draft creation in
+ * their own transaction must run this first: DDL executed inside a rolled-back
+ * transaction is lost while the per-process schema promises stay resolved.
+ */
+export async function ensureTimedDraftOrderSchemas() {
+  await ensureOrderingTimingSchema();
+  await ensureOrderingPosSchema();
+  await ensureOrderingCustomerSchema();
+  await ensureOrderingMenuOverrideSchema();
+  await ensureOrderingVariantSchema();
+  await ensureOrderingPromotionSchema();
+  await ensureOrderingLoyaltySchema();
+}
+
 export async function createTimedDraftOrder(input: CreateTimedDraftOrderInput): Promise<TimedOrderRow> {
   await ensureOrderingTimingSchema();
   const mode = input.timingMode ?? "asap";
@@ -69,12 +84,7 @@ export async function createTimedDraftOrder(input: CreateTimedDraftOrderInput): 
 
   // Bootstrap schemas outside the transaction so a rolled-back order cannot
   // roll back DDL that the per-process schema promises already consider done.
-  await ensureOrderingPosSchema();
-  await ensureOrderingCustomerSchema();
-  await ensureOrderingMenuOverrideSchema();
-  await ensureOrderingVariantSchema();
-  await ensureOrderingPromotionSchema();
-  await ensureOrderingLoyaltySchema();
+  await ensureTimedDraftOrderSchemas();
 
   // Draft creation, timing, and promotions commit together: a failure part way
   // must not leave an ASAP-defaulted draft without its quoted timing.

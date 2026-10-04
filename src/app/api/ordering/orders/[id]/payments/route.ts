@@ -4,7 +4,7 @@ import { assertOrderReadyForCheckout, checkoutState, commitTender, PaymentConfli
 import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { paymentStationProfile, PaymentStationError } from "@/lib/ordering-payment-stations";
-import { submitDraftOrder } from "@/lib/ordering-order-lifecycle";
+import { submitPaidDraft } from "@/lib/ordering-paid-draft-submit";
 import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
 import { localDevToolsAllowed } from "@/lib/local-dev-tools";
 
@@ -70,7 +70,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       } : undefined,
     });
     if(result.order.payment_status==="paid"&&result.order.status==="draft"){
-      await submitDraftOrder(id,business,actor);
+      const unsent=await submitPaidDraft(id,business,actor);
+      if(unsent)return unsent;
       await dispatchSubmittedOrderPrintJobs(id,business);
     }else await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});
     return Response.json(result,{status:201});
