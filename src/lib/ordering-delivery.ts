@@ -1,3 +1,4 @@
+import { recordTaxRateChange } from "@/lib/ordering-sales-tax";
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import type { OrderingBusiness } from "@/lib/ordering-core";
@@ -154,6 +155,7 @@ export async function saveDeliveryPricingSettings(input: DeliveryPricingSettings
         updated_at = NOW()
     WHERE business = ${input.business}
   `;
+  await recordTaxRateChange(input.business, updatedBy);
 
   await sql`
     INSERT INTO ordering_delivery_policies (

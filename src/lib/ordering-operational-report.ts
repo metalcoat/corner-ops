@@ -3,6 +3,7 @@ import { ensureOrderingDeliverySchema } from "@/lib/ordering-delivery-schema";
 import { ensureOrderingGiftCardSchema } from "@/lib/ordering-gift-card-schema";
 import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
+import { salesTaxReport } from "@/lib/ordering-sales-tax";
 
 const MAX_RANGE_DAYS = 366;
 const OVERDUE_MINUTES = 30;
@@ -25,6 +26,7 @@ export async function orderingOperationalReport(input: { business: OrderingBusin
   const end = dateBoundary(input.end, true);
   if (end <= start || end.getTime() - start.getTime() > MAX_RANGE_DAYS * 86_400_000) throw new Error("Report range must be between one and 366 days.");
   const sql = getSql();
+  const salesTax = await salesTaxReport({ business: input.business, start, end });
   const [summary, tenders, giftCards, services, channels, items, categories, voids, openOrders, actions] = await Promise.all([
     sql`SELECT COUNT(*)::int orders,
       COALESCE(SUM(gross_base_merchandise_cents),0)::bigint gross_merchandise_cents,
@@ -74,9 +76,10 @@ export async function orderingOperationalReport(input: { business: OrderingBusin
   const mapMoney = (rows: Record<string, unknown>[]) => rows.map((row) => Object.fromEntries(Object.entries(row).map(([key,value]) => key.endsWith("_cents") || key === "count" || key === "orders" || key === "quantity" ? [key,integer(value)] : [key,value])));
   return {
     business: input.business, range: { start: input.start, end: input.end, businessDayStartsAt: "04:00 America/New_York" }, generatedAt: new Date().toISOString(),
-    summary: mapMoney(summary)[0], tenders: mapMoney(tenders), giftCards: mapMoney(giftCards), salesByServiceType: mapMoney(services), salesByChannel: mapMoney(channels),
+    // Prices include tax, so the tax figure is backed out of sales rather than read from orders.
+    summary: { ...mapMoney(summary)[0], tax_cents: salesTax.totals.netTaxCents } as Record<string, any>, salesTax, tenders: mapMoney(tenders), giftCards: mapMoney(giftCards), salesByServiceType: mapMoney(services), salesByChannel: mapMoney(channels),
     salesByItem: mapMoney(items), salesByCategory: mapMoney(categories), voids: mapMoney(voids)[0],
     openOrders: mapMoney(openOrders), openOrderSummary: { count: openOrders.length, overdueCount: openOrders.filter((row) => row.overdue).length, amountDueCents: openOrders.reduce((sum,row) => sum+integer(row.amount_due_cents),0), overdueAfterMinutes: OVERDUE_MINUTES },
-    employeeActions: mapMoney(actions), notes: ["Sales exclude draft and cancelled orders.", "Tender and gift-card figures come from immutable ledgers by entry timestamp.", "Legacy lines without a category snapshot are not reclassified from mutable menu data."],
+    employeeActions: mapMoney(actions), notes: ["Sales exclude draft and cancelled orders.", "Tender and gift-card figures come from immutable ledgers by entry timestamp.", "Legacy lines without a category snapshot are not reclassified from mutable menu data.", "Sales tax is backed out of tax-inclusive prices at the rate in effect when each order was placed; tips are not taxed."],
   };
 }

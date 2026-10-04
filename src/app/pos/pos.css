@@ -2682,3 +2682,6 @@
   text-decoration: none;
   font-weight: 800;
 }
+.posReportTax .posReportWarning{margin:0 0 12px;padding:10px 12px;border-radius:10px;background:#fff0c2;color:#5c3d00;font-weight:650}
+.posReportTax .posReportExport{margin-top:14px;width:100%;min-height:44px;border:0;border-radius:10px;background:#174f36;color:#fff;font-weight:800;cursor:pointer}
+.posReportTax .posReportExport:disabled{opacity:.5;cursor:default}
