@@ -119,8 +119,9 @@ export async function submitCustomerDisplayResponse(stationKey:string, input:Rec
       const sent=await sendTransactionalEmail({to:email,subject:`Corner Deli receipt #${order.display_number}`,text:["Corner Deli",`Receipt #${order.display_number}`,`Order total: $${(Number(order.total_cents)/100).toFixed(2)}`,`Paid: $${(Number(order.paid_cents)/100).toFixed(2)}`,"", "Thank you for your order."].join("\n"),idempotencyKey:`customer-receipt-${order.id}`});
       if(sent.sent!==1)throw new Error(sent.failures[0]||"Receipt email is not configured.");
       details.email=email;
+      // Store the receipt address on this order only. It is unverified input from the
+      // counter display, and ordering_customers.email is the customer sign-in identity.
       await sql`UPDATE ordering_orders SET email_snapshot=${email} WHERE id=${order.id}`;
-      if(order.customer_id&&!order.customer_email)await sql`UPDATE ordering_customers SET email=${email},updated_at=NOW() WHERE id=${order.customer_id}`;
     }
     if(method==="print"){
       const printerId=String((session.payload||{}).receiptPrinterId||"");

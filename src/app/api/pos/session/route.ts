@@ -1,11 +1,8 @@
 import { NextRequest } from "next/server";
 import { authenticateDeliPosPin, clearPosSession, getPosSession, setPosSession } from "@/lib/pos-auth";
+import { pinAttemptKeys } from "@/lib/pos-access-guard";
 
 export const runtime = "nodejs";
-
-function attemptKey(request: NextRequest): string {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local-terminal";
-}
 
 export async function GET() {
   const session = await getPosSession(false);
@@ -15,7 +12,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as { pin?: unknown };
-    const session = await authenticateDeliPosPin(body.pin, attemptKey(request));
+    const session = await authenticateDeliPosPin(body.pin, pinAttemptKeys(request.headers));
     await setPosSession(session);
     return Response.json({ authenticated: true, session });
   } catch (error) {

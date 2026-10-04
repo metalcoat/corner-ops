@@ -165,7 +165,7 @@ async function main() {
     "Delivery validation failures must not be reported as missing menu items.",
   );
   assert.ok(
-    sidebandSource.includes("customerId: String(args.customerId") &&
+    sidebandSource.includes("resolvePhoneCustomerId(args.customerId") &&
       sidebandSource.includes("args.customerAddressId"),
     "Confirmed caller accounts and saved addresses must stay attached to the order.",
   );

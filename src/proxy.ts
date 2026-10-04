@@ -158,7 +158,10 @@ function isDeliPosApi(path: string): boolean {
     ].some((part) => matchesPath(path, `/api/ordering/${part}`)) ||
     path === "/api/ordering/delivery/quote" ||
     path === "/api/ordering/hardware/status" ||
-    path === "/api/ordering/store-dashboard"
+    path === "/api/ordering/store-dashboard" ||
+    // Counter customer display: shows live orders/customer email and accepts
+    // tips, signatures, and receipt choices, so it must stay on POS networks.
+    path === "/api/ordering/customer-display"
   );
 }
 
