@@ -9,7 +9,7 @@ import "./deli-pos-shell.css";
 import "./deli-pos-shell-overrides.css";
 import "./deli-safe-area.css";
 import { useOnlineOrderAlert } from "./use-online-order-alert";
-import { offlineOrders, syncOfflineOrders } from "@/lib/pos-offline-queue";
+import { dismissOfflineOrder, offlineOrders, retryOfflineOrder, syncOfflineOrders, type OfflineCashOrder } from "@/lib/pos-offline-queue";
 
 const centerWorkspaces = [
   { label: "Menu", href: "/pos/deli" },
@@ -36,12 +36,12 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
   const [printers,setPrinters]=useState<{kitchenPrinter:string;receiptPrinter:string;cardReader:string}>({kitchenPrinter:"Unknown",receiptPrinter:"Unknown",cardReader:"Not applicable"});
   const [androidUpdateUrl, setAndroidUpdateUrl] = useState<string | null>(null);
   const onlineOrderAlerts = useOnlineOrderAlert(Boolean(session?.authenticated), alertSound, alertVolume);
-  const [online,setOnline]=useState(true),[offlinePending,setOfflinePending]=useState(0),[offlineMessage,setOfflineMessage]=useState("");
+  const [online,setOnline]=useState(true),[offlinePending,setOfflinePending]=useState(0),[offlineMessage,setOfflineMessage]=useState(""),[offlineConflicts,setOfflineConflicts]=useState<OfflineCashOrder[]>([]);
   const [pendingEmployeeMeal,setPendingEmployeeMeal]=useState(false);
 
   useEffect(()=>{if(!menuActive||!pendingEmployeeMeal)return;setPendingEmployeeMeal(false);window.requestAnimationFrame(()=>window.dispatchEvent(new Event("corner-ops-pos-employee-meal")))},[menuActive,pendingEmployeeMeal]);
 
-  useEffect(()=>{let active=true;const refresh=()=>{setOnline(navigator.onLine);setOfflinePending(offlineOrders().length)};const sync=async()=>{refresh();if(!navigator.onLine)return;const result=await syncOfflineOrders();if(!active)return;setOfflinePending(result.remaining);if(result.synced)setOfflineMessage(`${result.synced} offline order${result.synced===1?"":"s"} synced to the kitchen and register.`)};refresh();void sync();window.addEventListener("online",sync);window.addEventListener("offline",refresh);window.addEventListener("corner-ops-offline-queue",refresh);const timer=window.setInterval(()=>void sync(),15000);return()=>{active=false;window.clearInterval(timer);window.removeEventListener("online",sync);window.removeEventListener("offline",refresh);window.removeEventListener("corner-ops-offline-queue",refresh)}},[]);
+  useEffect(()=>{let active=true;const refresh=()=>{const rows=offlineOrders();setOnline(navigator.onLine);setOfflinePending(rows.filter(row=>row.status!=="conflict").length);setOfflineConflicts(rows.filter(row=>row.status==="conflict"))};const sync=async()=>{refresh();if(!navigator.onLine)return;const result=await syncOfflineOrders();if(!active)return;setOfflinePending(result.remaining);if(result.synced)setOfflineMessage(`${result.synced} offline order${result.synced===1?"":"s"} synced to the kitchen and register.`)};refresh();void sync();window.addEventListener("online",sync);window.addEventListener("offline",refresh);window.addEventListener("corner-ops-offline-queue",refresh);const timer=window.setInterval(()=>void sync(),15000);return()=>{active=false;window.clearInterval(timer);window.removeEventListener("online",sync);window.removeEventListener("offline",refresh);window.removeEventListener("corner-ops-offline-queue",refresh)}},[]);
 
   const loadOpenCount = useCallback(async () => {
     const response = await fetch("/api/ordering/order-center?view=open", { cache: "no-store" });
@@ -145,6 +145,9 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
 
   return <div className="deliPosShell">
     {(!online||offlinePending>0||offlineMessage)&&<div className={`deliOfflineBanner ${online?"syncing":"offline"}`} role="status"><strong>{online?offlinePending?`${offlinePending} OFFLINE ORDER${offlinePending===1?"":"S"} WAITING TO SYNC`:offlineMessage:"OFFLINE — CASH ONLY"}</strong>{offlinePending>0&&online&&<button type="button" onClick={()=>void syncOfflineOrders().then(result=>{setOfflinePending(result.remaining);setOfflineMessage(result.synced?`${result.synced} order${result.synced===1?"":"s"} synced.`:result.remaining?"Sync needs attention. Tap system status for connection details.":"")})}>SYNC NOW</button>}</div>}
+    {offlineConflicts.map(row=><div className="deliOfflineBanner offline" role="alert" key={row.id}><strong>OFFLINE ORDER OFF-{row.id.slice(-6).toUpperCase()}{row.amountTenderedCents!=null?` (CASH $${(row.amountTenderedCents/100).toFixed(2)})`:""} DID NOT SYNC: {row.error||"Manual review is required."}</strong><button type="button" onClick={()=>void retryOfflineOrder(row.id).then(result=>setOfflineMessage(result.synced?`${result.synced} order${result.synced===1?"":"s"} synced.`:""))}>RETRY</button><button type="button" onClick={()=>{if(window.confirm("Dismiss this offline order? It will NOT reach the kitchen or register. Ring it in again or record it manually first."))dismissOfflineOrder(row.id)}}>DISMISS</button></div>)}
+    {onlineOrderAlerts.pendingOnlineOrders>0&&<div className="deliOfflineBanner" role="alert"><strong>{onlineOrderAlerts.pendingOnlineOrders} NEW ONLINE ORDER{onlineOrderAlerts.pendingOnlineOrders===1?"":"S"} IN THE KITCHEN</strong><button type="button" onClick={onlineOrderAlerts.acknowledgeOnlineOrders}>ACKNOWLEDGE</button></div>}
+    {onlineOrderAlerts.soundBlocked&&<button type="button" className="deliOfflineBanner offline deliSoundPrompt">{/* Any tap unlocks audio through the alert hook's pointerdown listener. */}<strong>NEW-ORDER SOUND IS OFF — TAP HERE TO ENABLE IT</strong></button>}
     {androidUpdateUrl ? <a className="deliAndroidUpdate" href={androidUpdateUrl}>ANDROID POS UPDATE AVAILABLE — DOWNLOAD</a> : null}
     {onlineOrderAlerts.alertNotice && <div className="deliAlertNotice" role="status">{onlineOrderAlerts.alertNotice}</div>}
     <header className="deliShellHeader">

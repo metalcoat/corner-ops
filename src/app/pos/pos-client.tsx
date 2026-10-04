@@ -918,9 +918,12 @@ export default function PosClient({
   }, [addressSessionToken]);
   useEffect(() => {
     if (business !== "Corner Deli" || !session?.authenticated) return;
-    let stopped = false;
-    const load = () =>
-      fetch("/api/ordering/calls", { cache: "no-store" })
+    let stopped = false,
+      loading = false;
+    const load = () => {
+      if (loading) return;
+      loading = true;
+      return fetch("/api/ordering/calls", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((body) => {
           if (!stopped) {
@@ -929,7 +932,11 @@ export default function PosClient({
             setPosEmployeeId(body?.employeeId || "");
           }
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => {
+          loading = false;
+        });
+    };
     void load();
     const timer = window.setInterval(load, 2000);
     return () => {
@@ -2507,6 +2514,9 @@ export default function PosClient({
     const reopenedDraft = savedDraft?.reopened ? savedDraft : null;
     const mutationId=clientId();
     const orderBody={
+      // The same key is reused if this draft is replayed from the offline queue, so a draft the
+      // server created before the connection dropped is returned instead of duplicated.
+      idempotencyKey:reopenedDraft?undefined:mutationId,
       business,serviceType,timingMode,
       scheduledFor:timingMode === "future" ? new Date(scheduledFor).toISOString() : null,
       deliveryAddress:serviceType === "delivery" ? deliveryValidatedInput : undefined,
@@ -2775,6 +2785,8 @@ export default function PosClient({
       };
       if (!response.ok || !payload.order)
         throw new Error(payload.error || "Could not submit order.");
+      // TODO: the submit route will also report the kitchen ticket print status; surface a
+      // failed print here instead of showing the order as sent.
       setSubmittedOrder({
         displayNumber: payload.order.display_number,
         totalCents: Number(payload.order.total_cents),
@@ -3496,9 +3508,9 @@ export default function PosClient({
     setTipPromptOpen(true);
   }
 
-  async function applyTipAndStartCard(tipCents: number) {
+  async function applyTipAndStartCard(tipCents: number): Promise<boolean> {
     const draft = savedDraft || activeTab;
-    if (!draft || paymentBusy) return;
+    if (!draft || paymentBusy) return false;
     setTipPromptOpen(false);
     const enteredCents = Math.round(Number(cashTender) * 100);
     setPaymentBusy(true);
@@ -3540,14 +3552,21 @@ export default function PosClient({
           () => void startMxPayment(cardAmount, payload),
           0,
         );
+      return true;
     } catch (error) {
       setCheckoutError(
         error instanceof Error ? error.message : "Tip could not be added.",
       );
       setPaymentBusy(false);
-      return;
+      return true;
     }
   }
+  // The customer-display poller outlives renders; always call the latest closure so the tip
+  // lands on the currently selected check/amount and respects the current paymentBusy.
+  const applyTipAndStartCardRef = useRef(applyTipAndStartCard);
+  useEffect(() => {
+    applyTipAndStartCardRef.current = applyTipAndStartCard;
+  });
 
   function chooseCredit() {
     const enteredCents = Math.round(Number(cashTender) * 100);
@@ -3576,7 +3595,9 @@ export default function PosClient({
     let stopped = false,
       processing = false;
     async function checkCustomerDisplay() {
+      // Guard the whole poll, not just the tip step, so a slow response cannot overlap the next tick.
       if (processing || stopped) return;
+      processing = true;
       try {
         const response = await fetch(
             `/api/ordering/customer-display?stationKey=${encodeURIComponent(stationKey!)}`,
@@ -3591,8 +3612,9 @@ export default function PosClient({
           session.response?.action !== "tip"
         )
           return;
-        processing = true;
-        await applyTipAndStartCard(Number(session.response.tipCents || 0));
+        // Busy with another payment step: leave the response unhandled and pick it up next poll.
+        if (!(await applyTipAndStartCardRef.current(Number(session.response.tipCents || 0))))
+          return;
         await fetch("/api/ordering/customer-display", {
           method: "POST",
           headers: { "content-type": "application/json" },

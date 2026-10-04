@@ -58,6 +58,9 @@ export function ensureOrderingPosSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS ready_at TIMESTAMPTZ`;
+      // Client-supplied key so a retried POS/offline draft creation returns the original order.
+      await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS idempotency_key TEXT`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_orders_idempotency_idx ON ordering_orders (business, idempotency_key) WHERE idempotency_key IS NOT NULL`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_orders_display_number_idx ON ordering_orders (business, display_number) WHERE display_number <> ''`;
