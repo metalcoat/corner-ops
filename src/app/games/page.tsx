@@ -30,8 +30,8 @@ const games = [
     icon: "🥪",
     title: "DELI MAN: The Last Jumbo",
     tag: "RUN · JUMP · BLAST",
-    copy: "Blast absurd obstacles with wrapped subs, defeat complaint bosses, and deliver the food.",
-    prize: "3 ESCALATING ROUTES",
+    copy: "Pick a boss, blast pickles, steal their weapon. Pothole Man, Goose Man and six more North Country menaces.",
+    prize: "8 BOSSES · 1 KIOSK",
     color: "pizza",
   },
 ];
