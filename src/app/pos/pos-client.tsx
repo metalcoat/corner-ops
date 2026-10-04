@@ -2781,12 +2781,11 @@ export default function PosClient({
       );
       const payload = (await response.json()) as {
         order?: { display_number: string; total_cents: number };
+        print?: { warning?: boolean; message?: string };
         error?: string;
       };
       if (!response.ok || !payload.order)
         throw new Error(payload.error || "Could not submit order.");
-      // TODO: the submit route will also report the kitchen ticket print status; surface a
-      // failed print here instead of showing the order as sent.
       setSubmittedOrder({
         displayNumber: payload.order.display_number,
         totalCents: Number(payload.order.total_cents),
@@ -2813,6 +2812,11 @@ export default function PosClient({
       setDeliveryValidationToken("");
       setDeliveryValidatedInput("");
       setDeliveryRoute(null);
+      // The order is in the kitchen queue, but its ticket did not print.
+      if (payload.print?.warning)
+        setCheckoutError(
+          `Order #${payload.order.display_number} was sent, but the kitchen ticket did not print${payload.print.message ? ` (${payload.print.message})` : ""}. It will retry automatically — check the kitchen printer.`,
+        );
     } catch (error) {
       setCheckoutError(
         error instanceof Error ? error.message : "Could not submit order.",
