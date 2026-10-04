@@ -78,6 +78,14 @@ export async function POST(
       new Date(session.expires_at).getTime() < Date.now()
     )
       throw new HelcimError("This Helcim checkout session expired.");
+    // The checkout secret is cleared once a checkout completes, so a retried
+    // confirm (lost response) returns the recorded result instead of failing
+    // verification for a card that was already charged and recorded.
+    if (session.status === "completed")
+      return Response.json(
+        { ...(await checkoutState(orderId, business, session.check_id || null)), duplicate: true },
+        { status: 201 },
+      );
     const approval = await verifyHelcimCheckoutApproval({
       session: session as never,
       data: body.data,

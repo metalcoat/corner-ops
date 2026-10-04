@@ -2,13 +2,12 @@ import { apiError, unauthorized } from "@/lib/http";
 import type { VariantConfiguredOrderItemInput } from "@/lib/ordering-orders-with-variants";
 import type { OrderingBusiness, ServiceType } from "@/lib/ordering-core";
 import { ensureOrderingDeliverySchema } from "@/lib/ordering-delivery-schema";
-import { createTimedDraftOrder } from "@/lib/ordering-timed-orders";
+import { createTimedDraftOrder, ensureTimedDraftOrderSchemas } from "@/lib/ordering-timed-orders";
 import type { OrderTimingMode } from "@/lib/ordering-timing-core";
 import { orderingActor } from "@/lib/ordering-route-auth";
 import { addressForOrder, routeDeliveryAddress } from "@/lib/ordering-address";
 import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
 import { getSql, withTransaction } from "@/lib/db";
-import { ensureOrderingTimingSchema } from "@/lib/ordering-timing-schema";
 import { readIdempotencyKey } from "@/lib/pos-offline-sync-policy";
 import { quoteDelivery } from "@/lib/ordering-delivery";
 
@@ -130,7 +129,8 @@ export async function POST(request: Request) {
     let order: Awaited<ReturnType<typeof createTimedDraftOrder>>;
     if (idempotencyKey) {
       // A retried POST (lost response, offline replay) returns the order the first attempt created.
-      await ensureOrderingTimingSchema();
+      // Schema bootstrap must not run inside the transaction below (see ensureTimedDraftOrderSchemas).
+      await ensureTimedDraftOrderSchemas();
       const outcome = await withTransaction(async () => {
         const sql = getSql();
         await sql`SELECT pg_advisory_xact_lock(hashtext(${`order-create:${business}:${idempotencyKey}`}))`;

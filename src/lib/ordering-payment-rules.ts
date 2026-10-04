@@ -28,7 +28,11 @@ export function tipChangeError(input: TipChangeInput): string | null {
   if (input.voided || input.orderStatus === "cancelled") return "Tips cannot be changed on a voided or cancelled order.";
   if (input.paymentStatus === "refunded" || input.paymentStatus === "partially_refunded") return "Tips cannot be changed after a refund.";
   if ((input.resultingOrderTipCents ?? input.tipCents) > maxTipCents(input.subtotalCents)) return `Tip cannot exceed $${(maxTipCents(input.subtotalCents) / 100).toFixed(2)} for this order.`;
-  if (input.paidCents > 0 && input.tipCents !== input.currentTipCents && !input.isManager) return "Manager or owner authorization is required to change the tip after a payment has been taken.";
+  // Split tender (e.g. part cash, then a card with a tip from the customer display) adds a tip
+  // while a balance is still due; raising the tip only raises what is still owed, so staff may
+  // do that. Lowering a tip, or changing it once the check is fully paid, needs a manager.
+  const addingTipToOpenBalance = input.tipCents > input.currentTipCents && input.totalCents > input.paidCents;
+  if (input.paidCents > 0 && input.tipCents !== input.currentTipCents && !input.isManager && !addingTipToOpenBalance) return "Manager or owner authorization is required to change the tip after a payment has been taken.";
   if (input.totalCents + input.tipCents - input.currentTipCents < input.paidCents) return "The tip cannot be lowered below what has already been paid. Reverse a tender first.";
   return null;
 }

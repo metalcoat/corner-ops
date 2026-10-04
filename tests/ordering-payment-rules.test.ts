@@ -21,6 +21,13 @@ test("staff may tip an unpaid order but need a manager once payment exists", () 
   assert.equal(tipChangeError({ ...base, tipCents: 0, currentTipCents: 0, paidCents: 2160, paymentStatus: "paid" }), null);
 });
 
+test("staff may add a tip before the remaining balance of a split tender is paid", () => {
+  const partial = { ...base, paidCents: 1000, paymentStatus: "partially_paid" };
+  assert.equal(tipChangeError(partial), null);
+  assert.match(tipChangeError({ ...partial, tipCents: 100, currentTipCents: 500, totalCents: 2660 }) || "", /Manager or owner/);
+  assert.equal(tipChangeError({ ...partial, tipCents: 100, currentTipCents: 500, totalCents: 2660, isManager: true }), null);
+});
+
 test("tips are rejected on voided/refunded orders and cannot drop the total below what was paid", () => {
   assert.match(tipChangeError({ ...base, voided: true }) || "", /voided/);
   assert.match(tipChangeError({ ...base, orderStatus: "cancelled" }) || "", /voided or cancelled/);
