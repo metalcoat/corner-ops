@@ -7,6 +7,7 @@ import { cornerOpsBaseUrl } from "@/lib/transactional-email";
 import { get, put } from "@/lib/storage";
 import {
   deliveryOrigin,
+  straightLineMiles,
   planDeliveryRoute,
   type DeliveryRoutePlan,
 } from "@/lib/ordering-delivery-route";
@@ -14,7 +15,8 @@ import {
 export const DELIVERY_STATUSES = ["ASSIGNED","READY_FOR_DRIVER","PICKED_UP","EN_ROUTE","ARRIVED","DELIVERED","NO_CONTACT","DELIVERY_FAILED","RETURNED","CANCELLED"] as const;
 export type DriverDeliveryStatus = typeof DELIVERY_STATUSES[number];
 export type DriverActor = EmployeeSession & { manager: boolean; driver: boolean };
-export type CustomerTrackingView={token_id:string;expires_at:string;delivery_id:string;status:string;delivered_at:string|null;updated_at:string;display_number:string;order_status:string;proof_id:string|null;proof_captured_at:string|null;location:{latitude:number;longitude:number;accuracyMeters:number|null;capturedAt:string;approximate:true}|null};
+export type CustomerTrackingView={token_id:string;expires_at:string;delivery_id:string;status:string;delivered_at:string|null;updated_at:string;display_number:string;order_status:string;proof_id:string|null;proof_captured_at:string|null;location:DriverPosition|null;destination:{latitude:number;longitude:number}|null;etaMinutes:number|null};
+export type DriverPosition={latitude:number;longitude:number;accuracyMeters:number|null;capturedAt:string;approximate:true};
 
 const transitions: Record<DriverDeliveryStatus, DriverDeliveryStatus[]> = {
   ASSIGNED:["READY_FOR_DRIVER","PICKED_UP","CANCELLED"], READY_FOR_DRIVER:["PICKED_UP","CANCELLED"],
@@ -75,6 +77,7 @@ export async function ensureDriverDeliverySchema() {
     order_id UUID NOT NULL REFERENCES ordering_orders(id) ON DELETE CASCADE, tracking_token_id UUID REFERENCES ordering_delivery_tracking_tokens(id),
     channel TEXT NOT NULL, destination TEXT NOT NULL, classification TEXT NOT NULL DEFAULT 'transactional', payload TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'queued', queued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), sent_at TIMESTAMPTZ, failed_at TIMESTAMPTZ, failure TEXT NOT NULL DEFAULT '')`;
+  await sql`CREATE TABLE IF NOT EXISTS ordering_driver_dispatch_settings(business TEXT PRIMARY KEY CHECK(business IN('Corner Deli','Tiki')),show_live_driver BOOLEAN NOT NULL DEFAULT FALSE,call_link_template TEXT NOT NULL DEFAULT '',updated_by UUID REFERENCES employees(id),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
 }
 
 export async function driverActor(): Promise<DriverActor | null> {
@@ -91,8 +94,9 @@ async function audit(deliveryId:string,orderId:string,actor:DriverActor,action:s
 
 export async function listDriverDeliveries(actor:DriverActor,input:{query?:string;dispatch?:boolean}){
   await ensureDriverDeliverySchema();const q=String(input.query||"").trim(),digits=q.replace(/\D/g,""),like=`%${q}%`,digitLike=`%${digits}%`;
-  return getSql()`SELECT d.id delivery_id,d.status delivery_status,d.driver_employee_id assigned_employee_id,d.assigned_at,d.updated_at delivery_updated_at,
-    o.id order_id,o.display_number,o.status order_status,o.payment_status,o.service_type,o.timing_mode,o.scheduled_for,o.created_at,
+  return getSql()`SELECT d.id delivery_id,d.status delivery_status,d.driver_employee_id assigned_employee_id,d.assigned_at,d.en_route_at,d.updated_at delivery_updated_at,
+    o.id order_id,o.display_number,o.status order_status,o.payment_status,o.payment_preference,o.total_cents,o.paid_cents,o.amount_due_cents,o.tip_cents,o.service_type,o.timing_mode,o.scheduled_for,o.created_at,
+    (SELECT COALESCE(SUM(GREATEST(i.quantity-COALESCE(i.cancelled_quantity,0),0)),0)::int FROM ordering_order_items i WHERE i.order_id=o.id) item_count,
     COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,o.phone_snapshot delivery_phone,
     a.formatted_address delivery_address,a.line2 delivery_unit,a.delivery_notes_snapshot delivery_notes,a.latitude destination_latitude,a.longitude destination_longitude,
     e.name driver_name,e.position driver_position,
@@ -197,5 +201,28 @@ export async function recordLocation(actor:DriverActor,deliveryId:string,input:{
 
 export async function captureProof(actor:DriverActor,deliveryId:string,file:File,input:{capturedAt:string;latitude?:number;longitude?:number;accuracy?:number;proofType:string;note?:string}){await ensureDriverDeliverySchema();if(!["image/jpeg","image/png","image/webp"].includes(file.type)||file.size<1||file.size>10_000_000)throw new Error("Choose a JPEG, PNG, or WebP photo up to 10 MB.");const sql=getSql(),d=(await sql`SELECT * FROM ordering_delivery_assignments WHERE id=${deliveryId} AND business=${actor.business}`)[0];if(!d||!permitted(actor,d))throw new Error("This delivery is not assigned to you.");if(["DELIVERED","RETURNED","CANCELLED"].includes(String(d.status)))throw new Error("This delivery no longer accepts proof.");const id=randomUUID(),extension=file.type==="image/png"?"png":file.type==="image/webp"?"webp":"jpg",stored=await put(`delivery-proof/${d.order_id}/${id}.${extension}`,await file.arrayBuffer(),{access:"private"});await sql`INSERT INTO ordering_delivery_proofs(id,order_id,delivery_id,employee_id,storage_reference,mime_type,size_bytes,captured_at,latitude,longitude,accuracy_meters,proof_type,employee_note)VALUES(${id},${d.order_id},${deliveryId},${actor.employeeId},${stored.url},${file.type},${file.size},${new Date(input.capturedAt)},${Number.isFinite(Number(input.latitude))?Number(input.latitude):null},${Number.isFinite(Number(input.longitude))?Number(input.longitude):null},${Number.isFinite(Number(input.accuracy))?Number(input.accuracy):null},${input.proofType.slice(0,40)},${String(input.note||"").slice(0,500)})`;await audit(deliveryId,String(d.order_id),actor,"proof_captured",String(d.status),String(d.status),{proofId:id,proofType:input.proofType});return{ok:true,proofId:id}}
 
-export async function customerTracking(token:string):Promise<CustomerTrackingView|null>{await ensureDriverDeliverySchema();const hash=createHash("sha256").update(token).digest("hex"),sql=getSql(),row=(await sql`SELECT t.id token_id,t.expires_at,d.id delivery_id,d.status,d.delivered_at,d.updated_at,o.display_number,o.status order_status,p.id proof_id,p.captured_at proof_captured_at FROM ordering_delivery_tracking_tokens t JOIN ordering_delivery_assignments d ON d.id=t.delivery_id JOIN ordering_orders o ON o.id=t.order_id LEFT JOIN LATERAL(SELECT id,captured_at FROM ordering_delivery_proofs WHERE delivery_id=d.id ORDER BY created_at DESC LIMIT 1)p ON TRUE WHERE t.token_hash=${hash} AND t.revoked_at IS NULL AND t.expires_at>NOW()`)[0] as Omit<CustomerTrackingView,"location">|undefined;if(!row)return null;const location=["EN_ROUTE","ARRIVED"].includes(String(row.status))?(await sql`SELECT latitude,longitude,accuracy_meters,captured_at FROM ordering_delivery_locations WHERE delivery_id=${row.delivery_id} ORDER BY captured_at DESC LIMIT 1`)[0]:null;return{...row,location:location?{latitude:Math.round(Number(location.latitude)*1000)/1000,longitude:Math.round(Number(location.longitude)*1000)/1000,accuracyMeters:location.accuracy_meters==null?null:Math.max(100,Number(location.accuracy_meters)),capturedAt:location.captured_at,approximate:true}:null}}
+/**
+ * Where the driver is, for a customer watching their own delivery. Shown only
+ * when the store turns live tracking on, only to the stop the driver is
+ * heading to right now, only while fresh, and rounded to about 100 m.
+ */
+export async function liveDriverForDelivery(delivery:{business:string;delivery_id:string;status:string;driver_employee_id:string|null;en_route_at:string|Date|null;destination_latitude:unknown;destination_longitude:unknown}){
+  const sql=getSql(),destination=delivery.destination_latitude==null||delivery.destination_longitude==null?null:{latitude:Number(delivery.destination_latitude),longitude:Number(delivery.destination_longitude)};
+  if(!["EN_ROUTE","ARRIVED"].includes(String(delivery.status)))return{location:null,destination,etaMinutes:null};
+  const enabled=Boolean((await sql`SELECT show_live_driver FROM ordering_driver_dispatch_settings WHERE business=${delivery.business}`)[0]?.show_live_driver);
+  const currentStop=enabled&&!(await sql`SELECT 1 FROM ordering_delivery_assignments WHERE driver_employee_id=${delivery.driver_employee_id} AND id<>${delivery.delivery_id} AND status IN('EN_ROUTE','ARRIVED') AND en_route_at>${delivery.en_route_at} LIMIT 1`).length;
+  const row=currentStop?(await sql`SELECT latitude::double precision latitude,longitude::double precision longitude,accuracy_meters,captured_at FROM ordering_delivery_locations WHERE delivery_id=${delivery.delivery_id} AND captured_at>NOW()-INTERVAL '15 minutes' ORDER BY captured_at DESC LIMIT 1`)[0]:null;
+  if(!row)return{location:null,destination,etaMinutes:null};
+  const exact={latitude:Number(row.latitude),longitude:Number(row.longitude)};
+  return{destination,etaMinutes:destination&&delivery.status==="EN_ROUTE"?Math.max(1,Math.round(straightLineMiles(exact,destination)*3)):null,
+    location:{latitude:Math.round(exact.latitude*1000)/1000,longitude:Math.round(exact.longitude*1000)/1000,accuracyMeters:row.accuracy_meters==null?null:Math.max(100,Number(row.accuracy_meters)),capturedAt:new Date(row.captured_at).toISOString(),approximate:true} as DriverPosition};
+}
+export async function customerTracking(token:string):Promise<CustomerTrackingView|null>{await ensureDriverDeliverySchema();const hash=createHash("sha256").update(token).digest("hex"),sql=getSql(),row=(await sql`SELECT t.id token_id,t.expires_at,d.id delivery_id,d.business,d.status,d.delivered_at,d.updated_at,d.driver_employee_id,d.en_route_at,o.display_number,o.status order_status,a.latitude destination_latitude,a.longitude destination_longitude,p.id proof_id,p.captured_at proof_captured_at FROM ordering_delivery_tracking_tokens t JOIN ordering_delivery_assignments d ON d.id=t.delivery_id JOIN ordering_orders o ON o.id=t.order_id LEFT JOIN ordering_order_delivery_addresses a ON a.order_id=o.id LEFT JOIN LATERAL(SELECT id,captured_at FROM ordering_delivery_proofs WHERE delivery_id=d.id ORDER BY created_at DESC LIMIT 1)p ON TRUE WHERE t.token_hash=${hash} AND t.revoked_at IS NULL AND t.expires_at>NOW()`)[0];if(!row)return null;
+  const live=await liveDriverForDelivery({business:String(row.business),delivery_id:String(row.delivery_id),status:String(row.status),driver_employee_id:row.driver_employee_id,en_route_at:row.en_route_at,destination_latitude:row.destination_latitude,destination_longitude:row.destination_longitude});
+  return{token_id:row.token_id,expires_at:row.expires_at,delivery_id:row.delivery_id,status:row.status,delivered_at:row.delivered_at,updated_at:row.updated_at,display_number:row.display_number,order_status:row.order_status,proof_id:row.proof_id,proof_captured_at:row.proof_captured_at,...live}}
+/** The delivery side of a web order's status page (the Domino's-style tracker). */
+export async function webOrderDelivery(orderId:string){await ensureDriverDeliverySchema();const row=(await getSql()`SELECT d.id delivery_id,d.business,d.status,d.driver_employee_id,d.en_route_at,d.picked_up_at,d.arrived_at,d.delivered_at,split_part(e.name,' ',1) driver_first_name,a.latitude destination_latitude,a.longitude destination_longitude FROM ordering_delivery_assignments d JOIN ordering_order_delivery_addresses a ON a.order_id=d.order_id LEFT JOIN employees e ON e.id=d.driver_employee_id WHERE d.order_id=${orderId} ORDER BY d.created_at DESC LIMIT 1`)[0];if(!row)return null;
+  const live=await liveDriverForDelivery({business:String(row.business),delivery_id:String(row.delivery_id),status:String(row.status),driver_employee_id:row.driver_employee_id,en_route_at:row.en_route_at,destination_latitude:row.destination_latitude,destination_longitude:row.destination_longitude});
+  const iso=(value:unknown)=>value?new Date(value as string).toISOString():null;
+  return{status:String(row.status),driverFirstName:row.driver_first_name?String(row.driver_first_name):null,pickedUpAt:iso(row.picked_up_at),enRouteAt:iso(row.en_route_at),arrivedAt:iso(row.arrived_at),deliveredAt:iso(row.delivered_at),...live}}
 export async function customerProof(token:string,proofId:string){const tracking=await customerTracking(token);if(!tracking||tracking.proof_id!==proofId)return null;const row=(await getSql()`SELECT storage_reference,mime_type FROM ordering_delivery_proofs WHERE id=${proofId} AND delivery_id=${tracking.delivery_id}`)[0];if(!row)return null;return{object:await get(String(row.storage_reference),{access:"private"}),mimeType:String(row.mime_type)}}

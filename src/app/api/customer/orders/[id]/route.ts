@@ -6,6 +6,8 @@ import {
 } from "@/lib/customer-ordering-session";
 import { getSql } from "@/lib/db";
 import { unauthorized } from "@/lib/http";
+import { deliveryOrigin } from "@/lib/ordering-delivery-route";
+import { webOrderDelivery } from "@/lib/ordering-driver-delivery";
 
 export const runtime = "nodejs";
 
@@ -23,5 +25,19 @@ export async function GET(
   const order = await customerOrderConfirmation(id);
   if (!order)
     return Response.json({ error: "Order not found." }, { status: 404 });
-  return Response.json({ order });
+  // Delivery orders get the live tracker: driver status, and (when the store
+  // turns it on) the driver's approximate position on a map.
+  const delivery =
+    order.service_type === "delivery" || order.service_type === "no_contact_delivery"
+      ? await webOrderDelivery(id).catch((error) => {
+          console.error("Web order delivery tracker failed", error);
+          return null;
+        })
+      : null;
+  return Response.json({
+    order,
+    delivery,
+    store: deliveryOrigin(),
+    mapTileUrl: process.env.MAP_TILE_URL?.trim() || null,
+  });
 }

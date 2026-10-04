@@ -1374,3 +1374,115 @@
   text-align: center;
   font-size: 1.05rem;
 }
+/* Domino's-style order tracker on the confirmation page */
+.orderTracker h1 {
+  margin-bottom: 8px;
+}
+.trackerDetail {
+  margin: 0 0 22px;
+  font-size: 18px;
+  color: var(--muted);
+}
+.trackerSteps {
+  display: grid;
+  grid-template-columns: repeat(var(--steps), 1fr);
+  margin: 0 0 22px;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.trackerSteps li {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.trackerSteps li::before {
+  content: "";
+  position: absolute;
+  top: 15px;
+  left: -50%;
+  width: 100%;
+  height: 6px;
+  background: #e1e6dc;
+  z-index: 0;
+}
+.trackerSteps li:first-child::before {
+  display: none;
+}
+.trackerSteps li.done::before,
+.trackerSteps li.now::before {
+  background: var(--green);
+}
+.trackerSteps i {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #e1e6dc;
+  border: 4px solid #fff;
+  box-shadow: 0 0 0 2px #e1e6dc;
+}
+.trackerSteps i::after {
+  counter-increment: step;
+  content: counter(step);
+  font-style: normal;
+  font-weight: 800;
+  color: #6b766d;
+}
+.trackerSteps li.done i {
+  background: var(--green);
+  box-shadow: 0 0 0 2px var(--green);
+}
+.trackerSteps li.done i::after {
+  content: "✓";
+  color: #fff;
+}
+.trackerSteps li.now {
+  color: inherit;
+}
+.trackerSteps li.now i {
+  background: var(--green);
+  box-shadow: 0 0 0 2px var(--green), 0 0 0 8px #2f7a4633;
+  animation: trackerPulse 1.8s ease-in-out infinite;
+}
+.trackerSteps li.now i::after {
+  color: #fff;
+}
+.trackerMap {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 22px;
+}
+.trackerMap small {
+  color: var(--muted);
+}
+@keyframes trackerPulse {
+  50% {
+    box-shadow: 0 0 0 2px var(--green), 0 0 0 14px #2f7a4600;
+  }
+}
+@media (max-width: 520px) {
+  .trackerSteps li {
+    font-size: 11px;
+  }
+  .trackerSteps i {
+    width: 30px;
+    height: 30px;
+  }
+  .trackerSteps li::before {
+    top: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .trackerSteps li.now i {
+    animation: none;
+  }
+}
