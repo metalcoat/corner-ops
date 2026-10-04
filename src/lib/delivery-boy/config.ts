@@ -4,11 +4,11 @@
  * if at least `quota` of them get their food.
  */
 export const DELIVERY_STAGES = [
-  { day: "MONDAY", name: "Monday Lunch", deliveries: 5, quota: 4, speed: 150, time: 60 },
-  { day: "TUESDAY", name: "Tuesday Dinner Run", deliveries: 7, quota: 5, speed: 180, time: 66 },
-  { day: "WEDNESDAY", name: "Wing Wednesday", deliveries: 8, quota: 6, speed: 210, time: 72 },
-  { day: "THURSDAY", name: "Deer O'Clock", deliveries: 9, quota: 7, speed: 235, time: 78 },
-  { day: "FRIDAY", name: "Friday Night Rush", deliveries: 11, quota: 9, speed: 265, time: 84 },
+  { day: "MONDAY", name: "Monday Lunch", deliveries: 14, quota: 9, speed: 150, time: 60 },
+  { day: "TUESDAY", name: "Tuesday Dinner Run", deliveries: 16, quota: 11, speed: 175, time: 66 },
+  { day: "WEDNESDAY", name: "Wing Wednesday", deliveries: 18, quota: 13, speed: 200, time: 72 },
+  { day: "THURSDAY", name: "Deer O'Clock", deliveries: 20, quota: 15, speed: 225, time: 78 },
+  { day: "FRIDAY", name: "Friday Night Rush", deliveries: 22, quota: 17, speed: 250, time: 84 },
 ] as const;
 
 /** Leave empty to hide the "real page" link in the game. */
