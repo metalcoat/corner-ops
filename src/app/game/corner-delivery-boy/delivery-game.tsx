@@ -12,9 +12,12 @@ import {
   DELIVERY_STAGES,
 } from "@/lib/delivery-boy/config";
 import { deliveryAudio } from "@/lib/games/delivery-audio";
+import { perfectionPenalty } from "@/lib/games/complaints";
 import { MenuAdTicker } from "@/app/games/components/menu-ad-ticker";
 import { buildFeed, FacebookFeed, reactions, type FacebookPost } from "./facebook-feed";
 import { drawStreet, porchPoint, type StreetFrame } from "./street-renderer";
+import { loadAssets, type Assets } from "./art-assets";
+import { lotKindFor } from "./lots";
 import {
   collisionRadius,
   CONDITION_BONUS_PER_POINT,
@@ -37,6 +40,7 @@ import {
   PICKUPS,
   PLAYER_Y,
   PORCH_WINDOW,
+  RESIDENTIAL,
   RESTOCK_SUBS,
   SAMPLE_POINTS,
   SCREEN_H,
@@ -163,6 +167,7 @@ type Sim = {
   invulnerable: number;
   spawnTimer: number;
   sceneryTimer: number;
+  potholeTimer: number;
   /** When each order comes in, and on which side of the street. */
   plan: { at: number; side: Side }[];
   waiting: Record<Side, number>;
@@ -182,7 +187,8 @@ function makeHouse(stage: number, side: Side, y: number, number: number, custome
     number,
     address: `${number} ${STREETS[stage - 1]}`,
     item: pick(orderPayloads),
-    look: Math.floor(Math.random() * 24),
+    kind: lotKindFor(stage, number),
+    seed: stage * 100003 + number * 7919,
     state: "pending",
   };
 }
@@ -229,6 +235,7 @@ function newSim(stage: number, stats: Stats): Sim {
     invulnerable: 0,
     spawnTimer: 0,
     sceneryTimer: 0,
+    potholeTimer: 0,
     plan,
     waiting: { left: 0, right: 0 },
     nextLot,
@@ -310,7 +317,8 @@ export default function DeliveryGame() {
       deliveryAudio.getSettings(),
     ),
     [showAudio, setShowAudio] = useState(false),
-    [reducedEffects, setReducedEffects] = useState(false);
+    [reducedEffects, setReducedEffects] = useState(false),
+    [practiceMode, setPracticeMode] = useState(false);
   const [showLeaders, setShowLeaders] = useState(false),
     [leaders, setLeaders] = useState<DeliveryLeader[]>([]),
     [leadersState, setLeadersState] = useState<"loading" | "ready" | "error">(
@@ -327,6 +335,7 @@ export default function DeliveryGame() {
     canvasRef = useRef<HTMLCanvasElement>(null),
     controlsRef = useRef<HTMLDivElement>(null),
     stepRef = useRef<(dt: number, now: number) => void>(() => {}),
+    assetsRef = useRef<Assets | null>(null),
     live = useRef({
       mode: "home" as Mode,
       paused: false,
@@ -389,6 +398,8 @@ export default function DeliveryGame() {
 
   useEffect(() => {
     setBest(Number(storageGet(HIGH_SCORE_KEY) || 0));
+    setPracticeMode(new URLSearchParams(window.location.search).has("practice"));
+    void loadAssets().then((assets) => (assetsRef.current = assets)).catch(() => {});
     setName(storageGet(DRIVER_NAME_KEY) || "");
     const saved = storageGet(REDUCED_EFFECTS_KEY);
     setReducedEffects(
@@ -612,7 +623,7 @@ export default function DeliveryGame() {
       const now = performance.now(),
         from = { x: laneX(s.lane), y: pctY(PLAYER_Y) - 6 },
         to = house
-          ? porchPoint(side, house.y)
+          ? porchPoint(side, house.y, house)
           : { x: side === "left" ? 36 : SCREEN_W - 36, y: from.y - 26 };
       s.ammo -= 1;
       fx.current.throws = [
@@ -671,7 +682,13 @@ export default function DeliveryGame() {
       burst();
       scoreBurst(`${porch ? "PORCH" : "LAWN"} +${points}`, true);
       vibrate([15, 30]);
-      pop(porch ? pick(quips) : "ON THE LAWN. THEY WILL MENTION THIS.");
+      // A perfect porch landing can still earn a complaint.
+      const penalty = porch ? perfectionPenalty(0.2, 150) : null;
+      if (penalty) {
+        s.stats = { ...s.stats, score: Math.max(0, s.stats.score - penalty.points) };
+        later(() => scoreBurst(`COMPLAINT -${penalty.points}`, false), 450);
+        pop(penalty.complaint);
+      } else pop(porch ? pick(quips) : "ON THE LAWN. THEY WILL MENTION THIS.");
       later(() => sfx("delivery"), 190);
     },
     [later, pop, scoreBurst, sfx, vibrate],
@@ -772,10 +789,10 @@ export default function DeliveryGame() {
         s.things.filter((x) => x.y < 8 && !PICKUPS.has(x.type)).length >= 2;
       const types: HazardType[] =
           s.stage <= 1
-            ? ["squirrel", "cat", "pothole", "pothole", "dog"]
+            ? ["squirrel", "cat", "dog", "goose", "ebike", "tarpcar"]
             : s.stage <= 3
-              ? ["dog", "cat", "raccoon", "person", "car", "pothole", "mower", "goose"]
-              : ["deer", "dog", "goose", "cow", "person", "car", "van", "pothole", "mower"],
+              ? ["dog", "cat", "raccoon", "person", "car", "mower", "goose", "ebike", "ebike", "tarpcar"]
+              : ["deer", "deer", "dog", "goose", "cow", "person", "car", "van", "mower", "ebike", "tarpcar"],
         restockChance = s.ammo <= 2 ? 0.14 : 0.05,
         roll = Math.random(),
         type: Thing["type"] =
@@ -788,33 +805,64 @@ export default function DeliveryGame() {
                 : pick(types);
       if (!crowded || PICKUPS.has(type)) {
         const crossing = CRITTERS.has(type) && Math.random() < 0.55,
-          fromLeft = Math.random() < 0.5;
+          fromLeft = Math.random() < 0.5,
+          // Tarp-covered cars sit parked against a curb.
+          parked = type === "tarpcar" ? (fromLeft ? 0.12 : 1.88) : null;
         s.things = [
           ...s.things,
           {
             id: ++cosmeticId.current,
             type,
-            lane: crossing
-              ? fromLeft
-                ? -0.3
-                : 2.3
-              : HAZARD_LANE_MIN + Math.random() * HAZARD_LANE_SPAN,
+            lane:
+              parked ??
+              (crossing
+                ? fromLeft
+                  ? -0.3
+                  : 2.3
+                : HAZARD_LANE_MIN + Math.random() * HAZARD_LANE_SPAN),
             y: crossing ? 8 + Math.random() * 25 : -12,
             vx: crossing ? (fromLeft ? 1 : -1) * (0.45 + Math.random() * 0.45) : 0,
             speed:
-              type === "car" ? 1.6 : type === "van" ? 1.4 : type === "mower" || type === "goose" ? 1.2 : 1,
+              type === "car"
+                ? 1.6
+                : type === "van"
+                  ? 1.4
+                  : type === "ebike"
+                    ? 1.5
+                    : type === "mower" || type === "goose"
+                      ? 1.2
+                      : 1,
+            variant: Math.floor(Math.random() * 12),
+            phase: Math.random() * Math.PI * 2,
           },
         ];
       }
+    }
+    // Ogdensburg potholes: random, frequent, all sizes.
+    s.potholeTimer += dt;
+    if (s.potholeTimer > 0.9 + Math.random() * 1.6) {
+      s.potholeTimer = 0;
+      s.things = [
+        ...s.things,
+        {
+          id: ++cosmeticId.current,
+          type: "pothole",
+          lane: 0.1 + Math.random() * 1.8,
+          y: -8,
+          size: 0.6 + Math.random() * 1,
+        },
+      ];
     }
     // Orders that have come in wait for the next house on their side.
     while (s.plan.length && s.plan[0].at <= elapsed) s.waiting[s.plan.shift()!.side]++;
     for (const side of ["left", "right"] as const)
       if (s.distance >= s.nextLot[side]) {
         s.nextLot[side] = s.distance + LOT_SPACING + Math.random() * LOT_JITTER;
-        const customer = s.waiting[side] > 0;
-        if (customer) s.waiting[side]--;
         s.lotNumber[side] += 2;
+        // Orders only come from homes; a waiting order takes the next house.
+        const customer =
+          s.waiting[side] > 0 && RESIDENTIAL.has(lotKindFor(s.stage, s.lotNumber[side]));
+        if (customer) s.waiting[side]--;
         s.houses = [
           ...s.houses,
           makeHouse(s.stage, side, HOUSE_SPAWN_Y, s.lotNumber[side], customer),
@@ -822,7 +870,7 @@ export default function DeliveryGame() {
       }
     if (s.sceneryTimer > 2.4) {
       s.sceneryTimer = 0;
-      const kinds: Scenery["kind"][] = ["trash", "trash", "cart", "tent", "abandoned"];
+      const kinds: Scenery["kind"][] = ["pole", "pole", "trash", "trash", "cart", "tent", "abandoned", "dumpster"];
       s.scenery = [
         ...s.scenery.slice(-10),
         {
@@ -859,7 +907,12 @@ export default function DeliveryGame() {
         n = {
           ...x,
           y: x.y + scroll * (moving ? speedRamp * (x.speed ?? 1) : 1),
-          lane: x.lane + (x.vx ?? 0) * dt,
+          lane:
+            x.lane +
+            (x.vx ?? 0) * dt +
+            // Kids on e-bikes weave across the street.
+            (x.type === "ebike" ? Math.cos(x.phase ?? 0) * dt * 1.1 : 0),
+          phase: (x.phase ?? 0) + dt * 2.6,
         };
       const gone = n.y >= 118 || n.lane < -0.7 || n.lane > 2.7;
       const touching =
@@ -934,6 +987,25 @@ export default function DeliveryGame() {
           hit(1, 0, pickFailure("dog", DELIVERY_COLLISION_FAILURES.dog),
             "DOG INCIDENT! EVERY PORCH CAMERA SAW THAT.", "bark");
           break;
+        case "ebike":
+          hit(1, 200, pickFailure("ebike", DELIVERY_COLLISION_FAILURES.ebike),
+            "E-BIKE KID! HE IS FINE. HE IS ALREADY FILMING IT.", "ouch");
+          break;
+        case "tarpcar":
+          hit(1, 300, pickFailure("tarpcar", DELIVERY_COLLISION_FAILURES.tarpcar),
+            "YOU HIT THE TARP CAR. IT HAS NOT MOVED SINCE 2011.", "crash");
+          break;
+        case "pothole":
+          if ((n.size ?? 1) < 0.95) {
+            s.stats = { ...s.stats, score: Math.max(0, s.stats.score - 50) };
+            impact();
+            scoreBurst("BUMP -50", false);
+            sfx("crash");
+            break;
+          }
+          hit(1, 0, pickFailure("pothole", DELIVERY_COLLISION_FAILURES.pothole),
+            "POTHOLE! THE SUSPENSION HAS FILED A COMPLAINT.", "crash");
+          break;
         default:
           hit(1, 0, pickFailure("pothole", DELIVERY_COLLISION_FAILURES.pothole),
             "POTHOLE! THE SUSPENSION HAS FILED A COMPLAINT.", "crash");
@@ -965,12 +1037,12 @@ export default function DeliveryGame() {
         n.y > 80 &&
         n.y < 90 &&
         onCurb &&
-        (n.kind === "abandoned" || n.kind === "tent")
+        (n.kind === "abandoned" || n.kind === "tent" || n.kind === "dumpster")
       ) {
         s.stats = { ...s.stats, hits: s.stats.hits + 1, combo: 0 };
         s.scenery = scenery;
         endRun(
-          pickFailure(n.kind, DELIVERY_COLLISION_FAILURES[n.kind]),
+          pickFailure(n.kind, DELIVERY_COLLISION_FAILURES[n.kind === "dumpster" ? "abandoned" : n.kind]),
           n.kind === "tent" ? "ouch" : "crash",
         );
         return;
@@ -1013,15 +1085,16 @@ export default function DeliveryGame() {
       // Lets automated play-tests read the street in development builds.
       if (process.env.NODE_ENV !== "production")
         (window as unknown as { __deliverySim?: Sim }).__deliverySim = sim.current;
-      if (f.toast && now - f.toast.at > 1700) f.toast = null;
+      if (f.toast && now - f.toast.at > 1500 + f.toast.text.length * 28) f.toast = null;
       f.bursts = f.bursts.filter((b) => now - b.at < 900);
       f.throws = f.throws.filter((t) => now - t.at < 330);
       f.particles = f.particles.filter((p) => now - p.at < 600);
-      drawStreet(ctx, streetFrame(sim.current), f, {
-        countdown: state.countdown,
-        wrecked: state.wrecked,
-        reducedEffects: state.reducedEffects,
-      }, now);
+      if (assetsRef.current)
+        drawStreet(ctx, streetFrame(sim.current), f, {
+          countdown: state.countdown,
+          wrecked: state.wrecked,
+          reducedEffects: state.reducedEffects,
+        }, now, assetsRef.current);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -1053,6 +1126,7 @@ export default function DeliveryGame() {
     setStartError("");
     storageSet(DRIVER_NAME_KEY, name.trim());
     try {
+      assetsRef.current = await loadAssets();
       const response = await fetch("/api/delivery-boy/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1077,6 +1151,21 @@ export default function DeliveryGame() {
       setStarting(false);
     }
   }
+  // Testing only (?practice in the URL): jump straight to any day. Practice
+  // shifts never contact the server, so they can't earn a prize.
+  async function practice(day: number) {
+    try {
+      assetsRef.current = await loadAssets();
+    } catch {
+      setStartError("Could not load the game art. Refresh and try again.");
+      return;
+    }
+    runRef.current = null;
+    setRun(null);
+    setReward(null);
+    setNewBest(false);
+    begin(day, fresh());
+  }
   async function nextRoute() {
     if (checkpointState === "saving") return;
     if (checkpointState === "error") {
@@ -1087,7 +1176,11 @@ export default function DeliveryGame() {
       begin(stage + 1, sim.current.stats);
       return;
     }
-    if (!run || claiming) return;
+    if (!run) {
+      setMode("home");
+      return;
+    }
+    if (claiming) return;
     setClaiming(true);
     try {
       const response = await fetch("/api/delivery-boy/run", {
@@ -1228,6 +1321,17 @@ export default function DeliveryGame() {
             </li>
           </ul>
           <div className="sub-prize">SURVIVE MONDAY–FRIDAY · WIN: {DELIVERY_PRIZE.name.toUpperCase()}</div>
+          {practiceMode && (
+            <div className="practice-days">
+              <b>PRACTICE (TESTING ONLY · NO PRIZE)</b>
+              {DELIVERY_STAGES.map((route, index) => (
+                <button type="button" key={route.day} onClick={() => void practice(index + 1)}>
+                  {route.day.slice(0, 3)}
+                  {index >= 3 ? " ☾" : ""}
+                </button>
+              ))}
+            </div>
+          )}
         </form>
       )}
       {mode === "play" && (
@@ -1401,7 +1505,9 @@ export default function DeliveryGame() {
                 : claiming
                   ? "CHECKING YOUR WEEK…"
                   : stage === DELIVERY_STAGES.length
-                    ? "CLAIM FREE SUB"
+                    ? run
+                      ? "CLAIM FREE SUB"
+                      : "PRACTICE OVER · MENU"
                     : `CLOCK IN FOR ${DELIVERY_STAGES[stage].day} →`}
           </button>
         </section>

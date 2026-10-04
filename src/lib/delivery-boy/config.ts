@@ -60,6 +60,26 @@ export const DELIVERY_FACEBOOK_PEOPLE = [
 
 /** Posted even when the sub landed perfectly. {item} {address} are filled in. */
 export const DELIVERY_FACEBOOK_DELIVERED = [
+  "Found a HAIR in my {item}. The cook is bald. The driver is bald. I have a chunk missing from the back of my head but that is unrelated and I resent the implication. 1 star.",
+  "My {item} was perfect, which is how I know they're hiding something. Nobody is this good at sandwiches without a reason.",
+  "The sub was cut in half. I asked for it whole. I then cut it in half myself because it was too long. Still mad.",
+  "There was too much meat in my {item}. I had to eat it all. I have a doctor's appointment Thursday and I'll be bringing this up.",
+  "The pickle was looking at me. I'm not saying it was alive. I'm saying it was looking at me.",
+  "Got my {item} in 18 minutes. My last relationship lasted 14. I'm not ready to be this happy.",
+  "They put mayo on it like I asked. I did not ask. I checked the receipt and I did ask. I'm leaving the review up anyway.",
+  "The driver complimented my wreath. It's October. I don't have a wreath. Who's wreath did he see.",
+  "Sub was hot. I ordered a cold sub. Then it got cold. Then I wanted it hot. Nobody at this deli thinks ahead.",
+  "The bag was knotted so well I had to use the good scissors. My wife uses the good scissors for fabric only. My marriage is in trouble and the sub was great.",
+  "The delivery guy said 'enjoy' like he knew something. I didn't enjoy it. I mean I did. But I didn't want to.",
+  "Food was delicious but I can't find the receipt and I'm convinced it was delivered to my house by mistake. Keeping it.",
+  "My {item} arrived exactly when the app said. That's never happened. I've already called my cousin in Massena to tell him nothing is real anymore.",
+  "There was a hair in my food. It was mine. I'd like to know what the deli plans to do about it.",
+  "I ordered extra onions. They gave me extra onions. Now my car smells like extra onions. Should've warned me.",
+  "Delivered right to the porch. Problem is I was on the porch. The sub hit me. Still ate it. 2 stars.",
+  "They spelled my name right on the bag. I didn't give them my name. 5 stars but I'm sleeping with the lights on.",
+  "Got a free cookie I didn't ask for. Now I have to eat a cookie. Some of us are trying.",
+  "The bread was so fresh it was still warm and I felt like it was judging my kitchen. Clean your own kitchen, bread.",
+  "Perfectly fine sub. Wanted to leave a review anyway so the page knows I'm watching.",
   "My {item} arrived at {address} hot, on time, and correct. I have never been so suspicious in my life. Who is running this deli and what do they want.",
   "Driver threw my {item} onto the porch. It landed perfectly. Too perfectly. I watched the Ring footage 40 times and I believe he has done this before. 2 stars.",
   "Ordered a {item}. Received a {item}. Where is the surprise? Where is the adventure? Ogdensburg used to have spirit.",
@@ -201,6 +221,14 @@ export const DELIVERY_PRIZE = {
   expiresDays: 30,
 };
 export const DELIVERY_COMPLAINTS = [
+  "Customer found a hair in their sub. The cook is bald. The driver is bald. The customer is missing a patch of hair from the back of their head. Investigation closed; customer is still furious.",
+  "Customer says the sub was 'too correct' and requests that next time we 'surprise them a little.'",
+  "Customer reports the delivery was so fast it 'felt rushed' and the sub 'didn't get to know the neighborhood.'",
+  "Customer wants a refund because the sub was better than their mother's. Their mother has been informed. Their mother agrees.",
+  "Customer says the driver waved too enthusiastically and it 'set an expectation for the rest of the week.'",
+  "Customer received exactly what they ordered and is demanding to know who told us.",
+  "Customer says the bag was 'too easy to open' and they felt 'unchallenged.'",
+  "Customer complained that the sub was cut on a diagonal 'at a political angle.'",
   "Customer says you never arrived. Route log: you stared at each other through the storm door for 2:07.",
   "Customer reports the sub was shaken. The road reports the customer owns a driveway made entirely of potholes.",
   "Customer asked for quiet delivery, then called because you did not knock.",
@@ -261,6 +289,18 @@ export const DELIVERY_ROUTE_SUCCESSES = [
   "All deliveries successful. DPW will commemorate the occasion the next time there is a full moon and available overtime.",
 ] as const;
 export const DELIVERY_COLLISION_FAILURES = {
+  ebike: [
+    "You clipped a kid on an e-bike doing 31 mph on the sidewalk, the road, and briefly a porch. He is fine. He is livestreaming. You are trending.",
+    "The e-bike kid swerved into you, then asked if you were okay, then asked if you had any free subs. You had eleven. Now you have zero and a lawyer.",
+    "A twelve-year-old on a 3,000-watt e-bike passed you on the right, the left, and spiritually through the middle. Insurance calls this an act of Gen Alpha.",
+    "You hit an e-bike kid with no helmet, no lights, and a speaker playing music you are too old to identify. His mom has already posted on Facebook.",
+  ],
+  tarpcar: [
+    "You hit the tarp-covered car. Nobody has seen what is under the tarp since 2011. The tarp has filed a claim on its own behalf.",
+    "The blue tarp car absorbed the impact and released a family of raccoons, three hubcaps, and a 2009 Price Chopper receipt.",
+    "You struck a car that is legally a car, structurally a tarp, and emotionally a family heirloom. The owner wants it 'restored to original condition.' Nobody knows the original condition.",
+    "The tarp flew off. Under it was another tarp. Under that was a snowmobile. You are now in a long-term relationship with this family's attorney.",
+  ],
   dog: [
     "You hit a dog. The dog is physically fine, emotionally furious, and has left a one-star review under three accounts.",
     "A dog intercepted the Equinox. Its owner arrived before the yelp finished and already had your manager on speaker.",

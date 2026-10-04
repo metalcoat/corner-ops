@@ -12,6 +12,7 @@ import {
   DELIVERY_ROUTE_SUCCESSES,
 } from "@/lib/delivery-boy/config";
 import type { House } from "./street-model";
+import { randomComplaint } from "@/lib/games/complaints";
 
 export type FacebookPost = {
   id: number;
@@ -90,9 +91,8 @@ export function buildFeed(log: House[], shiftCleared: boolean): FacebookPost[] {
       id: ++id,
       author: "Corner Deli",
       page: true,
-      text: `Shift complete! ${pick(
-        missed.length ? DELIVERY_COMPLAINTS : DELIVERY_ROUTE_SUCCESSES,
-      )}`,
+      // Even a flawless shift gets a ridiculous complaint pinned to the page.
+      text: `Shift complete! ${pick(DELIVERY_ROUTE_SUCCESSES)} Pinned complaint of the day: ${Math.random() < 0.6 ? randomComplaint() : pick(DELIVERY_COMPLAINTS)}`,
       reactions: reactions(0.6),
       comments: comments(1),
     });

@@ -13,7 +13,9 @@ export type HazardType =
   | "cow"
   | "person"
   | "car"
-  | "pothole";
+  | "pothole"
+  | "ebike"
+  | "tarpcar";
 export type Pickup = "boost" | "slow" | "restock";
 export type Side = "left" | "right";
 export type Thing = {
@@ -25,6 +27,10 @@ export type Thing = {
   speed?: number;
   /** Lanes per second, for animals running across the street. */
   vx?: number;
+  /** Pothole size (0.6–1.6) or e-bike weave phase / car paint variant. */
+  size?: number;
+  phase?: number;
+  variant?: number;
 };
 // Paperboy rules: houses that ordered glow and want their food on the porch;
 // houses that didn't order can still be hit with a "free sample".
@@ -36,13 +42,34 @@ export type House = {
   number: number;
   address: string;
   item: string;
-  look: number;
+  /** What stands on the lot; fixed per address so a street looks the same every run. */
+  kind: LotKind;
+  seed: number;
   state: "pending" | "delivered" | "missed" | "sampled";
   landed?: "porch" | "lawn";
 };
+export type LotKind =
+  | "victorian"
+  | "foursquare"
+  | "ranch"
+  | "duplex"
+  | "trailer"
+  | "brick"
+  | "vacant"
+  | "minimart"
+  | "dollar"
+  | "church";
+export const RESIDENTIAL = new Set<LotKind>([
+  "victorian",
+  "foursquare",
+  "ranch",
+  "duplex",
+  "trailer",
+  "brick",
+]);
 export type Scenery = {
   id: number;
-  kind: "abandoned" | "tent" | "cart" | "trash";
+  kind: "abandoned" | "tent" | "cart" | "trash" | "dumpster" | "pole" | "sign";
   side: Side;
   y: number;
 };
@@ -55,14 +82,15 @@ export type Stats = {
   bestCombo: number;
 };
 
-// ---- screen geometry (native SNES-ish resolution) ----
-export const SCREEN_W = 256;
-export const SCREEN_H = 224;
-export const HUD_H = 21;
+// ---- screen geometry (SNES hi-res 512×448) ----
+export const SCREEN_W = 512;
+export const SCREEN_H = 448;
+export const HUD_H = 40;
 export const PLAY_Y = HUD_H;
 export const PLAY_H = SCREEN_H - HUD_H;
-export const ROAD_LEFT = 72;
-export const ROAD_RIGHT = 184;
+export const ROAD_LEFT = 176;
+export const ROAD_RIGHT = 336;
+export const SIDEWALK = { left: [150, 172], right: [340, 362] } as const;
 export const LANE_PX = (ROAD_RIGHT - ROAD_LEFT) / 2;
 export const laneX = (lane: number) => ROAD_LEFT + lane * LANE_PX;
 export const pctY = (y: number) => PLAY_Y + (y / 100) * PLAY_H;
@@ -80,9 +108,9 @@ export const SCROLL_RATE = 18;
 export const THROW_WINDOW = { start: 58, end: 90 };
 export const PORCH_WINDOW = { start: 69, end: 81 };
 /** Distance (in screen %) between houses on the same side of the street. */
-export const LOT_SPACING = 27;
+export const LOT_SPACING = 30;
 export const LOT_JITTER = 6;
-export const HOUSE_SPAWN_Y = -24;
+export const HOUSE_SPAWN_Y = -12;
 export const INVULNERABLE_SECONDS = 1.2;
 export const WRECK_SECONDS = 1.1;
 export const EXTRA_SUBS = 3;
@@ -140,6 +168,10 @@ export function collisionRadius(type: Thing["type"]) {
       return 0.11;
     case "squirrel":
       return 0.07;
+    case "ebike":
+      return 0.14;
+    case "tarpcar":
+      return 0.32;
     default:
       return 0.18;
   }

@@ -698,3 +698,28 @@
   display: block;
   margin-top: 10px;
 }
+.paperboy-screen canvas {
+  width: 512px;
+  height: 448px;
+}
+.practice-days {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 10px;
+  border: 2px dashed #8a8f96;
+}
+.practice-days b {
+  width: 100%;
+  font-size: 0.75rem;
+  color: #c8c8c0;
+}
+.practice-days button {
+  padding: 6px 12px;
+  border: 2px solid #f4f4ec;
+  background: #1c2850;
+  color: #f4f4ec;
+  font-weight: 900;
+}
