@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { ensureSchema } from "@/lib/db";
 import { ensureOrderingSchema } from "@/lib/ordering-db";
+import { dropTableConstraintIfPresent } from "@/lib/schema-constraints";
 
 let inventorySchemaPromise: Promise<void> | null = null;
 
@@ -129,7 +130,7 @@ export function ensureOrderingInventorySchema(): Promise<void> {
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS ordering_inventory_counts_item_idx ON ordering_inventory_counts (inventory_item_id, counted_at DESC)`;
-      await sql`ALTER TABLE ordering_inventory_counts DROP CONSTRAINT IF EXISTS ordering_inventory_counts_expected_quantity_check`;
+      await dropTableConstraintIfPresent("ordering_inventory_counts", "ordering_inventory_counts_expected_quantity_check");
 
       // Link sellable menu items/modifier options to stock items. Quantity usage
       // is deliberately configurable so automatic depletion only occurs when a

@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { ensureOrderingTimingSchema } from "@/lib/ordering-timing-schema";
+import { preOpenAsapAllowed, previousDaySpilloverCovers, sameDayWindowCovers } from "@/lib/ordering-hours-math";
 
 export type OrderingService = "all" | "pickup" | "delivery" | "dine_in" | "online" | "phone";
 export type AvailabilitySource = "emergency_closure" | "special_service" | "special_general" | "weekly_service" | "weekly_general" | "unconfigured";
@@ -37,10 +38,19 @@ function minutes(value: string): number {
   return hour * 60 + minute;
 }
 
-/** The configured cutoff minute is inclusive through second 59. */
+/**
+ * The configured cutoff minute is inclusive through second 59. This tests the
+ * window's full span ignoring which date an overnight window belongs to; date-
+ * aware checks use sameDayWindowCovers/previousDaySpilloverCovers.
+ */
 export function isWithinInclusiveWindow(openMinute: number, cutoffMinute: number, currentMinute: number): boolean {
   if (openMinute < cutoffMinute) return currentMinute >= openMinute && currentMinute <= cutoffMinute;
   return currentMinute >= openMinute || currentMinute <= cutoffMinute;
+}
+
+function addDays(date: Pick<LocalParts, "year" | "month" | "day">, days: number) {
+  const value = new Date(Date.UTC(date.year, date.month - 1, date.day + days));
+  return { year: value.getUTCFullYear(), month: value.getUTCMonth() + 1, day: value.getUTCDate() };
 }
 
 function wallTimeUtc(date: Pick<LocalParts, "year" | "month" | "day">, minuteOfDay: number, timeZone: string): Date {
@@ -92,6 +102,37 @@ export async function resolveOrderingAvailability(input: {
   ` as Array<{ reason: string; customer_message: string }>;
   if (closures[0]) return { open: false, orderable: false, reason: closures[0].customer_message || closures[0].reason || "Ordering is temporarily closed.", opensAt: null, cutoffAt: null, nextAvailableAt: null, sourceRule: "emergency_closure", timezone };
 
+  const currentMinute = local.hour * 60 + local.minute;
+  const entry = input.orderEntryStartedAt ? localParts(input.orderEntryStartedAt, timezone) : null;
+
+  // Overnight windows belong to the date they open on, so the early-morning
+  // part of yesterday's late window (e.g. 18:00-02:00) is checked first.
+  const previousDate = addDays(local, -1);
+  const previousKey = dateKey(previousDate);
+  const previousSpecial = (await sql`
+    SELECT service_type, status, opens_at::text, closes_at::text, ordering_opens_at::text, ordering_cutoff_at::text, label, 0 AS sort_order
+    FROM ordering_special_hours WHERE business=${input.business} AND business_date=${previousKey}::date AND service_type IN ('all', ${service})
+    ORDER BY CASE WHEN service_type=${service} THEN 0 ELSE 1 END LIMIT 1
+  ` as SpecialRow[])[0];
+  const previousWindows = previousSpecial
+    ? { rows: previousSpecial.status === "closed" ? [] : [previousSpecial] as WindowRow[], source: (previousSpecial.service_type === service ? "special_service" : "special_general") as AvailabilitySource }
+    : chooseRows(await sql`
+      SELECT service_type, opens_at::text, closes_at::text, ordering_opens_at::text, ordering_cutoff_at::text, sort_order
+      FROM ordering_operating_windows WHERE business=${input.business} AND weekday=${(local.weekday + 6) % 7} AND active=TRUE AND service_type IN ('all', ${service})
+      ORDER BY service_type, sort_order, opens_at
+    ` as WindowRow[], service);
+  for (const window of previousWindows.rows) {
+    const orderingOpen = minutes(window.ordering_opens_at || window.opens_at);
+    const cutoff = minutes(window.ordering_cutoff_at || window.closes_at);
+    const open = previousDaySpilloverCovers(minutes(window.opens_at), minutes(window.closes_at), currentMinute);
+    const entryMinute = entry ? entry.hour * 60 + entry.minute : -1;
+    const startedInWindow = entry !== null && orderingOpen > cutoff && (
+      (dateKey(entry) === previousKey && entryMinute >= orderingOpen)
+      || (dateKey(entry) === businessDate && previousDaySpilloverCovers(orderingOpen, cutoff, entryMinute)));
+    const orderable = previousDaySpilloverCovers(orderingOpen, cutoff, currentMinute) || startedInWindow;
+    if (open || orderable) return { open, orderable, reason: orderable ? "Ordering is available." : "The store is outside ordering hours.", opensAt: wallTimeUtc(previousDate, orderingOpen, timezone), cutoffAt: wallTimeUtc(local, cutoff, timezone), nextAvailableAt: null, sourceRule: previousWindows.source, timezone };
+  }
+
   const specials = await sql`
     SELECT service_type, status, opens_at::text, closes_at::text, ordering_opens_at::text, ordering_cutoff_at::text, label, 0 AS sort_order
     FROM ordering_special_hours WHERE business=${input.business} AND business_date=${businessDate}::date AND service_type IN ('all', ${service})
@@ -120,21 +161,21 @@ export async function resolveOrderingAvailability(input: {
     if (!configured.length) return { open: false, orderable: false, reason: "Ordering hours are not configured for this service and date.", opensAt: null, cutoffAt: null, nextAvailableAt: null, sourceRule: "unconfigured", timezone };
     return { open: false, orderable: false, reason: "This service is closed on the selected date.", opensAt: null, cutoffAt: null, nextAvailableAt: null, sourceRule: configured[0].service_type === service ? "weekly_service" : "weekly_general", timezone };
   }
-  const currentMinute = local.hour * 60 + local.minute;
-  const entry = input.orderEntryStartedAt ? localParts(input.orderEntryStartedAt, timezone) : null;
   let nextOpen: Date | null = null;
   for (const window of selected) {
     const openMinute = minutes(window.opens_at);
     const closeMinute = minutes(window.closes_at);
     const orderingOpen = minutes(window.ordering_opens_at || window.opens_at);
     const cutoff = minutes(window.ordering_cutoff_at || window.closes_at);
-    const open = isWithinInclusiveWindow(openMinute, closeMinute, currentMinute);
-    const startedInWindow = entry && dateKey(entry) === businessDate && isWithinInclusiveWindow(orderingOpen, cutoff, entry.hour * 60 + entry.minute);
-    const orderable = isWithinInclusiveWindow(orderingOpen, cutoff, currentMinute) || Boolean(startedInWindow);
+    const open = sameDayWindowCovers(openMinute, closeMinute, currentMinute);
+    const startedInWindow = entry && dateKey(entry) === businessDate && sameDayWindowCovers(orderingOpen, cutoff, entry.hour * 60 + entry.minute);
+    const orderable = sameDayWindowCovers(orderingOpen, cutoff, currentMinute) || Boolean(startedInWindow);
     const opensAt = wallTimeUtc(local, orderingOpen, timezone);
-    const cutoffAt = wallTimeUtc(local, cutoff, timezone);
+    const cutoffAt = wallTimeUtc(cutoff < orderingOpen ? addDays(local, 1) : local, cutoff, timezone);
     if (opensAt > at && (!nextOpen || opensAt < nextOpen)) nextOpen = opensAt;
-    if (input.allowPreOpenAsap && currentMinute < orderingOpen)
+    // ASAP before opening is only taken within the pre-open lead window, not
+    // hours ahead (e.g. at 3 a.m. for an 11 a.m. opening).
+    if (input.allowPreOpenAsap && currentMinute < orderingOpen && preOpenAsapAllowed((opensAt.getTime() - at.getTime()) / 60_000))
       return { open: false, orderable: true, reason: "ASAP order accepted before opening.", opensAt, cutoffAt, nextAvailableAt: opensAt, sourceRule: source, timezone };
     if (open || orderable) return { open, orderable, reason: orderable ? "Ordering is available." : "The store is outside ordering hours.", opensAt, cutoffAt, nextAvailableAt: nextOpen, sourceRule: source, timezone };
   }
@@ -147,6 +188,7 @@ export async function resolveOrderingAvailability(input: {
       if(!future.length)continue;
       const firstMinute=Math.min(...future.map(row=>minutes(row.ordering_opens_at||row.opens_at)));
       const candidate=wallTimeUtc({year:futureDate.getUTCFullYear(),month:futureDate.getUTCMonth()+1,day:futureDate.getUTCDate()},firstMinute,timezone);
+      if(!preOpenAsapAllowed((candidate.getTime()-at.getTime())/60_000))break;
       const confirmed=await resolveOrderingAvailability({business:input.business,serviceType:input.serviceType,at:candidate});
       if(confirmed.orderable)return {open:false,orderable:true,reason:"ASAP order accepted for the next opening.",opensAt:candidate,cutoffAt:null,nextAvailableAt:candidate,sourceRule:confirmed.sourceRule,timezone};
     }

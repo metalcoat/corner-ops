@@ -16,7 +16,7 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
     let order=(await sql`SELECT * FROM ordering_orders WHERE id=${id} AND business='Corner Deli'`)[0];
     if(!order||order.status!=="draft")return Response.json({error:"This order is not open for changes."},{status:409});
     const reopen=(await sql`SELECT 1 FROM ordering_order_events WHERE order_id=${id} AND event_type='order_reopened_for_additions' AND NOT EXISTS(SELECT 1 FROM ordering_order_events later WHERE later.order_id=${id} AND later.event_type='order_addition_submitted' AND later.created_at>ordering_order_events.created_at) ORDER BY created_at DESC LIMIT 1`)[0];
-    if(!reopen)return Response.json({error:"Use Open in POS before changing a sent order."},{status:409});
+    if(!reopen&&order.submitted_at)return Response.json({error:"Use Open in POS before changing a sent order."},{status:409});
     const items=Array.isArray(body.items)?body.items:[];
     const orderItemIds=items.length?await appendConfiguredOrderItemsWithVariants(id,"Corner Deli",items):[];
     order=(await sql`SELECT * FROM ordering_orders WHERE id=${id}`)[0];

@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
+import { ensureTableConstraint } from "@/lib/schema-constraints";
 
 let ready: Promise<void> | null = null;
 
@@ -48,8 +49,7 @@ export function ensureOrderingPromotionSchema(): Promise<void> {
       )
     `;
     await sql`CREATE INDEX IF NOT EXISTS ordering_order_promotions_order_idx ON ordering_order_promotion_applications(order_id, application_sequence)`;
-    await sql`ALTER TABLE ordering_order_promotion_allocations DROP CONSTRAINT IF EXISTS ordering_order_promotion_allocations_order_item_id_fkey`;
-    await sql`ALTER TABLE ordering_order_promotion_allocations ADD CONSTRAINT ordering_order_promotion_allocations_order_item_id_fkey FOREIGN KEY(order_item_id) REFERENCES ordering_order_items(id) ON DELETE CASCADE`;
+    await ensureTableConstraint("ordering_order_promotion_allocations", "ordering_order_promotion_allocations_order_item_id_fkey", `FOREIGN KEY(order_item_id) REFERENCES ordering_order_items(id) ON DELETE CASCADE`);
   })().catch((error) => { ready = null; throw error; });
   return ready;
 }

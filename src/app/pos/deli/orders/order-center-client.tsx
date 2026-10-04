@@ -120,7 +120,18 @@ export default function OrderCenterClient() {
     const b = await r.json();
     if (r.ok) setSelected(b.order);
   }
+  // Paying a sent order does not need it pulled back to draft: hand it to the
+  // POS checkout as-is (the same handoff the payment station uses).
+  function cashOut(order: Order) {
+    localStorage.setItem("corner-ops-checkout-order", JSON.stringify({ id: order.id, displayNumber: order.display_number, totalCents: Number(order.total_cents), deliveryFeeCents: Number((order as Order & { delivery_fee_cents?: number }).delivery_fee_cents || 0), timingMessage: "", kitchenTimingLabel: "", scheduledFor: order.scheduled_for, promotions: [], loyalty: [], orderItemIds: [], checkoutOnly: true }));
+    setSelected(null);
+    router.push("/pos/deli");
+    window.dispatchEvent(new Event("corner-ops-checkout-order"));
+  }
   async function reopen(order: Order) {
+    // Editing a sent order takes it off the kitchen line until it is sent
+    // again, so it is only done on an explicit Edit with confirmation.
+    if (order.status !== "draft" && !window.confirm(`Edit order #${order.display_number}? The kitchen screen will show it as being edited until you send the changes. If nothing is changed it returns to the kitchen automatically after 15 minutes.`)) return;
     setReopenBusy(true);
     setError("");
     try {
@@ -254,7 +265,7 @@ export default function OrderCenterClient() {
         const unpaid = !["paid", "refunded"].includes(o.payment_status);
         const pickupAttention = unpaid && o.service_type === "pickup" && o.status !== "cancelled" && clock - new Date(o.created_at).getTime() >= 40 * 60 * 1000;
         return (
-        <button className={`ocOrder ${pickupAttention ? "pickupAttention" : ""}`} key={o.id} onClick={() => void (o.voided_at || o.status === "cancelled" ? details(o) : reopen(o))}>
+        <button className={`ocOrder ${pickupAttention ? "pickupAttention" : ""}`} key={o.id} onClick={() => void details(o)}>
           {o.overdue_unpaid && (
             <em>
               UNPAID FROM{" "}
@@ -493,8 +504,11 @@ export default function OrderCenterClient() {
             ))}
             {!selected.voided_at && (
               <div className="ocDetailActions">
+                {selected.status !== "draft" && ["sent_to_kitchen", "in_progress", "ready", "completed"].includes(selected.status) && !["paid", "refunded"].includes(selected.payment_status) && Number(selected.amount_due_cents) > 0 && (
+                  <button className="primary" disabled={reopenBusy} onClick={() => cashOut(selected)}>CASH OUT IN POS</button>
+                )}
                 {["draft", "sent_to_kitchen", "in_progress", "ready", "completed"].includes(selected.status) && (
-                  <button disabled={reopenBusy} onClick={() => void reopen(selected)}>{reopenBusy ? "OPENING…" : !["paid", "refunded"].includes(selected.payment_status) ? "OPEN IN POS · CASH OUT / EDIT" : "OPEN IN POS · EDIT / REFUND"}</button>
+                  <button disabled={reopenBusy} onClick={() => void reopen(selected)}>{reopenBusy ? "OPENING…" : selected.status === "draft" ? "OPEN IN POS · CASH OUT / EDIT" : !["paid", "refunded"].includes(selected.payment_status) ? "EDIT ORDER IN POS" : "OPEN IN POS · EDIT / REFUND"}</button>
                 )}
               </div>
             )}

@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingChannelSchema } from "@/lib/ordering-channel-schema";
+import { ensureTableConstraint } from "@/lib/schema-constraints";
 
 let deliverySchemaPromise: Promise<void> | null = null;
 
@@ -50,13 +51,8 @@ export function ensureOrderingDeliverySchema(): Promise<void> {
         )
       `;
 
-      await sql`ALTER TABLE ordering_delivery_policies DROP CONSTRAINT IF EXISTS ordering_delivery_policies_minimum_basis_check`;
+      await ensureTableConstraint("ordering_delivery_policies", "ordering_delivery_policies_minimum_basis_check", `CHECK (minimum_basis IN ('merchandise_after_discounts', 'order_total_including_delivery_fee'))`);
       await sql`ALTER TABLE ordering_delivery_policies ALTER COLUMN minimum_basis SET DEFAULT 'merchandise_after_discounts'`;
-      await sql`
-        ALTER TABLE ordering_delivery_policies
-        ADD CONSTRAINT ordering_delivery_policies_minimum_basis_check
-        CHECK (minimum_basis IN ('merchandise_after_discounts', 'order_total_including_delivery_fee'))
-      `;
 
       // Corner Deli policy: $16.00 of merchandise is required for delivery.
       // The mileage-based delivery fee is then added on top. The customer may
@@ -117,19 +113,8 @@ export function ensureOrderingDeliverySchema(): Promise<void> {
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS minimum_order_adjustment_cents INTEGER NOT NULL DEFAULT 0`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS tax_rate_bps_snapshot INTEGER NOT NULL DEFAULT 0`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS prices_include_tax_snapshot BOOLEAN NOT NULL DEFAULT TRUE`;
-      await sql`ALTER TABLE ordering_orders DROP CONSTRAINT IF EXISTS ordering_orders_delivery_distance_check`;
-      await sql`ALTER TABLE ordering_orders ADD CONSTRAINT ordering_orders_delivery_distance_check CHECK (delivery_distance_miles IS NULL OR delivery_distance_miles >= 0)`;
-      await sql`ALTER TABLE ordering_orders DROP CONSTRAINT IF EXISTS ordering_orders_delivery_fee_check`;
-      await sql`
-        ALTER TABLE ordering_orders
-        ADD CONSTRAINT ordering_orders_delivery_fee_check
-        CHECK (
-          delivery_fee_cents >= 0
-          AND minimum_order_cents_snapshot >= 0
-          AND minimum_order_adjustment_cents >= 0
-          AND tax_rate_bps_snapshot >= 0
-        )
-      `;
+      await ensureTableConstraint("ordering_orders", "ordering_orders_delivery_distance_check", `CHECK (delivery_distance_miles IS NULL OR delivery_distance_miles >= 0)`);
+      await ensureTableConstraint("ordering_orders", "ordering_orders_delivery_fee_check", `CHECK ( delivery_fee_cents >= 0 AND minimum_order_cents_snapshot >= 0 AND minimum_order_adjustment_cents >= 0 AND tax_rate_bps_snapshot >= 0 )`);
 
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_delivery_minimum_exceptions (

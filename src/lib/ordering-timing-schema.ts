@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
+import { ensureTableConstraint } from "@/lib/schema-constraints";
 
 let timingSchemaPromise: Promise<void> | null = null;
 
@@ -232,17 +233,8 @@ export function ensureOrderingTimingSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS kitchen_release_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS operational_follow_up_reason TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS affected_by_closure_id UUID`;
-      await sql`ALTER TABLE ordering_orders DROP CONSTRAINT IF EXISTS ordering_orders_timing_mode_check`;
-      await sql`ALTER TABLE ordering_orders ADD CONSTRAINT ordering_orders_timing_mode_check CHECK (timing_mode IN ('asap', 'future'))`;
-      await sql`ALTER TABLE ordering_orders DROP CONSTRAINT IF EXISTS ordering_orders_quoted_lead_check`;
-      await sql`
-        ALTER TABLE ordering_orders
-        ADD CONSTRAINT ordering_orders_quoted_lead_check
-        CHECK (
-          quoted_lead_min_minutes >= 0
-          AND quoted_lead_max_minutes >= quoted_lead_min_minutes
-        )
-      `;
+      await ensureTableConstraint("ordering_orders", "ordering_orders_timing_mode_check", `CHECK (timing_mode IN ('asap', 'future'))`);
+      await ensureTableConstraint("ordering_orders", "ordering_orders_quoted_lead_check", `CHECK ( quoted_lead_min_minutes >= 0 AND quoted_lead_max_minutes >= quoted_lead_min_minutes )`);
 
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS store_was_open BOOLEAN`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS next_open_at TIMESTAMPTZ`;

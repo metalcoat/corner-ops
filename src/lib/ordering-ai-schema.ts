@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingChannelSchema } from "@/lib/ordering-channel-schema";
+import { ensureTableConstraint } from "@/lib/schema-constraints";
 
 let aiSchemaPromise: Promise<void> | null = null;
 
@@ -15,12 +16,7 @@ export function ensureOrderingAiSchema(): Promise<void> {
       const sql = getSql();
 
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS fulfillment_question_state TEXT NOT NULL DEFAULT 'not_asked'`;
-      await sql`ALTER TABLE ordering_call_sessions DROP CONSTRAINT IF EXISTS ordering_call_sessions_fulfillment_question_state_check`;
-      await sql`
-        ALTER TABLE ordering_call_sessions
-        ADD CONSTRAINT ordering_call_sessions_fulfillment_question_state_check
-        CHECK (fulfillment_question_state IN ('not_asked', 'asked_unanswered', 'deferred_while_ordering', 'resolved'))
-      `;
+      await ensureTableConstraint("ordering_call_sessions", "ordering_call_sessions_fulfillment_question_state_check", `CHECK (fulfillment_question_state IN ('not_asked', 'asked_unanswered', 'deferred_while_ordering', 'resolved'))`);
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS deferred_required_fields JSONB NOT NULL DEFAULT '[]'::jsonb`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS pending_item JSONB`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS last_customer_turn_at TIMESTAMPTZ`;
@@ -34,8 +30,7 @@ export function ensureOrderingAiSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS selected_provider TEXT NOT NULL DEFAULT 'openai'`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS bridge_action TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE ordering_call_sessions ADD COLUMN IF NOT EXISTS operating_mode TEXT NOT NULL DEFAULT 'shadow'`;
-      await sql`ALTER TABLE ordering_call_sessions DROP CONSTRAINT IF EXISTS ordering_call_sessions_operating_mode_check`;
-      await sql`ALTER TABLE ordering_call_sessions ADD CONSTRAINT ordering_call_sessions_operating_mode_check CHECK(operating_mode IN ('shadow','assisted','autonomous'))`;
+      await ensureTableConstraint("ordering_call_sessions", "ordering_call_sessions_operating_mode_check", `CHECK(operating_mode IN ('shadow','assisted','autonomous'))`);
 
       await sql`CREATE INDEX IF NOT EXISTS ordering_call_sessions_fulfillment_state_idx ON ordering_call_sessions (business, fulfillment_question_state, updated_at DESC)`;
 
@@ -93,8 +88,7 @@ export function ensureOrderingAiSchema(): Promise<void> {
       `;
       await sql`INSERT INTO ordering_ai_phone_settings(business) VALUES('Corner Deli'),('Tiki') ON CONFLICT DO NOTHING`;
       await sql`ALTER TABLE ordering_ai_phone_settings ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'openai'`;
-      await sql`ALTER TABLE ordering_ai_phone_settings DROP CONSTRAINT IF EXISTS ordering_ai_phone_settings_provider_check`;
-      await sql`ALTER TABLE ordering_ai_phone_settings ADD CONSTRAINT ordering_ai_phone_settings_provider_check CHECK(provider IN ('openai','gemini'))`;
+      await ensureTableConstraint("ordering_ai_phone_settings", "ordering_ai_phone_settings_provider_check", `CHECK(provider IN ('openai','gemini'))`);
       await sql`ALTER TABLE ordering_ai_phone_settings ADD COLUMN IF NOT EXISTS openai_model TEXT NOT NULL DEFAULT 'gpt-realtime-1.5'`;
       await sql`ALTER TABLE ordering_ai_phone_settings ADD COLUMN IF NOT EXISTS gemini_model TEXT NOT NULL DEFAULT 'gemini-3.1-flash-live-preview'`;
       await sql`UPDATE ordering_ai_phone_settings SET openai_model=model WHERE provider='openai' AND openai_model='gpt-realtime-1.5' AND model<>''`;

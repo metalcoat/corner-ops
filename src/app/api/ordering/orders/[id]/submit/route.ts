@@ -3,6 +3,7 @@ import { OrderConflictError, submitDraftOrder } from "@/lib/ordering-order-lifec
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { orderingActor } from "@/lib/ordering-route-auth";
 import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
+import { kitchenPrintStatus } from "@/lib/ordering-hardware";
 
 export const runtime = "nodejs";
 
@@ -19,8 +20,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (!actor) return unauthorized();
     const { id } = await context.params;
     const result = await submitDraftOrder(id, business, actor, { approved: body.managerOverride === true, reason: String(body.overrideReason || "") });
-    await dispatchSubmittedOrderPrintJobs(id,business);
-    return Response.json(result);
+    // The order is already committed; a printer problem must not turn this
+    // into an error response. Report it so the POS can warn staff instead.
+    let paused = false, dispatchError = "";
+    try { paused = (await dispatchSubmittedOrderPrintJobs(id, business)).paused === true; }
+    catch (error) { dispatchError = error instanceof Error ? error.message : "Kitchen print dispatch failed."; }
+    const kitchen = await kitchenPrintStatus(id, business).catch(() => ({ status: "none" as const, printed: false, message: "" }));
+    const print = { ...kitchen, paused, message: dispatchError || kitchen.message, warning: result.kitchenTicketCreated === true && !paused && !kitchen.printed && kitchen.status !== "none" };
+    return Response.json({ ...result, print });
   } catch (error) {
     if (error instanceof OrderConflictError) return Response.json({ error: error.message }, { status: 409 });
     return apiError(error);

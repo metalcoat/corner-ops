@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { ensureSchema } from "@/lib/db";
 import { ensureOrderingSchema } from "@/lib/ordering-db";
+import { ensureTableConstraint } from "@/lib/schema-constraints";
 
 let orderingAccountSchemaPromise: Promise<void> | null = null;
 
@@ -67,12 +68,7 @@ export function ensureOrderingAccountSchema(): Promise<void> {
       `;
       await sql`CREATE INDEX IF NOT EXISTS ordering_payment_transactions_order_idx ON ordering_payment_transactions (order_id, created_at)`;
       await sql`CREATE INDEX IF NOT EXISTS ordering_payment_transactions_customer_idx ON ordering_payment_transactions (customer_id, created_at DESC)`;
-      await sql`ALTER TABLE ordering_payment_transactions DROP CONSTRAINT IF EXISTS ordering_payment_transactions_tender_type_check`;
-      await sql`
-        ALTER TABLE ordering_payment_transactions
-        ADD CONSTRAINT ordering_payment_transactions_tender_type_check
-        CHECK (tender_type IN ('cash', 'card', 'gift_card', 'house_account', 'employee_meal', 'manager_comp', 'store_credit', 'other'))
-      `;
+      await ensureTableConstraint("ordering_payment_transactions", "ordering_payment_transactions_tender_type_check", `CHECK (tender_type IN ('cash', 'card', 'gift_card', 'house_account', 'employee_meal', 'manager_comp', 'store_credit', 'other'))`);
       await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS client_mutation_id TEXT`;
       await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS check_id UUID`;
       await sql`ALTER TABLE ordering_payment_transactions ADD COLUMN IF NOT EXISTS amount_tendered_cents INTEGER NOT NULL DEFAULT 0`;
@@ -144,8 +140,7 @@ export function ensureOrderingAccountSchema(): Promise<void> {
         )
       `;
       await sql`CREATE INDEX IF NOT EXISTS ordering_check_lines_item_idx ON ordering_check_line_assignments(order_item_id)`;
-      await sql`ALTER TABLE ordering_check_line_assignments DROP CONSTRAINT IF EXISTS ordering_check_line_assignments_order_item_id_fkey`;
-      await sql`ALTER TABLE ordering_check_line_assignments ADD CONSTRAINT ordering_check_line_assignments_order_item_id_fkey FOREIGN KEY(order_item_id) REFERENCES ordering_order_items(id) ON DELETE CASCADE`;
+      await ensureTableConstraint("ordering_check_line_assignments", "ordering_check_line_assignments_order_item_id_fkey", `FOREIGN KEY(order_item_id) REFERENCES ordering_order_items(id) ON DELETE CASCADE`);
 
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_order_links (

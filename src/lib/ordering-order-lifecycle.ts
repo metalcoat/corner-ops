@@ -27,6 +27,7 @@ import { kitchenTicketTimingLines } from "@/lib/ordering-kitchen-ticket";
 import { compareKitchenItems } from "@/lib/ordering-line-format";
 import { ensureRestaurantPlatformSchema } from "@/lib/restaurant-platform";
 import { notifyPosStationsOfOnlineOrder } from "@/lib/push-notifications";
+import { abandonedReopenRestoreStatus, effectiveReopen } from "@/lib/ordering-reopen-policy";
 
 export type StoredOrderStatus =
   | "draft"
@@ -115,13 +116,14 @@ export async function reopenOrderForAdditions(
       const openReopen = (
         await sql`SELECT details FROM ordering_order_events WHERE order_id=${orderId} AND event_type='order_reopened_for_additions' AND NOT EXISTS(SELECT 1 FROM ordering_order_events later WHERE later.order_id=${orderId} AND later.event_type='order_addition_submitted' AND later.created_at>ordering_order_events.created_at) ORDER BY created_at DESC LIMIT 1`
       )[0];
-      if (openReopen) {
-        const details = openReopen.details as { existingItemIds?: string[] };
+      const details = effectiveReopen(openReopen?.details as { existingItemIds?: string[]; previousStatus?: string } | undefined);
+      if (details)
         return { order, orderItemIds: (details.existingItemIds || []).map(String) };
-      }
+      // A never-sent draft is simply opened for editing. Logging a reopen here
+      // made Send/payment treat it as an add-on to an order the kitchen never
+      // received (no kitchen ticket, inventory depletion, or loyalty).
       const existingItems =
         await sql`SELECT id FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`;
-      await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${order.version},'order_reopened_for_additions',${actor.type},${actor.id},${JSON.stringify({ previousStatus: "draft", previousTotalCents: Number(order.total_cents), previousPaidCents: Number(order.paid_cents), existingItemIds: existingItems.map((row) => String(row.id)), actorName: actor.name })}::jsonb)`;
       return { order, orderItemIds: existingItems.map((row) => String(row.id)) };
     }
     if (
@@ -141,6 +143,56 @@ export async function reopenOrderForAdditions(
       orderItemIds: existingItems.map((row) => String(row.id)),
     };
   });
+}
+
+// A sent order reopened in the POS and then left idle this long with no
+// unsent changes is put back in its prior kitchen status automatically.
+export const ABANDONED_REOPEN_MINUTES = 15;
+
+/**
+ * Restores reopened orders that were abandoned without changes. Orders with
+ * unsent additions or adjustments are left alone; the kitchen display shows
+ * them flagged as being edited at the POS until someone finishes the edit.
+ */
+export async function restoreAbandonedReopenedOrders(business: OrderingBusiness, limit = 20) {
+  await ensureOrderingPosSchema();
+  const sql = getSql();
+  const candidates = await sql`
+    SELECT o.id
+    FROM ordering_orders o
+    JOIN LATERAL (
+      SELECT details, created_at FROM ordering_order_events ev
+      WHERE ev.order_id=o.id AND ev.event_type='order_reopened_for_additions'
+      ORDER BY ev.created_at DESC LIMIT 1
+    ) reopen ON TRUE
+    WHERE o.business=${business} AND o.status='draft'
+      AND o.updated_at < NOW() - make_interval(mins => ${ABANDONED_REOPEN_MINUTES})
+      AND reopen.created_at < NOW() - make_interval(mins => ${ABANDONED_REOPEN_MINUTES})
+      AND reopen.details->>'previousStatus' IN ('sent_to_kitchen','in_progress','ready','completed')
+    ORDER BY o.updated_at
+    LIMIT ${limit}
+  `;
+  let restored = 0;
+  for (const candidate of candidates) {
+    const orderId = String(candidate.id);
+    const done = await withTransaction(async () => {
+      const tx = getSql();
+      const order = (await tx`SELECT id,status,version FROM ordering_orders WHERE id=${orderId} AND business=${business} FOR UPDATE`)[0];
+      if (!order || order.status !== "draft") return false;
+      const reopen = (await tx`SELECT details,created_at FROM ordering_order_events WHERE order_id=${orderId} AND event_type='order_reopened_for_additions' ORDER BY created_at DESC LIMIT 1`)[0];
+      if (!reopen) return false;
+      const items = await tx`SELECT id FROM ordering_order_items WHERE order_id=${orderId}`;
+      const adjustments = await tx`SELECT 1 FROM ordering_order_events WHERE order_id=${orderId} AND created_at>=${reopen.created_at} AND event_type IN('order_item_cancelled','order_fulfillment_changed') LIMIT 1`;
+      const priorStatus = abandonedReopenRestoreStatus(reopen.details as { existingItemIds?: string[]; previousStatus?: string }, items.map((row) => String(row.id)), adjustments.length > 0);
+      if (!priorStatus) return false;
+      const updated = await tx`UPDATE ordering_orders SET status=${priorStatus},locked_at=NOW(),version=version+1,updated_at=NOW() WHERE id=${orderId} AND status='draft' AND version=${order.version} RETURNING version`;
+      if (!updated.length) return false;
+      await tx`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${updated[0].version},'order_reopen_closed_no_changes','system','reopen-sweep',${JSON.stringify({ restoredStatus: priorStatus, reason: "abandoned_timeout", idleMinutes: ABANDONED_REOPEN_MINUTES })}::jsonb)`;
+      return true;
+    });
+    if (done) restored += 1;
+  }
+  return { restored };
 }
 
 function number(value: unknown): number {
@@ -400,17 +452,21 @@ export async function submitDraftOrder(
     const order = rows[0];
     if (!order) throw new OrderConflictError("Draft order was not found.");
     if (order.status === "sent_to_kitchen")
-      return { order, alreadySubmitted: true };
+      return { order, alreadySubmitted: true, kitchenTicketCreated: false };
     if (order.status !== "draft")
       throw new OrderConflictError("Only a draft order can be submitted.");
     const reopenRows =
       await sql`SELECT id,details,created_at FROM ordering_order_events WHERE order_id=${orderId} AND event_type='order_reopened_for_additions' AND NOT EXISTS(SELECT 1 FROM ordering_order_events later WHERE later.order_id=${orderId} AND later.event_type='order_addition_submitted' AND later.created_at>ordering_order_events.created_at) ORDER BY created_at DESC LIMIT 1`;
-    const reopenDetails = reopenRows[0]?.details as
+    const latestReopen = reopenRows[0]?.details as
       { existingItemIds?: string[]; previousTotalCents?: number; previousStatus?: string } | undefined;
+    // Legacy reopen events recorded against never-sent drafts are ignored: such
+    // an order is still a first submit and needs the full kitchen ticket,
+    // inventory depletion, and loyalty earn.
+    const reopenDetails = effectiveReopen(latestReopen);
     const existingIds = new Set((reopenDetails?.existingItemIds || []).map(String));
     const currentIds = await sql`SELECT id FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`;
     const addedItemIds = reopenDetails ? currentIds.map((row) => String(row.id)).filter((id) => !existingIds.has(id)) : [];
-    const adjustmentEvents = reopenRows[0]
+    const adjustmentEvents = reopenDetails && reopenRows[0]
       ? await sql`SELECT event_type,details FROM ordering_order_events WHERE order_id=${orderId} AND created_at>=${reopenRows[0].created_at} AND event_type IN('order_item_cancelled','order_fulfillment_changed') ORDER BY created_at,id`
       : [];
     if (reopenDetails && !addedItemIds.length && !adjustmentEvents.length) {
@@ -418,7 +474,7 @@ export async function submitDraftOrder(
       const restored = await sql`UPDATE ordering_orders SET status=${priorStatus},locked_at=NOW(),version=version+1,updated_at=NOW() WHERE id=${orderId} AND business=${business} AND status='draft' AND version=${order.version} RETURNING *`;
       if (!restored.length) throw new OrderConflictError("This order changed while checkout was opening. Refresh and try again.");
       await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${restored[0].version},'order_reopen_closed_no_changes',${actor.type},${actor.id},${JSON.stringify({restoredStatus:priorStatus,reason:"payment_only",actorName:actor.name})}::jsonb)`;
-      return { order: restored[0], alreadySubmitted: false };
+      return { order: restored[0], alreadySubmitted: false, kitchenTicketCreated: false };
     }
     const availabilityAt =
       order.timing_mode === "future" && order.scheduled_for
@@ -608,7 +664,7 @@ export async function submitDraftOrder(
     if (reopenDetails)
       await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${updated[0].version},'order_addition_submitted',${actor.type},${actor.id},${JSON.stringify({ addedItemIds, previousTotalCents: Number(reopenDetails.previousTotalCents || 0), newTotalCents: Number(updated[0].total_cents), additionalAmountDueCents: Number(updated[0].amount_due_cents), actorName: actor.name })}::jsonb)`;
     await depleteInventoryForOrder(orderId, business, actor);
-    return { order: updated[0], alreadySubmitted: false };
+    return { order: updated[0], alreadySubmitted: false, kitchenTicketCreated: true };
   });
   const source = String(result.order.source || "").toLowerCase();
   if (
@@ -704,19 +760,27 @@ export async function listKitchenOrders(
   const rows = await sql`
     SELECT id, business, source, display_number, status, payment_status, service_type, version,
            subtotal_cents, total_cents, special_instructions, created_at, submitted_at, started_at,
-           ready_at, completed_at, cancelled_at, voided_at, voided_by, void_reason, pre_void_status, pre_void_payment_status, NOW() AS server_now
+           ready_at, completed_at, cancelled_at, voided_at, voided_by, void_reason, pre_void_status, pre_void_payment_status, NOW() AS server_now,
+           reopen.previous_status AS reopened_from_status, (status='draft' AND reopen.previous_status IS NOT NULL) AS editing_at_pos
     FROM ordering_orders
+    LEFT JOIN LATERAL (
+      SELECT ev.details->>'previousStatus' AS previous_status FROM ordering_order_events ev
+      WHERE ev.order_id=ordering_orders.id AND ev.event_type='order_reopened_for_additions'
+        AND ordering_orders.status='draft' AND ev.details->>'previousStatus' IN ('sent_to_kitchen','in_progress','ready')
+        AND NOT EXISTS (SELECT 1 FROM ordering_order_events later WHERE later.order_id=ev.order_id AND later.event_type IN ('order_addition_submitted','order_reopen_closed_no_changes') AND later.created_at>ev.created_at)
+      ORDER BY ev.created_at DESC LIMIT 1
+    ) reopen ON TRUE
     WHERE business = ${business}
       AND (${includeRecent} OR (
-        status IN ('sent_to_kitchen', 'in_progress', 'ready')
+        (status IN ('sent_to_kitchen', 'in_progress', 'ready') OR reopen.previous_status IS NOT NULL)
         AND (payment_status <> 'paid' OR source IN ('web','online','customer_web','kiosk','ai_phone') OR order_origin IN ('employee_meal','complaint_remake'))
         AND NOT EXISTS (
           SELECT 1 FROM ordering_delivery_assignments delivery
           WHERE delivery.order_id=ordering_orders.id AND delivery.status='DELIVERED'
         )
       ))
-      AND (status IN ('sent_to_kitchen', 'in_progress', 'ready') OR COALESCE(completed_at, cancelled_at, updated_at) > NOW() - INTERVAL '8 hours')
-    ORDER BY CASE status WHEN 'ready' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'sent_to_kitchen' THEN 3 ELSE 4 END,
+      AND (status IN ('sent_to_kitchen', 'in_progress', 'ready') OR reopen.previous_status IS NOT NULL OR COALESCE(completed_at, cancelled_at, updated_at) > NOW() - INTERVAL '8 hours')
+    ORDER BY CASE COALESCE(reopen.previous_status, status) WHEN 'ready' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'sent_to_kitchen' THEN 3 ELSE 4 END,
              submitted_at, created_at
   `;
   const result = [];

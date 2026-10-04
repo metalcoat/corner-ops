@@ -1,4 +1,6 @@
+import { after } from "next/server";
 import { apiError, unauthorized } from "@/lib/http";
+import { runOrderingMaintenanceOpportunistically } from "@/lib/ordering-maintenance";
 import {
   listKitchenOrders,
   OrderConflictError,
@@ -25,6 +27,9 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const business = businessFrom(url.searchParams.get("business"));
     if (!await orderingActor(business)) return unauthorized();
+    // Kitchen displays poll constantly, so they double as the retry trigger for
+    // failed kitchen prints and abandoned reopened orders.
+    after(() => runOrderingMaintenanceOpportunistically(business).catch(() => undefined));
     const orders = await listKitchenOrders(business, url.searchParams.get("recent") === "true");
     return Response.json({ business, orders });
   } catch (error) {

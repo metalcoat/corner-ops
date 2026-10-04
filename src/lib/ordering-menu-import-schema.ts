@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingVariantSchema } from "@/lib/ordering-variant-schema";
+import { ensureTableConstraint, dropTableConstraintIfPresent } from "@/lib/schema-constraints";
 
 let menuImportSchemaPromise: Promise<void> | null = null;
 
@@ -16,7 +17,7 @@ export function ensureOrderingMenuImportSchema(): Promise<void> {
 
       // Rezku can define materially different modifier groups with the same
       // display name. Source mappings, not names, determine their identity.
-      await sql`ALTER TABLE ordering_modifier_groups DROP CONSTRAINT IF EXISTS ordering_modifier_groups_business_name_key`;
+      await dropTableConstraintIfPresent("ordering_modifier_groups", "ordering_modifier_groups_business_name_key");
       await sql`CREATE INDEX IF NOT EXISTS ordering_modifier_groups_business_name_idx ON ordering_modifier_groups (business, name)`;
 
       await sql`
@@ -59,15 +60,7 @@ export function ensureOrderingMenuImportSchema(): Promise<void> {
           UNIQUE (business, source, entity_type, source_id)
         )
       `;
-      await sql`ALTER TABLE ordering_menu_source_map DROP CONSTRAINT IF EXISTS ordering_menu_source_map_entity_type_check`;
-      await sql`
-        ALTER TABLE ordering_menu_source_map
-        ADD CONSTRAINT ordering_menu_source_map_entity_type_check
-        CHECK (entity_type IN (
-          'category', 'item', 'variant', 'modifier_group', 'modifier_option',
-          'variant_modifier_price', 'combo', 'combo_group', 'combo_option'
-        ))
-      `;
+      await ensureTableConstraint("ordering_menu_source_map", "ordering_menu_source_map_entity_type_check", `CHECK (entity_type IN ( 'category', 'item', 'variant', 'modifier_group', 'modifier_option', 'variant_modifier_price', 'combo', 'combo_group', 'combo_option' ))`);
       await sql`CREATE INDEX IF NOT EXISTS ordering_menu_source_map_internal_idx ON ordering_menu_source_map (entity_type, internal_id)`;
     })().catch((error) => {
       menuImportSchemaPromise = null;

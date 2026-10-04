@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { ensureOrderingTimingSchema } from "@/lib/ordering-timing-schema";
+import { windowsCoverMinute } from "@/lib/ordering-hours-math";
 
 type SettingsRow = {
   timezone: string;
@@ -113,11 +114,6 @@ function localDateTimeToUtc(input: {
   return new Date(guess);
 }
 
-function intervalContainsMinute(openMinute: number, closeMinute: number, currentMinute: number): boolean {
-  if (openMinute < closeMinute) return currentMinute >= openMinute && currentMinute <= closeMinute;
-  return currentMinute >= openMinute || currentMinute <= closeMinute;
-}
-
 function weekdayForDate(parts: { year: number; month: number; day: number }): number {
   return new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
 }
@@ -168,7 +164,7 @@ export async function getOrderingAvailability(input: {
     SELECT business_date, status, opens_at::TEXT, closes_at::TEXT
     FROM ordering_business_hour_exceptions
     WHERE business = ${input.business}
-      AND business_date BETWEEN ${dateKey(localNow)}::DATE AND ${dateKey(lastLocalDate)}::DATE
+      AND business_date BETWEEN ${dateKey(addLocalDays(localNow, -1))}::DATE AND ${dateKey(lastLocalDate)}::DATE
     ORDER BY business_date
   `) as ExceptionRow[];
 
@@ -193,9 +189,9 @@ export async function getOrderingAvailability(input: {
   const todayIntervals = intervalsForDate(today);
   const yesterdayIntervals = intervalsForDate(yesterday);
 
-  const openToday = todayIntervals.some((interval) => intervalContainsMinute(interval.open, interval.close, currentMinute));
-  const openFromYesterday = yesterdayIntervals.some((interval) => interval.open >= interval.close && currentMinute < interval.close);
-  const openNow = openToday || openFromYesterday;
+  // An overnight window belongs to the date it opens on: today's 18:00-02:00
+  // covers tonight, and early-morning minutes come from yesterday's window.
+  const openNow = windowsCoverMinute(todayIntervals, yesterdayIntervals, currentMinute);
 
   let nextOpenAt: Date | null = null;
   for (let dayOffset = 0; dayOffset <= searchDays; dayOffset += 1) {

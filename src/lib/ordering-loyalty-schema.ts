@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
+import { ensureTableConstraint } from "@/lib/schema-constraints";
 
 const JUMBO_THIN_LOYALTY_ID = "9f2ea950-10c0-4c2b-bf19-00c8d19f6210";
 
@@ -20,9 +21,12 @@ export function ensureOrderingLoyaltySchema(): Promise<void> {
     await sql`ALTER TABLE ordering_loyalty_ledger ADD COLUMN IF NOT EXISTS related_event_id UUID REFERENCES ordering_loyalty_ledger(id)`;
     await sql`ALTER TABLE ordering_loyalty_ledger ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL DEFAULT ''`;
     await sql`ALTER TABLE ordering_loyalty_ledger ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb`;
-    await sql`ALTER TABLE ordering_loyalty_ledger DROP CONSTRAINT IF EXISTS ordering_loyalty_ledger_entry_type_check`;
-    await sql`ALTER TABLE ordering_loyalty_ledger ADD CONSTRAINT ordering_loyalty_ledger_entry_type_check CHECK(entry_type IN ('earn','redeem','void_reversal','redemption_reversal','manager_adjustment','reversal','adjustment','expire'))`;
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_loyalty_earn_once_idx ON ordering_loyalty_ledger(program_id,order_id) WHERE entry_type='earn'`;
+    await ensureTableConstraint("ordering_loyalty_ledger", "ordering_loyalty_ledger_entry_type_check", `CHECK(entry_type IN ('earn','redeem','void_reversal','redemption_reversal','manager_adjustment','reversal','adjustment','expire'))`);
+    // Earning is incremental per order (see ordering-loyalty-earn.ts): one earn
+    // row per cumulative total, so add-ons earn and retries cannot double-earn.
+    // Legacy rows (no earnedThroughUnits) were already limited to one per order.
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_loyalty_earn_progress_idx ON ordering_loyalty_ledger(program_id,order_id,(COALESCE(metadata->>'earnedThroughUnits','legacy'))) WHERE entry_type='earn'`;
+    await sql`DROP INDEX IF EXISTS ordering_loyalty_earn_once_idx`;
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_loyalty_reverse_once_idx ON ordering_loyalty_ledger(related_event_id,entry_type) WHERE related_event_id IS NOT NULL`;
     await sql`
       CREATE TABLE IF NOT EXISTS ordering_order_loyalty_applications (
@@ -86,10 +90,13 @@ export function ensureOrderingLoyaltySchema(): Promise<void> {
           INSERT INTO ordering_loyalty_ledger(
             id,business,program_id,customer_id,order_id,entry_type,delta_units,
             description,created_by,metadata
-          ) VALUES(
-            ${randomUUID()},'Corner Deli',${String(loyaltyProgram.id)},${order.customer_id},
-            ${order.order_id},'earn',${Number(order.units)},'Jumbo Thin Pizza Loyalty',
+          ) SELECT
+            ${randomUUID()}::uuid,'Corner Deli',${String(loyaltyProgram.id)}::uuid,${order.customer_id}::uuid,
+            ${order.order_id}::uuid,'earn',${Number(order.units)}::integer,'Jumbo Thin Pizza Loyalty',
             'system-backfill',${JSON.stringify({quantity:Number(order.units),reason:"Program activation"})}::jsonb
+          WHERE NOT EXISTS (
+            SELECT 1 FROM ordering_loyalty_ledger existing
+            WHERE existing.program_id=${String(loyaltyProgram.id)} AND existing.order_id=${order.order_id} AND existing.entry_type='earn'
           ) ON CONFLICT DO NOTHING
         `;
       }

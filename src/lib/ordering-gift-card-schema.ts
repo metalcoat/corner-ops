@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
+import { ensureTableConstraint } from "@/lib/schema-constraints";
 
 let promise: Promise<void> | null = null;
 
@@ -33,8 +34,7 @@ export function ensureOrderingGiftCardSchema(): Promise<void> {
     await sql`ALTER TABLE ordering_gift_card_ledger ADD COLUMN IF NOT EXISTS related_entry_id UUID REFERENCES ordering_gift_card_ledger(id)`;
     await sql`ALTER TABLE ordering_gift_card_ledger ADD COLUMN IF NOT EXISTS approved_by TEXT NOT NULL DEFAULT ''`;
     await sql`ALTER TABLE ordering_gift_card_ledger ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb`;
-    await sql`ALTER TABLE ordering_gift_card_ledger DROP CONSTRAINT IF EXISTS ordering_gift_card_ledger_entry_type_check`;
-    await sql`ALTER TABLE ordering_gift_card_ledger ADD CONSTRAINT ordering_gift_card_ledger_entry_type_check CHECK(entry_type IN ('initial_load','issue','redeem','reload','refund','manager_adjustment','adjustment','expire','reversal','replacement_transfer_in','replacement_transfer_out','import_opening_balance'))`;
+    await ensureTableConstraint("ordering_gift_card_ledger", "ordering_gift_card_ledger_entry_type_check", `CHECK(entry_type IN ('initial_load','issue','redeem','reload','refund','manager_adjustment','adjustment','expire','reversal','replacement_transfer_in','replacement_transfer_out','import_opening_balance'))`);
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_gift_card_ledger_operation_idx ON ordering_gift_card_ledger(business,operation_key) WHERE operation_key IS NOT NULL`;
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_gift_card_ledger_reversal_idx ON ordering_gift_card_ledger(related_entry_id) WHERE entry_type='reversal'`;
     await sql`CREATE INDEX IF NOT EXISTS ordering_gift_card_ledger_business_created_idx ON ordering_gift_card_ledger(business,created_at DESC)`;

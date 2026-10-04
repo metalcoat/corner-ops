@@ -658,17 +658,38 @@ export function printPayloadLines(payload: Record<string, unknown>) {
   }
   return lines;
 }
+// Automatic retries stop after this many failed attempts; a manager can still
+// requeue the job from POS hardware settings.
+export const MAX_AUTOMATIC_PRINT_ATTEMPTS = 4;
+// A job left in 'attempting' longer than this belongs to a request that died
+// mid-print and may be claimed again.
+const STALE_ATTEMPT_INTERVAL = "2 minutes";
+// Kitchen tickets that were never printable (no printer, or auto-print paused)
+// are only picked up automatically while still fresh, so a later dispatch for
+// the same order does not print a stale ticket the kitchen already handled.
+const FRESH_UNSENT_KITCHEN_INTERVAL = "10 minutes";
+
 export async function dispatchOrderPrintJobs(
   orderId: string,
   business: OrderingBusiness,
-  options: { includeKitchenProduction?: boolean; jobId?: string } = {},
+  options: { includeKitchenProduction?: boolean; jobId?: string; retryOnly?: boolean } = {},
 ) {
   await ensureOrderingHardwareSchema();
   const sql = getSql(),
     includeKitchen = options.includeKitchenProduction !== false,
     jobId = options.jobId || null,
+    retryOnly = options.retryOnly === true,
     jobs =
-      await sql`SELECT * FROM ordering_print_jobs WHERE order_id=${orderId} AND business=${business} AND status IN('not_configured','queued') AND (${includeKitchen} OR purpose<>'kitchen_production') AND (${jobId}::uuid IS NULL OR id=${jobId}::uuid) ORDER BY created_at,id`;
+      await sql`SELECT * FROM ordering_print_jobs WHERE order_id=${orderId} AND business=${business}
+        AND (${includeKitchen} OR purpose<>'kitchen_production') AND (${jobId}::uuid IS NULL OR id=${jobId}::uuid)
+        AND (
+          (NOT ${retryOnly} AND status='queued')
+          OR (${retryOnly} AND status='queued' AND queued_at<NOW()-INTERVAL '1 minute')
+          OR (NOT ${retryOnly} AND status='not_configured' AND (${jobId}::uuid IS NOT NULL OR purpose<>'kitchen_production' OR created_at>NOW()-${FRESH_UNSENT_KITCHEN_INTERVAL}::interval))
+          OR (status='failed' AND COALESCE(next_attempt_at,NOW())<=NOW() AND retry_count<${MAX_AUTOMATIC_PRINT_ATTEMPTS} AND COALESCE(payload->>'openCashDrawer','false')<>'true')
+          OR (status='attempting' AND COALESCE(attempted_at,queued_at)<NOW()-${STALE_ATTEMPT_INTERVAL}::interval AND COALESCE(payload->>'openCashDrawer','false')<>'true')
+        )
+        ORDER BY created_at,id`;
   for (const job of jobs) {
     if (job.payload?.customerReceiptPending === true) continue;
     const role =
@@ -683,10 +704,14 @@ export async function dispatchOrderPrintJobs(
       await sql`SELECT device.* FROM ordering_hardware_devices device LEFT JOIN ordering_printer_routes route ON route.printer_id=device.id AND route.active=TRUE WHERE device.business=${business} AND (device.role=${role} OR (${role}='receipt_printer' AND ${targetPrinterId}::uuid IS NOT NULL AND device.adapter_config->>'receiptEnabled'='true')) AND device.active=TRUE AND device.adapter_key='network-printer' AND (${targetPrinterId}::uuid IS NULL OR device.id=${targetPrinterId}::uuid) ORDER BY COALESCE(route.priority,0) DESC,device.created_at LIMIT 1`
     )[0];
     if (!device) {
-      await sql`UPDATE ordering_print_jobs SET status='not_configured',error_message=${role === "kitchen_printer" ? "Kitchen printer not configured." : "Receipt printer not configured."} WHERE id=${job.id}`;
+      await sql`UPDATE ordering_print_jobs SET status='not_configured',error_message=${role === "kitchen_printer" ? "Kitchen printer not configured." : "Receipt printer not configured."} WHERE id=${job.id} AND status=${job.status}`;
       continue;
     }
-    await sql`UPDATE ordering_print_jobs SET status='attempting',device_id=${device.id},location_id=${device.location_id},attempted_at=NOW(),error_message='' WHERE id=${job.id}`;
+    // Claim the job atomically: only the request that moves it out of the
+    // status it was selected in may print it, so concurrent dispatches for the
+    // same order cannot double-print.
+    const claimed = await sql`UPDATE ordering_print_jobs SET status='attempting',device_id=${device.id},location_id=${device.location_id},attempted_at=NOW(),error_message='' WHERE id=${job.id} AND (status IN('queued','not_configured') OR (status='failed' AND COALESCE(next_attempt_at,NOW())<=NOW()) OR (status='attempting' AND COALESCE(attempted_at,queued_at)<NOW()-${STALE_ATTEMPT_INTERVAL}::interval)) RETURNING id`;
+    if (!claimed.length) continue;
     try {
       await sendEpsonPrint(
         device.adapter_config,
@@ -698,8 +723,57 @@ export async function dispatchOrderPrintJobs(
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Printer connection failed.";
-      await sql`UPDATE ordering_print_jobs SET status='failed',error_message=${message},retry_count=retry_count+1,next_attempt_at=NOW()+INTERVAL '30 seconds' WHERE id=${job.id}`;
+      await sql`UPDATE ordering_print_jobs SET status='failed',error_message=${message},retry_count=retry_count+1,next_attempt_at=NOW()+INTERVAL '30 seconds'*POWER(2,LEAST(retry_count,4)) WHERE id=${job.id}`;
       await sql`UPDATE ordering_hardware_devices SET reported_status='offline',last_seen_at=NOW(),status_message=${message},updated_at=NOW() WHERE id=${device.id}`;
     }
   }
+}
+
+/**
+ * Retry entry point for print jobs that failed or were abandoned mid-print.
+ * Called by the print-retry cron route and opportunistically by the kitchen
+ * display poll. Never picks up kitchen tickets held back by paused auto-print.
+ */
+export async function retryDuePrintJobs(business?: OrderingBusiness, limit = 20) {
+  await ensureOrderingHardwareSchema();
+  const sql = getSql();
+  const due = await sql`
+    SELECT order_id, business FROM ordering_print_jobs
+    WHERE (${business ?? null}::text IS NULL OR business=${business ?? null})
+      AND created_at>NOW()-INTERVAL '1 hour'
+      AND COALESCE(payload->>'openCashDrawer','false')<>'true'
+      AND (
+        (status='failed' AND COALESCE(next_attempt_at,NOW())<=NOW() AND retry_count<${MAX_AUTOMATIC_PRINT_ATTEMPTS})
+        OR (status='attempting' AND COALESCE(attempted_at,queued_at)<NOW()-${STALE_ATTEMPT_INTERVAL}::interval)
+        OR (status='queued' AND queued_at<NOW()-INTERVAL '1 minute')
+      )
+    GROUP BY order_id, business
+    ORDER BY MIN(created_at)
+    LIMIT ${limit}
+  `;
+  let orders = 0;
+  for (const row of due) {
+    try {
+      await dispatchOrderPrintJobs(String(row.order_id), row.business as OrderingBusiness, { retryOnly: true });
+      orders += 1;
+    } catch (error) {
+      console.error("Print retry failed", error);
+    }
+  }
+  return { orders };
+}
+
+/** Latest kitchen-ticket print outcome for an order, for POS warnings. */
+export async function kitchenPrintStatus(orderId: string, business: OrderingBusiness) {
+  await ensureOrderingHardwareSchema();
+  const job = (
+    await getSql()`SELECT status,error_message FROM ordering_print_jobs WHERE order_id=${orderId} AND business=${business} AND purpose='kitchen_production' ORDER BY created_at DESC,id DESC LIMIT 1`
+  )[0];
+  if (!job) return { status: "none" as const, printed: false, message: "" };
+  const status = String(job.status) as "queued" | "attempting" | "succeeded" | "failed" | "not_configured";
+  return {
+    status,
+    printed: status === "succeeded",
+    message: status === "succeeded" ? "" : String(job.error_message || ""),
+  };
 }

@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
+import { ensureTableConstraint } from "@/lib/schema-constraints";
 let promise: Promise<void> | null = null;
 export function ensureOrderingTipSchema() {
   if (!promise)
@@ -15,8 +16,7 @@ export function ensureOrderingTipSchema() {
       await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_tip_allocations_active_unique_idx ON ordering_tip_allocations(order_id,employee_id,tender_type) WHERE status IN('unassigned','eligible')`;
       await sql`ALTER TABLE ordering_checks ADD COLUMN IF NOT EXISTS tip_cents INTEGER NOT NULL DEFAULT 0`;
       await sql`CREATE TABLE IF NOT EXISTS ordering_tip_payout_batches(id UUID PRIMARY KEY,business TEXT NOT NULL CHECK(business IN('Corner Deli','Tiki')),status TEXT NOT NULL DEFAULT 'posted' CHECK(status IN('posted','reversed')),total_cents INTEGER NOT NULL DEFAULT 0,employee_count INTEGER NOT NULL DEFAULT 0,period_start DATE,period_end DATE,created_by TEXT NOT NULL,approved_by TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),reversed_at TIMESTAMPTZ)`;
-      await sql`ALTER TABLE ordering_tip_allocations DROP CONSTRAINT IF EXISTS ordering_tip_allocations_payout_batch_id_fkey`;
-      await sql`ALTER TABLE ordering_tip_allocations ADD CONSTRAINT ordering_tip_allocations_payout_batch_id_fkey FOREIGN KEY(payout_batch_id) REFERENCES ordering_tip_payout_batches(id)`;
+      await ensureTableConstraint("ordering_tip_allocations", "ordering_tip_allocations_payout_batch_id_fkey", `FOREIGN KEY(payout_batch_id) REFERENCES ordering_tip_payout_batches(id)`);
     })().catch((error) => {
       promise = null;
       throw error;
