@@ -15,6 +15,8 @@ export function ensureOrderingHelcimSchema() {
       provider_transaction_reference TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL,
       expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), completed_at TIMESTAMPTZ
     )`;
+    // The checkout secret stays on the server; it is cleared once the checkout completes.
+    await sql`ALTER TABLE ordering_helcim_checkout_sessions ADD COLUMN IF NOT EXISTS secret_token TEXT`;
     await sql`CREATE INDEX IF NOT EXISTS ordering_helcim_checkout_order_idx ON ordering_helcim_checkout_sessions(order_id,created_at DESC)`;
   })();
   return promise;

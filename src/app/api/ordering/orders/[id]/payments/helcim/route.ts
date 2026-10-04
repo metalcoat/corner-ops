@@ -5,11 +5,10 @@ import {
   HelcimError,
   helcimStatus,
   initializeHelcimPay,
-  safeEqual,
   sha256,
   testHelcimConnection,
-  validateHelcimPayResponse,
 } from "@/lib/helcim";
+import { verifyHelcimCheckoutApproval } from "@/lib/ordering-helcim-verify";
 import { ensureOrderingHelcimSchema } from "@/lib/ordering-helcim-schema";
 import {
   assertOrderReadyForCheckout,
@@ -61,17 +60,15 @@ export async function POST(
       const initialized = await initializeHelcimPay(amountCents, await helcimCustomerForOrder(orderId, business));
       const sessionId = randomUUID(),
         clientMutationId = randomUUID();
-      await sql`INSERT INTO ordering_helcim_checkout_sessions(id,business,order_id,check_id,amount_cents,checkout_token,secret_hash,client_mutation_id,created_by,expires_at)
-        VALUES(${sessionId},${business},${orderId},${checkId},${amountCents},${initialized.checkoutToken},${sha256(initialized.secretToken)},${clientMutationId},${actor.id},NOW()+INTERVAL '60 minutes')`;
-      return Response.json({
-        checkoutToken: initialized.checkoutToken,
-        secretToken: initialized.secretToken,
-      });
+      await sql`INSERT INTO ordering_helcim_checkout_sessions(id,business,order_id,check_id,amount_cents,checkout_token,secret_hash,secret_token,client_mutation_id,created_by,expires_at)
+        VALUES(${sessionId},${business},${orderId},${checkId},${amountCents},${initialized.checkoutToken},${sha256(initialized.secretToken)},${initialized.secretToken},${clientMutationId},${actor.id},NOW()+INTERVAL '60 minutes')`;
+      // The secret token never leaves the server; the browser only needs the
+      // checkout token to open the HelcimPay.js iframe.
+      return Response.json({ checkoutToken: initialized.checkoutToken });
     }
     if (body.action !== "confirm")
       throw new HelcimError("Unknown Helcim action.");
-    const checkoutToken = String(body.checkoutToken || ""),
-      secretToken = String(body.secretToken || "");
+    const checkoutToken = String(body.checkoutToken || "");
     const session = (
       await sql`SELECT * FROM ordering_helcim_checkout_sessions WHERE checkout_token=${checkoutToken} AND order_id=${orderId} AND business=${business} LIMIT 1`
     )[0];
@@ -81,34 +78,13 @@ export async function POST(
       new Date(session.expires_at).getTime() < Date.now()
     )
       throw new HelcimError("This Helcim checkout session expired.");
-    if (!safeEqual(String(session.secret_hash), sha256(secretToken)))
-      throw new HelcimError("Helcim checkout verification failed.");
-    const data = validateHelcimPayResponse(
-      body.data,
-      String(body.hash || ""),
-      secretToken,
-    );
-    const approved = String(
-      data.status || data.approvalStatus || "",
-    ).toLowerCase();
-    if (!approved.includes("approve") && approved !== "success")
-      throw new HelcimError("Helcim did not approve this payment.");
-    if (String(data.type || "").toLowerCase() !== "purchase")
-      throw new HelcimError("Helcim returned the wrong transaction type.");
-    const reference = String(data.transactionId || data.id || "");
-    if (!reference)
-      throw new HelcimError("Helcim did not return a transaction reference.");
-    const responseAmountCents = Math.round(Number(data.amount) * 100);
-    if (
-      responseAmountCents !== Number(session.amount_cents) ||
-      String(data.currency || "").toUpperCase() !== "USD"
-    )
-      throw new HelcimError(
-        "The Helcim approval does not match this order balance.",
-      );
-    const cardDigits = String(
-      data.cardNumber || data.cardNumberMasked || data.lastFour || "",
-    ).replace(/\D/g, "");
+    const approval = await verifyHelcimCheckoutApproval({
+      session: session as never,
+      data: body.data,
+      hash: String(body.hash || ""),
+      legacyClientSecret: body.secretToken ? String(body.secretToken) : undefined,
+    });
+    const reference = approval.reference;
     const result = await commitTender({
       orderId,
       business,
@@ -120,15 +96,15 @@ export async function POST(
       providerApproval: {
         provider: "helcim",
         transactionReference: reference,
-        brand: String(data.cardType || data.cardBrand || "").slice(0, 40),
-        last4: cardDigits.slice(-4),
+        brand: approval.brand,
+        last4: approval.last4,
         details: {
           helcimCheckoutToken: checkoutToken,
-          helcimApprovalCode: String(data.approvalCode || "").slice(0, 80),
+          helcimApprovalCode: approval.approvalCode,
         },
       },
     });
-    await sql`UPDATE ordering_helcim_checkout_sessions SET status='completed',provider_transaction_reference=${reference},completed_at=NOW() WHERE id=${session.id}`;
+    await sql`UPDATE ordering_helcim_checkout_sessions SET status='completed',provider_transaction_reference=${reference},secret_token=NULL,completed_at=NOW() WHERE id=${session.id}`;
     await dispatchOrderPrintJobs(orderId, business, {
       includeKitchenProduction: false,
     });

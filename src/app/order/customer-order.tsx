@@ -710,19 +710,16 @@ export default function CustomerOrder() {
       });
       const initialized = (await response.json()) as {
         checkoutToken?: string;
-        secretToken?: string;
         error?: string;
       };
       if (
         !response.ok ||
-        !initialized.checkoutToken ||
-        !initialized.secretToken
+        !initialized.checkoutToken
       )
         throw new Error(
           initialized.error || "Could not start secure checkout.",
         );
-      const checkoutToken = initialized.checkoutToken,
-        secretToken = initialized.secretToken;
+      const checkoutToken = initialized.checkoutToken;
       const result = await new Promise<any>((resolve, reject) => {
         const listener = async (event: MessageEvent) => {
           if (
@@ -754,7 +751,6 @@ export default function CustomerOrder() {
               body: JSON.stringify({
                 action: "confirm",
                 checkoutToken,
-                secretToken,
                 data: message.data,
                 hash: message.hash,
               }),

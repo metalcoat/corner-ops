@@ -25,8 +25,21 @@ function pinVerifier(pin?: string) {
   const salt = randomBytes(16).toString("hex");
   return `scrypt:${salt}:${scryptSync(pin, salt, 32).toString("hex")}`;
 }
+// Corner Deli gift cards are bearer cards: the POS has no PIN entry and staff
+// are told cards never need one, so a stored PIN is intentionally not enforced.
+// Value can only be created by a manager (see requireManager below).
 function pinMatches(_pin: string | undefined, _verifier: string | null) {
   return true;
+}
+/** Largest value a single activation or reload may add to a card. */
+export const GIFT_CARD_MAX_LOAD_CENTS = 50_000;
+function loadAmount(value: number, label = "Amount") {
+  money(value, label);
+  if (value > GIFT_CARD_MAX_LOAD_CENTS)
+    throw new GiftCardError(
+      `${label} cannot exceed $${GIFT_CARD_MAX_LOAD_CENTS / 100}.`,
+    );
+  return value;
 }
 function requireManager(actor: OrderingActor) {
   if (!canManagePos(actor))
@@ -90,8 +103,12 @@ export async function activateGiftCard(input: {
   cardNumber?: string;
   sourceReference?: string;
 }) {
+  // Activation creates spendable value, so only a manager may do it. Imported
+  // legacy balances (sourceReference) are exempt from the per-load cap.
+  requireManager(input.actor);
+  if (input.sourceReference) money(input.initialLoadCents, "Initial load");
+  else loadAmount(input.initialLoadCents, "Initial load");
   await ensureOrderingGiftCardSchema();
-  money(input.initialLoadCents, "Initial load");
   return withTransaction(async () => {
     const sql = getSql();
     const existing =
@@ -123,6 +140,7 @@ export async function activateGiftCard(input: {
       operationKey: input.operationKey,
       actor: input.actor,
       note: "Gift card activation and initial load",
+      approvedBy: input.actor.id,
     });
     return {
       cardId: id,
@@ -160,8 +178,9 @@ export async function reloadGiftCard(input: {
   actor: OrderingActor;
   note?: string;
 }) {
+  requireManager(input.actor);
+  loadAmount(input.amountCents);
   await ensureOrderingGiftCardSchema();
-  money(input.amountCents);
   return withTransaction(async () => {
     const card = await cardForUpdate(input.business, input.cardNumber);
     if (!["active", "depleted"].includes(card.status))
@@ -173,6 +192,7 @@ export async function reloadGiftCard(input: {
       operationKey: input.operationKey,
       actor: input.actor,
       note: input.note || "Gift card reload",
+      approvedBy: input.actor.id,
     });
   });
 }

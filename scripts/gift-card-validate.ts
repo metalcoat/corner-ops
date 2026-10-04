@@ -106,6 +106,40 @@ async function main() {
         denied = true;
       }
       if (!denied) throw new Error("Employee manager operation was allowed.");
+      for (const attempt of [
+        () =>
+          activateGiftCard({
+            business: "Corner Deli",
+            initialLoadCents: 1000,
+            operationKey: `${operation}:employee-activate`,
+            actor: employee,
+          }),
+        () =>
+          reloadGiftCard({
+            business: "Corner Deli",
+            cardNumber,
+            amountCents: 1000,
+            operationKey: `${operation}:employee-reload`,
+            actor: employee,
+          }),
+        () =>
+          reloadGiftCard({
+            business: "Corner Deli",
+            cardNumber,
+            amountCents: 50_001,
+            operationKey: `${operation}:over-cap`,
+            actor,
+          }),
+      ]) {
+        let blocked = false;
+        try {
+          await attempt();
+        } catch {
+          blocked = true;
+        }
+        if (!blocked)
+          throw new Error("Gift card value was created without authorization.");
+      }
       let negativeBlocked = false;
       try {
         await adjustGiftCard({

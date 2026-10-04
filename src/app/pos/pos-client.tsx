@@ -3371,19 +3371,16 @@ export default function PosClient({
       );
       const initialized = (await response.json()) as {
         checkoutToken?: string;
-        secretToken?: string;
         error?: string;
       };
       if (
         !response.ok ||
-        !initialized.checkoutToken ||
-        !initialized.secretToken
+        !initialized.checkoutToken
       )
         throw new Error(
           initialized.error || "Could not start Helcim checkout.",
         );
       const checkoutToken = initialized.checkoutToken;
-      const secretToken = initialized.secretToken;
       const eventName = `helcim-pay-js-${checkoutToken}`;
       const result = await new Promise<CheckoutState>((resolve, reject) => {
         const listener = async (event: MessageEvent) => {
@@ -3420,7 +3417,6 @@ export default function PosClient({
                 body: JSON.stringify({
                   action: "confirm",
                   checkoutToken,
-                  secretToken,
                   data: message.data,
                   hash: message.hash,
                 }),

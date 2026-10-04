@@ -147,3 +147,45 @@ export function validateHelcimPayRawResponse(
     throw new HelcimError("Helcim returned an invalid payment response.");
   return data as Record<string, unknown>;
 }
+
+/** Looks a card transaction up directly with Helcim (the source of truth). */
+export async function retrieveHelcimCardTransaction(transactionId: string) {
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(transactionId))
+    throw new HelcimError("Helcim did not return a valid transaction reference.");
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await helcimFetch(
+        `/card-transactions/${encodeURIComponent(transactionId)}`,
+        { method: "GET" },
+      );
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+  }
+  throw lastError instanceof HelcimError
+    ? lastError
+    : new HelcimError("Helcim could not confirm this payment. Try again.");
+}
+
+/** Throws unless Helcim's own record is an approved USD purchase for exactly this amount. */
+export function assertHelcimTransactionMatches(
+  transaction: Record<string, unknown>,
+  reference: string,
+  amountCents: number,
+) {
+  if (String(transaction.transactionId ?? "") !== reference)
+    throw new HelcimError("Helcim could not find this payment.");
+  if (String(transaction.status || "").toUpperCase() !== "APPROVED")
+    throw new HelcimError("Helcim did not approve this payment.");
+  if (String(transaction.type || "").toLowerCase() !== "purchase")
+    throw new HelcimError("Helcim returned the wrong transaction type.");
+  if (
+    Math.round(Number(transaction.amount) * 100) !== amountCents ||
+    String(transaction.currency || "").toUpperCase() !== "USD"
+  )
+    throw new HelcimError(
+      "The Helcim approval does not match this order balance.",
+    );
+}
