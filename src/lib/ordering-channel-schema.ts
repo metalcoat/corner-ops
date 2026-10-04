@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingSchema } from "@/lib/ordering-db";
+import { ensureTableConstraint, dropTableConstraintIfPresent } from "@/lib/schema-constraints";
 
 let channelSchemaPromise: Promise<void> | null = null;
 
@@ -14,24 +15,14 @@ export function ensureOrderingChannelSchema(): Promise<void> {
       await ensureOrderingSchema();
       const sql = getSql();
 
-      await sql`ALTER TABLE ordering_orders DROP CONSTRAINT IF EXISTS ordering_orders_service_type_check`;
-      await sql`
-        ALTER TABLE ordering_orders
-        ADD CONSTRAINT ordering_orders_service_type_check
-        CHECK (service_type IN ('undecided','pickup','delivery','no_contact_delivery','dine_in','curbside','bar'))
-      `;
+      await ensureTableConstraint("ordering_orders", "ordering_orders_service_type_check", `CHECK (service_type IN ('undecided','pickup','delivery','no_contact_delivery','dine_in','curbside','bar'))`);
 
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS sms_verified_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS arrival_status TEXT NOT NULL DEFAULT 'not_expected'`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS arrived_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS arrival_acknowledged_at TIMESTAMPTZ`;
       await sql`ALTER TABLE ordering_orders ADD COLUMN IF NOT EXISTS arrival_details TEXT NOT NULL DEFAULT ''`;
-      await sql`ALTER TABLE ordering_orders DROP CONSTRAINT IF EXISTS ordering_orders_arrival_status_check`;
-      await sql`
-        ALTER TABLE ordering_orders
-        ADD CONSTRAINT ordering_orders_arrival_status_check
-        CHECK (arrival_status IN ('not_expected', 'waiting', 'arrived', 'acknowledged', 'completed'))
-      `;
+      await ensureTableConstraint("ordering_orders", "ordering_orders_arrival_status_check", `CHECK (arrival_status IN ('not_expected', 'waiting', 'arrived', 'acknowledged', 'completed'))`);
 
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_menu_item_modifier_defaults (
@@ -54,18 +45,11 @@ export function ensureOrderingChannelSchema(): Promise<void> {
       await sql`ALTER TABLE ordering_order_item_modifiers ADD COLUMN IF NOT EXISTS selection_state TEXT NOT NULL DEFAULT 'selected'`;
       await sql`ALTER TABLE ordering_order_item_modifiers ADD COLUMN IF NOT EXISTS pizza_topping_portion TEXT`;
       await sql`ALTER TABLE ordering_order_item_modifiers ADD COLUMN IF NOT EXISTS pizza_topping_amount TEXT`;
-      await sql`ALTER TABLE ordering_order_item_modifiers DROP CONSTRAINT IF EXISTS ordering_order_item_modifiers_order_item_id_group_id_option_id_key`;
-      await sql`ALTER TABLE ordering_order_item_modifiers DROP CONSTRAINT IF EXISTS ordering_order_item_modifiers_order_item_id_group_id_option_key`;
-      await sql`ALTER TABLE ordering_order_item_modifiers DROP CONSTRAINT IF EXISTS ordering_order_item_modifiers_pizza_topping_portion_check`;
-      await sql`ALTER TABLE ordering_order_item_modifiers ADD CONSTRAINT ordering_order_item_modifiers_pizza_topping_portion_check CHECK (pizza_topping_portion IS NULL OR pizza_topping_portion IN ('whole','left_half','right_half'))`;
-      await sql`ALTER TABLE ordering_order_item_modifiers DROP CONSTRAINT IF EXISTS ordering_order_item_modifiers_pizza_topping_amount_check`;
-      await sql`ALTER TABLE ordering_order_item_modifiers ADD CONSTRAINT ordering_order_item_modifiers_pizza_topping_amount_check CHECK (pizza_topping_amount IS NULL OR pizza_topping_amount IN ('regular','extra','double_extra','triple_extra'))`;
-      await sql`ALTER TABLE ordering_order_item_modifiers DROP CONSTRAINT IF EXISTS ordering_order_item_modifiers_selection_state_check`;
-      await sql`
-        ALTER TABLE ordering_order_item_modifiers
-        ADD CONSTRAINT ordering_order_item_modifiers_selection_state_check
-        CHECK (selection_state IN ('selected', 'removed', 'extra', 'declined_included'))
-      `;
+      await dropTableConstraintIfPresent("ordering_order_item_modifiers", "ordering_order_item_modifiers_order_item_id_group_id_option_id_key");
+      await dropTableConstraintIfPresent("ordering_order_item_modifiers", "ordering_order_item_modifiers_order_item_id_group_id_option_key");
+      await ensureTableConstraint("ordering_order_item_modifiers", "ordering_order_item_modifiers_pizza_topping_portion_check", `CHECK (pizza_topping_portion IS NULL OR pizza_topping_portion IN ('whole','left_half','right_half'))`);
+      await ensureTableConstraint("ordering_order_item_modifiers", "ordering_order_item_modifiers_pizza_topping_amount_check", `CHECK (pizza_topping_amount IS NULL OR pizza_topping_amount IN ('regular','extra','double_extra','triple_extra'))`);
+      await ensureTableConstraint("ordering_order_item_modifiers", "ordering_order_item_modifiers_selection_state_check", `CHECK (selection_state IN ('selected', 'removed', 'extra', 'declined_included'))`);
 
       await sql`
         CREATE TABLE IF NOT EXISTS ordering_combo_definitions (

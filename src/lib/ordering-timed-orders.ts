@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { getSql } from "@/lib/db";
+import { getSql, withTransaction } from "@/lib/db";
+import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
+import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
+import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
+import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
+import { ensureOrderingLoyaltySchema } from "@/lib/ordering-loyalty-schema";
+import { ensureOrderingVariantSchema } from "@/lib/ordering-variant-schema";
 import type { OrderingBusiness, OrderSource, ServiceType } from "@/lib/ordering-core";
 import { createDraftOrderWithVariants, type VariantConfiguredOrderItemInput } from "@/lib/ordering-orders-with-variants";
 import type { OrderTimingMode } from "@/lib/ordering-timing-core";
@@ -61,72 +67,85 @@ export async function createTimedDraftOrder(input: CreateTimedDraftOrderInput): 
   });
   if (!quote.accepted) throw new Error(quote.customerMessage || "The requested order time is not available.");
 
-  const base = await createDraftOrderWithVariants({
-    business: input.business,
-    source: input.source,
-    serviceType: input.serviceType,
-    customerId: input.customerId,
-    customerPhoneId: input.customerPhoneId,
-    callerPhone: input.callerPhone,
-    customerFirstName:input.customerFirstName,
-    customerLastName:input.customerLastName,
-    orderOrigin:input.orderOrigin,
-    createdBy: input.createdBy,
-    createdByName: input.createdByName,
-    items: input.items,
+  // Bootstrap schemas outside the transaction so a rolled-back order cannot
+  // roll back DDL that the per-process schema promises already consider done.
+  await ensureOrderingPosSchema();
+  await ensureOrderingCustomerSchema();
+  await ensureOrderingMenuOverrideSchema();
+  await ensureOrderingVariantSchema();
+  await ensureOrderingPromotionSchema();
+  await ensureOrderingLoyaltySchema();
+
+  // Draft creation, timing, and promotions commit together: a failure part way
+  // must not leave an ASAP-defaulted draft without its quoted timing.
+  return withTransaction(async () => {
+    const base = await createDraftOrderWithVariants({
+      business: input.business,
+      source: input.source,
+      serviceType: input.serviceType,
+      customerId: input.customerId,
+      customerPhoneId: input.customerPhoneId,
+      callerPhone: input.callerPhone,
+      customerFirstName:input.customerFirstName,
+      customerLastName:input.customerLastName,
+      orderOrigin:input.orderOrigin,
+      createdBy: input.createdBy,
+      createdByName: input.createdByName,
+      items: input.items,
+    });
+
+    const sql = getSql();
+    await sql`
+      UPDATE ordering_orders
+      SET timing_mode = ${mode},
+          scheduled_for = ${quote.requestedFor ? quote.requestedFor.toISOString() : null},
+          promised_at = ${quote.promisedFor ? quote.promisedFor.toISOString() : null},
+          quoted_lead_min_minutes = ${quote.minMinutes},
+          quoted_lead_max_minutes = ${quote.maxMinutes},
+          timing_message_snapshot = ${quote.customerMessage},
+          kitchen_timing_label_snapshot = ${quote.kitchenLabel},
+          version = version + 1,
+          updated_at = NOW()
+      WHERE id = ${base.id}
+    `;
+
+    await sql`
+      INSERT INTO ordering_order_events (
+        id, order_id, order_version, event_type, actor_type, actor_id, details
+      )
+      SELECT
+        ${randomUUID()}, id, version, 'order_timing_set',
+        ${input.source === "pos" ? "employee" : input.source === "web" ? "web" : input.source === "ai_phone" ? "ai" : "system"},
+        ${input.createdBy},
+        CAST(${JSON.stringify({
+          timingMode: mode,
+          requestedFor: quote.requestedFor?.toISOString() || null,
+          promisedFor: quote.promisedFor?.toISOString() || null,
+          minMinutes: quote.minMinutes,
+          maxMinutes: quote.maxMinutes,
+          isBusy: quote.isBusy,
+          kitchenLabel: quote.kitchenLabel,
+          actorName: input.createdByName || null,
+        })} AS jsonb)
+      FROM ordering_orders
+      WHERE id = ${base.id}
+    `;
+
+    // Promotion schedules use the persisted fulfillment time, not entry time.
+    await applyPromotionsToOrder(String(base.id));
+
+    const rows = (await sql`
+      SELECT id, business, display_number, status, payment_status, service_type,
+             timing_mode, scheduled_for, promised_at, quoted_lead_min_minutes,
+             quoted_lead_max_minutes, timing_message_snapshot,
+             kitchen_timing_label_snapshot, version, subtotal_cents, discount_cents,
+             tax_cents, tip_cents, total_cents, paid_cents, amount_due_cents,
+             created_at, updated_at
+      FROM ordering_orders
+      WHERE id = ${base.id}
+      LIMIT 1
+    `) as TimedOrderRow[];
+
+    return rows[0];
   });
-
-  const sql = getSql();
-  await sql`
-    UPDATE ordering_orders
-    SET timing_mode = ${mode},
-        scheduled_for = ${quote.requestedFor ? quote.requestedFor.toISOString() : null},
-        promised_at = ${quote.promisedFor ? quote.promisedFor.toISOString() : null},
-        quoted_lead_min_minutes = ${quote.minMinutes},
-        quoted_lead_max_minutes = ${quote.maxMinutes},
-        timing_message_snapshot = ${quote.customerMessage},
-        kitchen_timing_label_snapshot = ${quote.kitchenLabel},
-        version = version + 1,
-        updated_at = NOW()
-    WHERE id = ${base.id}
-  `;
-
-  await sql`
-    INSERT INTO ordering_order_events (
-      id, order_id, order_version, event_type, actor_type, actor_id, details
-    )
-    SELECT
-      ${randomUUID()}, id, version, 'order_timing_set',
-      ${input.source === "pos" ? "employee" : input.source === "web" ? "web" : input.source === "ai_phone" ? "ai" : "system"},
-      ${input.createdBy},
-      CAST(${JSON.stringify({
-        timingMode: mode,
-        requestedFor: quote.requestedFor?.toISOString() || null,
-        promisedFor: quote.promisedFor?.toISOString() || null,
-        minMinutes: quote.minMinutes,
-        maxMinutes: quote.maxMinutes,
-        isBusy: quote.isBusy,
-        kitchenLabel: quote.kitchenLabel,
-        actorName: input.createdByName || null,
-      })} AS jsonb)
-    FROM ordering_orders
-    WHERE id = ${base.id}
-  `;
-
-  // Promotion schedules use the persisted fulfillment time, not entry time.
-  await applyPromotionsToOrder(String(base.id));
-
-  const rows = (await sql`
-    SELECT id, business, display_number, status, payment_status, service_type,
-           timing_mode, scheduled_for, promised_at, quoted_lead_min_minutes,
-           quoted_lead_max_minutes, timing_message_snapshot,
-           kitchen_timing_label_snapshot, version, subtotal_cents, discount_cents,
-           tax_cents, tip_cents, total_cents, paid_cents, amount_due_cents,
-           created_at, updated_at
-    FROM ordering_orders
-    WHERE id = ${base.id}
-    LIMIT 1
-  `) as TimedOrderRow[];
-
-  return rows[0];
 }

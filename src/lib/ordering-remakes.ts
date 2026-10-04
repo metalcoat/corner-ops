@@ -170,7 +170,12 @@ export async function createManagerRemake(value: unknown, actor: OrderingActor) 
     await recordRemakeInventory(order.id, actor);
     return { orderId: order.id, alreadyCreated: false };
   });
-  if (!created.alreadyCreated) await dispatchSubmittedOrderPrintJobs(created.orderId, BUSINESS);
+  // Dispatch on retries too: if the first request died after commit but before
+  // printing, the retry is the only chance to send the ticket. Jobs that already
+  // printed are not selected again and the claim step prevents double prints.
+  // Paused auto-print is respected on purpose (see c61617e / a88f636): the
+  // remakes screen warns that nothing prints while printing is paused.
+  await dispatchSubmittedOrderPrintJobs(created.orderId, BUSINESS);
   return remakeResult(created.orderId, created.alreadyCreated);
 }
 

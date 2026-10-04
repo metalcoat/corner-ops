@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PosPinGate, { type PosEmployeeSession, type PosSessionView } from "../../pos-pin-gate";
-import { usePosIdleLock } from "../../use-pos-idle-lock";
 import { formatOrderModifier, hasSplitPizzaToppings, kitchenModifierOrder, kitchenPortionName, kitchenProductionTotals, pizzaToppingColumns } from "@/lib/ordering-line-format";
 import type { PizzaToppingAmount, PizzaToppingPortion } from "@/lib/ordering-pizza-toppings";
 
@@ -36,7 +35,9 @@ type KitchenItem = {
 type KitchenOrder = {
   id: string;
   display_number: string;
-  status: KitchenStatus;
+  status: KitchenStatus | "draft";
+  editing_at_pos?: boolean;
+  reopened_from_status?: KitchenStatus | null;
   payment_status: string;
   service_type: "pickup" | "delivery" | "dine_in";
   total_cents: number;
@@ -62,7 +63,7 @@ function elapsed(submittedAt: string, serverNow: string, tick: number): string {
   return minutes < 60 ? `${minutes}:${String(seconds % 60).padStart(2, "0")}` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSeconds?: number }) {
+export default function KitchenClient() {
   const [session, setSession] = useState<PosSessionView | null>(null);
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [error, setError] = useState("");
@@ -79,6 +80,7 @@ export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSecond
   const loadOrders = useCallback(async (recent = showRecent) => {
     try {
       const response = await fetch(`/api/ordering/kitchen?business=${encodeURIComponent("Corner Deli")}&recent=${recent}`, { cache: "no-store" });
+      if (response.status === 401) { setSession({ authenticated: false }); return; }
       const payload = await response.json() as { orders?: KitchenOrder[]; error?: string };
       if (!response.ok) throw new Error(payload.error || "Could not load kitchen orders.");
       setOrders(payload.orders || []);
@@ -103,19 +105,20 @@ export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSecond
     return () => window.clearInterval(clock);
   }, []);
 
-  const activeCount = useMemo(() => orders.filter((order) => order.status === "sent_to_kitchen" || order.status === "in_progress" || order.status === "ready").length, [orders]);
+  const activeCount = useMemo(() => orders.filter((order) => order.status === "sent_to_kitchen" || order.status === "in_progress" || order.status === "ready" || order.editing_at_pos).length, [orders]);
 
-  function applyLock() {
-    setSession({ authenticated: false });
-    window.dispatchEvent(new Event("corner-ops-pos-locked"));
-  }
-  const { lock: lockKitchen } = usePosIdleLock({ authenticated: Boolean(session?.authenticated), seconds: idleLockSeconds, onLock: applyLock });
-
+  // The kitchen display is a wall screen: it never idle-locks, and it must not
+  // broadcast a lock or end the shared POS session, which would log out every
+  // register tab. It only locks on an explicit request from this screen.
   useEffect(() => {
-    const requestLock = () => lockKitchen();
+    const requestLock = () => {
+      setSession({ authenticated: false });
+      window.dispatchEvent(new Event("corner-ops-pos-locked"));
+      void fetch("/api/pos/session", { method: "DELETE", keepalive: true }).catch(() => undefined);
+    };
     window.addEventListener("corner-ops-pos-lock-request", requestLock);
     return () => window.removeEventListener("corner-ops-pos-lock-request", requestLock);
-  }, [lockKitchen]);
+  }, []);
 
   async function transition(order: KitchenOrder, nextStatus: KitchenStatus) {
     if (busyOrderId) return;
@@ -156,9 +159,9 @@ export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSecond
     {loading && <div className="kitchenEmpty">Loading kitchen queue…</div>}
     {!loading && !orders.length && <div className="kitchenEmpty">No active kitchen orders.</div>}
     <section className="kitchenGrid" aria-label="Kitchen orders">
-      {orders.map((order) => <article className={`kitchenTicket ${order.status}`} key={order.id} aria-label={`Order ${order.display_number}`}>
+      {orders.map((order) => <article className={`kitchenTicket ${order.editing_at_pos ? order.reopened_from_status || "sent_to_kitchen" : order.status}`} key={order.id} aria-label={`Order ${order.display_number}`}>
         <header>
-          <div><strong>#{order.display_number}</strong><span>{statusLabels[order.status]}</span></div>
+          <div><strong>#{order.display_number}</strong><span>{order.editing_at_pos ? "EDITING AT POS" : order.status === "draft" ? "DRAFT" : statusLabels[order.status]}</span></div>
           <div><b>{serviceLabels[order.service_type]}</b><time>{elapsed(order.submitted_at, order.server_now, tick)}</time></div>
         </header>
         <div className="kitchenItems">
@@ -184,6 +187,7 @@ export default function KitchenClient({ idleLockSeconds = 60 }: { idleLockSecond
         {order.special_instructions && <p className="kitchenOrderNote">ORDER NOTE: {order.special_instructions}</p>}
         <footer>
           <span>{order.payment_status.toUpperCase()}</span>
+          {order.editing_at_pos && <span>BEING CHANGED AT THE REGISTER · {statusLabels[order.reopened_from_status || "sent_to_kitchen"]} BEFORE EDIT</span>}
           {order.status === "sent_to_kitchen" && <button type="button" disabled={Boolean(busyOrderId)} onClick={() => void transition(order, "in_progress")}>START</button>}
           {order.status === "in_progress" && <button type="button" disabled={Boolean(busyOrderId)} onClick={() => void transition(order, "ready")}>READY</button>}
           {order.status === "ready" && <button type="button" disabled={Boolean(busyOrderId)} onClick={() => void transition(order, "completed")}>COMPLETE</button>}

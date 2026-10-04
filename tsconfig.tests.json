@@ -15,6 +15,9 @@
     "src/lib/accounting-import-utils.ts",
     "src/lib/journal-integrity.ts",
     "src/lib/helcim.ts",
+    "src/lib/ordering-hours-math.ts",
+    "src/lib/ordering-reopen-policy.ts",
+    "src/lib/ordering-loyalty-earn.ts",
     "tests/**/*.ts"
   ]
 }

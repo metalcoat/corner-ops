@@ -2,6 +2,7 @@ import { getSql } from "@/lib/db";
 import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
 import { ensureOrderingChannelSchema } from "@/lib/ordering-channel-schema";
 import { ensureOrderingInventorySchema } from "@/lib/ordering-inventory-schema";
+import { ensureTableConstraint } from "@/lib/schema-constraints";
 
 let posSchemaPromise: Promise<void> | null = null;
 
@@ -411,22 +412,7 @@ export function ensureOrderingPosSchema(): Promise<void> {
         )
       `;
 
-      await sql`ALTER TABLE ordering_order_links DROP CONSTRAINT IF EXISTS ordering_order_links_relation_type_check`;
-      await sql`
-        ALTER TABLE ordering_order_links
-        ADD CONSTRAINT ordering_order_links_relation_type_check
-        CHECK (relation_type IN (
-          'add_on',
-          'payment_followup',
-          'replacement',
-          'complaint_remake',
-          'split',
-          'merge',
-          'reopen',
-          'duplicate',
-          'other'
-        ))
-      `;
+      await ensureTableConstraint("ordering_order_links", "ordering_order_links_relation_type_check", `CHECK (relation_type IN ( 'add_on', 'payment_followup', 'replacement', 'complaint_remake', 'split', 'merge', 'reopen', 'duplicate', 'other' ))`);
     })().catch((error) => {
       posSchemaPromise = null;
       throw error;
