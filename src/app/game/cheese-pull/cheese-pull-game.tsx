@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { randomComplaint } from "@/lib/games/complaints";
 
 type Mode = "home" | "play" | "over" | "won";
 type Shot = { x: number; y: number };
@@ -109,13 +110,15 @@ export default function DeliveryBlaster() {
     frame = useRef(0);
   const [mode, setMode] = useState<Mode>("home"),
     [view, setView] = useState(fresh()),
-    [high, setHigh] = useState(0);
+    [high, setHigh] = useState(0),
+    [complaint, setComplaint] = useState("");
   useEffect(
     () => setHigh(Number(localStorage.getItem("delivery-blaster-high") || 0)),
     [],
   );
   const finish = useCallback((won: boolean) => {
     const s = game.current;
+    setComplaint(randomComplaint());
     setMode(won ? "won" : "over");
     audio.stop();
     if (won) audio.win();
@@ -390,6 +393,7 @@ export default function DeliveryBlaster() {
                 </small>
                 <h2>{view.message}</h2>
                 <b>{view.score.toLocaleString()} POINTS</b>
+                <p className="end-complaint">CUSTOMER FEEDBACK: {complaint}</p>
                 <button onClick={start}>PLAY AGAIN</button>
                 <a href="/games">ALL GAMES</a>
               </div>

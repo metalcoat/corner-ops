@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MenuAdTicker } from "@/app/games/components/menu-ad-ticker";
+import { perfectionPenalty, randomComplaint } from "@/lib/games/complaints";
 
 type Size = "SMALL" | "REGULAR" | "JUMBO";
 type Top =
@@ -260,6 +261,7 @@ export default function Game() {
       null,
     ),
     [message, setMessage] = useState(""),
+    [endComplaint, setEndComplaint] = useState(""),
     [reward, setReward] = useState<{ code?: string; error?: string } | null>(
       null,
     ),
@@ -319,6 +321,7 @@ export default function Game() {
     setCombo(0);
     select(tickets.filter((t) => t.id !== late.id));
     if (ns >= 3) {
+      setEndComplaint(randomComplaint());
       setMode("lost");
       if (run)
         void fetch("/api/pizza-gauntlet/run", {
@@ -532,7 +535,16 @@ export default function Game() {
     setPerfects(np);
     setCombo(nc);
     setBestCombo((v) => Math.max(v, nc));
-    const newScore = score + result.total * 12 * Math.max(1, Math.min(4, nc));
+    // A perfect pizza can still draw a complaint (and cost you).
+    const penalty = result.total >= 93 ? perfectionPenalty(0.25, 300) : null;
+    if (penalty) {
+      setMessage(`${penalty.line} · −${penalty.points} · ${penalty.complaint}`);
+      setTimeout(() => setMessage(""), 4200);
+    }
+    const newScore = Math.max(
+      0,
+      score + result.total * 12 * Math.max(1, Math.min(4, nc)) - (penalty?.points ?? 0),
+    );
     setScore(newScore);
     const wasBoss = !!active.boss,
       remaining = tickets.filter((t) => t.id !== active.id);
@@ -540,6 +552,7 @@ export default function Game() {
     setBuild(blank());
     select(remaining);
     if (ns >= 3) {
+      setEndComplaint(randomComplaint());
       setMode("lost");
       if (run)
         void fetch("/api/pizza-gauntlet/run", {
@@ -571,6 +584,7 @@ export default function Game() {
     ns: number,
     finalScore: number,
   ) {
+    setEndComplaint(randomComplaint());
     setMode("won");
     if (!run) return;
     seq.current++;
@@ -918,6 +932,7 @@ export default function Game() {
             PIZZAS {made} · ACCURACY {average}% · PERFECT {perfects} · PHONE
             CALLS {phoneCalls} · LONGEST COMBO {bestCombo} · SCORE {score}
           </p>
+          <p className="end-complaint">CUSTOMER FEEDBACK: {endComplaint}</p>
           <button onClick={begin}>CLOCK BACK IN</button>
           <button onClick={openLeaders}>LEADERBOARD</button>
           <a className="return-games" href="/games">
@@ -930,6 +945,7 @@ export default function Game() {
           <small>SHIFT COMPLETE</small>
           <h1>AGAINST ALL ODDS</h1>
           <p>MANAGEMENT HAS REVIEWED YOUR PERFORMANCE.</p>
+          <p className="end-complaint">STILL, A CUSTOMER CALLED: {endComplaint}</p>
           <b>YOU HAVE EARNED A JUMBO PIZZA.</b>
           {reward?.code ? (
             <code>{reward.code}</code>

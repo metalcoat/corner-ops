@@ -16,6 +16,7 @@ import {
   SELECT_CELLS,
 } from "./screens";
 import { Stage } from "./stage";
+import { randomComplaint } from "@/lib/games/complaints";
 
 export type GameMode = "title" | "select" | "intro" | "stage" | "pause" | "weaponGet" | "gameOver" | "ending";
 
@@ -37,6 +38,8 @@ export class Game {
   menu = 0;
   /** Weapon earned on the last victory (for the weapon-get screen). */
   earned: WeaponId | null = null;
+  /** A customer complaint about the boss you just beat. Winning never stops them. */
+  complaint = "";
 
   constructor() {
     this.save = loadSave();
@@ -205,6 +208,7 @@ export class Game {
       } else this.startStage();
     } else if (stage.result === "victory") {
       const def = BOSSES[this.bossId];
+      this.complaint = randomComplaint();
       this.save = { ...this.save, defeated: [...new Set([...this.save.defeated, this.bossId])] };
       if (this.bossId === "margin") this.save.cleared = true;
       writeSave(this.save);

@@ -274,7 +274,13 @@ export function drawWeaponGet(ctx: CanvasRenderingContext2D, game: Game) {
     if (victim) drawText(ctx, `TRY IT ON ${victim.name}`, SCREEN_W / 2, 214, "#f8b800", { align: "center" });
   }
   if (t > 120 && t % 40 < 26) drawText(ctx, "PRESS START", SCREEN_W / 2, 228, "#fcfcfc", { align: "center" });
-  drawText(ctx, "Q/E OR WPN BUTTON TO SWITCH WEAPONS", SCREEN_W / 2, 30, "#7c7c7c", { align: "center" });
+  // You saved the deli. A customer is still unhappy.
+  if (game.complaint) {
+    drawText(ctx, "MEANWHILE, A CUSTOMER CALLED:", SCREEN_W / 2, 6, "#f8b800", { align: "center" });
+    wrap(game.complaint, 40)
+      .slice(0, 5)
+      .forEach((line, i) => drawText(ctx, line, SCREEN_W / 2, 17 + i * 8, "#fcfcfc", { align: "center" }));
+  } else drawText(ctx, "Q/E OR WPN BUTTON TO SWITCH WEAPONS", SCREEN_W / 2, 30, "#7c7c7c", { align: "center" });
 }
 
 /* ---------------- game over ---------------- */

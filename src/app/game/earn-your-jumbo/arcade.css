@@ -1198,3 +1198,12 @@
   font-size: 0.55rem;
   margin-top: 3px;
 }
+
+.end-complaint {
+  max-width: 560px;
+  margin: 10px auto;
+  padding: 10px 12px;
+  border: 2px dashed currentColor;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
