@@ -1,7 +1,7 @@
 import { getSql } from "@/lib/db";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { ensureOrderingTimingSchema } from "@/lib/ordering-timing-schema";
-import { preOpenAsapAllowed, previousDaySpilloverCovers, sameDayWindowCovers } from "@/lib/ordering-hours-math";
+import { previousDaySpilloverCovers, sameDayWindowCovers } from "@/lib/ordering-hours-math";
 
 export type OrderingService = "all" | "pickup" | "delivery" | "dine_in" | "online" | "phone";
 export type AvailabilitySource = "emergency_closure" | "special_service" | "special_general" | "weekly_service" | "weekly_general" | "unconfigured";
@@ -173,9 +173,9 @@ export async function resolveOrderingAvailability(input: {
     const opensAt = wallTimeUtc(local, orderingOpen, timezone);
     const cutoffAt = wallTimeUtc(cutoff < orderingOpen ? addDays(local, 1) : local, cutoff, timezone);
     if (opensAt > at && (!nextOpen || opensAt < nextOpen)) nextOpen = opensAt;
-    // ASAP before opening is only taken within the pre-open lead window, not
-    // hours ahead (e.g. at 3 a.m. for an 11 a.m. opening).
-    if (input.allowPreOpenAsap && currentMinute < orderingOpen && preOpenAsapAllowed((opensAt.getTime() - at.getTime()) / 60_000))
+    // ASAP orders are taken any time before opening; they print right away
+    // marked ASAP and are made when the store opens.
+    if (input.allowPreOpenAsap && currentMinute < orderingOpen)
       return { open: false, orderable: true, reason: "ASAP order accepted before opening.", opensAt, cutoffAt, nextAvailableAt: opensAt, sourceRule: source, timezone };
     if (open || orderable) return { open, orderable, reason: orderable ? "Ordering is available." : "The store is outside ordering hours.", opensAt, cutoffAt, nextAvailableAt: nextOpen, sourceRule: source, timezone };
   }
@@ -188,7 +188,6 @@ export async function resolveOrderingAvailability(input: {
       if(!future.length)continue;
       const firstMinute=Math.min(...future.map(row=>minutes(row.ordering_opens_at||row.opens_at)));
       const candidate=wallTimeUtc({year:futureDate.getUTCFullYear(),month:futureDate.getUTCMonth()+1,day:futureDate.getUTCDate()},firstMinute,timezone);
-      if(!preOpenAsapAllowed((candidate.getTime()-at.getTime())/60_000))break;
       const confirmed=await resolveOrderingAvailability({business:input.business,serviceType:input.serviceType,at:candidate});
       if(confirmed.orderable)return {open:false,orderable:true,reason:"ASAP order accepted for the next opening.",opensAt:candidate,cutoffAt:null,nextAvailableAt:candidate,sourceRule:confirmed.sourceRule,timezone};
     }

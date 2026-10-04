@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  preOpenAsapAllowed,
   previousDaySpilloverCovers,
   sameDayWindowCovers,
   windowsCoverMinute,
@@ -38,11 +37,3 @@ test("1 a.m. is open only when yesterday had the overnight window", () => {
   assert.equal(windowsCoverMinute([overnight], [], at(19)), true);
 });
 
-test("ASAP before opening is limited to the pre-open lead window", () => {
-  assert.equal(preOpenAsapAllowed(30), true);
-  assert.equal(preOpenAsapAllowed(60), true);
-  assert.equal(preOpenAsapAllowed(61), false);
-  assert.equal(preOpenAsapAllowed(8 * 60), false);
-  assert.equal(preOpenAsapAllowed(0), false);
-  assert.equal(preOpenAsapAllowed(90, 120), true);
-});

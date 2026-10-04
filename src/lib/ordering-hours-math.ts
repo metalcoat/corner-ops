@@ -8,9 +8,6 @@
 
 export const MINUTES_PER_DAY = 1440;
 
-/** ASAP orders may be accepted this long before ordering opens, not earlier. */
-export const PRE_OPEN_ASAP_MINUTES = 60;
-
 /** Part of a window that falls on its own business date. */
 export function sameDayWindowCovers(openMinute: number, closeMinute: number, minute: number): boolean {
   if (openMinute === closeMinute) return true;
@@ -31,7 +28,3 @@ export function windowsCoverMinute(today: MinuteWindow[], yesterday: MinuteWindo
     || yesterday.some((window) => previousDaySpilloverCovers(window.open, window.close, minute));
 }
 
-/** Whether an ASAP order placed now may be accepted ahead of an upcoming opening. */
-export function preOpenAsapAllowed(minutesUntilOpening: number, leadMinutes = PRE_OPEN_ASAP_MINUTES): boolean {
-  return minutesUntilOpening > 0 && minutesUntilOpening <= leadMinutes;
-}
