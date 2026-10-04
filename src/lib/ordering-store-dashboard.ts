@@ -1,3 +1,4 @@
+import { deliLocation } from "@/lib/deli-location";
 import { getSql } from "@/lib/db";
 import { deliveryRoutePlans, syncDeliveryAssignments } from "@/lib/ordering-driver-delivery";
 
@@ -42,5 +43,5 @@ export async function orderingStoreDashboard(){
     {key:"timed",label:"Timed orders due within four hours",count:Number(summary[0]?.timed_upcoming||0),href:"/pos/deli/orders"},
     {key:"unpaid",label:"Open orders with a balance",count:Number(summary[0]?.unpaid_open||0),href:"/pos/deli/orders"}
   ];
-  return{generatedAt:new Date().toISOString(),summary:summary[0],tasks,timedOrders,unpaidOrders,deliveries,routePlans:deliveryRoutePlans(deliveryRows),activity};
+  return{generatedAt:new Date().toISOString(),summary:summary[0],tasks,timedOrders,unpaidOrders,deliveries,routePlans:deliveryRoutePlans(deliveryRows,new Date(),await deliLocation()),activity};
 }

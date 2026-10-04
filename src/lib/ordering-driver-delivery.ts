@@ -113,6 +113,7 @@ export async function listDriverDeliveries(actor:DriverActor,input:{query?:strin
 export function deliveryRoutePlans(
   deliveries: Array<Record<string, unknown>>,
   now = new Date(),
+  storeOrigin: { latitude: number; longitude: number } | null = deliveryOrigin(),
 ): Array<{ driverEmployeeId: string; driverName: string; plan: DeliveryRoutePlan }> {
   const active = deliveries.filter(
     (delivery) =>
@@ -124,7 +125,6 @@ export function deliveryRoutePlans(
   const groups = Map.groupBy(active, (delivery) =>
     String(delivery.assigned_employee_id),
   );
-  const storeOrigin = deliveryOrigin();
   return [...groups.entries()].flatMap(([driverEmployeeId, rows]) => {
     const latestLocation = rows
       .filter(

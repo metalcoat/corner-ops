@@ -6,7 +6,7 @@ import {
 } from "@/lib/customer-ordering-session";
 import { getSql } from "@/lib/db";
 import { unauthorized } from "@/lib/http";
-import { deliveryOrigin } from "@/lib/ordering-delivery-route";
+import { deliLocation } from "@/lib/deli-location";
 import { webOrderDelivery } from "@/lib/ordering-driver-delivery";
 
 export const runtime = "nodejs";
@@ -37,7 +37,7 @@ export async function GET(
   return Response.json({
     order,
     delivery,
-    store: deliveryOrigin(),
+    store: await deliLocation(),
     mapTileUrl: process.env.MAP_TILE_URL?.trim() || null,
   });
 }
