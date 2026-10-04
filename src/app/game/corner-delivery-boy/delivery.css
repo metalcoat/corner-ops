@@ -2678,3 +2678,7 @@
     height: 76px !important;
   }
 }
+.delivery-home .fb-real-link.home {
+  display: inline-block;
+  margin-top: 12px;
+}

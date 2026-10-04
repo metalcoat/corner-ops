@@ -1562,6 +1562,16 @@ export default function DeliveryGame() {
           <a className="return-games" href="/games">
             ← ALL GAMES
           </a>
+          {DELIVERY_FACEBOOK_URL && (
+            <a
+              className="fb-real-link home"
+              href={DELIVERY_FACEBOOK_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Read the real reviews on Corner Deli&apos;s Facebook →
+            </a>
+          )}
           <ul className="how-to-play">
             <li>
               <b>STEER</b> ← → / A D, hold the arrows, or swipe

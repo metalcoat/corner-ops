@@ -12,7 +12,7 @@ export const DELIVERY_STAGES = [
 ] as const;
 
 /** Leave empty to hide the "real page" link in the game. */
-export const DELIVERY_FACEBOOK_URL = "";
+export const DELIVERY_FACEBOOK_URL = "https://www.facebook.com/ordercornerdeli/";
 
 /**
  * Shifts run for a fixed amount of driving, so a run that checkpoints faster
