@@ -153,7 +153,7 @@ export async function salesTaxReport(input: { business: OrderingBusiness; start:
   const rateBps = Number(settings?.tax_rate_bps || 0), pricesIncludeTax = settings?.prices_include_tax !== false;
   const warnings: string[] = [];
   if (!settings?.tax_rate_configured || rateBps === 0)
-    warnings.push("No sales tax rate is set, so tax shows as $0. Set it under POS settings → Delivery, minimums, and tax (St. Lawrence County is 7%; confirm with your accountant).");
+    warnings.push("No sales tax rate is set, so tax shows as $0. Set it under POS settings → Delivery, minimums, and tax (Ogdensburg is 8%).");
   if (!pricesIncludeTax)
     warnings.push("“Menu prices include tax” is turned off, but the POS does not add tax on top of prices. Turn it back on, or tax is being undercharged.");
   return {
