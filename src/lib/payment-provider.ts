@@ -1,7 +1,8 @@
+// Card payments go through Dharma / MX Merchant (Priority). Helcim is no
+// longer used; card tenders recorded with provider 'helcim' are history only.
 import { listMxTerminals, type MxTerminal } from "@/lib/mx-terminal";
-import { helcimStatus, testHelcimConnection } from "@/lib/helcim";
 
-export type PaymentProviderKey = "helcim" | "mx_merchant";
+export type PaymentProviderKey = "mx_merchant";
 
 export type PaymentProviderStatus = {
   provider: PaymentProviderKey;
@@ -13,13 +14,7 @@ export type PaymentProviderStatus = {
   missing: string[];
 };
 
-export function activePaymentProvider(): PaymentProviderKey {
-  return process.env.PAYMENT_PROVIDER?.trim().toLowerCase() === "mx_merchant"
-    ? "mx_merchant"
-    : "helcim";
-}
-
-export function mxMerchantStatus(): PaymentProviderStatus {
+export function paymentProviderStatus(): PaymentProviderStatus {
   const required = {
     MX_MERCHANT_ID: process.env.MX_MERCHANT_ID,
     MX_CONSUMER_KEY: process.env.MX_CONSUMER_KEY,
@@ -35,8 +30,7 @@ export function mxMerchantStatus(): PaymentProviderStatus {
     label: "Dharma / MX Merchant",
     configured,
     onlineCheckoutEnabled: configured,
-    terminalCheckoutEnabled:
-      configured && Boolean(process.env.MX_TERMINAL_API_ENABLED?.trim() === "true"),
+    terminalCheckoutEnabled: configured && process.env.MX_TERMINAL_API_ENABLED?.trim() === "true",
     sandbox: process.env.MX_ENVIRONMENT?.trim().toLowerCase() !== "production",
     missing,
   };
@@ -48,27 +42,24 @@ function mxApiBase(): string {
     : "https://sandbox.api.mxmerchant.com/checkout/v3";
 }
 
-async function testMxMerchantConnection() {
-  const merchantId = process.env.MX_MERCHANT_ID?.trim();
-  const consumerKey = process.env.MX_CONSUMER_KEY?.trim();
-  const consumerSecret = process.env.MX_CONSUMER_SECRET?.trim();
-  if (!merchantId || !consumerKey || !consumerSecret)
-    throw new Error("MX Merchant credentials are incomplete.");
-  const authorization = Buffer.from(`${consumerKey}:${consumerSecret}`, "utf8").toString("base64");
-  const response = await fetch(
-    `${mxApiBase()}/merchant/${encodeURIComponent(merchantId)}`,
-    {
-      method: "GET",
-      headers: { Authorization: `Basic ${authorization}`, Accept: "application/json" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(10_000),
-    },
-  );
+/** Checks the MX credentials against the merchant record and lists the terminals registered for it. */
+export async function testActivePaymentProvider() {
+  const status = paymentProviderStatus();
+  if (!status.configured)
+    throw new Error(`MX Merchant is missing: ${status.missing.join(", ")}.`);
+  const merchantId = process.env.MX_MERCHANT_ID!.trim();
+  const authorization = Buffer.from(`${process.env.MX_CONSUMER_KEY!.trim()}:${process.env.MX_CONSUMER_SECRET!.trim()}`, "utf8").toString("base64");
+  const response = await fetch(`${mxApiBase()}/merchant/${encodeURIComponent(merchantId)}`, {
+    method: "GET",
+    headers: { Authorization: `Basic ${authorization}`, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!response.ok) {
     throw new Error(
       response.status === 401 || response.status === 403
-        ? "Priority rejected the MX API credentials for this environment."
-        : `Priority terminal lookup failed (${response.status}).`,
+        ? "MX rejected the API credentials for this environment."
+        : `MX merchant lookup failed (${response.status}).`,
     );
   }
   await response.json();
@@ -82,32 +73,9 @@ async function testMxMerchantConnection() {
   return {
     connected: true,
     provider: "mx_merchant" as const,
-    environment: process.env.MX_ENVIRONMENT?.trim().toLowerCase() === "production" ? "production" : "sandbox",
+    environment: status.sandbox ? "sandbox" : "production",
     enabledTerminalCount: terminals.filter((terminal) => terminal.enabled).length,
     terminals: terminals.map(({ id, name, providerKey, enabled }) => ({ id, name, providerKey, enabled })),
     terminalError,
   };
-}
-
-export function paymentProviderStatus(): PaymentProviderStatus {
-  if (activePaymentProvider() === "mx_merchant") return mxMerchantStatus();
-  const status = helcimStatus();
-  return {
-    provider: "helcim",
-    label: "Helcim",
-    configured: status.apiTokenConfigured,
-    onlineCheckoutEnabled: status.checkoutEnabled,
-    terminalCheckoutEnabled:
-      status.apiTokenConfigured && status.deviceCodeConfigured,
-    sandbox: false,
-    missing: status.apiTokenConfigured ? [] : ["HELCIM_API_TOKEN"],
-  };
-}
-
-export async function testActivePaymentProvider() {
-  const status = paymentProviderStatus();
-  if (status.provider === "helcim") return testHelcimConnection();
-  if (!status.configured)
-    throw new Error(`MX Merchant is missing: ${status.missing.join(", ")}.`);
-  return testMxMerchantConnection();
 }

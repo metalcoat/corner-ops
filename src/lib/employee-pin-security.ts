@@ -84,7 +84,7 @@ export async function assertEmployeePinAvailable(input: {
       )
     LIMIT 1
   ` as unknown as Array<{ id: string }>;
-  if (rows[0]) throw new Error("That PIN is already in use at this location.");
+  if (rows[0]) throw new Error("That PIN is already assigned at this location.");
   return pin;
 }
 

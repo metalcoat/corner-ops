@@ -230,10 +230,7 @@ Every offer and acceptance should eventually be logged for conversion and increm
 
 The application uses a provider abstraction. Orders reference internal payment records, not provider-specific IDs throughout the codebase.
 
-Initial providers under evaluation:
-
-- Helcim
-- Stripe
+Card payments go through Dharma / MX Merchant (Priority): keyed cards, online checkout, and the payment-station terminal. See `PAYMENT_STATION.md`.
 
 Corner Ops never stores PAN, CVV, or PIN. Phone-payment card data must go directly through a PCI-compliant payment collection/tokenization path. The AI receives only non-sensitive results such as approved/declined, brand, last four, token/payment-method reference, and amount.
 

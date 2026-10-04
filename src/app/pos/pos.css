@@ -1456,50 +1456,6 @@
   margin: 0;
   color: #94a3b8;
 }
-.posSecurePaymentBackdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 2147483645;
-  display: grid;
-  place-items: center;
-  background: rgb(2 6 23 / 72%);
-  backdrop-filter: blur(3px);
-  color: #fff;
-}
-.posSecurePaymentBackdrop > div {
-  display: grid;
-  gap: 8px;
-  text-align: center;
-}
-.posSecurePaymentBackdrop span {
-  font-size: 0.75rem;
-  font-weight: 900;
-  letter-spacing: 0.12em;
-  color: #93c5fd;
-}
-.posSecurePaymentBackdrop strong {
-  font-size: 1.25rem;
-}
-#helcimPayIframe {
-  position: fixed !important;
-  inset: 50% auto auto 50% !important;
-  z-index: 2147483646 !important;
-  width: min(720px, calc(100vw - 16px)) !important;
-  height: calc(100dvh - 16px) !important;
-  transform: translate(-50%, -50%) !important;
-  border: 0 !important;
-  border-radius: 18px !important;
-  box-shadow: 0 24px 80px rgb(0 0 0 / 48%) !important;
-  overflow: hidden !important;
-}
-@media (min-width: 760px) {
-  #helcimPayIframe {
-    inset: 50% auto auto 50% !important;
-    width: 720px !important;
-    height: min(850px, calc(100dvh - 24px)) !important;
-    transform: translate(-50%, -50%) !important;
-  }
-}
 .posAiCallStrip {
   position: fixed;
   z-index: 75;
@@ -2685,3 +2641,236 @@
 .posReportTax .posReportWarning{margin:0 0 12px;padding:10px 12px;border-radius:10px;background:#fff0c2;color:#5c3d00;font-weight:650}
 .posReportTax .posReportExport{margin-top:14px;width:100%;min-height:44px;border:0;border-radius:10px;background:#174f36;color:#fff;font-weight:800;cursor:pointer}
 .posReportTax .posReportExport:disabled{opacity:.5;cursor:default}
+
+/* Checkout panel */
+.posCheckoutSidePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px 104px;
+  background: linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
+  border-left: 1px solid #1e293b;
+}
+.posCheckoutHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #1e293b;
+}
+.posCheckoutHeader h2 {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+.posCheckoutHeader h2 small {
+  color: #60a5fa;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+}
+.posCheckoutClose {
+  width: 48px;
+  min-height: 48px;
+  flex: none;
+  padding: 0;
+  border-radius: 999px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  font-size: 1.15rem;
+}
+.posCheckoutDue {
+  display: grid;
+  gap: 2px;
+  padding: 16px 18px;
+  border: 1px solid #1d4ed8;
+  border-radius: 16px;
+  background: radial-gradient(120% 140% at 0% 0%, #1e3a8a 0%, #0f1f3d 55%, #0b1220 100%);
+  box-shadow: inset 0 1px 0 #ffffff14, 0 10px 30px #02061780;
+}
+.posCheckoutDue span {
+  color: #93c5fd;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.posCheckoutDue strong {
+  color: #fff;
+  font-size: clamp(2.6rem, 5vw, 3.4rem);
+  font-weight: 900;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.posCheckoutDue small {
+  color: #cbd5e1;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+.posCheckoutSidePanel .posSplitOrderButton {
+  min-height: 46px;
+  border-radius: 12px;
+  background: #0b1220;
+  border: 1px solid #0e7490;
+  color: #67e8f9;
+  letter-spacing: 0.08em;
+}
+.posCheckoutSidePanel .posCheckTabs button {
+  border-radius: 12px;
+}
+.posCheckoutTender {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid #1f3b2b;
+  border-left: 4px solid #22c55e;
+  border-radius: 12px;
+  background: #0d1a14;
+}
+.posCheckoutTender.reversal {
+  border-color: #3f1d1d;
+  border-left-color: #f87171;
+  background: #1a0f12;
+}
+.posCheckoutTender > span {
+  flex: 1 1 auto;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+.posCheckoutTender > small {
+  color: #94a3b8;
+  font-weight: 700;
+}
+.posCheckoutTender > button {
+  min-height: 40px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-size: 0.78rem;
+}
+.posCheckoutSidePanel .posCheckoutInlineError {
+  margin: 0;
+  border-radius: 12px;
+  border-left-width: 4px;
+}
+.posCheckoutSidePanel .posCheckoutPaymentGrid {
+  grid-template-columns: minmax(300px, 1.35fr) minmax(200px, 0.65fr);
+  align-items: start;
+}
+.posCheckoutSidePanel .posCashPanel,
+.posCheckoutSidePanel .posOtherTenders {
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #1e293b;
+  border-radius: 16px;
+  background: #0b1424;
+}
+.posCheckoutSidePanel .posCashPanel h3,
+.posCheckoutSidePanel .posOtherTenders h3 {
+  color: #94a3b8;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.posCheckoutSidePanel .posCashPanel output {
+  padding: 14px 16px;
+  border: 2px solid #2563eb;
+  border-radius: 14px;
+  background: #020617;
+  font-size: 2.3rem;
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 2px 10px #0008;
+}
+.posCheckoutSidePanel .posCashQuick button {
+  min-height: 46px;
+  border-radius: 999px;
+  border: 1px solid #1d4ed8;
+  background: #0f1f3d;
+  color: #bfdbfe;
+  font-weight: 900;
+}
+.posCheckoutSidePanel .posCashNumpad {
+  gap: 8px;
+}
+.posCheckoutSidePanel .posCashNumpad button {
+  min-height: 58px;
+  border-radius: 14px;
+  border: 1px solid #334155;
+  background: linear-gradient(180deg, #273449 0%, #1c2638 100%);
+  box-shadow: inset 0 1px 0 #ffffff12, 0 2px 0 #020617;
+  color: #f8fafc;
+  font-size: 1.45rem;
+  font-variant-numeric: tabular-nums;
+}
+.posCheckoutSidePanel .posCashNumpad button:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 0 #ffffff12;
+}
+.posCheckoutSidePanel .posCashNumpad button.clear {
+  grid-column: 1 / -1;
+  min-height: 48px;
+  background: #1a1f2b;
+  color: #fca5a5;
+  font-size: 0.95rem;
+  letter-spacing: 0.1em;
+}
+.posCheckoutSidePanel .posOtherTenders label {
+  display: grid;
+  gap: 6px;
+  color: #cbd5e1;
+  font-weight: 800;
+}
+.posCheckoutSidePanel .posOtherTenders input {
+  min-height: 52px;
+  border-radius: 12px;
+  border: 1px solid #475569;
+  background: #020617;
+  color: #fff;
+  font-size: 1.1rem;
+}
+.posCheckoutSidePanel .posOtherTenders p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+.posCheckoutSidePanel > .posTenderButtons {
+  gap: 10px;
+  padding: 12px 18px max(12px, env(safe-area-inset-bottom));
+  background: #0b1220f2;
+  border-top: 1px solid #1e293b;
+  backdrop-filter: blur(6px);
+}
+.posCheckoutSidePanel > .posTenderButtons button {
+  min-height: 70px;
+  display: grid;
+  place-content: center;
+  gap: 2px;
+  border-radius: 14px;
+  font-size: 1.15rem;
+  letter-spacing: 0.06em;
+  box-shadow: inset 0 1px 0 #ffffff26, 0 6px 16px #02061799;
+}
+.posCheckoutSidePanel > .posTenderButtons button small {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+.posCheckoutSidePanel > .posTenderButtons button:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+}
+@media (max-width: 760px) {
+  .posCheckoutSidePanel .posCheckoutPaymentGrid {
+    grid-template-columns: 1fr;
+  }
+}

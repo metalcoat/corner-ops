@@ -303,27 +303,6 @@
   background: rgb(13 27 21 / 58%);
   backdrop-filter: blur(2px);
 }
-#helcimPayIframe {
-  position: fixed !important;
-  inset: 50% auto auto 50% !important;
-  z-index: 2147483646 !important;
-  width: min(720px, calc(100vw - 16px)) !important;
-  height: calc(100dvh - 16px) !important;
-  transform: translate(-50%, -50%) !important;
-  border: 0 !important;
-  border-radius: 18px !important;
-  box-shadow: 0 24px 80px rgb(0 0 0 / 38%) !important;
-  overflow: hidden !important;
-}
-@media (min-width: 760px) {
-  #helcimPayIframe {
-    inset: -66px auto auto 50% !important;
-    width: 720px !important;
-    height: 850px !important;
-    transform: translateX(-50%) scale(0.82) !important;
-    transform-origin: top center !important;
-  }
-}
 .orderIntro {
   padding: 24px clamp(18px, 5vw, 80px) 18px;
   display: flex;

@@ -12,7 +12,6 @@ import {
   supportsSubModifierIntensity,
   type ModifierIntensity,
 } from "@/lib/ordering-modifier-intensity";
-import { unwrapHelcimPayResponse } from "@/lib/helcim-pay-response";
 import { consolidateQuantities } from "@/lib/cart-line-consolidation";
 import {
   DELIVERY_LOCATION_PRESETS,
@@ -673,132 +672,6 @@ export default function CustomerOrder() {
       setBusy(false);
     }
   }
-  async function payWithHelcim(order = review) {
-    if (!order?.id || busy) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      if (!window.appendHelcimPayIframe) {
-        await new Promise<void>((resolve, reject) => {
-          const existing = document.querySelector<HTMLScriptElement>(
-            'script[data-helcim-pay="true"]',
-          );
-          if (existing) {
-            existing.addEventListener("load", () => resolve(), { once: true });
-            existing.addEventListener(
-              "error",
-              () => reject(new Error("Could not load secure checkout.")),
-              { once: true },
-            );
-            return;
-          }
-          const script = document.createElement("script");
-          script.src = "https://secure.helcim.app/helcim-pay/services/start.js";
-          script.async = true;
-          script.dataset.helcimPay = "true";
-          script.onload = () => resolve();
-          script.onerror = () =>
-            reject(new Error("Could not load secure checkout."));
-          document.head.appendChild(script);
-        });
-      }
-      const endpoint = `/api/customer/orders/${encodeURIComponent(order.id)}/payments/helcim`;
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "initialize" }),
-      });
-      const initialized = (await response.json()) as {
-        checkoutToken?: string;
-        error?: string;
-      };
-      if (
-        !response.ok ||
-        !initialized.checkoutToken
-      )
-        throw new Error(
-          initialized.error || "Could not start secure checkout.",
-        );
-      const checkoutToken = initialized.checkoutToken;
-      const result = await new Promise<any>((resolve, reject) => {
-        const listener = async (event: MessageEvent) => {
-          if (
-            event.origin !== "https://secure.helcim.app" ||
-            event.data?.eventName !== `helcim-pay-js-${checkoutToken}`
-          )
-            return;
-          if (
-            event.data.eventStatus === "HIDE" ||
-            event.data.eventStatus === "ABORTED"
-          ) {
-            window.removeEventListener("message", listener);
-            reject(
-              new Error(
-                event.data.eventStatus === "ABORTED"
-                  ? "The payment was declined."
-                  : "Secure checkout was closed.",
-              ),
-            );
-            return;
-          }
-          if (event.data.eventStatus !== "SUCCESS") return;
-          window.removeEventListener("message", listener);
-          try {
-            const message = unwrapHelcimPayResponse(event.data.eventMessage);
-            const confirmed = await fetch(endpoint, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                action: "confirm",
-                checkoutToken,
-                data: message.data,
-                hash: message.hash,
-              }),
-            });
-            const payload = await confirmed.json();
-            if (!confirmed.ok)
-              throw new Error(
-                payload.error ||
-                  "Payment was approved but the order could not be submitted. Please call the deli before retrying.",
-              );
-            resolve(payload);
-          } catch (error) {
-            reject(error);
-          }
-        };
-        window.addEventListener("message", listener);
-        if (!window.appendHelcimPayIframe) {
-          window.removeEventListener("message", listener);
-          reject(new Error("Secure checkout did not load."));
-          return;
-        }
-        setPaymentOpen(true);
-        window.appendHelcimPayIframe(checkoutToken);
-      });
-      if (result.needsAssistance) {
-        setMessage(
-          `Payment was approved, but the order needs staff review: ${result.submissionError || "please call Corner Deli."}`,
-        );
-      }
-      const submittedOrder = result.order;
-      setCompletedOrder(submittedOrder);
-      setReview(null);
-      setCart([]);
-      if (!result.needsAssistance && submittedOrder?.id) {
-        window.location.assign(
-          `/order/confirmation?orderId=${encodeURIComponent(submittedOrder.id)}`,
-        );
-      }
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Secure checkout failed.",
-      );
-    } finally {
-      window.removeHelcimPayIframe?.();
-      setPaymentOpen(false);
-      setBusy(false);
-    }
-  }
   async function validateDeliveryAddressNow(
     enteredAddress: string,
     placeId: string,
@@ -841,12 +714,8 @@ export default function CustomerOrder() {
     setMessage("");
     try {
       const response = await fetch(
-        `/api/customer/orders/${encodeURIComponent(order.id)}/payments/helcim`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action: "pay_later" }),
-        },
+        `/api/customer/orders/${encodeURIComponent(order.id)}/pay-later`,
+        { method: "POST" },
       );
       const result = await response.json();
       if (!response.ok)

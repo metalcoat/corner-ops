@@ -26,7 +26,7 @@ const PORT = 3057, BASE = `http://127.0.0.1:${PORT}`;
 const EMPLOYEE_ID = "11110000-0000-4000-8000-000000000001";
 
 async function waitForHealth(server: ReturnType<typeof spawn>) {
-  for (let i = 0; i < 120; i += 1) {
+  for (let i = 0; i < 240; i += 1) {
     if (server.exitCode !== null) throw new Error(`The app server exited (${server.exitCode}).`);
     try { if ((await fetch(`${BASE}/api/health`)).ok) return; } catch {}
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -79,12 +79,15 @@ async function main() {
     const now = Date.now();
     const cookie = encodePosSession({ employeeId: String(employee.id), business: "Corner Deli", name: String(employee.name), position: String(employee.position || ""), posRole: employee.pos_role === "owner" ? "owner" : "manager", issuedAt: now, expiresAt: now + 3_600_000, clockInRequired: false });
 
-    server = spawn("node_modules/.bin/next", ["start", "-p", String(PORT), "-H", "127.0.0.1"], {
-      env: { ...process.env, ...standIn.env, PORT: String(PORT), NODE_ENV: "production" }, stdio: ["ignore", "inherit", "inherit"],
+    // MX_E2E_DEV_SERVER=1 runs `next dev` instead, for quick visual iteration without a rebuild.
+    const dev = process.env.MX_E2E_DEV_SERVER === "1";
+    server = spawn("node_modules/.bin/next", [dev ? "dev" : "start", "-p", String(PORT), "-H", "127.0.0.1"], {
+      env: { ...process.env, ...standIn.env, PORT: String(PORT), NODE_ENV: dev ? "development" : "production" }, stdio: ["ignore", "inherit", "inherit"],
     });
     await waitForHealth(server);
     // Spawned asynchronously: the stand-in runs in this process and must keep answering while the browser tests run.
-    const run = spawn("node_modules/.bin/playwright", ["test", "tests/mx-terminal.spec.ts", "--reporter=list", ...process.argv.slice(2)], {
+    const specs = process.argv.slice(2).some((arg) => arg.endsWith(".spec.ts")) ? [] : ["tests/mx-terminal.spec.ts"];
+    const run = spawn("node_modules/.bin/playwright", ["test", ...specs, "--reporter=list", ...process.argv.slice(2)], {
       stdio: "inherit",
       env: { ...process.env, POS_BASE_URL: BASE, MX_E2E_POS_COOKIE: cookie, MX_E2E_STATION_KEY: String(station.station_key), MX_STAND_IN_URL: standIn.base, MX_E2E_CUSTOMER_PHONE: phone },
     });

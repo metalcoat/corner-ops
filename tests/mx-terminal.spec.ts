@@ -69,7 +69,7 @@ test("cash waits until the terminal sale is cancelled, then the terminal can be 
 
   // The terminal may still charge the card, so cash is refused.
   await page.getByRole("button", { name: "CASH", exact: true }).click();
-  await expect(page.getByLabel(/Checkout · Order #/).getByRole("alert")).toContainText(/The terminal may still charge the card for this order/);
+  await expect(page.getByRole("dialog", { name: /Order #/ }).getByRole("alert")).toContainText(/The terminal may still charge the card for this order/);
 
   // The red X on the terminal: MX reports the sale cancelled, and a new card sale goes through.
   await fetch(`${standIn}/__stand-in/cancel-pending`, { method: "POST" });

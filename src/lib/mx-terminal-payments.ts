@@ -62,6 +62,7 @@ function ensureSchema() {
     await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS tip_cents INTEGER NOT NULL DEFAULT 0`;
     await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS completion_replay_id BIGINT`;
     await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS completion_started_at TIMESTAMPTZ`;
+    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS capture_base_cents INTEGER`;
     // One sale in flight per terminal, even if two requests race past the busy check.
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_mx_terminal_one_active_idx ON ordering_mx_checkout_sessions(terminal_id) WHERE channel='terminal' AND status IN ('sending','sent')`;
   })().catch((error) => { ready = null; throw error; });
@@ -102,6 +103,8 @@ const setStatus = (id: string, status: string, message = "") =>
 const uniqueViolation = (error: unknown) => (error as { code?: string } | null)?.code === "23505";
 const markNeedsReview = (id: string, reference: string, message: string) =>
   getSql()`UPDATE ordering_mx_checkout_sessions SET status='needs_review',provider_transaction_reference=${reference},status_message=${message.slice(0, 500)} WHERE id=${id}`;
+/** What the completion charges before the tip: the authorized amount, or less if the balance dropped since (set when it is claimed). */
+const captureBase = (session: Session) => Number(session.capture_base_cents ?? session.amount_cents);
 const authorizedOutcome = (session: Session, message = ""): TerminalPaymentOutcome =>
   ({ state: "authorized", sessionId: String(session.id), amountCents: Number(session.amount_cents), message: message || "Card approved. Ask the customer about a tip." });
 
@@ -158,7 +161,7 @@ async function recordAuthorization(session: Session, known?: Record<string, unkn
 /** Records the completed charge (balance + tip) on the order. Safe to repeat: the session's mutation id makes the tender idempotent. */
 async function recordCompletion(session: Session, business: OrderingBusiness, actor: OrderingActor, payment: Record<string, unknown>): Promise<TerminalPaymentOutcome> {
   const sessionId = String(session.id), orderId = String(session.order_id), checkId = session.check_id ? String(session.check_id) : null;
-  const tipCents = Number(session.tip_cents || 0), expectedCents = Number(session.amount_cents) + tipCents;
+  const tipCents = Number(session.tip_cents || 0), expectedCents = captureBase(session) + tipCents;
   const reference = String(payment.id || payment.reference || ""), approvedCents = toCents(payment.amount);
   if (approvedCents !== expectedCents || !reference) {
     const message = `MX completed the card for ${dollars(approvedCents)} but the POS expected ${dollars(expectedCents)}, so it was not added to the order. A manager must check MX payment ${reference || session.auth_reference}.`;
@@ -209,7 +212,7 @@ async function recordCompletion(session: Session, business: OrderingBusiness, ac
  * replayId before trying again, so the card is never charged twice. A decline (usually the tip) returns to the tip step.
  */
 async function finishCompletion(session: Session, business: OrderingBusiness, actor: OrderingActor): Promise<TerminalPaymentOutcome> {
-  const sessionId = String(session.id), tipCents = Number(session.tip_cents || 0), totalCents = Number(session.amount_cents) + tipCents;
+  const sessionId = String(session.id), tipCents = Number(session.tip_cents || 0), totalCents = captureBase(session) + tipCents;
   if (!session.completion_replay_id) throw new MxMerchantError("This card payment has no completion on record.");
   await getSql()`UPDATE ordering_mx_checkout_sessions SET completion_started_at=NOW() WHERE id=${sessionId}`;
   const already = await findMxPaymentByReplayId(Number(session.completion_replay_id));
@@ -231,17 +234,28 @@ async function finishCompletion(session: Session, business: OrderingBusiness, ac
         return { state: "needs_review", sessionId, message };
       }
       const message = tipCents ? `MX did not accept ${dollars(totalCents)} with the tip (${error.message.replace(/\.$/, "")}). Choose a different tip or no tip.` : `MX did not accept the final charge (${error.message.replace(/\.$/, "")}).`;
-      await getSql()`UPDATE ordering_mx_checkout_sessions SET status='authorized',tip_cents=0,completion_replay_id=NULL,status_message=${message.slice(0, 500)} WHERE id=${sessionId} AND status='completing'`;
+      await getSql()`UPDATE ordering_mx_checkout_sessions SET status='authorized',tip_cents=0,capture_base_cents=NULL,completion_replay_id=NULL,status_message=${message.slice(0, 500)} WHERE id=${sessionId} AND status='completing'`;
       return authorizedOutcome(session, message);
     }
     throw error;
   }
 }
 
-/** Claims an authorization for completion with this tip; only one request wins, the rest resume it. */
+/**
+ * Claims an authorization for completion with this tip; only one request wins, the rest resume it.
+ * The order may have changed since the card was approved (an item removed, part paid another way), so the charge is
+ * capped at the current balance, and a hold on an order with nothing left to pay is released instead.
+ */
 async function completeWithTip(session: Session, business: OrderingBusiness, actor: OrderingActor, tipCents: number): Promise<TerminalPaymentOutcome> {
   if (session.status === "authorized") {
-    const claimed = (await getSql()`UPDATE ordering_mx_checkout_sessions SET status='completing',tip_cents=${tipCents},completion_replay_id=${newReplayId()},completion_started_at=NOW(),status_message='' WHERE id=${session.id} AND status='authorized' RETURNING *`)[0];
+    const balance = await checkoutState(String(session.order_id), business, session.check_id || null);
+    const dueCents = Math.max(0, Number(balance.check?.amount_due_cents ?? balance.order.amount_due_cents));
+    if (dueCents === 0) {
+      await voidTerminalAuthorization({ business, orderId: String(session.order_id), sessionId: String(session.id) });
+      return { state: "failed", sessionId: String(session.id), message: "This order has nothing left to pay, so the card was released without charging it." };
+    }
+    const base = Math.min(Number(session.amount_cents), dueCents);
+    const claimed = (await getSql()`UPDATE ordering_mx_checkout_sessions SET status='completing',tip_cents=${tipCents},capture_base_cents=${base},completion_replay_id=${newReplayId()},completion_started_at=NOW(),status_message='' WHERE id=${session.id} AND status='authorized' RETURNING *`)[0];
     if (claimed) return finishCompletion(claimed, business, actor);
     session = (await getSql()`SELECT * FROM ordering_mx_checkout_sessions WHERE id=${session.id}`)[0];
   }

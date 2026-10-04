@@ -236,7 +236,7 @@ export async function POST(request: Request) {
         },
         nextStep:
           serviceType === "pickup"
-            ? "Pay securely with Helcim to submit this order."
+            ? "Pay securely by card to submit this order."
             : "Delivery checkout requires address validation before payment.",
       },
       { status: 201 },

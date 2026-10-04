@@ -126,7 +126,7 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     const source = (await sql`SELECT * FROM ordering_payment_transactions WHERE id=${input.transactionId} AND order_id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
     if (!source || source.transaction_type !== "payment" || source.status !== "approved") throw new PaymentConflictError("Approved payment tender was not found.");
     const viaMx = source.tender_type === "card" && source.provider === "mx_merchant";
-    if (source.tender_type === "card" && source.provider && source.provider !== "test" && !viaMx) throw new PaymentConflictError("Helcim card reversals must be done in Helcim; the POS cannot send them yet.");
+    if (source.tender_type === "card" && source.provider && source.provider !== "test" && !viaMx) throw new PaymentConflictError("This card payment was not taken through Dharma / MX Merchant, so the POS cannot refund it. Refund it with the processor that took it.");
     const reversed = Number((await sql`SELECT COALESCE(SUM(amount_cents),0) amount FROM ordering_payment_transactions WHERE related_transaction_id=${source.id} AND transaction_type IN ('void','refund') AND status='approved'`)[0].amount);
     const inFlightAtMx = viaMx ? await unappliedMxReversalCents(String(source.id), amount) : 0;
     if (amount > Number(source.amount_cents) - reversed - inFlightAtMx) throw new PaymentConflictError("Reversal exceeds the tender's unreversed amount.");

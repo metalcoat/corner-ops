@@ -112,13 +112,15 @@ export async function startMxStandIn(port = 0) {
         if (!auth || body.authOnly !== false || body.authCode !== auth.authCode || body.merchantId !== M) return send(res, 400, { message: "Invalid completion" });
         if (auth.status !== "Approved") return send(res, 200, { status: "Declined", authMessage: `Authorization is ${String(auth.status).toLowerCase()}` });
         // As in the MX sandbox: once completed, the authorization has nothing left to complete.
-        if (Number(auth.availableAuthAmount ?? auth.amount) <= 0) return send(res, 400, { message: `The provided amount (${body.amount}) exceeds the available amount for the authorization` });
-        assert.equal(Math.round(Number(body.amount) * 100), Math.round((Number(auth.amount) + Number(body.tip || 0)) * 100), "Completion amount must be the authorization plus the tip");
+        const available = Number(auth.availableAuthAmount ?? auth.amount);
+        if (available <= 0) return send(res, 400, { message: `The provided amount (${body.amount}) exceeds the available amount for the authorization` });
+        // MX takes less than the hold (the rest stays available) or more by the tip.
+        assert.ok(Math.round(Number(body.amount) * 100) <= Math.round((available + Number(body.tip || 0)) * 100), "Completion is more than the hold plus the tip");
         state.completions.push(body);
         if (mode === "decline") return send(res, 200, { status: "Declined", authMessage: "AMOUNT EXCEEDS AUTHORIZATION LIMIT" });
         const payment = { id: 800000 + state.completions.length, type: "SaleCompletion", authorizationId: auth.id, status: "Approved", amount: Number(body.amount).toFixed(2), tip: Number(body.tip || 0).toFixed(2), authOnly: false, authCode: auth.authCode, cardAccount: auth.cardAccount };
         // MX leaves the authorization "Approved" and consumes its available amount.
-        auth.availableAuthAmount = (Number(auth.amount) - Number(body.amount)).toFixed(2);
+        auth.availableAuthAmount = (available - Number(body.amount)).toFixed(2);
         post(payment, String(body.replayId));
         if (mode === "gateway-after-capture") return send(res, 504, { message: "Gateway timeout" });
         return send(res, 201, payment);
@@ -135,7 +137,7 @@ export async function startMxStandIn(port = 0) {
           payment.status = "Voided";
           // Voiding a completion puts the hold back on its authorization (as the MX sandbox does).
           const auth = payment.authorizationId ? state.byId.get(String(payment.authorizationId)) : undefined;
-          if (auth) auth.availableAuthAmount = Number(auth.amount).toFixed(2);
+          if (auth) auth.availableAuthAmount = (Number(auth.availableAuthAmount ?? 0) + Number(payment.amount)).toFixed(2);
           return send(res, 200, {});
         }
         return send(res, 200, payment);
@@ -154,7 +156,7 @@ export async function startMxStandIn(port = 0) {
     state,
     /** Server environment that points the MX clients at this stand-in. */
     env: {
-      PAYMENT_PROVIDER: "mx_merchant", MX_ENVIRONMENT: "sandbox", MX_MERCHANT_ID: M, MX_CONSUMER_KEY: "stand-in-key", MX_CONSUMER_SECRET: "stand-in-secret", MX_BUSINESS_ID: "stand-in",
+      MX_ENVIRONMENT: "sandbox", MX_MERCHANT_ID: M, MX_CONSUMER_KEY: "stand-in-key", MX_CONSUMER_SECRET: "stand-in-secret", MX_BUSINESS_ID: "stand-in",
       MX_TERMINAL_API_ENABLED: "true", MX_TEST_API_BASE_URL: `${base}/checkout/v3`, MX_TEST_TERMINAL_API_BASE_URL: base,
     },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),

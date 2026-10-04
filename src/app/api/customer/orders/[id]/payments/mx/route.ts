@@ -25,7 +25,7 @@ import {
   newReplayId,
   retrieveMxPayment,
 } from "@/lib/mx-merchant";
-import { helcimCustomerForOrder } from "@/lib/ordering-helcim-customer";
+import { cardBillingContactForOrder } from "@/lib/card-billing-contact";
 export const runtime = "nodejs";
 const business = "Corner Deli" as const;
 async function owned(request: Request, id: string) {
@@ -69,17 +69,17 @@ export async function POST(
         throw new PaymentConflictError("This order has no remaining balance.");
       const init = await initializeMxPayment(),
         replayId = newReplayId(),
-        customer = await helcimCustomerForOrder(orderId, business);
+        customer = await cardBillingContactForOrder(orderId, business);
       await sql`INSERT INTO ordering_mx_checkout_sessions(id,business,order_id,amount_cents,replay_id,client_mutation_id,created_by,expires_at)VALUES(${randomUUID()},${business},${orderId},${amount},${replayId},${randomUUID()},${actor.id},NOW()+INTERVAL '30 minutes')`;
       return Response.json({
         ...init,
         amount: amount / 100,
         replayId,
         customerName: customer?.contactName,
-        avsStreet: customer?.billingAddress?.street1,
-        avsZip: customer?.billingAddress?.postalCode,
-        requireAvsZip: !customer?.billingAddress?.postalCode,
-        requireAvsStreet: !customer?.billingAddress?.street1,
+        avsStreet: customer?.street1,
+        avsZip: customer?.postalCode,
+        requireAvsZip: !customer?.postalCode,
+        requireAvsStreet: !customer?.street1,
       });
     }
     if (body.action !== "confirm")

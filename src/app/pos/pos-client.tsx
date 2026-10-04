@@ -30,7 +30,6 @@ import {
   formatModifierIntensity,
   supportsSubModifierIntensity,
 } from "@/lib/ordering-modifier-intensity";
-import { unwrapHelcimPayResponse } from "@/lib/helcim-pay-response";
 import ItemCancellationPanel from "./deli/orders/item-cancellation-panel";
 import {
   formatPizzaTopping,
@@ -185,10 +184,11 @@ type CheckoutState = {
     reason?: string;
   }>;
 };
-type HelcimStatus = {
+/** Dharma / MX Merchant readiness, from /api/ordering/payments/status. */
+type CardPaymentStatus = {
   checkoutEnabled: boolean;
-  apiTokenConfigured: boolean;
-  localDevelopment?: boolean;
+  configured: boolean;
+  sandbox?: boolean;
 };
 type PosStationProfile = {
   name: string;
@@ -707,10 +707,9 @@ export default function PosClient({
   >("");
   const [customTip, setCustomTip] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
-  const [helcimOpen, setHelcimOpen] = useState(false);
   const [mxPayment,setMxPayment]=useState<MxPaymentInitialization|null>(null);
   const [mxTerminalSale,setMxTerminalSale]=useState<MxTerminalSale|null>(null);
-  const [helcimStatus, setHelcimStatus] = useState<HelcimStatus | null>(null);
+  const [cardPaymentStatus, setCardPaymentStatus] = useState<CardPaymentStatus | null>(null);
   const [stationProfile, setStationProfile] =
     useState<PosStationProfile | null>(null);
   const [assignedStationKey, setAssignedStationKey] = useState("");
@@ -740,14 +739,14 @@ export default function PosClient({
         return body;
       })
       .then((body) =>
-        setHelcimStatus({
+        setCardPaymentStatus({
           checkoutEnabled: Boolean(body.onlineCheckoutEnabled),
-          apiTokenConfigured: Boolean(body.configured),
-          localDevelopment: Boolean(body.sandbox),
+          configured: Boolean(body.configured),
+          sandbox: Boolean(body.sandbox),
         }),
       )
       .catch(() =>
-        setHelcimStatus({ checkoutEnabled: false, apiTokenConfigured: false }),
+        setCardPaymentStatus({ checkoutEnabled: false, configured: false }),
       );
   }, [business]);
   useEffect(() => {
@@ -3334,171 +3333,6 @@ export default function PosClient({
     }
   }
 
-  async function startHelcimPayment(
-    requestedOverride?: number,
-    stateOverride?: CheckoutState,
-    checkIdOverride?: string,
-  ) {
-    const draft = savedDraft || activeTab;
-    const activeCheckout = stateOverride || checkoutState;
-    if (!draft || !activeCheckout || paymentBusy) return;
-    setPaymentBusy(true);
-    setHelcimOpen(true);
-    setCheckoutError("");
-    try {
-      const due = Number(
-        activeCheckout.check?.amount_due_cents ??
-          activeCheckout.order.amount_due_cents,
-      );
-      const requestedCents =
-        requestedOverride ??
-        (cashTender.trim() ? Math.round(Number(cashTender) * 100) : due);
-      if (
-        !Number.isSafeInteger(requestedCents) ||
-        requestedCents <= 0 ||
-        requestedCents > due
-      )
-        throw new Error(
-          "Enter a card amount between $0.01 and the remaining balance.",
-        );
-      if (!window.appendHelcimPayIframe) {
-        await new Promise<void>((resolve, reject) => {
-          const existing = document.querySelector<HTMLScriptElement>(
-            'script[data-helcim-pay="true"]',
-          );
-          if (existing) {
-            existing.addEventListener("load", () => resolve(), { once: true });
-            existing.addEventListener(
-              "error",
-              () => reject(new Error("Could not load Helcim checkout.")),
-              { once: true },
-            );
-            return;
-          }
-          const script = document.createElement("script");
-          script.src = "https://secure.helcim.app/helcim-pay/services/start.js";
-          script.async = true;
-          script.dataset.helcimPay = "true";
-          script.onload = () => resolve();
-          script.onerror = () =>
-            reject(new Error("Could not load Helcim checkout."));
-          document.head.appendChild(script);
-        });
-      }
-      const response = await fetch(
-        `/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/helcim`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            action: "initialize",
-            checkId: checkIdOverride || selectedCheckId,
-            amountCents: requestedCents,
-          }),
-        },
-      );
-      const initialized = (await response.json()) as {
-        checkoutToken?: string;
-        error?: string;
-        checkout?: CheckoutState;
-      };
-      if (!response.ok && initialized.checkout) applyMxApproval(draft, initialized.checkout);
-      if (
-        !response.ok ||
-        !initialized.checkoutToken
-      )
-        throw new Error(
-          initialized.error || "Could not start Helcim checkout.",
-        );
-      const checkoutToken = initialized.checkoutToken;
-      const eventName = `helcim-pay-js-${checkoutToken}`;
-      const result = await new Promise<CheckoutState>((resolve, reject) => {
-        const listener = async (event: MessageEvent) => {
-          if (
-            event.origin !== "https://secure.helcim.app" ||
-            event.data?.eventName !== eventName
-          )
-            return;
-          if (event.data.eventStatus === "HIDE") {
-            window.removeEventListener("message", listener);
-            reject(new Error("Helcim checkout was closed."));
-            return;
-          }
-          if (event.data.eventStatus === "ABORTED") {
-            window.removeEventListener("message", listener);
-            reject(
-              new Error(
-                typeof event.data.eventMessage === "string"
-                  ? event.data.eventMessage
-                  : "Helcim declined the payment.",
-              ),
-            );
-            return;
-          }
-          if (event.data.eventStatus !== "SUCCESS") return;
-          window.removeEventListener("message", listener);
-          try {
-            const message = unwrapHelcimPayResponse(event.data.eventMessage);
-            const confirmation = await fetch(
-              `/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/helcim`,
-              {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({
-                  action: "confirm",
-                  checkoutToken,
-                  data: message.data,
-                  hash: message.hash,
-                }),
-              },
-            );
-            const payload = (await confirmation.json()) as CheckoutState & {
-              error?: string;
-            };
-            if (!confirmation.ok)
-              throw new Error(
-                payload.error || "Helcim payment could not be verified.",
-              );
-            resolve(payload);
-          } catch (error) {
-            reject(error);
-          }
-        };
-        window.addEventListener("message", listener);
-        if (!window.appendHelcimPayIframe) {
-          window.removeEventListener("message", listener);
-          reject(new Error("Helcim checkout did not load."));
-          return;
-        }
-        window.appendHelcimPayIframe(checkoutToken);
-      });
-      setCheckoutState(result);
-      setCashTender(
-        (
-          Number(
-            result.check?.amount_due_cents ?? result.order.amount_due_cents,
-          ) / 100
-        ).toFixed(2),
-      );
-      setPayableChecks((checks) =>
-        checks.map((check) =>
-          check.id === (checkIdOverride || selectedCheckId) && result.check
-            ? { ...check, ...result.check }
-            : check,
-        ),
-      );
-      closePaidCheckout(draft, result);
-    } catch (error) {
-      setCheckoutError(
-        error instanceof Error ? error.message : "Helcim payment failed.",
-      );
-    } finally {
-      window.removeHelcimPayIframe?.();
-      setHelcimOpen(false);
-      setPaymentBusy(false);
-    }
-  }
-
   async function startMxPayment(requestedOverride?:number,stateOverride?:CheckoutState,checkIdOverride?:string,draftOverride?:SavedDraft){const draft=draftOverride||savedDraft||activeTab,activeCheckout=stateOverride||checkoutState;if(!draft||!activeCheckout||paymentBusy)return;setPaymentBusy(true);setCheckoutError("");try{const due=Number(activeCheckout.check?.amount_due_cents??activeCheckout.order.amount_due_cents),requested=requestedOverride??(cashTender.trim()?Math.round(Number(cashTender)*100):due);if(!Number.isSafeInteger(requested)||requested<=0||requested>due)throw new Error("Enter a card amount within the remaining balance.");if(stationProfile?.mx_terminal_ready){const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx-terminal`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"start",checkId:checkIdOverride||selectedCheckId||null,amountCents:requested,stationKey:stationProfile.station_key})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not send the sale to the card terminal.");if(body.state==="approved"){applyMxApproval(draft,body.checkout);setCheckoutError(body.kitchenWarning||"An earlier card sale on the terminal went through and was added to this order. Check the balance before charging again.");setPaymentBusy(false);return}setMxTerminalSale({orderId:draft.id,sessionId:body.sessionId,amountCents:body.state==="authorized"?Number(body.amountCents):requested,message:body.message||"",state:body.state==="authorized"?"authorized":"pending"});return}const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"initialize",checkId:checkIdOverride||selectedCheckId,amountCents:requested})}),body=await response.json();if(!response.ok){if(body.checkout)applyMxApproval(draft,body.checkout);throw new Error(body.error||"Could not start MX checkout.")}setMxPayment(body)}catch(e){setCheckoutError(e instanceof Error?e.message:"Could not start MX checkout.");setPaymentBusy(false)}}
   function applyMxApproval(draft:SavedDraft,result:CheckoutState){setCheckoutState(result);setCashTender((Number(result.check?.amount_due_cents??result.order.amount_due_cents)/100).toFixed(2));setPayableChecks(checks=>checks.map(check=>result.check&&check.id===result.check.id?{...check,...result.check}:check));closePaidCheckout(draft,result)}
   function finishMxTerminalSale(checkout:unknown,kitchenWarning?:string){const draft=savedDraft||activeTab;setMxTerminalSale(null);setPaymentBusy(false);if(draft&&checkout)applyMxApproval(draft,checkout as CheckoutState);if(kitchenWarning)setCheckoutError(kitchenWarning)}
@@ -5089,18 +4923,6 @@ export default function PosClient({
       )}
       {mxTerminalSale&&<MxTerminalPaymentDialog sale={mxTerminalSale} onApproved={finishMxTerminalSale} onClose={()=>{setMxTerminalSale(null);setPaymentBusy(false)}}/>}
       {mxPayment&&<MxKeyedPaymentDialog payment={mxPayment} onApproved={confirmMxPayment} onCancel={()=>{setMxPayment(null);setPaymentBusy(false)}}/>}
-      {helcimOpen && (
-        <div
-          className="posSecurePaymentBackdrop"
-          role="status"
-          aria-live="polite"
-        >
-          <div>
-            <span>SECURE CARD PAYMENT</span>
-            <strong>Loading Helcim…</strong>
-          </div>
-        </div>
-      )}
       {checkoutOpen && (savedDraft || activeTab) && (
         <div
           className="posCheckoutSideBackdrop"
@@ -5115,9 +4937,12 @@ export default function PosClient({
             aria-labelledby="checkout-title"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <h2 id="checkout-title">
-              Checkout · Order #{(savedDraft || activeTab)!.displayNumber}
-            </h2>
+            <header className="posCheckoutHeader">
+              <h2 id="checkout-title">
+                <small>CHECKOUT</small> Order #{(savedDraft || activeTab)!.displayNumber}
+              </h2>
+              <button type="button" className="posCheckoutClose" aria-label="Close checkout" onClick={closeCheckout}>✕</button>
+            </header>
             {savedDraft?.reopened && (
               <section className="posCheckoutMore">
                 <button
@@ -5170,7 +4995,7 @@ export default function PosClient({
                 )}
               </section>
             )}
-            <nav className="posCheckTabs" aria-label="Payable checks">
+            {payableChecks.length > 1 && <nav className="posCheckTabs" aria-label="Payable checks">
               {payableChecks.map((check) => (
                 <button
                   type="button"
@@ -5182,22 +5007,29 @@ export default function PosClient({
                   {money(Number(check.amount_due_cents))} DUE
                 </button>
               ))}
-            </nav>
+            </nav>}
+            <div className="posCheckoutDue">
+              <span>Amount due</span>
+              <strong>
+                {money(
+                  Number(
+                    checkoutState?.check?.amount_due_cents ??
+                      checkoutState?.order.amount_due_cents ??
+                      (savedDraft || activeTab)!.totalCents,
+                  ),
+                )}
+              </strong>
+              <small>
+                {payableChecks.length > 1 && checkoutState?.check ? `Check ${checkoutState.check.display_sequence} of ${payableChecks.length} · ` : ""}
+                Order total {money(Number(checkoutState?.order.total_cents ?? (savedDraft || activeTab)!.totalCents))}
+                {Number(checkoutState?.order.paid_cents || 0) > 0 ? ` · Paid ${money(Number(checkoutState?.order.paid_cents))}` : ""}
+              </small>
+            </div>
             {Number(checkoutState?.order.paid_cents || 0) === 0 && (
               <button type="button" className="posSplitOrderButton" disabled={paymentBusy} onClick={openSplitOrder}>
                 {payableChecks.length > 1 ? "EDIT SPLIT ORDER" : "SPLIT ORDER"}
               </button>
             )}
-            <p>Amount due</p>
-            <strong>
-              {money(
-                Number(
-                  checkoutState?.check?.amount_due_cents ??
-                    checkoutState?.order.amount_due_cents ??
-                    (savedDraft || activeTab)!.totalCents,
-                ),
-              )}
-            </strong>
             {checkoutError && (
               <div className="posCheckoutInlineError" role="alert">
                 {checkoutError}
@@ -5213,7 +5045,7 @@ export default function PosClient({
                   .reduce((sum, row) => sum + Number(row.amount_cents), 0),
                 available = Number(tender.amount_cents) - reversed;
               return (
-                <div key={tender.id}>
+                <div key={tender.id} className={`posCheckoutTender${tender.transaction_type === "void" ? " reversal" : ""}`}>
                   <span>
                     {tender.transaction_type === "void"
                       ? "REVERSAL"
@@ -5340,25 +5172,11 @@ export default function PosClient({
                       className="posCashNumpad"
                       aria-label="Payment amount keypad"
                     >
-                      {[
-                        "1",
-                        "2",
-                        "3",
-                        "4",
-                        "5",
-                        "6",
-                        "7",
-                        "8",
-                        "9",
-                        "clear",
-                        "0",
-                        ".",
-                        "backspace",
-                      ].map((key) => (
+                      {["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "backspace", "clear"].map((key) => (
                         <button
                           type="button"
                           key={key}
-                          className={key === "0" ? "zero" : ""}
+                          className={key === "clear" ? "clear" : ""}
                           aria-label={
                             key === "backspace"
                               ? "Backspace"
@@ -5418,19 +5236,21 @@ export default function PosClient({
                     }}
                   >
                     CASH
+                    <small aria-hidden="true">Till drawer</small>
                   </button>
                   <button
                     type="button"
                     disabled={
                       paymentBusy ||
-                      !helcimStatus?.checkoutEnabled ||
+                      !cardPaymentStatus?.checkoutEnabled ||
                       (stationProfile?.station_mode === "order_taker" && !stationProfile.phone_card_payments_enabled)
                     }
                     onClick={chooseCredit}
                   >
-                    {helcimStatus?.checkoutEnabled
+                    {cardPaymentStatus?.checkoutEnabled
                       ? "CREDIT"
                       : "CREDIT SETUP REQUIRED"}
+                    {cardPaymentStatus?.checkoutEnabled && <small aria-hidden="true">{stationProfile?.mx_terminal_ready ? "Tap · insert · swipe" : "Key in card"}</small>}
                   </button>
                   <button
                     type="button"
@@ -5448,9 +5268,10 @@ export default function PosClient({
                     }}
                   >
                     GIFT CARD
+                    <small aria-hidden="true">Swipe or enter number</small>
                   </button>
                 </div>
-                {helcimStatus?.localDevelopment && canManagePayments && (
+                {cardPaymentStatus?.sandbox && canManagePayments && (
                   <button
                     type="button"
                     disabled={
@@ -5578,7 +5399,7 @@ export default function PosClient({
                     ))}
                     {!column.length && <span className="posSplitEmpty">Drop items here</span>}
                   </div>
-                  {splitPaymentReady && check && <div className="posSplitCheckout">{paid ? <strong>PAID</strong> : <><button type="button" disabled={paymentBusy} onClick={() => void paySplitCheck(check, "cash")}>CASH</button><button type="button" disabled={paymentBusy || !helcimStatus?.checkoutEnabled} onClick={() => void paySplitCheck(check, "card")}>CREDIT</button><button type="button" disabled={paymentBusy} onClick={() => void paySplitCheck(check, "gift_card")}>GIFT CARD</button></>}</div>}
+                  {splitPaymentReady && check && <div className="posSplitCheckout">{paid ? <strong>PAID</strong> : <><button type="button" disabled={paymentBusy} onClick={() => void paySplitCheck(check, "cash")}>CASH</button><button type="button" disabled={paymentBusy || !cardPaymentStatus?.checkoutEnabled} onClick={() => void paySplitCheck(check, "card")}>CREDIT</button><button type="button" disabled={paymentBusy} onClick={() => void paySplitCheck(check, "gift_card")}>GIFT CARD</button></>}</div>}
                 </section>
               )})}
             </div>

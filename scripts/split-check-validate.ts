@@ -17,7 +17,7 @@ void (async () => {
     await sql`DELETE FROM ordering_print_jobs WHERE order_id IN (SELECT id FROM ordering_orders WHERE display_number='SPLIT-V' AND created_by='split-validation')`;
     await sql`DELETE FROM ordering_payment_transactions WHERE order_id IN (SELECT id FROM ordering_orders WHERE display_number='SPLIT-V' AND created_by='split-validation')`;
     await sql`DELETE FROM ordering_orders WHERE display_number='SPLIT-V' AND created_by='split-validation'`;
-    await sql`INSERT INTO ordering_orders(id,business,source,status,payment_status,service_type,display_number,total_cents,amount_due_cents,created_by) VALUES(${orderId},'Corner Deli','pos','draft','unpaid','dine_in','SPLIT-V',1501,1501,'split-validation')`;
+    await sql`INSERT INTO ordering_orders(id,business,source,status,payment_status,service_type,display_number,total_cents,amount_due_cents,created_by,first_name_snapshot,last_name_snapshot) VALUES(${orderId},'Corner Deli','pos','draft','unpaid','dine_in','SPLIT-V',1501,1501,'split-validation','Split','Validator')`;
     await sql`INSERT INTO ordering_order_items(id,order_id,item_id,item_name_snapshot,quantity,unit_price_cents,modifier_total_cents,line_total_cents,sort_order) VALUES(${firstLine},${orderId},${item.id},'Two quantity line',2,500,0,1001,10),(${secondLine},${orderId},${item.id},'Single quantity line',1,500,0,500,20)`;
     const initial = await ensureInitialCheck(orderId, "Corner Deli", actor);
     const result = await splitCheck({ orderId, business: "Corner Deli", fromCheckId: initial.id, lines: [{ orderItemId: firstLine, quantity: 1 }], actor });
@@ -25,7 +25,7 @@ void (async () => {
     const assigned = result.checks.flatMap((check) => check.lines as Array<Record<string, unknown>>).filter((line: Record<string, unknown>) => line.order_item_id === firstLine).reduce((sum, line) => sum + Number(line.quantity), 0);
     if (result.checks.length !== 2 || total !== 1501 || assigned !== 2 || !result.checks.every((check) => (check.lines as Array<Record<string, unknown>>).every((line) => line.order_item_id === firstLine || line.order_item_id === secondLine))) throw new Error("Split-check allocation acceptance failed.");
     const payable = result.checks[0];
-    const paid = await commitTender({ orderId, business: "Corner Deli", checkId: payable.id, tenderType: "card", amountTenderedCents: Number(payable.amount_due_cents), clientMutationId: `split-${randomUUID()}`, actor, providerApproval: { provider: "helcim", transactionReference: `split-${randomUUID()}` } });
+    const paid = await commitTender({ orderId, business: "Corner Deli", checkId: payable.id, tenderType: "card", amountTenderedCents: Number(payable.amount_due_cents), clientMutationId: `split-${randomUUID()}`, actor, providerApproval: { provider:"mx_merchant", transactionReference: `split-${randomUUID()}` } });
     if (paid.check?.status !== "paid" || paid.order.payment_status !== "partially_paid") throw new Error("Per-check payment state was not reflected in the overall order balance.");
     let rearrangeBlocked = false;
     try { await splitCheck({ orderId, business: "Corner Deli", fromCheckId: result.checks[1].id, lines: [{ orderItemId: firstLine, quantity: 1 }], actor }); }

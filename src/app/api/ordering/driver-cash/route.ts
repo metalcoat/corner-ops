@@ -1,13 +1,31 @@
-import { driverActor } from "@/lib/ordering-driver-delivery";
+import { getSql } from "@/lib/db";
+import { getPosSession } from "@/lib/pos-auth";
+import { driverActor, type DriverActor } from "@/lib/ordering-driver-delivery";
 import {
   driverCashDashboard,
   postDriverCashSettlement,
 } from "@/lib/ordering-driver-cash";
 
 export const runtime = "nodejs";
+
+/**
+ * Cash-out is posted under the employee signed into this POS (PIN). The employee
+ * app's sign-in still works for a driver settling from their own phone.
+ */
+async function cashOutActor(): Promise<DriverActor | null> {
+  const pos = await getPosSession(true);
+  if (!pos) return driverActor();
+  const row = (await getSql()`SELECT active,role_group,position FROM employees WHERE id=${pos.employeeId} AND business='Corner Deli' LIMIT 1`)[0];
+  if (!row?.active) return null;
+  return {
+    employeeId: pos.employeeId, business: "Corner Deli", name: pos.name, position: String(row.position || pos.position || ""),
+    roleGroup: row.role_group, posRole: pos.posRole, deviceSessionId: "", expiresAt: pos.expiresAt,
+    manager: pos.posRole === "manager" || pos.posRole === "owner", driver: row.role_group === "Driver",
+  };
+}
 export async function GET() {
   try {
-    const actor = await driverActor();
+    const actor = await cashOutActor();
     if (!actor)
       return Response.json(
         { error: "Employee sign-in required." },
@@ -27,7 +45,7 @@ export async function GET() {
 }
 export async function POST(request: Request) {
   try {
-    const actor = await driverActor();
+    const actor = await cashOutActor();
     if (!actor)
       return Response.json(
         { error: "Employee sign-in required." },

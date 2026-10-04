@@ -200,16 +200,41 @@ async function main() {
       await settleOpenTerminalSales({ business, orderId: mismatchOrder, actor });
       result.amountMismatchHeldForManager = true;
 
-      // Order paid some other way before the charge was completed: flagged, never dropped silently.
+      // Order paid some other way before the tip was chosen: nothing is left to pay, so the hold is released, not charged.
       const paidElsewhere = await newOrder(1200);
       const pending = await start(paidElsewhere);
       await check(paidElsewhere, pending.sessionId);
       assert.equal((await check(paidElsewhere, pending.sessionId)).state, "authorized");
       await commitTender({ orderId: paidElsewhere, business, tenderType: "card", amountTenderedCents: 1200, clientMutationId: `other-${suffix}`, actor, providerApproval: { provider: "test", transactionReference: `other-${suffix}` } });
-      const flagged = await complete(paidElsewhere, pending.sessionId, 0);
+      const releasedInstead = await complete(paidElsewhere, pending.sessionId, 0);
+      assert.equal(releasedInstead.state, "failed");
+      assert.match(releasedInstead.state === "failed" ? releasedInstead.message : "", /nothing left to pay.*released/);
+      assert.equal(await sessionStatus(pending.sessionId), "voided");
+      assert.equal((await cardTenders(paidElsewhere)).filter((row) => row.provider === "mx_merchant").length, 0);
+      result.paidElsewhereReleasesHold = true;
+
+      // An item was removed after the card was approved: only the new balance (plus tip) is charged.
+      const shrunk = await newOrder(1500);
+      const shrunkSale = await start(shrunk);
+      await check(shrunk, shrunkSale.sessionId);
+      assert.equal((await check(shrunk, shrunkSale.sessionId)).state, "authorized");
+      await sql`UPDATE ordering_orders SET subtotal_cents=1000,total_cents=1000,amount_due_cents=1000 WHERE id=${shrunk}`;
+      assert.equal((await complete(shrunk, shrunkSale.sessionId, 100)).state, "approved");
+      assert.deepEqual({ amount: mx.completions.at(-1)!.amount, tip: mx.completions.at(-1)!.tip }, { amount: "11.00", tip: "1.00" });
+      assert.deepEqual({ ...(await orderRow(shrunk)) }, { tip_cents: 100, total_cents: 1100, payment_status: "paid" });
+      result.smallerBalanceChargedNotHold = true;
+
+      // The charge cannot be put on the order (here: its payment request ID is already taken): flagged for a manager, never dropped.
+      const tipRefused = await newOrder(1000), elsewhere = await newOrder(500);
+      const tipRefusedSale = await start(tipRefused);
+      await check(tipRefused, tipRefusedSale.sessionId);
+      await check(tipRefused, tipRefusedSale.sessionId);
+      const takenId = String((await sql`SELECT client_mutation_id FROM ordering_mx_checkout_sessions WHERE id=${tipRefusedSale.sessionId}`)[0].client_mutation_id);
+      await commitTender({ orderId: elsewhere, business, tenderType: "card", amountTenderedCents: 500, clientMutationId: takenId, actor, providerApproval: { provider: "test", transactionReference: `taken-${suffix}` } });
+      const flagged = await complete(tipRefused, tipRefusedSale.sessionId, 0);
       assert.equal(flagged.state, "needs_review");
-      assert.match(flagged.state === "needs_review" ? flagged.message : "", /charged the card \$12\.00.*manager must refund MX payment \d+/);
-      result.paidElsewhereFlagged = true;
+      assert.match(flagged.state === "needs_review" ? flagged.message : "", /charged the card \$10\.00.*manager must refund MX payment \d+/);
+      result.unrecordableChargeFlagged = true;
 
       // Tip chosen after the card: one charge for balance + tip, the tip lands on the order once.
       const tipOrder = await newOrder(2000);

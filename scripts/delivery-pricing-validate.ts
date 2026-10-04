@@ -66,11 +66,14 @@ async function main() {
       .update(encoded)
       .digest("base64url");
   const { proxy } = await import("../src/proxy");
+  // POS APIs are gated to approved networks before session auth, so these
+  // requests come from a store LAN address; offsite gets a 403 regardless.
   const authorized = proxy(
       new NextRequest("http://localhost/api/ordering/delivery/quote", {
         method: "POST",
         headers: {
           host: "localhost",
+          "cf-connecting-ip": "192.168.1.50",
           cookie: `corner_ops_pos=${encoded}.${signature}`,
         },
       }),
@@ -78,11 +81,22 @@ async function main() {
     unauthorized = proxy(
       new NextRequest("http://localhost/api/ordering/delivery/quote", {
         method: "POST",
-        headers: { host: "localhost" },
+        headers: { host: "localhost", "cf-connecting-ip": "192.168.1.50" },
+      }),
+    ),
+    offsite = proxy(
+      new NextRequest("http://localhost/api/ordering/delivery/quote", {
+        method: "POST",
+        headers: {
+          host: "localhost",
+          "cf-connecting-ip": "203.0.113.9",
+          cookie: `corner_ops_pos=${encoded}.${signature}`,
+        },
       }),
     );
   assert.equal(authorized.headers.get("x-middleware-next"), "1");
   assert.equal(unauthorized.status, 401);
+  assert.equal(offsite.status, 403);
   console.log("Delivery pricing validation passed.");
 }
 main().catch((error) => {

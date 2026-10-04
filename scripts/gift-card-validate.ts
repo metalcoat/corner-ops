@@ -193,8 +193,8 @@ async function main() {
         clientMutationId: `${operation}:pay-card`,
         actor,
         providerApproval: {
-          provider: "helcim",
-          transactionReference: `${operation}:helcim`,
+          provider: "mx_merchant",
+          transactionReference: `${operation}:mx`,
         },
       });
       if (paid.order.payment_status !== "paid")

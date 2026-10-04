@@ -30,8 +30,7 @@ function credentials() {
 
 /** Terminal sales are switched on separately, once the terminal is certified on the account. */
 export function mxTerminalEnabled() {
-  return process.env.PAYMENT_PROVIDER?.trim().toLowerCase() === "mx_merchant"
-    && process.env.MX_TERMINAL_API_ENABLED?.trim() === "true"
+  return process.env.MX_TERMINAL_API_ENABLED?.trim() === "true"
     && Boolean(process.env.MX_MERCHANT_ID?.trim() && process.env.MX_CONSUMER_KEY?.trim() && process.env.MX_CONSUMER_SECRET?.trim());
 }
 

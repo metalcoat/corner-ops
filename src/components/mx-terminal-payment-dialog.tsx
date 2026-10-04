@@ -164,7 +164,8 @@ export default function MxTerminalPaymentDialog({
         )}
         {phase === "tip" && (
           <div className="mxTerminalTip">
-            {message && <p role="alert">{message}</p>}
+            {/* The server's normal "Card approved…" line is the heading here; only problems (a declined tip) are shown. */}
+            {message && !message.startsWith("Card approved") && <p role="alert">{message}</p>}
             <div className="posTipChoices">
               {TIP_PERCENTS.map((percent) => {
                 const tip = Math.round((sale.amountCents * percent) / 100);

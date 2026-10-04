@@ -194,9 +194,13 @@ async function main() {
       "utf8",
     ),
   ]);
+  // The route binds order tools to the call's active order through bindPhoneOrderId; check its behaviour, not the source text.
+  const { bindPhoneOrderId } = await import("../src/lib/ordering-ai-phone-guard");
+  const holdArgs: Record<string, unknown> = { orderId: "model-supplied" };
   assert.ok(
-    mcpSource.includes('["hold", "get_draft", "send"]') &&
-      mcpSource.includes("args.orderId = String(call.order_id)"),
+    mcpSource.includes("bindPhoneOrderId(requestedName, args, call.order_id)") &&
+      ["hold", "get_draft", "send"].every((tool) => { const args: Record<string, unknown> = {}; return bindPhoneOrderId(tool, args, "active-order").ok && args.orderId === "active-order"; }) &&
+      bindPhoneOrderId("hold", holdArgs, "active-order").ok && holdArgs.orderId === "active-order",
     "Gemini hold calls must inherit the active order instead of failing without an orderId.",
   );
   assert.ok(

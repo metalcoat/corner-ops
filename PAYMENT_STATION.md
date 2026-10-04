@@ -12,7 +12,7 @@ The cash drawer plugs into the supported network receipt printer's drawer port. 
 
 ## Dharma / MX Merchant
 
-Set `PAYMENT_PROVIDER=mx_merchant` only after Dharma supplies sandbox access and confirms terminal API/certification. The server expects `MX_MERCHANT_ID`, `MX_CONSUMER_KEY`, and `MX_CONSUMER_SECRET`. Set `MX_TERMINAL_API_ENABLED=true` only after the selected tap/chip/swipe terminal has been certified for the account.
+All card payments (keyed, online, and the terminal) go through Dharma / MX Merchant; Helcim is no longer used. The server expects `MX_MERCHANT_ID`, `MX_CONSUMER_KEY`, `MX_CONSUMER_SECRET`, and `MX_BUSINESS_ID`, with `MX_ENVIRONMENT=production` for the live account (anything else uses the sandbox). Set `MX_TERMINAL_API_ENABLED=true` only after the selected tap/chip/swipe terminal has been certified for the account.
 
 ### Card terminal (Dejavoo through MX)
 
@@ -38,7 +38,8 @@ Things to know at the counter:
 - **Customer taps anyway after STOP WAITING:** the next payment attempt on that order finds the approved card. Another terminal charge goes to the tip step; cash or a keyed card charges the approved card with no tip and tells the cashier the balance changed.
 - **Nobody answers the tip question:** the scheduled maintenance job charges the card with no tip after 10 minutes, so the hold always ends up on the order.
 - **Customer changes their mind after the card is approved:** **RELEASE CARD** voids the hold without charging.
-- **Problem charges:** if MX approves a different amount than the POS sent, or the order was already paid another way, the POS does not record the charge. It lists it under **Card terminal charges to review** in Hardware settings with the MX payment ID, and the order takes no other payment until a manager marks it resolved.
+- **Order changed after the card was approved:** the POS charges the current balance plus tip, never more than was approved. If nothing is left to pay (for example, it was paid another way), the hold is released instead. When less than the hold is charged, the bank drops the unused part of the hold when the batch settles.
+- **Problem charges:** if MX approves a different amount than the POS sent, or the POS cannot add the charge to the order, it does not record it. It lists it under **Card terminal charges to review** in Hardware settings with the MX payment ID, and the order takes no other payment until a manager marks it resolved.
 - **Customer display:** a terminal sale does not use the customer display for the tip; the tip is asked on the POS after the card. Other stations ask for tips on the customer display only when the station has **customer display** turned on.
 
 Tests:

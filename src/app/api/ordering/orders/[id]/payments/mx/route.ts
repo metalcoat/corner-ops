@@ -18,19 +18,16 @@ import {
   newReplayId,
   retrieveMxPayment,
 } from "@/lib/mx-merchant";
-import { helcimCustomerForOrder } from "@/lib/ordering-helcim-customer";
+import { cardBillingContactForOrder } from "@/lib/card-billing-contact";
+import { paymentProviderStatus } from "@/lib/payment-provider";
 export const runtime = "nodejs";
 import { settleOpenTerminalSales, TerminalSaleRecordedError } from "@/lib/mx-terminal-payments";
 const business = "Corner Deli" as const;
 export async function GET() {
   try {
     if (!(await orderingActor(business))) return unauthorized();
-    return Response.json({
-      checkoutEnabled:
-        process.env.MX_ENVIRONMENT === "sandbox" ||
-        Boolean(process.env.MX_CONSUMER_KEY),
-      sandbox: process.env.MX_ENVIRONMENT !== "production",
-    });
+    const status = paymentProviderStatus();
+    return Response.json({ checkoutEnabled: status.onlineCheckoutEnabled, sandbox: status.sandbox });
   } catch (e) {
     return apiError(e);
   }
@@ -65,17 +62,17 @@ export async function POST(
         );
       const initialized = await initializeMxPayment(),
         replayId = newReplayId(),
-        customer = await helcimCustomerForOrder(orderId, business);
+        customer = await cardBillingContactForOrder(orderId, business);
       await sql`INSERT INTO ordering_mx_checkout_sessions(id,business,order_id,check_id,amount_cents,replay_id,client_mutation_id,created_by,expires_at)VALUES(${randomUUID()},${business},${orderId},${checkId},${amount},${replayId},${randomUUID()},${actor.id},NOW()+INTERVAL '30 minutes')`;
       return Response.json({
         ...initialized,
         amount: amount / 100,
         replayId,
         customerName: customer?.contactName,
-        avsStreet: customer?.billingAddress?.street1,
-        avsZip: customer?.billingAddress?.postalCode || "13669",
+        avsStreet: customer?.street1,
+        avsZip: customer?.postalCode || "13669",
         requireAvsZip: false,
-        requireAvsStreet: !customer?.billingAddress?.street1,
+        requireAvsStreet: !customer?.street1,
       });
     }
     if (body.action !== "confirm")

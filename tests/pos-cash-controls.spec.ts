@@ -8,6 +8,7 @@ test("manager can open the driver bulk cash-out workspace",async({page})=>{
   for(const digit of pin)await page.getByRole("button",{name:digit,exact:true}).click();
   await page.goto("/pos/deli/drivers");
   await expect(page.getByRole("heading",{name:"Driver bulk cash-out"})).toBeVisible();
-  await expect(page.getByText(/Expected cash:/)).toBeVisible();
-  await expect(page.getByRole("button",{name:"POST DRIVER CASH-OUT"})).toBeDisabled();
+  await expect(page.getByText("DRIVER CASH CHECKOUT")).toBeVisible();
+  await expect(page.getByText(/^Expected from \d+ orders?$/)).toBeVisible();
+  await expect(page.getByRole("button",{name:/^CASH OUT/})).toBeDisabled();
 });
