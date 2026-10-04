@@ -17,6 +17,7 @@ type Device = {
     tillKey?: string;
     cashDrawerEnabled?: boolean;
     receiptEnabled?: boolean;
+    mxTerminalId?: string;
   };
   active: boolean;
   effective_status: string;
@@ -55,6 +56,8 @@ export default function HardwareSettingsClient() {
     [role, setRole] = useState("receipt_printer"),
     [adapter, setAdapter] = useState("unconfigured"),
     [printerHost, setPrinterHost] = useState(""),
+    [mxTerminalId, setMxTerminalId] = useState(""),
+    [mxTerminals, setMxTerminals] = useState<{ id: string; name: string; providerKey: string; enabled: boolean }[]>([]),
     [printerPort, setPrinterPort] = useState(9100),
     [ticketTextSize, setTicketTextSize] = useState("normal"),
     [ticketHeaderSize, setTicketHeaderSize] = useState("large"),
@@ -139,6 +142,7 @@ export default function HardwareSettingsClient() {
     setRole(device.role);
     setAdapter(device.adapter_key);
     setPrinterHost(device.adapter_config?.host || "");
+    setMxTerminalId(device.adapter_config?.mxTerminalId || "");
     setPrinterPort(Number(device.adapter_config?.port || 9100));
     setTicketTextSize(device.adapter_config?.ticketTextSize || "normal");
     setTicketHeaderSize(device.adapter_config?.ticketHeaderSize || "large");
@@ -152,6 +156,7 @@ export default function HardwareSettingsClient() {
     setEditingKey("");
     setDeviceName("");
     setPrinterHost("");
+    setMxTerminalId("");
     setPrinterPort(9100);
     setTicketTextSize("normal");
     setTicketHeaderSize("large");
@@ -180,11 +185,24 @@ export default function HardwareSettingsClient() {
         <button type="button" disabled={!paymentProvider?.configured || paymentProviderBusy} onClick={() => {
           setPaymentProviderBusy(true); setMessage("");
           void fetch("/api/ordering/payments/status", { method: "POST" })
-            .then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body.error || "Payment provider connection failed."); setMessage(`${paymentProvider?.label||"Payment provider"} connection verified.`); })
+            .then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body.error || "Payment provider connection failed."); setMxTerminals(Array.isArray(body.terminals) ? body.terminals : []); setMessage(`${paymentProvider?.label||"Payment provider"} connection verified.${body.provider === "mx_merchant" ? body.terminalError ? ` Terminal list failed: ${body.terminalError}` : ` ${body.terminals?.length || 0} terminal(s) registered in MX.` : ""}`); })
             .catch((error) => setMessage(error instanceof Error ? error.message : "Payment provider connection failed."))
             .finally(() => setPaymentProviderBusy(false));
         }}>TEST PROVIDER</button>
       </div>
+      {mxTerminals.length > 0 && (
+        <ul className="mxTerminalList">
+          {mxTerminals.map((terminal) => (
+            <li key={terminal.id}>
+              <strong>{terminal.name || "Unnamed terminal"}</strong> · {terminal.providerKey || "terminal"}{terminal.enabled ? "" : " · DISABLED"}
+              <br /><code>{terminal.id}</code>
+              {deviceType === "payment_terminal" && adapter === "mx-terminal" && (
+                <button type="button" onClick={() => setMxTerminalId(terminal.id)}>USE FOR THIS TERMINAL</button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
       <h3>Automatic kitchen tickets</h3>
       <div className="autoPrintControl">
         <div>
@@ -283,7 +301,10 @@ export default function HardwareSettingsClient() {
               <option value="network-printer">Network printer (TCP/IP)</option>
             )}
             {deviceType === "payment_terminal" && (
-              <option value="payment-placeholder">Payment placeholder</option>
+              <>
+                <option value="mx-terminal">MX Merchant terminal (Dejavoo)</option>
+                <option value="payment-placeholder">Payment placeholder</option>
+              </>
             )}
             {deviceType === "barcode_scanner" && (
               <option value="keyboard-wedge">USB/Bluetooth keyboard-wedge reader</option>
@@ -291,6 +312,17 @@ export default function HardwareSettingsClient() {
             <option value="mock">Test/mock</option>
           </select>
         </label>
+        {deviceType === "payment_terminal" && adapter === "mx-terminal" && (
+          <label>
+            MX TERMINAL ID
+            <input
+              autoComplete="off"
+              placeholder="From TEST PROVIDER, e.g. 8328D726-911A-4604-AADA-FF08091A4EDE"
+              value={mxTerminalId}
+              onChange={(e) => setMxTerminalId(e.target.value)}
+            />
+          </label>
+        )}
         {deviceType === "printer" && adapter === "network-printer" && (
           <>
             <label>
@@ -362,7 +394,8 @@ export default function HardwareSettingsClient() {
           disabled={
             !locationId ||
             !deviceName ||
-            (adapter === "network-printer" && !printerHost.trim())
+            (adapter === "network-printer" && !printerHost.trim()) ||
+            (adapter === "mx-terminal" && !mxTerminalId.trim())
           }
           onClick={() =>
             void guarded(
@@ -387,10 +420,12 @@ export default function HardwareSettingsClient() {
                         cashDrawerEnabled,
                         receiptEnabled,
                       }
-                    : {},
+                    : adapter === "mx-terminal"
+                      ? { mxTerminalId: mxTerminalId.trim() }
+                      : {},
               },
               editingId
-                ? "Printer updated."
+                ? "Device updated."
                 : "Device saved. Use Test Print to verify it.",
             ).then(clearDevice)
           }

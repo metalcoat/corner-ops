@@ -5,6 +5,7 @@ import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 import { canManagePos } from "@/lib/ordering-route-auth";
 import { ensureOrderingHardwareSchema } from "@/lib/ordering-hardware-schema";
+import { listMxTerminals, mxTerminalEnabled, normalizeMxTerminalId } from "@/lib/mx-terminal";
 
 export type DeviceStatus = "online" | "offline" | "unknown";
 export interface HardwareAdapter {
@@ -151,6 +152,26 @@ export class PaymentTerminalPlaceholderAdapter extends UnconfiguredAdapter {
     super("payment_terminal");
   }
 }
+/** A terminal registered in MX Merchant (the Dejavoo). MX can say it is registered, not whether it is switched on. */
+export class MxTerminalAdapter implements HardwareAdapter {
+  readonly key = "mx-terminal";
+  readonly kind = "payment_terminal" as const;
+  async probe(config: Record<string, unknown>) {
+    const id = normalizeMxTerminalId(config.mxTerminalId);
+    if (!id) return { status: "unknown" as const, message: "Enter the terminal's MX terminal ID." };
+    try {
+      const terminal = (await listMxTerminals()).find((row) => row.id === id);
+      if (!terminal) return { status: "offline" as const, message: "MX Merchant has no terminal with this ID on the account." };
+      if (!terminal.enabled) return { status: "offline" as const, message: `MX Merchant lists ${terminal.name || "this terminal"} as disabled.` };
+      return {
+        status: "unknown" as const,
+        message: `Registered in MX as ${terminal.name || id} (${terminal.providerKey || "terminal"}).${mxTerminalEnabled() ? "" : " Terminal checkout is switched off on the server (MX_TERMINAL_API_ENABLED), so cards are keyed in."} MX does not report power or network; a sale shows whether it is connected.`,
+      };
+    } catch (error) {
+      return { status: "unknown" as const, message: error instanceof Error ? error.message : "MX Merchant could not be reached." };
+    }
+  }
+}
 export class KeyboardWedgeAdapter extends UnconfiguredAdapter {
   readonly key = "keyboard-wedge";
   constructor() {
@@ -173,6 +194,8 @@ export function hardwareAdapter(
   if (key === "mock") return new MockDeviceAdapter(kind);
   if (key === "payment-placeholder" && kind === "payment_terminal")
     return new PaymentTerminalPlaceholderAdapter();
+  if (key === "mx-terminal" && kind === "payment_terminal")
+    return new MxTerminalAdapter();
   if (key === "keyboard-wedge" && kind === "barcode_scanner")
     return new KeyboardWedgeAdapter();
   return new UnconfiguredAdapter(kind);
@@ -364,16 +387,24 @@ export async function saveHardware(input: {
         "unconfigured",
         "mock",
         "payment-placeholder",
+        "mx-terminal",
         "network-printer",
         "keyboard-wedge",
       ].includes(adapterKey) ||
-      (adapterKey === "payment-placeholder" &&
+      ((adapterKey === "payment-placeholder" || adapterKey === "mx-terminal") &&
         deviceType !== "payment_terminal") ||
       (adapterKey === "network-printer" && deviceType !== "printer") ||
       (adapterKey === "keyboard-wedge" && deviceType !== "barcode_scanner")
     )
       throw new Error("Unsupported adapter.");
     const config = safeConfig(body.adapterConfig);
+    if (adapterKey === "mx-terminal") {
+      const mxTerminalId = normalizeMxTerminalId(config.mxTerminalId);
+      if (!mxTerminalId)
+        throw new Error("Enter the MX terminal ID (the long ID MX Merchant shows for the terminal, like 8328D726-911A-4604-AADA-FF08091A4EDE).");
+      for (const key of Object.keys(config)) delete config[key];
+      config.mxTerminalId = mxTerminalId;
+    }
     if (adapterKey === "network-printer") {
       const host = String(config.host || "").trim(),
         port = Number(config.port || 9100),

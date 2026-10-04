@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { ensureOrderingHardwareSchema } from "@/lib/ordering-hardware-schema";
+import { mxTerminalEnabled, normalizeMxTerminalId } from "@/lib/mx-terminal";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 
@@ -10,7 +11,10 @@ export async function paymentStationProfile(business: OrderingBusiness, stationK
   await ensureOrderingHardwareSchema();
   const key = stationKey.trim().toLowerCase();
   if (!key) return null;
-  return (await getSql()`SELECT station.*,receipt.adapter_config receipt_printer_config,terminal.reported_status terminal_status,terminal.last_seen_at terminal_last_seen_at FROM ordering_payment_stations station LEFT JOIN ordering_hardware_devices receipt ON receipt.id=station.receipt_printer_id LEFT JOIN ordering_hardware_devices terminal ON terminal.id=station.payment_terminal_id WHERE station.business=${business} AND station.station_key=${key} AND station.active=TRUE LIMIT 1`)[0] || null;
+  const profile = (await getSql()`SELECT station.*,receipt.adapter_config receipt_printer_config,terminal.reported_status terminal_status,terminal.last_seen_at terminal_last_seen_at,CASE WHEN terminal.active THEN terminal.adapter_key ELSE '' END terminal_adapter_key,CASE WHEN terminal.active THEN COALESCE(terminal.adapter_config->>'mxTerminalId','') ELSE '' END terminal_mx_id FROM ordering_payment_stations station LEFT JOIN ordering_hardware_devices receipt ON receipt.id=station.receipt_printer_id LEFT JOIN ordering_hardware_devices terminal ON terminal.id=station.payment_terminal_id WHERE station.business=${business} AND station.station_key=${key} AND station.active=TRUE LIMIT 1`)[0];
+  if (!profile) return null;
+  // Card sales go to the terminal only when it is an MX terminal and terminal checkout is switched on; otherwise the POS keys the card.
+  return { ...profile, mx_terminal_ready: profile.station_mode === "payment" && profile.terminal_adapter_key === "mx-terminal" && Boolean(normalizeMxTerminalId(profile.terminal_mx_id)) && mxTerminalEnabled() } as typeof profile & { mx_terminal_ready: boolean };
 }
 
 export async function listPaymentQueue(business: OrderingBusiness) {

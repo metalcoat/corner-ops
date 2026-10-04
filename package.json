@@ -39,6 +39,8 @@
     "test:cash-drawer": "tsx scripts/cash-drawer-validate.ts",
     "test:payment-station": "tsx scripts/payment-station-validate.ts",
     "test:payment-provider": "tsx scripts/payment-provider-validate.ts",
+    "test:mx-terminal": "tsx scripts/mx-terminal-validate.ts",
+    "mx:terminal-check": "tsx scripts/mx-terminal-live-check.ts",
     "test:restaurant-platform": "tsx scripts/restaurant-platform-validate.ts",
     "test:kitchen-ticket": "tsx scripts/kitchen-ticket-validate.ts",
     "test:tiki-pos": "tsx scripts/tiki-pos-validate.ts",

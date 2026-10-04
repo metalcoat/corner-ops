@@ -1,3 +1,4 @@
+import { listMxTerminals, type MxTerminal } from "@/lib/mx-terminal";
 import { helcimStatus, testHelcimConnection } from "@/lib/helcim";
 
 export type PaymentProviderKey = "helcim" | "mx_merchant";
@@ -71,12 +72,20 @@ async function testMxMerchantConnection() {
     );
   }
   await response.json();
+  // The terminal list comes from the separate Terminal API; a failure there should not hide a working Checkout API.
+  let terminals: MxTerminal[] = [], terminalError = "";
+  try {
+    terminals = await listMxTerminals();
+  } catch (error) {
+    terminalError = error instanceof Error ? error.message : "MX terminal list failed.";
+  }
   return {
     connected: true,
     provider: "mx_merchant" as const,
     environment: process.env.MX_ENVIRONMENT?.trim().toLowerCase() === "production" ? "production" : "sandbox",
-    enabledTerminalCount: 0,
-    terminals: [],
+    enabledTerminalCount: terminals.filter((terminal) => terminal.enabled).length,
+    terminals: terminals.map(({ id, name, providerKey, enabled }) => ({ id, name, providerKey, enabled })),
+    terminalError,
   };
 }
 

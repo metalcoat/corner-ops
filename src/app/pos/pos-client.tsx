@@ -49,6 +49,7 @@ import { consolidateQuantities } from "@/lib/cart-line-consolidation";
 import { queueOfflineOrder } from "@/lib/pos-offline-queue";
 import MxKeyedPaymentDialog,{type MxPaymentInitialization} from "@/components/mx-keyed-payment-dialog";
 import "@/components/mx-keyed-payment-dialog.css";
+import MxTerminalPaymentDialog,{type MxTerminalSale} from "@/components/mx-terminal-payment-dialog";
 
 type PosServiceType = Exclude<ServiceType, "undecided">;
 
@@ -198,6 +199,7 @@ type PosStationProfile = {
   shared_register_key?: string;
   receipt_printer_id?: string | null;
   payment_terminal_id?: string | null;
+  mx_terminal_ready?: boolean;
 };
 type PayableCheck = {
   id: string;
@@ -707,6 +709,7 @@ export default function PosClient({
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [helcimOpen, setHelcimOpen] = useState(false);
   const [mxPayment,setMxPayment]=useState<MxPaymentInitialization|null>(null);
+  const [mxTerminalSale,setMxTerminalSale]=useState<MxTerminalSale|null>(null);
   const [helcimStatus, setHelcimStatus] = useState<HelcimStatus | null>(null);
   const [stationProfile, setStationProfile] =
     useState<PosStationProfile | null>(null);
@@ -3485,8 +3488,10 @@ export default function PosClient({
     }
   }
 
-  async function startMxPayment(requestedOverride?:number,stateOverride?:CheckoutState,checkIdOverride?:string){const draft=savedDraft||activeTab,activeCheckout=stateOverride||checkoutState;if(!draft||!activeCheckout||paymentBusy)return;setPaymentBusy(true);setCheckoutError("");try{const due=Number(activeCheckout.check?.amount_due_cents??activeCheckout.order.amount_due_cents),requested=requestedOverride??(cashTender.trim()?Math.round(Number(cashTender)*100):due);if(!Number.isSafeInteger(requested)||requested<=0||requested>due)throw new Error("Enter a card amount within the remaining balance.");const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"initialize",checkId:checkIdOverride||selectedCheckId,amountCents:requested})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not start MX checkout.");setMxPayment(body)}catch(e){setCheckoutError(e instanceof Error?e.message:"Could not start MX checkout.");setPaymentBusy(false)}}
-  async function confirmMxPayment(replayId:number){const draft=savedDraft||activeTab;if(!draft)return;try{const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"confirm",replayId})}),result=await response.json();if(!response.ok)throw new Error(result.error||"MX payment could not be verified.");setMxPayment(null);setCheckoutState(result);setCashTender((Number(result.check?.amount_due_cents??result.order.amount_due_cents)/100).toFixed(2));setPayableChecks(checks=>checks.map(check=>check.id===selectedCheckId&&result.check?{...check,...result.check}:check));closePaidCheckout(draft,result)}catch(e){setCheckoutError(e instanceof Error?e.message:"MX payment could not be verified.");setMxPayment(null)}finally{setPaymentBusy(false)}}
+  async function startMxPayment(requestedOverride?:number,stateOverride?:CheckoutState,checkIdOverride?:string){const draft=savedDraft||activeTab,activeCheckout=stateOverride||checkoutState;if(!draft||!activeCheckout||paymentBusy)return;setPaymentBusy(true);setCheckoutError("");try{const due=Number(activeCheckout.check?.amount_due_cents??activeCheckout.order.amount_due_cents),requested=requestedOverride??(cashTender.trim()?Math.round(Number(cashTender)*100):due);if(!Number.isSafeInteger(requested)||requested<=0||requested>due)throw new Error("Enter a card amount within the remaining balance.");if(stationProfile?.mx_terminal_ready){const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx-terminal`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"start",checkId:checkIdOverride||selectedCheckId||null,amountCents:requested,stationKey:stationProfile.station_key})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not send the sale to the card terminal.");if(body.state==="approved"){applyMxApproval(draft,body.checkout);setCheckoutError("An earlier card sale on the terminal went through and was added to this order. Check the balance before charging again.");setPaymentBusy(false);return}setMxTerminalSale({orderId:draft.id,sessionId:body.sessionId,amountCents:requested,message:body.message||""});return}const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"initialize",checkId:checkIdOverride||selectedCheckId,amountCents:requested})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not start MX checkout.");setMxPayment(body)}catch(e){setCheckoutError(e instanceof Error?e.message:"Could not start MX checkout.");setPaymentBusy(false)}}
+  function applyMxApproval(draft:SavedDraft,result:CheckoutState){setCheckoutState(result);setCashTender((Number(result.check?.amount_due_cents??result.order.amount_due_cents)/100).toFixed(2));setPayableChecks(checks=>checks.map(check=>result.check&&check.id===result.check.id?{...check,...result.check}:check));closePaidCheckout(draft,result)}
+  function finishMxTerminalSale(checkout:unknown){const draft=savedDraft||activeTab;setMxTerminalSale(null);setPaymentBusy(false);if(draft&&checkout)applyMxApproval(draft,checkout as CheckoutState)}
+  async function confirmMxPayment(replayId:number){const draft=savedDraft||activeTab;if(!draft)return;try{const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"confirm",replayId})}),result=await response.json();if(!response.ok)throw new Error(result.error||"MX payment could not be verified.");setMxPayment(null);applyMxApproval(draft,result)}catch(e){setCheckoutError(e instanceof Error?e.message:"MX payment could not be verified.");setMxPayment(null)}finally{setPaymentBusy(false)}}
 
   async function paySplitCheck(check: PayableCheck, tenderType: "cash" | "card" | "gift_card") {
     if (paymentBusy || Number(check.amount_due_cents) <= 0) return;
@@ -5061,6 +5066,7 @@ export default function PosClient({
           </section>
         </div>
       )}
+      {mxTerminalSale&&<MxTerminalPaymentDialog sale={mxTerminalSale} onApproved={finishMxTerminalSale} onClose={()=>{setMxTerminalSale(null);setPaymentBusy(false)}}/>}
       {mxPayment&&<MxKeyedPaymentDialog payment={mxPayment} onApproved={confirmMxPayment} onCancel={()=>{setMxPayment(null);setPaymentBusy(false)}}/>}
       {helcimOpen && (
         <div
