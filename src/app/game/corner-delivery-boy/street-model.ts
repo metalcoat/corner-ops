@@ -16,7 +16,8 @@ export type HazardType =
   | "pothole"
   | "ebike"
   | "tarpcar"
-  | "parked";
+  | "parked"
+  | "racer";
 export type Pickup = "boost" | "slow" | "restock";
 export type Side = "left" | "right";
 export type Thing = {
@@ -117,7 +118,7 @@ export const SCROLL_RATE = 18;
 export const THROW_WINDOW = { start: 58, end: 90 };
 export const PORCH_WINDOW = { start: 69, end: 81 };
 /** Distance (in screen %) between houses on the same side of the street. */
-export const LOT_SPACING = 30;
+export const LOT_SPACING = 32;
 export const LOT_JITTER = 6;
 export const HOUSE_SPAWN_Y = -12;
 export const INVULNERABLE_SECONDS = 1.2;
@@ -129,6 +130,7 @@ export const CONDITION_BONUS_PER_POINT = 150;
 export const PERFECT_SHIFT_BONUS = 1000;
 export const SAMPLE_POINTS = 75;
 export const DEADLY = new Set<Thing["type"]>([
+  "racer",
   "car",
   "van",
   "cow",
@@ -166,6 +168,7 @@ export function collisionRadius(type: Thing["type"], size = 1) {
     case "van":
     case "tarpcar":
     case "parked":
+    case "racer":
       return 0.4;
     case "cow":
       return 0.4;
@@ -190,6 +193,31 @@ export function collisionRadius(type: Thing["type"], size = 1) {
       return 0.26;
   }
 }
+
+/** The car's half-length plus a thing's half-length, in screen %, for collisions. */
+export const PLAYER_HALF = 9.3;
+export function halfLength(type: Thing["type"]) {
+  switch (type) {
+    case "car":
+    case "van":
+    case "parked":
+    case "tarpcar":
+    case "racer":
+      return 10;
+    case "pothole":
+      return 2.5;
+    case "ebike":
+    case "mower":
+    case "deer":
+    case "cow":
+    case "person":
+      return 6;
+    default:
+      return 4;
+  }
+}
+export const touchesPlayer = (type: Thing["type"], y: number) =>
+  Math.abs(y - PLAYER_Y) < PLAYER_HALF + halfLength(type) - 3;
 
 /** Cosmetic effects the renderer animates; times are performance.now() ms. */
 export type Fx = {

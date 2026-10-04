@@ -50,6 +50,7 @@ import {
   SCROLL_RATE,
   START_LANE,
   STEER_RATE,
+  touchesPlayer,
   STREETS,
   SUBS_LEFT_BONUS,
   WRECK_SECONDS,
@@ -172,6 +173,8 @@ type Sim = {
   sceneryTimer: number;
   potholeTimer: number;
   parkedTimer: number;
+  racerTimer: number;
+  steer: number;
   /** When each order comes in, and on which side of the street. */
   plan: { at: number; side: Side }[];
   waiting: Record<Side, number>;
@@ -241,6 +244,8 @@ function newSim(stage: number, stats: Stats): Sim {
     sceneryTimer: 0,
     potholeTimer: 0,
     parkedTimer: 0,
+    racerTimer: 0,
+    steer: 0,
     plan,
     waiting: { left: 0, right: 0 },
     nextLot,
@@ -271,6 +276,7 @@ function streetFrame(s: Sim): StreetFrame {
     dayName: route.name,
     street: STREETS[s.stage - 1],
     lane: s.lane,
+    steer: s.steer,
     things: s.things,
     houses: s.houses,
     scenery: s.scenery,
@@ -764,6 +770,8 @@ export default function DeliveryGame() {
     const held = keys.current,
       left = held.has("arrowleft") || held.has("a") || held.has("touch-left"),
       right = held.has("arrowright") || held.has("d") || held.has("touch-right");
+    // Ease the car's heading toward the steering direction (for drawing).
+    s.steer += ((left === right ? 0 : right ? 1 : -1) - s.steer) * Math.min(1, dt * 10);
     if (left !== right)
       s.lane = Math.max(
         LANE_MIN,
@@ -873,6 +881,26 @@ export default function DeliveryGame() {
           },
         ];
     }
+    // Harder days: cars race by, head-on down the other lane or passing us in it.
+    if (s.stage >= 3) {
+      s.racerTimer += dt;
+      if (s.racerTimer > Math.max(3, 9 - s.stage * 1.2) + Math.random() * 3) {
+        s.racerTimer = 0;
+        const fromBehind = Math.random() < 0.45;
+        s.things = [
+          ...s.things,
+          {
+            id: ++cosmeticId.current,
+            type: "racer",
+            lane: ONCOMING_LANE.min + Math.random() * (ONCOMING_LANE.max - ONCOMING_LANE.min),
+            y: fromBehind ? 116 : -20,
+            speed: fromBehind ? -1.6 : 2.8,
+            variant: Math.floor(Math.random() * 12),
+          },
+        ];
+        pop(fromBehind ? "CAR PASSING ON YOUR LEFT!" : "SOMEONE IS RACING DOWN THE OTHER LANE!");
+      }
+    }
     // Ogdensburg potholes: random, frequent, all sizes.
     s.potholeTimer += dt;
     if (s.potholeTimer > 0.9 + Math.random() * 1.6) {
@@ -938,7 +966,7 @@ export default function DeliveryGame() {
 
     const things: Thing[] = [];
     for (const x of s.things) {
-      const moving = (x.speed ?? 1) > 1,
+      const moving = (x.speed ?? 1) !== 1,
         n = {
           ...x,
           y: x.y + scroll * (moving ? speedRamp * (x.speed ?? 1) : 1),
@@ -949,9 +977,9 @@ export default function DeliveryGame() {
             (x.type === "ebike" ? Math.cos(x.phase ?? 0) * dt * 1.1 : 0),
           phase: (x.phase ?? 0) + dt * 2.6,
         };
-      const gone = n.y >= 118 || n.lane < -0.7 || n.lane > 2.7;
+      const gone = n.y >= 118 || n.y < -30 || n.lane < -0.7 || n.lane > 2.7;
       const touching =
-        n.y > 78 && n.y < 91 && Math.abs(n.lane - s.lane) < collisionRadius(n.type, n.size);
+        touchesPlayer(n.type, n.y) && Math.abs(n.lane - s.lane) < collisionRadius(n.type, n.size);
       if (!touching) {
         if (!gone) things.push(n);
         continue;
@@ -981,7 +1009,7 @@ export default function DeliveryGame() {
         if (!gone) things.push(n);
         continue;
       }
-      if ((n.type === "car" || n.type === "van") && Math.abs(n.lane - s.lane) >= 0.17) {
+      if ((n.type === "car" || n.type === "van" || n.type === "racer") && Math.abs(n.lane - s.lane) >= 0.17) {
         s.damaged = 4;
         hit(1, 500, pickFailure("car", DELIVERY_CAR_CRASHES),
           "SIDESWIPE! -500. ALIGNMENT NOW PROVIDED BY A SHOPPING CART.", "crash");
@@ -991,7 +1019,7 @@ export default function DeliveryGame() {
         s.stats = { ...s.stats, hits: s.stats.hits + 1, combo: 0 };
         s.things = things;
         endRun(
-          n.type === "car" || n.type === "van"
+          n.type === "car" || n.type === "van" || n.type === "racer"
             ? pickFailure("car", DELIVERY_CAR_CRASHES)
             : pickFailure(n.type, DELIVERY_COLLISION_FAILURES[n.type as "cow" | "person" | "mower"]),
           n.type === "person" ? "ouch" : n.type === "cow" ? "moo" : "crash",

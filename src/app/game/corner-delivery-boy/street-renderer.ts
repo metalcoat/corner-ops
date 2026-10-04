@@ -1,12 +1,12 @@
-// Draws one frame of the Delivery Boy street at 512×448 (SNES hi-res).
+// Draws one frame of the Delivery Boy street at 512×448 (SNES hi-res), seen
+// from above like Paperboy: roofs, porches facing the road, top-down traffic.
 import type { Assets } from "./art-assets";
-import { LOT_GROUND, LOT_W, lotCanvas, shade } from "./lots";
+import { LOT_GROUND, LOT_W, lotCanvas } from "./lots";
 import { drawText, sprites, wrapText } from "./pixel-art";
 import {
   DEADLY,
   HUD_H,
   inThrowWindow,
-  LOT_SPAN,
   laneX,
   PLAY_H,
   PLAY_Y,
@@ -24,6 +24,22 @@ import {
   type Side,
   type Thing,
 } from "./street-model";
+import {
+  PAINTS,
+  drawAnimated,
+  drawCarTop,
+  drawCartTop,
+  drawDumpsterTop,
+  drawEbikeTop,
+  drawMowerTop,
+  drawPickup,
+  drawPoleTop,
+  drawPotholeTop,
+  drawTentTop,
+  drawTrashTop,
+  headlightBeams,
+  type CarOptions,
+} from "./topdown-art";
 
 export type StreetFrame = {
   stage: number;
@@ -31,6 +47,7 @@ export type StreetFrame = {
   dayName: string;
   street: string;
   lane: number;
+  steer: number;
   things: Thing[];
   houses: House[];
   scenery: Scenery[];
@@ -75,10 +92,9 @@ function ground() {
   const g = tile.getContext("2d")!;
   R(g, 0, 0, SCREEN_W, TILE, "#5a9a3a");
   for (let i = 0; i < 2600; i++) {
-    const x = Math.floor(hash(i + 0.3) * SCREEN_W),
-      y = Math.floor(hash(i + 0.7) * TILE),
-      roll = hash(i);
-    R(g, x, y, 1, 2, roll > 0.66 ? "#4c8a32" : roll > 0.33 ? "#6aaa44" : "#5a9a3a");
+    const roll = hash(i);
+    R(g, Math.floor(hash(i + 0.3) * SCREEN_W), Math.floor(hash(i + 0.7) * TILE), 1, 2,
+      roll > 0.66 ? "#4c8a32" : roll > 0.33 ? "#6aaa44" : "#5a9a3a");
   }
   // Fallen leaves: it is October in the North Country.
   for (let i = 0; i < 420; i++)
@@ -90,27 +106,25 @@ function ground() {
     for (let y = 0; y < TILE; y += 22) R(g, a, y, b - a, 1, "#9c988c");
     for (let i = 0; i < 18; i++) {
       const y = Math.floor(hash(i + side.length) * TILE);
-      R(g, a + 4 + Math.floor(hash(i + 2) * 12), y, 1, 6, "#8c887c");
-      R(g, a + 5 + Math.floor(hash(i + 2) * 12), y + 5, 3, 1, "#8c887c");
+      R(g, a + 3 + Math.floor(hash(i + 2) * 10), y, 1, 6, "#8c887c");
     }
-    for (let y = 0; y < TILE; y += 44) R(g, side === "left" ? a - 2 : b, y + 8, 2, 30, "#7aa04a");
-    R(g, side === "left" ? b : ROAD_RIGHT, 0, 4, TILE, "#8e8a82");
-    R(g, side === "left" ? b + 3 : ROAD_RIGHT + 3, 0, 1, TILE, "#5e5a54");
+    R(g, side === "left" ? b : ROAD_RIGHT, 0, 4, TILE, "#9a968e");
+    R(g, side === "left" ? b + 3 : ROAD_RIGHT, 0, 1, TILE, "#5e5a54");
   }
   R(g, ROAD_LEFT, 0, ROAD_RIGHT - ROAD_LEFT, TILE, "#474c53");
-  for (let i = 0; i < 1800; i++)
+  for (let i = 0; i < 2600; i++)
     R(g, ROAD_LEFT + Math.floor(hash(i + 4.1) * (ROAD_RIGHT - ROAD_LEFT)), Math.floor(hash(i + 2.9) * TILE), 1, 1,
       hash(i + 9) > 0.5 ? "#3d4248" : "#555a61");
   // Patches and cracks: the city fixes potholes one rectangle at a time.
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 11; i++) {
     const x = ROAD_LEFT + 10 + Math.floor(hash(i + 31) * (ROAD_RIGHT - ROAD_LEFT - 60)),
       y = Math.floor(hash(i + 17) * (TILE - 60)),
-      w = 18 + Math.floor(hash(i + 5) * 30),
-      h = 14 + Math.floor(hash(i + 8) * 30);
+      w = 18 + Math.floor(hash(i + 5) * 34),
+      h = 14 + Math.floor(hash(i + 8) * 34);
     R(g, x, y, w, h, "#3a3e44");
     R(g, x, y, w, 1, "#2e3238");
   }
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 18; i++) {
     let x = ROAD_LEFT + 6 + Math.floor(hash(i + 51) * (ROAD_RIGHT - ROAD_LEFT - 12)),
       y = Math.floor(hash(i + 61) * TILE);
     for (let s = 0; s < 14; s++) {
@@ -119,30 +133,25 @@ function ground() {
       y += 2;
     }
   }
+  // Manhole covers.
+  for (const y of [120, 380]) {
+    g.fillStyle = "#33373c";
+    g.beginPath();
+    g.arc(ROAD_LEFT + 60 + (y % 7) * 14, y, 9, 0, Math.PI * 2);
+    g.fill();
+    R(g, ROAD_LEFT + 54 + (y % 7) * 14, y - 1, 12, 2, "#2a2d31");
+  }
   R(g, ROAD_LEFT + 4, 0, 2, TILE, "#d8d6cc");
   R(g, ROAD_RIGHT - 6, 0, 2, TILE, "#d8d6cc");
-  // Faded double yellow.
+  // Faded double yellow down the middle.
+  const mid = (ROAD_LEFT + ROAD_RIGHT) / 2;
   for (let y = 0; y < TILE; y++)
     if (hash(y * 0.37) > 0.12) {
-      R(g, 253, y, 2, 1, "#d8b434");
-      R(g, 257, y, 2, 1, "#d8b434");
+      R(g, mid - 4, y, 2, 1, "#d8b434");
+      R(g, mid + 2, y, 2, 1, "#d8b434");
     }
   groundTile = tile;
   return tile;
-}
-
-function blit(ctx: CanvasRenderingContext2D, image: CanvasImageSource & { width: number; height: number }, cx: number, bottom: number, flip = false) {
-  const x = Math.round(cx - image.width / 2),
-    y = Math.round(bottom - image.height);
-  if (!flip) {
-    ctx.drawImage(image, x, y);
-    return;
-  }
-  ctx.save();
-  ctx.translate(x + image.width, y);
-  ctx.scale(-1, 1);
-  ctx.drawImage(image, 0, 0);
-  ctx.restore();
 }
 
 function box(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
@@ -151,262 +160,208 @@ function box(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: 
   R(ctx, x + 2, y + 2, w - 4, h - 4, "#1c2c64");
 }
 
-// Houses are drawn smaller and sheared so their fronts turn toward the
-// street: the edge nearest the road sits lower (closer to the viewer).
-const HOUSE_SX = 0.62,
-  HOUSE_SY = 0.8,
-  HOUSE_SKEW = 0.22;
-function lotPlacement(side: Side, base: number, door: number) {
-  const k = side === "left" ? HOUSE_SKEW : -HOUSE_SKEW,
-    originX =
-      side === "left" ? LOT_SPAN - LOT_W * HOUSE_SX - 2 : SIDEWALK.right[1] + 2,
-    originY = base - LOT_GROUND * HOUSE_SY - door * k;
-  return { k, originX, originY, doorX: originX + door * HOUSE_SX };
-}
-
-/** Where a sub is tossed to for a house: its front door. */
+/** Where a sub is tossed to for a house: its front porch. */
 export function porchPoint(side: Side, y: number, house?: House) {
-  const door = house ? lotCanvas(house, false).door : LOT_W / 2;
-  return { x: lotPlacement(side, pctY(y), door).doorX, y: pctY(y) - 8 };
+  const door = house ? lotCanvas(house, false).door : LOT_W - 24;
+  return { x: side === "left" ? door : SCREEN_W - door, y: pctY(y) };
 }
 
 function drawLot(ctx: CanvasRenderingContext2D, house: House, now: number, night: boolean) {
   const base = pctY(house.y),
-    { canvas, door } = lotCanvas(house, night),
-    place = lotPlacement(house.side, base, door);
-  ctx.save();
-  ctx.transform(HOUSE_SX, place.k, 0, HOUSE_SY, Math.round(place.originX), Math.round(place.originY));
-  ctx.drawImage(canvas, 0, 0);
-  ctx.restore();
-  const pending = house.customer && house.state === "pending";
-  // Mailbox at the curb with the house number; the flag is up for an order.
-  const mx = house.side === "left" ? SIDEWALK.left[1] - 3 : SIDEWALK.right[0] + 3;
-  R(ctx, mx - 1, base - 10, 3, 18, "#5a3a22");
-  R(ctx, mx - 7, base - 20, 14, 10, "#3a4a5a");
-  R(ctx, mx - 7, base - 20, 14, 2, "#5a6a7a");
-  if (pending) {
-    R(ctx, mx + 6, base - 30, 2, 12, "#d8302c");
-    R(ctx, mx + 6, base - 30, 7, 5, "#d8302c");
+    { canvas, sign } = lotCanvas(house, night),
+    top = Math.round(base - LOT_GROUND);
+  if (house.side === "left") ctx.drawImage(canvas, 0, top);
+  else {
+    ctx.save();
+    ctx.translate(SCREEN_W, top);
+    ctx.scale(-1, 1);
+    ctx.drawImage(canvas, 0, 0);
+    ctx.restore();
   }
-  drawText(ctx, String(house.number), mx, base + 10, pending ? "#f8d848" : "#f4f4ec", {
-    align: "center",
+  if (sign) {
+    const x = house.side === "left" ? sign.x : SCREEN_W - sign.x - sign.w;
+    R(ctx, x + 2, top + sign.y + 2, sign.w, 11, "rgba(0,0,0,0.3)");
+    R(ctx, x, top + sign.y, sign.w, 11, sign.bg);
+    drawText(ctx, sign.text, x + sign.w / 2, top + sign.y + 2, sign.fg, { align: "center" });
+  }
+  const pending = house.customer && house.state === "pending",
+    p = porchPoint(house.side, house.y, house);
+  // Mailbox at the edge of the sidewalk; the flag is up for an order.
+  const mx = house.side === "left" ? SIDEWALK.left[0] + 3 : SIDEWALK.right[1] - 3,
+    my = base + 12;
+  R(ctx, mx - 1, my - 2, 3, 8, "#5a3a22");
+  R(ctx, mx - 5, my - 8, 10, 7, "#3a4a5a");
+  R(ctx, mx - 5, my - 8, 10, 2, "#5a6a7a");
+  if (pending) {
+    const wave = Math.floor(now / 300) % 2;
+    R(ctx, mx + (house.side === "left" ? 4 : -6), my - 16 + wave, 2, 9, "#d8302c");
+    R(ctx, mx + (house.side === "left" ? 4 : -9), my - 16 + wave, 5, 4, "#d8302c");
+  }
+  drawText(ctx, String(house.number), house.side === "left" ? mx - 8 : mx + 8, my + 8, pending ? "#f8d848" : "#f4f4ec", {
+    align: house.side === "left" ? "right" : "left",
     shadow: "#14141c",
   });
-  const dx = place.doorX,
-    s = sprites();
+  const s = sprites();
   if (house.state === "delivered" || house.state === "sampled") {
     ctx.save();
-    ctx.translate(dx - 6, base - 14);
+    ctx.translate(p.x - 6, p.y - 6);
     ctx.scale(2, 2);
     ctx.drawImage(s.bag, 0, 0);
     ctx.restore();
   }
   if (house.state === "delivered")
-    drawText(ctx, "✓", dx, base - 44, "#9cdc64", { align: "center", shadow: "#14141c", scale: 2 });
+    drawText(ctx, "✓", p.x, p.y - 34, "#9cdc64", { align: "center", shadow: "#14141c", scale: 2 });
   else if (house.state === "missed")
-    drawText(ctx, "×", dx, base - 44, "#ff6050", { align: "center", shadow: "#14141c", scale: 2 });
+    drawText(ctx, "×", p.x, p.y - 34, "#ff6050", { align: "center", shadow: "#14141c", scale: 2 });
   else if (pending) {
     const bob = Math.floor(now / 200) % 2;
-    box(ctx, dx - 32, base - 70 + bob, 64, 22);
-    drawText(ctx, "ORDER", dx, base - 66 + bob, "#f8d848", { align: "center" });
-    drawText(ctx, house.item.split(" ")[0], dx, base - 57 + bob, "#f4f4ec", { align: "center" });
+    box(ctx, p.x - 30, p.y - 56 + bob, 60, 22);
+    drawText(ctx, "ORDER", p.x, p.y - 52 + bob, "#f8d848", { align: "center" });
+    drawText(ctx, house.item.split(" ")[0], p.x, p.y - 43 + bob, "#f4f4ec", { align: "center" });
     if (inThrowWindow(house.y) && Math.floor(now / 120) % 2) {
       const porch = house.y >= PORCH_WINDOW.start && house.y <= PORCH_WINDOW.end;
       drawText(ctx, house.side === "right" ? "▶" : "◀", house.side === "right" ? ROAD_RIGHT - 18 : ROAD_LEFT + 6,
-        base - 20, porch ? "#9cdc64" : "#f8d848", { shadow: "#14141c", scale: 2 });
+        base - 8, porch ? "#9cdc64" : "#f8d848", { shadow: "#14141c", scale: 2 });
     }
   }
 }
 
-function drawCar(ctx: CanvasRenderingContext2D, cx: number, bottom: number, variant: number, van: boolean, night: boolean, rear = false) {
-  // Seen from the front (oncoming, or parked facing us) or from the back.
-  const paint = ["#2a5ea8", "#8a2a2a", "#d8d4c8", "#2f2f34", "#6a7a3a", "#b08a3a"][variant % 6],
-    // Same scale as the Equinox (about 1.85 m wide ≈ 62 px).
-    w = van ? 66 : 62,
-    h = van ? 62 : 48,
-    x = cx - w / 2,
-    y = bottom - h;
-  R(ctx, x + 3, bottom - 6, 9, 7, "#141418");
-  R(ctx, x + w - 12, bottom - 6, 9, 7, "#141418");
-  R(ctx, x, y + h * 0.42, w, h * 0.5, paint);
-  R(ctx, x + 4, y, w - 8, h * 0.46, shade(paint, 0.85));
-  R(ctx, x + 8, y + 4, w - 16, h * 0.34, "#3a5068");
-  R(ctx, x + 10, y + 6, 6, 3, "#8fb0cf");
-  const lamp = rear ? (night ? "#ff4030" : "#b82020") : night ? "#fff6c0" : "#e8e4c8";
-  R(ctx, x + 6, y + h * 0.6, 10, 6, lamp);
-  R(ctx, x + w - 16, y + h * 0.6, 10, 6, lamp);
-  if (rear) R(ctx, x + w / 2 - 8, y + h * 0.62, 16, 6, "#e8e4d8");
-  else R(ctx, x + w / 2 - 9, y + h * 0.62, 18, 6, "#1c1c20");
-  R(ctx, x - 2, bottom - 10, w + 4, 4, "#9a9a98");
-  R(ctx, x - 4, y + h * 0.36, 5, 4, paint);
-  R(ctx, x + w - 1, y + h * 0.36, 5, 4, paint);
+function carLook(thing: Thing): Partial<CarOptions> {
+  const v = thing.variant ?? 0;
+  return {
+    paint: PAINTS[v % PAINTS.length],
+    kind: thing.type === "van" ? "van" : v % 5 === 0 ? "pickup" : v % 7 === 3 ? "suv" : "car",
+    roofLoad: thing.type === "car" && v === 11 ? "mattress" : thing.type === "car" && v === 10 ? "kayak" : null,
+    rusty: v % 4 === 1,
+  };
 }
 
-function drawTarpCar(ctx: CanvasRenderingContext2D, cx: number, bottom: number) {
-  ctx.save();
-  ctx.translate(cx, bottom);
-  ctx.scale(1.1, 1.2);
-  ctx.translate(-cx, -bottom);
-  const x = cx - 28;
-  R(ctx, x + 2, bottom - 6, 9, 7, "#141418");
-  R(ctx, x + 45, bottom - 6, 9, 7, "#141418");
-  for (let i = 0; i < 30; i++) {
-    const inset = Math.max(0, 14 - i) * 1.1;
-    R(ctx, x + inset, bottom - 34 + i, 56 - inset * 2, 1, i % 4 ? "#2f6fc4" : "#2558a0");
-  }
-  R(ctx, x + 4, bottom - 20, 48, 1, "#e0302c");
-  R(ctx, x + 27, bottom - 34, 1, 28, "#e0302c");
-  R(ctx, x + 10, bottom - 28, 8, 2, "#5a90e0");
-  R(ctx, x + 40, bottom - 14, 6, 6, "#1d1d22");
-  ctx.restore();
-}
-
-function drawEbike(ctx: CanvasRenderingContext2D, cx: number, bottom: number, variant: number, now: number) {
-  // A kid on an e-bike, riding the wrong way, hood up, no helmet.
-  const hoodie = ["#c7312c", "#2a5ea8", "#3a7a32", "#5a2a7a", "#222"][variant % 5];
-  R(ctx, cx - 3, bottom - 12, 6, 12, "#141418");
-  R(ctx, cx - 2, bottom - 9, 4, 6, "#3a3a40");
-  R(ctx, cx - 12, bottom - 30, 24, 3, "#9a9aa0");
-  R(ctx, cx - 9, bottom - 34, 18, 16, hoodie);
-  R(ctx, cx - 6, bottom - 44, 12, 11, hoodie);
-  R(ctx, cx - 4, bottom - 41, 8, 7, "#e8b890");
-  R(ctx, cx - 3, bottom - 38, 2, 2, "#222");
-  R(ctx, cx + 1, bottom - 38, 2, 2, "#222");
-  R(ctx, cx - 14, bottom - 28, 5, 4, "#e8b890");
-  R(ctx, cx + 9, bottom - 28, 5, 4, "#e8b890");
-  if (Math.floor(now / 150) % 2) R(ctx, cx - 2, bottom - 16, 4, 3, "#9cf0ff");
-}
-
-function drawPothole(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) {
-  const w = Math.round(30 * size),
-    h = Math.round(14 * size);
-  for (let i = 0; i < h; i++) {
-    const t = 1 - Math.abs((i - h / 2) / (h / 2));
-    const half = Math.round((w / 2) * Math.sqrt(Math.max(0, t)));
-    R(ctx, cx - half - 1, cy - h / 2 + i, half * 2 + 2, 1, "#2e3136");
-    R(ctx, cx - half + 1, cy - h / 2 + i, Math.max(0, half * 2 - 2), 1, i < h / 2 ? "#141519" : "#1f2126");
-  }
-  R(ctx, cx - w / 2 + 2, cy + h / 2 - 1, w - 4, 1, "#6a6e74");
-  if (size > 1.1) R(ctx, cx - 3, cy, 6, 2, "#3a5070");
-}
+const GAIT: Partial<Record<Thing["type"], "trot" | "walk" | "waddle" | "hop" | "graze">> = {
+  dog: "trot",
+  cat: "walk",
+  squirrel: "hop",
+  raccoon: "walk",
+  goose: "waddle",
+  deer: "hop",
+  cow: "graze",
+  person: "walk",
+};
 
 function drawThing(ctx: CanvasRenderingContext2D, thing: Thing, assets: Assets, now: number, night: boolean) {
   const x = laneX(thing.lane),
-    y = pctY(thing.y),
-    s = sprites(),
-    flip = (thing.vx ?? 0) < 0;
+    y = pctY(thing.y);
   switch (thing.type) {
     case "pothole":
-      drawPothole(ctx, x, y, thing.size ?? 1);
+      drawPotholeTop(ctx, x, y, thing.size ?? 1);
       return;
     case "car":
     case "van":
-      drawCar(ctx, x, y + 20, thing.variant ?? 0, thing.type === "van", night);
-      return;
-    case "tarpcar":
-      drawTarpCar(ctx, x, y + 18);
+      drawCarTop(ctx, x, y, { ...carLook(thing), paint: carLook(thing).paint!, angle: Math.PI, headlights: night });
       return;
     case "parked":
-      drawCar(ctx, x, y + 20, thing.variant ?? 0, false, false, thing.size === 1);
+      // Left-side cars face us (nose down); right-side ones face away.
+      drawCarTop(ctx, x, y, { ...carLook(thing), paint: carLook(thing).paint!, angle: thing.size === 1 ? 0 : Math.PI });
       return;
+    case "tarpcar":
+      drawCarTop(ctx, x, y, { paint: "#2f6fc4", angle: thing.lane < 1 ? Math.PI : 0, tarp: true, time: now });
+      return;
+    case "racer": {
+      const up = (thing.speed ?? 1) < 0;
+      drawCarTop(ctx, x, y, { paint: ["#e8d020", "#e02020", "#20a0e0", "#f0f0f0"][(thing.variant ?? 0) % 4], kind: "car", angle: up ? 0 : Math.PI, headlights: true, brake: false });
+      // Speed lines behind it.
+      for (let i = 0; i < 4; i++) R(ctx, x - 14 + i * 9, up ? y + 46 : y - 66, 2, 20, "rgba(255,255,255,0.35)");
+      return;
+    }
     case "ebike":
-      drawEbike(ctx, x, y + 22, thing.variant ?? 0, now);
+      drawEbikeTop(ctx, x, y, Math.PI + Math.cos(thing.phase ?? 0) * 0.35, thing.variant ?? 0, now);
       return;
     case "mower":
-      blit(ctx, assets.person, x + 8, y + 20);
-      R(ctx, x - 22, y + 6, 22, 12, "#c7312c");
-      R(ctx, x - 22, y + 6, 22, 3, "#e05a4a");
-      R(ctx, x - 24, y + 16, 6, 5, "#141418");
-      R(ctx, x - 6, y + 16, 6, 5, "#141418");
-      R(ctx, x - 4, y - 6, 2, 14, "#2a2a2e");
+      drawMowerTop(ctx, x, y, now);
       return;
     case "boost":
     case "slow":
-    case "restock": {
-      const sprite = s[thing.type];
-      ctx.save();
-      ctx.translate(Math.round(x - sprite.width), Math.round(y - sprite.height));
-      ctx.scale(2, 2);
-      ctx.drawImage(sprite, 0, 0);
-      ctx.restore();
+    case "restock":
+      drawPickup(ctx, thing.type, x, y, now);
       return;
-    }
     default: {
       const art = assets[thing.type];
-      if (art) blit(ctx, art, x, y + art.height / 2, flip);
+      if (!art) return;
+      const vx = thing.vx ?? 0,
+        // Painted animals face left; the walker faces right.
+        facesRight = thing.type === "person",
+        flip = facesRight ? vx < 0 : vx > 0,
+        moving = vx !== 0 || thing.type === "person" || thing.type === "goose" || thing.type === "dog";
+      drawAnimated(ctx, art, x, y + art.height / 2, { flip, time: now + thing.id * 97, gait: GAIT[thing.type] ?? "walk", moving });
+      if (thing.type === "goose" && Math.floor((now + thing.id * 300) / 1400) % 3 === 0)
+        drawText(ctx, "HONK!", x, y - art.height / 2 - 10, "#f4f4ec", { align: "center", shadow: "#14141c" });
+      if (thing.type === "cow" && Math.floor((now + thing.id * 300) / 1800) % 4 === 0)
+        drawText(ctx, "MOO", x, y - art.height / 2 - 10, "#f4f4ec", { align: "center", shadow: "#14141c" });
+      if (night && thing.type === "deer") {
+        // Eyes in the headlights.
+        R(ctx, x + (flip ? 8 : -12), y - art.height / 2 + 8, 2, 2, "#fff8c0");
+      }
     }
   }
 }
 
-function drawScenery(ctx: CanvasRenderingContext2D, item: Scenery, assets: Assets) {
+function drawScenery(ctx: CanvasRenderingContext2D, item: Scenery, night: boolean) {
   const left = item.side === "left",
     x = left ? (SIDEWALK.left[0] + SIDEWALK.left[1]) / 2 : (SIDEWALK.right[0] + SIDEWALK.right[1]) / 2,
-    y = pctY(item.y) + 14,
-    s = sprites();
+    y = pctY(item.y);
   switch (item.kind) {
     case "abandoned":
-      blit(ctx, assets.junkcar, x + (left ? -6 : 6), y, !left);
+      drawCarTop(ctx, x + (left ? -14 : 14), y, { paint: "#8a6a4a", angle: left ? Math.PI : 0, rusty: true });
       return;
     case "tent":
-      blit(ctx, assets.tent, x, y, !left);
+      drawTentTop(ctx, x + (left ? -8 : 8), y);
       return;
     case "dumpster":
-      blit(ctx, assets.dumpster, x, y);
+      drawDumpsterTop(ctx, x, y);
       return;
     case "pole":
-      blit(ctx, assets.pole, left ? x - 14 : x + 14, y, !left);
-      return;
-    case "sign":
-      R(ctx, x - 1, y - 40, 3, 40, "#6a6e74");
-      R(ctx, x - 24, y - 46, 48, 11, "#1f6a3a");
-      R(ctx, x - 23, y - 45, 46, 9, "#2a8a4a");
+      drawPoleTop(ctx, left ? SIDEWALK.left[1] - 2 : SIDEWALK.right[0] + 2, y, item.side, night);
       return;
     case "trash":
-      // Two city cans, one lid missing, one bag that didn't make it in.
-      for (const [dx, lid] of [[-7, true], [7, false]] as const) {
-        R(ctx, x + dx - 6, y - 22, 12, 20, "#5a6068");
-        for (let yy = y - 20; yy < y - 2; yy += 4) R(ctx, x + dx - 6, yy, 12, 1, "#4a5058");
-        R(ctx, x + dx - 6, y - 22, 2, 20, "#7a8088");
-        if (lid) R(ctx, x + dx - 8, y - 25, 16, 3, "#3a4048");
-        else R(ctx, x + dx - 5, y - 26, 10, 5, "#202024");
-      }
-      R(ctx, x - 16, y - 8, 9, 8, "#202024");
-      R(ctx, x - 13, y - 10, 3, 2, "#202024");
+      drawTrashTop(ctx, x, y);
       return;
     case "cart":
-      R(ctx, x - 12, y - 22, 24, 2, "#b8bcc4");
-      R(ctx, x - 12, y - 22, 2, 14, "#b8bcc4");
-      R(ctx, x + 10, y - 22, 2, 14, "#b8bcc4");
-      for (let xx = x - 10; xx < x + 10; xx += 4) R(ctx, xx, y - 20, 1, 12, "#9aa0a8");
-      R(ctx, x - 12, y - 10, 24, 2, "#b8bcc4");
-      R(ctx, x + 12, y - 26, 2, 6, "#b8bcc4");
-      R(ctx, x + 8, y - 28, 10, 3, "#c7312c");
-      R(ctx, x - 10, y - 4, 4, 4, "#202024");
-      R(ctx, x + 6, y - 4, 4, 4, "#202024");
+      drawCartTop(ctx, x, y);
+      return;
+    case "sign":
+      R(ctx, x - 1, y - 2, 3, 6, "#6a6e74");
+      R(ctx, x - 22, y - 10, 44, 9, "#2a8a4a");
       return;
   }
 }
 
-function drawPlayer(ctx: CanvasRenderingContext2D, f: StreetFrame, fx: Fx, now: number, assets: Assets) {
+function drawPlayer(ctx: CanvasRenderingContext2D, f: StreetFrame, fx: Fx, now: number) {
   const x = laneX(f.lane),
-    bottom = pctY(PLAYER_Y) + 24;
-  ctx.fillStyle = "rgba(0,0,0,0.32)";
-  ctx.fillRect(Math.round(x - 28), Math.round(bottom - 6), 56, 8);
+    y = pctY(PLAYER_Y);
   if (now - fx.skidAt < 260) {
-    R(ctx, x - 20, bottom, 4, 14, "#24272c");
-    R(ctx, x + 16, bottom, 4, 14, "#24272c");
+    R(ctx, x - 18, y + 30, 5, 22, "#24272c");
+    R(ctx, x + 13, y + 30, 5, 22, "#24272c");
   }
   if (f.boost > 0) {
     const flick = Math.floor(now / 60) % 2;
-    R(ctx, x - 14, bottom - 2, 5, 8 + flick * 4, flick ? "#f8d848" : "#f08830");
-    R(ctx, x + 9, bottom - 2, 5, 12 - flick * 4, flick ? "#f08830" : "#f8d848");
+    R(ctx, x - 12, y + 42, 6, 10 + flick * 6, flick ? "#f8d848" : "#f08830");
+    R(ctx, x + 6, y + 42, 6, 16 - flick * 6, flick ? "#f08830" : "#f8d848");
   }
   if (f.invulnerable > 0 && Math.floor(now / 80) % 2) return;
-  blit(ctx, assets.suv, x, bottom);
+  // The car turns as you steer, wheels and all.
+  drawCarTop(ctx, x, y, {
+    paint: "#e8e6de",
+    kind: "delivery",
+    angle: f.steer * 0.22,
+    steer: f.steer * 0.4,
+    headlights: f.stage >= 4,
+    brake: f.slow > 0,
+  });
   if (f.damaged > 0) {
     const t = (now / 500) % 1;
     ctx.fillStyle = `rgba(150,150,160,${0.85 - t * 0.7})`;
-    ctx.fillRect(Math.round(x - 6 - t * 8), Math.round(bottom - 60 - t * 24), 10, 10);
+    ctx.beginPath();
+    ctx.arc(x - 4 - t * 8, y - 30 - t * 24, 6 + t * 6, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
@@ -455,15 +410,16 @@ export function drawStreet(
   const tile = ground();
   for (let y = PLAY_Y - TILE + offset; y < SCREEN_H; y += TILE) ctx.drawImage(tile, 0, Math.round(y));
   const night = f.stage >= 4;
-  // Far things first so nearer houses overlap the ones up the street.
   for (const house of [...f.houses].sort((a, b) => a.y - b.y)) drawLot(ctx, house, now, night);
-  for (const item of [...f.scenery].sort((a, b) => a.y - b.y)) drawScenery(ctx, item, assets);
+  for (const item of [...f.scenery].sort((a, b) => a.y - b.y)) drawScenery(ctx, item, night);
   for (const thing of [...f.things].sort((a, b) => a.y - b.y)) {
     drawThing(ctx, thing, assets, now, night);
-    if (DEADLY.has(thing.type) && thing.y < 14 && Math.floor(now / 140) % 2)
+    if (DEADLY.has(thing.type) && thing.y < 14 && thing.y > -30 && Math.floor(now / 140) % 2)
       drawText(ctx, "!", laneX(thing.lane), PLAY_Y + 6, "#ff6050", { align: "center", shadow: "#14141c", scale: 3 });
+    if (thing.type === "racer" && thing.y > 96 && Math.floor(now / 120) % 2)
+      drawText(ctx, "!", laneX(thing.lane), SCREEN_H - 26, "#ff6050", { align: "center", shadow: "#14141c", scale: 3 });
   }
-  drawPlayer(ctx, f, fx, now, assets);
+  drawPlayer(ctx, f, fx, now);
   for (const t of fx.throws) {
     const p = Math.min(1, (now - t.at) / 320);
     const x = t.fromX + (t.toX - t.fromX) * p,
@@ -488,36 +444,28 @@ export function drawStreet(
   if (tint) R(ctx, 0, PLAY_Y, SCREEN_W, PLAY_H, tint);
   if (night) {
     ctx.globalCompositeOperation = "lighter";
-    const x = laneX(f.lane),
-      y = pctY(PLAYER_Y) - 20;
-    const beam = ctx.createLinearGradient(0, y, 0, y - 150);
-    beam.addColorStop(0, "rgba(255,240,170,0.32)");
-    beam.addColorStop(1, "rgba(255,240,170,0)");
-    ctx.fillStyle = beam;
-    ctx.beginPath();
-    ctx.moveTo(x - 16, y);
-    ctx.lineTo(x + 16, y);
-    ctx.lineTo(x + 54, y - 150);
-    ctx.lineTo(x - 54, y - 150);
-    ctx.fill();
+    headlightBeams(ctx, laneX(f.lane), pctY(PLAYER_Y), f.steer * 0.22, 170, "delivery");
+    for (const thing of f.things)
+      if (thing.type === "car" || thing.type === "van" || thing.type === "racer")
+        headlightBeams(ctx, laneX(thing.lane), pctY(thing.y), (thing.speed ?? 1) < 0 ? 0 : Math.PI, 110);
     for (const house of f.houses)
       if (house.customer && house.state === "pending") {
         const p = porchPoint(house.side, house.y, house);
-        const glow = ctx.createRadialGradient(p.x, p.y - 20, 2, p.x, p.y - 20, 36);
-        glow.addColorStop(0, "rgba(255,210,120,0.45)");
+        const glow = ctx.createRadialGradient(p.x, p.y, 2, p.x, p.y, 34);
+        glow.addColorStop(0, "rgba(255,210,120,0.5)");
         glow.addColorStop(1, "rgba(255,210,120,0)");
         ctx.fillStyle = glow;
-        ctx.fillRect(p.x - 36, p.y - 56, 72, 72);
+        ctx.fillRect(p.x - 34, p.y - 34, 68, 68);
       }
     for (const item of f.scenery)
       if (item.kind === "pole") {
-        const px = item.side === "left" ? SIDEWALK.left[1] : SIDEWALK.right[0],
-          py = pctY(item.y) - 110;
-        const glow = ctx.createRadialGradient(px, py + 60, 4, px, py + 60, 60);
-        glow.addColorStop(0, "rgba(255,190,110,0.28)");
+        const px = item.side === "left" ? SIDEWALK.left[1] + 28 : SIDEWALK.right[0] - 28,
+          py = pctY(item.y);
+        const glow = ctx.createRadialGradient(px, py, 4, px, py, 70);
+        glow.addColorStop(0, "rgba(255,190,110,0.3)");
         glow.addColorStop(1, "rgba(255,190,110,0)");
         ctx.fillStyle = glow;
-        ctx.fillRect(px - 60, py, 120, 120);
+        ctx.fillRect(px - 70, py - 70, 140, 140);
       }
     ctx.globalCompositeOperation = "source-over";
   }
