@@ -20,6 +20,7 @@ async function main() {
   const { commitTender, reprintPaymentReceipt, reverseTender, PaymentConflictError } = await import("../src/lib/ordering-payments");
   await ensureOrderingAccountSchema();
   await ensureOrderingGiftCardSchema();
+  await (await import("../src/lib/ordering-hardware-schema")).ensureOrderingHardwareSchema();
   const result: Record<string, unknown> = {};
   try {
     await withTransaction(async () => {
@@ -36,6 +37,8 @@ async function main() {
           ${`PAY-${orderId.slice(0, 8)}`}, ${actor.id}, 'Payment', 'Test', '+13155550199', 4200, 4200
         )
       `;
+      // Station-less cash is only accepted while no payment station is configured (rolled back below).
+      await sql`UPDATE ordering_payment_stations SET active=FALSE WHERE business='Corner Deli'`;
       const first = await commitTender({ orderId, business: "Corner Deli", tenderType: "cash", amountTenderedCents: 2000, clientMutationId: "payment-test-cash", actor });
       if (Number(first.order.amount_due_cents) !== 2200 || first.order.payment_status !== "partially_paid") throw new Error("Partial cash payment was incorrect.");
       const duplicate = await commitTender({ orderId, business: "Corner Deli", tenderType: "cash", amountTenderedCents: 2000, clientMutationId: "payment-test-cash", actor });

@@ -6,6 +6,7 @@ import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { paymentStationProfile, PaymentStationError } from "@/lib/ordering-payment-stations";
 import { submitDraftOrder } from "@/lib/ordering-order-lifecycle";
 import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
+import { localDevToolsAllowed } from "@/lib/local-dev-tools";
 
 export const runtime = "nodejs";
 
@@ -60,7 +61,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       stationKey,
       giftCardNumber: body.giftCardNumber ? String(body.giftCardNumber) : undefined,
       giftCardPin: body.giftCardPin ? String(body.giftCardPin) : undefined,
-      providerApproval: body.testCard === true && process.env.LOCAL_DEVELOPMENT === "true" && canManagePos(actor) ? {
+      providerApproval: body.testCard === true && localDevToolsAllowed(process.env, request.headers.get("host")) && canManagePos(actor) ? {
         provider: "test",
         transactionReference: `local-test-${String(body.clientMutationId || "")}`,
         brand: "TEST",

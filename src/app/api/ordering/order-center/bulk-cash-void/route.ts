@@ -6,6 +6,7 @@ import { isAuthorizationResponse, orderingManagerActor } from "@/lib/ordering-ro
 import { voidSentOrder } from "@/lib/ordering-voids";
 import { reverseTender } from "@/lib/ordering-payments";
 import { cancelPaymentQueueEntries } from "@/lib/ordering-payment-stations";
+import { localDevToolsAllowed } from "@/lib/local-dev-tools";
 
 export const runtime = "nodejs";
 const BUSINESS = "Corner Deli";
@@ -61,6 +62,15 @@ function snapshot(from: string, to: string, orders: Awaited<ReturnType<typeof ca
   return createHash("sha256").update(JSON.stringify({ from, to, orders })).digest("hex");
 }
 
+// Destructive dev tool: owner only, and never on production (Vercel / production host), even if LOCAL_DEVELOPMENT is set.
+async function ownerActor(request: Request) {
+  if (!localDevToolsAllowed(process.env, request.headers.get("host"))) return Response.json({ error: "Unavailable." }, { status: 404 });
+  const actor = await orderingManagerActor(BUSINESS);
+  if (isAuthorizationResponse(actor)) return actor;
+  if (actor.role !== "owner") return Response.json({ error: "Owner access required." }, { status: 403 });
+  return actor;
+}
+
 function errorResponse(error: unknown) {
   if (error instanceof BulkVoidInputError) return Response.json({ error: error.message }, { status: 400 });
   console.error("[bulk-cash-void] failed", error);
@@ -68,9 +78,8 @@ function errorResponse(error: unknown) {
 }
 
 export async function GET(request: Request) {
-  if (process.env.LOCAL_DEVELOPMENT !== "true") return Response.json({ error: "Unavailable." }, { status: 404 });
-  const actor = await orderingManagerActor(BUSINESS);
-  if (isAuthorizationResponse(actor)) return actor;
+  const actor = await ownerActor(request);
+  if (actor instanceof Response) return actor;
   try {
     const params = new URL(request.url).searchParams;
     const { from, to } = dates(params.get("from"), params.get("to"));
@@ -80,9 +89,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (process.env.LOCAL_DEVELOPMENT !== "true") return Response.json({ error: "Unavailable." }, { status: 404 });
-  const actor = await orderingManagerActor(BUSINESS);
-  if (isAuthorizationResponse(actor)) return actor;
+  const actor = await ownerActor(request);
+  if (actor instanceof Response) return actor;
   try {
     const body = await request.json();
     const { from, to } = dates(body.from, body.to);

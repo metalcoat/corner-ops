@@ -36,6 +36,9 @@ async function main() {
       if (!duplicate.duplicate) throw new Error("Payment queue retry duplicated the request.");
       const tipped = await setCheckoutTip({ orderId, business: "Tiki", tipCents: 450, actor });
       if (Number(tipped.order.amount_due_cents) !== 3450) throw new Error("Checkout tip was not added to the amount due.");
+      let stationlessCashBlocked = false;
+      try { await commitTender({ orderId, business: "Tiki", tenderType: "cash", amountTenderedCents: 2000, clientMutationId: `cash-nostation-${suffix}`, actor, receiptPrinterId: printerId, cashControlMode: "till" }); } catch (error) { stationlessCashBlocked = error instanceof Error && /payment station/.test(error.message); }
+      if (!stationlessCashBlocked) throw new Error("Cash without a payment station bypassed the register.");
       const cash = await commitTender({ orderId, business: "Tiki", tenderType: "cash", amountTenderedCents: 2000, clientMutationId: `cash-${suffix}`, actor, receiptPrinterId: printerId, cashControlMode: "till", stationKey });
       const card = await commitTender({ orderId, business: "Tiki", tenderType: "card", amountTenderedCents: 1450, clientMutationId: `card-${suffix}`, actor, providerApproval: { provider: "mx_merchant", transactionReference: `mx-${suffix}` } });
       const cashPayment = cash.tenders.find((row) => row.tender_type === "cash");
@@ -45,7 +48,7 @@ async function main() {
       const queueStatuses = (await sql`SELECT status FROM ordering_payment_station_queue WHERE order_id=${orderId}`).map((row) => String(row.status));
       const movements = await sql`SELECT delta_cash_cents FROM ordering_cash_drawer_movements WHERE order_id=${orderId} ORDER BY created_at`;
       if (profile?.station_mode !== "payment" || !queueStatuses.includes("cancelled") || !queueStatuses.includes("completed") || card.order.payment_status !== "paid" || movements.length !== 2 || Number(movements[0].delta_cash_cents) !== 2000 || Number(movements[1].delta_cash_cents) !== -500) throw new Error("Payment station routing or cash ledger validation failed.");
-      Object.assign(result, { singlePaymentStation: true, orderTakerQueue: true, queueCancellation: true, queueIdempotency: true, checkoutTip: true, mxProviderLedger: true, cashRegisterLedger: true, cashRefundLedger: true });
+      Object.assign(result, { singlePaymentStation: true, orderTakerQueue: true, queueCancellation: true, queueIdempotency: true, checkoutTip: true, stationlessCashBlocked: true, mxProviderLedger: true, cashRegisterLedger: true, cashRefundLedger: true });
       throw new Error(ROLLBACK);
     });
   } catch (error) {

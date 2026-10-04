@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getSql, withTransaction } from "@/lib/db";
 import { ensureOrderingTipSchema } from "@/lib/ordering-tip-schema";
 import { canManagePos, type OrderingActor } from "@/lib/ordering-route-auth";
+import { tipAllocationTarget } from "@/lib/ordering-payment-rules";
 export class TipError extends Error {}
 function split(total: number, weights: Array<{ key: string; amount: number }>) {
   const positive = weights.filter((row) => row.amount > 0);
@@ -17,20 +18,30 @@ function split(total: number, weights: Array<{ key: string; amount: number }>) {
     return { key: row.key, amount };
   });
 }
+const DEFAULT_TIP_POLICY = { delivery_policy: "assigned_driver", counter_policy: "order_taker", pool_clocked_in_only: true };
+/**
+ * Brings an order's active tip allocations in line with its current tip. Runs after payment,
+ * tip edits, tender reversals and voids: unpaid/voided orders end with no active allocations,
+ * and a changed tip re-allocates whatever has not already been paid out in a payout batch.
+ */
 export async function reconcileOrderTips(orderId: string, business: string) {
   await ensureOrderingTipSchema();
+  return withTransaction(async () => {
   const sql = getSql(),
     order = (
-      await sql`SELECT * FROM ordering_orders WHERE id=${orderId} AND business=${business}`
+      await sql`SELECT * FROM ordering_orders WHERE id=${orderId} AND business=${business} FOR UPDATE`
     )[0];
-  if (!order || Number(order.tip_cents) <= 0 || order.payment_status !== "paid")
-    return;
-  const existing =
-    await sql`SELECT id FROM ordering_tip_allocations WHERE order_id=${orderId} LIMIT 1`;
-  if (existing.length) return;
+  if (!order) return;
+  const target = tipAllocationTarget({ tipCents: Number(order.tip_cents), paymentStatus: String(order.payment_status), voided: Boolean(order.voided_at), status: String(order.status) }),
+    active = (await sql`SELECT COALESCE(SUM(amount_cents),0)::integer total,COALESCE(SUM(amount_cents) FILTER(WHERE status='paid'),0)::integer paid FROM ordering_tip_allocations WHERE order_id=${orderId} AND status<>'reversed'`)[0];
+  if (Number(active.total) === target) return;
+  await sql`UPDATE ordering_tip_allocations SET status='reversed',updated_at=NOW() WHERE order_id=${orderId} AND status IN('unassigned','eligible')`;
+  // Allocations already paid out stay paid; a manager reverses the payout batch if that money must come back.
+  const tipCents = target - Number(active.paid);
+  if (tipCents <= 0) return;
   const policy = (
       await sql`SELECT * FROM ordering_tip_policies WHERE business=${business}`
-    )[0],
+    )[0] || DEFAULT_TIP_POLICY,
     delivery = ["delivery", "no_contact_delivery"].includes(
       String(order.service_type),
     );
@@ -56,7 +67,7 @@ export async function reconcileOrderTips(orderId: string, business: string) {
   const tenders =
       await sql`SELECT tender_type,SUM(amount_cents)::integer amount FROM ordering_payment_transactions WHERE order_id=${orderId} AND transaction_type='payment' AND status='approved' GROUP BY tender_type`,
     tenderParts = split(
-      Number(order.tip_cents),
+      tipCents,
       tenders.map((row) => ({
         key: String(row.tender_type),
         amount: Number(row.amount),
@@ -68,8 +79,8 @@ export async function reconcileOrderTips(orderId: string, business: string) {
     const employee = employees[index],
       employeeAmount =
         index === employeeCount - 1
-          ? Number(order.tip_cents) - employeeUsed
-          : Math.floor(Number(order.tip_cents) / employeeCount);
+          ? tipCents - employeeUsed
+          : Math.floor(tipCents / employeeCount);
     employeeUsed += employeeAmount;
     let tenderUsed = 0;
     for (let tenderIndex = 0; tenderIndex < tenderParts.length; tenderIndex++) {
@@ -78,19 +89,20 @@ export async function reconcileOrderTips(orderId: string, business: string) {
           tenderIndex === tenderParts.length - 1
             ? employeeAmount - tenderUsed
             : Math.floor(
-                (employeeAmount * part.amount) / Number(order.tip_cents),
+                (employeeAmount * part.amount) / tipCents,
               );
       tenderUsed += amount;
       if (amount <= 0) continue;
       await sql`INSERT INTO ordering_tip_allocations(id,business,order_id,employee_id,employee_name,tender_type,amount_cents,status,allocation_reason)VALUES(${randomUUID()},${business},${orderId},${employee?.id || null},${employee?.name || "Unassigned"},${["cash", "card", "gift_card"].includes(part.key) ? part.key : "other"},${amount},${employee ? "eligible" : "unassigned"},${usePool ? "Tip pool" : delivery ? "Assigned delivery driver" : "Order cashier"}) ON CONFLICT DO NOTHING`;
     }
   }
+  });
 }
 export async function tipsDashboard() {
   await ensureOrderingTipSchema();
   const sql = getSql();
   const orders =
-    await sql`SELECT id FROM ordering_orders WHERE business='Corner Deli' AND payment_status='paid' AND tip_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_tip_allocations allocation WHERE allocation.order_id=ordering_orders.id) ORDER BY paid_at DESC LIMIT 500`;
+    await sql`SELECT id FROM ordering_orders WHERE business='Corner Deli' AND ((payment_status='paid' AND voided_at IS NULL AND tip_cents>0 AND NOT EXISTS(SELECT 1 FROM ordering_tip_allocations allocation WHERE allocation.order_id=ordering_orders.id AND allocation.status<>'reversed')) OR ((payment_status<>'paid' OR voided_at IS NOT NULL) AND EXISTS(SELECT 1 FROM ordering_tip_allocations allocation WHERE allocation.order_id=ordering_orders.id AND allocation.status IN('unassigned','eligible')))) ORDER BY paid_at DESC NULLS LAST LIMIT 500`;
   for (const row of orders)
     await reconcileOrderTips(String(row.id), "Corner Deli");
   await sql`UPDATE ordering_tip_allocations allocation SET employee_id=driver.id,employee_name=driver.name,status='eligible',allocation_reason='Assigned delivery driver',updated_at=NOW() FROM ordering_orders orders JOIN LATERAL(SELECT employee.id,employee.name FROM ordering_delivery_assignments assignment JOIN employees employee ON employee.id=assignment.driver_employee_id WHERE assignment.order_id=orders.id AND assignment.status<>'cancelled' ORDER BY assignment.assigned_at DESC LIMIT 1)driver ON TRUE WHERE allocation.order_id=orders.id AND allocation.status='unassigned' AND orders.service_type IN('delivery','no_contact_delivery')`;

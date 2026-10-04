@@ -367,7 +367,7 @@ export default function OrderCenterClient() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Order, customer, phone, address"
         />
-        {clearEnabled && session.session?.posRole !== "employee" && (
+        {clearEnabled && session.session?.posRole === "owner" && (
           <button type="button" onClick={() => setBulkCashOpen(true)}>BULK VOID CASH ORDERS</button>
         )}
         {clearEnabled && session.session?.posRole !== "employee" && (

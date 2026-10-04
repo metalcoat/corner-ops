@@ -26,6 +26,8 @@ export async function redeemCustomerCredit(input:{orderId:string;checkId?:string
   return withTransaction(async()=>{
     const sql=getSql(),order=(await sql`SELECT id,customer_id,amount_due_cents,paid_cents,total_cents,version FROM ordering_orders WHERE id=${input.orderId} AND business='Corner Deli' FOR UPDATE`)[0];
     if(!order?.customer_id)throw new Error("Attach a customer before applying account credit.");
+    // Serialize redemptions per customer so two orders cannot spend the same balance concurrently.
+    await sql`SELECT pg_advisory_xact_lock(hashtext(${`store-credit:${order.customer_id}`}))`;
     const balanceRows=await sql`SELECT COALESCE(SUM(delta_balance_cents) FILTER(WHERE expires_at IS NULL OR expires_at>NOW()),0)::integer balance FROM ordering_store_credit_ledger WHERE business='Corner Deli' AND customer_id=${order.customer_id}`;
     const check=input.checkId?(await sql`SELECT id,amount_due_cents,paid_cents,total_cents FROM ordering_checks WHERE id=${input.checkId} AND order_id=${input.orderId} FOR UPDATE`)[0]:null;
     const due=Number(check?.amount_due_cents??order.amount_due_cents),amount=Math.min(due,Number(balanceRows[0]?.balance||0));

@@ -11,6 +11,8 @@ import { completePaidPaymentQueue } from "@/lib/ordering-payment-stations";
 import { ensureOrderingAddressSchema } from "@/lib/ordering-address-schema";
 import {reconcileOrderTips} from "@/lib/ordering-tips";
 import {ensureOrderingTipSchema} from "@/lib/ordering-tip-schema";
+import { tipChangeError } from "@/lib/ordering-payment-rules";
+import { ensureOrderingHardwareSchema } from "@/lib/ordering-hardware-schema";
 
 export type CheckoutTenderType = "cash" | "card" | "gift_card";
 
@@ -56,21 +58,25 @@ export async function setCheckoutTip(input: {
 }) {
   if (!Number.isSafeInteger(input.tipCents) || input.tipCents < 0)
     throw new PaymentConflictError("Tip must be a non-negative amount in cents.");
-  await ensureOrderingAccountSchema();
+  await ensureOrderingTipSchema();
   return withTransaction(async () => {
     const sql = getSql();
-    const order = (await sql`SELECT id,tip_cents,total_cents,paid_cents FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
+    const order = (await sql`SELECT id,status,voided_at,payment_status,subtotal_cents,tip_cents,total_cents,paid_cents FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
     if (!order) throw new PaymentConflictError("Order was not found.");
-    const delta = input.tipCents - Number(order.tip_cents);
-    if (input.checkId) {
-      const check = (await sql`SELECT id FROM ordering_checks WHERE id=${input.checkId} AND order_id=${input.orderId} FOR UPDATE`)[0];
-      if (!check) throw new PaymentConflictError("Check was not found.");
-      await sql`UPDATE ordering_checks SET total_cents=GREATEST(0,total_cents+${delta}),amount_due_cents=GREATEST(0,total_cents+${delta}-paid_cents),status=CASE WHEN total_cents+${delta}-paid_cents<=0 THEN 'paid' WHEN paid_cents>0 THEN 'partially_paid' ELSE 'open' END,updated_at=NOW() WHERE id=${input.checkId}`;
-    }
+    // With split checks the tip belongs to the check, so the delta is measured against that check's own tip.
+    const check = input.checkId ? (await sql`SELECT id,status,tip_cents,total_cents,paid_cents FROM ordering_checks WHERE id=${input.checkId} AND order_id=${input.orderId} FOR UPDATE`)[0] : null;
+    if (input.checkId && !check) throw new PaymentConflictError("Check was not found.");
+    if (check?.status === "voided") throw new PaymentConflictError("Tips cannot be changed on a voided check.");
+    const target = check || order, previousTip = Number(target.tip_cents), delta = input.tipCents - previousTip, orderTip = Math.max(0, Number(order.tip_cents) + delta);
+    const error = tipChangeError({ tipCents: input.tipCents, currentTipCents: previousTip, subtotalCents: Number(order.subtotal_cents), totalCents: Number(target.total_cents), paidCents: Number(target.paid_cents), orderStatus: String(order.status), voided: Boolean(order.voided_at), paymentStatus: String(order.payment_status), isManager: canManagePos(input.actor), resultingOrderTipCents: orderTip });
+    if (error) throw new PaymentConflictError(error);
+    if (delta === 0) return checkoutState(input.orderId, input.business, input.checkId);
+    if (check) await sql`UPDATE ordering_checks SET tip_cents=${input.tipCents},total_cents=GREATEST(0,total_cents+${delta}),amount_due_cents=GREATEST(0,total_cents+${delta}-paid_cents),status=CASE WHEN total_cents+${delta}-paid_cents<=0 THEN 'paid' WHEN paid_cents>0 THEN 'partially_paid' ELSE 'open' END,updated_at=NOW() WHERE id=${input.checkId}`;
     const total = Math.max(0, Number(order.total_cents) + delta);
     const due = Math.max(0, total - Number(order.paid_cents));
-    await sql`UPDATE ordering_orders SET tip_cents=${input.tipCents},total_cents=${total},amount_due_cents=${due},payment_status=CASE WHEN ${due}=0 THEN 'paid' WHEN paid_cents>0 THEN 'partially_paid' ELSE 'unpaid' END,version=version+1,updated_at=NOW() WHERE id=${input.orderId}`;
-    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) SELECT ${randomUUID()},id,version,'tip_updated',${input.actor.type},${input.actor.id},${JSON.stringify({ tipCents: input.tipCents })}::jsonb FROM ordering_orders WHERE id=${input.orderId}`;
+    await sql`UPDATE ordering_orders SET tip_cents=${orderTip},total_cents=${total},amount_due_cents=${due},payment_status=CASE WHEN ${due}=0 THEN 'paid' WHEN paid_cents>0 THEN 'partially_paid' ELSE 'unpaid' END,version=version+1,updated_at=NOW() WHERE id=${input.orderId}`;
+    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) SELECT ${randomUUID()},id,version,'tip_updated',${input.actor.type},${input.actor.id},${JSON.stringify({ tipCents: input.tipCents, previousTipCents: previousTip, orderTipCents: orderTip, checkId: input.checkId || null, actorName: input.actor.name, actorRole: input.actor.role })}::jsonb FROM ordering_orders WHERE id=${input.orderId}`;
+    await reconcileOrderTips(input.orderId, input.business);
     return checkoutState(input.orderId, input.business, input.checkId);
   });
 }
@@ -108,6 +114,7 @@ export async function reverseTender(input: { orderId: string; business: Ordering
   const amount = cents(input.amountCents, "Reversal amount");
   if (!input.clientMutationId.trim() || input.clientMutationId.length > 160) throw new PaymentConflictError("A valid reversal request ID is required.");
   await ensureOrderingGiftCardSchema();
+  await ensureOrderingTipSchema();
   return withTransaction(async () => {
     const sql = getSql();
     const duplicate = await sql`SELECT id,order_id,transaction_type,related_transaction_id FROM ordering_payment_transactions WHERE business=${input.business} AND client_mutation_id=${input.clientMutationId}`;
@@ -132,9 +139,13 @@ export async function reverseTender(input: { orderId: string; business: Ordering
       await sql`UPDATE ordering_gift_cards SET current_balance_cents=${balance},status=CASE WHEN status='depleted' THEN 'active' ELSE status END WHERE id=${ledger.gift_card_id}`;
     }
     if(source.tender_type==="cash"&&source.details?.registerSessionId){
-      const registerSessionId=String(source.details.registerSessionId),movementId=randomUUID();
-      await sql`INSERT INTO ordering_cash_drawer_movements(id,register_session_id,order_id,payment_transaction_id,movement_type,delta_cash_cents,reason,created_by,approved_by,details) SELECT ${movementId},id,${input.orderId},${reversalId},'refund',${-amount},${reversalReason},${input.actor.id},${input.actor.id},${JSON.stringify({sourcePaymentId:source.id})}::jsonb FROM ordering_register_sessions WHERE id=${registerSessionId}`;
-      await sql`UPDATE ordering_register_sessions SET expected_cash_cents=GREATEST(0,expected_cash_cents-${amount}) WHERE id=${registerSessionId}`;
+      // Cash leaves the drawer now, so post it to the station's currently open session; never rewrite a closed/counted session.
+      const originalSessionId=String(source.details.registerSessionId),original=(await sql`SELECT id,terminal_id,status FROM ordering_register_sessions WHERE id=${originalSessionId} FOR UPDATE`)[0];
+      const register=original?.status==="open"?original:original?(await sql`SELECT id,status FROM ordering_register_sessions WHERE terminal_id=${original.terminal_id} AND status='open' ORDER BY opened_at DESC LIMIT 1 FOR UPDATE`)[0]:null;
+      if(!register)throw new PaymentConflictError("The register that took this cash is closed. Open the register at that payment station before reversing cash.");
+      await sql`INSERT INTO ordering_cash_drawer_movements(id,register_session_id,order_id,payment_transaction_id,movement_type,delta_cash_cents,reason,created_by,approved_by,details) VALUES(${randomUUID()},${register.id},${input.orderId},${reversalId},'refund',${-amount},${reversalReason},${input.actor.id},${input.actor.id},${JSON.stringify({sourcePaymentId:source.id,originalRegisterSessionId:originalSessionId})}::jsonb)`;
+      await sql`UPDATE ordering_register_sessions SET expected_cash_cents=GREATEST(0,expected_cash_cents-${amount}) WHERE id=${register.id}`;
+      await sql`UPDATE ordering_payment_transactions SET details=details||${JSON.stringify({registerSessionId:register.id})}::jsonb WHERE id=${reversalId}`;
     }
     const newPaid = Math.max(0, Number(order.paid_cents) - amount), remaining = Math.max(0, Number(order.total_cents) - newPaid);
     const paymentStatus = newPaid === 0 ? "unpaid" : remaining === 0 ? "paid" : "partially_paid";
@@ -142,6 +153,7 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     if (source.check_id) await sql`UPDATE ordering_checks SET paid_cents=GREATEST(0,paid_cents-${amount}),amount_due_cents=LEAST(total_cents,amount_due_cents+${amount}),status=CASE WHEN paid_cents-${amount}<=0 THEN 'open' WHEN amount_due_cents+${amount}>0 THEN 'partially_paid' ELSE 'paid' END,updated_at=NOW() WHERE id=${source.check_id}`;
     const version = Number(order.version)+1;
     await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) VALUES(${randomUUID()},${input.orderId},${version},'payment_reversed',${input.actor.type},${input.actor.id},${JSON.stringify({transactionId:reversalId,sourceTransactionId:source.id,tenderType:source.tender_type,amountCents:amount,reason:reversalReason,actorName:input.actor.name,actorRole:input.actor.role,totalPaidCents:newPaid,remainingDueCents:remaining})}::jsonb)`;
+    await reconcileOrderTips(input.orderId,input.business);
     return { ...(await checkoutState(input.orderId,input.business,source.check_id)), duplicate: false };
   });
 }
@@ -153,6 +165,7 @@ export async function settleTenderAsStoreCredit(input: { orderId: string; transa
   const creditCents = cents(input.creditCents, "Customer credit amount");
   if (creditCents > refundCents) throw new PaymentConflictError("Customer credit cannot exceed the original refund amount.");
   await ensureOrderingGiftCardSchema();
+  await ensureOrderingTipSchema();
   return withTransaction(async () => {
     const sql = getSql();
     const duplicate = await sql`SELECT id FROM ordering_payment_transactions WHERE business='Corner Deli' AND client_mutation_id=${input.clientMutationId}`;
@@ -170,6 +183,7 @@ export async function settleTenderAsStoreCredit(input: { orderId: string; transa
     await sql`UPDATE ordering_orders SET paid_cents=${newPaid},amount_due_cents=${remaining},payment_status=CASE WHEN ${newPaid}=0 THEN 'unpaid' WHEN ${remaining}=0 THEN 'paid' ELSE 'partially_paid' END,paid_at=CASE WHEN ${remaining}=0 THEN paid_at ELSE NULL END,version=version+1,updated_at=NOW() WHERE id=${input.orderId}`;
     if (source.check_id) await sql`UPDATE ordering_checks SET paid_cents=GREATEST(0,paid_cents-${refundCents}),amount_due_cents=LEAST(total_cents,amount_due_cents+${refundCents}),status=CASE WHEN paid_cents-${refundCents}<=0 THEN 'open' WHEN amount_due_cents+${refundCents}>0 THEN 'partially_paid' ELSE 'paid' END,updated_at=NOW() WHERE id=${source.check_id}`;
     await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) SELECT ${randomUUID()},id,version,'refund_issued_as_store_credit',${input.actor.type},${input.actor.id},${JSON.stringify({transactionId,sourceTransactionId:source.id,refundCents,creditCents,reason:reversalReason,actorName:input.actor.name,actorRole:input.actor.role})}::jsonb FROM ordering_orders WHERE id=${input.orderId}`;
+    await reconcileOrderTips(input.orderId,"Corner Deli");
     return { duplicate: false, transactionId, creditCents };
   });
 }
@@ -209,6 +223,7 @@ export async function commitTender(input: {
   await assertOrderReadyForCheckout(input.orderId, input.business);
   await ensureOrderingTipSchema();
   if (input.tenderType === "gift_card") await ensureOrderingGiftCardSchema(); else await ensureOrderingAccountSchema();
+  if (input.tenderType === "cash") await ensureOrderingHardwareSchema();
   cents(input.amountTenderedCents, "Tender amount");
   if (!input.clientMutationId.trim() || input.clientMutationId.length > 160) throw new PaymentConflictError("A valid payment request ID is required.");
 
@@ -243,6 +258,12 @@ export async function commitTender(input: {
     if (input.checkId && !check) throw new PaymentConflictError("Check was not found.");
     const due = Number(check?.amount_due_cents ?? order.amount_due_cents);
     if (due <= 0) throw new PaymentConflictError("This order has no remaining balance.");
+    // Till cash (the default for every caller except driver settlement) must land in an open register once
+    // the business has any payment station configured; a missing stationKey no longer skips the drawer.
+    const stationKey=String(input.stationKey||"").trim().toLowerCase();
+    if (input.tenderType === "cash" && (input.cashControlMode ?? "till") === "till" && !stationKey) {
+      if((await sql`SELECT 1 FROM ordering_payment_stations WHERE business=${input.business} AND station_mode='payment' AND active=TRUE LIMIT 1`).length)throw new PaymentConflictError("Cash must be taken at a payment station with an open register. Assign this device to the payment station or send the check there.");
+    }
 
     let applied = Math.min(due, input.amountTenderedCents);
     const change = input.tenderType === "cash" ? Math.max(0, input.amountTenderedCents - applied) : 0;
@@ -267,8 +288,8 @@ export async function commitTender(input: {
         CAST(${JSON.stringify({ actorName: input.actor.name, actorType: input.actor.type, giftCard: input.tenderType === "gift_card", receiptPrinterId: input.receiptPrinterId || null, ...(input.providerApproval?.details || {}) })} AS jsonb)
       )
     `;
-    if (input.tenderType === "cash" && input.cashControlMode === "till" && input.stationKey?.trim()) {
-      const stationKey=input.stationKey.trim().toLowerCase(),station=(await sql`SELECT * FROM ordering_payment_stations WHERE business=${input.business} AND station_key=${stationKey} AND station_mode='payment' AND active=TRUE`)[0];
+    if (input.tenderType === "cash" && (input.cashControlMode ?? "till") === "till" && stationKey) {
+      const station=(await sql`SELECT * FROM ordering_payment_stations WHERE business=${input.business} AND station_key=${stationKey} AND station_mode='payment' AND active=TRUE`)[0];
       if(!station)throw new PaymentConflictError("Cash can only be accepted at the configured payment station.");
       const terminalId=randomUUID(),terminalKey=String(station.shared_register_key||station.station_key).trim().toLowerCase(),terminalName=String(station.shared_register_key||station.name);
       const terminal=(await sql`INSERT INTO ordering_pos_terminals(id,business,name,terminal_key,terminal_type,location_label,allow_cash,allow_offline_cash) VALUES(${terminalId},${input.business},${terminalName},${terminalKey},'pos',${station.name},TRUE,TRUE) ON CONFLICT(business,terminal_key) DO UPDATE SET name=EXCLUDED.name,active=TRUE,allow_offline_cash=TRUE,last_seen_at=NOW(),updated_at=NOW() RETURNING id`)[0];
