@@ -1,34 +1,35 @@
 "use client";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import {
   DELIVERY_CAR_CRASHES,
   DELIVERY_COLLISION_FAILURES,
   DELIVERY_COMPLAINTS,
   DELIVERY_FAILURES,
+  DELIVERY_OUT_OF_SUBS,
   DELIVERY_PRIZE,
   DELIVERY_ROUTE_SUCCESSES,
   DELIVERY_STAGES,
+  deliveryTargetGap,
 } from "@/lib/delivery-boy/config";
 import { deliveryAudio } from "@/lib/games/delivery-audio";
 import { MenuAdTicker } from "@/app/games/components/menu-ad-ticker";
+type HazardType =
+  | "deer"
+  | "dog"
+  | "cat"
+  | "goose"
+  | "raccoon"
+  | "mower"
+  | "van"
+  | "squirrel"
+  | "cow"
+  | "person"
+  | "car"
+  | "pothole";
 type Thing = {
   id: number;
-  type:
-    | "deer"
-    | "dog"
-    | "cat"
-    | "goose"
-    | "raccoon"
-    | "mower"
-    | "van"
-    | "squirrel"
-    | "cow"
-    | "person"
-    | "car"
-    | "pothole"
-    | "boost"
-    | "slow";
+  type: HazardType | "boost" | "slow";
   lane: number;
   y: number;
   speed?: number;
@@ -47,6 +48,12 @@ type Scenery = {
   y: number;
 };
 type Run = { runId: string; token: string };
+type Reward = {
+  code?: string;
+  prize_type?: string;
+  expires_at?: string;
+  error?: string;
+};
 type DeliveryLeader = {
   player_name: string;
   status: string;
@@ -67,14 +74,22 @@ type Stats = {
   bestCombo: number;
 };
 type ScoreBurst = { id: number; text: string; tone: "good" | "bad" };
-const fresh: Stats = {
-  score: 0,
-  delivered: 0,
-  missed: 0,
-  hits: 0,
-  combo: 0,
-  bestCombo: 0,
-};
+type Sfx =
+  | "throw"
+  | "delivery"
+  | "miss"
+  | "crash"
+  | "start"
+  | "steer"
+  | "gameover"
+  | "menu"
+  | "bark"
+  | "meow"
+  | "moo"
+  | "squish"
+  | "ouch"
+  | "victory";
+type Mode = "home" | "play" | "between" | "won" | "lost";
 const communities = [
   { name: "LISBON", warning: "WATCH FOR COWS" },
   { name: "HEUVELTON", warning: "TRACTORS HAVE RIGHT OF WAY. THEY DECIDED." },
@@ -83,6 +98,7 @@ const communities = [
   { name: "RENSSELAER FALLS", warning: "GPS HAS LEFT THE CHAT" },
   { name: "MADRID", warning: "MAILBOXES MAY BE STRUCTURAL" },
 ] as const;
+type Community = (typeof communities)[number];
 const quips = [
   "SUB SECURED",
   "PORCH PERFECT",
@@ -109,460 +125,668 @@ const orderPayloads = [
   "Steak Sub",
   "Turkey Sub",
 ];
+// The driver can roam from curb to curb; hazards stay on the asphalt. Both are
+// drawn with the same lane → % mapping so what you see is what you collide with.
+const LANE_MIN = -0.18;
+const LANE_MAX = 2.18;
+const HAZARD_LANE_MIN = 0.15;
+const HAZARD_LANE_SPAN = 1.7;
+const laneLeft = (lane: number) => `${lane * 50}%`;
+const STEER_RATE = 1.7;
+const THROW_WINDOW = { start: 60, end: 88 };
+const PERFECT_WINDOW = { start: 71, end: 79 };
+const INVULNERABLE_SECONDS = 1.2;
+const WRECK_SECONDS = 1.1;
+const TIME_BONUS_PER_SECOND = 25;
+const CONDITION_BONUS_PER_POINT = 150;
+const DEADLY = new Set<Thing["type"]>(["car", "van", "cow", "person", "mower"]);
+const HIGH_SCORE_KEY = "corner-delivery-high-score";
+const DRIVER_NAME_KEY = "corner-delivery-driver-name";
+const REDUCED_EFFECTS_KEY = "corner-delivery-reduced-effects";
+const fresh = (): Stats => ({
+  score: 0,
+  delivered: 0,
+  missed: 0,
+  hits: 0,
+  combo: 0,
+  bestCombo: 0,
+});
+const emptyTarget: Target = {
+  y: -20,
+  side: "left",
+  active: false,
+  address: "",
+  neighbor: "",
+};
+const pick = <T,>(items: readonly T[]) =>
+  items[Math.floor(Math.random() * items.length)];
 const recentFailures = new Map<string, string[]>();
 function pickFailure(key: string, pool: readonly string[]) {
   const recent = recentFailures.get(key) || [];
   const available = pool.filter((line) => !recent.includes(line));
-  const choices = available.length ? available : [...pool];
-  const selected = choices[Math.floor(Math.random() * choices.length)];
+  const selected = pick(available.length ? available : pool);
   recentFailures.set(key, [...recent.slice(-4), selected]);
   return selected;
 }
+function collisionRadius(type: Thing["type"]) {
+  switch (type) {
+    case "car":
+    case "van":
+      return 0.36;
+    case "cow":
+      return 0.29;
+    case "deer":
+      return 0.21;
+    case "mower":
+      return 0.2;
+    case "goose":
+      return 0.15;
+    case "dog":
+    case "person":
+      return 0.13;
+    case "cat":
+    case "raccoon":
+      return 0.11;
+    case "squirrel":
+      return 0.07;
+    default:
+      return 0.18;
+  }
+}
+function storageGet(key: string) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function storageSet(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+type Sim = {
+  stage: number;
+  lane: number;
+  things: Thing[];
+  target: Target;
+  scenery: Scenery[];
+  time: number;
+  health: number;
+  ammo: number;
+  routeDelivered: number;
+  boost: number;
+  slow: number;
+  damaged: number;
+  invulnerable: number;
+  spawnTimer: number;
+  targetTimer: number;
+  sceneryTimer: number;
+  zoneTimer: number;
+  cowTimer: number;
+  zone: "city" | "rural";
+  community: Community;
+  stats: Stats;
+  lastImpact: string;
+  ending: boolean;
+};
+function newSim(stage: number, stats: Stats): Sim {
+  const route = DELIVERY_STAGES[stage - 1];
+  const rural = stage >= 3;
+  return {
+    stage,
+    lane: 1,
+    things: [],
+    target: emptyTarget,
+    scenery: [],
+    time: route.time,
+    health: 3,
+    ammo: route.deliveries + 4,
+    routeDelivered: 0,
+    boost: 0,
+    slow: 0,
+    damaged: 0,
+    invulnerable: 0,
+    spawnTimer: 0,
+    targetTimer: 0,
+    sceneryTimer: 0,
+    zoneTimer: 0,
+    cowTimer: 0,
+    zone: rural ? "rural" : "city",
+    community: rural ? pick(communities) : communities[0],
+    stats,
+    lastImpact: "",
+    ending: false,
+  };
+}
+type Frame = Omit<
+  Sim,
+  "spawnTimer" | "targetTimer" | "sceneryTimer" | "zoneTimer" | "cowTimer"
+>;
+const snapshot = (s: Sim): Frame => ({
+  stage: s.stage,
+  lane: s.lane,
+  things: s.things,
+  target: s.target,
+  scenery: s.scenery,
+  time: s.time,
+  health: s.health,
+  ammo: s.ammo,
+  routeDelivered: s.routeDelivered,
+  boost: s.boost,
+  slow: s.slow,
+  damaged: s.damaged,
+  invulnerable: s.invulnerable,
+  zone: s.zone,
+  community: s.community,
+  stats: s.stats,
+  lastImpact: s.lastImpact,
+  ending: s.ending,
+});
+const isTypingTarget = (target: EventTarget | null) =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable ||
+    ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 declare global {
   interface Window {
     webkitAudioContext?: typeof AudioContext;
   }
 }
 export default function DeliveryGame() {
-  const emptyTarget: Target = {
-    y: -20,
-    side: "left",
-    active: false,
-    address: "",
-    neighbor: "",
-  };
-  const [mode, setMode] = useState<
-      "home" | "play" | "between" | "won" | "lost"
-    >("home"),
+  const [mode, setMode] = useState<Mode>("home"),
     [name, setName] = useState(""),
-    [stage, setStage] = useState(1),
-    [zone, setZone] = useState<"city" | "rural">("city"),
-    [lane, setLane] = useState(1),
-    [things, setThings] = useState<Thing[]>([]),
-    [scenery, setScenery] = useState<Scenery[]>([]),
+    [frame, setFrame] = useState<Frame>(() => snapshot(newSim(1, fresh()))),
+    [countdown, setCountdown] = useState<number | null>(null),
+    [paused, setPaused] = useState(false),
+    [wrecked, setWrecked] = useState(false),
     [thrown, setThrown] = useState<{
       id: number;
       side: "left" | "right";
       start: number;
     } | null>(null),
-    [target, setTarget] = useState<Target>(emptyTarget),
-    [routeDelivered, setRouteDelivered] = useState(0),
-    [time, setTime] = useState(70),
-    [health, setHealth] = useState(3),
-    [stats, setStats] = useState(fresh),
+    [particles, setParticles] = useState<
+      { id: number; side: "left" | "right"; y: number }[]
+    >([]),
+    [scoreBursts, setScoreBursts] = useState<ScoreBurst[]>([]),
     [toast, setToast] = useState(""),
+    [shaking, setShaking] = useState(false),
+    [skidding, setSkidding] = useState(false),
+    [brokenWindow, setBrokenWindow] = useState(false),
+    [orderPayload, setOrderPayload] = useState(orderPayloads[0]),
     [complaint, setComplaint] = useState(""),
     [successMessage, setSuccessMessage] = useState(""),
+    [routeBonus, setRouteBonus] = useState({ time: 0, condition: 0 }),
+    [checkpointState, setCheckpointState] = useState<
+      "idle" | "saving" | "saved" | "error"
+    >("idle"),
     [failure, setFailure] = useState(""),
     [run, setRun] = useState<Run | null>(null),
-    [sequence, setSequence] = useState(0),
-    [reward, setReward] = useState<any>(null),
+    [starting, setStarting] = useState(false),
+    [startError, setStartError] = useState(""),
+    [claiming, setClaiming] = useState(false),
+    [reward, setReward] = useState<Reward | null>(null),
+    [copied, setCopied] = useState(false),
+    [best, setBest] = useState(0),
+    [newBest, setNewBest] = useState(false),
     [muted, setMuted] = useState(() => deliveryAudio.getSettings().muted),
     [audioSettings, setAudioSettings] = useState(() =>
       deliveryAudio.getSettings(),
     ),
     [showAudio, setShowAudio] = useState(false),
-    [reducedEffects, setReducedEffects] = useState(false),
-    [boost, setBoost] = useState(0),
-    [slow, setSlow] = useState(0),
-    [damaged, setDamaged] = useState(0),
-    [paused, setPaused] = useState(false),
-    [orderPayload, setOrderPayload] = useState(orderPayloads[0]),
-    [brokenWindow, setBrokenWindow] = useState(false),
-    [scoreBursts, setScoreBursts] = useState<ScoreBurst[]>([]),
-    [community, setCommunity] = useState<(typeof communities)[number]>(
-      communities[0],
-    ),
-    [ammo, setAmmo] = useState(8),
-    [shaking, setShaking] = useState(false),
-    [skidding, setSkidding] = useState(false),
-    [particles, setParticles] = useState<
-      { id: number; side: "left" | "right"; y: number }[]
-    >([]);
+    [reducedEffects, setReducedEffects] = useState(false);
   const [showLeaders, setShowLeaders] = useState(false),
     [leaders, setLeaders] = useState<DeliveryLeader[]>([]),
-    [leadersLoading, setLeadersLoading] = useState(false);
-  const keys = useRef(new Set<string>()),
-    last = useRef(0),
-    spawn = useRef(0),
-    deliveryGap = useRef(0),
-    impactFailure = useRef(""),
-    cosmeticId = useRef(0),
+    [leadersState, setLeadersState] = useState<"loading" | "ready" | "error">(
+      "loading",
+    );
+  const sim = useRef<Sim>(newSim(1, fresh())),
+    keys = useRef(new Set<string>()),
+    runRef = useRef<Run | null>(null),
+    sequence = useRef(0),
     lossSaved = useRef(false),
-    playerLane = useRef(1),
-    state = useRef<{
-      mode: string;
-      time: number;
-      health: number;
-      stage: number;
-      target: Target;
-    }>({ mode: "home", time: 70, health: 3, stage: 1, target: emptyTarget }),
-    audio = useRef<{
-      ctx: AudioContext;
-      gain: GainNode;
-      timer: number;
-      step: number;
-    } | null>(null),
+    cosmeticId = useRef(0),
+    timers = useRef(new Set<number>()),
+    live = useRef({ mode: "home" as Mode, paused: false, running: false }),
     touch = useRef({ x: 0, y: 0, moved: false });
-  const cfg = DELIVERY_STAGES[stage - 1];
-  async function openLeaderboard() {
-    setShowLeaders(true);
-    setLeadersLoading(true);
-    const response = await fetch("/api/delivery-boy/leaderboard");
-    const data = await response.json();
-    setLeaders(Array.isArray(data.leaders) ? data.leaders : []);
-    setLeadersLoading(false);
-  }
-  useEffect(() => {
-    state.current = { mode, time, health, stage, target };
-  }, [mode, time, health, stage, target]);
-  useEffect(() => {
-    if (mode !== "lost" || !run || lossSaved.current) return;
-    lossSaved.current = true;
-    const activeSeconds =
-      DELIVERY_STAGES.slice(0, stage - 1).reduce(
-        (total, route) => total + route.time,
-        0,
-      ) + Math.max(0, DELIVERY_STAGES[stage - 1].time - time);
-    void fetch("/api/delivery-boy/run", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        action: "loss",
-        token: run.token,
-        runId: run.runId,
-        stage,
-        activeSeconds,
-        score: stats.score,
-        delivered: stats.delivered,
-        missed: stats.missed,
-        hits: stats.hits,
-      }),
-    });
-  }, [mode, run, stage, stats, time]);
-  useEffect(() => {
-    playerLane.current = lane;
-  }, [lane]);
-  useEffect(() => {
-    if (mode !== "lost" && mode !== "won") return;
-    const previous = Number(
-      localStorage.getItem("corner-delivery-high-score") || 0,
-    );
-    localStorage.setItem(
-      "corner-delivery-high-score",
-      String(Math.max(previous, stats.score)),
-    );
-  }, [mode, stats.score]);
-  const beep = useCallback(
-    (
-      kind:
-        | "throw"
-        | "delivery"
-        | "miss"
-        | "hit"
-        | "coin"
-        | "start"
-        | "steer"
-        | "gameover"
-        | "menu"
-        | "yelp"
-        | "bark"
-        | "meow"
-        | "moo"
-        | "squish"
-        | "ouch"
-        | "victory",
-    ) => {
-      deliveryAudio.setMuted(muted);
-      if (kind === "delivery" || kind === "coin")
-        deliveryAudio.play("delivery");
-      else if (kind === "hit") deliveryAudio.play("crash");
-      else if (kind === "start") {
-        deliveryAudio.play("start");
-        deliveryAudio.transition("action");
-      } else deliveryAudio.play(kind);
-    },
-    [muted],
-  );
-  function soundtrack() {
-    if (audio.current) return;
-    const A = window.AudioContext || window.webkitAudioContext;
-    if (!A) return;
-    const ctx = new A(),
-      gain = ctx.createGain();
-    gain.gain.value = muted ? 0 : 0.05;
-    gain.connect(ctx.destination);
-    const lead = [
-        329.6, 392, 493.9, 659.3, 587.3, 493.9, 392, 440, 523.3, 659.3, 784,
-        659.3, 523.3, 440, 392, 293.7,
-      ],
-      bass = [82.4, 82.4, 98, 110, 65.4, 65.4, 73.4, 98],
-      chords = [
-        [164.8, 196, 246.9],
-        [196, 246.9, 293.7],
-        [130.8, 164.8, 196],
-        [146.8, 196, 246.9],
-      ],
-      s = { ctx, gain, timer: 0, step: 0 };
-    const play = (
-      f: number,
-      type: OscillatorType,
-      vol: number,
-      len: number,
-      when = 0,
-    ) => {
-      const o = ctx.createOscillator(),
-        g = ctx.createGain(),
-        at = ctx.currentTime + when;
-      o.type = type;
-      o.frequency.value = f;
-      g.gain.setValueAtTime(vol, at);
-      g.gain.exponentialRampToValueAtTime(0.001, at + len);
-      o.connect(g);
-      g.connect(gain);
-      o.start(at);
-      o.stop(at + len);
-    };
-    s.timer = window.setInterval(() => {
-      const beat = s.step % 16,
-        bar = Math.floor(s.step / 16) % 4,
-        night = state.current.stage >= 4,
-        urgent = Math.max(0, (18 - state.current.time) / 18);
-      play(
-        lead[beat] * (night ? 0.75 : 1),
-        beat % 4 ? "triangle" : "square",
-        0.22,
-        0.16,
-      );
-      if (beat % 2 === 0)
-        play(
-          bass[Math.floor(beat / 2)] * (night ? 0.75 : 1),
-          "square",
-          0.25,
-          0.22,
-        );
-      if (beat % 4 === 0)
-        chords[bar].forEach((n, i) =>
-          play(n * (night ? 0.75 : 1), "triangle", 0.07, 0.48, i * 0.008),
-        );
-      play(
-        beat % 4 === 0 ? 62 : beat % 4 === 2 ? 145 : 220,
-        "square",
-        beat % 2 ? 0.035 : 0.16,
-        0.055,
-      );
-      if (urgent > 0.55) play(lead[beat] * 2, "sine", 0.06, 0.06, 0.065);
-      s.step++;
-    }, 128);
-    audio.current = s;
-  }
-  useEffect(() => {
-    deliveryAudio.setMuted(muted);
-  }, [muted]);
-  useEffect(
-    () => () => {
-      if (audio.current) {
-        clearInterval(audio.current.timer);
-        void audio.current.ctx.close();
-      }
-      deliveryAudio.stop();
-    },
-    [],
-  );
-  useEffect(() => {
-    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const saved = localStorage.getItem("corner-delivery-reduced-effects");
-    setReducedEffects(saved === null ? motion.matches : saved === "true");
-    const visibility = () =>
-      document.hidden || paused || mode !== "play"
-        ? deliveryAudio.suspend()
-        : deliveryAudio.resume();
-    document.addEventListener("visibilitychange", visibility);
-    visibility();
-    return () => document.removeEventListener("visibilitychange", visibility);
-  }, [mode, paused]);
-  function pop(message: string) {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 850);
-  }
-  const scoreBurst = useCallback((text: string, tone: "good" | "bad") => {
-    const id = ++cosmeticId.current;
-    setScoreBursts((bursts) => [...bursts, { id, text, tone }]);
-    window.setTimeout(
-      () =>
-        setScoreBursts((bursts) => bursts.filter((burst) => burst.id !== id)),
-      900,
-    );
+  const stage = frame.stage,
+    cfg = DELIVERY_STAGES[stage - 1],
+    stats = frame.stats,
+    running = mode === "play" && (countdown === null || countdown === 0);
+  live.current = { mode, paused, running };
+
+  const later = useCallback((fn: () => void, ms: number) => {
+    const id = window.setTimeout(() => {
+      timers.current.delete(id);
+      fn();
+    }, ms);
+    timers.current.add(id);
   }, []);
+  const sfx = useCallback((kind: Sfx) => {
+    if (kind === "start") {
+      deliveryAudio.play("start");
+      deliveryAudio.transition("action");
+    } else deliveryAudio.play(kind);
+  }, []);
+  const pop = useCallback(
+    (message: string) => {
+      setToast(message);
+      later(() => setToast((current) => (current === message ? "" : current)), 1100);
+    },
+    [later],
+  );
+  const scoreBurst = useCallback(
+    (text: string, tone: "good" | "bad") => {
+      const id = ++cosmeticId.current;
+      setScoreBursts((bursts) => [...bursts.slice(-3), { id, text, tone }]);
+      later(
+        () =>
+          setScoreBursts((bursts) => bursts.filter((burst) => burst.id !== id)),
+        900,
+      );
+    },
+    [later],
+  );
   const vibrate = useCallback((pattern: number | number[]) => {
     if (typeof navigator !== "undefined" && "vibrate" in navigator)
       navigator.vibrate(pattern);
   }, []);
   const impact = useCallback(() => {
     setShaking(true);
-    window.setTimeout(() => setShaking(false), 210);
+    later(() => setShaking(false), 210);
+  }, [later]);
+  const commit = useCallback(() => setFrame(snapshot(sim.current)), []);
+
+  async function openLeaderboard() {
+    setShowLeaders(true);
+    setLeadersState("loading");
+    try {
+      const response = await fetch("/api/delivery-boy/leaderboard");
+      const data = await response.json();
+      setLeaders(Array.isArray(data.leaders) ? data.leaders : []);
+      setLeadersState("ready");
+    } catch {
+      setLeadersState("error");
+    }
+  }
+
+  useEffect(() => {
+    setBest(Number(storageGet(HIGH_SCORE_KEY) || 0));
+    setName(storageGet(DRIVER_NAME_KEY) || "");
+    const saved = storageGet(REDUCED_EFFECTS_KEY);
+    setReducedEffects(
+      saved === null
+        ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        : saved === "true",
+    );
+    const pending = timers.current;
+    return () => {
+      pending.forEach((id) => clearTimeout(id));
+      pending.clear();
+      deliveryAudio.stop();
+    };
   }, []);
-  const move = useCallback(
-    (d: number) => {
-      if (Math.abs(d) >= 0.18) {
-        setSkidding(true);
-        window.setTimeout(() => setSkidding(false), 230);
-        beep("steer");
-      }
-      setLane((v) =>
-        Math.max(-0.18, Math.min(2.18, v + d * (damaged ? 0.58 : 1))),
+  useEffect(() => {
+    deliveryAudio.setMuted(muted);
+  }, [muted]);
+  // Hiding the tab pauses the route instead of letting the clock run out.
+  useEffect(() => {
+    const visibility = () => {
+      if (document.hidden && live.current.mode === "play") setPaused(true);
+      if (document.hidden || paused || mode !== "play")
+        deliveryAudio.suspend();
+      else deliveryAudio.resume();
+    };
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("blur", clearKeys);
+    visibility();
+    return () => {
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("blur", clearKeys);
+    };
+  }, [mode, paused]);
+  function clearKeys() {
+    keys.current.clear();
+  }
+  useEffect(() => {
+    const speedRatio = Math.min(
+      1,
+      (cfg.speed + (frame.boost > 0 ? 65 : 0)) / 330,
+    );
+    const urgencyRatio = Math.max(0, Math.min(1, (20 - frame.time) / 20));
+    deliveryAudio.setIntensity(speedRatio, urgencyRatio);
+  }, [cfg.speed, frame.boost, frame.time]);
+
+  // Personal best + run result reporting.
+  useEffect(() => {
+    if (mode !== "lost" && mode !== "won") return;
+    const previous = Number(storageGet(HIGH_SCORE_KEY) || 0);
+    if (stats.score > previous) {
+      storageSet(HIGH_SCORE_KEY, String(stats.score));
+      setBest(stats.score);
+      setNewBest(previous > 0 || stats.score > 0);
+    }
+  }, [mode, stats.score]);
+  useEffect(() => {
+    const current = runRef.current;
+    if (mode !== "lost" || !current || lossSaved.current) return;
+    lossSaved.current = true;
+    const s = sim.current;
+    const activeSeconds =
+      DELIVERY_STAGES.slice(0, s.stage - 1).reduce(
+        (total, route) => total + route.time,
+        0,
+      ) + Math.max(0, DELIVERY_STAGES[s.stage - 1].time - s.time);
+    void fetch("/api/delivery-boy/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "loss",
+        token: current.token,
+        runId: current.runId,
+        stage: s.stage,
+        activeSeconds: Math.round(activeSeconds),
+        score: s.stats.score,
+        delivered: s.stats.delivered,
+        missed: s.stats.missed,
+        hits: s.stats.hits,
+      }),
+    }).catch(() => {});
+  }, [mode]);
+
+  const endRun = useCallback(
+    (reason: string, sound: Sfx) => {
+      const s = sim.current;
+      if (s.ending) return;
+      s.ending = true;
+      keys.current.clear();
+      commit();
+      setFailure(reason);
+      setWrecked(true);
+      impact();
+      vibrate([80, 40, 120]);
+      sfx(sound);
+      if (sound !== "gameover") later(() => sfx("gameover"), 420);
+      later(
+        () => {
+          setWrecked(false);
+          setMode("lost");
+          deliveryAudio.transition("menu");
+        },
+        reducedEffects ? 300 : WRECK_SECONDS * 1000,
       );
     },
-    [beep, damaged],
+    [commit, impact, later, reducedEffects, sfx, vibrate],
   );
-  const deliver = useCallback(() => {
-    const t = state.current.target;
-    if (state.current.mode !== "play" || paused || !t.active) return;
-    if (ammo <= 0) {
-      pop("NO SUBS LEFT. YOU DELIVERED THE INVENTORY TO SHRUBS.");
+
+  const saveCheckpoint = useCallback(async () => {
+    const current = runRef.current;
+    if (!current) {
+      setCheckpointState("saved");
       return;
     }
-    const throwId = Date.now();
-    setAmmo((count) => Math.max(0, count - 1));
-    setThrown({ id: throwId, side: t.side, start: playerLane.current });
-    beep("throw");
-    window.setTimeout(() => setThrown(null), 650);
-    const timed = t.y >= 60 && t.y <= 88,
-      correctSide =
-        t.side === "left"
-          ? playerLane.current < 0.72
-          : playerLane.current > 1.28;
-    if (timed && correctSide) {
-      const perfect = t.y >= 71 && t.y <= 79;
-      setTarget((x) => ({ ...x, active: false }));
-      setRouteDelivered((n) => n + 1);
-      setOrderPayload(
-        orderPayloads[Math.floor(Math.random() * orderPayloads.length)],
+    const s = sim.current;
+    setCheckpointState("saving");
+    const nextSequence = sequence.current + 1;
+    const checkpoint = {
+      runId: current.runId,
+      stage: s.stage,
+      sequence: nextSequence,
+      activeSeconds: Math.round(
+        DELIVERY_STAGES.slice(0, s.stage).reduce((n, r) => n + r.time, 0) -
+          s.time,
+      ),
+      score: s.stats.score,
+      delivered: s.stats.delivered,
+      missed: s.stats.missed,
+      hits: s.stats.hits,
+    };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const response = await fetch("/api/delivery-boy/run", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "checkpoint",
+            token: current.token,
+            checkpoint,
+          }),
+        });
+        if (response.ok) {
+          sequence.current = nextSequence;
+          setCheckpointState("saved");
+          return;
+        }
+        // The server rejected the checkpoint itself; retrying won't help.
+        if (response.status < 500) break;
+      } catch {}
+      await new Promise((resolve) => setTimeout(resolve, 600 * 2 ** attempt));
+    }
+    setCheckpointState("error");
+  }, []);
+
+  const completeRoute = useCallback(() => {
+    const s = sim.current;
+    if (s.ending) return;
+    s.ending = true;
+    keys.current.clear();
+    const time = Math.ceil(s.time) * TIME_BONUS_PER_SECOND,
+      condition = s.health * CONDITION_BONUS_PER_POINT;
+    s.stats = { ...s.stats, score: s.stats.score + time + condition };
+    commit();
+    setRouteBonus({ time, condition });
+    if (Math.random() < 0.58) {
+      setComplaint(pick(DELIVERY_COMPLAINTS));
+      setSuccessMessage("");
+    } else {
+      setComplaint("");
+      setSuccessMessage(pick(DELIVERY_ROUTE_SUCCESSES));
+    }
+    setMode("between");
+    deliveryAudio.transition("menu");
+    sfx("victory");
+    void saveCheckpoint();
+  }, [commit, saveCheckpoint, sfx]);
+
+  const move = useCallback(
+    (d: number) => {
+      const s = sim.current;
+      if (!live.current.running || live.current.paused || s.ending) return;
+      if (Math.abs(d) >= 0.18) {
+        setSkidding(true);
+        later(() => setSkidding(false), 230);
+        sfx("steer");
+      }
+      s.lane = Math.max(
+        LANE_MIN,
+        Math.min(LANE_MAX, s.lane + d * (s.damaged > 0 ? 0.58 : 1)),
       );
-      setParticles((items) => [
-        ...items,
-        { id: throwId, side: t.side, y: t.y },
-      ]);
-      window.setTimeout(
+      commit();
+    },
+    [commit, later, sfx],
+  );
+
+  const deliver = useCallback(() => {
+    const s = sim.current,
+      t = s.target;
+    if (!live.current.running || live.current.paused || s.ending) return;
+    if (!t.active) {
+      pop("NO ADDRESS YET. HOLD THE SUB.");
+      return;
+    }
+    if (s.ammo <= 0) return;
+    const throwId = ++cosmeticId.current;
+    s.ammo -= 1;
+    setThrown({ id: throwId, side: t.side, start: s.lane });
+    sfx("throw");
+    later(
+      () => setThrown((current) => (current?.id === throwId ? null : current)),
+      650,
+    );
+    const timed = t.y >= THROW_WINDOW.start && t.y <= THROW_WINDOW.end,
+      correctSide = t.side === "left" ? s.lane < 0.72 : s.lane > 1.28;
+    if (timed && correctSide) {
+      const perfect =
+          t.y >= PERFECT_WINDOW.start && t.y <= PERFECT_WINDOW.end,
+        combo = s.stats.combo + 1,
+        multiplier = Math.min(4, combo),
+        points = (perfect ? 200 : 100) * multiplier;
+      s.target = { ...t, active: false };
+      s.routeDelivered += 1;
+      s.stats = {
+        ...s.stats,
+        delivered: s.stats.delivered + 1,
+        combo,
+        bestCombo: Math.max(s.stats.bestCombo, combo),
+        score: s.stats.score + points,
+      };
+      if (perfect) s.boost = Math.max(s.boost, 2);
+      setOrderPayload(pick(orderPayloads));
+      setParticles((items) => [...items, { id: throwId, side: t.side, y: t.y }]);
+      later(
         () =>
           setParticles((items) => items.filter((item) => item.id !== throwId)),
         750,
       );
-      setStats((s) => {
-        const combo = s.combo + 1,
-          multiplier = Math.min(4, Math.max(1, combo)),
-          score = s.score + (perfect ? 200 : 100) * multiplier;
-        return {
-          ...s,
-          delivered: s.delivered + 1,
-          combo,
-          bestCombo: Math.max(s.bestCombo, combo),
-          score: Math.round(score),
-        };
-      });
-      if (perfect) setBoost(2);
       scoreBurst(
-        perfect
-          ? `PERFECT +${200 * Math.min(4, stats.combo + 1)}`
-          : `GOOD +${100 * Math.min(4, stats.combo + 1)}`,
+        `${perfect ? "PERFECT" : "GOOD"} +${points}${multiplier > 1 ? ` ×${multiplier}` : ""}`,
         "good",
       );
       vibrate([15, 30]);
-      pop(
-        perfect
-          ? quips[Math.floor(Math.random() * quips.length)]
-          : "RIGHT HOUSE. QUESTIONABLE THROW.",
-      );
-      window.setTimeout(() => beep("delivery"), 190);
+      pop(perfect ? pick(quips) : "RIGHT HOUSE. QUESTIONABLE THROW.");
+      later(() => sfx("delivery"), 190);
     } else {
-      setStats((s) => ({ ...s, score: Math.max(0, s.score - 50), combo: 0 }));
+      s.stats = {
+        ...s.stats,
+        score: Math.max(0, s.stats.score - 50),
+        combo: 0,
+      };
       setBrokenWindow(true);
-      window.setTimeout(() => setBrokenWindow(false), 420);
+      later(() => setBrokenWindow(false), 420);
       scoreBurst("BROKEN WINDOW -50", "bad");
       vibrate([45, 25, 45]);
       pop(
         !correctSide
           ? `WRONG HOUSE! THAT WAS ${t.neighbor}`
-          : t.y < 60
+          : t.y < THROW_WINDOW.start
             ? "TOO EARLY! SUB IN SHRUB"
-            : "MISSED THE ADDRESS!",
+            : "TOO LATE! MISSED THE ADDRESS",
       );
       impact();
-      beep("miss");
+      sfx("miss");
     }
-  }, [ammo, beep, impact, paused, scoreBurst, stats.combo, vibrate]);
-  useEffect(() => {
-    const speedRatio = Math.min(1, (cfg.speed + (boost > 0 ? 65 : 0)) / 330);
-    const urgencyRatio = Math.max(0, Math.min(1, (20 - time) / 20));
-    deliveryAudio.setIntensity(speedRatio, urgencyRatio);
-  }, [cfg.speed, boost, time]);
+    commit();
+    const remaining =
+      DELIVERY_STAGES[s.stage - 1].deliveries - s.routeDelivered;
+    if (remaining <= 0) completeRoute();
+    else if (s.ammo < remaining)
+      endRun(pickFailure("subs", DELIVERY_OUT_OF_SUBS), "gameover");
+    else if (s.ammo <= 2) pop(`ONLY ${s.ammo} SUB${s.ammo === 1 ? "" : "S"} LEFT!`);
+  }, [commit, completeRoute, endRun, impact, later, pop, scoreBurst, sfx, vibrate]);
+
+  // Keyboard: steering is read from `keys` by the game loop.
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (
-        (e.key === "p" || e.key === "P" || e.key === "Escape") &&
-        mode === "play"
-      ) {
-        e.preventDefault();
-        setPaused((value) => !value);
+      if (showLeaders) {
+        if (e.key === "Escape") setShowLeaders(false);
         return;
       }
-      keys.current.add(e.key);
-      if ([" ", "Enter", "w", "W"].includes(e.key) && !paused) {
+      if (isTypingTarget(e.target)) return;
+      if (mode !== "play") return;
+      if (e.key === "p" || e.key === "P" || e.key === "Escape") {
         e.preventDefault();
-        deliver();
+        if (!sim.current.ending) setPaused((value) => !value);
+        return;
+      }
+      if (
+        ["ArrowLeft", "ArrowRight", "a", "A", "d", "D", " "].includes(e.key)
+      )
+        e.preventDefault();
+      keys.current.add(e.key.toLowerCase());
+      if ([" ", "enter", "w", "arrowup"].includes(e.key.toLowerCase())) {
+        e.preventDefault();
+        if (!e.repeat) deliver();
       }
     };
-    const up = (e: KeyboardEvent) => keys.current.delete(e.key);
+    const up = (e: KeyboardEvent) => keys.current.delete(e.key.toLowerCase());
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [deliver, mode, paused]);
+  }, [deliver, mode, showLeaders]);
+
+  // 3-2-1-GO before each route.
   useEffect(() => {
-    if (mode !== "play" || paused) return;
-    let raf = 0;
-    last.current = performance.now();
+    if (mode !== "play" || countdown === null || paused) return;
+    const id = window.setTimeout(
+      () => {
+        if (countdown > 1) sfx("menu");
+        else if (countdown === 1) sfx("start");
+        setCountdown(countdown === 0 ? null : countdown - 1);
+      },
+      countdown === 0 ? 450 : 650,
+    );
+    return () => clearTimeout(id);
+  }, [countdown, mode, paused, sfx]);
+
+  // Main simulation loop. All per-frame state lives in `sim`; React only
+  // receives a snapshot to draw, so collisions are applied exactly once.
+  useEffect(() => {
+    if (!running || paused) return;
+    let raf = 0,
+      last = performance.now();
     const loop = (now: number) => {
-      const dt = Math.min(0.04, (now - last.current) / 1000);
-      last.current = now;
-      spawn.current += dt;
-      deliveryGap.current += dt;
-      const left =
-          keys.current.has("ArrowLeft") ||
-          keys.current.has("a") ||
-          keys.current.has("A"),
+      const s = sim.current;
+      if (s.ending) return;
+      const dt = Math.min(0.04, (now - last) / 1000);
+      last = now;
+      const route = DELIVERY_STAGES[s.stage - 1];
+      s.time = Math.max(0, s.time - dt);
+      s.boost = Math.max(0, s.boost - dt);
+      s.slow = Math.max(0, s.slow - dt);
+      s.damaged = Math.max(0, s.damaged - dt);
+      s.invulnerable = Math.max(0, s.invulnerable - dt);
+      s.spawnTimer += dt;
+      s.targetTimer += dt;
+      s.sceneryTimer += dt;
+      s.zoneTimer += dt;
+      s.cowTimer += dt;
+
+      const held = keys.current,
+        left = held.has("arrowleft") || held.has("a") || held.has("touch-left"),
         right =
-          keys.current.has("ArrowRight") ||
-          keys.current.has("d") ||
-          keys.current.has("D");
+          held.has("arrowright") || held.has("d") || held.has("touch-right");
       if (left !== right)
-        setLane((v) =>
-          Math.max(
-            -0.18,
-            Math.min(
-              2.18,
-              v + (right ? 1 : -1) * dt * 1.7 * (damaged ? 0.58 : 1),
-            ),
+        s.lane = Math.max(
+          LANE_MIN,
+          Math.min(
+            LANE_MAX,
+            s.lane +
+              (right ? 1 : -1) * dt * STEER_RATE * (s.damaged > 0 ? 0.58 : 1),
           ),
         );
+
       const speed = Math.max(
-        0.65,
-        (DELIVERY_STAGES[state.current.stage - 1].speed +
-          (boost > 0 ? 65 : 0) -
-          (slow > 0 ? 120 : 0)) /
-          100,
-      );
-      const elapsed =
-          DELIVERY_STAGES[state.current.stage - 1].time - state.current.time,
-        speedRamp = 1 + Math.floor(Math.max(0, elapsed) / 30) * 0.08;
-      if (spawn.current > Math.max(0.36, 1.05 - state.current.stage * 0.09)) {
-        spawn.current = 0;
-        const types: Thing["type"][] =
-            state.current.stage <= 1
+          0.65,
+          (route.speed + (s.boost > 0 ? 65 : 0) - (s.slow > 0 ? 120 : 0)) /
+            100,
+        ),
+        elapsed = route.time - s.time,
+        speedRamp = 1 + Math.floor(Math.max(0, elapsed) / 30) * 0.08,
+        scroll = dt * speed * 36;
+
+      if (s.spawnTimer > Math.max(0.36, 1.05 - s.stage * 0.09)) {
+        s.spawnTimer = 0;
+        // Never stack enough hazards at the horizon to wall off the road.
+        const crowded =
+          s.things.filter(
+            (x) => x.y < 8 && x.type !== "boost" && x.type !== "slow",
+          ).length >= 2;
+        const types: HazardType[] =
+            s.stage <= 1
               ? ["squirrel", "cat", "pothole", "pothole"]
-              : state.current.stage <= 3
+              : s.stage <= 3
                 ? ["dog", "cat", "raccoon", "person", "car", "pothole", "mower"]
                 : [
                     "deer",
@@ -576,426 +800,326 @@ export default function DeliveryGame() {
                     "mower",
                   ],
           roll = Math.random(),
-          type =
-            roll < 0.08
-              ? "slow"
-              : roll < 0.17
-                ? "boost"
-                : types[Math.floor(Math.random() * types.length)];
-        setThings((a) => [
-          ...a,
-          {
-            id: Date.now() + Math.random(),
-            type,
-            lane: Math.random() * 2,
-            y: -12,
-            speed:
-              type === "mower" || type === "van" || type === "goose" ? 1.35 : 1,
-          },
-        ]);
-      }
-      if (
-        deliveryGap.current > Math.max(2.8, 4.4 - state.current.stage * 0.25) &&
-        !state.current.target.active
-      ) {
-        deliveryGap.current = 0;
-        const address = addresses[Math.floor(Math.random() * addresses.length)],
-          neighbor = addresses.filter((x) => x !== address)[
-            Math.floor(Math.random() * (addresses.length - 1))
+          type: Thing["type"] =
+            roll < 0.08 ? "slow" : roll < 0.17 ? "boost" : pick(types);
+        if (!crowded || type === "boost" || type === "slow")
+          s.things = [
+            ...s.things,
+            {
+              id: ++cosmeticId.current,
+              type,
+              lane: HAZARD_LANE_MIN + Math.random() * HAZARD_LANE_SPAN,
+              y: -12,
+              speed:
+                type === "mower" || type === "van" || type === "goose"
+                  ? 1.35
+                  : 1,
+            },
           ];
-        setTarget({
+      }
+      if (s.zone === "rural" && s.stage >= 2) {
+        if (s.cowTimer > Math.max(2.4, 4.2 - s.stage * 0.3)) {
+          s.cowTimer = 0;
+          s.things = [
+            ...s.things,
+            {
+              id: ++cosmeticId.current,
+              type: "cow",
+              lane: HAZARD_LANE_MIN + Math.random() * HAZARD_LANE_SPAN,
+              y: -12,
+            },
+          ];
+        }
+      }
+      if (s.targetTimer > deliveryTargetGap(s.stage) && !s.target.active) {
+        s.targetTimer = 0;
+        const address = pick(addresses);
+        s.target = {
           y: -14,
           side: Math.random() > 0.5 ? "right" : "left",
           active: true,
           address,
-          neighbor,
-        });
+          neighbor: pick(addresses.filter((x) => x !== address)),
+        };
       }
-      setThings((a) => {
-        const next: Thing[] = [];
-        for (const x of a) {
-          const n = {
-              ...x,
-              y: x.y + dt * speed * speedRamp * 36 * (x.speed || 1),
-            },
-            collisionRadius =
-              n.type === "car" || n.type === "van"
-                ? 0.36
-                : n.type === "cow"
-                  ? 0.29
-                  : n.type === "deer"
-                    ? 0.21
-                    : n.type === "dog"
-                      ? 0.13
-                      : n.type === "cat" || n.type === "raccoon"
-                        ? 0.11
-                        : n.type === "goose"
-                          ? 0.15
-                          : n.type === "mower"
-                            ? 0.2
-                            : n.type === "squirrel"
-                              ? 0.07
-                              : n.type === "person"
-                                ? 0.13
-                                : 0.18;
-          if (
-            n.y > 78 &&
-            n.y < 91 &&
-            Math.abs(n.lane - playerLane.current) < collisionRadius
-          ) {
-            if (n.type === "boost" || n.type === "slow") {
-              if (n.type === "boost") {
-                setBoost(4);
-                pop("TURBO PICKLE! +350");
-              } else {
-                setSlow(6);
-                pop("FROZEN SUB TIME! TRAFFIC SLOWED");
-              }
-              setStats((s) => ({ ...s, score: s.score + 350 }));
-              beep("coin");
-              continue;
-            }
-            if (
-              (n.type === "car" || n.type === "van") &&
-              Math.abs(n.lane - playerLane.current) >= 0.17
-            ) {
-              setDamaged(4);
-              setHealth((health) => Math.max(0, health - 1));
-              setStats((stats) => ({
-                ...stats,
-                score: Math.max(0, stats.score - 500),
-                hits: stats.hits + 1,
-                combo: 0,
-              }));
-              pop(
-                "SIDESWIPE! -500. ALIGNMENT NOW PROVIDED BY A SHOPPING CART.",
-              );
-              impact();
-              beep("hit");
-              continue;
-            }
-            if (
-              n.type === "car" ||
-              n.type === "van" ||
-              n.type === "cow" ||
-              n.type === "person" ||
-              n.type === "mower"
-            ) {
-              const reason =
-                n.type === "car"
-                  ? pickFailure("car", DELIVERY_CAR_CRASHES)
-                  : pickFailure(n.type, DELIVERY_COLLISION_FAILURES[n.type]);
-              impactFailure.current = reason;
-              setFailure(reason);
-              setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
-              setMode("lost");
-              impact();
-              beep(
-                n.type === "person" ? "ouch" : n.type === "cow" ? "moo" : "hit",
-              );
-              continue;
-            }
-            if (n.type === "squirrel") {
-              impactFailure.current = pickFailure(
-                "squirrel",
-                DELIVERY_COLLISION_FAILURES.squirrel,
-              );
-              setStats((s) => ({
-                ...s,
-                score: Math.max(0, s.score - 100),
-                hits: s.hits + 1,
-                combo: 0,
-              }));
-              pop("SQUIRREL TAP! -100. IT HAS RETAINED COUNSEL.");
-              beep("squish");
-              continue;
-            }
-            if (n.type === "cat") {
-              impactFailure.current = pickFailure(
-                "cat",
-                DELIVERY_COLLISION_FAILURES.cat,
-              );
-              setHealth((health) => Math.max(0, health - 1));
-              setStats((stats) => ({
-                ...stats,
-                score: Math.max(0, stats.score - 175),
-                hits: stats.hits + 1,
-                combo: 0,
-              }));
-              pop("CAT INCIDENT! -175. IT WILL BE REVIEWING THIS RIDE ONLINE.");
-              impact();
-              beep("meow");
-              continue;
-            }
-            if (n.type === "goose" || n.type === "raccoon") {
-              impactFailure.current = pickFailure(
-                n.type,
-                DELIVERY_COLLISION_FAILURES[n.type],
-              );
-              setHealth((health) => Math.max(0, health - 1));
-              setStats((stats) => ({
-                ...stats,
-                score: Math.max(0, stats.score - 150),
-                hits: stats.hits + 1,
-                combo: 0,
-              }));
-              pop(
-                n.type === "goose"
-                  ? "GOOSE INCIDENT! IT HAS CLAIMED THE LANE AND YOUR INSURANCE."
-                  : "RACCOON INCIDENT! THE SUB HAS BEEN RECLASSIFIED AS TRASH.",
-              );
-              impact();
-              beep("hit");
-              continue;
-            }
-            const collisionType =
-              n.type === "deer" ? "deer" : n.type === "dog" ? "dog" : "pothole";
-            const reasonPool = DELIVERY_COLLISION_FAILURES[collisionType];
-            impactFailure.current = pickFailure(collisionType, reasonPool);
-            setHealth((h) => Math.max(0, h - (n.type === "deer" ? 2 : 1)));
-            setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
-            pop(
-              n.type === "deer"
-                ? "YOU HIT A DEER. THE DEER IS ANGRY."
-                : `${n.type.toUpperCase()} INCIDENT!`,
+      if (s.sceneryTimer > (s.zone === "rural" ? 2.6 : 0.9)) {
+        s.sceneryTimer = 0;
+        const kinds: Scenery["kind"][] =
+          s.zone === "rural"
+            ? ["house", "house", "trash"]
+            : ["house", "house", "house", "abandoned", "tent", "cart", "trash"];
+        s.scenery = [
+          ...s.scenery.slice(-14),
+          {
+            id: ++cosmeticId.current,
+            kind: pick(kinds),
+            side: Math.random() > 0.5 ? "right" : "left",
+            y: -12,
+          },
+        ];
+      }
+      if (s.zoneTimer > Math.max(9, 15 - s.stage * 0.9)) {
+        s.zoneTimer = 0;
+        s.zone = s.zone === "city" ? "rural" : "city";
+        if (s.zone === "rural") s.community = pick(communities);
+      }
+
+      const hit = (
+        damage: number,
+        penalty: number,
+        reason: string,
+        message: string,
+        sound: Sfx,
+      ) => {
+        s.lastImpact = reason;
+        s.health = Math.max(0, s.health - damage);
+        s.invulnerable = INVULNERABLE_SECONDS;
+        s.stats = {
+          ...s.stats,
+          score: Math.max(0, s.stats.score - penalty),
+          hits: s.stats.hits + 1,
+          combo: 0,
+        };
+        if (penalty) scoreBurst(`-${penalty}`, "bad");
+        if (damage) {
+          impact();
+          vibrate(60);
+        }
+        pop(message);
+        sfx(sound);
+      };
+
+      const things: Thing[] = [];
+      for (const x of s.things) {
+        const n = { ...x, y: x.y + scroll * speedRamp * (x.speed || 1) };
+        const touching =
+          n.y > 78 &&
+          n.y < 91 &&
+          Math.abs(n.lane - s.lane) < collisionRadius(n.type);
+        if (!touching) {
+          if (n.y < 112) things.push(n);
+          continue;
+        }
+        if (n.type === "boost" || n.type === "slow") {
+          if (n.type === "boost") {
+            s.boost = 4;
+            pop("TURBO PICKLE! +350");
+          } else {
+            s.slow = 6;
+            pop("FROZEN SUB TIME! TRAFFIC SLOWED");
+          }
+          s.stats = { ...s.stats, score: s.stats.score + 350 };
+          scoreBurst("+350", "good");
+          sfx("delivery");
+          continue;
+        }
+        // Freshly hit: everything passes through while the car blinks.
+        if (s.invulnerable > 0) {
+          if (n.y < 112) things.push(n);
+          continue;
+        }
+        if (
+          (n.type === "car" || n.type === "van") &&
+          Math.abs(n.lane - s.lane) >= 0.17
+        ) {
+          s.damaged = 4;
+          hit(
+            1,
+            500,
+            pickFailure("car", DELIVERY_CAR_CRASHES),
+            "SIDESWIPE! -500. ALIGNMENT NOW PROVIDED BY A SHOPPING CART.",
+            "crash",
+          );
+          continue;
+        }
+        if (DEADLY.has(n.type)) {
+          s.stats = { ...s.stats, hits: s.stats.hits + 1, combo: 0 };
+          s.things = things;
+          endRun(
+            n.type === "car" || n.type === "van"
+              ? pickFailure("car", DELIVERY_CAR_CRASHES)
+              : pickFailure(
+                  n.type,
+                  DELIVERY_COLLISION_FAILURES[
+                    n.type as "cow" | "person" | "mower"
+                  ],
+                ),
+            n.type === "person" ? "ouch" : n.type === "cow" ? "moo" : "crash",
+          );
+          return;
+        }
+        switch (n.type) {
+          case "squirrel":
+            hit(
+              0,
+              100,
+              pickFailure("squirrel", DELIVERY_COLLISION_FAILURES.squirrel),
+              "SQUIRREL TAP! IT HAS RETAINED COUNSEL.",
+              "squish",
             );
-            impact();
-            beep(n.type === "dog" ? "bark" : "hit");
-            continue;
-          }
-          if (n.y < 112) next.push(n);
+            break;
+          case "cat":
+            hit(
+              1,
+              175,
+              pickFailure("cat", DELIVERY_COLLISION_FAILURES.cat),
+              "CAT INCIDENT! IT WILL BE REVIEWING THIS RIDE ONLINE.",
+              "meow",
+            );
+            break;
+          case "goose":
+          case "raccoon":
+            hit(
+              1,
+              150,
+              pickFailure(n.type, DELIVERY_COLLISION_FAILURES[n.type]),
+              n.type === "goose"
+                ? "GOOSE INCIDENT! IT HAS CLAIMED THE LANE AND YOUR INSURANCE."
+                : "RACCOON INCIDENT! THE SUB HAS BEEN RECLASSIFIED AS TRASH.",
+              "crash",
+            );
+            break;
+          case "deer":
+            hit(
+              2,
+              0,
+              pickFailure("deer", DELIVERY_COLLISION_FAILURES.deer),
+              "YOU HIT A DEER. THE DEER IS ANGRY.",
+              "crash",
+            );
+            break;
+          case "dog":
+            hit(
+              1,
+              0,
+              pickFailure("dog", DELIVERY_COLLISION_FAILURES.dog),
+              "DOG INCIDENT! EVERY PORCH CAMERA SAW THAT.",
+              "bark",
+            );
+            break;
+          default:
+            hit(
+              1,
+              0,
+              pickFailure("pothole", DELIVERY_COLLISION_FAILURES.pothole),
+              "POTHOLE! THE SUSPENSION HAS FILED A COMPLAINT.",
+              "crash",
+            );
         }
-        return next;
-      });
-      setTarget((t) => {
-        if (!t.active) return t;
-        const y = t.y + dt * speed * 36;
+      }
+      s.things = things;
+
+      if (s.target.active) {
+        const y = s.target.y + scroll;
         if (y > 108) {
-          setStats((s) => ({ ...s, missed: s.missed + 1, combo: 0 }));
-          pop(`MISSED ${t.address}. CUSTOMER ALREADY CALLED.`);
-          return { ...t, y, active: false };
+          s.stats = { ...s.stats, missed: s.stats.missed + 1, combo: 0 };
+          s.target = { ...s.target, y, active: false };
+          pop(`MISSED ${s.target.address}. CUSTOMER ALREADY CALLED.`);
+        } else s.target = { ...s.target, y };
+      }
+
+      const scenery: Scenery[] = [];
+      for (const x of s.scenery) {
+        const n = { ...x, y: x.y + scroll },
+          onCurb =
+            (s.lane < -0.04 && n.side === "left") ||
+            (s.lane > 2.04 && n.side === "right");
+        if (
+          s.invulnerable <= 0 &&
+          n.y > 82 &&
+          n.y < 91 &&
+          onCurb &&
+          (n.kind === "abandoned" || n.kind === "tent")
+        ) {
+          s.stats = { ...s.stats, hits: s.stats.hits + 1, combo: 0 };
+          s.scenery = scenery;
+          endRun(
+            pickFailure(n.kind, DELIVERY_COLLISION_FAILURES[n.kind]),
+            n.kind === "tent" ? "ouch" : "crash",
+          );
+          return;
         }
-        return { ...t, y };
-      });
-      setScenery((items) => {
-        const next: Scenery[] = [];
-        for (const x of items) {
-          const n = { ...x, y: x.y + dt * speed * 36 },
-            onLeftCurb = playerLane.current < -0.04 && n.side === "left",
-            onRightCurb = playerLane.current > 2.04 && n.side === "right";
-          if (
-            n.y > 82 &&
-            n.y < 91 &&
-            (onLeftCurb || onRightCurb) &&
-            (n.kind === "abandoned" || n.kind === "tent")
-          ) {
-            const reason =
-              n.kind === "abandoned"
-                ? pickFailure(
-                    "abandoned",
-                    DELIVERY_COLLISION_FAILURES.abandoned,
-                  )
-                : pickFailure("tent", DELIVERY_COLLISION_FAILURES.tent);
-            impactFailure.current = reason;
-            setFailure(reason);
-            setStats((s) => ({ ...s, hits: s.hits + 1, combo: 0 }));
-            setMode("lost");
-            impact();
-            beep(n.kind === "tent" ? "ouch" : "hit");
-            continue;
-          }
-          if (n.y < 112) next.push(n);
-        }
-        return next;
-      });
+        if (n.y < 112) scenery.push(n);
+      }
+      s.scenery = scenery;
+
+      if (s.health <= 0) {
+        endRun(s.lastImpact || pickFailure("route", DELIVERY_FAILURES), "crash");
+        return;
+      }
+      if (s.time <= 0) {
+        endRun(pickFailure("route", DELIVERY_FAILURES), "gameover");
+        return;
+      }
+      commit();
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [mode, paused, boost, slow, damaged, beep, impact]);
-  useEffect(() => {
-    if (mode !== "play" || paused) return;
-    const id = setInterval(() => {
-      setTime((t) => Math.max(0, t - 1));
-      setBoost((b) => Math.max(0, b - 1));
-      setSlow((s) => Math.max(0, s - 1));
-      setDamaged((seconds) => Math.max(0, seconds - 1));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [mode, paused]);
-  useEffect(() => {
-    if (mode !== "play") return;
-    const cityKinds: Scenery["kind"][] = [
-        "house",
-        "house",
-        "house",
-        "abandoned",
-        "tent",
-        "cart",
-        "trash",
-      ],
-      ruralKinds: Scenery["kind"][] = ["house", "house", "trash"];
-    const spawnId = window.setInterval(
-      () => {
-        const kinds = zone === "rural" ? ruralKinds : cityKinds,
-          kind = kinds[Math.floor(Math.random() * kinds.length)];
-        setScenery((items) => [
-          ...items.slice(-14),
-          {
-            id: Date.now() + Math.random(),
-            kind,
-            side: Math.random() > 0.5 ? "right" : "left",
-            y: -12,
-          },
-        ]);
-      },
-      zone === "rural" ? 2600 : 900,
-    );
-    return () => {
-      clearInterval(spawnId);
-    };
-  }, [mode, zone]);
-  useEffect(() => {
-    if (mode !== "play") return;
-    const startsRural = stage >= 3;
-    setZone(startsRural ? "rural" : "city");
-    if (startsRural)
-      setCommunity(communities[Math.floor(Math.random() * communities.length)]);
-    const id = window.setInterval(
-      () =>
-        setZone((current) => {
-          const next = current === "city" ? "rural" : "city";
-          if (next === "rural")
-            setCommunity(
-              communities[Math.floor(Math.random() * communities.length)],
-            );
-          return next;
-        }),
-      Math.max(9000, 15000 - stage * 900),
-    );
-    return () => clearInterval(id);
-  }, [mode, stage]);
-  useEffect(() => {
-    if (mode !== "play" || zone !== "rural") return;
-    const id = window.setInterval(
-      () =>
-        setThings((items) => [
-          ...items,
-          {
-            id: Date.now() + Math.random(),
-            type: "cow",
-            lane: Math.random() * 2,
-            y: -12,
-          },
-        ]),
-      3600,
-    );
-    return () => clearInterval(id);
-  }, [mode, zone]);
-  useEffect(() => {
-    if (mode === "play" && (health <= 0 || time <= 0)) {
-      setFailure(
-        health <= 0 && impactFailure.current
-          ? impactFailure.current
-          : pickFailure("route", DELIVERY_FAILURES),
-      );
-      setMode("lost");
-      beep("gameover");
-    }
-  }, [mode, health, time, beep]);
-  useEffect(() => {
-    if (mode !== "play" || routeDelivered < cfg.deliveries) return;
-    void finishRoute();
-  }, [routeDelivered, mode, cfg.deliveries]);
-  async function start() {
-    lossSaved.current = false;
-    beep("start");
-    const r = await fetch("/api/delivery-boy/run", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "start", playerName: name }),
-      }),
-      d = await r.json();
-    if (!r.ok) {
-      pop(d.error || "Could not start route");
-      return;
-    }
-    setRun(d);
-    begin(1);
-  }
-  function begin(n: number) {
-    setStage(n);
-    setRouteDelivered(0);
-    setHealth(3);
-    setTime(DELIVERY_STAGES[n - 1].time);
-    setThings([]);
-    setScenery([]);
-    setTarget(emptyTarget);
-    setAmmo(DELIVERY_STAGES[n - 1].deliveries + 4);
+  }, [running, paused, commit, endRun, impact, pop, scoreBurst, sfx, vibrate]);
+
+  function begin(n: number, carried: Stats) {
+    sim.current = newSim(n, carried);
+    keys.current.clear();
+    setFrame(snapshot(sim.current));
+    setThrown(null);
+    setParticles([]);
+    setScoreBursts([]);
+    setToast("");
     setFailure("");
+    setWrecked(false);
     setPaused(false);
-    setOrderPayload(
-      orderPayloads[Math.floor(Math.random() * orderPayloads.length)],
-    );
-    impactFailure.current = "";
-    setLane(1);
-    setDamaged(0);
+    setCheckpointState("idle");
+    setOrderPayload(pick(orderPayloads));
+    setCountdown(3);
     deliveryAudio.transition("action");
     setMode("play");
   }
-  async function finishRoute() {
-    setMode("between");
-    deliveryAudio.transition("menu");
-    const nextSeq = sequence + 1,
-      checkpoint = {
-        runId: run?.runId,
-        stage,
-        sequence: nextSeq,
-        activeSeconds:
-          DELIVERY_STAGES.slice(0, stage).reduce((n, s) => n + s.time, 0) -
-          time,
-        score: stats.score,
-        delivered: stats.delivered,
-        missed: stats.missed,
-        hits: stats.hits,
-      };
-    if (run) {
-      const r = await fetch("/api/delivery-boy/run", {
+  async function start(event?: FormEvent) {
+    event?.preventDefault();
+    if (starting) return;
+    setStarting(true);
+    setStartError("");
+    storageSet(DRIVER_NAME_KEY, name.trim());
+    try {
+      const response = await fetch("/api/delivery-boy/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "checkpoint",
-          token: run.token,
-          checkpoint,
-        }),
+        body: JSON.stringify({ action: "start", playerName: name }),
       });
-      if (r.ok) setSequence(nextSeq);
-    }
-    if (Math.random() < 0.58) {
-      setComplaint(
-        DELIVERY_COMPLAINTS[
-          Math.floor(Math.random() * DELIVERY_COMPLAINTS.length)
-        ],
-      );
-      setSuccessMessage("");
-    } else {
-      setComplaint("");
-      setSuccessMessage(
-        DELIVERY_ROUTE_SUCCESSES[
-          Math.floor(Math.random() * DELIVERY_ROUTE_SUCCESSES.length)
-        ],
-      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setStartError(data.error || "Dispatch could not start your route.");
+        return;
+      }
+      runRef.current = data;
+      setRun(data);
+      sequence.current = 0;
+      lossSaved.current = false;
+      setReward(null);
+      setNewBest(false);
+      setCopied(false);
+      begin(1, fresh());
+    } catch {
+      setStartError("Dispatch is offline. Check your connection and try again.");
+    } finally {
+      setStarting(false);
     }
   }
   async function nextRoute() {
-    setComplaint("");
-    setSuccessMessage("");
-    if (stage < DELIVERY_STAGES.length) {
-      begin(stage + 1);
+    if (checkpointState === "saving") return;
+    if (checkpointState === "error") {
+      void saveCheckpoint();
       return;
     }
-    if (!run) return;
-    const r = await fetch("/api/delivery-boy/run", {
+    if (stage < DELIVERY_STAGES.length) {
+      begin(stage + 1, sim.current.stats);
+      return;
+    }
+    if (!run || claiming) return;
+    setClaiming(true);
+    try {
+      const response = await fetch("/api/delivery-boy/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1003,11 +1127,26 @@ export default function DeliveryGame() {
           runId: run.runId,
           token: run.token,
         }),
-      }),
-      d = await r.json();
-    setReward(d);
-    if (r.ok) beep("victory");
-    setMode(r.ok ? "won" : "lost");
+      });
+      const data: Reward = await response.json().catch(() => ({}));
+      setReward(response.ok ? data : { error: data.error || "Prize could not be issued." });
+      if (response.ok) sfx("victory");
+      setMode(response.ok ? "won" : "lost");
+    } catch {
+      setReward({ error: "Dispatch is offline. Tap CLAIM again in a moment." });
+    } finally {
+      setClaiming(false);
+    }
+  }
+  function copyCode() {
+    if (!reward?.code) return;
+    void navigator.clipboard?.writeText(reward.code).then(
+      () => setCopied(true),
+      () => {},
+    );
+  }
+  function holdSteer(direction: "left" | "right", held: boolean) {
+    keys.current[held ? "add" : "delete"](`touch-${direction}`);
   }
   function touchEnd(e: React.TouchEvent) {
     const p = e.changedTouches[0],
@@ -1023,10 +1162,20 @@ export default function DeliveryGame() {
       touch.current = { x: p.clientX, y: p.clientY, moved: true };
     }
   }
+  const target = frame.target,
+    inRange =
+      target.y >= THROW_WINDOW.start && target.y <= THROW_WINDOW.end,
+    time = Math.ceil(frame.time),
+    lane = frame.lane;
+  const bestLine = newBest ? (
+    <div className="new-best">NEW PERSONAL BEST · {stats.score.toLocaleString()}</div>
+  ) : best > 0 ? (
+    <div className="home-best">YOUR BEST · {best.toLocaleString()}</div>
+  ) : null;
   return (
     <main className="delivery-boy">
       {mode === "home" && (
-        <section className="delivery-home">
+        <form className="delivery-home" onSubmit={start}>
           <img
             className="game-corner-logo"
             src="https://rezku-pos-upload.imgix.net/2e2a0810-d179-474b-a40b-e4104c60d8c1/olo/logo/jO52kF7dMM84upTQGozunTrduBxjbylAFeGYc8r_RT8.png?fit=max&auto=compress&fmt=png32&h=180"
@@ -1046,11 +1195,23 @@ export default function DeliveryGame() {
           <MenuAdTicker />
           <input
             value={name}
+            maxLength={40}
+            autoComplete="nickname"
+            aria-label="Driver name"
             onChange={(e) => setName(e.target.value)}
             placeholder="Driver name"
           />
-          <button onClick={start}>START THE CAR</button>
+          <button type="submit" disabled={starting}>
+            {starting ? "WARMING UP THE ENGINE…" : "START THE CAR"}
+          </button>
+          {startError && (
+            <div className="start-error" role="alert">
+              {startError}
+            </div>
+          )}
+          {bestLine}
           <button
+            type="button"
             className="driver-leaderboard-button"
             onClick={openLeaderboard}
           >
@@ -1059,24 +1220,34 @@ export default function DeliveryGame() {
           <a className="return-games" href="/games">
             ← ALL GAMES
           </a>
-          <small>← → or swipe to steer · SPACE or DELIVER to throw</small>
+          <ul className="how-to-play">
+            <li>
+              <b>STEER</b> ← → / A D, hold the arrows, or swipe
+            </li>
+            <li>
+              <b>THROW</b> SPACE or tap when the house says DELIVER NOW
+            </li>
+            <li>
+              <b>COMBO</b> back-to-back deliveries multiply up to ×4
+            </li>
+            <li>
+              <b>PAUSE</b> P or Esc
+            </li>
+          </ul>
           <div className="sub-prize">
-            WIN: {DELIVERY_PRIZE.name.toUpperCase()}
+            CLEAR ALL {DELIVERY_STAGES.length} ROUTES · WIN:{" "}
+            {DELIVERY_PRIZE.name.toUpperCase()}
           </div>
-        </section>
+        </form>
       )}
       {mode === "play" && (
         <>
           <header className="delivery-hud">
             <div>
-              <small>
-                {stage <= 1
-                  ? "SUBURBAN"
-                  : stage <= 3
-                    ? "DOWNTOWN / MAIN ST"
-                    : "RUSH HOUR / RIVER RD"}
-              </small>
-              <b>ROUTE {stage}</b>
+              <small>{cfg.name.toUpperCase()}</small>
+              <b>
+                ROUTE {stage}/{DELIVERY_STAGES.length}
+              </b>
             </div>
             <div className="active-order-hud">
               <small>TOSS</small>
@@ -1085,7 +1256,7 @@ export default function DeliveryGame() {
             <div>
               <small>DELIVERED</small>
               <b>
-                {routeDelivered}/{cfg.deliveries}
+                {frame.routeDelivered}/{cfg.deliveries}
               </b>
             </div>
             <div className={time < 16 ? "hot" : ""}>
@@ -1094,7 +1265,7 @@ export default function DeliveryGame() {
             </div>
             <div>
               <small>SCORE</small>
-              <b>{stats.score}</b>
+              <b>{stats.score.toLocaleString()}</b>
             </div>
             <div className={`combo-hud combo-${Math.min(4, stats.combo)}`}>
               <small>TIP STREAK</small>
@@ -1104,18 +1275,25 @@ export default function DeliveryGame() {
                   : `×${Math.max(1, stats.combo)}`}
               </b>
             </div>
-            <div className={ammo < 3 ? "ammo-hud critical" : "ammo-hud"}>
+            <div className={frame.ammo < 3 ? "ammo-hud critical" : "ammo-hud"}>
               <small>SUBS</small>
               <b>
-                <i className="sub-ammo-icon" /> {ammo}
+                <i className="sub-ammo-icon" /> {frame.ammo}
               </b>
             </div>
-            {slow > 0 && (
+            {frame.slow > 0 && (
               <div className="slow-hud">
                 <small>SLOW TIME</small>
-                <b>{slow}s</b>
+                <b>{Math.ceil(frame.slow)}s</b>
               </div>
             )}
+            <button
+              className="hud-pause"
+              aria-label={paused ? "Resume" : "Pause"}
+              onClick={() => !frame.ending && setPaused((value) => !value)}
+            >
+              {paused ? "▶" : "❚❚"}
+            </button>
             <button
               aria-label="Audio settings"
               onClick={() => setShowAudio(!showAudio)}
@@ -1124,7 +1302,7 @@ export default function DeliveryGame() {
             </button>
           </header>
           <section
-            className={`delivery-world zone-${zone} ${time < 16 ? "panic" : ""} ${stage >= 4 ? "night" : ""} ${slow ? "slow-motion" : ""} ${shaking && !reducedEffects ? "impact-shake" : ""} ${brokenWindow && !reducedEffects ? "window-shatter" : ""} ${paused ? "paused" : ""} ${reducedEffects ? "reduced-effects" : ""}`}
+            className={`delivery-world zone-${frame.zone} ${time < 16 ? "panic" : ""} ${stage >= 4 ? "night" : ""} ${frame.slow ? "slow-motion" : ""} ${shaking && !reducedEffects ? "impact-shake" : ""} ${brokenWindow && !reducedEffects ? "window-shatter" : ""} ${paused ? "paused" : ""} ${wrecked ? "wrecked" : ""} ${reducedEffects ? "reduced-effects" : ""}`}
             onTouchStart={(e) =>
               (touch.current = {
                 x: e.touches[0].clientX,
@@ -1139,23 +1317,23 @@ export default function DeliveryGame() {
             <div className="route-progress" aria-label="Route progress">
               <i
                 style={{
-                  width: `${Math.min(100, (routeDelivered / cfg.deliveries) * 100)}%`,
+                  width: `${Math.min(100, (frame.routeDelivered / cfg.deliveries) * 100)}%`,
                 }}
               />
               <b>
-                {routeDelivered}/{cfg.deliveries} TO FINISH
+                {frame.routeDelivered}/{cfg.deliveries} TO FINISH
               </b>
             </div>
             <div className="horizon-layer" />
             <div className="midground-layer" />
-            {zone === "rural" && (
+            {frame.zone === "rural" && (
               <div
                 className="community-sign"
-                key={`${community.name}-${stage}`}
+                key={`${frame.community.name}-${stage}`}
               >
                 <small>ENTERING</small>
-                <b>{community.name}</b>
-                <span>{community.warning}</span>
+                <b>{frame.community.name}</b>
+                <span>{frame.community.warning}</span>
               </div>
             )}
             {target.active && (
@@ -1174,7 +1352,7 @@ export default function DeliveryGame() {
               <div className="sidewalk right-walk" />
               <div className="lane-lines" />
               <div className="speed-lines" />
-              {scenery.map((x) => (
+              {frame.scenery.map((x) => (
                 <i
                   className={`scenery ${x.kind} ${x.side}`}
                   style={
@@ -1207,7 +1385,7 @@ export default function DeliveryGame() {
                     <b>{target.neighbor}</b>
                   </div>
                   <div
-                    className={`house target ${target.side} ${target.y >= 60 && target.y <= 88 ? "in-range" : ""}`}
+                    className={`house target ${target.side} ${inRange ? "in-range" : ""}`}
                     style={
                       {
                         top: `${target.y}%`,
@@ -1220,20 +1398,16 @@ export default function DeliveryGame() {
                   >
                     <span className="house-sprite" />
                     <b>{target.address}</b>
-                    <em>
-                      {target.y >= 60 && target.y <= 88
-                        ? "◀ DELIVER NOW ▶"
-                        : "TARGET"}
-                    </em>
+                    <em>{inRange ? "◀ DELIVER NOW ▶" : "TARGET"}</em>
                   </div>
                 </>
               )}
-              {things.map((x) => (
+              {frame.things.map((x) => (
                 <Fragment key={x.id}>
-                  {(x.speed || 1) > 1 && x.y < 18 && (
+                  {((x.speed || 1) > 1 || DEADLY.has(x.type)) && x.y < 18 && (
                     <i
                       className="hazard-warning"
-                      style={{ left: `${16.66 + x.lane * 33.33}%` }}
+                      style={{ left: laneLeft(x.lane) }}
                     >
                       !
                     </i>
@@ -1242,7 +1416,7 @@ export default function DeliveryGame() {
                     className={`hazard ${x.type}`}
                     style={
                       {
-                        left: `${16.66 + x.lane * 33.33}%`,
+                        left: laneLeft(x.lane),
                         top: `${x.y}%`,
                         "--depth": Math.max(
                           0.45,
@@ -1254,8 +1428,8 @@ export default function DeliveryGame() {
                 </Fragment>
               ))}
               <div
-                className={`driver ${boost ? "boost" : ""} ${skidding ? "skidding" : ""} ${damaged ? "damaged" : ""}`}
-                style={{ left: `${lane * 50}%` }}
+                className={`driver ${frame.boost ? "boost" : ""} ${skidding ? "skidding" : ""} ${frame.damaged ? "damaged" : ""} ${frame.invulnerable > 0 && !frame.ending ? "invulnerable" : ""}`}
+                style={{ left: laneLeft(lane) }}
               >
                 <img
                   src="/games/delivery-boy/delivery-suv-pixel-v2.png"
@@ -1269,9 +1443,7 @@ export default function DeliveryGame() {
                 <i
                   key={thrown.id}
                   className={`flying-sub ${thrown.side}`}
-                  style={
-                    { "--start": `${thrown.start * 50}%` } as CSSProperties
-                  }
+                  style={{ "--start": laneLeft(thrown.start) } as CSSProperties}
                 />
               )}
               {particles.map((particle) => (
@@ -1282,7 +1454,7 @@ export default function DeliveryGame() {
                 />
               ))}
               {stage >= 4 && (
-                <div className="headlights" style={{ left: `${lane * 50}%` }} />
+                <div className="headlights" style={{ left: laneLeft(lane) }} />
               )}
             </div>
             {toast && <div className="delivery-toast">{toast}</div>}
@@ -1291,15 +1463,39 @@ export default function DeliveryGame() {
                 {burst.text}
               </div>
             ))}
+            {countdown !== null && (
+              <div className="route-countdown" aria-live="assertive">
+                <small>
+                  ROUTE {stage} · {cfg.name.toUpperCase()}
+                </small>
+                <b key={countdown}>{countdown === 0 ? "GO!" : countdown}</b>
+                <span>
+                  {cfg.deliveries} DELIVERIES · {cfg.time} SECONDS ·{" "}
+                  {cfg.deliveries + 4} SUBS IN THE BAG
+                </span>
+              </div>
+            )}
+            {wrecked && (
+              <div className="wreck-stamp" aria-live="assertive">
+                ROUTE OVER
+              </div>
+            )}
             {paused && (
               <div className="pause-card">
                 <b>ROUTE PAUSED</b>
                 <span>Press P or Esc to keep disappointing customers.</span>
+                <button onClick={() => setPaused(false)}>RESUME</button>
               </div>
             )}
-            <div className="hearts" aria-label={`${health} condition points`}>
+            <div
+              className="hearts"
+              aria-label={`${frame.health} condition points`}
+            >
               {[0, 1, 2].map((point) => (
-                <i className={point < health ? "full" : "empty"} key={point} />
+                <i
+                  className={point < frame.health ? "full" : "empty"}
+                  key={point}
+                />
               ))}
             </div>
             {showAudio && (
@@ -1339,8 +1535,8 @@ export default function DeliveryGame() {
                     checked={reducedEffects}
                     onChange={(event) => {
                       setReducedEffects(event.target.checked);
-                      localStorage.setItem(
-                        "corner-delivery-reduced-effects",
+                      storageSet(
+                        REDUCED_EFFECTS_KEY,
                         String(event.target.checked),
                       );
                     }}
@@ -1350,23 +1546,60 @@ export default function DeliveryGame() {
               </aside>
             )}
             <div className="touch-controls">
-              <button onPointerDown={() => move(-0.25)}>◀</button>
-              <button className="deliver" onPointerDown={deliver}>
+              <button
+                aria-label="Steer left"
+                onPointerDown={() => {
+                  move(-0.25);
+                  holdSteer("left", true);
+                }}
+                onPointerUp={() => holdSteer("left", false)}
+                onPointerLeave={() => holdSteer("left", false)}
+                onPointerCancel={() => holdSteer("left", false)}
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                ◀
+              </button>
+              <button
+                className={`deliver ${target.active && inRange ? "ready" : ""}`}
+                onPointerDown={deliver}
+              >
                 THROW TO ADDRESS
               </button>
-              <button onPointerDown={() => move(0.25)}>▶</button>
+              <button
+                aria-label="Steer right"
+                onPointerDown={() => {
+                  move(0.25);
+                  holdSteer("right", true);
+                }}
+                onPointerUp={() => holdSteer("right", false)}
+                onPointerLeave={() => holdSteer("right", false)}
+                onPointerCancel={() => holdSteer("right", false)}
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                ▶
+              </button>
             </div>
           </section>
         </>
       )}
       {mode === "between" && (
         <section className="delivery-summary">
-          <small>ROUTE {stage} CLEAR</small>
+          <small>
+            ROUTE {stage} OF {DELIVERY_STAGES.length} CLEAR
+          </small>
           <h1>{complaint ? "CUSTOMER FEEDBACK" : "ROUTE LEGEND"}</h1>
           <div className="complaint-card">{complaint || successMessage}</div>
+          <div className="route-bonus">
+            <span>
+              TIME BONUS <b>+{routeBonus.time.toLocaleString()}</b>
+            </span>
+            <span>
+              CAR CONDITION <b>+{routeBonus.condition.toLocaleString()}</b>
+            </span>
+          </div>
           <div className="route-stats">
             <b>
-              {stats.score}
+              {stats.score.toLocaleString()}
               <small>SCORE</small>
             </b>
             <b>
@@ -1374,29 +1607,75 @@ export default function DeliveryGame() {
               <small>DELIVERED</small>
             </b>
             <b>
+              ×{stats.bestCombo}
+              <small>BEST STREAK</small>
+            </b>
+            <b>
               {stats.hits}
               <small>ANIMAL/OBJECT INCIDENTS</small>
             </b>
           </div>
-          <button onClick={nextRoute}>
-            {stage === DELIVERY_STAGES.length
-              ? "CLAIM FREE SUB"
-              : "NEXT ROUTE →"}
+          {checkpointState === "error" && (
+            <div className="start-error" role="alert">
+              Dispatch didn&apos;t log this route. Retry so your prize run stays
+              valid.
+            </div>
+          )}
+          {reward?.error && (
+            <div className="start-error" role="alert">
+              {reward.error}
+            </div>
+          )}
+          <button
+            onClick={nextRoute}
+            disabled={checkpointState === "saving" || claiming}
+          >
+            {checkpointState === "saving"
+              ? "LOGGING ROUTE…"
+              : checkpointState === "error"
+                ? "RETRY LOGGING ROUTE"
+                : claiming
+                  ? "CHECKING YOUR ROUTE…"
+                  : stage === DELIVERY_STAGES.length
+                    ? "CLAIM FREE SUB"
+                    : `START ROUTE ${stage + 1} →`}
           </button>
         </section>
       )}
       {mode === "lost" && (
         <section className="delivery-summary">
+          <small>
+            ROUTE {stage} OF {DELIVERY_STAGES.length}
+          </small>
           <h1>ROUTE FAILED</h1>
           <div className="complaint-card">
             {reward?.error ||
               failure ||
               "The subs survived. Your dignity did not."}
           </div>
-          <button onClick={() => location.reload()}>DRIVE AGAIN</button>
-          <a className="return-games" href="/games">
-            ← ALL GAMES
-          </a>
+          <div className="route-stats">
+            <b>
+              {stats.score.toLocaleString()}
+              <small>SCORE</small>
+            </b>
+            <b>
+              {stats.delivered}
+              <small>DELIVERED</small>
+            </b>
+            <b>
+              ×{stats.bestCombo}
+              <small>BEST STREAK</small>
+            </b>
+          </div>
+          {bestLine}
+          {startError && (
+            <div className="start-error" role="alert">
+              {startError}
+            </div>
+          )}
+          <button onClick={() => void start()} disabled={starting}>
+            {starting ? "WARMING UP THE ENGINE…" : "DRIVE AGAIN"}
+          </button>
           <button
             className="driver-leaderboard-button"
             onClick={openLeaderboard}
@@ -1410,31 +1689,71 @@ export default function DeliveryGame() {
       )}
       {mode === "won" && (
         <section className="delivery-summary win">
-          <small>YOU SURVIVED THE ROUTE</small>
+          <small>YOU SURVIVED ALL {DELIVERY_STAGES.length} ROUTES</small>
           <h1>FREE SUB EARNED</h1>
-          <div className="reward-code">{reward?.code}</div>
+          <button
+            type="button"
+            className="reward-code"
+            onClick={copyCode}
+            title="Copy code"
+          >
+            {reward?.code}
+          </button>
+          <div className="reward-meta">
+            {copied ? "CODE COPIED" : "TAP CODE TO COPY · SHOW IT AT THE COUNTER"}
+            {reward?.expires_at &&
+              ` · EXPIRES ${new Date(reward.expires_at).toLocaleDateString()}`}
+          </div>
           <p>{DELIVERY_PRIZE.terms}</p>
+          <div className="route-stats">
+            <b>
+              {stats.score.toLocaleString()}
+              <small>SCORE</small>
+            </b>
+            <b>
+              {stats.delivered}
+              <small>DELIVERED</small>
+            </b>
+            <b>
+              ×{stats.bestCombo}
+              <small>BEST STREAK</small>
+            </b>
+          </div>
+          {bestLine}
           <button
             className="driver-leaderboard-button"
             onClick={openLeaderboard}
           >
             DRIVER LEADERBOARD
           </button>
+          <a className="return-games" href="/games">
+            ← ALL GAMES
+          </a>
         </section>
       )}
       {showLeaders && (
-        <section className="driver-leaderboard" role="dialog" aria-modal="true">
+        <section
+          className="driver-leaderboard"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Driver leaderboard"
+          onClick={(e) => e.target === e.currentTarget && setShowLeaders(false)}
+        >
           <div>
             <button
               className="driver-board-close"
+              aria-label="Close leaderboard"
+              autoFocus
               onClick={() => setShowLeaders(false)}
             >
               ×
             </button>
             <small>CORNER DELI ROUTE RECORDS</small>
             <h2>DELIVERY LEGENDS</h2>
-            {leadersLoading ? (
+            {leadersState === "loading" ? (
               <p>LOADING ROUTES…</p>
+            ) : leadersState === "error" ? (
+              <p>Dispatch radio is down. Try again in a minute.</p>
             ) : leaders.length === 0 ? (
               <p>No winning drivers yet. The deer remain undefeated.</p>
             ) : (
@@ -1451,8 +1770,8 @@ export default function DeliveryGame() {
                         : `ROUTE ${leader.stage} · `}
                       {Number(leader.score).toLocaleString()} PTS
                       <small>
-                        {leader.delivered} DELIVERED · {leader.hits} HITS ·{" "}
-                        {leader.game_version} · {leader.missed} MISSED
+                        {leader.delivered} DELIVERED · {leader.missed} MISSED ·{" "}
+                        {leader.hits} HITS
                       </small>
                     </span>
                   </li>

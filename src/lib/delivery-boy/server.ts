@@ -1,6 +1,11 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
-import { DELIVERY_PRIZE, DELIVERY_STAGES } from "./config";
+import {
+  DELIVERY_PRIZE,
+  DELIVERY_STAGES,
+  deliveriesThrough,
+  deliveryMinimumSeconds,
+} from "./config";
 import { DELIVERY_GAME_VERSION } from "@/lib/games/versions";
 let schema: Promise<void> | null = null;
 const digest = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -56,6 +61,18 @@ export async function checkpointDelivery(body: any, token: string) {
     missed < Number(run.missed)
   )
     throw new Error("Invalid route checkpoint.");
+  // A checkpoint is only sent when a route is cleared, so every address on
+  // every route so far must be delivered, and enough real time must have
+  // passed for those addresses to have appeared at all.
+  const minimum = deliveryMinimumSeconds(stage);
+  const [{ elapsed }] =
+    await getSql()`SELECT EXTRACT(EPOCH FROM (NOW()-started_at))::float AS elapsed FROM delivery_boy_runs WHERE id=${body.runId}`;
+  if (
+    delivered < deliveriesThrough(stage) ||
+    active < minimum ||
+    Number(elapsed) < minimum
+  )
+    throw new Error("Invalid route checkpoint.");
   const entry = {
     at: new Date().toISOString(),
     stage,
@@ -66,7 +83,9 @@ export async function checkpointDelivery(body: any, token: string) {
     missed,
     hits,
   };
-  await getSql()`UPDATE delivery_boy_runs SET stage=${stage},sequence=${sequence},active_seconds=${active},score=${score},delivered=${delivered},missed=${missed},hits=${hits},checkpoints=checkpoints||${JSON.stringify([entry])}::jsonb,updated_at=NOW() WHERE id=${body.runId}`;
+  const updated =
+    await getSql()`UPDATE delivery_boy_runs SET stage=${stage},sequence=${sequence},active_seconds=${Math.round(active)},score=${Math.round(score)},delivered=${delivered},missed=${missed},hits=${hits},checkpoints=checkpoints||${JSON.stringify([entry])}::jsonb,updated_at=NOW() WHERE id=${body.runId} AND status='active' AND sequence=${Number(run.sequence)} RETURNING id`;
+  if (!updated[0]) throw new Error("Impossible route progression.");
   return { ok: true };
 }
 export async function completeDeliveryRun(id: string, token: string) {
@@ -94,7 +113,9 @@ export async function completeDeliveryRun(id: string, token: string) {
       hits: run.hits,
       activeSeconds: run.active_seconds,
     };
-  await getSql()`UPDATE delivery_boy_runs SET status='won',completed_at=NOW(),updated_at=NOW() WHERE id=${id}`;
+  const claimed =
+    await getSql()`UPDATE delivery_boy_runs SET status='won',completed_at=NOW(),updated_at=NOW() WHERE id=${id} AND status='active' RETURNING id`;
+  if (!claimed[0]) throw new Error("Run is unavailable.");
   return (
     await getSql()`INSERT INTO delivery_boy_rewards(id,run_id,code,prize_type,terms,completion_stats,expires_at)VALUES(${randomUUID()},${id},${code},${DELIVERY_PRIZE.name},${JSON.stringify(DELIVERY_PRIZE)}::jsonb,${JSON.stringify(stats)}::jsonb,${expires}) RETURNING code,prize_type,expires_at`
   )[0];

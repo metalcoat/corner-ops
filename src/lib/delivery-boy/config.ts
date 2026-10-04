@@ -6,6 +6,38 @@ export const DELIVERY_STAGES = [
   { name: "Last Run", deliveries: 10, speed: 265, time: 85, hazards: 18 },
 ] as const;
 
+/** Seconds of driving before the next address can appear on a route. */
+export function deliveryTargetGap(stage: number) {
+  return Math.max(2.8, 4.4 - stage * 0.25);
+}
+
+/**
+ * Fastest humanly possible time to finish routes 1..stage. Addresses only
+ * appear every deliveryTargetGap seconds, so a run that checkpoints faster
+ * than this was not played in the browser.
+ */
+export function deliveryMinimumSeconds(throughStage: number) {
+  return DELIVERY_STAGES.slice(0, throughStage).reduce(
+    (total, route, index) =>
+      total + route.deliveries * deliveryTargetGap(index + 1),
+    0,
+  );
+}
+
+export function deliveriesThrough(stage: number) {
+  return DELIVERY_STAGES.slice(0, stage).reduce(
+    (total, route) => total + route.deliveries,
+    0,
+  );
+}
+
+export const DELIVERY_OUT_OF_SUBS = [
+  "You ran out of subs with customers still waiting. Dispatch has asked you to return to the store and explain the shrubs.",
+  "The bag is empty. The last three porches received nothing but eye contact and a confident wave.",
+  "Out of inventory. Several hedges on this route are now better fed than the customers.",
+  "No subs left. You attempted to deliver the receipt alone. It was not well received.",
+] as const;
+
 export const DELIVERY_CAR_CRASHES = [
   "You hit a parked Pontiac that has not moved since the 1998 ice storm. Ogdensburg finally found a use for it: ending your shift.",
   "DPW only moves abandoned cars during a full moon. Unfortunately, you moved this one during a waxing gibbous and voided the warranty.",

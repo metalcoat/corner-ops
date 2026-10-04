@@ -2300,3 +2300,176 @@
     font-size: .43rem;
   }
 }
+
+/* ---- Route flow polish: countdown, wreck, i-frames, pause, results ---- */
+.route-countdown {
+  position: absolute;
+  z-index: 58;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  text-align: center;
+  background: #090f1d99;
+  pointer-events: none;
+}
+.route-countdown small,
+.route-countdown span {
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+.route-countdown small {
+  color: var(--yellow);
+}
+.route-countdown b {
+  font-size: clamp(5rem, 22vw, 11rem);
+  line-height: 1;
+  color: #fff;
+  text-shadow: 6px 6px #000, 0 0 30px var(--red);
+  animation: countdown-pop 0.6s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+@keyframes countdown-pop {
+  from {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.driver.invulnerable {
+  animation: invulnerable-blink 0.16s steps(2) infinite !important;
+}
+@keyframes invulnerable-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+.delivery-world.wrecked:after {
+  content: "";
+  position: absolute;
+  z-index: 56;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(transparent 35%, #c4100a99);
+  animation: wreck-flash 0.5s ease-out both;
+}
+@keyframes wreck-flash {
+  from {
+    background-color: #ffffffaa;
+  }
+}
+.wreck-stamp {
+  position: absolute;
+  z-index: 59;
+  top: 38%;
+  left: 50%;
+  translate: -50% -50%;
+  rotate: -8deg;
+  padding: 10px 22px;
+  border: 6px solid var(--red);
+  border-radius: 8px;
+  background: #0b0f18e6;
+  color: var(--red);
+  font-size: clamp(2rem, 8vw, 4.5rem);
+  font-weight: 900;
+  white-space: nowrap;
+  animation: countdown-pop 0.35s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+.delivery-hud .hud-pause {
+  min-width: 44px;
+}
+.pause-card button,
+.delivery-summary .reward-code {
+  justify-self: center;
+  cursor: pointer;
+}
+.pause-card button {
+  margin-top: 8px;
+  padding: 12px 34px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--yellow);
+  color: #111;
+  font-weight: 900;
+}
+.touch-controls .deliver.ready {
+  animation: deliver-ready 0.5s ease-in-out infinite alternate;
+}
+@keyframes deliver-ready {
+  to {
+    filter: brightness(1.35);
+    transform: scale(1.04);
+  }
+}
+.start-error {
+  margin: 10px auto;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #5a0d0b;
+  color: #ffd9d6;
+  font-weight: 700;
+}
+.home-best,
+.new-best {
+  margin: 10px 0;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: var(--yellow);
+}
+.new-best {
+  animation: deliver-ready 0.45s ease-in-out infinite alternate;
+}
+.how-to-play {
+  display: grid;
+  gap: 4px;
+  margin: 14px auto;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+.how-to-play b {
+  color: var(--yellow);
+  margin-right: 6px;
+}
+.route-bonus {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin: 12px 0;
+  font-weight: 900;
+}
+.route-bonus b {
+  color: var(--yellow);
+}
+.delivery-summary .reward-code {
+  display: block;
+  margin-inline: auto;
+  border: 0;
+  font: inherit;
+}
+.reward-meta {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  opacity: 0.8;
+}
+.delivery-boy button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+@media (prefers-reduced-motion: reduce) {
+  .route-countdown b,
+  .wreck-stamp,
+  .new-best,
+  .driver.invulnerable,
+  .touch-controls .deliver.ready {
+    animation: none !important;
+  }
+}
+.delivery-summary .route-stats {
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+}
