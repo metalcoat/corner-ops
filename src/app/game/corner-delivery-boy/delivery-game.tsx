@@ -35,6 +35,8 @@ import {
   laneX,
   LOT_JITTER,
   LOT_SPACING,
+  ONCOMING_LANE,
+  PARKED_LANE,
   pctY,
   PERFECT_SHIFT_BONUS,
   PICKUPS,
@@ -46,6 +48,7 @@ import {
   SCREEN_H,
   SCREEN_W,
   SCROLL_RATE,
+  START_LANE,
   STEER_RATE,
   STREETS,
   SUBS_LEFT_BONUS,
@@ -168,6 +171,7 @@ type Sim = {
   spawnTimer: number;
   sceneryTimer: number;
   potholeTimer: number;
+  parkedTimer: number;
   /** When each order comes in, and on which side of the street. */
   plan: { at: number; side: Side }[];
   waiting: Record<Side, number>;
@@ -217,7 +221,7 @@ function newSim(stage: number, stats: Stats): Sim {
   }
   return {
     stage,
-    lane: 1,
+    lane: START_LANE,
     things: [],
     houses,
     scenery: [],
@@ -236,6 +240,7 @@ function newSim(stage: number, stats: Stats): Sim {
     spawnTimer: 0,
     sceneryTimer: 0,
     potholeTimer: 0,
+    parkedTimer: 0,
     plan,
     waiting: { left: 0, right: 0 },
     nextLot,
@@ -806,8 +811,15 @@ export default function DeliveryGame() {
       if (!crowded || PICKUPS.has(type)) {
         const crossing = CRITTERS.has(type) && Math.random() < 0.55,
           fromLeft = Math.random() < 0.5,
-          // Tarp-covered cars sit parked against a curb.
-          parked = type === "tarpcar" ? (fromLeft ? 0.12 : 1.88) : null;
+          // Tarp-covered cars sit parked against a curb; traffic keeps to its lane.
+          parked =
+            type === "tarpcar"
+              ? fromLeft
+                ? PARKED_LANE.left
+                : PARKED_LANE.right
+              : type === "car" || type === "van"
+                ? ONCOMING_LANE.min + Math.random() * (ONCOMING_LANE.max - ONCOMING_LANE.min)
+                : null;
         s.things = [
           ...s.things,
           {
@@ -837,6 +849,29 @@ export default function DeliveryGame() {
           },
         ];
       }
+    }
+    // Cars parked along both curbs narrow the street.
+    s.parkedTimer += dt;
+    if (s.parkedTimer > 1.4 + Math.random() * 2.2) {
+      s.parkedTimer = 0;
+      const side = Math.random() < 0.5 ? "left" : "right",
+        lane = PARKED_LANE[side],
+        clear = !s.things.some(
+          (t) => (t.type === "parked" || t.type === "tarpcar") && Math.abs(t.lane - lane) < 0.2 && t.y < 20,
+        );
+      if (clear)
+        s.things = [
+          ...s.things,
+          {
+            id: ++cosmeticId.current,
+            type: Math.random() < 0.18 ? "tarpcar" : "parked",
+            lane,
+            y: -14,
+            variant: Math.floor(Math.random() * 12),
+            // Right-side cars face our way (we see the back); left-side ones face us.
+            size: side === "right" ? 1 : 0,
+          },
+        ];
     }
     // Ogdensburg potholes: random, frequent, all sizes.
     s.potholeTimer += dt;
@@ -916,7 +951,7 @@ export default function DeliveryGame() {
         };
       const gone = n.y >= 118 || n.lane < -0.7 || n.lane > 2.7;
       const touching =
-        n.y > 78 && n.y < 91 && Math.abs(n.lane - s.lane) < collisionRadius(n.type);
+        n.y > 78 && n.y < 91 && Math.abs(n.lane - s.lane) < collisionRadius(n.type, n.size);
       if (!touching) {
         if (!gone) things.push(n);
         continue;
@@ -994,6 +1029,10 @@ export default function DeliveryGame() {
         case "tarpcar":
           hit(1, 300, pickFailure("tarpcar", DELIVERY_COLLISION_FAILURES.tarpcar),
             "YOU HIT THE TARP CAR. IT HAS NOT MOVED SINCE 2011.", "crash");
+          break;
+        case "parked":
+          hit(1, 250, pickFailure("car", DELIVERY_CAR_CRASHES),
+            "PARKED CAR! THE OWNER WAS WATCHING FROM THE PORCH.", "crash");
           break;
         case "pothole":
           if ((n.size ?? 1) < 0.95) {

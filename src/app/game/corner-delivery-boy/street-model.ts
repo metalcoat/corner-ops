@@ -15,7 +15,8 @@ export type HazardType =
   | "car"
   | "pothole"
   | "ebike"
-  | "tarpcar";
+  | "tarpcar"
+  | "parked";
 export type Pickup = "boost" | "slow" | "restock";
 export type Side = "left" | "right";
 export type Thing = {
@@ -88,9 +89,12 @@ export const SCREEN_H = 448;
 export const HUD_H = 40;
 export const PLAY_Y = HUD_H;
 export const PLAY_H = SCREEN_H - HUD_H;
-export const ROAD_LEFT = 176;
-export const ROAD_RIGHT = 336;
-export const SIDEWALK = { left: [150, 172], right: [340, 362] } as const;
+// Lots | sidewalk | curb | a two-lane road wide enough for two cars to pass
+// (parked cars narrow it) | curb | sidewalk | lots.
+export const LOT_SPAN = 116;
+export const ROAD_LEFT = 136;
+export const ROAD_RIGHT = 376;
+export const SIDEWALK = { left: [116, 132], right: [380, 396] } as const;
 export const LANE_PX = (ROAD_RIGHT - ROAD_LEFT) / 2;
 export const laneX = (lane: number) => ROAD_LEFT + lane * LANE_PX;
 export const pctY = (y: number) => PLAY_Y + (y / 100) * PLAY_H;
@@ -98,8 +102,13 @@ export const PLAYER_Y = 84;
 
 // ---- tuning ----
 // The driver can roam from curb to curb; hazards stay on the asphalt.
-export const LANE_MIN = -0.18;
-export const LANE_MAX = 2.18;
+export const LANE_MIN = -0.12;
+export const LANE_MAX = 2.12;
+/** You drive in the right lane; oncoming traffic keeps to the left lane. */
+export const START_LANE = 1.45;
+export const ONCOMING_LANE = { min: 0.58, max: 0.72 };
+/** Where parked cars sit against each curb (tyres at the curb). */
+export const PARKED_LANE = { left: 0.12, right: 1.88 };
 export const HAZARD_LANE_MIN = 0.15;
 export const HAZARD_LANE_SPAN = 1.7;
 export const STEER_RATE = 1.7;
@@ -147,33 +156,38 @@ export const STREETS = [
   "FORD ST",
 ] as const;
 
-export function collisionRadius(type: Thing["type"]) {
+/**
+ * How close (in lanes, 120 px each) a thing's centre must be to the car's
+ * centre to touch it: half its drawn width plus most of the car's half-width.
+ */
+export function collisionRadius(type: Thing["type"], size = 1) {
   switch (type) {
     case "car":
     case "van":
-      return 0.36;
+    case "tarpcar":
+    case "parked":
+      return 0.4;
     case "cow":
-      return 0.29;
+      return 0.4;
     case "deer":
-      return 0.21;
-    case "mower":
-      return 0.2;
-    case "goose":
-      return 0.15;
-    case "dog":
+      return 0.36;
     case "person":
-      return 0.13;
+    case "mower":
+      return 0.3;
+    case "ebike":
+    case "dog":
+      return 0.27;
+    case "goose":
+      return 0.25;
     case "cat":
     case "raccoon":
-      return 0.11;
+      return 0.24;
     case "squirrel":
-      return 0.07;
-    case "ebike":
-      return 0.14;
-    case "tarpcar":
-      return 0.32;
+      return 0.21;
+    case "pothole":
+      return (15 * size + 18) / 120;
     default:
-      return 0.18;
+      return 0.26;
   }
 }
 

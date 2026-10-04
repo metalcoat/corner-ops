@@ -6,6 +6,7 @@ import {
   DEADLY,
   HUD_H,
   inThrowWindow,
+  LOT_SPAN,
   laneX,
   PLAY_H,
   PLAY_Y,
@@ -102,7 +103,7 @@ function ground() {
       hash(i + 9) > 0.5 ? "#3d4248" : "#555a61");
   // Patches and cracks: the city fixes potholes one rectangle at a time.
   for (let i = 0; i < 9; i++) {
-    const x = ROAD_LEFT + 10 + Math.floor(hash(i + 31) * 120),
+    const x = ROAD_LEFT + 10 + Math.floor(hash(i + 31) * (ROAD_RIGHT - ROAD_LEFT - 60)),
       y = Math.floor(hash(i + 17) * (TILE - 60)),
       w = 18 + Math.floor(hash(i + 5) * 30),
       h = 14 + Math.floor(hash(i + 8) * 30);
@@ -110,7 +111,7 @@ function ground() {
     R(g, x, y, w, 1, "#2e3238");
   }
   for (let i = 0; i < 14; i++) {
-    let x = ROAD_LEFT + 6 + Math.floor(hash(i + 51) * 148),
+    let x = ROAD_LEFT + 6 + Math.floor(hash(i + 51) * (ROAD_RIGHT - ROAD_LEFT - 12)),
       y = Math.floor(hash(i + 61) * TILE);
     for (let s = 0; s < 14; s++) {
       R(g, x, y, 1, 2, "#2a2e33");
@@ -150,21 +151,36 @@ function box(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: 
   R(ctx, x + 2, y + 2, w - 4, h - 4, "#1c2c64");
 }
 
+// Houses are drawn smaller and sheared so their fronts turn toward the
+// street: the edge nearest the road sits lower (closer to the viewer).
+const HOUSE_SX = 0.62,
+  HOUSE_SY = 0.8,
+  HOUSE_SKEW = 0.22;
+function lotPlacement(side: Side, base: number, door: number) {
+  const k = side === "left" ? HOUSE_SKEW : -HOUSE_SKEW,
+    originX =
+      side === "left" ? LOT_SPAN - LOT_W * HOUSE_SX - 2 : SIDEWALK.right[1] + 2,
+    originY = base - LOT_GROUND * HOUSE_SY - door * k;
+  return { k, originX, originY, doorX: originX + door * HOUSE_SX };
+}
+
 /** Where a sub is tossed to for a house: its front door. */
 export function porchPoint(side: Side, y: number, house?: House) {
-  const left = side === "left" ? 0 : SCREEN_W - LOT_W;
   const door = house ? lotCanvas(house, false).door : LOT_W / 2;
-  return { x: left + door, y: pctY(y) - 8 };
+  return { x: lotPlacement(side, pctY(y), door).doorX, y: pctY(y) - 8 };
 }
 
 function drawLot(ctx: CanvasRenderingContext2D, house: House, now: number, night: boolean) {
   const base = pctY(house.y),
-    left = house.side === "left" ? 0 : SCREEN_W - LOT_W,
-    { canvas, door } = lotCanvas(house, night);
-  ctx.drawImage(canvas, left, Math.round(base - LOT_GROUND));
+    { canvas, door } = lotCanvas(house, night),
+    place = lotPlacement(house.side, base, door);
+  ctx.save();
+  ctx.transform(HOUSE_SX, place.k, 0, HOUSE_SY, Math.round(place.originX), Math.round(place.originY));
+  ctx.drawImage(canvas, 0, 0);
+  ctx.restore();
   const pending = house.customer && house.state === "pending";
   // Mailbox at the curb with the house number; the flag is up for an order.
-  const mx = house.side === "left" ? SIDEWALK.left[0] + 4 : SIDEWALK.right[1] - 4;
+  const mx = house.side === "left" ? SIDEWALK.left[1] - 3 : SIDEWALK.right[0] + 3;
   R(ctx, mx - 1, base - 10, 3, 18, "#5a3a22");
   R(ctx, mx - 7, base - 20, 14, 10, "#3a4a5a");
   R(ctx, mx - 7, base - 20, 14, 2, "#5a6a7a");
@@ -176,7 +192,7 @@ function drawLot(ctx: CanvasRenderingContext2D, house: House, now: number, night
     align: "center",
     shadow: "#14141c",
   });
-  const dx = left + door,
+  const dx = place.doorX,
     s = sprites();
   if (house.state === "delivered" || house.state === "sampled") {
     ctx.save();
@@ -202,11 +218,12 @@ function drawLot(ctx: CanvasRenderingContext2D, house: House, now: number, night
   }
 }
 
-function drawCar(ctx: CanvasRenderingContext2D, cx: number, bottom: number, variant: number, van: boolean, night: boolean) {
-  // Oncoming traffic, seen from the front.
+function drawCar(ctx: CanvasRenderingContext2D, cx: number, bottom: number, variant: number, van: boolean, night: boolean, rear = false) {
+  // Seen from the front (oncoming, or parked facing us) or from the back.
   const paint = ["#2a5ea8", "#8a2a2a", "#d8d4c8", "#2f2f34", "#6a7a3a", "#b08a3a"][variant % 6],
-    w = van ? 54 : 50,
-    h = van ? 54 : 40,
+    // Same scale as the Equinox (about 1.85 m wide ≈ 62 px).
+    w = van ? 66 : 62,
+    h = van ? 62 : 48,
     x = cx - w / 2,
     y = bottom - h;
   R(ctx, x + 3, bottom - 6, 9, 7, "#141418");
@@ -215,15 +232,21 @@ function drawCar(ctx: CanvasRenderingContext2D, cx: number, bottom: number, vari
   R(ctx, x + 4, y, w - 8, h * 0.46, shade(paint, 0.85));
   R(ctx, x + 8, y + 4, w - 16, h * 0.34, "#3a5068");
   R(ctx, x + 10, y + 6, 6, 3, "#8fb0cf");
-  R(ctx, x + 6, y + h * 0.6, 10, 6, night ? "#fff6c0" : "#e8e4c8");
-  R(ctx, x + w - 16, y + h * 0.6, 10, 6, night ? "#fff6c0" : "#e8e4c8");
-  R(ctx, x + w / 2 - 9, y + h * 0.62, 18, 6, "#1c1c20");
+  const lamp = rear ? (night ? "#ff4030" : "#b82020") : night ? "#fff6c0" : "#e8e4c8";
+  R(ctx, x + 6, y + h * 0.6, 10, 6, lamp);
+  R(ctx, x + w - 16, y + h * 0.6, 10, 6, lamp);
+  if (rear) R(ctx, x + w / 2 - 8, y + h * 0.62, 16, 6, "#e8e4d8");
+  else R(ctx, x + w / 2 - 9, y + h * 0.62, 18, 6, "#1c1c20");
   R(ctx, x - 2, bottom - 10, w + 4, 4, "#9a9a98");
   R(ctx, x - 4, y + h * 0.36, 5, 4, paint);
   R(ctx, x + w - 1, y + h * 0.36, 5, 4, paint);
 }
 
 function drawTarpCar(ctx: CanvasRenderingContext2D, cx: number, bottom: number) {
+  ctx.save();
+  ctx.translate(cx, bottom);
+  ctx.scale(1.1, 1.2);
+  ctx.translate(-cx, -bottom);
   const x = cx - 28;
   R(ctx, x + 2, bottom - 6, 9, 7, "#141418");
   R(ctx, x + 45, bottom - 6, 9, 7, "#141418");
@@ -235,6 +258,7 @@ function drawTarpCar(ctx: CanvasRenderingContext2D, cx: number, bottom: number) 
   R(ctx, x + 27, bottom - 34, 1, 28, "#e0302c");
   R(ctx, x + 10, bottom - 28, 8, 2, "#5a90e0");
   R(ctx, x + 40, bottom - 14, 6, 6, "#1d1d22");
+  ctx.restore();
 }
 
 function drawEbike(ctx: CanvasRenderingContext2D, cx: number, bottom: number, variant: number, now: number) {
@@ -281,6 +305,9 @@ function drawThing(ctx: CanvasRenderingContext2D, thing: Thing, assets: Assets, 
       return;
     case "tarpcar":
       drawTarpCar(ctx, x, y + 18);
+      return;
+    case "parked":
+      drawCar(ctx, x, y + 20, thing.variant ?? 0, false, false, thing.size === 1);
       return;
     case "ebike":
       drawEbike(ctx, x, y + 22, thing.variant ?? 0, now);
@@ -334,14 +361,29 @@ function drawScenery(ctx: CanvasRenderingContext2D, item: Scenery, assets: Asset
       R(ctx, x - 24, y - 46, 48, 11, "#1f6a3a");
       R(ctx, x - 23, y - 45, 46, 9, "#2a8a4a");
       return;
-    default: {
-      const sprite = s[item.kind];
-      ctx.save();
-      ctx.translate(Math.round(x - sprite.width), Math.round(y - sprite.height * 2));
-      ctx.scale(2, 2);
-      ctx.drawImage(sprite, 0, 0);
-      ctx.restore();
-    }
+    case "trash":
+      // Two city cans, one lid missing, one bag that didn't make it in.
+      for (const [dx, lid] of [[-7, true], [7, false]] as const) {
+        R(ctx, x + dx - 6, y - 22, 12, 20, "#5a6068");
+        for (let yy = y - 20; yy < y - 2; yy += 4) R(ctx, x + dx - 6, yy, 12, 1, "#4a5058");
+        R(ctx, x + dx - 6, y - 22, 2, 20, "#7a8088");
+        if (lid) R(ctx, x + dx - 8, y - 25, 16, 3, "#3a4048");
+        else R(ctx, x + dx - 5, y - 26, 10, 5, "#202024");
+      }
+      R(ctx, x - 16, y - 8, 9, 8, "#202024");
+      R(ctx, x - 13, y - 10, 3, 2, "#202024");
+      return;
+    case "cart":
+      R(ctx, x - 12, y - 22, 24, 2, "#b8bcc4");
+      R(ctx, x - 12, y - 22, 2, 14, "#b8bcc4");
+      R(ctx, x + 10, y - 22, 2, 14, "#b8bcc4");
+      for (let xx = x - 10; xx < x + 10; xx += 4) R(ctx, xx, y - 20, 1, 12, "#9aa0a8");
+      R(ctx, x - 12, y - 10, 24, 2, "#b8bcc4");
+      R(ctx, x + 12, y - 26, 2, 6, "#b8bcc4");
+      R(ctx, x + 8, y - 28, 10, 3, "#c7312c");
+      R(ctx, x - 10, y - 4, 4, 4, "#202024");
+      R(ctx, x + 6, y - 4, 4, 4, "#202024");
+      return;
   }
 }
 
@@ -469,7 +511,7 @@ export function drawStreet(
       }
     for (const item of f.scenery)
       if (item.kind === "pole") {
-        const px = item.side === "left" ? 140 : SCREEN_W - 140,
+        const px = item.side === "left" ? SIDEWALK.left[1] : SIDEWALK.right[0],
           py = pctY(item.y) - 110;
         const glow = ctx.createRadialGradient(px, py + 60, 4, px, py + 60, 60);
         glow.addColorStop(0, "rgba(255,190,110,0.28)");

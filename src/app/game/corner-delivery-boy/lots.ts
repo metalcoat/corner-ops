@@ -429,7 +429,8 @@ function paintLot(g: G, house: House, night: boolean) {
       const w = 96,
         x = cx - w / 2,
         top = G0 - 70;
-      R(g, cx - 8, top - 70, 16, 40, "#f4f2ea");
+      R(g, cx - 8, top - 70, 16, 70, "#f4f2ea");
+      R(g, cx - 3, top - 60, 6, 10, "#2a3a5a");
       for (let i = 0; i < 20; i++) R(g, cx - 8 + i * 0.4, top - 90 + i, 16 - i * 0.8, 1, roof);
       R(g, cx - 1, top - 98, 2, 10, "#c8a040");
       R(g, cx - 4, top - 94, 8, 2, "#c8a040");

@@ -22,23 +22,27 @@ const WILDLIFE: Record<string, Crop> = {
   cow: [384, 298, 192, 166],
   person: [576, 272, 166, 195],
 };
-/** Drawn height in screen pixels at 512×448. */
+/**
+ * Drawn height in screen pixels at 512×448. Sized against the Equinox (about
+ * 1.7 m tall = 56 px, so roughly 33 px per metre), nudged up slightly for the
+ * smallest animals so they stay readable.
+ */
 const HEIGHTS: Record<string, number> = {
   storefront: 112,
   mailbox: 40,
   pole: 150,
   dumpster: 40,
   junkcar: 44,
-  tent: 50,
+  tent: 46,
   tree: 96,
   treeSmall: 64,
-  squirrel: 22,
-  cat: 30,
-  dog: 36,
-  raccoon: 28,
-  goose: 40,
-  deer: 66,
-  cow: 56,
+  squirrel: 14,
+  cat: 18,
+  dog: 24,
+  raccoon: 17,
+  goose: 28,
+  deer: 54,
+  cow: 50,
   person: 56,
   suv: 56,
 };
