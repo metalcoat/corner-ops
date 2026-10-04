@@ -3,8 +3,8 @@ import { getSql } from "@/lib/db";
 import {
   DELIVERY_PRIZE,
   DELIVERY_STAGES,
-  deliveriesThrough,
   deliveryMinimumSeconds,
+  deliveryQuotaThrough,
 } from "./config";
 import { DELIVERY_GAME_VERSION } from "@/lib/games/versions";
 let schema: Promise<void> | null = null;
@@ -61,14 +61,13 @@ export async function checkpointDelivery(body: any, token: string) {
     missed < Number(run.missed)
   )
     throw new Error("Invalid route checkpoint.");
-  // A checkpoint is only sent when a route is cleared, so every address on
-  // every route so far must be delivered, and enough real time must have
-  // passed for those addresses to have appeared at all.
+  // A checkpoint is only sent when a shift is survived, so every shift so far
+  // must have met its delivery quota, and shifts last a fixed time.
   const minimum = deliveryMinimumSeconds(stage);
   const [{ elapsed }] =
     await getSql()`SELECT EXTRACT(EPOCH FROM (NOW()-started_at))::float AS elapsed FROM delivery_boy_runs WHERE id=${body.runId}`;
   if (
-    delivered < deliveriesThrough(stage) ||
+    delivered < deliveryQuotaThrough(stage) ||
     active < minimum ||
     Number(elapsed) < minimum
   )
@@ -97,8 +96,7 @@ export async function completeDeliveryRun(id: string, token: string) {
     )[0];
   if (
     Number(run.stage) !== DELIVERY_STAGES.length ||
-    Number(run.delivered) <
-      DELIVERY_STAGES.reduce((n, s) => n + s.deliveries, 0) ||
+    Number(run.delivered) < deliveryQuotaThrough(DELIVERY_STAGES.length) ||
     Number(run.sequence) < DELIVERY_STAGES.length
   )
     throw new Error("The full route is not complete.");

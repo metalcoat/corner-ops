@@ -1,41 +1,147 @@
+/**
+ * A shift is one street, Paperboy style: it always lasts `time` seconds of
+ * driving, `deliveries` houses on it have ordered, and you keep your job only
+ * if at least `quota` of them get their food.
+ */
 export const DELIVERY_STAGES = [
-  { name: "Training Route", deliveries: 4, speed: 150, time: 70, hazards: 5 },
-  { name: "Dinner Run", deliveries: 6, speed: 180, time: 75, hazards: 8 },
-  { name: "Deer O'Clock", deliveries: 7, speed: 210, time: 78, hazards: 11 },
-  { name: "Friday Night", deliveries: 8, speed: 235, time: 80, hazards: 14 },
-  { name: "Last Run", deliveries: 10, speed: 265, time: 85, hazards: 18 },
+  { day: "MONDAY", name: "Monday Lunch", deliveries: 5, quota: 4, speed: 150, time: 60 },
+  { day: "TUESDAY", name: "Tuesday Dinner Run", deliveries: 7, quota: 5, speed: 180, time: 66 },
+  { day: "WEDNESDAY", name: "Wing Wednesday", deliveries: 8, quota: 6, speed: 210, time: 72 },
+  { day: "THURSDAY", name: "Deer O'Clock", deliveries: 9, quota: 7, speed: 235, time: 78 },
+  { day: "FRIDAY", name: "Friday Night Rush", deliveries: 11, quota: 9, speed: 265, time: 84 },
 ] as const;
 
-/** Seconds of driving before the next address can appear on a route. */
-export function deliveryTargetGap(stage: number) {
-  return Math.max(2.8, 4.4 - stage * 0.25);
-}
+/** Leave empty to hide the "real page" link in the game. */
+export const DELIVERY_FACEBOOK_URL = "";
 
 /**
- * Fastest humanly possible time to finish routes 1..stage. Addresses only
- * appear every deliveryTargetGap seconds, so a run that checkpoints faster
- * than this was not played in the browser.
+ * Shifts run for a fixed amount of driving, so a run that checkpoints faster
+ * than this (with a little slack for timer jitter) was not played in a browser.
  */
 export function deliveryMinimumSeconds(throughStage: number) {
-  return DELIVERY_STAGES.slice(0, throughStage).reduce(
-    (total, route, index) =>
-      total + route.deliveries * deliveryTargetGap(index + 1),
-    0,
+  return (
+    DELIVERY_STAGES.slice(0, throughStage).reduce(
+      (total, route) => total + route.time,
+      0,
+    ) * 0.95
   );
 }
 
-export function deliveriesThrough(stage: number) {
+export function deliveryQuotaThrough(stage: number) {
   return DELIVERY_STAGES.slice(0, stage).reduce(
-    (total, route) => total + route.deliveries,
+    (total, route) => total + route.quota,
     0,
   );
 }
 
-export const DELIVERY_OUT_OF_SUBS = [
-  "You ran out of subs with customers still waiting. Dispatch has asked you to return to the store and explain the shrubs.",
-  "The bag is empty. The last three porches received nothing but eye contact and a confident wave.",
-  "Out of inventory. Several hedges on this route are now better fed than the customers.",
-  "No subs left. You attempted to deliver the receipt alone. It was not well received.",
+export const DELIVERY_FIRED = [
+  "You finished the street with hungry customers behind you. Dispatch has asked you to return to the store and explain the shrubs.",
+  "Too many porches got nothing but eye contact and a confident wave. You are now a former employee and a current Facebook topic.",
+  "Several hedges on this route are now better fed than the customers. Management has reassigned you to the hedges.",
+  "You returned to the deli with a bag full of subs and a phone full of voicemails. Shift over.",
+  "The customers you missed have formed a group chat. It has more members than the deli has employees.",
+] as const;
+
+/** Every name here is fictional. */
+export const DELIVERY_FACEBOOK_PEOPLE = [
+  "Brenda K.",
+  "Dale (Not That Dale)",
+  "Concerned Ogdensburg Resident",
+  "Tammy Lynn R.",
+  "Gary From The Corner",
+  "Deb S.",
+  "Ron 'The Mayor' P.",
+  "Kayleigh M.",
+  "Big Steve",
+  "Linda (Admin of 4 Groups)",
+  "Chet W.",
+  "Marge T.",
+] as const;
+
+/** Posted even when the sub landed perfectly. {item} {address} are filled in. */
+export const DELIVERY_FACEBOOK_DELIVERED = [
+  "My {item} arrived at {address} hot, on time, and correct. I have never been so suspicious in my life. Who is running this deli and what do they want.",
+  "Driver threw my {item} onto the porch. It landed perfectly. Too perfectly. I watched the Ring footage 40 times and I believe he has done this before. 2 stars.",
+  "Ordered a {item}. Received a {item}. Where is the surprise? Where is the adventure? Ogdensburg used to have spirit.",
+  "The {item} came in a bag. I did not consent to a bag.",
+  "Delivery was so fast I had not finished complaining about the wait yet. Now I have to complain about this instead.",
+  "Driver did not wave. Driver was going 30 mph and throwing a sandwich. Still. Would have been nice.",
+  "My {item} was delivered to the correct address which is fine but my neighbor got one too and nobody explained that to me.",
+  "I asked for the sub to be left at the side door. It was left at the side door. The side door is not where I am. 1 star.",
+  "{item} was excellent. Unfortunately I ordered it for my husband and he loved it, so now he is insufferable. Who do I contact.",
+  "The sub landed on my welcome mat, which says WELCOME, so technically I invited it. I'd like to rescind that.",
+  "Sub was great. The bread was so soft I worried about it. Is the bread okay. Is anyone checking on the bread.",
+  "Arrived at {address} in under 20 minutes. My dog was not ready. My dog has never been ready.",
+  "Tossed my {item} from a moving vehicle like a newspaper in a 1985 arcade game. Honestly the best thing that's happened on this street since the parade.",
+  "The driver's car had a sub on the roof. I asked if that was mine. It was not mine. Now I want that one.",
+  "My order arrived correctly and the receipt was stapled straight. Who is training these people. It's unsettling.",
+  "I tipped in the app and the driver still threw it. I would like to know what tipping is FOR.",
+  "Not a complaint, just want everyone to know I got a {item} and you didn't. Anyway 3 stars.",
+  "Sub was delivered on time but in the general direction of my cat. The cat would like a word with management.",
+  "Five stars for the food. One star because the delivery car is louder than my thoughts.",
+  "The {item} landed on my porch. My porch is on the second floor. I need to know how.",
+] as const;
+
+/** Posted by the houses the driver missed. */
+export const DELIVERY_FACEBOOK_MISSED = [
+  "Ordered a {item} to {address} 45 minutes ago. Just watched the Corner Deli car drive past my house AT SPEED, holding my sub, making eye contact.",
+  "Still waiting on my {item}. I can see it from my window. It's in the neighbor's hedge. Do I go get it? Is that legal?",
+  "Driver blew right past {address}. Didn't even slow down. I'm not mad, I'm just going to post about it in five groups.",
+  "My {item} never came. I'm sitting on the porch in a lawn chair like it's 1962 and I'm waiting for a ship.",
+  "The car went by so fast my wind chimes are still going. No sub though. Just chimes.",
+  "No {item}. Called the deli. They said the driver 'saw a goose.' We all saw a goose. We have been seeing that goose for three years.",
+  "Waited an hour. Then I made a sandwich. Then I ate it angrily. Then I wrote this. Then I made another sandwich.",
+  "Watched my dinner go by on Google Maps tracking like a satellite I could not reach.",
+] as const;
+
+/** Posted by houses that never ordered but got a sub anyway. */
+export const DELIVERY_FACEBOOK_SAMPLES = [
+  "A sandwich hit my porch tonight and I did not order it. Best sub of my life. 1 star because I feel like I'm being recruited.",
+  "Someone threw a free sub at my house. I've been in the North Country 58 years and I know a bribe when I see one. It worked though.",
+  "Is anyone else getting unsolicited subs?? Mine was a {item}. I want to know who's getting the steak ones.",
+  "Free {item} landed on my lawn. Called the deli to report it. They asked if I wanted to order a drink with that. Bold.",
+  "I don't live here, I'm house-sitting, and the house got a sub. Does the sub count as part of the house. Asking for legal reasons.",
+  "Unordered sub on my steps. My Ring camera caught it all. Uploading in 4K, slow motion, with dramatic music.",
+] as const;
+
+/** For a shift where every single order landed. */
+export const DELIVERY_FACEBOOK_PERFECT = [
+  "Every house on my street got their order tonight and nobody's complaining. I don't trust it. Something is coming.",
+  "Whole block got fed on time. Linda from the group says it's a scam. Linda has not said what the scam is.",
+  "Corner Deli delivered to every house on the street. Even the house that's just a garage. The garage is thrilled.",
+  "Flawless route tonight. The deer are regrouping. Mark my words.",
+] as const;
+
+/** Comments under the posts. {name} is another fictional person. */
+export const DELIVERY_FACEBOOK_COMMENTS = [
+  "Mine was perfect too. Disgusting.",
+  "this is why I only order from the deli in person and then stand in the kitchen",
+  "{name} you need to let it go, it's been since 2019",
+  "Did anyone else see the goose",
+  "My cousin's friend drives for them and says the subs are 'aerodynamically wrapped.' Make of that what you will.",
+  "Following",
+  "I had the Big Boss Sub and lost the ability to speak for 20 minutes. In a good way.",
+  "{name} that's not even your street",
+  "Shared to Ogdensburg Rants & Raves (Unfiltered) (No Politics) (Some Politics)",
+  "The cow on River Rd has seen things.",
+  "I don't understand the problem. You got a sub. Celebrate.",
+  "Every time the delivery car goes by my dog thinks it's his birthday",
+  "This is why my grandfather walked to the deli. Uphill. In the snow. Both directions.",
+  "Not to brag but mine hit my mailbox and the flag went up",
+  "Can confirm, I am the neighbor, the sub was delicious",
+  "{name} please stop tagging me in these",
+] as const;
+
+/** The deli's deadpan replies. */
+export const DELIVERY_FACEBOOK_REPLIES = [
+  "We're so sorry the sandwich was correct. We'll look into it.",
+  "Thank you for your feedback. We have forwarded it to the driver, who read it at 30 mph.",
+  "We appreciate you! Please don't stand in the kitchen.",
+  "The goose has been spoken to.",
+  "Our drivers are trained to deliver to the porch. The porch moved. We're working with the porch.",
+  "Thanks for reaching out! Your sub is in the hedge. It is still a good sub.",
+  "We hear you. We are also scared of how good the bread is.",
+  "Please DM us your address so we can deliver an apology sub at a more reasonable velocity.",
 ] as const;
 
 export const DELIVERY_CAR_CRASHES = [
