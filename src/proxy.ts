@@ -37,6 +37,8 @@ const selfAuthorizedApiPaths = [
   // Tablet setup lists station and label printer names before anyone signs
   // in; it is still limited to approved POS networks by isDeliPosApi.
   "/api/ordering/device-setup",
+  // The label station checks its own sign-in (an employee or its screen pass).
+  "/api/ordering/labels",
   "/api/pizza-gauntlet/run",
   "/api/pizza-gauntlet/leaderboard",
   "/api/delivery-boy/run",

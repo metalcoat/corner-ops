@@ -1,7 +1,16 @@
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { labelQueue, printItemLabel } from "@/lib/ordering-labels";
-import { orderingActor } from "@/lib/ordering-route-auth";
+import { orderingActor, type OrderingActor } from "@/lib/ordering-route-auth";
+import { currentScreen } from "@/lib/screen-auth";
+
+/** A signed-in employee, or the label station screen's own permanent pass. */
+async function labelActor(business: OrderingBusiness): Promise<OrderingActor | null> {
+  const actor = await orderingActor(business);
+  if (actor) return actor;
+  const screen = business === "Corner Deli" ? await currentScreen("labels") : null;
+  return screen ? { id: `screen:${screen.id}`, name: screen.name, type: "employee", role: "employee" } : null;
+}
 
 export const runtime = "nodejs";
 
@@ -15,7 +24,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const business = businessFrom(url.searchParams.get("business") || "Corner Deli");
-    if (!(await orderingActor(business))) return unauthorized();
+    if (!(await labelActor(business))) return unauthorized();
     return Response.json(await labelQueue(business, String(url.searchParams.get("printerId") || "")));
   } catch (error) {
     return apiError(error);
@@ -27,7 +36,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const business = businessFrom(body.business || "Corner Deli");
-    const actor = await orderingActor(business);
+    const actor = await labelActor(business);
     if (!actor) return unauthorized();
     const unitIndex = Number(body.unitIndex);
     if (!Number.isSafeInteger(unitIndex) || unitIndex < 0) throw new Error("Unknown label.");

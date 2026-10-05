@@ -1,48 +1,47 @@
-import { orderingBusinessConfigs } from "@/lib/ordering-business-config";
-import "./pos.css";
-import "./pos-separation.css";
+import type { Metadata } from "next";
+import "./pos-home.css";
 
-export default function PosDevelopmentHome() {
-  const deli = orderingBusinessConfigs["Corner Deli"];
-  const tiki = orderingBusinessConfigs.Tiki;
+export const metadata: Metadata = { title: "Corner Deli" };
 
-  return <main className="posDevHome">
-    <section className="posDevHomeCard">
-      <span className="posDevBadge">DEVELOPMENT · AUTO DEPLOY OFF</span>
-      <p className="posDevEyebrow">Replacement POS build</p>
-      <h1>Separate POS applications</h1>
-      <p>
-        The deli and Tiki share lower-level ordering infrastructure, but their POS screens,
-        features, operational workflows, and reporting stay business-specific. This development
-        area is intentionally separate from the live Corner Ops application until parallel testing begins.
-      </p>
-      <div className="posDevChoices">
-        <a href={deli.posPath}>
-          <strong>Corner Deli POS</strong>
-          <span>Pickup, delivery, drivers, deli inventory, and deli-only reporting. No bar tabs.</span>
-        </a>
-        <a href={tiki.posPath}>
-          <strong>Tiki POS</strong>
-          <span>Bar service, tabs, Tiki inventory, and Tiki-only reporting. No deli driver workflow.</span>
-        </a>
-        <a href="/pos/restaurant">
-          <strong>New Restaurant · Table Service</strong>
-          <span>Floor plan, server table sessions, seat counts, and Tiki-based menu ordering.</span>
-        </a>
-        <a href="/kiosk/deli">
-          <strong>Corner Deli Kiosk</strong>
-          <span>Touch-first self-service menu using the authoritative deli catalog and modifiers.</span>
-        </a>
-        <a href="/display/deli" target="_blank" rel="noreferrer">
-          <strong>Corner Deli Customer Display</strong>
-          <span>Open full-screen on the customer-facing monitor to mirror the active register cart.</span>
-        </a>
-        <a href="/pos/deli/settings">
-          <strong>Deli delivery & tax settings</strong>
-          <span>Edit the delivery minimum, mileage bands, fees, tax-inclusive mode, and current tax rate.</span>
-        </a>
-      </div>
-      <a className="posDevExit" href="/ops/people">Return to live-style Corner Ops area</a>
-    </section>
-  </main>;
+const MAIN = [
+  { href: "/pos/deli", icon: "🧾", title: "POS", detail: "Take orders, phone orders and payments." },
+  { href: "/pos/labels", icon: "🏷️", title: "Labels", detail: "Print the sticker label for each sub and pizza." },
+  { href: "/pos/board", icon: "📺", title: "Dashboard", detail: "Order status board for the monitor. Stays signed in." },
+];
+const OTHER = [
+  { href: "/pos/deli/kitchen", title: "Kitchen display" },
+  { href: "/display/deli", title: "Customer display" },
+  { href: "/kiosk/deli", title: "Self-order kiosk" },
+  { href: "/employee/deliveries", title: "Driver tablet" },
+  { href: "/pos/deli/dashboard", title: "Manager dashboard" },
+  { href: "/pos/deli/settings", title: "Settings" },
+  { href: "/setup", title: "Set up a tablet" },
+  { href: "/pos/tiki", title: "Tiki POS" },
+  { href: "/pos/restaurant", title: "Restaurant table service" },
+  { href: "/ops/people", title: "Employees" },
+];
+
+export default function PosHome() {
+  return (
+    <main className="posHome">
+      <header>
+        <p>CORNER DELI</p>
+        <h1>What are you opening?</h1>
+      </header>
+      <nav className="posHomeMain" aria-label="Main screens">
+        {MAIN.map((item) => (
+          <a key={item.href} href={item.href}>
+            <span aria-hidden="true">{item.icon}</span>
+            <strong>{item.title}</strong>
+            <small>{item.detail}</small>
+          </a>
+        ))}
+      </nav>
+      <nav className="posHomeOther" aria-label="Other screens">
+        {OTHER.map((item) => (
+          <a key={item.href} href={item.href}>{item.title}</a>
+        ))}
+      </nav>
+    </main>
+  );
 }

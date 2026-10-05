@@ -119,6 +119,7 @@ export default function HardwareSettingsClient() {
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [thisTablet, setThisTablet] = useState("");
   const [locationName, setLocationName] = useState("");
+  const [screens, setScreens] = useState<Array<{ id: string; kind: string; name: string; signed_in_by: string; last_seen_at: string }>>([]);
 
   async function load() {
     const [response, paymentResponse, reviewResponse] = await Promise.all([
@@ -131,6 +132,8 @@ export default function HardwareSettingsClient() {
     setData(body);
     if (paymentResponse.ok) setProvider(paymentBody);
     if (reviewResponse.ok) setReviews(Array.isArray(reviewBody.sales) ? reviewBody.sales : []);
+    const screenResponse = await fetch("/api/pos/screen?list=1", { cache: "no-store" }).catch(() => null);
+    if (screenResponse?.ok) setScreens((await screenResponse.json()).screens || []);
   }
   useEffect(() => {
     try {
@@ -890,6 +893,42 @@ export default function HardwareSettingsClient() {
             </article>
           ))}
         </div>
+      </section>
+
+      {/* ---------------- Always-on screens ---------------- */}
+      <section className="hwSection">
+        <h3>Screens that stay signed in</h3>
+        <p className="hwIntro">The status board monitor and label stations sign in once and never time out. Sign one out here if it moves or goes missing.</p>
+        {screens.length === 0 ? (
+          <p className="hwEmpty">None yet. Open the Dashboard or Labels from the /pos screen on that device and sign in once.</p>
+        ) : (
+          <ul className="hwJobs">
+            {screens.map((screen) => (
+              <li key={screen.id}>
+                <span>
+                  <strong>{screen.name}</strong> · {screen.kind === "board" ? "Status board" : "Label station"}
+                  <small>
+                    Signed in by {screen.signed_in_by} · last seen {new Date(screen.last_seen_at).toLocaleString()}
+                  </small>
+                </span>
+                <button
+                  type="button"
+                  className="hwDanger"
+                  onClick={() => {
+                    if (!confirm(`Sign out ${screen.name}? It will ask for a PIN next time.`)) return;
+                    void fetch(`/api/pos/screen?id=${encodeURIComponent(screen.id)}`, { method: "DELETE" }).then(async (response) => {
+                      if (!response.ok) return setMessage({ text: "Could not sign that screen out.", tone: "bad" });
+                      setScreens((rows) => rows.filter((row) => row.id !== screen.id));
+                      setMessage({ text: `${screen.name} signed out.`, tone: "good" });
+                    });
+                  }}
+                >
+                  Sign out
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {/* ---------------- Print history ---------------- */}

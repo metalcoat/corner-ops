@@ -135,9 +135,9 @@ export default function LabelStationClient() {
     return (
       <main className="labelStation">
         <section className="labelEmpty">
-          <h1>Sign in to the POS first</h1>
-          <p>The label station uses the POS sign-in. Sign in with your PIN, then come back to this screen.</p>
-          <Link className="labelButton" href="/pos/deli">Go to POS sign-in</Link>
+          <h1>This screen was signed out</h1>
+          <p>A manager signed this label station out. Sign it in again to keep printing.</p>
+          <button className="labelButton" onClick={() => window.location.reload()}>Sign in again</button>
         </section>
       </main>
     );

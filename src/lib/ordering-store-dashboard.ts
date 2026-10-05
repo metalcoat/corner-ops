@@ -5,7 +5,7 @@ import { deliveryRoutePlans, syncDeliveryAssignments } from "@/lib/ordering-driv
 export async function orderingStoreDashboard(){
   await syncDeliveryAssignments("Corner Deli");
   const sql=getSql();
-  const [summary,timedOrders,unpaidOrders,deliveries,activity]=await Promise.all([
+  const [summary,timedOrders,unpaidOrders,deliveries,activity,openOrders]=await Promise.all([
     sql`SELECT
       COUNT(*) FILTER(WHERE created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York'))::int orders_today,
       COUNT(*) FILTER(WHERE status NOT IN('completed','cancelled'))::int open_orders,
@@ -33,7 +33,19 @@ export async function orderingStoreDashboard(){
       ORDER BY CASE d.status WHEN 'DELIVERY_FAILED' THEN 0 WHEN 'NO_CONTACT' THEN 1 WHEN 'EN_ROUTE' THEN 2 WHEN 'READY_FOR_DRIVER' THEN 3 ELSE 4 END,COALESCE(o.scheduled_for,o.created_at) LIMIT 60`,
     sql`SELECT a.id,a.action,a.new_status,a.created_at,o.display_number,e.name employee_name
       FROM ordering_delivery_audit a JOIN ordering_orders o ON o.id=a.order_id LEFT JOIN employees e ON e.id=a.employee_id
-      WHERE o.business='Corner Deli' AND a.created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York') ORDER BY a.created_at DESC LIMIT 30`
+      WHERE o.business='Corner Deli' AND a.created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York') ORDER BY a.created_at DESC LIMIT 30`,
+    // Every open order with where it is right now, for the status board monitor.
+    sql`SELECT o.id,o.display_number,o.status,o.service_type,o.timing_mode,o.scheduled_for,o.created_at,o.updated_at,
+      COALESCE(NULLIF(trim(o.first_name_snapshot||' '||LEFT(o.last_name_snapshot,1)),''),'Guest') customer_name,
+      (SELECT COALESCE(SUM(GREATEST(i.quantity-COALESCE(i.cancelled_quantity,0),0)),0)::int FROM ordering_order_items i WHERE i.order_id=o.id) item_count,
+      d.status delivery_status,e.name driver_name
+      FROM ordering_orders o
+      LEFT JOIN LATERAL(SELECT status,driver_employee_id FROM ordering_delivery_assignments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) d ON TRUE
+      LEFT JOIN employees e ON e.id=d.driver_employee_id
+      WHERE o.business='Corner Deli' AND o.status NOT IN('draft','completed','cancelled')
+        AND (o.created_at>NOW()-INTERVAL '18 hours' OR o.scheduled_for<NOW()+INTERVAL '12 hours')
+        AND COALESCE(d.status,'') NOT IN('DELIVERED','RETURNED','CANCELLED')
+      ORDER BY COALESCE(o.scheduled_for,o.created_at),o.created_at LIMIT 120`
   ]);
   const deliveryRows=deliveries as Array<Record<string,unknown>>;
   const tasks=[
@@ -43,5 +55,5 @@ export async function orderingStoreDashboard(){
     {key:"timed",label:"Timed orders due within four hours",count:Number(summary[0]?.timed_upcoming||0),href:"/pos/deli/orders"},
     {key:"unpaid",label:"Open orders with a balance",count:Number(summary[0]?.unpaid_open||0),href:"/pos/deli/orders"}
   ];
-  return{generatedAt:new Date().toISOString(),summary:summary[0],tasks,timedOrders,unpaidOrders,deliveries,routePlans:deliveryRoutePlans(deliveryRows,new Date(),await deliLocation()),activity};
+  return{generatedAt:new Date().toISOString(),summary:summary[0],tasks,timedOrders,unpaidOrders,deliveries,openOrders,routePlans:deliveryRoutePlans(deliveryRows,new Date(),await deliLocation()),activity};
 }
