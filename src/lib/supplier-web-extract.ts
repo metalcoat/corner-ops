@@ -140,3 +140,26 @@ export function productsToCsv(products: WebProduct[]): string {
     rows.push([p.sku, p.pack, p.size, p.unit, p.brand, p.description, p.casePrice == null ? "" : p.casePrice.toFixed(2), p.unitPrice == null ? "" : p.unitPrice.toFixed(2)]);
   return rows.map((row) => row.map(cell).join(",")).join("\n");
 }
+
+/**
+ * The one-time sign-in code in a supplier's email or text ("Your verification
+ * code is 482913"). Numbers near the words code/verification/passcode win;
+ * years, prices, phone numbers and ZIP codes lose.
+ */
+export function extractSignInCode(text: string): string | null {
+  const clean = text.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
+  const candidates: Array<{ code: string; score: number }> = [];
+  for (const match of clean.matchAll(/(?<![\d$.,\-/:#(])(\d{4,8})(?![\d,\-/:%)]|\.\d)/g)) {
+    const code = match[1], at = match.index ?? 0;
+    const before = clean.slice(Math.max(0, at - 80), at).toLowerCase(), after = clean.slice(at + code.length, at + code.length + 30).toLowerCase();
+    if (/^(19|20)\d\d$/.test(code) && !/code/.test(before.slice(-25))) continue; // a year
+    if (/(zip|ny|suite|ste|po box|street|st\.|ave)\s*$/.test(before) || /^\s*(st|ave|rd|street|road)\b/.test(after)) continue; // an address
+    let score = code.length === 6 ? 3 : code.length === 8 || code.length === 4 ? 1 : 0;
+    if (/(code|passcode|verification|one[- ]time|otp|pin)\W{0,20}$/.test(before)) score += 10;
+    else if (/(code|passcode|verification|one[- ]time|otp)/.test(before)) score += 5;
+    if (/^\s*(is|expires|to sign|to verify|to log)/.test(after)) score += 2;
+    candidates.push({ code, score });
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0] && candidates[0].score >= 5 ? candidates[0].code : null;
+}

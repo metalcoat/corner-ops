@@ -9,6 +9,8 @@ type Supplier = {
   deliveryDays: number[]; cutoffTime: string; cutoffDaysBefore: number; shipsInDays: number | null;
   contactName: string; email: string; phone: string; accountNumber: string; notes: string; next: Window;
   priceSync: { at: string; status: "ok" | "needs_login" | "needs_code" | "no_products" | "failed"; message: string; products: number | null } | null;
+  syncRequestedAt: string | null;
+  codeSentAt: string | null;
 };
 type Price = { supplierId: string; caseQuantity: number; caseUnit: string; casePriceCents: number; vendorSku: string; quotedAt: string | null; unitCostCents: number | null };
 type Item = {
@@ -50,9 +52,10 @@ export default function SupplierCosts() {
   const [busy, setBusy] = useState("");
   const [editing, setEditing] = useState<{ itemId: string; supplierId: string; caseQuantity: string; caseUnit: string; price: string; sku: string } | null>(null);
   const [usageEdit, setUsageEdit] = useState<{ itemId: string; weekly: string; par: string } | null>(null);
-  const [supplierEdit, setSupplierEdit] = useState<(Omit<Supplier, "minimumOrderCents" | "minimumCases" | "deliveryFeeCents" | "freeDeliveryOverCents" | "shipsInDays" | "next" | "priceSync"> & { minimumCases: string } & { minimum: string; fee: string; freeOver: string; ships: string }) | null>(null);
+  const [supplierEdit, setSupplierEdit] = useState<(Omit<Supplier, "minimumOrderCents" | "minimumCases" | "deliveryFeeCents" | "freeDeliveryOverCents" | "shipsInDays" | "next" | "priceSync" | "syncRequestedAt" | "codeSentAt"> & { minimumCases: string } & { minimum: string; fee: string; freeOver: string; ships: string }) | null>(null);
   const [importing, setImporting] = useState({ supplierId: "", text: "" });
   const [filter, setFilter] = useState("");
+  const [codes, setCodes] = useState<Record<string, string>>({});
   const [specEdit, setSpecEdit] = useState<{ itemId: string; keywords: string; maxUnit: string; minPack: string; maxPack: string } | null>(null);
   const [search, setSearch] = useState({ query: "", unit: "lb", itemId: "" });
   const [results, setResults] = useState<SearchResult[] | null>(null);
@@ -69,6 +72,13 @@ export default function SupplierCosts() {
   useEffect(() => {
     void load();
   }, [load]);
+  // While a website sync is starting or waiting on a code, keep the page current.
+  const syncing = Boolean(data?.suppliers.some((s) => s.syncRequestedAt || (s.priceSync?.status === "needs_code" && Date.now() - new Date(s.priceSync.at).getTime() < 10 * 60_000) || s.priceSync?.message === "Code entered; signing in…"));
+  useEffect(() => {
+    if (!syncing) return;
+    const timer = window.setInterval(() => void load(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [syncing, load]);
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(""), 5000);
@@ -642,6 +652,29 @@ export default function SupplierCosts() {
                     </dd>
                   </div>
                 </dl>
+                {/* The job is waiting on a sign-in code (it also checks the deli's email for it). */}
+                {s.priceSync?.status === "needs_code" && Date.now() - new Date(s.priceSync.at).getTime() < 10 * 60_000 && (
+                  <form
+                    className="codeForm"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void post(`code:${s.id}`, { action: "sync_code", supplierId: s.id, code: codes[s.id] ?? "" }, () => `Code sent to the ${s.name} sign-in.`).then((ok) => ok && setCodes((c) => ({ ...c, [s.id]: "" })));
+                    }}
+                  >
+                    <label>
+                      Code from {s.name}
+                      <input inputMode="numeric" autoComplete="one-time-code" value={codes[s.id] ?? ""} onChange={(e) => setCodes((c) => ({ ...c, [s.id]: e.target.value }))} placeholder="123456" />
+                    </label>
+                    <button disabled={!(codes[s.id] ?? "").trim() || busy === `code:${s.id}`}>SEND CODE</button>
+                  </form>
+                )}
+                <button
+                  className="ghost syncNow"
+                  disabled={Boolean(busy) || Boolean(s.syncRequestedAt)}
+                  onClick={() => void post(`sync:${s.id}`, { action: "sync_now", supplierId: s.id }, () => `${s.name} prices will update within about 5 minutes.`)}
+                >
+                  {s.syncRequestedAt ? "SYNC STARTING…" : "SYNC PRICES NOW"}
+                </button>
               </article>
             ),
           )}

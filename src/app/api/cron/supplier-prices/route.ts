@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { getSql } from "@/lib/db";
-import { ensureSupplierCostSchema, importPrices, ingestCatalog, recordPriceSync, SupplierCostError, type CatalogProduct } from "@/lib/ordering-supplier-costs";
+import { ensureSupplierCostSchema, importPrices, ingestCatalog, recordPriceSync, SupplierCostError, takeSyncCode, takeSyncRequests, type CatalogProduct } from "@/lib/ordering-supplier-costs";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -11,6 +11,21 @@ function authorized(request: Request): boolean {
   const supplied = Buffer.from(request.headers.get("authorization") || "");
   const expected = Buffer.from(`Bearer ${secret}`);
   return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+}
+
+/**
+ * For the price job on the store server:
+ *   ?code=<supplier>   the sign-in code a manager typed in on Supplier costs (once)
+ *   ?requested=1       suppliers someone pressed "Sync now" for
+ */
+export async function GET(request: Request) {
+  if (!process.env.CRON_SECRET?.trim()) return Response.json({ error: "CRON_SECRET is not configured." }, { status: 503 });
+  if (!authorized(request)) return Response.json({ error: "Unauthorized." }, { status: 401 });
+  const url = new URL(request.url);
+  const supplier = url.searchParams.get("code");
+  if (supplier) return Response.json({ code: await takeSyncCode(supplier) });
+  if (url.searchParams.get("requested")) return Response.json({ suppliers: await takeSyncRequests() });
+  return Response.json({ error: "Ask for code or requested." }, { status: 400 });
 }
 
 /**

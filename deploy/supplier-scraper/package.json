@@ -4,6 +4,8 @@
   "type": "module",
   "dependencies": {
     "playwright": "1.63.0",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "imapflow": "2.2.5",
+    "mailparser": "3.9.36"
   }
 }

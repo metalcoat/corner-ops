@@ -140,6 +140,17 @@ services:
       PFG_CODE: ${PFG_CODE:-}
       PFG_LOGIN_URL: ${PFG_LOGIN_URL:-}
       PFG_ORDER_GUIDE_URL: ${PFG_ORDER_GUIDE_URL:-}
+      SYSCO_CODE_VIA: ${SYSCO_CODE_VIA:-}
+      SYSCO_CODE_FROM: ${SYSCO_CODE_FROM:-}
+      USFOODS_CODE_VIA: ${USFOODS_CODE_VIA:-}
+      USFOODS_CODE_FROM: ${USFOODS_CODE_FROM:-}
+      PFG_CODE_VIA: ${PFG_CODE_VIA:-}
+      PFG_CODE_FROM: ${PFG_CODE_FROM:-}
+      CODE_EMAIL_HOST: ${CODE_EMAIL_HOST:-}
+      CODE_EMAIL_PORT: ${CODE_EMAIL_PORT:-}
+      CODE_EMAIL_USER: ${CODE_EMAIL_USER:-}
+      CODE_EMAIL_PASSWORD: ${CODE_EMAIL_PASSWORD:-}
+      CODE_EMAIL_FOLDER: ${CODE_EMAIL_FOLDER:-}
     volumes:
       - cornerops_supplier_browsers:/profiles
       - ${SUPPLIER_PRICES_DIR:-/opt/corner-ops/supplier-prices}/_website:/debug

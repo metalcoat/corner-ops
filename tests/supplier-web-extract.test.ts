@@ -54,3 +54,11 @@ test("CSV round-trips through the order-guide importer", () => {
     ["118822", "Chicken Tenders", 20, "lb", 7390],
   ]);
 });
+
+test("finds the sign-in code in supplier emails, not years, prices, or addresses", async () => {
+  const { extractSignInCode } = await import("../src/lib/supplier-web-extract.js");
+  assert.equal(extractSignInCode("US Foods: Your verification code is 482913. It expires in 10 minutes."), "482913");
+  assert.equal(extractSignInCode("<p>Hello,</p><p>Use this one-time code to sign in:</p><h2>&nbsp;730 441&nbsp;</h2>".replace("730 441", "730441")), "730441");
+  assert.equal(extractSignInCode("© 2026 US Foods, 9399 W Higgins Rd, Rosemont IL 60018. Order total $1234.50. Your passcode: 5521"), "5521");
+  assert.equal(extractSignInCode("Thanks for your order of 2026-10-05. Call 315-555-0100."), null);
+});

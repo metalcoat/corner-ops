@@ -41,6 +41,10 @@ export function ensureSupplierCostSchema() {
     await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_status TEXT NOT NULL DEFAULT ''`;
     await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_message TEXT NOT NULL DEFAULT ''`;
     await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_products INTEGER`;
+    // A one-time sign-in code typed in by a manager, and "Sync now" requests, both picked up by the price job.
+    await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_code TEXT`;
+    await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_code_at TIMESTAMPTZ`;
+    await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_requested_at TIMESTAMPTZ`;
     await sql`ALTER TABLE ordering_inventory_items ADD COLUMN IF NOT EXISTS weekly_usage_override NUMERIC(14,3)`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_inventory_requests(
       id UUID PRIMARY KEY,
@@ -262,7 +266,9 @@ export async function supplierCostDashboard(mode: CostMode = "week") {
     catalogSize: Number((await sql`SELECT COUNT(*) n FROM ordering_supplier_catalog c JOIN ordering_inventory_suppliers s ON s.id=c.supplier_id WHERE s.business=${BUSINESS}`)[0].n),
     mode,
     suppliers: supplierRows.map((row) => ({ ...supplierTerms(row), contactName: row.contact_name, email: row.email, phone: row.phone, accountNumber: row.account_number, notes: row.notes, next: nextDelivery(supplierTerms(row)),
-      priceSync: row.price_sync_at ? { at: row.price_sync_at, status: String(row.price_sync_status), message: String(row.price_sync_message), products: row.price_sync_products == null ? null : Number(row.price_sync_products) } : null })),
+      priceSync: row.price_sync_at ? { at: row.price_sync_at, status: String(row.price_sync_status), message: String(row.price_sync_message), products: row.price_sync_products == null ? null : Number(row.price_sync_products) } : null,
+      syncRequestedAt: row.price_sync_requested_at ?? null,
+      codeSentAt: row.price_sync_code_at ?? null })),
     items: rows,
     analysis,
     requests,
@@ -290,6 +296,19 @@ export async function supplierCostAction(body: Record<string, unknown>, actorNam
         cutoff_days_before=EXCLUDED.cutoff_days_before,ships_in_days=EXCLUDED.ships_in_days,account_number=EXCLUDED.account_number,notes=EXCLUDED.notes,updated_at=NOW()
       RETURNING id`;
     return { id: rows[0].id };
+  }
+  if (action === "sync_now") {
+    // The store server checks for these every few minutes and starts the website price job.
+    const id = String(body.supplierId || "");
+    await sql`UPDATE ordering_inventory_suppliers SET price_sync_requested_at=NOW() WHERE business=${BUSINESS} AND (${id}='' OR id::text=${id})`;
+    return { ok: true };
+  }
+  if (action === "sync_code") {
+    const code = String(body.code || "").replace(/\s+/g, "");
+    if (!/^[A-Za-z0-9-]{4,12}$/.test(code)) throw new SupplierCostError("Enter the code exactly as it was sent.");
+    const rows = await sql`UPDATE ordering_inventory_suppliers SET price_sync_code=${code},price_sync_code_at=NOW(),price_sync_message='Code entered; signing in…' WHERE id=${required(body.supplierId, "Supplier")} AND business=${BUSINESS} RETURNING id`;
+    if (!rows.length) throw new SupplierCostError("Supplier not found.");
+    return { ok: true };
   }
   if (action === "save_price") {
     const supplierId = required(body.supplierId, "Supplier"), itemId = required(body.itemId, "Item");
@@ -592,4 +611,22 @@ export async function recordPriceSync(supplierId: string, result: { status: "ok"
   await ensureSupplierCostSchema();
   await getSql()`UPDATE ordering_inventory_suppliers SET price_sync_at=NOW(),price_sync_status=${result.status},price_sync_message=${String(result.message || "").slice(0, 500)},
     price_sync_products=${result.products ?? null} WHERE id=${supplierId} AND business=${BUSINESS}`;
+}
+
+/** The sign-in code a manager entered in the last 15 minutes (used once). */
+export async function takeSyncCode(supplierName: string) {
+  await ensureSupplierCostSchema();
+  const row = (await getSql()`UPDATE ordering_inventory_suppliers s SET price_sync_code=NULL
+    FROM (SELECT id,price_sync_code FROM ordering_inventory_suppliers WHERE business=${BUSINESS} AND lower(name)=lower(${supplierName})
+      AND price_sync_code IS NOT NULL AND price_sync_code_at>NOW()-INTERVAL '15 minutes' FOR UPDATE) old
+    WHERE s.id=old.id RETURNING old.price_sync_code code`)[0];
+  return row ? String(row.code) : null;
+}
+
+/** Suppliers someone pressed "Sync now" for (cleared once handed out). */
+export async function takeSyncRequests() {
+  await ensureSupplierCostSchema();
+  const rows = await getSql()`UPDATE ordering_inventory_suppliers SET price_sync_requested_at=NULL
+    WHERE business=${BUSINESS} AND price_sync_requested_at IS NOT NULL AND price_sync_requested_at>NOW()-INTERVAL '2 hours' RETURNING name`;
+  return rows.map((row) => String(row.name));
 }

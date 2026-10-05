@@ -1,8 +1,8 @@
 [Unit]
-Description=Every 30 minutes, 5am–9pm: pick up new supplier price files
+Description=Every 5 minutes, 5am–11pm: new supplier price files and "Sync prices now" requests
 
 [Timer]
-OnCalendar=*-*-* 05..21:00,30:00 America/New_York
+OnCalendar=*-*-* 05..22:00/5:00 America/New_York
 Persistent=true
 Unit=corner-ops-supplier-prices.service
 

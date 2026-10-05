@@ -25,11 +25,21 @@ mkdir -p "$DROP" "$DROP/_website"
 # --website: sign in to the suppliers' sites and pull today's prices (see
 # deploy/supplier-scraper). Optional second argument limits it to one supplier:
 #   supplier-prices-sync.sh --website sysco
-if [[ "${1:-}" == "--website" ]]; then
-  readonly RUNTIME="$ROOT/runtime"
-  compose=(docker compose --project-name corner-ops --env-file "$ENV_FILE" -f "$RUNTIME/docker-compose.local.yml" --profile tools)
+website() {
+  # One website run at a time: they share each supplier's browser profile.
+  exec 8>"$DROP/_website/.lock"
+  if ! flock -n 8; then
+    printf '%s A website price run is already going; skipping.\n' "$(date -u +%FT%TZ)"
+    return 0
+  fi
+  local compose=(docker compose --project-name corner-ops --env-file "$ENV_FILE" -f "$ROOT/runtime/docker-compose.local.yml" --profile tools)
   "${compose[@]}" build --quiet supplier-prices
-  exec "${compose[@]}" run --rm --no-deps supplier-prices ${2:+"$2"}
+  "${compose[@]}" run --rm --no-deps supplier-prices "$@"
+}
+if [[ "${1:-}" == "--website" ]]; then
+  shift
+  website "$@"
+  exit $?
 fi
 
 shopt -s nullglob
@@ -53,4 +63,13 @@ for dir in "$DROP"/*/; do
     fi
   done
 done
+# "Sync prices now" pressed on Supplier costs: run the website job for those suppliers.
+requested="$(curl -fsS --max-time 30 -H @<(printf 'Authorization: Bearer %s\n' "$secret") 'http://127.0.0.1:3000/api/cron/supplier-prices?requested=1' 2>/dev/null \
+  | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin).get("suppliers", [])))' 2>/dev/null || true)"
+while IFS= read -r supplier; do
+  [[ -n "$supplier" ]] || continue
+  printf '%s Sync now: %s\n' "$(date -u +%FT%TZ)" "$supplier"
+  website "$supplier" || status=1
+done <<< "$requested"
+
 exit "$status"
