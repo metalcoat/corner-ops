@@ -137,6 +137,7 @@ export default function CatalogEditor({
     dragGhostRef = useRef<HTMLDivElement>(null),
     [query, setQuery] = useState(""),
     [mode, setMode] = useState<"catalog" | "modifiers">("catalog"),
+    [arranging, setArranging] = useState(false),
     [error, setError] = useState(""),
     [dirty, setDirty] = useState(false),
     [draft, setDraft] = useState<any>({});
@@ -260,6 +261,14 @@ export default function CatalogEditor({
   };
   appendCategories(null, 0);
   data.categories.filter((category) => !visited.has(category.id)).forEach((category) => categoryRows.push({ category, depth: 0 }));
+  const topCategories = data.categories.filter((category) => !category.parent_id || !data.categories.some((row) => row.id === category.parent_id)).toSorted((a, b) => categoryRows.findIndex((row) => row.category.id === a.id) - categoryRows.findIndex((row) => row.category.id === b.id));
+  const topOf = (id: string): string => {
+    const category = data.categories.find((row) => row.id === id);
+    return category?.parent_id && data.categories.some((row) => row.id === category.parent_id) ? topOf(category.parent_id) : id;
+  };
+  const activeTop = selectedCategory ? topOf(selectedCategory) : "";
+  const topCategory = data.categories.find((row) => row.id === activeTop);
+  const subCategories = categoryRows.filter((row) => row.depth > 0 && topOf(row.category.id) === activeTop).map((row) => row.category);
   const current = data.items.find((i) => i.id === selectedItem),
     currentCategory = data.categories.find((category) => category.id === selectedCategory),
     variants = data.variants.filter((v) => v.item_id === selectedItem),
@@ -376,183 +385,142 @@ export default function CatalogEditor({
   return (
     <section className="catalogEditor">
       <div className="catalogTools">
-        <button
-          className={mode === "catalog" ? "selected" : ""}
-          onClick={() => setMode("catalog")}
-        >
-          MENU DRILL-DOWN
-        </button>
-        <button
-          className={mode === "modifiers" ? "selected" : ""}
-          onClick={() => setMode("modifiers")}
-        >
-          SHARED MODIFIER LIBRARY
-        </button>
-        <input
-          aria-label="Search menu"
-          placeholder="Search items, variants, modifiers…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <div className="catalogModes">
+          <button className={mode === "catalog" ? "selected" : ""} onClick={() => setMode("catalog")}>Menu</button>
+          <button className={mode === "modifiers" ? "selected" : ""} onClick={() => setMode("modifiers")}>Modifier library</button>
+        </div>
+        <input aria-label="Search menu" placeholder="Search items, sizes, toppings…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        {mode === "catalog" && (
+          <button className={arranging ? "arrangeOn" : ""} onClick={() => setArranging((value) => !value)}>
+            {arranging ? "Done arranging" : "Arrange order"}
+          </button>
+        )}
       </div>
       {error && <p role="alert">{error}</p>}
       {mode === "catalog" ? (
-        <div className="threePane">
-          <aside>
-            <h2>Categories</h2>
+        <div className="menuMirror">
+          {/* Category tabs, like the top of the POS menu. */}
+          <nav className="mirrorTabs" aria-label="Menu categories">
+            {topCategories.map((c, index) => (
+              <div
+                key={c.id}
+                className={`mirrorTab${activeTop === c.id ? " selected" : ""}${c.active ? "" : " hidden"}`}
+                data-reorder-entity="category"
+                data-reorder-id={c.id}
+                draggable={arranging}
+                onDragStart={() => setDragging({ entity: "category", id: c.id })}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => drop("category", c.id)}
+              >
+                {arranging && (
+                  <button aria-label={`Move ${categoryName(c)} left`} disabled={index === 0} onClick={() => move("category", c.id, -1)}>◀</button>
+                )}
+                <button className="mirrorTabName" onClick={() => setSelectedCategory(c.id)}>
+                  {c.display_name || c.name}
+                  {!c.active && <small> hidden</small>}
+                </button>
+                {arranging && (
+                  <button aria-label={`Move ${categoryName(c)} right`} disabled={index === topCategories.length - 1} onClick={() => move("category", c.id, 1)}>▶</button>
+                )}
+              </div>
+            ))}
             <button
+              className="mirrorAdd"
               onClick={async () => {
-                const name = prompt("New category name");
+                const name = prompt("New category name (for example: Subs, Pizza, Sides)");
                 if (name) await post({ action: "create_category", name });
               }}
             >
               + Category
             </button>
-            {currentCategory && <div className="categoryEditor" key={currentCategory.id}>
-              <label>Name<input defaultValue={currentCategory.display_name || currentCategory.name} onBlur={(event) => { const name=event.currentTarget.value.trim();if(name&&name!==(currentCategory.display_name||currentCategory.name))void post({action:"update",entity:"category",id:currentCategory.id,patch:{name,displayName:name}}) }}/></label>
-              <label>Parent<select value={currentCategory.parent_id || ""} onChange={(event)=>void post({action:"update",entity:"category",id:currentCategory.id,patch:{parentId:event.target.value}})}><option value="">Top-level category</option>{data.categories.filter(category=>category.id!==currentCategory.id&&category.parent_id!==currentCategory.id).map(category=><option key={category.id} value={category.id}>{categoryName(category)}</option>)}</select></label>
-              <label><input type="checkbox" checked={currentCategory.active} onChange={(event)=>void post({action:"update",entity:"category",id:currentCategory.id,patch:{active:event.target.checked}})}/> Active</label>
-              <button onClick={async()=>{const name=prompt(`New subcategory under ${currentCategory.display_name||currentCategory.name}`);if(name)await post({action:"create_category",name,parentId:currentCategory.id})}}>+ Subcategory</button>
-            </div>}
-            <p className="reorderHint">Drag to set the POS display order.</p>
-            {categoryRows.map(({ category: c, depth }, index) => (
-              <div
-                key={c.id}
-                className="categoryRow"
-                data-reorder-entity="category"
-                data-reorder-id={c.id}
-                style={{ paddingLeft: `${depth * 14}px` }}
-                draggable
-                onDragStart={() => setDragging({ entity: "category", id: c.id })}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => drop("category", c.id)}
-              >
-                <span
-                  className="touchDragHandle"
-                  role="button"
-                  aria-label={`Drag ${categoryName(c)}`}
-                  onPointerDown={(event) => startPointerDrag(event, "category", c.id, categoryName(c))}
-                  onPointerMove={movePointerDrag}
-                  onPointerUp={finishPointerDrag}
-                  onPointerCancel={() => setPointerDrag(null)}
-                >☰</span>
-                <button
-                  className={selectedCategory === c.id ? "selected" : ""}
-                  onClick={() => setSelectedCategory(c.id)}
-                >
-                  {categoryName(c)}
-                  {!c.active && <small>Archived</small>}
+          </nav>
+          {subCategories.length > 0 && (
+            <nav className="mirrorTabs sub" aria-label="Subcategories">
+              {[topCategory!, ...subCategories].map((c) => (
+                <button key={c.id} className={`mirrorSubTab${selectedCategory === c.id ? " selected" : ""}`} onClick={() => setSelectedCategory(c.id)}>
+                  {c.display_name || c.name}
                 </button>
-                <button
-                  aria-label={`Move ${c.name} up`}
-                  disabled={index === 0}
-                  onClick={() => move("category", c.id, -1)}
-                >
-                  ↑
-                </button>
-                <button
-                  aria-label={`Move ${c.name} down`}
-                  disabled={index === data.categories.length - 1}
-                  onClick={() => move("category", c.id, 1)}
-                >
-                  ↓
-                </button>
-              </div>
-            ))}
-          </aside>
-          <div className="itemBrowser">
-            <div className="itemBrowserHeader">
-              <div>
-                <h2>Items</h2>
-                <p>
-                  {query
-                    ? "Clear search to reorder items."
-                    : "Drag tiles to match the ordering screen."}
-                </p>
-              </div>
-              <button
-                onClick={async () => {
-                  const name = prompt("New item name");
-                  if (name) {
-                    const result = await post({
-                      action: "create_item",
-                      categoryId: selectedCategory,
-                      name,
-                      basePriceCents: 0,
-                    });
-                    if (result)
-                      selectItem({
-                        ...data.items[0],
-                        id: result.id,
-                        category_id: selectedCategory,
-                        name,
-                        description: "",
-                        base_price_cents: 0,
-                        available: true,
-                        active: true,
-                        sort_order: 0,
-                      });
-                  }
-                }}
-              >
-                + Item
-              </button>
+              ))}
+            </nav>
+          )}
+          {currentCategory && (
+            <div className="mirrorCategoryBar" key={currentCategory.id}>
+              <label>
+                Category name
+                <input defaultValue={currentCategory.display_name || currentCategory.name} onBlur={(event) => { const name = event.currentTarget.value.trim(); if (name && name !== (currentCategory.display_name || currentCategory.name)) void post({ action: "update", entity: "category", id: currentCategory.id, patch: { name, displayName: name } }); }} />
+              </label>
+              <label>
+                Inside
+                <select value={currentCategory.parent_id || ""} onChange={(event) => void post({ action: "update", entity: "category", id: currentCategory.id, patch: { parentId: event.target.value } })}>
+                  <option value="">Its own tab</option>
+                  {data.categories.filter((category) => category.id !== currentCategory.id && category.parent_id !== currentCategory.id).map((category) => <option key={category.id} value={category.id}>{categoryName(category)}</option>)}
+                </select>
+              </label>
+              <label className="mirrorCheck">
+                <input type="checkbox" checked={currentCategory.active} onChange={(event) => void post({ action: "update", entity: "category", id: currentCategory.id, patch: { active: event.target.checked } })} /> Show on the menu
+              </label>
+              <button onClick={async () => { const name = prompt(`New subcategory under ${currentCategory.display_name || currentCategory.name}`); if (name) await post({ action: "create_category", name, parentId: currentCategory.id }); }}>+ Subcategory</button>
             </div>
-            <div className="itemTileGrid">
+          )}
+          <div className={`mirrorBody${current ? " editing" : ""}`}>
+            <div className="mirrorGrid">
+              {query && <p className="mirrorHint">Showing every item that matches “{query}”. Clear the search to go back to the tabs.</p>}
+              {arranging && !query && <p className="mirrorHint">Drag tiles, or use the arrows, to set the order the POS shows them in. Tap “Done arranging” when finished.</p>}
               {matches.map((i, index) => (
                 <div
                   key={i.id}
-                  className={`itemTile ${selectedItem === i.id ? "selected" : ""}`}
+                  className={`mirrorTile${selectedItem === i.id ? " selected" : ""}${i.active ? "" : " archived"}${i.available ? "" : " soldOut"}`}
                   data-reorder-entity="item"
                   data-reorder-id={i.id}
-                  draggable={!query}
+                  draggable={arranging && !query}
                   onDragStart={() => setDragging({ entity: "item", id: i.id })}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={() => drop("item", i.id)}
                 >
-                  <button
-                    className="itemTileMain"
-                    onClick={() => selectItem(i)}
-                  >
+                  <button className="mirrorTileMain" onClick={() => (arranging ? undefined : selectItem(i))}>
                     <strong>{i.name}</strong>
                     <span>${dollars(i.base_price_cents)}</span>
-                    {!i.active && <small>Archived</small>}
+                    {!i.active ? <small>Hidden</small> : !i.available ? <small>86’d</small> : null}
                   </button>
-                  <div className="tileOrderControls">
-                    <span
-                      className="touchDragHandle"
-                      role="button"
-                      aria-label={`Drag ${i.name}`}
-                      onPointerDown={(event) => startPointerDrag(event, "item", i.id, i.name)}
-                      onPointerMove={movePointerDrag}
-                      onPointerUp={finishPointerDrag}
-                      onPointerCancel={() => setPointerDrag(null)}
-                    >☰</span>
-                    <button
-                      aria-label={`Move ${i.name} up`}
-                      disabled={Boolean(query) || index === 0}
-                      onClick={() => move("item", i.id, -1)}
-                    >
-                      ↑
-                    </button>
-                    <button
-                      aria-label={`Move ${i.name} down`}
-                      disabled={
-                        Boolean(query) || index === categoryItems.length - 1
-                      }
-                      onClick={() => move("item", i.id, 1)}
-                    >
-                      ↓
-                    </button>
-                  </div>
+                  {arranging && !query && (
+                    <div className="mirrorTileOrder">
+                      <span
+                        className="touchDragHandle"
+                        role="button"
+                        aria-label={`Drag ${i.name}`}
+                        onPointerDown={(event) => startPointerDrag(event, "item", i.id, i.name)}
+                        onPointerMove={movePointerDrag}
+                        onPointerUp={finishPointerDrag}
+                        onPointerCancel={() => setPointerDrag(null)}
+                      >☰</span>
+                      <button aria-label={`Move ${i.name} earlier`} disabled={index === 0} onClick={() => move("item", i.id, -1)}>◀</button>
+                      <button aria-label={`Move ${i.name} later`} disabled={index === categoryItems.length - 1} onClick={() => move("item", i.id, 1)}>▶</button>
+                    </div>
+                  )}
                 </div>
               ))}
+              {!query && !arranging && selectedCategory && (
+                <button
+                  className="mirrorTile mirrorAddTile"
+                  onClick={async () => {
+                    const name = prompt("New item name");
+                    if (name) {
+                      const result = await post({ action: "create_item", categoryId: selectedCategory, name, basePriceCents: 0 });
+                      if (result)
+                        selectItem({ ...data.items[0], id: result.id, category_id: selectedCategory, name, description: "", base_price_cents: 0, available: true, active: true, sort_order: 0 });
+                    }
+                  }}
+                >
+                  <strong>+ Add item</strong>
+                  <span>to {currentCategory?.display_name || currentCategory?.name}</span>
+                </button>
+              )}
             </div>
-          </div>
-          <article>
+          {current && <article className="menuEditPanel">
+            <button className="menuEditClose" aria-label="Close" onClick={() => setSelectedItem("")}>×</button>
             {current ? (
               <>
-                <h2>Edit item</h2>
+                <h2>{current.name}</h2>
                 {dirty && <strong className="dirty">Unsaved changes</strong>}
                 <label>
                   Name
@@ -797,10 +765,9 @@ export default function CatalogEditor({
                   );
                 })}
               </>
-            ) : (
-              <p>Select an item.</p>
-            )}
-          </article>
+            ) : null}
+          </article>}
+          </div>
         </div>
       ) : (
         <div className="modifierGrid">
@@ -853,6 +820,54 @@ export default function CatalogEditor({
       )}
       {pointerDrag && <div ref={dragGhostRef} className="menuDragGhost" style={{ left: pointerDrag.x, top: pointerDrag.y }}>{pointerDrag.label}</div>}
       <style jsx>{`
+        /* POS-style menu mirror: same tabs and tiles the cashier sees. */
+        .catalogTools { display: flex; gap: 10px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
+        .catalogTools input { flex: 1; min-width: 200px; min-height: 46px; }
+        .catalogModes { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: #e3e9e1; }
+        .catalogModes button { min-height: 40px; padding: 6px 16px; border: 0; border-radius: 9px; background: transparent; color: #26352b; font-weight: 800; }
+        .catalogModes button.selected { background: #fff; box-shadow: 0 1px 3px #0002; }
+        .catalogTools > button { min-height: 46px; padding: 8px 16px; border-radius: 10px; font-weight: 800; }
+        .catalogTools > button.arrangeOn { background: #e0a72e; color: #1f1600; }
+        .menuMirror { display: grid; gap: 10px; padding: 14px; border-radius: 16px; background: #0f172a; color: #e8edf5; }
+        .mirrorTabs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+        .mirrorTabs.sub { gap: 6px; }
+        .mirrorTab { display: flex; flex: none; align-items: stretch; border-radius: 10px; background: #1b2438; border: 1px solid #2c3a55; }
+        .mirrorTab.selected { background: #2563eb; border-color: #2563eb; }
+        .mirrorTab.hidden { opacity: .6; border-style: dashed; }
+        .mirrorTab button { min-height: 46px; padding: 8px 14px; border: 0; background: transparent; color: inherit; font-weight: 800; font-size: 1rem; white-space: nowrap; }
+        .mirrorTab button:not(.mirrorTabName) { padding: 8px 8px; opacity: .8; }
+        .mirrorTab small { font-weight: 600; opacity: .8; }
+        .mirrorAdd { flex: none; min-height: 46px; padding: 8px 14px; border-radius: 10px; border: 2px dashed #3b4a6b; background: transparent; color: #a9b8d6; font-weight: 800; }
+        .mirrorSubTab { flex: none; min-height: 40px; padding: 6px 14px; border-radius: 999px; border: 1px solid #2c3a55; background: #141c2e; color: #c8d3e8; font-weight: 700; }
+        .mirrorSubTab.selected { background: #e8edf5; color: #0f172a; }
+        .mirrorCategoryBar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; padding: 10px 12px; border-radius: 12px; background: #141c2e; }
+        .mirrorCategoryBar label { display: grid; gap: 4px; font-size: .78rem; font-weight: 700; color: #a9b8d6; }
+        .mirrorCategoryBar input, .mirrorCategoryBar select { min-height: 40px; min-width: 180px; border-radius: 8px; border: 1px solid #2c3a55; background: #0f172a; color: #fff; padding: 6px 10px; }
+        .mirrorCategoryBar .mirrorCheck { display: flex; align-items: center; gap: 6px; font-size: .9rem; color: #e8edf5; }
+        .mirrorCategoryBar .mirrorCheck input { min-width: 0; min-height: 0; width: 20px; height: 20px; }
+        .mirrorCategoryBar button { min-height: 40px; padding: 6px 14px; border-radius: 8px; border: 1px solid #3b4a6b; background: #1b2438; color: #fff; font-weight: 700; }
+        .mirrorBody { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
+        .mirrorBody.editing { grid-template-columns: minmax(0, 1fr) minmax(360px, 440px); }
+        .mirrorGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; align-content: start; }
+        .mirrorHint { grid-column: 1 / -1; margin: 0; padding: 8px 12px; border-radius: 10px; background: #1b2438; color: #c8d3e8; }
+        .mirrorTile { display: grid; grid-template-rows: 1fr auto; min-height: 112px; border-radius: 12px; background: #172033; border: 1px solid #2c3a55; overflow: hidden; }
+        .mirrorTile.selected { border: 2px solid #60a5fa; box-shadow: 0 0 0 3px #60a5fa33; }
+        .mirrorTile.archived { opacity: .55; border-style: dashed; }
+        .mirrorTileMain { display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 8px; width: 100%; min-height: 112px; padding: 14px; border: 0; background: transparent; color: #f1f5fb; text-align: left; cursor: pointer; }
+        .mirrorTileMain strong { font-size: 1.05rem; line-height: 1.2; }
+        .mirrorTileMain span { color: #7fb2ff; font-weight: 800; }
+        .mirrorTileMain small { padding: 2px 8px; border-radius: 6px; background: #4a1f1a; color: #ffd2c9; font-weight: 800; }
+        .mirrorTile.soldOut .mirrorTileMain small { background: #4a3a12; color: #ffe3a1; }
+        .mirrorTileOrder { display: grid; grid-template-columns: 1fr 44px 44px; border-top: 1px solid #2c3a55; }
+        .mirrorTileOrder button { min-height: 40px; border: 0; background: #1b2438; color: #fff; }
+        .mirrorTileOrder .touchDragHandle { background: #1b2438; color: #a9b8d6; border: 0; border-radius: 0; min-height: 40px; }
+        .mirrorAddTile { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; padding: 14px; border: 2px dashed #3b4a6b; background: transparent; color: #a9b8d6; cursor: pointer; }
+        .mirrorAddTile strong { color: #e8edf5; font-size: 1.05rem; }
+        .menuEditPanel { position: sticky; top: 12px; max-height: calc(100dvh - 24px); overflow: auto; padding: 16px; border-radius: 14px; background: #fff; color: #17202a; }
+        .menuEditClose { float: right; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #d0d7de !important; background: #f5f7f9 !important; color: #17202a !important; font-size: 1.5rem; line-height: 1; padding: 0 !important; }
+        .menuEditPanel :global(input:not([type="checkbox"]):not([type="radio"])), .menuEditPanel :global(select), .menuEditPanel :global(textarea) { background: #fff; color: #17202a; border: 1px solid #c3ccd5; border-radius: 8px; }
+        .menuEditPanel :global(label) { color: #2b3640; font-weight: 700; }
+        @media (max-width: 1000px) { .mirrorBody.editing { grid-template-columns: 1fr; } .menuEditPanel { position: static; max-height: none; } }
         .catalogTools {
           display: flex;
           gap: 8px;
