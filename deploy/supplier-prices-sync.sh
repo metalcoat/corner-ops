@@ -9,6 +9,8 @@
 # new file, then moves it to <supplier>/done/ (or <supplier>/failed/ with the error).
 # With --website it instead signs in to Sysco, US Foods and PFG and pulls prices
 # from their sites (corner-ops-supplier-website.timer runs that twice a day).
+# With --signin webstaurant it opens that site for a person to sign in to by hand
+# (it has an "I'm not a robot" check): it prints a link to open from the deli network.
 set -Eeuo pipefail
 
 readonly ROOT="${CORNER_OPS_ROOT:-/opt/corner-ops}"
@@ -37,6 +39,33 @@ website() {
   "${compose[@]}" build --quiet supplier-prices
   "${compose[@]}" run --rm --no-deps supplier-prices "$@"
 }
+# --signin <site>: the price job's browser, shown as a web page on this box's
+# deli-network address only (never 0.0.0.0, nothing through Cloudflare), with a
+# one-time password. It closes once the person is signed in, or after 15 minutes.
+signin() {
+  exec 8>"$DROP/_website/.lock"
+  if ! flock -n 8; then
+    printf '%s A website price run is going; try again in a few minutes.\n' "$(date -u +%FT%TZ)" >&2
+    return 1
+  fi
+  local address="${SIGNIN_ADDRESS:-$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')}"
+  if [[ ! "$address" =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.) ]]; then
+    printf 'Not a private network address (%s); set SIGNIN_ADDRESS to this box'"'"'s deli-network address.\n' "$address" >&2
+    return 1
+  fi
+  local password
+  password="$(tr -dc 'a-km-z2-9' < /dev/urandom | head -c 8 || true)"
+  local compose=(docker compose --project-name corner-ops --env-file "$ENV_FILE" -f "$ROOT/runtime/docker-compose.local.yml" --profile tools)
+  "${compose[@]}" build --quiet supplier-prices
+  printf '\nOn a phone or computer on the deli network, open:\n  http://%s:6080/vnc.html?autoconnect=1&resize=scale&password=%s\nSign in there; this closes by itself once you are signed in.\n\n' "$address" "$password"
+  "${compose[@]}" run --rm --no-deps -p "$address:6080:6080" -e VNC_PASSWORD="$password" \
+    --entrypoint /scraper/signin.sh supplier-prices "$@"
+}
+if [[ "${1:-}" == "--signin" ]]; then
+  shift
+  signin "$@"
+  exit $?
+fi
 if [[ "${1:-}" == "--website" ]]; then
   shift
   website "$@"
