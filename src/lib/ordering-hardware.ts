@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { normalizeLabelConfig, sampleLabel, sendLabel } from "@/lib/ordering-label-print";
 import { Socket } from "node:net";
+import { validPrinterHost } from "@/lib/printer-network";
 import { getSql, withTransaction } from "@/lib/db";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
@@ -205,33 +207,6 @@ function manager(actor: OrderingActor) {
   if (!canManagePos(actor))
     throw new Error("Manager or owner authorization is required.");
 }
-function validPrinterHost(value: string) {
-  if (
-    !value ||
-    value.length > 253 ||
-    !/^[a-z0-9.-]+$/i.test(value) ||
-    value.startsWith(".") ||
-    value.endsWith(".")
-  )
-    return false;
-  const parts = value.split(".").map(Number);
-  if (
-    parts.length === 4 &&
-    parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
-  )
-    return (
-      parts[0] === 10 ||
-      (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
-      (parts[0] === 192 && parts[1] === 168) ||
-      (parts[0] === 169 && parts[1] === 254) ||
-      parts[0] === 127
-    );
-  return (
-    !value.includes(".") ||
-    value.toLowerCase().endsWith(".local") ||
-    value.toLowerCase().endsWith(".lan")
-  );
-}
 function safeConfig(value: unknown): Record<string, unknown> {
   const config =
     value && typeof value === "object" && !Array.isArray(value)
@@ -262,13 +237,14 @@ export function effectiveDeviceStatus(row: {
 export async function hardwareDashboard(business: OrderingBusiness) {
   await ensureOrderingHardwareSchema();
   const sql = getSql();
-  const [locations, devices, routes, jobs, paymentStations] = await Promise.all(
+  const [locations, devices, routes, jobs, paymentStations, categories] = await Promise.all(
     [
       sql`SELECT * FROM ordering_hardware_locations WHERE business=${business} AND active=TRUE ORDER BY name`,
       sql`SELECT device.*,location.name location_name FROM ordering_hardware_devices device JOIN ordering_hardware_locations location ON location.id=device.location_id WHERE device.business=${business} AND device.active=TRUE AND location.active=TRUE ORDER BY location.name,device.name`,
       sql`SELECT route.*,device.name printer_name,location.name location_name FROM ordering_printer_routes route JOIN ordering_hardware_devices device ON device.id=route.printer_id JOIN ordering_hardware_locations location ON location.id=route.location_id WHERE route.business=${business} AND route.active=TRUE AND device.active=TRUE AND location.active=TRUE ORDER BY route.priority DESC,route.created_at`,
       sql`SELECT job.id,job.order_id,job.purpose,job.event_subtype,job.status,job.is_reprint,job.retry_count,job.error_message,job.queued_at,job.attempted_at,job.completed_at,job.device_id,device.name device_name FROM ordering_print_jobs job LEFT JOIN ordering_hardware_devices device ON device.id=job.device_id WHERE job.business=${business} ORDER BY job.created_at DESC LIMIT 100`,
       sql`SELECT station.*,receipt.name receipt_printer_name,terminal.name payment_terminal_name,reader.name gift_card_reader_name FROM ordering_payment_stations station LEFT JOIN ordering_hardware_devices receipt ON receipt.id=station.receipt_printer_id LEFT JOIN ordering_hardware_devices terminal ON terminal.id=station.payment_terminal_id LEFT JOIN ordering_hardware_devices reader ON reader.id=station.gift_card_reader_id WHERE station.business=${business} AND station.active=TRUE ORDER BY station.station_mode,station.name`,
+      sql`SELECT id,name FROM ordering_menu_categories WHERE business=${business} AND active=TRUE ORDER BY sort_order,name`,
     ],
   );
   return {
@@ -280,6 +256,11 @@ export async function hardwareDashboard(business: OrderingBusiness) {
     routes,
     jobs,
     paymentStations,
+    categories,
+    // The kitchen printer that wins at print time (highest-priority route, else the oldest).
+    kitchenPrinterId:
+      String((routes as any[]).find((route) => route.target_type === "all")?.printer_id ||
+        (devices as any[]).filter((row) => row.role === "kitchen_printer" && row.adapter_key === "network-printer").sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))[0]?.id || ""),
   };
 }
 
@@ -360,23 +341,33 @@ export async function saveHardware(input: {
     return { id };
   }
   if (input.action === "save_device") {
+    let locationId = String(body.locationId || "");
     const id = String(body.id || randomUUID()),
       name = String(body.name || "").trim(),
       deviceKey = String(body.deviceKey || "")
         .trim()
         .toLowerCase(),
-      locationId = String(body.locationId || ""),
       deviceType = String(body.deviceType || ""),
       role = String(body.role || ""),
       adapterKey = String(body.adapterKey || "unconfigured");
-    if (!name || !deviceKey || !locationId)
-      throw new Error("Device name, key, and location are required.");
+    if (!name || !deviceKey)
+      throw new Error("Device name is required.");
+    // Most stores have one location; create it on first use instead of asking.
+    if (!locationId) {
+      const existing = (await sql`SELECT id FROM ordering_hardware_locations WHERE business=${input.business} AND active=TRUE ORDER BY created_at LIMIT 1`)[0];
+      if (existing) locationId = String(existing.id);
+      else {
+        locationId = randomUUID();
+        await sql`INSERT INTO ordering_hardware_locations(id,business,name,location_key) VALUES(${locationId},${input.business},'Store','store') ON CONFLICT(business,location_key) DO NOTHING`;
+        locationId = String((await sql`SELECT id FROM ordering_hardware_locations WHERE business=${input.business} AND location_key='store'`)[0].id);
+      }
+    }
     if (
       !["printer", "payment_terminal", "barcode_scanner"].includes(deviceType)
     )
       throw new Error("Unknown device type.");
     const expected = {
-      printer: ["receipt_printer", "kitchen_printer"],
+      printer: ["receipt_printer", "kitchen_printer", "label_printer"],
       payment_terminal: ["payment_terminal"],
       barcode_scanner: ["barcode_scanner"],
     }[deviceType]!;
@@ -431,6 +422,14 @@ export async function saveHardware(input: {
           : "";
       config.cashDrawerEnabled =
         config.receiptEnabled === true && config.cashDrawerEnabled === true;
+      if (role === "label_printer") {
+        Object.assign(config, normalizeLabelConfig(config));
+        config.receiptEnabled = false;
+        config.cashDrawerEnabled = false;
+        config.tillKey = "";
+      } else {
+        for (const key of ["labelLanguage", "labelWidthMm", "labelHeightMm", "labelCategoryIds"]) delete config[key];
+      }
     }
     const rows =
       await sql`INSERT INTO ordering_hardware_devices(id,business,location_id,name,device_key,device_type,role,station_key,adapter_key,adapter_config,active,created_by,updated_by) SELECT ${id},${input.business},id,${name},${deviceKey},${deviceType},${role},${String(body.stationKey || "").trim()},${adapterKey},${JSON.stringify(config)}::jsonb,${body.active !== false},${input.actor.id},${input.actor.id} FROM ordering_hardware_locations WHERE id=${locationId} AND business=${input.business} ON CONFLICT(id) DO UPDATE SET location_id=EXCLUDED.location_id,name=EXCLUDED.name,device_key=EXCLUDED.device_key,device_type=EXCLUDED.device_type,role=EXCLUDED.role,station_key=EXCLUDED.station_key,adapter_key=EXCLUDED.adapter_key,adapter_config=EXCLUDED.adapter_config,active=EXCLUDED.active,updated_by=EXCLUDED.updated_by,updated_at=NOW() WHERE ordering_hardware_devices.business=${input.business} RETURNING id`;
@@ -545,6 +544,11 @@ export async function saveHardware(input: {
       throw new Error(
         "Configure this printer as Network printer (TCP/IP) first.",
       );
+    if (device.role === "label_printer") {
+      await sendLabel(device.adapter_config, sampleLabel(device.name));
+      await sql`UPDATE ordering_hardware_devices SET reported_status='online',last_seen_at=NOW(),status_message='Test label sent successfully.',updated_by=${input.actor.id},updated_at=NOW() WHERE id=${id}`;
+      return { status: "online", message: "Test label sent." };
+    }
     await sendEpsonPrint(device.adapter_config, [
       "******** TEST - DO NOT MAKE ********",
       "CORNER OPS PRINTER TEST",
@@ -619,6 +623,23 @@ export async function saveHardware(input: {
       );
     await sql`INSERT INTO ordering_printer_routes(id,business,location_id,printer_id,target_type,target_id,priority,active,created_by,updated_by) VALUES(${id},${input.business},${locationId},${printerId},${targetType},${targetId},${Number(body.priority || 0)},${body.active !== false},${input.actor.id},${input.actor.id}) ON CONFLICT(id) DO UPDATE SET location_id=EXCLUDED.location_id,printer_id=EXCLUDED.printer_id,target_type=EXCLUDED.target_type,target_id=EXCLUDED.target_id,priority=EXCLUDED.priority,active=EXCLUDED.active,updated_by=EXCLUDED.updated_by,updated_at=NOW() WHERE ordering_printer_routes.business=${input.business}`;
     return { id };
+  }
+  if (input.action === "set_kitchen_printer") {
+    // One choice: which kitchen printer gets kitchen tickets.
+    const printer = (
+      await sql`SELECT id,location_id FROM ordering_hardware_devices WHERE id=${String(body.printerId || "")} AND business=${input.business} AND active=TRUE AND device_type='printer' AND role='kitchen_printer'`
+    )[0];
+    if (!printer) throw new Error("Choose an active kitchen printer.");
+    await withTransaction(async () => {
+      await getSql()`UPDATE ordering_printer_routes SET active=FALSE,updated_by=${input.actor.id},updated_at=NOW() WHERE business=${input.business} AND target_type='all' AND active=TRUE`;
+      await getSql()`INSERT INTO ordering_printer_routes(id,business,location_id,printer_id,target_type,target_id,priority,active,created_by,updated_by) VALUES(${randomUUID()},${input.business},${printer.location_id},${printer.id},'all','',100,TRUE,${input.actor.id},${input.actor.id}) ON CONFLICT(business,location_id,target_type,target_id,printer_id) DO UPDATE SET active=TRUE,priority=100,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+    });
+    return { id: String(printer.id) };
+  }
+  if (input.action === "remove_station") {
+    const rows = await sql`UPDATE ordering_payment_stations SET active=FALSE,updated_by=${input.actor.id},updated_at=NOW() WHERE id=${String(body.id || "")} AND business=${input.business} RETURNING id`;
+    if (!rows.length) throw new Error("Register not found.");
+    return { id: String(rows[0].id) };
   }
   throw new Error("Unknown hardware configuration action.");
 }

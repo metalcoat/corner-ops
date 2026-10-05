@@ -34,6 +34,9 @@ const selfAuthorizedApiPaths = [
   "/api/ordering/store-dashboard",
   "/api/mobile/android/version",
   "/api/ordering/customer-display",
+  // Tablet setup lists station and label printer names before anyone signs
+  // in; it is still limited to approved POS networks by isDeliPosApi.
+  "/api/ordering/device-setup",
   "/api/pizza-gauntlet/run",
   "/api/pizza-gauntlet/leaderboard",
   "/api/delivery-boy/run",
@@ -155,6 +158,8 @@ function isDeliPosApi(path: string): boolean {
       "payment-stations",
       "payments",
       "tips",
+      "labels",
+      "device-setup",
     ].some((part) => matchesPath(path, `/api/ordering/${part}`)) ||
     path === "/api/ordering/delivery/quote" ||
     path === "/api/ordering/hardware/status" ||

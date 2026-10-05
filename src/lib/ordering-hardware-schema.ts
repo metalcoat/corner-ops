@@ -25,6 +25,9 @@ export function ensureOrderingHardwareSchema(): Promise<void> {
       created_by TEXT NOT NULL, updated_by TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(business,device_key), UNIQUE(location_id,name)
     )`;
+    // Label printers (sticker labels for subs and pizzas) are printers too.
+    await sql`ALTER TABLE ordering_hardware_devices DROP CONSTRAINT IF EXISTS ordering_hardware_devices_role_check`;
+    await sql`ALTER TABLE ordering_hardware_devices ADD CONSTRAINT ordering_hardware_devices_role_check CHECK(role IN ('receipt_printer','kitchen_printer','label_printer','payment_terminal','barcode_scanner'))`;
     await sql`CREATE INDEX IF NOT EXISTS ordering_hardware_devices_scope_idx ON ordering_hardware_devices(business,location_id,device_type,active)`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_payment_stations (
       id UUID PRIMARY KEY, business TEXT NOT NULL CHECK (business IN ('Corner Deli','Tiki')),

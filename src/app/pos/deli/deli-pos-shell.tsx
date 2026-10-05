@@ -16,6 +16,7 @@ const centerWorkspaces = [
   { label: "Dashboard", href: "/pos/deli/dashboard" },
   { label: "Customers", href: "/pos/deli/customers" },
   { label: "Kitchen", href: "/pos/deli/kitchen" },
+  { label: "Labels", href: "/pos/deli/labels" },
   { label: "Payments", href: "/pos/deli/payments" },
   { label: "Tips", href: "/pos/deli/tips" },
 ] as const;

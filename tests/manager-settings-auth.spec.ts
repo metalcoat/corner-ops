@@ -25,12 +25,12 @@ test("an authenticated employee is denied while manager and owner sessions open 
   await context.addCookies([{ name: "corner_ops_pos", value: posCookie("employee"), url: "http://127.0.0.1:3000" }]);
   await page.goto("/pos/deli/settings");
   await expect(page.getByRole("heading", { name: "MANAGER ACCESS REQUIRED" })).toBeVisible();
-  await expect(page.getByText("Hardware & print queue")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Printers & devices" })).toHaveCount(0);
 
   for (const role of ["manager", "owner"] as const) {
     await context.addCookies([{ name: "corner_ops_pos", value: posCookie(role), url: "http://127.0.0.1:3000" }]);
     await page.goto("/pos/deli/settings/hardware");
-    await expect(page.getByRole("heading", { name: "Hardware & print queue" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Printers & devices" })).toBeVisible();
     const response = await page.request.get("/api/ordering/settings/hardware");
     expect(response.status()).toBe(200);
   }
