@@ -10,7 +10,7 @@ import { restoreSessionCookies, saveSessionCookies } from "./session-cookies.mjs
 const PROFILES = process.env.PROFILE_DIR || "/profiles";
 const MINUTES = Number(process.env.SIGNIN_MINUTES || 15);
 
-// signedIn: a page that loads (200) only when signed in; signed out it redirects to the login.
+// signedIn: the account page; signed out, the site sends you to the login form instead.
 const SITES = {
   webstaurant: {
     key: "WEBSTAURANT",
@@ -19,6 +19,7 @@ const SITES = {
     signedIn: "https://www.webstaurantstore.com/myaccount/orders/",
     email: "#email",
     password: "#password",
+    loginForm: /id="the_login_button"/,
   },
 };
 
@@ -39,9 +40,19 @@ const context = await chromium.launchPersistentContext(`${PROFILES}/${site.key}`
 
 await restoreSessionCookies(context, PROFILES, site.key);
 
+// Signed in only when the account page itself loads, not the login form, twice in a
+// row: one answer alone has been wrong while the site was still settling.
+async function showsAccount() {
+  const response = await context.request.get(site.signedIn, { timeout: 20_000 }).catch(() => null);
+  if (!response) return false;
+  const landed = new URL(response.url()).pathname.startsWith(new URL(site.signedIn).pathname);
+  return response.status() === 200 && landed && !site.loginForm.test(await response.text());
+}
+
 async function signedIn() {
-  const response = await context.request.get(site.signedIn, { maxRedirects: 0, timeout: 20_000 }).catch(() => null);
-  return response?.status() === 200;
+  if (!(await showsAccount())) return false;
+  await new Promise((resolve) => setTimeout(resolve, 3_000));
+  return showsAccount();
 }
 
 try {
