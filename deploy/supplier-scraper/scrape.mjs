@@ -21,7 +21,8 @@ const HEADED = process.env.HEADED === "1";
 // /opt/corner-ops/.env (e.g. SYSCO_ORDER_GUIDE_URL) if a site moves things.
 const SUPPLIERS = [
   { name: "Sysco", key: "SYSCO", login: "https://shop.sysco.com/auth/login", guide: "https://shop.sysco.com/app/lists" },
-  { name: "US Foods", key: "USFOODS", login: "https://order.usfoods.com/desktop/login", guide: "https://order.usfoods.com/desktop/lists" },
+  // The deli's order guide, then everything bought recently (catches items not on the guide).
+  { name: "US Foods", key: "USFOODS", login: "https://order.usfoods.com/desktop/login", guide: "https://order.usfoods.com/desktop/lists/view/OG-127949 https://order.usfoods.com/desktop/lists/view/recentlyPurchased" },
   { name: "Performance Foodservice", key: "PFG", login: "https://www.customerfirstsolutions.com/", guide: "" },
 ];
 
@@ -282,7 +283,9 @@ async function run(supplier) {
     return;
   }
   const loginUrl = process.env[`${supplier.key}_LOGIN_URL`] || supplier.login;
-  const guideUrl = process.env[`${supplier.key}_ORDER_GUIDE_URL`] || supplier.guide;
+  // One or more list pages (space or comma separated); prices from all of them are combined.
+  const guideUrls = (process.env[`${supplier.key}_ORDER_GUIDE_URL`] || supplier.guide).split(/[\s,]+/).filter(Boolean);
+  const guideUrl = guideUrls[0] || "";
   const context = await chromium.launchPersistentContext(`${PROFILES}/${supplier.key}`, {
     headless: !HEADED,
     viewport: { width: 1440, height: 1000 },
@@ -339,6 +342,12 @@ async function run(supplier) {
     }
     await loadEverything(page);
     await page.waitForTimeout(2_000);
+    for (const url of guideUrls.slice(1)) {
+      console.log(`${supplier.name}: also reading ${url}`);
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 }).catch((error) => console.log(`${supplier.name}: ${error.message.split("\n")[0]}`));
+      await page.waitForTimeout(6_000);
+      await loadEverything(page);
+    }
     const found = () => dedupeProducts(captured.flatMap((c) => extractProducts(c.json)));
     // The page we opened had no list prices (sites move things): look for the
     // order guide / lists in the site's own menus, then open the first list.
