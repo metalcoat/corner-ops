@@ -15,6 +15,8 @@ type Unit = {
   item: string;
   options: string[];
   note: string;
+  differences?: string[];
+  sameAs?: string;
   destination: string;
   footer: string;
   printed: boolean;
@@ -228,8 +230,15 @@ export default function LabelStationClient() {
                         <span className="labelCode" aria-hidden="true"><i>{foodIcon(unit.item)}</i><b>{unit.code.split("-").pop()}</b></span>
                         <span className="labelItem">
                           <b>{unit.item}</b>
-                          {unit.options.length > 0 && <small>{unit.options.join(", ")}</small>}
-                          {unit.note && <em>{unit.note}</em>}
+                          {unit.differences?.length ? (
+                            <mark>This one: {unit.differences.join(", ")}</mark>
+                          ) : unit.sameAs ? (
+                            <mark className="same">Same as {unit.sameAs.split("-").pop()}</mark>
+                          ) : null}
+                          {unit.options.filter((option) => !unit.differences?.includes(option)).length > 0 && (
+                            <small>{unit.options.filter((option) => !unit.differences?.includes(option)).join(", ")}</small>
+                          )}
+                          {unit.note && !unit.differences?.includes(unit.note) && <em>{unit.note}</em>}
                         </span>
                         <span className="labelAction">{printing ? "PRINTING…" : unit.count ? `PRINT ${unit.count}` : "PRINT"}</span>
                       </button>

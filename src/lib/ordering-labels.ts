@@ -86,7 +86,9 @@ async function loadUnits(business: OrderingBusiness, printer: { config: Record<s
   const wanted = (row: Record<string, unknown>) =>
     categoryIds.length ? categoryIds.includes(String(row.category_id)) : DEFAULT_LABEL_CATEGORY.test(`${row.category_name} ${row.item_name_snapshot}`);
   const byOrder = new Map<string, LabelUnit[]>();
+  const unitOrderNumber = new Map<string, string>();
   for (const row of rows.filter(wanted)) {
+    unitOrderNumber.set(String(row.order_id), String(row.display_number));
     const quantity = Math.max(0, Number(row.quantity) - Number(row.cancelled_quantity));
     const service = String(row.service_type);
     const destination =
@@ -115,13 +117,38 @@ async function loadUnits(business: OrderingBusiness, printer: { config: Record<s
       });
     }
     byOrder.set(String(row.order_id), units);
+  }
+  for (const units of byOrder.values()) {
     // Codes and counts are per order: #1042-A, #1042-B ... with "2/3".
     units.forEach((unit, index) => {
-      unit.code = `#${row.display_number}-${String.fromCharCode(65 + (index % 26))}${index >= 26 ? Math.floor(index / 26) : ""}`;
+      unit.code = `#${String(unitOrderNumber.get(unit.orderId))}-${String.fromCharCode(65 + (index % 26))}${index >= 26 ? Math.floor(index / 26) : ""}`;
       unit.count = units.length > 1 ? `${index + 1}/${units.length}` : "";
     });
+    markDifferences(units);
   }
   return byOrder;
+}
+
+/**
+ * Several of the same item in one order (three turkey subs): each label gets
+ * what sets it apart from the others (its own toppings or note), or says it is
+ * the same as another one.
+ */
+function markDifferences(units: LabelUnit[]) {
+  const groups = Map.groupBy(units, (unit) => unit.item.trim().toLowerCase());
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const traits = group.map((unit) => [...unit.options, ...(unit.note ? [unit.note] : [])]);
+    const shared = traits.reduce((common, list) => common.filter((trait) => list.includes(trait)));
+    group.forEach((unit, index) => {
+      const own = traits[index].filter((trait) => !shared.includes(trait));
+      if (own.length) unit.differences = own;
+      else {
+        const twin = group.find((other, otherIndex) => otherIndex !== index && traits[otherIndex].length === traits[index].length && traits[otherIndex].every((trait) => traits[index].includes(trait)));
+        if (twin) unit.sameAs = twin.code;
+      }
+    });
+  }
 }
 
 export async function labelQueue(business: OrderingBusiness, printerId: string) {

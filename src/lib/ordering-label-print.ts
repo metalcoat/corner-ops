@@ -19,6 +19,13 @@ export type ItemLabel = {
   item: string;
   options: string[];
   note: string;
+  /**
+   * When an order has several of the same item (three turkey subs), what makes
+   * this one different from the others, printed first so they don't get mixed up.
+   */
+  differences?: string[];
+  /** Set when this one is exactly like another in the order, e.g. "#1042-A". */
+  sameAs?: string;
   /** Delivery address, or PICKUP / CURBSIDE / DINE IN. */
   destination: string;
   footer: string;
@@ -62,14 +69,21 @@ function wrap(text: string, width: number, maxLines: number) {
 
 type Line = { text: string; size: "xl" | "lg" | "md" | "sm"; bold?: boolean };
 /** The label as lines, sized to fit `cols` characters of medium text. */
+// Most important first: small labels drop whatever doesn't fit at the bottom,
+// so who it belongs to and where it goes always print.
 function layout(label: ItemLabel, cols: number): Line[] {
   const big = Math.max(8, Math.floor(cols / 2)), large = Math.max(10, Math.floor(cols * 0.7));
   const lines: Line[] = [{ text: `${label.code}${label.count ? `  ${label.count}` : ""}`.slice(0, big), size: "xl", bold: true }];
   for (const text of wrap(label.customer, large, 1)) lines.push({ text, size: "lg", bold: true });
   for (const text of wrap(label.item, large, 2)) lines.push({ text, size: "lg" });
-  if (label.options.length) for (const text of wrap(label.options.join(", "), cols, 3)) lines.push({ text, size: "md" });
-  if (label.note) for (const text of wrap(`NOTE: ${label.note}`, cols, 2)) lines.push({ text, size: "md", bold: true });
+  const differences = label.differences ?? [];
+  if (differences.length) for (const text of wrap(`THIS ONE: ${differences.join(", ")}`, cols, 2)) lines.push({ text, size: "md", bold: true });
+  else if (label.sameAs) lines.push({ text: `SAME AS ${label.sameAs}`.slice(0, cols), size: "md", bold: true });
   for (const text of wrap(label.destination, cols, 2)) lines.push({ text, size: "md", bold: true });
+  const noteShown = differences.some((item) => item.toLowerCase() === label.note.toLowerCase());
+  if (label.note && !noteShown) for (const text of wrap(`NOTE: ${label.note}`, cols, 2)) lines.push({ text, size: "md", bold: true });
+  const rest = label.options.filter((option) => !differences.includes(option));
+  if (rest.length) for (const text of wrap(rest.join(", "), cols, 2)) lines.push({ text, size: "md" });
   if (label.footer) lines.push({ text: ascii(label.footer).slice(0, cols + 6), size: "sm" });
   return lines;
 }
@@ -143,6 +157,7 @@ export function sampleLabel(printerName: string): ItemLabel {
     item: "Large Italian Sub",
     options: ["Hot peppers", "Extra cheese", "Toasted"],
     note: "No onions",
+    differences: ["Extra cheese", "No onions"],
     destination: "DELIVERY: 828 Morris St, Ogdensburg",
     footer: `Label test · ${printerName}`,
   };

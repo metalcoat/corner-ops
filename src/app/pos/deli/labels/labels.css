@@ -44,3 +44,5 @@
 .labelRecent li small{color:var(--muted)}
 .labelRecent li button{min-height:44px;background:#f0f3ee!important;color:var(--ink)!important;border:1px solid var(--line)!important}
 @media (max-width:820px){.labelLayout{grid-template-columns:1fr}.labelRecent{position:static;max-height:none}}
+.labelItem mark{justify-self:start;padding:2px 8px;border-radius:6px;background:#ffe08a;color:#3d2c00;font-weight:850}
+.labelItem mark.same{background:#e3ebf7;color:#203a5c}
