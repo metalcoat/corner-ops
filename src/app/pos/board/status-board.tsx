@@ -16,8 +16,15 @@ type OpenOrder = {
   delivery_status: string | null;
   driver_name: string | null;
 };
+type CallEvent = { id: string; at: string; callerLast4: string; ringSeconds: number; outcome: "answered" | "missed"; answeredBy: string; calledBackAt: string | null; otherCallsActive: number | null; onClock: Array<{ name: string; position: string }> };
+type Calls = {
+  total: number; answered: number; missed: number; missedNotCalledBack: number; quickHangups: number; answerRate: number | null;
+  avgRingSeconds: number | null; longestRingSeconds: number | null; longRingSeconds: number; longRings: number; aiPhoneOrders: number;
+  byHour: Array<{ hour: number; calls: number; missed: number }>; ringingNow: Array<{ since: string; callerLast4: string }>; attention: CallEvent[]; dataAsOf: string | null;
+};
 type Board = {
   generatedAt: string;
+  calls: Calls | null;
   openOrders: OpenOrder[];
   tasks: Array<{ key: string; label: string; count: number }>;
 };
@@ -25,6 +32,8 @@ type Board = {
 const SERVICE: Record<string, string> = { pickup: "Pickup", delivery: "Delivery", no_contact_delivery: "Delivery", curbside: "Curbside", dine_in: "Dine in", bar: "Bar" };
 const DELIVERY_STEP: Record<string, string> = { PICKED_UP: "In the car", EN_ROUTE: "On the way", ARRIVED: "At the door", NO_CONTACT: "No answer", DELIVERY_FAILED: "Problem" };
 const clock = (value: string | Date) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+const seconds = (s: number | null) => (s == null ? "—" : s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : `${s}s`);
+const hourLabel = (h: number) => `${h % 12 || 12}${h < 12 ? "a" : "p"}`;
 const isDelivery = (order: OpenOrder) => order.service_type === "delivery" || order.service_type === "no_contact_delivery";
 
 /** Where an order sits on the board. */
@@ -59,7 +68,7 @@ export default function StatusBoard() {
   useEffect(() => {
     void load();
     const poll = window.setInterval(() => void load(), 10_000);
-    const tick = window.setInterval(() => setNow(Date.now()), 15_000);
+    const tick = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => {
       window.clearInterval(poll);
       window.clearInterval(tick);
@@ -84,7 +93,11 @@ export default function StatusBoard() {
           : `${task.count} delivery ${task.count === 1 ? "problem" : "problems"} — check with the driver`,
       ),
     ...(late ? [`${late} order${late === 1 ? "" : "s"} waiting over 30 min`] : []),
+    ...(data?.calls?.missedNotCalledBack ? [`${data.calls.missedNotCalledBack} missed call${data.calls.missedNotCalledBack === 1 ? "" : "s"} not called back`] : []),
   ];
+  const calls = data?.calls ?? null;
+  const ringing = calls?.ringingNow ?? [];
+  const peak = Math.max(1, ...(calls?.byHour ?? []).map((h) => h.calls));
 
   const card = (order: OpenOrder, place: keyof typeof columns) => {
     const age = minutes(order);
@@ -120,7 +133,14 @@ export default function StatusBoard() {
           <p>CORNER DELI</p>
           <h1>Orders</h1>
         </div>
+        <div className="boardMiddle">
+        {ringing.length > 0 && (
+          <div className="boardRinging" role="alert">
+            ☎ PHONE RINGING {ringing.length > 1 ? `(${ringing.length})` : ""} · {seconds(Math.max(0, Math.round((now - new Date(ringing[0].since).getTime()) / 1000)))}
+          </div>
+        )}
         <div className={`boardAlerts${alerts.length ? " on" : ""}`}>{alerts.length ? alerts.map((alert) => <span key={alert}>⚠ {alert}</span>) : <span>All good</span>}</div>
+        </div>
         <div className="boardClock">
           <strong>{clock(new Date(now))}</strong>
           <small>{error ? "Reconnecting…" : data ? `Updated ${clock(data.generatedAt)}` : "Loading…"}</small>
@@ -143,6 +163,57 @@ export default function StatusBoard() {
           </section>
         ))}
       </div>
+      {calls && (
+        <section className="boardPhones" aria-label="Phones today">
+          <div className="phoneStats">
+            <h2>Phones today</h2>
+            <dl>
+              <div><dt>Calls</dt><dd>{calls.total}</dd></div>
+              <div><dt>Answered</dt><dd className={calls.answerRate != null && calls.answerRate < 90 ? "bad" : "good"}>{calls.answerRate == null ? "—" : `${calls.answerRate}%`}</dd></div>
+              <div><dt>Missed</dt><dd className={calls.missed ? "bad" : ""}>{calls.missed}{calls.missed ? <small>{calls.missedNotCalledBack} not called back</small> : null}</dd></div>
+              <div><dt>Avg ring</dt><dd className={calls.avgRingSeconds != null && calls.avgRingSeconds >= 20 ? "warn" : ""}>{seconds(calls.avgRingSeconds)}</dd></div>
+              <div><dt>Longest</dt><dd className={calls.longestRingSeconds != null && calls.longestRingSeconds >= calls.longRingSeconds ? "bad" : ""}>{seconds(calls.longestRingSeconds)}</dd></div>
+              <div><dt>Rang {calls.longRingSeconds}s+</dt><dd className={calls.longRings ? "warn" : ""}>{calls.longRings}</dd></div>
+              <div><dt>AI phone orders</dt><dd>{calls.aiPhoneOrders}</dd></div>
+            </dl>
+            {calls.byHour.length > 0 && (
+              <div className="phoneHours" aria-label="Calls by hour">
+                {calls.byHour.map((h) => (
+                  <span key={h.hour} title={`${h.calls} calls, ${h.missed} missed`}>
+                    <i style={{ height: `${(h.calls / peak) * 100}%` }}>{h.missed > 0 && <b style={{ height: `${(h.missed / h.calls) * 100}%` }} />}</i>
+                    <small>{hourLabel(h.hour)}</small>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="phoneAttention">
+            <h2>Missed &amp; long rings</h2>
+            {calls.attention.length === 0 ? (
+              <p className="boardEmpty">None today. Nice.</p>
+            ) : (
+              <ul>
+                {calls.attention.slice(0, 5).map((call) => (
+                  <li key={call.id} className={call.outcome === "missed" ? (call.calledBackAt ? "missed back" : "missed") : "long"}>
+                    <div className="callLine">
+                      <strong>{clock(call.at)}</strong>
+                      <span className="callWhat">
+                        {call.outcome === "missed" ? `Missed · rang ${seconds(call.ringSeconds)}` : `Rang ${seconds(call.ringSeconds)} · ${call.answeredBy || "answered"}`}
+                      </span>
+                      <span className="callWho">···{call.callerLast4 || "????"}</span>
+                      {call.outcome === "missed" && <span className={`callBack ${call.calledBackAt ? "yes" : "no"}`}>{call.calledBackAt ? `Called back ${clock(call.calledBackAt)}` : "Not called back"}</span>}
+                    </div>
+                    <div className="callClock">
+                      On the clock: {call.onClock.length ? call.onClock.map((p) => `${p.name.split(" ")[0]}${p.position ? ` (${p.position})` : ""}`).join(", ") : "nobody"}
+                      {call.otherCallsActive ? ` · ${call.otherCallsActive} other call${call.otherCallsActive === 1 ? "" : "s"} in progress` : ""}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      )}
     </main>
   );
 }
