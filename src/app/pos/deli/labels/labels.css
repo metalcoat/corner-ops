@@ -27,9 +27,9 @@
 .labelOrder>header strong{font-size:1.3rem;margin-right:6px}
 .labelOrder>header small{display:block;color:var(--muted);margin-top:2px}
 .labelUnits{display:grid;gap:8px;padding:10px}
-.labelUnit{display:grid!important;grid-template-columns:52px 1fr auto;align-items:center;justify-items:stretch!important;gap:12px;min-height:76px!important;text-align:left;background:#fff!important;color:var(--ink)!important;border:2px solid var(--line)!important}
+.labelUnit{display:grid!important;grid-template-columns:72px 1fr auto;align-items:center;justify-items:stretch!important;gap:12px;min-height:76px!important;text-align:left;background:#fff!important;color:var(--ink)!important;border:2px solid var(--line)!important}
 .labelUnit:active{transform:scale(.99);border-color:var(--green)!important}
-.labelCode{display:grid;place-items:center;width:48px;height:48px;border-radius:12px;background:var(--green);color:#fff;font-size:1.5rem;font-weight:900}
+.labelCode{position:relative;display:grid;place-items:center;width:64px;height:58px;border-radius:14px;background:#f3f6f1;border:2px solid var(--line)}.labelCode i{font-style:normal;font-size:2rem;line-height:1}.labelCode b{position:absolute;right:-6px;bottom:-6px;display:grid;place-items:center;min-width:26px;height:26px;padding:0 5px;border-radius:13px;background:var(--green);color:#fff;font-size:.95rem;font-weight:900}
 .labelStation .labelUnit .labelItem{display:grid;gap:2px;text-align:left;justify-items:start}
 .labelItem b{font-size:1.2rem}
 .labelItem small{color:var(--muted);font-weight:600}

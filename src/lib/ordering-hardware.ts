@@ -257,10 +257,8 @@ export async function hardwareDashboard(business: OrderingBusiness) {
     jobs,
     paymentStations,
     categories,
-    // The kitchen printer that wins at print time (highest-priority route, else the oldest).
-    kitchenPrinterId:
-      String((routes as any[]).find((route) => route.target_type === "all")?.printer_id ||
-        (devices as any[]).filter((row) => row.role === "kitchen_printer" && row.adapter_key === "network-printer").sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))[0]?.id || ""),
+    // Kitchen printers that print every kitchen ticket.
+    kitchenPrinterIds: (await kitchenTicketPrinters(business)).map((printer: any) => String(printer.id)),
   };
 }
 
@@ -431,6 +429,8 @@ export async function saveHardware(input: {
         for (const key of ["labelLanguage", "labelWidthMm", "labelHeightMm", "labelCategoryIds"]) delete config[key];
       }
     }
+    // A removed device keeps its row for print history; free its name so it can be reused.
+    await sql`UPDATE ordering_hardware_devices SET name=name||' (removed '||to_char(NOW(),'YYYY-MM-DD HH24:MI:SS')||')',updated_at=NOW() WHERE business=${input.business} AND location_id=${locationId} AND lower(name)=lower(${name}) AND active=FALSE AND id<>${id}`;
     const rows =
       await sql`INSERT INTO ordering_hardware_devices(id,business,location_id,name,device_key,device_type,role,station_key,adapter_key,adapter_config,active,created_by,updated_by) SELECT ${id},${input.business},id,${name},${deviceKey},${deviceType},${role},${String(body.stationKey || "").trim()},${adapterKey},${JSON.stringify(config)}::jsonb,${body.active !== false},${input.actor.id},${input.actor.id} FROM ordering_hardware_locations WHERE id=${locationId} AND business=${input.business} ON CONFLICT(id) DO UPDATE SET location_id=EXCLUDED.location_id,name=EXCLUDED.name,device_key=EXCLUDED.device_key,device_type=EXCLUDED.device_type,role=EXCLUDED.role,station_key=EXCLUDED.station_key,adapter_key=EXCLUDED.adapter_key,adapter_config=EXCLUDED.adapter_config,active=EXCLUDED.active,updated_by=EXCLUDED.updated_by,updated_at=NOW() WHERE ordering_hardware_devices.business=${input.business} RETURNING id`;
     if (!rows.length)
@@ -624,20 +624,22 @@ export async function saveHardware(input: {
     await sql`INSERT INTO ordering_printer_routes(id,business,location_id,printer_id,target_type,target_id,priority,active,created_by,updated_by) VALUES(${id},${input.business},${locationId},${printerId},${targetType},${targetId},${Number(body.priority || 0)},${body.active !== false},${input.actor.id},${input.actor.id}) ON CONFLICT(id) DO UPDATE SET location_id=EXCLUDED.location_id,printer_id=EXCLUDED.printer_id,target_type=EXCLUDED.target_type,target_id=EXCLUDED.target_id,priority=EXCLUDED.priority,active=EXCLUDED.active,updated_by=EXCLUDED.updated_by,updated_at=NOW() WHERE ordering_printer_routes.business=${input.business}`;
     return { id };
   }
-  if (input.action === "set_kitchen_printer") {
-    // One choice: which kitchen printer gets kitchen tickets.
-    const printer = (
-      await sql`SELECT id,location_id FROM ordering_hardware_devices WHERE id=${String(body.printerId || "")} AND business=${input.business} AND active=TRUE AND device_type='printer' AND role='kitchen_printer'`
-    )[0];
-    if (!printer) throw new Error("Choose an active kitchen printer.");
+  if (input.action === "set_kitchen_printers") {
+    // Which kitchen printers print kitchen tickets; each prints an identical slip.
+    const ids = Array.isArray(body.printerIds) ? [...new Set(body.printerIds.map(String))] : [];
+    const printers = ids.length
+      ? await sql`SELECT id,location_id FROM ordering_hardware_devices WHERE id=ANY(${ids}::uuid[]) AND business=${input.business} AND active=TRUE AND device_type='printer' AND role='kitchen_printer'`
+      : [];
+    if (printers.length !== ids.length || !ids.length) throw new Error("Choose at least one active kitchen printer.");
     await withTransaction(async () => {
       await getSql()`UPDATE ordering_printer_routes SET active=FALSE,updated_by=${input.actor.id},updated_at=NOW() WHERE business=${input.business} AND target_type='all' AND active=TRUE`;
-      await getSql()`INSERT INTO ordering_printer_routes(id,business,location_id,printer_id,target_type,target_id,priority,active,created_by,updated_by) VALUES(${randomUUID()},${input.business},${printer.location_id},${printer.id},'all','',100,TRUE,${input.actor.id},${input.actor.id}) ON CONFLICT(business,location_id,target_type,target_id,printer_id) DO UPDATE SET active=TRUE,priority=100,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+      for (const printer of printers)
+        await getSql()`INSERT INTO ordering_printer_routes(id,business,location_id,printer_id,target_type,target_id,priority,active,created_by,updated_by) VALUES(${randomUUID()},${input.business},${printer.location_id},${printer.id},'all','',100,TRUE,${input.actor.id},${input.actor.id}) ON CONFLICT(business,location_id,target_type,target_id,printer_id) DO UPDATE SET active=TRUE,priority=100,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
     });
-    return { id: String(printer.id) };
+    return { ids };
   }
   if (input.action === "remove_station") {
-    const rows = await sql`UPDATE ordering_payment_stations SET active=FALSE,updated_by=${input.actor.id},updated_at=NOW() WHERE id=${String(body.id || "")} AND business=${input.business} RETURNING id`;
+    const rows = await sql`UPDATE ordering_payment_stations SET active=FALSE,name=name||' (removed '||to_char(NOW(),'YYYY-MM-DD HH24:MI:SS')||')',station_key=station_key||'-removed-'||to_char(NOW(),'YYYYMMDDHH24MISS'),updated_by=${input.actor.id},updated_at=NOW() WHERE id=${String(body.id || "")} AND business=${input.business} RETURNING id`;
     if (!rows.length) throw new Error("Register not found.");
     return { id: String(rows[0].id) };
   }
@@ -721,6 +723,20 @@ const STALE_ATTEMPT_INTERVAL = "2 minutes";
 // the same order does not print a stale ticket the kitchen already handled.
 const FRESH_UNSENT_KITCHEN_INTERVAL = "10 minutes";
 
+/**
+ * Kitchen printers that print every kitchen ticket. A manager can tick which
+ * ones; with none ticked, every kitchen printer prints. Each gets an identical
+ * copy of the slip.
+ */
+export async function kitchenTicketPrinters(business: OrderingBusiness) {
+  const sql = getSql();
+  const printers = await sql`SELECT device.*,EXISTS(SELECT 1 FROM ordering_printer_routes route WHERE route.printer_id=device.id AND route.active=TRUE AND route.target_type='all') chosen
+    FROM ordering_hardware_devices device WHERE device.business=${business} AND device.active=TRUE AND device.role='kitchen_printer' AND device.adapter_key='network-printer'
+    ORDER BY device.created_at,device.id`;
+  const chosen = printers.filter((printer) => printer.chosen);
+  return chosen.length ? chosen : printers;
+}
+
 export async function dispatchOrderPrintJobs(
   orderId: string,
   business: OrderingBusiness,
@@ -742,6 +758,7 @@ export async function dispatchOrderPrintJobs(
           OR (status='attempting' AND COALESCE(attempted_at,queued_at)<NOW()-${STALE_ATTEMPT_INTERVAL}::interval AND COALESCE(payload->>'openCashDrawer','false')<>'true')
         )
         ORDER BY created_at,id`;
+  const kitchenCopies: string[] = [];
   for (const job of jobs) {
     if (job.payload?.customerReceiptPending === true) continue;
     const role =
@@ -752,7 +769,21 @@ export async function dispatchOrderPrintJobs(
       role === "receipt_printer" && job.payload?.receiptPrinterId
         ? String(job.payload.receiptPrinterId)
         : null;
-    const device = (
+    let device: any = null;
+    if (role === "kitchen_printer") {
+      const printers = await kitchenTicketPrinters(business);
+      // A job already tied to a kitchen printer (a copy, a retry, a reprint) stays on it.
+      device = printers.find((printer) => job.device_id && String(printer.id) === String(job.device_id)) ?? null;
+      if (!device && printers.length) {
+        device = printers[0];
+        for (const printer of printers.slice(1)) {
+          const copy = await sql`INSERT INTO ordering_print_jobs(id,business,order_id,check_id,payment_transaction_id,purpose,event_subtype,status,is_reprint,actor_type,actor_id,error_message,payload,location_id,device_id,idempotency_key,parent_job_id)
+            SELECT ${randomUUID()},business,order_id,check_id,payment_transaction_id,purpose,event_subtype,'queued',is_reprint,actor_type,actor_id,'',payload,${printer.location_id},${printer.id},${`kitchen-copy:${job.id}:${printer.id}`},id FROM ordering_print_jobs WHERE id=${job.id}
+            ON CONFLICT DO NOTHING RETURNING id`;
+          if (copy[0]) kitchenCopies.push(String(copy[0].id));
+        }
+      }
+    } else device = (
       await sql`SELECT device.* FROM ordering_hardware_devices device LEFT JOIN ordering_printer_routes route ON route.printer_id=device.id AND route.active=TRUE WHERE device.business=${business} AND (device.role=${role} OR (${role}='receipt_printer' AND ${targetPrinterId}::uuid IS NOT NULL AND device.adapter_config->>'receiptEnabled'='true')) AND device.active=TRUE AND device.adapter_key='network-printer' AND (${targetPrinterId}::uuid IS NULL OR device.id=${targetPrinterId}::uuid) ORDER BY COALESCE(route.priority,0) DESC,device.created_at LIMIT 1`
     )[0];
     if (!device) {
@@ -779,6 +810,8 @@ export async function dispatchOrderPrintJobs(
       await sql`UPDATE ordering_hardware_devices SET reported_status='offline',last_seen_at=NOW(),status_message=${message},updated_at=NOW() WHERE id=${device.id}`;
     }
   }
+  // Identical slips for the other kitchen printers.
+  for (const copyId of kitchenCopies) await dispatchOrderPrintJobs(orderId, business, { jobId: copyId });
 }
 
 /**
@@ -818,10 +851,14 @@ export async function retryDuePrintJobs(business?: OrderingBusiness, limit = 20)
 /** Latest kitchen-ticket print outcome for an order, for POS warnings. */
 export async function kitchenPrintStatus(orderId: string, business: OrderingBusiness) {
   await ensureOrderingHardwareSchema();
-  const job = (
-    await getSql()`SELECT status,error_message FROM ordering_print_jobs WHERE order_id=${orderId} AND business=${business} AND purpose='kitchen_production' ORDER BY created_at DESC,id DESC LIMIT 1`
+  // The latest kitchen ticket plus its copies for the other kitchen printers; the worst one is reported.
+  const latest = (
+    await getSql()`SELECT id FROM ordering_print_jobs WHERE order_id=${orderId} AND business=${business} AND purpose='kitchen_production' AND COALESCE(idempotency_key,'') NOT LIKE 'kitchen-copy:%' ORDER BY created_at DESC,id DESC LIMIT 1`
   )[0];
-  if (!job) return { status: "none" as const, printed: false, message: "" };
+  if (!latest) return { status: "none" as const, printed: false, message: "" };
+  const batch = await getSql()`SELECT status,error_message FROM ordering_print_jobs WHERE id=${latest.id} OR idempotency_key LIKE ${`kitchen-copy:${latest.id}:%`}`;
+  const rank = ["failed", "not_configured", "attempting", "queued", "succeeded"];
+  const job = batch.toSorted((a, b) => rank.indexOf(String(a.status)) - rank.indexOf(String(b.status)))[0];
   const status = String(job.status) as "queued" | "attempting" | "succeeded" | "failed" | "not_configured";
   return {
     status,

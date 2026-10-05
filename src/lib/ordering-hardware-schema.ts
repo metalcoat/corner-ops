@@ -65,6 +65,12 @@ export function ensureOrderingHardwareSchema(): Promise<void> {
     await sql`ALTER TABLE ordering_print_jobs ADD COLUMN IF NOT EXISTS idempotency_key TEXT`;
     await sql`ALTER TABLE ordering_print_jobs ADD COLUMN IF NOT EXISTS parent_job_id UUID REFERENCES ordering_print_jobs(id)`;
     await sql`ALTER TABLE ordering_print_jobs ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ`;
+    // One kitchen ticket per order, but each extra kitchen printer gets a copy of it (parent_job_id set).
+    const kitchenOnce = (await sql`SELECT indexdef FROM pg_indexes WHERE indexname='ordering_print_jobs_kitchen_once_idx'`)[0];
+    if (!String(kitchenOnce?.indexdef || "").includes("parent_job_id")) {
+      await sql`DROP INDEX IF EXISTS ordering_print_jobs_kitchen_once_idx`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_print_jobs_kitchen_once_idx ON ordering_print_jobs (order_id, purpose) WHERE purpose = 'kitchen_production' AND is_reprint = FALSE AND parent_job_id IS NULL`;
+    }
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_print_jobs_idempotency_idx ON ordering_print_jobs(business,idempotency_key) WHERE idempotency_key IS NOT NULL`;
     await sql`CREATE INDEX IF NOT EXISTS ordering_print_jobs_queue_idx ON ordering_print_jobs(business,status,queued_at DESC)`;
   })().catch(error => { hardwareSchemaPromise = null; throw error; });

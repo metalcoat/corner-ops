@@ -52,7 +52,7 @@ type Dashboard = {
   jobs: Job[];
   paymentStations: Station[];
   categories: Array<{ id: string; name: string }>;
-  kitchenPrinterId: string;
+  kitchenPrinterIds: string[];
   printSettings: { externalKitchenAutoPrint: boolean };
 };
 type Provider = { provider: string; label: string; configured: boolean; onlineCheckoutEnabled: boolean; terminalCheckoutEnabled: boolean; sandbox: boolean; missing: string[] };
@@ -285,7 +285,7 @@ export default function HardwareSettingsClient() {
 
   const checklist = [
     { ok: receiptCapable.length > 0, title: "Receipt printer", hint: receiptCapable.length ? receiptCapable.map((row) => row.name).join(", ") : "Add a printer that prints receipts" },
-    { ok: kitchenPrinters.length > 0, title: "Kitchen printer", hint: kitchenPrinters.length ? deviceName(data.kitchenPrinterId) || kitchenPrinters[0].name : "Add a printer for kitchen tickets" },
+    { ok: kitchenPrinters.length > 0, title: "Kitchen printer", hint: kitchenPrinters.length ? kitchenPrinters.filter((row) => data.kitchenPrinterIds.includes(row.id)).map((row) => row.name).join(", ") : "Add a printer for kitchen tickets" },
     { ok: labelPrinters.length > 0, title: "Label printer", hint: labelPrinters.length ? labelPrinters.map((row) => row.name).join(", ") : "Optional: sticker labels for subs & pizzas" },
     { ok: printers.some((row) => row.adapter_config?.cashDrawerEnabled), title: "Cash drawer", hint: printers.filter((row) => row.adapter_config?.cashDrawerEnabled).map((row) => `on ${row.name}`).join(", ") || "Tick “cash drawer plugged in” on a receipt printer" },
     { ok: terminals.length > 0, title: "Card terminal", hint: terminals.length ? terminals.map((row) => row.name).join(", ") : "Add the Dejavoo terminal once Dharma sets it up" },
@@ -525,7 +525,7 @@ export default function HardwareSettingsClient() {
                 <div className="hwTags">
                   {config.cashDrawerEnabled && <span>💵 Cash drawer attached</span>}
                   {device.role === "kitchen_printer" && config.receiptEnabled && <span>Also prints receipts</span>}
-                  {device.role === "kitchen_printer" && data.kitchenPrinterId === device.id && <span>Gets kitchen tickets</span>}
+                  {device.role === "kitchen_printer" && data.kitchenPrinterIds.includes(device.id) && <span>Prints kitchen tickets</span>}
                   {device.role === "label_printer" && (
                     <span>
                       {config.labelCategoryIds?.length ? `Labels: ${config.labelCategoryIds.map((id) => categoryName.get(id) || "?").join(", ")}` : "Labels: subs & pizzas"} · {(config.labelLanguage || "tspl").toUpperCase()}
@@ -563,15 +563,33 @@ export default function HardwareSettingsClient() {
       <section className="hwSection">
         <h3>Kitchen tickets</h3>
         <div className="hwRow">
-          <label className="hwField">
+          <div className="hwField">
             Kitchen tickets print on
-            <select value={data.kitchenPrinterId} disabled={!kitchenPrinters.length} onChange={(e) => void act({ action: "set_kitchen_printer", printerId: e.target.value }, "Kitchen printer saved.")}>
-              {!kitchenPrinters.length && <option value="">Add a kitchen printer first</option>}
-              {kitchenPrinters.map((device) => (
-                <option key={device.id} value={device.id}>{device.name}</option>
-              ))}
-            </select>
-          </label>
+            {kitchenPrinters.length ? (
+              <div className="hwChips">
+                {kitchenPrinters.map((device) => {
+                  const on = data.kitchenPrinterIds.includes(device.id);
+                  const next = on ? data.kitchenPrinterIds.filter((id) => id !== device.id) : [...data.kitchenPrinterIds, device.id];
+                  return (
+                    <button
+                      type="button"
+                      key={device.id}
+                      className={on ? "selected" : ""}
+                      disabled={Boolean(busy) || (on && next.length === 0)}
+                      title={on && next.length === 0 ? "At least one kitchen printer has to print tickets" : undefined}
+                      onClick={() => void act({ action: "set_kitchen_printers", printerIds: next }, "Kitchen printers saved.")}
+                    >
+                      {on ? "✓ " : ""}
+                      {device.name}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <small>Add a kitchen printer above first.</small>
+            )}
+            <small>Every ticked printer prints the same full ticket.</small>
+          </div>
           <div className="hwToggle">
             <span>
               <strong>Print new orders automatically</strong>

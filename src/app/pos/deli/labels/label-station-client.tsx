@@ -27,6 +27,18 @@ type Queue = { printers: Printer[]; printer: Printer | null; orders: OrderGroup[
 
 const PRINTER_KEY = "corner-ops-label-printer";
 const unitKey = (unit: Pick<Unit, "orderItemId" | "unitIndex">) => `${unit.orderItemId}:${unit.unitIndex}`;
+/** A picture for each kind of food, so the right button is easy to spot. */
+function foodIcon(item: string) {
+  const name = item.toLowerCase();
+  if (/pizza|slice|\bpie\b/.test(name)) return "🍕";
+  if (/calzone|stromboli/.test(name)) return "🥟";
+  if (/wrap/.test(name)) return "🌯";
+  if (/salad/.test(name)) return "🥗";
+  if (/burger/.test(name)) return "🍔";
+  if (/sandwich|panini|melt|club|blt/.test(name)) return "🥪";
+  if (/sub|hoagie|grinder|italian|hero/.test(name)) return "🥖";
+  return "🏷️";
+}
 const clock = (value: string) => new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 export default function LabelStationClient() {
@@ -213,7 +225,7 @@ export default function LabelStationClient() {
                     const printing = busy.has(unitKey(unit));
                     return (
                       <button key={unitKey(unit)} className="labelUnit" disabled={printing} onClick={() => void print([unit])}>
-                        <span className="labelCode">{unit.code.split("-").pop()}</span>
+                        <span className="labelCode" aria-hidden="true"><i>{foodIcon(unit.item)}</i><b>{unit.code.split("-").pop()}</b></span>
                         <span className="labelItem">
                           <b>{unit.item}</b>
                           {unit.options.length > 0 && <small>{unit.options.join(", ")}</small>}
