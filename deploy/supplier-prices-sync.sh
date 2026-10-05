@@ -7,8 +7,8 @@
 #   /opt/corner-ops/supplier-prices/US Foods/export.csv
 # This script (run daily by corner-ops-supplier-prices.timer, or by hand) posts each
 # new file, then moves it to <supplier>/done/ (or <supplier>/failed/ with the error).
-# A browser job that downloads the exports from each supplier's site can save into
-# the same folders.
+# With --website it instead signs in to Sysco, US Foods and PFG and pulls prices
+# from their sites (corner-ops-supplier-website.timer runs that twice a day).
 set -Eeuo pipefail
 
 readonly ROOT="${CORNER_OPS_ROOT:-/opt/corner-ops}"
@@ -20,7 +20,17 @@ if [[ -z "$secret" ]]; then
   printf '%s CRON_SECRET is not set in %s.\n' "$(date -u +%FT%TZ)" "$ENV_FILE" >&2
   exit 1
 fi
-mkdir -p "$DROP"
+mkdir -p "$DROP" "$DROP/_website"
+
+# --website: sign in to the suppliers' sites and pull today's prices (see
+# deploy/supplier-scraper). Optional second argument limits it to one supplier:
+#   supplier-prices-sync.sh --website sysco
+if [[ "${1:-}" == "--website" ]]; then
+  readonly RUNTIME="$ROOT/runtime"
+  compose=(docker compose --project-name corner-ops --env-file "$ENV_FILE" -f "$RUNTIME/docker-compose.local.yml" --profile tools)
+  "${compose[@]}" build --quiet supplier-prices
+  exec "${compose[@]}" run --rm --no-deps supplier-prices ${2:+"$2"}
+fi
 
 shopt -s nullglob
 status=0

@@ -35,6 +35,12 @@ export function ensureSupplierCostSchema() {
     await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS ships_in_days SMALLINT`;
     await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS account_number TEXT NOT NULL DEFAULT ''`;
     await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`;
+    await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS minimum_cases INTEGER NOT NULL DEFAULT 0`;
+    // Result of the daily price job that signs in to the supplier's website.
+    await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_at TIMESTAMPTZ`;
+    await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_status TEXT NOT NULL DEFAULT ''`;
+    await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_message TEXT NOT NULL DEFAULT ''`;
+    await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_products INTEGER`;
     await sql`ALTER TABLE ordering_inventory_items ADD COLUMN IF NOT EXISTS weekly_usage_override NUMERIC(14,3)`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_inventory_requests(
       id UUID PRIMARY KEY,
@@ -84,12 +90,18 @@ export function ensureSupplierCostSchema() {
     await sql`ALTER TABLE ordering_inventory_items ADD COLUMN IF NOT EXISTS spec_min_pack NUMERIC(14,3)`;
     await sql`ALTER TABLE ordering_inventory_items ADD COLUMN IF NOT EXISTS spec_max_pack NUMERIC(14,3)`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_inventory_settings(business TEXT PRIMARY KEY, suppliers_seeded_at TIMESTAMPTZ)`;
+    await sql`ALTER TABLE ordering_inventory_settings ADD COLUMN IF NOT EXISTS case_minimums_set_at TIMESTAMPTZ`;
     const seeded = await sql`INSERT INTO ordering_inventory_settings(business,suppliers_seeded_at) VALUES(${BUSINESS},NOW()) ON CONFLICT(business) DO NOTHING RETURNING business`;
     if (seeded.length)
       for (const supplier of STARTER_SUPPLIERS)
         await sql`INSERT INTO ordering_inventory_suppliers(id,business,name,ships_in_days,cutoff_days_before)
           SELECT ${randomUUID()},${BUSINESS},${supplier.name},${supplier.shipsInDays},${supplier.shipsInDays == null ? 1 : 0}
           WHERE NOT EXISTS (SELECT 1 FROM ordering_inventory_suppliers WHERE business=${BUSINESS} AND lower(name)=lower(${supplier.name}))`;
+    // Once: the broadliners' minimum is 20 cases, with no dollar minimum.
+    const caseMinimums = await sql`UPDATE ordering_inventory_settings SET case_minimums_set_at=NOW() WHERE business=${BUSINESS} AND case_minimums_set_at IS NULL RETURNING business`;
+    if (caseMinimums.length)
+      await sql`UPDATE ordering_inventory_suppliers SET minimum_cases=20,minimum_order_cents=0,updated_at=NOW()
+        WHERE business=${BUSINESS} AND lower(name) IN ('sysco','us foods','performance foodservice')`;
   })().catch((error) => {
     ready = null;
     throw error;
@@ -159,6 +171,7 @@ function supplierTerms(row: Record<string, unknown>): SupplierTerms {
     id: String(row.id),
     name: String(row.name),
     minimumOrderCents: Number(row.minimum_order_cents || 0),
+    minimumCases: Number(row.minimum_cases || 0),
     deliveryFeeCents: Number(row.delivery_fee_cents || 0),
     freeDeliveryOverCents: num(row.free_delivery_over_cents),
     deliveryDays: Array.isArray(row.delivery_days) ? (row.delivery_days as unknown[]).map(Number) : [],
@@ -248,7 +261,8 @@ export async function supplierCostDashboard(mode: CostMode = "week") {
     priceChanges,
     catalogSize: Number((await sql`SELECT COUNT(*) n FROM ordering_supplier_catalog c JOIN ordering_inventory_suppliers s ON s.id=c.supplier_id WHERE s.business=${BUSINESS}`)[0].n),
     mode,
-    suppliers: supplierRows.map((row) => ({ ...supplierTerms(row), contactName: row.contact_name, email: row.email, phone: row.phone, accountNumber: row.account_number, notes: row.notes, next: nextDelivery(supplierTerms(row)) })),
+    suppliers: supplierRows.map((row) => ({ ...supplierTerms(row), contactName: row.contact_name, email: row.email, phone: row.phone, accountNumber: row.account_number, notes: row.notes, next: nextDelivery(supplierTerms(row)),
+      priceSync: row.price_sync_at ? { at: row.price_sync_at, status: String(row.price_sync_status), message: String(row.price_sync_message), products: row.price_sync_products == null ? null : Number(row.price_sync_products) } : null })),
     items: rows,
     analysis,
     requests,
@@ -267,11 +281,11 @@ export async function supplierCostAction(body: Record<string, unknown>, actorNam
     if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(cutoff)) throw new SupplierCostError("Order-by time must look like 16:00.");
     const id = String(body.id || randomUUID()), name = required(body.name, "Supplier name");
     const ships = num(body.shipsInDays);
-    const rows = await sql`INSERT INTO ordering_inventory_suppliers(id,business,name,contact_name,email,phone,minimum_order_cents,delivery_fee_cents,free_delivery_over_cents,delivery_days,cutoff_time,cutoff_days_before,ships_in_days,account_number,notes)
-      VALUES(${id},${BUSINESS},${name},${String(body.contactName || "")},${String(body.email || "")},${String(body.phone || "")},${cents(body.minimumOrderCents, "Minimum")},${cents(body.deliveryFeeCents, "Delivery fee")},
+    const rows = await sql`INSERT INTO ordering_inventory_suppliers(id,business,name,contact_name,email,phone,minimum_order_cents,minimum_cases,delivery_fee_cents,free_delivery_over_cents,delivery_days,cutoff_time,cutoff_days_before,ships_in_days,account_number,notes)
+      VALUES(${id},${BUSINESS},${name},${String(body.contactName || "")},${String(body.email || "")},${String(body.phone || "")},${cents(body.minimumOrderCents, "Minimum")},${Math.max(0, Math.min(500, Math.round(Number(body.minimumCases) || 0)))},${cents(body.deliveryFeeCents, "Delivery fee")},
         ${body.freeDeliveryOverCents == null || body.freeDeliveryOverCents === "" ? null : cents(body.freeDeliveryOverCents, "Free delivery amount")},${days}::smallint[],${cutoff},${Math.max(0, Math.min(14, Number(body.cutoffDaysBefore ?? 1) || 0))},
         ${ships == null || !Number.isFinite(ships) ? null : Math.max(0, Math.min(30, Math.round(ships)))},${String(body.accountNumber || "")},${String(body.notes || "")})
-      ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,contact_name=EXCLUDED.contact_name,email=EXCLUDED.email,phone=EXCLUDED.phone,minimum_order_cents=EXCLUDED.minimum_order_cents,
+      ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,contact_name=EXCLUDED.contact_name,email=EXCLUDED.email,phone=EXCLUDED.phone,minimum_order_cents=EXCLUDED.minimum_order_cents,minimum_cases=EXCLUDED.minimum_cases,
         delivery_fee_cents=EXCLUDED.delivery_fee_cents,free_delivery_over_cents=EXCLUDED.free_delivery_over_cents,delivery_days=EXCLUDED.delivery_days,cutoff_time=EXCLUDED.cutoff_time,
         cutoff_days_before=EXCLUDED.cutoff_days_before,ships_in_days=EXCLUDED.ships_in_days,account_number=EXCLUDED.account_number,notes=EXCLUDED.notes,updated_at=NOW()
       RETURNING id`;
@@ -571,4 +585,11 @@ export async function addStockRequest(employee: StockEmployee, input: { itemId?:
   await sql`INSERT INTO ordering_inventory_requests(id,business,inventory_item_id,item_text,quantity,unit,urgency,note,requested_by,requested_by_name)
     VALUES(${id},${BUSINESS},${itemId},${text},${quantity},${String(input.unit || "").slice(0, 20)},${urgency},${String(input.note || "").slice(0, 300)},${employee.employeeId},${employee.name})`;
   return { ok: true, id };
+}
+
+/** Records how the daily website price job went for a supplier, for the Supplier costs page. */
+export async function recordPriceSync(supplierId: string, result: { status: "ok" | "needs_login" | "needs_code" | "no_products" | "failed"; message: string; products?: number | null }) {
+  await ensureSupplierCostSchema();
+  await getSql()`UPDATE ordering_inventory_suppliers SET price_sync_at=NOW(),price_sync_status=${result.status},price_sync_message=${String(result.message || "").slice(0, 500)},
+    price_sync_products=${result.products ?? null} WHERE id=${supplierId} AND business=${BUSINESS}`;
 }

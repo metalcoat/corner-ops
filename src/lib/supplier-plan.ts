@@ -41,6 +41,8 @@ export type SupplierTerms = {
   id: string;
   name: string;
   minimumOrderCents: number;
+  /** Broadliners (Sysco, US Foods, PFG) set their minimum in cases, not dollars. */
+  minimumCases?: number;
   deliveryFeeCents: number;
   /** Delivery fee is waived at or above this order size. */
   freeDeliveryOverCents: number | null;
@@ -127,7 +129,8 @@ export function casesFor(need: number, offer: Offer, baseUnit: string): number |
 }
 
 export type PlanItem = { id: string; name: string; baseUnit: string; need: number; runOutDate?: string | null };
-export type PlanLine = { itemId: string; name: string; cases: number; casePriceCents: number; costCents: number; unitCostCents: number; late: boolean };
+/** `extraCases` are cases beyond what we need, added only to reach the supplier's minimum. */
+export type PlanLine = { itemId: string; name: string; cases: number; extraCases: number; casePriceCents: number; costCents: number; unitCostCents: number; late: boolean };
 export type SupplierOrder = {
   supplierId: string;
   name: string;
@@ -137,6 +140,11 @@ export type SupplierOrder = {
   totalCents: number;
   minimumOrderCents: number;
   shortOfMinimumCents: number;
+  cases: number;
+  minimumCases: number;
+  shortOfMinimumCases: number;
+  /** Cases added beyond what we need to reach the minimum. */
+  extraCases: number;
   delivery: DeliveryWindow | null;
 };
 export type Plan = {
@@ -179,20 +187,25 @@ function buildPlan(label: string, supplierIds: string[], items: PlanItem[], opti
     if (!choices.length) missing.push(item.id);
     else assigned.set(item.id, pick(choices));
   }
-  const subtotal = (supplierId: string) => [...assigned.values()].filter((c) => c.offer.supplierId === supplierId).reduce((sum, c) => sum + c.cost, 0);
-  if (enforceMinimums) {
-    // Top a supplier up to its minimum by moving over the items that cost the least extra to switch.
-    for (const supplierId of supplierIds) {
-      const minimum = suppliers.get(supplierId)!.minimumOrderCents;
-      while (subtotal(supplierId) < minimum) {
+  const extra = new Map<string, number>();
+  const inOrder = (supplierId: string) => [...assigned.entries()].filter(([, c]) => c.offer.supplierId === supplierId);
+  const subtotal = (supplierId: string) => inOrder(supplierId).reduce((sum, [itemId, c]) => sum + c.cost + (extra.get(itemId) ?? 0) * c.offer.casePriceCents, 0);
+  const caseCount = (supplierId: string) => inOrder(supplierId).reduce((sum, [itemId, c]) => sum + c.cases + (extra.get(itemId) ?? 0), 0);
+  const short = (supplierId: string, minus?: Choice) => {
+    const t = suppliers.get(supplierId)!;
+    return subtotal(supplierId) - (minus?.cost ?? 0) < t.minimumOrderCents || caseCount(supplierId) - (minus?.cases ?? 0) < (t.minimumCases ?? 0);
+  };
+  for (const supplierId of supplierIds) {
+    if (enforceMinimums) {
+      // First move over the items that cost the least extra to switch to this supplier.
+      while (inOrder(supplierId).length && short(supplierId)) {
         const moves = [...assigned.entries()]
           .filter(([, choice]) => choice.offer.supplierId !== supplierId)
           .map(([itemId, choice]) => {
             const alternative = options.get(itemId)?.get(supplierId);
             const from = choice.offer.supplierId;
-            const fromMinimum = suppliers.get(from)!.minimumOrderCents;
             // Don't pull a supplier we already topped up back under its own minimum.
-            const breaks = subtotal(from) - choice.cost < fromMinimum && supplierIds.indexOf(from) < supplierIds.indexOf(supplierId);
+            const breaks = supplierIds.indexOf(from) < supplierIds.indexOf(supplierId) && short(from, choice);
             return alternative && !breaks ? { itemId, alternative, extra: alternative.cost - choice.cost } : null;
           })
           .filter((move): move is NonNullable<typeof move> => Boolean(move))
@@ -201,22 +214,35 @@ function buildPlan(label: string, supplierIds: string[], items: PlanItem[], opti
         assigned.set(moves[0].itemId, moves[0].alternative);
       }
     }
+    // Still short: buy extra cases of what we go through fastest from them, so the extra stock is used soonest.
+    const lines = inOrder(supplierId).sort((a, b) => b[1].cases - a[1].cases || a[1].offer.casePriceCents - b[1].offer.casePriceCents);
+    let guard = 0;
+    while (lines.length && short(supplierId) && guard++ < 500) extra.set(lines[0][0], (extra.get(lines[0][0]) ?? 0) + 1);
   }
   const byName = new Map(items.map((item) => [item.id, item.name]));
   const orders: SupplierOrder[] = [];
   for (const supplierId of supplierIds) {
     const terms = suppliers.get(supplierId)!;
-    const lines = [...assigned.entries()]
-      .filter(([, choice]) => choice.offer.supplierId === supplierId)
-      .map(([itemId, c]) => ({ itemId, name: byName.get(itemId) || "", cases: c.cases, casePriceCents: c.offer.casePriceCents, costCents: c.cost, unitCostCents: Math.round(c.unit * 100) / 100, late: c.late }))
+    const lines = inOrder(supplierId)
+      .map(([itemId, c]) => {
+        const more = extra.get(itemId) ?? 0;
+        return { itemId, name: byName.get(itemId) || "", cases: c.cases + more, extraCases: more, casePriceCents: c.offer.casePriceCents, costCents: c.cost + more * c.offer.casePriceCents, unitCostCents: Math.round(c.unit * 100) / 100, late: c.late };
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
     if (!lines.length) {
       if (enforceMinimums) return null; // same as a plan without this supplier
       continue;
     }
-    const sub = lines.reduce((sum, line) => sum + line.costCents, 0);
+    const sub = lines.reduce((sum, line) => sum + line.costCents, 0), cases = lines.reduce((sum, line) => sum + line.cases, 0);
     const fee = terms.freeDeliveryOverCents != null && sub >= terms.freeDeliveryOverCents ? 0 : terms.deliveryFeeCents;
-    orders.push({ supplierId, name: terms.name, lines, subtotalCents: sub, feeCents: fee, totalCents: sub + fee, minimumOrderCents: terms.minimumOrderCents, shortOfMinimumCents: Math.max(0, terms.minimumOrderCents - sub), delivery: windows.get(supplierId) ?? null });
+    const minimumCases = terms.minimumCases ?? 0;
+    orders.push({
+      supplierId, name: terms.name, lines, subtotalCents: sub, feeCents: fee, totalCents: sub + fee,
+      minimumOrderCents: terms.minimumOrderCents, shortOfMinimumCents: Math.max(0, terms.minimumOrderCents - sub),
+      cases, minimumCases, shortOfMinimumCases: Math.max(0, minimumCases - cases),
+      extraCases: lines.reduce((sum, line) => sum + line.extraCases, 0),
+      delivery: windows.get(supplierId) ?? null,
+    });
   }
   return {
     label,
@@ -224,7 +250,7 @@ function buildPlan(label: string, supplierIds: string[], items: PlanItem[], opti
     totalCents: orders.reduce((sum, order) => sum + order.totalCents, 0),
     feesCents: orders.reduce((sum, order) => sum + order.feeCents, 0),
     missing,
-    meetsMinimums: orders.every((order) => order.shortOfMinimumCents === 0),
+    meetsMinimums: orders.every((order) => order.shortOfMinimumCents === 0 && order.shortOfMinimumCases === 0),
     lateItems: orders.reduce((sum, order) => sum + order.lines.filter((line) => line.late).length, 0),
   };
 }

@@ -123,3 +123,9 @@
   .changeRows li{grid-template-columns:1fr auto}
   .matchGroups{grid-template-columns:1fr}
 }
+.minimum.warn{background:#fff0c2;color:#754f00!important}
+.orderCards li small.extra{color:var(--amber)}
+.termCard dd.sync{display:grid;justify-items:end;gap:2px}
+.termCard dd.sync.ok{color:var(--good)}
+.termCard dd.sync.needs_login,.termCard dd.sync.needs_code,.termCard dd.sync.failed,.termCard dd.sync.no_products{color:var(--bad)}
+.termCard dd.sync small{font-weight:500;color:var(--muted);max-width:240px}

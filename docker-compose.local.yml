@@ -115,6 +115,38 @@ services:
     networks:
       - cornerops
 
+  # Website price job: signs in to Sysco / US Foods / PFG and sends prices to the
+  # app. Not started by `up`; deploy/supplier-prices-sync.sh --website runs it.
+  supplier-prices:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: deploy/supplier-scraper/Dockerfile
+    environment:
+      CRON_SECRET: ${CRON_SECRET:-}
+      APP_INTERNAL_URL: http://app:3000
+      SYSCO_USERNAME: ${SYSCO_USERNAME:-}
+      SYSCO_PASSWORD: ${SYSCO_PASSWORD:-}
+      SYSCO_CODE: ${SYSCO_CODE:-}
+      SYSCO_LOGIN_URL: ${SYSCO_LOGIN_URL:-}
+      SYSCO_ORDER_GUIDE_URL: ${SYSCO_ORDER_GUIDE_URL:-}
+      USFOODS_USERNAME: ${USFOODS_USERNAME:-}
+      USFOODS_PASSWORD: ${USFOODS_PASSWORD:-}
+      USFOODS_CODE: ${USFOODS_CODE:-}
+      USFOODS_LOGIN_URL: ${USFOODS_LOGIN_URL:-}
+      USFOODS_ORDER_GUIDE_URL: ${USFOODS_ORDER_GUIDE_URL:-}
+      PFG_USERNAME: ${PFG_USERNAME:-}
+      PFG_PASSWORD: ${PFG_PASSWORD:-}
+      PFG_CODE: ${PFG_CODE:-}
+      PFG_LOGIN_URL: ${PFG_LOGIN_URL:-}
+      PFG_ORDER_GUIDE_URL: ${PFG_ORDER_GUIDE_URL:-}
+    volumes:
+      - cornerops_supplier_browsers:/profiles
+      - ${SUPPLIER_PRICES_DIR:-/opt/corner-ops/supplier-prices}/_website:/debug
+    shm_size: 1gb
+    networks:
+      - cornerops
+
   postgres:
     image: postgres:17-bookworm
     container_name: corner-ops-postgres
@@ -136,6 +168,7 @@ services:
 volumes:
   cornerops_postgres_data:
   cornerops_uploads:
+  cornerops_supplier_browsers:
 
 networks:
   cornerops:

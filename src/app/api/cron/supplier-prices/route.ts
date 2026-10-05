@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { getSql } from "@/lib/db";
-import { ensureSupplierCostSchema, importPrices, ingestCatalog, SupplierCostError, type CatalogProduct } from "@/lib/ordering-supplier-costs";
+import { ensureSupplierCostSchema, importPrices, ingestCatalog, recordPriceSync, SupplierCostError, type CatalogProduct } from "@/lib/ordering-supplier-costs";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -27,11 +27,28 @@ export async function POST(request: Request) {
   if (!authorized(request)) return Response.json({ error: "Unauthorized." }, { status: 401 });
   try {
     await ensureSupplierCostSchema();
-    const body = (await request.json()) as { supplier?: string; csv?: string; products?: CatalogProduct[]; source?: string };
+    const body = (await request.json()) as { supplier?: string; csv?: string; products?: CatalogProduct[]; source?: string; status?: string; message?: string };
     const name = String(body.supplier || "").trim();
     const supplier = (await getSql()`SELECT id FROM ordering_inventory_suppliers WHERE business='Corner Deli' AND (lower(name)=lower(${name}) OR id::text=${name}) LIMIT 1`)[0];
     if (!supplier) return Response.json({ error: `No supplier named "${name}".` }, { status: 404 });
-    if (typeof body.csv === "string") return Response.json(await importPrices(String(supplier.id), body.csv));
+    const statuses = ["ok", "needs_login", "needs_code", "no_products", "failed"] as const;
+    // The website price job reports a sign-in or page problem without any prices.
+    if (body.status && body.status !== "ok" && typeof body.csv !== "string") {
+      const status = statuses.find((s) => s === body.status) ?? "failed";
+      await recordPriceSync(String(supplier.id), { status, message: String(body.message || "") });
+      return Response.json({ recorded: status });
+    }
+    if (typeof body.csv === "string") {
+      try {
+        const result = await importPrices(String(supplier.id), body.csv);
+        if (body.source === "website")
+          await recordPriceSync(String(supplier.id), { status: "ok", message: `${result.priceChanges} price change${result.priceChanges === 1 ? "" : "s"}, ${result.offersUpdated} of our items updated`, products: result.catalog });
+        return Response.json(result);
+      } catch (error) {
+        if (body.source === "website" && error instanceof SupplierCostError) await recordPriceSync(String(supplier.id), { status: "no_products", message: error.message });
+        throw error;
+      }
+    }
     if (Array.isArray(body.products)) return Response.json(await ingestCatalog(String(supplier.id), body.products, String(body.source || "feed").slice(0, 40)));
     return Response.json({ error: "Send csv or products." }, { status: 400 });
   } catch (error) {

@@ -2,7 +2,7 @@
 Description=Every 30 minutes, 5am–9pm: pick up new supplier price files
 
 [Timer]
-OnCalendar=*-*-* 05..21:00,30:00
+OnCalendar=*-*-* 05..21:00,30:00 America/New_York
 Persistent=true
 Unit=corner-ops-supplier-prices.service
 

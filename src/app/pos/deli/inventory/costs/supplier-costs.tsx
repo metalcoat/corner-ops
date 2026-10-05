@@ -5,9 +5,10 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 type Window = { orderBy: string | null; deliveryDate: string } | null;
 type Supplier = {
-  id: string; name: string; minimumOrderCents: number; deliveryFeeCents: number; freeDeliveryOverCents: number | null;
+  id: string; name: string; minimumOrderCents: number; minimumCases: number; deliveryFeeCents: number; freeDeliveryOverCents: number | null;
   deliveryDays: number[]; cutoffTime: string; cutoffDaysBefore: number; shipsInDays: number | null;
   contactName: string; email: string; phone: string; accountNumber: string; notes: string; next: Window;
+  priceSync: { at: string; status: "ok" | "needs_login" | "needs_code" | "no_products" | "failed"; message: string; products: number | null } | null;
 };
 type Price = { supplierId: string; caseQuantity: number; caseUnit: string; casePriceCents: number; vendorSku: string; quotedAt: string | null; unitCostCents: number | null };
 type Item = {
@@ -15,8 +16,8 @@ type Item = {
   weeklyUsage: number | null; usageSource: "set" | "history" | "none"; runOutDate: string | null; need: number; requests: number;
   prices: Record<string, Price>; bestUnitCostCents: number | null; weeklySpreadCents: number;
 };
-type Line = { itemId: string; name: string; cases: number; casePriceCents: number; costCents: number; unitCostCents: number; late: boolean };
-type Order = { supplierId: string; name: string; lines: Line[]; subtotalCents: number; feeCents: number; totalCents: number; minimumOrderCents: number; shortOfMinimumCents: number; delivery: Window };
+type Line = { itemId: string; name: string; cases: number; extraCases: number; casePriceCents: number; costCents: number; unitCostCents: number; late: boolean };
+type Order = { supplierId: string; name: string; lines: Line[]; subtotalCents: number; feeCents: number; totalCents: number; minimumOrderCents: number; shortOfMinimumCents: number; cases: number; minimumCases: number; shortOfMinimumCases: number; extraCases: number; delivery: Window };
 type Plan = { label: string; orders: Order[]; totalCents: number; feesCents: number; missing: string[]; meetsMinimums: boolean; lateItems: number };
 type Request = { id: string; item_name: string | null; item_text: string; quantity: string | null; unit: string; urgency: string; note: string; status: string; requested_by_name: string; requested_at: string };
 type Spec = { keywords: string; maxUnitCostCents: number | null; minPack: number | null; maxPack: number | null };
@@ -25,6 +26,7 @@ type PriceChange = { id: string; supplier_name: string; description: string; pre
 type SearchResult = { id: string; supplier_name: string; vendor_sku: string; description: string; brand: string; pack_quantity: number; pack_unit: string; price_cents: number; unitCostCents: number | null; last_seen_at: string };
 type Data = { specs: Record<string, Spec>; matches: Record<string, Match[]>; priceChanges: PriceChange[]; catalogSize: number; mode: "week" | "order"; suppliers: Supplier[]; items: Item[]; analysis: { best: Plan | null; single: Plan[]; floorCents: number }; requests: Request[]; unpriced: string[]; noUsage: number };
 
+const SYNC_LABEL = { ok: "Updated", needs_login: "Sign-in failed", needs_code: "Needs a verification code", no_products: "Signed in, no prices found", failed: "Failed" } as const;
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const money = (c: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(c / 100);
 const unitMoney = (c: number) => (c < 100 ? `${(c).toFixed(1)}¢` : money(c));
@@ -48,7 +50,7 @@ export default function SupplierCosts() {
   const [busy, setBusy] = useState("");
   const [editing, setEditing] = useState<{ itemId: string; supplierId: string; caseQuantity: string; caseUnit: string; price: string; sku: string } | null>(null);
   const [usageEdit, setUsageEdit] = useState<{ itemId: string; weekly: string; par: string } | null>(null);
-  const [supplierEdit, setSupplierEdit] = useState<(Omit<Supplier, "minimumOrderCents" | "deliveryFeeCents" | "freeDeliveryOverCents" | "shipsInDays" | "next"> & { minimum: string; fee: string; freeOver: string; ships: string }) | null>(null);
+  const [supplierEdit, setSupplierEdit] = useState<(Omit<Supplier, "minimumOrderCents" | "minimumCases" | "deliveryFeeCents" | "freeDeliveryOverCents" | "shipsInDays" | "next" | "priceSync"> & { minimumCases: string } & { minimum: string; fee: string; freeOver: string; ships: string }) | null>(null);
   const [importing, setImporting] = useState({ supplierId: "", text: "" });
   const [filter, setFilter] = useState("");
   const [specEdit, setSpecEdit] = useState<{ itemId: string; keywords: string; maxUnit: string; minPack: string; maxPack: string } | null>(null);
@@ -117,6 +119,7 @@ export default function SupplierCosts() {
                       action: "save_supplier",
                       ...supplierEdit,
                       minimumOrderCents: toCents(supplierEdit.minimum) ?? 0,
+                      minimumCases: Number(supplierEdit.minimumCases || 0),
                       deliveryFeeCents: toCents(supplierEdit.fee) ?? 0,
                       freeDeliveryOverCents: toCents(supplierEdit.freeOver),
                       shipsInDays: supplierEdit.ships.trim() === "" ? null : Number(supplierEdit.ships),
@@ -127,7 +130,8 @@ export default function SupplierCosts() {
               >
                 <label>Name<input value={supplierEdit.name} onChange={(e) => setSupplierEdit({ ...supplierEdit, name: e.target.value })} /></label>
                 <div className="termRow">
-                  <label>Minimum order $<input inputMode="decimal" value={supplierEdit.minimum} onChange={(e) => setSupplierEdit({ ...supplierEdit, minimum: e.target.value })} /></label>
+                  <label>Minimum cases<input inputMode="numeric" value={supplierEdit.minimumCases} placeholder="none" onChange={(e) => setSupplierEdit({ ...supplierEdit, minimumCases: e.target.value.replace(/\D/g, "") })} /></label>
+                  <label>Minimum order $<input inputMode="decimal" value={supplierEdit.minimum} placeholder="none" onChange={(e) => setSupplierEdit({ ...supplierEdit, minimum: e.target.value })} /></label>
                   <label>Delivery fee $<input inputMode="decimal" value={supplierEdit.fee} onChange={(e) => setSupplierEdit({ ...supplierEdit, fee: e.target.value })} /></label>
                   <label>Free delivery over $<input inputMode="decimal" value={supplierEdit.freeOver} placeholder="never" onChange={(e) => setSupplierEdit({ ...supplierEdit, freeOver: e.target.value })} /></label>
                 </div>
@@ -247,6 +251,7 @@ export default function SupplierCosts() {
                       <span>{line.cases}×</span>
                       <b>{line.name}</b>
                       <em>{money(line.costCents)}</em>
+                      {line.extraCases > 0 && <small className="extra">incl. {line.extraCases} extra to reach the minimum</small>}
                       {line.late && <small>Arrives after we run out</small>}
                     </li>
                   ))}
@@ -256,6 +261,15 @@ export default function SupplierCosts() {
                   <div><dt>Delivery</dt><dd>{order.feeCents ? money(order.feeCents) : "Free"}</dd></div>
                   <div className="total"><dt>Total</dt><dd>{money(order.totalCents)}</dd></div>
                 </dl>
+                {order.minimumCases > 0 && (
+                  <p className={`minimum ${order.shortOfMinimumCases ? "bad" : order.extraCases ? "warn" : "good"}`}>
+                    {order.cases} cases · {order.shortOfMinimumCases
+                      ? `${order.shortOfMinimumCases} short of the ${order.minimumCases}-case minimum`
+                      : order.extraCases
+                        ? `${order.extraCases} extra case${order.extraCases === 1 ? "" : "s"} added to reach ${order.minimumCases}`
+                        : `meets the ${order.minimumCases}-case minimum`}
+                  </p>
+                )}
                 {order.minimumOrderCents > 0 && (
                   <p className={`minimum ${order.shortOfMinimumCents ? "bad" : "good"}`}>
                     {order.shortOfMinimumCents ? `${money(order.shortOfMinimumCents)} short of the ${money(order.minimumOrderCents)} minimum` : `Meets the ${money(order.minimumOrderCents)} minimum`}
@@ -590,7 +604,8 @@ export default function SupplierCosts() {
                     onClick={() =>
                       setSupplierEdit({
                         ...s,
-                        minimum: dollars(s.minimumOrderCents),
+                        minimum: s.minimumOrderCents ? dollars(s.minimumOrderCents) : "",
+                        minimumCases: s.minimumCases ? String(s.minimumCases) : "",
                         fee: dollars(s.deliveryFeeCents),
                         freeOver: dollars(s.freeDeliveryOverCents),
                         ships: s.shipsInDays == null ? "" : String(s.shipsInDays),
@@ -601,7 +616,7 @@ export default function SupplierCosts() {
                   </button>
                 </header>
                 <dl>
-                  <div><dt>Minimum</dt><dd>{s.minimumOrderCents ? money(s.minimumOrderCents) : "None set"}</dd></div>
+                  <div><dt>Minimum</dt><dd>{[s.minimumCases ? `${s.minimumCases} cases` : "", s.minimumOrderCents ? money(s.minimumOrderCents) : ""].filter(Boolean).join(" and ") || "None"}</dd></div>
                   <div><dt>Delivery</dt><dd>{s.deliveryFeeCents ? money(s.deliveryFeeCents) : "Free"}{s.freeDeliveryOverCents != null ? ` (free over ${money(s.freeDeliveryOverCents)})` : ""}</dd></div>
                   <div>
                     <dt>Schedule</dt>
@@ -615,13 +630,24 @@ export default function SupplierCosts() {
                   </div>
                   <div><dt>Next</dt><dd>{s.next ? <>{day(s.next.deliveryDate)}{s.next.orderBy ? <> · order by {when(s.next.orderBy)}</> : null}</> : "—"}</dd></div>
                   {s.contactName && <div><dt>Rep</dt><dd>{s.contactName}{s.phone ? ` · ${s.phone}` : ""}</dd></div>}
+                  <div>
+                    <dt>Website prices</dt>
+                    <dd className={`sync ${s.priceSync?.status ?? "none"}`}>
+                      {!s.priceSync
+                        ? "Not synced yet"
+                        : s.priceSync.status === "ok"
+                          ? `Updated ${when(s.priceSync.at)}${s.priceSync.products != null ? ` · ${s.priceSync.products} products` : ""}`
+                          : `${SYNC_LABEL[s.priceSync.status]} · ${when(s.priceSync.at)}`}
+                      {s.priceSync && s.priceSync.status !== "ok" && s.priceSync.message ? <small>{s.priceSync.message}</small> : null}
+                    </dd>
+                  </div>
                 </dl>
               </article>
             ),
           )}
           {!(supplierEdit && !supplierEdit.id) && <button
             className="termCard addSupplier"
-            onClick={() => setSupplierEdit({ id: "", name: "", deliveryDays: [], cutoffTime: "16:00", cutoffDaysBefore: 1, contactName: "", email: "", phone: "", accountNumber: "", notes: "", minimum: "", fee: "", freeOver: "", ships: "" })}
+            onClick={() => setSupplierEdit({ id: "", name: "", deliveryDays: [], cutoffTime: "16:00", cutoffDaysBefore: 1, contactName: "", email: "", phone: "", accountNumber: "", notes: "", minimumCases: "", minimum: "", fee: "", freeOver: "", ships: "" })}
           >
             + Add supplier
           </button>}

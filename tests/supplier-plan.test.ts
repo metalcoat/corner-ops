@@ -57,7 +57,38 @@ test("cheapest split respects minimums and fees", () => {
   assert.equal(result.best!.totalCents, 16000 + 3000);
   const single = result.single.find((plan) => plan.label.endsWith("B"))!;
   assert.deepEqual(single.missing, ["cups"]);
-  assert.equal(single.orders[0].shortOfMinimumCents, 20000 - 15200);
+  // Alone, B can only reach its minimum by buying an extra case of turkey.
+  assert.equal(single.orders[0].shortOfMinimumCents, 0);
+  assert.equal(single.orders[0].extraCases, 1);
+  assert.equal(single.totalCents, 3 * 7600);
+});
+
+test("20-case minimums: items move over first, then extra cases fill the gap", () => {
+  const items = [
+    { id: "turkey", name: "Turkey", baseUnit: "lb", need: 200 }, // 10 cases
+    { id: "ham", name: "Ham", baseUnit: "lb", need: 160 }, // 8 cases
+    { id: "cups", name: "Cups", baseUnit: "each", need: 2000 }, // 2 cases
+  ];
+  const offers = [
+    { supplierId: "S", itemId: "turkey", caseQuantity: 20, caseUnit: "lb", casePriceCents: 8000 },
+    { supplierId: "U", itemId: "turkey", caseQuantity: 20, caseUnit: "lb", casePriceCents: 7800 },
+    { supplierId: "S", itemId: "ham", caseQuantity: 20, caseUnit: "lb", casePriceCents: 7000 },
+    { supplierId: "U", itemId: "ham", caseQuantity: 20, caseUnit: "lb", casePriceCents: 7100 },
+    { supplierId: "S", itemId: "cups", caseQuantity: 1000, caseUnit: "each", casePriceCents: 6000 },
+    { supplierId: "U", itemId: "cups", caseQuantity: 1000, caseUnit: "each", casePriceCents: 6500 },
+  ];
+  const twenty = { minimumOrderCents: 0, minimumCases: 20 };
+  const result = analyzeSuppliers(items, offers, [terms("S", twenty), terms("U", twenty)]);
+  // Splitting leaves both under 20 cases; one supplier with all 20 cases beats padding two orders.
+  assert.equal(result.best!.orders.length, 1);
+  assert.equal(result.best!.orders[0].cases, 20);
+  assert.ok(result.best!.meetsMinimums);
+  assert.equal(result.best!.label, "U");
+  // A smaller week: 12 cases total, so 8 extra cases of the cheapest item we already buy there.
+  const small = analyzeSuppliers(items.map((i) => ({ ...i, need: i.need * 0.6 })), offers, [terms("S", twenty)]);
+  assert.equal(small.best!.orders[0].cases, 20);
+  assert.equal(small.best!.orders[0].extraCases, 20 - (6 + 5 + 2));
+  assert.equal(small.best!.orders[0].lines.find((l) => l.itemId === "cups")!.extraCases, 0);
 });
 
 test("a supplier that can't deliver before an item runs out loses to one that can", () => {
