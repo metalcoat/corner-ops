@@ -551,6 +551,10 @@ async function run(supplier) {
       return;
     }
     writeFileSync(`${DEBUG}/${supplier.key}-latest.csv`, csv);
+    // DEBUG_RESPONSES=1: also keep the shape of what the site loaded on a successful run (no values), for tuning.
+    // DEBUG_RESPONSES=raw keeps the responses themselves (on this box only, like the price files) to debug the reader.
+    if (process.env.DEBUG_RESPONSES === "raw") writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-raw.json`, JSON.stringify(captured));
+    if (process.env.DEBUG_RESPONSES === "1") writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-responses.txt`, captured.map((c) => `${c.url.split("?")[0]}\n${describe(c.json)}`).join("\n\n"));
     console.log(`${supplier.name}: ${await report(supplier.name, { csv })}`);
   } catch (error) {
     const picture = await shot("error");

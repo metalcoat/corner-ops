@@ -65,3 +65,20 @@ test("PFG count packs with no weight unit", () => {
   assert.equal(parseSize("8/13.37"), null);
   assert.deepEqual(parseSize("1/2 GAL"), { quantity: 0.5, unit: "gal" });
 });
+
+test("unit prices per pound or per item use the case's pounds or item count", () => {
+  const csv = [
+    "Item #,Pack,Size,Unit,Brand,Description,Case Price,Unit Price,Price Unit",
+    "1219127,1/160 OZA,,,STOCK YARDS,Strip loin steak,,29.40,LB",
+    "3353448,6/19 OZ,,,MONARCH,Garlic seasoning,,19.65,EA",
+    "2720977,4/10 LB,,,PATUXENT,Chicken breast,,2.89,LB",
+    "5505406,3/2/8.3 LBA,,,PATUXENT,Pork butt,,2.06,LB",
+  ].join("\n");
+  const { products } = parseGuide(csv);
+  assert.deepEqual(products.map((p) => [p.sku, p.packQuantity, p.packUnit, p.priceCents]), [
+    ["1219127", 160, "oz", 29400], // 10 lb at $29.40/lb, not 160 × $29.40
+    ["3353448", 114, "oz", 11790], // 6 bottles at $19.65
+    ["2720977", 40, "lb", 11560],
+    ["5505406", 49.8, "lb", 10259],
+  ]);
+});

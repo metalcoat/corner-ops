@@ -13,6 +13,8 @@ export type WebProduct = {
   unit: string;
   casePrice: number | null;
   unitPrice: number | null;
+  /** What unitPrice is per when it isn't the size unit: "LB" (catch weight) or "EA" (one of the case's items). */
+  priceUnit?: string;
 };
 
 type Flat = Array<[string[], string | number | boolean]>;
@@ -41,7 +43,7 @@ const PACK = /^(pack|packsize|packqty|packquantity|casepack|unitspercase|packcou
 const SIZE = /^(size|itemsize|sizedescription|packsizedescription|packandsize|packsizetext|packsizedisplay|unitsize)$/;
 const UNIT = /^(uom|unit|unitofmeasure|sizeuom|sizeunit|uomdescription|sellinguom)$/;
 const PRICEISH = /(price|cost|amount|value)$/;
-const EXCLUDE_PRICE = /(list|msrp|retail|was|previous|old|compare|savings|discount|deposit|tax|fee|total|extended|min|max)/;
+const EXCLUDE_PRICE = /(list|msrp|retail|was|previous|old|compare|savings|discount|deposit|tax|fee|total|extended|min|max|reference)/;
 const EACH = /(each|unit|split|perpound|perlb|lb|piece|ea)/;
 
 function money(value: string | number | boolean): number | null {
@@ -75,7 +77,8 @@ function asProduct(flat: Flat): WebProduct | null {
   for (const [path, v] of flat) {
     const joined = norm(path.join("."));
     const last = norm(path[path.length - 1] ?? "");
-    if (!PRICEISH.test(last) && !/price/.test(joined)) continue;
+    // The field itself must be a price (price, netPrice, amount…); an id or zone inside a "price" object is not.
+    if (!PRICEISH.test(last)) continue;
     if (!/price|cost/.test(joined) || EXCLUDE_PRICE.test(joined.replace(/price$/, ""))) continue;
     const amount = money(v);
     if (amount == null) continue;
@@ -84,13 +87,20 @@ function asProduct(flat: Flat): WebProduct | null {
     else casePrice ??= amount;
   }
   if (casePrice == null && unitPrice == null) return null;
+  // Catch-weight items (sold by the case, priced by the pound) carry a per-pound price (Sysco: isCatchWeight).
+  let priceUnit: string | undefined;
+  if (flat.some(([p, v]) => v === true && /catchweight/.test(norm(p[p.length - 1] ?? "")))) {
+    unitPrice = casePrice ?? unitPrice;
+    casePrice = null;
+    priceUnit = "LB";
+  }
   const pack = text(find(PACK, (v) => /^\s*\d+(\.\d+)?\s*$/.test(String(v)) || /\d+\s*\/\s*\d/.test(String(v))));
   const size = text(find(SIZE, (v) => /\d/.test(String(v))));
   const unit = text(find(UNIT, (v) => typeof v === "string" && v.length <= 12));
   if (!pack && !size) return null;
   // Brand is either a field ("brand": "X") or an object ("brand": { "name": "X" }).
   const brandEntry = flat.find(([p, v]) => typeof v === "string" && p.some((segment) => BRAND.test(norm(segment))));
-  return { sku, description, brand: brandEntry ? String(brandEntry[1]).trim() : "", pack, size, unit, casePrice, unitPrice };
+  return { sku, description, brand: brandEntry ? String(brandEntry[1]).trim() : "", pack, size, unit, casePrice, unitPrice, ...(priceUnit ? { priceUnit } : {}) };
 }
 
 /** Every product found anywhere in a JSON document (lists of 2+ product-like objects). */
@@ -172,7 +182,7 @@ export function joinSplitProducts(responses: unknown[]): WebProduct[] {
     // US Foods names the unit on the price; PFG on the product (CS, or per pound when catch weight).
     const uom = price.uom || (product.perPound ? "LB" : product.unit || "CS");
     const perCase = uom === "CS" || uom === "CASE";
-    products.push({ sku: product.sku ?? number, description: product.description, brand: product.brand, pack: product.pack, size: "", unit: perCase ? "" : uom, casePrice: perCase ? price.amount : null, unitPrice: perCase ? null : price.amount });
+    products.push({ sku: product.sku ?? number, description: product.description, brand: product.brand, pack: product.pack, size: "", unit: "", casePrice: perCase ? price.amount : null, unitPrice: perCase ? null : price.amount, ...(perCase ? {} : { priceUnit: uom }) });
   }
   return products;
 }
@@ -195,9 +205,9 @@ const cell = (value: string | number | null) => {
 
 /** The order-guide CSV the app's importer reads (headers it recognizes). */
 export function productsToCsv(products: WebProduct[]): string {
-  const rows = [["Item #", "Pack", "Size", "Unit", "Brand", "Description", "Case Price", "Unit Price"]];
+  const rows = [["Item #", "Pack", "Size", "Unit", "Brand", "Description", "Case Price", "Unit Price", "Price Unit"]];
   for (const p of products)
-    rows.push([p.sku, p.pack, p.size, p.unit, p.brand, p.description, p.casePrice == null ? "" : p.casePrice.toFixed(2), p.unitPrice == null ? "" : p.unitPrice.toFixed(2)]);
+    rows.push([p.sku, p.pack, p.size, p.unit, p.brand, p.description, p.casePrice == null ? "" : p.casePrice.toFixed(2), p.unitPrice == null ? "" : p.unitPrice.toFixed(2), p.priceUnit ?? ""]);
   return rows.map((row) => row.map(cell).join(",")).join("\n");
 }
 

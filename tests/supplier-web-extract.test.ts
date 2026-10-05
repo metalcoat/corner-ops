@@ -81,7 +81,7 @@ test("US Foods: prices and details from separate responses are joined by product
   const products = joinSplitProducts([guideItems, details, pricing]);
   assert.deepEqual(products, [
     { sku: "1328699", description: "Shortening, Frying Soybean Liquid", brand: "Harvest Value", pack: "1/35 LB", size: "", unit: "", casePrice: 41.27, unitPrice: null },
-    { sku: "2720977", description: "Chicken, Breast Boneless Skinless Raw", brand: "Cross Valley", pack: "4/10 LB", size: "", unit: "LB", casePrice: null, unitPrice: 2.89 },
+    { sku: "2720977", description: "Chicken, Breast Boneless Skinless Raw", brand: "Cross Valley", pack: "4/10 LB", size: "", unit: "", casePrice: null, unitPrice: 2.89, priceUnit: "LB" },
   ]);
   // The app's importer reads them: a case price, and a per-pound price times the 40 lb case.
   const { products: parsed } = parseGuide(productsToCsv(products));
@@ -105,8 +105,25 @@ test("PFG: an order's guide and its prices are joined by product key", () => {
   const products = joinSplitProducts([guide, prices]);
   assert.deepEqual(products, [
     { sku: "G2132", description: "Dough Bread Prefried Frozen", brand: "Bricins", pack: "36/7 Oz", size: "", unit: "", casePrice: 53.82, unitPrice: null },
-    { sku: "5512", description: "Beef Brisket Choice", brand: "IBP", pack: "2/12-14 Lb", size: "", unit: "LB", casePrice: null, unitPrice: 5.49 },
+    { sku: "5512", description: "Beef Brisket Choice", brand: "IBP", pack: "2/12-14 Lb", size: "", unit: "", casePrice: null, unitPrice: 5.49, priceUnit: "LB" },
   ]);
   const { products: parsed } = parseGuide(productsToCsv(products));
   assert.deepEqual(parsed.map((p) => [p.sku, p.packQuantity, p.packUnit, p.priceCents]), [["G2132", 252, "oz", 5382], ["5512", 26, "lb", 14274]]);
+});
+
+test("Sysco: ids inside a price object aren't prices; catch-weight prices are per pound", () => {
+  // Shapes as Sysco's deals and orders load them (values made up).
+  const products = extractProducts({ data: { deals: { products: [
+    { productInfo: { description: "Chip Potato Barbecue Xvl", brand: "LAYS", isCatchWeight: false, packSize: { pack: "24", size: "2.25OZ", uom: "OZ" } }, id: "7118396",
+      priceInfoV2: { case: { priceZoneId: 1, netPrice: 29.48, price: 29.48, customerReferencePrice: 36.85, discounts: [{ id: "7709282", priceAdjustment: 0.89, amount: 1.025 }] }, each: null } },
+    { productInfo: { description: "Cheese Mozzarella Whole Milk", brand: "GALBANI", isCatchWeight: true, packSize: { pack: "8", size: "5#AVG", uom: "LB" } }, id: "1864305",
+      priceInfoV2: { case: { priceZoneId: 1, netPrice: 1.92, price: 1.92 }, each: null } },
+  ] } } });
+  assert.deepEqual(products.map((p) => [p.description, p.casePrice, p.unitPrice, p.priceUnit ?? ""]), [
+    ["Chip Potato Barbecue Xvl", 29.48, null, ""],
+    ["Cheese Mozzarella Whole Milk", null, 1.92, "LB"],
+  ]);
+  const { products: parsed } = parseGuide(productsToCsv(products));
+  // 8 × 5 lb average at $1.92/lb.
+  assert.deepEqual(parsed.find((p) => p.description.startsWith("Cheese"))?.priceCents, 7680);
 });

@@ -36,8 +36,9 @@ const UNIT_WORDS: Record<string, string> = {
   cs: "each", case: "each", bag: "each", box: "each", can: "each", cn: "each", btl: "each", bottle: "each", roll: "each", sl: "each", slice: "each", loaf: "each",
 };
 export function normalizeUnit(raw: string) {
-  const key = raw.trim().toLowerCase().replace(/\.$/, "");
-  return UNIT_WORDS[key] ?? UNIT_WORDS[key.replace(/s$/, "")] ?? key;
+  const key = raw.trim().toLowerCase().replace(/\.$/, "").replace(/\+$/, "");
+  // "LBA" / "OZA" / "#A": pounds or ounces, average weight (catch-weight items).
+  return UNIT_WORDS[key] ?? UNIT_WORDS[key.replace(/s$/, "")] ?? (key.endsWith("a") ? UNIT_WORDS[key.slice(0, -1)] : undefined) ?? key;
 }
 
 const fraction = (text: string) => {
@@ -53,7 +54,8 @@ const fraction = (text: string) => {
  * "6/#10" → 6 each (cans), "2/1 GAL" → 2 gal, "1/2 GAL" → 0.5 gal.
  */
 export function parseSize(text: string): { quantity: number; unit: string } | null {
-  const t = text.trim().toLowerCase().replace(/\s+/g, " ");
+  // "5#AVG", "6 LB AVG": an average weight reads as that weight.
+  const t = text.trim().toLowerCase().replace(/\s+/g, " ").replace(/\s*(avg|average)\.?$/, "");
   if (!t) return null;
   const can = /^(\d+)\s*\/\s*#\s*\d+/.exec(t);
   if (can) return { quantity: Number(can[1]), unit: "each" };
@@ -100,7 +102,7 @@ const money = (text: string) => {
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : null;
 };
 
-const HEADERS: Record<keyof GuideProduct | "pack" | "size" | "unit" | "price" | "unitPrice", RegExp> = {
+const HEADERS: Record<keyof GuideProduct | "pack" | "size" | "unit" | "price" | "unitPrice" | "priceUnit", RegExp> = {
   description: /^(item |product )?(description|desc|name)$|^product$|^item$/,
   sku: /^(item|product|sup|supc|mfr)\s*(#|no\.?|num(ber)?|code|id)$|^sku$|^supc$|^code$|^item number$/,
   brand: /brand/,
@@ -110,9 +112,32 @@ const HEADERS: Record<keyof GuideProduct | "pack" | "size" | "unit" | "price" | 
   unit: /^(unit|uom|unit of measure|size unit|size uom)$/,
   price: /^(case price|price|cost|case cost|your price|net price|current price|sell price)$/,
   unitPrice: /^(unit price|each price|price per (unit|lb|each)|per lb)$/,
+  // What the unit price is per (LB for catch weight, EA for one of the pack's items); the size unit otherwise.
+  priceUnit: /^price unit$/,
   packQuantity: /^$/,
   packUnit: /^$/,
   priceCents: /^$/,
+};
+
+/**
+ * How many of the unit price's units a case holds: the case in pounds for a per-pound price ("4/10 OZ" at $/lb →
+ * 2.5), the number of items for a per-each price ("6/19 OZ" at $/each → 6), the case quantity otherwise.
+ */
+function unitsInCase(quantity: number, unit: string, priceUnit: string, packText: string) {
+  if (!priceUnit || priceUnit === unit) return quantity;
+  if (priceUnit === "each") {
+    const count = /^\s*(\d+)\s*\//.exec(packText);
+    return count ? Number(count[1]) : 1;
+  }
+  const from = UNIT_SIZE[unit], to = UNIT_SIZE[priceUnit];
+  return from && to && from[0] === to[0] ? (quantity * from[1]) / to[1] : quantity;
+}
+
+/** Units this parser produces, as [kind, size in that kind's base unit] (kept local: this file has no imports). */
+const UNIT_SIZE: Record<string, [string, number]> = {
+  lb: ["weight", 453.592], oz: ["weight", 28.3495], kg: ["weight", 1000], g: ["weight", 1],
+  gal: ["volume", 3785.41], qt: ["volume", 946.353], pt: ["volume", 473.176], floz: ["volume", 29.5735], l: ["volume", 1000], ml: ["volume", 1],
+  each: ["count", 1], dozen: ["count", 12],
 };
 
 /** Parses a pasted or exported order guide. Lines that can't be read are returned in `skipped`. */
@@ -122,7 +147,7 @@ export function parseGuide(text: string): { products: GuideProduct[]; skipped: s
   const delimiter = lines[0].includes("\t") ? "\t" : ",";
   const head = splitRow(lines[0], delimiter).map((h) => h.toLowerCase().replace(/\s+/g, " ").trim());
   const find = (key: keyof typeof HEADERS) => head.findIndex((h) => HEADERS[key].test(h));
-  const col = { description: find("description"), sku: find("sku"), brand: find("brand"), category: find("category"), pack: find("pack"), size: find("size"), unit: find("unit"), price: find("price"), unitPrice: find("unitPrice") };
+  const col = { description: find("description"), sku: find("sku"), brand: find("brand"), category: find("category"), pack: find("pack"), size: find("size"), unit: find("unit"), price: find("price"), unitPrice: find("unitPrice"), priceUnit: find("priceUnit") };
   const hasHeader = col.description >= 0 && (col.price >= 0 || col.unitPrice >= 0);
   const products: GuideProduct[] = [], skipped: string[] = [];
   for (const line of hasHeader ? lines.slice(1) : lines) {
@@ -151,7 +176,7 @@ export function parseGuide(text: string): { products: GuideProduct[]; skipped: s
       let price = money(get(col.price));
       if (price == null && quantity) {
         const each = money(get(col.unitPrice));
-        if (each != null) price = Math.round(each * quantity);
+        if (each != null) price = Math.round(each * unitsInCase(quantity, unit, normalizeUnit(get(col.priceUnit)), pack || size));
       }
       const description = get(col.description);
       if (description && quantity && quantity > 0 && unit && price)
