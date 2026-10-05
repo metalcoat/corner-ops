@@ -118,13 +118,17 @@ export function extractProducts(json: unknown): WebProduct[] {
 }
 
 /**
- * Products whose prices arrive in a separate response from their details, joined by product number. US Foods
- * loads its order guide this way: details from product-domain-api ({ productNumber, summary: { productDescLong,
- * brand, salesPackSize } }) and the account's prices from price-domain-api ({ productNumber, unitPrice, priceUom }),
- * where priceUom CS is a case price and LB or EA is per pound / per each (catch-weight and split items).
+ * Products whose prices arrive in a separate response from their details, joined by product number or key.
+ * - US Foods: details from product-domain-api ({ productNumber, summary: { productDescLong, brand, salesPackSize } })
+ *   and the account's prices from price-domain-api ({ productNumber, unitPrice, priceUom }), where priceUom CS is a
+ *   case price and LB or EA is per pound / per each (catch-weight and split items).
+ * - PFG (an order's guide): details from ProductListOrderEntrySearch ({ ProductKey, ProductNumber, ProductDescription,
+ *   ProductBrand, ProductIsCatchWeight, UnitOfMeasureOrderQuantities: [{ UnitOfMeasure, PackSize,
+ *   UnitOfMeasureAbbreviation }] }) and prices from GetOrderEntryCustomerProductPrice ({ ProductKey,
+ *   UnitOfMeasureType, Price }); catch-weight prices are per pound.
  */
 export function joinSplitProducts(responses: unknown[]): WebProduct[] {
-  type Details = { description: string; brand: string; pack: string };
+  type Details = { sku?: string; description: string; brand: string; pack: string; perPound?: boolean; unit?: string };
   const key = (value: unknown) => String(value ?? "").trim().replace(/^0+(?=\d)/, "");
   const details = new Map<string, Details>(), prices = new Map<string, { amount: number; uom: string }>();
   const visit = (value: unknown, depth: number) => {
@@ -134,6 +138,20 @@ export function joinSplitProducts(responses: unknown[]): WebProduct[] {
       return;
     }
     const record = value as Record<string, unknown>;
+    // PFG: details and prices share ProductKey; the price's UnitOfMeasureType matches a pack's UnitOfMeasure.
+    if (typeof record.ProductKey === "string" && typeof record.ProductDescription === "string" && Array.isArray(record.UnitOfMeasureOrderQuantities)) {
+      for (const uom of record.UnitOfMeasureOrderQuantities as Record<string, unknown>[]) {
+        // Keys are GUIDs whose letter case differs between the two responses.
+        const pack = String(uom?.PackSize || "").trim(), productKey = record.ProductKey.toLowerCase(), id = `${productKey}:${uom?.UnitOfMeasure ?? 0}`;
+        const entry = { sku: key(record.ProductNumber) || key(uom.ProductNumberDisplay), description: record.ProductDescription.trim(), brand: String(record.ProductBrand || "").trim(), pack, perPound: record.ProductIsCatchWeight === true || uom.ProductIsCatchWeight === true, unit: String(uom.UnitOfMeasureAbbreviation || "").trim().toUpperCase() };
+        if (pack && !details.has(productKey)) details.set(productKey, entry);
+        if (pack && !details.has(id)) details.set(id, entry);
+      }
+    }
+    if (typeof record.ProductKey === "string" && record.Price !== undefined && record.UnitOfMeasureType !== undefined) {
+      const amount = money(record.Price as number), id = `${record.ProductKey.toLowerCase()}:${record.UnitOfMeasureType}`;
+      if (amount != null && !prices.has(id)) prices.set(id, { amount, uom: "" });
+    }
     const number = key(record.productNumber);
     if (/^\d{3,}$/.test(number)) {
       const summary = (record.summary && typeof record.summary === "object" ? record.summary : record) as Record<string, unknown>;
@@ -148,10 +166,13 @@ export function joinSplitProducts(responses: unknown[]): WebProduct[] {
   for (const response of responses) visit(response, 0);
   const products: WebProduct[] = [];
   for (const [number, price] of prices) {
-    const product = details.get(number);
+    // PFG prices are keyed "<product key>:<unit type>"; fall back to the product alone if the unit numbers differ.
+    const product = details.get(number) ?? details.get(number.split(":")[0]);
     if (!product) continue;
-    const perCase = price.uom === "CS" || price.uom === "CASE";
-    products.push({ sku: number, description: product.description, brand: product.brand, pack: product.pack, size: "", unit: perCase ? "" : price.uom, casePrice: perCase ? price.amount : null, unitPrice: perCase ? null : price.amount });
+    // US Foods names the unit on the price; PFG on the product (CS, or per pound when catch weight).
+    const uom = price.uom || (product.perPound ? "LB" : product.unit || "CS");
+    const perCase = uom === "CS" || uom === "CASE";
+    products.push({ sku: product.sku ?? number, description: product.description, brand: product.brand, pack: product.pack, size: "", unit: perCase ? "" : uom, casePrice: perCase ? price.amount : null, unitPrice: perCase ? null : price.amount });
   }
   return products;
 }

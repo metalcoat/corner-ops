@@ -23,7 +23,9 @@ const SUPPLIERS = [
   { name: "Sysco", key: "SYSCO", login: "https://shop.sysco.com/auth/login", guide: "https://shop.sysco.com/app/lists" },
   // The deli's order guide, then everything bought recently (catches items not on the guide).
   { name: "US Foods", key: "USFOODS", login: "https://order.usfoods.com/desktop/search/browse", guide: "https://order.usfoods.com/desktop/lists/view/OG-127949 https://order.usfoods.com/desktop/lists/view/recentlyPurchased" },
-  { name: "Performance Foodservice", key: "PFG", login: "https://www.customerfirstsolutions.com/", guide: "" },
+  // PFG shows prices only while placing an order: the job opens the unsubmitted order (or starts one, which
+  // stays open and is never submitted) and reads the Order Guide inside it.
+  { name: "Performance Foodservice", key: "PFG", login: "https://www.customerfirstsolutions.com/", guide: "", order: true },
 ];
 
 const only = (process.argv[2] || "").toLowerCase();
@@ -352,6 +354,27 @@ function listTitles(responses) {
   return [...new Set(titles)].sort((a, b) => Number(/order guide/i.test(b)) - Number(/order guide/i.test(a))).slice(0, 5);
 }
 
+/**
+ * Opens an order to see the order guide with prices (PFG): the unsubmitted order if there is one, otherwise
+ * "New order", accepting the defaults of a start-order dialog. Never reviews, submits, or changes quantities.
+ */
+async function openOrderEntry(page, supplier) {
+  const existing = page.getByText(/^\s*Unsubmitted\s*$/i).filter({ visible: true });
+  if (await visible(existing)) await existing.first().click();
+  else {
+    const start = page.getByRole("button", { name: /^\s*new order\s*$/i }).or(page.getByRole("link", { name: /^\s*new order\s*$/i })).filter({ visible: true });
+    if (!(await visible(start))) return false;
+    await start.first().click();
+    await page.waitForTimeout(5_000);
+    const confirm = page.getByRole("dialog").getByRole("button", { name: /^\s*(create|start|continue|ok|save|begin)( (an |the )?order)?\s*$/i });
+    if (await visible(confirm)) await confirm.first().click();
+  }
+  await page.waitForURL(/order-entry/i, { timeout: 30_000 }).catch(() => {});
+  await page.waitForTimeout(8_000);
+  console.log(`${supplier.name}: opened order ${page.url().split("?")[0]}`);
+  return /order-entry/i.test(page.url());
+}
+
 /** Scrolls until the list stops growing (order guides load more items as you scroll). */
 async function loadEverything(page) {
   let same = 0, last = 0;
@@ -448,6 +471,8 @@ async function run(supplier) {
       await page.goto(guideUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
       await page.waitForTimeout(6_000);
       console.log(`${supplier.name}: opened ${guideUrl} → ${page.url()}`);
+    } else if (supplier.order) {
+      if (!(await openOrderEntry(page, supplier))) console.log(`${supplier.name}: couldn't open an order; looking for lists instead`);
     } else {
       const link = page.locator('a:has-text("Order Guide"), a:has-text("Order guide"), a:has-text("My Lists"), a:has-text("Lists"), button:has-text("Order Guide")');
       if (await visible(link)) await link.first().click();
@@ -510,6 +535,7 @@ async function run(supplier) {
     }
 
     const products = found();
+    console.log(`${supplier.name}: ${captured.flatMap((c) => extractProducts(c.json)).length} products from single responses, ${joinSplitProducts(captured.map((c) => c.json)).length} from joined price data`);
     let csv = products.length >= 3 ? productsToCsv(products) : null;
     if (!csv) csv = await tryExport(page, supplier);
     if (!csv) {

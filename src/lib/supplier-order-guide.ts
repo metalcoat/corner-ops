@@ -64,6 +64,17 @@ export function parseSize(text: string): { quantity: number; unit: string } | nu
     if (count === 1 && size >= 2 && size <= 4 && ["gal", "qt", "pt", "lb"].includes(unit)) return { quantity: 1 / size, unit };
     return { quantity: count * size, unit };
   }
+  // Counts with no weight or volume (PFG paper goods and produce): "25/Cnt" → 25 each, "12/500" → 6000 each,
+  // "1/18-24" → 21 each (a range counts at the middle). A decimal without a unit ("8/13.37") stays unread.
+  const counted = /^(\d+)\s*\/\s*(cnt|ct|count|ea|each|pc|pcs)$/.exec(t);
+  if (counted) return { quantity: Number(counted[1]), unit: "each" };
+  if (/^\d+(?:-\d+)?(?:\s*\/\s*\d+(?:-\d+)?)+$/.test(t)) {
+    const quantity = t.split("/").reduce((total, part) => {
+      const [low, high] = part.trim().split("-").map(Number);
+      return total * (high ? (low + high) / 2 : low);
+    }, 1);
+    if (quantity >= 2) return { quantity, unit: "each" };
+  }
   // US Foods: nested packs, weight ranges and averages, e.g. "3/2/8.3 LBA" (3 × 2 × 8.3 lb), "2/9-10 LBA"
   // (2 × 9–10 lb, counted at the middle), "4/.5 GA", "4/13/1.25#A", "2/5 LBA+" (A = average weight).
   const nested = /^((?:(?:\d*\.)?\d+(?:-(?:\d*\.)?\d+)?\s*\/\s*)+(?:\d*\.)?\d+(?:-(?:\d*\.)?\d+)?)\s*(#a?|[a-z]+)\+?$/.exec(t);

@@ -87,3 +87,26 @@ test("US Foods: prices and details from separate responses are joined by product
   const { products: parsed } = parseGuide(productsToCsv(products));
   assert.deepEqual(parsed.map((p) => [p.sku, p.packQuantity, p.packUnit, p.priceCents]), [["1328699", 35, "lb", 4127], ["2720977", 40, "lb", 11560]]);
 });
+
+test("PFG: an order's guide and its prices are joined by product key", () => {
+  // Shapes as PFG's order entry loads them (values made up).
+  const guide = { ResultObject: { ProductListCategories: [{ CategoryTitle: "Bakery, Frozen", Products: [
+    { ProductListDetailId: "d1", Product: { ProductKey: "k-1", ProductNumber: "G2132", ProductDescription: "Dough Bread Prefried Frozen", ProductBrand: "Bricins", ProductIsCatchWeight: false,
+      UnitOfMeasureOrderQuantities: [{ UnitOfMeasure: 0, Quantity: 0, Price: 0, PackSize: "36/7 Oz", UnitOfMeasureAbbreviation: "CS" }] } },
+    { ProductListDetailId: "d2", Product: { ProductKey: "k-2", ProductNumber: "5512", ProductDescription: "Beef Brisket Choice", ProductBrand: "IBP", ProductIsCatchWeight: true,
+      UnitOfMeasureOrderQuantities: [{ UnitOfMeasure: 0, Quantity: 0, Price: 0, PackSize: "2/12-14 Lb", UnitOfMeasureAbbreviation: "CS" }] } },
+    { ProductListDetailId: "d3", Product: { ProductKey: "k-3", ProductNumber: "777", ProductDescription: "Not priced yet", ProductBrand: "X",
+      UnitOfMeasureOrderQuantities: [{ UnitOfMeasure: 0, PackSize: "1/5 Lb", UnitOfMeasureAbbreviation: "CS" }] } },
+  ] }] } };
+  const prices = { ResultObject: { CustomerProductPrices: [
+    { ProductKey: "K-1", UnitOfMeasureType: 0, Price: 53.82, ProductAverageWeight: 0 }, // key case differs on the real site
+    { ProductKey: "k-2", UnitOfMeasureType: 0, Price: 5.49, ProductAverageWeight: 26 },
+  ], UpdatedTotals: false } };
+  const products = joinSplitProducts([guide, prices]);
+  assert.deepEqual(products, [
+    { sku: "G2132", description: "Dough Bread Prefried Frozen", brand: "Bricins", pack: "36/7 Oz", size: "", unit: "", casePrice: 53.82, unitPrice: null },
+    { sku: "5512", description: "Beef Brisket Choice", brand: "IBP", pack: "2/12-14 Lb", size: "", unit: "LB", casePrice: null, unitPrice: 5.49 },
+  ]);
+  const { products: parsed } = parseGuide(productsToCsv(products));
+  assert.deepEqual(parsed.map((p) => [p.sku, p.packQuantity, p.packUnit, p.priceCents]), [["G2132", 252, "oz", 5382], ["5512", 26, "lb", 14274]]);
+});

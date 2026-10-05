@@ -56,3 +56,12 @@ test("US Foods pack notation: nested packs, ranges, averages", () => {
   assert.deepEqual(parseSize("1/2 GAL"), { quantity: 0.5, unit: "gal" });
   assert.deepEqual(parseSize("4/5 LB"), { quantity: 20, unit: "lb" });
 });
+
+test("PFG count packs with no weight unit", () => {
+  assert.deepEqual(parseSize("25/Cnt"), { quantity: 25, unit: "each" });
+  assert.deepEqual(parseSize("12/500"), { quantity: 6000, unit: "each" });
+  assert.deepEqual(parseSize("1/1000"), { quantity: 1000, unit: "each" });
+  assert.deepEqual(parseSize("1/18-24"), { quantity: 21, unit: "each" });
+  assert.equal(parseSize("8/13.37"), null);
+  assert.deepEqual(parseSize("1/2 GAL"), { quantity: 0.5, unit: "gal" });
+});
