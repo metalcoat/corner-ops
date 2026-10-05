@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dedupeProducts, extractProducts, joinSplitProducts, productsToCsv } from "../src/lib/supplier-web-extract.js";
+import { dedupeProducts, extractProducts, joinSplitProducts, productsToCsv, webstaurantProducts } from "../src/lib/supplier-web-extract.js";
 import { parseGuide } from "../src/lib/supplier-order-guide.js";
 
 test("finds products in a nested order-guide response (pack + size, case price)", () => {
@@ -126,4 +126,31 @@ test("Sysco: ids inside a price object aren't prices; catch-weight prices are pe
   const { products: parsed } = parseGuide(productsToCsv(products));
   // 8 × 5 lb average at $1.92/lb.
   assert.deepEqual(parsed.find((p) => p.description.startsWith("Cheese"))?.priceCents, 7680);
+});
+
+test("WebstaurantStore: Rapid Reorder items become sized products, with shipping on items that don't ship free", () => {
+  const spec = (classification: string, value: string, name: string) => ({ classification, subType: { name, value, isNumeric: true } });
+  const food = [{ name: "Food & Beverage" }];
+  const products = webstaurantProducts([
+    { itemNumber: "125HLMNMAYO", description: "Hellmann's Extra Heavy Mayonnaise 1 Gallon - 4/Case", isWebstaurantPlusEligible: true, price: { unitPrice: 96.49 },
+      fullProductInfo: { brand: "Hellmann's", unitsPerPackaging: 4, parentCategories: food, productSpecifications: [spec("Package Size", "1", "Gallon"), spec("Total Case Size", "4", "Gallons")] } },
+    { itemNumber: "10702640", description: "Hometown Provisions Mushroom Pieces & Stems - #10 Can - 6/Case", isWebstaurantPlusEligible: false, price: { unitPrice: 45.99 },
+      fullProductInfo: { parentCategories: food, productSpecifications: [spec("Package Size", "68", "oz."), spec("Total Case Size", "6", "#10 Cans")] } },
+    { itemNumber: "102707756", description: "Regal Bulk Table Ground Black Pepper 25 lb.", isWebstaurantPlusEligible: true, price: { unitPrice: 148.99 },
+      fullProductInfo: { parentCategories: food, productSpecifications: [] } },
+    { itemNumber: "127P400C", description: "Choice 4 oz. Clear Plastic Souffle Cup / Portion Cup - 2,500/Case", isWebstaurantPlusEligible: true, price: { unitPrice: 33.49 },
+      fullProductInfo: { parentCategories: [{ name: "Disposables" }], productSpecifications: [spec("Capacity", "4", "oz.")] } },
+    { itemNumber: "178A19FHC", description: "Avantco A-19F-HC 29\" Solid Door Reach-In Freezer", isWebstaurantPlusEligible: true, price: { unitPrice: 1349 },
+      fullProductInfo: { parentCategories: [{ name: "Refrigeration Equipment" }] } },
+  ], 9.65);
+  assert.deepEqual(products.map((p) => [p.sku, p.size, p.casePrice]), [
+    ["125HLMNMAYO", "4/1 GAL", 96.49],
+    ["10702640", "6/#10", 55.64],
+    ["102707756", "25 LB", 148.99],
+    ["127P400C", "2500 CT", 33.49],
+  ]);
+  assert.match(products[1].description, /incl\. \$9\.65 est\. shipping/);
+  const { products: parsed, skipped } = parseGuide(productsToCsv(products));
+  assert.deepEqual(skipped, []);
+  assert.deepEqual(parsed.map((p) => [p.packQuantity, p.packUnit, p.priceCents]), [[4, "gal", 9649], [6, "each", 5564], [25, "lb", 14899], [2500, "each", 3349]]);
 });

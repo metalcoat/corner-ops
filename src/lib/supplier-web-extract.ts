@@ -233,3 +233,70 @@ export function extractSignInCode(text: string): string | null {
   candidates.sort((a, b) => b.score - a.score);
   return candidates[0] && candidates[0].score >= 5 ? candidates[0].code : null;
 }
+
+/** What WebstaurantStore's Rapid Reorder list (/api/rapidreorder/products) says about one item. */
+export type WebstaurantItem = {
+  itemNumber: string;
+  description: string;
+  uom?: string;
+  isWebstaurantPlusEligible?: boolean;
+  price?: { unitPrice?: number };
+  fullProductInfo?: {
+    brand?: string;
+    unitsPerPackaging?: number;
+    hasFreeShipping?: boolean;
+    parentCategories?: Array<{ name?: string }>;
+    productSpecifications?: Array<{ classification?: string; subType?: { name?: string; value?: string; isNumeric?: boolean } }>;
+  };
+};
+
+// Supplies and food only; equipment, smallwares and furniture aren't costed per use.
+const WEBSTAURANT_CATEGORIES = new Set(["Food & Beverage", "Disposables", "Janitorial Supplies"]);
+const WEBSTAURANT_UNITS: Record<string, string> = {
+  lb: "LB", lbs: "LB", pound: "LB", pounds: "LB", oz: "OZ", ounce: "OZ", ounces: "OZ", "fl oz": "FL OZ",
+  gallon: "GAL", gallons: "GAL", gal: "GAL", quart: "QT", quarts: "QT", qt: "QT", pint: "PT", pints: "PT",
+  liter: "L", liters: "L", l: "L", ml: "ML", kg: "KG", g: "G", grams: "G",
+};
+const webstaurantUnit = (name = "") => WEBSTAURANT_UNITS[name.toLowerCase().replace(/\./g, "").trim()];
+
+/**
+ * Rapid Reorder items (everything the account has bought, at its member prices)
+ * as products. Food is sized by what's in the case ("4/1 GAL", "6/#10", "25 LB");
+ * supplies by count ("2500 CT"). Items that don't ship free (Plus or free-shipping)
+ * carry an estimated shipping charge per case in their price, so they compare
+ * with delivered prices from the other suppliers.
+ */
+export function webstaurantProducts(items: WebstaurantItem[], shippingPerCase: number): WebProduct[] {
+  const products: WebProduct[] = [];
+  for (const item of items) {
+    const info = item.fullProductInfo ?? {};
+    const category = info.parentCategories?.[0]?.name ?? "";
+    const price = Number(item.price?.unitPrice);
+    if (!WEBSTAURANT_CATEGORIES.has(category) || !(price > 0) || !item.itemNumber) continue;
+    const listed = /-\s*([\d,]+)\s*\/\s*[a-z]+\.?\s*$/i.exec(item.description);
+    const count = listed ? Number(listed[1].replace(/,/g, "")) : Math.max(1, Number(info.unitsPerPackaging) || 1);
+    const spec = (classification: string) => info.productSpecifications?.find((s) => s.classification === classification && s.subType?.isNumeric)?.subType;
+    let size = `${count} CT`;
+    if (category === "Food & Beverage") {
+      const each = spec("Package Size"), total = spec("Total Case Size");
+      const named = /(\d+(?:\.\d+)?)\s*(lb|oz|gallon|gal)\.?(?![a-z])/i.exec(item.description);
+      if (total && /#\s*10/.test(total.name ?? "")) size = `${total.value}/#10`;
+      else if (each && webstaurantUnit(each.name)) size = count > 1 ? `${count}/${each.value} ${webstaurantUnit(each.name)}` : `${each.value} ${webstaurantUnit(each.name)}`;
+      else if (total && webstaurantUnit(total.name)) size = `${total.value} ${webstaurantUnit(total.name)}`;
+      else if (named) size = count > 1 ? `${count}/${named[1]} ${webstaurantUnit(named[2])}` : `${named[1]} ${webstaurantUnit(named[2])}`;
+    }
+    const shipsFree = item.isWebstaurantPlusEligible || info.hasFreeShipping;
+    const shipping = shipsFree ? 0 : shippingPerCase;
+    products.push({
+      sku: item.itemNumber,
+      description: shipping ? `${item.description} (incl. $${shipping.toFixed(2)} est. shipping)` : item.description,
+      brand: info.brand ?? "",
+      pack: "",
+      size,
+      unit: "",
+      casePrice: Math.round((price + shipping) * 100) / 100,
+      unitPrice: null,
+    });
+  }
+  return products;
+}

@@ -9,8 +9,10 @@
 // Runs in its own container (docker compose --profile tools run supplier-prices),
 // started by deploy/supplier-prices-sync.sh --website on a timer.
 import { chromium } from "playwright";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dedupeProducts, extractProducts, extractSignInCode, joinSplitProducts, productsToCsv } from "./supplier-web-extract.ts";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { restoreSessionCookies, saveSessionCookies } from "./session-cookies.mjs";
+import { dedupeProducts, extractProducts, extractSignInCode, joinSplitProducts, productsToCsv, webstaurantProducts } from "./supplier-web-extract.ts";
 
 const SECRET = process.env.CRON_SECRET || "";
 const DEBUG = process.env.DEBUG_DIR || "/debug";
@@ -26,7 +28,11 @@ const SUPPLIERS = [
   // PFG shows prices only while placing an order: the job opens the unsubmitted order (or starts one, which
   // stays open and is never submitted) and reads the Order Guide inside it.
   { name: "Performance Foodservice", key: "PFG", login: "https://www.customerfirstsolutions.com/", guide: "", order: true },
+  // Signed in by hand (the site has a robot check): supplier-prices-sync.sh --signin webstaurant. Reads
+  // Rapid Reorder, everything the account has bought at its member prices. Runs in a real (virtual-screen) browser.
+  { name: "WebstaurantStore", key: "WEBSTAURANT", login: "", guide: "https://www.webstaurantstore.com/reorder.html", reader: "webstaurant", headed: true, signInByHand: true },
 ];
+const SIGN_IN_BY_HAND = "/opt/corner-ops/runtime/deploy/supplier-prices-sync.sh --signin";
 
 const only = (process.argv[2] || "").toLowerCase();
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -419,10 +425,56 @@ async function tryExport(page, supplier) {
   }
 }
 
+/** A virtual screen for sites that turn away headless browsers; it goes away with the container. */
+async function startScreen() {
+  spawn("Xvfb", [":97", "-screen", "0", "1440x1000x24", "-nolisten", "tcp"], { stdio: "ignore", detached: true }).unref();
+  for (let i = 0; i < 50 && !existsSync("/tmp/.X11-unix/X97"); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+  process.env.DISPLAY = ":97";
+}
+
+/** WebstaurantStore: its Rapid Reorder list, page by page, from the signed-in page itself. */
+async function readWebstaurant(supplier, context, page, shot, guideUrl) {
+  await restoreSessionCookies(context, PROFILES, supplier.key);
+  await page.goto(guideUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  await page.waitForTimeout(5_000);
+  if (!new URL(page.url()).pathname.startsWith("/reorder") || (await visible(page.locator("#the_login_button")))) {
+    await shot("needs_login");
+    const message = `${supplier.name} needs you to sign in (it has an "I'm not a robot" check). On the server run ${SIGN_IN_BY_HAND} webstaurant and open the link it prints from the deli network.`;
+    console.log(`${supplier.name}: ${message}`);
+    await report(supplier.name, { status: "needs_login", message });
+    return;
+  }
+  const items = await page.evaluate(async () => {
+    const all = [];
+    for (let pageNumber = 1; pageNumber <= 100; pageNumber++) {
+      const response = await fetch("/api/rapidreorder/products", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ page: pageNumber, searchTerm: "", categoryFilter: "0", sortBy: "fo" }) });
+      if (!response.ok) throw new Error(`Rapid Reorder page ${pageNumber} answered ${response.status}`);
+      const body = await response.json();
+      all.push(...(body.rapidReorderItems || []));
+      if (!body.rapidReorderItems?.length || all.length >= body.totalHits) break;
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+    return all;
+  });
+  // Only items that don't ship free (WebstaurantPlus) carry this; it's the typical charge per case on the deli's orders.
+  const products = webstaurantProducts(items, Number(process.env.WEBSTAURANT_SHIPPING_PER_CASE || 9.65));
+  console.log(`${supplier.name}: ${items.length} items bought before, ${products.length} food and supplies`);
+  if (products.length < 3) {
+    const message = `Signed in, but Rapid Reorder listed ${items.length} items (${page.url()}).`;
+    await shot("no-products");
+    await report(supplier.name, { status: "no_products", message });
+    return;
+  }
+  const csv = productsToCsv(products);
+  writeFileSync(`${DEBUG}/${supplier.key}-latest.csv`, csv);
+  console.log(`${supplier.name}: ${await report(supplier.name, { csv })}`);
+  await saveSessionCookies(context, PROFILES, supplier.key);
+}
+
 async function run(supplier) {
   const user = process.env[`${supplier.key}_USERNAME`], password = process.env[`${supplier.key}_PASSWORD`];
   // Password is optional: US Foods signs in with a username and a one-time code.
-  if (!user) {
+  if (!user && !supplier.signInByHand) {
     console.log(`${supplier.name}: skipped (no ${supplier.key}_USERNAME)`);
     return;
   }
@@ -430,8 +482,9 @@ async function run(supplier) {
   // One or more list pages (space or comma separated); prices from all of them are combined.
   const guideUrls = (process.env[`${supplier.key}_ORDER_GUIDE_URL`] || supplier.guide).split(/[\s,]+/).filter(Boolean);
   const guideUrl = guideUrls[0] || "";
+  if (supplier.headed && !process.env.DISPLAY) await startScreen();
   const context = await chromium.launchPersistentContext(`${PROFILES}/${supplier.key}`, {
-    headless: !HEADED,
+    headless: !HEADED && !supplier.headed,
     viewport: { width: 1440, height: 1000 },
     acceptDownloads: true,
     locale: "en-US",
@@ -458,6 +511,7 @@ async function run(supplier) {
     return path;
   };
   try {
+    if (supplier.reader === "webstaurant") return await readWebstaurant(supplier, context, page, shot, guideUrl);
     await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await page.waitForTimeout(4_000);
     const login = await signIn(page, supplier, user, password);
