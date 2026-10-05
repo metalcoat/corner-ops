@@ -27,6 +27,7 @@
     "src/lib/driver-call-link.ts",
     "src/lib/supplier-plan.ts",
     "src/lib/supplier-order-guide.ts",
+    "src/lib/alert-sounds.ts",
     "tests/**/*.ts"
   ]
 }

@@ -106,3 +106,12 @@
 .hwJobs li>span:first-child{display:grid}
 .hwJobs strong{text-transform:capitalize}
 @media (max-width:760px){.hwKinds,.hwKinds.two,.hwRow{grid-template-columns:1fr}.hwHeader{flex-direction:column}}
+/* Alert sound picker: tap a tile to hear it and choose it. */
+.posSettingsCard .soundPicker{display:grid;gap:12px;margin:6px 0 12px}
+.posSettingsCard .soundPicker>div{display:grid;gap:6px}
+.posSettingsCard .soundPicker>div>span{font-size:.72rem;font-weight:900;letter-spacing:.12em}
+.posSettingsCard .soundPicker>div>div{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.posSettingsCard.posSettingsCard .soundPicker button{display:flex;align-items:center;gap:10px;min-height:52px;padding:10px 14px;border:2px solid #cfc5b4;border-radius:12px;background:#fbf8f2;color:#211d17;font-weight:800;text-align:left;cursor:pointer}
+.posSettingsCard.posSettingsCard .soundPicker button b{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#e7dfd0;color:#24553e;font-size:.75rem}
+.posSettingsCard.posSettingsCard .soundPicker button[aria-checked="true"]{border-color:#24553e;background:#e3f1e7;box-shadow:0 0 0 2px #24553e33}
+.posSettingsCard.posSettingsCard .soundPicker button[aria-checked="true"] b{background:#24553e;color:#fff}

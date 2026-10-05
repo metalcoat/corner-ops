@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { OnlineOrderAlertSound } from "@/lib/ordering-pos-settings";
+import { ALERT_SOUNDS } from "@/lib/alert-sounds";
 
 type Settings = {
   posIdleLockSeconds: number;
@@ -9,15 +10,10 @@ type Settings = {
   onlineOrderAlertVolume: number;
   businessTimezone: string;
 };
-const sounds: { value: OnlineOrderAlertSound; label: string }[] = [
-  { value: "warm_chime", label: "Warm two-note chime" },
-  { value: "gentle_bell", label: "Gentle bell" },
-  { value: "wooden_tap", label: "Wooden tap" },
-  { value: "phone_ring", label: "Soft phone ring" },
-  { value: "mellow_horn", label: "Mellow horn" },
-  { value: "register_chime", label: "Register chime" },
-  { value: "off", label: "Off" },
-];
+const soundGroups = ["Bells", "Instruments", "Subtle"].map((group) => ({
+  group,
+  sounds: ALERT_SOUNDS.filter((sound) => sound.group === group),
+}));
 
 export default function PosSettingsClient() {
   const [settings, setSettings] = useState<Settings | null>(null),
@@ -38,10 +34,10 @@ export default function PosSettingsClient() {
         }
       });
   }, []);
-  function preview() {
+  function preview(choice: OnlineOrderAlertSound = sound) {
     window.dispatchEvent(
       new CustomEvent("corner-ops-online-order-alert-preference", {
-        detail: { sound, volume, test: true },
+        detail: { sound: choice, volume, test: true },
       }),
     );
   }
@@ -75,19 +71,37 @@ export default function PosSettingsClient() {
     <>
       <section className="posSettingsCard">
         <h2>Online order alert</h2>
-        <label>
-          <span>ALERT SOUND</span>
-          <select
-            value={sound}
-            onChange={(e) => setSound(e.target.value as OnlineOrderAlertSound)}
-          >
-            {sounds.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="soundPicker" role="radiogroup" aria-label="Alert sound">
+          {soundGroups.map(({ group, sounds }) => (
+            <div key={group}>
+              <span>{group.toUpperCase()}</span>
+              <div>
+                {sounds.map((option) => (
+                  <button
+                    type="button"
+                    key={option.id}
+                    role="radio"
+                    aria-checked={sound === option.id}
+                    onClick={() => {
+                      setSound(option.id);
+                      preview(option.id);
+                    }}
+                  >
+                    <b aria-hidden="true">▶</b> {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div>
+            <span>NONE</span>
+            <div>
+              <button type="button" role="radio" aria-checked={sound === "off"} onClick={() => setSound("off")}>
+                Off (no sound)
+              </button>
+            </div>
+          </div>
+        </div>
         <label>
           <span>VOLUME · {volume}%</span>
           <input
@@ -100,14 +114,16 @@ export default function PosSettingsClient() {
           />
         </label>
         <div className="posTools">
-          <button type="button" disabled={sound === "off"} onClick={preview}>
+          <button type="button" disabled={sound === "off"} onClick={() => preview()}>
             TEST SOUND
           </button>
         </div>
         <p className="posSettingsHint">
-          Plays once when a new online, kiosk, or AI phone order reaches every
-          open POS and KDS. Sounds have a gentle attack and capped peak level.
-          Use Test Sound on this device, then adjust its volume as needed.
+          Tap a sound to hear it. It plays when a new online, kiosk, or AI phone
+          order reaches every open POS and KDS, and repeats every 20 seconds
+          until someone looks. Sounds are modelled on the real thing (bells,
+          marimba, piano…) with a little room echo and a capped peak level.
+          Save to use it on every device.
         </p>
       </section>
       <section className="posSettingsCard">

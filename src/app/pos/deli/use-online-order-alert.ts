@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { OnlineOrderAlertSound } from "@/lib/ordering-pos-settings";
+import { renderAlertSound, roomImpulse } from "@/lib/alert-sounds";
 import {
   createOnlineAlertState,
   reconcileOnlineAlerts,
@@ -9,6 +10,33 @@ import {
 } from "@/lib/pos-offline-sync-policy";
 
 type AlertOrder = { id: string };
+
+const rendered = new Map<string, AudioBuffer>();
+/** Sounds are rendered once per device (a few milliseconds each) and reused. */
+function soundBuffer(context: AudioContext, sound: string) {
+  const key = `${sound}@${context.sampleRate}`;
+  let buffer = rendered.get(key);
+  if (!buffer) {
+    const { left, right } = renderAlertSound(sound, context.sampleRate);
+    buffer = context.createBuffer(2, left.length, context.sampleRate);
+    buffer.copyToChannel(left as Float32Array<ArrayBuffer>, 0);
+    buffer.copyToChannel(right as Float32Array<ArrayBuffer>, 1);
+    rendered.set(key, buffer);
+  }
+  return buffer;
+}
+function roomBuffer(context: AudioContext) {
+  const key = `room@${context.sampleRate}`;
+  let buffer = rendered.get(key);
+  if (!buffer) {
+    const { left, right } = roomImpulse(context.sampleRate);
+    buffer = context.createBuffer(2, left.length, context.sampleRate);
+    buffer.copyToChannel(left as Float32Array<ArrayBuffer>, 0);
+    buffer.copyToChannel(right as Float32Array<ArrayBuffer>, 1);
+    rendered.set(key, buffer);
+  }
+  return buffer;
+}
 
 /** Unacknowledged new online orders re-chime on this interval. */
 const REPEAT_ALERT_MS = 20_000;
@@ -76,6 +104,12 @@ export function useOnlineOrderAlert(
       audio.current = new Context();
       // iPads suspend audio again after backgrounding; keep the visible prompt in sync.
       audio.current.addEventListener("statechange", refreshSoundBlocked);
+      // Render the chosen sound now so the first alert plays instantly.
+      const context = audio.current;
+      window.setTimeout(() => {
+        if (preference.current.sound !== "off") soundBuffer(context, preference.current.sound);
+        roomBuffer(context);
+      }, 0);
     }
     const resumed =
       audio.current.state === "running"
@@ -93,64 +127,31 @@ export function useOnlineOrderAlert(
       if (selected.sound === "off") return true;
       const context = audio.current;
       if (!context || context.state !== "running") return false;
-      const start = context.currentTime;
-      // Gentle sine partials and decaying envelopes avoid the sharp edges of
-      // square waves and horns. The master gain caps the peak on every preset.
+      // Modelled instrument samples (see alert-sounds.ts) through a small-room
+      // reverb and a limiter, so the peak stays capped on every preset.
+      const buffer = soundBuffer(context, selected.sound);
+      const source = context.createBufferSource();
+      source.buffer = buffer;
       const master = context.createGain();
-      master.gain.value = Math.max(0.02, Math.min(0.24, selected.volume / 100 * 0.24));
+      master.gain.value = Math.max(0.03, Math.min(0.55, (selected.volume / 100) * 0.55));
       const limiter = context.createDynamicsCompressor();
-      limiter.threshold.value = -18;
-      limiter.knee.value = 18;
-      limiter.ratio.value = 4;
-      limiter.attack.value = 0.012;
-      limiter.release.value = 0.18;
-      master.connect(limiter).connect(context.destination);
-
-      const strike = (
-        begins: number,
-        frequency: number,
-        duration: number,
-        partials: readonly (readonly [number, number])[],
-      ) => {
-        for (const [multiple, level] of partials) {
-          const oscillator = context.createOscillator();
-          const envelope = context.createGain();
-          oscillator.type = "sine";
-          oscillator.frequency.setValueAtTime(frequency * multiple, begins);
-          envelope.gain.setValueAtTime(0.0001, begins);
-          envelope.gain.linearRampToValueAtTime(level, begins + Math.min(0.022, duration / 5));
-          envelope.gain.exponentialRampToValueAtTime(0.0001, begins + duration);
-          oscillator.connect(envelope).connect(master);
-          oscillator.start(begins);
-          oscillator.stop(begins + duration + 0.01);
-        }
-      };
-
-      if (selected.sound === "gentle_bell") {
-        strike(start, 587.33, 0.9, [[1, 0.45], [2.76, 0.1], [4.07, 0.035]]);
-        strike(start + 0.55, 739.99, 0.9, [[1, 0.4], [2.76, 0.09], [4.07, 0.03]]);
-      } else if (selected.sound === "wooden_tap") {
-        strike(start, 349.23, 0.2, [[1, 0.55], [2.35, 0.11], [3.8, 0.035]]);
-        strike(start + 0.34, 440, 0.24, [[1, 0.5], [2.35, 0.1], [3.8, 0.03]]);
-      } else if (selected.sound === "phone_ring") {
-        for (const delay of [0, 0.23, 0.74, 0.97]) {
-          strike(start + delay, 440, 0.17, [[1, 0.22]]);
-          strike(start + delay, 480, 0.17, [[1, 0.22]]);
-        }
-      } else if (selected.sound === "mellow_horn") {
-        for (const delay of [0, 0.62]) {
-          strike(start + delay, 220, 0.42, [[1, 0.3], [2, 0.11], [3, 0.035]]);
-          strike(start + delay, 293.66, 0.42, [[1, 0.24], [2, 0.06]]);
-        }
-      } else if (selected.sound === "register_chime") {
-        strike(start, 523.25, 0.28, [[1, 0.27], [2.02, 0.045]]);
-        strike(start + 0.12, 783.99, 0.46, [[1, 0.26], [2.02, 0.04]]);
-        strike(start + 0.42, 1046.5, 0.58, [[1, 0.22], [2.02, 0.025]]);
-      } else {
-        strike(start, 523.25, 0.64, [[1, 0.4], [2.01, 0.1], [3.88, 0.025]]);
-        strike(start + 0.26, 659.25, 0.76, [[1, 0.4], [2.01, 0.1], [3.88, 0.025]]);
-      }
-      window.setTimeout(() => { master.disconnect(); limiter.disconnect(); }, 2_000);
+      limiter.threshold.value = -10;
+      limiter.knee.value = 8;
+      limiter.ratio.value = 6;
+      limiter.attack.value = 0.003;
+      limiter.release.value = 0.2;
+      const wet = context.createGain();
+      wet.gain.value = 0.22;
+      const room = context.createConvolver();
+      room.buffer = roomBuffer(context);
+      source.connect(master);
+      master.connect(limiter);
+      master.connect(room).connect(wet).connect(limiter);
+      limiter.connect(context.destination);
+      source.start();
+      window.setTimeout(() => {
+        for (const node of [source, master, room, wet, limiter]) node.disconnect();
+      }, (buffer.duration + 1.2) * 1000);
       return true;
     },
     [unlockAudio],

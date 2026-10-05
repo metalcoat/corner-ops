@@ -1,25 +1,18 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
+import { ALERT_SOUNDS, type AlertSoundId } from "@/lib/alert-sounds";
 
 export const BUSINESS_TIMEZONE = "America/New_York";
-export const ONLINE_ORDER_ALERT_SOUNDS = [
-  "warm_chime",
-  "gentle_bell",
-  "wooden_tap",
-  "phone_ring",
-  "mellow_horn",
-  "register_chime",
-  "off",
-] as const;
-export type OnlineOrderAlertSound = (typeof ONLINE_ORDER_ALERT_SOUNDS)[number];
+export const ONLINE_ORDER_ALERT_SOUNDS = [...ALERT_SOUNDS.map((sound) => sound.id), "off"] as const satisfies readonly (AlertSoundId | "off")[];
+export type OnlineOrderAlertSound = AlertSoundId | "off";
 
 export async function getPosSettings(business: OrderingBusiness) {
   await ensureOrderingCustomerSchema();
   const rows =
     await getSql()`SELECT pos_idle_lock_seconds,online_order_alert_sound,online_order_alert_volume,business_timezone,updated_at FROM ordering_business_settings WHERE business=${business}`;
   const sound = String(rows[0]?.online_order_alert_sound || "warm_chime");
-  const supportedSound = ONLINE_ORDER_ALERT_SOUNDS.includes(sound as OnlineOrderAlertSound);
+  const supportedSound = (ONLINE_ORDER_ALERT_SOUNDS as readonly string[]).includes(sound);
   const storedVolume = Number(rows[0]?.online_order_alert_volume ?? 65);
   return {
     business,
@@ -44,7 +37,7 @@ export async function savePosSettings(
       "Auto-lock must be disabled or between 15 and 3600 seconds.",
     );
   const sound = String(soundValue || "warm_chime") as OnlineOrderAlertSound;
-  if (!ONLINE_ORDER_ALERT_SOUNDS.includes(sound))
+  if (!(ONLINE_ORDER_ALERT_SOUNDS as readonly string[]).includes(sound))
     throw new Error("Choose a valid online-order alert sound.");
   const volume = Math.trunc(Number(volumeValue));
   if (!Number.isFinite(volume) || volume < 10 || volume > 100)
