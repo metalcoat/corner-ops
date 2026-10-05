@@ -319,7 +319,7 @@ async function signIn(page, supplier, user, password) {
  * prices or account details.
  */
 function describe(json, path = "", depth = 0, out = []) {
-  if (depth > 6 || out.length > 400) return out.join("\n");
+  if (depth > 10 || out.length > 400) return out.join("\n");
   if (Array.isArray(json)) {
     out.push(`  ${path || "(root)"}: list of ${json.length}`);
     if (json.length && json[0] && typeof json[0] === "object") describe(json[0], `${path}[0]`, depth + 1, out);
@@ -327,10 +327,29 @@ function describe(json, path = "", depth = 0, out = []) {
     for (const [key, value] of Object.entries(json)) {
       const at = path ? `${path}.${key}` : key;
       if (value && typeof value === "object") describe(value, at, depth + 1, out);
-      else out.push(`  ${at}: ${value === null ? "null" : typeof value}${typeof value === "string" && /^\$?\d+(\.\d+)?$/.test(value) ? " (number-like)" : ""}`);
+      // Only whether a number is zero is shown (a price field that's always 0 means prices load elsewhere).
+      else out.push(`  ${at}: ${value === null ? "null" : typeof value}${typeof value === "string" && /^\$?\d+(\.\d+)?$/.test(value) ? " (number-like)" : ""}${value === 0 ? " (zero)" : ""}`);
     }
   }
   return out.join("\n");
+}
+
+/**
+ * Titles of the customer's lists, from list data the site loaded (e.g. PFG's ProductListHeaders:
+ * { ProductListHeaderId, ProductListTitle }), order guides first.
+ */
+function listTitles(responses) {
+  const titles = [];
+  const visit = (value, depth) => {
+    if (depth > 6 || value == null || typeof value !== "object") return;
+    if (Array.isArray(value)) return value.forEach((entry) => visit(entry, depth + 1));
+    for (const [key, entry] of Object.entries(value)) {
+      if (typeof entry === "string" && /list.*(title|name)|guide.*(title|name)/i.test(key) && entry.trim().length >= 2) titles.push(entry.trim());
+      else visit(entry, depth + 1);
+    }
+  };
+  responses.forEach((response) => visit(response, 0));
+  return [...new Set(titles)].sort((a, b) => Number(/order guide/i.test(b)) - Number(/order guide/i.test(a))).slice(0, 5);
 }
 
 /** Scrolls until the list stops growing (order guides load more items as you scroll). */
@@ -461,14 +480,25 @@ async function run(supplier) {
     const visited = new Set([page.url()]);
     for (const pattern of [/^\s*(my )?order guides?\s*$/i, /^\s*(my |shopping )?lists?\s*$/i, /order guide/i, /\blists?\b/i, /favorites|purchase history|frequently (bought|ordered)/i]) {
       if (found().length >= 3) break;
-      const link = page.locator("a, button, [role=link], [role=menuitem], [role=tab]").filter({ hasText: pattern });
+      // Menus are links, buttons, or plain text with a click handler (PFG); only consider what is showing.
+      let link = page.locator("a, button, [role=link], [role=menuitem], [role=tab]").filter({ hasText: pattern }).filter({ visible: true });
+      if (!(await visible(link))) link = page.getByText(pattern).filter({ visible: true });
       if (!(await visible(link))) continue;
       await link.first().click().catch(() => {});
       await page.waitForTimeout(5_000);
-      // On a page of lists, open the first one (the order guide is usually first).
+      // On a page of lists, open one: by a title the site's own list data named (PFG), else the first list link.
       if (found().length < 3) {
-        const firstList = page.locator('a[href*="list" i], [role=row] a, li a, [class*="list" i] a').filter({ hasText: /\w{3,}/ });
-        if (await visible(firstList)) {
+        let opened = false;
+        for (const title of listTitles(captured.map((c) => c.json))) {
+          const entry = page.getByText(title, { exact: true }).filter({ visible: true });
+          if (!(await visible(entry))) continue;
+          await entry.first().click().catch(() => {});
+          await page.waitForTimeout(6_000);
+          opened = true;
+          break;
+        }
+        const firstList = page.locator('a[href*="list" i], [role=row] a, li a, [class*="list" i] a').filter({ hasText: /\w{3,}/ }).filter({ visible: true });
+        if (!opened && (await visible(firstList))) {
           await firstList.first().click().catch(() => {});
           await page.waitForTimeout(5_000);
         }
