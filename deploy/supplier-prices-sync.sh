@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Sends supplier price files to the app's Supplier costs page.
+#
+# Drop a supplier's order-guide export (CSV or tab-separated) into a folder named
+# after the supplier, exactly as it's named in Supplier costs:
+#   /opt/corner-ops/supplier-prices/Sysco/order-guide.csv
+#   /opt/corner-ops/supplier-prices/US Foods/export.csv
+# This script (run daily by corner-ops-supplier-prices.timer, or by hand) posts each
+# new file, then moves it to <supplier>/done/ (or <supplier>/failed/ with the error).
+# A browser job that downloads the exports from each supplier's site can save into
+# the same folders.
+set -Eeuo pipefail
+
+readonly ROOT="${CORNER_OPS_ROOT:-/opt/corner-ops}"
+readonly DROP="${SUPPLIER_PRICES_DIR:-$ROOT/supplier-prices}"
+readonly ENV_FILE="$ROOT/.env"
+
+secret="$(grep -E '^CRON_SECRET=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
+if [[ -z "$secret" ]]; then
+  printf '%s CRON_SECRET is not set in %s.\n' "$(date -u +%FT%TZ)" "$ENV_FILE" >&2
+  exit 1
+fi
+mkdir -p "$DROP"
+
+shopt -s nullglob
+status=0
+for dir in "$DROP"/*/; do
+  supplier="$(basename "$dir")"
+  for file in "$dir"*.csv "$dir"*.txt "$dir"*.tsv; do
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    body="$(python3 -c 'import json,sys; print(json.dumps({"supplier": sys.argv[1], "csv": open(sys.argv[2], encoding="utf-8-sig", errors="replace").read()}))' "$supplier" "$file")"
+    if result="$(curl -fsS --max-time 300 -H 'content-type: application/json' -H @<(printf 'Authorization: Bearer %s\n' "$secret") \
+        --data-binary @<(printf '%s' "$body") http://127.0.0.1:3000/api/cron/supplier-prices 2>&1)"; then
+      mkdir -p "${dir}done"
+      mv "$file" "${dir}done/${stamp}-$(basename "$file")"
+      printf '%s %s: %s\n' "$(date -u +%FT%TZ)" "$supplier" "$result"
+    else
+      mkdir -p "${dir}failed"
+      mv "$file" "${dir}failed/${stamp}-$(basename "$file")"
+      printf '%s\n' "$result" > "${dir}failed/${stamp}-$(basename "$file").error"
+      printf '%s %s failed: %s\n' "$(date -u +%FT%TZ)" "$supplier" "$result" >&2
+      status=1
+    fi
+  done
+done
+exit "$status"

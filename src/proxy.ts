@@ -155,6 +155,7 @@ function isDeliPosApi(path: string): boolean {
       "customer-credits",
       "brand-logo",
       "inventory",
+      "supplier-costs",
       "register",
       "offline-sync",
       "payment-stations",

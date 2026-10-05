@@ -25,6 +25,8 @@
     "src/lib/ordering-reopen-policy.ts",
     "src/lib/ordering-loyalty-earn.ts",
     "src/lib/driver-call-link.ts",
+    "src/lib/supplier-plan.ts",
+    "src/lib/supplier-order-guide.ts",
     "tests/**/*.ts"
   ]
 }
