@@ -5,7 +5,7 @@ import { sendRawToPrinter } from "@/lib/printer-network";
 
 export type LabelLanguage = "zpl" | "tspl" | "escpos";
 export const LABEL_LANGUAGES: Array<{ value: LabelLanguage; label: string; hint: string }> = [
-  { value: "zpl", label: "ZPL", hint: "Zebra printers (ZD, GK, GX series)" },
+  { value: "zpl", label: "ZPL", hint: "Volcora V-LBPTZ, Zebra and most Ethernet label printers" },
   { value: "tspl", label: "TSPL", hint: "Rollo, Munbyn, Xprinter, TSC and most budget label printers" },
   { value: "escpos", label: "ESC/POS", hint: "Epson TM-L90 and other receipt-style label printers" },
 ];
@@ -32,7 +32,7 @@ export type ItemLabel = {
 };
 
 export function normalizeLabelConfig(config: Record<string, unknown>) {
-  const language = ["zpl", "tspl", "escpos"].includes(String(config.labelLanguage)) ? (String(config.labelLanguage) as LabelLanguage) : "tspl";
+  const language = ["zpl", "tspl", "escpos"].includes(String(config.labelLanguage)) ? (String(config.labelLanguage) as LabelLanguage) : "zpl";
   const clamp = (value: unknown, fallback: number, min: number, max: number) => {
     const number = Math.round(Number(value));
     return Number.isFinite(number) && number >= min && number <= max ? number : fallback;
@@ -136,6 +136,21 @@ function escpos(label: ItemLabel, widthMm: number) {
   }
   chunks.push(Buffer.from([0x1b, 0x45, 0, 0x1d, 0x21, 0, 0x0a, 0x1d, 0x56, 0x42, 0x00]));
   return Buffer.concat(chunks);
+}
+
+/** The label's lines and sizes, for an on-screen preview that matches what prints. */
+export function labelPreview(config: Record<string, unknown>, label: ItemLabel) {
+  const { labelWidthMm, labelHeightMm } = normalizeLabelConfig(config);
+  const width = labelWidthMm * DOTS_PER_MM, height = labelHeightMm * DOTS_PER_MM;
+  const font = { xl: 56, lg: 34, md: 26, sm: 22 };
+  const lines: Array<Line & { y: number }> = [];
+  let y = 16;
+  for (const line of layout(label, Math.floor((width - 32) / (font.md * 0.55)))) {
+    if (y + font[line.size] > height - 8) break;
+    lines.push({ ...line, y });
+    y += font[line.size] + 6;
+  }
+  return { widthDots: width, heightDots: height, fonts: font, lines };
 }
 
 export function renderLabel(config: Record<string, unknown>, label: ItemLabel) {

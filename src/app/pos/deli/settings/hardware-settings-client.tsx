@@ -64,8 +64,8 @@ const KINDS: Array<{ value: PrinterKind; title: string; detail: string }> = [
   { value: "label_printer", title: "Food labels", detail: "Sticker labels for each sub and pizza." },
 ];
 const LANGUAGES = [
-  { value: "tspl", label: "TSPL — Rollo, Munbyn, Xprinter, TSC and most budget label printers" },
-  { value: "zpl", label: "ZPL — Zebra printers" },
+  { value: "zpl", label: "ZPL — Volcora V-LBPTZ, Zebra and most Ethernet label printers" },
+  { value: "tspl", label: "TSPL — Rollo, Munbyn, Xprinter, TSC" },
   { value: "escpos", label: "ESC/POS — Epson TM-L90 and receipt-style label printers" },
 ] as const;
 const LABEL_SIZES = [
@@ -96,7 +96,7 @@ type PrinterForm = {
   height: number;
   categories: string[];
 };
-const blankPrinter = (kind: PrinterKind): PrinterForm => ({ id: "", key: "", kind, name: "", host: "", port: 9100, drawer: false, receipts: false, textSize: "normal", headerSize: "large", tillKey: "", language: "tspl", width: 101, height: 51, categories: [] });
+const blankPrinter = (kind: PrinterKind): PrinterForm => ({ id: "", key: "", kind, name: "", host: "", port: 9100, drawer: false, receipts: false, textSize: "normal", headerSize: "large", tillKey: "", language: "zpl", width: 101, height: 51, categories: [] });
 type StationForm = { id: string; key: string; name: string; payment: boolean; printerId: string; terminalId: string; readerId: string; display: boolean; phonePayments: boolean; registerKey: string; originalPrinterId: string };
 const blankStation = (): StationForm => ({ id: "", key: "", name: "", payment: false, printerId: "", terminalId: "", readerId: "", display: false, phonePayments: true, registerKey: "", originalPrinterId: "" });
 type OtherForm = { id: string; key: string; type: "payment_terminal" | "barcode_scanner"; name: string; mxTerminalId: string };
@@ -183,7 +183,7 @@ export default function HardwareSettingsClient() {
       textSize: config.ticketTextSize || "normal",
       headerSize: config.ticketHeaderSize || "large",
       tillKey: config.tillKey || "",
-      language: config.labelLanguage || "tspl",
+      language: config.labelLanguage || "zpl",
       width: Number(config.labelWidthMm || 101),
       height: Number(config.labelHeightMm || 51),
       categories: config.labelCategoryIds || [],
@@ -528,7 +528,7 @@ export default function HardwareSettingsClient() {
                   {device.role === "kitchen_printer" && data.kitchenPrinterIds.includes(device.id) && <span>Prints kitchen tickets</span>}
                   {device.role === "label_printer" && (
                     <span>
-                      {config.labelCategoryIds?.length ? `Labels: ${config.labelCategoryIds.map((id) => categoryName.get(id) || "?").join(", ")}` : "Labels: subs & pizzas"} · {(config.labelLanguage || "tspl").toUpperCase()}
+                      {config.labelCategoryIds?.length ? `Labels: ${config.labelCategoryIds.map((id) => categoryName.get(id) || "?").join(", ")}` : "Labels: subs & pizzas"} · {(config.labelLanguage || "zpl").toUpperCase()}
                     </span>
                   )}
                   {users.length > 0 && <span>Used by {users.join(", ")}</span>}
