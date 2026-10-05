@@ -228,8 +228,8 @@ export default function EmployeesPage() {
           <label>Hourly rate<input name="hourlyRate" type="number" min="0" step="0.01" defaultValue="0" /></label>
           <label>Tipped rate<input name="tippedRate" type="number" min="0" step="0.01" defaultValue="0" /></label>
           <label className="wfWide"><input name="countsForTips" type="checkbox" defaultChecked /> Include in eligible tip pools</label>
-          <label className="wfWide"><input name="smsOptIn" type="checkbox" required /> Employee consented to receive Corner Ops onboarding and schedule SMS notifications</label>
-          <p className="wfEmpty wfWide">Creating the employee sends their Employee Hub link, PIN, new-hire paperwork link, and tells them to send questions inside Corner Ops instead of replying to the text.</p>
+          <label className="wfWide"><input name="smsOptIn" type="checkbox" required /> Employee consented to receive onboarding and schedule SMS notifications</label>
+          <p className="wfEmpty wfWide">Creating the employee sends their Employee Hub link, PIN, and new-hire paperwork link, and directs questions to team messages.</p>
           <button className="wfPrimary" disabled={busy}>{busy ? "Creating…" : "Create employee & send onboarding text"}</button>
         </form>
       </article>

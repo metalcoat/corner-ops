@@ -1,8 +1,9 @@
 "use client";
 
 import { responseMessage } from "@/app/client-http";
+import { useSiteBrand } from "@/app/brand-context";
 import { DEFAULT_PUNCH_CORRECTION_REASON, normalizePunchCorrectionReason } from "@/lib/punch-correction-reason";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
 
@@ -64,6 +65,7 @@ type Version = {
 type Dashboard = {
   summary: {
     source: string;
+    processingFeeReviewCount?: number;
     weekStart: string;
     weekEnd: string;
     rows: PayrollRow[];
@@ -145,10 +147,14 @@ function easternInputValue(value: string | null) {
 }
 
 export default function PayrollControlPage() {
+  const brand = useSiteBrand();
+  const siteBusiness: Business = brand.name === "At the Docks" ? "Tiki" : "Corner Deli";
   const [session, setSession] = useState<SessionView | null>(null);
-  const [business, setBusiness] = useState<Business>("Corner Deli");
+  const [business, setBusiness] = useState<Business>(siteBusiness);
   const [weekStart, setWeekStart] = useState(previousMonday());
-  const [data, setData] = useState<Dashboard | null>(null);
+  const [dashboard, setDashboard] = useState<{ business: Business; weekStart: string; value: Dashboard } | null>(null);
+  const requestId = useRef(0);
+  const data = dashboard?.business === business && dashboard.weekStart === weekStart ? dashboard.value : null;
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Punch | null>(null);
@@ -162,18 +168,24 @@ export default function PayrollControlPage() {
   }, []);
 
   async function load(activeBusiness = business, activeWeek = weekStart) {
+    const currentRequest = ++requestId.current;
     const response = await fetch(
       `/api/payroll-control?business=${encodeURIComponent(activeBusiness)}&weekStart=${encodeURIComponent(activeWeek)}&displayVersion=20260804-3`,
       { cache: "no-store", headers: { "Cache-Control": "no-cache" } },
     );
     if (!response.ok) throw new Error(await responseMessage(response));
-    setData(await response.json() as Dashboard);
+    const value = await response.json() as Dashboard;
+    if (currentRequest === requestId.current) setDashboard({ business: activeBusiness, weekStart: activeWeek, value });
   }
 
   useEffect(() => {
     if (!session?.authenticated) return;
     setNotice("");
-    void load(business, weekStart).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
+    const activeRequest = requestId.current + 1;
+    void load(business, weekStart).catch((error) => {
+      if (activeRequest === requestId.current) setNotice(error instanceof Error ? error.message : String(error));
+    });
+    return () => { requestId.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.authenticated, business, weekStart]);
 
@@ -349,7 +361,8 @@ export default function PayrollControlPage() {
         </div>
         <p className="reportNote">{business === "Corner Deli"
           ? "Every saved shift correction and tip override is included the next time totals load. Corner Deli tips are reconciled by business day before the 3.5% deduction, so rounding cannot quietly create extra payroll."
-          : "Square tips are split equally among tip-eligible Tiki employees clocked in when the payment was created. Tiki corrections on this page also reconcile the live employee clock state."}</p>
+          : "Square tips are split equally among tip-eligible At the Docks employees clocked in when the payment was created. The tip's share of Square's recorded processing fee is deducted, up to 3.5%. Shift corrections on this page also reconcile the live employee clock state."}</p>
+        {business === "Tiki" && Boolean(data?.summary.processingFeeReviewCount) && <p className="reportNote"><strong>Review processing fees:</strong> {data?.summary.processingFeeReviewCount} Square payment(s) have no usable fee information. Their tips remain gross until Square's fee is available.</p>}
       </section>
 
       {business === "Corner Deli" && <section className="controlCard">
@@ -375,7 +388,7 @@ export default function PayrollControlPage() {
 
       <section className="controlCard">
         <div className="controlActions">
-          <button className="primary" onClick={() => void post({ action: "draft-create", business, weekStart }).then((result) => setNotice(`Payroll draft version ${result.version} created from the current corrected totals.`))} disabled={busy}>Create payroll draft</button>
+          <button className="primary" onClick={() => void post({ action: "draft-create", business, weekStart }).then((result) => setNotice(`Payroll draft version ${result.version} created from the current corrected totals.`))} disabled={busy || (business === "Tiki" && Boolean(data?.summary.processingFeeReviewCount))}>Create payroll draft</button>
         </div>
         <p className="eyebrow">Calculated summary</p>
         <h2>{data?.summary.source}</h2>
@@ -390,8 +403,8 @@ export default function PayrollControlPage() {
               return <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.pickupTipsBeforeFee || 0)}</td><td>{dollars(row.deliveryTipsBeforeFee || 0)}</td><td><strong>{dollars(gross)}</strong></td><td>{dollars(gross - automaticNet)}</td><td>{dollars(manual)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>;
             })}</tbody>
           </> : <>
-            <thead><tr><th>Employee</th><th>Total</th><th>Regular</th><th>OT</th><th>Tipped hours</th><th>Pickup tips</th><th>Delivery tips</th><th>Manual</th><th>Total tips</th></tr></thead>
-            <tbody>{data?.summary.rows.map((row) => <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.pickupTips)}</td><td>{dollars(row.deliveryTips)}</td><td>{dollars(row.manualTips || 0)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>)}</tbody>
+            <thead><tr><th>Employee</th><th>Total</th><th>Regular</th><th>OT</th><th>Tipped hours</th><th>Gross tips</th><th>Card fee</th><th>Automatic net</th><th>Manual</th><th>Net paid</th></tr></thead>
+            <tbody>{data?.summary.rows.map((row) => { const automaticNet = row.tips - (row.manualTips || 0); return <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.tipsBeforeFee || 0)}</td><td>{dollars((row.tipsBeforeFee || 0) - automaticNet)}</td><td>{dollars(automaticNet)}</td><td>{dollars(row.manualTips || 0)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>; })}</tbody>
           </>}
         </table></div>
       </section>

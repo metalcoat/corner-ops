@@ -29,6 +29,7 @@
     "src/lib/supplier-order-guide.ts",
     "src/lib/alert-sounds.ts",
     "src/lib/supplier-web-extract.ts",
+    "src/lib/square-tip-fee.ts",
     "tests/**/*.ts"
   ]
 }

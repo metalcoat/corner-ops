@@ -14,19 +14,17 @@ function businessFrom(value: string | null): Business {
 }
 
 async function reportWeatherWithTimeout(input: { business: Business; start: string; end: string }) {
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REPORT_WEATHER_TIMEOUT_MS);
   try {
-    return await Promise.race([
-      weatherSalesIntelligence(input),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error("Weather intelligence is taking too long. Stored performance data is still available; refresh weather again later.")),
-          REPORT_WEATHER_TIMEOUT_MS,
-        );
-      }),
-    ]);
+    return await weatherSalesIntelligence(input, { signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Weather intelligence is taking too long. Stored performance data is still available; refresh weather again later.");
+    }
+    throw error;
   } finally {
-    if (timer) clearTimeout(timer);
+    clearTimeout(timer);
   }
 }
 

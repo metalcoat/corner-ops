@@ -14,6 +14,7 @@ import {
   type EmploymentFormProfile,
 } from "@/lib/employment-forms";
 import { redactEmploymentSensitiveData } from "@/lib/sensitive-redaction";
+import { employerI9ValidationErrors } from "@/lib/i9-validation";
 import type { Business } from "@/lib/types";
 
 function businessValue(value: unknown): Business {
@@ -227,12 +228,15 @@ export async function POST(request: NextRequest) {
 
     if (action === "complete-i9") {
       const metadata = clientMetadata(request);
+      const payload = typeof body.payload === "object" && body.payload ? body.payload as Record<string, unknown> : {};
+      const i9Errors = employerI9ValidationErrors(payload);
+      if (i9Errors.length) throw new Error(i9Errors[0]);
       const form = await completeEmployerI9({
         id: String(body.id || ""),
         business,
         actor: session.email,
         signatureName: String(body.signatureName || ""),
-        payload: typeof body.payload === "object" && body.payload ? body.payload as Record<string, unknown> : {},
+        payload,
         ...metadata,
       });
       return NextResponse.json({ form });

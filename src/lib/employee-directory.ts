@@ -1,5 +1,4 @@
-import { createHmac } from "node:crypto";
-import { assertEmployeePinAvailable, employeePinUpdate } from "@/lib/employee-pin-security";
+import { assertEmployeePinAvailable, employeePinUpdate, ensureEmployeePinColumns } from "@/lib/employee-pin-security";
 import { ensureSchema, getSql } from "@/lib/db";
 import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
 import { validateEmployeePin } from "@/lib/employee-pin";
@@ -26,12 +25,6 @@ function clean(value: unknown, max = 255): string {
   return String(value ?? "").trim().slice(0, max);
 }
 
-function pinHash(business: Business, pin: string): string {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required.");
-  return createHmac("sha256", secret).update(`${business}:${pin}`).digest("hex");
-}
-
 export function ensureEmployeeDirectorySchema(): Promise<void> {
   if (!directorySchemaPromise) {
     directorySchemaPromise = (async () => {
@@ -42,6 +35,8 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
       await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT ''`;
       await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS sms_opt_in BOOLEAN NOT NULL DEFAULT FALSE`;
       await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin_enabled BOOLEAN NOT NULL DEFAULT TRUE`;
+      // Salted-PIN columns and session_version (revokes devices on PIN/active changes).
+      await ensureEmployeePinColumns();
       await sql`
         CREATE UNIQUE INDEX IF NOT EXISTS employees_business_email_unique
         ON employees (business, LOWER(email))
@@ -280,7 +275,7 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
         UPDATE employees SET
           email = ${email}, phone = ${phone}, sms_opt_in = ${smsOptIn}, name = ${name},
           pin_hash = ${updatedPin.hash}, pin_salt = ${updatedPin.salt}, pin_hash_version = ${updatedPin.version},
-          pin_fingerprint = ${updatedPin.fingerprint}, pin_enabled = TRUE,
+          pin_fingerprint = ${updatedPin.fingerprint}, pin_enabled = TRUE, session_version = session_version + 1,
           position = ${position}, role_group = ${roleGroup}, counts_for_tips = ${countsForTips},
           hourly_rate = ${hourlyRate}, tipped_rate = ${tippedRate}, active = TRUE, updated_at = NOW()
         WHERE id = ${existing[0].id}
@@ -288,13 +283,15 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
       ` as unknown as Array<{ id: string; name: string; email: string; phone: string }>;
       results.push({ ...rows[0], action: "updated" });
     } else {
+      await assertEmployeePinAvailable({ business, pin, employeeName: name });
+      const newPin = employeePinUpdate(business, pin, name);
       const rows = await sql`
         INSERT INTO employees (
-          id, business, email, phone, sms_opt_in, name, pin_hash, pin_enabled, position,
-          role_group, counts_for_tips, hourly_rate, tipped_rate, active
+          id, business, email, phone, sms_opt_in, name, pin_hash, pin_salt, pin_hash_version, pin_fingerprint,
+          pin_enabled, position, role_group, counts_for_tips, hourly_rate, tipped_rate, active
         ) VALUES (
           ${crypto.randomUUID()}, ${business}, ${email}, ${phone}, ${smsOptIn}, ${name},
-          ${pinHash(business, pin)}, TRUE, ${position}, ${roleGroup}, ${countsForTips},
+          ${newPin.hash}, ${newPin.salt}, ${newPin.version}, ${newPin.fingerprint}, TRUE, ${position}, ${roleGroup}, ${countsForTips},
           ${hourlyRate}, ${tippedRate}, TRUE
         )
         RETURNING id, name, email, phone

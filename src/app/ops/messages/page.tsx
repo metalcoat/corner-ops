@@ -527,14 +527,14 @@ export default function MessagesPage() {
   }
 
   if (!session) return <main className="messageApp"><div className="messageLoading">Loading messages…</div></main>;
-  if (!session.authenticated) return <main className="messageApp"><div className="messageLoading"><a href="/signin">Sign in to Corner Ops</a></div></main>;
+  if (!session.authenticated) return <main className="messageApp"><div className="messageLoading"><a href="/signin">Sign in</a></div></main>;
   const allowed = session.businesses?.length ? session.businesses : (["Corner Deli", "Tiki"] as Business[]);
   const canReact = !viewAsEmployeeId && Boolean(session.permissions?.includes("*") || session.permissions?.includes("workforce.write"));
 
   return <main ref={messageAppRef} className="messageApp" data-message-business={business}>
     <header className="messageTopBar">
       <div className="messageTopTitle">
-        <a className="messageTopIcon" href="/ops/people" aria-label="Open Corner Ops">☰</a>
+        <a className="messageTopIcon" href="/ops/people" aria-label="Open navigation">☰</a>
         <div><h1>Messages</h1><p>{business}</p></div>
       </div>
       <div className="messageTopActions">

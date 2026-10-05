@@ -1,5 +1,14 @@
-const APP_CACHE = "corner-ops-shell-v3";
-const APP_SHELL = ["/app", "/pos/deli", "/corner-ops-icon.svg"];
+const APP_CACHE = "corner-ops-shell-v5";
+const BRAND = self.location.hostname === "team.ordercornerdeli.com"
+  ? { name: "Corner Deli", icon: "/corner-deli-logo.png" }
+  : self.location.hostname === "team.atthedocks.com"
+    ? { name: "At the Docks", icon: "/at-the-docks-logo.svg" }
+    : self.location.hostname === "ops.ordercornerdeli.com"
+      ? { name: "Ops", icon: "/corner-deli-logo.png" }
+      : self.location.hostname === "ops.atthedocks.com"
+        ? { name: "Ops", icon: "/at-the-docks-logo.svg" }
+    : { name: "Corner Ops", icon: "/corner-ops-icon.svg" };
+const APP_SHELL = ["/app", "/pos/deli", BRAND.icon];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(APP_CACHE).then((cache) => cache.addAll(APP_SHELL)).catch(() => undefined));
@@ -19,7 +28,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
   const posResource = url.pathname === "/pos/deli" || url.pathname === "/api/ordering/menu" || url.pathname.startsWith("/_next/static/");
-  if (url.pathname !== "/app" && url.pathname !== "/corner-ops-icon.svg" && !posResource) return;
+  if (url.pathname !== "/app" && url.pathname !== BRAND.icon && !posResource) return;
   event.respondWith(
     fetch(event.request)
       .then((response) => {
@@ -35,7 +44,7 @@ self.addEventListener("fetch", (event) => {
 
 self.addEventListener("push", (event) => {
   let payload = {
-    title: "Corner Ops",
+    title: BRAND.name,
     body: "You have a new notification.",
     url: "/app",
     tag: "corner-ops",
@@ -45,10 +54,10 @@ self.addEventListener("push", (event) => {
   } catch {
     if (event.data) payload.body = event.data.text();
   }
-  event.waitUntil(self.registration.showNotification(payload.title || "Corner Ops", {
+  event.waitUntil(self.registration.showNotification(payload.title || BRAND.name, {
     body: payload.body || "",
-    icon: "/corner-ops-icon.svg",
-    badge: "/corner-ops-icon.svg",
+    icon: BRAND.icon,
+    badge: BRAND.icon,
     tag: payload.tag || "corner-ops",
     renotify: true,
     data: { url: payload.url || "/app" },

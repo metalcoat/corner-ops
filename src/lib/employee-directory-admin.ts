@@ -1,4 +1,3 @@
-import { createHmac } from "node:crypto";
 import { assertEmployeePinAvailable, employeePinUpdate } from "@/lib/employee-pin-security";
 import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
 import { ensureEmployeeDirectorySchema, upsertDirectoryEmployees, type DirectoryEmployeeInput } from "@/lib/employee-directory";
@@ -13,11 +12,6 @@ function clean(value: unknown, max = 255): string {
   return String(value ?? "").trim().slice(0, max);
 }
 
-function pinHash(business: Business, pin: string): string {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required.");
-  return createHmac("sha256", secret).update(`${business}:${pin}`).digest("hex");
-}
 
 export async function listDirectoryEmployees(business: Business) {
   await ensureEmployeeProfileSchema();
@@ -76,10 +70,9 @@ export async function bulkUpdateDirectoryPins(input: { business: Business; lines
     const key = name.toLowerCase();
     if (!name) throw new Error(`Line ${index + 1} is missing an employee name.`);
     if (seen.has(key)) throw new Error(`${name} appears more than once in the PIN list.`);
-    const hashed = pinHash(input.business, pin);
-    if (seenPins.has(hashed)) throw new Error("Each employee must have a unique PIN at this location.");
+    if (seenPins.has(pin)) throw new Error("Each employee must have a unique PIN at this location.");
     seen.add(key);
-    seenPins.add(hashed);
+    seenPins.add(pin);
     parsed.push({ name, pin });
   }
 
@@ -97,7 +90,7 @@ export async function bulkUpdateDirectoryPins(input: { business: Business; lines
       UPDATE employees
       SET pin_hash = ${bulkPin.hash}, pin_salt = ${bulkPin.salt}, pin_hash_version = ${bulkPin.version},
         pin_fingerprint = ${bulkPin.fingerprint}, pin_enabled = TRUE,
-        active = TRUE, updated_at = NOW()
+        active = TRUE, session_version = session_version + 1, updated_at = NOW()
       WHERE business = ${input.business}
         AND LOWER(BTRIM(name)) = LOWER(BTRIM(${entry.name}))
       RETURNING id,name
@@ -184,7 +177,9 @@ export async function updateDirectoryEmployee(input: {
       pin_salt = COALESCE(${newPin?.salt ?? null}, pin_salt),
       pin_hash_version = COALESCE(${newPin?.version ?? null}::int, pin_hash_version),
       pin_fingerprint = COALESCE(${newPin?.fingerprint ?? null}, pin_fingerprint),
-      pin_enabled = CASE WHEN ${pin} <> '' THEN TRUE ELSE pin_enabled END, updated_at = NOW()
+      pin_enabled = CASE WHEN ${pin} <> '' THEN TRUE ELSE pin_enabled END,
+      session_version = CASE WHEN ${pin} <> '' OR active <> ${active} THEN session_version + 1 ELSE session_version END,
+      updated_at = NOW()
     WHERE id = ${input.id} AND business = ${input.business}
     RETURNING id, email, phone, sms_opt_in, name, position, role_group, counts_for_tips,
       hourly_rate, tipped_rate, pin_enabled, active, schedule_color, profile_photo_pathname, chat_nickname

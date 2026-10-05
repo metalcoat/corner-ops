@@ -1,9 +1,4 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-} from "node:crypto";
+import { decryptIntegrationSecret as decryptSecret, encryptIntegrationSecret as encryptSecret } from "@/lib/integration-crypto";
 import { getSql } from "@/lib/db";
 import { ensureSquareControlSchema } from "@/lib/square-control";
 
@@ -40,38 +35,6 @@ function squareBase(): string {
   return squareEnvironment() === "production"
     ? "https://connect.squareup.com"
     : "https://connect.squareupsandbox.com";
-}
-
-function integrationKey(): Buffer {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required before Square can store credentials.");
-  return createHash("sha256").update(`corner-ops-integrations:${secret}`).digest();
-}
-
-function encryptSecret(value: string): string {
-  if (!value) return "";
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", integrationKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  return [iv, cipher.getAuthTag(), encrypted]
-    .map((part) => part.toString("base64url"))
-    .join(".");
-}
-
-function decryptSecret(value: string): string {
-  if (!value) return "";
-  const [ivText, tagText, encryptedText] = value.split(".");
-  if (!ivText || !tagText || !encryptedText) throw new Error("Stored Square credential is invalid.");
-  const decipher = createDecipheriv(
-    "aes-256-gcm",
-    integrationKey(),
-    Buffer.from(ivText, "base64url"),
-  );
-  decipher.setAuthTag(Buffer.from(tagText, "base64url"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(encryptedText, "base64url")),
-    decipher.final(),
-  ]).toString("utf8");
 }
 
 async function activeConnection(): Promise<ConnectionRow | null> {

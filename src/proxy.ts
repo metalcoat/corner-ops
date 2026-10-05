@@ -14,9 +14,24 @@ const removedVendorPaths = [
   "/api/ordering/import/rezku",
   "/ops/rezku-monitor",
 ];
+// When APP_ENV=production, only the public business hosts (and on-box callers)
+// are served; any other Host header gets a 404. Mirrors the production release.
+const PRODUCTION_HOSTS = new Set([
+  "ops.ordercornerdeli.com",
+  "ops.atthedocks.com",
+  "team.ordercornerdeli.com",
+  "team.atthedocks.com",
+  "localhost",
+  "127.0.0.1",
+]);
 const selfAuthorizedApiPaths = [
   "/api/health",
   "/api/auth/session",
+  // Ops-domain business switch: the start route checks the session itself and
+  // the completion route is authorized by its one-time code.
+  "/api/auth/ops-switch",
+  // Telnyx verifies its own ed25519 webhook signature in the route.
+  "/api/telnyx/inbound",
   "/api/auth/password-reset",
   "/api/timeclock",
   "/api/employee",
@@ -229,6 +244,7 @@ function needed(path: string, method: string): string | null {
       "/api/attendance",
       "/api/employment-forms",
       "/api/direct-deposit",
+      "/api/employment-handbook",
     ])
   ) {
     return write ? "workforce.write" : "workforce.read";
@@ -282,6 +298,13 @@ function securedResponse(request: NextRequest): NextResponse {
 
 export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
+  if (
+    process.env.APP_ENV === "production" &&
+    !PRODUCTION_HOSTS.has(visitorHost(request)) &&
+    !isInternalRequest(request.headers)
+  ) {
+    return new Response(null, { status: 404 });
+  }
   const insecureForward =
     request.headers.get("x-forwarded-proto") === "http" ||
     request.headers.get("cf-visitor")?.includes('"scheme":"http"');

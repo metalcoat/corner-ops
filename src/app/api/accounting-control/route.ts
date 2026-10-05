@@ -1,5 +1,6 @@
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
+import { reverseJournalEntry } from "@/lib/journal-reversal";
 import {
   accountingControlDashboard,
   createOpeningBalance,
@@ -66,6 +67,7 @@ export async function POST(request: Request) {
       return Response.json(await importCodedHistory({
         business,
         institutionName: String(form.get("institutionName") || "Historical workbook"),
+        accountType: form.get("accountType") === "credit" ? "credit" : "depository",
         fileName: file.name,
         bytes: await file.arrayBuffer(),
         postApproved: String(form.get("postApproved") || "") === "true",
@@ -126,7 +128,10 @@ export async function POST(request: Request) {
       transactionIds: Array.isArray(body.transactionIds) ? body.transactionIds.map(String) : [], notes: String(body.notes || ""),
       finalize: Boolean(body.finalize), actor: session.email,
     }));
-    if (action === "reconciliation-reopen") return Response.json(await reopenBankReconciliation(String(body.id || ""), session.email));
+    if (action === "reconciliation-reopen") return Response.json(await reopenBankReconciliation(String(body.id || ""), business, session.email));
+    if (action === "journal-reverse") return Response.json(await reverseJournalEntry({
+      entryId: String(body.entryId || ""), business, actor: session.email, reason: String(body.reason || "Manual accounting correction"),
+    }));
     return Response.json({ error: "Unknown accounting action." }, { status: 400 });
   } catch (error) {
     return apiError(error);

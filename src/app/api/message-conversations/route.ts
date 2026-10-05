@@ -185,6 +185,7 @@ export async function POST(request: Request) {
     }
     requirePermission(session, "workforce.write");
     if (action === "reaction") {
+      if (!session.userId) return Response.json({ error: "Management account ID is unavailable. Sign in again." }, { status: 401 });
       return Response.json(await toggleOwnerConversationReaction(business, session.userId, body.messageId, body.reaction));
     }
     if (action === "delete") {

@@ -16,7 +16,7 @@ export function cornerOpsBaseUrl(business: Business = "Corner Deli"): string {
 export function ownerNotificationEmails(): string[] {
   const values = [
     ...(process.env.ALERT_TO_EMAIL || "").split(/[;,]/),
-    process.env.APP_EMAIL || "crfrary@gmail.com",
+    process.env.APP_EMAIL || "",
   ]
     .map((value) => clean(value, 320).toLowerCase())
     .filter((value) => /^\S+@\S+\.\S+$/.test(value));

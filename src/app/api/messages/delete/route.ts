@@ -15,13 +15,13 @@ export async function POST(request: Request) {
     const session = await getSession();
     if (!session) return unauthorized();
     requirePermission(session, "workforce.write");
-    const body = await request.json() as { id?: unknown; business?: unknown };
+    const body = await request.json() as { id?: unknown; business?: unknown; reason?: unknown };
     const business = readBusiness(body.business);
     if (!canAccessBusiness(session, business)) {
       return Response.json({ error: "Business access denied." }, { status: 403 });
     }
 
-    const deleted = await deleteOwnerMessage({ id: String(body.id || ""), business, actor: session.email });
+    const deleted = await deleteOwnerMessage({ id: String(body.id || ""), business, actor: session.email, reason: String(body.reason || "") });
     return Response.json({ deleted: true, id: deleted.id });
   } catch (error) {
     return apiError(error);

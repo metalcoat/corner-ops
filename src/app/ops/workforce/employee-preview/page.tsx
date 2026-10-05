@@ -107,6 +107,7 @@ export default async function EmployeePreviewPage({ searchParams }: { searchPara
         roleGroup: employee.roleGroup,
         posRole: "employee",
         deviceSessionId: "owner-preview",
+        sessionVersion: 1,
         expiresAt: Date.now() + 60_000,
       })
     : null;

@@ -1,5 +1,6 @@
 "use client";
 
+import { useSiteBrand } from "@/app/brand-context";
 import { useEffect, useMemo, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import "../control-center.css";
@@ -8,12 +9,16 @@ import "./people.css";
 const STORAGE_KEY = "corner-ops-business-theme";
 
 export default function PeoplePage() {
+  const brand = useSiteBrand();
+  const siteBusiness: Business | null = brand.name === "At the Docks" ? "Tiki" : brand.name === "Corner Deli" ? "Corner Deli" : null;
   const [session, setSession] = useState<SessionView | null>(null);
-  const [business, setBusiness] = useState<Business>("Corner Deli");
+  const [business, setBusiness] = useState<Business>(siteBusiness || "Corner Deli");
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (saved === "Corner Deli" || saved === "Tiki") setBusiness(saved);
+    if (!siteBusiness) {
+      const saved = window.localStorage.getItem(STORAGE_KEY);
+      if (saved === "Corner Deli" || saved === "Tiki") setBusiness(saved);
+    }
 
     fetch("/api/auth/session", { cache: "no-store" })
       .then((response) => response.json())
@@ -23,7 +28,7 @@ export default function PeoplePage() {
         setBusiness((current) => allowed.length && !allowed.includes(current) ? allowed[0] : current);
       })
       .catch(() => setSession({ authenticated: false } as SessionView));
-  }, []);
+  }, [siteBusiness]);
 
   function chooseBusiness(next: Business) {
     setBusiness(next);

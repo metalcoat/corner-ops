@@ -1,5 +1,7 @@
 import { ensureSchema, getSql } from "@/lib/db";
 import type { EmployeeSession } from "@/lib/employee-auth";
+import { sendStaffNotification } from "@/lib/staff-notifications";
+import { enforceScheduleTimeOff } from "@/lib/schedule-time-off";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -165,6 +167,7 @@ function mapShift(row: Record<string, unknown>) {
     status: clean(row.status, 30),
     notes: clean(row.notes, 1000),
     publishedAt: row.published_at ? String(row.published_at) : null,
+    updatedAt: row.updated_at ? String(row.updated_at) : null,
   };
 }
 
@@ -182,6 +185,7 @@ export async function workforceDashboard(business: Business) {
       FROM schedule_shifts s
       LEFT JOIN employees e ON e.id = s.employee_id
       WHERE s.business = ${business}
+        AND s.status <> 'Cancelled'
         AND s.starts_at >= NOW() - INTERVAL '21 days'
         AND s.starts_at < NOW() + INTERVAL '120 days'
       ORDER BY s.starts_at
@@ -216,7 +220,10 @@ export async function workforceDashboard(business: Business) {
       LIMIT 200
     `,
     sql`
-      SELECT t.*, e.name AS employee_name
+      SELECT t.*,
+        t.starts_on::text AS starts_on,
+        t.ends_on::text AS ends_on,
+        e.name AS employee_name
       FROM time_off_requests t
       JOIN employees e ON e.id = t.employee_id
       WHERE t.business = ${business}
@@ -299,7 +306,10 @@ export async function employeeDashboard(session: EmployeeSession) {
       ORDER BY created_at DESC LIMIT 100
     `,
     sql`
-      SELECT * FROM time_off_requests
+      SELECT *,
+        starts_on::text AS starts_on,
+        ends_on::text AS ends_on
+      FROM time_off_requests
       WHERE employee_id = ${session.employeeId}
       ORDER BY created_at DESC LIMIT 100
     `,
@@ -534,16 +544,48 @@ export async function requestTimeOff(session: EmployeeSession, input: { startsOn
 
 export async function reviewTimeOff(input: { id: string; business: Business; approve: boolean; managerNote?: string; actor: string }) {
   await ensureWorkforceSchema();
-  const rows = await getSql()`
+  const sql = getSql();
+  const requests = await sql`
+    SELECT t.id, t.employee_id, t.starts_on::text AS starts_on, t.ends_on::text AS ends_on, e.name AS employee_name
+    FROM time_off_requests t
+    JOIN employees e ON e.id = t.employee_id
+    WHERE t.id = ${input.id} AND t.business = ${input.business} AND t.status = 'Pending'
+    LIMIT 1
+  ` as unknown as Array<{ id: string; employee_id: string; starts_on: string; ends_on: string; employee_name: string }>;
+  const request = requests[0];
+  if (!request) throw new Error("Pending time-off request not found.");
+
+  await sql`
     UPDATE time_off_requests SET
       status = ${input.approve ? "Approved" : "Rejected"},
       manager_note = ${clean(input.managerNote, 1000)},
       reviewed_by = ${input.actor}, reviewed_at = NOW()
-    WHERE id = ${input.id} AND business = ${input.business} AND status = 'Pending'
-    RETURNING id
-  ` as unknown as Array<{ id: string }>;
-  if (!rows[0]) throw new Error("Pending time-off request not found.");
-  return { id: rows[0].id };
+    WHERE id = ${input.id}
+  `;
+
+  const conflicts = input.approve ? await sql`
+    SELECT id, starts_at, ends_at, position, status
+    FROM schedule_shifts
+    WHERE business = ${input.business}
+      AND employee_id = ${request.employee_id}
+      AND status <> 'Cancelled'
+      AND (starts_at AT TIME ZONE ${TIME_ZONE})::date <= ${request.ends_on}::date
+      AND ((ends_at - INTERVAL '1 millisecond') AT TIME ZONE ${TIME_ZONE})::date >= ${request.starts_on}::date
+    ORDER BY starts_at
+  ` as unknown as Array<{ id: string; starts_at: string; ends_at: string; position: string; status: string }> : [];
+
+  return {
+    id: request.id,
+    employeeName: request.employee_name,
+    requiresReassignment: conflicts.length > 0,
+    conflictingShifts: conflicts.map((shift) => ({
+      id: String(shift.id),
+      startsAt: String(shift.starts_at),
+      endsAt: String(shift.ends_at),
+      position: clean(shift.position, 100),
+      status: clean(shift.status, 30),
+    })),
+  };
 }
 
 export async function createShiftRequest(session: EmployeeSession, input: {
@@ -560,9 +602,19 @@ export async function createShiftRequest(session: EmployeeSession, input: {
   ` as unknown as Array<Record<string, unknown>>;
   const shift = shifts[0];
   if (!shift) throw new Error("Shift not found.");
+  if (new Date(String(shift.starts_at)).getTime() <= Date.now()) {
+    throw new Error("Past shifts cannot be claimed, offered, or swapped.");
+  }
 
   if (input.requestType === "Claim") {
     if (shift.employee_id || shift.status !== "Open") throw new Error("That shift is no longer open.");
+    await enforceScheduleTimeOff({
+      business: session.business,
+      employeeId: session.employeeId,
+      startsAt: String(shift.starts_at),
+      endsAt: String(shift.ends_at),
+      acknowledgePendingTimeOff: true,
+    });
   } else if (String(shift.employee_id || "") !== session.employeeId) {
     throw new Error("You can only offer or swap one of your own shifts.");
   }
@@ -575,11 +627,14 @@ export async function createShiftRequest(session: EmployeeSession, input: {
     if (!input.offeredShiftId) throw new Error("Choose the other employee's shift for the swap.");
     const offeredRows = await getSql()`
       SELECT employee_id FROM schedule_shifts
-      WHERE id = ${input.offeredShiftId} AND business = ${session.business} AND status = 'Published'
+      WHERE id = ${input.offeredShiftId}
+        AND business = ${session.business}
+        AND status = 'Published'
+        AND starts_at > NOW()
       LIMIT 1
     ` as unknown as Array<{ employee_id: string | null }>;
     const offered = offeredRows[0];
-    if (!offered?.employee_id || offered.employee_id === session.employeeId) throw new Error("Choose another employee's published shift.");
+    if (!offered?.employee_id || offered.employee_id === session.employeeId) throw new Error("Choose another employee's future published shift.");
     targetEmployeeId = offered.employee_id;
     employeeResponse = "Pending";
   }
@@ -624,26 +679,75 @@ export async function reviewShiftRequest(input: { id: string; business: Business
 
   if (input.approve) {
     if (request.request_type === "Claim") {
+      const claimShift = await getSql()`
+        SELECT starts_at, ends_at FROM schedule_shifts
+        WHERE id = ${String(request.shift_id)} AND employee_id IS NULL AND status = 'Open'
+        LIMIT 1
+      ` as unknown as Array<{ starts_at: string; ends_at: string }>;
+      if (!claimShift[0]) throw new Error("That shift is no longer open.");
+      await enforceScheduleTimeOff({
+        business: input.business,
+        employeeId: String(request.requester_employee_id),
+        startsAt: claimShift[0].starts_at,
+        endsAt: claimShift[0].ends_at,
+        acknowledgePendingTimeOff: true,
+      });
       await getSql()`
         UPDATE schedule_shifts SET employee_id = ${String(request.requester_employee_id)}, status = 'Published', updated_at = NOW()
         WHERE id = ${String(request.shift_id)} AND employee_id IS NULL AND status = 'Open'
       `;
     } else if (request.request_type === "Offer") {
-      await getSql()`
+      const opened = await getSql()`
         UPDATE schedule_shifts SET employee_id = NULL, status = 'Open', updated_at = NOW()
         WHERE id = ${String(request.shift_id)} AND employee_id = ${String(request.requester_employee_id)}
-      `;
+        RETURNING starts_at, ends_at, position
+      ` as unknown as Array<{ starts_at: string | Date; ends_at: string | Date; position: string }>;
+      const openShift = opened[0];
+      if (openShift) {
+        const start = new Date(openShift.starts_at);
+        const end = new Date(openShift.ends_at);
+        const date = new Intl.DateTimeFormat("en-US", {
+          timeZone: TIME_ZONE,
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        }).format(start);
+        const time = new Intl.DateTimeFormat("en-US", {
+          timeZone: TIME_ZONE,
+          hour: "numeric",
+          minute: "2-digit",
+        });
+        await sendStaffNotification({
+          business: input.business,
+          actor: input.actor,
+          body: `Open shift available: ${date}, ${time.format(start)}-${time.format(end)} · ${clean(openShift.position, 100) || "Shift"}. Request it in Employee Hub.`,
+        });
+      }
     } else {
       const offeredShiftId = String(request.offered_shift_id || "");
       if (!offeredShiftId) throw new Error("Swap request is missing the second shift.");
       const shiftRows = await getSql()`
-        SELECT id, employee_id FROM schedule_shifts
+        SELECT id, employee_id, starts_at, ends_at FROM schedule_shifts
         WHERE id IN (${String(request.shift_id)}, ${offeredShiftId})
         ORDER BY id
-      ` as unknown as Array<{ id: string; employee_id: string | null }>;
+      ` as unknown as Array<{ id: string; employee_id: string | null; starts_at: string; ends_at: string }>;
       const first = shiftRows.find((row) => row.id === String(request.shift_id));
       const second = shiftRows.find((row) => row.id === offeredShiftId);
       if (!first?.employee_id || !second?.employee_id) throw new Error("Both swap shifts must still be assigned.");
+      await enforceScheduleTimeOff({
+        business: input.business,
+        employeeId: second.employee_id,
+        startsAt: first.starts_at,
+        endsAt: first.ends_at,
+        acknowledgePendingTimeOff: true,
+      });
+      await enforceScheduleTimeOff({
+        business: input.business,
+        employeeId: first.employee_id,
+        startsAt: second.starts_at,
+        endsAt: second.ends_at,
+        acknowledgePendingTimeOff: true,
+      });
       await getSql()`UPDATE schedule_shifts SET employee_id = ${second.employee_id}, updated_at = NOW() WHERE id = ${first.id}`;
       await getSql()`UPDATE schedule_shifts SET employee_id = ${first.employee_id}, updated_at = NOW() WHERE id = ${second.id}`;
     }

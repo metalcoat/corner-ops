@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import * as XLSX from "xlsx";
-import { ensureSchema, getSql } from "@/lib/db";
+import { codedHistoryBaseKey, nextOccurrence, parseAccountingMoney } from "@/lib/accounting-import-utils";
+import { ensureSchema, getSql, withTransaction } from "@/lib/db";
+import { ValidationError } from "@/lib/http";
 import { ensureIntegrationSchema } from "@/lib/integrations";
+import { assertBalancedJournalLines } from "@/lib/journal-integrity";
 import type { Business } from "@/lib/types";
 
 function clean(value: unknown, max = 255): string {
@@ -225,9 +228,9 @@ export async function saveTransactionSplits(input: {
 export async function postBankTransaction(input: { transactionId: string; business: Business; actor: string }) {
   await ensureAccountingControlSchema();
   const transaction = await loadBankTransaction(input.transactionId, input.business);
-  if (transaction.pending) throw new Error("Pending transactions cannot be posted.");
-  if (transaction.removed) throw new Error("Removed transactions cannot be posted.");
-  if (transaction.review_status !== "Approved") throw new Error("Approve the transaction before posting it.");
+  if (transaction.pending) throw new ValidationError("Pending transactions cannot be posted.");
+  if (transaction.removed) throw new ValidationError("Removed transactions cannot be posted.");
+  if (transaction.review_status !== "Approved") throw new ValidationError("Approve the transaction before posting it.");
   const existing = await getSql()`
     SELECT journal_entry_id FROM bank_transaction_postings WHERE bank_transaction_id = ${input.transactionId} LIMIT 1
   ` as unknown as Array<{ journal_entry_id: string }>;
@@ -240,58 +243,43 @@ export async function postBankTransaction(input: { transactionId: string; busine
   ` as unknown as Array<{ account_code: string; amount: string | number; memo: string }>;
   const amount = roundMoney(Math.abs(numberValue(transaction.signed_amount)));
   const categoryLines = splitRows.length
-    ? splitRows.map((row) => ({ code: row.account_code, amount: roundMoney(numberValue(row.amount)), memo: row.memo }))
-    : [{ code: clean(transaction.account_code, 20), amount, memo: "" }];
-  if (!categoryLines[0].code) throw new Error("Choose an accounting account before posting.");
+    ? splitRows.map((row) => ({ code: row.account_code, amount: roundMoney(numberValue(row.amount)) }))
+    : [{ code: clean(transaction.account_code, 20), amount }];
+  if (!categoryLines[0].code) throw new ValidationError("Choose an accounting account before posting.");
   if (Math.abs(categoryLines.reduce((sum, line) => sum + line.amount, 0) - amount) > 0.005) {
-    throw new Error("Transaction splits no longer equal the bank amount.");
+    throw new ValidationError("Transaction splits no longer equal the bank amount.");
   }
 
   const cashId = await accountId(input.business, "1000");
   const categoryIds = new Map<string, string>();
   for (const line of categoryLines) categoryIds.set(line.code, await accountId(input.business, line.code));
+  const positive = numberValue(transaction.signed_amount) > 0;
+  const journalLines = positive
+    ? [{ accountId: cashId, debit: amount, credit: 0 }, ...categoryLines.map((line) => ({ accountId: categoryIds.get(line.code)!, debit: 0, credit: line.amount }))]
+    : [...categoryLines.map((line) => ({ accountId: categoryIds.get(line.code)!, debit: line.amount, credit: 0 })), { accountId: cashId, debit: 0, credit: amount }];
+  assertBalancedJournalLines(journalLines);
   const entryId = crypto.randomUUID();
   const description = clean(transaction.merchant_name || transaction.description, 240) || "Bank transaction";
-  await getSql()`
-    INSERT INTO journal_entries (id, business, entry_date, description, source, reference, created_by)
-    VALUES (
-      ${entryId}, ${input.business}, ${String(transaction.transaction_date)}, ${description},
-      'Bank Import', ${`bank:${transaction.external_transaction_id}`}, ${input.actor}
-    )
-  `;
-
-  try {
-    if (numberValue(transaction.signed_amount) > 0) {
-      await getSql()`
+  await withTransaction(async () => {
+    const sql = getSql();
+    await sql`
+      INSERT INTO journal_entries (id, business, entry_date, description, source, reference, created_by)
+      VALUES (
+        ${entryId}, ${input.business}, ${String(transaction.transaction_date)}, ${description},
+        'Bank Import', ${`bank:${transaction.external_transaction_id}`}, ${input.actor}
+      )
+    `;
+    for (const line of journalLines) {
+      await sql`
         INSERT INTO journal_lines (id, entry_id, account_id, debit, credit)
-        VALUES (${crypto.randomUUID()}, ${entryId}, ${cashId}, ${amount}, 0)
-      `;
-      for (const line of categoryLines) {
-        await getSql()`
-          INSERT INTO journal_lines (id, entry_id, account_id, debit, credit)
-          VALUES (${crypto.randomUUID()}, ${entryId}, ${categoryIds.get(line.code)!}, 0, ${line.amount})
-        `;
-      }
-    } else {
-      for (const line of categoryLines) {
-        await getSql()`
-          INSERT INTO journal_lines (id, entry_id, account_id, debit, credit)
-          VALUES (${crypto.randomUUID()}, ${entryId}, ${categoryIds.get(line.code)!}, ${line.amount}, 0)
-        `;
-      }
-      await getSql()`
-        INSERT INTO journal_lines (id, entry_id, account_id, debit, credit)
-        VALUES (${crypto.randomUUID()}, ${entryId}, ${cashId}, 0, ${amount})
+        VALUES (${crypto.randomUUID()}, ${entryId}, ${line.accountId}, ${line.debit}, ${line.credit})
       `;
     }
-    await getSql()`
+    await sql`
       INSERT INTO bank_transaction_postings (id, bank_transaction_id, journal_entry_id, posted_by)
       VALUES (${crypto.randomUUID()}, ${input.transactionId}, ${entryId}, ${input.actor})
     `;
-  } catch (error) {
-    await getSql()`DELETE FROM journal_entries WHERE id = ${entryId}`;
-    throw error;
-  }
+  });
   return { posted: true, journalEntryId: entryId };
 }
 
@@ -393,7 +381,7 @@ export async function saveBankReconciliation(input: {
 
   const id = input.id || crypto.randomUUID();
   if (input.id) {
-    const current = await getSql()`SELECT status FROM bank_reconciliations WHERE id = ${id} LIMIT 1` as unknown as Array<{ status: string }>;
+    const current = await getSql()`SELECT status FROM bank_reconciliations WHERE id = ${id} AND business = ${input.business} LIMIT 1` as unknown as Array<{ status: string }>;
     if (!current[0]) throw new Error("Reconciliation was not found.");
     if (current[0].status === "Finalized") throw new Error("Finalized reconciliations are locked. Reopen it first.");
     await getSql()`
@@ -406,9 +394,9 @@ export async function saveBankReconciliation(input: {
         status = ${input.finalize ? 'Finalized' : 'Draft'},
         finalized_by = ${input.finalize ? input.actor : null},
         finalized_at = ${input.finalize ? new Date().toISOString() : null}, updated_at = NOW()
-      WHERE id = ${id}
+      WHERE id = ${id} AND business = ${input.business}
     `;
-    await getSql()`DELETE FROM bank_reconciliation_items WHERE reconciliation_id = ${id}`;
+    await getSql()`DELETE FROM bank_reconciliation_items WHERE reconciliation_id = ${id} AND EXISTS (SELECT 1 FROM bank_reconciliations WHERE id = ${id} AND business = ${input.business})`;
   } else {
     await getSql()`
       INSERT INTO bank_reconciliations (
@@ -432,22 +420,23 @@ export async function saveBankReconciliation(input: {
   return { id, clearedActivity, expectedActivity, difference, status: input.finalize ? "Finalized" : "Draft" };
 }
 
-export async function reopenBankReconciliation(id: string, actor: string) {
+export async function reopenBankReconciliation(id: string, business: Business, actor: string) {
   await ensureAccountingControlSchema();
   const rows = await getSql()`
     UPDATE bank_reconciliations SET status = 'Reopened', finalized_by = NULL, finalized_at = NULL,
       notes = CONCAT(notes, CASE WHEN notes = '' THEN '' ELSE E'\n' END, ${`Reopened by ${actor} on ${new Date().toISOString()}`}),
       updated_at = NOW()
-    WHERE id = ${id} AND status = 'Finalized'
+    WHERE id = ${id} AND business = ${business} AND status = 'Finalized'
     RETURNING id
   ` as unknown as Array<{ id: string }>;
-  if (!rows[0]) throw new Error("Only finalized reconciliations can be reopened.");
+  if (!rows[0]) throw new ValidationError("Only finalized reconciliations in this business can be reopened.");
   return { reopened: true };
 }
 
 export async function importCodedHistory(input: {
   business: Business;
   institutionName: string;
+  accountType: "depository" | "credit";
   fileName: string;
   bytes: ArrayBuffer;
   postApproved: boolean;
@@ -456,36 +445,52 @@ export async function importCodedHistory(input: {
   await ensureAccountingControlSchema();
   const workbook = XLSX.read(Buffer.from(input.bytes), { type: "buffer", cellDates: true });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  if (!sheet) throw new Error("The historical workbook did not contain a readable worksheet.");
+  if (!sheet) throw new ValidationError("The historical workbook did not contain a readable worksheet.");
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false, dateNF: "yyyy-mm-dd" });
-  const externalItemId = `history:${createHash("sha256").update(`${input.business}|${input.institutionName}`).digest("hex").slice(0, 24)}`;
+  const externalItemId = `history:${createHash("sha256").update(`${input.business}|${input.institutionName}|${input.accountType}`).digest("hex").slice(0, 24)}`;
+  const institutionName = clean(input.institutionName, 120);
   const connectionRows = await getSql()`
     INSERT INTO integration_connections (id, provider, business, institution_name, external_item_id, metadata)
     VALUES (
-      ${crypto.randomUUID()}, 'CSV', ${input.business}, ${clean(input.institutionName, 120)}, ${externalItemId},
-      ${JSON.stringify({ source: 'Coded historical workbook', fileName: input.fileName, actor: input.actor })}::jsonb
+      ${crypto.randomUUID()}, 'CSV', ${input.business}, ${institutionName}, ${externalItemId},
+      ${JSON.stringify({ source: 'Coded historical workbook', fileName: input.fileName, actor: input.actor, accountType: input.accountType })}::jsonb
     )
     ON CONFLICT (provider, external_item_id) DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = NOW()
     RETURNING id
   ` as unknown as Array<{ id: string }>;
   const connectionId = connectionRows[0].id;
+  await getSql()`
+    INSERT INTO bank_accounts (
+      id, connection_id, business, external_account_id, institution_name, name, official_name,
+      account_type, account_subtype, currency, active
+    ) VALUES (
+      ${crypto.randomUUID()}, ${connectionId}, ${input.business}, ${externalItemId}, ${institutionName}, ${institutionName}, ${institutionName},
+      ${input.accountType}, ${input.accountType === 'credit' ? 'credit card' : 'checking'}, 'USD', TRUE
+    )
+    ON CONFLICT (external_account_id) DO UPDATE SET
+      connection_id = EXCLUDED.connection_id, institution_name = EXCLUDED.institution_name, name = EXCLUDED.name,
+      official_name = EXCLUDED.official_name, account_type = EXCLUDED.account_type,
+      account_subtype = EXCLUDED.account_subtype, updated_at = NOW()
+  `;
   const accounts = await getSql()`
     SELECT code, name FROM accounting_accounts WHERE business = ${input.business} AND active = TRUE
   ` as unknown as Array<{ code: string; name: string }>;
   const byName = new Map(accounts.map((account) => [normalizeKey(account.name), account.code]));
   const validCodes = new Set(accounts.map((account) => account.code));
+  const occurrence = new Map<string, number>();
   const insertedIds: string[] = [];
   let skipped = 0;
+  let badAmounts = 0;
 
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index];
+  for (const row of rows) {
     const date = dateValue(rowValue(row, ["Date", "Transaction Date", "Posted Date"]));
     const merchant = clean(rowValue(row, ["Merchant", "Payee", "Vendor", "Name"]), 240);
     const description = clean(rowValue(row, ["Description", "Memo", "Details", "Transaction"]), 400) || merchant;
-    const debit = Math.abs(numberValue(rowValue(row, ["Debit", "Withdrawal", "Outflow"]))) || 0;
-    const credit = Math.abs(numberValue(rowValue(row, ["Credit", "Deposit", "Inflow"]))) || 0;
-    const rawAmount = numberValue(rowValue(row, ["Signed Amount", "Amount", "Transaction Amount"]));
+    const debit = Math.abs(parseAccountingMoney(rowValue(row, ["Debit", "Withdrawal", "Outflow"])));
+    const credit = Math.abs(parseAccountingMoney(rowValue(row, ["Credit", "Deposit", "Inflow"])));
+    const rawAmount = parseAccountingMoney(rowValue(row, ["Signed Amount", "Amount", "Transaction Amount"]));
     const signedAmount = roundMoney(credit ? credit : debit ? -debit : rawAmount);
+    if (!signedAmount) badAmounts += 1;
     const suppliedCode = clean(rowValue(row, ["GL Account", "Account Code", "GL Code", "Category Code"]), 20);
     const suppliedCategory = clean(rowValue(row, ["Category", "Account Name", "GL Account Name"]), 160);
     const accountCode = validCodes.has(suppliedCode) ? suppliedCode : byName.get(normalizeKey(suppliedCategory)) || "";
@@ -493,9 +498,21 @@ export async function importCodedHistory(input: {
       skipped += 1;
       continue;
     }
-    const externalTransactionId = createHash("sha256")
-      .update(`${externalItemId}|${date}|${description}|${signedAmount}|${index}`)
-      .digest("hex");
+    // Skip rows that already arrived through another feed (for example Plaid) for the same date, amount and payee.
+    const existing = await getSql()`
+      SELECT id, merchant_name, description FROM bank_transactions
+      WHERE business = ${input.business} AND connection_id <> ${connectionId}
+        AND transaction_date = ${date} AND signed_amount = ${signedAmount} AND removed = FALSE
+      LIMIT 20
+    ` as unknown as Array<{ id: string; merchant_name: string; description: string }>;
+    const target = normalizeKey(merchant || description);
+    if (target.length >= 10 && existing.some((candidate) => normalizeKey(candidate.merchant_name || candidate.description) === target)) {
+      skipped += 1;
+      continue;
+    }
+    const base = codedHistoryBaseKey({ externalItemId, date, description, signedAmount, accountCode });
+    const ordinal = nextOccurrence(occurrence, base);
+    const externalTransactionId = createHash("sha256").update(`${base}|${ordinal}`).digest("hex");
     const id = crypto.randomUUID();
     const result = await getSql()`
       INSERT INTO bank_transactions (
@@ -515,15 +532,14 @@ export async function importCodedHistory(input: {
     if (result[0]) insertedIds.push(result[0].id);
   }
 
+  if (rows.length >= 10 && badAmounts / rows.length > 0.25) {
+    throw new ValidationError(`Too many rows had unreadable amounts (${badAmounts} of ${rows.length}). No automatic posting was attempted.`);
+  }
   let posted = 0;
   if (input.postApproved) {
     for (const id of insertedIds) {
-      try {
-        await postBankTransaction({ transactionId: id, business: input.business, actor: input.actor });
-        posted += 1;
-      } catch {
-        // The imported transaction remains approved for review if posting fails.
-      }
+      await postBankTransaction({ transactionId: id, business: input.business, actor: input.actor });
+      posted += 1;
     }
   }
   return { rowsRead: rows.length, imported: insertedIds.length, skipped, posted };
@@ -621,7 +637,7 @@ export async function setSquareDepositMatchStatus(input: { id: string; status: "
 
 export async function postSquareDay(input: { businessDate: string; actor: string }) {
   await ensureAccountingControlSchema();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.businessDate)) throw new Error("Choose a valid Square business date.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.businessDate)) throw new ValidationError("Choose a valid Square business date.");
   const reference = `square:${input.businessDate}`;
   const existing = await getSql()`
     SELECT id FROM journal_entries WHERE business = 'Tiki' AND source = 'Square' AND reference = ${reference} LIMIT 1
@@ -634,7 +650,7 @@ export async function postSquareDay(input: { businessDate: string; actor: string
     WHERE status = 'COMPLETED'
       AND (created_at_square AT TIME ZONE 'America/New_York')::DATE = ${input.businessDate}
   ` as unknown as Array<{ amount: string | number; tip_amount: string | number; raw: unknown }>;
-  if (!payments.length) throw new Error("No completed Square payments were found for that date.");
+  if (!payments.length) throw new ValidationError("No completed Square payments were found for that date.");
   const orderTaxRows = await getSql()`
     SELECT COALESCE(SUM(tax_total), 0) AS tax_total
     FROM square_orders
@@ -655,19 +671,25 @@ export async function postSquareDay(input: { businessDate: string; actor: string
     tips: await accountId("Tiki", "2160"),
     fees: await accountId("Tiki", "5700"),
   };
+  const lines = [
+    { accountId: ids.clearing, debit: clearing, credit: 0 },
+    ...(fees ? [{ accountId: ids.fees, debit: fees, credit: 0 }] : []),
+    ...(revenue ? [{ accountId: ids.sales, debit: 0, credit: revenue }] : []),
+    ...(taxes ? [{ accountId: ids.tax, debit: 0, credit: taxes }] : []),
+    ...(tips ? [{ accountId: ids.tips, debit: 0, credit: tips }] : []),
+  ];
+  assertBalancedJournalLines(lines);
   const entryId = crypto.randomUUID();
-  await getSql()`
-    INSERT INTO journal_entries (id, business, entry_date, description, source, reference, created_by)
-    VALUES (${entryId}, 'Tiki', ${input.businessDate}, ${`Square sales for ${input.businessDate}`}, 'Square', ${reference}, ${input.actor})
-  `;
-  await getSql()`
-    INSERT INTO journal_lines (id, entry_id, account_id, debit, credit)
-    VALUES (${crypto.randomUUID()}, ${entryId}, ${ids.clearing}, ${clearing}, 0)
-  `;
-  if (fees) await getSql()`INSERT INTO journal_lines (id, entry_id, account_id, debit, credit) VALUES (${crypto.randomUUID()}, ${entryId}, ${ids.fees}, ${fees}, 0)`;
-  if (revenue) await getSql()`INSERT INTO journal_lines (id, entry_id, account_id, debit, credit) VALUES (${crypto.randomUUID()}, ${entryId}, ${ids.sales}, 0, ${revenue})`;
-  if (taxes) await getSql()`INSERT INTO journal_lines (id, entry_id, account_id, debit, credit) VALUES (${crypto.randomUUID()}, ${entryId}, ${ids.tax}, 0, ${taxes})`;
-  if (tips) await getSql()`INSERT INTO journal_lines (id, entry_id, account_id, debit, credit) VALUES (${crypto.randomUUID()}, ${entryId}, ${ids.tips}, 0, ${tips})`;
+  await withTransaction(async () => {
+    const sql = getSql();
+    await sql`
+      INSERT INTO journal_entries (id, business, entry_date, description, source, reference, created_by)
+      VALUES (${entryId}, 'Tiki', ${input.businessDate}, ${`Square sales for ${input.businessDate}`}, 'Square', ${reference}, ${input.actor})
+    `;
+    for (const line of lines) {
+      await sql`INSERT INTO journal_lines (id, entry_id, account_id, debit, credit) VALUES (${crypto.randomUUID()}, ${entryId}, ${line.accountId}, ${line.debit}, ${line.credit})`;
+    }
+  });
   return { posted: true, journalEntryId: entryId, amount, tips, fees, taxes, revenue, clearing };
 }
 
@@ -707,6 +729,15 @@ export async function accountingControlDashboard(business: Business) {
     LEFT JOIN bank_reconciliation_items i ON i.reconciliation_id = r.id
     WHERE r.business = ${business}
     GROUP BY r.id ORDER BY r.statement_end_date DESC, r.created_at DESC LIMIT 40
+  ` as unknown as Array<Record<string, unknown>>;
+  const unbalancedEntries = await getSql()`
+    SELECT e.id, e.entry_date, e.description, e.source,
+      COALESCE(SUM(l.debit), 0) AS debits, COALESCE(SUM(l.credit), 0) AS credits
+    FROM journal_entries e JOIN journal_lines l ON l.entry_id = e.id
+    WHERE e.business = ${business} AND e.source <> 'Reversal'
+    GROUP BY e.id
+    HAVING ABS(COALESCE(SUM(l.debit), 0) - COALESCE(SUM(l.credit), 0)) > 0.005
+    ORDER BY e.entry_date DESC, e.created_at DESC LIMIT 50
   ` as unknown as Array<Record<string, unknown>>;
   const openingBalances = await getSql()`
     SELECT id, entry_date, description, reference, created_by, created_at
@@ -809,6 +840,15 @@ export async function accountingControlDashboard(business: Business) {
       finalizedAt: row.finalized_at,
     })),
     openingBalances,
+    unbalancedEntries: unbalancedEntries.map((row) => ({
+      id: row.id,
+      entryDate: row.entry_date,
+      description: row.description,
+      source: row.source,
+      debits: numberValue(row.debits),
+      credits: numberValue(row.credits),
+      difference: roundMoney(numberValue(row.debits) - numberValue(row.credits)),
+    })),
     monthly: monthly.map((row) => ({
       month: row.month,
       revenue: numberValue(row.revenue),

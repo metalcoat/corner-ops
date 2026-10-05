@@ -3,48 +3,14 @@ import {
   controlledPayrollSummary,
   ensurePayrollControlSchema,
 } from "@/lib/payroll-control";
+import { addDateKeyDays, payrollWeekBounds } from "@/lib/payroll-week";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
 
-function getOffsetMilliseconds(date: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const represented = Date.UTC(
-    Number(values.year),
-    Number(values.month) - 1,
-    Number(values.day),
-    Number(values.hour),
-    Number(values.minute),
-    Number(values.second),
-  );
-  return represented - date.getTime();
-}
-
-function zonedDateToUtc(dateText: string, hour: number): Date {
-  const [year, month, day] = dateText.split("-").map(Number);
-  let timestamp = Date.UTC(year, month - 1, day, hour, 0, 0);
-  for (let index = 0; index < 2; index += 1) {
-    timestamp = Date.UTC(year, month - 1, day, hour, 0, 0)
-      - getOffsetMilliseconds(new Date(timestamp), TIME_ZONE);
-  }
-  return new Date(timestamp);
-}
-
 function weekBounds(weekStart: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw new Error("Choose a valid payroll week.");
-  const start = zonedDateToUtc(weekStart, 4);
-  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
-  const adjustmentStart = new Date(start.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const { start, end } = payrollWeekBounds(weekStart);
+  const adjustmentStart = payrollWeekBounds(addDateKeyDays(weekStart, -14)).start;
   return { start, end, adjustmentStart };
 }
 
@@ -74,21 +40,41 @@ export async function safePayrollControlDashboard(business: Business, weekStart:
   const summary = await controlledPayrollSummary(business, weekStart);
   const punches = business === "Tiki"
     ? await getSql()`
-        SELECT id, employee_name, position, clock_in, clock_out, status, notes, source
+        SELECT id, employee_name, position, clock_in, clock_out,
+          CASE WHEN clock_in IS NULL OR clock_out IS NULL THEN 'Needs Review' ELSE status END AS status,
+          notes, source
         FROM time_entries
         WHERE business = 'Tiki'
-          AND clock_in >= ${bounds.start.toISOString()}
-          AND clock_in < ${bounds.end.toISOString()}
-        ORDER BY clock_in
+          AND (
+            (clock_in >= ${bounds.start.toISOString()} AND clock_in < ${bounds.end.toISOString()})
+            OR (clock_in IS NULL AND clock_out >= ${bounds.start.toISOString()} AND clock_out < ${bounds.end.toISOString()})
+          )
+        ORDER BY COALESCE(clock_in, clock_out)
       `
     : await getSql()`
-        SELECT id, employee_name, position, clock_in, clock_out,
-          CASE WHEN clock_out IS NULL THEN 'Needs Review' ELSE 'Complete' END AS status,
-          raw->>'correctionReason' AS notes, 'Rezku' AS source
-        FROM rezku_shifts
-        WHERE clock_in >= ${bounds.start.toISOString()}
-          AND clock_in < ${bounds.end.toISOString()}
-        ORDER BY clock_in
+        SELECT r.id, r.employee_name,
+          COALESCE(NULLIF(BTRIM(r.position), ''), scheduled.position, '') AS position,
+          r.clock_in, r.clock_out,
+          CASE WHEN r.clock_in IS NULL OR r.clock_out IS NULL THEN 'Needs Review' ELSE 'Complete' END AS status,
+          r.raw->>'correctionReason' AS notes, 'Rezku' AS source
+        FROM rezku_shifts r
+        LEFT JOIN LATERAL (
+          SELECT s.position
+          FROM schedule_shifts s
+          JOIN employees e ON e.id = s.employee_id
+          WHERE s.business = 'Corner Deli'
+            AND s.status = 'Published'
+            AND LOWER(BTRIM(e.name)) = LOWER(BTRIM(r.employee_name))
+            AND s.starts_at < COALESCE(r.clock_out, r.clock_in + INTERVAL '18 hours')
+            AND s.ends_at > COALESCE(r.clock_in, r.clock_out - INTERVAL '18 hours')
+          ORDER BY ABS(EXTRACT(EPOCH FROM (s.starts_at - COALESCE(r.clock_in, r.clock_out))))
+          LIMIT 1
+        ) scheduled ON TRUE
+        WHERE (
+          (r.clock_in >= ${bounds.start.toISOString()} AND r.clock_in < ${bounds.end.toISOString()})
+          OR (r.clock_in IS NULL AND r.clock_out >= ${bounds.start.toISOString()} AND r.clock_out < ${bounds.end.toISOString()})
+        )
+        ORDER BY COALESCE(r.clock_in, r.clock_out)
       `;
   const versions = await getSql()`
     SELECT id, business, week_start, week_end, version, status, generated_by, generated_at,

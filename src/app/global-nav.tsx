@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import type { Business } from "@/lib/types";
+import type { SiteBrand } from "@/lib/site-brand";
 import "./global-nav.css";
 
 type NavLink = {
@@ -40,6 +41,7 @@ const teamLinks: NavLink[] = [
 ];
 
 const businessNames: Business[] = ["Corner Deli", "Tiki"];
+const hiddenNavPaths = ["/privacy", "/terms", "/sms-help", "/app"];
 
 function validBusiness(value: string | null | undefined): value is Business {
   return businessNames.includes(value as Business);
@@ -51,14 +53,90 @@ function linkIsActive(pathname: string, link: NavLink): boolean {
   return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
 
-export default function GlobalNav({ teamHost = false }: { teamHost?: boolean }) {
+export default function GlobalNav({ teamHost = false, brand }: { teamHost?: boolean; brand: SiteBrand }) {
   const pathname = usePathname();
-  const [currentBusiness, setCurrentBusiness] = useState<Business>("Corner Deli");
+  const siteBusiness: Business | null = brand.name === "At the Docks" ? "Tiki"
+    : brand.name === "Corner Deli" ? "Corner Deli" : null;
+  const opsBusiness = teamHost ? null : siteBusiness;
+  const [currentBusiness, setCurrentBusiness] = useState<Business>(siteBusiness || "Corner Deli");
+  const [availableBusinesses, setAvailableBusinesses] = useState<Business[]>([]);
+  const [switchingBusiness, setSwitchingBusiness] = useState(false);
   const [open, setOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const navHidden = pathname.startsWith("/game") || pathname.startsWith("/pos") || pathname.startsWith("/order") || pathname.startsWith("/account") || pathname.startsWith("/track") || pathname === "/menu" || pathname.startsWith("/kiosk") || pathname.startsWith("/display") || pathname === "/clock" || pathname === "/scan" || pathname.startsWith("/employee") || pathname === "/signin" || pathname === "/setup";
+  const navHidden = pathname.startsWith("/game")
+    || pathname.startsWith("/pos")
+    || pathname.startsWith("/order")
+    || pathname.startsWith("/account")
+    || pathname.startsWith("/track")
+    || pathname === "/menu"
+    || pathname.startsWith("/kiosk")
+    || pathname.startsWith("/display")
+    || pathname === "/setup"
+    || pathname === "/clock"
+    || pathname === "/scan"
+    || pathname.startsWith("/employee")
+    || pathname.startsWith("/deli-board")
+    || pathname === "/signin"
+    || hiddenNavPaths.includes(pathname);
+  const themeEffectsHidden = pathname === "/clock"
+    || pathname.startsWith("/deli-board")
+    || pathname === "/signin"
+    || hiddenNavPaths.includes(pathname);
 
   useEffect(() => setOpen(false), [pathname]);
+
+  useEffect(() => {
+    if (!opsBusiness) return;
+    let cancelled = false;
+    void fetch("/api/auth/session", { cache: "no-store" }).then((response) => response.json())
+      .then((session: { authenticated?: boolean; businesses?: Business[] }) => {
+        if (!cancelled) setAvailableBusinesses(session.authenticated && Array.isArray(session.businesses) ? session.businesses : []);
+      }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [opsBusiness]);
+
+  const switchOpsBusiness = useCallback(async (target: Business) => {
+    if (!opsBusiness || target === opsBusiness || switchingBusiness) return;
+    setSwitchingBusiness(true);
+    try {
+      const response = await fetch("/api/auth/ops-switch", {
+        method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+        body: JSON.stringify({ business: target, returnTo: `${window.location.pathname}${window.location.search}` }),
+      });
+      const result = await response.json() as { target?: string; code?: string; returnTo?: string; error?: string };
+      if (!response.ok || !result.target || !result.code) throw new Error(result.error || "Business switch failed.");
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = result.target;
+      form.style.display = "none";
+      for (const [name, value] of Object.entries({ code: result.code, returnTo: result.returnTo || "/ops/people" })) {
+        const input = document.createElement("input");
+        input.type = "hidden"; input.name = name; input.value = value;
+        form.appendChild(input);
+      }
+      document.body.appendChild(form);
+      form.submit();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Business switch failed.");
+      setSwitchingBusiness(false);
+    }
+  }, [opsBusiness, switchingBusiness]);
+
+  useEffect(() => {
+    if (!opsBusiness) return;
+    const handleSwitch = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const button = target.closest<HTMLButtonElement>(".businessSwitch button, .wfBusinessSwitch button, .businessPills button");
+      const business = button?.textContent?.trim();
+      if (business !== "Corner Deli" && business !== "Tiki") return;
+      if (business === opsBusiness) return;
+      event.preventDefault(); event.stopPropagation();
+      void switchOpsBusiness(business);
+    };
+    document.addEventListener("click", handleSwitch, true);
+    return () => document.removeEventListener("click", handleSwitch, true);
+  }, [opsBusiness, switchOpsBusiness]);
 
   useEffect(() => {
     if (navHidden) return;
@@ -96,6 +174,7 @@ export default function GlobalNav({ teamHost = false }: { teamHost?: boolean }) 
   }, [navHidden]);
 
   useEffect(() => {
+    if (themeEffectsHidden) return;
     let restored = false;
 
     const savedBusiness = (): Business | null => {
@@ -110,7 +189,7 @@ export default function GlobalNav({ teamHost = false }: { teamHost?: boolean }) 
     };
 
     function restore(): boolean {
-      if (restored || pathname === "/clock") return false;
+      if (restored) return false;
 
       if (pathname.startsWith("/employee")) {
         const select = document.querySelector<HTMLSelectElement>('select[name="business"]');
@@ -128,7 +207,7 @@ export default function GlobalNav({ teamHost = false }: { teamHost?: boolean }) 
       if (!switcher) return false;
 
       restored = true;
-      const saved = savedBusiness();
+      const saved = siteBusiness || savedBusiness();
       if (!saved) return false;
 
       const selected = switcher.querySelector<HTMLElement>(".selected, .active")?.textContent?.trim();
@@ -145,14 +224,13 @@ export default function GlobalNav({ teamHost = false }: { teamHost?: boolean }) 
     }
 
     function detect(): Business {
-      if (pathname === "/clock") return "Tiki";
       const selected = document
         .querySelector<HTMLElement>(".businessSwitch .selected, .wfBusinessSwitch .selected, .businessPills .active")
         ?.textContent?.trim();
       if (validBusiness(selected)) return selected;
       const select = document.querySelector<HTMLSelectElement>('select[name="business"]')?.value;
       if (validBusiness(select)) return select;
-      return savedBusiness() || "Corner Deli";
+      return siteBusiness || savedBusiness() || "Corner Deli";
     }
 
     function sync() {
@@ -180,14 +258,20 @@ export default function GlobalNav({ teamHost = false }: { teamHost?: boolean }) 
       document.removeEventListener("click", interaction, true);
       document.removeEventListener("change", interaction, true);
     };
-  }, [pathname]);
+  }, [pathname, themeEffectsHidden, siteBusiness]);
 
   if (navHidden) return null;
 
   return (
-    <nav className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label={teamHost ? "Team features" : "Corner Ops features"} data-business={currentBusiness}>
+    <nav className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label={teamHost ? "Team features" : "Operations features"} data-business={currentBusiness}>
       <div className="globalNavTopline">
-        <a className="globalBrand" href={teamHost ? "/team" : "/ops/people"}>Corner Ops</a>
+        <a className={`globalBrand ${teamHost ? "" : "globalBrandIconOnly"}`} href={teamHost ? "/team" : "/ops/people"} aria-label={`${brand.name} ${teamHost ? "team" : "operations"} home`}>
+          <img src={brand.icon} alt="" />{teamHost && brand.name}
+        </a>
+        {opsBusiness && availableBusinesses.length > 1 && <div className="globalOpsSwitcher" aria-label="Switch business">
+          <button type="button" className={opsBusiness === "Corner Deli" ? "active" : ""} title="Corner Deli" aria-label="Switch to Corner Deli" disabled={switchingBusiness} onClick={() => void switchOpsBusiness("Corner Deli")}><img src="/corner-deli-logo.png" alt="" /></button>
+          <button type="button" className={opsBusiness === "Tiki" ? "active" : ""} title="At the Docks" aria-label="Switch to At the Docks" disabled={switchingBusiness} onClick={() => void switchOpsBusiness("Tiki")}><img src="/at-the-docks-logo.svg" alt="" /></button>
+        </div>}
         <button className="globalMenuButton" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
           {open ? "Close" : "Menu"}
         </button>

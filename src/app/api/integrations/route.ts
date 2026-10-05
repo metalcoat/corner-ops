@@ -24,11 +24,9 @@ export async function GET(request: Request) {
     const session = await getSession();
     if (!session) return unauthorized();
     const value = new URL(request.url).searchParams.get("business");
-    const business = value ? businessFrom(value) : undefined;
-    if (business && !canAccessBusiness(session, business)) {
-      return Response.json({ error: "Business access denied." }, { status: 403 });
-    }
-    return Response.json(await integrationDashboard(business));
+    const business = value ? businessFrom(value) : session.businesses[0];
+    if (!business || !canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
+    return Response.json(await integrationDashboard(business, session.businesses.length > 1));
   } catch (error) {
     return apiError(error);
   }
@@ -106,7 +104,7 @@ export async function POST(request: Request) {
       if (!canAccessBusiness(session, business)) {
         return Response.json({ error: "Business access denied." }, { status: 403 });
       }
-      return Response.json(await syncBankConnection(String(body.connectionId || "")));
+      return Response.json(await syncBankConnection(String(body.connectionId || ""), business));
     }
 
     if (action === "plaid-exchange") {
@@ -122,7 +120,9 @@ export async function POST(request: Request) {
     }
 
     if (action === "bank-sync") {
-      return Response.json(await syncBankConnection(String(body.connectionId || "")));
+      const business = businessFrom(body.business);
+      if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
+      return Response.json(await syncBankConnection(String(body.connectionId || ""), business));
     }
 
     if (action === "transaction-approve") {
@@ -141,6 +141,7 @@ export async function POST(request: Request) {
     }
 
     if (action === "scheduler-run") {
+      if (session.businesses.length < 2) return Response.json({ error: "Both-business access is required to force the global scheduler." }, { status: 403 });
       return Response.json(await runScheduledOperations({ force: true, source: session.email }));
     }
 

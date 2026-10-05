@@ -1,6 +1,8 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { ensureIntegrationSchema } from "@/lib/integrations";
 import { getSql } from "@/lib/db";
+import { decryptIntegrationSecret as decryptSecret, encryptIntegrationSecret as encryptSecret } from "@/lib/integration-crypto";
+import { constantTimeEqual } from "@/lib/security-keys";
 
 const SQUARE_VERSION = process.env.SQUARE_API_VERSION?.trim() || "2026-07-15";
 
@@ -29,44 +31,12 @@ function money(value: SquareMoney): number {
   return Math.round(numberValue(value?.amount)) / 100;
 }
 
-function integrationKey(): Buffer {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required before Square can store credentials.");
-  return createHash("sha256").update(`corner-ops-integrations:${secret}`).digest();
-}
-
-function encryptSecret(value: string): string {
-  if (!value) return "";
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", integrationKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  return [iv, cipher.getAuthTag(), encrypted].map((part) => part.toString("base64url")).join(".");
-}
-
-function decryptSecret(value: string): string {
-  if (!value) return "";
-  const [ivText, tagText, encryptedText] = value.split(".");
-  if (!ivText || !tagText || !encryptedText) throw new Error("Stored Square credential is invalid.");
-  const decipher = createDecipheriv("aes-256-gcm", integrationKey(), Buffer.from(ivText, "base64url"));
-  decipher.setAuthTag(Buffer.from(tagText, "base64url"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(encryptedText, "base64url")),
-    decipher.final(),
-  ]).toString("utf8");
-}
-
 function squareEnvironment(): "sandbox" | "production" {
   return process.env.SQUARE_ENV?.toLowerCase() === "production" ? "production" : "sandbox";
 }
 
 function squareBase(): string {
   return squareEnvironment() === "production" ? "https://connect.squareup.com" : "https://connect.squareupsandbox.com";
-}
-
-function safeEqual(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 function allowedOrigin(origin: string): string {
@@ -453,7 +423,7 @@ export function verifySquareWebhookSignature(rawBody: string, suppliedSignature:
   const url = notificationUrl || process.env.SQUARE_WEBHOOK_NOTIFICATION_URL?.trim();
   if (!key || !url || !suppliedSignature) return false;
   const expected = createHmac("sha256", key).update(`${url}${rawBody}`).digest("base64");
-  return safeEqual(expected, suppliedSignature);
+  return constantTimeEqual(expected, suppliedSignature);
 }
 
 export async function processSquareWebhook(rawBody: string) {

@@ -1,5 +1,7 @@
 import { ensureSchema, getSql } from "@/lib/db";
+import { ValidationError } from "@/lib/http";
 import { payrollSummary } from "@/lib/payroll-summary-rules";
+import { payrollWeekBounds as weekBounds } from "@/lib/payroll-week";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -19,6 +21,7 @@ type PayrollRow = {
 type PayrollSnapshot = {
   business: Business;
   source: string;
+  processingFeeReviewCount?: number;
   weekStart: string;
   weekEnd: string;
   rows: PayrollRow[];
@@ -38,41 +41,6 @@ function numberValue(value: unknown): number {
 
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-function getOffsetMilliseconds(date: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const represented = Date.UTC(
-    Number(values.year), Number(values.month) - 1, Number(values.day),
-    Number(values.hour), Number(values.minute), Number(values.second),
-  );
-  return represented - date.getTime();
-}
-
-function zonedDateToUtc(dateText: string, hour: number): Date {
-  const [year, month, day] = dateText.split("-").map(Number);
-  let timestamp = Date.UTC(year, month - 1, day, hour, 0, 0);
-  for (let index = 0; index < 2; index += 1) {
-    timestamp = Date.UTC(year, month - 1, day, hour, 0, 0) - getOffsetMilliseconds(new Date(timestamp), TIME_ZONE);
-  }
-  return new Date(timestamp);
-}
-
-function weekBounds(weekStart: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw new Error("Choose a valid payroll week.");
-  const start = zonedDateToUtc(weekStart, 4);
-  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
-  return { start, end };
 }
 
 export async function ensurePayrollControlSchema(): Promise<void> {
@@ -192,7 +160,12 @@ async function unmatchedTips(business: Business, weekStart: string, allocatedDet
     SELECT source_transaction_id FROM tip_overrides
     WHERE business = 'Tiki' AND week_start = ${weekStart} AND source_transaction_id <> ''
   ` as unknown as Array<{ source_transaction_id: string }>;
-  const assigned = new Set(overrides.map((row) => row.source_transaction_id));
+  const assigned = new Set([
+    ...overrides.map((row) => row.source_transaction_id),
+    ...allocatedDetails
+      .filter((detail) => String(detail.employee || "") !== "Unallocated" && numberValue(detail.allocatedTip) !== 0)
+      .map((detail) => String(detail.transactionId || detail.sourceTransactionId || "")),
+  ].filter(Boolean));
   return rows.filter((row) => !assigned.has(String(row.external_payment_id))).map((row) => ({
     id: row.id,
     source: "Square",
@@ -294,6 +267,9 @@ export async function deleteTipOverride(id: string, actor: string) {
 export async function createPayrollDraft(input: { business: Business; weekStart: string; actor: string; reopenedFromId?: string }) {
   await ensurePayrollControlSchema();
   const summary = await controlledPayrollSummary(input.business, input.weekStart);
+  if (input.business === "Tiki" && summary.processingFeeReviewCount) {
+    throw new ValidationError(`Square processing fees are missing for ${summary.processingFeeReviewCount} tipped payment(s). Sync Square and recalculate before creating a payroll draft.`);
+  }
   const versions = await getSql()`
     SELECT COALESCE(MAX(version), 0)::INTEGER AS version
     FROM payroll_run_versions WHERE business = ${input.business} AND week_start = ${input.weekStart}

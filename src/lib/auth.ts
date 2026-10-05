@@ -1,9 +1,10 @@
 import { constantTimeEqual, hmacSignature, legacySessionHmac } from "@/lib/security-keys";
 import { cookies } from "next/headers";
 import { assertConfigured } from "@/lib/config";
+import { getSql } from "@/lib/db";
 import { PermissionError } from "@/lib/http";
 import { businesses, type Business } from "@/lib/types";
-import { appRoles, type AppRole, type AppUserIdentity } from "@/lib/users";
+import { appRoles, permissionsForRole, type AppRole, type AppUserIdentity } from "@/lib/users";
 import { secureCookies } from "@/lib/cookie-security";
 
 const COOKIE_NAME = "corner_ops_session";
@@ -16,6 +17,7 @@ export type SessionPayload = {
   role: AppRole;
   businesses: Business[];
   permissions: string[];
+  sessionVersion?: number;
   expiresAt: number;
 };
 
@@ -68,6 +70,7 @@ function normalizePayload(value: Partial<SessionPayload>): SessionPayload | null
     role: value.role as AppRole,
     businesses: validBusinesses,
     permissions: value.permissions.filter((permission): permission is string => typeof permission === "string" && permission.length > 0),
+    sessionVersion: Number(value.sessionVersion || 1),
     expiresAt: Number(value.expiresAt),
   };
 }
@@ -95,6 +98,7 @@ export async function createSession(identity: AppUserIdentity): Promise<SessionP
     role: identity.role,
     businesses: [...identity.businesses],
     permissions: [...identity.permissions],
+    sessionVersion: identity.sessionVersion,
     expiresAt: Date.now() + SESSION_SECONDS * 1000,
   };
 
@@ -123,7 +127,32 @@ export async function clearSession(): Promise<void> {
 export async function getSession(): Promise<SessionPayload | null> {
   if (!process.env.OWNER_SESSION_SECRET && !process.env.SESSION_SECRET) return null;
   const token = (await cookies()).get(COOKIE_NAME)?.value;
-  return token ? parseToken(token) : null;
+  const parsed = token ? parseToken(token) : null;
+  if (!parsed) return null;
+  // Revalidate against the account on every request (as production does): a
+  // deactivated user, a bumped session_version (password change, sign-out
+  // everywhere) or changed role/businesses take effect immediately.
+  const rows = await getSql()`
+    SELECT id, email, display_name, role, businesses, session_version, active
+    FROM app_users
+    WHERE LOWER(email) = LOWER(${parsed.email})
+    LIMIT 1
+  ` as unknown as Array<{ id: string; email: string; display_name: string; role: AppRole; businesses: Business[] | string; session_version: number; active: boolean }>;
+  const user = rows[0];
+  if (!user?.active || Number(user.session_version || 1) !== Number(parsed.sessionVersion || 1)) return null;
+  const values = Array.isArray(user.businesses) ? user.businesses : String(user.businesses || "").replace(/[{}]/g, "").split(",");
+  const currentBusinesses = values.filter((business): business is Business => businesses.includes(business as Business));
+  if (!currentBusinesses.length || !appRoles.includes(user.role)) return null;
+  return {
+    userId: user.id,
+    email: user.email,
+    displayName: displayName(user.display_name, user.email),
+    role: user.role,
+    businesses: currentBusinesses,
+    permissions: permissionsForRole(user.role),
+    sessionVersion: Number(user.session_version || 1),
+    expiresAt: parsed.expiresAt,
+  };
 }
 
 export function canAccessBusiness(session: SessionPayload, business: string): business is Business {

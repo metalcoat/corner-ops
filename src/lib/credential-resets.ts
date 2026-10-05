@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
-import { assertEmployeePinAvailable, employeePinUpdate } from "@/lib/employee-pin-security";
+import { assertEmployeePinAvailable, employeePinUpdate, isEmployeePinUniqueViolation } from "@/lib/employee-pin-security";
 import { ensureSchema, getSql } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import { cornerOpsBaseUrl, sendTransactionalEmail } from "@/lib/transactional-email";
@@ -151,7 +151,7 @@ export async function completeAppPasswordReset(input: { token: string; password:
   const updated = await sql`
     UPDATE app_users
     SET password_salt = ${password.salt}, password_hash = ${password.hash},
-        legacy_owner = FALSE, updated_at = NOW()
+        legacy_owner = FALSE, session_version = session_version + 1, updated_at = NOW()
     WHERE id = ${reset.subject_id} AND active = TRUE
     RETURNING id
   ` as unknown as Array<{ id: string }>;
@@ -207,13 +207,20 @@ export async function completeEmployeePinReset(input: { token: string; pin: stri
   const sql = getSql();
   await assertEmployeePinAvailable({business:reset.business,pin:String(input.pin || ""),excludeEmployeeId:String(reset.subject_id)});
   const next = employeePinUpdate(reset.business, String(input.pin || ""));
-  const updated = await sql`
-    UPDATE employees
-    SET pin_hash = ${next.hash}, pin_salt = ${next.salt}, pin_hash_version = ${next.version},
-      pin_fingerprint = ${next.fingerprint}, pin_enabled = TRUE, updated_at = NOW()
-    WHERE id = ${reset.subject_id} AND business = ${reset.business} AND active = TRUE
-    RETURNING id
-  ` as unknown as Array<{ id: string }>;
+  let updated: Array<{ id: string }>;
+  try {
+    updated = await sql`
+      UPDATE employees
+      SET pin_hash = ${next.hash}, pin_salt = ${next.salt}, pin_hash_version = ${next.version},
+        pin_fingerprint = ${next.fingerprint}, pin_enabled = TRUE,
+        session_version = session_version + 1, updated_at = NOW()
+      WHERE id = ${reset.subject_id} AND business = ${reset.business} AND active = TRUE
+      RETURNING id
+    ` as unknown as Array<{ id: string }>;
+  } catch (error) {
+    if (isEmployeePinUniqueViolation(error)) throw new Error("That PIN is already assigned at this location.");
+    throw error;
+  }
   if (!updated[0]) throw new Error("This employee account is no longer active.");
   await recordEmployeePinAudit({employeeId:updated[0].id,business:reset.business,action:"pin_reset",actor:"employee-self-service"});
   await sql`UPDATE credential_reset_tokens SET used_at = NOW() WHERE id = ${reset.id}`;

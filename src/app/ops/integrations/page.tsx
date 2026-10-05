@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { formatUsd } from "@/app/client-format";
+import { responseMessage } from "@/app/client-http";
 import type { Business, SessionView } from "@/lib/types";
 import "./integrations.css";
 
@@ -96,18 +98,9 @@ declare global {
   }
 }
 
-function money(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0);
-}
-
 function requestedBusiness(): Business {
   if (typeof window === "undefined") return "Corner Deli";
   return new URLSearchParams(window.location.search).get("business") === "Tiki" ? "Tiki" : "Corner Deli";
-}
-
-async function responseMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
 }
 
 function loadPlaidScript(): Promise<void> {
@@ -366,7 +359,7 @@ export default function IntegrationsPage() {
 
     <section className="stats fourStats integrationStats">
       <article><span>Connected institutions</span><strong>{plaidConnections.length}</strong></article>
-      <article><span>Combined balance</span><strong>{money(totalBalance)}</strong></article>
+      <article><span>Combined balance</span><strong>{formatUsd(totalBalance)}</strong></article>
       <article><span>Needs review</span><strong>{reviewTransactions.length}</strong></article>
       <article><span>Open issues</span><strong>{dashboard?.issues.filter((issue) => issue.business === business).length || 0}</strong></article>
     </section>
@@ -379,7 +372,7 @@ export default function IntegrationsPage() {
           <button className="primary" disabled={busy || !dashboard?.configuration.plaid} onClick={() => void launchPlaid(business)}>Connect a new institution login</button>
           <a className="secondary" href={`/ops/bank-accounts?business=${encodeURIComponent(business)}`}>Choose active account feeds</a>
           <a className="secondary" href={`/ops/card-statements?business=${encodeURIComponent(business)}`}>Upload and reconcile card statements</a>
-          {plaidConnections.map((connection) => <div className="connectionRow" key={connection.id}><div><strong>{connection.institutionName}</strong><small>One Item · Last sync: {connection.lastSyncAt ? new Date(connection.lastSyncAt).toLocaleString() : "Never"}</small></div><div className="connectionActions"><button className="secondary" disabled={busy} onClick={() => void managePlaidAccounts(connection)}>Manage shared accounts</button><button className="secondary" disabled={busy} onClick={() => void runAction({ action: "bank-sync", connectionId: connection.id }, `${connection.institutionName} synchronized.`)}>Sync now</button></div></div>)}
+          {plaidConnections.map((connection) => <div className="connectionRow" key={connection.id}><div><strong>{connection.institutionName}</strong><small>One Item · Last sync: {connection.lastSyncAt ? new Date(connection.lastSyncAt).toLocaleString() : "Never"}</small></div><div className="connectionActions"><button className="secondary" disabled={busy} onClick={() => void managePlaidAccounts(connection)}>Manage shared accounts</button><button className="secondary" disabled={busy} onClick={() => void runAction({ action: "bank-sync", business, connectionId: connection.id }, `${connection.institutionName} synchronized.`)}>Sync now</button></div></div>)}
         </div>
       </article>
 
@@ -410,7 +403,7 @@ export default function IntegrationsPage() {
         {(dashboard?.transactions || []).map((transaction) => {
           const selected = accountSelections[transaction.id] || transaction.accountCode;
           const account = dashboard?.accountingAccounts.find((candidate) => candidate.code === selected);
-          return <tr key={transaction.id}><td>{transaction.transactionDate}</td><td><strong>{transaction.merchantName || transaction.description}</strong><small>{transaction.description}</small><small>{transaction.classificationSource} · {Math.round(transaction.confidence * 100)}%</small></td><td className={transaction.signedAmount < 0 ? "negativeAmount" : "positiveAmount"}>{money(transaction.signedAmount)}</td><td>{transaction.category || "Uncategorized"}</td><td><select value={selected} onChange={(event: { target: { value: string } }) => setAccountSelections((current) => ({ ...current, [transaction.id]: event.target.value }))}>{(dashboard?.accountingAccounts || []).map((candidate) => <option key={candidate.code} value={candidate.code}>{candidate.code} · {candidate.name}</option>)}</select></td><td>{transaction.reviewStatus === "Approved" ? <span className="badge active">Approved</span> : <button className="textButton neutral approveButton" disabled={busy || !account} onClick={() => void runAction({ action: "transaction-approve", id: transaction.id, business, category: account?.name || transaction.category, accountCode: selected, teach: true }, "Transaction approved and future matching transactions will learn from it.")}>Approve & teach</button>}</td></tr>;
+          return <tr key={transaction.id}><td>{transaction.transactionDate}</td><td><strong>{transaction.merchantName || transaction.description}</strong><small>{transaction.description}</small><small>{transaction.classificationSource} · {Math.round(transaction.confidence * 100)}%</small></td><td className={transaction.signedAmount < 0 ? "negativeAmount" : "positiveAmount"}>{formatUsd(transaction.signedAmount)}</td><td>{transaction.category || "Uncategorized"}</td><td><select value={selected} onChange={(event: { target: { value: string } }) => setAccountSelections((current) => ({ ...current, [transaction.id]: event.target.value }))}>{(dashboard?.accountingAccounts || []).map((candidate) => <option key={candidate.code} value={candidate.code}>{candidate.code} · {candidate.name}</option>)}</select></td><td>{transaction.reviewStatus === "Approved" ? <span className="badge active">Approved</span> : <button className="textButton neutral approveButton" disabled={busy || !account} onClick={() => void runAction({ action: "transaction-approve", id: transaction.id, business, category: account?.name || transaction.category, accountCode: selected, teach: true }, "Transaction approved and future matching transactions will learn from it.")}>Approve & teach</button>}</td></tr>;
         })}
         {!dashboard?.transactions.length && <tr><td colSpan={6}>No bank or credit-card transactions have been imported yet.</td></tr>}
       </tbody></table></div>
