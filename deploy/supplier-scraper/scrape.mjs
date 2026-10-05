@@ -22,7 +22,7 @@ const HEADED = process.env.HEADED === "1";
 const SUPPLIERS = [
   { name: "Sysco", key: "SYSCO", login: "https://shop.sysco.com/auth/login", guide: "https://shop.sysco.com/app/lists" },
   // The deli's order guide, then everything bought recently (catches items not on the guide).
-  { name: "US Foods", key: "USFOODS", login: "https://order.usfoods.com/desktop/login", guide: "https://order.usfoods.com/desktop/lists/view/OG-127949 https://order.usfoods.com/desktop/lists/view/recentlyPurchased" },
+  { name: "US Foods", key: "USFOODS", login: "https://order.usfoods.com/desktop/search/browse", guide: "https://order.usfoods.com/desktop/lists/view/OG-127949 https://order.usfoods.com/desktop/lists/view/recentlyPurchased" },
   { name: "Performance Foodservice", key: "PFG", login: "https://www.customerfirstsolutions.com/", guide: "" },
 ];
 
@@ -69,12 +69,25 @@ async function waitForApp() {
 }
 
 async function report(supplier, body) {
-  await waitForApp();
-  const response = await callApp("/api/cron/supplier-prices", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ supplier, source: "website", ...body }),
-  });
+  let response;
+  // An update can recreate the app while the job runs (the deploy timer checks every minute); a dropped
+  // connection is retried after the app answers again. Importing the same prices twice only re-saves them
+  // (supplier items are upserted and a price change is recorded only when the price differs).
+  for (let attempt = 1; ; attempt++) {
+    await waitForApp();
+    try {
+      response = await callApp("/api/cron/supplier-prices", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ supplier, source: "website", ...body }),
+      });
+      break;
+    } catch (error) {
+      if (attempt >= 3) throw error;
+      console.log(`${supplier}: lost the connection to Corner Ops (${error.message.split(": ").pop()}); retrying`);
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
+    }
+  }
   const text = await response.text();
   if (!response.ok) throw new Error(`Corner Ops answered ${response.status}: ${text.slice(0, 300)}`);
   return text;
@@ -92,6 +105,15 @@ const USER_FIELD = 'input[type="email"], input[autocomplete="username"], input[n
 const PASSWORD_FIELD = 'input[type="password"]';
 const CODE_FIELD = 'input[autocomplete="one-time-code"], input[name*="code" i], input[id*="code" i], input[name*="otp" i], input[name*="passcode" i]';
 const SUBMIT = 'button[type="submit"], input[type="submit"], button:has-text("Sign in"), button:has-text("Log in"), button:has-text("Login"), button:has-text("Next"), button:has-text("Continue"), button:has-text("Verify")';
+
+/**
+ * Types a value key by key. Some sign-in pages (US Foods' Microsoft sign-in) show a "facade" box whose script
+ * copies each keystroke into the hidden field that is actually submitted; fill() skips those key events.
+ */
+async function typeInto(field, value) {
+  await field.fill("");
+  await field.pressSequentially(value, { delay: 35 });
+}
 
 async function submit(page, field) {
   const button = page.locator(SUBMIT);
@@ -197,6 +219,11 @@ async function clickText(page, pattern) {
  * that send a one-time code (US Foods), and "send the code by email or text?"
  * choices (${key}_CODE_VIA=email|text, email by default).
  */
+/** A visible "Log In" / "Sign In" button or link: the page is showing a guest. (getByText reaches into the shadow DOM of web-component buttons.) */
+function loginPrompt(page) {
+  return page.getByText(/^\s*(log ?in|sign ?in)\s*$/i);
+}
+
 async function signIn(page, supplier, user, password) {
   let askedForCode = false;
   for (let step = 0; step < 8; step++) {
@@ -207,7 +234,7 @@ async function signIn(page, supplier, user, password) {
       askedForCode = true;
       const code = await waitForCode(supplier);
       if (!code) return { status: "needs_code", message: `No sign-in code was entered for ${supplier.name} within 10 minutes. Press Sync now to try again.` };
-      await codeField.first().fill(code);
+      await typeInto(codeField.first(), code);
       const remember = page.getByLabel(/remember|trust this|don.t ask|this device/i);
       if (await visible(remember)) await remember.first().check().catch(() => {});
       await submit(page, codeField.first());
@@ -225,8 +252,8 @@ async function signIn(page, supplier, user, password) {
     }
     if (await visible(passwordField)) {
       if (!password) return { status: "needs_login", message: `${supplier.name} is asking for a password. Add ${supplier.key}_PASSWORD to /opt/corner-ops/.env.` };
-      if (await visible(userField) && !(await userField.first().inputValue().catch(() => ""))) await userField.first().fill(user);
-      await passwordField.first().fill(password);
+      if (await visible(userField) && !(await userField.first().inputValue().catch(() => ""))) await typeInto(userField.first(), user);
+      await typeInto(passwordField.first(), password);
       const remember = page.getByLabel(/remember|keep me signed in|stay signed in/i);
       if (await visible(remember)) await remember.first().check().catch(() => {});
       await submit(page, passwordField.first());
@@ -236,14 +263,24 @@ async function signIn(page, supplier, user, password) {
       if ((await userField.first().inputValue().catch(() => "")) === user && step > 0) {
         return { status: "needs_login", message: `${supplier.name} didn't move past the username. Check ${supplier.key}_USERNAME in /opt/corner-ops/.env.` };
       }
-      await userField.first().fill(user);
+      await typeInto(userField.first(), user);
       const remember = page.getByLabel(/remember|keep me signed in|stay signed in/i);
       if (await visible(remember)) await remember.first().check().catch(() => {});
       await submit(page, userField.first());
       continue;
     }
+    // A guest page (no form, but a "Log In" button): open the sign-in page. US Foods sends guests to
+    // its public catalogue, which loads product data but no account prices, so this is not "signed in".
+    const prompt = loginPrompt(page);
+    if (await visible(prompt)) {
+      await prompt.first().click().catch(() => {});
+      await page.waitForTimeout(6_000);
+      continue;
+    }
     return { status: "signed_in" };
   }
+  if (await visible(loginPrompt(page)))
+    return { status: "needs_login", message: `${supplier.name} still shows its Log In button after signing in, so the job is browsing as a guest. Check ${supplier.key}_LOGIN_URL and ${supplier.key}_USERNAME in /opt/corner-ops/.env.` };
   if (await visible(page.locator(PASSWORD_FIELD)) || await visible(page.locator(USER_FIELD)))
     return { status: "needs_login", message: `${supplier.name} didn't accept the sign-in. Check ${supplier.key}_USERNAME${password ? ` and ${supplier.key}_PASSWORD` : ""} in /opt/corner-ops/.env.` };
   return { status: "signed_in" };

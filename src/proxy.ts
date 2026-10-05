@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { isInternalRequest } from "@/lib/internal-request";
 import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "corner_ops_session";
@@ -264,10 +265,14 @@ export function proxy(request: NextRequest) {
   if (
     path !== "/api/health" &&
     insecureForward &&
+    !isInternalRequest(request.headers) &&
     !request.nextUrl.hostname.match(/^(localhost|127\.|192\.168\.)/)
   ) {
+    // Inside the container nextUrl's host is the bind address (0.0.0.0:3000); send the visitor to the public name.
     const secure = request.nextUrl.clone();
     secure.protocol = "https:";
+    secure.host = (request.headers.get("x-forwarded-host") || request.headers.get("host") || secure.host).split(",")[0].trim();
+    secure.port = "";
     return NextResponse.redirect(secure, 308);
   }
   if (removedVendorPaths.some((prefix) => matchesPath(path, prefix))) {

@@ -16,7 +16,7 @@
     "src/lib/journal-integrity.ts",
     "src/lib/ordering-ai-phone-guard.ts",
     "src/lib/pos-access-guard.ts",
-    "src/lib/helcim.ts",
+    "src/lib/internal-request.ts",
     "src/lib/ordering-payment-rules.ts",
     "src/lib/local-dev-tools.ts",
     "src/lib/pos-offline-sync-policy.ts",
