@@ -15,7 +15,8 @@ readonly ROOT="${CORNER_OPS_ROOT:-/opt/corner-ops}"
 readonly DROP="${SUPPLIER_PRICES_DIR:-$ROOT/supplier-prices}"
 readonly ENV_FILE="$ROOT/.env"
 
-secret="$(grep -E '^CRON_SECRET=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
+secret="$(grep -E '^[[:space:]]*(export[[:space:]]+)?CRON_SECRET[[:space:]]*=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- \
+  | sed -E -e 's/\r$//' -e 's/^[[:space:]]+//' -e 's/[[:space:]]+$//' -e 's/^"(.*)"$/\1/' -e "s/^'(.*)'$/\1/" || true)"
 if [[ -z "$secret" ]]; then
   printf '%s CRON_SECRET is not set in %s.\n' "$(date -u +%FT%TZ)" "$ENV_FILE" >&2
   exit 1

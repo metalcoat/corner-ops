@@ -71,7 +71,9 @@ const CODE_FROM = { SYSCO: "sysco", USFOODS: "usfoods", PFG: "pfgc" };
  * Only searches messages from that supplier; nothing else is read or kept.
  */
 async function codeFromEmail(supplier, since) {
-  const host = process.env.CODE_EMAIL_HOST, user = process.env.CODE_EMAIL_USER, pass = process.env.CODE_EMAIL_PASSWORD;
+  const host = process.env.CODE_EMAIL_HOST, user = process.env.CODE_EMAIL_USER;
+  // Gmail shows app passwords in groups ("abcd efgh ijkl mnop"); the spaces aren't part of it.
+  const pass = /gmail|googlemail/i.test(host || "") ? (process.env.CODE_EMAIL_PASSWORD || "").replace(/\s+/g, "") : process.env.CODE_EMAIL_PASSWORD;
   if (!host || !user || !pass) return null;
   const { ImapFlow } = await import("imapflow");
   const { simpleParser } = await import("mailparser");
