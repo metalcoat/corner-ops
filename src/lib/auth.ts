@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { constantTimeEqual, hmacSignature, legacySessionHmac } from "@/lib/security-keys";
 import { cookies } from "next/headers";
 import { assertConfigured } from "@/lib/config";
 import { PermissionError } from "@/lib/http";
@@ -27,15 +27,18 @@ function decode(value: string): string {
   return Buffer.from(value, "base64url").toString("utf8");
 }
 
+// Signed with the owner-session purpose key (as production signs it); cookies signed
+// with the plain session secret are still accepted, so nobody is signed out by the switch.
 function signature(data: string): string {
-  assertConfigured("SESSION_SECRET");
-  return createHmac("sha256", process.env.SESSION_SECRET!).update(data).digest("base64url");
+  return hmacSignature(data, "owner-session", { envName: "OWNER_SESSION_SECRET" });
 }
 
-function safeEqual(left: string, right: string): boolean {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
+function validSignature(encoded: string, supplied: string): boolean {
+  try {
+    return constantTimeEqual(signature(encoded), supplied) || constantTimeEqual(legacySessionHmac(encoded), supplied);
+  } catch {
+    return false;
+  }
 }
 
 function displayName(nameValue: unknown, emailValue: unknown): string {
@@ -71,7 +74,7 @@ function normalizePayload(value: Partial<SessionPayload>): SessionPayload | null
 
 function parseToken(token: string): SessionPayload | null {
   const [encoded, suppliedSignature] = token.split(".");
-  if (!encoded || !suppliedSignature || !safeEqual(signature(encoded), suppliedSignature)) return null;
+  if (!encoded || !suppliedSignature || !validSignature(encoded, suppliedSignature)) return null;
   try {
     return normalizePayload(JSON.parse(decode(encoded)) as Partial<SessionPayload>);
   } catch {
@@ -81,7 +84,7 @@ function parseToken(token: string): SessionPayload | null {
 
 export function isValidPassword(candidate: string): boolean {
   assertConfigured("APP_PASSWORD");
-  return safeEqual(candidate, process.env.APP_PASSWORD!);
+  return constantTimeEqual(candidate, process.env.APP_PASSWORD!);
 }
 
 export async function createSession(identity: AppUserIdentity): Promise<SessionPayload> {
@@ -118,7 +121,7 @@ export async function clearSession(): Promise<void> {
 }
 
 export async function getSession(): Promise<SessionPayload | null> {
-  if (!process.env.SESSION_SECRET) return null;
+  if (!process.env.OWNER_SESSION_SECRET && !process.env.SESSION_SECRET) return null;
   const token = (await cookies()).get(COOKIE_NAME)?.value;
   return token ? parseToken(token) : null;
 }
