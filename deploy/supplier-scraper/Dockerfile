@@ -10,7 +10,7 @@ RUN npm install --omit=dev --no-audit --no-fund \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends xvfb x11vnc novnc websockify \
     && rm -rf /var/lib/apt/lists/*
-COPY deploy/supplier-scraper/scrape.mjs deploy/supplier-scraper/signin.mjs deploy/supplier-scraper/signin.sh ./
+COPY deploy/supplier-scraper/scrape.mjs deploy/supplier-scraper/signin.mjs deploy/supplier-scraper/signin.sh deploy/supplier-scraper/session-cookies.mjs ./
 COPY src/lib/supplier-web-extract.ts ./
 ENV NODE_OPTIONS=--no-warnings
 ENTRYPOINT ["node", "scrape.mjs"]

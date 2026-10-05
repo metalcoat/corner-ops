@@ -5,6 +5,7 @@
 //
 //   supplier-prices-sync.sh --signin webstaurant
 import { chromium } from "playwright";
+import { restoreSessionCookies, saveSessionCookies } from "./session-cookies.mjs";
 
 const PROFILES = process.env.PROFILE_DIR || "/profiles";
 const MINUTES = Number(process.env.SIGNIN_MINUTES || 15);
@@ -35,6 +36,8 @@ const context = await chromium.launchPersistentContext(`${PROFILES}/${site.key}`
   timezoneId: "America/New_York",
   ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
 });
+
+await restoreSessionCookies(context, PROFILES, site.key);
 
 async function signedIn() {
   const response = await context.request.get(site.signedIn, { maxRedirects: 0, timeout: 20_000 }).catch(() => null);
@@ -69,6 +72,7 @@ try {
       // Let the site finish setting its cookies before the profile is saved.
       await page.goto(site.signedIn, { waitUntil: "domcontentloaded" }).catch(() => {});
       await page.waitForTimeout(3_000);
+      await saveSessionCookies(context, PROFILES, site.key);
       console.log(`${site.name}: signed in. The price job will use this session from now on.`);
     }
   }
