@@ -6,4 +6,4 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=chris
-ExecStart=/opt/corner-ops/deploy/supplier-prices-sync.sh
+ExecStart=/opt/corner-ops/runtime/deploy/supplier-prices-sync.sh
