@@ -51,7 +51,25 @@ async function callApp(path, init = {}) {
   throw new Error(`Couldn't reach Corner Ops from the price job: ${tried.join(", ")}`);
 }
 
+/** Waits (up to 3 minutes) for the app, e.g. while it restarts after an update. */
+async function waitForApp() {
+  const deadline = Date.now() + 3 * 60_000;
+  let last = null;
+  while (Date.now() < deadline) {
+    try {
+      const response = await callApp("/api/health");
+      if (response.ok) return;
+      last = new Error(`health check answered ${response.status}`);
+    } catch (error) {
+      last = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+  }
+  throw new Error(`Corner Ops isn't answering (is the app running? check: curl -fsS http://127.0.0.1:3000/api/health). ${last?.message || ""}`);
+}
+
 async function report(supplier, body) {
+  await waitForApp();
   const response = await callApp("/api/cron/supplier-prices", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -231,6 +249,26 @@ async function signIn(page, supplier, user, password) {
   return { status: "signed_in" };
 }
 
+/**
+ * The shape of a JSON response without its values (field names, list sizes,
+ * value types), so the price reader can be tuned to a site without sharing
+ * prices or account details.
+ */
+function describe(json, path = "", depth = 0, out = []) {
+  if (depth > 6 || out.length > 120) return out.join("\n");
+  if (Array.isArray(json)) {
+    out.push(`  ${path || "(root)"}: list of ${json.length}`);
+    if (json.length && json[0] && typeof json[0] === "object") describe(json[0], `${path}[0]`, depth + 1, out);
+  } else if (json && typeof json === "object") {
+    for (const [key, value] of Object.entries(json)) {
+      const at = path ? `${path}.${key}` : key;
+      if (value && typeof value === "object") describe(value, at, depth + 1, out);
+      else out.push(`  ${at}: ${value === null ? "null" : typeof value}${typeof value === "string" && /^\$?\d+(\.\d+)?$/.test(value) ? " (number-like)" : ""}`);
+    }
+  }
+  return out.join("\n");
+}
+
 /** Scrolls until the list stops growing (order guides load more items as you scroll). */
 async function loadEverything(page) {
   let same = 0, last = 0;
@@ -323,8 +361,11 @@ async function run(supplier) {
       await report(supplier.name, { status: login.status, message: login.message });
       return;
     }
-    if (guideUrl) await page.goto(guideUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
-    else {
+    if (guideUrl) {
+      await page.goto(guideUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+      await page.waitForTimeout(6_000);
+      console.log(`${supplier.name}: opened ${guideUrl} → ${page.url()}`);
+    } else {
       const link = page.locator('a:has-text("Order Guide"), a:has-text("Order guide"), a:has-text("My Lists"), a:has-text("Lists"), button:has-text("Order Guide")');
       if (await visible(link)) await link.first().click();
     }
@@ -346,6 +387,7 @@ async function run(supplier) {
       console.log(`${supplier.name}: also reading ${url}`);
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 }).catch((error) => console.log(`${supplier.name}: ${error.message.split("\n")[0]}`));
       await page.waitForTimeout(6_000);
+      console.log(`${supplier.name}: landed on ${page.url()}`);
       await loadEverything(page);
     }
     const found = () => dedupeProducts(captured.flatMap((c) => extractProducts(c.json)));
@@ -378,7 +420,7 @@ async function run(supplier) {
     if (!csv) {
       const picture = await shot("no-products");
       // What the page loaded, for tuning: URLs and top-level keys only.
-      writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-responses.txt`, captured.map((c) => `${c.url}\n  keys: ${Object.keys(c.json || {}).slice(0, 20).join(", ")}`).join("\n"));
+      writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-responses.txt`, captured.map((c) => `${c.url.split("?")[0]}\n${describe(c.json)}`).join("\n\n"));
       // The site's menu links (text and address only), to find the order guide page.
       const links = await page.evaluate(() => [...document.querySelectorAll("a[href]")].map((a) => `${(a.textContent || "").trim().replace(/\s+/g, " ").slice(0, 60)}\t${a.href}`).filter((l) => !l.startsWith("\t")));
       writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-links.txt`, [...new Set(links)].join("\n"));
@@ -402,6 +444,12 @@ async function run(supplier) {
 
 if (!SECRET) {
   console.error("CRON_SECRET is missing; the price job can't send prices to Corner Ops.");
+  process.exit(1);
+}
+try {
+  await waitForApp();
+} catch (error) {
+  console.error(error.message);
   process.exit(1);
 }
 for (const supplier of SUPPLIERS) {
