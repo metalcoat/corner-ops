@@ -155,6 +155,9 @@ services:
       - cornerops_supplier_browsers:/profiles
       - ${SUPPLIER_PRICES_DIR:-/opt/corner-ops/supplier-prices}/_website:/debug
     shm_size: 1gb
+    # Fallback route to the app (its published port) if service names don't resolve.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - cornerops
 

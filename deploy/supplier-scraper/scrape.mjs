@@ -12,7 +12,6 @@ import { chromium } from "playwright";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dedupeProducts, extractProducts, extractSignInCode, productsToCsv } from "./supplier-web-extract.ts";
 
-const APP = process.env.APP_INTERNAL_URL || "http://app:3000";
 const SECRET = process.env.CRON_SECRET || "";
 const DEBUG = process.env.DEBUG_DIR || "/debug";
 const PROFILES = process.env.PROFILE_DIR || "/profiles";
@@ -30,10 +29,31 @@ const only = (process.argv[2] || "").toLowerCase();
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 mkdirSync(DEBUG, { recursive: true });
 
+// Where the app answers from inside this container: its Compose service name,
+// its container name, or the host's port 3000 (host.docker.internal).
+const APP_CANDIDATES = [...new Set([process.env.APP_INTERNAL_URL, "http://app:3000", "http://corner-ops-app:3000", "http://host.docker.internal:3000"].filter(Boolean))];
+let appUrl = null;
+
+/** Calls Corner Ops, finding a route to it the first time. */
+async function callApp(path, init = {}) {
+  const tried = [];
+  for (const base of appUrl ? [appUrl] : APP_CANDIDATES) {
+    try {
+      const response = await fetch(`${base}${path}`, { ...init, headers: { ...(init.headers || {}), authorization: `Bearer ${SECRET}` }, signal: AbortSignal.timeout(60_000) });
+      appUrl = base;
+      return response;
+    } catch (error) {
+      tried.push(`${base} (${error.cause?.code || error.cause?.message || error.message})`);
+    }
+  }
+  appUrl = null;
+  throw new Error(`Couldn't reach Corner Ops from the price job: ${tried.join(", ")}`);
+}
+
 async function report(supplier, body) {
-  const response = await fetch(`${APP}/api/cron/supplier-prices`, {
+  const response = await callApp("/api/cron/supplier-prices", {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${SECRET}` },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ supplier, source: "website", ...body }),
   });
   const text = await response.text();
@@ -134,7 +154,7 @@ async function waitForCode(supplier) {
       }
     }
     try {
-      const response = await fetch(`${APP}/api/cron/supplier-prices?code=${encodeURIComponent(supplier.name)}`, { headers: { authorization: `Bearer ${SECRET}` } });
+      const response = await callApp(`/api/cron/supplier-prices?code=${encodeURIComponent(supplier.name)}`);
       const body = await response.json();
       if (body.code) return String(body.code);
     } catch {
@@ -319,15 +339,41 @@ async function run(supplier) {
     }
     await loadEverything(page);
     await page.waitForTimeout(2_000);
+    const found = () => dedupeProducts(captured.flatMap((c) => extractProducts(c.json)));
+    // The page we opened had no list prices (sites move things): look for the
+    // order guide / lists in the site's own menus, then open the first list.
+    const visited = new Set([page.url()]);
+    for (const pattern of [/^\s*(my )?order guides?\s*$/i, /^\s*(my |shopping )?lists?\s*$/i, /order guide/i, /\blists?\b/i, /favorites|purchase history|frequently (bought|ordered)/i]) {
+      if (found().length >= 3) break;
+      const link = page.locator("a, button, [role=link], [role=menuitem], [role=tab]").filter({ hasText: pattern });
+      if (!(await visible(link))) continue;
+      await link.first().click().catch(() => {});
+      await page.waitForTimeout(5_000);
+      // On a page of lists, open the first one (the order guide is usually first).
+      if (found().length < 3) {
+        const firstList = page.locator('a[href*="list" i], [role=row] a, li a, [class*="list" i] a').filter({ hasText: /\w{3,}/ });
+        if (await visible(firstList)) {
+          await firstList.first().click().catch(() => {});
+          await page.waitForTimeout(5_000);
+        }
+      }
+      if (visited.has(page.url())) continue;
+      visited.add(page.url());
+      console.log(`${supplier.name}: trying ${page.url()}`);
+      await loadEverything(page);
+    }
 
-    const products = dedupeProducts(captured.flatMap((c) => extractProducts(c.json)));
+    const products = found();
     let csv = products.length >= 3 ? productsToCsv(products) : null;
     if (!csv) csv = await tryExport(page, supplier);
     if (!csv) {
       const picture = await shot("no-products");
       // What the page loaded, for tuning: URLs and top-level keys only.
       writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-responses.txt`, captured.map((c) => `${c.url}\n  keys: ${Object.keys(c.json || {}).slice(0, 20).join(", ")}`).join("\n"));
-      const message = `Signed in, but found no prices on ${page.url()}. Screenshot: ${picture.replace(DEBUG, "/opt/corner-ops/supplier-prices/_website")}. Set ${supplier.key}_ORDER_GUIDE_URL to the order guide page.`;
+      // The site's menu links (text and address only), to find the order guide page.
+      const links = await page.evaluate(() => [...document.querySelectorAll("a[href]")].map((a) => `${(a.textContent || "").trim().replace(/\s+/g, " ").slice(0, 60)}\t${a.href}`).filter((l) => !l.startsWith("\t")));
+      writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-links.txt`, [...new Set(links)].join("\n"));
+      const message = `Signed in, but found no prices (last page ${page.url()}). Open your order guide in a browser and put its address in ${supplier.key}_ORDER_GUIDE_URL. Screenshot and site links: ${picture.replace(DEBUG, "/opt/corner-ops/supplier-prices/_website").replace(/-no-products\.png$/, "-*")}`;
       console.log(`${supplier.name}: ${message}`);
       await report(supplier.name, { status: "no_products", message });
       return;
