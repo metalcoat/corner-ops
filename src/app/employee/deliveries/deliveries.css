@@ -111,6 +111,20 @@
 .driverLogin form,.driverLogin label{display:grid;gap:10px}
 .driverLogin input{font-size:1.4rem;letter-spacing:.3em}
 
+/* Small crews: deliveries nobody has taken yet, and one tap to leave with every ready bag. */
+.driverApp .leaveNow{width:100%;min-height:68px;background:var(--green);font-size:1.2rem;letter-spacing:.03em}
+.grabs{display:grid;gap:8px;padding:12px;border-radius:14px;background:#fff7e0;border:2px dashed #d9a520;color:#3d3000}
+.grabs header{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.grabs header button{min-height:46px;background:#8a5a00}
+.grabs ul{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+.grabs li{display:grid;grid-template-columns:1fr auto;gap:8px}
+.driverApp .grabInfo{display:grid;justify-items:start;place-items:initial;gap:2px;text-align:left;background:#fffdf5;color:#2b2200;border:1px solid #ecd28a;font-weight:400}
+.grabInfo span{font-weight:700}
+.grabInfo small{color:#6b5a1f}
+.driverApp .take{min-width:96px;background:var(--green);font-size:1.05rem}
+.statusActions .giveBack{background:var(--soft);color:var(--ink);border:1px solid var(--line)}
+@media (prefers-color-scheme:dark){.grabs{background:#2a2310;border-color:#8a6a1a;color:#f3e6bf}.driverApp .grabInfo{background:#1f1a0c;color:#f3e6bf;border-color:#5c4a17}.grabInfo small{color:#cbb67a}}
+
 /* Portrait tablet / phone: list first, the order opens full screen. */
 @media (max-width:900px){
   .driverShell{grid-template-columns:1fr}

@@ -40,11 +40,11 @@ type Delivery = {
 };
 type RouteStop = { deliveryId: string; displayNumber: string; customerName: string; address: string; sequence: number; estimatedArrival: string; dueAt: string; timingRisk: "on_track" | "due_soon" | "late"; legMiles: number };
 type RoutePlan = { driverEmployeeId: string; driverName: string; plan: { stops: RouteStop[]; navigationUrl: string | null; totalStraightLineMiles: number; urgentStops: number } };
-type Settings = { showLiveDriver: boolean; callLinkTemplate: string };
+type Settings = { showLiveDriver: boolean; callLinkTemplate: string; autoAssignSolo: boolean; anyoneCanDeliver: boolean };
 type Payload = {
   actor: { name: string; manager: boolean; driver: boolean };
   deliveries: Delivery[];
-  drivers: Array<{ id: string; name: string; position: string }>;
+  drivers: Array<{ id: string; name: string; position: string; role_group: string; clocked_in: boolean }>;
   routePlans: RoutePlan[];
   settings: Settings;
   origin: { latitude: number; longitude: number } | null;
@@ -458,6 +458,27 @@ export default function DriverDeliveries() {
     await load();
   }
 
+  // Small crews: take deliveries in one tap, give one back, or leave with every ready bag at once.
+  async function dispatchAction(key: string, body: Record<string, unknown>, done: string) {
+    setBusy(key);
+    try {
+      const response = await fetch("/api/driver/deliveries", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(await message(response));
+      const result = await response.json().catch(() => ({}));
+      setNotice(done.replace("{n}", String(result.claimed ?? result.started ?? "")));
+      await load();
+      if (selectedId) await loadDetail(selectedId);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "That didn't save.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function saveSettings(next: Partial<Settings>) {
     setBusy("settings");
     try {
@@ -503,7 +524,11 @@ export default function DriverDeliveries() {
 
   const routePlan = !dispatch ? data.routePlans[0]?.plan : null;
   const stopNumber = new Map(data.routePlans.flatMap((plan) => plan.plan.stops.map((stop) => [stop.deliveryId, stop] as const)));
-  const current = data.deliveries.filter((delivery) => !finished(delivery));
+  const current = data.deliveries.filter((delivery) => !finished(delivery) && (dispatch || delivery.assigned_employee_id));
+  // Deliveries nobody has taken yet (several or no drivers on shift).
+  const upForGrabs = dispatch ? [] : data.deliveries.filter((delivery) => !finished(delivery) && !delivery.assigned_employee_id);
+  const readyToGrab = upForGrabs.filter((delivery) => delivery.delivery_status === "READY_FOR_DRIVER");
+  const readyToLeave = current.filter((delivery) => ["READY_FOR_DRIVER", "PICKED_UP"].includes(delivery.delivery_status));
   const done = data.deliveries.filter(finished);
   const ordered = current.toSorted((a, b) => (stopNumber.get(a.delivery_id)?.sequence ?? 99) - (stopNumber.get(b.delivery_id)?.sequence ?? 99));
   const selected = data.deliveries.find((delivery) => delivery.delivery_id === selectedId) ?? null;
@@ -587,6 +612,20 @@ export default function DriverDeliveries() {
                 <small>Only the customer the driver is heading to now sees the car, at about 100 m accuracy.</small>
               </span>
             </label>
+            <label className="toggle">
+              <input type="checkbox" checked={data.settings.autoAssignSolo} disabled={busy === "settings"} onChange={(e) => void saveSettings({ autoAssignSolo: e.target.checked })} />
+              <span>
+                <b>One driver on shift gets every delivery</b>
+                <small>When exactly one Driver is clocked in, new deliveries go straight to their tablet. Nobody has to hand them out.</small>
+              </span>
+            </label>
+            <label className="toggle">
+              <input type="checkbox" checked={data.settings.anyoneCanDeliver} disabled={busy === "settings"} onChange={(e) => void saveSettings({ anyoneCanDeliver: e.target.checked })} />
+              <span>
+                <b>Anyone on the clock can take a delivery</b>
+                <small>For short-staffed mornings: whoever is free signs in to the tablet and taps TAKE.</small>
+              </span>
+            </label>
             <form
               className="callSetting"
               onSubmit={(e) => {
@@ -607,6 +646,37 @@ export default function DriverDeliveries() {
 
       <div className="driverShell">
         <section className="deliveryColumn" aria-label="Deliveries">
+          {!dispatch && !showDone && readyToLeave.length > 0 && (
+            <button className="leaveNow" disabled={Boolean(busy)} onClick={() => void dispatchAction("run", { action: "start_run" }, "On the way with {n} deliveries. Customers' trackers now show you're on the way.")}>
+              {busy === "run" ? "STARTING…" : `LEAVING NOW · ${readyToLeave.length} ${readyToLeave.length === 1 ? "ORDER" : "ORDERS"}`}
+            </button>
+          )}
+          {!dispatch && !showDone && upForGrabs.length > 0 && (
+            <section className="grabs" aria-label="Deliveries nobody has taken">
+              <header>
+                <strong>UP FOR GRABS ({upForGrabs.length})</strong>
+                {readyToGrab.length > 0 && (
+                  <button disabled={Boolean(busy)} onClick={() => void dispatchAction("claim-all", { action: "claim", allReady: true }, "Took {n} deliveries.")}>
+                    {busy === "claim-all" ? "TAKING…" : `TAKE ALL READY (${readyToGrab.length})`}
+                  </button>
+                )}
+              </header>
+              <ul>
+                {upForGrabs.map((delivery) => (
+                  <li key={delivery.delivery_id}>
+                    <button className="grabInfo" onClick={() => setSelectedId(delivery.delivery_id)}>
+                      <b>#{delivery.display_number} {delivery.customer_name}</b>
+                      <span>{fullAddress(delivery.delivery_address, delivery.delivery_unit)}</span>
+                      <small>{delivery.delivery_status === "READY_FOR_DRIVER" ? "Food is ready" : "Still in the kitchen"} · {badgeFor(delivery).text}</small>
+                    </button>
+                    <button className="take" disabled={Boolean(busy)} onClick={() => void dispatchAction(`claim:${delivery.delivery_id}`, { action: "claim", deliveryIds: [delivery.delivery_id] }, "It's yours.")}>
+                      {busy === `claim:${delivery.delivery_id}` ? "…" : "TAKE"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {routePlan && routePlan.stops.length > 1 && (
             <div className="driverRoute">
               <strong>{routePlan.stops.length} STOPS · {routePlan.totalStraightLineMiles.toFixed(1)} MI</strong>
@@ -618,7 +688,7 @@ export default function DriverDeliveries() {
             <button role="tab" aria-selected={showDone} onClick={() => setShowDone(true)}>DONE TODAY ({done.length})</button>
           </div>
           {list.length === 0 ? (
-            <p className="emptyList">{showDone ? "Nothing finished yet." : "No open deliveries. New orders show up here automatically."}</p>
+            <p className="emptyList">{showDone ? "Nothing finished yet." : upForGrabs.length ? "Tap TAKE on a delivery above and it moves here." : "No open deliveries. New orders show up here automatically."}</p>
           ) : (
             <ol className="deliveryList">
               {list.map((delivery) => {
@@ -717,8 +787,12 @@ export default function DriverDeliveries() {
 
               {dispatch && (
                 <select aria-label={`Assign order ${selected.display_number}`} value={selected.assigned_employee_id || ""} onChange={(e) => void assign(selected.delivery_id, e.target.value)}>
-                  <option value="">ASSIGN DRIVER</option>
-                  {data.drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.name}</option>)}
+                  <option value="">UP FOR GRABS (NOBODY YET)</option>
+                  {data.drivers.map((driver) => (
+                    <option key={driver.id} value={driver.id}>
+                      {driver.name}{driver.clocked_in ? " · on the clock" : ""}{driver.role_group === "Driver" ? "" : ` · ${driver.position || driver.role_group}`}
+                    </option>
+                  ))}
                 </select>
               )}
               {!finished(selected) && (
@@ -728,7 +802,17 @@ export default function DriverDeliveries() {
                     <input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="Gate code, left with neighbor…" />
                   </label>
                   <div className="statusActions">
-                    {(statusActions[selected.delivery_status] || []).map(([label, status]) => (
+                    {!dispatch && !selected.assigned_employee_id && (
+                      <button className="success" disabled={Boolean(busy)} onClick={() => void dispatchAction(`claim:${selected.delivery_id}`, { action: "claim", deliveryIds: [selected.delivery_id] }, "It's yours.")}>
+                        TAKE THIS DELIVERY
+                      </button>
+                    )}
+                    {!dispatch && selected.assigned_employee_id && ["ASSIGNED", "READY_FOR_DRIVER"].includes(selected.delivery_status) && (
+                      <button className="giveBack" disabled={Boolean(busy)} onClick={() => void dispatchAction(`release:${selected.delivery_id}`, { action: "release", deliveryId: selected.delivery_id }, "Given back. It's up for grabs again.")}>
+                        GIVE BACK
+                      </button>
+                    )}
+                    {(dispatch || selected.assigned_employee_id ? statusActions[selected.delivery_status] || [] : []).map(([label, status]) => (
                       <button
                         className={status === "DELIVERED" ? "success" : status.includes("FAILED") ? "danger" : ""}
                         disabled={Boolean(busy)}

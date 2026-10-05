@@ -78,6 +78,10 @@ export async function ensureDriverDeliverySchema() {
     channel TEXT NOT NULL, destination TEXT NOT NULL, classification TEXT NOT NULL DEFAULT 'transactional', payload TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'queued', queued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), sent_at TIMESTAMPTZ, failed_at TIMESTAMPTZ, failure TEXT NOT NULL DEFAULT '')`;
   await sql`CREATE TABLE IF NOT EXISTS ordering_driver_dispatch_settings(business TEXT PRIMARY KEY CHECK(business IN('Corner Deli','Tiki')),show_live_driver BOOLEAN NOT NULL DEFAULT FALSE,call_link_template TEXT NOT NULL DEFAULT '',updated_by UUID REFERENCES employees(id),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
+  // Small crews: one driver gets every delivery without a manager handing them out,
+  // and whoever is free (e.g. the morning cashier) can take one from the tablet.
+  await sql`ALTER TABLE ordering_driver_dispatch_settings ADD COLUMN IF NOT EXISTS auto_assign_solo BOOLEAN NOT NULL DEFAULT TRUE`;
+  await sql`ALTER TABLE ordering_driver_dispatch_settings ADD COLUMN IF NOT EXISTS anyone_can_deliver BOOLEAN NOT NULL DEFAULT TRUE`;
 }
 
 export async function driverActor(): Promise<DriverActor | null> {
@@ -86,10 +90,33 @@ export async function driverActor(): Promise<DriverActor | null> {
   const row=(await getSql()`SELECT active,role_group,COALESCE(pos_role,'employee') pos_role FROM employees WHERE id=${session.employeeId} AND business=${session.business}`)[0];
   if(!row?.active)return null;
   await getSql()`UPDATE employee_app_sessions SET last_seen_at=NOW() WHERE id=${session.deviceSessionId}`.catch(()=>undefined);
-  return {...session,roleGroup:row.role_group,posRole:row.pos_role,manager:["manager","owner"].includes(String(row.pos_role)),driver:row.role_group==="Driver"};
+  const staffing=await deliveryStaffing(session.business);
+  return {...session,roleGroup:row.role_group,posRole:row.pos_role,manager:["manager","owner"].includes(String(row.pos_role)),driver:row.role_group==="Driver"||staffing.anyoneCanDeliver};
+}
+
+export type DeliveryStaffing={
+  /** When exactly one Driver is clocked in, new deliveries go straight to them. */
+  autoAssignSolo:boolean;
+  /** Any clocked-in employee can take a delivery from the tablet, not only Drivers. */
+  anyoneCanDeliver:boolean;
+};
+export async function deliveryStaffing(business:string):Promise<DeliveryStaffing>{
+  const row=(await getSql()`SELECT auto_assign_solo,anyone_can_deliver FROM ordering_driver_dispatch_settings WHERE business=${business}`)[0];
+  return {autoAssignSolo:row?row.auto_assign_solo!==false:true,anyoneCanDeliver:row?row.anyone_can_deliver!==false:true};
+}
+
+/** Employees who can be handed deliveries right now: clocked-in Drivers, plus anyone clocked in when the store allows it. */
+export async function deliveryCandidates(business:string){
+  const staffing=await deliveryStaffing(business);
+  return getSql()`SELECT e.id,e.name,e.position,e.role_group,EXISTS(SELECT 1 FROM time_entries t WHERE t.employee_id=e.id AND t.business=e.business AND t.clock_out IS NULL) clocked_in
+    FROM employees e WHERE e.business=${business} AND e.active=TRUE
+      AND (e.role_group='Driver' OR (${staffing.anyoneCanDeliver} AND EXISTS(SELECT 1 FROM time_entries t WHERE t.employee_id=e.id AND t.business=e.business AND t.clock_out IS NULL)))
+    ORDER BY 5 DESC,(e.role_group='Driver') DESC,e.name`;
 }
 
 function permitted(actor:DriverActor,delivery:{driver_employee_id?:string|null}) { return actor.manager||delivery.driver_employee_id===actor.employeeId; }
+/** Unclaimed deliveries are up for grabs for anyone allowed to drive. */
+function claimable(actor:DriverActor,delivery:{driver_employee_id?:string|null;status?:unknown}) { return actor.driver&&!delivery.driver_employee_id&&["ASSIGNED","READY_FOR_DRIVER"].includes(String(delivery.status)); }
 async function audit(deliveryId:string,orderId:string,actor:DriverActor,action:string,previous:string|null,next:string|null,details:unknown={}){await getSql()`INSERT INTO ordering_delivery_audit(id,delivery_id,order_id,employee_id,device_session_id,action,previous_status,new_status,details)VALUES(${randomUUID()},${deliveryId},${orderId},${actor.employeeId},${actor.deviceSessionId},${action},${previous},${next},${JSON.stringify(details)}::jsonb)`}
 
 export async function listDriverDeliveries(actor:DriverActor,input:{query?:string;dispatch?:boolean}){
@@ -105,7 +132,7 @@ export async function listDriverDeliveries(actor:DriverActor,input:{query?:strin
     LEFT JOIN employees e ON e.id=d.driver_employee_id
     LEFT JOIN LATERAL(SELECT latitude,longitude,captured_at FROM ordering_delivery_locations WHERE driver_id=d.driver_employee_id ORDER BY captured_at DESC LIMIT 1)location ON TRUE
     WHERE d.business=${actor.business} AND o.service_type IN('delivery','no_contact_delivery')
-      AND (${actor.manager&&Boolean(input.dispatch)} OR d.driver_employee_id=${actor.employeeId})
+      AND (${actor.manager&&Boolean(input.dispatch)} OR d.driver_employee_id=${actor.employeeId} OR (${actor.driver} AND d.driver_employee_id IS NULL AND d.status IN('ASSIGNED','READY_FOR_DRIVER')))
       AND (${q}='' OR o.display_number ILIKE ${like} OR o.first_name_snapshot ILIKE ${like} OR o.last_name_snapshot ILIKE ${like} OR trim(o.first_name_snapshot||' '||o.last_name_snapshot) ILIKE ${like} OR regexp_replace(o.phone_snapshot,'[^0-9]','','g') LIKE ${digitLike} OR a.formatted_address ILIKE ${like})
       AND (d.status NOT IN('DELIVERED','RETURNED','CANCELLED') OR d.updated_at>NOW()-INTERVAL '24 hours') ORDER BY COALESCE(o.scheduled_for,o.created_at),o.created_at`;
 }
@@ -180,15 +207,73 @@ export function deliveryRoutePlans(
   });
 }
 
-export async function syncDeliveryAssignments(business:"Corner Deli"|"Tiki"){await ensureDriverDeliverySchema();const sql=getSql();await sql`INSERT INTO ordering_delivery_assignments(id,order_id,business,status,assigned_by) SELECT gen_random_uuid(),o.id,o.business,CASE WHEN o.status='ready' THEN 'READY_FOR_DRIVER' ELSE 'ASSIGNED' END,'driver-pwa' FROM ordering_orders o JOIN ordering_order_delivery_addresses a ON a.order_id=o.id WHERE o.business=${business} AND o.service_type IN('delivery','no_contact_delivery') AND o.status NOT IN('draft','completed','cancelled') AND NOT EXISTS(SELECT 1 FROM ordering_delivery_assignments d WHERE d.order_id=o.id AND d.status NOT IN('DELIVERED','RETURNED','CANCELLED'))`;await sql`UPDATE ordering_delivery_assignments d SET status='READY_FOR_DRIVER',updated_at=NOW() FROM ordering_orders o WHERE o.id=d.order_id AND d.business=${business} AND o.status='ready' AND d.status='ASSIGNED'`}
-export async function ensureDeliveriesForOrders(actor:DriverActor){if(actor.manager)await syncDeliveryAssignments(actor.business)}
+export async function syncDeliveryAssignments(business:"Corner Deli"|"Tiki"){await ensureDriverDeliverySchema();const sql=getSql();await sql`INSERT INTO ordering_delivery_assignments(id,order_id,business,status,assigned_by) SELECT gen_random_uuid(),o.id,o.business,CASE WHEN o.status='ready' THEN 'READY_FOR_DRIVER' ELSE 'ASSIGNED' END,'driver-pwa' FROM ordering_orders o JOIN ordering_order_delivery_addresses a ON a.order_id=o.id WHERE o.business=${business} AND o.service_type IN('delivery','no_contact_delivery') AND o.status NOT IN('draft','completed','cancelled') AND NOT EXISTS(SELECT 1 FROM ordering_delivery_assignments d WHERE d.order_id=o.id AND d.status NOT IN('DELIVERED','RETURNED','CANCELLED'))`;await sql`UPDATE ordering_delivery_assignments d SET status='READY_FOR_DRIVER',updated_at=NOW() FROM ordering_orders o WHERE o.id=d.order_id AND d.business=${business} AND o.status='ready' AND d.status='ASSIGNED'`;await autoAssignSoloDriver(business)}
+/**
+ * With one Driver on the clock (most days), every new delivery is theirs: no one
+ * has to hand each order out. With none or several, deliveries stay up for grabs.
+ */
+export async function autoAssignSoloDriver(business:"Corner Deli"|"Tiki"){
+  if(!(await deliveryStaffing(business)).autoAssignSolo)return [];
+  const sql=getSql();
+  const rows=await sql`WITH on_shift AS (SELECT DISTINCT e.id FROM employees e JOIN time_entries t ON t.employee_id=e.id AND t.business=e.business AND t.clock_out IS NULL WHERE e.business=${business} AND e.active=TRUE AND e.role_group='Driver')
+    UPDATE ordering_delivery_assignments d SET driver_employee_id=(SELECT id FROM on_shift),assigned_at=NOW(),assigned_by='auto: only driver on shift',updated_at=NOW()
+    WHERE d.business=${business} AND d.driver_employee_id IS NULL AND d.status IN('ASSIGNED','READY_FOR_DRIVER') AND (SELECT COUNT(*) FROM on_shift)=1
+    RETURNING d.id,d.order_id,d.driver_employee_id,d.status`;
+  for(const row of rows)await sql`INSERT INTO ordering_delivery_audit(id,delivery_id,order_id,employee_id,device_session_id,action,previous_status,new_status,details)VALUES(${randomUUID()},${row.id},${row.order_id},${row.driver_employee_id},NULL,'auto_assigned',${row.status},${row.status},${JSON.stringify({reason:"only driver on shift"})}::jsonb)`;
+  return rows;
+}
+export async function ensureDeliveriesForOrders(actor:DriverActor){await syncDeliveryAssignments(actor.business)}
 
-export async function assignDelivery(actor:DriverActor,deliveryId:string,employeeId:string){if(!actor.manager)throw new Error("Dispatcher access required.");await ensureDriverDeliverySchema();return withTransaction(async()=>{const sql=getSql(),d=(await sql`SELECT * FROM ordering_delivery_assignments WHERE id=${deliveryId} AND business=${actor.business} FOR UPDATE`)[0];if(!d)throw new Error("Delivery not found.");const employee=(await sql`SELECT id,name,role_group FROM employees WHERE id=${employeeId} AND business=${actor.business} AND active=TRUE`)[0];if(!employee||employee.role_group!=="Driver")throw new Error("Choose an active driver.");const previous=d.driver_employee_id?String(d.driver_employee_id):null;await sql`UPDATE ordering_delivery_assignments SET driver_employee_id=${employeeId},assigned_at=NOW(),status=CASE WHEN status='DELIVERY_FAILED' THEN 'ASSIGNED' ELSE status END,updated_at=NOW() WHERE id=${deliveryId}`;await audit(deliveryId,String(d.order_id),actor,previous?"reassigned":"assigned",String(d.status),String(d.status),{previousEmployeeId:previous,employeeId});return{ok:true}})}
+/** Take deliveries in one tap: specific ones, or every unclaimed one whose food is ready. */
+export async function claimDeliveries(actor:DriverActor,input:{deliveryIds?:string[];allReady?:boolean}){
+  if(!actor.driver&&!actor.manager)throw new Error("Driver access required.");
+  await ensureDriverDeliverySchema();
+  const ids=(input.deliveryIds||[]).map(String).filter(Boolean).slice(0,50);
+  if(!input.allReady&&!ids.length)throw new Error("Choose a delivery to take.");
+  return withTransaction(async()=>{
+    const sql=getSql();
+    const rows=await sql`UPDATE ordering_delivery_assignments SET driver_employee_id=${actor.employeeId},assigned_at=NOW(),assigned_by='claimed on tablet',updated_at=NOW()
+      WHERE business=${actor.business} AND driver_employee_id IS NULL AND status IN('ASSIGNED','READY_FOR_DRIVER')
+        AND (${Boolean(input.allReady)} AND status='READY_FOR_DRIVER' OR id=ANY(${ids}::uuid[]))
+      RETURNING id,order_id,status`;
+    for(const row of rows)await audit(String(row.id),String(row.order_id),actor,"claimed",String(row.status),String(row.status),{});
+    if(!rows.length)throw new Error(input.allReady?"Nothing ready to take right now.":"Someone else already took that delivery.");
+    return{ok:true,claimed:rows.length};
+  });
+}
+
+/** Give back a delivery you took but haven't left with yet. */
+export async function releaseDelivery(actor:DriverActor,deliveryId:string){
+  await ensureDriverDeliverySchema();
+  const rows=await getSql()`UPDATE ordering_delivery_assignments SET driver_employee_id=NULL,updated_at=NOW()
+    WHERE id=${deliveryId} AND business=${actor.business} AND status IN('ASSIGNED','READY_FOR_DRIVER') AND (driver_employee_id=${actor.employeeId} OR ${actor.manager})
+    RETURNING id,order_id,status`;
+  if(!rows[0])throw new Error("Only a delivery that hasn't left the store can be given back.");
+  await audit(deliveryId,String(rows[0].order_id),actor,"released",String(rows[0].status),String(rows[0].status),{});
+  return{ok:true};
+}
+
+/**
+ * "Leaving now": every one of my deliveries whose food is ready goes out the door
+ * together (picked up, on the way), so a driver with three bags taps once, not six times.
+ */
+export async function startDeliveryRun(actor:DriverActor){
+  await ensureDriverDeliverySchema();
+  const mine=await getSql()`SELECT id,status FROM ordering_delivery_assignments WHERE business=${actor.business} AND driver_employee_id=${actor.employeeId} AND status IN('READY_FOR_DRIVER','PICKED_UP') ORDER BY assigned_at,created_at`;
+  if(!mine.length)throw new Error("None of your deliveries are ready to leave yet.");
+  for(const row of mine){
+    if(row.status==="READY_FOR_DRIVER")await changeDeliveryStatus(actor,String(row.id),"PICKED_UP");
+    await changeDeliveryStatus(actor,String(row.id),"EN_ROUTE");
+  }
+  return{ok:true,started:mine.length};
+}
+
+export async function assignDelivery(actor:DriverActor,deliveryId:string,employeeId:string){if(!actor.manager)throw new Error("Dispatcher access required.");await ensureDriverDeliverySchema();return withTransaction(async()=>{const sql=getSql(),d=(await sql`SELECT * FROM ordering_delivery_assignments WHERE id=${deliveryId} AND business=${actor.business} FOR UPDATE`)[0];if(!d)throw new Error("Delivery not found.");if(!employeeId){if(!["ASSIGNED","READY_FOR_DRIVER"].includes(String(d.status)))throw new Error("This delivery has already left the store.");await sql`UPDATE ordering_delivery_assignments SET driver_employee_id=NULL,updated_at=NOW() WHERE id=${deliveryId}`;await audit(deliveryId,String(d.order_id),actor,"unassigned",String(d.status),String(d.status),{previousEmployeeId:d.driver_employee_id});return{ok:true}}const employee=(await sql`SELECT id,name,role_group FROM employees WHERE id=${employeeId} AND business=${actor.business} AND active=TRUE`)[0];if(!employee||(employee.role_group!=="Driver"&&!(await deliveryStaffing(actor.business)).anyoneCanDeliver))throw new Error("Choose an active driver.");const previous=d.driver_employee_id?String(d.driver_employee_id):null;await sql`UPDATE ordering_delivery_assignments SET driver_employee_id=${employeeId},assigned_at=NOW(),status=CASE WHEN status='DELIVERY_FAILED' THEN 'ASSIGNED' ELSE status END,updated_at=NOW() WHERE id=${deliveryId}`;await audit(deliveryId,String(d.order_id),actor,previous?"reassigned":"assigned",String(d.status),String(d.status),{previousEmployeeId:previous,employeeId});return{ok:true}})}
 
 export async function revokeDeliveryTracking(actor:DriverActor,deliveryId:string){if(!actor.manager)throw new Error("Dispatcher access required.");await ensureDriverDeliverySchema();const rows=await getSql()`UPDATE ordering_delivery_tracking_tokens SET revoked_at=NOW() WHERE delivery_id=${deliveryId} AND revoked_at IS NULL RETURNING order_id`;if(rows[0])await audit(deliveryId,String(rows[0].order_id),actor,"tracking_token_revoked",null,null,{});return{ok:true,revoked:rows.length}}
 
 export async function changeDeliveryStatus(actor:DriverActor,deliveryId:string,next:DriverDeliveryStatus,note=""){
-  await ensureDriverDeliverySchema();return withTransaction(async()=>{const sql=getSql(),d=(await sql`SELECT d.*,o.service_type FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id WHERE d.id=${deliveryId} AND d.business=${actor.business} FOR UPDATE OF d`)[0];if(!d)throw new Error("Delivery not found.");if(!permitted(actor,d))throw new Error("This delivery is not assigned to you.");const current=String(d.status) as DriverDeliveryStatus;if(!transitions[current]?.includes(next))throw new Error(`Delivery cannot move from ${current} to ${next}.`);if(next==="DELIVERED"&&d.service_type==="no_contact_delivery"&&!Number((await sql`SELECT COUNT(*) count FROM ordering_delivery_proofs WHERE delivery_id=${deliveryId} AND proof_type='no_contact'`)[0]?.count))throw new Error("A no-contact proof photo is required before completion.");await sql`UPDATE ordering_delivery_assignments SET status=${next},status_note=${note.slice(0,500)},picked_up_at=CASE WHEN ${next}='PICKED_UP' THEN NOW() ELSE picked_up_at END,en_route_at=CASE WHEN ${next}='EN_ROUTE' THEN NOW() ELSE en_route_at END,arrived_at=CASE WHEN ${next}='ARRIVED' THEN NOW() ELSE arrived_at END,delivered_at=CASE WHEN ${next}='DELIVERED' THEN NOW() ELSE delivered_at END,failed_at=CASE WHEN ${next}='DELIVERY_FAILED' THEN NOW() ELSE failed_at END,returned_at=CASE WHEN ${next}='RETURNED' THEN NOW() ELSE returned_at END,cancelled_at=CASE WHEN ${next}='CANCELLED' THEN NOW() ELSE cancelled_at END,updated_at=NOW() WHERE id=${deliveryId}`;
+  await ensureDriverDeliverySchema();return withTransaction(async()=>{const sql=getSql(),d=(await sql`SELECT d.*,o.service_type FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id WHERE d.id=${deliveryId} AND d.business=${actor.business} FOR UPDATE OF d`)[0];if(!d)throw new Error("Delivery not found.");if(!permitted(actor,d)){if(!(claimable(actor,d)&&["PICKED_UP","EN_ROUTE"].includes(next)))throw new Error("This delivery is not assigned to you.");await sql`UPDATE ordering_delivery_assignments SET driver_employee_id=${actor.employeeId},assigned_at=NOW(),assigned_by='claimed on pickup' WHERE id=${deliveryId}`;await audit(deliveryId,String(d.order_id),actor,"claimed",String(d.status),String(d.status),{});d.driver_employee_id=actor.employeeId}const current=String(d.status) as DriverDeliveryStatus;if(!transitions[current]?.includes(next))throw new Error(`Delivery cannot move from ${current} to ${next}.`);if(next==="DELIVERED"&&d.service_type==="no_contact_delivery"&&!Number((await sql`SELECT COUNT(*) count FROM ordering_delivery_proofs WHERE delivery_id=${deliveryId} AND proof_type='no_contact'`)[0]?.count))throw new Error("A no-contact proof photo is required before completion.");await sql`UPDATE ordering_delivery_assignments SET status=${next},status_note=${note.slice(0,500)},picked_up_at=CASE WHEN ${next}='PICKED_UP' THEN NOW() ELSE picked_up_at END,en_route_at=CASE WHEN ${next}='EN_ROUTE' THEN NOW() ELSE en_route_at END,arrived_at=CASE WHEN ${next}='ARRIVED' THEN NOW() ELSE arrived_at END,delivered_at=CASE WHEN ${next}='DELIVERED' THEN NOW() ELSE delivered_at END,failed_at=CASE WHEN ${next}='DELIVERY_FAILED' THEN NOW() ELSE failed_at END,returned_at=CASE WHEN ${next}='RETURNED' THEN NOW() ELSE returned_at END,cancelled_at=CASE WHEN ${next}='CANCELLED' THEN NOW() ELSE cancelled_at END,updated_at=NOW() WHERE id=${deliveryId}`;
     let trackingUrl:string|undefined;if(next==="EN_ROUTE"){const trackingId=randomUUID(),raw=randomBytes(32).toString("base64url"),tokenId=randomUUID();await sql`INSERT INTO ordering_delivery_tracking_sessions(id,delivery_id,driver_id,device_session_id)VALUES(${trackingId},${deliveryId},${actor.employeeId},${actor.deviceSessionId}) ON CONFLICT DO NOTHING`;await sql`INSERT INTO ordering_delivery_tracking_tokens(id,delivery_id,order_id,token_hash,token_value,expires_at)VALUES(${tokenId},${deliveryId},${d.order_id},${createHash("sha256").update(raw).digest("hex")},${raw},NOW()+INTERVAL '30 days')`;trackingUrl=`${cornerOpsBaseUrl()}/track/${raw}`;await audit(deliveryId,String(d.order_id),actor,"tracking_started",current,next,{})}
     if(["DELIVERED","DELIVERY_FAILED","RETURNED"].includes(next)){await sql`UPDATE ordering_delivery_tracking_sessions SET stopped_at=NOW(),stop_reason=${next} WHERE delivery_id=${deliveryId} AND stopped_at IS NULL`;await audit(deliveryId,String(d.order_id),actor,"tracking_stopped",current,next,{reason:next})}
     await audit(deliveryId,String(d.order_id),actor,next.toLowerCase(),current,next,{note:note.slice(0,500)});

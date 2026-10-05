@@ -1,6 +1,6 @@
 import { getSql } from "@/lib/db";
 import { getPosSession } from "@/lib/pos-auth";
-import { driverActor, type DriverActor } from "@/lib/ordering-driver-delivery";
+import { deliveryStaffing, driverActor, type DriverActor } from "@/lib/ordering-driver-delivery";
 import {
   driverCashDashboard,
   postDriverCashSettlement,
@@ -20,7 +20,8 @@ async function cashOutActor(): Promise<DriverActor | null> {
   return {
     employeeId: pos.employeeId, business: "Corner Deli", name: pos.name, position: String(row.position || pos.position || ""),
     roleGroup: row.role_group, posRole: pos.posRole, deviceSessionId: "", expiresAt: pos.expiresAt,
-    manager: pos.posRole === "manager" || pos.posRole === "owner", driver: row.role_group === "Driver",
+    manager: pos.posRole === "manager" || pos.posRole === "owner", // Whoever took deliveries (a cashier on a short-staffed morning too) settles their own.
+    driver: row.role_group === "Driver" || (await deliveryStaffing("Corner Deli")).anyoneCanDeliver,
   };
 }
 export async function GET() {

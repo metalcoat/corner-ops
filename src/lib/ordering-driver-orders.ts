@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { ensureOrderingVariantSchema } from "@/lib/ordering-variant-schema";
 import { ensureOrderingChannelSchema } from "@/lib/ordering-channel-schema";
-import { ensureDriverDeliverySchema, type DriverActor } from "@/lib/ordering-driver-delivery";
+import { deliveryStaffing, ensureDriverDeliverySchema, type DriverActor } from "@/lib/ordering-driver-delivery";
 import { callLink, DEFAULT_CALL_LINK_TEMPLATE, validCallLinkTemplate } from "@/lib/driver-call-link";
 
 export type DispatchSettings = {
@@ -12,10 +12,16 @@ export type DispatchSettings = {
   showLiveDriver: boolean;
   /** How the tablet places calls; {phone} is replaced with the customer's digits. */
   callLinkTemplate: string;
+  /** One Driver clocked in → they get every new delivery automatically. */
+  autoAssignSolo: boolean;
+  /** Anyone clocked in (e.g. the morning cashier) can take a delivery from the tablet. */
+  anyoneCanDeliver: boolean;
 };
 const DEFAULTS: DispatchSettings = {
   showLiveDriver: false,
   callLinkTemplate: DEFAULT_CALL_LINK_TEMPLATE,
+  autoAssignSolo: true,
+  anyoneCanDeliver: true,
 };
 
 let schemaReady: Promise<void> | null = null;
@@ -36,6 +42,7 @@ export async function getDispatchSettings(business: string): Promise<DispatchSet
   const row = (await getSql()`SELECT show_live_driver,call_link_template FROM ordering_driver_dispatch_settings WHERE business=${business}`)[0];
   if (!row) return { ...DEFAULTS };
   return {
+    ...(await deliveryStaffing(business)),
     showLiveDriver: Boolean(row.show_live_driver),
     callLinkTemplate: validCallLinkTemplate(String(row.call_link_template || ""))
       ? String(row.call_link_template).trim()
@@ -52,17 +59,22 @@ export async function saveDispatchSettings(actor: DriverActor, input: Partial<Di
   const next: DispatchSettings = {
     showLiveDriver: input.showLiveDriver == null ? current.showLiveDriver : Boolean(input.showLiveDriver),
     callLinkTemplate: template,
+    autoAssignSolo: input.autoAssignSolo == null ? current.autoAssignSolo : Boolean(input.autoAssignSolo),
+    anyoneCanDeliver: input.anyoneCanDeliver == null ? current.anyoneCanDeliver : Boolean(input.anyoneCanDeliver),
   };
-  await getSql()`INSERT INTO ordering_driver_dispatch_settings(business,show_live_driver,call_link_template,updated_by,updated_at)
-    VALUES(${actor.business},${next.showLiveDriver},${next.callLinkTemplate},${actor.employeeId},NOW())
+  await getSql()`INSERT INTO ordering_driver_dispatch_settings(business,show_live_driver,call_link_template,auto_assign_solo,anyone_can_deliver,updated_by,updated_at)
+    VALUES(${actor.business},${next.showLiveDriver},${next.callLinkTemplate},${next.autoAssignSolo},${next.anyoneCanDeliver},${actor.employeeId},NOW())
     ON CONFLICT(business) DO UPDATE SET show_live_driver=EXCLUDED.show_live_driver,
-      call_link_template=EXCLUDED.call_link_template,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+      call_link_template=EXCLUDED.call_link_template,auto_assign_solo=EXCLUDED.auto_assign_solo,
+      anyone_can_deliver=EXCLUDED.anyone_can_deliver,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
   return next;
 }
 
 async function deliveryFor(actor: DriverActor, deliveryId: string) {
   const row = (await getSql()`SELECT d.id,d.order_id,d.driver_employee_id,d.status FROM ordering_delivery_assignments d WHERE d.id=${deliveryId} AND d.business=${actor.business}`)[0];
-  if (!row || !(actor.manager || row.driver_employee_id === actor.employeeId))
+  // Unclaimed deliveries are open to anyone who can drive, so they can see what's in the bag before taking it.
+  const unclaimed = actor.driver && row && !row.driver_employee_id && ["ASSIGNED", "READY_FOR_DRIVER"].includes(String(row.status));
+  if (!row || !(actor.manager || row.driver_employee_id === actor.employeeId || unclaimed))
     throw new Error("This delivery is not assigned to you.");
   return row;
 }
