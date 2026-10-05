@@ -117,6 +117,45 @@ export function extractProducts(json: unknown): WebProduct[] {
   return found;
 }
 
+/**
+ * Products whose prices arrive in a separate response from their details, joined by product number. US Foods
+ * loads its order guide this way: details from product-domain-api ({ productNumber, summary: { productDescLong,
+ * brand, salesPackSize } }) and the account's prices from price-domain-api ({ productNumber, unitPrice, priceUom }),
+ * where priceUom CS is a case price and LB or EA is per pound / per each (catch-weight and split items).
+ */
+export function joinSplitProducts(responses: unknown[]): WebProduct[] {
+  type Details = { description: string; brand: string; pack: string };
+  const key = (value: unknown) => String(value ?? "").trim().replace(/^0+(?=\d)/, "");
+  const details = new Map<string, Details>(), prices = new Map<string, { amount: number; uom: string }>();
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 8 || value == null || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (const entry of value) visit(entry, depth + 1);
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    const number = key(record.productNumber);
+    if (/^\d{3,}$/.test(number)) {
+      const summary = (record.summary && typeof record.summary === "object" ? record.summary : record) as Record<string, unknown>;
+      const description = String(summary.productDescLong || summary.productDescTxtl || "").trim();
+      const pack = String(summary.salesPackSize || "").trim();
+      if (description && pack && !details.has(number)) details.set(number, { description, brand: String(summary.brand || "").trim(), pack });
+      const amount = money(record.unitPrice as string | number);
+      if (amount != null && typeof record.priceUom === "string" && !prices.has(number)) prices.set(number, { amount, uom: record.priceUom.trim().toUpperCase() });
+    }
+    for (const entry of Object.values(record)) visit(entry, depth + 1);
+  };
+  for (const response of responses) visit(response, 0);
+  const products: WebProduct[] = [];
+  for (const [number, price] of prices) {
+    const product = details.get(number);
+    if (!product) continue;
+    const perCase = price.uom === "CS" || price.uom === "CASE";
+    products.push({ sku: number, description: product.description, brand: product.brand, pack: product.pack, size: "", unit: perCase ? "" : price.uom, casePrice: perCase ? price.amount : null, unitPrice: perCase ? null : price.amount });
+  }
+  return products;
+}
+
 /** One row per product (by item # or name), keeping the entry with a case price. */
 export function dedupeProducts(products: WebProduct[]): WebProduct[] {
   const byKey = new Map<string, WebProduct>();

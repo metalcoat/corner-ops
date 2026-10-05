@@ -64,6 +64,19 @@ export function parseSize(text: string): { quantity: number; unit: string } | nu
     if (count === 1 && size >= 2 && size <= 4 && ["gal", "qt", "pt", "lb"].includes(unit)) return { quantity: 1 / size, unit };
     return { quantity: count * size, unit };
   }
+  // US Foods: nested packs, weight ranges and averages, e.g. "3/2/8.3 LBA" (3 × 2 × 8.3 lb), "2/9-10 LBA"
+  // (2 × 9–10 lb, counted at the middle), "4/.5 GA", "4/13/1.25#A", "2/5 LBA+" (A = average weight).
+  const nested = /^((?:(?:\d*\.)?\d+(?:-(?:\d*\.)?\d+)?\s*\/\s*)+(?:\d*\.)?\d+(?:-(?:\d*\.)?\d+)?)\s*(#a?|[a-z]+)\+?$/.exec(t);
+  if (nested) {
+    const raw = nested[2], unit = UNIT_WORDS[raw] ?? (raw.endsWith("a") ? UNIT_WORDS[raw.slice(0, -1)] : undefined);
+    if (unit) {
+      const quantity = nested[1].split("/").reduce((total, part) => {
+        const [low, high] = part.trim().split("-").map(Number);
+        return total * (high ? (low + high) / 2 : low);
+      }, 1);
+      if (Number.isFinite(quantity) && quantity > 0) return { quantity: Math.round(quantity * 1000) / 1000, unit };
+    }
+  }
   const single = /^(\d+(?:\.\d+)?|\d+\s+\d+\/\d+|\d+\/\d+)\s*(#|[a-z][a-z .]*)$/.exec(t);
   if (single) return { quantity: fraction(single[1]), unit: normalizeUnit(single[2]) };
   const bare = /^(\d+(?:\.\d+)?)$/.exec(t);

@@ -10,7 +10,7 @@
 // started by deploy/supplier-prices-sync.sh --website on a timer.
 import { chromium } from "playwright";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dedupeProducts, extractProducts, extractSignInCode, productsToCsv } from "./supplier-web-extract.ts";
+import { dedupeProducts, extractProducts, extractSignInCode, joinSplitProducts, productsToCsv } from "./supplier-web-extract.ts";
 
 const SECRET = process.env.CRON_SECRET || "";
 const DEBUG = process.env.DEBUG_DIR || "/debug";
@@ -116,9 +116,12 @@ async function typeInto(field, value) {
 }
 
 async function submit(page, field) {
-  const button = page.locator(SUBMIT);
-  if (await visible(button)) await button.first().click().catch(() => field.press("Enter"));
-  else await field.press("Enter");
+  // Sign-in pages keep hidden submit buttons for other steps; only press one that is showing.
+  const button = page.locator(SUBMIT).filter({ visible: true });
+  // Some pages submit by themselves once the value is complete (US Foods' code box), so the field may be gone.
+  const enter = async () => { if (await field.isVisible().catch(() => false)) await field.press("Enter", { timeout: 5_000 }).catch(() => {}); };
+  if (await visible(button)) await button.first().click().catch(enter);
+  else await enter();
   await page.waitForLoadState("domcontentloaded", { timeout: 30_000 }).catch(() => {});
   await page.waitForTimeout(3_000);
 }
@@ -225,7 +228,7 @@ function loginPrompt(page) {
 }
 
 async function signIn(page, supplier, user, password) {
-  let askedForCode = false;
+  let askedForCode = false, choseMethod = false;
   for (let step = 0; step < 8; step++) {
     const passwordField = page.locator(PASSWORD_FIELD), userField = page.locator(USER_FIELD), codeField = page.locator(CODE_FIELD);
     const bodyText = (await page.locator("body").innerText().catch(() => "")).slice(0, 5_000);
@@ -238,6 +241,30 @@ async function signIn(page, supplier, user, password) {
       const remember = page.getByLabel(/remember|trust this|don.t ask|this device/i);
       if (await visible(remember)) await remember.first().check().catch(() => {});
       await submit(page, codeField.first());
+      continue;
+    }
+    // "Would you like to stay signed in on this device?" Yes keeps this browser trusted, so later runs skip the code.
+    const staySignedIn = page.getByRole("button", { name: /^\s*yes\s*$/i });
+    if (/stay signed in|remember (this|me)|trust this (device|browser)/i.test(bodyText) && (await visible(staySignedIn))) {
+      await staySignedIn.first().click().catch(() => {});
+      await page.waitForLoadState("domcontentloaded", { timeout: 30_000 }).catch(() => {});
+      await page.waitForTimeout(6_000);
+      continue;
+    }
+    // One button per destination, e.g. US Foods' "Text ***-***-3125" / "Email c***@gmail.com" (no wording to match).
+    const via = (process.env[`${supplier.key}_CODE_VIA`] || "email").toLowerCase();
+    const methodButton = page.getByRole("button", { name: via === "text" ? /^\s*(text|sms)\b/i : /^\s*e-?mail\b/i });
+    if (await visible(methodButton)) {
+      // Choosing sends a code; if the page doesn't move on, stop rather than send another one.
+      if (choseMethod) return { status: "needs_login", message: `${supplier.name} didn't move past choosing where to send the sign-in code.` };
+      choseMethod = true;
+      await methodButton.first().click();
+      await page.waitForTimeout(4_000);
+      const send = page.locator(SUBMIT).filter({ visible: true });
+      if (!(await visible(page.locator(CODE_FIELD))) && (await visible(send))) {
+        await send.first().click().catch(() => {});
+        await page.waitForTimeout(4_000);
+      }
       continue;
     }
     // "Where should we send your code?" — pick email or text, then send.
@@ -292,7 +319,7 @@ async function signIn(page, supplier, user, password) {
  * prices or account details.
  */
 function describe(json, path = "", depth = 0, out = []) {
-  if (depth > 6 || out.length > 120) return out.join("\n");
+  if (depth > 6 || out.length > 400) return out.join("\n");
   if (Array.isArray(json)) {
     out.push(`  ${path || "(root)"}: list of ${json.length}`);
     if (json.length && json[0] && typeof json[0] === "object") describe(json[0], `${path}[0]`, depth + 1, out);
@@ -427,7 +454,8 @@ async function run(supplier) {
       console.log(`${supplier.name}: landed on ${page.url()}`);
       await loadEverything(page);
     }
-    const found = () => dedupeProducts(captured.flatMap((c) => extractProducts(c.json)));
+    // Products in one response, plus products whose prices come in a separate response (US Foods).
+    const found = () => dedupeProducts([...captured.flatMap((c) => extractProducts(c.json)), ...joinSplitProducts(captured.map((c) => c.json))]);
     // The page we opened had no list prices (sites move things): look for the
     // order guide / lists in the site's own menus, then open the first list.
     const visited = new Set([page.url()]);

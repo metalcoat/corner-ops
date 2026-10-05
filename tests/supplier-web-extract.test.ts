@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dedupeProducts, extractProducts, productsToCsv } from "../src/lib/supplier-web-extract.js";
+import { dedupeProducts, extractProducts, joinSplitProducts, productsToCsv } from "../src/lib/supplier-web-extract.js";
 import { parseGuide } from "../src/lib/supplier-order-guide.js";
 
 test("finds products in a nested order-guide response (pack + size, case price)", () => {
@@ -61,4 +61,29 @@ test("finds the sign-in code in supplier emails, not years, prices, or addresses
   assert.equal(extractSignInCode("<p>Hello,</p><p>Use this one-time code to sign in:</p><h2>&nbsp;730 441&nbsp;</h2>".replace("730 441", "730441")), "730441");
   assert.equal(extractSignInCode("© 2026 US Foods, 9399 W Higgins Rd, Rosemont IL 60018. Order total $1234.50. Your passcode: 5521"), "5521");
   assert.equal(extractSignInCode("Thanks for your order of 2026-10-05. Call 315-555-0100."), null);
+});
+
+test("US Foods: prices and details from separate responses are joined by product number", () => {
+  // Shapes as US Foods' order guide loads them (values made up).
+  const details = { items: [
+    { productNumber: 1328699, summary: { productDescLong: "Shortening, Frying Soybean Liquid", productDescTxtl: "SHORTENING FRY SOY", brand: "Harvest Value", salesPackSize: "1/35 LB", priceUom: "CS" } },
+    { productNumber: 2720977, summary: { productDescLong: "Chicken, Breast Boneless Skinless Raw", brand: "Cross Valley", salesPackSize: "4/10 LB", priceUom: "LB", catchWeightFlag: true } },
+    { productNumber: 9999999, summary: { productDescLong: "Not on this account's price list", brand: "X", salesPackSize: "6/1 GAL" } },
+  ] };
+  const pricing = { messageHeader: { responseCode: 0 }, messageDetail: { productList: [
+    { productNumber: "1328699", unitPrice: "41.27", priceUom: "CS", eachPrice: "0" },
+    { productNumber: "002720977", unitPrice: "2.89", priceUom: "LB", eachPrice: "0" },
+    { productNumber: "5550001", unitPrice: "12.00", priceUom: "CS" },
+  ] } };
+  const guideItems = [{ productNumber: 1328699, itemSequenceNumber: 1 }, { productNumber: 2720977, itemSequenceNumber: 2 }];
+  // Neither response is a product list by itself.
+  assert.deepEqual([details, pricing, guideItems].flatMap((r) => extractProducts(r)).filter((p) => p.casePrice != null || p.unitPrice != null), []);
+  const products = joinSplitProducts([guideItems, details, pricing]);
+  assert.deepEqual(products, [
+    { sku: "1328699", description: "Shortening, Frying Soybean Liquid", brand: "Harvest Value", pack: "1/35 LB", size: "", unit: "", casePrice: 41.27, unitPrice: null },
+    { sku: "2720977", description: "Chicken, Breast Boneless Skinless Raw", brand: "Cross Valley", pack: "4/10 LB", size: "", unit: "LB", casePrice: null, unitPrice: 2.89 },
+  ]);
+  // The app's importer reads them: a case price, and a per-pound price times the 40 lb case.
+  const { products: parsed } = parseGuide(productsToCsv(products));
+  assert.deepEqual(parsed.map((p) => [p.sku, p.packQuantity, p.packUnit, p.priceCents]), [["1328699", 35, "lb", 4127], ["2720977", 40, "lb", 11560]]);
 });
