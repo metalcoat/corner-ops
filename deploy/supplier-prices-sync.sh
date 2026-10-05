@@ -76,6 +76,8 @@ shopt -s nullglob
 status=0
 for dir in "$DROP"/*/; do
   supplier="$(basename "$dir")"
+  # _website holds the website job's own debug files, not a supplier's prices.
+  [[ "$supplier" == _* ]] && continue
   for file in "$dir"*.csv "$dir"*.txt "$dir"*.tsv; do
     stamp="$(date +%Y%m%d-%H%M%S)"
     body="$(python3 -c 'import json,sys; print(json.dumps({"supplier": sys.argv[1], "csv": open(sys.argv[2], encoding="utf-8-sig", errors="replace").read()}))' "$supplier" "$file")"
