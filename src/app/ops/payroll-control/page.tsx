@@ -144,38 +144,6 @@ function easternInputValue(value: string | null) {
   return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
 }
 
-function easternOffsetMilliseconds(date: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: EASTERN_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return Date.UTC(
-    Number(values.year), Number(values.month) - 1, Number(values.day),
-    Number(values.hour), Number(values.minute), Number(values.second),
-  ) - date.getTime();
-}
-
-function easternInputToIso(value: string) {
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
-  if (!match) throw new Error("Enter a valid Eastern date and time.");
-  const wall = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), 0);
-  let timestamp = wall;
-  for (let index = 0; index < 3; index += 1) timestamp = wall - easternOffsetMilliseconds(new Date(timestamp));
-  return new Date(timestamp).toISOString();
-}
-
-async function errorMessage(response: Response) {
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  return payload?.error || `Request failed (${response.status}).`;
-}
-
 export default function PayrollControlPage() {
   const [session, setSession] = useState<SessionView | null>(null);
   const [business, setBusiness] = useState<Business>("Corner Deli");
@@ -198,7 +166,7 @@ export default function PayrollControlPage() {
       `/api/payroll-control?business=${encodeURIComponent(activeBusiness)}&weekStart=${encodeURIComponent(activeWeek)}&displayVersion=20260804-3`,
       { cache: "no-store", headers: { "Cache-Control": "no-cache" } },
     );
-    if (!response.ok) throw new Error(await errorMessage(response));
+    if (!response.ok) throw new Error(await responseMessage(response));
     setData(await response.json() as Dashboard);
   }
 
@@ -218,7 +186,7 @@ export default function PayrollControlPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!response.ok) throw new Error(await errorMessage(response));
+      if (!response.ok) throw new Error(await responseMessage(response));
       const result = await response.json();
       await load(business, weekStart);
       return result;
@@ -467,7 +435,7 @@ export default function PayrollControlPage() {
           <label>Source transaction<input name="sourceTransactionId" /></label>
           <label>Employee<select name="employeeName" required><option value="">Choose employee</option>{data?.summary.rows.map((row) => <option key={row.employee}>{row.employee}</option>)}</select></label>
           <label>Amount<input name="amount" type="number" step="0.01" required /></label>
-          <label>Reason<input name="reason" required /></label>
+          <label>Reason<input name="reason" minLength={3} placeholder="Why this tip belongs to this employee" required /><small>Required for the payroll audit.</small></label>
           <button className="primary" disabled={busy}>Apply & recalculate</button>
         </form>
         <div className="list">{data?.summary.overrides.map((override) => {

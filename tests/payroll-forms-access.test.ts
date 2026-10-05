@@ -207,22 +207,26 @@ for (const reason of [undefined, null, "", "   ", "x", "Forgot to clock out"]) {
   });
 }
 test("Tiki HTTP correction saves without a supplied reason", async () => {
-  const reasons: unknown[] = [];
+  const audits: unknown[][] = [];
+  let saved = false;
   const row = { id, employee_id: employeeId, employee_name: "Synthetic Employee", position: "Bartender", clock_in: "2026-09-01T14:00:00Z", clock_out: "2026-09-01T15:00:00Z", status: "Corrected" };
   const route = loadSource("src/app/api/tiki-time-corrections/route.ts", {
     "@/lib/auth": { ...auth, getSession: async () => identity("Owner") }, "@/lib/http": http,
     "@/lib/payroll-week": {}, "@/lib/punch-correction-reason": { normalizePunchCorrectionReason },
-    "@/lib/payroll-punch-correction": { correctPunch: async (input: { reason: unknown }) => {
-      reasons.push(input.reason); return { corrected: true, punch: row };
+    "@/lib/db": { getSql: () => async (parts: TemplateStringsArray, ...params: unknown[]) => {
+      const sql = parts.join("?");
+      if (sql.includes("INSERT INTO time_entry_adjustments")) { audits.push(params); return []; }
+      if (sql.includes("UPDATE time_entries")) { saved = true; assert.ok(params.includes("Correction: Owner time correction")); return [row]; }
+      if (sql.includes("AND id <>")) return [];
+      return [{ ...row, clock_out: saved ? row.clock_out : null }];
     } },
-    "@/lib/db": { getSql: () => async () => [] },
   });
   const response = await route.POST(new Request("https://ops.example.invalid/api/tiki-time-corrections", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "correct", sourceId: id,
       clockInWall: "2026-09-01T10:00", clockOutWall: "2026-09-01T11:00" }),
   }));
   assert.equal(response.status, 200); assert.equal((await response.json()).corrected, true);
-  assert.deepEqual(reasons, [DEFAULT_PUNCH_CORRECTION_REASON]);
+  assert.ok(audits[0].includes(DEFAULT_PUNCH_CORRECTION_REASON));
 });
 test("legacy correction entry point delegates instead of reintroducing a required reason", () => {
   const source = readFileSync("src/lib/payroll-control.ts", "utf8");

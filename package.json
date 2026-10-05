@@ -7,8 +7,9 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node tools/apply-production-migrations.mjs && next build",
     "start": "next start",
+    "db:migrate": "node tools/apply-production-migrations.mjs --force",
     "typecheck": "tsc --noEmit",
     "test": "node -e \"require('fs').rmSync('.test-dist',{recursive:true,force:true})\" && tsc -p tsconfig.tests.json && node --test .test-dist/tests/**/*.test.js",
     "db:bootstrap:local": "tsx scripts/local-db.ts bootstrap",
@@ -93,7 +94,7 @@
     "@neondatabase/serverless": "^1.0.2",
     "@types/ws": "^8.18.1",
     "@vercel/blob": "^2.3.0",
-    "next": "^16.3.1",
+    "next": "^16.3.3",
     "nodemailer": "^9.0.5",
     "openai": "^7.5.0",
     "pg": "^8.23.0",
@@ -111,13 +112,13 @@
     "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.21.0",
     "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
+    "@types/react-dom": "^19.2.0",
     "tsx": "^4.23.12",
     "typescript": "^5.7.0"
   },
   "overrides": {
     "nanoid": "3.3.18",
     "postcss": "8.5.26",
-    "sharp": "0.35.3"
+    "sharp": "0.35.4"
   }
 }

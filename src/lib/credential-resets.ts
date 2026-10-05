@@ -182,7 +182,7 @@ export async function requestEmployeePinReset(input: {
     email: employee.email,
     requestedIp: input.requestedIp,
   });
-  const base = cornerOpsBaseUrl();
+  const base = cornerOpsBaseUrl(employee.business);
   if (!base) throw new Error("APP_URL must be configured before PIN reset email can be sent.");
   const link = `${base}/employee/reset-pin?token=${encodeURIComponent(token)}`;
   await sendTransactionalEmail({

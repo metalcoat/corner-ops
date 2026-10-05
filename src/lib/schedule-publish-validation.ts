@@ -37,19 +37,23 @@ export async function publishValidatedScheduleWeek(input: {
   business: Business;
   weekStart: string;
   actor: string;
+  allowOvertime?: boolean;
 }) {
   await ensureScheduleMealSchema();
   const weekStart = validWeekStart(input.weekStart);
   const rows = await getSql()`
-    SELECT s.id, s.employee_id, e.name AS employee_name, s.starts_at, s.ends_at,
+    SELECT s.id,
+      CASE WHEN e.active IS TRUE THEN s.employee_id ELSE NULL END AS employee_id,
+      CASE WHEN e.active IS TRUE THEN e.name ELSE 'Open / unassigned' END AS employee_name,
+      s.starts_at, s.ends_at,
       s.meal_break_start, s.meal_break_minutes,
       s.extra_meal_break_start, s.extra_meal_break_minutes,
       s.status
     FROM schedule_shifts s
     LEFT JOIN employees e ON e.id = s.employee_id
     WHERE s.business = ${input.business}
-      AND s.starts_at >= (${weekStart}::date AT TIME ZONE ${TIME_ZONE})
-      AND s.starts_at < ((${weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+      AND s.starts_at >= (${weekStart}::date::timestamp AT TIME ZONE ${TIME_ZONE})
+      AND s.starts_at < (((${weekStart}::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE})
       AND s.status <> 'Cancelled'
     ORDER BY s.starts_at, e.name
   ` as unknown as Array<{
@@ -85,9 +89,10 @@ export async function publishValidatedScheduleWeek(input: {
     JOIN employees e ON e.id = s.employee_id
     JOIN time_off_requests t ON t.employee_id = s.employee_id AND t.business = s.business
     WHERE s.business = ${input.business}
-      AND s.starts_at >= (${weekStart}::date AT TIME ZONE ${TIME_ZONE})
-      AND s.starts_at < ((${weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+      AND s.starts_at >= (${weekStart}::date::timestamp AT TIME ZONE ${TIME_ZONE})
+      AND s.starts_at < (((${weekStart}::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE})
       AND s.status <> 'Cancelled'
+      AND e.active = TRUE
       AND t.status = 'Approved'
       AND t.starts_on <= ((s.ends_at - INTERVAL '1 millisecond') AT TIME ZONE ${TIME_ZONE})::date
       AND t.ends_on >= (s.starts_at AT TIME ZONE ${TIME_ZONE})::date
@@ -98,8 +103,8 @@ export async function publishValidatedScheduleWeek(input: {
   if (approvedTimeOffConflicts.length) {
     problems.push(`Approved time off conflicts: ${approvedTimeOffConflicts.slice(0, 8).map((item) => `${item.employee_name} at ${localStamp(item.starts_at)}`).join("; ")}. Reassign or open these shifts.`);
   }
-  if (analysis.overForty.length) {
-    problems.push(`Over 40 paid hours: ${analysis.overForty.map((employee) => `${employee.employeeName} (${employee.hours.toFixed(1)} hrs)`).join(", ")}`);
+  if (analysis.overForty.length && !input.allowOvertime) {
+    problems.push(`Overtime approval required: ${analysis.overForty.map((employee) => `${employee.employeeName} (${employee.hours.toFixed(1)} hrs)`).join(", ")}. Confirm the overtime in the schedule publisher.`);
   }
   if (analysis.overlaps.length) {
     problems.push(`Overlapping shifts: ${analysis.overlaps.slice(0, 4).map((overlap) => `${overlap.employeeName} at ${localStamp(overlap.startsAt)}`).join("; ")}`);
@@ -120,7 +125,18 @@ export async function publishValidatedScheduleWeek(input: {
     throw new Error(`Schedule cannot be published. ${problems.join(" | ")}`);
   }
 
-  const publication = await publishBusinessScheduleWeek({ ...input, weekStart });
+  const publication = await publishBusinessScheduleWeek({
+    business: input.business,
+    weekStart,
+    actor: input.actor,
+    overtimeOverride: input.allowOvertime
+      ? analysis.overForty.map((employee) => ({
+          employeeId: employee.employeeId,
+          employeeName: employee.employeeName,
+          hours: employee.hours,
+        }))
+      : [],
+  });
   const duplicate = "duplicate" in publication && publication.duplicate === true;
   const employeeIds = "affectedEmployeeIds" in publication && Array.isArray(publication.affectedEmployeeIds)
     ? publication.affectedEmployeeIds.filter((value): value is string => typeof value === "string" && Boolean(value))

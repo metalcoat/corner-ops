@@ -1,7 +1,6 @@
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { getSql } from "@/lib/db";
 import { apiError, unauthorized, ValidationError } from "@/lib/http";
-import { correctPunch } from "@/lib/payroll-punch-correction";
 import { payrollWeekBounds } from "@/lib/payroll-week";
 import { normalizePunchCorrectionReason } from "@/lib/punch-correction-reason";
 
@@ -40,8 +39,27 @@ function easternWallToIso(value: unknown) {
   return new Date(timestamp).toISOString();
 }
 
+function easternLabel(value: unknown) {
+  if (!value) return "Open";
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return "Invalid time";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(parsed);
+}
+
 function correctionReason(value: unknown) {
   return normalizePunchCorrectionReason(value);
+}
+
+function clean(value: unknown, max: number) {
+  return String(value || "").trim().slice(0, max);
 }
 
 async function adjustment(input: {
@@ -60,6 +78,175 @@ async function adjustment(input: {
       ${input.reason}, ${input.actor}
     )
   `;
+}
+
+async function reconcileLiveClockState(input: {
+  sourceId: string;
+  reason: string;
+  actor: string;
+}) {
+  const selectedRows = await getSql()`
+    SELECT * FROM time_entries
+    WHERE id = ${input.sourceId}::uuid AND business = 'Tiki'
+    LIMIT 1
+  ` as unknown as Array<Record<string, unknown>>;
+  const selected = selectedRows[0];
+  if (!selected) throw new ValidationError("The corrected Tiki punch could not be reloaded.");
+  if (!selected.clock_out) return { staleOpenPunchesResolved: 0 };
+
+  const correctedOut = new Date(String(selected.clock_out));
+  if (Number.isNaN(correctedOut.getTime())) throw new ValidationError("The corrected Tiki clock-out is invalid.");
+  const correctedOutIso = correctedOut.toISOString();
+
+  const staleRows = await getSql()`
+    SELECT * FROM time_entries
+    WHERE business = 'Tiki'
+      AND employee_id = ${String(selected.employee_id)}::uuid
+      AND id <> ${input.sourceId}::uuid
+      AND clock_out IS NULL
+      AND clock_in <= ${correctedOutIso}
+    ORDER BY clock_in, created_at, id
+  ` as unknown as Array<Record<string, unknown>>;
+
+  let resolved = 0;
+  for (const stale of staleRows) {
+    const savedRows = await getSql()`
+      UPDATE time_entries SET
+        clock_out = clock_in,
+        status = 'Corrected',
+        notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${input.reason}. Stale open punch zeroed after owner correction reconciled live clock state.`}::text),
+        updated_at = NOW()
+      WHERE id = ${String(stale.id)}::uuid
+        AND business = 'Tiki'
+        AND clock_out IS NULL
+      RETURNING *
+    ` as unknown as Array<Record<string, unknown>>;
+    const after = savedRows[0];
+    if (!after) continue;
+    try {
+      await adjustment({
+        sourceId: String(stale.id),
+        before: stale,
+        after,
+        reason: input.reason,
+        actor: input.actor,
+      });
+    } catch (error) {
+      console.error("[tiki-time-correction] stale-punch audit failed", {
+        sourceId: String(stale.id),
+        error,
+      });
+    }
+    resolved += 1;
+  }
+
+  return { staleOpenPunchesResolved: resolved };
+}
+
+async function correctTikiPunch(input: {
+  sourceId: string;
+  employeeName: string;
+  position: string;
+  clockIn: string;
+  clockOut: string | null;
+  reason: string;
+  actor: string;
+}) {
+  const requestId = crypto.randomUUID().slice(0, 8);
+  const clockIn = new Date(input.clockIn);
+  const clockOut = input.clockOut ? new Date(input.clockOut) : null;
+  if (Number.isNaN(clockIn.getTime())) throw new ValidationError("Enter a valid clock-in time.");
+  if (clockOut && Number.isNaN(clockOut.getTime())) throw new ValidationError("Enter a valid clock-out time.");
+  if (clockOut && clockOut < clockIn) throw new ValidationError("Clock-out cannot precede clock-in.");
+
+  try {
+    const beforeRows = await getSql()`
+      SELECT * FROM time_entries
+      WHERE id = ${input.sourceId}::uuid AND business = 'Tiki'
+      LIMIT 1
+    ` as unknown as Array<Record<string, unknown>>;
+    const before = beforeRows[0];
+    if (!before) throw new ValidationError("That Tiki punch was not found. Reload payroll and try again.");
+
+    const savedRows = await getSql()`
+      UPDATE time_entries SET
+        employee_name = ${input.employeeName || String(before.employee_name || "")},
+        position = ${input.position || String(before.position || "")},
+        clock_in = ${clockIn.toISOString()},
+        clock_out = ${clockOut?.toISOString() || null},
+        status = 'Corrected',
+        notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${input.reason}`}::text),
+        updated_at = NOW()
+      WHERE id = ${input.sourceId}::uuid AND business = 'Tiki'
+      RETURNING *
+    ` as unknown as Array<Record<string, unknown>>;
+    const saved = savedRows[0];
+    if (!saved) throw new Error("The Tiki punch update returned no row.");
+
+    let auditSaved = true;
+    try {
+      await adjustment({
+        sourceId: input.sourceId,
+        before,
+        after: saved,
+        reason: input.reason,
+        actor: input.actor,
+      });
+    } catch (error) {
+      auditSaved = false;
+      console.error("[tiki-time-correction] primary audit failed", { requestId, sourceId: input.sourceId, error });
+    }
+
+    let staleOpenPunchesResolved = 0;
+    let cleanupWarning = "";
+    try {
+      const liveState = await reconcileLiveClockState({ sourceId: input.sourceId, reason: input.reason, actor: input.actor });
+      staleOpenPunchesResolved = liveState.staleOpenPunchesResolved;
+    } catch (error) {
+      cleanupWarning = "The punch saved, but live-clock cleanup needs review.";
+      console.error("[tiki-time-correction] live-clock cleanup failed", { requestId, sourceId: input.sourceId, error });
+    }
+
+    console.info("[tiki-time-correction] saved", {
+      requestId,
+      sourceId: input.sourceId,
+      employeeName: String(saved.employee_name || ""),
+      clockIn: saved.clock_in,
+      clockOut: saved.clock_out,
+      auditSaved,
+      staleOpenPunchesResolved,
+    });
+
+    return {
+      corrected: true,
+      requestId,
+      punch: {
+        id: String(saved.id),
+        employeeId: String(saved.employee_id),
+        employeeName: String(saved.employee_name),
+        clockIn: new Date(String(saved.clock_in)).toISOString(),
+        clockOut: saved.clock_out ? new Date(String(saved.clock_out)).toISOString() : null,
+        clockInEastern: easternLabel(saved.clock_in),
+        clockOutEastern: easternLabel(saved.clock_out),
+        status: String(saved.status),
+      },
+      auditSaved,
+      staleOpenPunchesResolved,
+      warning: cleanupWarning || (auditSaved ? "" : "The punch saved, but its audit entry needs review."),
+    };
+  } catch (error) {
+    console.error("[tiki-time-correction] save failed", {
+      requestId,
+      sourceId: input.sourceId,
+      employeeName: input.employeeName,
+      clockIn: input.clockIn,
+      clockOut: input.clockOut,
+      error,
+    });
+    if (error instanceof ValidationError) throw error;
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ValidationError(`Tiki correction failed [${requestId}]: ${detail}`);
+  }
 }
 
 export async function GET(request: Request) {
@@ -113,17 +300,17 @@ export async function POST(request: Request) {
     const action = String(body.action || "");
 
     if (action === "correct") {
+      const sourceId = String(body.sourceId || "");
+      const reason = correctionReason(body.reason);
       const clockIn = easternWallToIso(body.clockInWall);
       const clockOut = String(body.clockOutWall || "").trim() ? easternWallToIso(body.clockOutWall) : null;
-      return Response.json(await correctPunch({
-        business: "Tiki",
-        sourceType: "Tiki",
-        sourceId: String(body.sourceId || ""),
-        employeeName: body.employeeName ? String(body.employeeName) : undefined,
-        position: body.position ? String(body.position) : undefined,
+      return Response.json(await correctTikiPunch({
+        sourceId,
+        employeeName: clean(body.employeeName, 120),
+        position: clean(body.position, 100),
         clockIn,
         clockOut,
-        reason: correctionReason(body.reason),
+        reason,
         actor: session.email,
       }));
     }
@@ -159,7 +346,7 @@ export async function POST(request: Request) {
         UPDATE time_entries SET
           clock_out = ${mistakenClockInIso},
           status = 'Corrected',
-          notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${reason}. Lunch/duplicate IN used as prior shift OUT.`}),
+          notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${reason}. Lunch/duplicate IN used as prior shift OUT.`}::text),
           updated_at = NOW()
         WHERE id = ${String(prior.id)}::uuid AND business = 'Tiki'
         RETURNING *
@@ -168,7 +355,7 @@ export async function POST(request: Request) {
         UPDATE time_entries SET
           clock_out = clock_in,
           status = 'Corrected',
-          notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${reason}. Mistaken IN moved to prior shift OUT; this row was zeroed.`}),
+          notes = CONCAT_WS(E'\n', NULLIF(notes, ''), ${`Correction: ${reason}. Mistaken IN moved to prior shift OUT; this row was zeroed.`}::text),
           updated_at = NOW()
         WHERE id = ${sourceId}::uuid AND business = 'Tiki'
         RETURNING *
@@ -180,12 +367,14 @@ export async function POST(request: Request) {
 
       await adjustment({ sourceId: String(prior.id), before: prior, after: priorAfter, reason, actor: session.email });
       await adjustment({ sourceId, before: mistaken, after: mistakenAfter, reason, actor: session.email });
+      const liveState = await reconcileLiveClockState({ sourceId: String(prior.id), reason, actor: session.email });
 
       return Response.json({
         corrected: true,
         priorShiftId: String(prior.id),
         mistakenPunchId: sourceId,
         priorClockOut: mistakenClockInIso,
+        ...liveState,
       });
     }
 

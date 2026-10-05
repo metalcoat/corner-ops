@@ -21,10 +21,12 @@ In the `DeliTiki` team, open the `corner-ops` project and go to **Settings → E
 ```text
 TELNYX_API_KEY=<Telnyx API key>
 TELNYX_FROM_NUMBER=<Telnyx SMS number in E.164 format>
-EMPLOYEE_APP_URL=https://corner-ops.vercel.app
+EMPLOYEE_APP_URL=https://team.ordercornerdeli.com
 ```
 
 Redeploy Production after changing environment variables.
+
+Production notifications use `team.ordercornerdeli.com` for Corner Deli and `team.atthedocks.com` for Tiki. Development continues to use its own `EMPLOYEE_APP_URL`.
 
 ## Employee records
 

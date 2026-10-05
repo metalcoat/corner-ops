@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { isInternalRequest } from "@/lib/internal-request";
+import { hmacSignature } from "@/lib/security-keys";
+import { isTeamHost, teamRoute } from "@/lib/team-domain-routing";
 import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "corner_ops_session";
@@ -70,7 +72,12 @@ function equal(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function signedValue<T>(request: NextRequest, cookieName: string): T | null {
+/**
+ * Cookies are signed with SESSION_SECRET. The owner cookie may instead carry
+ * production's purpose-specific "owner-session" key (see security-keys), so
+ * both are accepted.
+ */
+function signedValue<T>(request: NextRequest, cookieName: string, purpose?: { name: string; envName: string }): T | null {
   const raw = request.cookies.get(cookieName)?.value;
   const secret = process.env.SESSION_SECRET;
   if (!raw || !secret) return null;
@@ -79,7 +86,15 @@ function signedValue<T>(request: NextRequest, cookieName: string): T | null {
   const expected = createHmac("sha256", secret)
     .update(encoded)
     .digest("base64url");
-  if (!equal(expected, supplied)) return null;
+  let valid = equal(expected, supplied);
+  if (!valid && purpose) {
+    try {
+      valid = equal(hmacSignature(encoded, purpose.name, { envName: purpose.envName }), supplied);
+    } catch {
+      valid = false;
+    }
+  }
+  if (!valid) return null;
   try {
     return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as T;
   } catch {
@@ -88,7 +103,7 @@ function signedValue<T>(request: NextRequest, cookieName: string): T | null {
 }
 
 function token(request: NextRequest): Token | null {
-  const value = signedValue<Token>(request, COOKIE_NAME);
+  const value = signedValue<Token>(request, COOKIE_NAME, { name: "owner-session", envName: "OWNER_SESSION_SECRET" });
   return value && Number(value.expiresAt || 0) > Date.now() ? value : null;
 }
 
@@ -224,6 +239,14 @@ function needed(path: string, method: string): string | null {
   return null;
 }
 
+function visitorHost(request: NextRequest): string {
+  return (request.headers.get("x-forwarded-host") || request.headers.get("host") || request.nextUrl.host)
+    .split(",")[0]
+    .trim()
+    .replace(/:\d+$/, "")
+    .toLowerCase();
+}
+
 function securedResponse(request: NextRequest): NextResponse {
   const allowed = (process.env.ALLOWED_HOSTS || "")
     .split(",")
@@ -284,6 +307,23 @@ export function proxy(request: NextRequest) {
     "max-age=31536000; includeSubDomains",
   );
   if (response.status === 421) return response;
+
+  // Team domains only serve workforce features. Inside the container nextUrl's
+  // host is the bind address, so read the visitor's host from the headers.
+  const host = visitorHost(request);
+  if (isTeamHost(host)) {
+    const route = teamRoute(path);
+    if (route === "deny") return new Response(null, { status: 404 });
+    if (route === "home") {
+      const home = request.nextUrl.clone();
+      home.pathname = "/team";
+      home.search = "";
+      home.protocol = "https:";
+      home.host = host;
+      home.port = "";
+      return NextResponse.redirect(home);
+    }
+  }
 
   const posAccessRoute =
     matchesPath(path, "/api/pos/access") || path === "/pos/access";

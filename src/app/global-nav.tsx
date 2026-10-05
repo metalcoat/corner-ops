@@ -31,6 +31,14 @@ const links: NavLink[] = [
   { label: "Documents", href: "/" },
 ];
 
+const teamLinks: NavLink[] = [
+  { label: "Team", href: "/team", exact: true },
+  { label: "Messages", href: "/ops/messages" },
+  { label: "Staff", href: "/ops/workforce", activePaths: ["/ops/workforce", "/ops/employees", "/ops/employment-forms"] },
+  { label: "Attendance", href: "/ops/attendance" },
+  { label: "Payroll", href: "/ops/payroll-control", activePaths: ["/ops/payroll-control", "/ops/payroll-tip-audit"] },
+];
+
 const businessNames: Business[] = ["Corner Deli", "Tiki"];
 
 function validBusiness(value: string | null | undefined): value is Business {
@@ -43,7 +51,7 @@ function linkIsActive(pathname: string, link: NavLink): boolean {
   return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
 
-export default function GlobalNav() {
+export default function GlobalNav({ teamHost = false }: { teamHost?: boolean }) {
   const pathname = usePathname();
   const [currentBusiness, setCurrentBusiness] = useState<Business>("Corner Deli");
   const [open, setOpen] = useState(false);
@@ -177,15 +185,15 @@ export default function GlobalNav() {
   if (navHidden) return null;
 
   return (
-    <nav className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label="Corner Ops features" data-business={currentBusiness}>
+    <nav className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label={teamHost ? "Team features" : "Corner Ops features"} data-business={currentBusiness}>
       <div className="globalNavTopline">
-        <a className="globalBrand" href="/ops/people">Corner Ops</a>
+        <a className="globalBrand" href={teamHost ? "/team" : "/ops/people"}>Corner Ops</a>
         <button className="globalMenuButton" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
           {open ? "Close" : "Menu"}
         </button>
       </div>
       <div className="globalNavLinks">
-        {links.map((link) => {
+        {(teamHost ? teamLinks : links).map((link) => {
           const count = link.href === "/ops/messages" ? unreadMessages : 0;
           return <a key={link.href} className={linkIsActive(pathname, link) ? "active" : ""} href={link.href}>
             <span>{link.label}</span>

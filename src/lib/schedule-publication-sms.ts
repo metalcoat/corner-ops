@@ -2,6 +2,7 @@ import { getSql } from "@/lib/db";
 import { deliverSms, type SmsRecipient } from "@/lib/sms-notifications";
 import { scheduleSmsText, type ScheduleSmsShift } from "@/lib/schedule-sms-text";
 import type { Business } from "@/lib/types";
+import { publicEmployeeHubUrl } from "@/lib/public-team-url";
 
 const TIME_ZONE = "America/New_York";
 
@@ -12,16 +13,7 @@ function clean(value: unknown, max = 500): string {
 }
 
 function employeeHubUrl(business: Business): string {
-  const configured = process.env.EMPLOYEE_APP_URL?.trim() || process.env.APP_URL?.trim();
-  const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() || process.env.VERCEL_URL?.trim();
-  const root = configured
-    ? configured.replace(/\/$/, "")
-    : vercelUrl
-      ? `https://${vercelUrl.replace(/\/$/, "")}`
-      : "";
-  if (!root) return "";
-  const hub = root.endsWith("/employee") ? root : `${root}/employee`;
-  return `${hub}?business=${encodeURIComponent(business)}`;
+  return publicEmployeeHubUrl(business);
 }
 
 export async function deliverSchedulePublicationSms(input: {
@@ -52,8 +44,8 @@ export async function deliverSchedulePublicationSms(input: {
     SELECT employee_id, position, starts_at, ends_at
     FROM schedule_shifts
     WHERE business = ${input.business}
-      AND starts_at >= (${input.weekStart}::date AT TIME ZONE ${TIME_ZONE})
-      AND starts_at < ((${input.weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+      AND starts_at >= (${input.weekStart}::date::timestamp AT TIME ZONE ${TIME_ZONE})
+      AND starts_at < (((${input.weekStart}::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE})
       AND status <> 'Cancelled'
     ORDER BY starts_at
   ` as unknown as ScheduleSmsShift[];

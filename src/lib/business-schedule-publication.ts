@@ -5,6 +5,7 @@ import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import { ensureStaffNotificationSchema } from "@/lib/staff-notifications";
 import type { SmsRecipient } from "@/lib/sms-notifications";
 import type { Business } from "@/lib/types";
+import { publicEmployeeHubUrl } from "@/lib/public-team-url";
 
 const TIME_ZONE = "America/New_York";
 
@@ -115,16 +116,7 @@ function compactShiftLabel(shift: ScheduleShiftRow): string {
 }
 
 function employeeHubUrl(business: Business): string {
-  const configured = process.env.EMPLOYEE_APP_URL?.trim() || process.env.APP_URL?.trim();
-  const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() || process.env.VERCEL_URL?.trim();
-  const root = configured
-    ? configured.replace(/\/$/, "")
-    : vercelUrl
-      ? `https://${vercelUrl.replace(/\/$/, "")}`
-      : "";
-  if (!root) return "";
-  const hub = root.endsWith("/employee") ? root : `${root}/employee`;
-  return `${hub}?business=${encodeURIComponent(business)}`;
+  return publicEmployeeHubUrl(business);
 }
 
 function pinInstruction(business: Business): string {
@@ -261,20 +253,27 @@ export async function publishBusinessScheduleWeek(input: {
   business: Business;
   weekStart: string;
   actor: string;
+  overtimeOverride?: Array<{
+    employeeId: string;
+    employeeName: string;
+    hours: number;
+  }>;
 }) {
   await ensureStaffNotificationSchema();
   const weekEnd = addDays(input.weekStart, 6);
   const sql = getSql();
 
   const shifts = await sql`
-    SELECT s.id, s.employee_id, e.name AS employee_name, s.position,
-      s.starts_at, s.ends_at, s.meal_break_start, s.meal_break_minutes,
+    SELECT s.id,
+      CASE WHEN e.active IS TRUE THEN s.employee_id ELSE NULL END AS employee_id,
+      CASE WHEN e.active IS TRUE THEN e.name ELSE 'Open / unassigned' END AS employee_name,
+      s.position, s.starts_at, s.ends_at, s.meal_break_start, s.meal_break_minutes,
       s.extra_meal_break_start, s.extra_meal_break_minutes, s.notes, s.status
     FROM schedule_shifts s
     LEFT JOIN employees e ON e.id = s.employee_id
     WHERE s.business = ${input.business}
-      AND s.starts_at >= (${input.weekStart}::date AT TIME ZONE ${TIME_ZONE})
-      AND s.starts_at < ((${input.weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
+      AND s.starts_at >= (${input.weekStart}::date::timestamp AT TIME ZONE ${TIME_ZONE})
+      AND s.starts_at < (((${input.weekStart}::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE})
       AND s.status <> 'Cancelled'
     ORDER BY s.starts_at, e.name
   ` as unknown as ScheduleShiftRow[];
@@ -357,7 +356,7 @@ export async function publishBusinessScheduleWeek(input: {
     stateHash,
     mode,
   });
-  const publicationId = crypto.randomUUID();
+  let publicationId = crypto.randomUUID();
   const emailConfigured = Boolean(emailConfiguration());
   const emailMissingCount = contacts.filter((employee) => !clean(employee.email, 255)).length;
   const emailContacts = contacts.filter((employee) => clean(employee.email, 255));
@@ -386,6 +385,13 @@ export async function publishBusinessScheduleWeek(input: {
     mode,
     hubUrl,
     pinInstruction: accessInstruction,
+    overtimeOverride: input.overtimeOverride?.length
+      ? {
+          approvedBy: input.actor,
+          approvedAt: new Date().toISOString(),
+          employees: input.overtimeOverride,
+        }
+      : null,
   };
 
   const reserved = await sql`
@@ -405,44 +411,110 @@ export async function publishBusinessScheduleWeek(input: {
 
   if (!reserved[0]) {
     const existing = await sql`
-      SELECT id, delivery_status, email_sent_count, email_missing_count, email_failed_count, email_configured,
+      SELECT id, details, published_at, delivery_status,
+        email_sent_count, email_missing_count, email_failed_count, email_configured,
         sms_sent_count, sms_missing_count, sms_failed_count, sms_configured
       FROM schedule_publications WHERE idempotency_key = ${idempotencyKey} LIMIT 1
     ` as unknown as PublicationRow[];
     const row = existing[0];
-    return {
-      publicationId: row?.id || null,
-      duplicate: true,
-      weekStart: input.weekStart,
-      weekEnd,
-      publishedShifts: shifts.length,
-      activeEmployees: allContacts.length,
-      affectedEmployees: contacts.length,
-      openShifts: openShifts.length,
-      mode,
-      deliveryStatus: row?.delivery_status || "Pending",
-      email: { configured: Boolean(row?.email_configured), sent: Number(row?.email_sent_count || 0), failed: Number(row?.email_failed_count || 0), missingEmail: Number(row?.email_missing_count || 0) },
-      sms: { configured: Boolean(row?.sms_configured), sent: Number(row?.sms_sent_count || 0), failed: Number(row?.sms_failed_count || 0), missingPhone: Number(row?.sms_missing_count || 0), notOptedIn: 0 },
-    };
+    const reservationAgeMs = row?.published_at
+      ? Date.now() - new Date(row.published_at).getTime()
+      : Number.POSITIVE_INFINITY;
+    const resumeStalledPublication = Boolean(
+      row?.id
+      && draftRows.length > 0
+      && (row.delivery_status === "Failed" || reservationAgeMs >= 15_000),
+    );
+
+    if (!resumeStalledPublication) {
+      return {
+        publicationId: row?.id || null,
+        duplicate: true,
+        weekStart: input.weekStart,
+        weekEnd,
+        publishedShifts: shifts.length,
+        activeEmployees: allContacts.length,
+        affectedEmployees: contacts.length,
+        openShifts: openShifts.length,
+        mode,
+        deliveryStatus: row?.delivery_status || "Pending",
+        email: { configured: Boolean(row?.email_configured), sent: Number(row?.email_sent_count || 0), failed: Number(row?.email_failed_count || 0), missingEmail: Number(row?.email_missing_count || 0) },
+        sms: { configured: Boolean(row?.sms_configured), sent: Number(row?.sms_sent_count || 0), failed: Number(row?.sms_failed_count || 0), missingPhone: Number(row?.sms_missing_count || 0), notOptedIn: 0 },
+      };
+    }
+
+    publicationId = row.id;
+    await withTransaction(async () => {
+      const transactionSql = getSql();
+      await transactionSql`DELETE FROM schedule_publication_deliveries WHERE publication_id = ${publicationId}`;
+      await transactionSql`
+        UPDATE schedule_publications SET
+          published_by = ${input.actor},
+          shift_count = ${shifts.length},
+          active_employee_count = ${contacts.length},
+          email_sent_count = 0,
+          email_missing_count = ${emailMissingCount},
+          email_failed_count = 0,
+          email_configured = ${emailConfigured},
+          sms_sent_count = 0,
+          sms_missing_count = 0,
+          sms_failed_count = 0,
+          sms_configured = FALSE,
+          details = ${JSON.stringify({
+            ...baseDetails,
+            recoveredStalledAttempt: true,
+            recoveredAt: new Date().toISOString(),
+          })}::jsonb,
+          delivery_status = 'Pending',
+          published_at = NOW()
+        WHERE id = ${publicationId}
+      `;
+    });
   }
 
   try {
     await withTransaction(async () => {
       const transactionSql = getSql();
+      // Shifts of employees who are no longer active go back to Open.
       await transactionSql`
-        UPDATE schedule_shifts SET
-          status = CASE WHEN employee_id IS NULL THEN 'Open' ELSE 'Published' END,
+        UPDATE schedule_shifts s SET
+          employee_id = CASE
+            WHEN s.employee_id IS NULL OR EXISTS (
+              SELECT 1 FROM employees e
+              WHERE e.id = s.employee_id AND e.business = s.business AND e.active = TRUE
+            ) THEN s.employee_id
+            ELSE NULL
+          END,
+          status = CASE
+            WHEN s.employee_id IS NULL OR NOT EXISTS (
+              SELECT 1 FROM employees e
+              WHERE e.id = s.employee_id AND e.business = s.business AND e.active = TRUE
+            ) THEN 'Open'
+            ELSE 'Published'
+          END,
           published_at = NOW(), updated_at = NOW()
-        WHERE business = ${input.business}
-          AND starts_at >= (${input.weekStart}::date AT TIME ZONE ${TIME_ZONE})
-          AND starts_at < ((${input.weekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
-          AND status <> 'Cancelled'
+        WHERE s.business = ${input.business}
+          AND s.starts_at >= (${input.weekStart}::date::timestamp AT TIME ZONE ${TIME_ZONE})
+          AND s.starts_at < (((${input.weekStart}::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE})
+          AND s.status <> 'Cancelled'
       `;
       for (const employee of contacts) {
         await transactionSql`
-          INSERT INTO employee_messages (id, business, sender_name, recipient_employee_id, message_type, body)
-          VALUES (${crypto.randomUUID()}, ${input.business}, ${input.actor}, ${employee.id}, 'Direct',
-            ${`Your ${input.business} schedule was ${scheduleVerb} for ${rangeLabel}.${hubUrl ? ` Review it in the Employee Portal: ${hubUrl}` : " Review it in the Employee Hub."}`})
+          WITH inserted AS (
+            INSERT INTO employee_messages (
+              id, business, conversation_key, sender_name,
+              recipient_employee_id, message_type, body
+            ) VALUES (
+              ${crypto.randomUUID()}::uuid, ${input.business}, ${`owner:${employee.id}`}, ${input.actor},
+              ${employee.id}::uuid, 'Conversation',
+              ${`Your ${input.business} schedule was ${scheduleVerb} for ${rangeLabel}.${hubUrl ? ` Review it in the Employee Portal: ${hubUrl}` : " Review it in the Employee Hub."}`}
+            )
+            RETURNING id
+          )
+          INSERT INTO employee_message_recipients (message_id, employee_id)
+          SELECT inserted.id, ${employee.id}::uuid
+          FROM inserted
+          ON CONFLICT (message_id, employee_id) DO NOTHING
         `;
       }
       for (const employee of emailContacts) {

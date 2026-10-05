@@ -5,6 +5,7 @@ import { employeePinLength } from "@/lib/employee-pin";
 import { ensureScheduleMealSchema, normalizeScheduledMealFields } from "@/lib/schedule-meal-storage";
 import { deliverSms, type SmsRecipient } from "@/lib/sms-notifications";
 import type { Business } from "@/lib/types";
+import { publicEmployeeHubUrl } from "@/lib/public-team-url";
 
 const TIME_ZONE = "America/New_York";
 let notificationSchemaPromise: Promise<void> | null = null;
@@ -89,11 +90,7 @@ function shiftLabel(shift: ScheduleShiftRow): string {
 }
 
 function employeeHubUrl(business: Business): string {
-  const suffix = `/employee?business=${encodeURIComponent(business)}`;
-  const configured = process.env.EMPLOYEE_APP_URL?.trim() || process.env.APP_URL?.trim();
-  if (configured) return `${configured.replace(/\/$/, "")}${suffix}`;
-  const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() || process.env.VERCEL_URL?.trim();
-  return vercelUrl ? `https://${vercelUrl.replace(/\/$/, "")}${suffix}` : "";
+  return publicEmployeeHubUrl(business);
 }
 
 function emailConfiguration() {

@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
+import { isTeamHost } from "@/lib/team-domain-routing";
 import GlobalNav from "./global-nav";
 import PwaClient from "./pwa-client";
 import "./color-tokens.css";
@@ -29,12 +31,13 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const hostname = (await headers()).get("host")?.split(":")[0] || "";
   return (
     <html lang="en" data-business-theme="Corner Deli" suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} /></head>
       <body>
-        <GlobalNav />
+        <GlobalNav teamHost={isTeamHost(hostname)} />
         {children}
         <PwaClient />
       </body>

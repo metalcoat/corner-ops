@@ -1,5 +1,7 @@
 import { Resend } from "resend";
 import nodemailer from "nodemailer";
+import { publicTeamBaseUrl } from "@/lib/public-team-url";
+import type { Business } from "@/lib/types";
 
 function clean(value: unknown, max = 500): string {
   return String(value ?? "")
@@ -7,14 +9,8 @@ function clean(value: unknown, max = 500): string {
     .slice(0, max);
 }
 
-export function cornerOpsBaseUrl(): string {
-  const configured =
-    process.env.APP_URL?.trim() || process.env.EMPLOYEE_APP_URL?.trim();
-  if (configured) return configured.replace(/\/$/, "");
-  const vercel =
-    process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() ||
-    process.env.VERCEL_URL?.trim();
-  return vercel ? `https://${vercel.replace(/\/$/, "")}` : "";
+export function cornerOpsBaseUrl(business: Business = "Corner Deli"): string {
+  return publicTeamBaseUrl(business);
 }
 
 export function ownerNotificationEmails(): string[] {

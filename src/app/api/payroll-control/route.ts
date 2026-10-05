@@ -1,7 +1,6 @@
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
-  correctPunch,
   createPayrollDraft,
   createTipOverride,
   deleteTipOverride,
@@ -9,6 +8,7 @@ import {
   payrollCsv,
   reopenPayrollRun,
 } from "@/lib/payroll-control";
+import { correctPunch } from "@/lib/payroll-punch-correction";
 import { safePayrollControlDashboard } from "@/lib/payroll-control-dashboard";
 import type { Business } from "@/lib/types";
 
@@ -55,10 +55,16 @@ export async function POST(request: Request) {
       clockIn: String(body.clockIn || ""), clockOut: body.clockOut ? String(body.clockOut) : null,
       reason: String(body.reason || ""), actor: session.email,
     }));
-    if (action === "tip-override-create") return Response.json(await createTipOverride({
-      business, weekStart: String(body.weekStart || ""), sourceTransactionId: String(body.sourceTransactionId || ""),
-      employeeName: String(body.employeeName || ""), amount: Number(body.amount || 0), reason: String(body.reason || ""), actor: session.email,
-    }), { status: 201 });
+    if (action === "tip-override-create") {
+      const reason = String(body.reason || "").trim();
+      if (reason.length < 3) {
+        return Response.json({ error: "Add a reason (at least 3 characters) for this manual tip assignment." }, { status: 400 });
+      }
+      return Response.json(await createTipOverride({
+        business, weekStart: String(body.weekStart || ""), sourceTransactionId: String(body.sourceTransactionId || ""),
+        employeeName: String(body.employeeName || ""), amount: Number(body.amount || 0), reason, actor: session.email,
+      }), { status: 201 });
+    }
     if (action === "tip-override-delete") return Response.json(await deleteTipOverride(String(body.id || ""), session.email));
     if (action === "draft-create") return Response.json(await createPayrollDraft({ business, weekStart: String(body.weekStart || ""), actor: session.email }), { status: 201 });
     if (action === "run-lock") return Response.json(await lockPayrollRun(String(body.id || ""), session.email));
