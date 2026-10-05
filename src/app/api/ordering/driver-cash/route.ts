@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { getSql } from "@/lib/db";
 import { getPosSession } from "@/lib/pos-auth";
 import { deliveryStaffing, driverActor, type DriverActor } from "@/lib/ordering-driver-delivery";
@@ -28,17 +29,17 @@ export async function GET() {
   try {
     const actor = await cashOutActor();
     if (!actor)
-      return Response.json(
+      return isoJson(
         { error: "Employee sign-in required." },
         { status: 401 },
       );
-    return Response.json(await driverCashDashboard(actor));
+    return isoJson(await driverCashDashboard(actor));
   } catch (error) {
     const message =
       error instanceof Error
         ? error.message
         : "Driver cash-out could not be loaded.";
-    return Response.json(
+    return isoJson(
       { error: message },
       { status: message.includes("access") ? 403 : 400 },
     );
@@ -48,12 +49,12 @@ export async function POST(request: Request) {
   try {
     const actor = await cashOutActor();
     if (!actor)
-      return Response.json(
+      return isoJson(
         { error: "Employee sign-in required." },
         { status: 401 },
       );
     const body = (await request.json()) as Record<string, unknown>;
-    return Response.json(
+    return isoJson(
       await postDriverCashSettlement(actor, {
         orderIds: Array.isArray(body.orderIds) ? body.orderIds.map(String) : [],
         turnedInCashCents: Number(body.turnedInCashCents),
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
       error instanceof Error
         ? error.message
         : "Driver cash-out could not be posted.";
-    return Response.json(
+    return isoJson(
       { error: message },
       { status: message.includes("access") ? 403 : 400 },
     );

@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { listWaitingOnlineOrders } from "@/lib/ordering-online-alerts";
@@ -13,7 +14,7 @@ export async function GET(request: Request) {
     if (value !== "Corner Deli" && value !== "Tiki") throw new Error("Unknown business.");
     const business: OrderingBusiness = value;
     if (!await orderingActor(business)) return unauthorized();
-    return Response.json({ business, orders: await listWaitingOnlineOrders(business) });
+    return isoJson({ business, orders: await listWaitingOnlineOrders(business) });
   } catch (error) {
     return apiError(error);
   }

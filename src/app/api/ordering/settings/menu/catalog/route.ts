@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { isoJson } from "@/lib/timestamp-values";
 import { isAuthorizationResponse, orderingManagerActor } from "@/lib/ordering-route-auth";
 import { getSql } from "@/lib/db";
 import { ensureOrderingMenuEditorSchema } from "@/lib/ordering-menu-editor-schema";
@@ -20,11 +20,11 @@ export async function GET(request:Request){
     sql`SELECT entity_type,internal_id,source,source_id,source_payload FROM ordering_menu_source_map WHERE business=${business}`,
     sql`SELECT entity_type,entity_id,field_name FROM ordering_menu_local_fields WHERE business=${business}`,
   ]);
-  return NextResponse.json({business,categories,items,variants,groups,options,links,sources,localFields});
+  return isoJson({business,categories,items,variants,groups,options,links,sources,localFields});
 }
 
 export async function POST(request:Request){
   const auth=await authorize(request);if(auth instanceof Response)return auth;
-  try{const body=await request.json();const result=body.action==="dependencies"?await menuDependencies(auth.business,body.entity,body.id):await mutateMenu({id:auth.session.id,business:auth.business},body);return NextResponse.json(result)}
-  catch(error){const message=error instanceof Error?error.message:"Menu update failed.";return NextResponse.json({error:message},{status:/duplicate key|unique/i.test(message)?409:400})}
+  try{const body=await request.json();const result=body.action==="dependencies"?await menuDependencies(auth.business,body.entity,body.id):await mutateMenu({id:auth.session.id,business:auth.business},body);return isoJson(result)}
+  catch(error){const message=error instanceof Error?error.message:"Menu update failed.";return isoJson({error:message},{status:/duplicate key|unique/i.test(message)?409:400})}
 }

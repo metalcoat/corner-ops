@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
 import { orderingOperationalReport } from "@/lib/ordering-operational-report";
@@ -10,7 +11,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url); const selected = business(url.searchParams.get("business"));
     const actor = await orderingActor(selected);
     if (!actor) return unauthorized();
-    if (!canManagePos(actor)) return Response.json({ error: "Manager or owner authorization is required for reports." }, { status: 403 });
-    return Response.json(await orderingOperationalReport({ business: selected, start: String(url.searchParams.get("start") || ""), end: String(url.searchParams.get("end") || "") }));
+    if (!canManagePos(actor)) return isoJson({ error: "Manager or owner authorization is required for reports." }, { status: 403 });
+    return isoJson(await orderingOperationalReport({ business: selected, start: String(url.searchParams.get("start") || ""), end: String(url.searchParams.get("end") || "") }));
   } catch (error) { return apiError(error); }
 }

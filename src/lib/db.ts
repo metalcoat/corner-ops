@@ -2,6 +2,14 @@ import { neon } from "@neondatabase/serverless";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool } from "pg";
 import { assertConfigured, getDatabaseDriver } from "@/lib/config";
+import { ensurePostgresStringTimestamps } from "@/lib/postgres-string-timestamps";
+
+// Match production: timestamp (1114) and timestamptz (1184) columns arrive as
+// raw PostgreSQL text (e.g. "2026-10-05 12:34:56.123456+00"), never as Date
+// objects. Installed once, before any pool or client exists. DATE (1082) keeps
+// the pg default. Use toIsoTimestamp() from "@/lib/timestamp-values" when a
+// browser (Safari) needs to parse the value.
+ensurePostgresStringTimestamps();
 
 export type SqlRow = Record<string, any>;
 

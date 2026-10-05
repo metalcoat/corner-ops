@@ -1,5 +1,5 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { randomUUID } from "node:crypto";
-import { NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { ensureOrderingTimingSchema } from "@/lib/ordering-timing-schema";
 import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
@@ -47,7 +47,7 @@ async function audit(actor: NonNullable<Awaited<ReturnType<typeof manager>>>, ac
 
 export async function GET() {
   const actor = await manager();
-  if (!actor) return NextResponse.json({ error: "Manager access required." }, { status: 403 });
+  if (!actor) return isoJson({ error: "Manager access required." }, { status: 403 });
   await ensureOrderingTimingSchema();
   const sql = getSql();
   const [settings, weekly, specials, emergency] = await Promise.all([
@@ -56,12 +56,12 @@ export async function GET() {
     sql`SELECT id,business_date,service_type,status,opens_at::text,closes_at::text,ordering_opens_at::text,ordering_cutoff_at::text,label FROM ordering_special_hours WHERE business=${business} AND business_date>=CURRENT_DATE-INTERVAL '30 days' ORDER BY business_date,service_type`,
     sql`SELECT id,service_type,starts_at,ends_at,reason,internal_note,customer_message,created_by,created_at FROM ordering_emergency_closures WHERE business=${business} AND reopened_at IS NULL AND (ends_at IS NULL OR ends_at>=NOW()) ORDER BY starts_at DESC`,
   ]);
-  return NextResponse.json({ timezone: settings[0]?.timezone || "America/New_York", weekly, specials, emergency });
+  return isoJson({ timezone: settings[0]?.timezone || "America/New_York", weekly, specials, emergency });
 }
 
 export async function PATCH(request: Request) {
   const actor = await manager();
-  if (!actor) return NextResponse.json({ error: "Manager access required." }, { status: 403 });
+  if (!actor) return isoJson({ error: "Manager access required." }, { status: 403 });
   await ensureOrderingTimingSchema();
   const sql = getSql();
   try {
@@ -82,14 +82,14 @@ export async function PATCH(request: Request) {
       if (peers.some((row) => overlaps(opensAt, closesAt, row.opens_at, row.closes_at))) throw new Error("Operating intervals cannot overlap.");
       await sql`INSERT INTO ordering_operating_windows(id,business,service_type,weekday,opens_at,closes_at,ordering_opens_at,ordering_cutoff_at,active,sort_order,updated_by) VALUES(${id},${business},${serviceType},${weekday},${opensAt}::time,${closesAt}::time,${orderingOpensAt}::time,${orderingCutoffAt}::time,${body.active !== false},${Number(body.sortOrder || 0)},${actor.id}) ON CONFLICT(id) DO UPDATE SET service_type=EXCLUDED.service_type,weekday=EXCLUDED.weekday,opens_at=EXCLUDED.opens_at,closes_at=EXCLUDED.closes_at,ordering_opens_at=EXCLUDED.ordering_opens_at,ordering_cutoff_at=EXCLUDED.ordering_cutoff_at,active=EXCLUDED.active,sort_order=EXCLUDED.sort_order,updated_by=EXCLUDED.updated_by,updated_at=NOW() WHERE ordering_operating_windows.business=${business}`;
       await audit(actor, "ordering_hours_updated", "weekly_window", id, "", { serviceType, weekday });
-      return NextResponse.json({ ok: true, id });
+      return isoJson({ ok: true, id });
     }
     if (action === "delete_weekly") {
       const id = String(body.id || "");
       const rows = await sql`DELETE FROM ordering_operating_windows WHERE id=${id} AND business=${business} RETURNING id`;
       if (!rows.length) throw new Error("Operating interval not found.");
       await audit(actor, "ordering_hours_deleted", "weekly_window", id, String(body.reason || "").trim(), {});
-      return NextResponse.json({ ok: true });
+      return isoJson({ ok: true });
     }
     if (action === "upsert_special") {
       const id = String(body.id || randomUUID());
@@ -106,7 +106,7 @@ export async function PATCH(request: Request) {
       const label = String(body.label || "").trim();
       await sql`INSERT INTO ordering_special_hours(id,business,business_date,service_type,status,opens_at,closes_at,ordering_opens_at,ordering_cutoff_at,label,updated_by) VALUES(${id},${business},${businessDate}::date,${serviceType},${status},${opensAt}::time,${closesAt}::time,${orderingOpensAt}::time,${orderingCutoffAt}::time,${label},${actor.id}) ON CONFLICT(business,business_date,service_type) DO UPDATE SET status=EXCLUDED.status,opens_at=EXCLUDED.opens_at,closes_at=EXCLUDED.closes_at,ordering_opens_at=EXCLUDED.ordering_opens_at,ordering_cutoff_at=EXCLUDED.ordering_cutoff_at,label=EXCLUDED.label,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
       await audit(actor, "special_hours_updated", "special_hours", id, label, { businessDate, serviceType, status });
-      return NextResponse.json({ ok: true, id });
+      return isoJson({ ok: true, id });
     }
     if (action === "upsert_menu_availability") {
       const id = String(body.id || randomUUID());
@@ -119,7 +119,7 @@ export async function PATCH(request: Request) {
       if (Boolean(startsAt) !== Boolean(endsAt)) throw new Error("Availability start and end must both be set or both be blank.");
       await sql`INSERT INTO ordering_menu_availability_rules(id,business,target_type,target_id,enabled,days_of_week,starts_at,ends_at,valid_from,valid_through,updated_by) VALUES(${id},${business},${targetType},${targetId},${body.enabled !== false},${days},${startsAt}::time,${endsAt}::time,${body.validFrom ? String(body.validFrom) : null}::date,${body.validThrough ? String(body.validThrough) : null}::date,${actor.id}) ON CONFLICT(business,target_type,target_id) DO UPDATE SET enabled=EXCLUDED.enabled,days_of_week=EXCLUDED.days_of_week,starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,valid_from=EXCLUDED.valid_from,valid_through=EXCLUDED.valid_through,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
       await audit(actor, "menu_availability_updated", targetType, targetId, String(body.reason || "").trim(), { days, startsAt, endsAt });
-      return NextResponse.json({ ok: true, id });
+      return isoJson({ ok: true, id });
     }
     if (action === "emergency_close") {
       const id = randomUUID();
@@ -132,7 +132,7 @@ export async function PATCH(request: Request) {
       await sql`INSERT INTO ordering_emergency_closures(id,business,service_type,starts_at,ends_at,reason,internal_note,customer_message,created_by) VALUES(${id},${business},${serviceType},${startsAt},${endsAt},${reason},${String(body.internalNote || "").trim()},${String(body.customerMessage || "").trim()},${actor.id})`;
       await sql`UPDATE ordering_orders SET affected_by_closure_id=${id},operational_follow_up_reason=${`Emergency closure: ${reason}`},updated_at=NOW() WHERE business=${business} AND timing_mode='future' AND scheduled_for>=${startsAt} AND (${endsAt}::timestamptz IS NULL OR scheduled_for<=${endsAt}) AND status NOT IN ('completed','cancelled') AND (${serviceType}='all' OR CASE WHEN service_type IN ('no_contact_delivery') THEN 'delivery' WHEN service_type IN ('bar') THEN 'dine_in' ELSE service_type END=${serviceType})`;
       await audit(actor, "emergency_closed", "emergency_closure", id, reason, { serviceType, startsAt, endsAt });
-      return NextResponse.json({ ok: true, id });
+      return isoJson({ ok: true, id });
     }
     if (action === "reopen") {
       const id = String(body.id || "");
@@ -140,10 +140,10 @@ export async function PATCH(request: Request) {
       const rows = await sql`UPDATE ordering_emergency_closures SET reopened_by=${actor.id},reopened_at=NOW() WHERE id=${id} AND business=${business} AND reopened_at IS NULL RETURNING id`;
       if (!rows.length) throw new Error("Active emergency closure not found.");
       await audit(actor, "emergency_reopened", "emergency_closure", id, reason, {});
-      return NextResponse.json({ ok: true });
+      return isoJson({ ok: true });
     }
     throw new Error("Unknown Store Operations action.");
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not update Store Operations." }, { status: 400 });
+    return isoJson({ error: error instanceof Error ? error.message : "Could not update Store Operations." }, { status: 400 });
   }
 }

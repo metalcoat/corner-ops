@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import { PaymentConflictError } from "@/lib/ordering-payments";
 import { orderingActor } from "@/lib/ordering-route-auth";
@@ -25,11 +26,11 @@ export async function POST(
       body = (await request.json()) as Record<string, unknown>;
     if (body.action === "abandon") {
       await abandonTerminalPayment({ business, orderId, sessionId: String(body.sessionId || "") });
-      return Response.json({ ok: true });
+      return isoJson({ ok: true });
     }
     if (body.action === "void") {
       await voidTerminalAuthorization({ business, orderId, sessionId: String(body.sessionId || "") });
-      return Response.json({ ok: true });
+      return isoJson({ ok: true });
     }
     let outcome: TerminalPaymentOutcome;
     if (body.action === "start")
@@ -48,11 +49,11 @@ export async function POST(
       outcome = await completeTerminalPayment({ business, orderId, actor, sessionId: String(body.sessionId || ""), tipCents: Math.round(Number(body.tipCents)) });
     else throw new MxMerchantError("Unknown terminal payment action.");
     // Pending, authorized (ask for the tip), declined, failed, and needs_review are all normal answers; the dialog decides what to show.
-    if (outcome.state !== "approved") return Response.json(outcome);
-    return Response.json(await finishTerminalApproval(outcome, orderId, business, actor), { status: 201 });
+    if (outcome.state !== "approved") return isoJson(outcome);
+    return isoJson(await finishTerminalApproval(outcome, orderId, business, actor), { status: 201 });
   } catch (e) {
     if (e instanceof MxMerchantError || e instanceof PaymentConflictError)
-      return Response.json({ error: e.message }, { status: 409 });
+      return isoJson({ error: e.message }, { status: 409 });
     return apiError(e);
   }
 }

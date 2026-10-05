@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { readCustomerOrderingSession } from "@/lib/customer-ordering-session";
 import { getSql } from "@/lib/db";
 import { requestLoyaltyRedemption } from "@/lib/ordering-loyalty";
@@ -7,7 +8,7 @@ export const runtime = "nodejs";
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = readCustomerOrderingSession(request);
   if (!session?.customerId || !session.authenticatedAt)
-    return Response.json({ error: "Sign in to use a loyalty reward." }, { status: 401 });
+    return isoJson({ error: "Sign in to use a loyalty reward." }, { status: 401 });
   try {
     const { id: orderId } = await context.params;
     const body = (await request.json()) as { programId?: string };
@@ -43,8 +44,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const [updated] = await sql`
       SELECT discount_cents,total_cents,amount_due_cents FROM ordering_orders WHERE id=${orderId}
     `;
-    return Response.json({ applications, order: updated });
+    return isoJson({ applications, order: updated });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Reward could not be applied." }, { status: 409 });
+    return isoJson({ error: error instanceof Error ? error.message : "Reward could not be applied." }, { status: 409 });
   }
 }

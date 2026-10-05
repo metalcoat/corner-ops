@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import {
   calledDidFromSipHeaders,
   callerFromSipHeaders,
@@ -34,14 +35,14 @@ export async function POST(request: Request) {
     event = await client.webhooks.unwrap(raw, request.headers);
   } catch {
     console.warn("OpenAI realtime webhook rejected: invalid signature.");
-    return Response.json(
+    return isoJson(
       { error: "Invalid webhook signature." },
       { status: 401 },
     );
   }
   console.info("OpenAI realtime webhook verified.", { eventType: event.type });
   if (event.type !== "realtime.call.incoming")
-    return Response.json({ received: true });
+    return isoJson({ received: true });
   const readiness = openAiPhoneReadiness(),
     callId = event.data.call_id,
     headers = event.data.sip_headers || [],
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
       calledDidConfigured: Boolean(calledDid),
     });
     await client.realtime.calls.reject(callId, { status_code: 480 });
-    return Response.json({
+    return isoJson({
       received: true,
       accepted: false,
       reason: !readiness.ready
@@ -84,7 +85,7 @@ export async function POST(request: Request) {
   });
   if (settings.provider !== "openai") {
     await client.realtime.calls.reject(callId, { status_code: 480 });
-    return Response.json({
+    return isoJson({
       received: true,
       accepted: false,
       reason: "openai_not_selected",
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
   }
   if (!settings.enabled) {
     await client.realtime.calls.reject(callId, { status_code: 480 });
-    return Response.json({
+    return isoJson({
       received: true,
       accepted: false,
       reason: "ai_phone_disabled",
@@ -175,7 +176,7 @@ export async function POST(request: Request) {
     });
     throw error;
   }
-  return Response.json({
+  return isoJson({
     received: true,
     accepted: true,
     testMode: true,

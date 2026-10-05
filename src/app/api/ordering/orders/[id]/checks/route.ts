@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import {
   CheckConflictError,
@@ -20,10 +21,10 @@ export async function GET(
     if (!actor) return unauthorized();
     const { id } = await params;
     await ensureInitialCheck(id, "Corner Deli", actor);
-    return Response.json({ checks: await listChecks(id, "Corner Deli") });
+    return isoJson({ checks: await listChecks(id, "Corner Deli") });
   } catch (error) {
     if (error instanceof CheckConflictError)
-      return Response.json({ error: error.message }, { status: 409 });
+      return isoJson({ error: error.message }, { status: 409 });
     return apiError(error);
   }
 }
@@ -44,7 +45,7 @@ export async function POST(
     };
     const { id } = await params;
     if (body.action === "assign") {
-      return Response.json(await assignChecks({
+      return isoJson(await assignChecks({
         orderId: id,
         business: "Corner Deli",
         checks: (body.checks || []).map((check) => check.map((line) => ({
@@ -55,7 +56,7 @@ export async function POST(
       }), { status: 201 });
     }
     if (body.evenCheckCount !== undefined) {
-      return Response.json(
+      return isoJson(
         await splitCheckEvenly({
           orderId: id,
           business: "Corner Deli",
@@ -65,7 +66,7 @@ export async function POST(
         { status: 201 },
       );
     }
-    return Response.json(
+    return isoJson(
       await splitCheck({
         orderId: id,
         business: "Corner Deli",
@@ -80,7 +81,7 @@ export async function POST(
     );
   } catch (error) {
     if (error instanceof CheckConflictError)
-      return Response.json({ error: error.message }, { status: 409 });
+      return isoJson({ error: error.message }, { status: 409 });
     return apiError(error);
   }
 }

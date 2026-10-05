@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { timingSafeEqual } from "node:crypto";
 import { apiError } from "@/lib/http";
 import { ingestThreeCxLiveCall } from "@/lib/three-cx-live-calls";
@@ -26,14 +27,14 @@ function phone(value: string): string {
 export async function GET(request: Request) {
   try {
     if (!authorized(request))
-      return Response.json({ error: "Invalid 3CX CFD secret." }, { status: 401 });
+      return isoJson({ error: "Invalid 3CX CFD secret." }, { status: 401 });
     const url = new URL(request.url);
     const callerNumber = phone(url.searchParams.get("number") || "");
     const callId = (url.searchParams.get("callId") || "").trim();
     const requestedLine = (url.searchParams.get("line") || "").replace(/\D/g, "");
     const line = requestedLine === "95" || requestedLine === "96" ? requestedLine : undefined;
     if (!callerNumber || !callId)
-      return Response.json(
+      return isoJson(
         { error: "A valid caller number and CFD call ID are required." },
         { status: 400 },
       );
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
       status: "ringing",
       startedAt: new Date().toISOString(),
     });
-    return Response.json(
+    return isoJson(
       { ...result, queue: process.env.THREE_CX_DELI_QUEUE || "90" },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );

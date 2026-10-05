@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { after } from "next/server";
 import { getSql } from "@/lib/db";
 import { apiError, unauthorized } from "@/lib/http";
@@ -32,9 +33,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     after(async () => {
       await sendCustomerOrderConfirmation(orderId);
     });
-    return Response.json({ order: submitted.order, paymentStatus: "unpaid", payLater: true }, { status: 201 });
+    return isoJson({ order: submitted.order, paymentStatus: "unpaid", payLater: true }, { status: 201 });
   } catch (error) {
-    if (error instanceof OrderConflictError) return Response.json({ error: error.message }, { status: 409 });
+    if (error instanceof OrderConflictError) return isoJson({ error: error.message }, { status: 409 });
     return apiError(error);
   }
 }

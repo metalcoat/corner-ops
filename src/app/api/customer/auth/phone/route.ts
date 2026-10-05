@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { ensureCustomerOrderingSchema } from "@/lib/customer-ordering-schema";
 import { customerSessionCookie } from "@/lib/customer-ordering-session";
@@ -23,7 +24,7 @@ export async function POST(request:Request){
       const code=String(randomInt(0,1000000)).padStart(6,"0");
       await sql`INSERT INTO ordering_customer_login_phone_codes(id,normalized_phone,customer_id,code_hash,expires_at)VALUES(${randomUUID()},${phone},${match?.id||null},${digest(phone,code)},NOW()+INTERVAL '10 minutes')`;
       await sendTransactionalSms(phone,`Your Corner Deli sign-in code is ${code}. It expires in 10 minutes.`);
-      return Response.json({sent:true});
+      return isoJson({sent:true});
     }
     if(body.action==="verify"){
       const code=String(body.code||"").replace(/\D/g,"");if(!/^\d{6}$/.test(code))throw new Error("Enter the 6-digit code.");
@@ -33,8 +34,8 @@ export async function POST(request:Request){
       let customerId=String(row.customer_id||"");
       if(!customerId){customerId=randomUUID();const label=`Customer ${phone.slice(-4)}`;await sql`INSERT INTO ordering_customers(id,business,display_name)VALUES(${customerId},'Corner Deli',${label})`;await sql`INSERT INTO ordering_customer_phones(id,customer_id,normalized_phone,display_phone,label,is_primary)VALUES(${randomUUID()},${customerId},${phone},${displayPhone(phone)},'Mobile',TRUE)`}
       await sql`UPDATE ordering_orders SET customer_id=${customerId} WHERE business='Corner Deli' AND source='web' AND customer_id IS NULL AND regexp_replace(phone_snapshot,'\\D','','g') IN (${phone.slice(-10)},${phone.replace(/\D/g,"")})`;
-      return Response.json({authenticated:true},{headers:{"Set-Cookie":customerSessionCookie({sessionId:randomUUID(),customerId,authenticatedAt:Date.now(),expiresAt:Date.now()+30*86400000})}});
+      return isoJson({authenticated:true},{headers:{"Set-Cookie":customerSessionCookie({sessionId:randomUUID(),customerId,authenticatedAt:Date.now(),expiresAt:Date.now()+30*86400000})}});
     }
-    return Response.json({error:"Unknown action."},{status:400});
-  }catch(error){return Response.json({error:error instanceof Error?error.message:"Sign-in failed."},{status:400})}
+    return isoJson({error:"Unknown action."},{status:400});
+  }catch(error){return isoJson({error:error instanceof Error?error.message:"Sign-in failed."},{status:400})}
 }

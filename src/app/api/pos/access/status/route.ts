@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { ipAllowed, networkCookie, POS_NETWORK_COOKIE, requestIp } from "@/lib/pos-network-access";
 
 export const runtime = "nodejs";
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
       "Set-Cookie": `${POS_NETWORK_COOKIE}=${networkCookie(ip)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     } });
   }
-  const response = Response.json({ allowed, ip });
+  const response = isoJson({ allowed, ip });
   if (allowed) response.headers.append("Set-Cookie", `${POS_NETWORK_COOKIE}=${networkCookie(ip)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`);
   return response;
 }

@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import { addCustomerPhone } from "@/lib/ordering-customers";
 import { orderingActor } from "@/lib/ordering-route-auth";
@@ -22,7 +23,7 @@ export async function POST(
       isPrimary: body.isPrimary === true,
       allowShared: body.allowShared === true,
     });
-    return Response.json(result, { status: result.duplicate ? 409 : 201 });
+    return isoJson(result, { status: result.duplicate ? 409 : 201 });
   } catch (error) {
     return apiError(error);
   }
@@ -36,14 +37,14 @@ export async function DELETE(
     const actor = await orderingActor("Corner Deli");
     if (!actor) return unauthorized();
     if (!canManagePos(actor))
-      return Response.json(
+      return isoJson(
         { error: "Manager or owner authorization is required." },
         { status: 403 },
       );
     const { id: customerId } = await params,
       phoneId = new URL(request.url).searchParams.get("phoneId") || "";
     if (!phoneId)
-      return Response.json(
+      return isoJson(
         { error: "Choose a phone number to remove." },
         { status: 400 },
       );
@@ -58,11 +59,11 @@ export async function DELETE(
       return row;
     });
     if (!removed)
-      return Response.json(
+      return isoJson(
         { error: "Phone number was not found." },
         { status: 404 },
       );
-    return Response.json({ removed: true });
+    return isoJson({ removed: true });
   } catch (error) {
     return apiError(error);
   }

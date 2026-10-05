@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { addressForOrder, routeDeliveryAddress } from "@/lib/ordering-address";
 import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
 import {
@@ -24,9 +25,9 @@ export async function POST(
       await sql`SELECT o.id,o.status,o.service_type,o.subtotal_cents,o.customer_id FROM ordering_customer_web_carts c JOIN ordering_orders o ON o.id=c.order_id WHERE c.order_id=${id} AND c.session_hash=${hash} AND c.replaced_at IS NULL LIMIT 1`
     )[0];
     if (!order)
-      return Response.json({ error: "Order not found." }, { status: 404 });
+      return isoJson({ error: "Order not found." }, { status: 404 });
     if (order.status !== "draft" || order.service_type !== "delivery")
-      return Response.json(
+      return isoJson(
         { error: "This delivery order can no longer be updated." },
         { status: 409 },
       );
@@ -103,7 +104,7 @@ export async function POST(
     const updated = (
       await sql`SELECT total_cents,amount_due_cents,delivery_fee_cents FROM ordering_orders WHERE id=${id}`
     )[0];
-    return Response.json({
+    return isoJson({
       address,
       customerAddressId,
       route,
@@ -113,7 +114,7 @@ export async function POST(
       deliveryFeeCents: Number(updated.delivery_fee_cents),
     });
   } catch (error) {
-    return Response.json(
+    return isoJson(
       {
         error:
           error instanceof Error

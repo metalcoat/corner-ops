@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import {
   geminiPhoneReadiness,
   testGeminiPhoneConnection,
@@ -26,7 +27,7 @@ export async function GET() {
     openai: openAiPhoneReadiness(),
     gemini: geminiPhoneReadiness(settings.geminiModel),
   };
-  return Response.json({
+  return isoJson({
     readiness: {
       ready:
         settings.provider === "gemini"
@@ -57,12 +58,12 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as { action?: string; model?: string };
     if (body.action !== "test-gemini")
-      return Response.json({ error: "Unsupported action." }, { status: 400 });
-    return Response.json({
+      return isoJson({ error: "Unsupported action." }, { status: 400 });
+    return isoJson({
       result: await testGeminiPhoneConnection(body.model),
     });
   } catch (error) {
-    return Response.json(
+    return isoJson(
       {
         error:
           error instanceof Error
@@ -86,7 +87,7 @@ export async function PUT(request: Request) {
       throw new Error(
         "Gemini calling cannot be selected until its live audio bridge is ready.",
       );
-    return Response.json({
+    return isoJson({
       settings: await saveAiPhoneSettings(
         {
           enabled: body.enabled,
@@ -104,7 +105,7 @@ export async function PUT(request: Request) {
       ),
     });
   } catch (error) {
-    return Response.json(
+    return isoJson(
       {
         error:
           error instanceof Error

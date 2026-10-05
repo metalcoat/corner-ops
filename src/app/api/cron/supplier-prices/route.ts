@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { timingSafeEqual } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { ensureSupplierCostSchema, importPrices, ingestCatalog, recordPriceSync, SupplierCostError, takeSyncCode, takeSyncRequests, type CatalogProduct } from "@/lib/ordering-supplier-costs";
@@ -19,13 +20,13 @@ function authorized(request: Request): boolean {
  *   ?requested=1       suppliers someone pressed "Sync now" for
  */
 export async function GET(request: Request) {
-  if (!process.env.CRON_SECRET?.trim()) return Response.json({ error: "CRON_SECRET is not configured." }, { status: 503 });
-  if (!authorized(request)) return Response.json({ error: "Unauthorized." }, { status: 401 });
+  if (!process.env.CRON_SECRET?.trim()) return isoJson({ error: "CRON_SECRET is not configured." }, { status: 503 });
+  if (!authorized(request)) return isoJson({ error: "Unauthorized." }, { status: 401 });
   const url = new URL(request.url);
   const supplier = url.searchParams.get("code");
-  if (supplier) return Response.json({ code: await takeSyncCode(supplier) });
-  if (url.searchParams.get("requested")) return Response.json({ suppliers: await takeSyncRequests() });
-  return Response.json({ error: "Ask for code or requested." }, { status: 400 });
+  if (supplier) return isoJson({ code: await takeSyncCode(supplier) });
+  if (url.searchParams.get("requested")) return isoJson({ suppliers: await takeSyncRequests() });
+  return isoJson({ error: "Ask for code or requested." }, { status: 400 });
 }
 
 /**
@@ -38,37 +39,37 @@ export async function GET(request: Request) {
  * for "Find products".
  */
 export async function POST(request: Request) {
-  if (!process.env.CRON_SECRET?.trim()) return Response.json({ error: "CRON_SECRET is not configured." }, { status: 503 });
-  if (!authorized(request)) return Response.json({ error: "Unauthorized." }, { status: 401 });
+  if (!process.env.CRON_SECRET?.trim()) return isoJson({ error: "CRON_SECRET is not configured." }, { status: 503 });
+  if (!authorized(request)) return isoJson({ error: "Unauthorized." }, { status: 401 });
   try {
     await ensureSupplierCostSchema();
     const body = (await request.json()) as { supplier?: string; csv?: string; products?: CatalogProduct[]; source?: string; status?: string; message?: string };
     const name = String(body.supplier || "").trim();
     const supplier = (await getSql()`SELECT id FROM ordering_inventory_suppliers WHERE business='Corner Deli' AND (lower(name)=lower(${name}) OR id::text=${name}) LIMIT 1`)[0];
-    if (!supplier) return Response.json({ error: `No supplier named "${name}".` }, { status: 404 });
+    if (!supplier) return isoJson({ error: `No supplier named "${name}".` }, { status: 404 });
     const statuses = ["ok", "needs_login", "needs_code", "no_products", "failed"] as const;
     // The website price job reports a sign-in or page problem without any prices.
     if (body.status && body.status !== "ok" && typeof body.csv !== "string") {
       const status = statuses.find((s) => s === body.status) ?? "failed";
       await recordPriceSync(String(supplier.id), { status, message: String(body.message || "") });
-      return Response.json({ recorded: status });
+      return isoJson({ recorded: status });
     }
     if (typeof body.csv === "string") {
       try {
         const result = await importPrices(String(supplier.id), body.csv);
         if (body.source === "website")
           await recordPriceSync(String(supplier.id), { status: "ok", message: `${result.priceChanges} price change${result.priceChanges === 1 ? "" : "s"}, ${result.offersUpdated} of our items updated`, products: result.catalog });
-        return Response.json(result);
+        return isoJson(result);
       } catch (error) {
         if (body.source === "website" && error instanceof SupplierCostError) await recordPriceSync(String(supplier.id), { status: "no_products", message: error.message });
         throw error;
       }
     }
-    if (Array.isArray(body.products)) return Response.json(await ingestCatalog(String(supplier.id), body.products, String(body.source || "feed").slice(0, 40)));
-    return Response.json({ error: "Send csv or products." }, { status: 400 });
+    if (Array.isArray(body.products)) return isoJson(await ingestCatalog(String(supplier.id), body.products, String(body.source || "feed").slice(0, 40)));
+    return isoJson({ error: "Send csv or products." }, { status: 400 });
   } catch (error) {
-    if (error instanceof SupplierCostError) return Response.json({ error: error.message }, { status: 409 });
+    if (error instanceof SupplierCostError) return isoJson({ error: error.message }, { status: 409 });
     console.error(error);
-    return Response.json({ error: "Supplier prices could not be saved." }, { status: 500 });
+    return isoJson({ error: "Supplier prices could not be saved." }, { status: 500 });
   }
 }

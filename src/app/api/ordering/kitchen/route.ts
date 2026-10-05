@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { after } from "next/server";
 import { apiError, unauthorized } from "@/lib/http";
 import { runOrderingMaintenanceOpportunistically } from "@/lib/ordering-maintenance";
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
     // failed kitchen prints and abandoned reopened orders.
     after(() => runOrderingMaintenanceOpportunistically(business).catch(() => undefined));
     const orders = await listKitchenOrders(business, url.searchParams.get("recent") === "true");
-    return Response.json({ business, orders });
+    return isoJson({ business, orders });
   } catch (error) {
     return apiError(error);
   }
@@ -50,9 +51,9 @@ export async function PATCH(request: Request) {
       nextStatus: statusFrom(body.nextStatus),
       actor,
     });
-    return Response.json({ order });
+    return isoJson({ order });
   } catch (error) {
-    if (error instanceof OrderConflictError) return Response.json({ error: error.message }, { status: 409 });
+    if (error instanceof OrderConflictError) return isoJson({ error: error.message }, { status: 409 });
     return apiError(error);
   }
 }

@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { quoteDelivery } from "@/lib/ordering-delivery";
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
 
     const managerBypassApproved = Boolean(body.managerBypassApproved);
     if (managerBypassApproved && !canManagePos(actor)) {
-      return Response.json({ error: "Manager authorization is required to bypass a delivery minimum." }, { status: 403 });
+      return isoJson({ error: "Manager authorization is required to bypass a delivery minimum." }, { status: 403 });
     }
 
     const quote = await quoteDelivery({
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
       managerBypassApproved,
     });
 
-    return Response.json({ quote });
+    return isoJson({ quote });
   } catch (error) {
     return apiError(error);
   }

@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { orderingMenuWithVariants } from "@/lib/ordering-menu-variants";
 import { applyScheduledMenuAvailability } from "@/lib/ordering-menu-availability";
 import { resolveOrderingAvailability } from "@/lib/ordering-availability";
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
     const requested = params.get("scheduledFor");
     const at = requested ? new Date(requested) : new Date();
     if (!Number.isFinite(at.getTime()))
-      return Response.json({ error: "Invalid menu time." }, { status: 400 });
+      return isoJson({ error: "Invalid menu time." }, { status: 400 });
     const serviceType = ["pickup", "delivery"].includes(
       params.get("serviceType") || "",
     )
@@ -135,7 +136,7 @@ export async function GET(request: Request) {
             WHERE customer_id=${session.customerId} AND active=TRUE AND latitude IS NOT NULL AND longitude IS NOT NULL
             ORDER BY is_primary DESC,last_used_at DESC NULLS LAST,created_at DESC`
         : [];
-    const response = Response.json({
+    const response = isoJson({
       business: "Corner Deli",
       serverTime: new Date().toISOString(),
       scheduledFor: at.toISOString(),
@@ -190,7 +191,7 @@ export async function GET(request: Request) {
     return response;
   } catch (error) {
     console.error(error);
-    return Response.json(
+    return isoJson(
       { error: "The menu is temporarily unavailable." },
       { status: 500 },
     );

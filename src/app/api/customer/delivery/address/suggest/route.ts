@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import {
   normalizeAddressInput,
   suggestDeliveryAddresses,
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
       (time) => now - time < 60_000,
     );
     if (recent.length >= 30)
-      return Response.json(
+      return isoJson(
         { error: "Address lookup is temporarily rate limited." },
         { status: 429 },
       );
@@ -25,18 +26,18 @@ export async function POST(request: Request) {
     const input = normalizeAddressInput(body.input);
     const sessionToken = String(body.sessionToken || "");
     if (!/^[a-zA-Z0-9-]{20,80}$/.test(sessionToken))
-      return Response.json(
+      return isoJson(
         { error: "A valid address session is required." },
         { status: 400 },
       );
-    return Response.json({
+    return isoJson({
       suggestions:
         input.length < 2
           ? []
           : await suggestDeliveryAddresses(input, sessionToken),
     });
   } catch (error) {
-    return Response.json(
+    return isoJson(
       {
         error:
           error instanceof Error ? error.message : "Address lookup failed.",

@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { randomUUID } from "node:crypto";
 import {
   AI_ORDERING_TOOL_NAMES,
@@ -399,17 +400,17 @@ const tools = [
   },
 ];
 const reply = (id: Rpc["id"], result: unknown) =>
-  Response.json({ jsonrpc: "2.0", id, result });
+  isoJson({ jsonrpc: "2.0", id, result });
 const failure = (
   id: Rpc["id"],
   code: number,
   message: string,
   data?: unknown,
-) => Response.json({ jsonrpc: "2.0", id, error: { code, message, data } });
+) => isoJson({ jsonrpc: "2.0", id, error: { code, message, data } });
 
 export async function POST(request: Request) {
   if (!mcpAuthorized(request))
-    return Response.json({ error: "Unauthorized." }, { status: 401 });
+    return isoJson({ error: "Unauthorized." }, { status: 401 });
   const rpc = (await request.json()) as Rpc;
   if (rpc.method === "initialize")
     return reply(rpc.id, {

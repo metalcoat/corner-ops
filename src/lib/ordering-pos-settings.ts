@@ -2,6 +2,7 @@ import { getSql } from "@/lib/db";
 import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { ALERT_SOUNDS, type AlertSoundId } from "@/lib/alert-sounds";
+import { toIsoTimestamp } from "@/lib/timestamp-values";
 
 export const BUSINESS_TIMEZONE = "America/New_York";
 export const ONLINE_ORDER_ALERT_SOUNDS = [...ALERT_SOUNDS.map((sound) => sound.id), "off"] as const satisfies readonly (AlertSoundId | "off")[];
@@ -20,7 +21,7 @@ export async function getPosSettings(business: OrderingBusiness) {
     onlineOrderAlertSound: (supportedSound ? sound : "warm_chime") as OnlineOrderAlertSound,
     onlineOrderAlertVolume: supportedSound ? storedVolume : Math.min(storedVolume, 65),
     businessTimezone: String(rows[0]?.business_timezone || BUSINESS_TIMEZONE),
-    updatedAt: rows[0]?.updated_at,
+    updatedAt: toIsoTimestamp(rows[0]?.updated_at),
   };
 }
 

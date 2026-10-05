@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { geminiPhoneReadiness } from "@/lib/gemini-phone";
@@ -35,7 +36,7 @@ function authorized(request: Request) {
 
 export async function GET(request: Request) {
   if (!authorized(request))
-    return Response.json({ error: "Unauthorized." }, { status: 401 });
+    return isoJson({ error: "Unauthorized." }, { status: 401 });
   await ensureOrderingAiSchema();
   const url = new URL(request.url);
   const action = url.searchParams.get("action") || "route";
@@ -51,7 +52,7 @@ export async function GET(request: Request) {
       await getSql()`SELECT caller_phone,line_label FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} AND selected_provider='gemini' AND state='ai' LIMIT 1`
     )[0];
     if (!row)
-      return Response.json(
+      return isoJson(
         { error: "Gemini call not found." },
         { status: 404 },
       );
@@ -63,7 +64,7 @@ export async function GET(request: Request) {
         String(row.caller_phone || ""),
       ),
     ]);
-    return Response.json({
+    return isoJson({
       model: settings.geminiModel,
       greeting:
         "Thanks for calling Corner Deli, is this going to be pickup or delivery?",
@@ -99,7 +100,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (!authorized(request))
-    return Response.json({ error: "Unauthorized." }, { status: 401 });
+    return isoJson({ error: "Unauthorized." }, { status: 401 });
   try {
     await ensureOrderingAiSchema();
     const body = (await request.json()) as Record<string, unknown>;
@@ -109,7 +110,7 @@ export async function POST(request: Request) {
       await getSql()`SELECT call.id,call.order_id,orders.service_type,orders.payment_preference,orders.amount_due_cents FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.selected_provider='gemini' LIMIT 1`
     )[0];
     if (!call)
-      return Response.json(
+      return isoJson(
         { error: "Gemini call not found." },
         { status: 404 },
       );
@@ -121,23 +122,23 @@ export async function POST(request: Request) {
       const label = String(body.label || eventType).slice(0, 160);
       const detail = JSON.stringify(body.detail || {}).slice(0, 2000);
       await getSql()`INSERT INTO ordering_ai_call_events(id,business,call_id,event_key,event_type,role,label,detail,duration_ms) VALUES(${randomUUID()},'Corner Deli',${callId},${eventKey},${eventType},'system',${label},${detail},${body.durationMs == null ? null : Math.round(Math.max(0, Number(body.durationMs) || 0))}) ON CONFLICT(business,event_key) DO NOTHING`;
-      return Response.json({ ok: true });
+      return isoJson({ ok: true });
     }
     if (action === "transcript") {
       const speaker = String(body.speaker || "");
       if (!["customer", "assistant"].includes(speaker))
-        return Response.json(
+        return isoJson(
           { error: "Invalid transcript speaker." },
           { status: 400 },
         );
       const transcript = String(body.transcript || "").trim().slice(0, 5000);
-      if (!transcript) return Response.json({ ok: true, saved: false });
+      if (!transcript) return isoJson({ ok: true, saved: false });
       const turnId = Math.max(0, Math.trunc(Number(body.turnId) || 0));
       const eventKey = String(
         body.eventKey || `${callId}:gemini:transcript:${speaker}:${turnId}`,
       ).slice(0, 240);
       await getSql()`INSERT INTO ordering_call_transcript_segments(id,business,call_id,event_key,speaker,transcript,metadata) VALUES(${randomUUID()},'Corner Deli',${callId},${eventKey},${speaker},${transcript},${JSON.stringify({ provider: "gemini", turnId })}::jsonb) ON CONFLICT(business,event_key) DO NOTHING`;
-      return Response.json({ ok: true, saved: true });
+      return isoJson({ ok: true, saved: true });
     }
     if (action === "handoff") {
       const reason = String(
@@ -148,14 +149,14 @@ export async function POST(request: Request) {
           reason,
         )
       )
-        return Response.json({
+        return isoJson({
           closeBridge: false,
           handoffBlocked: true,
           instruction:
             "This is a recoverable ordering failure. Keep the current cart, ask whether to retry that item or continue, and remain on the call through payment.",
         });
       await getSql()`UPDATE ordering_call_sessions SET state='handoff_pending',bridge_action='handoff',handoff_reason=${String(body.reason || "Customer requested an employee.").slice(0, 500)},updated_at=NOW() WHERE id=${call.id}`;
-      return Response.json({ closeBridge: true });
+      return isoJson({ closeBridge: true });
     }
     if (action === "payment") {
       if (!call.order_id)
@@ -176,7 +177,7 @@ export async function POST(request: Request) {
       });
       await prepareVoicePayment(callId);
       await getSql()`UPDATE ordering_call_sessions SET bridge_action='payment',updated_at=NOW() WHERE id=${call.id}`;
-      return Response.json({ closeBridge: true });
+      return isoJson({ closeBridge: true });
     }
     if (action === "complete") {
       if (
@@ -185,7 +186,7 @@ export async function POST(request: Request) {
         Number(call.amount_due_cents || 0) > 0
       ) {
         const cardSelected = call.payment_preference === "card";
-        return Response.json({
+        return isoJson({
           closeBridge: false,
           completionBlocked: true,
           instruction: cardSelected
@@ -194,15 +195,15 @@ export async function POST(request: Request) {
         });
       }
       await getSql()`UPDATE ordering_call_sessions SET state='ended',bridge_action='complete',ended_at=NOW(),updated_at=NOW() WHERE id=${call.id}`;
-      return Response.json({ closeBridge: true });
+      return isoJson({ closeBridge: true });
     }
     if (action === "disconnect") {
       const ended = await getSql()`UPDATE ordering_call_sessions SET state='ended',bridge_action='disconnected',handoff_reason=CASE WHEN handoff_reason='' THEN 'Caller disconnected.' ELSE handoff_reason END,owner_type='none',owner_id='',ended_at=COALESCE(ended_at,NOW()),updated_at=NOW() WHERE id=${call.id} AND state='ai' RETURNING id`;
-      return Response.json({ ok: true, ended: Boolean(ended[0]) });
+      return isoJson({ ok: true, ended: Boolean(ended[0]) });
     }
-    return Response.json({ error: "Unknown action." }, { status: 400 });
+    return isoJson({ error: "Unknown action." }, { status: 400 });
   } catch (error) {
-    return Response.json(
+    return isoJson(
       { error: error instanceof Error ? error.message : "Action failed." },
       { status: 409 },
     );

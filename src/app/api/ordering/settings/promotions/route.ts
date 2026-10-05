@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { randomUUID } from "node:crypto";
 import { isAuthorizationResponse, orderingManagerActor } from "@/lib/ordering-route-auth";
 import { getSql } from "@/lib/db";
@@ -15,7 +16,7 @@ export async function GET(){
     sql`SELECT id,name,category_id FROM ordering_menu_items WHERE business='Corner Deli' AND active=TRUE ORDER BY name`,
     sql`SELECT variant.id,variant.item_id,variant.name FROM ordering_menu_item_variants variant JOIN ordering_menu_items item ON item.id=variant.item_id WHERE item.business='Corner Deli' AND variant.active=TRUE ORDER BY item.name,variant.sort_order`,
     sql`SELECT DISTINCT groups.id,groups.name FROM ordering_modifier_groups groups JOIN ordering_menu_item_modifier_groups link ON link.group_id=groups.id JOIN ordering_menu_items item ON item.id=link.item_id WHERE item.business='Corner Deli' AND groups.active=TRUE ORDER BY groups.name`,
-  ]);return Response.json({promotions,categories,items,variants,modifierGroups});
+  ]);return isoJson({promotions,categories,items,variants,modifierGroups});
 }
 
 export async function PUT(request:Request){
@@ -30,6 +31,6 @@ export async function PUT(request:Request){
     const existing=await sql`SELECT business,name,customer_label,internal_description,promotion_type,priority,rule,adjustment,active,automatic,stackable,stackable_with_loyalty,exclusive_group,version FROM ordering_promotions WHERE id=${id}`;if(existing[0]&&existing[0].business!=="Corner Deli")throw new Error("Promotion was not found.");const version=Number(existing[0]?.version||0)+1;
     await sql`INSERT INTO ordering_promotions(id,business,name,customer_label,internal_description,promotion_type,priority,rule,adjustment,active,automatic,stackable,stackable_with_loyalty,exclusive_group,created_by,version) VALUES(${id},'Corner Deli',${String(body.name||"").trim()},${String(body.customerLabel||body.name||"").trim()},${String(body.internalDescription||"").trim()},${type},${Math.trunc(Number(body.priority||0))},${JSON.stringify(rule)}::jsonb,${JSON.stringify(adjustment)}::jsonb,${body.enabled!==false},${body.automatic!==false},${Boolean(body.stackable)},${Boolean(body.stackableWithLoyalty)},${String(body.exclusiveGroup||"").trim()},${session.email},${version}) ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,customer_label=EXCLUDED.customer_label,internal_description=EXCLUDED.internal_description,promotion_type=EXCLUDED.promotion_type,priority=EXCLUDED.priority,rule=EXCLUDED.rule,adjustment=EXCLUDED.adjustment,active=EXCLUDED.active,automatic=EXCLUDED.automatic,stackable=EXCLUDED.stackable,stackable_with_loyalty=EXCLUDED.stackable_with_loyalty,exclusive_group=EXCLUDED.exclusive_group,version=EXCLUDED.version,updated_at=NOW()`;
     await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,actor,reason,details) VALUES(${randomUUID()},'Corner Deli','promotion_configuration_changed',${session.email},'',${JSON.stringify({promotionId:id,version,name:String(body.name||""),before:existing[0]||null,after:{name:String(body.name||"").trim(),customerLabel:String(body.customerLabel||body.name||"").trim(),promotionType:type,priority:Math.trunc(Number(body.priority||0)),rule,adjustment,enabled:body.enabled!==false,automatic:body.automatic!==false,stackable:Boolean(body.stackable),stackableWithLoyalty:Boolean(body.stackableWithLoyalty),exclusiveGroup:String(body.exclusiveGroup||"").trim()}})}::jsonb)`;
-    return Response.json({id,version});
-  }catch(error){return Response.json({error:error instanceof Error?error.message:"Could not save promotion."},{status:400})}
+    return isoJson({id,version});
+  }catch(error){return isoJson({error:error instanceof Error?error.message:"Could not save promotion."},{status:400})}
 }

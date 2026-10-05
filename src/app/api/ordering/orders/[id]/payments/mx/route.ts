@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { apiError, unauthorized } from "@/lib/http";
@@ -27,7 +28,7 @@ export async function GET() {
   try {
     if (!(await orderingActor(business))) return unauthorized();
     const status = paymentProviderStatus();
-    return Response.json({ checkoutEnabled: status.onlineCheckoutEnabled, sandbox: status.sandbox });
+    return isoJson({ checkoutEnabled: status.onlineCheckoutEnabled, sandbox: status.sandbox });
   } catch (e) {
     return apiError(e);
   }
@@ -64,7 +65,7 @@ export async function POST(
         replayId = newReplayId(),
         customer = await cardBillingContactForOrder(orderId, business);
       await sql`INSERT INTO ordering_mx_checkout_sessions(id,business,order_id,check_id,amount_cents,replay_id,client_mutation_id,created_by,expires_at)VALUES(${randomUUID()},${business},${orderId},${checkId},${amount},${replayId},${randomUUID()},${actor.id},NOW()+INTERVAL '30 minutes')`;
-      return Response.json({
+      return isoJson({
         ...initialized,
         amount: amount / 100,
         replayId,
@@ -130,11 +131,11 @@ export async function POST(
         includeKitchenProduction: false,
       });
     }
-    return Response.json(result, { status: 201 });
+    return isoJson(result, { status: 201 });
   } catch (e) {
-    if (e instanceof TerminalSaleRecordedError) return Response.json({ error: e.message, checkout: e.checkout }, { status: 409 });
+    if (e instanceof TerminalSaleRecordedError) return isoJson({ error: e.message, checkout: e.checkout }, { status: 409 });
     if (e instanceof MxMerchantError || e instanceof PaymentConflictError)
-      return Response.json({ error: e.message }, { status: 409 });
+      return isoJson({ error: e.message }, { status: 409 });
     return apiError(e);
   }
 }

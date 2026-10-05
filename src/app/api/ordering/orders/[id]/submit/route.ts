@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import { OrderConflictError, submitDraftOrder } from "@/lib/ordering-order-lifecycle";
 import type { OrderingBusiness } from "@/lib/ordering-core";
@@ -27,9 +28,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     catch (error) { dispatchError = error instanceof Error ? error.message : "Kitchen print dispatch failed."; }
     const kitchen = await kitchenPrintStatus(id, business).catch(() => ({ status: "none" as const, printed: false, message: "" }));
     const print = { ...kitchen, paused, message: dispatchError || kitchen.message, warning: result.kitchenTicketCreated === true && !paused && kitchen.status === "failed" };
-    return Response.json({ ...result, print });
+    return isoJson({ ...result, print });
   } catch (error) {
-    if (error instanceof OrderConflictError) return Response.json({ error: error.message }, { status: 409 });
+    if (error instanceof OrderConflictError) return isoJson({ error: error.message }, { status: 409 });
     return apiError(error);
   }
 }

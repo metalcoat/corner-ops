@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import {
   createAddressValidationToken,
   routeDeliveryAddress,
@@ -10,7 +11,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const sessionToken = String(body.sessionToken || "");
     if (!/^[a-zA-Z0-9-]{20,80}$/.test(sessionToken))
-      return Response.json(
+      return isoJson(
         { error: "A valid address session is required." },
         { status: 400 },
       );
@@ -20,13 +21,13 @@ export async function POST(request: Request) {
       sessionToken,
     });
     const route = await routeDeliveryAddress(address);
-    return Response.json({
+    return isoJson({
       address,
       route,
       validationToken: createAddressValidationToken(address),
     });
   } catch (error) {
-    return Response.json(
+    return isoJson(
       {
         error:
           error instanceof Error ? error.message : "Address validation failed.",

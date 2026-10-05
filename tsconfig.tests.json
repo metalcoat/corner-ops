@@ -30,6 +30,8 @@
     "src/lib/alert-sounds.ts",
     "src/lib/supplier-web-extract.ts",
     "src/lib/square-tip-fee.ts",
+    "src/lib/timestamp-values.ts",
+    "src/lib/postgres-string-timestamps.ts",
     "tests/**/*.ts"
   ]
 }

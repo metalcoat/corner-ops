@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { readCustomerOrderingSession } from "@/lib/customer-ordering-session";
 import { ensureOrderingLoyaltySchema } from "@/lib/ordering-loyalty-schema";
 import { loyaltyHistory, loyaltyStatus } from "@/lib/ordering-loyalty";
@@ -7,13 +8,13 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   const session = readCustomerOrderingSession(request);
   if (!session?.customerId || !session.authenticatedAt)
-    return Response.json({ error: "Sign in required." }, { status: 401 });
+    return isoJson({ error: "Sign in required." }, { status: 401 });
   await ensureOrderingLoyaltySchema();
   const sql = getSql();
   const [customer] =
     await sql`SELECT id,display_name,first_name,last_name,email FROM ordering_customers WHERE id=${session.customerId} AND active=TRUE`;
   if (!customer)
-    return Response.json({ error: "Account not found." }, { status: 404 });
+    return isoJson({ error: "Account not found." }, { status: 404 });
   const range = new URL(request.url).searchParams.get("range") || "180";
   const days = range === "all" ? null : Math.max(1, Math.min(3650, Number(range) || 180));
   const cutoff = days ? new Date(Date.now() - days * 86_400_000).toISOString() : null;
@@ -43,13 +44,13 @@ export async function GET(request: Request) {
     sql`SELECT id,label,display_phone,is_primary FROM ordering_customer_phones WHERE customer_id=${session.customerId} ORDER BY is_primary DESC,created_at`,
     sql`SELECT id,label,line1,line2,city,state,postal_code,is_primary FROM ordering_customer_addresses WHERE customer_id=${session.customerId} AND active=TRUE ORDER BY is_primary DESC,last_used_at DESC NULLS LAST,created_at`,
   ]);
-  return Response.json({ customer, programs, history, orders, phones, addresses, paymentMethods: [], paymentProvider: "mx" });
+  return isoJson({ customer, programs, history, orders, phones, addresses, paymentMethods: [], paymentProvider: "mx" });
 }
 
 export async function PATCH(request: Request) {
   try {
     const session = readCustomerOrderingSession(request);
-    if (!session?.customerId || !session.authenticatedAt) return Response.json({ error: "Sign in required." }, { status: 401 });
+    if (!session?.customerId || !session.authenticatedAt) return isoJson({ error: "Sign in required." }, { status: 401 });
     const body = await request.json() as Record<string, unknown>, sql = getSql(), action = String(body.action || "profile");
     if (action === "profile") {
       const firstName = String(body.firstName || "").trim(), lastName = String(body.lastName || "").trim();
@@ -61,6 +62,6 @@ export async function PATCH(request: Request) {
       await sql`UPDATE ordering_customer_addresses SET active=FALSE,is_primary=FALSE,updated_at=NOW() WHERE id=${String(body.addressId || "")} AND customer_id=${session.customerId}`;
       await sql`UPDATE ordering_customer_addresses SET is_primary=TRUE,updated_at=NOW() WHERE id=(SELECT id FROM ordering_customer_addresses WHERE customer_id=${session.customerId} AND active=TRUE ORDER BY last_used_at DESC NULLS LAST,created_at LIMIT 1) AND NOT EXISTS(SELECT 1 FROM ordering_customer_addresses WHERE customer_id=${session.customerId} AND active=TRUE AND is_primary=TRUE)`;
     } else throw new Error("Unknown account update.");
-    return Response.json({ updated: true });
-  } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Account could not be updated." }, { status: 400 }); }
+    return isoJson({ updated: true });
+  } catch (error) { return isoJson({ error: error instanceof Error ? error.message : "Account could not be updated." }, { status: 400 }); }
 }

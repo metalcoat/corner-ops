@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import { listFutureOrderingSlots, resolveOrderingAvailability } from "@/lib/ordering-availability";
 import { orderingActor } from "@/lib/ordering-route-auth";
@@ -11,10 +12,10 @@ export async function GET(request: Request) {
     const serviceType = params.get("serviceType") || "pickup";
     const businessDate = params.get("date");
     if (businessDate) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return Response.json({ error: "A valid date is required." }, { status: 400 });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) return isoJson({ error: "A valid date is required." }, { status: 400 });
       const slots = await listFutureOrderingSlots({ business: "Corner Deli", serviceType, businessDate });
-      return Response.json({ businessDate, slots: slots.map((slot) => slot.toISOString()) });
+      return isoJson({ businessDate, slots: slots.map((slot) => slot.toISOString()) });
     }
-    return Response.json({ availability: await resolveOrderingAvailability({ business: "Corner Deli", serviceType }) });
+    return isoJson({ availability: await resolveOrderingAvailability({ business: "Corner Deli", serviceType }) });
   } catch (error) { return apiError(error); }
 }

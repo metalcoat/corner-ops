@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { getEmployeeSession, type EmployeeSession } from "@/lib/employee-auth";
 import { getSql, withTransaction } from "@/lib/db";
+import { toIsoTimestamp, toIsoTimestampOrEmpty } from "@/lib/timestamp-values";
 import { ensureOrderingAddressSchema } from "@/lib/ordering-address-schema";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
 import { cornerOpsBaseUrl } from "@/lib/transactional-email";
@@ -194,8 +195,8 @@ export function deliveryRoutePlans(
         latitude,
         longitude,
         timingMode: String(row.timing_mode || "asap"),
-        scheduledFor: row.scheduled_for ? String(row.scheduled_for) : null,
-        createdAt: String(row.created_at),
+        scheduledFor: toIsoTimestamp(row.scheduled_for),
+        createdAt: toIsoTimestampOrEmpty(row.created_at),
       }];
     });
     if (!stops.length) return [];

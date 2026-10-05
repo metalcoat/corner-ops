@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { createTimedDraftOrder } from "@/lib/ordering-timed-orders";
 import type { VariantConfiguredOrderItemInput } from "@/lib/ordering-orders-with-variants";
 import {
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
           ? "pickup"
             : null;
     if (!serviceType)
-      return Response.json(
+      return isoJson(
         { error: "Choose pickup or delivery." },
         { status: 400 },
       );
@@ -112,7 +113,7 @@ export async function POST(request: Request) {
       }
     }
     if (!firstName || phone.length !== 10 || !/^\S+@\S+\.\S+$/.test(email))
-      return Response.json(
+      return isoJson(
         {
           error:
             "Enter your name, a 10-digit phone number, and a valid email address.",
@@ -120,7 +121,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     if (!authenticatedCustomer)
-      return Response.json(
+      return isoJson(
         {
           error: "Verify your mobile number before placing this order.",
           code: "sms_verification_required",
@@ -132,7 +133,7 @@ export async function POST(request: Request) {
         ? new Date(String(body.scheduledFor || ""))
         : null;
     if (requestedFor && !Number.isFinite(requestedFor.getTime()))
-      return Response.json(
+      return isoJson(
         { error: "Choose a valid future time." },
         { status: 400 },
       );
@@ -203,7 +204,7 @@ export async function POST(request: Request) {
       serviceType === "delivery"
         ? await getDeliveryPricingSettings("Corner Deli")
         : null;
-    const response = Response.json(
+    const response = isoJson(
       {
         cart: {
           id: order.id,
@@ -250,7 +251,7 @@ export async function POST(request: Request) {
       /^(Add at least|An invalid|Choose|The selected|This item|This menu item|Menu item|Item quantity|Required|Invalid|A selected|Ordering|Pickup|Delivery|Future)/.test(
         message,
       ) || message.endsWith("is currently unavailable.");
-    return Response.json(
+    return isoJson(
       { error: safe ? message : "The cart could not be priced." },
       { status: safe ? 409 : 500 },
     );

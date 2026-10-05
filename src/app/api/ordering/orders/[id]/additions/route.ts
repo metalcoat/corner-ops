@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import { addressForOrder, routeDeliveryAddress } from "@/lib/ordering-address";
 import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
@@ -14,9 +15,9 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
     const{id}=await params,body=await request.json() as {items?:VariantConfiguredOrderItemInput[];serviceType?:unknown;deliveryAddress?:unknown;deliveryUnit?:unknown;deliveryValidationToken?:unknown};
     const sql=getSql();
     let order=(await sql`SELECT * FROM ordering_orders WHERE id=${id} AND business='Corner Deli'`)[0];
-    if(!order||order.status!=="draft")return Response.json({error:"This order is not open for changes."},{status:409});
+    if(!order||order.status!=="draft")return isoJson({error:"This order is not open for changes."},{status:409});
     const reopen=(await sql`SELECT 1 FROM ordering_order_events WHERE order_id=${id} AND event_type='order_reopened_for_additions' AND NOT EXISTS(SELECT 1 FROM ordering_order_events later WHERE later.order_id=${id} AND later.event_type='order_addition_submitted' AND later.created_at>ordering_order_events.created_at) ORDER BY created_at DESC LIMIT 1`)[0];
-    if(!reopen&&order.submitted_at)return Response.json({error:"Use Open in POS before changing a sent order."},{status:409});
+    if(!reopen&&order.submitted_at)return isoJson({error:"Use Open in POS before changing a sent order."},{status:409});
     const items=Array.isArray(body.items)?body.items:[];
     const orderItemIds=items.length?await appendConfiguredOrderItemsWithVariants(id,"Corner Deli",items):[];
     order=(await sql`SELECT * FROM ordering_orders WHERE id=${id}`)[0];
@@ -25,8 +26,8 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
       const previousService=String(order.service_type);let deliveryFeeCents=0,formattedAddress="";
       if(requestedService==="delivery"){
         const enteredAddress=String(body.deliveryAddress||"").trim();let validatedAddress;
-        try{validatedAddress=addressForOrder("delivery",String(body.deliveryValidationToken||""),enteredAddress)}catch(error){return Response.json({error:error instanceof Error?error.message:"Validate the delivery address."},{status:409})}
-        if(!validatedAddress)return Response.json({error:"Validate the delivery address."},{status:409});
+        try{validatedAddress=addressForOrder("delivery",String(body.deliveryValidationToken||""),enteredAddress)}catch(error){return isoJson({error:error instanceof Error?error.message:"Validate the delivery address."},{status:409})}
+        if(!validatedAddress)return isoJson({error:"Validate the delivery address."},{status:409});
         let route=null;try{route=await routeDeliveryAddress(validatedAddress)}catch{/* Routing may be temporarily unavailable. */}
         await saveOrderDeliveryAddress({orderId:id,address:validatedAddress,line2:String(body.deliveryUnit||""),customerAddressId:null,route});formattedAddress=validatedAddress.formattedAddress;
         if(route){const quote=await quoteDelivery({business:"Corner Deli",distanceMiles:route.distanceMiles,merchandiseSubtotalCents:Number(order.subtotal_cents)});deliveryFeeCents=quote.deliveryFeeCents}
@@ -41,6 +42,6 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
       const otherTotal=checks.slice(1).reduce((sum,row)=>sum+Number(row.total_cents),0),primaryTotal=Math.max(0,Number(order.total_cents)-otherTotal);
       await sql`UPDATE ordering_checks SET total_cents=${primaryTotal},amount_due_cents=GREATEST(0,${primaryTotal}-paid_cents),status=CASE WHEN paid_cents=0 THEN 'open' WHEN paid_cents>=${primaryTotal} THEN 'paid' ELSE 'partially_paid' END,updated_at=NOW() WHERE id=${primary.id}`;
     }
-    return Response.json({order,orderItems:orderItemIds.map(itemId=>({id:itemId}))},{status:201});
+    return isoJson({order,orderItems:orderItemIds.map(itemId=>({id:itemId}))},{status:201});
   }catch(error){return apiError(error)}
 }

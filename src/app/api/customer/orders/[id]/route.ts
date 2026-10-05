@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { customerOrderConfirmation } from "@/lib/customer-order-confirmation";
 import { ensureCustomerOrderingSchema } from "@/lib/customer-ordering-schema";
 import {
@@ -24,7 +25,7 @@ export async function GET(
   if (!rows[0]) return unauthorized();
   const order = await customerOrderConfirmation(id);
   if (!order)
-    return Response.json({ error: "Order not found." }, { status: 404 });
+    return isoJson({ error: "Order not found." }, { status: 404 });
   // Delivery orders get the live tracker: driver status, and (when the store
   // turns it on) the driver's approximate position on a map.
   const delivery =
@@ -34,7 +35,7 @@ export async function GET(
           return null;
         })
       : null;
-  return Response.json({
+  return isoJson({
     order,
     delivery,
     store: await deliLocation(),

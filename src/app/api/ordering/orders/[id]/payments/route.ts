@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { assertOrderReadyForCheckout, checkoutState, commitTender, PaymentConflictError, printPaidReceipt, reprintPaymentReceipt, reverseTender, setCheckoutTip, type CheckoutTenderType } from "@/lib/ordering-payments";
@@ -28,9 +29,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (!await orderingActor(business)) return unauthorized();
     const { id } = await context.params;
     await assertOrderReadyForCheckout(id, business);
-    return Response.json(await checkoutState(id, business, url.searchParams.get("checkId")));
+    return isoJson(await checkoutState(id, business, url.searchParams.get("checkId")));
   } catch (error) {
-    if (error instanceof PaymentConflictError) return Response.json({ error: error.message }, { status: 409 });
+    if (error instanceof PaymentConflictError) return isoJson({ error: error.message }, { status: 409 });
     return apiError(error);
   }
 }
@@ -45,10 +46,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const stationKey=String(body.stationKey||"");
     const station=stationKey?await paymentStationProfile(business,stationKey):null;
     if(station?.station_mode==="order_taker")throw new PaymentStationError("This device is an order-taking station. Send the check to the payment station.");
-    if (body.action === "reverse") return Response.json(await reverseTender({orderId:id,business,transactionId:String(body.transactionId||""),amountCents:Number(body.amountCents),clientMutationId:String(body.clientMutationId||""),reason:String(body.reason||""),actor}),{status:201});
-    if (body.action === "reprint") {const result=await reprintPaymentReceipt({orderId:id,business,transactionId:String(body.transactionId||""),reason:String(body.reason||""),actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});return Response.json(result,{status:201})}
-    if (body.action === "print_paid_receipt") {const result=await printPaidReceipt({orderId:id,business,itemized:body.itemized===true,receiptPrinterId:body.receiptPrinterId?String(body.receiptPrinterId):undefined,actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false,jobId:result.printJobId});return Response.json(result,{status:201})}
-    if (body.action === "set_tip") {await assertOrderReadyForCheckout(id,business);return Response.json(await setCheckoutTip({orderId:id,business,checkId:body.checkId?String(body.checkId):null,tipCents:Number(body.tipCents),actor}),{status:200});}
+    if (body.action === "reverse") return isoJson(await reverseTender({orderId:id,business,transactionId:String(body.transactionId||""),amountCents:Number(body.amountCents),clientMutationId:String(body.clientMutationId||""),reason:String(body.reason||""),actor}),{status:201});
+    if (body.action === "reprint") {const result=await reprintPaymentReceipt({orderId:id,business,transactionId:String(body.transactionId||""),reason:String(body.reason||""),actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});return isoJson(result,{status:201})}
+    if (body.action === "print_paid_receipt") {const result=await printPaidReceipt({orderId:id,business,itemized:body.itemized===true,receiptPrinterId:body.receiptPrinterId?String(body.receiptPrinterId):undefined,actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false,jobId:result.printJobId});return isoJson(result,{status:201})}
+    if (body.action === "set_tip") {await assertOrderReadyForCheckout(id,business);return isoJson(await setCheckoutTip({orderId:id,business,checkId:body.checkId?String(body.checkId):null,tipCents:Number(body.tipCents),actor}),{status:200});}
     // A terminal sale on this order may still charge the card; settle it before taking cash or a gift card.
     await settleOpenTerminalSales({ business, orderId: id, actor });
     const result=await commitTender({
@@ -77,10 +78,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if(unsent)return unsent;
       await dispatchSubmittedOrderPrintJobs(id,business);
     }else await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});
-    return Response.json(result,{status:201});
+    return isoJson(result,{status:201});
   } catch (error) {
-    if (error instanceof TerminalSaleRecordedError) return Response.json({ error: error.message, checkout: error.checkout }, { status: 409 });
-    if (error instanceof PaymentConflictError || error instanceof PaymentStationError) return Response.json({ error: error.message }, { status: 409 });
+    if (error instanceof TerminalSaleRecordedError) return isoJson({ error: error.message, checkout: error.checkout }, { status: 409 });
+    if (error instanceof PaymentConflictError || error instanceof PaymentStationError) return isoJson({ error: error.message }, { status: 409 });
     return apiError(error);
   }
 }

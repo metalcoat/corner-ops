@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
@@ -22,8 +23,8 @@ export async function GET(request: Request) {
     const business = readBusiness(url.searchParams.get("business"));
     const session = await orderingActor(business);
     if (!session) return unauthorized();
-    if (!canManagePos(session)) return Response.json({ error: "Manager access required." }, { status: 403 });
-    return Response.json({ settings: await getDeliveryPricingSettings(business) });
+    if (!canManagePos(session)) return isoJson({ error: "Manager access required." }, { status: 403 });
+    return isoJson({ settings: await getDeliveryPricingSettings(business) });
   } catch (error) {
     return apiError(error);
   }
@@ -72,7 +73,7 @@ export async function PUT(request: Request) {
         : current.feeBands,
     }, session.id);
 
-    return Response.json({ settings });
+    return isoJson({ settings });
   } catch (error) {
     return apiError(error);
   }

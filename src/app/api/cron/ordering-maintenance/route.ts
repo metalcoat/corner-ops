@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { timingSafeEqual } from "node:crypto";
 import { runOrderingMaintenance } from "@/lib/ordering-maintenance";
 
@@ -16,7 +17,7 @@ function authorized(request: Request): boolean {
 // Schedule every minute on the host; the kitchen display poll also runs the
 // same sweeps opportunistically.
 export async function GET(request: Request) {
-  if (!process.env.CRON_SECRET?.trim()) return Response.json({ error: "CRON_SECRET is not configured." }, { status: 503 });
-  if (!authorized(request)) return Response.json({ error: "Unauthorized." }, { status: 401 });
-  return Response.json({ results: [await runOrderingMaintenance("Corner Deli"), await runOrderingMaintenance("Tiki")] });
+  if (!process.env.CRON_SECRET?.trim()) return isoJson({ error: "CRON_SECRET is not configured." }, { status: 503 });
+  if (!authorized(request)) return isoJson({ error: "Unauthorized." }, { status: 401 });
+  return isoJson({ results: [await runOrderingMaintenance("Corner Deli"), await runOrderingMaintenance("Tiki")] });
 }

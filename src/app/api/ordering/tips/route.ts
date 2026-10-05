@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import { orderingActor } from "@/lib/ordering-route-auth";
 import {
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
           "content-disposition": `attachment; filename="corner-deli-tips-${new Date().toISOString().slice(0, 10)}.csv"`,
         },
       });
-    return Response.json(await tipsDashboard());
+    return isoJson(await tipsDashboard());
   } catch (error) {
     return apiError(error);
   }
@@ -26,12 +27,12 @@ export async function POST(request: Request) {
   const actor = await orderingActor("Corner Deli");
   if (!actor) return unauthorized();
   try {
-    return Response.json(await tipAction(await request.json(), actor), {
+    return isoJson(await tipAction(await request.json(), actor), {
       status: 201,
     });
   } catch (error) {
     if (error instanceof TipError)
-      return Response.json({ error: error.message }, { status: 409 });
+      return isoJson({ error: error.message }, { status: 409 });
     return apiError(error);
   }
 }

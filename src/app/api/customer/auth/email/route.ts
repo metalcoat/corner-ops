@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import {
   requestCustomerEmailCode,
   verifyCustomerEmailCode,
@@ -9,11 +10,11 @@ export async function POST(request: Request) {
     const body = await request.json();
     if (body.action === "request") {
       await requestCustomerEmailCode(body.email);
-      return Response.json({ sent: true });
+      return isoJson({ sent: true });
     }
     if (body.action === "verify") {
       const customerId = await verifyCustomerEmailCode(body.email, body.code);
-      return Response.json(
+      return isoJson(
         { authenticated: true },
         {
           headers: {
@@ -27,9 +28,9 @@ export async function POST(request: Request) {
         },
       );
     }
-    return Response.json({ error: "Unknown action." }, { status: 400 });
+    return isoJson({ error: "Unknown action." }, { status: 400 });
   } catch (error) {
-    return Response.json(
+    return isoJson(
       { error: error instanceof Error ? error.message : "Sign-in failed." },
       { status: 400 },
     );

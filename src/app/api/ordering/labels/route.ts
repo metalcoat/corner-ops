@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { labelQueue, printItemLabel } from "@/lib/ordering-labels";
@@ -25,7 +26,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const business = businessFrom(url.searchParams.get("business") || "Corner Deli");
     if (!(await labelActor(business))) return unauthorized();
-    return Response.json(await labelQueue(business, String(url.searchParams.get("printerId") || "")));
+    return isoJson(await labelQueue(business, String(url.searchParams.get("printerId") || "")));
   } catch (error) {
     return apiError(error);
   }
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
     if (!actor) return unauthorized();
     const unitIndex = Number(body.unitIndex);
     if (!Number.isSafeInteger(unitIndex) || unitIndex < 0) throw new Error("Unknown label.");
-    return Response.json(
+    return isoJson(
       await printItemLabel({ business, printerId: String(body.printerId || ""), orderItemId: String(body.orderItemId || ""), unitIndex, reprint: body.reprint === true, actor }),
     );
   } catch (error) {

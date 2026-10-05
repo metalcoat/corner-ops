@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { timingSafeEqual } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { apiError } from "@/lib/http";
@@ -27,11 +28,11 @@ function normalizedPhone(value: string): string {
 export async function GET(request: Request) {
   try {
     if (!authorized(request))
-      return Response.json({ error: "Invalid 3CX CRM secret." }, { status: 401 });
+      return isoJson({ error: "Invalid 3CX CRM secret." }, { status: 401 });
     const url = new URL(request.url);
     const phone = normalizedPhone(url.searchParams.get("number") || "");
     if (!phone)
-      return Response.json({ error: "A valid caller phone number is required." }, { status: 400 });
+      return isoJson({ error: "A valid caller phone number is required." }, { status: 400 });
 
     await ensureOrderingCustomerSchema();
     const customer = (await getSql()`
@@ -47,7 +48,7 @@ export async function GET(request: Request) {
     `)[0];
 
     const origin = url.origin;
-    return Response.json({
+    return isoJson({
       contacts: customer ? [{
         id: String(customer.id),
         firstName: String(customer.first_name || customer.display_name || "Customer"),

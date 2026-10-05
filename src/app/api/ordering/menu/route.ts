@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import { orderingMenuWithVariants } from "@/lib/ordering-menu-variants";
 import type { OrderingBusiness } from "@/lib/ordering-core";
@@ -19,9 +20,9 @@ export async function GET(request: Request) {
     const channel=params.get("channel")==="web"?"web":"pos";
     const requested = params.get("scheduledFor");
     const at = requested ? new Date(requested) : new Date();
-    if (!Number.isFinite(at.getTime())) return Response.json({ error: "Invalid scheduled menu time." }, { status: 400 });
+    if (!Number.isFinite(at.getTime())) return isoJson({ error: "Invalid scheduled menu time." }, { status: 400 });
     const categories = await orderingMenuWithVariants(business,channel);
-    return Response.json({ business,channel,categories:await applyScheduledMenuAvailability(business, at, categories as unknown as Array<Record<string, any>>) });
+    return isoJson({ business,channel,categories:await applyScheduledMenuAvailability(business, at, categories as unknown as Array<Record<string, any>>) });
   } catch (error) {
     return apiError(error);
   }

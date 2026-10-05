@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { randomUUID } from "node:crypto";
 import { getSql, withTransaction } from "@/lib/db";
 import { unauthorized } from "@/lib/http";
@@ -32,8 +33,8 @@ export async function POST(request: Request) {
       text: available ? `${actor.name} (${actor.role || "employee"}) returned ${item.name} from the POS.\n\nThe item is active again on POS, kiosk, online ordering, and AI phone ordering.` : `${actor.name} (${actor.role || "employee"}) 86'd ${item.name} from the POS.\n\nThe item is now unavailable on POS, kiosk, online ordering, and AI phone ordering.`,
       idempotencyKey: `menu-availability-${item.id}-${Date.now()}`,
     });
-    return Response.json({ item: { ...item, available }, emailSent: email.sent > 0, emailFailures: email.failures }, { status: 201 });
+    return isoJson({ item: { ...item, available }, emailSent: email.sent > 0, emailFailures: email.failures }, { status: 201 });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "The item could not be 86'd." }, { status: 400 });
+    return isoJson({ error: error instanceof Error ? error.message : "The item could not be 86'd." }, { status: 400 });
   }
 }

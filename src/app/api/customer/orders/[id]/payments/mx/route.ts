@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 import { getSql } from "@/lib/db";
@@ -57,7 +58,7 @@ export async function POST(
       const submitted = await submitDraftOrder(orderId, business, actor);
       await dispatchSubmittedOrderPrintJobs(orderId, business);
       after(() => sendCustomerOrderConfirmation(orderId).then(() => {}));
-      return Response.json({ order: submitted.order }, { status: 201 });
+      return isoJson({ order: submitted.order }, { status: 201 });
     }
     await ensureMxPaymentSchema();
     if (body.action === "initialize") {
@@ -71,7 +72,7 @@ export async function POST(
         replayId = newReplayId(),
         customer = await cardBillingContactForOrder(orderId, business);
       await sql`INSERT INTO ordering_mx_checkout_sessions(id,business,order_id,amount_cents,replay_id,client_mutation_id,created_by,expires_at)VALUES(${randomUUID()},${business},${orderId},${amount},${replayId},${randomUUID()},${actor.id},NOW()+INTERVAL '30 minutes')`;
-      return Response.json({
+      return isoJson({
         ...init,
         amount: amount / 100,
         replayId,
@@ -114,14 +115,14 @@ export async function POST(
     const submitted = await submitDraftOrder(orderId, business, actor);
     await dispatchSubmittedOrderPrintJobs(orderId, business);
     after(() => sendCustomerOrderConfirmation(orderId).then(() => {}));
-    return Response.json({ payment, order: submitted.order }, { status: 201 });
+    return isoJson({ payment, order: submitted.order }, { status: 201 });
   } catch (e) {
     if (
       e instanceof MxMerchantError ||
       e instanceof PaymentConflictError ||
       e instanceof OrderConflictError
     )
-      return Response.json({ error: e.message }, { status: 409 });
+      return isoJson({ error: e.message }, { status: 409 });
     return apiError(e);
   }
 }

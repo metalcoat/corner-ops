@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { createHash, randomUUID } from "node:crypto";
 import { apiError } from "@/lib/http";
 import { getSql, withTransaction } from "@/lib/db";
@@ -64,15 +65,15 @@ function snapshot(from: string, to: string, orders: Awaited<ReturnType<typeof ca
 
 // Destructive dev tool: owner only, and never on production (Vercel / production host), even if LOCAL_DEVELOPMENT is set.
 async function ownerActor(request: Request) {
-  if (!localDevToolsAllowed(process.env, request.headers.get("host"))) return Response.json({ error: "Unavailable." }, { status: 404 });
+  if (!localDevToolsAllowed(process.env, request.headers.get("host"))) return isoJson({ error: "Unavailable." }, { status: 404 });
   const actor = await orderingManagerActor(BUSINESS);
   if (isAuthorizationResponse(actor)) return actor;
-  if (actor.role !== "owner") return Response.json({ error: "Owner access required." }, { status: 403 });
+  if (actor.role !== "owner") return isoJson({ error: "Owner access required." }, { status: 403 });
   return actor;
 }
 
 function errorResponse(error: unknown) {
-  if (error instanceof BulkVoidInputError) return Response.json({ error: error.message }, { status: 400 });
+  if (error instanceof BulkVoidInputError) return isoJson({ error: error.message }, { status: 400 });
   console.error("[bulk-cash-void] failed", error);
   return apiError(error);
 }
@@ -84,7 +85,7 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams;
     const { from, to } = dates(params.get("from"), params.get("to"));
     const orders = await candidates(from, to);
-    return Response.json({ from, to, orders, count: orders.length, totalCents: orders.reduce((sum, order) => sum + order.amountCents, 0), previewToken: snapshot(from, to, orders) });
+    return isoJson({ from, to, orders, count: orders.length, totalCents: orders.reduce((sum, order) => sum + order.amountCents, 0), previewToken: snapshot(from, to, orders) });
   } catch (error) { return errorResponse(error); }
 }
 
@@ -134,6 +135,6 @@ export async function POST(request: Request) {
         skipped.push({ displayNumber: previewOrder.displayNumber, reason: error instanceof Error ? error.message : "Could not void order." });
       }
     }
-    return Response.json({ batchId, voided, reversedCents, skipped });
+    return isoJson({ batchId, voided, reversedCents, skipped });
   } catch (error) { return errorResponse(error); }
 }

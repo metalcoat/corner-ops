@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import type { VariantConfiguredOrderItemInput } from "@/lib/ordering-orders-with-variants";
 import type { OrderingBusiness, ServiceType } from "@/lib/ordering-core";
@@ -44,13 +45,13 @@ function cashierOrderError(error: unknown): Response | null {
   const safeOrderError = /^(Choose a size|The selected size|This (item|menu item)|Menu item|Item quantity|Required modifier choices|Required combo choice|An invalid (modifier|combo)|Invalid quantity|The selected combo|A selected modifier|A valid future order time|Unknown (business|fulfillment type|order timing mode)|Invalid order item)/.test(message)
     || message.endsWith(" is currently unavailable.");
   if (!safeOrderError) return null;
-  return Response.json({ error: message }, { status: 409 });
+  return isoJson({ error: message }, { status: 409 });
 }
 
 async function orderResponse(order: { id: unknown }, status: number) {
   const promotions = await getSql()`SELECT label_snapshot label,discount_cents FROM ordering_order_promotion_applications WHERE order_id=${order.id} ORDER BY application_sequence`;
   const orderItems=await getSql()`SELECT id,sort_order FROM ordering_order_items WHERE order_id=${order.id} ORDER BY sort_order,created_at,id`;
-  return Response.json({ order, promotions, orderItems }, { status });
+  return isoJson({ order, promotions, orderItems }, { status });
 }
 
 export async function POST(request: Request) {
@@ -103,11 +104,11 @@ export async function POST(request: Request) {
     const serviceType = readServiceType(body.serviceType);
     const enteredAddress = String(body.deliveryAddress || "");
     const customerAddressId=body.customerAddressId?String(body.customerAddressId):null;
-    if(customerAddressId){const rows=await getSql()`SELECT address.id FROM ordering_customer_addresses address JOIN ordering_customers customer ON customer.id=address.customer_id WHERE address.id=${customerAddressId} AND address.customer_id=${body.customerId?String(body.customerId):null} AND address.active=TRUE AND customer.business=${business}`;if(!rows[0])return Response.json({error:"The selected customer address is no longer available."},{status:409})}
+    if(customerAddressId){const rows=await getSql()`SELECT address.id FROM ordering_customer_addresses address JOIN ordering_customers customer ON customer.id=address.customer_id WHERE address.id=${customerAddressId} AND address.customer_id=${body.customerId?String(body.customerId):null} AND address.active=TRUE AND customer.business=${business}`;if(!rows[0])return isoJson({error:"The selected customer address is no longer available."},{status:409})}
     let validatedAddress = null;
     if (enteredAddress || body.deliveryValidationToken) {
       try { validatedAddress = addressForOrder(serviceType, String(body.deliveryValidationToken || ""), enteredAddress); }
-      catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Validate the delivery address." }, { status: 409 }); }
+      catch (error) { return isoJson({ error: error instanceof Error ? error.message : "Validate the delivery address." }, { status: 409 }); }
     }
     const draftInput: Parameters<typeof createTimedDraftOrder>[0] = {
       business,
@@ -145,7 +146,7 @@ export async function POST(request: Request) {
     } else {
       order = await createTimedDraftOrder(draftInput);
     }
-    if(body.tableSessionId){const sessionId=String(body.tableSessionId);const linked=await getSql()`UPDATE restaurant_table_sessions session SET order_id=${order.id},status='ordering',updated_at=NOW() FROM restaurant_tables table_row JOIN restaurant_floor_plans floor ON floor.id=table_row.floor_plan_id JOIN restaurant_locations location ON location.id=floor.location_id JOIN restaurant_concepts concept ON concept.id=location.concept_id WHERE session.id=${sessionId} AND session.table_id=table_row.id AND session.order_id IS NULL AND session.status='open' AND concept.legacy_business=${business} RETURNING session.id,table_row.label`;if(!linked.length){await getSql()`DELETE FROM ordering_orders WHERE id=${order.id}`;return Response.json({error:"The table session is no longer available."},{status:409})}await getSql()`UPDATE ordering_orders SET first_name_snapshot=${String(linked[0].label)},updated_at=NOW() WHERE id=${order.id}`}
+    if(body.tableSessionId){const sessionId=String(body.tableSessionId);const linked=await getSql()`UPDATE restaurant_table_sessions session SET order_id=${order.id},status='ordering',updated_at=NOW() FROM restaurant_tables table_row JOIN restaurant_floor_plans floor ON floor.id=table_row.floor_plan_id JOIN restaurant_locations location ON location.id=floor.location_id JOIN restaurant_concepts concept ON concept.id=location.concept_id WHERE session.id=${sessionId} AND session.table_id=table_row.id AND session.order_id IS NULL AND session.status='open' AND concept.legacy_business=${business} RETURNING session.id,table_row.label`;if(!linked.length){await getSql()`DELETE FROM ordering_orders WHERE id=${order.id}`;return isoJson({error:"The table session is no longer available."},{status:409})}await getSql()`UPDATE ordering_orders SET first_name_snapshot=${String(linked[0].label)},updated_at=NOW() WHERE id=${order.id}`}
     if (validatedAddress) {
       let route = null;
       try { route = await routeDeliveryAddress(validatedAddress); } catch { /* Routing remains optional until origin coordinates are configured. */ }

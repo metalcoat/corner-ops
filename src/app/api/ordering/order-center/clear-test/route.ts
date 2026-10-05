@@ -1,3 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
 import { apiError } from "@/lib/http";
 import { getSql } from "@/lib/db";
 import { isAuthorizationResponse, orderingManagerActor } from "@/lib/ordering-route-auth";
@@ -8,7 +9,7 @@ export const runtime = "nodejs";
 
 export async function POST() {
   if (process.env.LOCAL_DEVELOPMENT !== "true") {
-    return Response.json({ error: "Test-order clearing is disabled in this environment." }, { status: 404 });
+    return isoJson({ error: "Test-order clearing is disabled in this environment." }, { status: 404 });
   }
   const actor = await orderingManagerActor("Corner Deli");
   if (isAuthorizationResponse(actor)) return actor;
@@ -32,7 +33,7 @@ export async function POST() {
         else throw error;
       }
     }
-    return Response.json({ cleared, skipped: skipped.length });
+    return isoJson({ cleared, skipped: skipped.length });
   } catch (error) {
     console.error("[clear-test-orders] failed", error);
     return apiError(error);

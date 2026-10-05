@@ -58,4 +58,5 @@ log "Building and starting staging"
 "${compose[@]}" build --quiet app
 "${compose[@]}" up -d --wait app
 curl -fsS "http://$address:3002/api/health" >/dev/null
+"$SOURCE_REPO/deploy/staging/add-test-owner.sh" corner-ops-staging-postgres
 log "Staging is up at http://$address:3002 ($sha, data from $(basename "$dump"))"
