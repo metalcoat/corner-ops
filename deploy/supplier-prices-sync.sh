@@ -31,14 +31,18 @@ mkdir -p "$DROP" "$DROP/_website"
 website() {
   # One website run at a time: they share each supplier's browser profile.
   exec 8>"$DROP/_website/.lock"
-  if ! flock -n 8; then
+  # A website search waits for a run that's already going (up to 20 minutes); a price run just skips.
+  local wait=(-n)
+  (( ${#search_env[@]} )) && wait=(-w 1200)
+  if ! flock "${wait[@]}" 8; then
     printf '%s A website price run is already going; skipping.\n' "$(date -u +%FT%TZ)"
     return 0
   fi
   local compose=(docker compose --project-name corner-ops --env-file "$ENV_FILE" -f "$ROOT/runtime/docker-compose.local.yml" --profile tools)
   "${compose[@]}" build --quiet supplier-prices
-  "${compose[@]}" run --rm --no-deps supplier-prices "$@"
+  "${compose[@]}" run --rm --no-deps "${search_env[@]}" supplier-prices "$@"
 }
+search_env=()
 # --signin <site>: the price job's browser, shown as a web page on this box's
 # deli-network address only (never 0.0.0.0, nothing through Cloudflare), with a
 # one-time password. It closes once the person is signed in, or after 15 minutes.
@@ -103,5 +107,16 @@ while IFS= read -r supplier; do
   printf '%s Sync now: %s\n' "$(date -u +%FT%TZ)" "$supplier"
   website "$supplier" || status=1
 done <<< "$requested"
+
+# "Search the suppliers' websites" pressed on Supplier costs: look each term up on every supplier's site.
+searches="$(curl -fsS --max-time 30 -H @<(printf 'Authorization: Bearer %s\n' "$secret") 'http://127.0.0.1:3000/api/cron/supplier-prices?searches=1' 2>/dev/null \
+  | python3 -c 'import json,sys; [print(s["id"] + "\t" + s["query"].replace("\t", " ").replace("\n", " ")) for s in json.load(sys.stdin).get("searches", [])]' 2>/dev/null || true)"
+while IFS=$'\t' read -r search_id query; do
+  [[ -n "$search_id" && -n "$query" ]] || continue
+  printf '%s Website search: %s\n' "$(date -u +%FT%TZ)" "$query"
+  search_env=(-e "SEARCH_QUERY=$query" -e "SEARCH_ID=$search_id")
+  website || status=1
+  search_env=()
+done <<< "$searches"
 
 exit "$status"

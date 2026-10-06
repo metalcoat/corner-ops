@@ -35,6 +35,10 @@ const SUPPLIERS = [
 const SIGN_IN_BY_HAND = "/opt/corner-ops/runtime/deploy/supplier-prices-sync.sh --signin";
 
 const only = (process.argv[2] || "").toLowerCase();
+// "Search the suppliers' sites" on Supplier costs: look this up on each site instead of reading the guide.
+const SEARCH = (process.env.SEARCH_QUERY || "").trim().slice(0, 80);
+// What each supplier's search turned up, for the note on Supplier costs.
+const searchResults = new Map();
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 mkdirSync(DEBUG, { recursive: true });
 
@@ -444,6 +448,26 @@ async function readWebstaurant(supplier, context, page, shot, guideUrl) {
     await report(supplier.name, { status: "needs_login", message });
     return;
   }
+  if (SEARCH) {
+    // Search results come inside the page (a JSON script tag), priced for the signed-in account.
+    await page.goto(`https://www.webstaurantstore.com/search/${encodeURIComponent(SEARCH)}.html`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page.waitForTimeout(4_000);
+    const found = await page.evaluate(() => {
+      const script = document.querySelector('script[type="application/json"][data-hypernova-key="SearchPage"]');
+      const text = (script?.textContent || "").trim().replace(/^<!--/, "").replace(/-->$/, "");
+      return text ? JSON.parse(text).products || [] : [];
+    }).catch(() => []);
+    const items = found.filter((p) => p && p.itemNumber && p.price).map((p) => ({
+      itemNumber: String(p.itemNumber).toUpperCase(), description: p.description, isWebstaurantPlusEligible: p.isWebstaurantPlusEligible,
+      price: { unitPrice: Number(p.price.price) }, fullProductInfo: p,
+    }));
+    const products = webstaurantProducts(items, Number(process.env.WEBSTAURANT_SHIPPING_PER_CASE || 9.65));
+    console.log(`${supplier.name}: "${SEARCH}": ${found.length} results, ${products.length} food and supplies`);
+    await shot("search");
+    searchResults.set(supplier.name, { found: products.length });
+    if (products.length) console.log(`${supplier.name}: ${await report(supplier.name, { csv: productsToCsv(products), source: "search" })}`);
+    return;
+  }
   const items = await page.evaluate(async () => {
     const all = [];
     for (let pageNumber = 1; pageNumber <= 100; pageNumber++) {
@@ -469,6 +493,42 @@ async function readWebstaurant(supplier, context, page, shot, guideUrl) {
   writeFileSync(`${DEBUG}/${supplier.key}-latest.csv`, csv);
   console.log(`${supplier.name}: ${await report(supplier.name, { csv })}`);
   await saveSessionCookies(context, PROFILES, supplier.key);
+}
+
+/**
+ * Searches the supplier's own site the way a person would: its search box (PFG's is
+ * inside the open order), then reads the products and account prices the results
+ * page downloads, like the order guide. Results only go into the catalog.
+ */
+async function searchSite(supplier, page, captured, shot) {
+  if (supplier.order && !(await openOrderEntry(page, supplier))) console.log(`${supplier.name}: couldn't open an order to search in`);
+  captured.length = 0;
+  const box = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i], input[name*="search" i], input[id*="search" i]').filter({ visible: true });
+  // Some sites (Sysco) show a loading screen for a while after signing in.
+  await box.first().waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
+  if (!(await visible(box))) {
+    const picture = await shot("no-search-box");
+    console.log(`${supplier.name}: no search box on ${page.url()} (${picture})`);
+    searchResults.set(supplier.name, { found: 0, note: "couldn't find its search box" });
+    return;
+  }
+  // Promotions pop up over the page (Sysco's "Deals of the Week"); close them without choosing anything.
+  await page.keyboard.press("Escape").catch(() => {});
+  const close = page.locator('[role="dialog"] button[aria-label*="close" i], [role="dialog"] button:has-text("×"), button[aria-label="Close"]').filter({ visible: true });
+  if (await visible(close)) await close.first().click({ timeout: 5_000 }).catch(() => {});
+  await box.first().fill(SEARCH);
+  await box.first().press("Enter");
+  await page.waitForTimeout(8_000);
+  await loadEverything(page);
+  await page.waitForTimeout(2_000);
+  const products = dedupeProducts([...captured.flatMap((c) => extractProducts(c.json)), ...joinSplitProducts(captured.map((c) => c.json))]);
+  console.log(`${supplier.name}: "${SEARCH}" → ${page.url()}: ${products.length} products`);
+  if (process.env.DEBUG_RESPONSES === "1") writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-search-responses.txt`, captured.map((c) => `${c.url.split("?")[0]}\n${describe(c.json)}`).join("\n\n"));
+  if (process.env.DEBUG_RESPONSES === "raw") writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-search-raw.json`, JSON.stringify(captured));
+  await shot("search");
+  searchResults.set(supplier.name, { found: products.length });
+  if (!products.length) return;
+  console.log(`${supplier.name}: ${await report(supplier.name, { csv: productsToCsv(products), source: "search" })}`);
 }
 
 async function run(supplier) {
@@ -519,8 +579,10 @@ async function run(supplier) {
       await shot(login.status);
       console.log(`${supplier.name}: ${login.message}`);
       await report(supplier.name, { status: login.status, message: login.message });
+      if (SEARCH) searchResults.set(supplier.name, { found: 0, note: "needs signing in" });
       return;
     }
+    if (SEARCH) return await searchSite(supplier, page, captured, shot);
     if (guideUrl) {
       await page.goto(guideUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
       await page.waitForTimeout(6_000);
@@ -614,6 +676,7 @@ async function run(supplier) {
     const picture = await shot("error");
     const message = `${error.message.split("\n")[0]} (screenshot ${picture.replace(DEBUG, "/opt/corner-ops/supplier-prices/_website")})`;
     console.error(`${supplier.name}: ${message}`);
+    if (SEARCH) searchResults.set(supplier.name, { found: 0, note: "the search failed" });
     await report(supplier.name, { status: "failed", message }).catch((e) => console.error(e.message));
     process.exitCode = 1;
   } finally {
@@ -633,10 +696,22 @@ try {
 }
 for (const supplier of SUPPLIERS) {
   if (only && supplier.key.toLowerCase() !== only && supplier.name.toLowerCase() !== only) continue;
+  if (SEARCH && !process.env[`${supplier.key}_USERNAME`] && !supplier.signInByHand) continue;
   // One supplier's problem never stops the others.
   await run(supplier).catch(async (error) => {
     console.error(`${supplier.name}: ${error.message.split("\n")[0]}`);
     process.exitCode = 1;
     await report(supplier.name, { status: "failed", message: error.message.split("\n")[0] }).catch(() => {});
   });
+}
+
+// A website search from Supplier costs: say how it went on each supplier.
+if (SEARCH && process.env.SEARCH_ID) {
+  const found = [...searchResults.values()].reduce((sum, r) => sum + r.found, 0);
+  const message = [...searchResults.entries()].map(([name, r]) => `${name}: ${r.note || `${r.found} found`}`).join(" · ") || "No supplier could be searched.";
+  await callApp("/api/cron/supplier-prices", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ searchDone: process.env.SEARCH_ID, found, message, failed: searchResults.size === 0 }),
+  }).catch((error) => console.error(`Couldn't record the search result: ${error.message}`));
 }

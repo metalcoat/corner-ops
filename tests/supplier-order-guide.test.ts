@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseGuide, parseSize, splitRow } from "../src/lib/supplier-order-guide.js";
+import { parseGuide, parseSize, splitRow, normalizeUnit } from "../src/lib/supplier-order-guide.js";
 
 test("pack sizes the way suppliers write them", () => {
   assert.deepEqual(parseSize("5 LB"), { quantity: 5, unit: "lb" });
@@ -81,4 +81,8 @@ test("unit prices per pound or per item use the case's pounds or item count", ()
     ["2720977", 40, "lb", 11560],
     ["5505406", 49.8, "lb", 10259],
   ]);
+});
+
+test("a pack counted in bags (BG) is a count", () => {
+  assert.equal(normalizeUnit("BG"), "each");
 });

@@ -89,6 +89,13 @@
 .importForm,.searchForm{display:grid;grid-template-columns:240px 1fr auto;gap:8px;align-items:start}
 .searchForm{grid-template-columns:1fr auto auto;align-items:end}
 .searchForm label{display:flex;align-items:center;gap:6px;font-size:.85rem;font-weight:700}
+.siteSearch{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:10px}
+.siteSearches{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:6px}
+.siteSearches li{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--soft);font-size:.9rem}
+.siteSearches li small{color:var(--muted)}
+.siteSearches li.queued,.siteSearches li.running{border-color:var(--amber)}
+.siteSearches li.failed{border-color:var(--bad)}
+.costsPage.costsPage.costsPage .siteSearches button.small{min-height:30px;padding:3px 10px;font-size:.8rem;margin-left:auto}
 .costsPage code{padding:1px 5px;border-radius:5px;background:var(--soft);font-size:.85em}
 .termCards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 .termCard{display:grid;align-content:start;gap:10px;padding:14px;border-radius:12px;background:var(--panel);border:1px solid var(--line)}

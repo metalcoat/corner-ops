@@ -33,7 +33,7 @@ const UNIT_WORDS: Record<string, string> = {
   "#": "lb", lb: "lb", lbs: "lb", pound: "lb", pounds: "lb", oz: "oz", ounce: "oz", ounces: "oz", "fl oz": "floz", floz: "floz",
   gal: "gal", gallon: "gal", gallons: "gal", ga: "gal", qt: "qt", quart: "qt", pt: "pt", pint: "pt", l: "l", lt: "l", liter: "l", ltr: "l", ml: "ml",
   kg: "kg", g: "g", gm: "g", gram: "g", ct: "each", count: "each", ea: "each", each: "each", pc: "each", pcs: "each", pk: "each", dz: "dozen", doz: "dozen", dozen: "dozen",
-  cs: "each", case: "each", bag: "each", box: "each", can: "each", cn: "each", btl: "each", bottle: "each", roll: "each", sl: "each", slice: "each", loaf: "each",
+  cs: "each", case: "each", bag: "each", bg: "each", box: "each", can: "each", cn: "each", btl: "each", bottle: "each", roll: "each", sl: "each", slice: "each", loaf: "each",
 };
 export function normalizeUnit(raw: string) {
   const key = raw.trim().toLowerCase().replace(/\.$/, "").replace(/\+$/, "");

@@ -1,7 +1,7 @@
 "use client";
 // Supplier costs: which supplier to buy each item from, given what we use each
 // week, each supplier's minimum order, delivery fee, and truck days.
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Window = { orderBy: string | null; deliveryDate: string } | null;
 type Supplier = {
@@ -26,7 +26,8 @@ type Spec = { keywords: string; maxUnitCostCents: number | null; minPack: number
 type Match = { id: string; supplier_id: string; supplier_name: string; vendor_sku: string; description: string; brand: string; pack_quantity: number; pack_unit: string; price_cents: number; unitCostCents: number; isNew: boolean };
 type PriceChange = { id: string; supplier_name: string; description: string; previous: number; price_cents: number; seen_at: string; item_name: string };
 type SearchResult = { id: string; supplier_name: string; vendor_sku: string; description: string; brand: string; pack_quantity: number; pack_unit: string; price_cents: number; unitCostCents: number | null; last_seen_at: string };
-type Data = { specs: Record<string, Spec>; matches: Record<string, Match[]>; priceChanges: PriceChange[]; catalogSize: number; mode: "week" | "order"; suppliers: Supplier[]; items: Item[]; analysis: { best: Plan | null; single: Plan[]; floorCents: number }; requests: Request[]; unpriced: string[]; noUsage: number };
+type SiteSearch = { id: string; query: string; status: "queued" | "running" | "done" | "failed"; found: number | null; message: string; requestedAt: string; finishedAt: string | null };
+type Data = { siteSearches: SiteSearch[]; specs: Record<string, Spec>; matches: Record<string, Match[]>; priceChanges: PriceChange[]; catalogSize: number; mode: "week" | "order"; suppliers: Supplier[]; items: Item[]; analysis: { best: Plan | null; single: Plan[]; floorCents: number }; requests: Request[]; unpriced: string[]; noUsage: number };
 
 const SYNC_LABEL = { ok: "Updated", needs_login: "Sign-in failed", needs_code: "Needs a verification code", no_products: "Signed in, no prices found", failed: "Failed" } as const;
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -73,7 +74,8 @@ export default function SupplierCosts() {
     void load();
   }, [load]);
   // While a website sync is starting or waiting on a code, keep the page current.
-  const syncing = Boolean(data?.suppliers.some((s) => s.syncRequestedAt || (s.priceSync?.status === "needs_code" && Date.now() - new Date(s.priceSync.at).getTime() < 10 * 60_000) || s.priceSync?.message === "Code entered; signing in…"));
+  const siteSearching = Boolean(data?.siteSearches.some((s) => s.status === "queued" || s.status === "running"));
+  const syncing = siteSearching || Boolean(data?.suppliers.some((s) => s.syncRequestedAt || (s.priceSync?.status === "needs_code" && Date.now() - new Date(s.priceSync.at).getTime() < 10 * 60_000) || s.priceSync?.message === "Code entered; signing in…"));
   useEffect(() => {
     if (!syncing) return;
     const timer = window.setInterval(() => void load(), 10_000);
@@ -84,6 +86,28 @@ export default function SupplierCosts() {
     const timer = window.setTimeout(() => setNotice(""), 5000);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  // When a website search for what's in the search box finishes, show its products right away.
+  const finishedSearches = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!data) return;
+    const done = new Set(data.siteSearches.filter((s) => s.status === "done").map((s) => s.id));
+    const before = finishedSearches.current;
+    finishedSearches.current = done;
+    if (!before) return;
+    const justDone = data.siteSearches.find((s) => done.has(s.id) && !before.has(s.id));
+    if (justDone && justDone.query.toLowerCase() === search.query.trim().toLowerCase()) runSearch(justDone.query);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  function runSearch(query = search.query) {
+    if (!query.trim()) return;
+    if (query !== search.query) setSearch((current) => ({ ...current, query }));
+    setBusy("search");
+    fetch("/api/ordering/supplier-costs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "search_catalog", query, unit: search.unit }) })
+      .then(async (r) => (r.ok ? setResults((await r.json()).results) : setError(await message(r))))
+      .finally(() => setBusy(""));
+  }
 
   async function post(key: string, body: Record<string, unknown>, done: (result: Record<string, unknown>) => string) {
     setBusy(key);
@@ -423,16 +447,38 @@ export default function SupplierCosts() {
           className="searchForm"
           onSubmit={(e) => {
             e.preventDefault();
-            setBusy("search");
-            fetch("/api/ordering/supplier-costs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "search_catalog", query: search.query, unit: search.unit }) })
-              .then(async (r) => (r.ok ? setResults((await r.json()).results) : setError(await message(r))))
-              .finally(() => setBusy(""));
+            runSearch();
           }}
         >
           <input value={search.query} onChange={(e) => setSearch({ ...search, query: e.target.value })} placeholder="e.g. chicken tender 4 oz" aria-label="Search products" />
           <label>Price per<select value={search.unit} onChange={(e) => setSearch({ ...search, unit: e.target.value })}>{["lb", "oz", "each", "gal", "qt"].map((u) => <option key={u}>{u}</option>)}</select></label>
           <button disabled={!search.query.trim() || busy === "search"}>{busy === "search" ? "SEARCHING…" : "SEARCH"}</button>
         </form>
+        <div className="siteSearch">
+          <button
+            type="button"
+            className="ghost"
+            disabled={!search.query.trim() || Boolean(busy)}
+            onClick={() => void post("site_search", { action: "site_search", query: search.query }, () => `Looking up “${search.query.trim()}” on the suppliers' websites. Results show up here in about 5–10 minutes.`)}
+          >
+            SEARCH SUPPLIER WEBSITES{search.query.trim() ? ` FOR “${search.query.trim().toUpperCase()}”` : ""}
+          </button>
+          <span className="muted">Not on our order guides? Looks it up on Sysco, US Foods, PFG and WebstaurantStore at our account prices.</span>
+        </div>
+        {data.siteSearches.length > 0 && (
+          <ul className="siteSearches">
+            {data.siteSearches.map((s) => (
+              <li key={s.id} className={s.status}>
+                <b>“{s.query}”</b>{" "}
+                {s.status === "queued" ? "waiting to start…" : s.status === "running" ? "searching the suppliers' websites…" : s.status === "failed" ? "didn't finish" : `${s.found ?? 0} product${s.found === 1 ? "" : "s"} found`}
+                {s.message ? <small> · {s.message}</small> : null}
+                {s.status === "done" && (
+                  <button type="button" className="ghost small" onClick={() => runSearch(s.query)}>SHOW</button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
         {results && (
           results.length === 0 ? <p className="costsEmpty">Nothing matches.</p> : (
             <table className="singleTable">

@@ -1,7 +1,7 @@
 import { isoJson } from "@/lib/timestamp-values";
 import { timingSafeEqual } from "node:crypto";
 import { getSql } from "@/lib/db";
-import { ensureSupplierCostSchema, importPrices, ingestCatalog, recordPriceSync, SupplierCostError, takeSyncCode, takeSyncRequests, type CatalogProduct } from "@/lib/ordering-supplier-costs";
+import { ensureSupplierCostSchema, importPrices, ingestCatalog, finishSiteSearch, recordPriceSync, SupplierCostError, takeSiteSearches, takeSyncCode, takeSyncRequests, type CatalogProduct } from "@/lib/ordering-supplier-costs";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -18,6 +18,7 @@ function authorized(request: Request): boolean {
  * For the price job on the store server:
  *   ?code=<supplier>   the sign-in code a manager typed in on Supplier costs (once)
  *   ?requested=1       suppliers someone pressed "Sync now" for
+ *   ?searches=1        terms someone asked to look up on the suppliers' websites
  */
 export async function GET(request: Request) {
   if (!process.env.CRON_SECRET?.trim()) return isoJson({ error: "CRON_SECRET is not configured." }, { status: 503 });
@@ -26,7 +27,8 @@ export async function GET(request: Request) {
   const supplier = url.searchParams.get("code");
   if (supplier) return isoJson({ code: await takeSyncCode(supplier) });
   if (url.searchParams.get("requested")) return isoJson({ suppliers: await takeSyncRequests() });
-  return isoJson({ error: "Ask for code or requested." }, { status: 400 });
+  if (url.searchParams.get("searches")) return isoJson({ searches: await takeSiteSearches() });
+  return isoJson({ error: "Ask for code, requested or searches." }, { status: 400 });
 }
 
 /**
@@ -43,7 +45,12 @@ export async function POST(request: Request) {
   if (!authorized(request)) return isoJson({ error: "Unauthorized." }, { status: 401 });
   try {
     await ensureSupplierCostSchema();
-    const body = (await request.json()) as { supplier?: string; csv?: string; products?: CatalogProduct[]; source?: string; status?: string; message?: string };
+    const body = (await request.json()) as { supplier?: string; csv?: string; products?: CatalogProduct[]; source?: string; status?: string; message?: string; searchDone?: string; found?: number; failed?: boolean };
+    // A website search finished on every supplier.
+    if (body.searchDone) {
+      await finishSiteSearch(String(body.searchDone), Number(body.found || 0), String(body.message || ""), Boolean(body.failed));
+      return isoJson({ recorded: true });
+    }
     const name = String(body.supplier || "").trim();
     const supplier = (await getSql()`SELECT id FROM ordering_inventory_suppliers WHERE business='Corner Deli' AND (lower(name)=lower(${name}) OR id::text=${name}) LIMIT 1`)[0];
     if (!supplier) return isoJson({ error: `No supplier named "${name}".` }, { status: 404 });

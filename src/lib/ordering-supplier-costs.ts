@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { getSql, withTransaction } from "@/lib/db";
 import { ensureOrderingInventorySchema } from "@/lib/ordering-inventory-schema";
 import { parseGuide } from "@/lib/supplier-order-guide";
+import { toIsoTimestamp, toIsoTimestampOrEmpty } from "@/lib/timestamp-values";
 import { analyzeSuppliers, convertUnits, nextDelivery, unitCostCents, type Offer, type PlanItem, type SupplierTerms } from "@/lib/supplier-plan";
 
 const BUSINESS = "Corner Deli";
@@ -45,6 +46,18 @@ export function ensureSupplierCostSchema() {
     await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_code TEXT`;
     await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_code_at TIMESTAMPTZ`;
     await sql`ALTER TABLE ordering_inventory_suppliers ADD COLUMN IF NOT EXISTS price_sync_requested_at TIMESTAMPTZ`;
+    // "Search the suppliers' websites": a term the price job looks up on each supplier's site.
+    await sql`CREATE TABLE IF NOT EXISTS ordering_supplier_site_searches(
+      id UUID PRIMARY KEY,
+      business TEXT NOT NULL CHECK (business IN ('Corner Deli','Tiki')),
+      query TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','done','failed')),
+      found INTEGER,
+      message TEXT NOT NULL DEFAULT '',
+      requested_by TEXT NOT NULL DEFAULT '',
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      started_at TIMESTAMPTZ,
+      finished_at TIMESTAMPTZ)`;
     await sql`ALTER TABLE ordering_inventory_items ADD COLUMN IF NOT EXISTS weekly_usage_override NUMERIC(14,3)`;
     await sql`CREATE TABLE IF NOT EXISTS ordering_inventory_requests(
       id UUID PRIMARY KEY,
@@ -274,6 +287,11 @@ export async function supplierCostDashboard(mode: CostMode = "week") {
     requests,
     unpriced: rows.filter((row) => row.need > 0 && !Object.keys(row.prices).length).map((row) => row.name),
     noUsage: rows.filter((row) => row.weeklyUsage == null).length,
+    siteSearches: (await sql`SELECT id,query,status,found,message,requested_at,finished_at FROM ordering_supplier_site_searches
+      WHERE business=${BUSINESS} AND requested_at>NOW()-INTERVAL '1 day' ORDER BY requested_at DESC LIMIT 5`).map((row) => ({
+      id: String(row.id), query: String(row.query), status: String(row.status), found: row.found == null ? null : Number(row.found),
+      message: String(row.message), requestedAt: toIsoTimestamp(row.requested_at), finishedAt: toIsoTimestampOrEmpty(row.finished_at) || null,
+    })),
   };
 }
 
@@ -355,6 +373,17 @@ export async function supplierCostAction(body: Record<string, unknown>, actorNam
       VALUES(${randomUUID()},${product.supplier_id},${itemId},${product.vendor_sku || product.product_key},${product.pack_quantity},${product.pack_unit},${product.price_cents},${product.last_seen_at},TRUE)
       ON CONFLICT(supplier_id,inventory_item_id) DO UPDATE SET vendor_sku=EXCLUDED.vendor_sku,case_quantity=EXCLUDED.case_quantity,case_unit=EXCLUDED.case_unit,case_price_cents=EXCLUDED.case_price_cents,last_quoted_at=EXCLUDED.last_quoted_at,active=TRUE,updated_at=NOW()`;
     return { ok: true };
+  }
+  if (action === "site_search") {
+    // The store server picks these up every few minutes; one queued search per term at a time.
+    const query = String(body.query || "").trim().replace(/\s+/g, " ").slice(0, 80);
+    if (query.length < 2) throw new SupplierCostError("Type what to look for.");
+    const existing = (await sql`SELECT id FROM ordering_supplier_site_searches WHERE business=${BUSINESS} AND lower(query)=lower(${query})
+      AND status IN ('queued','running') AND requested_at>NOW()-INTERVAL '2 hours' LIMIT 1`)[0];
+    if (existing) return { ok: true, id: String(existing.id) };
+    const id = randomUUID();
+    await sql`INSERT INTO ordering_supplier_site_searches(id,business,query,requested_by) VALUES(${id},${BUSINESS},${query},${actorName.slice(0, 120)})`;
+    return { ok: true, id };
   }
   if (action === "search_catalog") return { results: await searchCatalog(String(body.query || ""), String(body.unit || "")) };
   if (action === "resolve_request") {
@@ -621,6 +650,27 @@ export async function takeSyncCode(supplierName: string) {
       AND price_sync_code IS NOT NULL AND price_sync_code_at>NOW()-INTERVAL '15 minutes' FOR UPDATE) old
     WHERE s.id=old.id RETURNING old.price_sync_code code`)[0];
   return row ? String(row.code) : null;
+}
+
+/** Website searches waiting for the price job (marked running once handed out). */
+export async function takeSiteSearches() {
+  await ensureSupplierCostSchema();
+  const sql = getSql();
+  // A run that never reported back (container stopped, server restarted) is given up on.
+  await sql`UPDATE ordering_supplier_site_searches SET status='failed',finished_at=NOW(),message='The search stopped before finishing. Try again.'
+    WHERE status='running' AND started_at<NOW()-INTERVAL '45 minutes'`;
+  const rows = await sql`UPDATE ordering_supplier_site_searches SET status='running',started_at=NOW()
+    WHERE id IN (SELECT id FROM ordering_supplier_site_searches WHERE business=${BUSINESS} AND status='queued' AND requested_at>NOW()-INTERVAL '2 hours'
+      ORDER BY requested_at LIMIT 3 FOR UPDATE SKIP LOCKED)
+    RETURNING id,query`;
+  return rows.map((row) => ({ id: String(row.id), query: String(row.query) }));
+}
+
+/** The price job finished a website search: how many products it found, and per-supplier notes. */
+export async function finishSiteSearch(id: string, found: number, message: string, failed = false) {
+  await ensureSupplierCostSchema();
+  await getSql()`UPDATE ordering_supplier_site_searches SET status=${failed ? "failed" : "done"},found=${Math.max(0, Math.round(found)) || 0},
+    message=${message.slice(0, 500)},finished_at=NOW() WHERE id::text=${id} AND status='running'`;
 }
 
 /** Suppliers someone pressed "Sync now" for (cleared once handed out). */
