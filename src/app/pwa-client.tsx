@@ -1,6 +1,6 @@
 "use client";
 
-import { BeforeInstallPromptEvent, isIos, isStandalone } from "@/app/pwa-platform";
+import { applicationServerKey, BeforeInstallPromptEvent, deviceLabel, isIos, isStandalone, registerServiceWorker } from "@/app/pwa-platform";
 import { responseMessage } from "@/app/client-http";
 import { useSiteBrand } from "@/app/brand-context";
 import { usePathname } from "next/navigation";
@@ -18,32 +18,8 @@ const PWA_CORNER_KEY = "corner-ops-pwa-control-corner";
 const PWA_HIDDEN_KEY = "corner-ops-pwa-control-hidden";
 const CORNERS: PwaCorner[] = ["top-right", "top-left", "bottom-left", "bottom-right"];
 
-function applicationServerKey(value: string): ArrayBuffer {
-  const padding = "=".repeat((4 - (value.length % 4)) % 4);
-  const decoded = atob((value + padding).replace(/-/g, "+").replace(/_/g, "/"));
-  const bytes = new Uint8Array(decoded.length);
-  for (let index = 0; index < decoded.length; index += 1) bytes[index] = decoded.charCodeAt(index);
-  return bytes.buffer;
-}
-
 function currentAudience(): "owner" | "employee" {
   return window.location.pathname.startsWith("/employee") ? "employee" : "owner";
-}
-
-function deviceLabel() {
-  if (/iphone/i.test(navigator.userAgent)) return "iPhone";
-  if (/ipad/i.test(navigator.userAgent)) return "iPad";
-  if (/android/i.test(navigator.userAgent)) return "Android device";
-  if (/windows/i.test(navigator.userAgent)) return "Windows device";
-  if (/macintosh/i.test(navigator.userAgent)) return "Mac";
-  return "Browser device";
-}
-
-async function registerServiceWorker() {
-  if (!("serviceWorker" in navigator)) throw new Error("This browser does not support installed web apps.");
-  const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-  await navigator.serviceWorker.ready;
-  return registration;
 }
 
 function savedCorner(pathname: string): PwaCorner {

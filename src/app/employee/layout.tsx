@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import EmployeeAttendanceBadge from "./attendance-badge";
 import EmployeeEmailPrompt from "./email-prompt";
 import EmployeeInstallPrompt from "./install-prompt";
+import EmployeeNotificationPrompt from "./notification-prompt";
 import MessageNotificationRedirect from "./message-notification-redirect";
 import EmployeePinController from "./pin-controller";
 import ProfilePhotoOptimizer from "./profile-photo-optimizer";
@@ -26,7 +27,7 @@ export default function EmployeeLayout({ children }: Readonly<{ children: ReactN
         <EmployeeAttendanceBadge />
         <a href="/employee/forgot-pin">Forgot PIN</a>
       </nav>
-      <div className="employeePortalContent"><EmployeeEmailPrompt />{children}</div>
+      <div className="employeePortalContent"><EmployeeEmailPrompt /><EmployeeNotificationPrompt />{children}</div>
     </div>
   );
 }

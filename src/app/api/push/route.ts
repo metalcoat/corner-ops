@@ -5,6 +5,7 @@ import { apiError, unauthorized } from "@/lib/http";
 import {
   pushStatus,
   removePushSubscription,
+  requestOrigin,
   savePushSubscription,
   sendTestPush,
   type PushActor,
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
         ...subscription,
         userAgent: String(body.userAgent || ""),
         deviceLabel: String(body.deviceLabel || ""),
+        origin: requestOrigin(request.headers),
       }), { status: 201 });
     }
 
