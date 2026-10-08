@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Calls one of the app's scheduled jobs with CRON_SECRET from /opt/corner-ops/.env.
-#   deploy/run-cron.sh ordering-maintenance | schedule-delivery | scheduler
+#   deploy/run-cron.sh ordering-maintenance | schedule-delivery | scheduler | missed-clock-outs
 set -Eeuo pipefail
 
 readonly ENV_FILE="${CORNER_OPS_ROOT:-/opt/corner-ops}/.env"
@@ -8,7 +8,8 @@ case "${1:-}" in
   ordering-maintenance) path="ordering-maintenance" ;;
   schedule-delivery) path="schedule-delivery" ;;
   scheduler) path="scheduler-0700" ;; # runs the 3 AM Eastern daily scheduler; it skips other hours
-  *) printf 'Usage: %s ordering-maintenance|schedule-delivery|scheduler\n' "$0" >&2; exit 64 ;;
+  missed-clock-outs) path="missed-clock-outs" ;; # every 15 minutes; each open punch is handled once
+  *) printf 'Usage: %s ordering-maintenance|schedule-delivery|scheduler|missed-clock-outs\n' "$0" >&2; exit 64 ;;
 esac
 
 secret="$(grep -E '^[[:space:]]*(export[[:space:]]+)?CRON_SECRET[[:space:]]*=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- \

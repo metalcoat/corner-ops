@@ -4,10 +4,10 @@ import {
   createPayrollDraft,
   createTipOverride,
   deleteTipOverride,
-  lockPayrollRun,
   payrollCsv,
-  reopenPayrollRun,
 } from "@/lib/payroll-control";
+import { applyMissedClockOut, getMissedClockOutCase, missedClockOutCasesForBusiness, type ClockOutChoice } from "@/lib/missed-clock-outs";
+import { approvePayrollRun, payrollApprovalOverview, reopenPayrollRunAndWithdraw, retryPayrollSubmission } from "@/lib/payroll-approval";
 import { correctPunch } from "@/lib/payroll-punch-correction";
 import { safePayrollControlDashboard } from "@/lib/payroll-control-dashboard";
 import type { Business } from "@/lib/types";
@@ -91,9 +91,21 @@ export async function GET(request: Request) {
         headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${result.fileName}"` },
       });
     }
+    const caseId = url.searchParams.get("clockOutCase");
+    if (caseId) {
+      const item = await getMissedClockOutCase(caseId);
+      if (!item) return Response.json({ error: "That missed clock-out was not found." }, { status: 404 });
+      if (!canAccessBusiness(session, item.business)) return Response.json({ error: "Business access denied." }, { status: 403 });
+      return Response.json({ case: item });
+    }
     const business = businessFrom(url.searchParams.get("business") || "Corner Deli");
     if (!canAccessBusiness(session, business)) return Response.json({ error: "Business access denied." }, { status: 403 });
-    return Response.json(await safePayrollControlDashboard(business, String(url.searchParams.get("weekStart") || "")));
+    if (url.searchParams.get("clockOuts")) {
+      return Response.json({ business, cases: await missedClockOutCasesForBusiness(business, { includeResolved: url.searchParams.get("resolved") === "1" }) });
+    }
+    const weekStart = String(url.searchParams.get("weekStart") || "");
+    const dashboard = await safePayrollControlDashboard(business, weekStart);
+    return Response.json({ ...dashboard, approval: await payrollApprovalOverview(business, weekStart) });
   } catch (error) {
     return apiError(error);
   }
@@ -129,8 +141,20 @@ export async function POST(request: Request) {
     }
     if (action === "tip-override-delete") return Response.json(await deleteTipOverride(String(body.id || ""), session.email));
     if (action === "draft-create") return Response.json(await createPayrollDraft({ business, weekStart: String(body.weekStart || ""), actor: session.email }), { status: 201 });
-    if (action === "run-lock") return Response.json(await lockPayrollRun(String(body.id || ""), session.email));
-    if (action === "run-reopen") return Response.json(await reopenPayrollRun(String(body.id || ""), session.email), { status: 201 });
+    // Approving is locking; it is refused while the week has open punches or missed clock-outs.
+    if (action === "run-lock") return Response.json(await approvePayrollRun({ id: String(body.id || ""), business, actor: session.email }));
+    if (action === "run-reopen") return Response.json(await reopenPayrollRunAndWithdraw({ id: String(body.id || ""), business, actor: session.email }), { status: 201 });
+    if (action === "submission-retry") return Response.json(await retryPayrollSubmission({ id: String(body.id || ""), business, actor: session.email }));
+    if (action === "clock-out-apply") {
+      const choice = String(body.choice || "");
+      if (choice !== "scheduled_end" && choice !== "employee_time" && choice !== "custom") {
+        return Response.json({ error: "Choose which clock-out to use." }, { status: 400 });
+      }
+      return Response.json(await applyMissedClockOut({
+        id: String(body.id || ""), business, choice: choice as ClockOutChoice,
+        customTime: body.customTime ? String(body.customTime) : undefined, actor: session.email,
+      }));
+    }
     return Response.json({ error: "Unknown payroll action." }, { status: 400 });
   } catch (error) {
     return apiError(error);

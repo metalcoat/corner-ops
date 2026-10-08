@@ -20,7 +20,16 @@ type AttendanceCase = {
   status: string;
   managerNote: string;
 };
-type AttendancePayload = { business: Business; employeeId: string; cases: AttendanceCase[] };
+type ClockOutCase = {
+  id: string;
+  clockIn: string | null;
+  scheduledEnd: string | null;
+  status: "Open" | "Submitted" | "Resolved";
+  employeeLeftAt: string | null;
+  employeeNote: string;
+  resolvedClockOut: string | null;
+};
+type AttendancePayload = { business: Business; employeeId: string; cases: AttendanceCase[]; clockOuts?: ClockOutCase[] };
 type TimeRecord = {
   id: string;
   clock_in: string | null;
@@ -72,9 +81,14 @@ export default function EmployeeAttendancePage() {
   const [selectedId, setSelectedId] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [clockOutId, setClockOutId] = useState("");
+  const [loginBusiness, setLoginBusiness] = useState<Business>("Corner Deli");
 
   useEffect(() => {
-    setSelectedId(new URLSearchParams(window.location.search).get("case") || "");
+    const params = new URLSearchParams(window.location.search);
+    setSelectedId(params.get("case") || "");
+    setClockOutId(params.get("clockout") || "");
+    if (params.get("business") === "Tiki") setLoginBusiness("Tiki");
     fetch("/api/employee/session", { cache: "no-store" })
       .then((response) => response.json())
       .then((payload: { session?: EmployeeSession | null }) => setSession(payload.session || null))
@@ -148,6 +162,28 @@ export default function EmployeeAttendancePage() {
       setNotice("Correction submitted. Management approval is still required before payroll changes.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Correction submission failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitClockOut(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/employee/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clock-out-time", id: form.get("id"), leftAt: form.get("leftAt"), note: form.get("note") }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      await load();
+      window.dispatchEvent(new Event("corner-ops-attendance-updated"));
+      setNotice("Thanks — your clock-out time was sent to management for approval.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Your clock-out time could not be sent.");
     } finally {
       setBusy(false);
     }
@@ -228,7 +264,7 @@ export default function EmployeeAttendancePage() {
       <p>Sign in with your normal five-digit Employee Hub PIN.</p>
       {notice && <div className="attendanceNotice">{notice}</div>}
       <form onSubmit={login}>
-        <label>Location<select name="business" defaultValue="Corner Deli"><option>Corner Deli</option><option>Tiki</option></select></label>
+        <label>Location<select key={loginBusiness} name="business" defaultValue={loginBusiness}><option>Corner Deli</option><option>Tiki</option></select></label>
         <label>Five-digit PIN<input name="pin" inputMode="numeric" pattern="\d{5}" maxLength={5} required /></label>
         <button disabled={busy}>Sign in</button>
       </form>
@@ -247,6 +283,31 @@ export default function EmployeeAttendancePage() {
     </header>
 
     {notice && <div className="attendanceNotice">{notice}</div>}
+
+    {(data?.clockOuts || []).some((item) => item.status !== "Resolved" || item.id === clockOutId) && <>
+      <section className="attendanceSectionHeading">
+        <div><p className="attendanceEyebrow">Missed clock-out</p><h2>When did you leave?</h2></div>
+      </section>
+      <div className="attendanceEmployeeGrid">
+        {(data?.clockOuts || []).filter((item) => item.status !== "Resolved" || item.id === clockOutId).map((item) => <section className="attendanceEmployeeCard" key={item.id}>
+          <div className="attendanceCaseHeader">
+            <div><p className="attendanceEyebrow">Still clocked in since</p><h2>{local(item.clockIn)}</h2></div>
+            <span className={`attendanceStatus ${item.status === "Resolved" ? "approved" : item.status.toLowerCase()}`}>{item.status === "Open" ? "Needs your time" : item.status === "Submitted" ? "Sent for approval" : "Settled"}</span>
+          </div>
+          {item.scheduledEnd && <div className="attendanceScheduled"><strong>Scheduled until {local(item.scheduledEnd)}</strong></div>}
+          {item.status === "Resolved" ? <div className="attendanceReadOnly approved">
+            <strong>Clock-out saved</strong>
+            <span>{local(item.resolvedClockOut)}</span>
+          </div> : <form className="attendanceCorrectionForm" onSubmit={submitClockOut}>
+            <input type="hidden" name="id" value={item.id} />
+            <label>The time you left<input type="datetime-local" name="leftAt" defaultValue={inputDateTime(item.employeeLeftAt)} required /></label>
+            <label className="wide">Note <small>Optional</small><textarea name="note" rows={3} defaultValue={item.employeeNote} placeholder="Example: I forgot to clock out after closing." /></label>
+            {item.status === "Submitted" && <div className="attendanceManagerNote">You entered {local(item.employeeLeftAt)}. Management still has to approve it; you can change it until then.</div>}
+            <div className="attendanceActionRow"><button disabled={busy}>{item.status === "Submitted" ? "Update my time" : "Send my clock-out time"}</button></div>
+          </form>}
+        </section>)}
+      </div>
+    </>}
 
     <section className="attendanceSectionHeading">
       <div><p className="attendanceEyebrow">Scheduled shift review</p><h2>Attendance corrections</h2></div>

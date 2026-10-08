@@ -310,7 +310,7 @@ export async function lockPayrollRun(id: string, actor: string) {
 export async function reopenPayrollRun(id: string, actor: string) {
   await ensurePayrollControlSchema();
   const rows = await getSql()`
-    SELECT id, business, week_start FROM payroll_run_versions WHERE id = ${id} AND status = 'Locked' LIMIT 1
+    SELECT id, business, week_start::text AS week_start FROM payroll_run_versions WHERE id = ${id} AND status = 'Locked' LIMIT 1
   ` as unknown as Array<{ id: string; business: Business; week_start: string }>;
   if (!rows[0]) throw new Error("Only a locked payroll version can be reopened.");
   return createPayrollDraft({ business: rows[0].business, weekStart: String(rows[0].week_start), actor, reopenedFromId: id });
@@ -319,7 +319,7 @@ export async function reopenPayrollRun(id: string, actor: string) {
 export async function payrollCsv(id: string): Promise<{ fileName: string; csv: string }> {
   await ensurePayrollControlSchema();
   const rows = await getSql()`
-    SELECT business, week_start, version, payload FROM payroll_run_versions WHERE id = ${id} LIMIT 1
+    SELECT business, week_start::text AS week_start, version, payload FROM payroll_run_versions WHERE id = ${id} LIMIT 1
   ` as unknown as Array<{ business: Business; week_start: string; version: number; payload: PayrollSnapshot }>;
   const run = rows[0];
   if (!run) throw new Error("Payroll version was not found.");

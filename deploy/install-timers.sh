@@ -10,11 +10,11 @@ set -Eeuo pipefail
 readonly SOURCE_DIR="$(cd "$(dirname "$0")/systemd" && pwd)"
 readonly UNITS=(corner-ops-backup.service corner-ops-backup.timer corner-ops-cron@.service
   corner-ops-cron-maintenance.timer corner-ops-cron-schedule-delivery.timer corner-ops-cron-scheduler.timer
-  corner-ops-supplier-prices.service corner-ops-supplier-prices.timer
+  corner-ops-cron-missed-clock-outs.timer corner-ops-supplier-prices.service corner-ops-supplier-prices.timer
   corner-ops-supplier-website.service corner-ops-supplier-website.timer)
 readonly TIMERS=(corner-ops-backup.timer corner-ops-cron-maintenance.timer
-  corner-ops-cron-schedule-delivery.timer corner-ops-cron-scheduler.timer corner-ops-supplier-prices.timer
-  corner-ops-supplier-website.timer)
+  corner-ops-cron-schedule-delivery.timer corner-ops-cron-scheduler.timer corner-ops-cron-missed-clock-outs.timer
+  corner-ops-supplier-prices.timer corner-ops-supplier-website.timer)
 
 if [[ "$(id -u)" != "0" ]]; then
   printf 'Run this with sudo; it installs systemd units.\n' >&2

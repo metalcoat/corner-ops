@@ -3,6 +3,7 @@ import { Resend } from "resend";
 import { detectMissedShifts } from "@/lib/attendance";
 import { getSql } from "@/lib/db";
 import { runExpenseAutomation } from "@/lib/expense-control";
+import { preparePayrollApproval } from "@/lib/payroll-approval";
 import { payrollSummary } from "@/lib/payroll-summary-rules";
 import { evaluateAndNotifyOvertimeRisk } from "@/lib/overtime-risk";
 import { generateDueRecurringInvoices } from "@/lib/receivables";
@@ -177,6 +178,9 @@ export async function runScheduledOperations(input: { force?: boolean; source?: 
     details.payrollWeekStart = weekStart;
     await runSchedulerStep({ localDate: local.date, step: "payrollCornerDeli", details, failures, run: () => capturePayrollRun("Corner Deli", weekStart) });
     await runSchedulerStep({ localDate: local.date, step: "payrollTiki", details, failures, run: () => capturePayrollRun("Tiki", weekStart) });
+    // Draft last week for approval and email the owner the summary and anything blocking it.
+    await runSchedulerStep({ localDate: local.date, step: "payrollApprovalCornerDeli", details, failures, run: () => preparePayrollApproval("Corner Deli", weekStart) });
+    await runSchedulerStep({ localDate: local.date, step: "payrollApprovalTiki", details, failures, run: () => preparePayrollApproval("Tiki", weekStart) });
   }
 
   await runSchedulerStep({ localDate: local.date, step: "openTikiPunches", details, failures, run: () => flagOpenTikiPunches(local.date) });

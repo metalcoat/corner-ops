@@ -32,6 +32,7 @@
     "src/lib/square-tip-fee.ts",
     "src/lib/timestamp-values.ts",
     "src/lib/postgres-string-timestamps.ts",
+    "src/lib/missed-clock-out-rules.ts",
     "tests/**/*.ts"
   ]
 }
