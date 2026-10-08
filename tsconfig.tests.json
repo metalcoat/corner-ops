@@ -33,6 +33,8 @@
     "src/lib/timestamp-values.ts",
     "src/lib/postgres-string-timestamps.ts",
     "src/lib/missed-clock-out-rules.ts",
+    "src/lib/payroll-relief-timesheet.ts",
+    "src/lib/payroll-schedule-compare.ts",
     "tests/**/*.ts"
   ]
 }

@@ -12,7 +12,9 @@ import {
   parseEasternInput,
   payrollApprovalBlockMessage,
   payrollApprovalEmail,
+  payrollCodeEmail,
   payrollSubmissionEmail,
+  payrollWeekLabel,
   resolveMissedClockOutClose,
   submissionStatusLine,
   wallTimeToUtc,
@@ -194,8 +196,8 @@ test("Monday payroll email summarizes hours, tips and blockers", () => {
     business: "Tiki",
     weekStart: "2026-09-28",
     rows: [
-      { employee: "Ana Diaz", hours: 42.5, regularHours: 40, overtimeHours: 2.5, tips: 312.4 },
-      { employee: "Sam Rivera", hours: 20, regularHours: 20, overtimeHours: 0, tips: 100 },
+      { employee: "Ana Diaz", regularHours: 40, tippedHours: 0, overtimeHours: 2.5, tips: 312.4, schedule: { text: "Scheduled 40.00 · worked 42.50 · +2.50", flagged: true } },
+      { employee: "Sam Rivera", regularHours: 0, tippedHours: 20, overtimeHours: 0, tips: 100, schedule: { text: "Scheduled 20.00 · worked 20.00 · 0.00", flagged: false } },
     ],
     draft: { version: 1, created: true },
     blockers: { openPunches: 0, unresolvedClockOuts: 1 },
@@ -204,13 +206,24 @@ test("Monday payroll email summarizes hours, tips and blockers", () => {
     reviewLink: "https://team.atthedocks.com/ops/payroll-control?business=Tiki&weekStart=2026-09-28",
   });
   assert.equal(email.subject, "Tiki payroll for 2026-09-28 – 2026-10-04: needs attention");
-  assert.match(email.text, /Ana Diaz: 42\.50 h \(40\.00 reg, 2\.50 OT\), tips \$312\.40/);
-  assert.match(email.text, /Totals: 62\.50 h \(60\.00 regular, 2\.50 OT\), tips \$412\.40/);
+  assert.match(email.text, /Employee\s+\| Regular Hours \| Tipped Hours \| Tips\s+\| OT\s+\| Scheduled vs worked/);
+  assert.match(email.text, /Ana Diaz\s+\| 40\.00\s+\| 0\.00\s+\| \$312\.40 \| 2\.50 \| CHECK: Scheduled 40\.00 · worked 42\.50 · \+2\.50/);
+  assert.match(email.text, /Totals\s+\| 40\.00\s+\| 20\.00\s+\| \$412\.40 \| 2\.50/);
   assert.match(email.text, /1 missed clock-out not resolved \(blocks approval\)/);
   assert.match(email.text, /3 Square payments missing processing fees/);
   assert.match(email.text, /2 punches marked Needs Review/);
+  assert.match(email.text, /1 employee worked an hour or more off their schedule/);
   assert.match(email.text, /Draft v1 was created\./);
+  assert.match(email.text, /The Docks isn't sent to AccountantsOffice automatically/);
   assert.match(email.text, /Review and approve: https:\/\/team\.atthedocks\.com\/ops\/payroll-control\?business=Tiki&weekStart=2026-09-28/);
+
+  const noOvertime = payrollApprovalEmail({
+    business: "Corner Deli", weekStart: "2026-09-28",
+    rows: [{ employee: "Sean", regularHours: 30, tippedHours: 5, overtimeHours: 0, tips: 80, schedule: null }],
+    draft: { version: 2, created: false }, blockers: { openPunches: 0, unresolvedClockOuts: 0 }, missingSquareFees: 0, needsReview: 0, reviewLink: "x",
+  });
+  assert.doesNotMatch(noOvertime.text, /\| OT/);
+  assert.match(noOvertime.text, /saved, not submitted\) in Payroll Relief/);
 
   const ready = payrollApprovalEmail({
     business: "Corner Deli", weekStart: "2026-09-28", rows: [], draft: { error: "Square fees missing." },
@@ -221,17 +234,26 @@ test("Monday payroll email summarizes hours, tips and blockers", () => {
   assert.match(ready.text, /could not be created: Square fees missing\./);
 });
 
-test("submission status lines and confirmation email", () => {
-  assert.equal(submissionStatusLine("queued"), "Waiting to send to AccountantsOffice");
-  assert.equal(submissionStatusLine("submitted"), "Sent to AccountantsOffice");
-  assert.equal(submissionStatusLine("submitted", "Confirmation 123"), "Sent to AccountantsOffice: Confirmation 123");
+test("submission status lines and Payroll Relief emails", () => {
+  assert.equal(submissionStatusLine("queued"), "Waiting to enter in Payroll Relief");
+  assert.equal(submissionStatusLine("submitting"), "Entering hours in Payroll Relief…");
+  assert.match(submissionStatusLine("needs_code"), /texted a sign-in code/);
+  assert.equal(submissionStatusLine("submitted"), "Saved in Payroll Relief (not submitted): review it there and press Submit");
+  assert.match(submissionStatusLine("submitted", "Reg 100.00"), /press Submit\. Reg 100\.00$/);
   assert.equal(submissionStatusLine("failed", "Login rejected"), "Failed: Login rejected");
+  assert.equal(submissionStatusLine("submitted", "Found 12 employees", "roster"), "Found 12 employees");
   assert.equal(submissionStatusLine(null), "");
-  const ok = payrollSubmissionEmail({ business: "Tiki", weekStart: "2026-09-28", version: 2, status: "submitted", message: "Confirmation 123", link: "https://x" });
-  assert.equal(ok.subject, "Tiki payroll for 2026-09-28 was sent to AccountantsOffice");
-  assert.match(ok.text, /Payroll v2 for Tiki/);
-  assert.match(ok.text, /Details: Confirmation 123/);
-  const failed = payrollSubmissionEmail({ business: "Tiki", weekStart: "2026-09-28", version: 2, status: "failed", message: "Login rejected", link: "https://x" });
-  assert.match(failed.subject, /could not be sent/);
-  assert.match(failed.text, /Reason: Login rejected/);
+  assert.equal(payrollWeekLabel("2026-09-28"), "9/28–10/4");
+  const ok = payrollSubmissionEmail({
+    business: "Corner Deli", weekStart: "2026-09-28", version: 2, status: "submitted", message: "",
+    link: "https://x", totalsText: "Reg 120.50, Tipped 30.00, Tips $412.40, OT 2.00",
+  });
+  assert.match(ok.subject, /saved in Payroll Relief/);
+  assert.match(ok.text, /^Corner Deli hours for 9\/28–10\/4 are saved in Payroll Relief \(Reg 120\.50, Tipped 30\.00, Tips \$412\.40, OT 2\.00\)\. Review, make any changes, and press Submit there: https:\/\/www\.accountantsoffice\.com\/aocommon\//);
+  const failed = payrollSubmissionEmail({ business: "Corner Deli", weekStart: "2026-09-28", version: 2, status: "failed", message: "Payroll Relief's open payroll is 10/5–10/11, not 9/28–10/4.", link: "https://x" });
+  assert.match(failed.subject, /could not be entered/);
+  assert.match(failed.text, /Reason: Payroll Relief's open payroll is 10\/5–10\/11, not 9\/28–10\/4\./);
+  assert.match(failed.text, /Nothing was submitted\./);
+  const code = payrollCodeEmail({ business: "Corner Deli", weekStart: "2026-09-28", link: "https://x/pay" });
+  assert.match(code.text, /within 10 minutes: https:\/\/x\/pay/);
 });

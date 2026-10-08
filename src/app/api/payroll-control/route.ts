@@ -7,7 +7,15 @@ import {
   payrollCsv,
 } from "@/lib/payroll-control";
 import { applyMissedClockOut, getMissedClockOutCase, missedClockOutCasesForBusiness, type ClockOutChoice } from "@/lib/missed-clock-outs";
-import { approvePayrollRun, payrollApprovalOverview, reopenPayrollRunAndWithdraw, retryPayrollSubmission } from "@/lib/payroll-approval";
+import {
+  approvePayrollRun,
+  enterPayrollSubmissionCode,
+  payrollApprovalOverview,
+  reopenPayrollRunAndWithdraw,
+  requestPayrollReliefRosterCheck,
+  retryPayrollSubmission,
+  savePayrollReliefMappings,
+} from "@/lib/payroll-approval";
 import { correctPunch } from "@/lib/payroll-punch-correction";
 import { safePayrollControlDashboard } from "@/lib/payroll-control-dashboard";
 import type { Business } from "@/lib/types";
@@ -144,6 +152,15 @@ export async function POST(request: Request) {
     // Approving is locking; it is refused while the week has open punches or missed clock-outs.
     if (action === "run-lock") return Response.json(await approvePayrollRun({ id: String(body.id || ""), business, actor: session.email }));
     if (action === "run-reopen") return Response.json(await reopenPayrollRunAndWithdraw({ id: String(body.id || ""), business, actor: session.email }), { status: 201 });
+    if (action === "submission-code") return Response.json(await enterPayrollSubmissionCode({ id: String(body.id || ""), business, code: String(body.code || ""), actor: session.email }));
+    if (action === "payroll-relief-check") return Response.json(await requestPayrollReliefRosterCheck({ business, actor: session.email }));
+    if (action === "payroll-relief-map-save") {
+      const mappings = Array.isArray(body.mappings) ? body.mappings as Array<Record<string, unknown>> : [];
+      return Response.json(await savePayrollReliefMappings({
+        business, actor: session.email,
+        mappings: mappings.map((item) => ({ employee: String(item.employee || ""), eeNum: String(item.eeNum || "") })),
+      }));
+    }
     if (action === "submission-retry") return Response.json(await retryPayrollSubmission({ id: String(body.id || ""), business, actor: session.email }));
     if (action === "clock-out-apply") {
       const choice = String(body.choice || "");

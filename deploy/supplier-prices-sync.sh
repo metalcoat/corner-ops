@@ -9,6 +9,9 @@
 # new file, then moves it to <supplier>/done/ (or <supplier>/failed/ with the error).
 # With --website it instead signs in to Sysco, US Foods and PFG and pulls prices
 # from their sites (corner-ops-supplier-website.timer runs that twice a day).
+# After those, each approved Corner Deli payroll week waiting in Corner Ops is entered in
+# Payroll Relief and saved (never submitted) by deploy/supplier-scraper/payroll-relief.mjs.
+# With --payroll-dry-run <YYYY-MM-DD> it fills that week's timesheet without uploading or saving.
 # With --signin webstaurant (or accountantsoffice) it opens that site for a person to sign in to by
 # hand (a robot check, or a texted code): it prints a link to open from the deli network.
 set -Eeuo pipefail
@@ -65,6 +68,25 @@ signin() {
   "${compose[@]}" run --rm --no-deps -p "$address:6080:6080" -e VNC_PASSWORD="$password" \
     --entrypoint /scraper/signin.sh supplier-prices "$@"
 }
+# One payroll entry (or employee-list check) in Payroll Relief, under the same lock as the
+# website job (they share the browser profiles): waits for a run that's going, up to 20 minutes.
+payroll() {
+  exec 8>"$DROP/_website/.lock"
+  if ! flock -w 1200 8; then
+    printf '%s A website price run is still going after 20 minutes; payroll entry not started.\n' "$(date -u +%FT%TZ)" >&2
+    return 1
+  fi
+  local compose=(docker compose --project-name corner-ops --env-file "$ENV_FILE" -f "$ROOT/runtime/docker-compose.local.yml" --profile tools)
+  "${compose[@]}" build --quiet supplier-prices
+  "${compose[@]}" run --rm --no-deps "$@" --entrypoint node supplier-prices payroll-relief.mjs
+}
+if [[ "${1:-}" == "--payroll-dry-run" ]]; then
+  # Signs in, checks Payroll Relief's open payroll is that week, downloads and fills the timesheet
+  # (written to $DROP/_website), and stops: no upload, no save, nothing reported to the queue.
+  [[ "${2:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "Usage: $0 --payroll-dry-run YYYY-MM-DD (the payroll week's Monday)" >&2; exit 2; }
+  payroll -e DRY_RUN=1 -e "PREVIEW_BUSINESS=Corner Deli" -e "PREVIEW_WEEK=$2"
+  exit $?
+fi
 if [[ "${1:-}" == "--signin" ]]; then
   shift
   signin "$@"
@@ -118,5 +140,20 @@ while IFS=$'\t' read -r search_id query; do
   website || status=1
   search_env=()
 done <<< "$searches"
+
+# Approved Corner Deli payroll weeks (and "Check AccountantsOffice" requests): enter each in Payroll Relief and save it.
+# Taking them marks them "submitting" in Corner Ops; one that can't be started is reported failed so it can be sent again.
+payroll_ids="$(curl -fsS --max-time 60 -H @<(printf 'Authorization: Bearer %s\n' "$secret") 'http://127.0.0.1:3000/api/cron/payroll-submissions?submissions=1' 2>/dev/null \
+  | python3 -c 'import json,sys,re; [print(s["id"]) for s in json.load(sys.stdin).get("submissions", []) if re.fullmatch(r"[0-9a-f-]{36}", str(s.get("id","")))]' 2>/dev/null || true)"
+while IFS= read -r submission_id; do
+  [[ -n "$submission_id" ]] || continue
+  printf '%s Payroll Relief: %s\n' "$(date -u +%FT%TZ)" "$submission_id"
+  if ! payroll -e "SUBMISSION_ID=$submission_id"; then
+    status=1
+    body="$(python3 -c 'import json,sys; print(json.dumps({"id": sys.argv[1], "status": "failed", "message": "The payroll job on the store server could not run (see the supplier prices log). Press Send again."}))' "$submission_id")"
+    curl -fsS --max-time 30 -H 'content-type: application/json' -H @<(printf 'Authorization: Bearer %s\n' "$secret") \
+      --data-binary "$body" http://127.0.0.1:3000/api/cron/payroll-submissions >/dev/null 2>&1 || true
+  fi
+done <<< "$payroll_ids"
 
 exit "$status"

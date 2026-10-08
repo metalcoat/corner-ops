@@ -287,10 +287,40 @@ export function payrollApprovalBlockMessage(blockers: ApprovalBlockers): string 
   return `Payroll can't be approved yet: this week still has ${parts.join(" and ")}. Close or correct them first.`;
 }
 
-export type PayrollEmailRow = { employee: string; hours: number; regularHours: number; overtimeHours: number; tips: number };
+/** One line of the payroll summary (payrollDisplayRows in payroll-schedule-compare). */
+export type PayrollEmailRow = {
+  employee: string;
+  regularHours: number;
+  tippedHours: number;
+  tips: number;
+  overtimeHours: number;
+  schedule: { text: string; flagged: boolean } | null;
+};
 
 const hoursText = (value: number) => Number(value || 0).toFixed(2);
 const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value || 0));
+
+/** Employee | Regular Hours | Tipped Hours | Tips | [OT, only when someone has overtime] | Scheduled vs worked, as aligned text. */
+export function payrollEmailTable(rows: PayrollEmailRow[]): string[] {
+  if (!rows.length) return ["No hours recorded."];
+  const overtime = rows.some((row) => Number(row.overtimeHours || 0) > 0);
+  const header = ["Employee", "Regular Hours", "Tipped Hours", "Tips", ...(overtime ? ["OT"] : []), "Scheduled vs worked"];
+  const body = rows.map((row) => [
+    row.employee, hoursText(row.regularHours), hoursText(row.tippedHours), money(row.tips),
+    ...(overtime ? [hoursText(row.overtimeHours)] : []),
+    row.schedule ? `${row.schedule.flagged ? "CHECK: " : ""}${row.schedule.text}` : "",
+  ]);
+  const totals = rows.reduce((sum, row) => ({
+    regular: sum.regular + Number(row.regularHours || 0),
+    tipped: sum.tipped + Number(row.tippedHours || 0),
+    tips: sum.tips + Number(row.tips || 0),
+    overtime: sum.overtime + Number(row.overtimeHours || 0),
+  }), { regular: 0, tipped: 0, tips: 0, overtime: 0 });
+  const total = ["Totals", hoursText(totals.regular), hoursText(totals.tipped), money(totals.tips), ...(overtime ? [hoursText(totals.overtime)] : []), ""];
+  const all = [header, ...body, total];
+  const widths = header.map((_, column) => Math.max(...all.map((cells) => cells[column].length)));
+  return all.map((cells) => cells.map((cell, column) => column === cells.length - 1 ? cell : cell.padEnd(widths[column])).join(" | ").trimEnd());
+}
 
 export function payrollApprovalEmail(input: {
   business: Business;
@@ -302,12 +332,6 @@ export function payrollApprovalEmail(input: {
   needsReview: number;
   reviewLink: string;
 }): { subject: string; text: string } {
-  const totals = input.rows.reduce((sum, row) => ({
-    hours: sum.hours + Number(row.hours || 0),
-    regular: sum.regular + Number(row.regularHours || 0),
-    overtime: sum.overtime + Number(row.overtimeHours || 0),
-    tips: sum.tips + Number(row.tips || 0),
-  }), { hours: 0, regular: 0, overtime: 0, tips: 0 });
   const weekEnd = addDays(input.weekStart, 6);
   const blocking = payrollApprovalBlockMessage(input.blockers);
   const attention: string[] = [];
@@ -315,56 +339,89 @@ export function payrollApprovalEmail(input: {
   if (input.blockers.unresolvedClockOuts) attention.push(`- ${input.blockers.unresolvedClockOuts} missed clock-out${input.blockers.unresolvedClockOuts === 1 ? "" : "s"} not resolved (blocks approval)`);
   if (input.missingSquareFees) attention.push(`- ${input.missingSquareFees} Square payment${input.missingSquareFees === 1 ? "" : "s"} missing processing fees`);
   if (input.needsReview) attention.push(`- ${input.needsReview} punch${input.needsReview === 1 ? "" : "es"} marked Needs Review`);
+  const flagged = input.rows.filter((row) => row.schedule?.flagged).length;
+  if (flagged) attention.push(`- ${flagged} employee${flagged === 1 ? "" : "s"} worked an hour or more off their schedule, or missed a shift (marked CHECK)`);
   if ("error" in input.draft) attention.push(`- The payroll draft could not be created: ${input.draft.error}`);
   const draftLine = "error" in input.draft
     ? "No draft was created."
     : `Draft v${input.draft.version} ${input.draft.created ? "was created" : "already existed"}.`;
-  const table = input.rows.length
-    ? input.rows.map((row) => `${row.employee}: ${hoursText(row.hours)} h (${hoursText(row.regularHours)} reg, ${hoursText(row.overtimeHours)} OT), tips ${money(row.tips)}`)
-    : ["No hours recorded."];
   return {
     subject: `${input.business} payroll for ${input.weekStart} – ${weekEnd}: ${blocking ? "needs attention" : "ready to approve"}`,
     text: [
       `${input.business} payroll, week of ${input.weekStart} through ${weekEnd}. ${draftLine}`,
       "",
-      ...table,
-      "",
-      `Totals: ${hoursText(totals.hours)} h (${hoursText(totals.regular)} regular, ${hoursText(totals.overtime)} OT), tips ${money(totals.tips)}`,
+      ...payrollEmailTable(input.rows),
       "",
       attention.length ? "Needs attention:" : "Nothing is blocking approval.",
       ...attention,
       "",
       `Review and approve: ${input.reviewLink}`,
-      "Approving locks this payroll and queues it to be sent to AccountantsOffice.",
+      input.business === "Corner Deli"
+        ? "Approving locks this payroll and queues it to be entered (saved, not submitted) in Payroll Relief."
+        : "Approving locks this payroll. The Docks isn't sent to AccountantsOffice automatically.",
     ].join("\n"),
   };
 }
 
-export type SubmissionStatus = "queued" | "submitting" | "submitted" | "failed" | "cancelled";
+export type SubmissionStatus = "queued" | "submitting" | "needs_code" | "submitted" | "failed" | "cancelled";
 
-/** The status line shown on the payroll page for a locked run's submission. */
-export function submissionStatusLine(status: SubmissionStatus | string | null | undefined, message = ""): string {
-  if (status === "queued") return "Waiting to send to AccountantsOffice";
-  if (status === "submitting") return "Sending to AccountantsOffice…";
-  if (status === "submitted") return message ? `Sent to AccountantsOffice: ${message}` : "Sent to AccountantsOffice";
-  if (status === "failed") return `Failed: ${message || "AccountantsOffice did not accept it."}`;
-  if (status === "cancelled") return "Not sent (payroll was reopened)";
+/** The status line shown on the payroll page for a locked run's submission (kind "roster": a Check AccountantsOffice request). */
+export function submissionStatusLine(status: SubmissionStatus | string | null | undefined, message = "", kind: "payroll" | "roster" = "payroll"): string {
+  if (kind === "roster") {
+    if (status === "queued") return "Waiting to check AccountantsOffice";
+    if (status === "submitting") return "Checking AccountantsOffice…";
+    if (status === "needs_code") return "AccountantsOffice texted a sign-in code: enter it below";
+    if (status === "submitted") return message || "Checked AccountantsOffice";
+    if (status === "failed") return `Check failed: ${message || "AccountantsOffice could not be read."}`;
+    return "";
+  }
+  if (status === "queued") return "Waiting to enter in Payroll Relief";
+  if (status === "submitting") return "Entering hours in Payroll Relief…";
+  if (status === "needs_code") return "AccountantsOffice texted a sign-in code: enter it below within 10 minutes";
+  if (status === "submitted") return `Saved in Payroll Relief (not submitted): review it there and press Submit${message ? `. ${message}` : ""}`;
+  if (status === "failed") return `Failed: ${message || "Payroll Relief did not accept it."}`;
+  if (status === "cancelled") return message || "Not sent (payroll was reopened)";
   return "";
 }
 
-export function payrollSubmissionEmail(input: { business: Business; weekStart: string; version: number; status: "submitted" | "failed"; message: string; link: string }): { subject: string; text: string } {
-  const ok = input.status === "submitted";
+export const ACCOUNTANTSOFFICE_HOME = "https://www.accountantsoffice.com/aocommon/";
+
+/** "2026-09-28" → "9/28–10/4". */
+export function payrollWeekLabel(weekStart: string): string {
+  const short = (iso: string) => { const [, m, d] = iso.split("-"); return `${Number(m)}/${Number(d)}`; };
+  return `${short(weekStart)}–${short(addDays(weekStart, 6))}`;
+}
+
+export function payrollSubmissionEmail(input: { business: Business; weekStart: string; version: number; status: "submitted" | "failed"; message: string; link: string; totalsText?: string }): { subject: string; text: string } {
+  const week = payrollWeekLabel(input.weekStart);
+  if (input.status === "submitted") {
+    return {
+      subject: `${input.business} hours for ${week} are saved in Payroll Relief: review and Submit`,
+      text: [
+        `${input.business} hours for ${week} are saved in Payroll Relief${input.totalsText ? ` (${input.totalsText})` : ""}. Review, make any changes, and press Submit there: ${ACCOUNTANTSOFFICE_HOME}`,
+        "",
+        `Nothing was submitted; payroll v${input.version} in Corner Ops: ${input.link}`,
+      ].join("\n"),
+    };
+  }
   return {
-    subject: ok
-      ? `${input.business} payroll for ${input.weekStart} was sent to AccountantsOffice`
-      : `${input.business} payroll for ${input.weekStart} could not be sent to AccountantsOffice`,
+    subject: `${input.business} hours for ${week} could not be entered in Payroll Relief`,
     text: [
-      ok
-        ? `Payroll v${input.version} for ${input.business}, week of ${input.weekStart}, was submitted to AccountantsOffice.`
-        : `Payroll v${input.version} for ${input.business}, week of ${input.weekStart}, was not submitted to AccountantsOffice.`,
-      input.message ? `${ok ? "Details" : "Reason"}: ${input.message}` : "",
+      `${input.business} hours for ${week} (payroll v${input.version}) were not saved in Payroll Relief. Nothing was submitted.`,
+      `Reason: ${input.message || "unknown"}`,
       "",
-      `Payroll: ${input.link}`,
-    ].filter((line, index) => line || index > 1).join("\n"),
+      `Fix it and press Send again on the payroll page: ${input.link}`,
+    ].join("\n"),
+  };
+}
+
+/** Sent when AccountantsOffice asks for the code it texted, so the owner knows where to type it. */
+export function payrollCodeEmail(input: { business: Business; weekStart: string | null; link: string }): { subject: string; text: string } {
+  return {
+    subject: "AccountantsOffice texted you a sign-in code: enter it in Corner Ops",
+    text: [
+      `To ${input.weekStart ? `enter ${input.business} hours for ${payrollWeekLabel(input.weekStart)} in Payroll Relief` : "check AccountantsOffice's employee list"}, the store server is signing in to AccountantsOffice, and it texted you a code.`,
+      `Type the code on the payroll page within 10 minutes: ${input.link}`,
+    ].join("\n"),
   };
 }
