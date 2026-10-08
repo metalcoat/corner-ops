@@ -12,6 +12,16 @@ const MINUTES = Number(process.env.SIGNIN_MINUTES || 15);
 
 // signedIn: the account page; signed out, the site sends you to the login form instead.
 const SITES = {
+  // The owner's payroll website; signs in with a code texted to the owner's phone.
+  accountantsoffice: {
+    key: "ACCOUNTANTSOFFICE",
+    name: "AccountantsOffice",
+    login: "https://login.accountantsoffice.com/login?firmCode=whale1910&returnurl=https://www.accountantsoffice.com/aocommon/account/login",
+    signedIn: "https://www.accountantsoffice.com/aocommon/",
+    email: "#UserName",
+    password: "#Password",
+    loginForm: /id="Password"/,
+  },
   webstaurant: {
     key: "WEBSTAURANT",
     name: "WebstaurantStore",

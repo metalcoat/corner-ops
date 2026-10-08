@@ -9,8 +9,8 @@
 # new file, then moves it to <supplier>/done/ (or <supplier>/failed/ with the error).
 # With --website it instead signs in to Sysco, US Foods and PFG and pulls prices
 # from their sites (corner-ops-supplier-website.timer runs that twice a day).
-# With --signin webstaurant it opens that site for a person to sign in to by hand
-# (it has an "I'm not a robot" check): it prints a link to open from the deli network.
+# With --signin webstaurant (or accountantsoffice) it opens that site for a person to sign in to by
+# hand (a robot check, or a texted code): it prints a link to open from the deli network.
 set -Eeuo pipefail
 
 readonly ROOT="${CORNER_OPS_ROOT:-/opt/corner-ops}"
