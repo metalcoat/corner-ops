@@ -56,6 +56,7 @@ docker run --rm -i -v corner-ops-staging_uploads:/data alpine:3 sh -c 'tar -xzf 
 
 log "Building and starting staging"
 "${compose[@]}" build --quiet app
+docker image prune -f --filter until=24h >/dev/null 2>&1 || true
 "${compose[@]}" up -d --wait app
 curl -fsS "http://$address:3002/api/health" >/dev/null
 "$SOURCE_REPO/deploy/staging/add-test-owner.sh" corner-ops-staging-postgres

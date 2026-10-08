@@ -43,6 +43,8 @@ website() {
   fi
   local compose=(docker compose --project-name corner-ops --env-file "$ENV_FILE" -f "$ROOT/runtime/docker-compose.local.yml" --profile tools)
   "${compose[@]}" build --quiet supplier-prices
+  # Each rebuild leaves the previous image behind; without cleanup they filled the disk (Oct 2026).
+  docker image prune -f --filter until=24h >/dev/null 2>&1 || true
   "${compose[@]}" run --rm --no-deps "${search_env[@]}" supplier-prices "$@"
 }
 search_env=()

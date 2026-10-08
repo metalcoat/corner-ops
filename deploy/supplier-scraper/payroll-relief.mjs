@@ -191,7 +191,8 @@ async function signIn(page) {
   if (signedInText(await bodyText(page))) return { ok: true };
   const user = process.env.ACCOUNTANTSOFFICE_USERNAME, password = process.env.ACCOUNTANTSOFFICE_PASSWORD;
   if (!user || !password) return { ok: false, message: `AccountantsOffice needs signing in and ACCOUNTANTSOFFICE_USERNAME / ACCOUNTANTSOFFICE_PASSWORD aren't in /opt/corner-ops/.env. Or sign in by hand: ${SIGN_IN_BY_HAND}` };
-  if (!/login\.accountantsoffice\.com/i.test(page.url())) {
+  // Signed out, the portal sends you to the general login page, which asks for the firm code; the firm's own link fills it in.
+  if (!/login\.accountantsoffice\.com/i.test(page.url()) || !/firmcode=/i.test(page.url())) {
     await page.goto(LOGIN, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await settle(page, 2_000);
   }
@@ -204,6 +205,8 @@ async function signIn(page) {
     const passwordField = page.locator("#Password").filter({ visible: true });
     if (onLogin && (await visible(passwordField))) {
       if (step > 0 && !askedForCode && /invalid|incorrect|not valid|failed|locked/i.test(text)) return { ok: false, message: "AccountantsOffice didn't accept the username and password in /opt/corner-ops/.env." };
+      const firmField = page.locator("#FirmCode").filter({ visible: true });
+      if (await visible(firmField) && !(await firmField.first().inputValue().catch(() => ""))) await firmField.first().fill(process.env.ACCOUNTANTSOFFICE_FIRM_CODE || "whale1910");
       if (await visible(userField)) await userField.first().fill(user);
       await passwordField.first().fill(password);
       await rememberDevice(page);
