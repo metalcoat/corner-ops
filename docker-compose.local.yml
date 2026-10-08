@@ -1,0 +1,188 @@
+name: corner-ops
+
+services:
+  asterisk:
+    build:
+      context: ./asterisk
+      dockerfile: Dockerfile
+    container_name: corner-ops-asterisk
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      ASTERISK_3CX_IP: ${ASTERISK_3CX_IP:-192.168.1.46}
+      ASTERISK_OPENAI_PROJECT_ID: ${ASTERISK_OPENAI_PROJECT_ID}
+      ASTERISK_OPENAI_DID: ${ASTERISK_OPENAI_DID:-+13156057291}
+      ASTERISK_VOICE_PAYMENT_EXTENSION: ${ASTERISK_VOICE_PAYMENT_EXTENSION:-101}
+      ASTERISK_VOICE_PAYMENT_FALLBACK_EXTENSION: ${ASTERISK_VOICE_PAYMENT_FALLBACK_EXTENSION:-95}
+      VOICE_PAYMENT_API_URL: http://127.0.0.1:3000/api/internal/voice-payment
+      VOICE_PAYMENT_INTERNAL_SECRET: ${VOICE_PAYMENT_INTERNAL_SECRET:-${THREE_CX_CRM_SECRET}}
+      MX_ENVIRONMENT: ${MX_ENVIRONMENT:-sandbox}
+      VOICE_PAYMENT_DEBUG_RECOGNITION: ${VOICE_PAYMENT_DEBUG_RECOGNITION:-true}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_PHONE_BRIDGE_ENABLED: ${GEMINI_PHONE_BRIDGE_ENABLED:-true}
+      OPENAI_ORDERING_MCP_TOKEN: ${OPENAI_ORDERING_MCP_TOKEN:-}
+      GEMINI_PHONE_APP_URL: http://127.0.0.1:3000
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show uptime' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: corner-ops-app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_DRIVER: postgres
+      DATABASE_URL: postgresql://cornerops:${POSTGRES_PASSWORD}@postgres:5432/cornerops
+      STORAGE_DRIVER: local
+      LOCAL_STORAGE_PATH: /data/uploads
+      HEALTHCHECK_DATABASE: "true"
+      CRON_SECRET: ${CRON_SECRET:-}
+      DELI_ORIGIN_ADDRESS: ${DELI_ORIGIN_ADDRESS:-}
+      MAP_TILE_URL: ${MAP_TILE_URL:-}
+      LOCAL_DEVELOPMENT: ${LOCAL_DEVELOPMENT:-false}
+      SESSION_SECRET: ${SESSION_SECRET}
+      APP_PASSWORD: ${APP_PASSWORD}
+      APP_EMAIL: ${APP_EMAIL:-}
+      APP_URL: ${APP_URL}
+      CUSTOMER_APP_URL: ${CUSTOMER_APP_URL:-https://dev.ordercornerdeli.com}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      ALERT_FROM_EMAIL: ${ALERT_FROM_EMAIL:-}
+      EMPLOYEE_NOTIFICATION_FROM_EMAIL: ${EMPLOYEE_NOTIFICATION_FROM_EMAIL:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp.hostinger.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      CUSTOMER_EMAIL_FROM: ${CUSTOMER_EMAIL_FROM:-}
+      THREE_CX_CRM_SECRET: ${THREE_CX_CRM_SECRET:-}
+      THREE_CX_DELI_QUEUE: ${THREE_CX_DELI_QUEUE:-90}
+      THREE_CX_DELI_EXTENSIONS: ${THREE_CX_DELI_EXTENSIONS:-95,96}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      ADDRESS_PROVIDER: ${ADDRESS_PROVIDER:-}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      DELI_ORIGIN_LATITUDE: ${DELI_ORIGIN_LATITUDE:-}
+      DELI_ORIGIN_LONGITUDE: ${DELI_ORIGIN_LONGITUDE:-}
+      DELI_DELIVERY_RADIUS_MILES: ${DELI_DELIVERY_RADIUS_MILES:-12}
+      MX_ENVIRONMENT: ${MX_ENVIRONMENT:-sandbox}
+      MX_MERCHANT_ID: ${MX_MERCHANT_ID:-}
+      MX_API_KEY: ${MX_API_KEY:-}
+      MX_CONSUMER_KEY: ${MX_CONSUMER_KEY:-}
+      MX_CONSUMER_SECRET: ${MX_CONSUMER_SECRET:-}
+      MX_BUSINESS_ID: ${MX_BUSINESS_ID:-}
+      MX_TERMINAL_API_ENABLED: ${MX_TERMINAL_API_ENABLED:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_WEBHOOK_SECRET: ${OPENAI_WEBHOOK_SECRET:-}
+      OPENAI_ORDERING_MCP_URL: ${OPENAI_ORDERING_MCP_URL:-}
+      OPENAI_ORDERING_MCP_TOKEN: ${OPENAI_ORDERING_MCP_TOKEN:-}
+      OPENAI_PHONE_TEST_DIDS: ${OPENAI_PHONE_TEST_DIDS:-}
+      OPENAI_PHONE_DID_LINES: ${OPENAI_PHONE_DID_LINES:-}
+      OPENAI_PHONE_HANDOFF_TARGET: ${OPENAI_PHONE_HANDOFF_TARGET:-}
+      OPENAI_PHONE_VOICE_PAYMENT_TARGET: ${OPENAI_PHONE_VOICE_PAYMENT_TARGET:-}
+      VOICE_PAYMENT_INTERNAL_SECRET: ${VOICE_PAYMENT_INTERNAL_SECRET:-}
+      OPENAI_PHONE_ORDERING_ENABLED: ${OPENAI_PHONE_ORDERING_ENABLED:-false}
+      OPENAI_REALTIME_MODEL: ${OPENAI_REALTIME_MODEL:-gpt-realtime-1.5}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_PHONE_BRIDGE_ENABLED: ${GEMINI_PHONE_BRIDGE_ENABLED:-true}
+    ports:
+      - "3000:3000"
+    volumes:
+      - cornerops_uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:3000/api/health'').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - cornerops
+
+  # Website price job: signs in to Sysco / US Foods / PFG and sends prices to the
+  # app. Not started by `up`; deploy/supplier-prices-sync.sh --website runs it.
+  supplier-prices:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: deploy/supplier-scraper/Dockerfile
+    environment:
+      CRON_SECRET: ${CRON_SECRET:-}
+      APP_INTERNAL_URL: http://app:3000
+      SYSCO_USERNAME: ${SYSCO_USERNAME:-}
+      SYSCO_PASSWORD: ${SYSCO_PASSWORD:-}
+      SYSCO_CODE: ${SYSCO_CODE:-}
+      SYSCO_LOGIN_URL: ${SYSCO_LOGIN_URL:-}
+      SYSCO_ORDER_GUIDE_URL: ${SYSCO_ORDER_GUIDE_URL:-}
+      USFOODS_USERNAME: ${USFOODS_USERNAME:-}
+      USFOODS_PASSWORD: ${USFOODS_PASSWORD:-}
+      USFOODS_CODE: ${USFOODS_CODE:-}
+      USFOODS_LOGIN_URL: ${USFOODS_LOGIN_URL:-}
+      USFOODS_ORDER_GUIDE_URL: ${USFOODS_ORDER_GUIDE_URL:-}
+      PFG_USERNAME: ${PFG_USERNAME:-}
+      PFG_PASSWORD: ${PFG_PASSWORD:-}
+      PFG_CODE: ${PFG_CODE:-}
+      PFG_LOGIN_URL: ${PFG_LOGIN_URL:-}
+      PFG_ORDER_GUIDE_URL: ${PFG_ORDER_GUIDE_URL:-}
+      WEBSTAURANT_USERNAME: ${WEBSTAURANT_USERNAME:-}
+      WEBSTAURANT_PASSWORD: ${WEBSTAURANT_PASSWORD:-}
+      WEBSTAURANT_SHIPPING_PER_CASE: ${WEBSTAURANT_SHIPPING_PER_CASE:-}
+      ACCOUNTANTSOFFICE_USERNAME: ${ACCOUNTANTSOFFICE_USERNAME:-}
+      ACCOUNTANTSOFFICE_PASSWORD: ${ACCOUNTANTSOFFICE_PASSWORD:-}
+      SYSCO_CODE_VIA: ${SYSCO_CODE_VIA:-}
+      SYSCO_CODE_FROM: ${SYSCO_CODE_FROM:-}
+      USFOODS_CODE_VIA: ${USFOODS_CODE_VIA:-}
+      USFOODS_CODE_FROM: ${USFOODS_CODE_FROM:-}
+      PFG_CODE_VIA: ${PFG_CODE_VIA:-}
+      PFG_CODE_FROM: ${PFG_CODE_FROM:-}
+      CODE_EMAIL_HOST: ${CODE_EMAIL_HOST:-}
+      CODE_EMAIL_PORT: ${CODE_EMAIL_PORT:-}
+      CODE_EMAIL_USER: ${CODE_EMAIL_USER:-}
+      CODE_EMAIL_PASSWORD: ${CODE_EMAIL_PASSWORD:-}
+      CODE_EMAIL_FOLDER: ${CODE_EMAIL_FOLDER:-}
+    volumes:
+      - cornerops_supplier_browsers:/profiles
+      - ${SUPPLIER_PRICES_DIR:-/opt/corner-ops/supplier-prices}/_website:/debug
+    shm_size: 1gb
+    # Fallback route to the app (its published port) if service names don't resolve.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cornerops
+
+  postgres:
+    image: postgres:17-bookworm
+    container_name: corner-ops-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cornerops
+      POSTGRES_USER: cornerops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - cornerops_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cornerops -d cornerops"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - cornerops
+
+volumes:
+  cornerops_postgres_data:
+  cornerops_uploads:
+  cornerops_supplier_browsers:
+
+networks:
+  cornerops:

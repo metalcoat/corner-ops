@@ -12,7 +12,7 @@ test("both team hosts use the same login driven workspace", () => {
 test("team hosts show team pages and keep ordering closed", () => {
   assert.equal(teamRoute("/"), "home");
   assert.equal(teamRoute("/ops/people"), "home");
-  for (const path of ["/employee/messages", "/ops/messages", "/ops/payroll-control", "/ops/workforce", "/signin", "/api/employee/session", "/_next/static/app.js"]) {
+  for (const path of ["/app", "/employee/messages", "/ops/messages", "/ops/payroll-control", "/ops/workforce", "/signin", "/api/employee/session", "/_next/static/app.js"]) {
     assert.equal(teamRoute(path), "allow", path);
   }
   for (const path of ["/order", "/pos", "/ops/banking", "/api/order", "/api/ordering/checkout", "/api/pos/tickets"]) {

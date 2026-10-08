@@ -1,0 +1,59 @@
+import { deliLocation } from "@/lib/deli-location";
+import { getSql } from "@/lib/db";
+import { deliveryRoutePlans, syncDeliveryAssignments } from "@/lib/ordering-driver-delivery";
+
+export async function orderingStoreDashboard(){
+  await syncDeliveryAssignments("Corner Deli");
+  const sql=getSql();
+  const [summary,timedOrders,unpaidOrders,deliveries,activity,openOrders]=await Promise.all([
+    sql`SELECT
+      COUNT(*) FILTER(WHERE created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York'))::int orders_today,
+      COUNT(*) FILTER(WHERE status NOT IN('completed','cancelled'))::int open_orders,
+      COUNT(*) FILTER(WHERE timing_mode='future' AND scheduled_for>=NOW() AND scheduled_for<NOW()+INTERVAL '4 hours' AND status NOT IN('completed','cancelled'))::int timed_upcoming,
+      COUNT(*) FILTER(WHERE amount_due_cents>0 AND status NOT IN('completed','cancelled'))::int unpaid_open,
+      COALESCE(SUM(total_cents) FILTER(WHERE created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York') AND status<>'cancelled'),0)::int sales_cents
+      FROM ordering_orders WHERE business='Corner Deli'`,
+    sql`SELECT id,display_number,status,service_type,scheduled_for,COALESCE(NULLIF(trim(first_name_snapshot||' '||last_name_snapshot),''),'Guest') customer_name
+      FROM ordering_orders WHERE business='Corner Deli' AND timing_mode='future' AND scheduled_for>=NOW()-INTERVAL '30 minutes' AND scheduled_for<NOW()+INTERVAL '8 hours' AND status NOT IN('completed','cancelled') ORDER BY scheduled_for LIMIT 30`,
+    sql`SELECT id,display_number,status,payment_status,service_type,created_at,scheduled_for,amount_due_cents,COALESCE(NULLIF(trim(first_name_snapshot||' '||last_name_snapshot),''),'Guest') customer_name
+      FROM ordering_orders WHERE business='Corner Deli' AND created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York') AND amount_due_cents>0 AND status<>'cancelled' ORDER BY COALESCE(scheduled_for,created_at),created_at LIMIT 60`,
+    sql`SELECT d.id delivery_id,d.status,d.status delivery_status,d.driver_employee_id,d.driver_employee_id assigned_employee_id,d.assigned_at,d.picked_up_at,d.en_route_at,d.arrived_at,d.delivered_at,d.failed_at,d.updated_at,
+      o.display_number,o.status order_status,o.timing_mode,o.scheduled_for,o.created_at,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,e.name driver_name,
+      address.formatted_address delivery_address,address.latitude::double precision destination_latitude,address.longitude::double precision destination_longitude,
+      location.latitude::double precision driver_latitude,location.longitude::double precision driver_longitude,location.accuracy_meters::double precision driver_accuracy_meters,location.captured_at driver_location_captured_at
+      FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id JOIN ordering_order_delivery_addresses address ON address.order_id=o.id LEFT JOIN employees e ON e.id=d.driver_employee_id
+      LEFT JOIN LATERAL(
+        SELECT l.latitude,l.longitude,l.accuracy_meters,l.captured_at
+        FROM ordering_delivery_locations l
+        WHERE l.delivery_id=d.id AND d.status IN('EN_ROUTE','ARRIVED','NO_CONTACT')
+          AND EXISTS(SELECT 1 FROM ordering_delivery_tracking_sessions s WHERE s.id=l.tracking_session_id AND s.stopped_at IS NULL)
+        ORDER BY l.captured_at DESC LIMIT 1
+      )location ON TRUE
+      WHERE d.business='Corner Deli' AND (d.status NOT IN('DELIVERED','RETURNED','CANCELLED') OR d.updated_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York'))
+      ORDER BY CASE d.status WHEN 'DELIVERY_FAILED' THEN 0 WHEN 'NO_CONTACT' THEN 1 WHEN 'EN_ROUTE' THEN 2 WHEN 'READY_FOR_DRIVER' THEN 3 ELSE 4 END,COALESCE(o.scheduled_for,o.created_at) LIMIT 60`,
+    sql`SELECT a.id,a.action,a.new_status,a.created_at,o.display_number,e.name employee_name
+      FROM ordering_delivery_audit a JOIN ordering_orders o ON o.id=a.order_id LEFT JOIN employees e ON e.id=a.employee_id
+      WHERE o.business='Corner Deli' AND a.created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York') ORDER BY a.created_at DESC LIMIT 30`,
+    // Every open order with where it is right now, for the status board monitor.
+    sql`SELECT o.id,o.display_number,o.status,o.service_type,o.timing_mode,o.scheduled_for,o.created_at,o.updated_at,
+      COALESCE(NULLIF(trim(o.first_name_snapshot||' '||LEFT(o.last_name_snapshot,1)),''),'Guest') customer_name,
+      (SELECT COALESCE(SUM(GREATEST(i.quantity-COALESCE(i.cancelled_quantity,0),0)),0)::int FROM ordering_order_items i WHERE i.order_id=o.id) item_count,
+      d.status delivery_status,e.name driver_name
+      FROM ordering_orders o
+      LEFT JOIN LATERAL(SELECT status,driver_employee_id FROM ordering_delivery_assignments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) d ON TRUE
+      LEFT JOIN employees e ON e.id=d.driver_employee_id
+      WHERE o.business='Corner Deli' AND o.status NOT IN('draft','completed','cancelled')
+        AND (o.created_at>NOW()-INTERVAL '18 hours' OR o.scheduled_for<NOW()+INTERVAL '12 hours')
+        AND COALESCE(d.status,'') NOT IN('DELIVERED','RETURNED','CANCELLED')
+      ORDER BY COALESCE(o.scheduled_for,o.created_at),o.created_at LIMIT 120`
+  ]);
+  const deliveryRows=deliveries as Array<Record<string,unknown>>;
+  const tasks=[
+    {key:"unassigned",label:"Deliveries waiting for a driver",count:deliveryRows.filter(d=>!d.driver_employee_id&&!['DELIVERED','RETURNED','CANCELLED'].includes(String(d.status))).length,href:"/employee/deliveries?dispatch=1"},
+    {key:"ready",label:"Ready orders waiting for pickup",count:deliveryRows.filter(d=>d.status==="READY_FOR_DRIVER").length,href:"/employee/deliveries?dispatch=1"},
+    {key:"problems",label:"Delivery problems needing attention",count:deliveryRows.filter(d=>['NO_CONTACT','DELIVERY_FAILED'].includes(String(d.status))).length,href:"/employee/deliveries?dispatch=1"},
+    {key:"timed",label:"Timed orders due within four hours",count:Number(summary[0]?.timed_upcoming||0),href:"/pos/deli/orders"},
+    {key:"unpaid",label:"Open orders with a balance",count:Number(summary[0]?.unpaid_open||0),href:"/pos/deli/orders"}
+  ];
+  return{generatedAt:new Date().toISOString(),summary:summary[0],tasks,timedOrders,unpaidOrders,deliveries,openOrders,routePlans:deliveryRoutePlans(deliveryRows,new Date(),await deliLocation()),activity};
+}

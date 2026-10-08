@@ -1,6 +1,9 @@
 import { ensureSchema, getSql } from "@/lib/db";
+import { ValidationError } from "@/lib/http";
 import { payrollSummary } from "@/lib/payroll-summary-rules";
 import { payrollWeekBounds as weekBounds } from "@/lib/payroll-week";
+import { toIsoTimestamp } from "@/lib/timestamp-values";
+import { compareScheduleToWorked, payrollDisplayCsvRows, payrollDisplayRows, type ScheduleComparison } from "@/lib/payroll-schedule-compare";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -20,12 +23,15 @@ type PayrollRow = {
 type PayrollSnapshot = {
   business: Business;
   source: string;
+  processingFeeReviewCount?: number;
   weekStart: string;
   weekEnd: string;
   rows: PayrollRow[];
   tipDetails: Array<Record<string, unknown>>;
   overrides: Array<Record<string, unknown>>;
   unmatchedTips: Array<Record<string, unknown>>;
+  /** Scheduled vs worked per employee (added 2026-10; older saved versions don't have it). */
+  scheduleComparison?: ScheduleComparison[];
 };
 
 function clean(value: unknown, max = 255): string {
@@ -44,9 +50,67 @@ function roundMoney(value: number): number {
 export async function ensurePayrollControlSchema(): Promise<void> {
   await ensureSchema();
   const sql = getSql();
+  await sql`
+    CREATE TABLE IF NOT EXISTS time_entry_adjustments (
+      id UUID PRIMARY KEY,
+      business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
+      source_type TEXT NOT NULL CHECK (source_type IN ('Tiki', 'Rezku')),
+      source_id UUID NOT NULL,
+      before_state JSONB NOT NULL,
+      after_state JSONB NOT NULL,
+      reason TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS time_entry_adjustments_source_idx ON time_entry_adjustments (source_type, source_id, created_at DESC)`;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS tip_overrides (
+      id UUID PRIMARY KEY,
+      business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
+      week_start DATE NOT NULL,
+      source_transaction_id TEXT NOT NULL DEFAULT '',
+      employee_name TEXT NOT NULL,
+      amount NUMERIC(12,2) NOT NULL,
+      reason TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS tip_overrides_week_idx ON tip_overrides (business, week_start, created_at)`;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS payroll_run_versions (
+      id UUID PRIMARY KEY,
+      business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
+      week_start DATE NOT NULL,
+      week_end TIMESTAMPTZ NOT NULL,
+      version INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft', 'Locked')),
+      payload JSONB NOT NULL,
+      generated_by TEXT NOT NULL,
+      generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      locked_by TEXT,
+      locked_at TIMESTAMPTZ,
+      reopened_from_id UUID REFERENCES payroll_run_versions(id),
+      UNIQUE (business, week_start, version)
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS payroll_run_versions_week_idx ON payroll_run_versions (business, week_start DESC, version DESC)`;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS payroll_audit_events (
+      id UUID PRIMARY KEY,
+      business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
+      event_type TEXT NOT NULL,
+      reference_id TEXT NOT NULL DEFAULT '',
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      actor TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS payroll_audit_events_business_idx ON payroll_audit_events (business, created_at DESC)`;
 }
 
 async function listTipOverrides(business: Business, weekStart: string) {
@@ -145,9 +209,63 @@ export async function controlledPayrollSummary(business: Business, weekStart: st
     ...base,
     business,
     rows: mappedRows,
+    scheduleComparison: await scheduleComparisonFor(business, weekStart, mappedRows),
     overrides,
     unmatchedTips: await unmatchedTips(business, weekStart, base.tipDetails || []),
   };
+}
+
+/** Rezku shows "Ken" as "Can"; the payroll summary uses Ken, so the schedule comparison does too. */
+function canonicalName(value: unknown): string {
+  const name = String(value ?? "").trim();
+  return /^can$/i.test(name) ? "Ken" : name;
+}
+
+/**
+ * Scheduled vs worked for the payroll week (Monday 4 AM to Monday 4 AM): the week's published schedule
+ * shifts against the punches payroll used (Corner Deli: Rezku shifts, matched by name; Tiki: time
+ * entries, matched by employee id). Never stops payroll: on an error the comparison is left empty.
+ */
+export async function scheduleComparisonFor(business: Business, weekStart: string, rows: PayrollRow[]): Promise<ScheduleComparison[]> {
+  try {
+    const bounds = weekBounds(weekStart);
+    const start = bounds.start.toISOString(), end = bounds.end.toISOString();
+    // Punches a little outside the week still show a shift at the edge was worked.
+    const near = new Date(bounds.start.getTime() - 18 * 3_600_000).toISOString();
+    const after = new Date(bounds.end.getTime() + 18 * 3_600_000).toISOString();
+    const [shiftRows, punchRows] = await Promise.all([
+      getSql()`
+        SELECT s.employee_id, e.name AS employee_name, s.starts_at, s.ends_at
+        FROM schedule_shifts s
+        JOIN employees e ON e.id = s.employee_id
+        WHERE s.business = ${business} AND s.status = 'Published'
+          AND s.starts_at >= ${start} AND s.starts_at < ${end}
+      `,
+      business === "Tiki"
+        ? getSql()`
+            SELECT employee_id, employee_name, clock_in, clock_out FROM time_entries
+            WHERE business = 'Tiki' AND COALESCE(clock_in, clock_out) >= ${near} AND COALESCE(clock_in, clock_out) < ${after}
+          `
+        : getSql()`
+            SELECT NULL::uuid AS employee_id, employee_name, clock_in, clock_out FROM rezku_shifts
+            WHERE COALESCE(clock_in, clock_out) >= ${near} AND COALESCE(clock_in, clock_out) < ${after}
+          `,
+    ]) as unknown as [Array<Record<string, unknown>>, Array<Record<string, unknown>>];
+    return compareScheduleToWorked({
+      rows,
+      shifts: shiftRows.map((row) => ({
+        employeeId: row.employee_id ? String(row.employee_id) : null, employeeName: canonicalName(row.employee_name),
+        startsAt: toIsoTimestamp(row.starts_at) || "", endsAt: toIsoTimestamp(row.ends_at) || "",
+      })),
+      punches: punchRows.map((row) => ({
+        employeeId: row.employee_id ? String(row.employee_id) : null, employeeName: canonicalName(row.employee_name),
+        clockIn: toIsoTimestamp(row.clock_in), clockOut: toIsoTimestamp(row.clock_out),
+      })),
+    });
+  } catch (error) {
+    console.error("[payroll] scheduled vs worked could not be calculated", error);
+    return [];
+  }
 }
 
 // Keep older callers on the same validated, optional-note correction implementation.
@@ -207,6 +325,9 @@ export async function deleteTipOverride(id: string, actor: string) {
 export async function createPayrollDraft(input: { business: Business; weekStart: string; actor: string; reopenedFromId?: string }) {
   await ensurePayrollControlSchema();
   const summary = await controlledPayrollSummary(input.business, input.weekStart);
+  if (input.business === "Tiki" && summary.processingFeeReviewCount) {
+    throw new ValidationError(`Square processing fees are missing for ${summary.processingFeeReviewCount} tipped payment(s). Sync Square and recalculate before creating a payroll draft.`);
+  }
   const versions = await getSql()`
     SELECT COALESCE(MAX(version), 0)::INTEGER AS version
     FROM payroll_run_versions WHERE business = ${input.business} AND week_start = ${input.weekStart}
@@ -247,7 +368,7 @@ export async function lockPayrollRun(id: string, actor: string) {
 export async function reopenPayrollRun(id: string, actor: string) {
   await ensurePayrollControlSchema();
   const rows = await getSql()`
-    SELECT id, business, week_start FROM payroll_run_versions WHERE id = ${id} AND status = 'Locked' LIMIT 1
+    SELECT id, business, week_start::text AS week_start FROM payroll_run_versions WHERE id = ${id} AND status = 'Locked' LIMIT 1
   ` as unknown as Array<{ id: string; business: Business; week_start: string }>;
   if (!rows[0]) throw new Error("Only a locked payroll version can be reopened.");
   return createPayrollDraft({ business: rows[0].business, weekStart: String(rows[0].week_start), actor, reopenedFromId: id });
@@ -256,19 +377,15 @@ export async function reopenPayrollRun(id: string, actor: string) {
 export async function payrollCsv(id: string): Promise<{ fileName: string; csv: string }> {
   await ensurePayrollControlSchema();
   const rows = await getSql()`
-    SELECT business, week_start, version, payload FROM payroll_run_versions WHERE id = ${id} LIMIT 1
+    SELECT business, week_start::text AS week_start, version, payload FROM payroll_run_versions WHERE id = ${id} LIMIT 1
   ` as unknown as Array<{ business: Business; week_start: string; version: number; payload: PayrollSnapshot }>;
   const run = rows[0];
   if (!run) throw new Error("Payroll version was not found.");
-  const headers = ["Employee", "Total Hours", "Regular Hours", "Overtime Hours", "Driver Tipped Hours", "Pickup Tips", "Delivery Tips", "Manual Tips", "Total Tips"];
+  // Saved versions from before the schedule comparison existed get it calculated now.
+  const comparison = run.payload.scheduleComparison
+    || await scheduleComparisonFor(run.business, String(run.week_start).slice(0, 10), run.payload.rows || []);
   const quote = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-  const lines = [headers.map(quote).join(",")];
-  for (const row of run.payload.rows || []) {
-    lines.push([
-      row.employee, row.hours, row.regularHours, row.overtimeHours, row.driverTipHours,
-      row.pickupTips, row.deliveryTips, row.manualTips || 0, row.tips,
-    ].map(quote).join(","));
-  }
+  const lines = payrollDisplayCsvRows(payrollDisplayRows(run.payload.rows || [], comparison)).map((cells) => cells.map(quote).join(","));
   return {
     fileName: `${run.business.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-payroll-${run.week_start}-v${run.version}.csv`,
     csv: `${lines.join("\r\n")}\r\n`,

@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const business = businessFrom(body.business);
     policies = authRatePolicies("employee-session", request, business);
     await assertRateLimit(policies);
-    const session = await createEmployeeSession(business, String(body.pin || ""));
+    const session = await createEmployeeSession(business, String(body.pin || ""), { label: String(body.deviceLabel || ""), userAgent: request.headers.get("user-agent") || "" });
     await clearRateLimit(policies);
     return Response.json({ authenticated: true, session });
   } catch (error) {

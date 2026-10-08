@@ -207,7 +207,7 @@ export default function EmployeesPage() {
   }
 
   if (!session) return <main className="workforceShell"><section className="workforcePanel"><h1>Loading employees</h1></section></main>;
-  if (!session.authenticated) return <main className="workforceShell"><section className="workforcePanel"><h1>Owner access required</h1><a className="wfPrimary" href="/">Return to sign-in</a></section></main>;
+  if (!session.authenticated) return <main className="workforceShell"><section className="workforcePanel"><h1>Owner access required</h1><a className="wfPrimary" href="/signin">Return to sign-in</a></section></main>;
 
   return <main className="workforceShell">
     <header className="workforceHero">
@@ -228,8 +228,8 @@ export default function EmployeesPage() {
           <label>Hourly rate<input name="hourlyRate" type="number" min="0" step="0.01" defaultValue="0" /></label>
           <label>Tipped rate<input name="tippedRate" type="number" min="0" step="0.01" defaultValue="0" /></label>
           <label className="wfWide"><input name="countsForTips" type="checkbox" defaultChecked /> Include in eligible tip pools</label>
-          <label className="wfWide"><input name="smsOptIn" type="checkbox" required /> Employee consented to receive Corner Ops onboarding and schedule SMS notifications</label>
-          <p className="wfEmpty wfWide">Creating the employee sends their Employee Hub link, PIN, new-hire paperwork link, and tells them to send questions inside Corner Ops instead of replying to the text.</p>
+          <label className="wfWide"><input name="smsOptIn" type="checkbox" required /> Employee consented to receive onboarding and schedule SMS notifications</label>
+          <p className="wfEmpty wfWide">Creating the employee sends their Employee Hub link, PIN, and new-hire paperwork link, and directs questions to team messages.</p>
           <button className="wfPrimary" disabled={busy}>{busy ? "Creating…" : "Create employee & send onboarding text"}</button>
         </form>
       </article>
@@ -265,7 +265,7 @@ export default function EmployeesPage() {
               <span className={`wfBadge ${employee.smsOptIn ? "approved" : "pending"}`}>{employee.smsOptIn ? "SMS enabled" : "SMS off"}</span>
               <button disabled={busy} onClick={() => editName(employee)}>Edit name</button>
               <button disabled={busy} onClick={() => void action({ action: "update-access", id: employee.id, active: !employee.active }, employee.active ? "Employee deactivated." : "Employee reactivated.")}>{employee.active ? "Deactivate" : "Reactivate"}</button>
-              <button disabled={busy} onClick={() => { const pin = window.prompt(`Enter a new ${pinLength}-digit PIN for ${employee.name}`); if (pin) void action({ action: "update-access", id: employee.id, pin }, "PIN updated and Employee Hub access enabled."); }}>Change PIN</button>
+              <button disabled={busy} onClick={() => { const pin = window.prompt(`Enter a new ${pinLength}-digit PIN for ${employee.name}`); if (!pin) return; const confirmation = window.prompt("Confirm the new PIN"); if (pin !== confirmation) { setNotice("The PIN entries do not match."); return; } void action({ action: "update-access", id: employee.id, pin }, "PIN updated and Employee Hub access enabled."); }}>Change PIN</button>
               <button disabled={busy} onClick={() => { const email = window.prompt(`Enter an email for ${employee.name}`, employee.email); if (email !== null) void action({ action: "update-access", id: employee.id, email }, "Employee email updated."); }}>Edit email</button>
               <button disabled={busy} onClick={() => editPhone(employee)}>Edit phone</button>
               <button disabled={busy || !employee.phone} onClick={() => void action({ action: "update-access", id: employee.id, smsOptIn: !employee.smsOptIn }, employee.smsOptIn ? "SMS notifications disabled." : "SMS consent recorded and notifications enabled.")}>{employee.smsOptIn ? "Disable SMS" : "Enable SMS"}</button>

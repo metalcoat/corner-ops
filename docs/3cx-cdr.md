@@ -99,3 +99,12 @@ Open **Reports → Deli calls**. Corner Ops:
 - checks whether configured Deli extensions were already on answered calls at the drop time;
 - finds later answered inbound or outbound contact with the same caller;
 - flags a 30-second-or-longer unresolved abandonment with no other active Deli calls as an operational issue.
+
+## Live POS caller-ID popup with 3CX Professional
+
+Upload `public/downloads/CornerOps-3CX-CRM.xml` in **Admin → Integrations → CRM**. Configure:
+
+- **Corner Ops URL:** `https://dev.ordercornerdeli.com`
+- **Corner Ops CRM Secret:** the same long random value configured as `THREE_CX_CRM_SECRET`
+
+Enable CRM contact lookup for Deli extensions 95 and 96. The lookup occurs while the call is ringing, records a short-lived live-call event, matches the phone number to the Corner Deli customer database, and causes the POS caller popup. The CDR socket remains separately responsible for completed and missed-call reporting.

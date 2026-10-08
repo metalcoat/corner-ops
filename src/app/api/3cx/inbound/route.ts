@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { apiError } from "@/lib/http";
 import { ingestThreeCxCdr, type ThreeCxCdrInput } from "@/lib/three-cx-cdr";
 import { notifyClockedInDeliEmployeesOfMissedCalls } from "@/lib/three-cx-missed-call-messages";
+import { ingestThreeCxLiveCall, type ThreeCxLiveEvent } from "@/lib/three-cx-live-calls";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -62,7 +63,8 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     if (!authorized(request)) return Response.json({ error: "Invalid 3CX CDR secret." }, { status: 401 });
-    const body = await request.json() as { records?: ThreeCxCdrInput[]; record?: ThreeCxCdrInput } | ThreeCxCdrInput[];
+    const body = await request.json() as { records?: ThreeCxCdrInput[]; record?: ThreeCxCdrInput; event?:ThreeCxLiveEvent } | ThreeCxCdrInput[];
+    if(!Array.isArray(body)&&body.event)return Response.json(await ingestThreeCxLiveCall(body.event),{status:202});
     const records = Array.isArray(body) ? body : Array.isArray(body.records) ? body.records : body.record ? [body.record] : [];
     const ingestion = await ingestThreeCxCdr(records);
     const notificationScheduled = records.some(mightNeedMissedCallCheck);

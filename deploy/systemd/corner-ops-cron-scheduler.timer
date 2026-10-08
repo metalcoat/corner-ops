@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily 3 AM Eastern scheduler (missed shifts, payroll, expenses)
+
+[Timer]
+OnCalendar=*-*-* 03:05:00 America/New_York
+Persistent=true
+Unit=corner-ops-cron@scheduler.service
+
+[Install]
+WantedBy=timers.target

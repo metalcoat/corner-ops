@@ -1,4 +1,4 @@
-import { del, put } from "@vercel/blob";
+import { del, put } from "@/lib/storage";
 import { getEmployeeSession, type EmployeeSession } from "@/lib/employee-auth";
 import { listDirectoryEmployees } from "@/lib/employee-directory-admin";
 import { employeePortalDashboard } from "@/lib/employee-portal-dashboard";

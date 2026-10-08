@@ -1,0 +1,67 @@
+name: Bundle Vercel Preview Source
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/pos-ordering-foundation
+    paths:
+      - .github/workflows/vercel-preview-bundle.yml
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out testing branch
+        uses: actions/checkout@v6
+
+      - name: Create Vercel source manifest
+        shell: bash
+        run: |
+          mkdir -p out
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const includeRoots = ['src', 'public'];
+          const rootFiles = [
+            '.gitignore',
+            'next-env.d.ts',
+            'package.json',
+            'package-lock.json',
+            'tsconfig.json',
+            'next.config.js',
+            'next.config.mjs',
+            'next.config.ts',
+            'vercel.json'
+          ];
+          const files = [];
+          function addFile(file) {
+            if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return;
+            const data = fs.readFileSync(file, 'utf8');
+            files.push({ file: file.replace(/\\/g, '/'), data });
+          }
+          function walk(dir) {
+            if (!fs.existsSync(dir)) return;
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) walk(full);
+              else if (entry.isFile()) addFile(full);
+            }
+          }
+          for (const file of rootFiles) addFile(file);
+          for (const dir of includeRoots) walk(dir);
+          fs.writeFileSync('out/vercel-files.json', JSON.stringify(files));
+          console.log(`Bundled ${files.length} files for preview deployment.`);
+          NODE
+
+      - name: Upload source manifest
+        uses: actions/upload-artifact@v6
+        with:
+          name: vercel-preview-source
+          path: out/vercel-files.json
+          if-no-files-found: error
+          retention-days: 2

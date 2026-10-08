@@ -1,5 +1,6 @@
 import { ensureAttendanceSchema } from "@/lib/attendance";
 import { getEmployeeSession } from "@/lib/employee-auth";
+import { ensureMissedClockOutSchema } from "@/lib/missed-clock-outs";
 import { getSql } from "@/lib/db";
 import { apiError, unauthorized } from "@/lib/http";
 
@@ -19,7 +20,17 @@ export async function GET() {
         AND status IN ('Awaiting Correction', 'Rejected')
     ` as unknown as Array<{ count: number | string }>;
 
-    return Response.json({ count: Number(rows[0]?.count || 0) }, {
+    await ensureMissedClockOutSchema();
+    const clockOuts = await getSql()`
+      SELECT COUNT(*)::INTEGER AS count
+      FROM missed_clock_out_cases c
+      JOIN time_entries t ON t.id = c.time_entry_id AND t.clock_out IS NULL
+      WHERE c.employee_id = ${session.employeeId}
+        AND c.business = ${session.business}
+        AND c.status = 'Open'
+    ` as unknown as Array<{ count: number | string }>;
+
+    return Response.json({ count: Number(rows[0]?.count || 0) + Number(clockOuts[0]?.count || 0) }, {
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {

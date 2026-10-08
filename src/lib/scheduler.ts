@@ -3,6 +3,7 @@ import { Resend } from "resend";
 import { detectMissedShifts } from "@/lib/attendance";
 import { getSql } from "@/lib/db";
 import { runExpenseAutomation } from "@/lib/expense-control";
+import { preparePayrollApproval } from "@/lib/payroll-approval";
 import { payrollSummary } from "@/lib/payroll-summary-rules";
 import { evaluateAndNotifyOvertimeRisk } from "@/lib/overtime-risk";
 import { generateDueRecurringInvoices } from "@/lib/receivables";
@@ -11,7 +12,6 @@ import {
   ensureIntegrationSchema,
   localDateParts,
   syncAllBankConnections,
-  syncSquareConnection,
 } from "@/lib/integrations";
 import type { Business } from "@/lib/types";
 import { syncOperationalWeather } from "@/lib/weather-intelligence";
@@ -46,28 +46,6 @@ async function flagOpenTikiPunches(localDate: string) {
     });
   }
   return rows.length;
-}
-
-async function checkRezkuFreshness(localDate: string) {
-  const rows = await getSql()`
-    SELECT imported_at FROM rezku_import_batches ORDER BY imported_at DESC LIMIT 1
-  ` as unknown as Array<{ imported_at: string }>;
-  const latest = rows[0]?.imported_at ? new Date(rows[0].imported_at).getTime() : 0;
-  if (!latest || Date.now() - latest > 36 * 60 * 60 * 1000) {
-    await createOperationIssue({
-      issueKey: `rezku-stale:${localDate}`,
-      business: "Corner Deli",
-      issueType: "Rezku Import",
-      severity: "Warning",
-      title: "Corner Deli Rezku reports are stale",
-      details: latest
-        ? `The newest Rezku report was imported at ${rows[0].imported_at}.`
-        : "No Rezku reports have been imported yet.",
-      reference: rows[0]?.imported_at || "none",
-    });
-    return false;
-  }
-  return true;
 }
 
 async function capturePayrollRun(business: Business, weekStart: string) {
@@ -200,10 +178,12 @@ export async function runScheduledOperations(input: { force?: boolean; source?: 
     details.payrollWeekStart = weekStart;
     await runSchedulerStep({ localDate: local.date, step: "payrollCornerDeli", details, failures, run: () => capturePayrollRun("Corner Deli", weekStart) });
     await runSchedulerStep({ localDate: local.date, step: "payrollTiki", details, failures, run: () => capturePayrollRun("Tiki", weekStart) });
+    // Draft last week for approval and email the owner the summary and anything blocking it.
+    await runSchedulerStep({ localDate: local.date, step: "payrollApprovalCornerDeli", details, failures, run: () => preparePayrollApproval("Corner Deli", weekStart) });
+    await runSchedulerStep({ localDate: local.date, step: "payrollApprovalTiki", details, failures, run: () => preparePayrollApproval("Tiki", weekStart) });
   }
 
   await runSchedulerStep({ localDate: local.date, step: "openTikiPunches", details, failures, run: () => flagOpenTikiPunches(local.date) });
-  await runSchedulerStep({ localDate: local.date, step: "rezkuFresh", details, failures, run: () => checkRezkuFreshness(local.date) });
   await runSchedulerStep({ localDate: local.date, step: "weather", details, failures, run: () => syncOperationalWeather() });
   await runSchedulerStep({ localDate: local.date, step: "missedShifts", details, failures, run: () => detectMissedShifts() });
   await runSchedulerStep({
@@ -243,7 +223,6 @@ export async function runScheduledOperations(input: { force?: boolean; source?: 
       }).catch(() => undefined);
     }
   }
-  await runSchedulerStep({ localDate: local.date, step: "squareSync", details, failures, run: () => syncSquareConnection() });
   await runSchedulerStep({ localDate: local.date, step: "alertEmail", details, failures, run: () => emailIssueDigest({ ...details, failures }) });
 
   details.failures = failures;
@@ -267,5 +246,5 @@ export async function handleCronRequest(request: Request) {
   if (!safeBearer(request.headers.get("authorization") || "", `Bearer ${expected}`)) {
     return Response.json({ error: "Unauthorized scheduler request." }, { status: 401 });
   }
-  return Response.json(await runScheduledOperations({ source: "Vercel Cron" }));
+  return Response.json(await runScheduledOperations({ source: "Corner Ops Cron" }));
 }

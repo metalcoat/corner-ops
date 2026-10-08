@@ -1,0 +1,9 @@
+[Unit]
+Description=Corner Ops: send dropped supplier price files to Supplier costs
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=chris
+ExecStart=/opt/corner-ops/runtime/deploy/supplier-prices-sync.sh

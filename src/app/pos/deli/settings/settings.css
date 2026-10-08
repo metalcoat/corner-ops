@@ -1,0 +1,117 @@
+.managerSettingsWorkspace{width:100%;min-height:calc(100dvh - 86px);padding-bottom:32px;background:#f4f1e9;color:#211d17}
+.managerSettingsWorkspace>:not(nav){box-sizing:border-box;width:min(1100px,calc(100% - 32px));margin-left:auto;margin-right:auto}
+.managerSettingsWorkspace .posSettingsCard{max-width:none;margin-top:24px;background:#fff;color:#211d17;border-color:#cfc5b4;box-shadow:0 3px 12px #211d1712}
+.managerSettingsWorkspace .posSettingsCard h2,.managerSettingsWorkspace .posSettingsCard h3,.managerSettingsWorkspace .posSettingsCard strong,.managerSettingsWorkspace .posSettingsCard label{color:#211d17}
+.managerSettingsWorkspace .posSettingsCard p,.managerSettingsWorkspace .posSettingsCard span,.managerSettingsWorkspace .posSettingsCard small,.managerSettingsWorkspace .posSettingsCard article{color:#3f392f}
+.managerSettingsWorkspace .posSettingsCard input:not([type="checkbox"]),.managerSettingsWorkspace .posSettingsCard select,.managerSettingsWorkspace .posSettingsCard textarea,.managerSettingsWorkspace .posTools input{box-sizing:border-box;min-height:42px;border:1px solid #766b59;border-radius:8px;background:#fff;color:#17130f;padding:9px 10px;font:inherit}
+.managerSettingsWorkspace .posSettingsCard input::placeholder,.managerSettingsWorkspace .posTools input::placeholder{color:#686158;opacity:1}
+.managerSettingsWorkspace .posSettingsCard button,.managerSettingsWorkspace .posTools button{min-height:42px;border:1px solid #51493d;border-radius:8px;background:#29241d;color:#fff;padding:9px 13px;font:inherit;font-weight:800;cursor:pointer}
+.managerSettingsWorkspace .posSettingsCard button:disabled,.managerSettingsWorkspace .posTools button:disabled{background:#d8d3ca;color:#6b655d;border-color:#b9b2a7;cursor:not-allowed}
+.managerSettingsWorkspace .posSettingsCard article{margin:8px 0;padding:12px;border:1px solid #ddd6ca;border-radius:9px;background:#faf8f3}
+.managerSettingsWorkspace .posSettingsGrid{max-width:none;margin:12px 0;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.managerSettingsWorkspace .posSettingsCard label{grid-template-columns:1fr;gap:6px;border-bottom:0}
+.managerSettingsWorkspace .posTools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.managerSettingsWorkspace .storeOperationsCard .posTools label>span{color:#211d17;font-weight:850}
+.managerSettingsWorkspace .storeOperationsCard .posTools select,.managerSettingsWorkspace .storeOperationsCard .posTools input{border:2px solid #51493d;background:#fff;color:#0f0c09;font-weight:750}
+.managerSettingsWorkspace .storeOperationsCard .posBandRow{border:2px solid #334155;background:#172033}
+.managerSettingsWorkspace .storeOperationsCard .posBandRow span{color:#fff;font-weight:800}
+.managerSettingsWorkspace .storeOperationsCard .posBandRow span:nth-child(2){color:#fde68a}
+.managerSettingsWorkspace .storeOperationsCard .posBandRow span:last-child{color:#dbeafe}
+.managerSettingsWorkspace [role="status"]{color:#174d3a!important;font-weight:700}
+@media(max-width:640px){.managerSettingsWorkspace>:not(nav){width:min(100% - 16px,1100px)}.managerSettingsWorkspace .posSettingsCard{margin-top:12px;padding:14px}}
+.autoPrintControl{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px;border:2px solid #263238;border-radius:12px;background:#f5f7f8}.autoPrintControl p{margin:6px 0 0}.autoPrintControl .rocker{display:flex;align-items:center;gap:9px;min-width:124px;justify-content:center;background:#5d6670;color:#fff}.autoPrintControl .rocker span{width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:inset 0 0 0 3px #343a40}.autoPrintControl .rocker.on{background:#137b3f}.autoPrintControl .rocker.on span{box-shadow:inset 0 0 0 3px #0b572b}@media(max-width:700px){.autoPrintControl{align-items:flex-start;flex-direction:column}.autoPrintControl .rocker{width:100%}}
+.mxTerminalList{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:8px}.mxTerminalList li{padding:12px 14px;border:2px solid #263238;border-radius:10px;background:#fff;overflow-wrap:anywhere}.mxTerminalList code{font-size:.95rem}.mxTerminalList button{margin-top:8px;display:block}
+.mxTerminalList label{display:grid;gap:4px;margin-top:8px;font-weight:800}.mxTerminalList input{min-height:44px}
+/* Printers & devices */
+.hwPage{--hw-line:#d6dcd3;--hw-muted:#5d6a61;--hw-green:#1f6b3a;display:grid;gap:18px}
+.hwPage h3{margin:0;font-size:1.15rem}
+.hwPage h4{margin:0 0 4px;font-size:1.05rem}
+.hwPage p{margin:0}
+.hwPage small{display:block;color:var(--hw-muted);font-weight:500}
+.hwPage.hwPage.hwPage button,.hwLinkButton{min-height:44px;padding:8px 14px;border:0;border-radius:10px;background:#26352b;color:#fff;font:inherit;font-weight:800;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.hwPage.hwPage.hwPage button:disabled{opacity:.5;cursor:default}
+.hwPage.hwPage.hwPage .hwSecondary{background:#eef1ec;color:#1d2a21;border:1px solid var(--hw-line)}
+.hwPage.hwPage.hwPage .hwDanger{background:#fff;color:#a12b20;border:1px solid #e4b7b1}
+.hwLinkButton{background:var(--hw-green)}
+.hwLinkButton.small{min-height:44px}
+.hwHeader{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.hwHeader h2{margin:0 0 4px}
+.hwMessage{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px!important;border-radius:10px;font-weight:700;position:sticky;top:8px;z-index:5}
+.hwMessage.good{background:#dff3e4;color:#175c2d}
+.hwMessage.bad{background:#ffe2dd;color:#86200f}
+.hwPage.hwPage.hwPage .hwMessage button{min-height:32px!important;padding:0 10px!important;background:transparent!important;color:inherit!important;font-size:1.3rem}
+.hwChecklist{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.hwChecklist>div{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:10px;background:#f6f3e8;border:1px solid #e7dfc4}
+.hwChecklist>div.ok{background:#eef7f0;border-color:#cfe6d6}
+.hwChecklist b{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#fff;color:#8a6d1a;flex:none}
+.hwChecklist .ok b{background:var(--hw-green);color:#fff}
+.hwChecklist span{display:grid;min-width:0}
+.hwChecklist small{overflow:hidden;text-overflow:ellipsis}
+.hwSection{display:grid;gap:12px;padding:16px;border:1px solid var(--hw-line);border-radius:14px;background:#fff}
+.hwSection.hwAlert{border-color:#e9b3aa;background:#fff7f5}
+.hwSectionHead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.hwIntro{color:var(--hw-muted)}
+.hwEmpty{padding:14px;border-radius:10px;background:#f6f7f4;color:var(--hw-muted)}
+.hwCards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.hwCard{display:grid;gap:6px;align-content:start;padding:14px;border:1px solid var(--hw-line);border-radius:12px;background:#fbfcfa}
+.hwCard.thisOne{border-color:var(--hw-green);box-shadow:0 0 0 2px #1f6b3a33}
+.hwCardTop{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.hwKind{font-size:.72rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--hw-muted)}
+.hwCardName{font-size:1.15rem}
+.hwStatus{padding:3px 9px;border-radius:999px;font-size:.75rem;font-weight:800;background:#eceee9;color:#4c5850}
+.hwStatus.online{background:#dff3e4;color:#175c2d}
+.hwStatus.offline{background:#ffe2dd;color:#86200f}
+.hwTags{display:flex;flex-wrap:wrap;gap:6px}
+.hwTags span{padding:3px 8px;border-radius:8px;background:#eef1ec;font-size:.8rem;font-weight:650}
+.hwProblem{color:#a12b20!important}
+.hwActions{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.hwFacts{margin:0;padding-left:18px;display:grid;gap:3px;font-size:.92rem}
+.hwForm{display:grid;gap:12px;padding:16px;border-radius:12px;background:#f6f8f4;border:2px solid #cfdccf}
+.hwKinds{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0;padding:0;border:0}
+.hwKinds.two{grid-template-columns:repeat(2,1fr)}
+.hwKinds legend{font-weight:800;margin-bottom:6px}
+.hwKinds label{display:grid;gap:3px;padding:12px;border:2px solid var(--hw-line);border-radius:10px;background:#fff;cursor:pointer}
+.hwKinds label.selected{border-color:var(--hw-green);box-shadow:0 0 0 2px #1f6b3a33}
+.hwKinds input{position:absolute;opacity:0;pointer-events:none}
+.hwFields{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.hwField{display:grid;gap:4px;font-weight:750;font-size:.9rem}
+.hwField input,.hwField select{min-height:44px;padding:8px 10px;border:1px solid #b9c3b6;border-radius:8px;font:inherit;font-weight:500;background:#fff;color:#16201a}
+.hwField input.hwTiny{width:70px;min-height:32px;display:inline-block}
+.hwCheck{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:10px;background:#fff;border:1px solid var(--hw-line);cursor:pointer}
+.hwCheck input{width:22px;height:22px;margin-top:2px;accent-color:var(--hw-green)}
+.hwCheck span{display:grid}
+.hwLabelOptions{display:grid;gap:12px}
+.hwChips{display:flex;flex-wrap:wrap;gap:6px}
+.hwPage.hwPage.hwPage .hwChips button{min-height:38px;background:#fff;color:#1d2a21;border:1px solid var(--hw-line);font-weight:650}
+.hwPage.hwPage.hwPage .hwChips button.selected{background:var(--hw-green);color:#fff;border-color:var(--hw-green)}
+.hwAdvanced summary{cursor:pointer;font-weight:700;color:var(--hw-muted)}
+.hwAdvanced[open] summary{margin-bottom:10px}
+.hwFormActions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hwRow{display:grid;grid-template-columns:minmax(220px,1fr) 2fr;gap:14px;align-items:end}
+.hwToggle{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 12px;border-radius:10px;background:#f6f8f4}
+.hwToggle span{display:grid}
+.hwPage.hwPage.hwPage .hwToggle .rocker{display:flex;align-items:center;gap:9px;min-width:120px;background:#5d6670}
+.hwToggle .rocker span{width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:inset 0 0 0 3px #343a40}
+.hwPage.hwPage.hwPage .hwToggle .rocker.on{background:#137b3f}
+.hwProvider{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;background:#f6f8f4;flex-wrap:wrap}
+.hwProvider>span:nth-child(2){flex:1;display:grid}
+.hwTerminalPicker{display:flex;flex-wrap:wrap;gap:8px}
+.hwPage.hwPage.hwPage .hwTerminalPicker button:not(.hwSecondary){display:grid;text-align:left;background:#fff;color:#1d2a21;border:1px solid var(--hw-line)}
+.hwPage.hwPage.hwPage .hwTerminalPicker button.selected{border:2px solid var(--hw-green)}
+.hwHistory summary,.hwAdvancedSection summary{display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer;list-style:none}
+.hwHistory summary span,.hwAdvancedSection summary span{color:var(--hw-muted);font-weight:600}
+.hwJobs{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.hwJobs li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:#f8f9f6}
+.hwJobs li.bad{background:#fff3f0}
+.hwJobs li>span:first-child{display:grid}
+.hwJobs strong{text-transform:capitalize}
+@media (max-width:760px){.hwKinds,.hwKinds.two,.hwRow{grid-template-columns:1fr}.hwHeader{flex-direction:column}}
+/* Alert sound picker: tap a tile to hear it and choose it. */
+.posSettingsCard .soundPicker{display:grid;gap:12px;margin:6px 0 12px}
+.posSettingsCard .soundPicker>div{display:grid;gap:6px}
+.posSettingsCard .soundPicker>div>span{font-size:.72rem;font-weight:900;letter-spacing:.12em}
+.posSettingsCard .soundPicker>div>div{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.posSettingsCard.posSettingsCard .soundPicker button{display:flex;align-items:center;gap:10px;min-height:52px;padding:10px 14px;border:2px solid #cfc5b4;border-radius:12px;background:#fbf8f2;color:#211d17;font-weight:800;text-align:left;cursor:pointer}
+.posSettingsCard.posSettingsCard .soundPicker button b{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#e7dfd0;color:#24553e;font-size:.75rem}
+.posSettingsCard.posSettingsCard .soundPicker button[aria-checked="true"]{border-color:#24553e;background:#e3f1e7;box-shadow:0 0 0 2px #24553e33}
+.posSettingsCard.posSettingsCard .soundPicker button[aria-checked="true"] b{background:#24553e;color:#fff}

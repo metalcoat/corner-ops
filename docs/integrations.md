@@ -47,14 +47,6 @@ Accepted files:
 
 PDF statements are retained securely as source documents. Spreadsheet statements also extract transaction lines. Individual card purchases do not normally match checking-account transactions. The system instead matches the credit-card statement payment to an equal bank withdrawal near the statement date, then requires owner confirmation.
 
-## Square
-
-Square supplies Tiki payment and tip activity. Corner Ops remains the employee time-clock source.
-
-## Rezku
-
-Trusted Rezku daily-report emails provide Corner Deli labor, order, transaction, product-sales, and void information. Inbound report processing validates the sender, subject, and download host before importing workbooks.
-
 ## Scheduler
 
-The nightly scheduler performs operational checks and synchronizes configured feeds. Production deployments remain paused until the owner explicitly authorizes them.
+The nightly scheduler performs native operational checks and synchronizes configured bank feeds. The POS has no Square or Rezku connection, import, webhook, or scheduled-sync path.

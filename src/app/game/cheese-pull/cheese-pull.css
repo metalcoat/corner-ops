@@ -1,0 +1,185 @@
+.blaster-game {
+  min-height: 100dvh;
+  background: #100b20;
+  color: #fff;
+  font-family: "Courier New", monospace;
+  overflow: hidden;
+  user-select: none;
+}
+.blaster-game * {
+  box-sizing: border-box;
+}
+.blaster-card {
+  width: min(720px, calc(100% - 28px));
+  margin: 5vh auto;
+  padding: 32px;
+  text-align: center;
+  border: 8px solid #222;
+  background: #11182c;
+  box-shadow:
+    0 0 0 5px #62dfff,
+    12px 14px #000;
+}
+.blaster-card small,
+.blaster-over small {
+  color: #ffd94a;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+}
+.blaster-card h1 {
+  font: 1000 clamp(3rem, 9vw, 6.5rem)/0.8 Arial;
+  margin: 30px 0;
+  text-shadow: 7px 7px #000;
+}
+.blaster-card h1 i {
+  display: block;
+  color: #f33b31;
+  font-style: normal;
+}
+.blaster-card p {
+  font-size: 1.1rem;
+  line-height: 1.5;
+}
+.blaster-card > button,
+.blaster-over button {
+  display: block;
+  width: 100%;
+  margin: 20px 0;
+  padding: 18px;
+  border: 0;
+  background: #ef3d32;
+  color: #fff;
+  box-shadow: 0 7px #76120d;
+  font: 1000 1.2rem "Courier New";
+}
+.blaster-card a,
+.blaster-over a {
+  color: #6deaff;
+  font-weight: 900;
+}
+.blaster-hud {
+  height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 10px;
+  background: #090c16;
+  border-bottom: 5px solid #ffd248;
+  color: #fff;
+}
+.blaster-hud b {
+  color: #ffd248;
+  font-size: 1.3rem;
+}
+.blaster-hud i {
+  font-style: normal;
+  color: #6ceaff;
+  font-weight: 900;
+}
+.blaster-stage {
+  position: relative;
+  height: calc(100dvh - 70px);
+  overflow: hidden;
+}
+.blaster-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.boss-message {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  translate: -50%;
+  width: min(760px, 90%);
+  padding: 9px;
+  background: #111d;
+  border: 3px solid #ffd349;
+  text-align: center;
+  font-weight: 900;
+}
+.route-meter {
+  position: absolute;
+  top: 66px;
+  left: 10%;
+  right: 10%;
+  height: 12px;
+  border: 3px solid #fff;
+  background: #111;
+}
+.route-meter i {
+  display: block;
+  height: 100%;
+  background: #45e477;
+}
+.blaster-controls {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  translate: -50%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+  width: min(650px, 92%);
+}
+.blaster-controls button {
+  min-height: 76px;
+  border: 5px solid #fff;
+  background: #18233b;
+  color: #fff;
+  box-shadow: 0 7px #080b12;
+  font: 1000 1.1rem "Courier New";
+  touch-action: manipulation;
+}
+.blaster-controls button:active {
+  translate: 0 6px;
+  box-shadow: 0 1px #000;
+}
+.blaster-over {
+  position: absolute;
+  z-index: 20;
+  inset: 50% auto auto 50%;
+  translate: -50% -50%;
+  width: min(620px, calc(100% - 28px));
+  padding: 25px;
+  text-align: center;
+  background: #111827f5;
+  border: 6px solid #ffd248;
+  box-shadow: 10px 10px #000;
+}
+.blaster-over h2 {
+  font-size: clamp(1rem, 3vw, 1.6rem);
+}
+@media (max-width: 650px) {
+  .blaster-hud {
+    height: 82px;
+    flex-wrap: wrap;
+    font-size: 0.72rem;
+    padding: 6px;
+  }
+  .blaster-stage {
+    height: calc(100dvh - 82px);
+  }
+  .boss-message {
+    font-size: 0.7rem;
+  }
+  .blaster-controls {
+    bottom: 10px;
+  }
+  .blaster-card {
+    margin: 2vh auto;
+    padding: 20px;
+  }
+  .blaster-card h1 {
+    font-size: 3.4rem;
+  }
+}
+
+.end-complaint {
+  max-width: 560px;
+  margin: 10px auto;
+  padding: 10px 12px;
+  border: 2px dashed currentColor;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}

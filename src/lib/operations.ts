@@ -1,9 +1,13 @@
 import { createHash, createHmac } from "node:crypto";
+import { assertEmployeePinAvailable, employeeByPin, employeePinUpdate } from "@/lib/employee-pin-security";
 import * as XLSX from "xlsx";
 import { ensureSchema, getSql } from "@/lib/db";
-import { rezkuDateTime, rezkuNextDayDateTime } from "@/lib/rezku-eastern-time";
 import type { Business } from "@/lib/types";
 
+const TIME_ZONE = "America/New_York";
+const TIP_MULTIPLIER = 0.965;
+const CUTOFF_HOUR = 15;
+const DRIVER_GRACE_MINUTES = 35;
 
 type LocationInput = {
   latitude?: number | null;
@@ -24,6 +28,24 @@ type EmployeeRow = {
   created_at: string;
 };
 
+type ShiftLike = {
+  id: string;
+  employeeName: string;
+  position: string;
+  roleGroup: "Driver" | "In-House" | "Ignore";
+  countsForTips: boolean;
+  clockIn: Date | null;
+  clockOut: Date | null;
+  reportedHours: number;
+};
+
+type TipTransaction = {
+  id: string;
+  orderId: string;
+  time: Date;
+  tip: number;
+  orderType: string;
+};
 
 function numeric(value: unknown): number {
   const parsed = Number(String(value ?? "").replace(/[$,%\s,]/g, ""));
@@ -47,19 +69,6 @@ function rowLookup(row: Record<string, unknown>, candidates: string[]): unknown 
   return "";
 }
 
-function orderOpenedLookup(row: Record<string, unknown>): unknown {
-  const strong = rowLookup(row, ["Order Opened At", "Order Opened", "Opened At", "Opened", "Open Time", "Order Time"]);
-  if (strong !== "") return strong;
-  const candidates = Object.entries(row)
-    .filter(([key, value]) => {
-      const normalized = normalizeKey(key);
-      return value !== undefined && value !== null && String(value).trim() !== ""
-        && (normalized.includes("opened") || normalized.includes("opentime") || normalized.includes("orderopen"));
-    });
-  if (candidates[0]) return candidates[0][1];
-  return rowLookup(row, ["Created At", "Time"]);
-}
-
 function parseDate(value: unknown): Date | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
   if (typeof value === "number") {
@@ -70,6 +79,29 @@ function parseDate(value: unknown): Date | null {
   if (!text) return null;
   const parsed = new Date(text);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function combineDateAndTime(dateValue: unknown, timeValue: unknown): Date | null {
+  const direct = parseDate(timeValue);
+  if (direct && direct.getFullYear() > 1971) return direct;
+
+  const date = parseDate(dateValue);
+  const timeText = clean(timeValue, 50);
+  if (!date || !timeText) return direct;
+
+  const match = timeText.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
+  if (!match) return direct;
+
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3] || 0);
+  const meridiem = match[4]?.toUpperCase();
+  if (meridiem === "PM" && hour < 12) hour += 12;
+  if (meridiem === "AM" && hour === 12) hour = 0;
+
+  const result = new Date(date);
+  result.setHours(hour, minute, second, 0);
+  return result;
 }
 
 function roleFromPosition(position: string): "Driver" | "In-House" | "Ignore" {
@@ -165,10 +197,9 @@ export async function updateEmployee(input: {
   const current = currentRows[0];
   if (!current) throw new Error("Employee not found.");
 
-  const nextPinHash = input.pin
-    ? pinHash(current.business, input.pin)
-    : null;
   if (input.pin && !/^\d{5}$/.test(input.pin)) throw new Error("Employee PINs must contain exactly five digits.");
+  if (input.pin) await assertEmployeePinAvailable({ business: current.business, pin: input.pin, employeeName: current.name, excludeEmployeeId: current.id });
+  const next = input.pin ? employeePinUpdate(current.business, input.pin, current.name) : null;
 
   const rows = await getSql()`
     UPDATE employees SET
@@ -179,7 +210,10 @@ export async function updateEmployee(input: {
       hourly_rate = ${Math.max(0, input.hourlyRate ?? Number(current.hourly_rate))},
       tipped_rate = ${Math.max(0, input.tippedRate ?? Number(current.tipped_rate))},
       active = ${input.active ?? current.active},
-      pin_hash = COALESCE(${nextPinHash}, pin_hash),
+      pin_hash = COALESCE(${next?.hash ?? null}, pin_hash),
+      pin_salt = COALESCE(${next?.salt ?? null}, pin_salt),
+      pin_hash_version = COALESCE(${next?.version ?? null}::int, pin_hash_version),
+      pin_fingerprint = COALESCE(${next?.fingerprint ?? null}, pin_fingerprint),
       updated_at = NOW()
     WHERE id = ${input.id}
     RETURNING id, business, name, position, role_group, counts_for_tips, hourly_rate, tipped_rate, active, created_at
@@ -209,12 +243,12 @@ export async function punchTiki(pin: string, location: LocationInput) {
   await ensureSchema();
   if (!/^\d{5}$/.test(pin)) throw new Error("Enter your five-digit PIN.");
 
-  const employeeRows = await getSql()`
+  const match = await employeeByPin("Tiki", pin, { requirePinEnabled: false });
+  const employeeRows = match ? await getSql()`
     SELECT id, business, name, position, role_group, counts_for_tips, hourly_rate, tipped_rate, active, created_at
     FROM employees
-    WHERE business = 'Tiki' AND pin_hash = ${pinHash("Tiki", pin)} AND active = TRUE
-    LIMIT 1
-  ` as unknown as EmployeeRow[];
+    WHERE id = ${match.id}
+  ` as unknown as EmployeeRow[] : [];
   const employee = employeeRows[0];
   if (!employee) throw new Error("PIN not recognized.");
 
@@ -272,6 +306,330 @@ export async function punchTiki(pin: string, location: LocationInput) {
   };
 }
 
+function getOffsetMilliseconds(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const represented = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second),
+  );
+  return represented - date.getTime();
+}
+
+function zonedDateToUtc(dateText: string, hour: number): Date {
+  const [year, month, day] = dateText.split("-").map(Number);
+  let timestamp = Date.UTC(year, month - 1, day, hour, 0, 0);
+  for (let index = 0; index < 2; index += 1) {
+    timestamp = Date.UTC(year, month - 1, day, hour, 0, 0) - getOffsetMilliseconds(new Date(timestamp), TIME_ZONE);
+  }
+  return new Date(timestamp);
+}
+
+function defaultWeekStart(): string {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const localDate = new Date(`${values.year}-${values.month}-${values.day}T12:00:00Z`);
+  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(values.weekday);
+  const daysSinceMonday = (weekday + 6) % 7;
+  localDate.setUTCDate(localDate.getUTCDate() - daysSinceMonday - 7);
+  return localDate.toISOString().slice(0, 10);
+}
+
+function weekBounds(weekStart?: string) {
+  const startText = /^\d{4}-\d{2}-\d{2}$/.test(weekStart || "") ? weekStart! : defaultWeekStart();
+  const start = zonedDateToUtc(startText, 4);
+  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+  return { startText, start, end };
+}
+
+function durationHours(start: Date | null, end: Date | null, fallback = 0): number {
+  if (!start || !end) return fallback;
+  return Math.max(0, (end.getTime() - start.getTime()) / 3_600_000);
+}
+
+function localHour(date: Date): number {
+  return Number(new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).format(date));
+}
+
+function localDayKey(date: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function covers(shift: ShiftLike, time: Date): boolean {
+  return Boolean(shift.clockIn && shift.clockOut
+    && time.getTime() >= shift.clockIn.getTime()
+    && time.getTime() <= shift.clockOut.getTime());
+}
+
+function overlapAfterCutoffHours(shift: ShiftLike): number {
+  if (!shift.clockIn || !shift.clockOut || shift.roleGroup !== "Driver") return 0;
+  const key = localDayKey(shift.clockIn);
+  const cutoff = zonedDateToUtc(key, CUTOFF_HOUR);
+  const start = Math.max(shift.clockIn.getTime(), cutoff.getTime());
+  return Math.max(0, (shift.clockOut.getTime() - start) / 3_600_000);
+}
+
+function summarizeShifts(shifts: ShiftLike[]) {
+  const byEmployee = new Map<string, {
+    employee: string;
+    hours: number;
+    driverTipHours: number;
+    tips: number;
+    pickupTips: number;
+    deliveryTips: number;
+  }>();
+
+  for (const shift of shifts) {
+    const row = byEmployee.get(shift.employeeName) || {
+      employee: shift.employeeName,
+      hours: 0,
+      driverTipHours: 0,
+      tips: 0,
+      pickupTips: 0,
+      deliveryTips: 0,
+    };
+    row.hours += durationHours(shift.clockIn, shift.clockOut, shift.reportedHours);
+    row.driverTipHours += overlapAfterCutoffHours(shift);
+    byEmployee.set(shift.employeeName, row);
+  }
+
+  return byEmployee;
+}
+
+function allocateDeliTips(shifts: ShiftLike[], transactions: TipTransaction[], summary: ReturnType<typeof summarizeShifts>) {
+  const details: Array<{
+    time: string;
+    orderId: string;
+    orderType: string;
+    originalTip: number;
+    tipAfterFee: number;
+    employee: string;
+    splitCount: number;
+    rule: string;
+  }> = [];
+
+  for (const transaction of transactions) {
+    const tipAfterFee = Math.round(transaction.tip * TIP_MULTIPLIER * 100) / 100;
+    if (tipAfterFee === 0) continue;
+
+    const isDelivery = transaction.orderType.toLowerCase().includes("deliver");
+    let eligible: ShiftLike[] = [];
+    let rule = "";
+
+    if (localHour(transaction.time) < CUTOFF_HOUR) {
+      eligible = shifts.filter((shift) => shift.countsForTips && shift.roleGroup !== "Ignore" && covers(shift, transaction.time));
+      rule = "Before 3 PM: all tip-eligible employees clocked in";
+    } else if (isDelivery) {
+      eligible = shifts.filter((shift) => shift.countsForTips && shift.roleGroup === "Driver" && covers(shift, transaction.time));
+      if (eligible.length === 0) {
+        const graceEnd = transaction.time.getTime() + DRIVER_GRACE_MINUTES * 60_000;
+        eligible = shifts.filter((shift) => shift.countsForTips
+          && shift.roleGroup === "Driver"
+          && shift.clockIn
+          && shift.clockIn.getTime() > transaction.time.getTime()
+          && shift.clockIn.getTime() <= graceEnd);
+        rule = "Delivery: driver arrived within 35-minute grace window";
+      } else {
+        rule = "After 3 PM delivery: driver clocked in";
+      }
+
+      if (eligible.length === 0) {
+        eligible = shifts.filter((shift) => shift.countsForTips && shift.roleGroup !== "Ignore" && covers(shift, transaction.time));
+        rule = "Delivery fallback: split among other employees clocked in";
+      }
+    } else {
+      eligible = shifts.filter((shift) => shift.countsForTips && shift.roleGroup === "In-House" && covers(shift, transaction.time));
+      rule = "After 3 PM pickup/takeout: in-house employees clocked in";
+    }
+
+    if (eligible.length === 0) {
+      const sameDay = shifts.filter((shift) => shift.countsForTips && shift.clockOut && localDayKey(shift.clockOut) === localDayKey(transaction.time));
+      const lastClockOut = Math.max(...sameDay.map((shift) => shift.clockOut?.getTime() || 0), 0);
+      eligible = sameDay.filter((shift) => shift.clockOut?.getTime() === lastClockOut);
+      rule = "After-close fallback: employees who signed out last";
+    }
+
+    if (eligible.length === 0) continue;
+    const split = Math.round((tipAfterFee / eligible.length) * 100) / 100;
+
+    for (const shift of eligible) {
+      const row = summary.get(shift.employeeName) || {
+        employee: shift.employeeName,
+        hours: 0,
+        driverTipHours: 0,
+        tips: 0,
+        pickupTips: 0,
+        deliveryTips: 0,
+      };
+      row.tips += split;
+      if (isDelivery) row.deliveryTips += split;
+      else row.pickupTips += split;
+      summary.set(shift.employeeName, row);
+      details.push({
+        time: transaction.time.toISOString(),
+        orderId: transaction.orderId,
+        orderType: transaction.orderType,
+        originalTip: transaction.tip,
+        tipAfterFee,
+        employee: shift.employeeName,
+        splitCount: eligible.length,
+        rule,
+      });
+    }
+  }
+
+  return details;
+}
+
+export async function payrollSummary(business: Business, weekStart?: string) {
+  await ensureSchema();
+  const bounds = weekBounds(weekStart);
+
+  if (business === "Tiki") {
+    const rows = await getSql()`
+      SELECT id, employee_name, position, role_group, clock_in, clock_out
+      FROM time_entries
+      WHERE business = 'Tiki'
+        AND clock_in >= ${bounds.start.toISOString()}
+        AND clock_in < ${bounds.end.toISOString()}
+      ORDER BY clock_in
+    ` as unknown as Array<{
+      id: string;
+      employee_name: string;
+      position: string;
+      role_group: "Driver" | "In-House" | "Ignore";
+      clock_in: string;
+      clock_out: string | null;
+    }>;
+
+    const shifts: ShiftLike[] = rows.map((row) => ({
+      id: row.id,
+      employeeName: row.employee_name,
+      position: row.position,
+      roleGroup: row.role_group,
+      countsForTips: row.role_group !== "Ignore",
+      clockIn: parseDate(row.clock_in),
+      clockOut: parseDate(row.clock_out),
+      reportedHours: 0,
+    }));
+    const summary = summarizeShifts(shifts);
+    return {
+      business,
+      source: "Corner Ops time clock",
+      weekStart: bounds.startText,
+      weekEnd: new Date(bounds.end.getTime() - 1).toISOString(),
+      rows: Array.from(summary.values()).map((row) => ({
+        ...row,
+        regularHours: Math.min(40, row.hours),
+        overtimeHours: Math.max(0, row.hours - 40),
+      })),
+      tipDetails: [],
+    };
+  }
+
+  const shiftRows = await getSql()`
+    SELECT id, employee_name, position, role_group, clock_in, clock_out, reported_hours
+    FROM rezku_shifts
+    WHERE clock_in >= ${bounds.start.toISOString()}
+      AND clock_in < ${bounds.end.toISOString()}
+    ORDER BY clock_in
+  ` as unknown as Array<{
+    id: string;
+    employee_name: string;
+    position: string;
+    role_group: "Driver" | "In-House" | "Ignore";
+    clock_in: string | null;
+    clock_out: string | null;
+    reported_hours: string | number;
+  }>;
+
+  const orderRows = await getSql()`
+    SELECT order_id, opened_at, order_type
+    FROM rezku_orders
+    WHERE opened_at >= ${bounds.start.toISOString()}
+      AND opened_at < ${bounds.end.toISOString()}
+  ` as unknown as Array<{ order_id: string; opened_at: string | null; order_type: string }>;
+  const orders = new Map(orderRows.map((row) => [row.order_id, row]));
+
+  const transactionRows = await getSql()`
+    SELECT id, order_id, transaction_time, tip
+    FROM rezku_transactions
+    WHERE transaction_time >= ${bounds.start.toISOString()}
+      AND transaction_time < ${bounds.end.toISOString()}
+      AND tip <> 0
+    ORDER BY transaction_time
+  ` as unknown as Array<{ id: string; order_id: string; transaction_time: string; tip: string | number }>;
+
+  const shifts: ShiftLike[] = shiftRows.map((row) => ({
+    id: row.id,
+    employeeName: row.employee_name,
+    position: row.position,
+    roleGroup: row.role_group,
+    countsForTips: row.role_group !== "Ignore",
+    clockIn: parseDate(row.clock_in),
+    clockOut: parseDate(row.clock_out),
+    reportedHours: numeric(row.reported_hours),
+  }));
+
+  const transactions: TipTransaction[] = transactionRows
+    .map((row) => {
+      const time = parseDate(row.transaction_time);
+      const order = orders.get(row.order_id);
+      return time ? {
+        id: row.id,
+        orderId: row.order_id,
+        time,
+        tip: numeric(row.tip),
+        orderType: order?.order_type || "",
+      } : null;
+    })
+    .filter((row): row is TipTransaction => Boolean(row));
+
+  const summary = summarizeShifts(shifts);
+  const tipDetails = allocateDeliTips(shifts, transactions, summary);
+  return {
+    business,
+    source: "Rezku daily email reports",
+    weekStart: bounds.startText,
+    weekEnd: new Date(bounds.end.getTime() - 1).toISOString(),
+    rows: Array.from(summary.values()).map((row) => ({
+      ...row,
+      regularHours: Math.min(40, row.hours),
+      overtimeHours: Math.max(0, row.hours - 40),
+    })),
+    tipDetails: tipDetails.slice(-250).reverse(),
+  };
+}
+
 function reportType(filename: string, requested?: string): "shifts" | "orders" | "transactions" {
   if (requested === "shifts" || requested === "orders" || requested === "transactions") return requested;
   const lower = filename.toLowerCase();
@@ -316,13 +674,10 @@ export async function importRezkuReport(fileName: string, bytes: ArrayBuffer, re
       if (!employee || /^main$/i.test(employee)) continue;
       const position = clean(rowLookup(row, ["Position", "Job", "Role", "Job Title"]), 80);
       const dateValue = rowLookup(row, ["Date", "Shift Date", "Business Date", "Work Date"]);
-      const clockIn = rezkuDateTime(dateValue, rowLookup(row, ["Clock In", "In", "Start", "Start Time", "Time In"]));
-      let clockOut = rezkuDateTime(dateValue, rowLookup(row, ["Clock Out", "Out", "End", "End Time", "Time Out"]));
+      const clockIn = combineDateAndTime(dateValue, rowLookup(row, ["Clock In", "In", "Start", "Start Time", "Time In"]));
+      let clockOut = combineDateAndTime(dateValue, rowLookup(row, ["Clock Out", "Out", "End", "End Time", "Time Out"]));
       if (clockIn && clockOut && clockOut.getTime() < clockIn.getTime()) {
-        clockOut = rezkuNextDayDateTime(
-          dateValue,
-          rowLookup(row, ["Clock Out", "Out", "End", "End Time", "Time Out"]),
-        ) || clockOut;
+        clockOut = new Date(clockOut.getTime() + 24 * 60 * 60 * 1000);
       }
       const hours = numeric(rowLookup(row, ["Regular Hours", "Total Hours", "Hours", "Reg Hours"]))
         + numeric(rowLookup(row, ["Overtime Hours", "OT Hours", "Overtime"]));
@@ -347,7 +702,7 @@ export async function importRezkuReport(fileName: string, bytes: ArrayBuffer, re
       const orderId = clean(rowLookup(row, ["Order ID", "Order Number", "Order #", "ID"]), 100);
       if (!orderId) continue;
       const dateValue = rowLookup(row, ["Date", "Business Date", "Order Date"]);
-      const openedAt = rezkuDateTime(dateValue, orderOpenedLookup(row));
+      const openedAt = combineDateAndTime(dateValue, rowLookup(row, ["Opened At", "Open Time", "Order Time", "Created At", "Time"]));
       const orderType = clean(rowLookup(row, ["Order Type", "Dining Option", "Service Type", "Type"]), 100);
       const key = sourceKey(["order", orderId, openedAt?.toISOString(), orderType]);
       const result = await getSql()`
@@ -366,7 +721,7 @@ export async function importRezkuReport(fileName: string, bytes: ArrayBuffer, re
       const orderId = clean(rowLookup(row, ["Order ID", "Order Number", "Order #"]), 100);
       const transactionId = clean(rowLookup(row, ["Transaction ID", "Payment ID", "ID"]), 100);
       const dateValue = rowLookup(row, ["Date", "Business Date", "Transaction Date"]);
-      const transactionTime = rezkuDateTime(dateValue, rowLookup(row, ["Transaction Time", "Payment Time", "Created At", "Time"]));
+      const transactionTime = combineDateAndTime(dateValue, rowLookup(row, ["Transaction Time", "Payment Time", "Created At", "Time"]));
       const tip = numeric(rowLookup(row, ["Tip", "Tip Amount", "Gratuity"]));
       if (!orderId && !transactionId && !transactionTime) continue;
       const key = sourceKey(["transaction", transactionId, orderId, transactionTime?.toISOString(), tip]);

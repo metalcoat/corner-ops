@@ -1,0 +1,154 @@
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { getSql } from "@/lib/db";
+import {
+  DELIVERY_PRIZE,
+  DELIVERY_STAGES,
+  deliveryMinimumSeconds,
+  deliveryQuotaThrough,
+} from "./config";
+import { DELIVERY_GAME_VERSION } from "@/lib/games/versions";
+let schema: Promise<void> | null = null;
+const digest = (s: string) => createHash("sha256").update(s).digest("hex");
+export function ensureDeliverySchema() {
+  if (!schema)
+    schema = (async () => {
+      const sql = getSql();
+      await sql`CREATE TABLE IF NOT EXISTS delivery_boy_runs(id UUID PRIMARY KEY,token_hash TEXT NOT NULL,player_name TEXT NOT NULL DEFAULT 'Anonymous Driver',status TEXT NOT NULL DEFAULT 'active',stage INTEGER NOT NULL DEFAULT 1,sequence INTEGER NOT NULL DEFAULT 0,active_seconds INTEGER NOT NULL DEFAULT 0,score INTEGER NOT NULL DEFAULT 0,delivered INTEGER NOT NULL DEFAULT 0,missed INTEGER NOT NULL DEFAULT 0,hits INTEGER NOT NULL DEFAULT 0,checkpoints JSONB NOT NULL DEFAULT '[]'::jsonb,started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),completed_at TIMESTAMPTZ)`;
+      await sql`ALTER TABLE delivery_boy_runs ADD COLUMN IF NOT EXISTS game_version TEXT NOT NULL DEFAULT 'legacy'`;
+      await sql`CREATE TABLE IF NOT EXISTS delivery_boy_rewards(id UUID PRIMARY KEY,run_id UUID NOT NULL UNIQUE REFERENCES delivery_boy_runs(id),code TEXT NOT NULL UNIQUE,prize_type TEXT NOT NULL,terms JSONB NOT NULL,completion_stats JSONB NOT NULL,issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),expires_at TIMESTAMPTZ,redeemed_at TIMESTAMPTZ,redeemed_by TEXT,redemption_note TEXT NOT NULL DEFAULT '')`;
+    })();
+  return schema;
+}
+export async function startDeliveryRun(name: string) {
+  await ensureDeliverySchema();
+  const id = randomUUID(),
+    token = randomBytes(32).toString("base64url");
+  await getSql()`INSERT INTO delivery_boy_runs(id,token_hash,player_name,game_version)VALUES(${id},${digest(token)},${name.trim().slice(0, 40) || "Anonymous Driver"},${DELIVERY_GAME_VERSION})`;
+  return { runId: id, token, gameVersion: DELIVERY_GAME_VERSION };
+}
+async function auth(id: string, token: string) {
+  await ensureDeliverySchema();
+  return (
+    (
+      await getSql()`SELECT * FROM delivery_boy_runs WHERE id=${id} AND token_hash=${digest(token)} LIMIT 1`
+    )[0] || null
+  );
+}
+export async function checkpointDelivery(body: any, token: string) {
+  const run = await auth(String(body.runId), token);
+  if (!run || run.status !== "active") throw new Error("Run is unavailable.");
+  const stage = Number(body.stage),
+    sequence = Number(body.sequence),
+    active = Number(body.activeSeconds),
+    score = Number(body.score),
+    delivered = Number(body.delivered),
+    missed = Number(body.missed),
+    hits = Number(body.hits);
+  if (
+    sequence !== Number(run.sequence) + 1 ||
+    stage < Number(run.stage) ||
+    stage > Number(run.stage) + 1 ||
+    stage > DELIVERY_STAGES.length
+  )
+    throw new Error("Impossible route progression.");
+  if (
+    active < Number(run.active_seconds) ||
+    active - Number(run.active_seconds) > 900 ||
+    score < Number(run.score) ||
+    delivered < Number(run.delivered) ||
+    delivered - Number(run.delivered) > 20 ||
+    hits < Number(run.hits) ||
+    missed < Number(run.missed)
+  )
+    throw new Error("Invalid route checkpoint.");
+  // A checkpoint is only sent when a shift is survived, so every shift so far
+  // must have met its delivery quota, and shifts last a fixed time.
+  const minimum = deliveryMinimumSeconds(stage);
+  const [{ elapsed }] =
+    await getSql()`SELECT EXTRACT(EPOCH FROM (NOW()-started_at))::float AS elapsed FROM delivery_boy_runs WHERE id=${body.runId}`;
+  if (
+    delivered < deliveryQuotaThrough(stage) ||
+    active < minimum ||
+    Number(elapsed) < minimum
+  )
+    throw new Error("Invalid route checkpoint.");
+  const entry = {
+    at: new Date().toISOString(),
+    stage,
+    sequence,
+    active,
+    score,
+    delivered,
+    missed,
+    hits,
+  };
+  const updated =
+    await getSql()`UPDATE delivery_boy_runs SET stage=${stage},sequence=${sequence},active_seconds=${Math.round(active)},score=${Math.round(score)},delivered=${delivered},missed=${missed},hits=${hits},checkpoints=checkpoints||${JSON.stringify([entry])}::jsonb,updated_at=NOW() WHERE id=${body.runId} AND status='active' AND sequence=${Number(run.sequence)} RETURNING id`;
+  if (!updated[0]) throw new Error("Impossible route progression.");
+  return { ok: true };
+}
+export async function completeDeliveryRun(id: string, token: string) {
+  const run = await auth(id, token);
+  if (!run) throw new Error("Run credentials are invalid.");
+  if (run.status === "won")
+    return (
+      await getSql()`SELECT code,prize_type,issued_at,expires_at FROM delivery_boy_rewards WHERE run_id=${id}`
+    )[0];
+  if (
+    Number(run.stage) !== DELIVERY_STAGES.length ||
+    Number(run.delivered) < deliveryQuotaThrough(DELIVERY_STAGES.length) ||
+    Number(run.sequence) < DELIVERY_STAGES.length
+  )
+    throw new Error("The full route is not complete.");
+  const code = `SUB-${randomBytes(2).toString("hex").toUpperCase()}-${randomBytes(2).toString("hex").toUpperCase()}`,
+    expires = new Date(
+      Date.now() + DELIVERY_PRIZE.expiresDays * 86400000,
+    ).toISOString(),
+    stats = {
+      score: run.score,
+      delivered: run.delivered,
+      missed: run.missed,
+      hits: run.hits,
+      activeSeconds: run.active_seconds,
+    };
+  const claimed =
+    await getSql()`UPDATE delivery_boy_runs SET status='won',completed_at=NOW(),updated_at=NOW() WHERE id=${id} AND status='active' RETURNING id`;
+  if (!claimed[0]) throw new Error("Run is unavailable.");
+  return (
+    await getSql()`INSERT INTO delivery_boy_rewards(id,run_id,code,prize_type,terms,completion_stats,expires_at)VALUES(${randomUUID()},${id},${code},${DELIVERY_PRIZE.name},${JSON.stringify(DELIVERY_PRIZE)}::jsonb,${JSON.stringify(stats)}::jsonb,${expires}) RETURNING code,prize_type,expires_at`
+  )[0];
+}
+export async function recordDeliveryLoss(
+  body: {
+    runId: string;
+    stage: number;
+    activeSeconds: number;
+    score: number;
+    delivered: number;
+    missed: number;
+    hits: number;
+  },
+  token: string,
+) {
+  const run = await auth(body.runId, token);
+  if (!run || run.status !== "active") return { ok: false };
+  await getSql()`UPDATE delivery_boy_runs SET status='lost',stage=GREATEST(stage,${Math.max(1, Math.floor(body.stage))}),active_seconds=GREATEST(active_seconds,${Math.max(0, Math.floor(body.activeSeconds))}),score=GREATEST(score,${Math.max(0, Math.floor(body.score))}),delivered=GREATEST(delivered,${Math.max(0, Math.floor(body.delivered))}),missed=GREATEST(missed,${Math.max(0, Math.floor(body.missed))}),hits=GREATEST(hits,${Math.max(0, Math.floor(body.hits))}),completed_at=NOW(),updated_at=NOW() WHERE id=${body.runId}`;
+  return { ok: true };
+}
+export async function findDeliveryRewards(query: string) {
+  await ensureDeliverySchema();
+  const q = `%${query.trim()}%`;
+  return getSql()`SELECT reward.*,run.player_name,run.active_seconds FROM delivery_boy_rewards reward JOIN delivery_boy_runs run ON run.id=reward.run_id WHERE ${query.trim() === ""} OR reward.code ILIKE ${q} OR run.player_name ILIKE ${q} ORDER BY reward.issued_at DESC LIMIT 50`;
+}
+export async function redeemDeliveryReward(code: string, actor: string) {
+  await ensureDeliverySchema();
+  const rows =
+    await getSql()`UPDATE delivery_boy_rewards SET redeemed_at=NOW(),redeemed_by=${actor} WHERE code=${code.trim().toUpperCase()} AND redeemed_at IS NULL AND(expires_at IS NULL OR expires_at>NOW()) RETURNING *`;
+  if (!rows[0])
+    throw new Error("Code is invalid, expired, or already redeemed.");
+  return rows[0];
+}
+export async function deliveryLeaderboard() {
+  await ensureDeliverySchema();
+  return getSql()`SELECT player_name,status,game_version,stage,score,delivered,missed,hits,active_seconds,completed_at FROM delivery_boy_runs WHERE status IN('won','lost') ORDER BY CASE WHEN status='won' THEN 1 ELSE 0 END DESC,stage DESC,delivered DESC,score DESC,missed ASC,hits ASC,completed_at ASC LIMIT 50`;
+}

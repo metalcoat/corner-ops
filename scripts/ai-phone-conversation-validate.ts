@@ -1,0 +1,618 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { localValidationEnv } from "./validation-env";
+
+localValidationEnv();
+
+async function main() {
+  const [
+    { compactAcknowledgement, requiredQuestion, buildPhoneInstructions },
+    { getAiPhoneSettings, realtimeBusinessContext },
+    { ensureOrderingAiSchema },
+    { getSql },
+    { menuCatalog, priceSpokenOrder },
+    { attachStandaloneModifierAnswer, compactPhoneMenuResult, compactPhoneOrderResult, incrementalSpokenCart },
+  ] = await Promise.all([
+    import("../src/lib/openai-phone-prompt"),
+    import("../src/lib/ordering-ai-phone-config"),
+    import("../src/lib/ordering-ai-schema"),
+    import("../src/lib/db"),
+    import("../src/lib/ordering-ai-tools"),
+    import("../src/lib/openai-phone-sideband"),
+  ]);
+  await ensureOrderingAiSchema();
+  const settings = await getAiPhoneSettings(),
+    business = await realtimeBusinessContext();
+  assert.equal(
+    settings.mode,
+    "shadow",
+    "Development must begin in shadow mode.",
+  );
+  assert.equal(requiredQuestion("sauce"), "What sauce?");
+  assert.equal(requiredQuestion("address"), "What's the address?");
+  assert.notEqual(compactAcknowledgement(0), compactAcknowledgement(1));
+  const prompt = buildPhoneInstructions({
+    callId: "rtc_validation",
+    callerPhone: "3155550100",
+    lineLabel: "TEST",
+    settings,
+    business,
+  });
+  const returningCustomerPrompt = buildPhoneInstructions({
+    callId: "rtc_returning_customer_validation",
+    callerPhone: "3155550100",
+    lineLabel: "TEST",
+    settings,
+    business,
+    customer: {
+      customerId: "customer-validation-id",
+      firstName: "Pat",
+      lastName: "Customer",
+      displayName: "Pat Customer",
+      address: {
+        customerAddressId: "address-validation-id",
+        line1: "412 J Street",
+        line2: "",
+        city: "Ogdensburg",
+        state: "NY",
+        postalCode: "13669",
+        spokenAddress: "412 J Street",
+        fullAddress: "412 J Street, Ogdensburg, NY 13669",
+      },
+    },
+  });
+  assert.ok(
+    returningCustomerPrompt.includes("ask once whether the matched name is correct and wait") &&
+      returningCustomerPrompt.includes(
+        "immediately call PRICE_ORDER silently with operation read, no items",
+      ) &&
+      returningCustomerPrompt.includes(
+        "the identity step is permanently complete for this call",
+      ) &&
+      returningCustomerPrompt.includes(
+        "never ask for their first name, last name, full name, or name again",
+      ) &&
+      returningCustomerPrompt.includes(
+        "ask whether they are still going to the saved address and wait",
+      ) &&
+      returningCustomerPrompt.includes("Include the confirmed customerId"),
+    "Returning callers must have their name and most-used address confirmed.",
+  );
+  for (const phrase of [
+    "Hard rules override creativity",
+    "Ask exactly one question at a time",
+    "finish it",
+    "no menu match means no item",
+    "Never invent, infer, substitute",
+    "ITEM_NOT_ON_MENU",
+    "INVALID_MODIFIER",
+    "CATALOG_UNAVAILABLE",
+    "after two failed clarification attempts",
+    "REQUEST_HUMAN_HANDOFF",
+    "totalDisplay",
+    "SHADOW",
+    "Maximum",
+    "Would you like mushrooms, onions, or peppers on it?",
+    "hamburgerSteakToppingsDecision",
+    "What's the first and last name for the order?",
+    "Never ask whether their name is “Customer,”",
+  ]) {
+    assert.ok(prompt.includes(phrase), `Missing prompt policy: ${phrase}`);
+  }
+  assert.equal(
+    settings.openaiModel,
+    "gpt-realtime-1.5",
+    "OpenAI test calls must retain the proven full Realtime model even when Gemini is currently selected.",
+  );
+  const webhookSource = await readFile(
+    new URL("../src/app/api/openai/realtime/webhook/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert.ok(
+    prompt.includes("Whenever speaking money") &&
+      prompt.includes("use the corresponding totalDisplay") &&
+      prompt.includes("never say the raw cents number"),
+    "Phone totals must be spoken as formatted dollars rather than raw cents.",
+  );
+  assert.ok(
+    !webhookSource.includes("reasoning:{effort"),
+    "GPT-Realtime 1.5 call acceptance must not send reasoning configuration.",
+  );
+  assert.ok(
+    /max_output_tokens:\s*512/.test(webhookSource),
+    "Function arguments and complete questions need enough output room while staying within the realtime token budget.",
+  );
+  assert.ok(
+    /voice:\s*["']marin["']/.test(webhookSource) &&
+      /speed:\s*1\.04/.test(webhookSource) &&
+      /noise_reduction:\s*\{\s*type:\s*["']far_field["']/.test(
+        webhookSource,
+      ),
+    "The live voice must use warm Marin delivery and speakerphone-oriented noise reduction.",
+  );
+  assert.ok(
+    /tools:\s*\[\s*OPENAI_PRICE_ORDER_TOOL,\s*OPENAI_MENU_SEARCH_TOOL,\s*OPENAI_HUMAN_HANDOFF_TOOL,\s*OPENAI_VOICE_PAYMENT_TOOL,?\s*\]/.test(
+      webhookSource,
+    ),
+    "Realtime calls must use direct atomic pricing and current-menu lookup functions.",
+  );
+  assert.ok(
+    !webhookSource.includes('type:"mcp"'),
+    "Realtime calls must not wait on hosted MCP discovery.",
+  );
+  assert.ok(
+    /create_response:\s*false/.test(webhookSource),
+    "The sideband must debounce customer turns instead of interjecting on every VAD pause.",
+  );
+  assert.ok(
+    /interrupt_response:\s*false/.test(webhookSource),
+    "Incidental VAD events must not cancel an active sentence.",
+  );
+  const sidebandSource = await readFile(
+    new URL("../src/lib/openai-phone-sideband.ts", import.meta.url),
+    "utf8",
+  );
+  assert.ok(
+    sidebandSource.indexOf("SET order_id") <
+      sidebandSource.indexOf(
+        "delivery = await attachSpokenDeliveryAddress",
+      ),
+    "The priced draft must be attached to the call before delivery validation can fail.",
+  );
+  assert.ok(
+    sidebandSource.includes("I couldn't verify that delivery address."),
+    "Delivery validation failures must not be reported as missing menu items.",
+  );
+  assert.ok(
+    sidebandSource.includes("resolvePhoneCustomerId(args.customerId") &&
+      sidebandSource.includes("args.customerAddressId"),
+    "Confirmed caller accounts and saved addresses must stay attached to the order.",
+  );
+  const [callsSource, posSource] = await Promise.all([
+    readFile(
+      new URL("../src/app/api/ordering/calls/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../src/app/pos/pos-client.tsx", import.meta.url), "utf8"),
+  ]);
+  const [mcpSource, internalPhoneSource, monitorSource, orderingToolSource] = await Promise.all([
+    readFile(
+      new URL("../src/app/api/openai/ordering/mcp/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/app/api/internal/ai-phone/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/app/pos/deli/ai-calls/ai-call-monitor.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/lib/openai-phone-ordering.ts", import.meta.url),
+      "utf8",
+    ),
+  ]);
+  // The route binds order tools to the call's active order through bindPhoneOrderId; check its behaviour, not the source text.
+  const { bindPhoneOrderId } = await import("../src/lib/ordering-ai-phone-guard");
+  const holdArgs: Record<string, unknown> = { orderId: "model-supplied" };
+  assert.ok(
+    mcpSource.includes("bindPhoneOrderId(requestedName, args, call.order_id)") &&
+      ["hold", "get_draft", "send"].every((tool) => { const args: Record<string, unknown> = {}; return bindPhoneOrderId(tool, args, "active-order").ok && args.orderId === "active-order"; }) &&
+      bindPhoneOrderId("hold", holdArgs, "active-order").ok && holdArgs.orderId === "active-order",
+    "Gemini hold calls must inherit the active order instead of failing without an orderId.",
+  );
+  assert.ok(
+    internalPhoneSource.includes("Math.round(Math.max(0, Number(body.durationMs)"),
+    "Fractional Gemini telemetry durations must be converted to database integers.",
+  );
+  assert.ok(
+    monitorSource.includes("response.status === 401") &&
+      monitorSource.includes("<PosPinGate"),
+    "An expired call-monitor session must show the PIN gate instead of polling forever.",
+  );
+  assert.ok(
+    callsSource.includes("variant_name_snapshot variant") &&
+      posSource.includes("item.variant"),
+    "The live POS panel must display pizza sizes and wing-count variants.",
+  );
+  assert.ok(
+    /row\.name\s*===\s*["']menu_search["']/.test(sidebandSource) &&
+      sidebandSource.includes("menuCatalog"),
+    "Menu descriptions must be retrieved on the actual realtime sideband.",
+  );
+  assert.ok(
+    /max_output_tokens:\s*128/.test(sidebandSource),
+    "The mandatory opening must have enough audio-token budget to finish exactly.",
+  );
+  assert.ok(
+    sidebandSource.includes("response.function_call_arguments.done") &&
+      sidebandSource.includes("function_call_output"),
+    "The sideband must execute and return native pricing calls.",
+  );
+  assert.ok(
+    sidebandSource.includes("response.completion_retry") &&
+      sidebandSource.includes("production_truncated_response"),
+    "Truncated speech must retry and become a regression case.",
+  );
+  assert.ok(
+    sidebandSource.includes("conversation.sustained_barge_in") &&
+      sidebandSource.includes("1800"),
+    "Only clearly sustained caller speech may interrupt playback.",
+  );
+  assert.ok(
+    sidebandSource.includes("output_audio_buffer.stopped") &&
+      sidebandSource.includes("realtime.calls.hangup(callId)"),
+    "The phone must hang up only after final closing audio playback finishes.",
+  );
+  assert.ok(
+    prompt.includes("Never interject while the caller is listing items") &&
+      prompt.includes("Nacho cheese always means"),
+    "Natural-pause and nacho-side rules must remain in the live prompt.",
+  );
+  assert.ok(
+    prompt.includes("explicitly asks for the total") &&
+      prompt.includes("A requested total never means the order is finished") &&
+      prompt.includes("ask exactly “Anything else?”"),
+    "Requested totals must not prematurely end the order.",
+  );
+  assert.ok(
+    prompt.includes("read the entire authoritative compact cart back once") &&
+      prompt.includes("Does that sound right?") &&
+      prompt.includes("after the caller confirms the readback"),
+    "Every completed phone order must receive one confirmed full readback.",
+  );
+  assert.ok(
+    prompt.includes("Will you be paying with cash or card?") &&
+      prompt.includes("Would you like to leave a tip for the driver on the card?") &&
+      prompt.includes("How much would you like to tip?") &&
+      prompt.includes("Never ask for a driver tip on pickup or cash orders") &&
+      prompt.includes("confirmed paymentMethod and tipCents"),
+    "Card delivery checkout must collect and authoritatively price the driver tip.",
+  );
+  assert.ok(
+    prompt.includes("What kind of dressing do you want for your salad?") &&
+      prompt.includes("Would you like fries with that?") &&
+      prompt.includes("SM Tossed Sal"),
+    "Hot meat meal defaults and question order must remain authoritative.",
+  );
+  assert.ok(
+    prompt.includes("What kind of dipping sauce would you like with that?") &&
+      prompt.includes("Do you want coleslaw with that?"),
+    "Chicken tender dinner questions must remain concise and ordered.",
+  );
+  assert.ok(
+    prompt.includes(
+      "Would you like blue cheese, ranch, or celery with that?",
+    ) &&
+      prompt.includes("Would you like gravy or nacho cheese for those fries?"),
+    "Wing accompaniments and the natural-pause fry upsell must remain explicit.",
+  );
+  assert.ok(
+      prompt.includes("What flavor would you like it dipped in?") &&
+      prompt.includes("Would you like any cheese on top?") &&
+      prompt.includes("Would you like anything on that burger?") &&
+      prompt.includes("come plain"),
+    "Buffalo chicken and plain-burger question flows must remain explicit.",
+  );
+  assert.ok(
+    Boolean(business.pickupWait) &&
+      Boolean(business.deliveryWait) &&
+      prompt.includes(`wait ${business.pickupWait}`) &&
+      prompt.includes(`wait ${business.deliveryWait}`),
+    "The phone prompt must use the current configured pickup and delivery timing.",
+  );
+  assert.ok(
+    prompt.includes("never ask bone-in or boneless") &&
+      prompt.includes("Quantity plus flavor is complete") &&
+      prompt.includes("real 2L Pepsi item"),
+    "Wing defaults and drink aliases must remain explicit.",
+  );
+  assert.ok(
+    prompt.includes("natural smiling voice") &&
+      prompt.includes("Never mention AI modes, drafts, staff review, approval"),
+    "Customer speech must stay upbeat and hide internal workflow language.",
+  );
+  assert.ok(
+    !prompt.includes("staff has the order for review") &&
+      !prompt.includes("awaiting staff approval"),
+    "Internal review status must not be spoken to callers.",
+  );
+  assert.ok(
+    prompt.toLowerCase().includes("never finish an order without a phone number") &&
+      prompt.includes("include it as callerPhone"),
+    "Missing caller ID must trigger callback-number collection for the POS order.",
+  );
+  assert.ok(
+    prompt.includes("silently add the real 4oz side cup") &&
+      prompt.includes("do not explain or announce this conversion"),
+    "Saucy wings must add the matching cup without narrating the rule.",
+  );
+  assert.ok(
+    prompt.includes("Preserve the caller's size words") &&
+      prompt.includes("large pepperoni pizza") &&
+      prompt.includes("requiredFollowUp"),
+    "Readbacks must preserve spoken pizza sizes and required wing follow-ups.",
+  );
+  assert.ok(
+    prompt.includes("Never ask whether they want “everything” on a burger") &&
+      prompt.includes("Would you like anything on that burger?") &&
+      prompt.includes("Would you like fries with that burger?") &&
+      prompt.includes("never Fry Option"),
+    "Plain burgers must collect burger toppings and then offer fries.",
+  );
+  assert.ok(
+    prompt.includes("immediately and silently call REQUEST_SECURE_VOICE_PAYMENT") &&
+      prompt.includes("The next voice the caller hears") &&
+      !prompt.includes("I’ll now move you to our secure automated payment line"),
+    "Secure payment must persist card payment and transition silently.",
+  );
+  assert.ok(
+    prompt.includes("Turkey Big Boss item with Full Sub") &&
+      prompt.includes("never reject them or substitute another sandwich"),
+    "Turkey sub business aliases must remain authoritative.",
+  );
+  assert.ok(
+    prompt.includes("call MENU_SEARCH immediately") &&
+      prompt.includes("Database descriptions and aliases are authoritative"),
+    "Live menu descriptions must be available to the phone agent.",
+  );
+  assert.ok(
+    prompt.includes(
+      "This line is only for Corner Deli orders and restaurant questions. Please call back if you need to place an order. Goodbye.",
+    ) && prompt.includes("Do not apply this rule to a misunderstood food name"),
+    "Off-topic callers must receive the bounded warning without blocking legitimate restaurant requests.",
+  );
+  assert.ok(
+    sidebandSource.includes(
+      "this line is only for corner deli orders and restaurant questions",
+    ) && /hangupAfterPlayback\s*=\s*true/.test(sidebandSource),
+    "Off-topic warning playback must trigger a deterministic hangup.",
+  );
+  assert.ok(
+    prompt.includes("Mayo, Russian, oil, or shakers?") &&
+      prompt.includes("Lettuce, tomato, onions, or hot peppers?") &&
+      prompt.includes("American, Swiss, or provolone?") &&
+      prompt.includes("never ask for cheese first") &&
+      prompt.includes("Do not run this checklist for any Big Boss item"),
+    "Regular sub build questions and the Big Boss exclusion must remain authoritative.",
+  );
+  assert.ok(
+    prompt.includes("Do you mean a Nacho Supreme?") &&
+      prompt.includes("Do you want everything on that?") &&
+      prompt.includes("Buffalo Grilled Chicken Salad"),
+    "Nacho Supreme and chicken-salad clarification rules must remain authoritative.",
+  );
+  assert.ok(
+    prompt.includes("Your pickup should be ready in") &&
+      prompt.includes("and then call COMPLETE_CALL") &&
+      prompt.includes(
+        "hang up only after that complete closing audio finishes",
+      ),
+    "An ASAP pickup must state its current wait and then complete deterministically.",
+  );
+  assert.ok(
+    !orderingToolSource.match(/enum: \["add", "replace_item", "remove_item", "replace_order"/) &&
+      mcpSource.includes("An active phone cart cannot be reset wholesale."),
+    "Voice providers must not be able to silently discard an active cart.",
+  );
+  const jumbo = await menuCatalog("Corner Deli", new Date(), "jumbo thin");
+  assert.equal(
+    jumbo[0]?.items[0]?.name,
+    "Pizza",
+    "Jumbo Thin must resolve to the standard Pizza item first.",
+  );
+  assert.ok(
+    jumbo[0].items[0].variants.some((variant: { name: string }) =>
+      variant.name.includes("Jumbo Thin"),
+    ),
+  );
+  const toppedJumbo = await menuCatalog(
+    "Corner Deli",
+    new Date(),
+    "jumbo pepperoni pizza onion",
+  );
+  assert.equal(
+    toppedJumbo[0]?.items[0]?.name,
+    "Pizza",
+    "A topped jumbo pizza request must resolve in one search.",
+  );
+  const compactJumbo=compactPhoneMenuResult(toppedJumbo);
+  assert.ok(JSON.stringify(compactJumbo).length<JSON.stringify(toppedJumbo).length,"Phone menu search must return a category-scoped compact payload.");
+  const priced = await priceSpokenOrder({
+    business: "Corner Deli",
+    actor: {
+      id: "validation",
+      name: "Validation",
+      type: "employee",
+      role: "employee",
+    },
+    service: "pickup",
+    callerPhone: "3155550100",
+    firstName: "Chris",
+    items: [
+      {
+        name: "Pizza",
+        variant: "Jumbo Thin",
+        quantity: 1,
+        modifiers: [
+          { name: "Pepperoni" },
+          { name: "Onions", portion: "left_half" },
+          { name: "Cheese" },
+        ],
+      },
+      {
+        name: "Wings",
+        variant: "20 Wings",
+        quantity: 1,
+        modifiers: [{ name: "Mild" }],
+      },
+    ],
+  });
+  try {
+    assert.equal(
+      priced.lines.length,
+      2,
+      "Atomic pricing must create both order lines.",
+    );
+    assert.ok(
+      priced.total_cents > 0,
+      "Atomic pricing must return an authoritative total.",
+    );
+    assert.ok(
+      priced.lines.some(
+        (line: Record<string, any>) =>
+          line.item_name_snapshot === "Pizza" &&
+          line.variant_name_snapshot?.includes("Jumbo Thin"),
+      ),
+    );
+    assert.ok(
+      priced.lines.some(
+        (line: Record<string, any>) =>
+          line.item_name_snapshot === "Wings" &&
+          line.variant_name_snapshot?.includes("20 Wings"),
+      ),
+    );
+    assert.equal(
+      priced.phone_snapshot,
+      "3155550100",
+      "Caller ID must persist on the priced order.",
+    );
+    const pizzaLine = priced.lines.find(
+      (line: Record<string, any>) => line.item_name_snapshot === "Pizza",
+    );
+    const pizzaModifiers =
+      await getSql()`SELECT option_name_snapshot,selection_state,print_on_ticket FROM ordering_order_item_modifiers WHERE order_item_id=${pizzaLine.id}`;
+    assert.ok(
+      pizzaModifiers.some(
+        (row: Record<string, any>) =>
+          row.option_name_snapshot === "Extra Cheese" &&
+          row.selection_state === "selected",
+      ),
+      "Spoken cheese must persist as Extra Cheese on pizza.",
+    );
+    for (const defaultName of ["Regular Cooked", "Classic Sauce"]) {
+      const row = pizzaModifiers.find(
+        (candidate: Record<string, any>) =>
+          candidate.option_name_snapshot === defaultName,
+      );
+      assert.ok(
+        row && row.selection_state === "selected" && !row.print_on_ticket,
+        `${defaultName} must remain selected and hidden by default.`,
+      );
+    }
+    const increment=await incrementalSpokenCart(String(priced.id),"add","",[{name:"cheeseburger",quantity:1}]);
+    assert.equal(increment.length,3,"Incremental add must retain the two server-side cart lines without retransmitting them.");
+    const incremented=await priceSpokenOrder({business:"Corner Deli",actor:{id:"validation",name:"Validation",type:"employee",role:"employee"},service:"pickup",orderId:String(priced.id),callerPhone:"3155550100",firstName:"Chris",items:increment});
+    assert.equal(incremented.lines.length,3,"Incremental cart state must reprice into the same draft.");
+    assert.ok(incremented.lines.some((line:Record<string,any>)=>line.item_name_snapshot==="Cheeseburger (1/4lbs)"),"Incremental shorthand must resolve the quarter-pound cheeseburger.");
+    const wingAnswer=await attachStandaloneModifierAnswer(String(priced.id),"add",[{name:"blue cheese",quantity:1}]);
+    assert.equal(wingAnswer?.operation,"replace_item","A standalone wing add-on answer must attach to the existing wings.");
+    assert.equal(wingAnswer?.targetItem,"Wings");
+    assert.ok(wingAnswer?.items[0].modifiers?.some(modifier=>modifier.name==="Blue Cheese (4oz)"));
+    const withFries=await incrementalSpokenCart(String(priced.id),"add","",[{name:"large fry",quantity:1}]);
+    await priceSpokenOrder({business:"Corner Deli",actor:{id:"validation",name:"Validation",type:"employee",role:"employee"},service:"pickup",orderId:String(priced.id),callerPhone:"3155550100",firstName:"Chris",items:withFries});
+    const fryAnswer=await attachStandaloneModifierAnswer(String(priced.id),"add",[{name:"nacho cheese",quantity:1}]);
+    assert.equal(fryAnswer?.targetItem,"Large French Fries","A standalone fry upsell answer must attach to the existing fries.");
+    assert.ok(fryAnswer?.items[0].modifiers?.some(modifier=>modifier.name==="Nacho Cheese on Side"));
+    const compactOrder=await compactPhoneOrderResult(incremented,"add");
+    assert.ok(JSON.stringify(compactOrder).length<JSON.stringify(incremented).length,"Realtime pricing must return a compact cart instead of database-shaped rows.");
+  } finally {
+    await getSql()`DELETE FROM ordering_orders WHERE id=${priced.id}`;
+  }
+  const malformedRealtimePayload = await priceSpokenOrder({
+    business: "Corner Deli",
+    actor: {
+      id: "validation",
+      name: "Validation",
+      type: "employee",
+      role: "employee",
+    },
+    service: "pickup",
+    callerPhone: "3155550100",
+    firstName: "Chris",
+    items: [
+      {
+        name: "Pepperoni Pizza",
+        variant: "Jumbo Thin 16 inch",
+        quantity: 1,
+      },
+      { name: "Wings", variant: "Mild", quantity: 20 },
+      { name: "French Fries", variant: "Large", quantity: 1 },
+      {
+        name: "Double Cheeseburger",
+        quantity: 1,
+        modifiers: [{ name: "Ketchup", portion: "whole" }],
+      },
+    ],
+  });
+  try {
+    assert.ok(
+      malformedRealtimePayload.lines.some(
+        (line: Record<string, any>) =>
+          line.item_name_snapshot === "Large French Fries",
+      ),
+      "French Fries with a Large variant must normalize to Large French Fries.",
+    );
+    const wingLine = malformedRealtimePayload.lines.find(
+      (line: Record<string, any>) => line.item_name_snapshot === "Wings",
+    );
+    assert.ok(
+      wingLine?.variant_name_snapshot?.includes("20 Wings"),
+      "A wing quantity with sauce in the variant must retain the wing count.",
+    );
+    const wingModifiers =
+      await getSql()`SELECT option_name_snapshot FROM ordering_order_item_modifiers WHERE order_item_id=${wingLine.id}`;
+    assert.ok(
+      wingModifiers.some(
+        (row: Record<string, any>) => row.option_name_snapshot === "Mild",
+      ),
+      "A wing sauce placed in the variant field must normalize to Wing Sauce.",
+    );
+    const burgerLine = malformedRealtimePayload.lines.find(
+      (line: Record<string, any>) =>
+        String(line.item_name_snapshot).includes("Double Cheeseburger"),
+    );
+    const burgerModifiers =
+      await getSql()`SELECT group_name_snapshot,option_name_snapshot FROM ordering_order_item_modifiers WHERE order_item_id=${burgerLine.id}`;
+    assert.ok(
+      burgerModifiers.some(
+        (row: Record<string, any>) =>
+          row.group_name_snapshot === "Burger Toppings" &&
+          row.option_name_snapshot === "Ketchup",
+      ),
+      "Plain ketchup on a burger must resolve to Burger Toppings.",
+    );
+  } finally {
+    await getSql()`DELETE FROM ordering_orders WHERE id=${malformedRealtimePayload.id}`;
+  }
+  const schema =
+    await getSql()`SELECT to_regclass('ordering_call_transcript_segments') transcript,to_regclass('ordering_ai_latency_samples') latency,to_regclass('ordering_ai_upsell_events') upsells,to_regclass('ordering_call_reviews') reviews`;
+  assert.ok(
+    schema[0].transcript &&
+      schema[0].latency &&
+      schema[0].upsells &&
+      schema[0].reviews,
+  );
+  console.log(
+    JSON.stringify(
+      {
+        mode: settings.mode,
+        maxResponseWords: settings.maxResponseWords,
+        maxUpsells: settings.maxUpsells,
+        vadEagerness: settings.vadEagerness,
+        pickupAvailable: business.pickupAvailable,
+        deliveryAvailable: business.deliveryAvailable,
+        policyChecks: "passed",
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

@@ -1,0 +1,717 @@
+// Website price job: signs in to each supplier's ordering site with the deli's
+// own account, opens the order guide, and sends today's prices to Corner Ops.
+//
+// It doesn't depend on the site's layout. It reads the product data the page
+// itself downloads (see src/lib/supplier-web-extract.ts), and falls back to the
+// site's own Export/Download button. Each supplier keeps its own browser profile,
+// so "remember this device" sign-ins (and their verification codes) stick.
+//
+// Runs in its own container (docker compose --profile tools run supplier-prices),
+// started by deploy/supplier-prices-sync.sh --website on a timer.
+import { chromium } from "playwright";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { restoreSessionCookies, saveSessionCookies } from "./session-cookies.mjs";
+import { dedupeProducts, extractProducts, extractSignInCode, joinSplitProducts, productsToCsv, webstaurantProducts } from "./supplier-web-extract.ts";
+
+const SECRET = process.env.CRON_SECRET || "";
+const DEBUG = process.env.DEBUG_DIR || "/debug";
+const PROFILES = process.env.PROFILE_DIR || "/profiles";
+const HEADED = process.env.HEADED === "1";
+
+// Default sign-in and order-guide pages. Any of these can be overridden in
+// /opt/corner-ops/.env (e.g. SYSCO_ORDER_GUIDE_URL) if a site moves things.
+const SUPPLIERS = [
+  { name: "Sysco", key: "SYSCO", login: "https://shop.sysco.com/auth/login", guide: "https://shop.sysco.com/app/lists" },
+  // The deli's order guide, then everything bought recently (catches items not on the guide).
+  { name: "US Foods", key: "USFOODS", login: "https://order.usfoods.com/desktop/search/browse", guide: "https://order.usfoods.com/desktop/lists/view/OG-127949 https://order.usfoods.com/desktop/lists/view/recentlyPurchased" },
+  // PFG shows prices only while placing an order: the job opens the unsubmitted order (or starts one, which
+  // stays open and is never submitted) and reads the Order Guide inside it.
+  { name: "Performance Foodservice", key: "PFG", login: "https://www.customerfirstsolutions.com/", guide: "", order: true },
+  // Signed in by hand (the site has a robot check): supplier-prices-sync.sh --signin webstaurant. Reads
+  // Rapid Reorder, everything the account has bought at its member prices. Runs in a real (virtual-screen) browser.
+  { name: "WebstaurantStore", key: "WEBSTAURANT", login: "", guide: "https://www.webstaurantstore.com/reorder.html", reader: "webstaurant", headed: true, signInByHand: true },
+];
+const SIGN_IN_BY_HAND = "/opt/corner-ops/runtime/deploy/supplier-prices-sync.sh --signin";
+
+const only = (process.argv[2] || "").toLowerCase();
+// "Search the suppliers' sites" on Supplier costs: look this up on each site instead of reading the guide.
+const SEARCH = (process.env.SEARCH_QUERY || "").trim().slice(0, 80);
+// What each supplier's search turned up, for the note on Supplier costs.
+const searchResults = new Map();
+const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+mkdirSync(DEBUG, { recursive: true });
+
+// Where the app answers from inside this container: its Compose service name,
+// its container name, or the host's port 3000 (host.docker.internal).
+const APP_CANDIDATES = [...new Set([process.env.APP_INTERNAL_URL, "http://app:3000", "http://corner-ops-app:3000", "http://host.docker.internal:3000"].filter(Boolean))];
+let appUrl = null;
+
+/** Calls Corner Ops, finding a route to it the first time. */
+async function callApp(path, init = {}) {
+  const tried = [];
+  for (const base of appUrl ? [appUrl] : APP_CANDIDATES) {
+    try {
+      const response = await fetch(`${base}${path}`, { ...init, headers: { ...(init.headers || {}), authorization: `Bearer ${SECRET}` }, signal: AbortSignal.timeout(60_000) });
+      appUrl = base;
+      return response;
+    } catch (error) {
+      tried.push(`${base} (${error.cause?.code || error.cause?.message || error.message})`);
+    }
+  }
+  appUrl = null;
+  throw new Error(`Couldn't reach Corner Ops from the price job: ${tried.join(", ")}`);
+}
+
+/** Waits (up to 3 minutes) for the app, e.g. while it restarts after an update. */
+async function waitForApp() {
+  const deadline = Date.now() + 3 * 60_000;
+  let last = null;
+  while (Date.now() < deadline) {
+    try {
+      const response = await callApp("/api/health");
+      if (response.ok) return;
+      last = new Error(`health check answered ${response.status}`);
+    } catch (error) {
+      last = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+  }
+  throw new Error(`Corner Ops isn't answering (is the app running? check: curl -fsS http://127.0.0.1:3000/api/health). ${last?.message || ""}`);
+}
+
+async function report(supplier, body) {
+  let response;
+  // An update can recreate the app while the job runs (the deploy timer checks every minute); a dropped
+  // connection is retried after the app answers again. Importing the same prices twice only re-saves them
+  // (supplier items are upserted and a price change is recorded only when the price differs).
+  for (let attempt = 1; ; attempt++) {
+    await waitForApp();
+    try {
+      response = await callApp("/api/cron/supplier-prices", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ supplier, source: "website", ...body }),
+      });
+      break;
+    } catch (error) {
+      if (attempt >= 3) throw error;
+      console.log(`${supplier}: lost the connection to Corner Ops (${error.message.split(": ").pop()}); retrying`);
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
+    }
+  }
+  const text = await response.text();
+  if (!response.ok) throw new Error(`Corner Ops answered ${response.status}: ${text.slice(0, 300)}`);
+  return text;
+}
+
+async function visible(locator) {
+  try {
+    return await locator.first().isVisible({ timeout: 500 });
+  } catch {
+    return false;
+  }
+}
+
+const USER_FIELD = 'input[type="email"], input[autocomplete="username"], input[name*="user" i], input[id*="user" i], input[name*="email" i], input[id*="email" i], input[name*="login" i]';
+const PASSWORD_FIELD = 'input[type="password"]';
+const CODE_FIELD = 'input[autocomplete="one-time-code"], input[name*="code" i], input[id*="code" i], input[name*="otp" i], input[name*="passcode" i]';
+const SUBMIT = 'button[type="submit"], input[type="submit"], button:has-text("Sign in"), button:has-text("Log in"), button:has-text("Login"), button:has-text("Next"), button:has-text("Continue"), button:has-text("Verify")';
+
+/**
+ * Types a value key by key. Some sign-in pages (US Foods' Microsoft sign-in) show a "facade" box whose script
+ * copies each keystroke into the hidden field that is actually submitted; fill() skips those key events.
+ */
+async function typeInto(field, value) {
+  await field.fill("");
+  await field.pressSequentially(value, { delay: 35 });
+}
+
+async function submit(page, field) {
+  // Sign-in pages keep hidden submit buttons for other steps; only press one that is showing.
+  const button = page.locator(SUBMIT).filter({ visible: true });
+  // Some pages submit by themselves once the value is complete (US Foods' code box), so the field may be gone.
+  const enter = async () => { if (await field.isVisible().catch(() => false)) await field.press("Enter", { timeout: 5_000 }).catch(() => {}); };
+  if (await visible(button)) await button.first().click().catch(enter);
+  else await enter();
+  await page.waitForLoadState("domcontentloaded", { timeout: 30_000 }).catch(() => {});
+  await page.waitForTimeout(3_000);
+}
+
+// Who each supplier's sign-in emails come from (override with <KEY>_CODE_FROM).
+const CODE_FROM = { SYSCO: "sysco", USFOODS: "usfoods", PFG: "pfgc" };
+
+/**
+ * Looks in the deli's inbox (IMAP, CODE_EMAIL_* in .env) for the supplier's
+ * sign-in email that arrived after `since`, and returns the code in it.
+ * Only searches messages from that supplier; nothing else is read or kept.
+ */
+async function codeFromEmail(supplier, since) {
+  const host = process.env.CODE_EMAIL_HOST, user = process.env.CODE_EMAIL_USER;
+  // Gmail shows app passwords in groups ("abcd efgh ijkl mnop"); the spaces aren't part of it.
+  const pass = /gmail|googlemail/i.test(host || "") ? (process.env.CODE_EMAIL_PASSWORD || "").replace(/\s+/g, "") : process.env.CODE_EMAIL_PASSWORD;
+  if (!host || !user || !pass) return null;
+  const { ImapFlow } = await import("imapflow");
+  const { simpleParser } = await import("mailparser");
+  const client = new ImapFlow({ host, port: Number(process.env.CODE_EMAIL_PORT || 993), secure: process.env.CODE_EMAIL_SECURE !== "false", auth: { user, pass }, logger: false });
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock(process.env.CODE_EMAIL_FOLDER || "INBOX");
+    try {
+      const from = process.env[`${supplier.key}_CODE_FROM`] || CODE_FROM[supplier.key] || supplier.name;
+      const uids = (await client.search({ since: new Date(since - 86_400_000), from }, { uid: true })) || [];
+      let newest = null;
+      for await (const message of client.fetch(uids.slice(-10), { source: true, internalDate: true }, { uid: true })) {
+        if (!message.internalDate || message.internalDate.getTime() < since) continue;
+        const mail = await simpleParser(message.source);
+        const code = extractSignInCode(`${mail.subject || ""} ${mail.text || ""} ${typeof mail.html === "string" ? mail.html : ""}`);
+        if (code && (!newest || message.internalDate > newest.at)) newest = { code, at: message.internalDate };
+      }
+      return newest?.code ?? null;
+    } finally {
+      lock.release();
+    }
+  } catch (error) {
+    console.error(`${supplier.name}: couldn't check email for the code (${error.message})`);
+    return null;
+  } finally {
+    await client.logout().catch(() => {});
+  }
+}
+
+/**
+ * Gets the sign-in code the supplier just sent: from the deli's inbox when
+ * CODE_EMAIL_* is set, or typed into Supplier costs by a manager. Waits up to
+ * 10 minutes.
+ */
+async function waitForCode(supplier) {
+  const once = process.env[`${supplier.key}_CODE`];
+  if (once) return once;
+  // Codes sent a moment before we got to this page still count.
+  const since = Date.now() - 2 * 60_000;
+  const emailOn = Boolean(process.env.CODE_EMAIL_HOST && process.env.CODE_EMAIL_USER && process.env.CODE_EMAIL_PASSWORD);
+  await report(supplier.name, {
+    status: "needs_code",
+    message: emailOn
+      ? `${supplier.name} sent a sign-in code. Checking the email for it; you can also type it in here.`
+      : `${supplier.name} sent a sign-in code by email or text. Type it in on Supplier costs within 10 minutes.`,
+  }).catch((error) => console.error(error.message));
+  console.log(`${supplier.name}: waiting for the sign-in code to be entered on Supplier costs…`);
+  const deadline = Date.now() + 10 * 60_000;
+  let checks = 0;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+    // Email every 15 seconds (it takes a moment to arrive), the app every 5.
+    if (emailOn && checks++ % 3 === 0) {
+      const code = await codeFromEmail(supplier, since);
+      if (code) {
+        console.log(`${supplier.name}: found the sign-in code in the email`);
+        return code;
+      }
+    }
+    try {
+      const response = await callApp(`/api/cron/supplier-prices?code=${encodeURIComponent(supplier.name)}`);
+      const body = await response.json();
+      if (body.code) return String(body.code);
+    } catch {
+      // Keep waiting through a brief app restart.
+    }
+  }
+  return null;
+}
+
+async function clickText(page, pattern) {
+  const target = page.locator("button, a, label, [role=radio], [role=button], input[type=radio] + *").filter({ hasText: pattern });
+  if (await visible(target)) {
+    await target.first().click().catch(() => {});
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Signs in if the page is asking. Handles password sites, username-only sites
+ * that send a one-time code (US Foods), and "send the code by email or text?"
+ * choices (${key}_CODE_VIA=email|text, email by default).
+ */
+/** A visible "Log In" / "Sign In" button or link: the page is showing a guest. (getByText reaches into the shadow DOM of web-component buttons.) */
+function loginPrompt(page) {
+  return page.getByText(/^\s*(log ?in|sign ?in)\s*$/i);
+}
+
+async function signIn(page, supplier, user, password) {
+  let askedForCode = false, choseMethod = false;
+  for (let step = 0; step < 8; step++) {
+    const passwordField = page.locator(PASSWORD_FIELD), userField = page.locator(USER_FIELD), codeField = page.locator(CODE_FIELD);
+    const bodyText = (await page.locator("body").innerText().catch(() => "")).slice(0, 5_000);
+    if (await visible(codeField) && /code|verif|one-time|passcode|authenticat/i.test(bodyText)) {
+      if (askedForCode) return { status: "needs_code", message: `${supplier.name} didn't accept the code. Press Sync now and enter the newest code.` };
+      askedForCode = true;
+      const code = await waitForCode(supplier);
+      if (!code) return { status: "needs_code", message: `No sign-in code was entered for ${supplier.name} within 10 minutes. Press Sync now to try again.` };
+      await typeInto(codeField.first(), code);
+      const remember = page.getByLabel(/remember|trust this|don.t ask|this device/i);
+      if (await visible(remember)) await remember.first().check().catch(() => {});
+      await submit(page, codeField.first());
+      continue;
+    }
+    // "Would you like to stay signed in on this device?" Yes keeps this browser trusted, so later runs skip the code.
+    const staySignedIn = page.getByRole("button", { name: /^\s*yes\s*$/i });
+    if (/stay signed in|remember (this|me)|trust this (device|browser)/i.test(bodyText) && (await visible(staySignedIn))) {
+      await staySignedIn.first().click().catch(() => {});
+      await page.waitForLoadState("domcontentloaded", { timeout: 30_000 }).catch(() => {});
+      await page.waitForTimeout(6_000);
+      continue;
+    }
+    // One button per destination, e.g. US Foods' "Text ***-***-3125" / "Email c***@gmail.com" (no wording to match).
+    const via = (process.env[`${supplier.key}_CODE_VIA`] || "email").toLowerCase();
+    const methodButton = page.getByRole("button", { name: via === "text" ? /^\s*(text|sms)\b/i : /^\s*e-?mail\b/i });
+    if (await visible(methodButton)) {
+      // Choosing sends a code; if the page doesn't move on, stop rather than send another one.
+      if (choseMethod) return { status: "needs_login", message: `${supplier.name} didn't move past choosing where to send the sign-in code.` };
+      choseMethod = true;
+      await methodButton.first().click();
+      await page.waitForTimeout(4_000);
+      const send = page.locator(SUBMIT).filter({ visible: true });
+      if (!(await visible(page.locator(CODE_FIELD))) && (await visible(send))) {
+        await send.first().click().catch(() => {});
+        await page.waitForTimeout(4_000);
+      }
+      continue;
+    }
+    // "Where should we send your code?" — pick email or text, then send.
+    // (Not the username page, which may also say "we'll send you a code".)
+    const usernameEmpty = (await visible(userField)) && !(await userField.first().inputValue().catch(() => ""));
+    if (!usernameEmpty && /send (you )?(a|the|your)? ?(verification |security |one-time )?code|how would you like|verify (it.s you|your identity)|choose a (method|verification)/i.test(bodyText) && /e-?mail|text|sms|phone/i.test(bodyText)) {
+      const via = (process.env[`${supplier.key}_CODE_VIA`] || "email").toLowerCase();
+      await clickText(page, via === "text" ? /text|sms|phone/i : /e-?mail/i);
+      if (!(await clickText(page, /^\s*(send|continue|next|send code)\s*$/i))) await clickText(page, /send|continue|next/i);
+      await page.waitForTimeout(3_000);
+      continue;
+    }
+    if (await visible(passwordField)) {
+      if (!password) return { status: "needs_login", message: `${supplier.name} is asking for a password. Add ${supplier.key}_PASSWORD to /opt/corner-ops/.env.` };
+      if (await visible(userField) && !(await userField.first().inputValue().catch(() => ""))) await typeInto(userField.first(), user);
+      await typeInto(passwordField.first(), password);
+      const remember = page.getByLabel(/remember|keep me signed in|stay signed in/i);
+      if (await visible(remember)) await remember.first().check().catch(() => {});
+      await submit(page, passwordField.first());
+      continue;
+    }
+    if (await visible(userField)) {
+      if ((await userField.first().inputValue().catch(() => "")) === user && step > 0) {
+        return { status: "needs_login", message: `${supplier.name} didn't move past the username. Check ${supplier.key}_USERNAME in /opt/corner-ops/.env.` };
+      }
+      await typeInto(userField.first(), user);
+      const remember = page.getByLabel(/remember|keep me signed in|stay signed in/i);
+      if (await visible(remember)) await remember.first().check().catch(() => {});
+      await submit(page, userField.first());
+      continue;
+    }
+    // A guest page (no form, but a "Log In" button): open the sign-in page. US Foods sends guests to
+    // its public catalogue, which loads product data but no account prices, so this is not "signed in".
+    const prompt = loginPrompt(page);
+    if (await visible(prompt)) {
+      await prompt.first().click().catch(() => {});
+      await page.waitForTimeout(6_000);
+      continue;
+    }
+    return { status: "signed_in" };
+  }
+  if (await visible(loginPrompt(page)))
+    return { status: "needs_login", message: `${supplier.name} still shows its Log In button after signing in, so the job is browsing as a guest. Check ${supplier.key}_LOGIN_URL and ${supplier.key}_USERNAME in /opt/corner-ops/.env.` };
+  if (await visible(page.locator(PASSWORD_FIELD)) || await visible(page.locator(USER_FIELD)))
+    return { status: "needs_login", message: `${supplier.name} didn't accept the sign-in. Check ${supplier.key}_USERNAME${password ? ` and ${supplier.key}_PASSWORD` : ""} in /opt/corner-ops/.env.` };
+  return { status: "signed_in" };
+}
+
+/**
+ * The shape of a JSON response without its values (field names, list sizes,
+ * value types), so the price reader can be tuned to a site without sharing
+ * prices or account details.
+ */
+function describe(json, path = "", depth = 0, out = []) {
+  if (depth > 10 || out.length > 400) return out.join("\n");
+  if (Array.isArray(json)) {
+    out.push(`  ${path || "(root)"}: list of ${json.length}`);
+    if (json.length && json[0] && typeof json[0] === "object") describe(json[0], `${path}[0]`, depth + 1, out);
+  } else if (json && typeof json === "object") {
+    for (const [key, value] of Object.entries(json)) {
+      const at = path ? `${path}.${key}` : key;
+      if (value && typeof value === "object") describe(value, at, depth + 1, out);
+      // Only whether a number is zero is shown (a price field that's always 0 means prices load elsewhere).
+      else out.push(`  ${at}: ${value === null ? "null" : typeof value}${typeof value === "string" && /^\$?\d+(\.\d+)?$/.test(value) ? " (number-like)" : ""}${value === 0 ? " (zero)" : ""}`);
+    }
+  }
+  return out.join("\n");
+}
+
+/**
+ * Titles of the customer's lists, from list data the site loaded (e.g. PFG's ProductListHeaders:
+ * { ProductListHeaderId, ProductListTitle }), order guides first.
+ */
+function listTitles(responses) {
+  const titles = [];
+  const visit = (value, depth) => {
+    if (depth > 6 || value == null || typeof value !== "object") return;
+    if (Array.isArray(value)) return value.forEach((entry) => visit(entry, depth + 1));
+    for (const [key, entry] of Object.entries(value)) {
+      if (typeof entry === "string" && /list.*(title|name)|guide.*(title|name)/i.test(key) && entry.trim().length >= 2) titles.push(entry.trim());
+      else visit(entry, depth + 1);
+    }
+  };
+  responses.forEach((response) => visit(response, 0));
+  return [...new Set(titles)].sort((a, b) => Number(/order guide/i.test(b)) - Number(/order guide/i.test(a))).slice(0, 5);
+}
+
+/**
+ * Opens an order to see the order guide with prices (PFG): the unsubmitted order if there is one, otherwise
+ * "New order", accepting the defaults of a start-order dialog. Never reviews, submits, or changes quantities.
+ */
+async function openOrderEntry(page, supplier) {
+  const existing = page.getByText(/^\s*Unsubmitted\s*$/i).filter({ visible: true });
+  if (await visible(existing)) await existing.first().click();
+  else {
+    const start = page.getByRole("button", { name: /^\s*new order\s*$/i }).or(page.getByRole("link", { name: /^\s*new order\s*$/i })).filter({ visible: true });
+    if (!(await visible(start))) return false;
+    await start.first().click();
+    await page.waitForTimeout(5_000);
+    const confirm = page.getByRole("dialog").getByRole("button", { name: /^\s*(create|start|continue|ok|save|begin)( (an |the )?order)?\s*$/i });
+    if (await visible(confirm)) await confirm.first().click();
+  }
+  await page.waitForURL(/order-entry/i, { timeout: 30_000 }).catch(() => {});
+  await page.waitForTimeout(8_000);
+  console.log(`${supplier.name}: opened order ${page.url().split("?")[0]}`);
+  return /order-entry/i.test(page.url());
+}
+
+/** Scrolls until the list stops growing (order guides load more items as you scroll). */
+async function loadEverything(page) {
+  let same = 0, last = 0;
+  for (let i = 0; i < 60 && same < 3; i++) {
+    const more = page.locator('button:has-text("Load more"), button:has-text("Show more"), a:has-text("Load more"), a:has-text("Show more"), button:has-text("View all")');
+    if (await visible(more)) await more.first().click().catch(() => {});
+    const height = await page.evaluate(() => {
+      const scrollers = [document.scrollingElement, ...document.querySelectorAll("*")].filter((el) => el && el.scrollHeight > el.clientHeight + 50 && getComputedStyle(el).overflowY !== "hidden");
+      for (const el of scrollers) el.scrollTop = el.scrollHeight;
+      return scrollers.reduce((sum, el) => sum + el.scrollHeight, 0);
+    });
+    await page.waitForTimeout(1_000);
+    same = height === last ? same + 1 : 0;
+    last = height;
+  }
+}
+
+/** The site's own export, if there is one: CSV as-is, Excel converted to CSV. */
+async function tryExport(page, supplier) {
+  const button = page.locator('button:has-text("Export"), a:has-text("Export"), button:has-text("Download"), a:has-text("Download"), [aria-label*="export" i], [aria-label*="download" i]');
+  if (!(await visible(button))) return null;
+  try {
+    const waiting = page.waitForEvent("download", { timeout: 20_000 });
+    await button.first().click();
+    // Some sites open a menu first: pick CSV, else Excel.
+    const option = page.locator('text=/^\\s*CSV/i, text=/comma/i, text=/Excel/i, text=/xlsx/i');
+    if (await visible(option)) await option.first().click().catch(() => {});
+    const confirm = page.locator('button:has-text("Export"), button:has-text("Download")');
+    if (await visible(confirm)) await confirm.last().click().catch(() => {});
+    const download = await waiting;
+    const file = `${DEBUG}/${supplier.key}-${stamp}-${download.suggestedFilename()}`;
+    await download.saveAs(file);
+    if (/\.(xlsx|xls)$/i.test(file)) {
+      const XLSX = await import("xlsx");
+      const book = XLSX.read(readFileSync(file));
+      return XLSX.utils.sheet_to_csv(book.Sheets[book.SheetNames[0]]);
+    }
+    return readFileSync(file, "utf8");
+  } catch (error) {
+    console.log(`${supplier.name}: export didn't work (${error.message.split("\n")[0]})`);
+    return null;
+  }
+}
+
+/** A virtual screen for sites that turn away headless browsers; it goes away with the container. */
+async function startScreen() {
+  spawn("Xvfb", [":97", "-screen", "0", "1440x1000x24", "-nolisten", "tcp"], { stdio: "ignore", detached: true }).unref();
+  for (let i = 0; i < 50 && !existsSync("/tmp/.X11-unix/X97"); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+  process.env.DISPLAY = ":97";
+}
+
+/** WebstaurantStore: its Rapid Reorder list, page by page, from the signed-in page itself. */
+async function readWebstaurant(supplier, context, page, shot, guideUrl) {
+  await restoreSessionCookies(context, PROFILES, supplier.key);
+  await page.goto(guideUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  await page.waitForTimeout(5_000);
+  if (!new URL(page.url()).pathname.startsWith("/reorder") || (await visible(page.locator("#the_login_button")))) {
+    await shot("needs_login");
+    const message = `${supplier.name} needs you to sign in (it has an "I'm not a robot" check). On the server run ${SIGN_IN_BY_HAND} webstaurant and open the link it prints from the deli network.`;
+    console.log(`${supplier.name}: ${message}`);
+    await report(supplier.name, { status: "needs_login", message });
+    return;
+  }
+  if (SEARCH) {
+    // Search results come inside the page (a JSON script tag), priced for the signed-in account.
+    await page.goto(`https://www.webstaurantstore.com/search/${encodeURIComponent(SEARCH)}.html`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page.waitForTimeout(4_000);
+    const found = await page.evaluate(() => {
+      const script = document.querySelector('script[type="application/json"][data-hypernova-key="SearchPage"]');
+      const text = (script?.textContent || "").trim().replace(/^<!--/, "").replace(/-->$/, "");
+      return text ? JSON.parse(text).products || [] : [];
+    }).catch(() => []);
+    const items = found.filter((p) => p && p.itemNumber && p.price).map((p) => ({
+      itemNumber: String(p.itemNumber).toUpperCase(), description: p.description, isWebstaurantPlusEligible: p.isWebstaurantPlusEligible,
+      price: { unitPrice: Number(p.price.price) }, fullProductInfo: p,
+    }));
+    const products = webstaurantProducts(items, Number(process.env.WEBSTAURANT_SHIPPING_PER_CASE || 9.65));
+    console.log(`${supplier.name}: "${SEARCH}": ${found.length} results, ${products.length} food and supplies`);
+    await shot("search");
+    searchResults.set(supplier.name, { found: products.length });
+    if (products.length) console.log(`${supplier.name}: ${await report(supplier.name, { csv: productsToCsv(products), source: "search" })}`);
+    return;
+  }
+  const items = await page.evaluate(async () => {
+    const all = [];
+    for (let pageNumber = 1; pageNumber <= 100; pageNumber++) {
+      const response = await fetch("/api/rapidreorder/products", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ page: pageNumber, searchTerm: "", categoryFilter: "0", sortBy: "fo" }) });
+      if (!response.ok) throw new Error(`Rapid Reorder page ${pageNumber} answered ${response.status}`);
+      const body = await response.json();
+      all.push(...(body.rapidReorderItems || []));
+      if (!body.rapidReorderItems?.length || all.length >= body.totalHits) break;
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+    return all;
+  });
+  // Only items that don't ship free (WebstaurantPlus) carry this; it's the typical charge per case on the deli's orders.
+  const products = webstaurantProducts(items, Number(process.env.WEBSTAURANT_SHIPPING_PER_CASE || 9.65));
+  console.log(`${supplier.name}: ${items.length} items bought before, ${products.length} food and supplies`);
+  if (products.length < 3) {
+    const message = `Signed in, but Rapid Reorder listed ${items.length} items (${page.url()}).`;
+    await shot("no-products");
+    await report(supplier.name, { status: "no_products", message });
+    return;
+  }
+  const csv = productsToCsv(products);
+  writeFileSync(`${DEBUG}/${supplier.key}-latest.csv`, csv);
+  console.log(`${supplier.name}: ${await report(supplier.name, { csv })}`);
+  await saveSessionCookies(context, PROFILES, supplier.key);
+}
+
+/**
+ * Searches the supplier's own site the way a person would: its search box (PFG's is
+ * inside the open order), then reads the products and account prices the results
+ * page downloads, like the order guide. Results only go into the catalog.
+ */
+async function searchSite(supplier, page, captured, shot) {
+  if (supplier.order && !(await openOrderEntry(page, supplier))) console.log(`${supplier.name}: couldn't open an order to search in`);
+  captured.length = 0;
+  const box = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i], input[name*="search" i], input[id*="search" i]').filter({ visible: true });
+  // Some sites (Sysco) show a loading screen for a while after signing in.
+  await box.first().waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
+  if (!(await visible(box))) {
+    const picture = await shot("no-search-box");
+    console.log(`${supplier.name}: no search box on ${page.url()} (${picture})`);
+    searchResults.set(supplier.name, { found: 0, note: "couldn't find its search box" });
+    return;
+  }
+  // Promotions pop up over the page (Sysco's "Deals of the Week"); close them without choosing anything.
+  await page.keyboard.press("Escape").catch(() => {});
+  const close = page.locator('[role="dialog"] button[aria-label*="close" i], [role="dialog"] button:has-text("×"), button[aria-label="Close"]').filter({ visible: true });
+  if (await visible(close)) await close.first().click({ timeout: 5_000 }).catch(() => {});
+  await box.first().fill(SEARCH);
+  await box.first().press("Enter");
+  await page.waitForTimeout(8_000);
+  await loadEverything(page);
+  await page.waitForTimeout(2_000);
+  const products = dedupeProducts([...captured.flatMap((c) => extractProducts(c.json)), ...joinSplitProducts(captured.map((c) => c.json))]);
+  console.log(`${supplier.name}: "${SEARCH}" → ${page.url()}: ${products.length} products`);
+  if (process.env.DEBUG_RESPONSES === "1") writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-search-responses.txt`, captured.map((c) => `${c.url.split("?")[0]}\n${describe(c.json)}`).join("\n\n"));
+  if (process.env.DEBUG_RESPONSES === "raw") writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-search-raw.json`, JSON.stringify(captured));
+  await shot("search");
+  searchResults.set(supplier.name, { found: products.length });
+  if (!products.length) return;
+  console.log(`${supplier.name}: ${await report(supplier.name, { csv: productsToCsv(products), source: "search" })}`);
+}
+
+async function run(supplier) {
+  const user = process.env[`${supplier.key}_USERNAME`], password = process.env[`${supplier.key}_PASSWORD`];
+  // Password is optional: US Foods signs in with a username and a one-time code.
+  if (!user && !supplier.signInByHand) {
+    console.log(`${supplier.name}: skipped (no ${supplier.key}_USERNAME)`);
+    return;
+  }
+  const loginUrl = process.env[`${supplier.key}_LOGIN_URL`] || supplier.login;
+  // One or more list pages (space or comma separated); prices from all of them are combined.
+  const guideUrls = (process.env[`${supplier.key}_ORDER_GUIDE_URL`] || supplier.guide).split(/[\s,]+/).filter(Boolean);
+  const guideUrl = guideUrls[0] || "";
+  if (supplier.headed && !process.env.DISPLAY) await startScreen();
+  const context = await chromium.launchPersistentContext(`${PROFILES}/${supplier.key}`, {
+    headless: !HEADED && !supplier.headed,
+    viewport: { width: 1440, height: 1000 },
+    acceptDownloads: true,
+    locale: "en-US",
+    timezoneId: "America/New_York",
+    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+  });
+  const page = context.pages()[0] || (await context.newPage());
+  const captured = [];
+  page.on("response", async (response) => {
+    try {
+      const type = response.headers()["content-type"] || "";
+      if (!type.includes("json") || response.request().method() === "OPTIONS") return;
+      if (/analytics|telemetry|segment|optimizely|newrelic|datadog|google|doubleclick|hotjar/i.test(response.url())) return;
+      const body = await response.text();
+      if (body.length > 20_000_000) return;
+      captured.push({ url: response.url(), json: JSON.parse(body) });
+    } catch {
+      // Redirects, empty bodies, and non-JSON are expected.
+    }
+  });
+  const shot = async (why) => {
+    const path = `${DEBUG}/${supplier.key}-${stamp}-${why}.png`;
+    await page.screenshot({ path, fullPage: false }).catch(() => {});
+    return path;
+  };
+  try {
+    if (supplier.reader === "webstaurant") return await readWebstaurant(supplier, context, page, shot, guideUrl);
+    await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page.waitForTimeout(4_000);
+    const login = await signIn(page, supplier, user, password);
+    if (login.status !== "signed_in") {
+      await shot(login.status);
+      console.log(`${supplier.name}: ${login.message}`);
+      await report(supplier.name, { status: login.status, message: login.message });
+      if (SEARCH) searchResults.set(supplier.name, { found: 0, note: "needs signing in" });
+      return;
+    }
+    if (SEARCH) return await searchSite(supplier, page, captured, shot);
+    if (guideUrl) {
+      await page.goto(guideUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+      await page.waitForTimeout(6_000);
+      console.log(`${supplier.name}: opened ${guideUrl} → ${page.url()}`);
+    } else if (supplier.order) {
+      if (!(await openOrderEntry(page, supplier))) console.log(`${supplier.name}: couldn't open an order; looking for lists instead`);
+    } else {
+      const link = page.locator('a:has-text("Order Guide"), a:has-text("Order guide"), a:has-text("My Lists"), a:has-text("Lists"), button:has-text("Order Guide")');
+      if (await visible(link)) await link.first().click();
+    }
+    await page.waitForTimeout(6_000);
+    // Signed in, but the site asked again (session expired mid-way).
+    if (await visible(page.locator(PASSWORD_FIELD)) || (/log-?in|sign-?in|auth/i.test(page.url()) && await visible(page.locator(USER_FIELD)))) {
+      const again = await signIn(page, supplier, user, password);
+      if (again.status !== "signed_in") {
+        await shot(again.status);
+        await report(supplier.name, { status: again.status, message: again.message });
+        return;
+      }
+      if (guideUrl) await page.goto(guideUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+      await page.waitForTimeout(6_000);
+    }
+    await loadEverything(page);
+    await page.waitForTimeout(2_000);
+    for (const url of guideUrls.slice(1)) {
+      console.log(`${supplier.name}: also reading ${url}`);
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 }).catch((error) => console.log(`${supplier.name}: ${error.message.split("\n")[0]}`));
+      await page.waitForTimeout(6_000);
+      console.log(`${supplier.name}: landed on ${page.url()}`);
+      await loadEverything(page);
+    }
+    // Products in one response, plus products whose prices come in a separate response (US Foods).
+    const found = () => dedupeProducts([...captured.flatMap((c) => extractProducts(c.json)), ...joinSplitProducts(captured.map((c) => c.json))]);
+    // The page we opened had no list prices (sites move things): look for the
+    // order guide / lists in the site's own menus, then open the first list.
+    const visited = new Set([page.url()]);
+    for (const pattern of [/^\s*(my )?order guides?\s*$/i, /^\s*(my |shopping )?lists?\s*$/i, /order guide/i, /\blists?\b/i, /favorites|purchase history|frequently (bought|ordered)/i]) {
+      if (found().length >= 3) break;
+      // Menus are links, buttons, or plain text with a click handler (PFG); only consider what is showing.
+      let link = page.locator("a, button, [role=link], [role=menuitem], [role=tab]").filter({ hasText: pattern }).filter({ visible: true });
+      if (!(await visible(link))) link = page.getByText(pattern).filter({ visible: true });
+      if (!(await visible(link))) continue;
+      await link.first().click().catch(() => {});
+      await page.waitForTimeout(5_000);
+      // On a page of lists, open one: by a title the site's own list data named (PFG), else the first list link.
+      if (found().length < 3) {
+        let opened = false;
+        for (const title of listTitles(captured.map((c) => c.json))) {
+          const entry = page.getByText(title, { exact: true }).filter({ visible: true });
+          if (!(await visible(entry))) continue;
+          await entry.first().click().catch(() => {});
+          await page.waitForTimeout(6_000);
+          opened = true;
+          break;
+        }
+        const firstList = page.locator('a[href*="list" i], [role=row] a, li a, [class*="list" i] a').filter({ hasText: /\w{3,}/ }).filter({ visible: true });
+        if (!opened && (await visible(firstList))) {
+          await firstList.first().click().catch(() => {});
+          await page.waitForTimeout(5_000);
+        }
+      }
+      if (visited.has(page.url())) continue;
+      visited.add(page.url());
+      console.log(`${supplier.name}: trying ${page.url()}`);
+      await loadEverything(page);
+    }
+
+    const products = found();
+    console.log(`${supplier.name}: ${captured.flatMap((c) => extractProducts(c.json)).length} products from single responses, ${joinSplitProducts(captured.map((c) => c.json)).length} from joined price data`);
+    let csv = products.length >= 3 ? productsToCsv(products) : null;
+    if (!csv) csv = await tryExport(page, supplier);
+    if (!csv) {
+      const picture = await shot("no-products");
+      // What the page loaded, for tuning: URLs and top-level keys only.
+      writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-responses.txt`, captured.map((c) => `${c.url.split("?")[0]}\n${describe(c.json)}`).join("\n\n"));
+      // The site's menu links (text and address only), to find the order guide page.
+      const links = await page.evaluate(() => [...document.querySelectorAll("a[href]")].map((a) => `${(a.textContent || "").trim().replace(/\s+/g, " ").slice(0, 60)}\t${a.href}`).filter((l) => !l.startsWith("\t")));
+      writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-links.txt`, [...new Set(links)].join("\n"));
+      const message = `Signed in, but found no prices (last page ${page.url()}). Open your order guide in a browser and put its address in ${supplier.key}_ORDER_GUIDE_URL. Screenshot and site links: ${picture.replace(DEBUG, "/opt/corner-ops/supplier-prices/_website").replace(/-no-products\.png$/, "-*")}`;
+      console.log(`${supplier.name}: ${message}`);
+      await report(supplier.name, { status: "no_products", message });
+      return;
+    }
+    writeFileSync(`${DEBUG}/${supplier.key}-latest.csv`, csv);
+    // DEBUG_RESPONSES=1: also keep the shape of what the site loaded on a successful run (no values), for tuning.
+    // DEBUG_RESPONSES=raw keeps the responses themselves (on this box only, like the price files) to debug the reader.
+    if (process.env.DEBUG_RESPONSES === "raw") writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-raw.json`, JSON.stringify(captured));
+    if (process.env.DEBUG_RESPONSES === "1") writeFileSync(`${DEBUG}/${supplier.key}-${stamp}-responses.txt`, captured.map((c) => `${c.url.split("?")[0]}\n${describe(c.json)}`).join("\n\n"));
+    console.log(`${supplier.name}: ${await report(supplier.name, { csv })}`);
+  } catch (error) {
+    const picture = await shot("error");
+    const message = `${error.message.split("\n")[0]} (screenshot ${picture.replace(DEBUG, "/opt/corner-ops/supplier-prices/_website")})`;
+    console.error(`${supplier.name}: ${message}`);
+    if (SEARCH) searchResults.set(supplier.name, { found: 0, note: "the search failed" });
+    await report(supplier.name, { status: "failed", message }).catch((e) => console.error(e.message));
+    process.exitCode = 1;
+  } finally {
+    await context.close();
+  }
+}
+
+if (!SECRET) {
+  console.error("CRON_SECRET is missing; the price job can't send prices to Corner Ops.");
+  process.exit(1);
+}
+try {
+  await waitForApp();
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+for (const supplier of SUPPLIERS) {
+  if (only && supplier.key.toLowerCase() !== only && supplier.name.toLowerCase() !== only) continue;
+  if (SEARCH && !process.env[`${supplier.key}_USERNAME`] && !supplier.signInByHand) continue;
+  // One supplier's problem never stops the others.
+  await run(supplier).catch(async (error) => {
+    console.error(`${supplier.name}: ${error.message.split("\n")[0]}`);
+    process.exitCode = 1;
+    await report(supplier.name, { status: "failed", message: error.message.split("\n")[0] }).catch(() => {});
+  });
+}
+
+// A website search from Supplier costs: say how it went on each supplier.
+if (SEARCH && process.env.SEARCH_ID) {
+  const found = [...searchResults.values()].reduce((sum, r) => sum + r.found, 0);
+  const message = [...searchResults.entries()].map(([name, r]) => `${name}: ${r.note || `${r.found} found`}`).join(" · ") || "No supplier could be searched.";
+  await callApp("/api/cron/supplier-prices", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ searchDone: process.env.SEARCH_ID, found, message, failed: searchResults.size === 0 }),
+  }).catch((error) => console.error(`Couldn't record the search result: ${error.message}`));
+}

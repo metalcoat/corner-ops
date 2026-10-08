@@ -1,9 +1,11 @@
 "use client";
 
 import { responseMessage } from "@/app/client-http";
+import { useSiteBrand } from "@/app/brand-context";
 import { DEFAULT_PUNCH_CORRECTION_REASON, normalizePunchCorrectionReason } from "@/lib/punch-correction-reason";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
+import { payrollDisplayRows, showOvertimeColumn, type ScheduleComparison } from "@/lib/payroll-schedule-compare";
 import "../control-center.css";
 
 type PayrollRow = {
@@ -61,15 +63,51 @@ type Version = {
   lockedAt: string | null;
 };
 
+type ClockOutCase = {
+  id: string;
+  employeeName: string;
+  clockInEastern: string | null;
+  scheduledEndEastern: string | null;
+  employeeLeftAtEastern: string | null;
+  status: string;
+  smsLabel: string;
+  resolvedClockOutEastern: string | null;
+};
+
+type Submission = {
+  id: string;
+  kind?: "payroll" | "roster";
+  payrollRunVersionId: string | null;
+  status: string;
+  statusLine: string;
+};
+
+type PayrollRelief = {
+  roster: Array<{ num: string; name: string; payType: string; display: string; lastSeenAt: string | null }>;
+  people: Array<{ employee: string; inPayroll: boolean; active: boolean; eeNum: string | null; guessNum: string | null; guessReason: string }>;
+  rosterCheck: Submission | null;
+};
+
+type Approval = {
+  blockers: { openPunches: number; unresolvedClockOuts: number; needsReview: number; message: string | null };
+  clockOutCases: ClockOutCase[];
+  submissions: Submission[];
+  sendsToPayrollRelief?: boolean;
+  payrollRelief?: PayrollRelief | null;
+};
+
 type Dashboard = {
+  approval?: Approval;
   summary: {
     source: string;
+    processingFeeReviewCount?: number;
     weekStart: string;
     weekEnd: string;
     rows: PayrollRow[];
     overrides: Array<Record<string, unknown>>;
     unmatchedTips: Array<Record<string, unknown>>;
     dailyTipReconciliation?: DailyTipCheck[];
+    scheduleComparison?: ScheduleComparison[];
   };
   punches: Punch[];
   versions: Version[];
@@ -145,16 +183,28 @@ function easternInputValue(value: string | null) {
 }
 
 export default function PayrollControlPage() {
+  const brand = useSiteBrand();
+  const siteBusiness: Business = brand.name === "At the Docks" ? "Tiki" : "Corner Deli";
   const [session, setSession] = useState<SessionView | null>(null);
-  const [business, setBusiness] = useState<Business>("Corner Deli");
+  const [business, setBusiness] = useState<Business>(siteBusiness);
   const [weekStart, setWeekStart] = useState(previousMonday());
-  const [data, setData] = useState<Dashboard | null>(null);
+  const [dashboard, setDashboard] = useState<{ business: Business; weekStart: string; value: Dashboard } | null>(null);
+  const requestId = useRef(0);
+  const data = dashboard?.business === business && dashboard.weekStart === weekStart ? dashboard.value : null;
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Punch | null>(null);
   const [correctionReason, setCorrectionReason] = useState(DEFAULT_PUNCH_CORRECTION_REASON);
+  const [codes, setCodes] = useState<Record<string, string>>({});
+  const [matches, setMatches] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    // Links from the Monday payroll email open a business and week directly.
+    const params = new URLSearchParams(window.location.search);
+    const requestedBusiness = params.get("business");
+    if (requestedBusiness === "Corner Deli" || requestedBusiness === "Tiki") setBusiness(requestedBusiness);
+    const requestedWeek = params.get("weekStart");
+    if (requestedWeek && /^\d{4}-\d{2}-\d{2}$/.test(requestedWeek)) setWeekStart(requestedWeek);
     fetch("/api/auth/session", { cache: "no-store" })
       .then((response) => response.json())
       .then(setSession)
@@ -162,20 +212,62 @@ export default function PayrollControlPage() {
   }, []);
 
   async function load(activeBusiness = business, activeWeek = weekStart) {
+    const currentRequest = ++requestId.current;
     const response = await fetch(
       `/api/payroll-control?business=${encodeURIComponent(activeBusiness)}&weekStart=${encodeURIComponent(activeWeek)}&displayVersion=20260804-3`,
       { cache: "no-store", headers: { "Cache-Control": "no-cache" } },
     );
     if (!response.ok) throw new Error(await responseMessage(response));
-    setData(await response.json() as Dashboard);
+    const value = await response.json() as Dashboard;
+    if (currentRequest === requestId.current) setDashboard({ business: activeBusiness, weekStart: activeWeek, value });
   }
 
   useEffect(() => {
     if (!session?.authenticated) return;
     setNotice("");
-    void load(business, weekStart).catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
+    const activeRequest = requestId.current + 1;
+    void load(business, weekStart).catch((error) => {
+      if (activeRequest === requestId.current) setNotice(error instanceof Error ? error.message : String(error));
+    });
+    return () => { requestId.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.authenticated, business, weekStart]);
+
+  // While the store server is entering payroll (or waiting for a texted code), keep the status current.
+  const working = Boolean(data?.approval && [...data.approval.submissions, ...(data.approval.payrollRelief?.rosterCheck ? [data.approval.payrollRelief.rosterCheck] : [])]
+    .some((item) => item.status === "submitting" || item.status === "needs_code" || item.status === "queued"));
+  useEffect(() => {
+    if (!working || !session?.authenticated) return;
+    const timer = window.setInterval(() => { if (!busy) void load(business, weekStart).catch(() => undefined); }, 10_000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [working, busy, business, weekStart, session?.authenticated]);
+
+  // The dropdowns start at the saved match, else the best guess; the owner confirms with Save.
+  const relief = data?.approval?.payrollRelief || null;
+  useEffect(() => {
+    if (!relief) return;
+    setMatches(Object.fromEntries(relief.people.map((p) => [p.employee, p.eeNum || p.guessNum || ""])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(relief?.people), JSON.stringify(relief?.roster.map((r) => r.num))]);
+
+  async function sendCode(submission: Submission) {
+    const code = (codes[submission.id] || "").trim();
+    if (!code) return;
+    await post({ action: "submission-code", business, id: submission.id, code })
+      .then(() => { setCodes((current) => ({ ...current, [submission.id]: "" })); setNotice("Code sent to the store server; it signs in within a few seconds."); })
+      .catch(() => undefined);
+  }
+
+  function submissionControls(submission: Submission) {
+    return <>
+      {submission.status === "needs_code" && <span className="controlActions">
+        <input aria-label="Code from the text" inputMode="numeric" autoComplete="one-time-code" placeholder="Code from the text" value={codes[submission.id] || ""} onChange={(event) => setCodes((current) => ({ ...current, [submission.id]: event.target.value }))} />
+        <button className="primary" disabled={busy || !(codes[submission.id] || "").trim()} onClick={() => void sendCode(submission)}>Send code</button>
+      </span>}
+      {submission.kind !== "roster" && (submission.status === "failed" || submission.status === "submitted") && <> <button disabled={busy} onClick={() => void post({ action: "submission-retry", business, id: submission.id }).then(() => setNotice("Queued to enter in Payroll Relief again (saved, not submitted).")).catch(() => undefined)}>Send again</button></>}
+    </>;
+  }
 
   async function post(body: Record<string, unknown>) {
     setBusy(true);
@@ -310,6 +402,10 @@ export default function PayrollControlPage() {
     { hours: 0, overtime: 0, tips: 0 },
   ) || { hours: 0, overtime: 0, tips: 0 }, [data]);
 
+  // Employee | Regular | Tipped | Tips | (OT when anyone has it) | Scheduled vs worked; scheduled-only employees included.
+  const displayRows = useMemo(() => data ? payrollDisplayRows(data.summary.rows, data.summary.scheduleComparison || []) : [], [data]);
+  const showOvertime = showOvertimeColumn(displayRows);
+
   const dailyTotals = useMemo(() => (data?.summary.dailyTipReconciliation || []).reduce(
     (current, day) => ({
       source: current.source + day.sourceTipsBeforeFee,
@@ -349,7 +445,8 @@ export default function PayrollControlPage() {
         </div>
         <p className="reportNote">{business === "Corner Deli"
           ? "Every saved shift correction and tip override is included the next time totals load. Corner Deli tips are reconciled by business day before the 3.5% deduction, so rounding cannot quietly create extra payroll."
-          : "Square tips are split equally among tip-eligible Tiki employees clocked in when the payment was created. Tiki corrections on this page also reconcile the live employee clock state."}</p>
+          : "Square tips are split equally among tip-eligible At the Docks employees clocked in when the payment was created. The tip's share of Square's recorded processing fee is deducted, up to 3.5%. Shift corrections on this page also reconcile the live employee clock state."}</p>
+        {business === "Tiki" && Boolean(data?.summary.processingFeeReviewCount) && <p className="reportNote"><strong>Review processing fees:</strong> {data?.summary.processingFeeReviewCount} Square payment(s) have no usable fee information. Their tips remain gross until Square's fee is available.</p>}
       </section>
 
       {business === "Corner Deli" && <section className="controlCard">
@@ -375,25 +472,31 @@ export default function PayrollControlPage() {
 
       <section className="controlCard">
         <div className="controlActions">
-          <button className="primary" onClick={() => void post({ action: "draft-create", business, weekStart }).then((result) => setNotice(`Payroll draft version ${result.version} created from the current corrected totals.`))} disabled={busy}>Create payroll draft</button>
+          <button className="primary" onClick={() => void post({ action: "draft-create", business, weekStart }).then((result) => setNotice(`Payroll draft version ${result.version} created from the current corrected totals.`))} disabled={busy || (business === "Tiki" && Boolean(data?.summary.processingFeeReviewCount))}>Create payroll draft</button>
         </div>
         <p className="eyebrow">Calculated summary</p>
         <h2>{data?.summary.source}</h2>
         {business === "Corner Deli" && <p className="reportNote">Before 3 PM, tips are split equally among all tip-eligible employees clocked in. After 3 PM, delivery tips go to the driver and takeout tips are split equally among clocked-in non-driver positions.</p>}
         <div className="tableWrap"><table className="controlTable">
-          {business === "Corner Deli" ? <>
-            <thead><tr><th>Employee</th><th>Total</th><th>Regular</th><th>OT</th><th>Driver tipped</th><th>Pickup gross</th><th>Delivery gross</th><th>Gross tips</th><th>3.5% fee</th><th>Manual</th><th>Net paid</th></tr></thead>
-            <tbody>{data?.summary.rows.map((row) => {
-              const manual = row.manualTips || 0;
-              const gross = row.tipsBeforeFee || 0;
-              const automaticNet = row.tips - manual;
-              return <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.pickupTipsBeforeFee || 0)}</td><td>{dollars(row.deliveryTipsBeforeFee || 0)}</td><td><strong>{dollars(gross)}</strong></td><td>{dollars(gross - automaticNet)}</td><td>{dollars(manual)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>;
-            })}</tbody>
-          </> : <>
-            <thead><tr><th>Employee</th><th>Total</th><th>Regular</th><th>OT</th><th>Tipped hours</th><th>Automatic tips</th><th>Manual</th><th>Total tips</th></tr></thead>
-            <tbody>{data?.summary.rows.map((row) => <tr key={row.employee}><td><strong>{row.employee}</strong></td><td>{hours(row.hours)}</td><td>{hours(row.regularHours)}</td><td>{hours(row.overtimeHours)}</td><td>{hours(row.driverTipHours)}</td><td>{dollars(row.tips - (row.manualTips || 0))}</td><td>{dollars(row.manualTips || 0)}</td><td><strong>{dollars(row.tips)}</strong></td></tr>)}</tbody>
-          </>}
+          <thead><tr><th>Employee</th><th>Regular Hours</th><th>Tipped Hours</th><th>Tips</th>{showOvertime && <th>OT</th>}<th>Scheduled vs worked</th></tr></thead>
+          <tbody>{displayRows.map((row) => <tr key={row.employee}>
+            <td><strong>{row.employee}</strong></td>
+            <td>{hours(row.regularHours)}</td>
+            <td>{hours(row.tippedHours)}</td>
+            <td><strong>{dollars(row.tips)}</strong></td>
+            {showOvertime && <td>{hours(row.overtimeHours)}</td>}
+            <td>{row.schedule ? <>{row.schedule.flagged && <span className="badge warn">Check</span>} {row.schedule.text}</> : "—"}</td>
+          </tr>)}</tbody>
+          {displayRows.length > 0 && <tfoot><tr>
+            <td><strong>Totals</strong></td>
+            <td>{hours(displayRows.reduce((sum, row) => sum + row.regularHours, 0))}</td>
+            <td>{hours(displayRows.reduce((sum, row) => sum + row.tippedHours, 0))}</td>
+            <td><strong>{dollars(displayRows.reduce((sum, row) => sum + row.tips, 0))}</strong></td>
+            {showOvertime && <td>{hours(displayRows.reduce((sum, row) => sum + row.overtimeHours, 0))}</td>}
+            <td>{displayRows.filter((row) => row.schedule?.flagged).length ? `${displayRows.filter((row) => row.schedule?.flagged).length} to check` : ""}</td>
+          </tr></tfoot>}
         </table></div>
+        <p className="reportNote">Tips include manual tip assignments. Scheduled = published shifts this payroll week (Monday 4 AM to Monday 4 AM); worked = clocked hours; the difference is worked − scheduled. Check: off by an hour or more, or a scheduled shift with no punch.</p>
       </section>
 
       <section className="controlCard">
@@ -444,14 +547,63 @@ export default function PayrollControlPage() {
         })}</div>
       </section>
 
+      {data?.approval && <section className="controlCard">
+        <p className="eyebrow">Approval</p>
+        <h2>{data.approval.blockers.message ? "Not ready to approve" : "Ready to approve"}</h2>
+        {data.approval.blockers.message
+          ? <p className="reportNote"><span className="badge warn">Blocked</span> {data.approval.blockers.message}</p>
+          : <p className="reportNote">No open punches or missed clock-outs this week. {data.approval.sendsToPayrollRelief
+            ? "Approving a draft locks it; the store server then enters the hours and tips in Payroll Relief and saves them (it never submits). You review and press Submit there."
+            : "Approving a draft locks it. The Docks isn't sent to AccountantsOffice automatically."}</p>}
+        {Boolean(data.approval.blockers.needsReview) && <p className="reportNote">{data.approval.blockers.needsReview} punch(es) this week are marked Needs Review.</p>}
+        {data.approval.clockOutCases.length > 0 && <div className="list">{data.approval.clockOutCases.map((item) => <div className="listItem" key={item.id}>
+          <div><strong>{item.employeeName} · {item.status === "Submitted" ? `says they left ${item.employeeLeftAtEastern}` : item.status === "Resolved" ? `clocked out ${item.resolvedClockOutEastern || ""}` : "still clocked in"}</strong><span>In {item.clockInEastern} · scheduled end {item.scheduledEndEastern || "none"} · {item.smsLabel}</span></div>
+          {item.status === "Resolved" ? <span className="badge good">Settled</span> : <a href={`/ops/payroll-control/clock-outs?case=${encodeURIComponent(item.id)}`}>Choose clock-out</a>}
+        </div>)}</div>}
+      </section>}
+
       <section className="controlCard">
         <p className="eyebrow">Append-only payroll history</p>
         <h2>Versions</h2>
         <div className="tableWrap"><table className="controlTable">
           <thead><tr><th>Week</th><th>Version</th><th>Status</th><th>Generated</th><th>Locked</th><th>Actions</th></tr></thead>
-          <tbody>{data?.versions.map((version) => <tr key={version.id}><td>{version.weekStart}</td><td>v{version.version}</td><td><span className={`badge ${version.status === "Locked" ? "good" : "warn"}`}>{version.status}</span></td><td>{version.generatedBy}<small>{easternDateTime(version.generatedAt)}</small></td><td>{version.lockedBy || "—"}</td><td><a href={`/api/payroll-control?export=${version.id}`}>CSV</a> {version.status === "Draft" ? <button onClick={() => void post({ action: "run-lock", business, id: version.id }).then(() => setNotice(`Payroll v${version.version} locked.`))}>Lock</button> : <button onClick={() => void post({ action: "run-reopen", business, id: version.id }).then((result) => setNotice(`Reopened as payroll draft v${result.version}.`))}>Reopen as new version</button>}</td></tr>)}</tbody>
+          <tbody>{data?.versions.map((version) => <tr key={version.id}><td>{version.weekStart}</td><td>v{version.version}</td><td><span className={`badge ${version.status === "Locked" ? "good" : "warn"}`}>{version.status}</span></td><td>{version.generatedBy}<small>{easternDateTime(version.generatedAt)}</small></td><td>{version.lockedBy || "—"}</td><td><a href={`/api/payroll-control?export=${version.id}`}>CSV</a> {version.status === "Draft" ? <button disabled={busy || (String(version.weekStart).slice(0, 10) === weekStart && Boolean(data?.approval?.blockers.message))} title={String(version.weekStart).slice(0, 10) === weekStart ? data?.approval?.blockers.message || "" : ""} onClick={() => void post({ action: "run-lock", business, id: version.id }).then((result) => setNotice(result?.submission ? `Payroll v${version.version} approved and locked. The store server will enter it in Payroll Relief (saved, not submitted) within a few minutes.` : `Payroll v${version.version} approved and locked. ${result?.submissionNote || ""}`)).catch(() => undefined)}>Approve & lock</button> : <button onClick={() => void post({ action: "run-reopen", business, id: version.id }).then((result) => setNotice(`Reopened as payroll draft v${result.version}.`))}>Reopen as new version</button>}{(() => {
+            const submission = data?.approval?.submissions.find((item) => item.payrollRunVersionId === version.id);
+            if (!submission) return null;
+            return <small>{submission.statusLine} {submissionControls(submission)}</small>;
+          })()}</td></tr>)}</tbody>
         </table></div>
       </section>
+
+      {relief && <section className="controlCard">
+        <p className="eyebrow">AccountantsOffice employees</p>
+        <h2>Who is who in Payroll Relief</h2>
+        <p className="reportNote">Hours and tips are entered for the Payroll Relief employee chosen here. Guesses are pre-selected (marked Guess); check them and press Save. Anyone with hours or tips but no match stops the entry with a message, so nothing is entered for the wrong person.</p>
+        {!relief.roster.length && <p className="reportNote"><span className="badge warn">No list yet</span> Payroll Relief&apos;s employee list fills in after the first send attempt, or press Check AccountantsOffice.</p>}
+        <div className="controlActions">
+          <button disabled={busy || Boolean(relief.rosterCheck && ["queued", "submitting", "needs_code"].includes(relief.rosterCheck.status))} onClick={() => void post({ action: "payroll-relief-check", business }).then(() => setNotice("The store server will check AccountantsOffice within a few minutes.")).catch(() => undefined)}>Check AccountantsOffice</button>
+          {relief.rosterCheck && <small>{relief.rosterCheck.statusLine} {submissionControls(relief.rosterCheck)}</small>}
+        </div>
+        {relief.roster.length > 0 && <>
+          <div className="tableWrap"><table className="controlTable">
+            <thead><tr><th>Corner Ops</th><th>Payroll Relief employee</th><th></th></tr></thead>
+            <tbody>{relief.people.map((person) => {
+              const value = matches[person.employee] ?? "";
+              const guessed = !person.eeNum && Boolean(person.guessNum) && value === person.guessNum;
+              return <tr key={person.employee}>
+                <td><strong>{person.employee}</strong><small>{[person.inPayroll ? "in recent payroll" : "", person.active ? "active" : "inactive"].filter(Boolean).join(" · ")}</small></td>
+                <td><select value={value} onChange={(event) => setMatches((current) => ({ ...current, [person.employee]: event.target.value }))}>
+                  <option value="">Not in Payroll Relief</option>
+                  {relief.roster.map((entry) => <option key={entry.num} value={entry.num}>{entry.display} (#{entry.num}{entry.payType ? `, ${entry.payType === "S" ? "salaried" : "hourly"}` : ""})</option>)}
+                </select></td>
+                <td>{person.eeNum ? (value === person.eeNum ? <span className="badge good">Saved</span> : <span className="badge warn">Changed</span>) : guessed ? <span className="badge warn" title={person.guessReason}>Guess: {person.guessReason}</span> : value ? <span className="badge warn">Not saved</span> : ""}</td>
+              </tr>;
+            })}</tbody>
+          </table></div>
+          <div className="controlActions"><button className="primary" disabled={busy} onClick={() => void post({ action: "payroll-relief-map-save", business, mappings: relief.people.map((person) => ({ employee: person.employee, eeNum: matches[person.employee] ?? "" })) }).then(() => setNotice("Payroll Relief employees saved.")).catch(() => undefined)}>Save matches</button></div>
+          <p className="reportNote">Payroll Relief list last seen {relief.roster.reduce((latest, entry) => entry.lastSeenAt && entry.lastSeenAt > latest ? entry.lastSeenAt : latest, "") ? easternDateTime(relief.roster.reduce((latest, entry) => entry.lastSeenAt && entry.lastSeenAt > latest ? entry.lastSeenAt : latest, "")) : "—"}.</p>
+        </>}
+      </section>}
 
       <section className="controlCard half">
         <p className="eyebrow">Shift changes</p>

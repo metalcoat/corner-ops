@@ -31,7 +31,8 @@ function loadSource(path: string, mocks: Record<string, unknown>) {
 const http = loadSource("src/lib/http.ts", { "@/lib/config": { ConfigurationError: class extends Error {} } });
 const users = loadSource("src/lib/users.ts", { "@/lib/db": {} });
 const auth = loadSource("src/lib/auth.ts", {
-  "next/headers": {}, "@/lib/db": {}, "@/lib/http": http, "@/lib/security-keys": {},
+  "next/headers": {}, "@/lib/config": { assertConfigured: () => undefined },
+  "@/lib/cookie-security": { secureCookies: () => false }, "@/lib/db": {}, "@/lib/http": http, "@/lib/security-keys": {},
   "@/lib/types": { businesses: ["Tiki", "Corner Deli"] }, "@/lib/users": users,
 });
 const id = "11111111-1111-4111-8111-111111111111";
@@ -154,6 +155,7 @@ test("scoped employment reader decrypts the original saved answers without chang
     const library = loadSource("src/lib/employment-forms.ts", {
       "@/lib/secret-strength": { requireStrongSecret },
       "@/lib/db": { ensureSchema: async () => undefined, getSql: () => async (sql: TemplateStringsArray, ...params: unknown[]) => {
+        if (!sql.join("?").includes("WHERE id = ? AND business = ?")) return [];
         assert.match(sql.join("?"), /WHERE id = \? AND business = \?/);
         assert.match(sql.join("?"), /employee_id = \?::uuid/);
         assert.deepEqual(params, [id, "Tiki", employeeId, employeeId]);

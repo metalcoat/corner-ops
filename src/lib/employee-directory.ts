@@ -1,6 +1,7 @@
+import { assertEmployeePinAvailable, employeePinUpdate, ensureEmployeePinColumns } from "@/lib/employee-pin-security";
 import { ensureSchema, getSql } from "@/lib/db";
 import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
-import { assertEmployeePinAvailable, createEmployeePinRecord } from "@/lib/employee-pin-security";
+import { validateEmployeePin } from "@/lib/employee-pin";
 import { normalizeSmsPhone } from "@/lib/phone";
 import type { Business } from "@/lib/types";
 
@@ -24,13 +25,18 @@ function clean(value: unknown, max = 255): string {
   return String(value ?? "").trim().slice(0, max);
 }
 
-
 export function ensureEmployeeDirectorySchema(): Promise<void> {
   if (!directorySchemaPromise) {
     directorySchemaPromise = (async () => {
       await ensureSchema();
       const sql = getSql();
 
+      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT ''`;
+      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS sms_opt_in BOOLEAN NOT NULL DEFAULT FALSE`;
+      await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin_enabled BOOLEAN NOT NULL DEFAULT TRUE`;
+      // Salted-PIN columns and session_version (revokes devices on PIN/active changes).
+      await ensureEmployeePinColumns();
       await sql`
         CREATE UNIQUE INDEX IF NOT EXISTS employees_business_email_unique
         ON employees (business, LOWER(email))
@@ -60,6 +66,25 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
         $$
       `;
 
+      await sql`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger
+            WHERE tgname = 'rezku_employee_alias_normalization'
+              AND tgrelid = 'rezku_shifts'::regclass
+              AND NOT tgisinternal
+          ) THEN
+            CREATE TRIGGER rezku_employee_alias_normalization
+            BEFORE INSERT OR UPDATE OF employee_name
+            ON rezku_shifts
+            FOR EACH ROW
+            EXECUTE FUNCTION corner_ops_prepare_rezku_employee();
+          END IF;
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END;
+        $$
+      `;
 
       await sql`
         CREATE OR REPLACE FUNCTION corner_ops_sync_rezku_employee()
@@ -112,6 +137,25 @@ export function ensureEmployeeDirectorySchema(): Promise<void> {
         $$
       `;
 
+      await sql`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger
+            WHERE tgname = 'rezku_employee_directory_sync'
+              AND tgrelid = 'rezku_shifts'::regclass
+              AND NOT tgisinternal
+          ) THEN
+            CREATE TRIGGER rezku_employee_directory_sync
+            AFTER INSERT OR UPDATE OF employee_name, position, role_group
+            ON rezku_shifts
+            FOR EACH ROW
+            EXECUTE FUNCTION corner_ops_sync_rezku_employee();
+          END IF;
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END;
+        $$
+      `;
 
       await sql`
         DELETE FROM rezku_shifts
@@ -206,8 +250,7 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
     const email = clean(input.email, 255).toLowerCase();
     const phone = normalizeSmsPhone(input.phone);
     const smsOptIn = Boolean(input.smsOptIn && phone);
-    const pin = await assertEmployeePinAvailable({ business, pin: input.pin, employeeName: name || "Employee", excludeEmployeeId: undefined });
-    const pinRecord = createEmployeePinRecord(business, pin, name || "Employee");
+    const pin = validateEmployeePin(business, input.pin, name || "Employee");
     const position = normalizePosition(business, input.position || (business === "Tiki" ? "Bartender" : "Pizza"));
     const roleGroup = input.roleGroup === "Ignore" ? "Ignore" : roleGroupForPosition(business, position);
     const countsForTips = input.countsForTips ?? roleGroup !== "Ignore";
@@ -226,11 +269,13 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
     ` as unknown as Array<{ id: string }>;
 
     if (existing[0]) {
+      await assertEmployeePinAvailable({ business, pin, employeeName: name, excludeEmployeeId: existing[0].id });
+      const updatedPin = employeePinUpdate(business, pin, name);
       const rows = await sql`
         UPDATE employees SET
           email = ${email}, phone = ${phone}, sms_opt_in = ${smsOptIn}, name = ${name},
-          pin_hash = ${pinRecord.hash}, pin_salt = ${pinRecord.salt}, pin_hash_version = ${pinRecord.version},
-          pin_fingerprint = ${pinRecord.fingerprint}, pin_enabled = TRUE, session_version = session_version + 1,
+          pin_hash = ${updatedPin.hash}, pin_salt = ${updatedPin.salt}, pin_hash_version = ${updatedPin.version},
+          pin_fingerprint = ${updatedPin.fingerprint}, pin_enabled = TRUE, session_version = session_version + 1,
           position = ${position}, role_group = ${roleGroup}, counts_for_tips = ${countsForTips},
           hourly_rate = ${hourlyRate}, tipped_rate = ${tippedRate}, active = TRUE, updated_at = NOW()
         WHERE id = ${existing[0].id}
@@ -238,13 +283,15 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
       ` as unknown as Array<{ id: string; name: string; email: string; phone: string }>;
       results.push({ ...rows[0], action: "updated" });
     } else {
+      await assertEmployeePinAvailable({ business, pin, employeeName: name });
+      const newPin = employeePinUpdate(business, pin, name);
       const rows = await sql`
         INSERT INTO employees (
           id, business, email, phone, sms_opt_in, name, pin_hash, pin_salt, pin_hash_version, pin_fingerprint,
           pin_enabled, position, role_group, counts_for_tips, hourly_rate, tipped_rate, active
         ) VALUES (
           ${crypto.randomUUID()}, ${business}, ${email}, ${phone}, ${smsOptIn}, ${name},
-          ${pinRecord.hash}, ${pinRecord.salt}, ${pinRecord.version}, ${pinRecord.fingerprint}, TRUE, ${position}, ${roleGroup}, ${countsForTips},
+          ${newPin.hash}, ${newPin.salt}, ${newPin.version}, ${newPin.fingerprint}, TRUE, ${position}, ${roleGroup}, ${countsForTips},
           ${hourlyRate}, ${tippedRate}, TRUE
         )
         RETURNING id, name, email, phone

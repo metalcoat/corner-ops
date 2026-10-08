@@ -2,6 +2,7 @@
 
 import { firstName } from "@/app/client-text";
 import { requestFailure, responseMessage } from "@/app/client-http";
+import { useSiteBrand } from "@/app/brand-context";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import ScheduleBoard, { type ScheduleEmployee, type ScheduleShift, type ScheduleTimeOff } from "./schedule-board";
@@ -112,8 +113,9 @@ function timeOffShiftConflicts(request: TimeOff, shifts: ScheduleShift[]) {
 
 
 export default function WorkforcePage() {
+  const brand = useSiteBrand();
   const [session, setSession] = useState<SessionView | null>(null);
-  const [business, setBusiness] = useState<Business>("Corner Deli");
+  const [business, setBusiness] = useState<Business>(brand.name === "At the Docks" ? "Tiki" : "Corner Deli");
   const [data, setData] = useState<WorkforceData | null>(null);
   const [tab, setTab] = useState<Tab>("schedule");
   const [busy, setBusy] = useState(false);

@@ -1,9 +1,10 @@
+import { assertEmployeePinAvailable, employeePinUpdate } from "@/lib/employee-pin-security";
 import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
 import { ensureEmployeeDirectorySchema, upsertDirectoryEmployees, type DirectoryEmployeeInput } from "@/lib/employee-directory";
 import { ensureEmployeeProfileSchema, scheduleColorFromId, validScheduleColor } from "@/lib/employee-profile";
 import { getSql } from "@/lib/db";
 import { employeePinLength, validateEmployeePin } from "@/lib/employee-pin";
-import { assertEmployeePinAvailable, createEmployeePinRecord, isEmployeePinUniqueViolation } from "@/lib/employee-pin-security";
+import { recordEmployeePinAudit } from "@/lib/employee-pin-audit";
 import { normalizeSmsPhone } from "@/lib/phone";
 import type { Business } from "@/lib/types";
 
@@ -52,11 +53,12 @@ export async function createDirectoryEmployee(input: DirectoryEmployeeInput) {
   return result.employees[0];
 }
 
-export async function bulkUpdateDirectoryPins(input: { business: Business; lines: string }) {
+export async function bulkUpdateDirectoryPins(input: { business: Business; lines: string; actor?: string }) {
   await ensureEmployeeDirectorySchema();
   const expectedLength = employeePinLength(input.business);
   const parsed: Array<{ name: string; pin: string }> = [];
   const seen = new Set<string>();
+  const seenPins = new Set<string>();
 
   for (const [index, rawLine] of String(input.lines || "").split(/\r?\n/).entries()) {
     const line = rawLine.trim();
@@ -68,7 +70,9 @@ export async function bulkUpdateDirectoryPins(input: { business: Business; lines
     const key = name.toLowerCase();
     if (!name) throw new Error(`Line ${index + 1} is missing an employee name.`);
     if (seen.has(key)) throw new Error(`${name} appears more than once in the PIN list.`);
+    if (seenPins.has(pin)) throw new Error("Each employee must have a unique PIN at this location.");
     seen.add(key);
+    seenPins.add(pin);
     parsed.push({ name, pin });
   }
 
@@ -77,18 +81,21 @@ export async function bulkUpdateDirectoryPins(input: { business: Business; lines
   const updated: string[] = [];
   const missing: string[] = [];
   for (const entry of parsed) {
-    await assertEmployeePinAvailable({ business: input.business, pin: entry.pin, employeeName: entry.name });
-    const record = createEmployeePinRecord(input.business, entry.pin, entry.name);
+    const target = await sql`SELECT id FROM employees WHERE business=${input.business} AND LOWER(BTRIM(name))=LOWER(BTRIM(${entry.name})) LIMIT 1`;
+    if(target[0]){
+      await assertEmployeePinAvailable({business:input.business,pin:entry.pin,employeeName:entry.name,excludeEmployeeId:String(target[0].id)});
+    }
+    const bulkPin = employeePinUpdate(input.business, entry.pin, entry.name);
     const rows = await sql`
       UPDATE employees
-      SET pin_hash = ${record.hash}, pin_salt = ${record.salt}, pin_hash_version = ${record.version},
-        pin_fingerprint = ${record.fingerprint}, pin_enabled = TRUE,
+      SET pin_hash = ${bulkPin.hash}, pin_salt = ${bulkPin.salt}, pin_hash_version = ${bulkPin.version},
+        pin_fingerprint = ${bulkPin.fingerprint}, pin_enabled = TRUE,
         active = TRUE, session_version = session_version + 1, updated_at = NOW()
       WHERE business = ${input.business}
         AND LOWER(BTRIM(name)) = LOWER(BTRIM(${entry.name}))
-      RETURNING name
-    ` as unknown as Array<{ name: string }>;
-    if (rows[0]) updated.push(rows[0].name);
+      RETURNING id,name
+    ` as unknown as Array<{ id:string;name: string }>;
+    if (rows[0]) { updated.push(rows[0].name); await recordEmployeePinAudit({employeeId:rows[0].id,business:input.business,action:"pin_changed",actor:input.actor||"system"}); }
     else missing.push(entry.name);
   }
   return { business: input.business, pinLength: expectedLength, requested: parsed.length, updated, missing };
@@ -109,6 +116,7 @@ export async function updateDirectoryEmployee(input: {
   hourlyRate?: number;
   tippedRate?: number;
   scheduleColor?: string;
+  actor?: string;
 }) {
   await ensureEmployeeProfileSchema();
   await ensureEmployeeDirectorySchema();
@@ -145,8 +153,12 @@ export async function updateDirectoryEmployee(input: {
   if (!position) throw new Error("Employee position is required.");
   if (email && !/^\S+@\S+\.\S+$/.test(email)) throw new Error("Employee email is invalid.");
   if (input.smsOptIn && !phone) throw new Error("Add a mobile phone number before enabling SMS notifications.");
-  const pin = input.pin ? await assertEmployeePinAvailable({ business: input.business, pin: validateEmployeePin(input.business, input.pin, name), employeeName: name, excludeEmployeeId: input.id }) : "";
-  const pinRecord = pin ? createEmployeePinRecord(input.business, pin, name) : null;
+  const pin = input.pin ? validateEmployeePin(input.business, input.pin, name) : "";
+
+  if (pin) {
+    await assertEmployeePinAvailable({ business: input.business, pin, employeeName: name, excludeEmployeeId: input.id });
+  }
+  const newPin = pin ? employeePinUpdate(input.business, pin, name) : null;
 
   const duplicate = await sql`
     SELECT id FROM employees
@@ -161,10 +173,10 @@ export async function updateDirectoryEmployee(input: {
       name = ${name}, position = ${position}, role_group = ${roleGroup},
       counts_for_tips = ${countsForTips}, hourly_rate = ${hourlyRate}, tipped_rate = ${tippedRate},
       active = ${active}, schedule_color = ${scheduleColor},
-      pin_hash = CASE WHEN ${pin} <> '' THEN ${pinRecord?.hash || ""} ELSE pin_hash END,
-      pin_salt = CASE WHEN ${pin} <> '' THEN ${pinRecord?.salt || ""} ELSE pin_salt END,
-      pin_hash_version = CASE WHEN ${pin} <> '' THEN ${pinRecord?.version || 1} ELSE pin_hash_version END,
-      pin_fingerprint = CASE WHEN ${pin} <> '' THEN ${pinRecord?.fingerprint || ""} ELSE pin_fingerprint END,
+      pin_hash = COALESCE(${newPin?.hash ?? null}, pin_hash),
+      pin_salt = COALESCE(${newPin?.salt ?? null}, pin_salt),
+      pin_hash_version = COALESCE(${newPin?.version ?? null}::int, pin_hash_version),
+      pin_fingerprint = COALESCE(${newPin?.fingerprint ?? null}, pin_fingerprint),
       pin_enabled = CASE WHEN ${pin} <> '' THEN TRUE ELSE pin_enabled END,
       session_version = CASE WHEN ${pin} <> '' OR active <> ${active} THEN session_version + 1 ELSE session_version END,
       updated_at = NOW()
@@ -184,6 +196,10 @@ export async function updateDirectoryEmployee(input: {
   }
 
   const row = rows[0];
+  if (pin) {
+    await recordEmployeePinAudit({employeeId:input.id,business:input.business,action:"pin_changed",actor:input.actor||"system"});
+  }
+
   if (Boolean(existing.active) && !Boolean(row.active)) {
     await sql`
       UPDATE schedule_shifts

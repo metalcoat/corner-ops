@@ -1,0 +1,4 @@
+import { isoJson } from "@/lib/timestamp-values";
+import { driverActor, recordLocation } from "@/lib/ordering-driver-delivery";
+export const runtime="nodejs";
+export async function POST(request:Request,{params}:{params:Promise<{id:string}>}){try{const actor=await driverActor();if(!actor)return isoJson({error:"Employee sign-in required."},{status:401});const body=await request.json() as Record<string,unknown>;return isoJson(await recordLocation(actor,(await params).id,{clientEventId:String(body.clientEventId||""),capturedAt:String(body.capturedAt||""),latitude:Number(body.latitude),longitude:Number(body.longitude),accuracy:Number(body.accuracy),metadata:body.metadata}))}catch(error){const message=error instanceof Error?error.message:"Location was not accepted.";return isoJson({error:message},{status:message.includes("assigned")?403:409})}}

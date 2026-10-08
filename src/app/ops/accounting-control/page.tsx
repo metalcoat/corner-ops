@@ -64,11 +64,8 @@ type Dashboard = {
   reconciliations: Array<Record<string, unknown>>;
   unbalancedEntries: Array<{ id: string; entryDate: string; description: string; source: string; debits: number; credits: number; difference: number }>;
   monthly: Array<{ month: string; revenue: number; expenses: number; profit: number }>;
-  squareDepositMatches: Array<Record<string, unknown>>;
-  squareDays: Array<Record<string, unknown>>;
   receivables: Receivables;
 };
-type SquareDash = { summary: { orders: number; sales: number; taxes: number; tips: number } };
 type CodingLine = { target: string; amount: string; memo: string };
 
 const dollars = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0);
@@ -82,7 +79,6 @@ export default function AccountingControlPage() {
   const [session, setSession] = useState<SessionView | null>(null);
   const [business, setBusiness] = useState<Business>("Corner Deli");
   const [data, setData] = useState<Dashboard | null>(null);
-  const [square, setSquare] = useState<SquareDash | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
@@ -96,13 +92,9 @@ export default function AccountingControlPage() {
 
   async function load(active = business) {
     setNotice("");
-    const [accountingResponse, squareResponse] = await Promise.all([
-      fetch(`/api/accounting-control?business=${encodeURIComponent(active)}`, { cache: "no-store" }),
-      fetch("/api/accounting-control?area=square", { cache: "no-store" }),
-    ]);
+    const accountingResponse = await fetch(`/api/accounting-control?business=${encodeURIComponent(active)}`, { cache: "no-store" });
     if (!accountingResponse.ok) throw new Error(await responseMessage(accountingResponse));
     setData(await accountingResponse.json() as Dashboard);
-    if (squareResponse.ok) setSquare(await squareResponse.json() as SquareDash);
   }
 
   useEffect(() => {
@@ -306,6 +298,5 @@ export default function AccountingControlPage() {
       </div></details>
     </section>
 
-    {business === "Tiki" && <section className="controlCard"><div className="sectionHeading"><div><p className="eyebrow">Square controls</p><h2>Tiki sales integration</h2></div><div className="controlActions"><button className="primary" onClick={() => void post({ action: "square-sync-full" }).then((result) => setNotice(`Square synced: ${result.orders} orders.`))} disabled={busy}>Full Square sync</button><button onClick={() => void post({ action: "square-match-build" }).then((result) => setNotice(`Built ${result.created} deposit suggestions.`))}>Build deposit matches</button></div></div><div className="metricGrid"><div className="metric"><span>Orders, 30 days</span><strong>{square?.summary.orders || 0}</strong></div><div className="metric"><span>Sales</span><strong>{dollars(square?.summary.sales || 0)}</strong></div><div className="metric"><span>Tax</span><strong>{dollars(square?.summary.taxes || 0)}</strong></div><div className="metric"><span>Tips</span><strong>{dollars(square?.summary.tips || 0)}</strong></div></div></section>}
   </main>;
 }

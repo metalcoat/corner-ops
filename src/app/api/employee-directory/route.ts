@@ -1,4 +1,4 @@
-import { del, put } from "@vercel/blob";
+import { del, put } from "@/lib/storage";
 import { recordAuditEvent } from "@/lib/audit";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { apiError, unauthorized } from "@/lib/http";
@@ -11,6 +11,7 @@ import {
 import { sendEmployeeOnboardingSms } from "@/lib/employee-onboarding";
 import { setEmployeeProfilePhoto } from "@/lib/employee-profile";
 import type { Business } from "@/lib/types";
+import { recordEmployeePinAudit } from "@/lib/employee-pin-audit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -105,6 +106,7 @@ export async function POST(request: Request) {
         hourlyRate: Number(body.hourlyRate || 0),
         tippedRate: Number(body.tippedRate || 0),
       });
+      await recordEmployeePinAudit({ employeeId: employee.id, business, action: "pin_assigned", actor: session.email });
 
       const onboardingSms = body.sendOnboardingSms === false
         ? null
@@ -146,6 +148,7 @@ export async function POST(request: Request) {
       return Response.json(await bulkUpdateDirectoryPins({
         business,
         lines: String(body.lines || ""),
+        actor: session.email,
       }));
     }
 
@@ -165,6 +168,7 @@ export async function POST(request: Request) {
         hourlyRate: body.hourlyRate === undefined ? undefined : Number(body.hourlyRate || 0),
         tippedRate: body.tippedRate === undefined ? undefined : Number(body.tippedRate || 0),
         scheduleColor: body.scheduleColor === undefined ? undefined : String(body.scheduleColor || ""),
+        actor: session.email,
       }));
     }
 

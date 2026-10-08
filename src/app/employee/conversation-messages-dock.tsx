@@ -4,6 +4,8 @@ import { canvasToJpegBlob, drawCanvasImage } from "@/app/client-image";
 import { responseMessage } from "@/app/client-http";
 import { firstName } from "@/app/client-text";
 import { useMessageThreadBehavior } from "@/app/use-message-thread-behavior";
+import MessageReactions from "@/app/message-reactions";
+import type { MessageReactionCount, MessageReactionKey } from "@/lib/message-reaction-options";
 import { ChangeEvent, ClipboardEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "../message-inbox.css";
 
@@ -37,6 +39,8 @@ type Message = {
   seenCount: number;
   seenBy: SeenBy[];
   unseenNames: string[];
+  reactions: MessageReactionCount[];
+  myReaction: MessageReactionKey | null;
   created_at: string;
 };
 
@@ -173,6 +177,7 @@ export default function EmployeeMessagesApp() {
   const [wideLayout, setWideLayout] = useState(false);
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reactionBusyId, setReactionBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<{ file: File; url: string; name: string; size: number } | null>(null);
@@ -481,6 +486,31 @@ export default function EmployeeMessagesApp() {
     }
   }
 
+  async function reactToMessage(message: Message, reaction: MessageReactionKey) {
+    if (reactionBusyId) return;
+    setReactionBusyId(message.id);
+    setNotice("");
+    try {
+      const response = await fetch("/api/employee/message-conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reaction", messageId: message.id, reaction }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      const result = await response.json() as { reactions: MessageReactionCount[]; myReaction: MessageReactionKey | null };
+      setData((current) => current ? {
+        ...current,
+        messages: current.messages.map((item) => item.id === message.id
+          ? { ...item, reactions: result.reactions, myReaction: result.myReaction }
+          : item),
+      } : current);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Reaction could not be saved.");
+    } finally {
+      setReactionBusyId(null);
+    }
+  }
+
   async function updateNickname(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -609,7 +639,7 @@ export default function EmployeeMessagesApp() {
                       {message.attachment_name && <a className="messagePhoto" href={photoUrl(message.id)} target="_blank" rel="noreferrer"><img src={photoUrl(message.id)} alt={message.body || `Photo from ${displayName}`} loading="lazy" onLoad={() => { if (stickToBottomRef.current) scrollThreadToBottom(); }} /></a>}
                       {message.body && <p>{message.body}</p>}
                     </div>
-                    <div className="messageBubbleMeta"><span>{isOwn ? "You" : displayName}</span><time>{messageTime(message.created_at)}</time>{isOwn && <button type="button" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>}</div>
+                    <div className="messageBubbleMeta"><span>{isOwn ? "You" : displayName}</span><time>{messageTime(message.created_at)}</time>{isOwn && <button type="button" disabled={busy} onClick={() => void deleteMessage(message)}>Delete</button>}<MessageReactions counts={message.reactions || []} mine={message.myReaction} disabled={reactionBusyId === message.id} onSelect={(reaction) => void reactToMessage(message, reaction)} /></div>
                     <details className="messageReceipt"><summary>{message.expectedCount === 0 ? "Sent to management" : `Seen by ${message.seenCount} of ${message.expectedCount}`}</summary><div>{message.seenBy.length > 0 && <section><strong>Seen</strong>{message.seenBy.map((read) => <span key={read.employeeId}>{read.name} · {new Date(read.readAt).toLocaleString()}</span>)}</section>}{message.unseenNames.length > 0 && <section><strong>Not seen</strong>{message.unseenNames.map((name) => <span key={name}>{name}</span>)}</section>}{message.expectedCount > 0 && !message.unseenNames.length && <p>Everyone still active on this message has seen it.</p>}</div></details>
                   </div>
                 </article>

@@ -1,6 +1,8 @@
 import { getSql } from "@/lib/db";
 import type { EmployeeSession } from "@/lib/employee-auth";
 import { scheduleColorFromId } from "@/lib/employee-profile";
+import { ensureMessageReadSchema } from "@/lib/message-reads";
+import { isMessageReactionKey, MESSAGE_REACTION_OPTIONS, type MessageReactionCount, type MessageReactionKey } from "@/lib/message-reaction-options";
 import type { Business } from "@/lib/types";
 
 export const TEAM_CONVERSATION_KEY = "team";
@@ -289,6 +291,7 @@ export async function sendConversationMessage(input: {
   body?: unknown;
   attachment?: AttachmentInput | null;
 }) {
+  await ensureMessageReadSchema();
   const senderEmployeeId = input.senderEmployeeId ? uuid(input.senderEmployeeId, "Sender") : null;
   const { descriptor, members, recipientEmployeeId, effectiveSenderEmployeeId, linkedManagementSide } = await resolveConversation({
     business: input.business,
@@ -399,6 +402,39 @@ function visibleMessages(
     viewerEmployeeId,
     linkedManagementAccess,
   ));
+}
+
+type ReactionViewer = { kind: "employee" | "management"; id: string };
+
+async function withReactions(messages: DecoratedMessage[], viewer?: ReactionViewer) {
+  if (!messages.length) return messages.map((message) => ({ ...message, reactions: [] as MessageReactionCount[], myReaction: null as MessageReactionKey | null }));
+  const ids = JSON.stringify(messages.map((message) => message.id));
+  const rows = await getSql()`
+    WITH visible AS (SELECT value::uuid AS id FROM jsonb_array_elements_text(${ids}::jsonb))
+    SELECT message_id, employee_id::text AS actor_id, 'employee' AS actor_kind, reaction
+    FROM employee_message_reactions WHERE message_id IN (SELECT id FROM visible)
+    UNION ALL
+    SELECT message_id, user_id::text AS actor_id, 'management' AS actor_kind, reaction
+    FROM owner_message_reactions WHERE message_id IN (SELECT id FROM visible)
+  ` as unknown as Array<{ message_id: string; actor_id: string; actor_kind: ReactionViewer["kind"]; reaction: MessageReactionKey }>;
+  const byMessage = new Map<string, { counts: Map<MessageReactionKey, number>; mine: MessageReactionKey | null }>();
+  for (const row of rows) {
+    const item = byMessage.get(row.message_id) || { counts: new Map<MessageReactionKey, number>(), mine: null };
+    item.counts.set(row.reaction, (item.counts.get(row.reaction) || 0) + 1);
+    if (viewer && row.actor_kind === viewer.kind && row.actor_id.toLowerCase() === viewer.id.toLowerCase()) item.mine = row.reaction;
+    byMessage.set(row.message_id, item);
+  }
+  return messages.map((message) => {
+    const item = byMessage.get(message.id);
+    return {
+      ...message,
+      reactions: MESSAGE_REACTION_OPTIONS.flatMap((option) => {
+        const count = item?.counts.get(option.key) || 0;
+        return count ? [{ key: option.key, count }] : [];
+      }),
+      myReaction: item?.mine || null,
+    };
+  });
 }
 
 async function recentMessageRows(
@@ -531,7 +567,8 @@ function unreadMessageIdsForViewer(messages: DecoratedMessage[], reads: ReceiptR
     .map((message) => message.id);
 }
 
-export async function ownerConversationDashboard(business: Business, viewAsEmployeeId?: unknown) {
+export async function ownerConversationDashboard(business: Business, viewAsEmployeeId?: unknown, ownerUserId?: string) {
+  await ensureMessageReadSchema();
   const employees = await activeEmployees(business);
   const activeIds = employees.map((employee) => String(employee.id).toLowerCase());
   const requestedViewer = clean(viewAsEmployeeId, 80);
@@ -554,13 +591,14 @@ export async function ownerConversationDashboard(business: Business, viewAsEmplo
   return {
     business,
     employees: employees.map(mapEmployee),
-    messages: decorated,
+    messages: await withReactions(decorated, viewerId || !ownerUserId ? undefined : { kind: "management", id: ownerUserId }),
     unreadMessageIds: viewerId ? unreadMessageIdsForViewer(decorated, receipts.reads, viewerId) : [],
     viewAsEmployee: viewer ? mapEmployee(viewer) : null,
   };
 }
 
 export async function employeeConversationDashboard(session: EmployeeSession) {
+  await ensureMessageReadSchema();
   const linkedManagementAccess = session.employeeId.toLowerCase() === LINKED_CHRIS_EMPLOYEE_ID
     && await linkedIdentityActive({ business: session.business, employeeId: session.employeeId });
   const employees = await activeEmployees(session.business);
@@ -582,12 +620,70 @@ export async function employeeConversationDashboard(session: EmployeeSession) {
     employee: mapEmployee(employee),
     linkedManagementAccess,
     directory: employees.map(mapEmployee),
-    messages: decorated,
+    messages: await withReactions(decorated, { kind: "employee", id: session.employeeId }),
     unreadMessageIds: unreadMessageIdsForViewer(decorated, receipts.reads, session.employeeId),
   };
 }
 
+export async function toggleConversationReaction(session: EmployeeSession, messageId: unknown, reactionValue: unknown) {
+  const id = uuid(messageId, "Message");
+  if (!isMessageReactionKey(reactionValue)) throw new Error("Choose a supported reaction.");
+  const dashboard = await employeeConversationDashboard(session);
+  const message = dashboard.messages.find((item) => item.id.toLowerCase() === id);
+  if (!message) throw new Error("This message is not available in your conversations.");
+  const sql = getSql();
+  const current = (await sql`
+    SELECT reaction FROM employee_message_reactions
+    WHERE message_id=${id}::uuid AND employee_id=${session.employeeId}::uuid
+  `)[0];
+  if (current?.reaction === reactionValue) {
+    await sql`
+      DELETE FROM employee_message_reactions
+      WHERE message_id=${id}::uuid AND employee_id=${session.employeeId}::uuid AND reaction=${reactionValue}
+    `;
+  } else {
+    await sql`
+      INSERT INTO employee_message_reactions (message_id, employee_id, reaction)
+      SELECT m.id, ${session.employeeId}::uuid, ${reactionValue}
+      FROM employee_messages m WHERE m.id=${id}::uuid AND m.business=${session.business} AND m.deleted_at IS NULL
+      ON CONFLICT (message_id, employee_id) DO UPDATE SET reaction=EXCLUDED.reaction, created_at=NOW()
+    `;
+  }
+  const updated = (await withReactions([message], { kind: "employee", id: session.employeeId }))[0];
+  return { messageId: id, reactions: updated.reactions, myReaction: updated.myReaction };
+}
+
+export async function toggleOwnerConversationReaction(business: Business, ownerUserId: string, messageId: unknown, reactionValue: unknown) {
+  const id = uuid(messageId, "Message");
+  const userId = uuid(ownerUserId, "Management account");
+  if (!isMessageReactionKey(reactionValue)) throw new Error("Choose a supported reaction.");
+  const dashboard = await ownerConversationDashboard(business);
+  const message = dashboard.messages.find((item) => item.id.toLowerCase() === id);
+  if (!message) throw new Error("This message is not available in your conversations.");
+  const sql = getSql();
+  const current = (await sql`
+    SELECT reaction FROM owner_message_reactions
+    WHERE message_id=${id}::uuid AND user_id=${userId}::uuid
+  `)[0];
+  if (current?.reaction === reactionValue) {
+    await sql`
+      DELETE FROM owner_message_reactions
+      WHERE message_id=${id}::uuid AND user_id=${userId}::uuid AND reaction=${reactionValue}
+    `;
+  } else {
+    await sql`
+      INSERT INTO owner_message_reactions (message_id, user_id, reaction)
+      SELECT m.id, ${userId}::uuid, ${reactionValue}
+      FROM employee_messages m WHERE m.id=${id}::uuid AND m.business=${business} AND m.deleted_at IS NULL
+      ON CONFLICT (message_id, user_id) DO UPDATE SET reaction=EXCLUDED.reaction, created_at=NOW()
+    `;
+  }
+  const updated = (await withReactions([message], { kind: "management", id: userId }))[0];
+  return { messageId: id, reactions: updated.reactions, myReaction: updated.myReaction };
+}
+
 export async function markConversationMessageSeen(session: EmployeeSession, messageId: unknown) {
+  await ensureMessageReadSchema();
   const linkedManagementAccess = session.employeeId.toLowerCase() === LINKED_CHRIS_EMPLOYEE_ID
     && await linkedIdentityActive({ business: session.business, employeeId: session.employeeId });
   const id = uuid(messageId, "Message");
@@ -636,6 +732,7 @@ function attachment(row: Record<string, unknown> | undefined): ConversationAttac
 }
 
 export async function ownerConversationAttachment(business: Business, messageId: unknown) {
+  await ensureMessageReadSchema();
   const id = uuid(messageId, "Message");
   const rows = await getSql()`
     SELECT attachment_pathname, attachment_name, attachment_type, attachment_size
@@ -648,6 +745,7 @@ export async function ownerConversationAttachment(business: Business, messageId:
 }
 
 export async function employeeConversationAttachment(session: EmployeeSession, messageId: unknown) {
+  await ensureMessageReadSchema();
   const linkedManagementAccess = session.employeeId.toLowerCase() === LINKED_CHRIS_EMPLOYEE_ID
     && await linkedIdentityActive({ business: session.business, employeeId: session.employeeId });
   const id = uuid(messageId, "Message");
