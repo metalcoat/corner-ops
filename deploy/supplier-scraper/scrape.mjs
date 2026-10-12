@@ -11,7 +11,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { restoreSessionCookies, saveSessionCookies } from "./session-cookies.mjs";
+import { clearStaleProfileLock, restoreSessionCookies, saveSessionCookies } from "./session-cookies.mjs";
 import { dedupeProducts, extractProducts, extractSignInCode, joinSplitProducts, productsToCsv, webstaurantProducts } from "./supplier-web-extract.ts";
 
 const SECRET = process.env.CRON_SECRET || "";
@@ -543,6 +543,7 @@ async function run(supplier) {
   const guideUrls = (process.env[`${supplier.key}_ORDER_GUIDE_URL`] || supplier.guide).split(/[\s,]+/).filter(Boolean);
   const guideUrl = guideUrls[0] || "";
   if (supplier.headed && !process.env.DISPLAY) await startScreen();
+  clearStaleProfileLock(`${PROFILES}/${supplier.key}`);
   const context = await chromium.launchPersistentContext(`${PROFILES}/${supplier.key}`, {
     headless: !HEADED && !supplier.headed,
     viewport: { width: 1440, height: 1000 },

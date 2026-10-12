@@ -5,7 +5,7 @@
 //
 //   supplier-prices-sync.sh --signin webstaurant
 import { chromium } from "playwright";
-import { restoreSessionCookies, saveSessionCookies } from "./session-cookies.mjs";
+import { clearStaleProfileLock, restoreSessionCookies, saveSessionCookies } from "./session-cookies.mjs";
 
 const PROFILES = process.env.PROFILE_DIR || "/profiles";
 const MINUTES = Number(process.env.SIGNIN_MINUTES || 15);
@@ -38,6 +38,8 @@ if (!site) {
   console.error(`Which site? One of: ${Object.keys(SITES).join(", ")}`);
   process.exit(2);
 }
+
+clearStaleProfileLock(`${PROFILES}/${site.key}`);
 
 const context = await chromium.launchPersistentContext(`${PROFILES}/${site.key}`, {
   headless: false,

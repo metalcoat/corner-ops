@@ -23,7 +23,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { restoreSessionCookies, saveSessionCookies } from "./session-cookies.mjs";
+import { clearStaleProfileLock, restoreSessionCookies, saveSessionCookies } from "./session-cookies.mjs";
 import {
   FORBIDDEN_CONTROL,
   compareTotals,
@@ -445,6 +445,7 @@ async function attemptRun(job, attempt) {
   const mapping = Object.fromEntries((job.mapping || []).map((m) => [m.key || employeeKey(m.employee), String(m.eeNum)]));
 
   if (!process.env.DISPLAY) await startScreen();
+  clearStaleProfileLock(`${PROFILES}/${KEY}`);
   const context = await chromium.launchPersistentContext(`${PROFILES}/${KEY}`, {
     headless: false,
     // Headed Chromium on Xvfb in the container: no GPU, /dev/shm is small (it crashed with SIGSEGV without these).

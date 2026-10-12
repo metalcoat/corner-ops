@@ -2,7 +2,7 @@
 // browser closes, so the saved profile alone forgets the sign-in. The sign-in
 // script keeps those cookies next to the profile (same private volume), and each
 // run puts them back before opening the site.
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const file = (profiles, key) => `${profiles}/${key}.session-cookies.json`;
 
@@ -21,5 +21,17 @@ export async function restoreSessionCookies(context, profiles, key) {
     return cookies.length;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Chromium locks a profile with Singleton* files. A browser that crashed in an earlier
+ * container leaves them behind, and the next container's browser then sees the profile
+ * as "in use on another computer" and fails or crashes (downloads especially). Jobs run
+ * one at a time under the website-job lock, so a leftover lock is always stale.
+ */
+export function clearStaleProfileLock(profileDir) {
+  for (const name of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
+    try { rmSync(`${profileDir}/${name}`, { force: true }); } catch {}
   }
 }
