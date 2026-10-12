@@ -174,6 +174,15 @@ flowchart TD
   PCTip (tips incl. manual), OT. Salaried rows, Sick, SPOH, Overpay are never touched.
 - Employee matching (Corner Ops payroll name → Payroll Relief EE #) is on the payroll page.
 - Dry run (fills the file, uploads nothing): `supplier-prices-sync.sh --payroll-dry-run <weekStart>`.
+- Payroll Relief behaviour (seen on the real site, 2026-10-12, week 10/5–10/11):
+  - "Download Excel" is `GET https://app.payrollrelief.com/Payroll/CreateCsv?sendEmail=false` (sendEmail=true emails it — never use).
+    The job fetches it directly; Chromium's download handling crashed in the container.
+  - **Uploading the Excel timesheet stores the entries immediately**; Save stays greyed out. The job verifies by
+    re-downloading the stored timesheet and comparing totals; it never re-runs after an upload.
+  - After the owner pressed Submit, the current payroll moved to the next week (#44) and the submitted one appeared
+    under Approved as "10/16/2026 - 43 - Normal" (pay date - number - type). The job's Submit check relies on this.
+  - The AccountantsOffice session lasts a few hours; most Mondays need the texted code (code box on the payroll page).
+  - Chromium leaves `Singleton*` lock files after a crash; jobs clear them before launching (one job at a time).
 - Automatic Submit stays **off** until a first Submit has been watched together.
 
 ## 5. Forgotten clock-outs
