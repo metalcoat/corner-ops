@@ -487,19 +487,34 @@ async function attemptRun(job, attempt) {
       }
     }
 
-    // Timesheet Options → Download Excel (a CSV of the payroll's current entries).
-    const options = page.locator("a, button, span, [role=button]").filter({ hasText: /^\s*Timesheet Options\s*$/i }).filter({ visible: true });
-    if (!(await visible(options))) throw new Error(`Payroll Entry has no Timesheet Options link (screenshot ${await shot("no-options")}). Is the Payroll Submission Method still Excel Timesheet?`);
-    await safeClick(options, "Timesheet Options");
-    await page.waitForTimeout(1_500);
-    const downloadLink = page.locator("a, button, li, span, [role=menuitem]").filter({ hasText: /^\s*Download Excel\s*$/i }).filter({ visible: true });
-    if (!(await visible(downloadLink))) throw new Error(`The Timesheet Options menu has no Download Excel (screenshot ${await shot("no-download")}).`);
-    const waiting = page.waitForEvent("download", { timeout: 60_000 });
-    await safeClick(downloadLink, "Download Excel");
-    const download = await waiting;
-    const fileName = download.suggestedFilename() || `timesheet-${stamp}.csv`;
+    // Timesheet Options → Download Excel is a plain GET of the open payroll's CSV. Fetching it with the
+    // signed-in session avoids Chromium's download handling, which crashed the browser in the container.
+    // sendEmail must stay false ("Email Excel" is the same address with sendEmail=true).
+    const CSV_URL = "https://app.payrollrelief.com/Payroll/CreateCsv?sendEmail=false";
+    let fileName = "", csvText = "";
+    const direct = await page.context().request.get(CSV_URL, { timeout: 60_000 }).catch((error) => { log(`direct timesheet download failed (${error.message.split("\n")[0]}); using the menu`); return null; });
+    const disposition = direct?.headers()["content-disposition"] || "";
+    if (direct?.ok() && /attachment/i.test(disposition)) {
+      fileName = (/filename="?([^";]+)"?/i.exec(disposition) || [])[1] || `timesheet-${stamp}.csv`;
+      csvText = await direct.text();
+    } else {
+      // Timesheet Options → Download Excel (a CSV of the payroll's current entries).
+      const options = page.locator("a, button, span, [role=button]").filter({ hasText: /^\s*Timesheet Options\s*$/i }).filter({ visible: true });
+      if (!(await visible(options))) throw new Error(`Payroll Entry has no Timesheet Options link (screenshot ${await shot("no-options")}). Is the Payroll Submission Method still Excel Timesheet?`);
+      await safeClick(options, "Timesheet Options");
+      await page.waitForTimeout(1_500);
+      const downloadLink = page.locator("a, button, li, span, [role=menuitem]").filter({ hasText: /^\s*Download Excel\s*$/i }).filter({ visible: true });
+      if (!(await visible(downloadLink))) throw new Error(`The Timesheet Options menu has no Download Excel (screenshot ${await shot("no-download")}).`);
+      const waiting = page.waitForEvent("download", { timeout: 60_000 });
+      await safeClick(downloadLink, "Download Excel");
+      const download = await waiting;
+      fileName = download.suggestedFilename() || `timesheet-${stamp}.csv`;
+      const saved = `${DEBUG}/payroll-relief-${stamp}-menu-download.csv`;
+      await download.saveAs(saved);
+      csvText = readFileSync(saved, "utf8");
+    }
     const downloaded = `${DEBUG}/payroll-relief-${stamp}-downloaded-${fileName.replace(/[^\w. -]+/g, "_")}`;
-    await download.saveAs(downloaded);
+    writeFileSync(downloaded, csvText);
     const sheet = parseTimesheet(readFileSync(downloaded, "utf8"));
     log(`downloaded ${fileName}: ${sheet.employees.length} employees, period ${sheet.periodStart} to ${sheet.periodEnd}, ${sheet.employer}`);
 
