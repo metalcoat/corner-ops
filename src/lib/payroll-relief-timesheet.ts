@@ -394,7 +394,33 @@ export function formatTotals(t: HoursTotals): string {
   return `Reg ${round2(t.reg).toFixed(2)}, Tipped ${round2(t.tipHours).toFixed(2)}, Tips $${round2(t.tips).toFixed(2)}, OT ${round2(t.ot).toFixed(2)}`;
 }
 
-/** Words on a control the payroll job may never press (it only uploads and saves; the owner submits). */
+/**
+ * After the job pressed Submit and reloaded Payroll Entry: did it go through? Yes when the open payroll is
+ * now a different period, or (no open period shown) the page lists this week's period as Approved.
+ * No when this week is still the open payroll, or the page shows neither (can't confirm).
+ */
+export function submitConfirmed(input: { pageText: string; open: { start: string; end: string } | null; weekStart: string }): boolean {
+  if (input.open && input.open.start && input.open.end) return periodMismatch(input.open, input.weekStart) !== null;
+  const text = String(input.pageText || "").replace(/\s+/g, " ");
+  const [y, m, d] = input.weekStart.split("-").map(Number);
+  const start = `${m}/${d}/${y}`;
+  const end = (() => { const e = addDays(input.weekStart, 6).split("-").map(Number); return `${e[1]}/${e[2]}/${e[0]}`; })();
+  const pad = (us: string) => us.replace(/^(\d)\//, "0$1/").replace(/\/(\d)\//, "/0$1/");
+  const mentions = (us: string) => text.includes(us) || text.includes(pad(us));
+  if (!(mentions(start) || mentions(end))) return false;
+  // "Approved" near this week's dates (within 200 characters either way).
+  for (const date of [start, end, pad(start), pad(end)]) {
+    let at = text.indexOf(date);
+    while (at >= 0) {
+      if (/approved/i.test(text.slice(Math.max(0, at - 200), at + date.length + 200))) return true;
+      at = text.indexOf(date, at + 1);
+    }
+  }
+  return false;
+}
+
+/** Words on a control the payroll job may never press via safeClick (it uploads and saves). The one exception is
+ * the separate, explicit Submit step in payroll-relief.mjs (pressSubmitOnce), gated by PAYROLL_RELIEF_AUTO_SUBMIT. */
 export const FORBIDDEN_CONTROL = /submit|approv|finali[sz]e|process|transmit|send to|commit|release/i;
 
 // ---------------------------------------------------------------------------

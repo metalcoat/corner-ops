@@ -17,7 +17,12 @@ type ClockOutCase = {
   closeBasisLabel: string;
   scheduledEnd: string | null;
   scheduledEndEastern: string | null;
-  status: "Open" | "Submitted" | "Resolved";
+  status: "Open" | "AutoClosed" | "Submitted" | "Resolved";
+  kind: "open_punch" | "auto_closed" | "late_clock_out" | "unscheduled";
+  kindLabel: string;
+  source: string;
+  punchClockOut: string | null;
+  punchClockOutEastern: string | null;
   employeeLeftAt: string | null;
   employeeLeftAtEastern: string | null;
   employeeNote: string;
@@ -52,6 +57,8 @@ const RESOLUTIONS: Record<string, string> = {
   employee_time: "Employee's time used",
   custom: "Time entered by owner",
   closed_elsewhere: "Closed on the punch itself",
+  kept: "Kept as it was",
+  confirmed: "Employee confirmed it",
 };
 
 export default function MissedClockOutsPage() {
@@ -99,7 +106,7 @@ export default function MissedClockOutsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.authenticated, business, focusId]);
 
-  async function apply(item: ClockOutCase, choice: "scheduled_end" | "employee_time" | "custom", customTime?: string) {
+  async function apply(item: ClockOutCase, choice: "scheduled_end" | "employee_time" | "custom" | "keep", customTime?: string) {
     setBusy(true);
     setNotice("");
     try {
@@ -132,27 +139,29 @@ export default function MissedClockOutsPage() {
 
   const others = cases.filter((item) => item.id !== focused?.id && item.status !== "Resolved");
   const card = (item: ClockOutCase) => <section className="controlCard" key={item.id}>
-    <p className="eyebrow">{item.business} · {item.position || "Shift"} · {item.status === "Submitted" ? "Employee entered a time" : item.status}</p>
+    <p className="eyebrow">{item.business} · {item.source} · {item.position || "Shift"} · {item.status === "Submitted" ? "Employee entered a time" : item.kindLabel}</p>
     <h2>{item.employeeName}</h2>
     <div className="metricGrid">
       <div className="metric"><span>Clocked in</span><strong>{item.clockInEastern || "—"}</strong></div>
       <div className="metric"><span>Scheduled end</span><strong>{item.scheduledEndEastern || "No published shift"}</strong></div>
+      {item.kind !== "open_punch" && <div className="metric"><span>{item.kind === "auto_closed" ? "Closed automatically at" : "Rezku clock-out"}</span><strong>{item.punchClockOutEastern || "—"}</strong></div>}
       <div className="metric"><span>They say they left</span><strong>{item.employeeLeftAtEastern || "Not entered yet"}</strong></div>
     </div>
     {item.employeeNote && <p className="reportNote">“{item.employeeNote}”</p>}
-    <p className="reportNote">{item.smsLabel}. Found after {item.closeBasisLabel}.</p>
+    <p className="reportNote">{item.smsLabel}.{item.kind === "open_punch" ? ` Found after ${item.closeBasisLabel}.` : ""}</p>
     {item.status === "Resolved"
       ? <p className="reportNote"><span className="badge good">{RESOLUTIONS[item.resolution] || "Settled"}</span> Clock-out {item.resolvedClockOutEastern || "saved"}{item.resolvedBy ? ` by ${item.resolvedBy}` : ""}.</p>
       : <>
         <div className="controlActions">
           {item.employeeLeftAt && <button className="primary" disabled={busy} onClick={() => void apply(item, "employee_time")}>Use the time they entered ({item.employeeLeftAtEastern})</button>}
-          {item.scheduledEnd && <button className={item.employeeLeftAt ? "" : "primary"} disabled={busy} onClick={() => void apply(item, "scheduled_end")}>Use scheduled end ({item.scheduledEndEastern})</button>}
+          {item.scheduledEnd && (item.kind !== "auto_closed" || item.punchClockOut !== item.scheduledEnd) && <button className={item.employeeLeftAt ? "" : "primary"} disabled={busy} onClick={() => void apply(item, "scheduled_end")}>Use scheduled end ({item.scheduledEndEastern})</button>}
+          {item.kind !== "open_punch" && <button disabled={busy} onClick={() => void apply(item, "keep")}>Keep as is ({item.punchClockOutEastern})</button>}
         </div>
         <form key={`${item.id}-${item.employeeLeftAt}`} className="controlForm" onSubmit={custom(item)}>
-          <label>Another clock-out (ET)<input name="clockOut" type="datetime-local" defaultValue={easternInputValue(item.employeeLeftAt || item.scheduledEnd)} required /></label>
+          <label>Another clock-out (ET)<input name="clockOut" type="datetime-local" defaultValue={easternInputValue(item.employeeLeftAt || item.scheduledEnd || item.punchClockOut)} required /></label>
           <div className="controlActions"><button disabled={busy}>Use this time</button></div>
         </form>
-        <p className="reportNote">Saved as an audited punch correction; it closes the open punch and settles this case.</p>
+        <p className="reportNote">A new time is saved as an audited punch correction ({item.source === "Rezku" ? "on the Rezku punch payroll uses" : "on the time clock punch"}) and settles this case. Keep as is settles it without changing the punch.</p>
       </>}
     <p><a href={`/ops/payroll-control?business=${encodeURIComponent(item.business)}&weekStart=${weekStartFor(item.businessDate)}`}>Open this payroll week</a></p>
   </section>;
@@ -161,8 +170,8 @@ export default function MissedClockOutsPage() {
     <header className="controlHeader">
       <div>
         <p className="eyebrow">Payroll · Eastern Time</p>
-        <h1>Missed clock-outs</h1>
-        <p>Punches still open an hour after close. Choose the clock-out to use; nothing changes until you tap one.</p>
+        <h1>Clock-outs to check</h1>
+        <p>Forgotten clock-outs: punches still open after close, punches closed automatically at the scheduled end, and Rezku clock-outs an hour or more past the schedule. Choose the clock-out to use; nothing changes until you tap one.</p>
       </div>
       <div className="controlActions">
         <div className="businessPills">{(["Corner Deli", "Tiki"] as Business[]).filter((name) => !session.businesses?.length || session.businesses.includes(name)).map((name) => <button key={name} className={business === name && !focusId ? "active" : ""} onClick={() => { setFocusId(""); setBusiness(name); }}>{name}</button>)}</div>

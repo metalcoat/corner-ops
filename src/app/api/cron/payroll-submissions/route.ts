@@ -1,6 +1,7 @@
 import { isoJson } from "@/lib/timestamp-values";
 import { timingSafeEqual } from "node:crypto";
 import {
+  claimPayrollSubmitPress,
   payrollSubmissionDetails,
   payrollSubmissionPreview,
   recordPayrollReliefRoster,
@@ -61,20 +62,26 @@ export async function GET(request: Request) {
 /**
  * The job reports:
  *   { "roster": [{ "num": "26", "name": "Allen  Gregory M.", "payType": "H" }, ...] }   Payroll Relief's employees
- *   { "id": "<submission id>", "status": "needs_code" | "submitted" | "failed", "message": "...", "totals": { reg, tipHours, tips, ot } }
- * "submitted" means saved in Payroll Relief for the owner to review and Submit (the job never submits).
- * The owner is emailed when a code is needed, and once when it is saved (or failed).
+ *   { "id": "<submission id>", "submitPressing": true }   about to press Submit: answers { granted } and records
+ *                                                         submit_pressed_at first; Submit is pressed only when granted
+ *   { "id": "<submission id>", "status": "needs_code" | "submitted" | "sent" | "failed", "message": "...", "totals": { reg, tipHours, tips, ot } }
+ * "submitted" = saved in Payroll Relief for the owner to review and Submit; "sent" = Submit pressed and confirmed.
+ * The owner is emailed when a code is needed, and once when it is saved, sent or failed.
  */
 export async function POST(request: Request) {
   if (!process.env.CRON_SECRET?.trim()) return isoJson({ error: "CRON_SECRET is not configured." }, { status: 503 });
   if (!authorized(request)) return isoJson({ error: "Unauthorized." }, { status: 401 });
   try {
-    const body = (await request.json().catch(() => ({}))) as { id?: string; status?: string; message?: string; totals?: HoursTotals; roster?: RosterEntry[] };
+    const body = (await request.json().catch(() => ({}))) as { id?: string; status?: string; message?: string; totals?: HoursTotals; roster?: RosterEntry[]; submitPressing?: boolean };
     if (Array.isArray(body.roster)) return isoJson(await recordPayrollReliefRoster(PAYROLL_RELIEF_BUSINESS, body.roster));
     const id = String(body.id || "").trim();
     if (!id) return isoJson({ error: "Send the submission id." }, { status: 400 });
-    if (body.status !== "submitted" && body.status !== "failed" && body.status !== "needs_code") {
-      return isoJson({ error: "status must be needs_code, submitted or failed." }, { status: 400 });
+    if (body.submitPressing === true) {
+      const claim = await claimPayrollSubmitPress(id);
+      return isoJson(claim, { status: claim.granted ? 200 : 409 });
+    }
+    if (body.status !== "submitted" && body.status !== "sent" && body.status !== "failed" && body.status !== "needs_code") {
+      return isoJson({ error: "status must be needs_code, submitted, sent or failed." }, { status: 400 });
     }
     const result = await recordPayrollSubmissionResult({ id, status: body.status, message: String(body.message || ""), totals: body.totals || null });
     return isoJson(result, { status: result.recorded ? 200 : 409 });

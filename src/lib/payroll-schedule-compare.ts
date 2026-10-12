@@ -30,12 +30,18 @@ export type ScheduleComparison = {
   missedShifts: number;
   flagged: boolean;
   text: string;
+  /** When each missed shift was (ISO), for "what's off from the schedule". Only present when there are some. */
+  missed?: Array<{ startsAt: string; endsAt: string }>;
+  /** Salaried or owner: hours aren't tracked against the schedule, so never flagged. Only present when true. */
+  untracked?: boolean;
 };
 
 /** A difference of at least this many hours is flagged. */
 export const DISCREPANCY_FLAG_HOURS = 1;
 /** A punch this close before or after a shift still counts as working it (early starts, late swaps). */
 export const SHIFT_MATCH_GRACE_MINUTES = 60;
+/** Shown instead of the comparison for salaried employees and owners. */
+export const UNTRACKED_TEXT = "Not tracked (salaried)";
 
 function nameKey(name: string): string {
   return String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
@@ -74,15 +80,18 @@ export function compareScheduleToWorked(input: {
   punches: PunchInput[];
   now?: Date;
   graceMinutes?: number;
+  /** Names of salaried employees and owners (matched ignoring case and spacing): listed, never flagged. */
+  untracked?: string[];
 }): ScheduleComparison[] {
   const now = (input.now || new Date()).getTime();
   const grace = (input.graceMinutes ?? SHIFT_MATCH_GRACE_MINUTES) * 60_000;
-  const people = new Map<string, { employee: string; ids: Set<string>; worked: number; scheduled: number; shifts: number; missed: number }>();
+  const untracked = new Set((input.untracked || []).map(nameKey).filter(Boolean));
+  const people = new Map<string, { employee: string; ids: Set<string>; worked: number; scheduled: number; shifts: number; missed: number; missedTimes: Array<{ startsAt: string; endsAt: string }> }>();
   const person = (name: string) => {
     const key = nameKey(name);
     let entry = people.get(key);
     if (!entry) {
-      entry = { employee: String(name).trim(), ids: new Set(), worked: 0, scheduled: 0, shifts: 0, missed: 0 };
+      entry = { employee: String(name).trim(), ids: new Set(), worked: 0, scheduled: 0, shifts: 0, missed: 0, missedTimes: [] };
       people.set(key, entry);
     }
     return entry;
@@ -110,15 +119,20 @@ export function compareScheduleToWorked(input: {
     if (start > now) continue;
     const key = nameKey(name);
     const worked = punches.some((p) => (id && p.id ? p.id === id : p.key === key) && p.start < end + grace && p.end > start - grace);
-    if (!worked) entry.missed += 1;
+    if (!worked) {
+      entry.missed += 1;
+      entry.missedTimes.push({ startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString() });
+    }
   }
 
-  return [...people.values()].map((entry) => {
+  return [...people.values()].map((entry): ScheduleComparison => {
     const scheduledHours = round2(entry.scheduled);
     const workedHours = round2(entry.worked);
     const difference = round2(workedHours - scheduledHours);
     const base = { employee: entry.employee, scheduledHours, workedHours, difference, scheduledShifts: entry.shifts, missedShifts: entry.missed };
-    return { ...base, flagged: Math.abs(difference) >= DISCREPANCY_FLAG_HOURS || entry.missed > 0, text: discrepancyText(base) };
+    if (untracked.has(nameKey(entry.employee))) return { ...base, flagged: false, text: UNTRACKED_TEXT, untracked: true };
+    const missed = entry.missedTimes.length ? { missed: entry.missedTimes.sort((a, b) => a.startsAt.localeCompare(b.startsAt)) } : {};
+    return { ...base, flagged: Math.abs(difference) >= DISCREPANCY_FLAG_HOURS || entry.missed > 0, text: discrepancyText(base), ...missed };
   }).sort((a, b) => a.employee.localeCompare(b.employee));
 }
 

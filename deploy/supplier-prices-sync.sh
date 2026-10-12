@@ -10,7 +10,8 @@
 # With --website it instead signs in to Sysco, US Foods and PFG and pulls prices
 # from their sites (corner-ops-supplier-website.timer runs that twice a day).
 # After those, each approved Corner Deli payroll week waiting in Corner Ops is entered in
-# Payroll Relief and saved (never submitted) by deploy/supplier-scraper/payroll-relief.mjs.
+# Payroll Relief and saved by deploy/supplier-scraper/payroll-relief.mjs; it presses Submit only
+# when PAYROLL_RELIEF_AUTO_SUBMIT=1 is in .env (passed through docker-compose.local.yml).
 # With --payroll-dry-run <YYYY-MM-DD> it fills that week's timesheet without uploading or saving.
 # With --signin webstaurant (or accountantsoffice) it opens that site for a person to sign in to by
 # hand (a robot check, or a texted code): it prints a link to open from the deli network.
@@ -143,7 +144,8 @@ while IFS=$'\t' read -r search_id query; do
   search_env=()
 done <<< "$searches"
 
-# Approved Corner Deli payroll weeks (and "Check AccountantsOffice" requests): enter each in Payroll Relief and save it.
+# Approved Corner Deli payroll weeks (and "Check AccountantsOffice" requests): enter each in Payroll Relief and save it
+# (and submit it, only with PAYROLL_RELIEF_AUTO_SUBMIT=1).
 # Taking them marks them "submitting" in Corner Ops; one that can't be started is reported failed so it can be sent again.
 payroll_ids="$(curl -fsS --max-time 60 -H @<(printf 'Authorization: Bearer %s\n' "$secret") 'http://127.0.0.1:3000/api/cron/payroll-submissions?submissions=1' 2>/dev/null \
   | python3 -c 'import json,sys,re; [print(s["id"]) for s in json.load(sys.stdin).get("submissions", []) if re.fullmatch(r"[0-9a-f-]{36}", str(s.get("id","")))]' 2>/dev/null || true)"

@@ -35,6 +35,7 @@
     "src/lib/missed-clock-out-rules.ts",
     "src/lib/payroll-relief-timesheet.ts",
     "src/lib/payroll-schedule-compare.ts",
+    "src/lib/payroll-auto-rules.ts",
     "tests/**/*.ts"
   ]
 }

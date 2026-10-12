@@ -222,9 +222,47 @@ function canonicalName(value: unknown): string {
 }
 
 /**
+ * Salaried employees and owners, whose hours aren't tracked against the schedule: employees matched (on the
+ * payroll page) to a Payroll Relief employee whose pay type is "S", and employees marked owner (POS role) or
+ * whose position says owner / salaried. Any lookup that fails (a table not created yet) just adds nobody.
+ */
+export async function untrackedPayrollNames(business: Business): Promise<string[]> {
+  const names = new Set<string>();
+  const sql = getSql();
+  try {
+    const rows = await sql`
+      SELECT m.employee_name AS name
+      FROM payroll_relief_employees m
+      JOIN payroll_relief_roster r ON r.business = m.business AND r.ee_num = m.ee_num
+      WHERE m.business = ${business} AND UPPER(BTRIM(r.pay_type)) = 'S'
+    ` as unknown as Array<{ name: string }>;
+    rows.forEach((row) => names.add(String(row.name || "").trim()));
+  } catch {
+    // Payroll Relief tables not created yet.
+  }
+  try {
+    const rows = await sql`
+      SELECT name FROM employees
+      WHERE business = ${business} AND (pos_role = 'owner' OR position ~* '(owner|salaried|salary)')
+    ` as unknown as Array<{ name: string }>;
+    rows.forEach((row) => names.add(canonicalName(row.name)));
+  } catch {
+    try {
+      const rows = await sql`
+        SELECT name FROM employees WHERE business = ${business} AND position ~* '(owner|salaried|salary)'
+      ` as unknown as Array<{ name: string }>;
+      rows.forEach((row) => names.add(canonicalName(row.name)));
+    } catch {
+      // employees unreadable: nobody is excluded.
+    }
+  }
+  return [...names].filter(Boolean);
+}
+
+/**
  * Scheduled vs worked for the payroll week (Monday 4 AM to Monday 4 AM): the week's published schedule
  * shifts against the punches payroll used (Corner Deli: Rezku shifts, matched by name; Tiki: time
- * entries, matched by employee id). Never stops payroll: on an error the comparison is left empty.
+ * entries, matched by employee id). Salaried employees and owners are listed as not tracked, never flagged. Never stops payroll: on an error the comparison is left empty.
  */
 export async function scheduleComparisonFor(business: Business, weekStart: string, rows: PayrollRow[]): Promise<ScheduleComparison[]> {
   try {
@@ -233,7 +271,7 @@ export async function scheduleComparisonFor(business: Business, weekStart: strin
     // Punches a little outside the week still show a shift at the edge was worked.
     const near = new Date(bounds.start.getTime() - 18 * 3_600_000).toISOString();
     const after = new Date(bounds.end.getTime() + 18 * 3_600_000).toISOString();
-    const [shiftRows, punchRows] = await Promise.all([
+    const [shiftRows, punchRows, untracked] = await Promise.all([
       getSql()`
         SELECT s.employee_id, e.name AS employee_name, s.starts_at, s.ends_at
         FROM schedule_shifts s
@@ -250,9 +288,11 @@ export async function scheduleComparisonFor(business: Business, weekStart: strin
             SELECT NULL::uuid AS employee_id, employee_name, clock_in, clock_out FROM rezku_shifts
             WHERE COALESCE(clock_in, clock_out) >= ${near} AND COALESCE(clock_in, clock_out) < ${after}
           `,
-    ]) as unknown as [Array<Record<string, unknown>>, Array<Record<string, unknown>>];
+      untrackedPayrollNames(business),
+    ]) as unknown as [Array<Record<string, unknown>>, Array<Record<string, unknown>>, string[]];
     return compareScheduleToWorked({
       rows,
+      untracked,
       shifts: shiftRows.map((row) => ({
         employeeId: row.employee_id ? String(row.employee_id) : null, employeeName: canonicalName(row.employee_name),
         startsAt: toIsoTimestamp(row.starts_at) || "", endsAt: toIsoTimestamp(row.ends_at) || "",
@@ -350,14 +390,28 @@ export async function createPayrollDraft(input: { business: Business; weekStart:
   return { id, version, status: "Draft", summary };
 }
 
-export async function lockPayrollRun(id: string, actor: string) {
+/**
+ * Draft → Locked. unlessHeld (the automatic 5 PM approval): in the same statement, refuse when the week is on
+ * Hold (payroll_week_holds, see payroll-approval), so a Hold pressed at the last moment always wins.
+ */
+export async function lockPayrollRun(id: string, actor: string, options: { unlessHeld?: boolean } = {}) {
   await ensurePayrollControlSchema();
-  const rows = await getSql()`
-    UPDATE payroll_run_versions SET status = 'Locked', locked_by = ${actor}, locked_at = NOW()
-    WHERE id = ${id} AND status = 'Draft'
-    RETURNING id, business, week_start, version
-  ` as unknown as Array<Record<string, unknown>>;
-  if (!rows[0]) throw new Error("Only a draft payroll version can be locked.");
+  const rows = options.unlessHeld
+    ? await getSql()`
+        UPDATE payroll_run_versions r SET status = 'Locked', locked_by = ${actor}, locked_at = NOW()
+        WHERE r.id = ${id} AND r.status = 'Draft'
+          AND NOT EXISTS (
+            SELECT 1 FROM payroll_week_holds h
+            WHERE h.business = r.business AND h.week_start = r.week_start AND h.released_at IS NULL
+          )
+        RETURNING id, business, week_start, version
+      ` as unknown as Array<Record<string, unknown>>
+    : await getSql()`
+        UPDATE payroll_run_versions SET status = 'Locked', locked_by = ${actor}, locked_at = NOW()
+        WHERE id = ${id} AND status = 'Draft'
+        RETURNING id, business, week_start, version
+      ` as unknown as Array<Record<string, unknown>>;
+  if (!rows[0]) throw new ValidationError(options.unlessHeld ? "This payroll is on hold (or no longer a draft), so it wasn't approved." : "Only a draft payroll version can be locked.");
   await getSql()`
     INSERT INTO payroll_audit_events (id, business, event_type, reference_id, details, actor)
     VALUES (${crypto.randomUUID()}, ${rows[0].business}, 'Payroll Locked', ${id}, ${JSON.stringify(rows[0])}::jsonb, ${actor})

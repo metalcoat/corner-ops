@@ -11,7 +11,6 @@ import {
   missedClockOutSmsText,
   parseEasternInput,
   payrollApprovalBlockMessage,
-  payrollApprovalEmail,
   payrollCodeEmail,
   payrollSubmissionEmail,
   payrollWeekLabel,
@@ -191,54 +190,13 @@ test("payroll approval is blocked by open punches and missed clock-outs", () => 
   );
 });
 
-test("Monday payroll email summarizes hours, tips and blockers", () => {
-  const email = payrollApprovalEmail({
-    business: "Tiki",
-    weekStart: "2026-09-28",
-    rows: [
-      { employee: "Ana Diaz", regularHours: 40, tippedHours: 0, overtimeHours: 2.5, tips: 312.4, schedule: { text: "Scheduled 40.00 · worked 42.50 · +2.50", flagged: true } },
-      { employee: "Sam Rivera", regularHours: 0, tippedHours: 20, overtimeHours: 0, tips: 100, schedule: { text: "Scheduled 20.00 · worked 20.00 · 0.00", flagged: false } },
-    ],
-    draft: { version: 1, created: true },
-    blockers: { openPunches: 0, unresolvedClockOuts: 1 },
-    missingSquareFees: 3,
-    needsReview: 2,
-    reviewLink: "https://team.atthedocks.com/ops/payroll-control?business=Tiki&weekStart=2026-09-28",
-  });
-  assert.equal(email.subject, "Tiki payroll for 2026-09-28 – 2026-10-04: needs attention");
-  assert.match(email.text, /Employee\s+\| Regular Hours \| Tipped Hours \| Tips\s+\| OT\s+\| Scheduled vs worked/);
-  assert.match(email.text, /Ana Diaz\s+\| 40\.00\s+\| 0\.00\s+\| \$312\.40 \| 2\.50 \| CHECK: Scheduled 40\.00 · worked 42\.50 · \+2\.50/);
-  assert.match(email.text, /Totals\s+\| 40\.00\s+\| 20\.00\s+\| \$412\.40 \| 2\.50/);
-  assert.match(email.text, /1 missed clock-out not resolved \(blocks approval\)/);
-  assert.match(email.text, /3 Square payments missing processing fees/);
-  assert.match(email.text, /2 punches marked Needs Review/);
-  assert.match(email.text, /1 employee worked an hour or more off their schedule/);
-  assert.match(email.text, /Draft v1 was created\./);
-  assert.match(email.text, /The Docks isn't sent to AccountantsOffice automatically/);
-  assert.match(email.text, /Review and approve: https:\/\/team\.atthedocks\.com\/ops\/payroll-control\?business=Tiki&weekStart=2026-09-28/);
-
-  const noOvertime = payrollApprovalEmail({
-    business: "Corner Deli", weekStart: "2026-09-28",
-    rows: [{ employee: "Sean", regularHours: 30, tippedHours: 5, overtimeHours: 0, tips: 80, schedule: null }],
-    draft: { version: 2, created: false }, blockers: { openPunches: 0, unresolvedClockOuts: 0 }, missingSquareFees: 0, needsReview: 0, reviewLink: "x",
-  });
-  assert.doesNotMatch(noOvertime.text, /\| OT/);
-  assert.match(noOvertime.text, /saved, not submitted\) in Payroll Relief/);
-
-  const ready = payrollApprovalEmail({
-    business: "Corner Deli", weekStart: "2026-09-28", rows: [], draft: { error: "Square fees missing." },
-    blockers: { openPunches: 0, unresolvedClockOuts: 0 }, missingSquareFees: 0, needsReview: 0, reviewLink: "x",
-  });
-  assert.match(ready.subject, /ready to approve$/);
-  assert.match(ready.text, /No hours recorded\./);
-  assert.match(ready.text, /could not be created: Square fees missing\./);
-});
 
 test("submission status lines and Payroll Relief emails", () => {
   assert.equal(submissionStatusLine("queued"), "Waiting to enter in Payroll Relief");
   assert.equal(submissionStatusLine("submitting"), "Entering hours in Payroll Relief…");
   assert.match(submissionStatusLine("needs_code"), /texted a sign-in code/);
-  assert.equal(submissionStatusLine("submitted"), "Saved in Payroll Relief (not submitted): review it there and press Submit");
+  assert.equal(submissionStatusLine("submitted"), "Saved in Payroll Relief — review and press Submit");
+  assert.equal(submissionStatusLine("sent"), "Submitted to Whalen, Davey & Looney");
   assert.match(submissionStatusLine("submitted", "Reg 100.00"), /press Submit\. Reg 100\.00$/);
   assert.equal(submissionStatusLine("failed", "Login rejected"), "Failed: Login rejected");
   assert.equal(submissionStatusLine("submitted", "Found 12 employees", "roster"), "Found 12 employees");

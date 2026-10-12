@@ -1,13 +1,17 @@
 // Payroll Relief job: enters an approved Corner Deli payroll week's hours and tips
 // in the owner's payroll website (AccountantsOffice → Payroll Relief) and SAVES
-// them. It never submits: the owner reviews the entries there and presses Submit.
+// them. It presses Submit only when this server has PAYROLL_RELIEF_AUTO_SUBMIT=1 AND the
+// approval asked for it (submit_after_save), after the save was verified, once (Corner Ops
+// records the press first), confirming success by reloading. Otherwise the owner reviews
+// the entries there and presses Submit. A crashed browser is retried (fresh browser, up
+// to 3 tries) unless Save or Submit was already pressed.
 //
 // Steps: sign in (saved session first, else the account in .env; if AccountantsOffice
 // texts a code, the owner types it on Corner Ops' payroll page) → Payroll Relief →
 // Payroll Entry → check the open payroll is the approved week → Timesheet Options →
 // Download Excel → report Payroll Relief's employees → fill Reg / TipWa / PCTip / OT
 // for the matched employees (src/lib/payroll-relief-timesheet.ts) → Upload → check the
-// grid's Totals equal the file's → Save → reload and check again → report.
+// grid's Totals equal the file's → Save → reload and check again → [Submit → confirm → reload] → report.
 //
 // Started by deploy/supplier-prices-sync.sh for each queued submission:
 //   docker compose ... run --rm --no-deps -e SUBMISSION_ID=<id> --entrypoint node supplier-prices payroll-relief.mjs
@@ -30,6 +34,7 @@ import {
   parseTimesheet,
   periodMismatch,
   planTimesheet,
+  submitConfirmed,
   timesheetRoster,
   timesheetTotals,
   weekRangeLabel,
@@ -45,6 +50,13 @@ const PREVIEW_WEEK = (process.env.PREVIEW_WEEK || "").trim();
 // A preview has no submission to report to, so it is always a dry run.
 const DRY_RUN = process.env.DRY_RUN === "1" || (!SUBMISSION_ID && Boolean(PREVIEW_WEEK));
 const CODE_MINUTES = 10;
+// Pressing Submit needs both this server's switch and the approval asking for it (submit_after_save).
+const AUTO_SUBMIT = process.env.PAYROLL_RELIEF_AUTO_SUBMIT === "1";
+const MAX_ATTEMPTS = 3;
+// Chromium dying under the job (not a problem with the payroll): worth one or two more tries.
+const BROWSER_CRASH = /Target page, context or browser has been closed|Target closed|browser has (been )?(closed|disconnected)|Browser closed|Page crashed|crashed|SIGSEGV|Protocol error|Connection closed/i;
+/** What has been pressed in Payroll Relief this run: after Save or Submit the run is never retried. */
+const pressed = { save: false, submit: false };
 
 const LOGIN = "https://login.accountantsoffice.com/login?firmCode=whale1910&returnurl=https://www.accountantsoffice.com/aocommon/account/login";
 const HOME = "https://www.accountantsoffice.com/aocommon/";
@@ -336,10 +348,95 @@ async function loadJob() {
   throw new Error("Set SUBMISSION_ID (a queued submission), or PREVIEW_WEEK=YYYY-MM-DD (with DRY_RUN=1) for a dry run.");
 }
 
+
+// --- Submit (only with PAYROLL_RELIEF_AUTO_SUBMIT=1 and an approval that asked for it) ---------------
+
+/**
+ * The one exception to FORBIDDEN_CONTROL: after the save was verified, press the visible control whose whole
+ * text is exactly "Submit", once. Corner Ops records the press (submit_pressed_at) BEFORE the click and
+ * refuses a second one. In a confirmation dialog only a button reading exactly OK, Yes, Submit or Confirm is
+ * pressed. Success = after reloading, this week is no longer Payroll Relief's open payroll (or is listed as
+ * Approved); anything else is reported as unconfirmed with screenshots.
+ */
+async function pressSubmitOnce(page, job, shot) {
+  const submit = exactButton(page, "Submit");
+  const count = await submit.count().catch(() => 0);
+  if (count !== 1) {
+    return { status: "submitted", message: `Saved, not submitted: Payroll Entry showed ${count ? `${count} Submit controls` : "no Submit button"} (screenshot ${await shot("no-submit")}). Review and press Submit there.` };
+  }
+  let granted = false;
+  try {
+    granted = Boolean((await post({ id: SUBMISSION_ID, submitPressing: true })).granted);
+  } catch (error) {
+    log(`Corner Ops didn't allow pressing Submit: ${error.message}`);
+  }
+  if (!granted) return { status: "submitted", message: "Saved, not submitted: Corner Ops didn't record the Submit press, so it wasn't pressed. Review and press Submit there." };
+  pressed.submit = true;
+  // A browser confirm() box: its OK is the only button, so accepting it is pressing OK.
+  const dialogs = [];
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.message());
+    log(`confirmation box: "${dialog.message().slice(0, 120)}" → OK`);
+    dialog.accept().catch(() => {});
+  });
+  log("pressing Submit");
+  await submit.first().click({ timeout: 15_000 });
+  await page.waitForTimeout(3_000);
+  const modal = page.locator('[role="dialog"], [role="alertdialog"], .k-window, .modal, .ui-dialog').filter({ visible: true });
+  if (await visible(modal)) {
+    const box = modal.last();
+    const text = (await box.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+    log(`confirmation dialog: "${text.slice(0, 160)}"`);
+    if (/error|invalid|failed|could not|unable|warning/i.test(text)) {
+      return { status: "failed", message: `Pressed Submit but couldn't confirm — check Payroll Relief. It showed: "${text.slice(0, 200)}" (screenshot ${await shot("submit-dialog")}).` };
+    }
+    let confirmed = false;
+    for (const word of ["OK", "Yes", "Submit", "Confirm"]) {
+      const button = exactButton(box, word);
+      if (await visible(button)) {
+        await button.first().click({ timeout: 15_000 });
+        log(`pressed ${word} in the confirmation dialog`);
+        confirmed = true;
+        break;
+      }
+    }
+    if (!confirmed) {
+      return { status: "failed", message: `Pressed Submit but couldn't confirm — check Payroll Relief. Its dialog had no OK/Yes/Submit/Confirm button (screenshot ${await shot("submit-dialog")}).` };
+    }
+  }
+  await settle(page, 8_000);
+  const after = await shot("submit-pressed");
+  const problem = await pageError(page);
+  if (problem) return { status: "failed", message: `Pressed Submit but couldn't confirm — check Payroll Relief. It showed: ${problem} (screenshots ${after}, ${await shot("submit-error")}).` };
+  const text = await openPayrollEntry(page);
+  const reloaded = await shot("submit-reloaded");
+  if (submitConfirmed({ pageText: text, open: parsePayrollEntryPeriod(text), weekStart: job.weekStart })) {
+    return { status: "sent", message: `Submitted to Whalen, Davey & Looney (${weekRangeLabel(job.weekStart)} is no longer the open payroll).` };
+  }
+  return { status: "failed", message: `Pressed Submit but couldn't confirm — check Payroll Relief. After reloading, ${weekRangeLabel(job.weekStart)} still looks like the open payroll or the page couldn't be read (screenshots ${after}, ${reloaded}).` };
+}
+
 async function run() {
   const job = await loadJob();
   if (!job) throw new Error("No such submission.");
-  log(`${job.kind === "roster" ? "checking AccountantsOffice's employee list" : `${job.business} week ${job.weekStart} (payroll v${job.version}, ${job.runStatus})`}${DRY_RUN ? " — DRY RUN, nothing is uploaded or saved" : ""}`);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await attemptRun(job, attempt);
+    } catch (error) {
+      // A crashed browser (Chromium on Xvfb sometimes dies around the download) is retried with a fresh one,
+      // but never once Save or Submit was pressed: then a person has to look at Payroll Relief.
+      if (error?.retryable && attempt < MAX_ATTEMPTS) {
+        log(`browser crashed (${error.message}); trying again with a fresh browser in 15 seconds (attempt ${attempt + 1} of ${MAX_ATTEMPTS})`);
+        await sleep(15_000);
+        continue;
+      }
+      throw error.retryable ? error.cause || error : error;
+    }
+  }
+}
+
+async function attemptRun(job, attempt) {
+  log(`${job.kind === "roster" ? "checking AccountantsOffice's employee list" : `${job.business} week ${job.weekStart} (payroll v${job.version}, ${job.runStatus})`}${DRY_RUN ? " — DRY RUN, nothing is uploaded or saved" : ""}${attempt > 1 ? ` (attempt ${attempt})` : ""}`);
   if (job.business !== "Corner Deli") return report("failed", "The Docks isn't sent to AccountantsOffice automatically.");
   if (SUBMISSION_ID && !["submitting", "needs_code"].includes(job.status) && !DRY_RUN) {
     throw new Error(`Submission ${SUBMISSION_ID} is ${job.status}, not being sent; nothing done.`);
@@ -350,6 +447,8 @@ async function run() {
   if (!process.env.DISPLAY) await startScreen();
   const context = await chromium.launchPersistentContext(`${PROFILES}/${KEY}`, {
     headless: false,
+    // Headed Chromium on Xvfb in the container: no GPU, /dev/shm is small (it crashed with SIGSEGV without these).
+    args: ["--disable-gpu", "--disable-dev-shm-usage", "--disable-software-rasterizer"],
     viewport: { width: 1440, height: 1000 },
     acceptDownloads: true,
     locale: "en-US",
@@ -458,6 +557,7 @@ async function run() {
     // Save (only the button reading exactly "Save"; never Submit).
     const save = exactButton(page, "Save");
     if (!(await visible(save))) throw new Error(`Payroll Entry has no Save button (screenshot ${await shot("no-save")}). Nothing was saved.`);
+    pressed.save = true;
     await safeClick(save, "Save");
     await settle(page, 6_000);
     const saveError = await pageError(page);
@@ -475,10 +575,28 @@ async function run() {
       return await report("failed", `Saved, but after reloading Payroll Relief ${stillSame || `the totals differ (${saved.join("; ")})`}. Check its entries before submitting. Screenshot ${picture}`, afterSave);
     }
     const extra = [...plan.notes, ...plan.cleared.map((c) => `EE #${c.num} ${c.rosterName} cleared (nothing in Corner Ops this week).`)].join(" ");
-    await report("submitted", `${formatTotals(afterSave)}.${extra ? ` ${extra}` : ""}`.slice(0, 990), afterSave);
+    const savedLine = `${formatTotals(afterSave)}.${extra ? ` ${extra}` : ""}`;
+    if (!job.submitAfterSave || !AUTO_SUBMIT) {
+      if (job.submitAfterSave) log("saved; not pressing Submit (PAYROLL_RELIEF_AUTO_SUBMIT isn't 1 on this server)");
+      return await report("submitted", savedLine.slice(0, 990), afterSave);
+    }
+    if (job.submitPressedAt) {
+      return await report("submitted", `${savedLine} Submit was already pressed once for this payroll, so it wasn't pressed again: check Payroll Relief.`.slice(0, 990), afterSave);
+    }
+    const outcome = await pressSubmitOnce(page, job, shot);
+    await report(outcome.status, `${outcome.message} ${savedLine}`.slice(0, 990), afterSave);
   } catch (error) {
     const picture = await shot("error");
-    await report("failed", `${String(error.message || error).split("\n")[0]} (screenshot ${picture})`);
+    const message = String(error.message || error).split("\n")[0];
+    if (pressed.submit) {
+      await report("failed", `Pressed Submit but couldn't confirm — check Payroll Relief. (${message}; screenshot ${picture})`);
+      process.exitCode = 1;
+      return;
+    }
+    if (BROWSER_CRASH.test(message) && !pressed.save && attempt < MAX_ATTEMPTS) {
+      throw Object.assign(new Error(message), { retryable: true, cause: error });
+    }
+    await report("failed", `${message}${pressed.save ? " (after pressing Save: check Payroll Relief's entries)" : ""} (screenshot ${picture})`);
     process.exitCode = 1;
   } finally {
     if (signedIn) await saveSessionCookies(context, PROFILES, KEY).catch(() => {});

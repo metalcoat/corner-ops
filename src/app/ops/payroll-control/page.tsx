@@ -72,6 +72,9 @@ type ClockOutCase = {
   status: string;
   smsLabel: string;
   resolvedClockOutEastern: string | null;
+  kind?: string;
+  kindLabel?: string;
+  punchClockOutEastern?: string | null;
 };
 
 type Submission = {
@@ -80,6 +83,19 @@ type Submission = {
   payrollRunVersionId: string | null;
   status: string;
   statusLine: string;
+  submitPressedAt?: string | null;
+};
+
+type AutoSend = {
+  sendAt: string;
+  windowEnd: string;
+  pending: boolean;
+  hold: { heldBy: string; heldAt: string | null } | null;
+  outcome: string | null;
+  reasons: string[];
+  summarySentAt: string | null;
+  summaryLate: boolean;
+  sundayMissing: boolean;
 };
 
 type PayrollRelief = {
@@ -89,11 +105,12 @@ type PayrollRelief = {
 };
 
 type Approval = {
-  blockers: { openPunches: number; unresolvedClockOuts: number; needsReview: number; message: string | null };
+  blockers: { openPunches: number; unresolvedClockOuts: number; needsReview: number; clockOutsToCheck?: number; message: string | null };
   clockOutCases: ClockOutCase[];
   submissions: Submission[];
   sendsToPayrollRelief?: boolean;
   payrollRelief?: PayrollRelief | null;
+  autoSend?: AutoSend | null;
 };
 
 type Dashboard = {
@@ -197,6 +214,8 @@ export default function PayrollControlPage() {
   const [correctionReason, setCorrectionReason] = useState(DEFAULT_PUNCH_CORRECTION_REASON);
   const [codes, setCodes] = useState<Record<string, string>>({});
   const [matches, setMatches] = useState<Record<string, string>>({});
+  // Opened from the summary email's Hold link: point at the Hold button (nothing changes until it's pressed).
+  const [holdRequested, setHoldRequested] = useState(false);
 
   useEffect(() => {
     // Links from the Monday payroll email open a business and week directly.
@@ -205,6 +224,7 @@ export default function PayrollControlPage() {
     if (requestedBusiness === "Corner Deli" || requestedBusiness === "Tiki") setBusiness(requestedBusiness);
     const requestedWeek = params.get("weekStart");
     if (requestedWeek && /^\d{4}-\d{2}-\d{2}$/.test(requestedWeek)) setWeekStart(requestedWeek);
+    if (params.get("hold") === "1") setHoldRequested(true);
     fetch("/api/auth/session", { cache: "no-store" })
       .then((response) => response.json())
       .then(setSession)
@@ -265,7 +285,7 @@ export default function PayrollControlPage() {
         <input aria-label="Code from the text" inputMode="numeric" autoComplete="one-time-code" placeholder="Code from the text" value={codes[submission.id] || ""} onChange={(event) => setCodes((current) => ({ ...current, [submission.id]: event.target.value }))} />
         <button className="primary" disabled={busy || !(codes[submission.id] || "").trim()} onClick={() => void sendCode(submission)}>Send code</button>
       </span>}
-      {submission.kind !== "roster" && (submission.status === "failed" || submission.status === "submitted") && <> <button disabled={busy} onClick={() => void post({ action: "submission-retry", business, id: submission.id }).then(() => setNotice("Queued to enter in Payroll Relief again (saved, not submitted).")).catch(() => undefined)}>Send again</button></>}
+      {submission.kind !== "roster" && (submission.status === "failed" || submission.status === "submitted") && !submission.submitPressedAt && <> <button disabled={busy} onClick={() => void post({ action: "submission-retry", business, id: submission.id }).then(() => setNotice("Queued to enter in Payroll Relief again.")).catch(() => undefined)}>Send again</button></>}
     </>;
   }
 
@@ -553,11 +573,26 @@ export default function PayrollControlPage() {
         {data.approval.blockers.message
           ? <p className="reportNote"><span className="badge warn">Blocked</span> {data.approval.blockers.message}</p>
           : <p className="reportNote">No open punches or missed clock-outs this week. {data.approval.sendsToPayrollRelief
-            ? "Approving a draft locks it; the store server then enters the hours and tips in Payroll Relief and saves them (it never submits). You review and press Submit there."
+            ? "Approving a draft locks it; the store server then enters the hours and tips in Payroll Relief and saves them (and submits them only where automatic submit is turned on)."
             : "Approving a draft locks it. The Docks isn't sent to AccountantsOffice automatically."}</p>}
         {Boolean(data.approval.blockers.needsReview) && <p className="reportNote">{data.approval.blockers.needsReview} punch(es) this week are marked Needs Review.</p>}
+        {Boolean(data.approval.blockers.clockOutsToCheck) && <p className="reportNote">{data.approval.blockers.clockOutsToCheck} clock-out(s) to check (closed automatically, or late in Rezku). They don&apos;t block approval.</p>}
+        {data.approval.autoSend && (() => {
+          const auto = data.approval.autoSend;
+          const when = new Intl.DateTimeFormat("en-US", { timeZone: EASTERN_TIME_ZONE, weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(auto.sendAt));
+          if (auto.outcome === "approved") return <p className="reportNote"><span className="badge good">Sent automatically</span> Approved at 5:00 PM Monday and queued for AccountantsOffice.</p>;
+          if (auto.outcome === "not_sent") return <p className="reportNote"><span className="badge warn">Not sent at 5 PM</span> {auto.reasons.join("; ")}. Approve below when ready.</p>;
+          if (!auto.pending) return null;
+          return <div id="hold" className="controlActions" style={holdRequested ? { outline: "2px solid currentColor", padding: 8, borderRadius: 8 } : undefined}>
+            {auto.hold
+              ? <><span><span className="badge warn">On hold</span> On hold by {auto.hold.heldBy} — it won&apos;t be sent automatically.</span>
+                <button disabled={busy} onClick={() => void post({ action: "week-release", business, weekStart }).then(() => setNotice("Released: it will be sent automatically at 5:00 PM Monday unless something blocks it.")).catch(() => undefined)}>Release</button></>
+              : <><span>Automatic send at 5:00 PM Monday ({when}){holdRequested ? " — press Hold to stop it" : ""}</span>
+                <button className={holdRequested ? "primary" : ""} disabled={busy} onClick={() => void post({ action: "week-hold", business, weekStart }).then((result) => { setHoldRequested(false); setNotice(result?.alreadyApproved ? "On hold, but it was already approved. Reopen it as a new version to stop the submission." : "On hold: it won't be sent automatically. Approve it yourself when ready."); }).catch(() => undefined)}>Hold</button></>}
+          </div>;
+        })()}
         {data.approval.clockOutCases.length > 0 && <div className="list">{data.approval.clockOutCases.map((item) => <div className="listItem" key={item.id}>
-          <div><strong>{item.employeeName} · {item.status === "Submitted" ? `says they left ${item.employeeLeftAtEastern}` : item.status === "Resolved" ? `clocked out ${item.resolvedClockOutEastern || ""}` : "still clocked in"}</strong><span>In {item.clockInEastern} · scheduled end {item.scheduledEndEastern || "none"} · {item.smsLabel}</span></div>
+          <div><strong>{item.employeeName} · {item.status === "Submitted" ? `says they left ${item.employeeLeftAtEastern}` : item.status === "Resolved" ? `clocked out ${item.resolvedClockOutEastern || ""}` : item.kindLabel && item.kind !== "open_punch" ? `${item.kindLabel}${item.punchClockOutEastern ? ` (${item.punchClockOutEastern})` : ""}` : "still clocked in"}</strong><span>In {item.clockInEastern} · scheduled end {item.scheduledEndEastern || "none"} · {item.smsLabel}</span></div>
           {item.status === "Resolved" ? <span className="badge good">Settled</span> : <a href={`/ops/payroll-control/clock-outs?case=${encodeURIComponent(item.id)}`}>Choose clock-out</a>}
         </div>)}</div>}
       </section>}
@@ -567,7 +602,7 @@ export default function PayrollControlPage() {
         <h2>Versions</h2>
         <div className="tableWrap"><table className="controlTable">
           <thead><tr><th>Week</th><th>Version</th><th>Status</th><th>Generated</th><th>Locked</th><th>Actions</th></tr></thead>
-          <tbody>{data?.versions.map((version) => <tr key={version.id}><td>{version.weekStart}</td><td>v{version.version}</td><td><span className={`badge ${version.status === "Locked" ? "good" : "warn"}`}>{version.status}</span></td><td>{version.generatedBy}<small>{easternDateTime(version.generatedAt)}</small></td><td>{version.lockedBy || "—"}</td><td><a href={`/api/payroll-control?export=${version.id}`}>CSV</a> {version.status === "Draft" ? <button disabled={busy || (String(version.weekStart).slice(0, 10) === weekStart && Boolean(data?.approval?.blockers.message))} title={String(version.weekStart).slice(0, 10) === weekStart ? data?.approval?.blockers.message || "" : ""} onClick={() => void post({ action: "run-lock", business, id: version.id }).then((result) => setNotice(result?.submission ? `Payroll v${version.version} approved and locked. The store server will enter it in Payroll Relief (saved, not submitted) within a few minutes.` : `Payroll v${version.version} approved and locked. ${result?.submissionNote || ""}`)).catch(() => undefined)}>Approve & lock</button> : <button onClick={() => void post({ action: "run-reopen", business, id: version.id }).then((result) => setNotice(`Reopened as payroll draft v${result.version}.`))}>Reopen as new version</button>}{(() => {
+          <tbody>{data?.versions.map((version) => <tr key={version.id}><td>{version.weekStart}</td><td>v{version.version}</td><td><span className={`badge ${version.status === "Locked" ? "good" : "warn"}`}>{version.status}</span></td><td>{version.generatedBy}<small>{easternDateTime(version.generatedAt)}</small></td><td>{version.lockedBy || "—"}</td><td><a href={`/api/payroll-control?export=${version.id}`}>CSV</a> {version.status === "Draft" ? <button disabled={busy || (String(version.weekStart).slice(0, 10) === weekStart && Boolean(data?.approval?.blockers.message))} title={String(version.weekStart).slice(0, 10) === weekStart ? data?.approval?.blockers.message || "" : ""} onClick={() => void post({ action: "run-lock", business, id: version.id }).then((result) => setNotice(result?.submission ? `Payroll v${version.version} approved and locked. The store server will enter it in Payroll Relief within a few minutes.` : `Payroll v${version.version} approved and locked. ${result?.submissionNote || ""}`)).catch(() => undefined)}>Approve & lock</button> : <button onClick={() => void post({ action: "run-reopen", business, id: version.id }).then((result) => setNotice(`Reopened as payroll draft v${result.version}.`))}>Reopen as new version</button>}{(() => {
             const submission = data?.approval?.submissions.find((item) => item.payrollRunVersionId === version.id);
             if (!submission) return null;
             return <small>{submission.statusLine} {submissionControls(submission)}</small>;

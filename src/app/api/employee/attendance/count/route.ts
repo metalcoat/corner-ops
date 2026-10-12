@@ -24,10 +24,11 @@ export async function GET() {
     const clockOuts = await getSql()`
       SELECT COUNT(*)::INTEGER AS count
       FROM missed_clock_out_cases c
-      JOIN time_entries t ON t.id = c.time_entry_id AND t.clock_out IS NULL
+      LEFT JOIN time_entries t ON t.id = c.time_entry_id
       WHERE c.employee_id = ${session.employeeId}
         AND c.business = ${session.business}
-        AND c.status = 'Open'
+        AND c.kind <> 'unscheduled'
+        AND (c.status = 'AutoClosed' OR (c.status = 'Open' AND (c.kind <> 'open_punch' OR c.time_entry_id IS NULL OR t.clock_out IS NULL)))
     ` as unknown as Array<{ count: number | string }>;
 
     return Response.json({ count: Number(rows[0]?.count || 0) + Number(clockOuts[0]?.count || 0) }, {

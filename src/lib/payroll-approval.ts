@@ -8,7 +8,6 @@ import {
 } from "@/lib/missed-clock-outs";
 import {
   payrollApprovalBlockMessage,
-  payrollApprovalEmail,
   payrollCodeEmail,
   payrollSubmissionEmail,
   submissionStatusLine,
@@ -20,7 +19,6 @@ import {
   lockPayrollRun,
   payrollCsv,
   reopenPayrollRun,
-  scheduleComparisonFor,
 } from "@/lib/payroll-control";
 import { payrollDisplayRows, type ScheduleComparison, type WorkedRowInput } from "@/lib/payroll-schedule-compare";
 import {
@@ -35,17 +33,35 @@ import { publicTeamBaseUrl } from "@/lib/public-team-url";
 import { toIsoTimestamp } from "@/lib/timestamp-values";
 import { sendTransactionalEmail } from "@/lib/transactional-email";
 import type { Business } from "@/lib/types";
-import { addDateKeyDays, currentPayrollWeekStart, payrollWeekBounds } from "@/lib/payroll-week";
+import { currentPayrollWeekStart } from "@/lib/payroll-week";
+import {
+  AUTO_APPROVAL_ACTOR,
+  autoSendDecision,
+  autoSendSkippedEmail,
+  blockerReasons,
+  mondayJobWeek,
+  payrollMondaySchedule,
+  payrollMondaySummaryEmail,
+  payrollSummaryFingerprint,
+  summaryDecision,
+  summaryWasLate,
+  type SummaryScheduleRow,
+} from "@/lib/payroll-auto-rules";
 
 /**
  * Monday payroll approval and the AccountantsOffice (Payroll Relief) queue.
+ * 8:00 AM Monday: a freshly recalculated summary email (waits for Sunday's punches until noon).
+ * 5:00 PM Monday: automatic approval unless the week is on Hold (payroll_week_holds) or blocked.
  * Approving is the existing lock (lockPayrollRun), refused while the week has
  * open punches or unresolved missed clock-outs. Each Corner Deli lock queues one
  * submission; the store server's job (deploy/supplier-scraper/payroll-relief.mjs)
  * takes queued ones from /api/cron/payroll-submissions, enters the hours and tips
- * in Payroll Relief and SAVES them (it never submits: the owner reviews and
- * presses Submit there), and reports the outcome. "submitted" in this table means
- * saved for review. The Docks (Tiki, a separate company) is never sent.
+ * in Payroll Relief and SAVES them, and reports the outcome ("submitted" = saved
+ * for the owner to review and Submit). Only when the store server has
+ * PAYROLL_RELIEF_AUTO_SUBMIT=1 and the submission has submit_after_save does the
+ * job then press Submit, once (submit_pressed_at is recorded here first), and
+ * report "sent" when Payroll Relief confirms it. The Docks (Tiki, a separate
+ * company) is never sent.
  * A "roster" row is a Check AccountantsOffice request: the job only downloads
  * the timesheet and reports Payroll Relief's employee list.
  */
@@ -91,13 +107,16 @@ export function ensurePayrollApprovalSchema(): Promise<void> {
         SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
         WHERE conrelid = 'payroll_submissions'::regclass AND conname = 'payroll_submissions_status_check'
       ` as unknown as Array<{ def: string }>;
-      if (!checks[0] || !checks[0].def.includes("needs_code")) {
+      if (!checks[0] || !checks[0].def.includes("'sent'")) {
         await sql`ALTER TABLE payroll_submissions DROP CONSTRAINT IF EXISTS payroll_submissions_status_check`;
         await sql`
           ALTER TABLE payroll_submissions ADD CONSTRAINT payroll_submissions_status_check
-          CHECK (status IN ('queued', 'submitting', 'needs_code', 'submitted', 'failed', 'cancelled'))
+          CHECK (status IN ('queued', 'submitting', 'needs_code', 'submitted', 'sent', 'failed', 'cancelled'))
         `;
       }
+      // Press Submit after saving (only where the store server allows it), and when the job pressed it (never twice).
+      await sql`ALTER TABLE payroll_submissions ADD COLUMN IF NOT EXISTS submit_after_save BOOLEAN NOT NULL DEFAULT FALSE`;
+      await sql`ALTER TABLE payroll_submissions ADD COLUMN IF NOT EXISTS submit_pressed_at TIMESTAMPTZ`;
       const kindChecks = await sql`
         SELECT 1 AS present FROM pg_constraint WHERE conrelid = 'payroll_submissions'::regclass AND conname = 'payroll_submissions_kind_check'
       ` as unknown as Array<{ present: number }>;
@@ -144,6 +163,18 @@ export function ensurePayrollApprovalSchema(): Promise<void> {
           PRIMARY KEY (business, week_start, kind)
         )
       `;
+      // Hold: keeps a week from being approved automatically at 5 PM Monday (released_at NULL = on hold).
+      await sql`
+        CREATE TABLE IF NOT EXISTS payroll_week_holds (
+          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
+          week_start DATE NOT NULL,
+          held_by TEXT NOT NULL,
+          held_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          released_by TEXT,
+          released_at TIMESTAMPTZ,
+          PRIMARY KEY (business, week_start)
+        )
+      `;
     })().catch((error) => {
       schemaPromise = null;
       throw error;
@@ -173,8 +204,12 @@ export async function payrollApprovalBlockers(business: Business, weekStart: str
   return { ...blockers, message: payrollApprovalBlockMessage(blockers) };
 }
 
-/** Approve = lock, refused with a clear message while the week still has open punches or missed clock-outs. */
-export async function approvePayrollRun(input: { id: string; business: Business; actor: string }) {
+/**
+ * Approve = lock, refused with a clear message while the week still has open punches or missed clock-outs.
+ * The Corner Deli submission it queues may press Submit after saving (submit_after_save), which the store
+ * server only does with PAYROLL_RELIEF_AUTO_SUBMIT=1. unlessHeld: the automatic approval, refused on Hold.
+ */
+export async function approvePayrollRun(input: { id: string; business: Business; actor: string; unlessHeld?: boolean }) {
   await ensurePayrollApprovalSchema();
   const runs = await getSql()`
     SELECT id, business, week_start, version, status FROM payroll_run_versions WHERE id = ${input.id} LIMIT 1
@@ -185,23 +220,23 @@ export async function approvePayrollRun(input: { id: string; business: Business;
   const weekStart = weekText(run.week_start);
   const blockers = await payrollApprovalBlockers(input.business, weekStart);
   if (blockers.message) throw new ValidationError(blockers.message);
-  const locked = await lockPayrollRun(input.id, input.actor);
+  const locked = await lockPayrollRun(input.id, input.actor, { unlessHeld: input.unlessHeld });
   // The Docks is a separate company (and closed for the season): it is never entered automatically.
   if (input.business !== PAYROLL_RELIEF_BUSINESS) return { ...locked, submission: null, submissionNote: DOCKS_NOT_SENT };
-  const submission = await queuePayrollSubmission({ runId: input.id, business: input.business, weekStart, actor: input.actor });
+  const submission = await queuePayrollSubmission({ runId: input.id, business: input.business, weekStart, actor: input.actor, submitAfterSave: true });
   return { ...locked, submission };
 }
 
-export async function queuePayrollSubmission(input: { runId: string; business: Business; weekStart: string; actor: string }) {
+export async function queuePayrollSubmission(input: { runId: string; business: Business; weekStart: string; actor: string; submitAfterSave?: boolean }) {
   if (input.business !== PAYROLL_RELIEF_BUSINESS) return null;
   await ensurePayrollApprovalSchema();
   const rows = await getSql()`
-    INSERT INTO payroll_submissions (id, business, week_start, payroll_run_version_id, queued_by)
-    VALUES (${crypto.randomUUID()}, ${input.business}, ${input.weekStart}::date, ${input.runId}, ${input.actor})
+    INSERT INTO payroll_submissions (id, business, week_start, payroll_run_version_id, queued_by, submit_after_save)
+    VALUES (${crypto.randomUUID()}, ${input.business}, ${input.weekStart}::date, ${input.runId}, ${input.actor}, ${Boolean(input.submitAfterSave)})
     ON CONFLICT (payroll_run_version_id) DO NOTHING
     RETURNING id, status
   ` as unknown as Array<{ id: string; status: string }>;
-  if (rows[0]) await audit(input.business, "Payroll Submission Queued", input.runId, { weekStart: input.weekStart, submissionId: rows[0].id, destination: "AccountantsOffice" }, input.actor);
+  if (rows[0]) await audit(input.business, "Payroll Submission Queued", input.runId, { weekStart: input.weekStart, submissionId: rows[0].id, destination: "AccountantsOffice", submitAfterSave: Boolean(input.submitAfterSave) }, input.actor);
   return rows[0] ? { id: String(rows[0].id), status: rows[0].status, statusLine: submissionStatusLine(rows[0].status) } : null;
 }
 
@@ -229,10 +264,15 @@ export async function retryPayrollSubmission(input: { id: string; business: Busi
       totals = NULL, updated_at = NOW()
     FROM payroll_run_versions r
     WHERE s.id::text = ${input.id} AND s.business = ${input.business} AND s.kind = 'payroll' AND s.status IN ('failed', 'submitted')
+      AND s.submit_pressed_at IS NULL
       AND r.id = s.payroll_run_version_id AND r.status = 'Locked'
     RETURNING s.id, s.payroll_run_version_id
   ` as unknown as Array<{ id: string; payroll_run_version_id: string }>;
-  if (!rows[0]) throw new ValidationError("Only a failed (or already saved) submission of a locked payroll can be sent again.");
+  if (!rows[0]) {
+    const pressed = await getSql()`SELECT 1 AS pressed FROM payroll_submissions WHERE id::text = ${input.id} AND submit_pressed_at IS NOT NULL` as unknown as Array<{ pressed: number }>;
+    if (pressed[0]) throw new ValidationError("Submit was already pressed in Payroll Relief for this payroll, so it can't be sent again. Check Payroll Relief first.");
+    throw new ValidationError("Only a failed (or already saved) submission of a locked payroll can be sent again.");
+  }
   await audit(input.business, "Payroll Submission Retried", String(rows[0].payroll_run_version_id), { submissionId: input.id }, input.actor);
   return { id: input.id, status: "queued", statusLine: submissionStatusLine("queued") };
 }
@@ -251,6 +291,8 @@ type SubmissionRow = {
   queued_at: string;
   started_at: string | null;
   finished_at: string | null;
+  submit_after_save?: boolean | null;
+  submit_pressed_at?: string | null;
   version?: number;
 };
 
@@ -271,6 +313,8 @@ function mapSubmission(row: SubmissionRow) {
     queuedAt: toIsoTimestamp(row.queued_at),
     startedAt: toIsoTimestamp(row.started_at),
     finishedAt: toIsoTimestamp(row.finished_at),
+    submitAfterSave: Boolean(row.submit_after_save),
+    submitPressedAt: toIsoTimestamp(row.submit_pressed_at ?? null),
   };
 }
 
@@ -293,6 +337,7 @@ export async function payrollApprovalOverview(business: Business, weekStart: str
     submissions: submissions.map(mapSubmission),
     sendsToPayrollRelief: business === PAYROLL_RELIEF_BUSINESS,
     payrollRelief: business === PAYROLL_RELIEF_BUSINESS ? await payrollReliefOverview(business) : null,
+    autoSend: await payrollAutoSendStatus(business, weekStart),
   };
 }
 
@@ -317,6 +362,10 @@ type SubmissionPayload = {
   mapping: Array<{ employee: string; key: string; eeNum: string }>;
   csvFileName: string | null;
   csv: string | null;
+  /** Press Submit after a verified save — only if the store server also has PAYROLL_RELIEF_AUTO_SUBMIT=1. */
+  submitAfterSave: boolean;
+  /** Submit was already pressed for this submission: never press it again. */
+  submitPressedAt: string | null;
 };
 
 async function payrollReliefMapping(business: Business) {
@@ -328,6 +377,7 @@ async function payrollReliefMapping(business: Business) {
 
 async function runPayload(input: {
   id: string | null; kind: "payroll" | "roster"; preview: boolean; status: string; business: Business; runId: string | null;
+  submitAfterSave?: boolean; submitPressedAt?: string | null;
 }): Promise<SubmissionPayload> {
   const sql = getSql();
   const runs = input.runId ? await sql`
@@ -352,6 +402,8 @@ async function runPayload(input: {
     mapping: await payrollReliefMapping(input.business),
     csvFileName: csv?.fileName ?? null,
     csv: csv?.csv ?? null,
+    submitAfterSave: input.kind === "payroll" && !input.preview && Boolean(input.submitAfterSave),
+    submitPressedAt: toIsoTimestamp(input.submitPressedAt ?? null),
   };
 }
 
@@ -360,7 +412,9 @@ async function expireStaleSubmissions() {
   const sql = getSql();
   await sql`
     UPDATE payroll_submissions SET status = 'failed', finished_at = NOW(), updated_at = NOW(),
-      message = 'The Payroll Relief job stopped before reporting back. Check the entries in Payroll Relief, then send it again from payroll.'
+      message = CASE WHEN submit_pressed_at IS NOT NULL
+        THEN 'Pressed Submit but couldn''t confirm — check Payroll Relief (the job stopped before reporting back).'
+        ELSE 'The Payroll Relief job stopped before reporting back. Check the entries in Payroll Relief, then send it again from payroll.' END
     WHERE status IN ('submitting', 'needs_code') AND started_at < NOW() - INTERVAL '75 minutes'
   `;
   await sql`
@@ -383,13 +437,14 @@ export async function takePayrollSubmissions(limit = 3) {
       ORDER BY s.queued_at LIMIT ${Math.max(1, Math.min(10, limit))}
       FOR UPDATE OF s SKIP LOCKED
     )
-    RETURNING id, kind, business, payroll_run_version_id
-  ` as unknown as Array<{ id: string; kind: "payroll" | "roster"; business: Business; payroll_run_version_id: string | null }>;
+    RETURNING id, kind, business, payroll_run_version_id, submit_after_save, submit_pressed_at
+  ` as unknown as Array<{ id: string; kind: "payroll" | "roster"; business: Business; payroll_run_version_id: string | null; submit_after_save: boolean; submit_pressed_at: string | null }>;
   const submissions = [];
   for (const row of rows) {
     submissions.push(await runPayload({
       id: String(row.id), kind: row.kind, preview: false, status: "submitting", business: row.business,
       runId: row.payroll_run_version_id ? String(row.payroll_run_version_id) : null,
+      submitAfterSave: Boolean(row.submit_after_save), submitPressedAt: row.submit_pressed_at,
     }));
   }
   return submissions;
@@ -399,13 +454,14 @@ export async function takePayrollSubmissions(limit = 3) {
 export async function payrollSubmissionDetails(id: string): Promise<SubmissionPayload | null> {
   await ensurePayrollApprovalSchema();
   const rows = await getSql()`
-    SELECT id, kind, status, business, payroll_run_version_id FROM payroll_submissions WHERE id::text = ${id} LIMIT 1
-  ` as unknown as Array<{ id: string; kind: "payroll" | "roster"; status: string; business: Business; payroll_run_version_id: string | null }>;
+    SELECT id, kind, status, business, payroll_run_version_id, submit_after_save, submit_pressed_at FROM payroll_submissions WHERE id::text = ${id} LIMIT 1
+  ` as unknown as Array<{ id: string; kind: "payroll" | "roster"; status: string; business: Business; payroll_run_version_id: string | null; submit_after_save: boolean; submit_pressed_at: string | null }>;
   const row = rows[0];
   if (!row) return null;
   return runPayload({
     id: String(row.id), kind: row.kind, preview: false, status: row.status, business: row.business,
     runId: row.payroll_run_version_id ? String(row.payroll_run_version_id) : null,
+    submitAfterSave: Boolean(row.submit_after_save), submitPressedAt: row.submit_pressed_at,
   });
 }
 
@@ -556,12 +612,32 @@ export async function payrollReliefOverview(business: Business) {
   return { roster, people: list, rosterCheck: checks[0] ? mapSubmission(checks[0]) : null };
 }
 
-type ReportStatus = "submitted" | "failed" | "needs_code";
+type ReportStatus = "submitted" | "sent" | "failed" | "needs_code";
+
+/**
+ * The job is about to press Submit in Payroll Relief: recorded BEFORE the click, once. Granted only for a
+ * payroll submission being sent, marked submit_after_save, and never pressed before; the job presses
+ * Submit only when this returns granted.
+ */
+export async function claimPayrollSubmitPress(id: string): Promise<{ granted: boolean; reason?: string }> {
+  await ensurePayrollApprovalSchema();
+  const rows = await getSql()`
+    UPDATE payroll_submissions SET submit_pressed_at = NOW(), message = 'Pressing Submit in Payroll Relief…', updated_at = NOW()
+    WHERE id::text = ${id} AND kind = 'payroll' AND business = ${PAYROLL_RELIEF_BUSINESS}
+      AND status = 'submitting' AND submit_after_save AND submit_pressed_at IS NULL
+    RETURNING id, business, payroll_run_version_id, week_start
+  ` as unknown as Array<{ id: string; business: Business; payroll_run_version_id: string; week_start: string | Date }>;
+  if (!rows[0]) return { granted: false, reason: "This submission isn't set to be submitted, isn't being sent, or Submit was already pressed." };
+  await audit(rows[0].business, "Payroll Relief Submit Pressed", String(rows[0].payroll_run_version_id),
+    { submissionId: String(rows[0].id), weekStart: weekText(rows[0].week_start), destination: "Payroll Relief (Submit)" }, "Payroll Relief job");
+  return { granted: true };
+}
 
 /**
  * The job reports how a submission went. needs_code: AccountantsOffice texted the owner a code (the owner is
- * emailed where to type it). submitted (= saved in Payroll Relief for the owner to review and Submit) or
- * failed: final, with one email to the owner. Roster checks are never emailed.
+ * emailed where to type it). submitted (= saved in Payroll Relief for the owner to review and Submit),
+ * sent (= Submit pressed and confirmed) or failed: final, with one email to the owner, each worded
+ * differently. Roster checks are never emailed.
  */
 export async function recordPayrollSubmissionResult(input: { id: string; status: ReportStatus; message?: string; totals?: HoursTotals | null }) {
   await ensurePayrollApprovalSchema();
@@ -593,18 +669,23 @@ export async function recordPayrollSubmissionResult(input: { id: string; status:
     return { recorded: true, status: input.status, emailed };
   }
 
+  // "sent" (submitted to the accountants) is only accepted after the job recorded pressing Submit.
   const rows = await sql`
     UPDATE payroll_submissions SET status = ${input.status}, message = ${message}, totals = ${totals ? JSON.stringify(totals) : null}::jsonb,
       code = NULL, finished_at = NOW(), updated_at = NOW()
     WHERE id::text = ${input.id} AND status IN ('submitting', 'needs_code')
-    RETURNING id, kind, business, week_start, payroll_run_version_id
-  ` as unknown as Array<{ id: string; kind: "payroll" | "roster"; business: Business; week_start: string | Date | null; payroll_run_version_id: string | null }>;
+      AND (${input.status}::text <> 'sent' OR submit_pressed_at IS NOT NULL)
+    RETURNING id, kind, business, week_start, payroll_run_version_id, submit_pressed_at
+  ` as unknown as Array<{ id: string; kind: "payroll" | "roster"; business: Business; week_start: string | Date | null; payroll_run_version_id: string | null; submit_pressed_at: string | null }>;
   const row = rows[0];
-  if (!row) return { recorded: false, reason: "No submission with that id is being sent." };
+  if (!row) return { recorded: false, reason: "No submission with that id is being sent (or Submit wasn't recorded as pressed)." };
   if (row.kind === "roster" || !row.week_start || !row.payroll_run_version_id) return { recorded: true, status: input.status, emailed: false };
   const weekStart = weekText(row.week_start);
-  await audit(row.business, input.status === "submitted" ? "Payroll Saved in Payroll Relief" : "Payroll Relief Entry Failed", String(row.payroll_run_version_id),
-    { submissionId: String(row.id), weekStart, message, totals, destination: "Payroll Relief (saved, not submitted)" }, "Payroll Relief job");
+  const submitPressed = Boolean(row.submit_pressed_at);
+  await audit(row.business,
+    input.status === "sent" ? "Payroll Submitted in Payroll Relief" : input.status === "submitted" ? "Payroll Saved in Payroll Relief" : submitPressed ? "Payroll Relief Submit Unconfirmed" : "Payroll Relief Entry Failed",
+    String(row.payroll_run_version_id),
+    { submissionId: String(row.id), weekStart, message, totals, destination: input.status === "sent" ? "Payroll Relief (submitted)" : "Payroll Relief (saved, not submitted)", submitPressed }, "Payroll Relief job");
 
   let emailed = false;
   const claimed = await sql`
@@ -615,7 +696,7 @@ export async function recordPayrollSubmissionResult(input: { id: string; status:
     const versions = await sql`SELECT version FROM payroll_run_versions WHERE id = ${row.payroll_run_version_id} LIMIT 1` as unknown as Array<{ version: number }>;
     const email = payrollSubmissionEmail({
       business: row.business, weekStart, version: Number(versions[0]?.version || 0), status: input.status, message,
-      link: payrollControlLink(row.business, weekStart), totalsText: totals ? formatTotals(totals) : undefined,
+      link: payrollControlLink(row.business, weekStart), totalsText: totals ? formatTotals(totals) : undefined, submitPressed,
     });
     try {
       emailed = (await sendTransactionalEmail({ to: recipients, subject: email.subject, text: email.text })).sent > 0;
@@ -628,101 +709,301 @@ export async function recordPayrollSubmissionResult(input: { id: string; status:
 }
 
 // ---------------------------------------------------------------------------
-// Monday scheduler step
+// Hold (per business and week)
 
-/**
- * Drafts last week's payroll (unless a version already exists) and emails the
- * owner the totals, anything blocking approval, and a "Review and approve"
- * link. Sends at most once per business and week.
- */
-const APPROVAL_GRACE_MS = 30 * 60_000;
+type HoldRow = { held_by: string; held_at: string; released_by: string | null; released_at: string | null };
 
-/**
- * Called every 15 minutes (with the missed clock-out check): once last week has
- * ended, drafts it and sends the Monday approval email (once per business per
- * week). Only in the two days after the week ends, so a new install doesn't
- * email about an old week later in the week.
- */
-export async function catchUpPayrollApprovals(now = new Date()) {
-  const weekStart = addDateKeyDays(currentPayrollWeekStart(now), -7);
-  const end = payrollWeekBounds(weekStart).end.getTime();
-  if (now.getTime() < end + APPROVAL_GRACE_MS || now.getTime() > end + 2 * 24 * 60 * 60_000) return { weekStart, skipped: true };
-  const results: Record<string, unknown> = {};
-  for (const business of ["Corner Deli", "Tiki"] as const) results[business] = await preparePayrollApproval(business, weekStart);
-  return { weekStart, results };
+async function activeHold(business: Business, weekStart: string) {
+  const rows = await getSql()`
+    SELECT held_by, held_at, released_by, released_at FROM payroll_week_holds WHERE business = ${business} AND week_start = ${weekStart}::date LIMIT 1
+  ` as unknown as HoldRow[];
+  const row = rows[0];
+  return row && !row.released_at ? { heldBy: row.held_by, heldAt: toIsoTimestamp(row.held_at) } : null;
 }
 
-export async function preparePayrollApproval(business: Business, weekStart: string, actor = "Nightly scheduler") {
-  // The payroll week ends Monday 4 AM; drafting earlier (the 3 AM scheduler run in summer) would leave out late punches.
-  if (Date.now() < payrollWeekBounds(weekStart).end.getTime() + APPROVAL_GRACE_MS) return { skipped: true, reason: "The payroll week hasn't ended yet." };
+function checkWeek(weekStart: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw new ValidationError("Choose a payroll week (its Monday, YYYY-MM-DD).");
+}
+
+/** Hold: the week is not approved automatically at 5 PM Monday. Manual approval still works. */
+export async function holdPayrollWeek(input: { business: Business; weekStart: string; actor: string }) {
+  checkWeek(input.weekStart);
+  if (input.business !== PAYROLL_RELIEF_BUSINESS) throw new ValidationError(DOCKS_NOT_SENT);
   await ensurePayrollApprovalSchema();
-  const versions = await getSql()`
+  const latest = await latestRun(input.business, input.weekStart);
+  if (latest?.status === "Locked") throw new ValidationError("This payroll is already approved. To stop it, reopen it as a new version.");
+  await getSql()`
+    INSERT INTO payroll_week_holds (business, week_start, held_by, held_at)
+    VALUES (${input.business}, ${input.weekStart}::date, ${input.actor}, NOW())
+    ON CONFLICT (business, week_start) DO UPDATE SET held_by = EXCLUDED.held_by, held_at = NOW(), released_by = NULL, released_at = NULL
+  `;
+  await audit(input.business, "Payroll Put On Hold", input.weekStart, { weekStart: input.weekStart }, input.actor);
+  // The 5 PM approval may have just happened; say so rather than pretend the hold stopped it.
+  const after = await latestRun(input.business, input.weekStart);
+  return { held: true, alreadyApproved: after?.status === "Locked", hold: await activeHold(input.business, input.weekStart) };
+}
+
+export async function releasePayrollWeek(input: { business: Business; weekStart: string; actor: string }) {
+  checkWeek(input.weekStart);
+  await ensurePayrollApprovalSchema();
+  const rows = await getSql()`
+    UPDATE payroll_week_holds SET released_by = ${input.actor}, released_at = NOW()
+    WHERE business = ${input.business} AND week_start = ${input.weekStart}::date AND released_at IS NULL
+    RETURNING held_by
+  ` as unknown as Array<{ held_by: string }>;
+  if (!rows[0]) throw new ValidationError("This payroll week isn't on hold.");
+  await audit(input.business, "Payroll Hold Released", input.weekStart, { weekStart: input.weekStart, heldBy: rows[0].held_by }, input.actor);
+  return { held: false };
+}
+
+/** For the payroll page: the 5 PM automatic send for this week, its hold, and what happened. */
+export async function payrollAutoSendStatus(business: Business, weekStart: string, now = new Date()) {
+  if (business !== PAYROLL_RELIEF_BUSINESS || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return null;
+  await ensurePayrollApprovalSchema();
+  const schedule = payrollMondaySchedule(weekStart);
+  const [hold, notices, latest] = await Promise.all([
+    activeHold(business, weekStart),
+    weekNotices(business, weekStart),
+    latestRun(business, weekStart),
+  ]);
+  const decided = notices.get("auto_send")?.details as { outcome?: string; reasons?: string[]; version?: number } | undefined;
+  const summary = notices.get("approval_request")?.details as { sentAt?: string; sundayMissing?: boolean; late?: boolean } | undefined;
+  return {
+    sendAt: schedule.autoSendAt.toISOString(),
+    windowEnd: schedule.windowEnd.toISOString(),
+    pending: !decided?.outcome && latest?.status !== "Locked" && now.getTime() < schedule.windowEnd.getTime(),
+    hold,
+    outcome: decided?.outcome || null,
+    reasons: decided?.reasons || [],
+    summarySentAt: summary?.sentAt || null,
+    summaryLate: Boolean(summary?.late),
+    sundayMissing: Boolean(summary?.sundayMissing),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Monday: 8 AM summary, 5 PM automatic approval
+
+type RunRow = { id: string; version: number; status: "Draft" | "Locked"; payload: Record<string, unknown> & { rows?: WorkedRowInput[]; scheduleComparison?: ScheduleComparison[]; processingFeeReviewCount?: number } };
+
+async function latestRun(business: Business, weekStart: string): Promise<RunRow | null> {
+  const rows = await getSql()`
     SELECT id, version, status, payload FROM payroll_run_versions
     WHERE business = ${business} AND week_start = ${weekStart}::date
     ORDER BY version DESC LIMIT 1
-  ` as unknown as Array<{ id: string; version: number; status: string; payload: { rows?: WorkedRowInput[]; processingFeeReviewCount?: number; scheduleComparison?: ScheduleComparison[] } }>;
-  const latest = versions[0];
-  if (latest?.status === "Locked") return { skipped: true, reason: "Payroll for this week is already approved.", version: Number(latest.version) };
+  ` as unknown as RunRow[];
+  return rows[0] || null;
+}
 
-  let draft: { version: number; created: boolean } | { error: string };
-  let rows: WorkedRowInput[] = [];
-  let comparison: ScheduleComparison[] | undefined;
-  let missingSquareFees = 0;
-  if (latest) {
-    draft = { version: Number(latest.version), created: false };
-    rows = latest.payload?.rows || [];
-    comparison = latest.payload?.scheduleComparison;
-    missingSquareFees = Number(latest.payload?.processingFeeReviewCount || 0);
-  } else {
-    try {
-      const created = await createPayrollDraft({ business, weekStart, actor });
-      draft = { version: Number(created.version), created: true };
-      rows = created.summary.rows || [];
-      comparison = created.summary.scheduleComparison;
-      missingSquareFees = Number(created.summary.processingFeeReviewCount || 0);
-    } catch (error) {
-      if (!(error instanceof ValidationError)) throw error;
-      draft = { error: error.message };
-      const summary = await controlledPayrollSummary(business, weekStart);
-      rows = summary.rows || [];
-      comparison = summary.scheduleComparison;
-      missingSquareFees = Number(summary.processingFeeReviewCount || 0);
-    }
-  }
-  const blockers = await clockOutBlockersForWeek(business, weekStart);
-  const recipients = payrollNotifyEmails();
-  if (!recipients.length) return { draft, blockers, emailed: false, reason: "PAYROLL_NOTIFY_EMAIL / APP_EMAIL is not set." };
+async function weekNotices(business: Business, weekStart: string) {
+  const rows = await getSql()`
+    SELECT kind, details, created_at FROM payroll_week_notices WHERE business = ${business} AND week_start = ${weekStart}::date
+  ` as unknown as Array<{ kind: string; details: Record<string, unknown>; created_at: string }>;
+  return new Map(rows.map((row) => [row.kind, row]));
+}
 
-  const claimed = await getSql()`
+async function claimNotice(business: Business, weekStart: string, kind: string, details: Record<string, unknown>) {
+  const rows = await getSql()`
     INSERT INTO payroll_week_notices (business, week_start, kind, details)
-    VALUES (${business}, ${weekStart}::date, 'approval_request', ${JSON.stringify({ draft, blockers })}::jsonb)
+    VALUES (${business}, ${weekStart}::date, ${kind}, ${JSON.stringify(details)}::jsonb)
     ON CONFLICT DO NOTHING
     RETURNING kind
   ` as unknown as Array<{ kind: string }>;
-  if (!claimed[0]) return { draft, blockers, emailed: false, reason: "The approval email for this week was already sent." };
+  return Boolean(rows[0]);
+}
 
-  const displayRows = payrollDisplayRows(rows, comparison || await scheduleComparisonFor(business, weekStart, rows as Parameters<typeof scheduleComparisonFor>[2]))
-    .map((row) => ({ ...row, schedule: row.schedule ? { text: row.schedule.text, flagged: row.schedule.flagged } : null }));
-  const email = payrollApprovalEmail({
-    business, weekStart, rows: displayRows, draft, blockers, missingSquareFees, needsReview: blockers.needsReview,
-    reviewLink: payrollControlLink(business, weekStart),
-  });
-  let sent = 0;
-  let configured = true;
-  let failure = "";
+async function setNotice(business: Business, weekStart: string, kind: string, details: Record<string, unknown>) {
+  await getSql()`
+    UPDATE payroll_week_notices SET details = ${JSON.stringify(details)}::jsonb
+    WHERE business = ${business} AND week_start = ${weekStart}::date AND kind = ${kind}
+  `;
+}
+
+async function releaseNotice(business: Business, weekStart: string, kind: string) {
+  await getSql()`DELETE FROM payroll_week_notices WHERE business = ${business} AND week_start = ${weekStart}::date AND kind = ${kind}`;
+}
+
+/**
+ * Recalculates the week and returns the draft to use: the latest draft when the recalculation is the same
+ * (payrollSummaryFingerprint), else a new draft version. Null draft when it's already approved.
+ */
+export async function freshPayrollDraft(business: Business, weekStart: string, actor: string) {
+  const latest = await latestRun(business, weekStart);
+  if (latest?.status === "Locked") return { locked: true as const, version: Number(latest.version) };
+  const summary = await controlledPayrollSummary(business, weekStart);
+  if (latest && payrollSummaryFingerprint(latest.payload as Parameters<typeof payrollSummaryFingerprint>[0]) === payrollSummaryFingerprint(summary)) {
+    return { locked: false as const, draft: { id: String(latest.id), version: Number(latest.version), created: false }, summary };
+  }
   try {
-    const delivery = await sendTransactionalEmail({ to: recipients, subject: email.subject, text: email.text, idempotencyKey: `payroll-approval-${business}-${weekStart}`.replace(/\s+/g, "-") });
-    sent = delivery.sent;
-    configured = delivery.configured;
-    failure = delivery.failures.join("; ");
+    const created = await createPayrollDraft({ business, weekStart, actor });
+    return { locked: false as const, draft: { id: String(created.id), version: Number(created.version), created: true }, summary: created.summary };
   } catch (error) {
-    failure = error instanceof Error ? error.message : String(error);
+    if (!(error instanceof ValidationError)) throw error;
+    return { locked: false as const, draft: { error: error.message }, summary };
   }
-  if (!sent) {
-    // Release the claim so a later scheduler attempt can send it.
-    await getSql()`DELETE FROM payroll_week_notices WHERE business = ${business} AND week_start = ${weekStart}::date AND kind = 'approval_request'`;
-    if (!configured) return { draft, blockers, emailed: false, reason: "Outbound email is not configured." };
-    throw new Error(`Payroll approval email was not sent: ${failure || "no recipient accepted it"}`);
+}
+
+/** Punches and published shifts on the week's Sunday (Sunday 4 AM → Monday 4 AM). */
+async function sundayReadiness(business: Business, weekStart: string) {
+  const s = payrollMondaySchedule(weekStart);
+  const start = s.sundayStart.toISOString(), end = s.sundayEnd.toISOString();
+  const shifts = await getSql()`
+    SELECT COUNT(*)::INTEGER AS count FROM schedule_shifts
+    WHERE business = ${business} AND status = 'Published' AND starts_at >= ${start} AND starts_at < ${end}
+  ` as unknown as Array<{ count: number }>;
+  const clock = await getSql()`
+    SELECT COUNT(*)::INTEGER AS count FROM time_entries
+    WHERE business = ${business} AND COALESCE(clock_in, clock_out) >= ${start} AND COALESCE(clock_in, clock_out) < ${end}
+  ` as unknown as Array<{ count: number }>;
+  let rezku = 0;
+  if (business === "Corner Deli") {
+    const rows = await getSql()`
+      SELECT COUNT(*)::INTEGER AS count FROM rezku_shifts
+      WHERE COALESCE(clock_in, clock_out) >= ${start} AND COALESCE(clock_in, clock_out) < ${end}
+    ` as unknown as Array<{ count: number }>;
+    rezku = Number(rows[0]?.count || 0);
   }
-  return { draft, blockers, emailed: true };
+  return { sundayScheduledShifts: Number(shifts[0]?.count || 0), sundayPunches: Number(clock[0]?.count || 0) + rezku };
+}
+
+function summaryRows(summary: { rows?: WorkedRowInput[]; scheduleComparison?: ScheduleComparison[] }): SummaryScheduleRow[] {
+  return payrollDisplayRows(summary.rows || [], summary.scheduleComparison || []).map((row) => ({
+    ...row,
+    schedule: row.schedule ? { text: row.schedule.text, flagged: row.schedule.flagged, missed: row.schedule.missed, untracked: row.schedule.untracked } : null,
+  }));
+}
+
+/**
+ * The Monday summary email, once per business and week, from 8:00 AM (waiting for Sunday's punches until
+ * noon), with a freshly recalculated draft. Called every 15 minutes; does nothing outside its window.
+ */
+export async function sendMondaySummary(business: Business, weekStart: string, now = new Date()) {
+  await ensurePayrollApprovalSchema();
+  const notices = await weekNotices(business, weekStart);
+  const latest = await latestRun(business, weekStart);
+  const readiness = await sundayReadiness(business, weekStart);
+  const decision = summaryDecision({ now, weekStart, ...readiness, alreadySent: notices.has("approval_request"), approved: latest?.status === "Locked" });
+  if (decision.action !== "send") return { action: decision.action, ...readiness };
+  const recipients = payrollNotifyEmails();
+  if (!recipients.length) return { action: "send", emailed: false, reason: "PAYROLL_NOTIFY_EMAIL / APP_EMAIL is not set." };
+  if (!(await claimNotice(business, weekStart, "approval_request", { claimedAt: now.toISOString() }))) return { action: "already_sent" };
+  try {
+    const fresh = await freshPayrollDraft(business, weekStart, "Monday 8 AM summary");
+    if (fresh.locked) {
+      await releaseNotice(business, weekStart, "approval_request");
+      return { action: "already_approved" };
+    }
+    const blockers = await clockOutBlockersForWeek(business, weekStart);
+    const late = summaryWasLate(weekStart, now);
+    const email = payrollMondaySummaryEmail({
+      business, weekStart, rows: summaryRows(fresh.summary), draft: fresh.draft, blockers: blockerReasons(blockers),
+      missingSquareFees: Number(fresh.summary.processingFeeReviewCount || 0), needsReview: blockers.needsReview,
+      clockOutsToCheck: blockers.clockOutsToCheck, sundayMissing: decision.sundayMissing,
+      autoSend: business === PAYROLL_RELIEF_BUSINESS, late,
+      reviewLink: payrollControlLink(business, weekStart),
+      holdLink: `${payrollControlLink(business, weekStart)}&hold=1`,
+    });
+    const delivery = await sendTransactionalEmail({ to: recipients, subject: email.subject, text: email.text, idempotencyKey: `payroll-summary-${business}-${weekStart}`.replace(/\s+/g, "-") });
+    if (!delivery.sent) {
+      await releaseNotice(business, weekStart, "approval_request");
+      if (!delivery.configured) return { action: "send", emailed: false, reason: "Outbound email is not configured." };
+      throw new Error(`Payroll summary email was not sent: ${delivery.failures.join("; ") || "no recipient accepted it"}`);
+    }
+    const draft = "error" in fresh.draft ? { error: fresh.draft.error } : { version: fresh.draft.version, created: fresh.draft.created };
+    await setNotice(business, weekStart, "approval_request", { sentAt: now.toISOString(), draft, blockers, sundayMissing: decision.sundayMissing, late });
+    return { action: "sent", emailed: true, draft, sundayMissing: decision.sundayMissing, late };
+  } catch (error) {
+    await releaseNotice(business, weekStart, "approval_request").catch(() => undefined);
+    throw error;
+  }
+}
+
+/** The scheduler's Monday step (3 AM) and older callers: the summary, which waits for its 8 AM window. */
+export async function preparePayrollApproval(business: Business, weekStart: string) {
+  return sendMondaySummary(business, weekStart);
+}
+
+/**
+ * 5:00 PM Monday (window to Tuesday 11:59 PM), Corner Deli only, decided once per week: recalculate and
+ * approve as "Automatic 5 PM approval" (which queues the AccountantsOffice submission), or, when on hold or
+ * blocked, email once "Not sent at 5 PM: <reasons>".
+ */
+export async function autoApprovePayrollWeek(business: Business, weekStart: string, now = new Date()) {
+  if (business !== PAYROLL_RELIEF_BUSINESS) return { action: "not_sent_automatically" };
+  if (now.getTime() < payrollMondaySchedule(weekStart).autoSendAt.getTime()) return { action: "too_early" };
+  await ensurePayrollApprovalSchema();
+  const notices = await weekNotices(business, weekStart);
+  const latest = await latestRun(business, weekStart);
+  const lockedBefore = await getSql()`
+    SELECT 1 AS present FROM payroll_run_versions
+    WHERE business = ${business} AND week_start = ${weekStart}::date AND (locked_at IS NOT NULL OR reopened_from_id IS NOT NULL)
+    LIMIT 1
+  ` as unknown as Array<{ present: number }>;
+  const hold = await activeHold(business, weekStart);
+  const summaryDetails = notices.get("approval_request")?.details as { sentAt?: string } | undefined;
+  const readiness = await sundayReadiness(business, weekStart);
+  const blockers = await clockOutBlockersForWeek(business, weekStart);
+  const decision = autoSendDecision({
+    now, weekStart, latestStatus: latest?.status ?? null, everLocked: Boolean(lockedBefore[0]), heldBy: hold?.heldBy || null,
+    summarySentAt: summaryDetails?.sentAt ? new Date(summaryDetails.sentAt) : null,
+    sundayMissing: readiness.sundayScheduledShifts > 0 && readiness.sundayPunches === 0,
+    blockers: blockerReasons(blockers), decided: notices.has("auto_send"),
+  });
+  if (decision.action !== "approve" && decision.action !== "not_sent") return { action: decision.action };
+  if (!(await claimNotice(business, weekStart, "auto_send", { claimedAt: now.toISOString() }))) return { action: "already_decided" };
+
+  let reasons = decision.reasons;
+  if (decision.action === "approve") {
+    try {
+      const fresh = await freshPayrollDraft(business, weekStart, AUTO_APPROVAL_ACTOR);
+      if (fresh.locked) {
+        await setNotice(business, weekStart, "auto_send", { outcome: "already_approved", at: now.toISOString() });
+        return { action: "already_approved" };
+      }
+      if ("error" in fresh.draft) throw new ValidationError(`the payroll draft couldn't be created: ${fresh.draft.error}`);
+      const approved = await approvePayrollRun({ id: fresh.draft.id, business, actor: AUTO_APPROVAL_ACTOR, unlessHeld: true });
+      await setNotice(business, weekStart, "auto_send", { outcome: "approved", at: now.toISOString(), version: fresh.draft.version, recalculated: fresh.draft.created, submissionId: approved.submission?.id || null });
+      await audit(business, "Payroll Approved Automatically", fresh.draft.id, { weekStart, version: fresh.draft.version, recalculated: fresh.draft.created }, AUTO_APPROVAL_ACTOR);
+      return { action: "approved", version: fresh.draft.version, submission: approved.submission };
+    } catch (error) {
+      if (!(error instanceof ValidationError)) {
+        await releaseNotice(business, weekStart, "auto_send");
+        throw error;
+      }
+      reasons = [error.message];
+    }
+  }
+
+  await setNotice(business, weekStart, "auto_send", { outcome: "not_sent", at: now.toISOString(), reasons });
+  await audit(business, "Payroll Not Sent Automatically", weekStart, { weekStart, reasons }, AUTO_APPROVAL_ACTOR);
+  const recipients = payrollNotifyEmails();
+  if (!recipients.length) return { action: "not_sent", reasons, emailed: false };
+  const email = autoSendSkippedEmail({ business, weekStart, reasons, link: payrollControlLink(business, weekStart) });
+  let emailed = false;
+  let configured = true;
+  try {
+    const delivery = await sendTransactionalEmail({ to: recipients, subject: email.subject, text: email.text, idempotencyKey: `payroll-not-sent-${business}-${weekStart}`.replace(/\s+/g, "-") });
+    emailed = delivery.sent > 0;
+    configured = delivery.configured;
+  } catch (error) {
+    console.error("[payroll-auto-send] not-sent email failed", error);
+  }
+  // Undelivered (but email is set up): decide again next run, so the owner is told.
+  if (!emailed && configured) await releaseNotice(business, weekStart, "auto_send");
+  return { action: "not_sent", reasons, emailed };
+}
+
+/**
+ * Called every 15 minutes (with the missed clock-out check): the Monday summary for both businesses
+ * (8 AM, or when Sunday's punches arrive, at the latest noon) and Corner Deli's 5 PM automatic approval.
+ */
+export async function catchUpPayrollApprovals(now = new Date()) {
+  const weekStart = mondayJobWeek(now);
+  const results: Record<string, unknown> = {};
+  for (const business of ["Corner Deli", "Tiki"] as const) {
+    const summary = await sendMondaySummary(business, weekStart, now).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
+    const autoSend = await autoApprovePayrollWeek(business, weekStart, now).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
+    results[business] = { summary, autoSend };
+  }
+  return { weekStart, results };
 }

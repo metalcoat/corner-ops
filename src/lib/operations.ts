@@ -2,6 +2,7 @@ import { createHash, createHmac } from "node:crypto";
 import { assertEmployeePinAvailable, employeeByPin, employeePinUpdate } from "@/lib/employee-pin-security";
 import * as XLSX from "xlsx";
 import { ensureSchema, getSql } from "@/lib/db";
+import { runMissedClockOutCheck } from "@/lib/missed-clock-outs";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -740,6 +741,11 @@ export async function importRezkuReport(fileName: string, bytes: ArrayBuffer, re
     }
   }
 
+  // New Rezku punches: check them for forgotten clock-outs right away (the 15-minute cron is the fallback).
+  if (kind === "shifts" && imported) {
+    await runMissedClockOutCheck({ sources: ["rezku"], rezkuBatchId: batchId })
+      .catch((error) => console.error("[rezku-import] missed clock-out check failed", error));
+  }
   return { batchId, reportType: kind, rowsRead: rows.length, imported };
 }
 

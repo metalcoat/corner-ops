@@ -4,7 +4,7 @@ import {
   submitEmployeeAttendanceCase,
 } from "@/lib/attendance";
 import { getEmployeeSession } from "@/lib/employee-auth";
-import { employeeMissedClockOutCases, submitMissedClockOutTime } from "@/lib/missed-clock-outs";
+import { confirmMissedClockOut, employeeMissedClockOutCases, submitMissedClockOutTime } from "@/lib/missed-clock-outs";
 import { getSql } from "@/lib/db";
 import { apiError, unauthorized } from "@/lib/http";
 
@@ -44,6 +44,11 @@ export async function POST(request: Request) {
         leftAt: String(body.leftAt || ""),
         note: String(body.note || ""),
       }));
+    }
+
+    // "That's right": the clock-out on the punch (Rezku's, or the automatic close) is correct.
+    if (action === "clock-out-confirm") {
+      return Response.json(await confirmMissedClockOut(session, { id: String(body.id || "") }));
     }
 
     if (action === "did-not-work") {

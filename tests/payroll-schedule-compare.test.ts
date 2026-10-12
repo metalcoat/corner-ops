@@ -51,7 +51,11 @@ test("scheduled vs worked: difference, flags and missed shifts", () => {
   assert.equal(by.Lillian.flagged, true);
   assert.equal(by.Lillian.text, "Scheduled 12.00 · worked 8.25 · -3.75 · 1 missed shift");
   // Scheduled but no hours at all: still listed, worked 0.
-  assert.deepEqual({ ...by.Seth, text: undefined }, { employee: "Seth", scheduledHours: 6, workedHours: 0, difference: -6, scheduledShifts: 1, missedShifts: 1, flagged: true, text: undefined });
+  assert.deepEqual({ ...by.Seth, text: undefined }, {
+    employee: "Seth", scheduledHours: 6, workedHours: 0, difference: -6, scheduledShifts: 1, missedShifts: 1, flagged: true, text: undefined,
+    missed: [{ startsAt: "2026-10-02T20:00:00.000Z", endsAt: "2026-10-03T02:00:00.000Z" }],
+  });
+  assert.equal(by.Sean.missed, undefined);
   assert.equal(by["Walk In"].text, "Not scheduled · worked 3.00");
   assert.equal(by["Walk In"].flagged, true);
 });
@@ -113,4 +117,20 @@ test("signed differences and text", () => {
   assert.equal(signedHours(1.234), "+1.23");
   assert.equal(signedHours(-0.004), "0.00");
   assert.equal(discrepancyText({ scheduledHours: 8, workedHours: 0, difference: -8, scheduledShifts: 2, missedShifts: 2 }), "Scheduled 8.00 · worked 0.00 · -8.00 · 2 missed shifts");
+});
+
+test("salaried employees and owners are listed as not tracked, never flagged", () => {
+  const result = compareScheduleToWorked({
+    now: NOW,
+    untracked: ["mike  owner"],
+    rows: [{ employee: "Mike Owner", hours: 0 }, { employee: "Sean", hours: 2 }],
+    shifts: [{ employeeName: "Mike Owner", startsAt: at("2026-09-28T10:00:00"), endsAt: at("2026-09-28T18:00:00") }],
+    punches: [],
+  });
+  const by = Object.fromEntries(result.map((r) => [r.employee, r]));
+  assert.equal(by["Mike Owner"].flagged, false);
+  assert.equal(by["Mike Owner"].untracked, true);
+  assert.equal(by["Mike Owner"].text, "Not tracked (salaried)");
+  assert.equal(by["Mike Owner"].missed, undefined);
+  assert.equal(by.Sean.flagged, true);
 });

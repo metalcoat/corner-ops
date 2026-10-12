@@ -18,7 +18,8 @@ export const SMS_MAX_LATENESS_HOURS = 24;
 /** An employee's phone clock may run a little ahead of the server. */
 const FUTURE_TOLERANCE_MS = 2 * 60_000;
 
-export type CloseBasis = "business_close" | "scheduled_end" | "max_shift";
+/** "none": a Rezku punch with no scheduled shift (compared with nothing). */
+export type CloseBasis = "business_close" | "scheduled_end" | "max_shift" | "none";
 
 /** One configured opening for a business date, as PostgreSQL TIME text ("21:30:00"). */
 export type HoursWindow = { opens: string; closes: string };
@@ -154,11 +155,11 @@ export function missedClockOutDecision(input: { now: Date; dueAt: Date; hasCase:
 export type SmsPlan = { send: true } | { send: false; reason: "not_opted_in" | "no_phone" | "too_late" | "inactive" };
 
 /** Text only employees who consented and have a phone, and only near the close (not for long-stale punches). */
-export function missedClockOutSmsPlan(input: { now: Date; dueAt: Date; smsOptIn: boolean; phone: string; active: boolean }): SmsPlan {
+export function missedClockOutSmsPlan(input: { now: Date; dueAt: Date; smsOptIn: boolean; phone: string; active: boolean; maxLatenessHours?: number }): SmsPlan {
   if (!input.active) return { send: false, reason: "inactive" };
   if (!input.smsOptIn) return { send: false, reason: "not_opted_in" };
   if (!String(input.phone || "").replace(/\D/g, "")) return { send: false, reason: "no_phone" };
-  if (input.now.getTime() - input.dueAt.getTime() > SMS_MAX_LATENESS_HOURS * 3_600_000) return { send: false, reason: "too_late" };
+  if (input.now.getTime() - input.dueAt.getTime() > (input.maxLatenessHours ?? SMS_MAX_LATENESS_HOURS) * 3_600_000) return { send: false, reason: "too_late" };
   return { send: true };
 }
 
@@ -222,6 +223,7 @@ const CLOSE_LABELS: Record<CloseBasis, string> = {
   business_close: "business close",
   scheduled_end: "scheduled shift end",
   max_shift: `${MAX_EMPLOYEE_SHIFT_HOURS} hours after clock-in`,
+  none: "no scheduled shift",
 };
 
 export function closeBasisLabel(basis: CloseBasis): string {
@@ -234,26 +236,45 @@ export type OwnerCaseLine = {
   scheduledEnd: Date | null;
   smsNote: string;
   link: string;
+  /** open_punch when omitted (older callers). */
+  kind?: CaseKind;
+  /** The clock-out on the punch: Rezku's, or the time Corner Ops closed it at. */
+  punchClockOut?: Date | null;
+  /** auto_closed: "scheduled end" or "closing time". */
+  autoCloseBasis?: AutoCloseBasis | null;
 };
 
-/** One owner email per business per run, listing the newly found open punches. */
+/** One owner email per business per run, listing the newly found punches, by kind. */
 export function missedClockOutOwnerEmail(input: { business: Business; cases: OwnerCaseLine[] }): { subject: string; text: string } {
+  const kindOf = (item: OwnerCaseLine): CaseKind => item.kind || "open_punch";
+  const section = (kind: CaseKind) => input.cases.filter((item) => kindOf(item) === kind);
+  const open = section("open_punch"), closed = section("auto_closed"), late = section("late_clock_out"), unscheduled = section("unscheduled");
+  const fix = "  Fix it (use scheduled end, use their time, enter one, or keep as is): ";
+  const lines: string[] = [];
+  if (open.length) {
+    lines.push(`Still clocked in an hour after close (no scheduled end or close time to use):`, "");
+    for (const item of open) lines.push(item.employeeName, `  Clocked in: ${formatDateTime(item.clockIn)}`, `  Scheduled end: ${item.scheduledEnd ? formatDateTime(item.scheduledEnd) : "No published shift"}`, `  Text to employee: ${item.smsNote}`, `  Choose the clock-out (use scheduled end, use their time, or enter one): ${item.link}`, "");
+  }
+  if (closed.length) {
+    lines.push("Forgot to clock out, closed automatically (marked Needs Review):", "");
+    for (const item of closed) lines.push(item.employeeName, `  Clocked in: ${formatDateTime(item.clockIn)}`, `  Closed at: ${item.punchClockOut ? formatDateTime(item.punchClockOut) : "?"} (${item.autoCloseBasis === "business_close" ? "closing time" : "scheduled end"})`, `  Text to employee: ${item.smsNote}`, `${fix}${item.link}`, "");
+  }
+  if (late.length) {
+    lines.push(`Clocked out in Rezku ${LATE_CLOCK_OUT_MINUTES} minutes or more after their scheduled end:`, "");
+    for (const item of late) lines.push(item.employeeName, `  Rezku: ${formatDateTime(item.clockIn)} to ${item.punchClockOut ? formatTime(item.punchClockOut) : "?"}`, `  Scheduled until: ${item.scheduledEnd ? formatTime(item.scheduledEnd) : "?"}`, `  Text to employee: ${item.smsNote}`, `${fix}${item.link}`, "");
+  }
+  if (unscheduled.length) {
+    lines.push("Worked without a scheduled shift (not texted):", "");
+    for (const item of unscheduled) lines.push(item.employeeName, `  Rezku: ${formatDateTime(item.clockIn)} to ${item.punchClockOut ? formatTime(item.punchClockOut) : "?"}`, `  Review (or keep as is): ${item.link}`, "");
+  }
   const count = input.cases.length;
-  const lines = input.cases.flatMap((item) => [
-    `${item.employeeName}`,
-    `  Clocked in: ${formatDateTime(item.clockIn)}`,
-    `  Scheduled end: ${item.scheduledEnd ? formatDateTime(item.scheduledEnd) : "No published shift"}`,
-    `  Text to employee: ${item.smsNote}`,
-    `  Choose the clock-out (use scheduled end, use their time, or enter one): ${item.link}`,
-    "",
-  ]);
   return {
-    subject: `${input.business}: ${count} employee${count === 1 ? " is" : "s are"} still clocked in`,
+    subject: open.length === count
+      ? `${input.business}: ${count} employee${count === 1 ? " is" : "s are"} still clocked in`
+      : `${input.business}: ${count} clock-out${count === 1 ? "" : "s"} to check`,
     text: [
-      `These ${input.business} punches were still open an hour after close:`,
-      "",
       ...lines,
-      "Opening a link changes nothing. You sign in and tap the clock-out to use; it is saved as an audited punch correction.",
+      "Opening a link changes nothing. You sign in and choose; it is saved as an audited punch correction.",
     ].join("\n"),
   };
 }
@@ -322,48 +343,10 @@ export function payrollEmailTable(rows: PayrollEmailRow[]): string[] {
   return all.map((cells) => cells.map((cell, column) => column === cells.length - 1 ? cell : cell.padEnd(widths[column])).join(" | ").trimEnd());
 }
 
-export function payrollApprovalEmail(input: {
-  business: Business;
-  weekStart: string;
-  rows: PayrollEmailRow[];
-  draft: { version: number; created: boolean } | { error: string };
-  blockers: ApprovalBlockers;
-  missingSquareFees: number;
-  needsReview: number;
-  reviewLink: string;
-}): { subject: string; text: string } {
-  const weekEnd = addDays(input.weekStart, 6);
-  const blocking = payrollApprovalBlockMessage(input.blockers);
-  const attention: string[] = [];
-  if (input.blockers.openPunches) attention.push(`- ${input.blockers.openPunches} open punch${input.blockers.openPunches === 1 ? "" : "es"} (blocks approval)`);
-  if (input.blockers.unresolvedClockOuts) attention.push(`- ${input.blockers.unresolvedClockOuts} missed clock-out${input.blockers.unresolvedClockOuts === 1 ? "" : "s"} not resolved (blocks approval)`);
-  if (input.missingSquareFees) attention.push(`- ${input.missingSquareFees} Square payment${input.missingSquareFees === 1 ? "" : "s"} missing processing fees`);
-  if (input.needsReview) attention.push(`- ${input.needsReview} punch${input.needsReview === 1 ? "" : "es"} marked Needs Review`);
-  const flagged = input.rows.filter((row) => row.schedule?.flagged).length;
-  if (flagged) attention.push(`- ${flagged} employee${flagged === 1 ? "" : "s"} worked an hour or more off their schedule, or missed a shift (marked CHECK)`);
-  if ("error" in input.draft) attention.push(`- The payroll draft could not be created: ${input.draft.error}`);
-  const draftLine = "error" in input.draft
-    ? "No draft was created."
-    : `Draft v${input.draft.version} ${input.draft.created ? "was created" : "already existed"}.`;
-  return {
-    subject: `${input.business} payroll for ${input.weekStart} – ${weekEnd}: ${blocking ? "needs attention" : "ready to approve"}`,
-    text: [
-      `${input.business} payroll, week of ${input.weekStart} through ${weekEnd}. ${draftLine}`,
-      "",
-      ...payrollEmailTable(input.rows),
-      "",
-      attention.length ? "Needs attention:" : "Nothing is blocking approval.",
-      ...attention,
-      "",
-      `Review and approve: ${input.reviewLink}`,
-      input.business === "Corner Deli"
-        ? "Approving locks this payroll and queues it to be entered (saved, not submitted) in Payroll Relief."
-        : "Approving locks this payroll. The Docks isn't sent to AccountantsOffice automatically.",
-    ].join("\n"),
-  };
-}
+/** "submitted" = saved in Payroll Relief for the owner to Submit; "sent" = the job pressed Submit and it was confirmed. */
+export type SubmissionStatus = "queued" | "submitting" | "needs_code" | "submitted" | "sent" | "failed" | "cancelled";
 
-export type SubmissionStatus = "queued" | "submitting" | "needs_code" | "submitted" | "failed" | "cancelled";
+export const ACCOUNTANTS_FIRM = "Whalen, Davey & Looney";
 
 /** The status line shown on the payroll page for a locked run's submission (kind "roster": a Check AccountantsOffice request). */
 export function submissionStatusLine(status: SubmissionStatus | string | null | undefined, message = "", kind: "payroll" | "roster" = "payroll"): string {
@@ -378,7 +361,8 @@ export function submissionStatusLine(status: SubmissionStatus | string | null | 
   if (status === "queued") return "Waiting to enter in Payroll Relief";
   if (status === "submitting") return "Entering hours in Payroll Relief…";
   if (status === "needs_code") return "AccountantsOffice texted a sign-in code: enter it below within 10 minutes";
-  if (status === "submitted") return `Saved in Payroll Relief (not submitted): review it there and press Submit${message ? `. ${message}` : ""}`;
+  if (status === "submitted") return `Saved in Payroll Relief — review and press Submit${message ? `. ${message}` : ""}`;
+  if (status === "sent") return `Submitted to ${ACCOUNTANTS_FIRM}${message ? `. ${message}` : ""}`;
   if (status === "failed") return `Failed: ${message || "Payroll Relief did not accept it."}`;
   if (status === "cancelled") return message || "Not sent (payroll was reopened)";
   return "";
@@ -392,15 +376,43 @@ export function payrollWeekLabel(weekStart: string): string {
   return `${short(weekStart)}–${short(addDays(weekStart, 6))}`;
 }
 
-export function payrollSubmissionEmail(input: { business: Business; weekStart: string; version: number; status: "submitted" | "failed"; message: string; link: string; totalsText?: string }): { subject: string; text: string } {
+export function payrollSubmissionEmail(input: {
+  business: Business; weekStart: string; version: number; status: "submitted" | "sent" | "failed"; message: string; link: string; totalsText?: string;
+  /** The job pressed Submit in Payroll Relief for this submission (it may have gone through). */
+  submitPressed?: boolean;
+}): { subject: string; text: string } {
   const week = payrollWeekLabel(input.weekStart);
+  if (input.status === "sent") {
+    return {
+      subject: `${input.business} payroll for ${week} was submitted to ${ACCOUNTANTS_FIRM}`,
+      text: [
+        `${input.business} hours for ${week}${input.totalsText ? ` (${input.totalsText})` : ""} were entered in Payroll Relief, saved, and submitted to ${ACCOUNTANTS_FIRM}. Payroll Relief no longer shows it as the open payroll.`,
+        "",
+        `Payroll v${input.version} in Corner Ops: ${input.link}`,
+        `Payroll Relief: ${ACCOUNTANTSOFFICE_HOME}`,
+      ].join("\n"),
+    };
+  }
   if (input.status === "submitted") {
     return {
       subject: `${input.business} hours for ${week} are saved in Payroll Relief: review and Submit`,
       text: [
         `${input.business} hours for ${week} are saved in Payroll Relief${input.totalsText ? ` (${input.totalsText})` : ""}. Review, make any changes, and press Submit there: ${ACCOUNTANTSOFFICE_HOME}`,
         "",
-        `Nothing was submitted; payroll v${input.version} in Corner Ops: ${input.link}`,
+        `Nothing was submitted${input.message ? ` (${input.message})` : ""}; payroll v${input.version} in Corner Ops: ${input.link}`,
+      ].join("\n"),
+    };
+  }
+  if (input.submitPressed) {
+    return {
+      subject: `Check Payroll Relief: ${input.business} payroll for ${week} may have been submitted`,
+      text: [
+        `Submit was pressed in Payroll Relief for ${input.business} hours for ${week} (payroll v${input.version}), but it couldn't be confirmed.`,
+        `Reason: ${input.message || "unknown"}`,
+        "",
+        `Check Payroll Relief before doing anything else: ${ACCOUNTANTSOFFICE_HOME}`,
+        "Corner Ops won't press Submit again for this payroll.",
+        `Payroll page: ${input.link}`,
       ].join("\n"),
     };
   }
@@ -424,4 +436,131 @@ export function payrollCodeEmail(input: { business: Business; weekStart: string 
       `Type the code on the payroll page within 10 minutes: ${input.link}`,
     ].join("\n"),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Forgotten clock-outs: automatic close (Corner Ops' clock) and late Rezku clock-outs
+
+/**
+ * open_punch      a time clock punch still open after close, with nothing to close it at
+ * auto_closed     a time clock punch Corner Ops closed at the scheduled end (or closing time)
+ * late_clock_out  a Rezku punch that ends LATE_CLOCK_OUT_MINUTES or more after the scheduled end
+ * unscheduled     a Rezku punch longer than UNSCHEDULED_MIN_HOURS with no scheduled shift that day (owner only)
+ */
+export type CaseKind = "open_punch" | "auto_closed" | "late_clock_out" | "unscheduled";
+export type AutoCloseBasis = "scheduled_end" | "business_close";
+
+/** A Rezku clock-out this long after the day's last scheduled end is probably a forgotten clock-out. */
+export const LATE_CLOCK_OUT_MINUTES = 60;
+/** Unscheduled Rezku punches longer than this are listed for the owner. */
+export const UNSCHEDULED_MIN_HOURS = 1;
+/** Rezku punches whose clock-out is older than this get a case and an owner email, but no text. */
+export const REZKU_SMS_MAX_AGE_HOURS = 48;
+/** How far back Rezku punches are checked (this payroll week and last). */
+export const REZKU_LOOKBACK_DAYS = 8;
+/** An open punch belongs to a shift starting up to this long after the clock-in (as the time clock matched before). */
+export const SHIFT_START_MATCH_HOURS = 3;
+/** A punch this close to a shift still overlaps it. */
+export const SHIFT_OVERLAP_GRACE_MINUTES = 60;
+
+export type ShiftWindow = { startsAt: Date; endsAt: Date };
+
+/**
+ * The scheduled end a punch is compared with: the LAST scheduled end that day among the employee's shifts
+ * ending after the clock-in, provided at least one of them overlaps the punch (for an open punch: starts by
+ * clock-in + 3 hours). A split double (10:30–3:00 and 3:30–6:30) is one day ending 6:30. Null when no
+ * shift matches.
+ */
+export function lastScheduledEnd(input: { clockIn: Date; clockOut: Date | null; shifts: ShiftWindow[]; timeZone?: string }): Date | null {
+  const grace = SHIFT_OVERLAP_GRACE_MINUTES * 60_000;
+  const clockIn = input.clockIn.getTime();
+  const until = input.clockOut ? input.clockOut.getTime() + grace : clockIn + SHIFT_START_MATCH_HOURS * 3_600_000;
+  const valid = input.shifts.filter((s) => s.endsAt.getTime() > s.startsAt.getTime());
+  const overlapping = valid.filter((s) => s.startsAt.getTime() <= until && s.endsAt.getTime() > clockIn - grace);
+  if (!overlapping.length) return null;
+  const days = new Set(overlapping.map((s) => localDateKey(s.startsAt, input.timeZone)));
+  const sameDay = valid.filter((s) => s.endsAt.getTime() > clockIn - grace && days.has(localDateKey(s.startsAt, input.timeZone)));
+  return new Date(Math.max(...sameDay.map((s) => s.endsAt.getTime())));
+}
+
+export type RezkuPunchCheck =
+  | { kind: "ok" }
+  | { kind: "open" }
+  | { kind: "late"; scheduledEnd: Date; minutesLate: number }
+  | { kind: "unscheduled"; hours: number };
+
+/** One Rezku punch against the employee's published shifts: late clock-out, unscheduled, still open, or fine. */
+export function rezkuPunchCheck(input: { clockIn: Date; clockOut: Date | null; shifts: ShiftWindow[]; timeZone?: string }): RezkuPunchCheck {
+  if (!input.clockOut) return { kind: "open" };
+  const end = lastScheduledEnd(input);
+  if (!end) {
+    const hours = (input.clockOut.getTime() - input.clockIn.getTime()) / 3_600_000;
+    return hours > UNSCHEDULED_MIN_HOURS ? { kind: "unscheduled", hours: Math.round(hours * 100) / 100 } : { kind: "ok" };
+  }
+  const minutesLate = Math.floor((input.clockOut.getTime() - end.getTime()) / 60_000);
+  return minutesLate >= LATE_CLOCK_OUT_MINUTES ? { kind: "late", scheduledEnd: end, minutesLate } : { kind: "ok" };
+}
+
+/**
+ * Where Corner Ops closes a forgotten time clock punch: the scheduled end (the day's last), else the
+ * business close, else nowhere (left open for the owner). It is done no earlier than the usual hour after
+ * close, and never before an hour after the time it closes at.
+ */
+export function autoClosePlan(input: { clockIn: Date; scheduledEnd: Date | null; businessCloseAt: Date | null; dueAt: Date; graceMinutes?: number }):
+  { closeAt: Date; basis: AutoCloseBasis; dueAt: Date } | null {
+  const grace = (input.graceMinutes ?? MISSED_CLOCK_OUT_GRACE_MINUTES) * 60_000;
+  const pick = input.scheduledEnd && input.scheduledEnd.getTime() > input.clockIn.getTime()
+    ? { closeAt: input.scheduledEnd, basis: "scheduled_end" as const }
+    : input.businessCloseAt && input.businessCloseAt.getTime() > input.clockIn.getTime()
+      ? { closeAt: input.businessCloseAt, basis: "business_close" as const }
+      : null;
+  if (!pick) return null;
+  if (pick.closeAt.getTime() - input.clockIn.getTime() > MAX_OWNER_SHIFT_HOURS * 3_600_000) return null;
+  return { ...pick, dueAt: new Date(Math.max(input.dueAt.getTime(), pick.closeAt.getTime() + grace)) };
+}
+
+function shortDay(date: Date, timeZone = BUSINESS_TIME_ZONE): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", month: "numeric", day: "numeric" }).format(date).replace(",", "");
+}
+
+export function autoClosedSmsText(input: { employeeName: string; business: Business; clockIn: Date; closedAt: Date; basis: AutoCloseBasis; link: string }): string {
+  const at = input.basis === "scheduled_end" ? "your scheduled end" : "closing time";
+  return `Hi ${firstName(input.employeeName)} — you didn't clock out at ${input.business} on ${shortDay(input.clockIn)}. `
+    + `We closed your shift at ${at}, ${formatTime(input.closedAt)}. If you left at a different time, tap to correct: ${input.link} Reply STOP to opt out.`;
+}
+
+export function lateClockOutSmsText(input: { employeeName: string; clockOut: Date; scheduledEnd: Date; link: string }): string {
+  return `Hi ${firstName(input.employeeName)} — Rezku shows you clocked out at ${formatTime(input.clockOut)} on ${shortDay(input.clockOut)}; `
+    + `you were scheduled until ${formatTime(input.scheduledEnd)}. If you forgot to clock out, tap to enter when you left (or confirm it's right): ${input.link} Reply STOP to opt out.`;
+}
+
+/** Rezku shows "Ken" as "Can"; payroll and the schedule use Ken. */
+export function canonicalRezkuName(value: string): string {
+  const name = String(value ?? "").trim().replace(/\s+/g, " ");
+  return /^can$/i.test(name) ? "Ken" : name;
+}
+
+/**
+ * The Corner Ops employee a Rezku punch belongs to: same name ignoring case and spacing ("Can" is Ken),
+ * preferring an active employee. Null when nobody (or more than one active employee) has that name.
+ */
+export function matchEmployeeByName<T extends { name: string; active: boolean }>(rezkuName: string, employees: T[]): T | null {
+  const key = canonicalRezkuName(rezkuName).toLowerCase();
+  if (!key || /^(cover|unallocated)$/.test(key)) return null;
+  const same = employees.filter((e) => canonicalRezkuName(e.name).toLowerCase() === key);
+  const active = same.filter((e) => e.active);
+  if (active.length === 1) return active[0];
+  if (active.length > 1) return null;
+  return same.length === 1 ? same[0] : null;
+}
+
+/**
+ * Which cases hold up payroll approval: a punch that is still open, or a time the employee sent that the
+ * owner hasn't decided on. Automatically closed punches and late or unscheduled Rezku punches don't (the
+ * punch has a clock-out payroll can use), until the employee sends a different time.
+ */
+export function caseBlocksApproval(kind: CaseKind, status: string): boolean {
+  if (status === "Resolved") return false;
+  if (status === "Submitted") return true;
+  return kind === "open_punch";
 }

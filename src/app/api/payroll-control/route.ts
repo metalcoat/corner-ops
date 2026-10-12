@@ -10,7 +10,9 @@ import { applyMissedClockOut, getMissedClockOutCase, missedClockOutCasesForBusin
 import {
   approvePayrollRun,
   enterPayrollSubmissionCode,
+  holdPayrollWeek,
   payrollApprovalOverview,
+  releasePayrollWeek,
   reopenPayrollRunAndWithdraw,
   requestPayrollReliefRosterCheck,
   retryPayrollSubmission,
@@ -161,10 +163,13 @@ export async function POST(request: Request) {
         mappings: mappings.map((item) => ({ employee: String(item.employee || ""), eeNum: String(item.eeNum || "") })),
       }));
     }
+    // Hold / Release the 5 PM Monday automatic send for one week (Corner Deli).
+    if (action === "week-hold") return Response.json(await holdPayrollWeek({ business, weekStart: String(body.weekStart || ""), actor: session.email }));
+    if (action === "week-release") return Response.json(await releasePayrollWeek({ business, weekStart: String(body.weekStart || ""), actor: session.email }));
     if (action === "submission-retry") return Response.json(await retryPayrollSubmission({ id: String(body.id || ""), business, actor: session.email }));
     if (action === "clock-out-apply") {
       const choice = String(body.choice || "");
-      if (choice !== "scheduled_end" && choice !== "employee_time" && choice !== "custom") {
+      if (choice !== "scheduled_end" && choice !== "employee_time" && choice !== "custom" && choice !== "keep") {
         return Response.json({ error: "Choose which clock-out to use." }, { status: 400 });
       }
       return Response.json(await applyMissedClockOut({

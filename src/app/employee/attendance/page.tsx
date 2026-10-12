@@ -24,7 +24,9 @@ type ClockOutCase = {
   id: string;
   clockIn: string | null;
   scheduledEnd: string | null;
-  status: "Open" | "Submitted" | "Resolved";
+  status: "Open" | "AutoClosed" | "Submitted" | "Resolved";
+  kind?: "open_punch" | "auto_closed" | "late_clock_out" | "unscheduled";
+  punchClockOut?: string | null;
   employeeLeftAt: string | null;
   employeeNote: string;
   resolvedClockOut: string | null;
@@ -189,6 +191,26 @@ export default function EmployeeAttendancePage() {
     }
   }
 
+  async function confirmClockOut(item: ClockOutCase) {
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/employee/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clock-out-confirm", id: item.id }),
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      await load();
+      window.dispatchEvent(new Event("corner-ops-attendance-updated"));
+      setNotice("Thanks — that clock-out is confirmed.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "That couldn't be confirmed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function didNotWork(item: AttendanceCase) {
     const confirmed = window.confirm(
       `Confirm that you did not work the scheduled ${item.position || "shift"} beginning ${local(item.scheduledStart)}.`,
@@ -286,15 +308,17 @@ export default function EmployeeAttendancePage() {
 
     {(data?.clockOuts || []).some((item) => item.status !== "Resolved" || item.id === clockOutId) && <>
       <section className="attendanceSectionHeading">
-        <div><p className="attendanceEyebrow">Missed clock-out</p><h2>When did you leave?</h2></div>
+        <div><p className="attendanceEyebrow">Clock-out</p><h2>When did you leave?</h2></div>
       </section>
       <div className="attendanceEmployeeGrid">
         {(data?.clockOuts || []).filter((item) => item.status !== "Resolved" || item.id === clockOutId).map((item) => <section className="attendanceEmployeeCard" key={item.id}>
           <div className="attendanceCaseHeader">
-            <div><p className="attendanceEyebrow">Still clocked in since</p><h2>{local(item.clockIn)}</h2></div>
-            <span className={`attendanceStatus ${item.status === "Resolved" ? "approved" : item.status.toLowerCase()}`}>{item.status === "Open" ? "Needs your time" : item.status === "Submitted" ? "Sent for approval" : "Settled"}</span>
+            <div><p className="attendanceEyebrow">{item.kind === "late_clock_out" ? "Clocked in" : item.kind === "auto_closed" ? "You didn't clock out · clocked in" : "Still clocked in since"}</p><h2>{local(item.clockIn)}</h2></div>
+            <span className={`attendanceStatus ${item.status === "Resolved" ? "approved" : item.status === "AutoClosed" ? "open" : item.status.toLowerCase()}`}>{item.status === "Open" || item.status === "AutoClosed" ? "Check your time" : item.status === "Submitted" ? "Sent for approval" : "Settled"}</span>
           </div>
           {item.scheduledEnd && <div className="attendanceScheduled"><strong>Scheduled until {local(item.scheduledEnd)}</strong></div>}
+          {item.status !== "Resolved" && item.punchClockOut && <div className="attendanceScheduled"><strong>{item.kind === "auto_closed" ? `We closed your shift at ${local(item.punchClockOut)}` : `Rezku shows you clocked out at ${local(item.punchClockOut)}`}</strong></div>}
+          {item.status !== "Resolved" && item.status !== "Submitted" && (item.kind === "late_clock_out" || item.kind === "auto_closed") && <div className="attendanceActionRow"><button type="button" disabled={busy} onClick={() => void confirmClockOut(item)}>That&apos;s right</button></div>}
           {item.status === "Resolved" ? <div className="attendanceReadOnly approved">
             <strong>Clock-out saved</strong>
             <span>{local(item.resolvedClockOut)}</span>
