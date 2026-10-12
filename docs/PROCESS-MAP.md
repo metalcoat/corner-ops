@@ -52,13 +52,24 @@ flowchart LR
 | Corner Ops (Corner Deli + the Docks) | `corner-ops` | store server | liberty-ci-01 (`liberty-ci-01-corner-ops`) | everything below this section |
 | AI ordering tools (MCP) | image `corner-deli-mcp:local` | store server, 127.0.0.1:3100 | — | used by the AI phone/ordering line (`OPENAI_ORDERING_MCP_*`) |
 | Phone bridge | `corner-ops/asterisk`, `tools/3cx-cdr-receiver.mjs` | store server | with Corner Ops | 3CX ↔ Asterisk ↔ app |
-| Liberty Platform (rental operations; SAP B1/Fame replacement) | `liberty-platform` | demo: libertydemo.stackconduit.com; Frappe POC on liberty-ci-01 | GitHub-hosted (`ubuntu-24.04`) + liberty-ci-01 for the Frappe job | see that repo's README / docs/IMPLEMENTATION.md |
-| Liberty Forms (HVAC rental agreements, quotes, signing) | `liberty-forms` | Railway | GitHub-hosted (`ubuntu-latest`) | SendGrid email; `LIBERTY_MODE=live` for customer use |
+| Liberty Platform (rental operations; SAP B1/Fame replacement) | `liberty-platform` | demo: libertydemo.stackconduit.com; Frappe POC on liberty-ci-01 | liberty-ci-01 | see that repo's README / docs/IMPLEMENTATION.md |
+| Liberty Forms (HVAC rental agreements, quotes, signing) | `liberty-forms` | Railway | liberty-ci-01 | SendGrid email; `LIBERTY_MODE=live` for customer use |
 
-Owner direction (2026-10-12): **builds and checks for all programs go through the local runner**
-(GitHub Actions orchestrates; jobs run on liberty-ci-01). Corner Ops is done; Liberty Platform's
-`ci.yml` and Liberty Forms' workflows still use GitHub-hosted runners (each repo needs its own
-runner registration on liberty-ci-01 — a personal account can't share one runner across repos).
+Owner direction (2026-10-12): **builds and checks for all programs run on the local runner**
+(GitHub Actions orchestrates; jobs run on liberty-ci-01, never GitHub-hosted runners). liberty-ci-01
+hosts one runner per repo (a personal account can't share a runner across repos), each a user systemd
+service under account `runner` (linger on, no sudo):
+
+| Repo | Runner | Service | Postgres test port on the host |
+|---|---|---|---|
+| liberty-platform | `liberty-ci-01` | `actions.runner.metalcoat-liberty-platform.liberty-ci-01` (system) | 15432 |
+| liberty-forms | `liberty-ci-01-liberty-forms` | `actions-runner-liberty-forms` (user) | 25432 |
+| corner-ops | `liberty-ci-01-corner-ops` | `actions-runner-corner-ops` (user) | 35432 |
+
+Jobs share the host, so each repo's workflow publishes its Postgres service on its own port. Browser
+system libraries for Playwright must be installed on liberty-ci-01 once by an admin
+(`sudo npx playwright install-deps chromium webkit`); workflows skip `--with-deps`/sudo when
+`RUNNER_ENVIRONMENT=self-hosted`. New workflows: `runs-on: [self-hosted]` and a free host port.
 
 ## 1. Machines and environments
 
