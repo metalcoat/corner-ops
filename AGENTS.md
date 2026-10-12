@@ -1,5 +1,7 @@
 # Corner Ops project instructions
 
+Read `docs/PROCESS-MAP.md` first: how all programs, machines, scheduled jobs, outside services and the weekly processes connect. Codex and Claude both use it; update it in the same commit when you change a flow it describes.
+
 ## Branch and deployment safety
 
 - Do not merge `main` or deploy production unless the user separately authorizes that exact action.
