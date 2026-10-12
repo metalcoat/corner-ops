@@ -58,6 +58,8 @@ const BROWSER_CRASH = /Target page, context or browser has been closed|Target cl
 /** What has been pressed in Payroll Relief this run: after Save or Submit the run is never retried. */
 const pressed = { save: false, submit: false };
 
+// Timesheet Options → Download Excel; sendEmail must stay false ("Email Excel" is the same address with sendEmail=true).
+const CSV_URL = "https://app.payrollrelief.com/Payroll/CreateCsv?sendEmail=false";
 const LOGIN = "https://login.accountantsoffice.com/login?firmCode=whale1910&returnurl=https://www.accountantsoffice.com/aocommon/account/login";
 const HOME = "https://www.accountantsoffice.com/aocommon/";
 const LAUNCH = "https://www.accountantsoffice.com/AoCommon/Home/Launch/payroll";
@@ -308,7 +310,7 @@ async function readGrid(page) {
     });
     const totals = [...rows].reverse().find((r) => {
       const first = cells(r).find((c) => c.text);
-      return first && /^totals?:?$/i.test(first.text);
+      return first && /^totals?\s*:?$/i.test(first.text);
     });
     return { header: header ? cells(header) : null, totals: totals ? cells(totals) : null };
   });
@@ -490,7 +492,6 @@ async function attemptRun(job, attempt) {
     // Timesheet Options → Download Excel is a plain GET of the open payroll's CSV. Fetching it with the
     // signed-in session avoids Chromium's download handling, which crashed the browser in the container.
     // sendEmail must stay false ("Email Excel" is the same address with sendEmail=true).
-    const CSV_URL = "https://app.payrollrelief.com/Payroll/CreateCsv?sendEmail=false";
     let fileName = "", csvText = "";
     const direct = await page.context().request.get(CSV_URL, { timeout: 60_000 }).catch((error) => { log(`direct timesheet download failed (${error.message.split("\n")[0]}); using the menu`); return null; });
     const disposition = direct?.headers()["content-disposition"] || "";
@@ -557,6 +558,8 @@ async function attemptRun(job, attempt) {
     const ok = exactButton((await visible(dialog)) ? dialog.first() : page, "OK");
     if (!(await visible(ok))) throw new Error(`The Upload dialog has no OK button (screenshot ${await shot("no-ok")}).`);
     await safeClick(ok, "OK");
+    // In Payroll Relief the upload itself stores the entries (Save stays greyed out afterwards).
+    pressed.save = true;
     await settle(page, 6_000);
     const uploadError = await pageError(page);
     if (uploadError) throw new Error(`Payroll Relief didn't take the upload: ${uploadError} (screenshot ${await shot("upload-error")}). Nothing was saved.`);
@@ -570,21 +573,32 @@ async function attemptRun(job, attempt) {
     }
     log(`grid totals match after upload: ${formatTotals(afterUpload)}`);
 
-    // Save (only the button reading exactly "Save"; never Submit).
+    // Save (only the button reading exactly "Save"; never Submit) — only when Payroll Relief still has
+    // unsaved changes; normally the upload already stored everything and Save is greyed out.
     const save = exactButton(page, "Save");
-    if (!(await visible(save))) throw new Error(`Payroll Entry has no Save button (screenshot ${await shot("no-save")}). Nothing was saved.`);
-    pressed.save = true;
-    await safeClick(save, "Save");
-    await settle(page, 6_000);
-    const saveError = await pageError(page);
-    if (saveError) throw new Error(`Payroll Relief didn't save: ${saveError} (screenshot ${await shot("save-error")}).`);
-    await shot("saved");
+    const saveEnabled = (await visible(save))
+      && await save.first().isEnabled().catch(() => false)
+      && !/disabled/i.test(`${await save.first().getAttribute("class").catch(() => "")} ${await save.first().getAttribute("aria-disabled").catch(() => "")}`);
+    if (saveEnabled) {
+      await safeClick(save, "Save");
+      await settle(page, 6_000);
+      const saveError = await pageError(page);
+      if (saveError) throw new Error(`Payroll Relief didn't save: ${saveError} (screenshot ${await shot("save-error")}).`);
+      await shot("saved");
+    } else {
+      log("Save isn't enabled: the upload already stored the entries");
+    }
 
     // Reload: the saved entries must still show the same totals.
     text = await openPayrollEntry(page);
     const reopened = parsePayrollEntryPeriod(text);
     const stillSame = periodMismatch(reopened, job.weekStart);
-    const afterSave = await gridTotalsOrThrow(page, "after-save");
+    // What Payroll Relief actually stored: its own timesheet export, downloaded again.
+    const storedResponse = await page.context().request.get(CSV_URL, { timeout: 60_000 });
+    if (!storedResponse.ok()) throw new Error(`Couldn't download Payroll Relief's timesheet to check what was stored (HTTP ${storedResponse.status()}).`);
+    const storedText = await storedResponse.text();
+    writeFileSync(`${DEBUG}/payroll-relief-${stamp}-stored.csv`, storedText);
+    const afterSave = timesheetTotals(parseTimesheet(storedText));
     const saved = compareTotals(plan.totals, afterSave);
     const picture = await shot("reloaded");
     if (stillSame || saved.length) {
