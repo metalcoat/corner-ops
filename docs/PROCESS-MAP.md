@@ -139,6 +139,7 @@ flowchart LR
 | Schedule delivery (schedule texts/emails) | every 5 min | `corner-ops-cron-schedule-delivery.timer` |
 | Rezku repair | every 15 min (**remove at switch**) | — |
 | Ordering maintenance | — | `corner-ops-cron-maintenance.timer` |
+| Interim Monday payroll email (until the switch) | 12:00 + 13:00 UTC Mondays → acts at 8 AM Eastern: `deploy/staging/monday-payroll-preview.sh` (fresh backup → staging → email owner; approve on staging) | — |
 | Missed clock-outs + Monday payroll (8 AM / 5 PM) | **not yet** | `deploy/systemd/corner-ops-cron-missed-clock-outs.timer` (every 15 min; install with `install-timers.sh`) |
 | Supplier price files + Sync now + website searches + payroll sends | — | `corner-ops-supplier-prices.timer` (every 5 min) |
 | Supplier website prices | — | `corner-ops-supplier-website.timer` (twice daily) |
@@ -181,6 +182,8 @@ flowchart TD
     re-downloading the stored timesheet and comparing totals; it never re-runs after an upload.
   - After the owner pressed Submit, the current payroll moved to the next week (#44) and the submitted one appeared
     under Approved as "10/16/2026 - 43 - Normal" (pay date - number - type). The job's Submit check relies on this.
+  - Nightly backups (02:20 UTC = 10:20 PM Eastern) run before Rezku's 11:01 PM Eastern labour report, so each
+    backup misses that day's hours; the interim Monday email takes its own fresh backup.
   - The AccountantsOffice session lasts a few hours; most Mondays need the texted code (code box on the payroll page).
   - Chromium leaves `Singleton*` lock files after a crash; jobs clear them before launching (one job at a time).
 - Automatic Submit stays **off** until a first Submit has been watched together.
