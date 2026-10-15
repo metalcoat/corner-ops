@@ -49,8 +49,6 @@ export function newReplayId(){return randomInt(1,2_147_483_647)}
 // https://developer.mxmerchant.com/docs/making-a-partial-refund) ----
 export async function getMxPayment(paymentId:string){const response=await mxFetch(`/payment/${encodeURIComponent(paymentId)}`);return await response.json() as Record<string,unknown>}
 const statusOf=(payment:Record<string,unknown>)=>String(payment.status||"").toLowerCase();
-/** MX settles card batches nightly; until then a payment can only be voided in full. */
-export function mxPaymentSettled(payment:Record<string,unknown>){const status=statusOf(payment);return status.includes("settled")||Boolean(payment.settledDate||payment.settlementDate||payment.batchCloseDate)}
 /**
  * Full reversal: MX voids an unsettled payment, or refunds a settled one, then we read back which it did.
  * For a settled payment MX answers 204 either way and books the refund as a separate "Return" transaction:
@@ -82,10 +80,13 @@ async function findMxReturn(original:Record<string,unknown>,sinceMs:number){
     &&Math.abs(Number(payment.amount||0))<=amount+0.004
     &&new Date(String(payment.created||"")).getTime()>=sinceMs-120_000)??null;
 }
-/** Partial refund on a settled payment: a negative sale on the same card token, linked to the original. */
+/**
+ * Partial refund: a negative sale on the same card token, booked by MX as a Return linked to the original.
+ * MX approves it before or after the batch settles (sandbox, Oct 2026; its validation guide has refunds made
+ * on unsettled payments).
+ */
 export async function refundMxPaymentPartially(input:{paymentId:string;amountCents:number;replayId:number}){
   const original=await getMxPayment(input.paymentId);
-  if(!mxPaymentSettled(original))throw new MxMerchantError("MX can only refund part of a card charge after tonight's batch settles. Refund the full charge now, or do the partial refund tomorrow.");
   const paymentToken=String(original.paymentToken||"");
   if(!paymentToken)throw new MxMerchantError("MX did not return a card token for the original payment, so it cannot be partially refunded from the POS. Refund it in MX Merchant.");
   const {merchantId}=credentials();

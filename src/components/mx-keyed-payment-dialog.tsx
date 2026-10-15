@@ -15,6 +15,7 @@ export type MxPaymentInitialization = {
   requireAvsStreet?: boolean;
   /** Keyed payments are never card-present: phone orders on the POS, or online orders (src/lib/mx-presentment.ts). */
   cardPresent?: boolean;
+  authorizationIndicator?: string;
   posData?: Record<string, string>;
 };
 
@@ -88,6 +89,7 @@ export default function MxKeyedPaymentDialog({
             source: "API",
             customerName: payment.customerName,
             ...(payment.cardPresent !== undefined ? { cardPresent: payment.cardPresent } : {}),
+            ...(payment.authorizationIndicator ? { authorizationIndicator: payment.authorizationIndicator } : {}),
             ...(payment.posData ? { posData: payment.posData } : {}),
             cardAccount: {
               number: digits,

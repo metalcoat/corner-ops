@@ -8,6 +8,13 @@ test("keyed MX payments say whether the card was present", () => {
   assert.equal(mxPresentment("online").cardPresent, false);
   assert.equal(mxPresentment("online").posData.cardholderPresence, "Ecom");
   assert.equal(mxPresentment("phone").cardPresent, false);
-  assert.equal(mxPresentment("phone").posData.cardholderPresence, "Phone");
+  assert.equal(mxPresentment("phone").posData.cardholderPresence, "NotPresent");
   for (const kind of ["pos_keyed", "online", "phone"] as const) assert.equal(mxPresentment(kind).posData.panCaptureMethod, "Manual");
+});
+
+test("sales are final and authorizations are preauthorizations (MX validation guide)", () => {
+  assert.equal(mxPresentment("phone").authorizationIndicator, "Final");
+  assert.equal(mxPresentment("phone").posData.transactionStatus, "Normal");
+  assert.equal(mxPresentment("online", { authOnly: true }).authorizationIndicator, "Undefined");
+  assert.equal(mxPresentment("online", { authOnly: true }).posData.transactionStatus, "Preauthorization");
 });
