@@ -1,8 +1,9 @@
 /**
  * How a keyed card reached us, for MX's POST /payment (https://developer.mxmerchant.com/reference/post-payment).
  * MX treats a keyed payment as card-present unless told otherwise (seen in the sandbox, Oct 2026), so every
- * keyed request says which it is: staff keying a card at the counter ("Card Present Keyed"), a customer
- * paying online (e-commerce), or a card read over the phone.
+ * keyed request says which it is. Card-present payments go through the reader (MX Terminal API); a card
+ * keyed on the POS is treated as read over the phone, and online orders are e-commerce. "pos_keyed" is kept
+ * for completeness but isn't used.
  */
 export type MxPresentment = "pos_keyed" | "online" | "phone";
 

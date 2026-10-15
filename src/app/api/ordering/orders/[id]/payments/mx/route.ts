@@ -1,4 +1,4 @@
-import { mxPresentment, type MxPresentment } from "@/lib/mx-presentment";
+import { mxPresentment } from "@/lib/mx-presentment";
 import { isoJson } from "@/lib/timestamp-values";
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
@@ -62,7 +62,6 @@ export async function POST(
         throw new PaymentConflictError(
           "Enter a card amount within the remaining balance.",
         );
-      const presence: MxPresentment = String((await sql`SELECT service_type FROM ordering_orders WHERE id=${orderId}`)[0]?.service_type || "") === "delivery" ? "phone" : "pos_keyed";
       const initialized = await initializeMxPayment(),
         replayId = newReplayId(),
         customer = await cardBillingContactForOrder(orderId, business);
@@ -76,9 +75,8 @@ export async function POST(
         avsZip: customer?.postalCode || "13669",
         requireAvsZip: false,
         requireAvsStreet: !customer?.street1,
-        // Staff confirm on the card screen; delivery orders are usually phoned in.
-        askPresence: presence,
-        ...mxPresentment(presence),
+        // Card-present payments go through the reader; a card keyed on the POS was read over the phone.
+        ...mxPresentment("phone"),
       });
     }
     if (body.action !== "confirm")
