@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { mxPresentment, type MxPresentment } from "@/lib/mx-presentment";
 
 export type MxPaymentInitialization = {
   token: string;
@@ -13,6 +14,11 @@ export type MxPaymentInitialization = {
   avsZip?: string;
   requireAvsZip?: boolean;
   requireAvsStreet?: boolean;
+  /** Card present (staff keying at the counter) or not (online order); see src/lib/mx-presentment.ts. */
+  cardPresent?: boolean;
+  posData?: Record<string, string>;
+  /** POS only: staff say whether the card is here or was read to them over the phone (suggested choice). */
+  askPresence?: MxPresentment;
 };
 
 export default function MxKeyedPaymentDialog({
@@ -29,6 +35,8 @@ export default function MxKeyedPaymentDialog({
   const [cvv, setCvv] = useState("");
   const [billingZip, setBillingZip] = useState(payment.avsZip || "");
   const [billingStreet, setBillingStreet] = useState(payment.avsStreet || "");
+  const [presence, setPresence] = useState<MxPresentment | null>(payment.askPresence ?? null);
+  const presentment = presence ? mxPresentment(presence) : { cardPresent: payment.cardPresent, posData: payment.posData };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   function updateExpiry(value: string) {
@@ -84,6 +92,8 @@ export default function MxKeyedPaymentDialog({
             replayId: payment.replayId,
             source: "API",
             customerName: payment.customerName,
+            ...(presentment.cardPresent !== undefined ? { cardPresent: presentment.cardPresent } : {}),
+            ...(presentment.posData ? { posData: presentment.posData } : {}),
             cardAccount: {
               number: digits,
               expiryMonth: match[1].padStart(2, "0"),
@@ -133,6 +143,13 @@ export default function MxKeyedPaymentDialog({
       >
         <h2 id="mx-payment-title">Secure card payment</h2>
         <strong>${payment.amount.toFixed(2)}</strong>
+        {payment.askPresence && (
+          <fieldset className="mxPresence">
+            <legend>Where's the card?</legend>
+            <label><input type="radio" name="mx-presence" checked={presence === "pos_keyed"} onChange={() => setPresence("pos_keyed")} /> Card is here</label>
+            <label><input type="radio" name="mx-presence" checked={presence === "phone"} onChange={() => setPresence("phone")} /> Read over the phone</label>
+          </fieldset>
+        )}
         <label>
           Card number
           <input

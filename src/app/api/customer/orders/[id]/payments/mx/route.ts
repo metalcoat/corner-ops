@@ -1,3 +1,4 @@
+import { mxPresentment } from "@/lib/mx-presentment";
 import { isoJson } from "@/lib/timestamp-values";
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
@@ -81,6 +82,7 @@ export async function POST(
         avsZip: customer?.postalCode,
         requireAvsZip: !customer?.postalCode,
         requireAvsStreet: !customer?.street1,
+        ...mxPresentment("online"),
       });
     }
     if (body.action !== "confirm")
