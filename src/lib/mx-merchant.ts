@@ -51,13 +51,36 @@ export async function getMxPayment(paymentId:string){const response=await mxFetc
 const statusOf=(payment:Record<string,unknown>)=>String(payment.status||"").toLowerCase();
 /** MX settles card batches nightly; until then a payment can only be voided in full. */
 export function mxPaymentSettled(payment:Record<string,unknown>){const status=statusOf(payment);return status.includes("settled")||Boolean(payment.settledDate||payment.settlementDate||payment.batchCloseDate)}
-/** Full reversal: MX voids an unsettled payment, or refunds a settled one, then we read back which it did. */
+/**
+ * Full reversal: MX voids an unsettled payment, or refunds a settled one, then we read back which it did.
+ * For a settled payment MX answers 204 either way and books the refund as a separate "Return" transaction:
+ * the original stays "Settled" with refundedAmount/balance updated (seen in the MX sandbox, Oct 2026). A
+ * declined refund (e.g. "Rapid Refund Activity Detected") leaves the original unchanged and a declined Return.
+ */
 export async function voidOrRefundMxPayment(paymentId:string){
+  const before=await getMxPayment(paymentId),startedAt=Date.now();
   await mxFetch(`/payment/${encodeURIComponent(paymentId)}?force=true`,{method:"DELETE"});
   const after=await getMxPayment(paymentId),status=statusOf(after);
   if(status.includes("void"))return{kind:"void" as const,payment:after};
   if(status.includes("refund")||status.includes("return")||status.includes("credit"))return{kind:"refund" as const,payment:after};
+  const refunded=(payment:Record<string,unknown>)=>Math.abs(Number(payment.refundedAmount||0));
+  const refundReturn=await findMxReturn(after,startedAt);
+  if(refunded(after)>refunded(before)+0.004)return{kind:"refund" as const,payment:refundReturn&&statusOf(refundReturn).includes("approve")?refundReturn:after};
+  if(refundReturn&&!statusOf(refundReturn).includes("approve"))throw new MxMerchantError(`MX declined the refund: ${String(refundReturn.authMessage||refundReturn.status||"no reason given")}.`);
   throw new MxMerchantError(`MX did not confirm the reversal (payment status: ${after.status||"unknown"}). Check MX Merchant before trying again.`);
+}
+/** The Return MX booked for a refund of this payment just now (same card, amount at most the original's). */
+async function findMxReturn(original:Record<string,unknown>,sinceMs:number){
+  const {merchantId}=credentials();
+  const response=await mxFetch(`/payment?merchantId=${encodeURIComponent(merchantId)}&limit=25`);
+  const data=await response.json() as Record<string,unknown>;
+  const records=(Array.isArray(data.records)?data.records:Array.isArray(data)?data:[]) as Record<string,unknown>[];
+  const card=(payment:Record<string,unknown>)=>payment.cardAccount as Record<string,unknown>|undefined;
+  const amount=Math.abs(Number(original.amount||0));
+  return records.find((payment)=>String(payment.type||"").toLowerCase()==="return"
+    &&card(payment)?.last4===card(original)?.last4&&card(payment)?.cardType===card(original)?.cardType
+    &&Math.abs(Number(payment.amount||0))<=amount+0.004
+    &&new Date(String(payment.created||"")).getTime()>=sinceMs-120_000)??null;
 }
 /** Partial refund on a settled payment: a negative sale on the same card token, linked to the original. */
 export async function refundMxPaymentPartially(input:{paymentId:string;amountCents:number;replayId:number}){
