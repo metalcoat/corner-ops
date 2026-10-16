@@ -3,7 +3,7 @@
  * MX treats a keyed payment as card-present unless told otherwise (seen in the sandbox, Oct 2026), so every
  * keyed request says which it is, using the posData objects in MX's API Validation Spreadsheet Guide.
  * Card-present payments go through the reader (MX Terminal API); a card keyed on the POS is a phone order,
- * sent as MX's "Card Not Present – Keyed"; online orders are e-commerce. "pos_keyed" is kept for
+ * sent with MX's MOTO posData (cardholderPresence "Phone", per MX's FTS review, Oct 2026); online orders are e-commerce. "pos_keyed" is kept for
  * completeness but isn't used. An authorization (authOnly) is a preauthorization; a sale is final.
  */
 export type MxPresentment = "pos_keyed" | "online" | "phone";
@@ -16,7 +16,7 @@ export function mxPresentment(kind: MxPresentment, options: { authOnly?: boolean
   const where = kind === "pos_keyed"
     ? { cardholderPresence: "Present", deviceAttendance: "Attended", deviceLocation: "OnPremise" }
     : kind === "phone"
-      ? { cardholderPresence: "NotPresent", deviceAttendance: "VoiceAru", deviceLocation: "VoiceAru" }
+      ? { cardholderPresence: "Phone", deviceAttendance: "VoiceAru", deviceLocation: "VoiceAru" }
       : { cardholderPresence: "Ecom", deviceAttendance: "HomePc", deviceLocation: "HomePc" };
   return {
     cardPresent: kind === "pos_keyed",

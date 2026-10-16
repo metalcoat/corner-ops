@@ -17,6 +17,7 @@ import {
   reviewShiftRequest,
   reviewTimeCorrection,
   reviewTimeOff,
+  deleteTimeOff,
   workforceDashboard,
 } from "@/lib/workforce";
 
@@ -287,6 +288,14 @@ export async function POST(request: Request) {
         managerNote: body.managerNote ? String(body.managerNote) : "",
         actor: session.displayName,
       }));
+    }
+
+    if (action === "time-off-delete") {
+      try {
+        return Response.json(await deleteTimeOff({ id: String(body.id || ""), business, actor: session.displayName }));
+      } catch (error) {
+        return actionError(error, "The time off could not be deleted.");
+      }
     }
 
     if (action === "time-correction-review") {

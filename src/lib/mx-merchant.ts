@@ -17,12 +17,12 @@ export async function retrieveMxPayment(replayId:number){const {merchantId}=cred
 export async function findMxPaymentByReplayId(replayId:number){const {merchantId,authorization}=credentials();const response=await fetch(`${base()}/payment?merchantId=${encodeURIComponent(merchantId)}&replayId=${encodeURIComponent(replayId)}`,{headers:{authorization,accept:"application/json"},cache:"no-store",signal:AbortSignal.timeout(12000)});if(response.status===404)return null;if(!response.ok)throw new MxMerchantError(`MX Merchant payment lookup failed (${response.status}).`);const text=await response.text();if(!text.trim())return null;const data=JSON.parse(text) as Record<string,unknown>;const records=Array.isArray(data.records)?data.records as Record<string,unknown>[]:null;return records?records[0]||null:data}
 /**
  * Captures an authorization with the final amount, tip included (https://developer.mxmerchant.com/docs/making-an-adjustment):
- * a sale on the authorization's card token and auth code with authOnly false. The replayId makes a retry safe to look up.
+ * a sale (paymentType "Sale") on the authorization's card token and auth code with authOnly false. The replayId makes a retry safe to look up.
  */
 export async function completeMxAuthorization(input:{paymentToken:string;authCode:string;amountCents:number;tipCents:number;replayId:number}){
   const {merchantId,authorization}=credentials();let response:Response;
   try{response=await fetch(`${base()}/payment?echo=true`,{method:"POST",headers:{authorization,accept:"application/json","content-type":"application/json"},cache:"no-store",signal:AbortSignal.timeout(20_000),
-    body:JSON.stringify({merchantId,tenderType:"Card",amount:(input.amountCents/100).toFixed(2),tip:(input.tipCents/100).toFixed(2),paymentToken:input.paymentToken,authCode:input.authCode,authOnly:false,replayId:input.replayId,source:"API"})})}
+    body:JSON.stringify({merchantId,tenderType:"Card",paymentType:"Sale",amount:(input.amountCents/100).toFixed(2),tip:(input.tipCents/100).toFixed(2),paymentToken:input.paymentToken,authCode:input.authCode,authOnly:false,replayId:input.replayId,source:"API"})})}
   catch(error){throw new MxMerchantUnreachableError(error instanceof Error&&error.name==="TimeoutError"?"MX did not answer in time.":"Could not reach MX.")}
   if([502,503,504].includes(response.status))throw new MxMerchantUnreachableError(`MX is not responding (${response.status}).`);
   const data=await response.json().catch(()=>null) as Record<string,unknown>|null;
@@ -81,7 +81,7 @@ async function findMxReturn(original:Record<string,unknown>,sinceMs:number){
     &&new Date(String(payment.created||"")).getTime()>=sinceMs-120_000)??null;
 }
 /**
- * Partial refund: a negative sale on the same card token, booked by MX as a Return linked to the original.
+ * Partial refund: a negative amount with paymentType "Return" on the same card token, booked by MX as a Return linked to the original.
  * MX approves it before or after the batch settles (sandbox, Oct 2026; its validation guide has refunds made
  * on unsettled payments).
  */
@@ -91,7 +91,7 @@ export async function refundMxPaymentPartially(input:{paymentId:string;amountCen
   if(!paymentToken)throw new MxMerchantError("MX did not return a card token for the original payment, so it cannot be partially refunded from the POS. Refund it in MX Merchant.");
   const {merchantId}=credentials();
   const response=await fetch(`${base()}/payment?echo=true`,{method:"POST",headers:{authorization:credentials().authorization,accept:"application/json","content-type":"application/json"},cache:"no-store",signal:AbortSignal.timeout(20_000),
-    body:JSON.stringify({merchantId,tenderType:"Card",amount:(-input.amountCents/100).toFixed(2),paymentToken,replayId:input.replayId,source:"API"})});
+    body:JSON.stringify({merchantId,tenderType:"Card",paymentType:"Return",amount:(-input.amountCents/100).toFixed(2),paymentToken,replayId:input.replayId,source:"API"})});
   const data=await response.json().catch(()=>null) as Record<string,unknown>|null;
   if(!response.ok||!data||!statusOf(data).includes("approve"))throw new MxMerchantError(String(data?.authMessage||data?.message||`MX declined the refund (${response.status}).`));
   return{kind:"refund" as const,payment:data};

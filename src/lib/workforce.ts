@@ -46,6 +46,8 @@ export function ensureWorkforceSchema(): Promise<void> {
       `;
       await sql`CREATE INDEX IF NOT EXISTS schedule_shifts_business_start_idx ON schedule_shifts (business, starts_at, status)`;
       await sql`CREATE INDEX IF NOT EXISTS schedule_shifts_employee_idx ON schedule_shifts (employee_id, starts_at)`;
+      // The regular employee taken off this shift for their time off, so copying the week gives it back to them.
+      await sql`ALTER TABLE schedule_shifts ADD COLUMN IF NOT EXISTS time_off_employee_id UUID REFERENCES employees(id) ON DELETE SET NULL`;
 
       await sql`
         CREATE TABLE IF NOT EXISTS employee_availability (
@@ -586,6 +588,21 @@ export async function reviewTimeOff(input: { id: string; business: Business; app
       status: clean(shift.status, 30),
     })),
   };
+}
+
+/** A manager removes a day off (any status). It's kept as Cancelled for the record and drops off the schedule. */
+export async function deleteTimeOff(input: { id: string; business: Business; actor: string }) {
+  await ensureWorkforceSchema();
+  const deleted = await getSql()`
+    UPDATE time_off_requests SET
+      status = 'Cancelled',
+      manager_note = CASE WHEN manager_note = '' THEN 'Deleted by manager' ELSE manager_note END,
+      reviewed_by = ${input.actor}, reviewed_at = NOW()
+    WHERE id = ${input.id} AND business = ${input.business} AND status <> 'Cancelled'
+    RETURNING id
+  ` as unknown as Array<{ id: string }>;
+  if (!deleted[0]) throw new Error("Time-off request not found.");
+  return { id: String(deleted[0].id), deleted: true };
 }
 
 export async function createShiftRequest(session: EmployeeSession, input: {
