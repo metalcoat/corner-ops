@@ -1,0 +1,11 @@
+[Unit]
+Description=Every 15 minutes: open punches an hour after close become missed clock-outs
+
+[Timer]
+OnCalendar=*-*-* *:00/15:00
+AccuracySec=30s
+Persistent=true
+Unit=corner-ops-cron@missed-clock-outs.service
+
+[Install]
+WantedBy=timers.target

@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { ensureSchema, getSql } from "@/lib/db";
 import { requireStrongSecret } from "@/lib/secret-strength";
+import { ensureSchema, getSql } from "@/lib/db";
 import { getEmploymentFormProfile } from "@/lib/employment-forms";
 import { cornerOpsBaseUrl, ownerNotificationEmails, sendTransactionalEmail } from "@/lib/transactional-email";
 import type { Business } from "@/lib/types";
@@ -46,6 +46,25 @@ export function ensureDirectDepositSchema(): Promise<void> {
     schemaPromise = (async () => {
       await ensureSchema();
       const sql = getSql();
+      await sql`
+        CREATE TABLE IF NOT EXISTS direct_deposit_elections (
+          id UUID PRIMARY KEY,
+          business TEXT NOT NULL CHECK (business IN ('Corner Deli', 'Tiki')),
+          employee_id UUID NOT NULL REFERENCES employees(id),
+          employee_name TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('Assigned', 'Completed', 'Superseded')),
+          encrypted_payload TEXT NOT NULL,
+          assigned_by TEXT NOT NULL,
+          assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          employee_signature_name TEXT NOT NULL DEFAULT '',
+          signed_at TIMESTAMPTZ,
+          signature_ip TEXT NOT NULL DEFAULT '',
+          signature_user_agent TEXT NOT NULL DEFAULT '',
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS direct_deposit_employee_idx ON direct_deposit_elections (employee_id, assigned_at DESC)`;
+      await sql`CREATE INDEX IF NOT EXISTS direct_deposit_business_status_idx ON direct_deposit_elections (business, status, assigned_at DESC)`;
     })().catch((error) => {
       schemaPromise = null;
       throw error;
@@ -55,7 +74,10 @@ export function ensureDirectDepositSchema(): Promise<void> {
 }
 
 function encryptionKey(): Buffer {
-  const secret = requireStrongSecret(process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY, "EMPLOYMENT_FORMS_ENCRYPTION_KEY");
+  const secret = requireStrongSecret(
+    process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY,
+    "EMPLOYMENT_FORMS_ENCRYPTION_KEY",
+  );
   return createHash("sha256").update(secret, "utf8").digest();
 }
 

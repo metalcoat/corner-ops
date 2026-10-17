@@ -24,7 +24,34 @@ type EmployeePinRow = {
   pin_hash_version: number;
   pin_fingerprint: string;
   session_version: number;
+  role_group: string;
+  pos_role: string;
 };
+
+let pinColumnsReady: Promise<void> | null = null;
+/** The salted-PIN columns (migration 0005), so fresh databases work too. */
+export function ensureEmployeePinColumns(): Promise<void> {
+  pinColumnsReady ??= (async () => {
+    const sql = getSql();
+    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin_salt TEXT NOT NULL DEFAULT ''`;
+    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin_hash_version INTEGER NOT NULL DEFAULT 1`;
+    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin_fingerprint TEXT NOT NULL DEFAULT ''`;
+    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1`;
+  })().catch((error) => {
+    pinColumnsReady = null;
+    throw error;
+  });
+  return pinColumnsReady;
+}
+
+/**
+ * Column values for saving a new PIN. Every place that changes a PIN must use
+ * these, so the stored hash and its format markers always agree.
+ */
+export function employeePinUpdate(business: Business, suppliedPin: unknown, employeeName = "Employee") {
+  const record = createEmployeePinRecord(business, suppliedPin, employeeName);
+  return { pin: record.pin, hash: record.hash, salt: record.salt, version: record.version, fingerprint: record.fingerprint };
+}
 
 type PinMatch = {
   matched: boolean;
@@ -52,6 +79,7 @@ export async function assertEmployeePinAvailable(input: {
   const [fingerprint, formsFingerprint, sessionFingerprint] = employeePinFingerprintCandidates(input.business, pin);
   const legacyHash = legacyEmployeePinHash(input.business, pin);
   const exclude = input.excludeEmployeeId || null;
+  await ensureEmployeePinColumns();
   const rows = await getSql()`
     SELECT id FROM employees
     WHERE business = ${input.business}
@@ -65,7 +93,7 @@ export async function assertEmployeePinAvailable(input: {
       )
     LIMIT 1
   ` as unknown as Array<{ id: string }>;
-  if (rows[0]) throw new Error("That PIN is already in use at this location.");
+  if (rows[0]) throw new Error("That PIN is already assigned at this location.");
   return pin;
 }
 
@@ -119,13 +147,36 @@ async function rewritePinWithCurrentKey(row: EmployeePinRow, pin: string): Promi
   }
 }
 
-export async function employeeByPin(business: Business, suppliedPin: unknown): Promise<EmployeePinRow | null> {
+/**
+ * The one PIN lookup for every sign-in (POS, employee app, deli board, Tiki
+ * punch). It accepts both the salted format and the old one, finds the row by
+ * fingerprint or old hash instead of hashing every employee, and upgrades old
+ * PINs on the way in.
+ */
+export async function employeeByPin(
+  business: Business,
+  suppliedPin: unknown,
+  options: { requirePinEnabled?: boolean } = {},
+): Promise<EmployeePinRow | null> {
   const pin = validateEmployeePin(business, suppliedPin, business);
+  await ensureEmployeePinColumns();
+  const requireEnabled = options.requirePinEnabled !== false;
+  // Every key generation's fingerprint, so PINs saved before a key rotation
+  // are still found (and then rehashed onto the current key below).
+  const [fingerprint, formsFingerprint, sessionFingerprint] = employeePinFingerprintCandidates(business, pin);
+  const legacyHash = legacyEmployeePinHash(business, pin);
   const rows = await getSql()`
     SELECT id, business, name, position, pin_hash, pin_salt, pin_hash_version,
-      pin_fingerprint, session_version
+      pin_fingerprint, session_version, COALESCE(role_group, '') role_group,
+      COALESCE(to_jsonb(employees) ->> 'pos_role', 'employee') pos_role
     FROM employees
-    WHERE business = ${business} AND active = TRUE AND pin_enabled = TRUE
+    WHERE business = ${business} AND active = TRUE
+      AND (${!requireEnabled} OR pin_enabled = TRUE)
+      AND (
+        pin_fingerprint IN (${fingerprint}, ${formsFingerprint}, ${sessionFingerprint})
+        OR pin_hash = ${legacyHash}
+        OR (pin_hash_version >= ${EMPLOYEE_PIN_HASH_VERSION} AND COALESCE(pin_fingerprint, '') = '')
+      )
     ORDER BY name
   ` as unknown as EmployeePinRow[];
 

@@ -1,0 +1,868 @@
+import { randomUUID } from "node:crypto";
+import { normalizeLabelConfig, sampleLabel, sendLabel } from "@/lib/ordering-label-print";
+import { Socket } from "node:net";
+import { validPrinterHost } from "@/lib/printer-network";
+import { getSql, withTransaction } from "@/lib/db";
+import type { OrderingBusiness } from "@/lib/ordering-core";
+import type { OrderingActor } from "@/lib/ordering-route-auth";
+import { canManagePos } from "@/lib/ordering-route-auth";
+import { ensureOrderingHardwareSchema } from "@/lib/ordering-hardware-schema";
+import { listMxTerminals, mxTerminalEnabled, normalizeMxTerminalId } from "@/lib/mx-terminal";
+
+export type DeviceStatus = "online" | "offline" | "unknown";
+export interface HardwareAdapter {
+  readonly key: string;
+  readonly kind: "printer" | "payment_terminal" | "barcode_scanner";
+  probe(
+    config: Record<string, unknown>,
+  ): Promise<{ status: DeviceStatus; message: string }>;
+}
+export class UnconfiguredAdapter implements HardwareAdapter {
+  readonly key: string = "unconfigured";
+  constructor(readonly kind: HardwareAdapter["kind"]) {}
+  async probe() {
+    return {
+      status: "unknown" as const,
+      message: "No hardware adapter is configured.",
+    };
+  }
+}
+export class MockDeviceAdapter implements HardwareAdapter {
+  readonly key: string = "mock";
+  constructor(readonly kind: HardwareAdapter["kind"]) {}
+  async probe(config: Record<string, unknown>) {
+    const requested = config.mockStatus;
+    const status: DeviceStatus =
+      requested === "online" || requested === "offline" ? requested : "unknown";
+    return {
+      status,
+      message:
+        status === "unknown"
+          ? "Mock status was not explicitly configured."
+          : `Mock adapter explicitly reports ${status}.`,
+    };
+  }
+}
+export class NetworkPrinterAdapter implements HardwareAdapter {
+  readonly key = "network-printer";
+  readonly kind = "printer" as const;
+  async probe(config: Record<string, unknown>) {
+    const host = String(config.host || "").trim(),
+      port = Number(config.port || 9100);
+    if (
+      !validPrinterHost(host) ||
+      !Number.isSafeInteger(port) ||
+      port < 1 ||
+      port > 65535
+    )
+      return {
+        status: "unknown" as const,
+        message: "A valid printer IP/host and port are required.",
+      };
+    return new Promise<{ status: DeviceStatus; message: string }>((resolve) => {
+      const socket = new Socket(),
+        finish = (status: DeviceStatus, message: string) => {
+          socket.destroy();
+          resolve({ status, message });
+        };
+      socket.setTimeout(2500);
+      socket.once("connect", () =>
+        finish("online", `TCP connection succeeded to ${host}:${port}.`),
+      );
+      socket.once("timeout", () =>
+        finish("offline", `Connection to ${host}:${port} timed out.`),
+      );
+      socket.once("error", (error: NodeJS.ErrnoException) =>
+        finish(
+          "offline",
+          `Could not connect to ${host}:${port} (${error.code || "connection error"}).`,
+        ),
+      );
+      socket.connect(port, host);
+    });
+  }
+}
+function epsonTextSize(value: unknown) {
+  return value === "extra_large" ? 0x22 : value === "large" ? 0x11 : 0x00;
+}
+export async function sendEpsonPrint(
+  config: Record<string, unknown>,
+  lines: string[],
+  options: { openCashDrawer?: boolean; drawerOnly?: boolean } = {},
+) {
+  const host = String(config.host || "").trim(),
+    port = Number(config.port || 9100);
+  if (
+    !validPrinterHost(host) ||
+    !Number.isSafeInteger(port) ||
+    port < 1 ||
+    port > 65535
+  )
+    throw new Error("A valid printer IP/host and port are required.");
+  const safeLines = lines.map((line) =>
+      String(line)
+        .replace(/[^\x20-\x7E]/g, "?")
+        .slice(0, 500),
+    ),
+    headerSize = epsonTextSize(config.ticketHeaderSize),
+    bodySize = epsonTextSize(config.ticketTextSize),
+    drawer =
+      options.openCashDrawer && config.cashDrawerEnabled === true
+        ? Buffer.from([0x1b, 0x70, 0x00, 0x19, 0xfa])
+        : Buffer.alloc(0);
+  const data = options.drawerOnly
+    ? Buffer.concat([Buffer.from([0x1b, 0x40]), drawer])
+    : Buffer.concat([
+        Buffer.from([0x1b, 0x40]),
+        drawer,
+        Buffer.from([
+          0x1b,
+          0x61,
+          0x01,
+          0x1b,
+          0x45,
+          0x01,
+          0x1d,
+          0x21,
+          headerSize,
+        ]),
+        Buffer.from(`${safeLines[0] || "CORNER OPS"}\n`, "ascii"),
+        Buffer.from([0x1b, 0x45, 0x00, 0x1b, 0x61, 0x00, 0x1d, 0x21, bodySize]),
+        Buffer.from(`${safeLines.slice(1).join("\n")}\n\n\n`, "ascii"),
+        Buffer.from([0x1d, 0x21, 0x00, 0x1d, 0x56, 0x42, 0x00]),
+      ]);
+  await new Promise<void>((resolve, reject) => {
+    const socket = new Socket(),
+      fail = (error: Error) => {
+        socket.destroy();
+        reject(error);
+      };
+    socket.setTimeout(4000);
+    socket.once("timeout", () =>
+      fail(new Error(`Print to ${host}:${port} timed out.`)),
+    );
+    socket.once("error", fail);
+    socket.connect(port, host, () => socket.end(data));
+    socket.once("close", (hadError) => {
+      if (!hadError) resolve();
+    });
+  });
+}
+export class PaymentTerminalPlaceholderAdapter extends UnconfiguredAdapter {
+  readonly key = "payment-placeholder";
+  constructor() {
+    super("payment_terminal");
+  }
+}
+/** A terminal registered in MX Merchant (the Dejavoo). MX can say it is registered, not whether it is switched on. */
+export class MxTerminalAdapter implements HardwareAdapter {
+  readonly key = "mx-terminal";
+  readonly kind = "payment_terminal" as const;
+  async probe(config: Record<string, unknown>) {
+    const id = normalizeMxTerminalId(config.mxTerminalId);
+    if (!id) return { status: "unknown" as const, message: "Enter the terminal's MX terminal ID." };
+    try {
+      const terminal = (await listMxTerminals()).find((row) => row.id === id);
+      if (!terminal) return { status: "offline" as const, message: "MX Merchant has no terminal with this ID on the account." };
+      if (!terminal.enabled) return { status: "offline" as const, message: `MX Merchant lists ${terminal.name || "this terminal"} as disabled.` };
+      return {
+        status: "unknown" as const,
+        message: `Registered in MX as ${terminal.name || id} (${terminal.providerKey || "terminal"}).${mxTerminalEnabled() ? "" : " Terminal checkout is switched off on the server (MX_TERMINAL_API_ENABLED), so cards are keyed in."} MX does not report power or network; a sale shows whether it is connected.`,
+      };
+    } catch (error) {
+      return { status: "unknown" as const, message: error instanceof Error ? error.message : "MX Merchant could not be reached." };
+    }
+  }
+}
+export class KeyboardWedgeAdapter extends UnconfiguredAdapter {
+  readonly key = "keyboard-wedge";
+  constructor() {
+    super("barcode_scanner");
+  }
+  async probe() {
+    return {
+      status: "unknown" as const,
+      message:
+        "Keyboard-wedge reader is configured locally; swipe a test gift card at checkout to verify it.",
+    };
+  }
+}
+export function hardwareAdapter(
+  key: string,
+  kind: HardwareAdapter["kind"],
+): HardwareAdapter {
+  if (key === "network-printer" && kind === "printer")
+    return new NetworkPrinterAdapter();
+  if (key === "mock") return new MockDeviceAdapter(kind);
+  if (key === "payment-placeholder" && kind === "payment_terminal")
+    return new PaymentTerminalPlaceholderAdapter();
+  if (key === "mx-terminal" && kind === "payment_terminal")
+    return new MxTerminalAdapter();
+  if (key === "keyboard-wedge" && kind === "barcode_scanner")
+    return new KeyboardWedgeAdapter();
+  return new UnconfiguredAdapter(kind);
+}
+
+function manager(actor: OrderingActor) {
+  if (!canManagePos(actor))
+    throw new Error("Manager or owner authorization is required.");
+}
+function safeConfig(value: unknown): Record<string, unknown> {
+  const config =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  if (
+    Object.keys(config).some((key) =>
+      /secret|password|token|credential|api.?key/i.test(key),
+    )
+  )
+    throw new Error(
+      "Credentials and secrets cannot be stored in device configuration.",
+    );
+  return config;
+}
+export function effectiveDeviceStatus(row: {
+  active: boolean;
+  reported_status: DeviceStatus;
+  last_seen_at?: string | Date | null;
+}): DeviceStatus {
+  if (!row.active) return "offline";
+  if (!row.last_seen_at) return "unknown";
+  if (Date.now() - new Date(row.last_seen_at).getTime() > 120_000)
+    return "offline";
+  return row.reported_status;
+}
+
+export async function hardwareDashboard(business: OrderingBusiness) {
+  await ensureOrderingHardwareSchema();
+  const sql = getSql();
+  const [locations, devices, routes, jobs, paymentStations, categories] = await Promise.all(
+    [
+      sql`SELECT * FROM ordering_hardware_locations WHERE business=${business} AND active=TRUE ORDER BY name`,
+      sql`SELECT device.*,location.name location_name FROM ordering_hardware_devices device JOIN ordering_hardware_locations location ON location.id=device.location_id WHERE device.business=${business} AND device.active=TRUE AND location.active=TRUE ORDER BY location.name,device.name`,
+      sql`SELECT route.*,device.name printer_name,location.name location_name FROM ordering_printer_routes route JOIN ordering_hardware_devices device ON device.id=route.printer_id JOIN ordering_hardware_locations location ON location.id=route.location_id WHERE route.business=${business} AND route.active=TRUE AND device.active=TRUE AND location.active=TRUE ORDER BY route.priority DESC,route.created_at`,
+      sql`SELECT job.id,job.order_id,job.purpose,job.event_subtype,job.status,job.is_reprint,job.retry_count,job.error_message,job.queued_at,job.attempted_at,job.completed_at,job.device_id,device.name device_name FROM ordering_print_jobs job LEFT JOIN ordering_hardware_devices device ON device.id=job.device_id WHERE job.business=${business} ORDER BY job.created_at DESC LIMIT 100`,
+      sql`SELECT station.*,receipt.name receipt_printer_name,terminal.name payment_terminal_name,reader.name gift_card_reader_name FROM ordering_payment_stations station LEFT JOIN ordering_hardware_devices receipt ON receipt.id=station.receipt_printer_id LEFT JOIN ordering_hardware_devices terminal ON terminal.id=station.payment_terminal_id LEFT JOIN ordering_hardware_devices reader ON reader.id=station.gift_card_reader_id WHERE station.business=${business} AND station.active=TRUE ORDER BY station.station_mode,station.name`,
+      sql`SELECT id,name FROM ordering_menu_categories WHERE business=${business} AND active=TRUE ORDER BY sort_order,name`,
+    ],
+  );
+  return {
+    locations,
+    devices: devices.map((row: any) => ({
+      ...row,
+      effective_status: effectiveDeviceStatus(row),
+    })),
+    routes,
+    jobs,
+    paymentStations,
+    categories,
+    // Kitchen printers that print every kitchen ticket.
+    kitchenPrinterIds: (await kitchenTicketPrinters(business)).map((printer: any) => String(printer.id)),
+  };
+}
+
+export async function operationalPrinterStatus(business: OrderingBusiness) {
+  await ensureOrderingHardwareSchema();
+  const sql = getSql();
+  const devices =
+    await sql`SELECT id,name,role,adapter_key,adapter_config FROM ordering_hardware_devices WHERE business=${business} AND device_type='printer' AND active=TRUE AND role IN ('kitchen_printer','receipt_printer')`;
+  const checked = await Promise.all(
+    devices.map(async (device: any) => {
+      const result = await hardwareAdapter(
+        String(device.adapter_key),
+        "printer",
+      ).probe(device.adapter_config || {});
+      await sql`UPDATE ordering_hardware_devices SET reported_status=${result.status},last_seen_at=NOW(),status_message=${result.message},updated_at=NOW() WHERE id=${device.id}`;
+      return {
+        role: String(device.role),
+        receiptEnabled: device.adapter_config?.receiptEnabled === true,
+        status: result.status,
+      };
+    }),
+  );
+  function roleStatus(role: string) {
+    const matches = checked.filter((device) => device.role === role);
+    if (!matches.length) return "not_configured" as const;
+    if (matches.some((device) => device.status === "online"))
+      return "online" as const;
+    if (matches.some((device) => device.status === "unknown"))
+      return "unknown" as const;
+    return "offline" as const;
+  }
+  const receiptDevices = checked.filter(
+    (device) => device.role === "receipt_printer" || device.receiptEnabled,
+  );
+  return {
+    kitchenPrinter: roleStatus("kitchen_printer"),
+    receiptPrinter: !receiptDevices.length
+      ? ("not_configured" as const)
+      : receiptDevices.some((device) => device.status === "online")
+        ? ("online" as const)
+        : receiptDevices.some((device) => device.status === "unknown")
+          ? ("unknown" as const)
+          : ("offline" as const),
+    receiptPrinters: devices
+      .filter(
+        (device: any) =>
+          device.role === "receipt_printer" ||
+          device.adapter_config?.receiptEnabled === true,
+      )
+      .map((device: any) => ({
+        id: String(device.id),
+        name: String(device.name),
+        tillKey: String(device.adapter_config?.tillKey || ""),
+        cashDrawerEnabled: device.adapter_config?.cashDrawerEnabled === true,
+      })),
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+export async function saveHardware(input: {
+  business: OrderingBusiness;
+  action: string;
+  body: Record<string, unknown>;
+  actor: OrderingActor;
+}): Promise<any> {
+  manager(input.actor);
+  await ensureOrderingHardwareSchema();
+  const sql = getSql(),
+    body = input.body;
+  if (input.action === "save_location") {
+    const id = String(body.id || randomUUID()),
+      name = String(body.name || "").trim(),
+      key = String(body.locationKey || "")
+        .trim()
+        .toLowerCase();
+    if (!name || !key) throw new Error("Location name and key are required.");
+    await sql`INSERT INTO ordering_hardware_locations(id,business,name,location_key,active) VALUES(${id},${input.business},${name},${key},${body.active !== false}) ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,location_key=EXCLUDED.location_key,active=EXCLUDED.active,updated_at=NOW() WHERE ordering_hardware_locations.business=${input.business}`;
+    return { id };
+  }
+  if (input.action === "save_device") {
+    let locationId = String(body.locationId || "");
+    const id = String(body.id || randomUUID()),
+      name = String(body.name || "").trim(),
+      deviceKey = String(body.deviceKey || "")
+        .trim()
+        .toLowerCase(),
+      deviceType = String(body.deviceType || ""),
+      role = String(body.role || ""),
+      adapterKey = String(body.adapterKey || "unconfigured");
+    if (!name || !deviceKey)
+      throw new Error("Device name is required.");
+    // Most stores have one location; create it on first use instead of asking.
+    if (!locationId) {
+      const existing = (await sql`SELECT id FROM ordering_hardware_locations WHERE business=${input.business} AND active=TRUE ORDER BY created_at LIMIT 1`)[0];
+      if (existing) locationId = String(existing.id);
+      else {
+        locationId = randomUUID();
+        await sql`INSERT INTO ordering_hardware_locations(id,business,name,location_key) VALUES(${locationId},${input.business},'Store','store') ON CONFLICT(business,location_key) DO NOTHING`;
+        locationId = String((await sql`SELECT id FROM ordering_hardware_locations WHERE business=${input.business} AND location_key='store'`)[0].id);
+      }
+    }
+    if (
+      !["printer", "payment_terminal", "barcode_scanner"].includes(deviceType)
+    )
+      throw new Error("Unknown device type.");
+    const expected = {
+      printer: ["receipt_printer", "kitchen_printer", "label_printer"],
+      payment_terminal: ["payment_terminal"],
+      barcode_scanner: ["barcode_scanner"],
+    }[deviceType]!;
+    if (!expected.includes(role))
+      throw new Error("Device role does not match its type.");
+    if (
+      ![
+        "unconfigured",
+        "mock",
+        "payment-placeholder",
+        "mx-terminal",
+        "network-printer",
+        "keyboard-wedge",
+      ].includes(adapterKey) ||
+      ((adapterKey === "payment-placeholder" || adapterKey === "mx-terminal") &&
+        deviceType !== "payment_terminal") ||
+      (adapterKey === "network-printer" && deviceType !== "printer") ||
+      (adapterKey === "keyboard-wedge" && deviceType !== "barcode_scanner")
+    )
+      throw new Error("Unsupported adapter.");
+    const config = safeConfig(body.adapterConfig);
+    if (adapterKey === "mx-terminal") {
+      const mxTerminalId = normalizeMxTerminalId(config.mxTerminalId);
+      if (!mxTerminalId)
+        throw new Error("Enter the MX terminal ID (the long ID MX Merchant shows for the terminal, like 8328D726-911A-4604-AADA-FF08091A4EDE).");
+      for (const key of Object.keys(config)) delete config[key];
+      config.mxTerminalId = mxTerminalId;
+    }
+    if (adapterKey === "network-printer") {
+      const host = String(config.host || "").trim(),
+        port = Number(config.port || 9100),
+        sizes = ["normal", "large", "extra_large"];
+      if (!validPrinterHost(host))
+        throw new Error("Enter a valid printer IP address or hostname.");
+      if (!Number.isSafeInteger(port) || port < 1 || port > 65535)
+        throw new Error("Printer port must be between 1 and 65535.");
+      config.host = host;
+      config.port = port;
+      config.ticketTextSize = sizes.includes(String(config.ticketTextSize))
+        ? String(config.ticketTextSize)
+        : "normal";
+      config.ticketHeaderSize = sizes.includes(String(config.ticketHeaderSize))
+        ? String(config.ticketHeaderSize)
+        : "large";
+      config.receiptEnabled =
+        role === "receipt_printer" || config.receiptEnabled === true;
+      config.tillKey =
+        config.receiptEnabled === true
+          ? String(config.tillKey || "")
+              .trim()
+              .slice(0, 80)
+          : "";
+      config.cashDrawerEnabled =
+        config.receiptEnabled === true && config.cashDrawerEnabled === true;
+      if (role === "label_printer") {
+        Object.assign(config, normalizeLabelConfig(config));
+        config.receiptEnabled = false;
+        config.cashDrawerEnabled = false;
+        config.tillKey = "";
+      } else {
+        for (const key of ["labelLanguage", "labelWidthMm", "labelHeightMm", "labelCategoryIds"]) delete config[key];
+      }
+    }
+    // A removed device keeps its row for print history; free its name so it can be reused.
+    await sql`UPDATE ordering_hardware_devices SET name=name||' (removed '||to_char(NOW(),'YYYY-MM-DD HH24:MI:SS')||')',updated_at=NOW() WHERE business=${input.business} AND location_id=${locationId} AND lower(name)=lower(${name}) AND active=FALSE AND id<>${id}`;
+    const rows =
+      await sql`INSERT INTO ordering_hardware_devices(id,business,location_id,name,device_key,device_type,role,station_key,adapter_key,adapter_config,active,created_by,updated_by) SELECT ${id},${input.business},id,${name},${deviceKey},${deviceType},${role},${String(body.stationKey || "").trim()},${adapterKey},${JSON.stringify(config)}::jsonb,${body.active !== false},${input.actor.id},${input.actor.id} FROM ordering_hardware_locations WHERE id=${locationId} AND business=${input.business} ON CONFLICT(id) DO UPDATE SET location_id=EXCLUDED.location_id,name=EXCLUDED.name,device_key=EXCLUDED.device_key,device_type=EXCLUDED.device_type,role=EXCLUDED.role,station_key=EXCLUDED.station_key,adapter_key=EXCLUDED.adapter_key,adapter_config=EXCLUDED.adapter_config,active=EXCLUDED.active,updated_by=EXCLUDED.updated_by,updated_at=NOW() WHERE ordering_hardware_devices.business=${input.business} RETURNING id`;
+    if (!rows.length)
+      throw new Error("Hardware location was not found in this business.");
+    return { id };
+  }
+  if (input.action === "save_payment_station") {
+    const id = String(body.id || randomUUID()),
+      name = String(body.name || "").trim(),
+      stationKey = String(body.stationKey || "")
+        .trim()
+        .toLowerCase(),
+      stationMode = String(body.stationMode || "order_taker"),
+      receiptPrinterId = body.receiptPrinterId
+        ? String(body.receiptPrinterId)
+        : null,
+      paymentTerminalId = body.paymentTerminalId
+        ? String(body.paymentTerminalId)
+        : null,
+      giftCardReaderId = body.giftCardReaderId
+        ? String(body.giftCardReaderId)
+        : null;
+    const phoneCardPaymentsEnabled = body.phoneCardPaymentsEnabled === true,
+      customerDisplayEnabled = body.customerDisplayEnabled === true;
+    let sharedRegisterKey = String(body.sharedRegisterKey || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "")
+      .slice(0, 80);
+    if (!name || !/^[a-z0-9][a-z0-9-]{1,79}$/.test(stationKey))
+      throw new Error(
+        "Station name and a stable lowercase station key are required.",
+      );
+    if (!["payment", "order_taker"].includes(stationMode))
+      throw new Error("Unknown station mode.");
+    if (stationMode === "payment" && !receiptPrinterId)
+      throw new Error("The payment station requires a receipt printer / till.");
+    const deviceIds = [
+      receiptPrinterId,
+      paymentTerminalId,
+      giftCardReaderId,
+    ].filter(Boolean) as string[];
+    if (deviceIds.length) {
+      const matched =
+        await sql`SELECT id,role,device_key,adapter_config FROM ordering_hardware_devices WHERE business=${input.business} AND active=TRUE AND id=ANY(${deviceIds}::uuid[])`;
+      if (matched.length !== new Set(deviceIds).size)
+        throw new Error("One or more station devices were not found.");
+      const roleById = new Map(
+        matched.map((row: any) => [String(row.id), String(row.role)]),
+      );
+      if (receiptPrinterId) {
+        const printer = matched.find(
+          (row: any) => String(row.id) === receiptPrinterId,
+        );
+        const device = printer;
+        if (
+          printer?.role !== "receipt_printer" &&
+          !(
+            printer?.role === "kitchen_printer" &&
+            device?.adapter_config?.receiptEnabled === true
+          )
+        )
+          throw new Error(
+            "Choose a receipt printer or a kitchen printer enabled for receipts.",
+          );
+        if (!sharedRegisterKey)
+          sharedRegisterKey = String(
+            device?.adapter_config?.tillKey || device?.device_key || "",
+          )
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9-]/g, "-")
+            .slice(0, 80);
+      }
+      if (
+        paymentTerminalId &&
+        roleById.get(paymentTerminalId) !== "payment_terminal"
+      )
+        throw new Error("Choose a payment terminal.");
+      if (
+        giftCardReaderId &&
+        roleById.get(giftCardReaderId) !== "barcode_scanner"
+      )
+        throw new Error("Choose a scanner / magnetic-stripe reader.");
+    }
+    const saved = (
+      await sql`INSERT INTO ordering_payment_stations(id,business,name,station_key,station_mode,receipt_printer_id,payment_terminal_id,gift_card_reader_id,phone_card_payments_enabled,customer_display_enabled,shared_register_key,active,created_by,updated_by) VALUES(${id},${input.business},${name},${stationKey},${stationMode},${receiptPrinterId},${paymentTerminalId},${giftCardReaderId},${phoneCardPaymentsEnabled},${customerDisplayEnabled},${sharedRegisterKey},TRUE,${input.actor.id},${input.actor.id}) ON CONFLICT(business,station_key) DO UPDATE SET name=EXCLUDED.name,station_mode=EXCLUDED.station_mode,receipt_printer_id=EXCLUDED.receipt_printer_id,payment_terminal_id=EXCLUDED.payment_terminal_id,gift_card_reader_id=EXCLUDED.gift_card_reader_id,phone_card_payments_enabled=EXCLUDED.phone_card_payments_enabled,customer_display_enabled=EXCLUDED.customer_display_enabled,shared_register_key=EXCLUDED.shared_register_key,active=TRUE,updated_by=EXCLUDED.updated_by,updated_at=NOW() RETURNING id`
+    )[0];
+    return { id: String(saved.id) };
+  }
+  if (input.action === "probe_device") {
+    const id = String(body.id || "");
+    const device = (
+      await sql`SELECT * FROM ordering_hardware_devices WHERE id=${id} AND business=${input.business}`
+    )[0];
+    if (!device) throw new Error("Device not found.");
+    const result = await hardwareAdapter(
+      device.adapter_key,
+      device.device_type,
+    ).probe(device.adapter_config);
+    await sql`UPDATE ordering_hardware_devices SET reported_status=${result.status},last_seen_at=NOW(),status_message=${result.message},updated_by=${input.actor.id},updated_at=NOW() WHERE id=${id}`;
+    return result;
+  }
+  if (input.action === "test_print") {
+    const id = String(body.id || "");
+    const device = (
+      await sql`SELECT * FROM ordering_hardware_devices WHERE id=${id} AND business=${input.business} AND device_type='printer' AND active=TRUE`
+    )[0];
+    if (!device) throw new Error("Active printer not found.");
+    if (device.adapter_key !== "network-printer")
+      throw new Error(
+        "Configure this printer as Network printer (TCP/IP) first.",
+      );
+    if (device.role === "label_printer") {
+      await sendLabel(device.adapter_config, sampleLabel(device.name));
+      await sql`UPDATE ordering_hardware_devices SET reported_status='online',last_seen_at=NOW(),status_message='Test label sent successfully.',updated_by=${input.actor.id},updated_at=NOW() WHERE id=${id}`;
+      return { status: "online", message: "Test label sent." };
+    }
+    await sendEpsonPrint(device.adapter_config, [
+      "******** TEST - DO NOT MAKE ********",
+      "CORNER OPS PRINTER TEST",
+      device.name,
+      `${device.role.replaceAll("_", " ")} - ${new Date().toISOString()}`,
+      "If you can read this, ESC/POS printing works.",
+    ]);
+    await sql`UPDATE ordering_hardware_devices SET reported_status='online',last_seen_at=NOW(),status_message='Epson ESC/POS test print sent successfully.',updated_by=${input.actor.id},updated_at=NOW() WHERE id=${id}`;
+    return { status: "online", message: "Epson ESC/POS test print sent." };
+  }
+  if (input.action === "test_cash_drawer") {
+    const id = String(body.id || "");
+    const device = (
+      await sql`SELECT * FROM ordering_hardware_devices WHERE id=${id} AND business=${input.business} AND device_type='printer' AND active=TRUE`
+    )[0];
+    if (
+      !device ||
+      !(
+        device.role === "receipt_printer" ||
+        (device.role === "kitchen_printer" &&
+          device.adapter_config?.receiptEnabled === true)
+      )
+    )
+      throw new Error("An active receipt-enabled printer was not found.");
+    if (
+      device.adapter_key !== "network-printer" ||
+      device.adapter_config?.cashDrawerEnabled !== true
+    )
+      throw new Error(
+        "Enable the cash drawer on a network receipt printer first.",
+      );
+    await sendEpsonPrint(
+      device.adapter_config,
+      [
+        "******** DRAWER TEST ********",
+        `OPENED BY: ${input.actor.name}`,
+        new Date().toISOString(),
+      ],
+      { openCashDrawer: true },
+    );
+    await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,actor,reason,details) VALUES(${randomUUID()},${input.business},'cash_drawer_test',${input.actor.id},'Manager hardware test',${JSON.stringify({ printerId: id, printerName: device.name })}::jsonb)`;
+    return {
+      status: "online",
+      message: "Cash-drawer pulse and marked test receipt sent.",
+    };
+  }
+  if (input.action === "deactivate_device") {
+    const id = String(body.id || "");
+    const rows =
+      await sql`UPDATE ordering_hardware_devices SET active=FALSE,reported_status='offline',status_message='Removed from active hardware.',updated_by=${input.actor.id},updated_at=NOW() WHERE id=${id} AND business=${input.business} RETURNING id`;
+    if (!rows.length) throw new Error("Printer not found.");
+    await sql`UPDATE ordering_printer_routes SET active=FALSE,updated_by=${input.actor.id},updated_at=NOW() WHERE printer_id=${id} AND business=${input.business}`;
+    return { id, active: false };
+  }
+  if (input.action === "save_route") {
+    const id = String(body.id || randomUUID()),
+      locationId = String(body.locationId || ""),
+      printerId = String(body.printerId || ""),
+      targetType = String(body.targetType || "all"),
+      targetId = String(body.targetId || "").trim();
+    if (
+      !["all", "item", "category", "station"].includes(targetType) ||
+      (targetType !== "all") !== Boolean(targetId)
+    )
+      throw new Error("A valid route target is required.");
+    const printer = (
+      await sql`SELECT id FROM ordering_hardware_devices WHERE id=${printerId} AND business=${input.business} AND location_id=${locationId} AND device_type='printer' AND role='kitchen_printer'`
+    )[0];
+    if (!printer)
+      throw new Error(
+        "Kitchen printer was not found in this business/location.",
+      );
+    await sql`INSERT INTO ordering_printer_routes(id,business,location_id,printer_id,target_type,target_id,priority,active,created_by,updated_by) VALUES(${id},${input.business},${locationId},${printerId},${targetType},${targetId},${Number(body.priority || 0)},${body.active !== false},${input.actor.id},${input.actor.id}) ON CONFLICT(id) DO UPDATE SET location_id=EXCLUDED.location_id,printer_id=EXCLUDED.printer_id,target_type=EXCLUDED.target_type,target_id=EXCLUDED.target_id,priority=EXCLUDED.priority,active=EXCLUDED.active,updated_by=EXCLUDED.updated_by,updated_at=NOW() WHERE ordering_printer_routes.business=${input.business}`;
+    return { id };
+  }
+  if (input.action === "set_kitchen_printers") {
+    // Which kitchen printers print kitchen tickets; each prints an identical slip.
+    const ids = Array.isArray(body.printerIds) ? [...new Set(body.printerIds.map(String))] : [];
+    const printers = ids.length
+      ? await sql`SELECT id,location_id FROM ordering_hardware_devices WHERE id=ANY(${ids}::uuid[]) AND business=${input.business} AND active=TRUE AND device_type='printer' AND role='kitchen_printer'`
+      : [];
+    if (printers.length !== ids.length || !ids.length) throw new Error("Choose at least one active kitchen printer.");
+    await withTransaction(async () => {
+      await getSql()`UPDATE ordering_printer_routes SET active=FALSE,updated_by=${input.actor.id},updated_at=NOW() WHERE business=${input.business} AND target_type='all' AND active=TRUE`;
+      for (const printer of printers)
+        await getSql()`INSERT INTO ordering_printer_routes(id,business,location_id,printer_id,target_type,target_id,priority,active,created_by,updated_by) VALUES(${randomUUID()},${input.business},${printer.location_id},${printer.id},'all','',100,TRUE,${input.actor.id},${input.actor.id}) ON CONFLICT(business,location_id,target_type,target_id,printer_id) DO UPDATE SET active=TRUE,priority=100,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+    });
+    return { ids };
+  }
+  if (input.action === "remove_station") {
+    const rows = await sql`UPDATE ordering_payment_stations SET active=FALSE,name=name||' (removed '||to_char(NOW(),'YYYY-MM-DD HH24:MI:SS')||')',station_key=station_key||'-removed-'||to_char(NOW(),'YYYYMMDDHH24MISS'),updated_by=${input.actor.id},updated_at=NOW() WHERE id=${String(body.id || "")} AND business=${input.business} RETURNING id`;
+    if (!rows.length) throw new Error("Register not found.");
+    return { id: String(rows[0].id) };
+  }
+  throw new Error("Unknown hardware configuration action.");
+}
+
+export async function controlPrintJob(input: {
+  business: OrderingBusiness;
+  jobId: string;
+  action: "retry" | "reprint";
+  reason: string;
+  actor: OrderingActor;
+}) {
+  manager(input.actor);
+  await ensureOrderingHardwareSchema();
+  const reason = input.reason.trim();
+  if (!reason) throw new Error("A reason is required.");
+  return withTransaction(async () => {
+    const sql = getSql();
+    const job = (
+      await sql`SELECT * FROM ordering_print_jobs WHERE id=${input.jobId} AND business=${input.business} FOR UPDATE`
+    )[0];
+    if (!job) throw new Error("Print job not found.");
+    if (input.action === "retry") {
+      if (!["failed", "not_configured"].includes(job.status))
+        throw new Error("Only failed or unconfigured jobs can be retried.");
+      await sql`UPDATE ordering_print_jobs SET status='queued',queued_at=NOW(),next_attempt_at=NOW(),retry_count=retry_count+1,error_message='',actor_type=${input.actor.type},actor_id=${input.actor.id} WHERE id=${job.id}`;
+      return { id: job.id, orderId: job.order_id, status: "queued" };
+    }
+    const id = randomUUID(),
+      key = `reprint:${job.id}:${id}`;
+    await sql`INSERT INTO ordering_print_jobs(id,business,order_id,check_id,payment_transaction_id,purpose,event_subtype,status,is_reprint,actor_type,actor_id,error_message,payload,location_id,device_id,idempotency_key,parent_job_id) VALUES(${id},${input.business},${job.order_id},${job.check_id},${job.payment_transaction_id},${job.purpose},'authorized_reprint','queued',TRUE,${input.actor.type},${input.actor.id},'',${JSON.stringify({ ...job.payload, reprintReason: reason })}::jsonb,${job.location_id},${job.device_id},${key},${job.id})`;
+    return { id, orderId: job.order_id, status: "queued" };
+  });
+}
+
+export function printPayloadLines(payload: Record<string, unknown>) {
+  const lines = [String(payload.heading || "CORNER OPS")];
+  if (payload.orderNumber) lines.push(`ORDER: #${payload.orderNumber}`);
+  if (payload.customerName) lines.push(`CUSTOMER: ${payload.customerName}`);
+  if (payload.phone) lines.push(`PHONE: ${payload.phone}`);
+  if (payload.serviceType)
+    lines.push(
+      `TYPE: ${String(payload.serviceType).replaceAll("_", " ").toUpperCase()}`,
+    );
+  if (payload.deliveryAddress)
+    lines.push(`DELIVER TO: ${payload.deliveryAddress}`);
+  if (payload.deliveryUnit) lines.push(`DROP-OFF: ${payload.deliveryUnit}`);
+  if (payload.orderInstructions)
+    lines.push(`DELIVERY INSTRUCTIONS: ${payload.orderInstructions}`);
+  if (Array.isArray(payload.timingLines))
+    for (const line of payload.timingLines) lines.push(String(line));
+  if (payload.paymentLabel) lines.push(String(payload.paymentLabel));
+  if (payload.cashier) lines.push(`CASHIER: ${payload.cashier}`);
+  if (Array.isArray(payload.lines)) {
+    lines.push("--------------------------------");
+    for (const line of payload.lines)
+      lines.push(typeof line === "string" ? line : JSON.stringify(line));
+  }
+  for (const key of [
+    "paidThisUpdateCents",
+    "totalPaidCents",
+    "remainingDueCents",
+    "changeDueCents",
+  ]) {
+    if (payload[key] !== undefined)
+      lines.push(
+        `${key.replace(/([A-Z])/g, " $1").toUpperCase()}: $${(Number(payload[key]) / 100).toFixed(2)}`,
+      );
+  }
+  return lines;
+}
+// Automatic retries stop after this many failed attempts; a manager can still
+// requeue the job from POS hardware settings.
+export const MAX_AUTOMATIC_PRINT_ATTEMPTS = 4;
+// A job left in 'attempting' longer than this belongs to a request that died
+// mid-print and may be claimed again.
+const STALE_ATTEMPT_INTERVAL = "2 minutes";
+// Kitchen tickets that were never printable (no printer, or auto-print paused)
+// are only picked up automatically while still fresh, so a later dispatch for
+// the same order does not print a stale ticket the kitchen already handled.
+const FRESH_UNSENT_KITCHEN_INTERVAL = "10 minutes";
+
+/**
+ * Kitchen printers that print every kitchen ticket. A manager can tick which
+ * ones; with none ticked, every kitchen printer prints. Each gets an identical
+ * copy of the slip.
+ */
+export async function kitchenTicketPrinters(business: OrderingBusiness) {
+  const sql = getSql();
+  const printers = await sql`SELECT device.*,EXISTS(SELECT 1 FROM ordering_printer_routes route WHERE route.printer_id=device.id AND route.active=TRUE AND route.target_type='all') chosen
+    FROM ordering_hardware_devices device WHERE device.business=${business} AND device.active=TRUE AND device.role='kitchen_printer' AND device.adapter_key='network-printer'
+    ORDER BY device.created_at,device.id`;
+  const chosen = printers.filter((printer) => printer.chosen);
+  return chosen.length ? chosen : printers;
+}
+
+export async function dispatchOrderPrintJobs(
+  orderId: string,
+  business: OrderingBusiness,
+  options: { includeKitchenProduction?: boolean; jobId?: string; retryOnly?: boolean } = {},
+) {
+  await ensureOrderingHardwareSchema();
+  const sql = getSql(),
+    includeKitchen = options.includeKitchenProduction !== false,
+    jobId = options.jobId || null,
+    retryOnly = options.retryOnly === true,
+    jobs =
+      await sql`SELECT * FROM ordering_print_jobs WHERE order_id=${orderId} AND business=${business}
+        AND (${includeKitchen} OR purpose<>'kitchen_production') AND (${jobId}::uuid IS NULL OR id=${jobId}::uuid)
+        AND (
+          (NOT ${retryOnly} AND status='queued')
+          OR (${retryOnly} AND status='queued' AND queued_at<NOW()-INTERVAL '1 minute')
+          OR (NOT ${retryOnly} AND status='not_configured' AND (${jobId}::uuid IS NOT NULL OR purpose<>'kitchen_production' OR created_at>NOW()-${FRESH_UNSENT_KITCHEN_INTERVAL}::interval))
+          OR (status='failed' AND COALESCE(next_attempt_at,NOW())<=NOW() AND retry_count<${MAX_AUTOMATIC_PRINT_ATTEMPTS} AND COALESCE(payload->>'openCashDrawer','false')<>'true')
+          OR (status='attempting' AND COALESCE(attempted_at,queued_at)<NOW()-${STALE_ATTEMPT_INTERVAL}::interval AND COALESCE(payload->>'openCashDrawer','false')<>'true')
+        )
+        ORDER BY created_at,id`;
+  const kitchenCopies: string[] = [];
+  for (const job of jobs) {
+    if (job.payload?.customerReceiptPending === true) continue;
+    const role =
+      job.purpose === "kitchen_production"
+        ? "kitchen_printer"
+        : "receipt_printer";
+    const targetPrinterId =
+      role === "receipt_printer" && job.payload?.receiptPrinterId
+        ? String(job.payload.receiptPrinterId)
+        : null;
+    let device: any = null;
+    if (role === "kitchen_printer") {
+      const printers = await kitchenTicketPrinters(business);
+      // A job already tied to a kitchen printer (a copy, a retry, a reprint) stays on it.
+      device = printers.find((printer) => job.device_id && String(printer.id) === String(job.device_id)) ?? null;
+      if (!device && printers.length) {
+        device = printers[0];
+        for (const printer of printers.slice(1)) {
+          const copy = await sql`INSERT INTO ordering_print_jobs(id,business,order_id,check_id,payment_transaction_id,purpose,event_subtype,status,is_reprint,actor_type,actor_id,error_message,payload,location_id,device_id,idempotency_key,parent_job_id)
+            SELECT ${randomUUID()},business,order_id,check_id,payment_transaction_id,purpose,event_subtype,'queued',is_reprint,actor_type,actor_id,'',payload,${printer.location_id},${printer.id},${`kitchen-copy:${job.id}:${printer.id}`},id FROM ordering_print_jobs WHERE id=${job.id}
+            ON CONFLICT DO NOTHING RETURNING id`;
+          if (copy[0]) kitchenCopies.push(String(copy[0].id));
+        }
+      }
+    } else device = (
+      await sql`SELECT device.* FROM ordering_hardware_devices device LEFT JOIN ordering_printer_routes route ON route.printer_id=device.id AND route.active=TRUE WHERE device.business=${business} AND (device.role=${role} OR (${role}='receipt_printer' AND ${targetPrinterId}::uuid IS NOT NULL AND device.adapter_config->>'receiptEnabled'='true')) AND device.active=TRUE AND device.adapter_key='network-printer' AND (${targetPrinterId}::uuid IS NULL OR device.id=${targetPrinterId}::uuid) ORDER BY COALESCE(route.priority,0) DESC,device.created_at LIMIT 1`
+    )[0];
+    if (!device) {
+      await sql`UPDATE ordering_print_jobs SET status='not_configured',error_message=${role === "kitchen_printer" ? "Kitchen printer not configured." : "Receipt printer not configured."} WHERE id=${job.id} AND status=${job.status}`;
+      continue;
+    }
+    // Claim the job atomically: only the request that moves it out of the
+    // status it was selected in may print it, so concurrent dispatches for the
+    // same order cannot double-print.
+    const claimed = await sql`UPDATE ordering_print_jobs SET status='attempting',device_id=${device.id},location_id=${device.location_id},attempted_at=NOW(),error_message='' WHERE id=${job.id} AND (status IN('queued','not_configured') OR (status='failed' AND COALESCE(next_attempt_at,NOW())<=NOW()) OR (status='attempting' AND COALESCE(attempted_at,queued_at)<NOW()-${STALE_ATTEMPT_INTERVAL}::interval)) RETURNING id`;
+    if (!claimed.length) continue;
+    try {
+      await sendEpsonPrint(
+        device.adapter_config,
+        printPayloadLines(job.payload || {}),
+        { openCashDrawer: job.payload?.openCashDrawer === true },
+      );
+      await sql`UPDATE ordering_print_jobs SET status='succeeded',completed_at=NOW(),error_message='' WHERE id=${job.id}`;
+      await sql`UPDATE ordering_hardware_devices SET reported_status='online',last_seen_at=NOW(),status_message='Last ESC/POS print completed.',updated_at=NOW() WHERE id=${device.id}`;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Printer connection failed.";
+      await sql`UPDATE ordering_print_jobs SET status='failed',error_message=${message},retry_count=retry_count+1,next_attempt_at=NOW()+INTERVAL '30 seconds'*POWER(2,LEAST(retry_count,4)) WHERE id=${job.id}`;
+      await sql`UPDATE ordering_hardware_devices SET reported_status='offline',last_seen_at=NOW(),status_message=${message},updated_at=NOW() WHERE id=${device.id}`;
+    }
+  }
+  // Identical slips for the other kitchen printers.
+  for (const copyId of kitchenCopies) await dispatchOrderPrintJobs(orderId, business, { jobId: copyId });
+}
+
+/**
+ * Retry entry point for print jobs that failed or were abandoned mid-print.
+ * Called by the print-retry cron route and opportunistically by the kitchen
+ * display poll. Never picks up kitchen tickets held back by paused auto-print.
+ */
+export async function retryDuePrintJobs(business?: OrderingBusiness, limit = 20) {
+  await ensureOrderingHardwareSchema();
+  const sql = getSql();
+  const due = await sql`
+    SELECT order_id, business FROM ordering_print_jobs
+    WHERE (${business ?? null}::text IS NULL OR business=${business ?? null})
+      AND created_at>NOW()-INTERVAL '1 hour'
+      AND COALESCE(payload->>'openCashDrawer','false')<>'true'
+      AND (
+        (status='failed' AND COALESCE(next_attempt_at,NOW())<=NOW() AND retry_count<${MAX_AUTOMATIC_PRINT_ATTEMPTS})
+        OR (status='attempting' AND COALESCE(attempted_at,queued_at)<NOW()-${STALE_ATTEMPT_INTERVAL}::interval)
+        OR (status='queued' AND queued_at<NOW()-INTERVAL '1 minute')
+      )
+    GROUP BY order_id, business
+    ORDER BY MIN(created_at)
+    LIMIT ${limit}
+  `;
+  let orders = 0;
+  for (const row of due) {
+    try {
+      await dispatchOrderPrintJobs(String(row.order_id), row.business as OrderingBusiness, { retryOnly: true });
+      orders += 1;
+    } catch (error) {
+      console.error("Print retry failed", error);
+    }
+  }
+  return { orders };
+}
+
+/** Latest kitchen-ticket print outcome for an order, for POS warnings. */
+export async function kitchenPrintStatus(orderId: string, business: OrderingBusiness) {
+  await ensureOrderingHardwareSchema();
+  // The latest kitchen ticket plus its copies for the other kitchen printers; the worst one is reported.
+  const latest = (
+    await getSql()`SELECT id FROM ordering_print_jobs WHERE order_id=${orderId} AND business=${business} AND purpose='kitchen_production' AND COALESCE(idempotency_key,'') NOT LIKE 'kitchen-copy:%' ORDER BY created_at DESC,id DESC LIMIT 1`
+  )[0];
+  if (!latest) return { status: "none" as const, printed: false, message: "" };
+  const batch = await getSql()`SELECT status,error_message FROM ordering_print_jobs WHERE id=${latest.id} OR idempotency_key LIKE ${`kitchen-copy:${latest.id}:%`}`;
+  const rank = ["failed", "not_configured", "attempting", "queued", "succeeded"];
+  const job = batch.toSorted((a, b) => rank.indexOf(String(a.status)) - rank.indexOf(String(b.status)))[0];
+  const status = String(job.status) as "queued" | "attempting" | "succeeded" | "failed" | "not_configured";
+  return {
+    status,
+    printed: status === "succeeded",
+    message: status === "succeeded" ? "" : String(job.error_message || ""),
+  };
+}

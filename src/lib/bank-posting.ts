@@ -1,5 +1,5 @@
 import { ensureAccountingControlSchema } from "@/lib/accounting-control";
-import { getSql } from "@/lib/db";
+import { getSql, withTransaction } from "@/lib/db";
 import { ValidationError } from "@/lib/http";
 import { assertBalancedJournalLines } from "@/lib/journal-integrity";
 import type { Business } from "@/lib/types";
@@ -63,7 +63,14 @@ export async function postFinancialTransaction(input: {
   const journalLines=positive?[{accountId:controlId,debit:amount,credit:0},...categoryLines.map((l)=>({accountId:categoryIds.get(l.code)!,debit:0,credit:l.amount}))]:[...categoryLines.map((l)=>({accountId:categoryIds.get(l.code)!,debit:l.amount,credit:0})),{accountId:controlId,debit:0,credit:amount}];
   assertBalancedJournalLines(journalLines);
   const entryId=crypto.randomUUID(); const description=clean(transaction.merchant_name||transaction.description,240)||(transaction.account_type==="credit"?"Credit-card transaction":"Bank transaction"); const source=transaction.account_type==="credit"?"Credit Card Import":"Bank Import";
-  await sql.transaction([sql`INSERT INTO journal_entries (id,business,entry_date,description,source,reference,created_by) VALUES (${entryId},${input.business},${String(transaction.transaction_date)},${description},${source},${`financial:${transaction.external_transaction_id}`},${input.actor})`,...journalLines.map((l)=>sql`INSERT INTO journal_lines (id,entry_id,account_id,debit,credit) VALUES (${crypto.randomUUID()},${entryId},${l.accountId},${l.debit},${l.credit})`),sql`INSERT INTO bank_transaction_postings (id,bank_transaction_id,journal_entry_id,posted_by) VALUES (${crypto.randomUUID()},${input.transactionId},${entryId},${input.actor})`]);
+  await withTransaction(async () => {
+    const transactionSql = getSql();
+    await transactionSql`INSERT INTO journal_entries (id,business,entry_date,description,source,reference,created_by) VALUES (${entryId},${input.business},${String(transaction.transaction_date)},${description},${source},${`financial:${transaction.external_transaction_id}`},${input.actor})`;
+    for (const line of journalLines) {
+      await transactionSql`INSERT INTO journal_lines (id,entry_id,account_id,debit,credit) VALUES (${crypto.randomUUID()},${entryId},${line.accountId},${line.debit},${line.credit})`;
+    }
+    await transactionSql`INSERT INTO bank_transaction_postings (id,bank_transaction_id,journal_entry_id,posted_by) VALUES (${crypto.randomUUID()},${input.transactionId},${entryId},${input.actor})`;
+  });
   return {posted:true,journalEntryId:entryId,controlAccount:controlCode};
 }
 

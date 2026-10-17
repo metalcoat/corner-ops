@@ -16,6 +16,35 @@ type LimitRow = {
   blocked_until: string | Date | null;
 };
 
+let schemaPromise: Promise<void> | null = null;
+
+async function ensureRateLimitSchema(): Promise<void> {
+  if (!schemaPromise) {
+    schemaPromise = (async () => {
+      await getSql()`
+        CREATE TABLE IF NOT EXISTS security_rate_limits (
+          scope TEXT NOT NULL,
+          discriminator_hash TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          blocked_until TIMESTAMPTZ,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (scope, discriminator_hash)
+        )
+      `;
+      await getSql()`
+        CREATE INDEX IF NOT EXISTS security_rate_limits_blocked_idx
+        ON security_rate_limits (blocked_until)
+        WHERE blocked_until IS NOT NULL
+      `;
+    })().catch((error) => {
+      schemaPromise = null;
+      throw error;
+    });
+  }
+  return schemaPromise;
+}
+
 function key(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -53,6 +82,7 @@ function secondsUntil(value: string | Date | null): number {
 }
 
 export async function assertRateLimit(policies: RateLimitPolicy[]): Promise<void> {
+  await ensureRateLimitSchema();
   const sql = getSql();
   for (const policy of policies) {
     const rows = await sql`
@@ -71,6 +101,7 @@ export async function assertRateLimit(policies: RateLimitPolicy[]): Promise<void
 }
 
 export async function recordRateLimitFailure(policies: RateLimitPolicy[]): Promise<void> {
+  await ensureRateLimitSchema();
   const sql = getSql();
   for (const policy of policies) {
     const discriminatorHash = key(policy.discriminator);
@@ -105,6 +136,7 @@ export async function recordRateLimitFailure(policies: RateLimitPolicy[]): Promi
 }
 
 export async function clearRateLimit(policies: RateLimitPolicy[]): Promise<void> {
+  await ensureRateLimitSchema();
   const sql = getSql();
   for (const policy of policies) {
     await sql`

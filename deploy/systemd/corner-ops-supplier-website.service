@@ -1,0 +1,10 @@
+[Unit]
+Description=Corner Ops: pull prices from the Sysco, US Foods and PFG websites
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=chris
+TimeoutStartSec=45min
+ExecStart=/opt/corner-ops/runtime/deploy/supplier-prices-sync.sh --website

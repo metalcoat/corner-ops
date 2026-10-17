@@ -12,6 +12,94 @@ export function ensureMessageReadSchema(): Promise<void> {
     readSchemaPromise = (async () => {
       await Promise.all([ensureMessageAttachmentSchema(), ensureEmployeeProfileSchema()]);
       const sql = getSql();
+      // The local dev database predates recipient-snapshotted conversations.
+      // Keep this additive and repeatable so a runtime update can open the inbox
+      // without first running the Neon-only production migration by hand.
+      await sql`ALTER TABLE employee_messages ADD COLUMN IF NOT EXISTS conversation_key TEXT`;
+      await sql`
+        UPDATE employee_messages
+        SET conversation_key = CASE
+          WHEN message_type IN ('Team', 'Announcement') THEN 'team'
+          WHEN sender_employee_id IS NULL AND recipient_employee_id IS NOT NULL
+            THEN 'owner:' || recipient_employee_id::text
+          WHEN sender_employee_id IS NOT NULL AND recipient_employee_id IS NOT NULL
+            THEN 'direct:' || LEAST(sender_employee_id::text, recipient_employee_id::text)
+              || ':' || GREATEST(sender_employee_id::text, recipient_employee_id::text)
+          WHEN sender_employee_id IS NOT NULL THEN 'owner:' || sender_employee_id::text
+          ELSE 'legacy:' || id::text
+        END
+        WHERE conversation_key IS NULL OR conversation_key = ''
+      `;
+      await sql`ALTER TABLE employee_messages ALTER COLUMN conversation_key SET NOT NULL`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS employee_message_recipients (
+          message_id UUID NOT NULL REFERENCES employee_messages(id) ON DELETE CASCADE,
+          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (message_id, employee_id)
+        )
+      `;
+      await sql`
+        INSERT INTO employee_message_recipients (message_id, employee_id)
+        SELECT m.id, e.id
+        FROM employee_messages m
+        JOIN employees e ON e.business = m.business AND e.created_at <= m.created_at
+        WHERE m.message_type IN ('Team', 'Announcement')
+        ON CONFLICT (message_id, employee_id) DO NOTHING
+      `;
+      await sql`
+        INSERT INTO employee_message_recipients (message_id, employee_id)
+        SELECT m.id, participant.employee_id
+        FROM employee_messages m
+        CROSS JOIN LATERAL (VALUES (m.sender_employee_id), (m.recipient_employee_id)) AS participant(employee_id)
+        WHERE participant.employee_id IS NOT NULL
+          AND m.message_type NOT IN ('Team', 'Announcement')
+        ON CONFLICT (message_id, employee_id) DO NOTHING
+      `;
+      await sql`ALTER TABLE employee_messages DROP CONSTRAINT IF EXISTS employee_messages_message_type_check`;
+      await sql`
+        ALTER TABLE employee_messages ADD CONSTRAINT employee_messages_message_type_check
+        CHECK (message_type IN ('Team', 'Direct', 'Announcement', 'Conversation'))
+      `;
+      await sql`
+        UPDATE employee_messages SET message_type = 'Conversation'
+        WHERE message_type IN ('Team', 'Announcement')
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS employee_messages_conversation_idx
+        ON employee_messages (business, conversation_key, created_at, id)
+        WHERE deleted_at IS NULL
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS employee_message_recipients_employee_idx
+        ON employee_message_recipients (employee_id, message_id)
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS employee_message_reactions (
+          message_id UUID NOT NULL REFERENCES employee_messages(id) ON DELETE CASCADE,
+          employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+          reaction TEXT NOT NULL CHECK (reaction IN ('thumbs_up', 'thumbs_down', 'heart', 'laugh', 'eggplant_mouth')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (message_id, employee_id)
+        )
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS employee_message_reactions_message_idx
+        ON employee_message_reactions (message_id, reaction)
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS owner_message_reactions (
+          message_id UUID NOT NULL REFERENCES employee_messages(id) ON DELETE CASCADE,
+          user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+          reaction TEXT NOT NULL CHECK (reaction IN ('thumbs_up', 'thumbs_down', 'heart', 'laugh', 'eggplant_mouth')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (message_id, user_id)
+        )
+      `;
+      await sql`
+        CREATE INDEX IF NOT EXISTS owner_message_reactions_message_idx
+        ON owner_message_reactions (message_id, reaction)
+      `;
     })().catch((error) => {
       readSchemaPromise = null;
       throw error;

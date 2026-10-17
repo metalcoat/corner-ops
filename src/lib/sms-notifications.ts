@@ -160,3 +160,17 @@ export async function deliverSms(input: {
     accepted,
   };
 }
+
+export async function sendTransactionalSms(phone: string, text: string) {
+  const configured = configuration();
+  if (!configured) throw new Error("SMS verification is not configured.");
+  const to = normalizeSmsPhone(phone);
+  if (!to) throw new Error("Enter a valid mobile phone number.");
+  const response = await fetch("https://api.telnyx.com/v2/messages", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${configured.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: configured.from, to, text: text.trim().slice(0, 600), type: "SMS" }),
+  });
+  const payload = await response.json().catch(() => null) as { errors?: Array<{ detail?: string; title?: string }> } | null;
+  if (!response.ok) throw new Error(payload?.errors?.[0]?.detail || payload?.errors?.[0]?.title || "Verification text could not be sent.");
+}

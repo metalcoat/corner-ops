@@ -10,7 +10,7 @@ const settings = [
   },
   {
     title: "Integrations & scheduler",
-    description: "Manage Plaid, Square, Rezku, automated imports, and scheduled operations.",
+    description: "Manage Plaid, bank imports, and scheduled native operations.",
     href: "/ops/integrations",
     action: "Open integrations",
   },

@@ -4,6 +4,7 @@ import { BeforeInstallPromptEvent, isIos, isStandalone } from "@/app/pwa-platfor
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useModalFocus } from "@/app/use-modal-focus";
+import { useSiteBrand } from "@/app/brand-context";
 import "./install-prompt.css";
 
 
@@ -13,6 +14,7 @@ const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
 
 
 export default function EmployeeInstallPrompt() {
+  const brand = useSiteBrand();
   const pathname = usePathname();
   const [authenticated, setAuthenticated] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -101,13 +103,13 @@ export default function EmployeeInstallPrompt() {
   const ios = isIos();
   return <div ref={installModalRef} tabIndex={-1} className="employeeInstallOverlay" role="dialog" aria-modal="true" aria-labelledby="employee-install-title">
     <section className="employeeInstallCard">
-      <img src="/corner-ops-icon.svg" alt="" />
+      <img src={brand.icon} alt="" />
       <div className="employeeInstallCopy">
-        <p>Corner Ops Employee App</p>
+        <p>{brand.name} Employee App</p>
         <h2 id="employee-install-title">Install this app</h2>
         {ios
           ? <p>Tap the Share button in Safari, choose <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.</p>
-          : <p>Add Corner Ops to this device for faster access to schedules, attendance, messages, and notifications.</p>}
+          : <p>Add {brand.name} to this device for faster access to schedules, attendance, messages, and notifications.</p>}
         {notice && <div className="employeeInstallNotice">{notice}</div>}
         <div className="employeeInstallActions">
           {!ios && <button className="primary" onClick={() => void install()}>Install now</button>}

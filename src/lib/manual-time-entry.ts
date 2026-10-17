@@ -19,6 +19,20 @@ async function ensureManualTimeAuditSchema() {
     auditSchemaPromise = (async () => {
       await ensureSchema();
       const sql = getSql();
+      await sql`
+        CREATE TABLE IF NOT EXISTS manual_time_entry_audit (
+          id UUID PRIMARY KEY,
+          business TEXT NOT NULL,
+          source_type TEXT NOT NULL,
+          source_id UUID NOT NULL,
+          employee_id UUID NOT NULL,
+          employee_name TEXT NOT NULL,
+          action TEXT NOT NULL DEFAULT 'Manager Added',
+          actor TEXT NOT NULL,
+          details JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
     })().catch((error) => {
       auditSchemaPromise = null;
       throw error;

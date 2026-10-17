@@ -3,6 +3,7 @@ import { Resend } from "resend";
 import { publicTeamBaseUrl } from "@/lib/public-team-url";
 import { getSql } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
+import { missedClockOutCasesForBusiness } from "@/lib/missed-clock-outs";
 import type { EmployeeSession } from "@/lib/employee-auth";
 import type { Business } from "@/lib/types";
 import { ensureWorkforceSchema } from "@/lib/workforce";
@@ -348,6 +349,7 @@ export async function attendanceAdminDashboard(business: Business) {
       AND scheduled_start >= NOW() - INTERVAL '180 days'
     ORDER BY CASE status WHEN 'Submitted' THEN 0 WHEN 'Awaiting Correction' THEN 1 ELSE 2 END, scheduled_start DESC
   ` as unknown as MissedShiftRow[];
+  const clockOutCases = await missedClockOutCasesForBusiness(business, { includeResolved: true });
   return {
     business,
     counts: {
@@ -355,8 +357,11 @@ export async function attendanceAdminDashboard(business: Business) {
       submitted: rows.filter((row) => row.status === "Submitted").length,
       approved: rows.filter((row) => row.status === "Approved").length,
       unresolvedEmail: rows.filter((row) => row.notification_error).length,
+      missedClockOuts: clockOutCases.filter((item) => item.status !== "Resolved").length,
     },
     cases: rows.map(mapCase),
+    // Missed clock-outs (open punches after close); settled on /ops/payroll-control/clock-outs.
+    clockOutCases,
   };
 }
 

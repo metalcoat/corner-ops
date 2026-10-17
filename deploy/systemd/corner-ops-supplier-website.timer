@@ -1,0 +1,12 @@
+[Unit]
+Description=Twice a day (5:40am and 1:40pm): pull supplier website prices
+
+[Timer]
+OnCalendar=*-*-* 05:40:00 America/New_York
+OnCalendar=*-*-* 13:40:00 America/New_York
+RandomizedDelaySec=10min
+Persistent=true
+Unit=corner-ops-supplier-website.service
+
+[Install]
+WantedBy=timers.target
