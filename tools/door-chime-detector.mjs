@@ -132,6 +132,7 @@ export function parseEvent(text) {
 }
 
 let lastChime = 0;
+let connectedAt = 0;
 
 async function handleEvent(event) {
   if (event.action !== "Start" && event.action !== "Pulse") return;
@@ -160,6 +161,11 @@ async function listen() {
     response.resume();
     throw new Error(`event stream refused: HTTP ${response.statusCode}${response.statusCode === 401 ? " (check the camera login)" : ""}`);
   }
+  // This camera sends nothing (not even the requested heartbeat) while no one crosses the line, so a quiet
+  // stream is normal: drop the idle timeout and let TCP keepalive notice a camera that has really gone away.
+  response.socket.setTimeout(0);
+  response.socket.setKeepAlive(true, 15_000);
+  connectedAt = Date.now();
   const boundary = String(response.headers["content-type"] || "").match(/boundary=([^;\s]+)/)?.[1] || "myboundary";
   const separator = `--${boundary.replace(/^--/, "")}`;
   log(`listening to ${config.host} for ${codes}${config.channel ? ` on camera ${config.channel}` : ""}`);
@@ -220,7 +226,8 @@ async function main() {
     } catch (error) {
       log(`${error.message}; reconnecting in ${delay / 1000}s`);
     }
-    if (Date.now() - started > 60_000) delay = 2_000;
+    // Back off only while the camera can't be reached; a stream that was up reconnects at once.
+    if (connectedAt >= started) delay = 2_000;
     await new Promise((resolve) => setTimeout(resolve, delay));
     delay = Math.min(delay * 2, 60_000);
   }
