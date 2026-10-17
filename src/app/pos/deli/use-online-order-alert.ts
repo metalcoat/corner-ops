@@ -8,8 +8,14 @@ import {
   reconcileOnlineAlerts,
   singleFlight,
 } from "@/lib/pos-offline-sync-policy";
+import {
+  createDoorChimeState,
+  DOOR_CHIME_NOTICE_MS,
+  reconcileDoorEvents,
+} from "@/lib/door-chime-policy";
 
 type AlertOrder = { id: string };
+type DoorEvent = { id: number; camera: string; kind: string; detectedAt: string };
 
 const rendered = new Map<string, AudioBuffer>();
 /** Sounds are rendered once per device (a few milliseconds each) and reused. */
@@ -42,6 +48,15 @@ function roomBuffer(context: AudioContext) {
 const REPEAT_ALERT_MS = 20_000;
 
 type AlertPreference = { sound: OnlineOrderAlertSound; volume: number };
+
+/**
+ * The entrance chime is the ding-dong, unless online orders already use it; then
+ * the hand bell, so staff can tell a walk-in from an order by ear.
+ */
+function doorSound(selected: AlertPreference): AlertPreference {
+  if (selected.sound === "off") return selected;
+  return { sound: selected.sound === "warm_chime" ? "gentle_bell" : "warm_chime", volume: selected.volume };
+}
 
 function applicationServerKey(value: string): ArrayBuffer {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
@@ -86,6 +101,9 @@ export function useOnlineOrderAlert(
   const [alertNotice, setAlertNotice] = useState("");
   const [pendingOnlineOrders, setPendingOnlineOrders] = useState(0);
   const [soundBlocked, setSoundBlocked] = useState(false);
+  const doorState = useRef(createDoorChimeState());
+  const doorNoticeTimer = useRef<number | null>(null);
+  const [doorNotice, setDoorNotice] = useState<DoorEvent | null>(null);
 
   const refreshSoundBlocked = useCallback(() => {
     setSoundBlocked(
@@ -162,6 +180,29 @@ export function useOnlineOrderAlert(
     if (ring()) heard.current = true;
   }, [ring]);
 
+  /** Someone walked in: one chime and a short notice; never repeats. */
+  const announceWalkIn = useCallback(
+    (event: DoorEvent) => {
+      ring(doorSound(preference.current));
+      setDoorNotice(event);
+      if (doorNoticeTimer.current) window.clearTimeout(doorNoticeTimer.current);
+      doorNoticeTimer.current = window.setTimeout(() => setDoorNotice(null), DOOR_CHIME_NOTICE_MS);
+    },
+    [ring],
+  );
+
+  const dismissDoorNotice = useCallback(() => {
+    if (doorNoticeTimer.current) window.clearTimeout(doorNoticeTimer.current);
+    setDoorNotice(null);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (doorNoticeTimer.current) window.clearTimeout(doorNoticeTimer.current);
+    },
+    [],
+  );
+
   /** Staff saw the new online order(s): stop repeating the chime. */
   const acknowledgeOnlineOrders = useCallback(() => {
     alertState.current.pending.clear();
@@ -209,6 +250,7 @@ export function useOnlineOrderAlert(
   useEffect(() => {
     if (!authenticated) {
       alertState.current = createOnlineAlertState();
+      doorState.current = createDoorChimeState();
       setPendingOnlineOrders(0);
       setSoundBlocked(false);
       return;
@@ -223,7 +265,10 @@ export function useOnlineOrderAlert(
           { cache: "no-store" },
         );
         if (!response.ok || stopped) return;
-        const payload = (await response.json()) as { orders?: AlertOrder[] };
+        const payload = (await response.json()) as {
+          orders?: AlertOrder[];
+          doorEvents?: DoorEvent[];
+        };
         if (stopped) return;
         const fresh = reconcileOnlineAlerts(
           alertState.current,
@@ -234,6 +279,14 @@ export function useOnlineOrderAlert(
           heard.current = false;
           ringPending();
         }
+        const doorEvents = payload.doorEvents || [];
+        const walkIns = reconcileDoorEvents(
+          doorState.current,
+          doorEvents.map((event) => Number(event.id)),
+        );
+        // Several walk-ins in one poll still chime once.
+        const latest = doorEvents.find((event) => Number(event.id) === walkIns.at(-1));
+        if (latest) announceWalkIn(latest);
       } catch {
         // The regular status indicator reports connectivity; alerts retry silently.
       }
@@ -247,7 +300,7 @@ export function useOnlineOrderAlert(
       window.clearInterval(timer);
       window.clearInterval(repeat);
     };
-  }, [authenticated, ringPending, unlockAudio]);
+  }, [authenticated, ringPending, unlockAudio, announceWalkIn]);
 
   useEffect(() => {
     if (
@@ -380,5 +433,7 @@ export function useOnlineOrderAlert(
     pendingOnlineOrders,
     soundBlocked,
     acknowledgeOnlineOrders,
+    doorNotice,
+    dismissDoorNotice,
   };
 }

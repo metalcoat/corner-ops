@@ -13,6 +13,7 @@ Contents: [All programs](#0-all-programs) · [Machines](#1-machines-and-environm
 [Supplier prices](#6-supplier-prices) ·
 [Sign-ins by hand](#7-sign-ins-done-by-a-person) ·
 [Outside services](#8-outside-services) ·
+[Door chime](#8a-entrance-door-chime) ·
 [Guardrails](#9-guardrails-for-assistants) ·
 [Open items](#10-open-items-before-the-switch)
 
@@ -253,6 +254,21 @@ Never automate around robot checks.
 | Sysco, US Foods, PFG, WebstaurantStore | supplier prices | `*_USERNAME/_PASSWORD` |
 | AccountantsOffice / Payroll Relief | payroll entry | `ACCOUNTANTSOFFICE_*`, `PAYROLL_RELIEF_AUTO_SUBMIT` |
 | GitHub + liberty-ci-01 | source control, CI | runner service on liberty-ci-01 |
+
+## 8a. Entrance door chime
+
+```mermaid
+flowchart LR
+  cam["Entrance camera / recorder<br/>Dahua-made, 192.168.8.209<br/>(detects people / tripwire itself)"] -->|"alarm event stream<br/>eventManager.cgi attach"| det["tools/door-chime-detector.mjs<br/>corner-ops-door-chime.service (chris)"]
+  det -->|"POST /api/cron/door-chime<br/>CRON_SECRET"| ev[(door_chime_events<br/>10 s cooldown per camera)]
+  ev -->|"rides on the 3 s online-alerts poll"| pos["Deli POS screens<br/>ding-dong + 'CUSTOMER WALKED IN' for 8 s"]
+```
+
+- Camera login lives in `/opt/corner-ops/config/door-camera.env` (never committed); see the detector's header for settings.
+  `--probe` shows the device and its detection rules, `--test` chimes the POS screens without the camera.
+- Sound: the ding-dong (`warm_chime`), or the hand bell when online orders already use the ding-dong. Volume follows the
+  online-order alert volume; "off" silences both. A screen that opens late never rings for a walk-in it missed.
+- Dev only so far (port 3000). The service is not installed until the camera login is in place.
 
 ## 9. Guardrails for assistants
 
