@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
-import Game from "./arcade-game";
-import "./arcade.css";
-import "./edge-coverage.css";
-export const metadata:Metadata={title:"Earn Your Jumbo | Corner Deli",description:"Survive the Corner Deli Pizza Gauntlet and earn your jumbo."};
-export default function Page(){return <Game/>}
+import JumboRush from "./jumbo-rush";
+import "./jumbo-rush.css";
+
+export const metadata: Metadata = {
+  title: "Jumbo Rush | Earn Your Jumbo | Corner Deli",
+  description: "Slice every pizza, dodge the phone, survive the rush and earn a free Jumbo Cheese Pizza.",
+};
+
+export default function Page() {
+  return <JumboRush />;
+}

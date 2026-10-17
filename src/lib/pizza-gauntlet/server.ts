@@ -3,6 +3,7 @@ import { getSql } from "@/lib/db";
 import { PRIZE, STAGES } from "./config";
 import type { RunCheckpoint } from "./types";
 import { PIZZA_GAME_VERSION } from "@/lib/games/versions";
+import { MAX_DELIVERED_PER_CHECKPOINT, MAX_STRIKES, MIN_DELIVERED } from "@/lib/games/pizza-rush/engine";
 
 let schema: Promise<void> | null = null;
 export function ensureGauntletSchema() {
@@ -142,12 +143,12 @@ export async function checkpointArcadeRun(
     throw new Error("Impossible arcade elapsed time.");
   if (
     delivered < Number(previous.delivered || 0) ||
-    delivered - Number(previous.delivered || 0) > 12 ||
+    delivered - Number(previous.delivered || 0) > MAX_DELIVERED_PER_CHECKPOINT ||
     perfects > delivered * 3 + 6 ||
     score < 0 ||
     score > 250000 ||
     ruined < 0 ||
-    ruined > 3
+    ruined > MAX_STRIKES
   )
     throw new Error("Impossible arcade progression.");
   const stats = { mode: "arcade60", score, delivered, perfects, ruined };
@@ -186,9 +187,9 @@ export async function completeArcadeRun(
   if (wallSeconds < 100 || Number(run.active_seconds) < 100 || checks < 9)
     throw new Error("The full pizza-station shift has not been validated yet.");
   if (
-    data.ruined > 2 ||
-    Number(stats.ruined) > 2 ||
-    data.delivered < 8 ||
+    data.ruined >= MAX_STRIKES ||
+    Number(stats.ruined) >= MAX_STRIKES ||
+    data.delivered < MIN_DELIVERED ||
     data.delivered !== Number(stats.delivered) ||
     data.score !== Number(stats.score)
   )

@@ -10,9 +10,9 @@ const games = [
   {
     href: "/game/earn-your-jumbo",
     icon: "🍕",
-    title: "Earn Your Jumbo",
-    tag: "PIZZA GAUNTLET",
-    copy: "Build pies, survive the rush, and earn a Jumbo Cheese Pizza.",
+    title: "Earn Your Jumbo: JUMBO RUSH",
+    tag: "SWIPE · SLICE · SURVIVE",
+    copy: "Slice every pizza flying out of the oven. Don't slice the ringing phone. Survive the rush and earn a Jumbo Cheese Pizza.",
     prize: "FREE JUMBO CHEESE PIZZA",
     color: "pizza",
   },

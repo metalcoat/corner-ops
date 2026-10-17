@@ -1,2 +1,2 @@
-export const PIZZA_GAME_VERSION = "pizza-arcade-2.1";
+export const PIZZA_GAME_VERSION = "jumbo-rush-1.0";
 export const DELIVERY_GAME_VERSION = "delivery-boy-3.0";
