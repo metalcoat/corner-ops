@@ -19,8 +19,8 @@ let lastPrune = 0;
  * The entrance camera detector on the store server (tools/door-chime-detector.mjs)
  * posts here when someone walks in:
  *   { "business": "Corner Deli", "camera": "entrance", "kind": "person" }
- * Repeats inside the cooldown are ignored ({ recorded: false }). POS screens pick
- * new rows up through /api/ordering/orders/online-alerts and chime.
+ * Repeats inside the cooldown are ignored ({ recorded: false }). The store dashboard
+ * matches each walk-in to the first POS order started after it (time to first interaction).
  */
 export async function POST(request: Request) {
   if (!process.env.CRON_SECRET?.trim()) return isoJson({ error: "CRON_SECRET is not configured." }, { status: 503 });

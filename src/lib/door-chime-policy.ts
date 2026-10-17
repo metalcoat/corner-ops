@@ -1,14 +1,12 @@
 /**
- * Entrance "door chime": pure rules shared by the server route and the POS
- * poller, kept free of database and browser code so they can be unit tested.
+ * Entrance walk-ins (door chime): pure rules shared by the detector route and the
+ * store dashboard, kept free of database code so they can be unit tested.
  */
 
-/** One person walking in rings once; repeat detections inside this window are dropped. */
+/** One person (or one group) walking in counts once; repeat detections inside this window are dropped. */
 export const DOOR_CHIME_COOLDOWN_SECONDS = 10;
-/** The POS poller only asks for events this recent, so a device that wakes up late never rings for old walk-ins. */
-export const DOOR_CHIME_RECENT_SECONDS = 30;
-/** How long the on-screen "customer walked in" notice stays up. */
-export const DOOR_CHIME_NOTICE_MS = 8_000;
+/** A walk-in with no POS order started within this long counts as missed. */
+export const DOOR_SERVE_MISSED_SECONDS = 10 * 60;
 
 export const DOOR_CHIME_KINDS = ["person", "line_crossing", "motion", "test"] as const;
 export type DoorChimeKind = (typeof DOOR_CHIME_KINDS)[number];
@@ -27,86 +25,56 @@ export function parseDoorChimeEvent(body: unknown): DoorChimeEventInput {
   return { business, camera, kind: kind as DoorChimeKind };
 }
 
-export type DoorChimeState = { initialized: boolean; lastId: number };
-
-export function createDoorChimeState(): DoorChimeState {
-  return { initialized: false, lastId: 0 };
-}
-
-/**
- * Fold the latest recent door events into the poller state. The first poll only
- * sets a baseline (a screen that just opened doesn't ring for someone who walked
- * in 20 seconds ago). Returns the ids that are new since the previous poll.
- */
-export function reconcileDoorEvents(state: DoorChimeState, ids: readonly number[]): number[] {
-  const newest = ids.reduce((max, id) => Math.max(max, id), 0);
-  if (!state.initialized) {
-    state.initialized = true;
-    state.lastId = newest;
-    return [];
-  }
-  const fresh = ids.filter((id) => id > state.lastId).sort((a, b) => a - b);
-  state.lastId = Math.max(state.lastId, newest);
-  return fresh;
-}
-
-/** A walk-in nobody has greeted yet chimes again (and the bar turns red) at each of these ages. */
-export const DOOR_GREET_REMINDER_SECONDS = [30, 60, 90, 120] as const;
-/** Not greeted within this long counts as a missed customer on the dashboard. */
-export const DOOR_GREET_MISSED_SECONDS = 120;
-/** Ungreeted walk-ins stay on the POS bar this long; after that they only show on the dashboard. */
-export const DOOR_GREET_OPEN_MINUTES = 10;
-
-export const DOOR_GREET_OUTCOMES = ["greeted", "not_customer"] as const;
-export type DoorGreetOutcome = (typeof DOOR_GREET_OUTCOMES)[number];
-
-/** Validates a POS tap on the walk-in bar. */
-export function parseDoorGreet(body: unknown): { ids: number[]; outcome: DoorGreetOutcome } {
-  const value = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
-  const ids = Array.isArray(value.ids) ? [...new Set(value.ids.map(Number))].filter((id) => Number.isSafeInteger(id) && id > 0) : [];
-  if (!ids.length || ids.length > 50) throw new Error("Choose the walk-ins to mark.");
-  const outcome = String(value.outcome ?? "greeted");
-  if (!(DOOR_GREET_OUTCOMES as readonly string[]).includes(outcome)) throw new Error("Outcome must be greeted or not_customer.");
-  return { ids, outcome: outcome as DoorGreetOutcome };
-}
+export type WalkIn = { id: number; detectedAt: string };
+export type CounterOrder = { id: string; displayNumber: string; createdAt: string };
+export type MatchedWalkIn = WalkIn & {
+  status: "served" | "missed" | "waiting";
+  order: CounterOrder | null;
+  waitSeconds: number | null;
+};
 
 /**
- * Which waiting walk-ins are due another chime: each reminder age rings once per
- * walk-in. `rung` remembers how many reminders each id has had.
+ * Time to first interaction: each POS order started is matched to the oldest
+ * walk-in still waiting (first come, first served). Walk-ins with no order within
+ * DOOR_SERVE_MISSED_SECONDS are missed; newer ones are still waiting.
  */
-export function dueGreetReminders(rung: Map<number, number>, waiting: readonly { id: number; ageSeconds: number }[]): number[] {
-  const waitingIds = new Set(waiting.map((event) => event.id));
-  for (const id of [...rung.keys()]) if (!waitingIds.has(id)) rung.delete(id);
-  const due: number[] = [];
-  for (const event of waiting) {
-    const reached = DOOR_GREET_REMINDER_SECONDS.filter((age) => event.ageSeconds >= age).length;
-    const already = rung.get(event.id) ?? 0;
-    if (reached > already) due.push(event.id);
-    rung.set(event.id, Math.max(already, reached));
+export function matchWalkInsToOrders(walkIns: readonly WalkIn[], orders: readonly CounterOrder[], nowIso: string): MatchedWalkIn[] {
+  const ms = (iso: string) => new Date(iso).getTime();
+  const limit = DOOR_SERVE_MISSED_SECONDS * 1000;
+  const sortedWalkIns = [...walkIns].sort((a, b) => ms(a.detectedAt) - ms(b.detectedAt) || a.id - b.id);
+  const result = new Map<number, MatchedWalkIn>();
+  const queue: WalkIn[] = [];
+  let next = 0;
+  for (const order of [...orders].sort((a, b) => ms(a.createdAt) - ms(b.createdAt))) {
+    const at = ms(order.createdAt);
+    while (next < sortedWalkIns.length && ms(sortedWalkIns[next].detectedAt) <= at) queue.push(sortedWalkIns[next++]);
+    while (queue.length && at - ms(queue[0].detectedAt) > limit) {
+      const missed = queue.shift()!;
+      result.set(missed.id, { ...missed, status: "missed", order: null, waitSeconds: null });
+    }
+    const served = queue.shift();
+    if (served) result.set(served.id, { ...served, status: "served", order, waitSeconds: Math.round((at - ms(served.detectedAt)) / 1000) });
   }
-  return due;
+  const now = ms(nowIso);
+  for (const walkIn of [...queue, ...sortedWalkIns.slice(next)])
+    result.set(walkIn.id, { ...walkIn, status: now - ms(walkIn.detectedAt) > limit ? "missed" : "waiting", order: null, waitSeconds: null });
+  return sortedWalkIns.map((walkIn) => result.get(walkIn.id)!);
 }
 
-export type DoorGreetRow = { detectedAt: string; greetedAt: string | null; outcome: string | null; ageSeconds: number };
-
-/** The dashboard's numbers for today's walk-ins ("not a customer" taps are left out). */
-export function summarizeDoorGreets(rows: readonly DoorGreetRow[]) {
-  const customers = rows.filter((row) => row.outcome !== "not_customer");
-  const waits = customers
-    .filter((row) => row.outcome === "greeted" && row.greetedAt)
-    .map((row) => Math.max(0, (new Date(row.greetedAt!).getTime() - new Date(row.detectedAt).getTime()) / 1000));
-  const sorted = [...waits].sort((a, b) => a - b);
-  const median = sorted.length ? (sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2) : null;
+/** Dashboard numbers for today's walk-ins. `hourOf` maps a timestamp to the store's local hour. */
+export function summarizeWalkIns(matched: readonly MatchedWalkIn[], hourOf: (iso: string) => number) {
+  const waits = matched.flatMap((walkIn) => (walkIn.waitSeconds === null ? [] : [walkIn.waitSeconds])).sort((a, b) => a - b);
+  const middle = waits.length >> 1;
+  const byHour = new Map<number, number>();
+  for (const walkIn of matched) byHour.set(hourOf(walkIn.detectedAt), (byHour.get(hourOf(walkIn.detectedAt)) ?? 0) + 1);
   return {
-    walkIns: customers.length,
-    greeted: waits.length,
-    waiting: customers.filter((row) => !row.outcome && row.ageSeconds < DOOR_GREET_MISSED_SECONDS).length,
-    missed:
-      waits.filter((seconds) => seconds > DOOR_GREET_MISSED_SECONDS).length +
-      customers.filter((row) => !row.outcome && row.ageSeconds >= DOOR_GREET_MISSED_SECONDS).length,
-    notCustomer: rows.length - customers.length,
+    walkIns: matched.length,
+    served: waits.length,
+    missed: matched.filter((walkIn) => walkIn.status === "missed").length,
+    waiting: matched.filter((walkIn) => walkIn.status === "waiting").length,
     averageSeconds: waits.length ? Math.round(waits.reduce((sum, seconds) => sum + seconds, 0) / waits.length) : null,
-    medianSeconds: median === null ? null : Math.round(median),
-    longestSeconds: sorted.length ? Math.round(sorted[sorted.length - 1]) : null,
+    medianSeconds: waits.length ? Math.round(waits.length % 2 ? waits[middle] : (waits[middle - 1] + waits[middle]) / 2) : null,
+    longestSeconds: waits.length ? waits[waits.length - 1] : null,
+    byHour: [...byHour].sort(([a], [b]) => a - b).map(([hour, count]) => ({ hour, count })),
   };
 }

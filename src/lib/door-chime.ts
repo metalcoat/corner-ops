@@ -2,11 +2,9 @@ import { getSql } from "@/lib/db";
 import { toIsoTimestamp } from "@/lib/timestamp-values";
 import {
   DOOR_CHIME_COOLDOWN_SECONDS,
-  DOOR_CHIME_RECENT_SECONDS,
-  DOOR_GREET_OPEN_MINUTES,
-  summarizeDoorGreets,
+  matchWalkInsToOrders,
+  summarizeWalkIns,
   type DoorChimeEventInput,
-  type DoorGreetOutcome,
 } from "@/lib/door-chime-policy";
 
 let schemaPromise: Promise<void> | null = null;
@@ -25,10 +23,6 @@ export function ensureDoorChimeSchema(): Promise<void> {
           detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `;
-      await sql`ALTER TABLE door_chime_events ADD COLUMN IF NOT EXISTS greeted_at TIMESTAMPTZ`;
-      await sql`ALTER TABLE door_chime_events ADD COLUMN IF NOT EXISTS outcome TEXT CHECK (outcome IN ('greeted', 'not_customer'))`;
-      await sql`ALTER TABLE door_chime_events ADD COLUMN IF NOT EXISTS greeted_by_employee_id TEXT`;
-      await sql`ALTER TABLE door_chime_events ADD COLUMN IF NOT EXISTS greeted_by_name TEXT`;
       await sql`CREATE INDEX IF NOT EXISTS idx_door_chime_events_recent ON door_chime_events (business, detected_at DESC)`;
     })().catch((error) => {
       schemaPromise = null;
@@ -39,9 +33,9 @@ export function ensureDoorChimeSchema(): Promise<void> {
 }
 
 /**
- * Records a walk-in unless the same camera already rang within the cooldown, so a
- * detector that reports one person several times still chimes once.
- * Test events skip the cooldown.
+ * Records a walk-in unless the same camera already reported one within the cooldown,
+ * so a detector that reports one person (or a group) several times counts once.
+ * Test events skip the cooldown and are left out of the dashboard.
  */
 export async function recordDoorChimeEvent(event: DoorChimeEventInput): Promise<{ recorded: boolean; id: number | null }> {
   await ensureDoorChimeSchema();
@@ -60,81 +54,45 @@ export async function recordDoorChimeEvent(event: DoorChimeEventInput): Promise<
   return rows[0] ? { recorded: true, id: Number(rows[0].id) } : { recorded: false, id: null };
 }
 
-/**
- * For the POS poller: walk-ins from the last few seconds (to chime) plus any that
- * nobody has greeted yet (to keep the bar up). Ages come from the database clock so
- * a tablet with the wrong time still turns the bar red on time.
- */
-export async function listRecentDoorChimeEvents(business: DoorChimeEventInput["business"]) {
+/** POS orders count as the first interaction; online, kiosk and AI-phone orders don't involve a walk-in. */
+const COUNTER_ORDER_SOURCES = ["pos"];
+
+const storeHour = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", hourCycle: "h23" });
+
+/** Today's walk-ins (store time), each matched to the first POS order started after it, for the store dashboard. */
+export async function doorWalkInDashboard(business: DoorChimeEventInput["business"]) {
   await ensureDoorChimeSchema();
-  const rows = await getSql()`
-    SELECT id, camera, kind, detected_at, outcome,
-      EXTRACT(EPOCH FROM NOW() - detected_at)::float AS age_seconds
-    FROM door_chime_events
-    WHERE business = ${business} AND kind <> 'test'
-      AND (
-        detected_at > NOW() - make_interval(secs => ${DOOR_CHIME_RECENT_SECONDS})
-        OR (outcome IS NULL AND detected_at > NOW() - make_interval(mins => ${DOOR_GREET_OPEN_MINUTES}))
-      )
-    UNION ALL
-    SELECT id, camera, kind, detected_at, 'greeted', EXTRACT(EPOCH FROM NOW() - detected_at)::float
-    FROM door_chime_events
-    WHERE business = ${business} AND kind = 'test' AND detected_at > NOW() - make_interval(secs => ${DOOR_CHIME_RECENT_SECONDS})
-    ORDER BY id
-    LIMIT 40
-  `;
-  return rows.map((row) => ({
-    id: Number(row.id),
-    camera: String(row.camera),
-    kind: String(row.kind),
-    detectedAt: toIsoTimestamp(row.detected_at),
-    waiting: !row.outcome,
-    ageSeconds: Math.round(Number(row.age_seconds)),
-  }));
+  const sql = getSql();
+  const [walkInRows, orderRows, nowRows] = await Promise.all([
+    sql`
+      SELECT id, detected_at FROM door_chime_events
+      WHERE business = ${business} AND kind <> 'test'
+        AND detected_at >= ((NOW() AT TIME ZONE 'America/New_York')::date AT TIME ZONE 'America/New_York')
+      ORDER BY detected_at
+      LIMIT 1000
+    `,
+    sql`
+      SELECT id, display_number, created_at FROM ordering_orders
+      WHERE business = ${business} AND source = ANY(${COUNTER_ORDER_SOURCES})
+        AND created_at >= ((NOW() AT TIME ZONE 'America/New_York')::date AT TIME ZONE 'America/New_York')
+      ORDER BY created_at
+      LIMIT 2000
+    `,
+    sql`SELECT NOW() AS now`,
+  ]);
+  const matched = matchWalkInsToOrders(
+    walkInRows.map((row) => ({ id: Number(row.id), detectedAt: toIsoTimestamp(row.detected_at) || "" })),
+    orderRows.map((row) => ({ id: String(row.id), displayNumber: String(row.display_number || ""), createdAt: toIsoTimestamp(row.created_at) || "" })),
+    toIsoTimestamp(nowRows[0].now) || new Date().toISOString(),
+  );
+  return {
+    summary: summarizeWalkIns(matched, (iso) => Number(storeHour.format(new Date(iso))) % 24),
+    walkIns: matched.reverse().slice(0, 60),
+  };
 }
 
-/** Staff tapped GREETED (or NOT A CUSTOMER) on the walk-in bar; the first tap wins. */
-export async function markDoorChimeEvents(
-  business: DoorChimeEventInput["business"],
-  ids: number[],
-  outcome: DoorGreetOutcome,
-  actor: { id: string; name: string },
-) {
-  await ensureDoorChimeSchema();
-  const rows = await getSql()`
-    UPDATE door_chime_events
-    SET greeted_at = NOW(), outcome = ${outcome}, greeted_by_employee_id = ${actor.id}, greeted_by_name = ${actor.name}
-    WHERE business = ${business} AND id = ANY(${ids}) AND outcome IS NULL AND kind <> 'test'
-    RETURNING id
-  `;
-  return rows.map((row) => Number(row.id));
-}
-
-/** Today's walk-ins (store time) and how long each waited to be greeted, for the store dashboard. */
-export async function doorGreetDashboard(business: DoorChimeEventInput["business"]) {
-  await ensureDoorChimeSchema();
-  const rows = await getSql()`
-    SELECT id, detected_at, greeted_at, outcome, greeted_by_name,
-      EXTRACT(EPOCH FROM NOW() - detected_at)::float AS age_seconds
-    FROM door_chime_events
-    WHERE business = ${business} AND kind <> 'test'
-      AND detected_at >= ((NOW() AT TIME ZONE 'America/New_York')::date AT TIME ZONE 'America/New_York')
-    ORDER BY detected_at DESC
-    LIMIT 500
-  `;
-  const walkIns = rows.map((row) => ({
-    id: Number(row.id),
-    detectedAt: toIsoTimestamp(row.detected_at) || "",
-    greetedAt: toIsoTimestamp(row.greeted_at),
-    outcome: row.outcome ? String(row.outcome) : null,
-    greetedBy: row.greeted_by_name ? String(row.greeted_by_name) : null,
-    ageSeconds: Math.round(Number(row.age_seconds)),
-  }));
-  return { summary: summarizeDoorGreets(walkIns), walkIns: walkIns.slice(0, 40) };
-}
-
-/** Old rows are only history; keep a week for checking how often the door rang. */
+/** Old rows are only history; keep 90 days for comparing walk-ins week to week. */
 export async function pruneDoorChimeEvents() {
   await ensureDoorChimeSchema();
-  await getSql()`DELETE FROM door_chime_events WHERE detected_at < NOW() - INTERVAL '7 days'`;
+  await getSql()`DELETE FROM door_chime_events WHERE detected_at < NOW() - INTERVAL '90 days'`;
 }

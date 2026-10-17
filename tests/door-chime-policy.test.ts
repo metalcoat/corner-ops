@@ -1,23 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDoorChimeState, dueGreetReminders, parseDoorChimeEvent, parseDoorGreet, reconcileDoorEvents, summarizeDoorGreets } from "../src/lib/door-chime-policy";
+import { matchWalkInsToOrders, parseDoorChimeEvent, summarizeWalkIns } from "../src/lib/door-chime-policy";
 
-test("door chime: first poll is a baseline, later polls return only new walk-ins", () => {
-  const state = createDoorChimeState();
-  assert.deepEqual(reconcileDoorEvents(state, [4, 5]), []);
-  assert.deepEqual(reconcileDoorEvents(state, [4, 5]), []);
-  assert.deepEqual(reconcileDoorEvents(state, [5, 7, 6]), [6, 7]);
-  // Events age out of the recent window; that never re-rings or rewinds.
-  assert.deepEqual(reconcileDoorEvents(state, []), []);
-  assert.deepEqual(reconcileDoorEvents(state, [7]), []);
-  assert.deepEqual(reconcileDoorEvents(state, [8]), [8]);
-});
-
-test("door chime: an empty first poll still sets the baseline", () => {
-  const state = createDoorChimeState();
-  assert.deepEqual(reconcileDoorEvents(state, []), []);
-  assert.deepEqual(reconcileDoorEvents(state, [1]), [1]);
-});
+const at = (minutes: number, seconds = 0) => new Date(Date.UTC(2026, 9, 17, 16, minutes, seconds)).toISOString();
+const order = (id: string, minutes: number, seconds = 0) => ({ id, displayNumber: id, createdAt: at(minutes, seconds) });
 
 test("door chime: detector bodies are validated", () => {
   assert.deepEqual(parseDoorChimeEvent({}), { business: "Corner Deli", camera: "entrance", kind: "person" });
@@ -27,36 +13,38 @@ test("door chime: detector bodies are validated", () => {
   assert.throws(() => parseDoorChimeEvent({ camera: "<script>" }), /Camera names/);
 });
 
-test("door chime: ungreeted walk-ins re-chime once at each reminder age", () => {
-  const rung = new Map<number, number>();
-  assert.deepEqual(dueGreetReminders(rung, [{ id: 1, ageSeconds: 5 }]), []);
-  assert.deepEqual(dueGreetReminders(rung, [{ id: 1, ageSeconds: 31 }]), [1]);
-  assert.deepEqual(dueGreetReminders(rung, [{ id: 1, ageSeconds: 34 }]), []);
-  assert.deepEqual(dueGreetReminders(rung, [{ id: 1, ageSeconds: 61 }, { id: 2, ageSeconds: 2 }]), [1]);
-  assert.deepEqual(dueGreetReminders(rung, [{ id: 1, ageSeconds: 500 }]), [1]);
-  assert.deepEqual(dueGreetReminders(rung, [{ id: 1, ageSeconds: 530 }]), []);
-  // Greeted: forgotten.
-  assert.deepEqual(dueGreetReminders(rung, []), []);
-  assert.equal(rung.size, 0);
-});
-
-test("door chime: greet taps are validated", () => {
-  assert.deepEqual(parseDoorGreet({ ids: [3, "3", 4] }), { ids: [3, 4], outcome: "greeted" });
-  assert.deepEqual(parseDoorGreet({ ids: [5], outcome: "not_customer" }), { ids: [5], outcome: "not_customer" });
-  assert.throws(() => parseDoorGreet({ ids: [] }), /Choose/);
-  assert.throws(() => parseDoorGreet({ ids: [1], outcome: "ignored" }), /Outcome/);
-});
-
-test("door chime: dashboard summary of time to greet", () => {
-  const at = (seconds: number) => new Date(Date.UTC(2026, 9, 17, 16, 0, seconds)).toISOString();
-  const summary = summarizeDoorGreets([
-    { detectedAt: at(0), greetedAt: at(10), outcome: "greeted", ageSeconds: 900 },
-    { detectedAt: at(0), greetedAt: at(30), outcome: "greeted", ageSeconds: 900 },
-    { detectedAt: at(0), greetedAt: at(200), outcome: "greeted", ageSeconds: 900 },
-    { detectedAt: at(0), greetedAt: at(5), outcome: "not_customer", ageSeconds: 900 },
-    { detectedAt: at(0), greetedAt: null, outcome: null, ageSeconds: 300 },
-    { detectedAt: at(0), greetedAt: null, outcome: null, ageSeconds: 20 },
+test("door chime: orders go to the oldest waiting walk-in", () => {
+  const matched = matchWalkInsToOrders(
+    [{ id: 1, detectedAt: at(0) }, { id: 2, detectedAt: at(1) }, { id: 3, detectedAt: at(30) }, { id: 4, detectedAt: at(50) }],
+    // Each order takes the oldest walk-in still waiting; walk-in 3 never gets one.
+    [order("A", 0, 0), order("B", 2), order("C", 3, 30), order("D", 55)],
+    at(58),
+  );
+  assert.deepEqual(matched.map((walkIn) => [walkIn.id, walkIn.status, walkIn.order?.id ?? null, walkIn.waitSeconds]), [
+    [1, "served", "A", 0],
+    [2, "served", "B", 60],
+    [3, "missed", null, null],
+    [4, "served", "D", 300],
   ]);
-  assert.deepEqual(summary, { walkIns: 5, greeted: 3, waiting: 1, missed: 2, notCustomer: 1, averageSeconds: 80, medianSeconds: 30, longestSeconds: 200 });
-  assert.equal(summarizeDoorGreets([]).averageSeconds, null);
+});
+
+test("door chime: walk-ins past ten minutes are missed, not matched to a later order", () => {
+  const matched = matchWalkInsToOrders([{ id: 1, detectedAt: at(0) }, { id: 2, detectedAt: at(9) }], [order("A", 12)], at(13));
+  assert.deepEqual(matched.map((walkIn) => [walkIn.id, walkIn.status, walkIn.waitSeconds]), [[1, "missed", null], [2, "served", 180]]);
+  const waiting = matchWalkInsToOrders([{ id: 5, detectedAt: at(0) }], [], at(4));
+  assert.equal(waiting[0].status, "waiting");
+});
+
+test("door chime: dashboard summary", () => {
+  const matched = matchWalkInsToOrders(
+    [{ id: 1, detectedAt: at(0) }, { id: 2, detectedAt: at(1) }, { id: 3, detectedAt: at(2) }, { id: 4, detectedAt: at(40) }],
+    [order("A", 0, 10), order("B", 1, 30), order("C", 5, 20)],
+    at(55),
+  );
+  const summary = summarizeWalkIns(matched, (iso) => new Date(iso).getUTCMinutes() < 30 ? 12 : 13);
+  assert.deepEqual(summary, {
+    walkIns: 4, served: 3, missed: 1, waiting: 0, averageSeconds: 80, medianSeconds: 30, longestSeconds: 200,
+    byHour: [{ hour: 12, count: 3 }, { hour: 13, count: 1 }],
+  });
+  assert.equal(summarizeWalkIns([], () => 0).averageSeconds, null);
 });

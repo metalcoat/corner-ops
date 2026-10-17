@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// Entrance door chime: listens to the deli entrance camera (Dahua-made, 192.168.8.209) and tells the app
-// when a customer walks in. The camera does the person/line-crossing detection itself; this only relays
-// its alarm events to POST /api/cron/door-chime, which chimes the POS screens (see docs/PROCESS-MAP.md).
+// Entrance walk-ins: listens to the Corner Deli counter camera (Dahua IPC-HDW4433C-A, 192.168.8.209) and
+// tells the app when a customer walks in through the front door. The camera does the line-crossing detection
+// itself; this only relays its alarm events to POST /api/cron/door-chime, which records them for the store
+// dashboard's time-to-first-interaction card (see docs/PROCESS-MAP.md).
 //
 //   node tools/door-chime-detector.mjs           listen and relay (runs until stopped)
 //   node tools/door-chime-detector.mjs --probe   show the device type, channels and its detection rules
-//   node tools/door-chime-detector.mjs --test    send one test walk-in to the app (POS screens chime)
+//   node tools/door-chime-detector.mjs --test    send one test event to the app (not counted on the dashboard)
 //
 // Camera settings: /opt/corner-ops/config/door-camera.env (never committed)
 //   DOOR_CAMERA_USER, DOOR_CAMERA_PASS   a view-only camera account
@@ -145,7 +146,7 @@ async function handleEvent(event) {
   lastChime = Date.now();
   try {
     const result = await notifyApp(KINDS[event.code] || "person");
-    log(`walk-in: ${event.code} on camera ${event.index + 1}${direction ? ` going ${direction}` : ""} → ${result.recorded ? "chimed" : "within cooldown"}`);
+    log(`walk-in: ${event.code} on camera ${event.index + 1}${direction ? ` going ${direction}` : ""} → ${result.recorded ? "recorded" : "within cooldown"}`);
   } catch (error) {
     log(`walk-in seen but the app could not be told: ${error.message}`);
   }
