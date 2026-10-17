@@ -37,6 +37,7 @@
     "src/lib/payroll-relief-timesheet.ts",
     "src/lib/payroll-schedule-compare.ts",
     "src/lib/payroll-auto-rules.ts",
+    "src/lib/games/rampage/*.ts",
     "tests/**/*.ts"
   ]
 }

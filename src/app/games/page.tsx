@@ -34,6 +34,15 @@ const games = [
     prize: "8 BOSSES · 1 KIOSK",
     color: "pizza",
   },
+  {
+    href: "/game/deli-rampage",
+    icon: "👹",
+    title: "DELI RAMPAGE: One Star Monster",
+    tag: "CLIMB · PUNCH · CLOSE",
+    copy: "The customers complained. You're sixty feet tall. Punch their buildings down and hand them a sub through the wall.",
+    prize: "HIGH SCORE GLORY",
+    color: "delivery",
+  },
 ];
 export default function Games() {
   return (
