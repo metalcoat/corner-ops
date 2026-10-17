@@ -11,11 +11,21 @@ import {
 import {
   createDoorChimeState,
   DOOR_CHIME_NOTICE_MS,
+  DOOR_GREET_REMINDER_SECONDS,
+  dueGreetReminders,
   reconcileDoorEvents,
+  type DoorGreetOutcome,
 } from "@/lib/door-chime-policy";
 
 type AlertOrder = { id: string };
-type DoorEvent = { id: number; camera: string; kind: string; detectedAt: string };
+type DoorEvent = {
+  id: number;
+  camera: string;
+  kind: string;
+  detectedAt: string;
+  waiting: boolean;
+  ageSeconds: number;
+};
 
 const rendered = new Map<string, AudioBuffer>();
 /** Sounds are rendered once per device (a few milliseconds each) and reused. */
@@ -102,8 +112,12 @@ export function useOnlineOrderAlert(
   const [pendingOnlineOrders, setPendingOnlineOrders] = useState(0);
   const [soundBlocked, setSoundBlocked] = useState(false);
   const doorState = useRef(createDoorChimeState());
-  const doorNoticeTimer = useRef<number | null>(null);
-  const [doorNotice, setDoorNotice] = useState<DoorEvent | null>(null);
+  const doorReminders = useRef(new Map<number, number>());
+  const doorTestTimer = useRef<number | null>(null);
+  // Walk-ins nobody has greeted yet (from the server, so every screen agrees).
+  const [doorWaiting, setDoorWaiting] = useState<DoorEvent[]>([]);
+  // A detector test only flashes the bar; it is never greeted or counted.
+  const [doorTest, setDoorTest] = useState(false);
 
   const refreshSoundBlocked = useCallback(() => {
     setSoundBlocked(
@@ -180,25 +194,58 @@ export function useOnlineOrderAlert(
     if (ring()) heard.current = true;
   }, [ring]);
 
-  /** Someone walked in: one chime and a short notice; never repeats. */
-  const announceWalkIn = useCallback(
-    (event: DoorEvent) => {
-      ring(doorSound(preference.current));
-      setDoorNotice(event);
-      if (doorNoticeTimer.current) window.clearTimeout(doorNoticeTimer.current);
-      doorNoticeTimer.current = window.setTimeout(() => setDoorNotice(null), DOOR_CHIME_NOTICE_MS);
+  /**
+   * Door events from one poll: chime once for new walk-ins, again for anyone
+   * still not greeted at each reminder age, and keep the bar up until a tap.
+   */
+  const updateDoor = useCallback(
+    (events: DoorEvent[]) => {
+      const firstPoll = !doorState.current.initialized;
+      const fresh = new Set(
+        reconcileDoorEvents(
+          doorState.current,
+          events.map((event) => Number(event.id)),
+        ),
+      );
+      const waiting = events.filter((event) => event.waiting);
+      const reminders = dueGreetReminders(doorReminders.current, waiting);
+      setDoorWaiting(waiting);
+      if (events.some((event) => fresh.has(event.id) && event.kind === "test")) {
+        setDoorTest(true);
+        if (doorTestTimer.current) window.clearTimeout(doorTestTimer.current);
+        doorTestTimer.current = window.setTimeout(() => setDoorTest(false), DOOR_CHIME_NOTICE_MS);
+      }
+      // A screen that just opened shows waiting walk-ins but doesn't ring for them.
+      if (!firstPoll && (fresh.size || reminders.length)) ring(doorSound(preference.current));
     },
     [ring],
   );
 
-  const dismissDoorNotice = useCallback(() => {
-    if (doorNoticeTimer.current) window.clearTimeout(doorNoticeTimer.current);
-    setDoorNotice(null);
-  }, []);
+  const greetWalkIns = useCallback(
+    async (outcome: DoorGreetOutcome) => {
+      void unlockAudio();
+      const ids = doorWaiting.map((event) => event.id);
+      setDoorTest(false);
+      if (!ids.length) return;
+      setDoorWaiting([]);
+      try {
+        const response = await fetch("/api/ordering/orders/door-events", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ids, outcome }),
+        });
+        if (!response.ok) throw new Error();
+      } catch {
+        // The next poll brings the bar back, so the walk-in isn't lost.
+        setAlertNotice("The greeting could not be saved. Tap GREETED again.");
+      }
+    },
+    [doorWaiting, unlockAudio],
+  );
 
   useEffect(
     () => () => {
-      if (doorNoticeTimer.current) window.clearTimeout(doorNoticeTimer.current);
+      if (doorTestTimer.current) window.clearTimeout(doorTestTimer.current);
     },
     [],
   );
@@ -251,6 +298,8 @@ export function useOnlineOrderAlert(
     if (!authenticated) {
       alertState.current = createOnlineAlertState();
       doorState.current = createDoorChimeState();
+      doorReminders.current.clear();
+      setDoorWaiting([]);
       setPendingOnlineOrders(0);
       setSoundBlocked(false);
       return;
@@ -279,14 +328,8 @@ export function useOnlineOrderAlert(
           heard.current = false;
           ringPending();
         }
-        const doorEvents = payload.doorEvents || [];
-        const walkIns = reconcileDoorEvents(
-          doorState.current,
-          doorEvents.map((event) => Number(event.id)),
-        );
         // Several walk-ins in one poll still chime once.
-        const latest = doorEvents.find((event) => Number(event.id) === walkIns.at(-1));
-        if (latest) announceWalkIn(latest);
+        updateDoor(payload.doorEvents || []);
       } catch {
         // The regular status indicator reports connectivity; alerts retry silently.
       }
@@ -300,7 +343,7 @@ export function useOnlineOrderAlert(
       window.clearInterval(timer);
       window.clearInterval(repeat);
     };
-  }, [authenticated, ringPending, unlockAudio, announceWalkIn]);
+  }, [authenticated, ringPending, unlockAudio, updateDoor]);
 
   useEffect(() => {
     if (
@@ -433,7 +476,15 @@ export function useOnlineOrderAlert(
     pendingOnlineOrders,
     soundBlocked,
     acknowledgeOnlineOrders,
-    doorNotice,
-    dismissDoorNotice,
+    doorWaiting: doorWaiting.length,
+    doorOverdue: doorWaiting.some(
+      (event) => event.ageSeconds >= DOOR_GREET_REMINDER_SECONDS[0],
+    ),
+    doorLongestWaitSeconds: doorWaiting.reduce(
+      (longest, event) => Math.max(longest, event.ageSeconds),
+      0,
+    ),
+    doorTest,
+    greetWalkIns,
   };
 }

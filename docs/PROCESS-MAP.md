@@ -261,11 +261,16 @@ Never automate around robot checks.
 flowchart LR
   cam["Entrance camera / recorder<br/>Dahua-made, 192.168.8.209<br/>(detects people / tripwire itself)"] -->|"alarm event stream<br/>eventManager.cgi attach"| det["tools/door-chime-detector.mjs<br/>corner-ops-door-chime.service (chris)"]
   det -->|"POST /api/cron/door-chime<br/>CRON_SECRET"| ev[(door_chime_events<br/>10 s cooldown per camera)]
-  ev -->|"rides on the 3 s online-alerts poll"| pos["Deli POS screens<br/>ding-dong + 'CUSTOMER WALKED IN' for 8 s"]
+  ev -->|"rides on the 3 s online-alerts poll"| pos["Deli POS screens<br/>ding-dong + 'CUSTOMER WALKED IN' bar"]
+  pos -->|"GREETED / NOT A CUSTOMER<br/>POST /api/ordering/orders/door-events"| ev
+  ev --> dash["Store dashboard: Door greetings<br/>walk-ins, time to greet, missed"]
 ```
 
 - Camera login lives in `/opt/corner-ops/config/door-camera.env` (never committed); see the detector's header for settings.
   `--probe` shows the device and its detection rules, `--test` chimes the POS screens without the camera.
+- The bar stays up on every Deli POS until someone taps GREETED (or NOT A CUSTOMER); the first tap clears it
+  everywhere and records who and when. Not greeted after 30 s: the bar turns red and chimes again at 30/60/90/120 s.
+  Over 2 minutes (or never) counts as missed on the dashboard; the bar drops after 10 minutes.
 - Sound: the ding-dong (`warm_chime`), or the hand bell when online orders already use the ding-dong. Volume follows the
   online-order alert volume; "off" silences both. A screen that opens late never rings for a walk-in it missed.
 - Dev only so far (port 3000). The service is not installed until the camera login is in place.
