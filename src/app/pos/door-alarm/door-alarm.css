@@ -1,0 +1,17 @@
+.doorAlarm{--da-bg:#f4f6f8;--da-ink:#16202a;--da-muted:#5f6b77;--da-card:#fff;--da-line:#d9dee4;min-height:100vh;display:grid;grid-template-rows:auto 1fr auto auto;gap:24px;padding:0 0 24px;background:var(--da-bg);color:var(--da-ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;transition:background .3s}
+.doorAlarmFlash{--da-bg:#ffe08a}
+.doorAlarmBanner{display:block;width:100%;box-sizing:border-box;padding:16px;border:0;font:inherit;font-size:20px;font-weight:800;text-align:center}
+.doorAlarmBanner.ok{background:#127a4a;color:#fff}
+.doorAlarmBanner.warn{background:#f2b632;color:#2b1d00;cursor:pointer}
+.doorAlarmBanner.bad{background:#b3001b;color:#fff}
+.doorAlarmMain{display:grid;place-items:center;align-content:center;gap:8px;text-align:center;padding:0 16px}
+.doorAlarmLabel{margin:0;font-size:28px;font-weight:800;color:var(--da-muted)}
+.doorAlarmFlash .doorAlarmLabel{color:#7a1d00}
+.doorAlarmTime{font-size:min(20vw,140px);line-height:1;font-variant-numeric:tabular-nums}
+.doorAlarmEarlier{margin:8px 0 0;color:var(--da-muted);font-size:18px}
+.doorAlarmSettings{display:flex;flex-wrap:wrap;justify-content:center;align-items:end;gap:16px;margin:0 16px;padding:16px;border:1px solid var(--da-line);border-radius:12px;background:var(--da-card)}
+.doorAlarmSettings label{display:grid;gap:6px;font-size:14px;font-weight:700;color:var(--da-muted)}
+.doorAlarmSettings select,.doorAlarmSettings input{min-height:40px;font-size:16px}
+.doorAlarmSettings button{min-height:44px;padding:0 20px;border:0;border-radius:8px;background:var(--da-ink);color:#fff;font-weight:800;cursor:pointer}
+.doorAlarmNote{text-align:center;color:var(--da-muted);padding:0 16px}
+@media (prefers-color-scheme:dark){.doorAlarm:not(.doorAlarmFlash){--da-bg:#11161b;--da-ink:#eef2f6;--da-muted:#9aa6b2;--da-card:#1a2128;--da-line:#2c3540}.doorAlarm:not(.doorAlarmFlash) .doorAlarmSettings button{background:#eef2f6;color:#11161b}}
