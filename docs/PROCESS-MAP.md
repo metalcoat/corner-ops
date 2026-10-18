@@ -263,6 +263,7 @@ flowchart LR
   det -->|"POST /api/cron/door-chime<br/>CRON_SECRET"| ev[(door_chime_events<br/>10 s cooldown per camera)]
   ev --> dash["Store dashboard: Door walk-ins<br/>time to first POS order, missed, by hour"]
   ord[(ordering_orders<br/>source = pos)] --> dash
+  ev -->|"GET /api/pos/greeter every 2 s"| tv["TV greeter: Raspberry Pi 3 A+ corner-greeter<br/>(192.168.6.217, Chromium kiosk) → /pos/greeter<br/>logo + order QR; 'Welcome to Corner Deli!' + spoken greeting"]
 ```
 
 - Nothing shows on the POS screens; this only measures. Each POS order started is matched to the oldest walk-in still
@@ -271,6 +272,11 @@ flowchart LR
   the cooler toward the customer side count as walk-ins. Staff crossing it count too.
 - Camera login lives in `/opt/corner-ops/config/door-camera.env` (never committed); see the detector's header for settings.
   `--probe` shows the device and its detection rules. Camera settings backup: `/opt/corner-ops/config/door-camera-backup-*.txt`.
+- TV greeter: the Pi (user chris, SSH key `~/.ssh/corner_greeter_ed25519` on the store server) opens
+  `http://192.168.1.237:3000/pos/greeter` full screen with sound to HDMI. The greeting audio is
+  `public/greeter/welcome.mp3`; the QR points at `GREETER_ORDER_URL` (default https://ordercornerdeli.com).
+- Camera clock: GMT-4 with time server sync and its own DST rule off (the firmware ignores it); set GMT-5 on the
+  first Sunday of November and GMT-4 on the second Sunday of March.
 - Dev only so far (port 3000). The service is not installed until the camera line is in place.
 
 ## 9. Guardrails for assistants

@@ -91,6 +91,19 @@ export async function doorWalkInDashboard(business: DoorChimeEventInput["busines
   };
 }
 
+/** The newest walk-in (tests included) for the TV greeter, or null when there's none in the last minute. */
+export async function latestDoorWalkIn(business: DoorChimeEventInput["business"]) {
+  await ensureDoorChimeSchema();
+  const row = (await getSql()`
+    SELECT id, kind, EXTRACT(EPOCH FROM NOW() - detected_at)::float AS age_seconds
+    FROM door_chime_events
+    WHERE business = ${business} AND detected_at > NOW() - INTERVAL '60 seconds'
+    ORDER BY id DESC
+    LIMIT 1
+  `)[0];
+  return row ? { id: Number(row.id), kind: String(row.kind), ageSeconds: Math.round(Number(row.age_seconds)) } : null;
+}
+
 /** Old rows are only history; keep 90 days for comparing walk-ins week to week. */
 export async function pruneDoorChimeEvents() {
   await ensureDoorChimeSchema();

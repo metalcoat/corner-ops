@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { matchWalkInsToOrders, parseDoorChimeEvent, summarizeWalkIns } from "../src/lib/door-chime-policy";
+import { greeterNext, matchWalkInsToOrders, parseDoorChimeEvent, summarizeWalkIns } from "../src/lib/door-chime-policy";
 
 const at = (minutes: number, seconds = 0) => new Date(Date.UTC(2026, 9, 17, 16, minutes, seconds)).toISOString();
 const order = (id: string, minutes: number, seconds = 0) => ({ id, displayNumber: id, createdAt: at(minutes, seconds) });
@@ -47,4 +47,16 @@ test("door chime: dashboard summary", () => {
     byHour: [{ hour: 12, count: 3 }, { hour: 13, count: 1 }],
   });
   assert.equal(summarizeWalkIns([], () => 0).averageSeconds, null);
+});
+
+test("greeter: greets each new recent walk-in once, never on the first poll", () => {
+  const state = { initialized: false, lastId: 0 };
+  assert.equal(greeterNext(state, { id: 7, ageSeconds: 2 }), null);
+  assert.equal(greeterNext(state, { id: 7, ageSeconds: 4 }), null);
+  assert.equal(greeterNext(state, { id: 8, ageSeconds: 1 }), 8);
+  assert.equal(greeterNext(state, { id: 8, ageSeconds: 3 }), null);
+  // A walk-in the screen only learns about late (it was offline) isn't greeted.
+  assert.equal(greeterNext(state, { id: 9, ageSeconds: 300 }), null);
+  assert.equal(greeterNext(state, null), null);
+  assert.equal(greeterNext(state, { id: 10, ageSeconds: 0 }), 10);
 });

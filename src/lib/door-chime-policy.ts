@@ -78,3 +78,24 @@ export function summarizeWalkIns(matched: readonly MatchedWalkIn[], hourOf: (iso
     byHour: [...byHour].sort(([a], [b]) => a - b).map(([hour, count]) => ({ hour, count })),
   };
 }
+
+/** How long the TV greeter shows "Welcome" after a walk-in. */
+export const GREETER_WELCOME_MS = 8_000;
+/** The greeter only reacts to walk-ins this recent, so a screen that reloads doesn't greet someone from earlier. */
+export const GREETER_RECENT_SECONDS = 20;
+
+/**
+ * The TV greeter's poll: returns the walk-in to greet, if any. The first poll only
+ * records what was already there; after that a newer id (and recent enough) greets.
+ */
+export function greeterNext(
+  state: { initialized: boolean; lastId: number },
+  latest: { id: number; ageSeconds: number } | null,
+): number | null {
+  const id = latest?.id ?? 0;
+  const first = !state.initialized;
+  state.initialized = true;
+  if (id <= state.lastId) return null;
+  state.lastId = id;
+  return first || !latest || latest.ageSeconds > GREETER_RECENT_SECONDS ? null : id;
+}
