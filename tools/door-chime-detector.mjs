@@ -12,7 +12,7 @@
 //   DOOR_CAMERA_USER, DOOR_CAMERA_PASS   a view-only camera account
 //   DOOR_CAMERA_HOST=192.168.8.209      DOOR_CAMERA_PORT=80
 //   DOOR_CAMERA_CHANNEL=1               recorder camera number for the door (1-based; blank = any)
-//   DOOR_CAMERA_CODES=CrossLineDetection,CrossRegionDetection,SmartMotionHuman
+//   DOOR_CAMERA_CODES=CrossLineDetection,CrossRegionDetection   which camera alerts count as a walk-in
 //   DOOR_CAMERA_DIRECTION=              e.g. LeftToRight: only that tripwire direction counts as walking in
 //   DOOR_CHIME_BUSINESS="Corner Deli"   DOOR_CHIME_CAMERA=entrance
 //   DOOR_CHIME_APP_URL=http://127.0.0.1:3000
@@ -46,7 +46,7 @@ const config = {
   user: cameraEnv.DOOR_CAMERA_USER || "",
   pass: cameraEnv.DOOR_CAMERA_PASS || "",
   channel: cameraEnv.DOOR_CAMERA_CHANNEL ? Number(cameraEnv.DOOR_CAMERA_CHANNEL) : null,
-  codes: (cameraEnv.DOOR_CAMERA_CODES || "CrossLineDetection,CrossRegionDetection,SmartMotionHuman")
+  codes: (cameraEnv.DOOR_CAMERA_CODES || "CrossLineDetection,CrossRegionDetection")
     .split(",").map((code) => code.trim()).filter(Boolean),
   direction: cameraEnv.DOOR_CAMERA_DIRECTION || "",
   business: cameraEnv.DOOR_CHIME_BUSINESS || "Corner Deli",
@@ -155,7 +155,9 @@ async function handleEvent(event) {
 
 async function listen() {
   const codes = config.codes.join(",");
-  const path = `/cgi-bin/eventManager.cgi?action=attach&codes=%5B${encodeURIComponent(codes)}%5D&heartbeat=10`;
+  // Ask for every alert and filter here, so an alert type this firmware doesn't have can't affect the
+  // subscription.
+  const path = "/cgi-bin/eventManager.cgi?action=attach&codes=%5BAll%5D&heartbeat=10";
   const response = await cameraGet(path, { timeoutMs: 35_000 });
   if (response.statusCode !== 200) {
     response.resume();
@@ -176,9 +178,9 @@ async function listen() {
     const parts = buffer.split(separator);
     buffer = parts.pop() || "";
     for (const part of parts) {
-      const body = part.split(/\r?\n\r?\n/).slice(1).join("\n\n").trim();
-      if (!body || body === "Heartbeat") continue;
-      const event = parseEvent(body);
+      // This firmware puts "Code=..." straight after Content-Length with no blank line, so look for it
+      // anywhere in the part rather than after the headers.
+      const event = parseEvent(part);
       if (event) await handleEvent(event);
     }
   }
