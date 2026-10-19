@@ -9,7 +9,7 @@ APP_EMAIL) using the server's SMTP settings; never to staff.
 
   monday-payroll-preview.py [--week YYYY-MM-DD] [--dry-run]
 """
-import argparse, json, smtplib, ssl, subprocess, sys, urllib.request
+import argparse, json, smtplib, ssl, subprocess, sys, urllib.error, urllib.request
 from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 STAGING = Path("/opt/corner-ops/staging")
 MATCHES = STAGING / "payroll-relief-matches.json"
+ROSTER = STAGING / "payroll-relief-roster.json"
 ENV = Path("/opt/corner-ops/.env")
 EASTERN = ZoneInfo("America/New_York")
 
@@ -68,6 +69,18 @@ def staging_client(base):
     return call
 
 
+def cron_post(base, payload):
+    """Staging's job endpoint (what payroll-relief.mjs reports to), with staging's own CRON_SECRET."""
+    secret = env_file(STAGING / ".env").get("CRON_SECRET", "")
+    request = urllib.request.Request(f"{base}/api/cron/payroll-submissions", data=json.dumps(payload).encode(),
+                                     headers={"content-type": "application/json", "authorization": f"Bearer {secret}"})
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()
+
+
 def last_week_start(today):
     monday = today - timedelta(days=today.weekday())
     return monday - timedelta(days=7)
@@ -93,11 +106,18 @@ def main():
     base = f"http://{address()}:3002"
     call = staging_client(base)
 
-    # The weekly refresh wipes staging; put the confirmed employee matches back.
+    # The weekly refresh wipes staging; put Payroll Relief's employee list back first (the matches are
+    # checked against it and are all refused without it), then the confirmed employee matches.
+    matches_problem = ""
+    if ROSTER.exists():
+        status, body = cron_post(base, {"roster": json.loads(ROSTER.read_text())})
+        print("Payroll Relief employee list restored:", status, body[:80])
     if MATCHES.exists():
         mappings = json.loads(MATCHES.read_text())
         status, body = call("/api/payroll-control", {"action": "payroll-relief-map-save", "business": "Corner Deli", "mappings": mappings})
         print("employee matches restored:", status, body[:80])
+        if status != 200:
+            matches_problem = body.decode(errors="replace")[:200]
 
     status, body = call("/api/payroll-control", {"action": "draft-create", "business": "Corner Deli", "weekStart": week.isoformat()})
     print("draft:", status)
@@ -116,6 +136,10 @@ def main():
     if saved:
         MATCHES.write_text(json.dumps(saved, indent=1))
         MATCHES.chmod(0o600)
+    roster = ((data.get("approval") or {}).get("payrollRelief") or {}).get("roster") or []
+    if roster:
+        ROSTER.write_text(json.dumps([{"num": r["num"], "name": r["name"], "payType": r.get("payType") or ""} for r in roster], indent=1))
+        ROSTER.chmod(0o600)
 
     any_ot = any(float(r.get("overtimeHours") or 0) for r in rows)
     lines = [f"Corner Deli payroll for {label} (from this morning's copy of production, Sunday included).", ""]
@@ -142,6 +166,9 @@ def main():
     issues = [f"{k}: {v}" for k, v in blockers.items() if v and k != "message"]
     if issues:
         lines += ["", "Needs attention before approving: " + ", ".join(issues)]
+    if matches_problem:
+        lines += ["", f"The AccountantsOffice employee matches couldn't be put back on staging ({matches_problem}).",
+                  "Tell Claude before approving: the hours can't be entered in Payroll Relief until they are."]
     lines += [
         "",
         f"Review and approve (deli Wi-Fi): {base}/ops/payroll-control?business=Corner%20Deli&weekStart={week.isoformat()}",
