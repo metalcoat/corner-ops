@@ -281,6 +281,9 @@ flowchart LR
 - TV weather slide: `GET /api/pos/greeter/weather` draws a PNG from api.weather.gov (forecast for the Ogdensburg
   gridpoint, current reading from KOGS, else KMSS), cached 20 minutes; keeps the last good forecast if weather.gov
   is down. Requests identify as `CornerDeli-TV/1.0 (ordercornerdeli.com)`.
+  The picture leaves the sky beside the temperature and a corner of each day card plain; the Pi animates the weather
+  there (sun, moon and stars, clouds, rain, snow, lightning, fog), placed by `GET /api/pos/greeter/weather/info`
+  (`src/lib/greeter-weather-layout.ts`). Only those areas are redrawn, about 12 times a second.
 - Front PC door alarm: `tools/door-alarm-windows` (Go tray program, download
   `/downloads/CornerDeliDoorAlarm.zip`), started from the PC's shell:startup folder.
 - `/api/pos/greeter` is read-only and unauthenticated but store-network only; it returns just the newest

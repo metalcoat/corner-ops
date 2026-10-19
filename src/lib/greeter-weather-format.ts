@@ -19,9 +19,25 @@ export type NwsObservation = {
   temperature?: { value: number | null; unitCode?: string } | null;
 };
 
-export type WeatherDay = { name: string; high: number | null; low: number | null; forecast: string; rainChance: number | null };
+/** Which animation the TV draws for a forecast (tools/greeter-pi/greeter.py). */
+export const WEATHER_KINDS = ["clear", "clear_night", "partly_cloudy", "cloudy", "rain", "snow", "storm", "fog"] as const;
+export type WeatherKind = (typeof WEATHER_KINDS)[number];
+
+/** Reads an NWS short forecast or observation text ("Chance Rain Showers", "Mostly Clear then Patchy Fog"). */
+export function weatherKind(text: string, daytime = true): WeatherKind {
+  const words = text.toLowerCase();
+  if (/thunder|t-storm|tstorm/.test(words)) return "storm";
+  if (/snow|flurr|sleet|ice pellets|freezing|wintry|blizzard/.test(words)) return "snow";
+  if (/rain|shower|drizzle/.test(words)) return "rain";
+  if (/fog|mist|haze|smoke/.test(words) && !/then/.test(words.split(/fog|mist|haze|smoke/)[0])) return "fog";
+  if (/partly|mostly sunny|mostly clear|few clouds|scattered clouds/.test(words)) return "partly_cloudy";
+  if (/cloud|overcast/.test(words)) return "cloudy";
+  return daytime ? "clear" : "clear_night";
+}
+
+export type WeatherDay = { name: string; high: number | null; low: number | null; forecast: string; rainChance: number | null; kind: WeatherKind };
 export type WeatherSlide = {
-  now: { temperature: number | null; conditions: string };
+  now: { temperature: number | null; conditions: string; kind: WeatherKind };
   today: WeatherDay;
   next: WeatherDay[];
   updatedAt: string;
@@ -43,6 +59,7 @@ function day(period: NwsPeriod | undefined, night: NwsPeriod | undefined, name: 
     low: night ? fahrenheit(night) : null,
     forecast: (period || night)?.shortForecast || "",
     rainChance: pops.length ? Math.max(...pops) : null,
+    kind: weatherKind((period || night)?.shortForecast || "", Boolean(period)),
   };
 }
 
@@ -61,10 +78,14 @@ export function summarizeForecast(periods: readonly NwsPeriod[], observation: Nw
     next.push(day(daytime, night, (daytime || night)!.name.replace(/ Night$/, "")));
   }
   const now = observedF(observation);
+  const conditions = observation?.textDescription || todayDay?.shortForecast || tonight?.shortForecast || "";
+  // Night if the forecast's current period is a night one (after ~6 PM until morning).
+  const daytimeNow = Boolean(list[0]?.isDaytime);
   return {
     now: {
       temperature: now ?? (todayDay ? fahrenheit(todayDay) : tonight ? fahrenheit(tonight) : null),
-      conditions: observation?.textDescription || todayDay?.shortForecast || tonight?.shortForecast || "",
+      conditions,
+      kind: weatherKind(conditions, daytimeNow),
     },
     today: day(todayDay, tonight, "Today"),
     next,

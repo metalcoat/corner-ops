@@ -3,6 +3,7 @@ import path from "node:path";
 import { ImageResponse } from "next/og";
 import { greeterWeather } from "@/lib/greeter-weather";
 import type { WeatherDay } from "@/lib/greeter-weather-format";
+import { CARD_ICON, CARD_WIDTH, CARDS, HERO, WEATHER_SLIDE } from "@/lib/greeter-weather-layout";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,14 +21,17 @@ const degrees = (value: number | null) => (value === null ? "--" : `${value}°`)
 
 function DayCard({ day }: { day: WeatherDay }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, padding: "34px 36px", borderRadius: 28, background: "rgba(255,255,255,0.08)", border: "2px solid rgba(255,255,255,0.16)" }}>
-      <div style={{ fontSize: 44, fontWeight: 700, color: GOLD }}>{day.name}</div>
-      <div style={{ display: "flex", fontSize: 34, color: MUTED, marginTop: 10, height: 92, overflow: "hidden" }}>{day.forecast}</div>
-      <div style={{ display: "flex", alignItems: "baseline", marginTop: 18 }}>
-        <span style={{ fontSize: 76, fontWeight: 700, color: INK }}>{degrees(day.high)}</span>
-        <span style={{ fontSize: 44, color: MUTED, marginLeft: 18 }}>{degrees(day.low)}</span>
+    <div style={{ display: "flex", flexDirection: "column", width: CARD_WIDTH, height: CARDS.height, padding: "32px 36px", borderRadius: 28, background: "rgba(255,255,255,0.08)", border: "2px solid rgba(255,255,255,0.16)" }}>
+      {/* The top-right corner (CARD_ICON square) is left empty for the Pi's animated icon. */}
+      <div style={{ display: "flex", flexDirection: "column", width: CARD_WIDTH - CARD_ICON - 90, height: CARD_ICON + 10 }}>
+        <div style={{ fontSize: 46, fontWeight: 700, color: GOLD }}>{day.name}</div>
+        <div style={{ display: "flex", fontSize: 32, color: MUTED, marginTop: 10, lineHeight: 1.2, overflow: "hidden" }}>{day.forecast}</div>
       </div>
-      <div style={{ fontSize: 30, color: MUTED, marginTop: 8 }}>{day.rainChance ? `${day.rainChance}% chance of rain` : " "}</div>
+      <div style={{ display: "flex", alignItems: "baseline", marginTop: 14 }}>
+        <span style={{ fontSize: 80, fontWeight: 700, color: INK }}>{degrees(day.high)}</span>
+        <span style={{ fontSize: 46, color: MUTED, marginLeft: 18 }}>{degrees(day.low)}</span>
+      </div>
+      <div style={{ fontSize: 30, color: MUTED, marginTop: 6 }}>{day.rainChance ? `${day.rainChance}% chance of rain` : " "}</div>
     </div>
   );
 }
@@ -35,43 +39,44 @@ function DayCard({ day }: { day: WeatherDay }) {
 /**
  * The weather slide for the TV greeter (Raspberry Pi, tools/greeter-pi), as a 1920×1080
  * PNG: Ogdensburg now, today's high and low, and the next three days from weather.gov.
- * Store network only, like the rest of /api/pos.
+ * The sky beside the temperature and a corner of each card are left plain: the Pi draws
+ * animated weather there (see greeter-weather-layout.ts). Store network only.
  */
 export async function GET() {
   const [weather, logoSrc] = await Promise.all([greeterWeather(), logoDataUrl()]);
   const time = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
   return new ImageResponse(
     (
-      <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", padding: "70px 90px", background: `radial-gradient(ellipse at 50% 30%, #1f4a2c 0%, ${GREEN} 72%)`, color: INK, fontFamily: "sans-serif" }}>
-        <div style={{ display: "flex", alignItems: "center" }}>
+      <div style={{ width: "100%", height: "100%", display: "flex", position: "relative", background: `radial-gradient(ellipse at 50% 30%, #1f4a2c 0%, ${GREEN} 72%)`, color: INK, fontFamily: "sans-serif" }}>
+        <div style={{ position: "absolute", left: 90, top: 60, display: "flex", alignItems: "center" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={logoSrc} width={130} height={130} style={{ borderRadius: 65 }} alt="" />
-          <div style={{ display: "flex", flexDirection: "column", marginLeft: 34 }}>
-            <div style={{ fontSize: 60, fontWeight: 700 }}>Ogdensburg weather</div>
+          <img src={logoSrc} width={120} height={120} style={{ borderRadius: 60 }} alt="" />
+          <div style={{ display: "flex", flexDirection: "column", marginLeft: 32 }}>
+            <div style={{ fontSize: 58, fontWeight: 700 }}>Ogdensburg weather</div>
             <div style={{ fontSize: 30, color: MUTED }}>{weather ? `National Weather Service · updated ${time.format(new Date(weather.updatedAt))}` : "National Weather Service"}</div>
           </div>
         </div>
         {weather ? (
-          <div style={{ display: "flex", flexDirection: "column", flex: 1, justifyContent: "space-between", marginTop: 40 }}>
-            <div style={{ display: "flex", alignItems: "center" }}>
-              <div style={{ fontSize: 230, fontWeight: 700, lineHeight: 1, color: GOLD }}>{degrees(weather.now.temperature)}</div>
-              <div style={{ display: "flex", flexDirection: "column", marginLeft: 60 }}>
-                <div style={{ fontSize: 64, fontWeight: 700 }}>{weather.now.conditions || weather.today.forecast}</div>
-                <div style={{ fontSize: 44, color: MUTED, marginTop: 12 }}>
-                  {weather.today.high !== null ? `Today: high ${degrees(weather.today.high)} · low ${degrees(weather.today.low)}` : `Tonight: low ${degrees(weather.today.low)}`}
+          <>
+            <div style={{ position: "absolute", left: HERO.left, top: HERO.top, width: HERO.width, display: "flex", alignItems: "center" }}>
+              <div style={{ fontSize: 220, fontWeight: 700, lineHeight: 1, color: GOLD }}>{degrees(weather.now.temperature)}</div>
+              <div style={{ display: "flex", flexDirection: "column", marginLeft: 50, flex: 1 }}>
+                <div style={{ fontSize: 58, fontWeight: 700, lineHeight: 1.1 }}>{weather.now.conditions || weather.today.forecast}</div>
+                <div style={{ fontSize: 40, color: MUTED, marginTop: 14 }}>
+                  {weather.today.high !== null ? `High ${degrees(weather.today.high)} · Low ${degrees(weather.today.low)}` : `Tonight: low ${degrees(weather.today.low)}`}
                 </div>
-                {weather.today.rainChance ? <div style={{ fontSize: 38, color: MUTED, marginTop: 8 }}>{`${weather.today.rainChance}% chance of rain`}</div> : null}
+                {weather.today.rainChance ? <div style={{ fontSize: 34, color: MUTED, marginTop: 8 }}>{`${weather.today.rainChance}% chance of rain today`}</div> : null}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 36 }}>
+            <div style={{ position: "absolute", left: CARDS.left, top: CARDS.top, display: "flex", gap: CARDS.gap }}>
               {weather.next.map((day) => <DayCard key={day.name} day={day} />)}
             </div>
-          </div>
+          </>
         ) : (
-          <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center", fontSize: 90, fontWeight: 700, color: MUTED }}>Weather unavailable</div>
+          <div style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 90, fontWeight: 700, color: MUTED }}>Weather unavailable</div>
         )}
       </div>
     ),
-    { width: 1920, height: 1080, headers: { "cache-control": "no-store" } },
+    { width: WEATHER_SLIDE.width, height: WEATHER_SLIDE.height, headers: { "cache-control": "no-store" } },
   );
 }
