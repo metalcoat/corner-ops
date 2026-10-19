@@ -272,6 +272,9 @@ flowchart LR
   waiting (first come, first served). No order within 10 minutes = missed. Online, kiosk and AI-phone orders don't count.
 - The front door (logo door) is at the back of the camera view, behind the deli cooler; people crossing the line by
   the cooler toward the customer side count as walk-ins. Staff crossing it count too.
+- Camera rules now: two one-way tripwires, DoorIn (at the logo door) and DoorIn2 (under the front window, past the
+  deli cooler); a person crossing both counts once (45 s cooldown). The listener reconnects every 5 minutes because
+  the camera can leave an open alert connection silent after its rules are edited.
 - Camera login lives in `/opt/corner-ops/config/door-camera.env` (never committed); see the detector's header for settings.
   `--probe` shows the device and its detection rules. Camera settings backup: `/opt/corner-ops/config/door-camera-backup-*.txt`.
 - TV greeter: the Pi (user chris, SSH key `~/.ssh/corner_greeter_ed25519` on the store server) runs

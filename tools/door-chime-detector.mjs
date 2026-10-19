@@ -24,6 +24,10 @@ import http from "node:http";
 const ROOT = process.env.CORNER_OPS_ROOT || "/opt/corner-ops";
 // Matches DOOR_CHIME_COOLDOWN_SECONDS in src/lib/door-chime-policy.ts (the app enforces it too).
 const COOLDOWN_MS = 45_000;
+// After rules are edited on the camera, connections that were already open can stay up but go silent for
+// good (seen 2026-10-19: nothing for 80 minutes until a new connection). Reconnect on a schedule; it takes
+// well under a second.
+const RESUBSCRIBE_MS = 5 * 60 * 1000;
 
 function readEnvFile(path) {
   const values = {};
@@ -134,6 +138,8 @@ export function parseEvent(text) {
 
 let lastChime = 0;
 let connectedAt = 0;
+// Only the first connection, and the first after a failure, is logged; scheduled reconnects are not.
+let quietReconnect = false;
 
 async function handleEvent(event) {
   if (event.action !== "Start" && event.action !== "Pulse") return;
@@ -171,20 +177,33 @@ async function listen() {
   connectedAt = Date.now();
   const boundary = String(response.headers["content-type"] || "").match(/boundary=([^;\s]+)/)?.[1] || "myboundary";
   const separator = `--${boundary.replace(/^--/, "")}`;
-  log(`listening to ${config.host} for ${codes}${config.channel ? ` on camera ${config.channel}` : ""}`);
+  if (!quietReconnect) log(`listening to ${config.host} for ${codes}${config.channel ? ` on camera ${config.channel}` : ""}`);
+  quietReconnect = true;
   let buffer = "";
+  let refreshed = false;
+  const refresh = setTimeout(() => {
+    refreshed = true;
+    response.destroy();
+  }, RESUBSCRIBE_MS);
   response.setEncoding("utf8");
-  for await (const chunk of response) {
-    buffer += chunk;
-    const parts = buffer.split(separator);
-    buffer = parts.pop() || "";
-    for (const part of parts) {
-      // This firmware puts "Code=..." straight after Content-Length with no blank line, so look for it
-      // anywhere in the part rather than after the headers.
-      const event = parseEvent(part);
-      if (event) await handleEvent(event);
+  try {
+    for await (const chunk of response) {
+      buffer += chunk;
+      const parts = buffer.split(separator);
+      buffer = parts.pop() || "";
+      for (const part of parts) {
+        // This firmware puts "Code=..." straight after Content-Length with no blank line, so look for it
+        // anywhere in the part rather than after the headers.
+        const event = parseEvent(part);
+        if (event) await handleEvent(event);
+      }
     }
+  } catch (error) {
+    if (!refreshed) throw error;
+  } finally {
+    clearTimeout(refresh);
   }
+  if (refreshed) return "refreshed";
   throw new Error("camera closed the event stream");
 }
 
@@ -225,8 +244,10 @@ async function main() {
   for (;;) {
     const started = Date.now();
     try {
-      await listen();
+      // A scheduled reconnect goes straight back in, without logging or waiting.
+      if ((await listen()) === "refreshed") continue;
     } catch (error) {
+      quietReconnect = false;
       log(`${error.message}; reconnecting in ${delay / 1000}s`);
     }
     // Back off only while the camera can't be reached; a stream that was up reconnects at once.
