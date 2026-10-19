@@ -13,6 +13,11 @@ Chromium is not used: on this Pi (512 MB) it crashes. To change the screens, edi
 
 ## Install (from the store server)
 
+Needs `python3-gi-cairo` (Cairo drawing from Python; not on a fresh Raspberry Pi OS):
+`sudo apt-get install -y python3-gi-cairo`. Without it the program stops at start-up.
+Before replacing a working copy, try the new one for a minute with
+`timeout 40 python3 /tmp/greeter_new.py --weather` and check its output for errors.
+
 ```sh
 ssh -i ~/.ssh/corner_greeter_ed25519 chris@corner-greeter   # 192.168.6.217 on the TV Wi-Fi
 mkdir -p ~/greeter && scp tools/greeter-pi/greeter.py chris@corner-greeter:greeter/
