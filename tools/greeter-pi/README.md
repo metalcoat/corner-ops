@@ -1,10 +1,11 @@
 # Corner Deli TV greeter (Raspberry Pi 3 A+)
 
-`greeter.py` shows the Corner Deli logo with the order-online QR code full screen,
-taking turns every 15 seconds with the Ogdensburg weather (`GET /api/pos/greeter/weather`,
-a PNG the app draws from api.weather.gov, refreshed every 20 minutes), and switches to
-"Welcome to Corner Deli!" with a spoken greeting for 8 seconds when the entrance camera
-records a walk-in (`GET /api/pos/greeter`). The pictures and the
+`greeter.py` shows three slides full screen, 15 seconds each: the Corner Deli logo with the
+order-online QR code, the Ogdensburg weather (`GET /api/pos/greeter/weather`, a PNG the app
+draws from api.weather.gov, refreshed every 20 minutes, with animated weather on top), and a
+"Did you know?" fun fact (`GET /api/pos/greeter/fact?n=`; the list is `src/lib/greeter-facts.ts`).
+It switches to "Welcome to Corner Deli!" with a spoken greeting for 8 seconds when the
+entrance camera records a walk-in (`GET /api/pos/greeter`). The pictures and the
 greeting are `public/greeter/idle.png`, `welcome.png` and `welcome.mp3` in the app;
 the Pi downloads them at start and every 6 hours and keeps the last copies.
 

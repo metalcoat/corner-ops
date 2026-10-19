@@ -2,8 +2,9 @@
 """Corner Deli TV greeter for the Raspberry Pi 3 A+ on the front TV.
 
 Chromium is too heavy for this Pi (512 MB), so this shows pictures full screen
-instead: the logo with the order-online QR code and the Ogdensburg weather
-(GET /api/pos/greeter/weather) take turns every 15 seconds, and "Welcome to Corner
+instead: the logo with the order-online QR code, the Ogdensburg weather
+(GET /api/pos/greeter/weather) and a "Did you know?" fun fact (GET /api/pos/greeter/fact,
+a different one each time round) take turns every 15 seconds, and "Welcome to Corner
 Deli!" interrupts either for 8 seconds with a spoken greeting whenever the entrance
 camera records a walk-in. The pictures and the greeting come from the app
 (public/greeter/); walk-ins come from GET /api/pos/greeter, polled every 2 seconds.
@@ -72,6 +73,52 @@ def refresh_weather():
         save("weather.json", info)
     except Exception as error:  # noqa: BLE001
         log(f"could not refresh weather: {error}")
+
+
+def refresh_facts():
+    """The fun-fact slides; downloaded again only when the app's list of facts changes."""
+    folder = os.path.join(CACHE, "facts")
+    try:
+        index = json.loads(fetch("/api/pos/greeter/facts", timeout=30))
+        count, version = int(index["count"]), str(index["version"])
+        try:
+            with open(os.path.join(folder, "version"), "r", encoding="utf-8") as handle:
+                if handle.read().strip() == version:
+                    return
+        except OSError:
+            pass
+        fresh = folder + ".new"
+        os.makedirs(fresh, exist_ok=True)
+        for name in os.listdir(fresh):
+            os.remove(os.path.join(fresh, name))
+        for n in range(count):
+            data = fetch(f"/api/pos/greeter/fact?n={n}", timeout=60)
+            if not data.startswith(b"\x89PNG"):
+                raise ValueError(f"fact {n} is not a picture")
+            with open(os.path.join(fresh, f"fact-{n}.png"), "wb") as handle:
+                handle.write(data)
+        with open(os.path.join(fresh, "version"), "w", encoding="utf-8") as handle:
+            handle.write(version)
+        old = folder + ".old"
+        if os.path.isdir(folder):
+            os.replace(folder, old)
+        os.replace(fresh, folder)
+        if os.path.isdir(old):
+            for name in os.listdir(old):
+                os.remove(os.path.join(old, name))
+            os.rmdir(old)
+        log(f"loaded {count} fun facts")
+    except Exception as error:  # noqa: BLE001 - keep the facts we have
+        log(f"could not refresh fun facts: {error}")
+
+
+def fact_files():
+    folder = os.path.join(CACHE, "facts")
+    try:
+        names = [name for name in os.listdir(folder) if name.startswith("fact-") and name.endswith(".png")]
+    except OSError:
+        return []
+    return [os.path.join(folder, name) for name in sorted(names, key=lambda name: int(name[5:-4]))]
 
 
 def refresh_assets():
@@ -247,6 +294,7 @@ class Greeter(Gtk.Window):
         self.surfaces = {}
         self.current = "idle"
         self.idle_slide = "idle"
+        self.fact_index = -1
         self.welcoming = False
         self.initialized = False
         self.last_id = 0
@@ -336,12 +384,32 @@ class Greeter(Gtk.Window):
         self.area.queue_draw()
         return False
 
+    def load_next_fact(self):
+        """Only the fact on screen is kept in memory; each turn loads the next one."""
+        files = fact_files()
+        if not files:
+            return False
+        self.fact_index = (self.fact_index + 1) % len(files)
+        window = self.get_window()
+        try:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file(files[self.fact_index])
+            self.surfaces["fact"] = Gdk.cairo_surface_create_from_pixbuf(pixbuf, 1, window)
+            return True
+        except Exception as error:  # noqa: BLE001 - skip a bad file rather than stop the rotation
+            log(f"could not show fun fact {self.fact_index}: {error}")
+            return False
+
     def rotate(self):
-        """Logo/QR and weather take turns while nobody is being welcomed."""
-        if "weather" in self.surfaces:
-            self.idle_slide = "weather" if self.idle_slide == "idle" else "idle"
-        else:
-            self.idle_slide = "idle"
+        """Logo/QR, weather and a fun fact take turns while nobody is being welcomed."""
+        order = ["idle", "weather", "fact"]
+        position = order.index(self.idle_slide) if self.idle_slide in order else 0
+        for step in range(1, len(order) + 1):
+            candidate = order[(position + step) % len(order)]
+            if candidate == "fact" and not self.load_next_fact():
+                continue
+            if candidate in self.surfaces:
+                self.idle_slide = candidate
+                break
         if not self.welcoming:
             self.show_picture(self.idle_slide)
         return True
@@ -357,6 +425,7 @@ class Greeter(Gtk.Window):
     def refresh(self):
         def work():
             refresh_assets()
+            refresh_facts()
             GLib.idle_add(self.load_pictures)
 
         threading.Thread(target=work, daemon=True).start()
@@ -408,6 +477,7 @@ class Greeter(Gtk.Window):
 def main():
     refresh_assets()
     refresh_weather()
+    refresh_facts()
     window = Greeter()
     if "--greet" in sys.argv:  # show the welcome once a few seconds after start, to check picture and sound
         GLib.timeout_add_seconds(3, window.greet)
