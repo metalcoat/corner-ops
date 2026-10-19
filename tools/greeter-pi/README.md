@@ -28,3 +28,11 @@ mkdir -p ~/greeter && scp tools/greeter-pi/greeter.py chris@corner-greeter:greet
 Sound goes to HDMI (`wpctl set-default <HDMI sink>`); screen blanking is off
 (`raspi-config nonint do_blanking 1`). `python3 greeter.py --greet` shows the welcome
 once after start to check picture and sound.
+
+To load a new `greeter.py`, copy it over and stop only the Python process; `lwrespawn`
+starts it again within a second. Anchor the pattern: an unanchored `pkill -f greeter.py`
+also matches the `lwrespawn` shell and nothing restarts it until the Pi reboots.
+
+```sh
+pkill -f '^/usr/bin/python3 /home/chris/greeter/greeter.py'
+```
