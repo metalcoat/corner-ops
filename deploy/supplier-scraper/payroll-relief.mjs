@@ -261,6 +261,18 @@ async function signIn(page) {
       await settle(page, 4_000);
       continue;
     }
+    // Or (seen 2026-10-19, /Auth/SendCode) "Select verification method": "Send me Text Message to …" / "Call me at …"
+    // radios and a Select button. Pick the text message.
+    const textRadio = page.locator('label, div').filter({ hasText: /^\s*Send me Text Message/i }).locator('input[type="radio"]');
+    const select = page.locator('button, input[type="submit"], input[type="button"]').filter({ visible: true }).filter({ hasText: /^\s*Select\s*$/i })
+      .or(page.locator('input[type="submit"][value="Select" i], input[type="button"][value="Select" i]').filter({ visible: true }));
+    if (onLogin && !sentCode && /verification method/i.test(text) && (await visible(select))) {
+      sentCode = true;
+      if (await textRadio.count()) await textRadio.first().check().catch(() => {});
+      await select.first().click().catch(() => {});
+      await settle(page, 4_000);
+      continue;
+    }
     if (!onLogin) {
       await page.goto(HOME, { waitUntil: "domcontentloaded", timeout: 60_000 });
       await settle(page, 2_000);

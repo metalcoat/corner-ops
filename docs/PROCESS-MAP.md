@@ -186,6 +186,7 @@ flowchart TD
   - Nightly backups (02:20 UTC = 10:20 PM Eastern) run before Rezku's 11:01 PM Eastern labour report, so each
     backup misses that day's hours; the interim Monday email takes its own fresh backup.
   - The AccountantsOffice session lasts a few hours; most Mondays need the texted code (code box on the payroll page).
+    Since 2026-10-19 it first asks "Select verification method" (text / call); the job picks the text message.
   - Chromium leaves `Singleton*` lock files after a crash; jobs clear them before launching (one job at a time).
 - Automatic Submit stays **off** until a first Submit has been watched together.
 
