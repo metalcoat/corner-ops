@@ -3,8 +3,12 @@
  * store dashboard, kept free of database code so they can be unit tested.
  */
 
-/** One person (or one group) walking in counts once; repeat detections inside this window are dropped. */
-export const DOOR_CHIME_COOLDOWN_SECONDS = 10;
+/**
+ * One person (or one group) walking in counts once; repeat detections inside this window are dropped.
+ * 45 s because the counter camera re-fires several times for one arrival (on 2026-10-18/19, 48 of
+ * 117 walk-ins came less than a minute after the one before).
+ */
+export const DOOR_CHIME_COOLDOWN_SECONDS = 45;
 /** A walk-in with no POS order started within this long counts as missed. */
 export const DOOR_SERVE_MISSED_SECONDS = 10 * 60;
 

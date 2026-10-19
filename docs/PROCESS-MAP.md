@@ -260,7 +260,7 @@ Never automate around robot checks.
 ```mermaid
 flowchart LR
   cam["Counter camera<br/>Dahua IPC-HDW4433C-A, 192.168.8.209<br/>(tripwire right of the deli cooler, one direction)"] -->|"alarm event stream<br/>eventManager.cgi attach"| det["tools/door-chime-detector.mjs<br/>corner-ops-door-chime.service (chris)"]
-  det -->|"POST /api/cron/door-chime<br/>CRON_SECRET"| ev[(door_chime_events<br/>10 s cooldown per camera)]
+  det -->|"POST /api/cron/door-chime<br/>CRON_SECRET"| ev[(door_chime_events<br/>45 s cooldown per camera)]
   ev --> dash["Store dashboard: Door walk-ins<br/>time to first POS order, missed, by hour"]
   ord[(ordering_orders<br/>source = pos)] --> dash
   ev -->|"GET /api/pos/greeter every 2 s"| tv["TV greeter: Raspberry Pi 3 A+ corner-greeter<br/>(192.168.6.217, tools/greeter-pi/greeter.py)<br/>logo + order QR; 'Welcome to Corner Deli!' + spoken greeting"]

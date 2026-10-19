@@ -22,7 +22,8 @@ import { readFileSync } from "node:fs";
 import http from "node:http";
 
 const ROOT = process.env.CORNER_OPS_ROOT || "/opt/corner-ops";
-const COOLDOWN_MS = 10_000;
+// Matches DOOR_CHIME_COOLDOWN_SECONDS in src/lib/door-chime-policy.ts (the app enforces it too).
+const COOLDOWN_MS = 45_000;
 
 function readEnvFile(path) {
   const values = {};
