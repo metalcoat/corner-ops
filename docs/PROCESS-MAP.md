@@ -263,7 +263,7 @@ flowchart LR
   det -->|"POST /api/cron/door-chime<br/>CRON_SECRET"| ev[(door_chime_events<br/>45 s cooldown per camera)]
   ev --> dash["Store dashboard: Door walk-ins<br/>time to first POS order, missed, by hour"]
   ord[(ordering_orders<br/>source = pos)] --> dash
-  ev -->|"GET /api/pos/greeter every 2 s"| tv["TV greeter: Raspberry Pi 3 A+ corner-greeter<br/>(192.168.6.217, tools/greeter-pi/greeter.py)<br/>logo + order QR; 'Welcome to Corner Deli!' + spoken greeting"]
+  ev -->|"GET /api/pos/greeter every 2 s"| tv["TV greeter: Raspberry Pi 3 A+ corner-greeter<br/>(192.168.6.217, tools/greeter-pi/greeter.py)<br/>logo + order QR ⇄ Ogdensburg weather (15 s);<br/>'Welcome to Corner Deli!' + spoken greeting"]
   ev -->|"GET /api/pos/greeter every 2 s"| pc["Front PC: CornerDeliDoorAlarm.exe (tray)<br/>loud ding-dong per walk-in<br/>(fallback page /pos/door-alarm)"]
 ```
 
@@ -277,6 +277,9 @@ flowchart LR
   `tools/greeter-pi/greeter.py` from labwc autostart (Chromium is too heavy for its 512 MB). It shows
   `public/greeter/idle.png` / `welcome.png` (rendered from `/pos/greeter`) and plays `welcome.mp3` to HDMI.
   The QR points at `GREETER_ORDER_URL` (default https://ordercornerdeli.com).
+- TV weather slide: `GET /api/pos/greeter/weather` draws a PNG from api.weather.gov (forecast for the Ogdensburg
+  gridpoint, current reading from KOGS, else KMSS), cached 20 minutes; keeps the last good forecast if weather.gov
+  is down. Requests identify as `CornerDeli-TV/1.0 (ordercornerdeli.com)`.
 - Front PC door alarm: `tools/door-alarm-windows` (Go tray program, download
   `/downloads/CornerDeliDoorAlarm.zip`), started from the PC's shell:startup folder.
 - `/api/pos/greeter` is read-only and unauthenticated but store-network only; it returns just the newest
