@@ -35,16 +35,16 @@ export async function GET() {
       <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", padding: "0 130px", background: `radial-gradient(ellipse at 40% 40%, #1f4a2c 0%, ${GREEN} 72%)`, color: INK, fontFamily: "sans-serif" }}>
         <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
           <div style={{ fontSize: 96, fontWeight: 700, color: GOLD }}>Our hours</div>
-          <div style={{ display: "flex", flexDirection: "column", marginTop: 40 }}>
+          <div style={{ display: "flex", flexDirection: "column", marginTop: 30 }}>
             {rows.map((row) => {
               const isToday = row.dayIndexes.includes(today);
               return (
-                <div key={row.days} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: 1060, padding: "18px 30px", marginBottom: 12, borderRadius: 20, background: isToday ? "rgba(242,182,50,0.16)" : "transparent", border: isToday ? `3px solid ${GOLD}` : "3px solid transparent" }}>
-                  <div style={{ display: "flex", alignItems: "center", fontSize: 54, fontWeight: 700 }}>
+                <div key={row.days} style={{ display: "flex", flexDirection: "column", width: 1120, padding: "22px 34px", marginBottom: 18, borderRadius: 22, background: isToday ? "rgba(242,182,50,0.16)" : "transparent", border: isToday ? `3px solid ${GOLD}` : "3px solid transparent" }}>
+                  <div style={{ display: "flex", alignItems: "center", fontSize: 46, color: MUTED, whiteSpace: "nowrap" }}>
                     {row.days}
-                    {isToday ? <span style={{ marginLeft: 22, padding: "4px 18px", borderRadius: 40, background: GOLD, color: GREEN, fontSize: 30 }}>TODAY</span> : null}
+                    {isToday ? <span style={{ display: "flex", flexShrink: 0, marginLeft: 24, padding: "4px 20px", borderRadius: 40, background: GOLD, color: GREEN, fontSize: 30, fontWeight: 700 }}>TODAY</span> : null}
                   </div>
-                  <div style={{ fontSize: 54, color: row.time === "Closed" ? MUTED : INK }}>{row.time}</div>
+                  <div style={{ display: "flex", fontSize: 76, fontWeight: 700, marginTop: 4, whiteSpace: "nowrap", color: row.time === "Closed" ? MUTED : INK }}>{row.time}</div>
                 </div>
               );
             })}
