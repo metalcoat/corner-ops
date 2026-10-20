@@ -165,7 +165,7 @@
   font:800 17px/1 ui-sans-serif,system-ui,sans-serif;
   text-decoration: none;
 }
-.orderBrand img { width:46px;height:46px;object-fit:contain; }
+.orderBrand img { width:46px;height:46px;object-fit:contain;border-radius:50%; }
 .orderHero .cartJump { background:#fff;color:var(--green); }
 .orderHero .accountLink { color:#fff; }
 .fulfillmentDock { position:sticky;top:66px;z-index:19;display:flex;background:#f6ecd8;border-bottom:1px solid #eadabd; }
@@ -197,8 +197,8 @@
 .orderCancellationNotice{display:grid;gap:3px;margin:14px 0;padding:11px 13px;border:1px solid #d9b978;border-radius:9px;background:#fff8e7;color:#654b18;font-size:12px;line-height:1.35}.orderCancellationNotice strong{font-size:13px}
 .fulfillmentCover { padding:0;background:#f8ecd7;display:none;flex-direction:column;align-items:stretch;justify-content:flex-start; }
 .fulfillmentCover.open { display:flex; }
-.fulfillmentCover .coverBrand { width:100%;min-height:103px;background:var(--green);color:#fff;display:grid;place-items:center;align-content:center;gap:6px; }
-.coverBrand img { width:60px;height:60px;object-fit:contain; }
+.fulfillmentCover .coverBrand { width:100%;min-height:103px;padding:12px 0 10px;background:var(--green);color:#fff;display:grid;place-items:center;align-content:center;gap:6px; }
+.coverBrand img { width:72px;height:72px;object-fit:contain;border-radius:50%;background:#fff; }
 .fulfillmentCover>section { width:min(420px,calc(100% - 18px));align-self:start;margin:8px auto 24px;padding:0 24px 34px;border:1px solid #cfd3d4;border-radius:7px;box-shadow:0 2px 6px #0002;overflow:hidden; }
 .fulfillmentCover .modalServicePicker { width:calc(100% + 48px);margin-left:-24px;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:0;box-shadow:none; }
 .fulfillmentCover .modalServicePicker button { min-height:42px;border-radius:0;font-size:16px; }

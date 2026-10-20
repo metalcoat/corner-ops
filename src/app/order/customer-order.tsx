@@ -389,6 +389,20 @@ export default function CustomerOrder() {
   );
   const populatedCategories =
     catalog?.categories.filter((category) => category.items.length) || [];
+  // A search hides categories (and Featured) with no matching items, so their sections aren't on the page.
+  // Tapping a category clears the search first, then scrolls once that section has been drawn again.
+  const [jumpTo, setJumpTo] = useState<string | null>(null);
+  const jumpToSection = (id: string) => {
+    if (query.trim()) {
+      setQuery("");
+      setJumpTo(id);
+    } else document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+  };
+  useEffect(() => {
+    if (!jumpTo) return;
+    document.getElementById(jumpTo)?.scrollIntoView({ behavior: "smooth" });
+    setJumpTo(null);
+  }, [jumpTo, visible]);
   const featuredItems = catalog?.featuredItems || [];
   const contactComplete = Boolean(
     firstName.trim() &&
@@ -749,7 +763,7 @@ export default function CustomerOrder() {
       ) : null}
       <header className="orderHero">
         <a className="orderBrand" href="/order">
-          <img src="/corner-ops-icon.svg" alt="Corner Deli" />
+          <img src="/corner-deli-logo.png" alt="Corner Deli" />
           <strong>Corner Deli</strong>
         </a>
         <button
@@ -771,7 +785,7 @@ export default function CustomerOrder() {
         <button className="fulfillmentSummary" onClick={()=>{setSetupVisited(true);setFulfillmentOpen(true)}}><span className="fulfillmentBag" aria-hidden="true">⌄</span><strong>{serviceType==="delivery"?"Delivery":serviceType==="curbside"?"Curbside pickup":"In-store pickup"}</strong><span>{timing==="asap"?(catalog&&!catalog.availability.open?"ASAP preorder":"ASAP"):scheduledFor?new Date(scheduledFor).toLocaleString([],{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"Choose future time"}{serviceType==="delivery"&&validatedDelivery?` · ${validatedDelivery.formattedAddress}`:""}</span><em>Change ›</em></button>
       </div>
       <div className={`fulfillmentModal ${fulfillmentOpen?"open":""} ${!setupVisited?"fulfillmentCover":""}`} aria-hidden={!fulfillmentOpen} onMouseDown={event=>{if(setupVisited&&event.target===event.currentTarget)setFulfillmentOpen(false)}}>
-        {!setupVisited&&<div className="coverBrand"><img src="/corner-ops-icon.svg" alt="Corner Deli"/><strong>Corner Deli</strong></div>}
+        {!setupVisited&&<div className="coverBrand"><img src="/corner-deli-logo.png" alt="Corner Deli"/><strong>Corner Deli</strong></div>}
         <section role="dialog" aria-modal="true" aria-label="Pickup or delivery setup">
           {setupVisited&&<header><div><p className="eyebrow">Order setup</p><h2>Pickup or delivery?</h2></div><button onClick={()=>setFulfillmentOpen(false)} aria-label="Close">×</button></header>}
           <div className="servicePicker modalServicePicker"><button className={serviceType!=="delivery"?"selected":""} onClick={()=>setServiceType("pickup")}>▣ Pickup</button><button className={serviceType==="delivery"?"selected":""} onClick={()=>setServiceType("delivery")}>⌂ Delivery</button></div>
@@ -813,24 +827,14 @@ export default function CustomerOrder() {
             Swipe →
           </span>
           {featuredItems.length > 0 && (
-            <button
-              onClick={() =>
-                document
-                  .getElementById("featured-items")
-                  ?.scrollIntoView({ behavior: "smooth" })
-              }
-            >
+            <button onClick={() => jumpToSection("featured-items")}>
               Featured
             </button>
           )}
           {populatedCategories.map((category) => (
             <button
               key={category.id}
-              onClick={() =>
-                document
-                  .getElementById(`category-${category.id}`)
-                  ?.scrollIntoView({ behavior: "smooth" })
-              }
+              onClick={() => jumpToSection(`category-${category.id}`)}
             >
               {category.displayName}
             </button>
