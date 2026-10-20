@@ -41,7 +41,7 @@ const teamLinks: NavLink[] = [
 ];
 
 const businessNames: Business[] = ["Corner Deli", "Tiki"];
-const hiddenNavPaths = ["/privacy", "/terms", "/sms-help", "/app"];
+const hiddenNavPaths = ["/privacy", "/terms", "/sms-help", "/refund-policy", "/app"];
 
 function validBusiness(value: string | null | undefined): value is Business {
   return businessNames.includes(value as Business);

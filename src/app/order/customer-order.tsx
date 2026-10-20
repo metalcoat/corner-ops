@@ -824,9 +824,9 @@ export default function CustomerOrder() {
           <fieldset><legend>When?</legend><div className="choiceRow"><button className="choiceButton" aria-pressed={timing==="asap"} onClick={()=>{setTiming("asap");setScheduledFor("")}}>{catalog&&!catalog.availability.open?"ASAP preorder":"ASAP"}</button><button className="choiceButton" aria-pressed={timing==="future"} onClick={()=>{setTiming("future");setDate(current=>current||localDateValue())}}>{catalog&&!catalog.availability.open?"Future preorder":"Future"}</button></div>{timing==="future"&&<div className="fulfillmentTimeGrid"><label>Date<input aria-label="Future order date" type="date" value={date} min={localDateValue()} onClick={event=>event.currentTarget.showPicker?.()} onChange={event=>{setDate(event.target.value);setScheduledFor("")}}/></label><label>Time<select aria-label="Future order time" value={scheduledFor} onChange={event=>setScheduledFor(event.target.value)}><option value="">Choose a time</option>{slots.map(slot=><option key={slot} value={slot}>{new Date(slot).toLocaleString([],{weekday:"short",hour:"numeric",minute:"2-digit"})}</option>)}</select></label></div>}</fieldset>
           <div id="delivery-address-top" className={serviceType==="delivery"?"topDeliveryAddress active":"topDeliveryAddress"}/>
           <button className="reviewButton setupStart" disabled={(timing==="future"&&!scheduledFor)||(serviceType==="delivery"&&!validatedDelivery&&!savedAddressId)} onClick={()=>{setSetupVisited(true);setFulfillmentOpen(false)}}>START ORDER</button>
-          {!setupVisited&&<><button className="setupBrowse" onClick={()=>{setSetupVisited(true);setFulfillmentOpen(false)}}>VIEW MENU</button><a className="setupLogin" href="/account">Log In / Sign Up</a><p className="setupLegal">By using this app you agree to the <a href="/privacy">Privacy Policy</a> &amp; <a href="/terms">Terms &amp; Conditions</a></p></>}
+          {!setupVisited&&<><button className="setupBrowse" onClick={()=>{setSetupVisited(true);setFulfillmentOpen(false)}}>VIEW MENU</button><a className="setupLogin" href="/account">Log In / Sign Up</a><p className="setupLegal">By using this app you agree to the <a href="/privacy">Privacy Policy</a> &amp; <a href="/terms">Terms &amp; Conditions</a>. All sales are final; see our <a href="/refund-policy">Refund Policy</a>.</p></>}
         </section>
-        {!setupVisited&&<footer className="coverFooter"><strong>Corner Deli</strong><a href="tel:+13153932271">(315) 393-2271</a><span>828 Morris St · Ogdensburg, NY 13669</span></footer>}
+        {!setupVisited&&<footer className="coverFooter"><strong>Corner Deli</strong><a href="tel:+13153932271">(315) 393-2271</a><span>828 Morris St · Ogdensburg, NY 13669</span><a href="/refund-policy">Refund Policy</a></footer>}
       </div>
       <section className="orderIntro">
         <div>
@@ -1350,8 +1350,8 @@ export default function CustomerOrder() {
             </aside>
           )}
           <aside className="orderCancellationNotice">
-            <strong>No-cancellation policy</strong>
-            <span>Once you place this order and it is sent to Corner Deli, it cannot be cancelled.</span>
+            <strong>All sales final</strong>
+            <span>Once you place this order and it is sent to Corner Deli, it cannot be cancelled and no refunds are given. <a href="/refund-policy">Refund policy</a></span>
           </aside>
           <button
             className="reviewButton"
