@@ -264,7 +264,7 @@ flowchart LR
   det -->|"POST /api/cron/door-chime<br/>CRON_SECRET"| ev[(door_chime_events<br/>45 s cooldown per camera)]
   ev --> dash["Store dashboard: Door walk-ins<br/>time to first POS order, missed, by hour"]
   ord[(ordering_orders<br/>source = pos)] --> dash
-  ev -->|"GET /api/pos/greeter every 2 s"| tv["TV greeter: Raspberry Pi 3 A+ corner-greeter<br/>(192.168.6.217, tools/greeter-pi/greeter.py)<br/>logo + order QR → Ogdensburg weather → fun fact (15 s each);<br/>'Welcome to Corner Deli!' + spoken greeting"]
+  ev -->|"GET /api/pos/greeter every 2 s"| tv["TV greeter: Raspberry Pi 3 A+ corner-greeter<br/>(192.168.6.217, tools/greeter-pi/greeter.py)<br/>logo + order QR → weather → fun fact → hours (15 s each);<br/>'Welcome to Corner Deli!' + spoken greeting"]
   ev -->|"GET /api/pos/greeter every 2 s"| pc["Front PC: CornerDeliDoorAlarm.exe (tray)<br/>loud ding-dong per walk-in<br/>(fallback page /pos/door-alarm)"]
 ```
 
@@ -281,6 +281,9 @@ flowchart LR
   `tools/greeter-pi/greeter.py` from labwc autostart (Chromium is too heavy for its 512 MB). It shows
   `public/greeter/idle.png` / `welcome.png` (rendered from `/pos/greeter`) and plays `welcome.mp3` to HDMI.
   The QR points at `GREETER_ORDER_URL` (default https://ordercornerdeli.com).
+- TV hours slide: `src/lib/greeter-hours.ts` (Sunday first; Sun–Thu 10:30 AM–9:30 PM, Fri–Sat 10:30 AM–10:30 PM
+  as of 2026-10-19), drawn by `GET /api/pos/greeter/hours` with today's row picked out; the Pi fetches it with the
+  weather. Not linked to online-ordering hours (ordering_business_hours is not set up yet).
 - TV fun facts: `src/lib/greeter-facts.ts` (edit freely; keep them short and true). `GET /api/pos/greeter/facts`
   gives the count and a version; the Pi downloads `GET /api/pos/greeter/fact?n=` pictures again when the version
   changes (checked at start and every 6 hours).

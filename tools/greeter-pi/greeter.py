@@ -3,8 +3,9 @@
 
 Chromium is too heavy for this Pi (512 MB), so this shows pictures full screen
 instead: the logo with the order-online QR code, the Ogdensburg weather
-(GET /api/pos/greeter/weather) and a "Did you know?" fun fact (GET /api/pos/greeter/fact,
-a different one each time round) take turns every 15 seconds, and "Welcome to Corner
+(GET /api/pos/greeter/weather), a "Did you know?" fun fact (GET /api/pos/greeter/fact,
+a different one each time round) and the opening hours (GET /api/pos/greeter/hours) take
+turns every 15 seconds, and "Welcome to Corner
 Deli!" interrupts either for 8 seconds with a spoken greeting whenever the entrance
 camera records a walk-in. The pictures and the greeting come from the app
 (public/greeter/); walk-ins come from GET /api/pos/greeter, polled every 2 seconds.
@@ -21,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 
 import gi
@@ -73,6 +75,22 @@ def refresh_weather():
         save("weather.json", info)
     except Exception as error:  # noqa: BLE001
         log(f"could not refresh weather: {error}")
+    refresh_hours()
+
+
+def refresh_hours():
+    """The "Our hours" slide, fetched with the weather so its TODAY row moves soon after midnight.
+    A 404 means no hours are set in the app: the slide leaves the rotation."""
+    try:
+        data = fetch("/api/pos/greeter/hours", timeout=60)
+        if not data.startswith(b"\x89PNG"):
+            raise ValueError("not a picture")
+        save("hours.png", data)
+    except urllib.error.HTTPError as error:
+        if error.code == 404 and os.path.exists(os.path.join(CACHE, "hours.png")):
+            os.remove(os.path.join(CACHE, "hours.png"))
+    except Exception as error:  # noqa: BLE001
+        log(f"could not refresh hours: {error}")
 
 
 def refresh_facts():
@@ -320,7 +338,8 @@ class Greeter(Gtk.Window):
     def load_pictures(self):
         """Turn each picture into a screen-ready surface once; the pixbufs are dropped after."""
         window = self.get_window()
-        for name in ("idle", "welcome", "weather"):
+        self.surfaces.pop("hours", None)
+        for name in ("idle", "welcome", "weather", "hours"):
             path = os.path.join(CACHE, f"{name}.png")
             if os.path.exists(path) and window:
                 pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
@@ -343,7 +362,8 @@ class Greeter(Gtk.Window):
     def on_draw(self, _widget, cr):
         cr.set_source_rgb(0.06, 0.11, 0.08)
         cr.paint()
-        surface = self.surfaces.get(self.current)
+        # A slide that was just withdrawn (e.g. hours removed) falls back to the logo screen.
+        surface = self.surfaces.get(self.current) or self.surfaces.get("idle")
         if not surface:
             return False
         scale, ox, oy = self.layout()
@@ -400,8 +420,8 @@ class Greeter(Gtk.Window):
             return False
 
     def rotate(self):
-        """Logo/QR, weather and a fun fact take turns while nobody is being welcomed."""
-        order = ["idle", "weather", "fact"]
+        """Logo/QR, weather, a fun fact and the hours take turns while nobody is being welcomed."""
+        order = ["idle", "weather", "fact", "hours"]
         position = order.index(self.idle_slide) if self.idle_slide in order else 0
         for step in range(1, len(order) + 1):
             candidate = order[(position + step) % len(order)]
