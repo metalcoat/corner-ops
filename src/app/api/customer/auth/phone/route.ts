@@ -6,6 +6,7 @@ import { getSql } from "@/lib/db";
 import { normalizeCallerPhone } from "@/lib/ordering-core";
 import { displayPhone } from "@/lib/ordering-customers";
 import { sendTransactionalSms } from "@/lib/sms-notifications";
+import { smsCodesShownOnScreen } from "@/lib/sms-test-mode";
 
 export const runtime = "nodejs";
 const digest=(phone:string,code:string)=>createHmac("sha256",process.env.SESSION_SECRET||"").update(`${phone}:${code}`).digest("hex");
@@ -23,6 +24,8 @@ export async function POST(request:Request){
       const match=(await sql`SELECT customer.id FROM ordering_customer_phones phone JOIN ordering_customers customer ON customer.id=phone.customer_id WHERE customer.business='Corner Deli' AND customer.active=TRUE AND customer.merged_into_customer_id IS NULL AND phone.normalized_phone=${phone} ORDER BY phone.is_primary DESC,customer.created_at LIMIT 1`)[0];
       const code=String(randomInt(0,1000000)).padStart(6,"0");
       await sql`INSERT INTO ordering_customer_login_phone_codes(id,normalized_phone,customer_id,code_hash,expires_at)VALUES(${randomUUID()},${phone},${match?.id||null},${digest(phone,code)},NOW()+INTERVAL '10 minutes')`;
+      // Dev test mode: show the code on screen instead of texting it (see smsCodesShownOnScreen).
+      if(smsCodesShownOnScreen())return isoJson({sent:true,testCode:code});
       await sendTransactionalSms(phone,`Your Corner Deli sign-in code is ${code}. It expires in 10 minutes.`);
       return isoJson({sent:true});
     }

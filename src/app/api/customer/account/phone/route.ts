@@ -6,6 +6,7 @@ import { ensureCustomerOrderingSchema } from "@/lib/customer-ordering-schema";
 import { normalizeCallerPhone } from "@/lib/ordering-core";
 import { displayPhone } from "@/lib/ordering-customers";
 import { sendTransactionalSms } from "@/lib/sms-notifications";
+import { smsCodesShownOnScreen } from "@/lib/sms-test-mode";
 export const runtime = "nodejs";
 const hash = (value:string) => createHash("sha256").update(`${process.env.SESSION_SECRET}:customer-phone:${value}`).digest();
 export async function POST(request:Request){
@@ -24,6 +25,7 @@ export async function POST(request:Request){
       if(Number(recent[0]?.count||0)>=5)throw new Error("Too many verification requests. Try again in 15 minutes.");
       const code=String(randomInt(0,1000000)).padStart(6,"0");
       await sql`INSERT INTO ordering_customer_phone_codes(id,customer_id,normalized_phone,code_hash,expires_at)VALUES(${randomUUID()},${session.customerId},${phone},${hash(code).toString("hex")},NOW()+INTERVAL '10 minutes')`;
+      if(smsCodesShownOnScreen())return isoJson({sent:true,testCode:code});
       await sendTransactionalSms(phone,`Your Corner Deli verification code is ${code}. It expires in 10 minutes.`);return isoJson({sent:true});
     }
     if(action==="verify"){

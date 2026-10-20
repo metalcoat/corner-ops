@@ -249,6 +249,7 @@ export default function CustomerOrder() {
     [phoneVerifyOpen, setPhoneVerifyOpen] = useState(false),
     [phoneVerifySent, setPhoneVerifySent] = useState(false),
     [phoneVerifyCode, setPhoneVerifyCode] = useState(""),
+    [phoneTestCode, setPhoneTestCode] = useState(""),
     [email, setEmail] = useState(""),
     [review, setReview] = useState<any>(null),
     [completedOrder, setCompletedOrder] = useState<any>(null),
@@ -586,7 +587,13 @@ export default function CustomerOrder() {
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Phone verification failed.");
-      if (!phoneVerifySent) { setPhoneVerifySent(true); return; }
+      if (!phoneVerifySent) {
+        setPhoneVerifySent(true);
+        // Dev test mode: no text is sent; the code comes back to show on screen.
+        if (body.testCode) { setPhoneTestCode(String(body.testCode)); setPhoneVerifyCode(String(body.testCode)); }
+        return;
+      }
+      setPhoneTestCode("");
       setPhoneVerified(true);
       setCatalog(current=>current?{...current,customer:{...current.customer,authenticated:true}}:current);
       setPhoneVerifyOpen(false);
@@ -780,7 +787,7 @@ export default function CustomerOrder() {
           Account
         </a>
       </header>
-      {phoneVerifyOpen&&<div className="fulfillmentModal open phoneVerifyModal"><section role="dialog" aria-modal="true" aria-label="Verify mobile number"><header><div><p className="eyebrow">One quick step</p><h2>Verify your phone</h2></div><button onClick={()=>setPhoneVerifyOpen(false)} aria-label="Close">×</button></header><p>We’ll text a six-digit code to <strong>{phone}</strong>. This confirms we can reach you if there is a question about your order.</p>{message&&<p className="orderError" role="alert">{message}</p>}{phoneVerifySent&&<input className="phoneVerifyInput" inputMode="numeric" autoComplete="one-time-code" aria-label="SMS verification code" placeholder="6-digit code" maxLength={6} value={phoneVerifyCode} onChange={event=>setPhoneVerifyCode(event.target.value.replace(/\D/g,""))}/>}<button className="reviewButton" disabled={busy||phone.replace(/\D/g,"").length!==10||(phoneVerifySent&&phoneVerifyCode.length!==6)} onClick={()=>void verifyOrderPhone()}>{busy?"Please wait…":phoneVerifySent?"VERIFY & PLACE ORDER":"TEXT ME A CODE"}</button>{phoneVerifySent&&<button className="accountLink" onClick={()=>{setPhoneVerifyOpen(false);setPhoneVerifySent(false);setPhoneVerifyCode("")}}>Change phone number</button>}</section></div>}
+      {phoneVerifyOpen&&<div className="fulfillmentModal open phoneVerifyModal"><section role="dialog" aria-modal="true" aria-label="Verify mobile number"><header><div><p className="eyebrow">One quick step</p><h2>Verify your phone</h2></div><button onClick={()=>setPhoneVerifyOpen(false)} aria-label="Close">×</button></header><p>We’ll text a six-digit code to <strong>{phone}</strong>. This confirms we can reach you if there is a question about your order.</p>{message&&<p className="orderError" role="alert">{message}</p>}{phoneTestCode&&<p className="phoneTestCode" role="status"><strong>Test mode:</strong> no text was sent. Your code is <b>{phoneTestCode}</b> (filled in for you).</p>}{phoneVerifySent&&<input className="phoneVerifyInput" inputMode="numeric" autoComplete="one-time-code" aria-label="SMS verification code" placeholder="6-digit code" maxLength={6} value={phoneVerifyCode} onChange={event=>setPhoneVerifyCode(event.target.value.replace(/\D/g,""))}/>}<button className="reviewButton" disabled={busy||phone.replace(/\D/g,"").length!==10||(phoneVerifySent&&phoneVerifyCode.length!==6)} onClick={()=>void verifyOrderPhone()}>{busy?"Please wait…":phoneVerifySent?"VERIFY & PLACE ORDER":"TEXT ME A CODE"}</button>{phoneVerifySent&&<button className="accountLink" onClick={()=>{setPhoneVerifyOpen(false);setPhoneVerifySent(false);setPhoneVerifyCode("")}}>Change phone number</button>}</section></div>}
       <div className="fulfillmentDock">
         <button className="fulfillmentSummary" onClick={()=>{setSetupVisited(true);setFulfillmentOpen(true)}}><span className="fulfillmentBag" aria-hidden="true">⌄</span><strong>{serviceType==="delivery"?"Delivery":serviceType==="curbside"?"Curbside pickup":"In-store pickup"}</strong><span>{timing==="asap"?(catalog&&!catalog.availability.open?"ASAP preorder":"ASAP"):scheduledFor?new Date(scheduledFor).toLocaleString([],{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"Choose future time"}{serviceType==="delivery"&&validatedDelivery?` · ${validatedDelivery.formattedAddress}`:""}</span><em>Change ›</em></button>
       </div>

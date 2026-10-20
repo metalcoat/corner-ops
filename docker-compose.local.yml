@@ -46,6 +46,8 @@ services:
       DELI_ORIGIN_ADDRESS: ${DELI_ORIGIN_ADDRESS:-}
       MAP_TILE_URL: ${MAP_TILE_URL:-}
       LOCAL_DEVELOPMENT: ${LOCAL_DEVELOPMENT:-false}
+      # Dev only: show customer sign-in/verification codes on screen instead of texting (needs no Telnyx key).
+      DEV_SHOW_SMS_CODES: ${DEV_SHOW_SMS_CODES:-false}
       SESSION_SECRET: ${SESSION_SECRET}
       APP_PASSWORD: ${APP_PASSWORD}
       APP_EMAIL: ${APP_EMAIL:-}

@@ -309,6 +309,8 @@ flowchart LR
 - Staging must never send texts/emails/pushes or reach providers — keep using `make-staging-env.py`.
 - Payroll: never press Submit unless `PAYROLL_RELIEF_AUTO_SUBMIT=1` and the owner has approved that.
 - Run test sends against staging or with mocks; dev .env holds real credentials.
+- Dev has no Telnyx settings, so it can't text. `DEV_SHOW_SMS_CODES=true` in the dev .env shows customer sign-in and
+  verification codes on screen instead (test mode); it can never switch on where Telnyx is configured (production).
 - Timestamps from Postgres come back as raw text (production behaviour); dev-only APIs return ISO via `isoJson`.
 
 ## 10. Open items before the switch
