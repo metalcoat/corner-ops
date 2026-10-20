@@ -55,5 +55,6 @@ export async function orderingStoreDashboard(){
     {key:"timed",label:"Timed orders due within four hours",count:Number(summary[0]?.timed_upcoming||0),href:"/pos/deli/orders"},
     {key:"unpaid",label:"Open orders with a balance",count:Number(summary[0]?.unpaid_open||0),href:"/pos/deli/orders"}
   ];
-  return{generatedAt:new Date().toISOString(),summary:summary[0],tasks,timedOrders,unpaidOrders,deliveries,openOrders,routePlans:deliveryRoutePlans(deliveryRows,new Date(),await deliLocation()),activity};
+  const origin=await deliLocation();
+  return{generatedAt:new Date().toISOString(),summary:summary[0],tasks,timedOrders,unpaidOrders,deliveries,openOrders,routePlans:deliveryRoutePlans(deliveryRows,new Date(),origin),activity,origin,mapTileUrl:process.env.MAP_TILE_URL?.trim()||null};
 }
