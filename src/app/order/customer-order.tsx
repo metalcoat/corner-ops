@@ -404,7 +404,30 @@ export default function CustomerOrder() {
     document.getElementById(jumpTo)?.scrollIntoView({ behavior: "smooth" });
     setJumpTo(null);
   }, [jumpTo, visible]);
+  // Curbside is card-only: drop a "pay at pickup" choice made before switching to curbside.
+  useEffect(() => {
+    if (serviceType === "curbside" && paymentChoice === "pickup") setPaymentChoice(null);
+  }, [serviceType, paymentChoice]);
   const featuredItems = catalog?.featuredItems || [];
+  // The first thing still needed before the order can be placed, shown on the button so it is
+  // never just greyed out without saying why.
+  const placeOrderBlocker = !cart.length
+    ? "Add an item to your order"
+    : !firstName.trim()
+      ? "Enter your first name"
+      : phone.replace(/\D/g, "").length !== 10
+        ? "Enter a 10-digit phone number"
+        : !/^\S+@\S+\.\S+$/.test(email.trim())
+          ? "Enter your email address"
+          : serviceType === "delivery" && (deliveryAddress.trim().length < 5 || (!savedAddressId && !addressValidationToken))
+            ? "Confirm your delivery address"
+            : timing === "future" && !scheduledFor
+              ? "Choose a pickup time"
+              : !catalog?.availability.orderable && timing === "asap"
+                ? "Choose a future time"
+                : !paymentChoice
+                  ? "Choose a payment method"
+                  : "";
   const contactComplete = Boolean(
     firstName.trim() &&
       phone.replace(/\D/g, "").length === 10 &&
@@ -1303,17 +1326,22 @@ export default function CustomerOrder() {
               >
                 Credit or debit
               </button>
-              <button
-                type="button"
-                className="choiceButton"
-                aria-pressed={paymentChoice === "pickup"}
-                onClick={() => setPaymentChoice("pickup")}
-              >
-                {serviceType === "delivery"
-                  ? "Pay at delivery"
-                  : "Pay at pickup"}
-              </button>
+              {serviceType !== "curbside" && (
+                <button
+                  type="button"
+                  className="choiceButton"
+                  aria-pressed={paymentChoice === "pickup"}
+                  onClick={() => setPaymentChoice("pickup")}
+                >
+                  {serviceType === "delivery"
+                    ? "Pay at delivery"
+                    : "Pay at pickup"}
+                </button>
+              )}
             </div>
+          )}
+          {serviceType === "curbside" && (
+            <p className="paymentNote">Curbside orders are paid online, so we can bring them straight out to your car.</p>
           )}
           {catalog && !catalog.availability.open && (
             <aside className="closedNotice preOpenNotice">
@@ -1327,28 +1355,13 @@ export default function CustomerOrder() {
           </aside>
           <button
             className="reviewButton"
-            disabled={
-              !paymentChoice ||
-              !cart.length ||
-              busy ||
-              !firstName.trim() ||
-              phone.replace(/\D/g, "").length !== 10 ||
-              !/^\S+@\S+\.\S+$/.test(email.trim()) ||
-              (timing === "future" && !scheduledFor) ||
-              (!catalog?.availability.orderable && timing === "asap") ||
-              (serviceType === "delivery" &&
-                deliveryAddress.trim().length < 5) ||
-              (serviceType === "delivery" &&
-                !savedAddressId &&
-                !addressValidationToken) ||
-              addressBusy
-            }
+            disabled={Boolean(placeOrderBlocker) || busy || addressBusy}
             onClick={() => void placeOrder()}
           >
             {busy
               ? "Placing order…"
-              : !paymentChoice
-                ? "Choose a payment method"
+              : placeOrderBlocker
+                ? placeOrderBlocker
                 : paymentChoice === "card"
                   ? "Place order and pay"
                   : `Place order — pay at ${serviceType === "delivery" ? "delivery" : "pickup"}`}
