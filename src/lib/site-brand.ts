@@ -4,7 +4,9 @@ export type SiteBrand = {
   teamHost: boolean;
 };
 
-const OWNER_BRAND: SiteBrand = { name: "Corner Ops", icon: "/corner-ops-icon.svg", teamHost: false };
+// Hosts not listed below (the dev and staging sites by IP, localhost) use the Corner Deli logo as their icon
+// and favicon; the public hosts keep their own.
+const OWNER_BRAND: SiteBrand = { name: "Corner Ops", icon: "/corner-deli-logo.png", teamHost: false };
 
 export function siteBrandForHost(hostname: string): SiteBrand {
   switch (hostname.toLowerCase().split(":")[0]) {
