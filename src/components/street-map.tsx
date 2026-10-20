@@ -78,8 +78,10 @@ export default function StreetMap({
         const wrapped = ((tx % count) + count) % count;
         const src = template.replace("{z}", String(zoom)).replace("{x}", String(wrapped)).replace("{y}", String(ty));
         tiles.push(
+          // The app's Referrer-Policy (same-origin) sends no referrer to other sites, but the OpenStreetMap
+          // tile policy requires one and some browsers get "access blocked" tiles without it: send our origin.
           // eslint-disable-next-line @next/next/no-img-element
-          <img key={`${zoom}/${tx}/${ty}`} src={src} alt="" draggable={false} style={{ left: tx * TILE - left, top: ty * TILE - top }} />,
+          <img key={`${zoom}/${tx}/${ty}`} src={src} alt="" draggable={false} referrerPolicy="strict-origin-when-cross-origin" style={{ left: tx * TILE - left, top: ty * TILE - top }} />,
         );
       }
     }
