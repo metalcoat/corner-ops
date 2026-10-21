@@ -43,3 +43,22 @@ also matches the `lwrespawn` shell and nothing restarts it until the Pi reboots.
 ```sh
 pkill -f '^/usr/bin/python3 /home/chris/greeter/greeter.py'
 ```
+
+## TV on and off (HDMI-CEC)
+
+`tv-power.sh on|off|status` switches the greeter TV over HDMI-CEC (`cec-ctl`, already on the Pi; user
+`chris` can use `/dev/cec0` through the `video` group). "on" wakes the TV, switches it to the Pi's input
+and retries up to three times. Schedule (store hours, from `src/lib/greeter-hours.ts`): on at 10:20 AM
+every day, off at 9:35 PM Sunday to Thursday and 10:35 PM Friday and Saturday. Install:
+
+```sh
+scp tools/greeter-pi/tv-power.sh chris@corner-greeter:greeter/
+ssh chris@corner-greeter 'chmod +x ~/greeter/tv-power.sh && (crontab -l 2>/dev/null; cat) | crontab -' <<'CRON'
+20 10 * * *   /home/chris/greeter/tv-power.sh on  >> /home/chris/greeter/tv-power.log 2>&1
+35 21 * * 0-4 /home/chris/greeter/tv-power.sh off >> /home/chris/greeter/tv-power.log 2>&1
+35 22 * * 5,6 /home/chris/greeter/tv-power.sh off >> /home/chris/greeter/tv-power.log 2>&1
+CRON
+```
+
+The Pi's clock is America/New_York, so the times follow daylight saving. Check with
+`~/greeter/tv-power.sh status` (prints `on` or `standby`) and `~/greeter/tv-power.log`.
