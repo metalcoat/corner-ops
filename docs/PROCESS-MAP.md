@@ -303,6 +303,24 @@ flowchart LR
   first Sunday of November and GMT-4 on the second Sunday of March.
 - Dev only so far (port 3000). The service is not installed until the camera line is in place.
 
+## 8b. TV menu board (Corner Deli)
+
+```mermaid
+flowchart LR
+  pos[(ordering_menu_items + sizes<br/>prices, available)] -->|"GET /api/pos/menu-board?tv=1..3<br/>every 60 s"| tv["Menu TVs 1–3 (Fire TV, kiosk browser)<br/>/pos/menu-board?tv=N"]
+  layout["src/lib/menu-board-layout.ts<br/>screens, promos, ticker, seasons"] --> pos2["buildBoard()"]
+  pos --> pos2 --> tv
+```
+
+- Three menu TVs rotate menu screens (12 s) and promo screens (8 s) with a crawling ticker. Items are named
+  "POS category|POS item", so prices and sold-out marks come straight from the POS; a changed price flashes. A promo
+  whose item is sold out or missing is skipped. Missing items are listed in the API's `missing`.
+- Seasons by store date (America/New_York): Halloween 10-21–10-31, Thanksgiving 11-12–11-26 (free turkey dinners on
+  Thanksgiving Day), Christmas 11-27–12-25 (gift cards). `?season=` previews one; `?motion=low` calms a slow TV.
+- Store-network only, like the rest of `/pos`. Fonts and the promo photos are in `public/menu-board/`.
+- The TVs are Fire TVs: a kiosk browser app opens the page. The Pis only switch the TVs on and off over HDMI-CEC
+  (`tools/greeter-pi/tv-power.sh`). Dev only so far (port 3000).
+
 ## 9. Guardrails for assistants
 
 - Follow `AGENTS.md`: no merging `main`, no production deploys or production data changes without the owner's
