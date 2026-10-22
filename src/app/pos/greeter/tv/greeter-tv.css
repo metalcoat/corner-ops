@@ -99,3 +99,11 @@ html:has(.greeterTv), body:has(.greeterTv) { margin: 0; height: 100%; background
 @keyframes wxDrift { from { translate: calc(-14 * var(--u)) 0 } to { translate: calc(14 * var(--u)) 0 } }
 @keyframes wxFall { from { transform: translateY(0); opacity: 1 } to { transform: translateY(calc(70 * var(--u))); opacity: 0 } }
 @keyframes wxFlash { 0%, 80% { opacity: 0 } 82%, 90% { opacity: 1 } 92%, 100% { opacity: 0 } }
+/* One or two games (Monday/Thursday night): big cards in the middle. */
+.gtGames.few { grid-template-columns: repeat(auto-fit, minmax(0, 760px)); justify-content: center; margin-top: 60px; gap: 40px }
+.gtGames.few .gtGame { padding: 34px 40px; gap: 18px }
+.gtGames.few .gtTeam { font-size: 60px; grid-template-columns: 100px 1fr auto auto; gap: 24px }
+.gtGames.few .gtTeam img, .gtGames.few .gtTeam i { width: 100px; height: 100px }
+.gtGames.few .gtTeam small { font-size: 36px }
+.gtGames.few .gtTeam em { font-size: 76px }
+.gtGames.few .gtStatus { font-size: 40px; padding-top: 16px }

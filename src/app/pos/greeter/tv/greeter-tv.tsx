@@ -268,7 +268,7 @@ function NflSlide({ games, on }: { games: NflGame[]; on: boolean }) {
         <h2>{sunday === "Sunday" ? "NFL Sunday" : `${sunday} Night Football`}</h2>
         <span>{live ? "Live scores" : games.every((g) => g.state === "post") ? "Final scores" : "Today's games"}</span>
       </header>
-      <div className={`gtGames${games.length > 8 ? " many" : ""}`}>
+      <div className={`gtGames${games.length > 8 ? " many" : games.length <= 2 ? " few" : ""}`}>
         {games.map((g) => (
           <div key={g.id} className={`gtGame ${g.state}${g.favorite ? " fav" : ""}`}>
             {[g.away, g.home].map((t) => (
