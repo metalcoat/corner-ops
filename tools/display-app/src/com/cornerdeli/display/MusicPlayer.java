@@ -47,7 +47,7 @@ final class MusicPlayer {
         // Keep the volume where the store wants it and the music in the state the page asked for.
         handler.postDelayed(new Runnable() {
             @Override public void run() {
-                if (!playlist.isEmpty()) {
+                if (!playlist.isEmpty() && view.getVisibility() != View.VISIBLE) { // hands off while pairing
                     view.evaluateJavascript(String.format(VOLUME_JS, volume), null);
                     view.evaluateJavascript(paused
                         ? "(function(){var v=document.querySelector('video');if(v&&!v.paused)v.pause();})()"
@@ -81,7 +81,10 @@ final class MusicPlayer {
         if (show && view.getUrl() == null) view.loadUrl("https://www.youtube.com/tv");
         view.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
         if (show) { view.bringToFront(); view.requestFocus(); }
-        else CookieManager.getInstance().flush();
+        else {
+            CookieManager.getInstance().flush();
+            if (!playlist.isEmpty()) view.loadUrl("https://www.youtube.com/tv#/watch?list=" + playlist); // back to the music, now signed in
+        }
     }
 
     void destroy() {

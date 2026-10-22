@@ -32,3 +32,19 @@ adb -s <tv>:5555 shell pm disable-user --user 0 de.ozerov.fully   # keep Fully f
 ```
 
 Raise `versionCode` in `AndroidManifest.xml` for each update.
+
+## Greeter music (YouTube, no ads)
+
+The greeter page asks the app (`window.CornerDeliTv`) to play the season's playlist from `src/lib/greeter-playlists.ts`.
+The app plays it in a hidden second WebView running YouTube's TV site (`youtube.com/tv`, identifying as the Fire TV
+YouTube app), signed in to the store's YouTube Premium account, so no ads play. It pauses for each spoken welcome.
+
+Pairing was done once on 2026-10-22. To pair again (new account, or signed out):
+
+```sh
+adb -s 192.168.6.83:5555 shell am start -n com.cornerdeli.display/.MainActivity --ez music_setup true
+```
+
+YouTube's sign-in screen comes up on the TV; choose "Sign in with your phone" and enter the code at yt.be/activate,
+pick the account, then run the same command with `--ez music_setup false`. The app turns on WebView debugging, so
+`adb forward tcp:9333 localabstract:webview_devtools_remote_<pid>` lets the server look at either page.
