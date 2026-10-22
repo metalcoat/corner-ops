@@ -80,7 +80,7 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
       if (stopped || !youTube.current) return;
       player = new YT.Player(youTube.current, {
         width: 356, height: 200,
-        playerVars: { listType: "playlist", list: playlist, autoplay: 1, loop: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1 },
+        playerVars: { listType: "playlist", list: playlist, autoplay: 1, loop: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1, origin: window.location.origin },
         events: {
           onReady: () => {
             player?.setVolume(MUSIC_VOLUME * 100);

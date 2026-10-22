@@ -9,7 +9,8 @@ import "../../menu-board/menu-board.css";
 import "./greeter-tv.css";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Welcome | Corner Deli" };
+// YouTube refuses to play embedded videos when the page sends no referrer (the site default is same-origin).
+export const metadata: Metadata = { title: "Welcome | Corner Deli", referrer: "strict-origin-when-cross-origin" };
 
 /**
  * The front-door greeter TV (Fire TV, Fully Kiosk): logo and order QR, weather, a fun fact and
