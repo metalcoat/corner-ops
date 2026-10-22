@@ -1,0 +1,42 @@
+html:has(.greeterTv), body:has(.greeterTv) { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none }
+
+/* 1920x1080 stage scaled to the screen; seasons recolor the logo/QR and welcome screens. */
+.greeterTv { position: fixed; inset: 0; background: #000 }
+.gtStage {
+  --bg-a: #1f4a2c; --bg-b: #0f1d14; --ink: #fdf8ec; --accent: #f2b632; --muted: #c9d6c8; --orange: #f06a24;
+  --display: "MB Slab", "Rockwell", Georgia, serif;
+  position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden; transform-origin: 0 0;
+  background: radial-gradient(ellipse at 50% 35%, var(--bg-a) 0%, var(--bg-b) 70%); color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.gtStage[data-season="halloween"] { --bg-a: #3a1d4a; --bg-b: #0b0610; --accent: #ff9a1f; --muted: #cbb8d8; --orange: #8be04e }
+.gtStage[data-season="thanksgiving"] { --bg-a: #5a2e12; --bg-b: #1e1008; --accent: #f4b43a; --muted: #d9bfa0; --orange: #e8622a }
+.gtStage[data-season="christmas"] { --bg-a: #1c4a30; --bg-b: #0a1a10; --accent: #f2d27a; --muted: #c8dccb; --orange: #e0393e }
+
+.gtSlide { position: absolute; inset: 0; opacity: 0; transition: opacity .8s ease, transform .8s ease; transform: scale(1.02) }
+.gtSlide.on { opacity: 1; transform: none }
+.gtPicture { width: 1920px; height: 1080px; object-fit: cover }
+.gtIdle, .gtHello { display: grid; place-items: center; align-content: center; gap: 44px; text-align: center }
+.gtLogo { width: 450px; height: 450px; border-radius: 50%; box-shadow: 0 20px 60px rgba(0,0,0,.45) }
+.gtIdle.on .gtLogo { animation: gtFloat 6s ease-in-out infinite }
+@keyframes gtFloat { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-14px) } }
+.gtOrder { display: flex; align-items: center; gap: 58px; padding: 26px 58px; border-radius: 22px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18) }
+.gtQr { width: 238px; height: 238px; padding: 11px; border-radius: 13px; background: #fff; box-sizing: border-box }
+.gtQr svg { display: block; width: 100%; height: 100% }
+.gtOrder div:last-child { display: grid; gap: 11px; text-align: left }
+.gtOrder strong { font-size: 56px; font-weight: 800 }
+.gtOrder span { font-size: 32px; color: var(--muted) }
+
+.gtHello { background: radial-gradient(ellipse at 50% 35%, var(--bg-a) 0%, var(--bg-b) 70%); z-index: 5; gap: 26px }
+.gtHello img { width: 324px; border-radius: 50%; box-shadow: 0 20px 60px rgba(0,0,0,.45) }
+.gtHello h1 { margin: 0; font-size: 118px; line-height: 1.05; font-weight: 900; color: var(--accent); text-shadow: 0 6px 26px rgba(0,0,0,.4) }
+.gtHello p { margin: 0; font-size: 54px }
+.gtHello .gtHoliday { font-family: var(--display); font-size: 64px; color: var(--orange) }
+.gtHello.on img { animation: mbSpin 1s ease both }
+.gtHello.on h1 { animation: mbPop .8s .15s cubic-bezier(.2,1.6,.4,1) both }
+
+.gtRibbon { z-index: 6 }
+.gtStage[data-season="halloween"] .gtRibbon { color: #140a1a }
+.gtStage .mbFx { z-index: 4 }
+.gtOffline { position: absolute; right: 22px; bottom: 22px; width: 18px; height: 18px; border-radius: 50%; background: #d33; z-index: 7 }
+@media (prefers-reduced-motion: reduce) { .gtSlide { transition: none } .gtIdle.on .gtLogo { animation: none } }
