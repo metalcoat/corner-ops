@@ -69,3 +69,33 @@ html:has(.greeterTv), body:has(.greeterTv) { margin: 0; height: 100%; background
 .gtGames.many .gtTeam { font-size: 30px; grid-template-columns: 44px 1fr auto auto }
 .gtGames.many .gtTeam img, .gtGames.many .gtTeam i { width: 44px; height: 44px }
 .gtGames.many .gtTeam em { font-size: 38px }
+
+/* Moving weather over the weather picture, in the spots weather/info gives (sky + one per day card). */
+.gtWeatherArt { pointer-events: none; transform: none }
+.wx { position: absolute; overflow: hidden; --u: 1px }
+.wx.big { --u: 2.4px }
+.wx i { position: absolute; display: block }
+.wx .sun { width: calc(80 * var(--u)); height: calc(80 * var(--u)); left: 50%; top: 50%; margin: calc(-40 * var(--u)) 0 0 calc(-40 * var(--u)); border-radius: 50%;
+  background: radial-gradient(circle, #ffd54a 0 55%, transparent 56%), repeating-conic-gradient(rgba(255,213,74,.9) 0 8deg, transparent 8deg 30deg);
+  -webkit-mask: radial-gradient(circle, #000 70%, transparent 71%); mask: radial-gradient(circle, #000 70%, transparent 71%); animation: wxSpin 24s linear infinite; filter: drop-shadow(0 0 calc(12 * var(--u)) rgba(255,200,60,.6)) }
+.wx.partly_cloudy .sun { left: 40%; top: 42% }
+.wx .moon { width: calc(60 * var(--u)); height: calc(60 * var(--u)); left: 50%; top: 45%; margin: calc(-30 * var(--u)) 0 0 calc(-30 * var(--u)); border-radius: 50%; box-shadow: calc(-14 * var(--u)) calc(6 * var(--u)) 0 0 #f4ecd0; animation: wxBob 6s ease-in-out infinite }
+.wx .star { width: calc(5 * var(--u)); height: calc(5 * var(--u)); border-radius: 50%; background: #fff; animation: wxTwinkle 2.4s ease-in-out infinite }
+.wx .s1 { left: 20%; top: 25% } .wx .s2 { left: 75%; top: 20%; animation-delay: .8s } .wx .s3 { left: 70%; top: 70%; animation-delay: 1.6s }
+.wx .cloud { width: calc(90 * var(--u)); height: calc(34 * var(--u)); border-radius: calc(20 * var(--u)); background: #e9eef2;
+  box-shadow: calc(18 * var(--u)) calc(-16 * var(--u)) 0 calc(4 * var(--u)) #e9eef2, calc(48 * var(--u)) calc(-6 * var(--u)) 0 0 #e9eef2; animation: wxDrift 9s ease-in-out infinite alternate }
+.wx .c1 { left: 30%; top: 48% }
+.wx .c2 { left: 12%; top: 30%; opacity: .75; transform: scale(.8); animation-duration: 12s }
+.wx.rain .cloud, .wx.storm .cloud, .wx.snow .cloud { background: #b8c2cc; box-shadow: calc(18 * var(--u)) calc(-16 * var(--u)) 0 calc(4 * var(--u)) #b8c2cc, calc(48 * var(--u)) calc(-6 * var(--u)) 0 0 #b8c2cc }
+.wx .drop { width: calc(3 * var(--u)); height: calc(14 * var(--u)); background: #7fb7ff; border-radius: 2px; top: 60%; animation: wxFall 1s linear infinite }
+.wx .flake { width: calc(7 * var(--u)); height: calc(7 * var(--u)); background: #fff; border-radius: 50%; top: 60%; animation: wxFall 3s linear infinite }
+.wx .d0 { left: 30% } .wx .d1 { left: 42%; animation-delay: .3s } .wx .d2 { left: 54%; animation-delay: .6s } .wx .d3 { left: 66%; animation-delay: .15s } .wx .d4 { left: 36%; animation-delay: .45s } .wx .d5 { left: 60%; animation-delay: .75s }
+.wx .bolt { width: calc(24 * var(--u)); height: calc(46 * var(--u)); left: 48%; top: 58%; background: #ffe066; clip-path: polygon(40% 0, 100% 0, 60% 45%, 90% 45%, 20% 100%, 40% 55%, 10% 55%); animation: wxFlash 3.2s steps(1) infinite }
+.wx .fogband { left: -10%; width: 120%; height: calc(10 * var(--u)); border-radius: 99px; background: rgba(230,236,240,.55); animation: wxDrift 7s ease-in-out infinite alternate }
+.wx .f0 { top: 35% } .wx .f1 { top: 52%; animation-delay: 1s } .wx .f2 { top: 69%; animation-delay: 2s }
+@keyframes wxSpin { to { transform: rotate(360deg) } }
+@keyframes wxBob { 50% { transform: translateY(calc(-6 * var(--u))) } }
+@keyframes wxTwinkle { 50% { opacity: .2 } }
+@keyframes wxDrift { from { translate: calc(-14 * var(--u)) 0 } to { translate: calc(14 * var(--u)) 0 } }
+@keyframes wxFall { from { transform: translateY(0); opacity: 1 } to { transform: translateY(calc(70 * var(--u))); opacity: 0 } }
+@keyframes wxFlash { 0%, 80% { opacity: 0 } 82%, 90% { opacity: 1 } 92%, 100% { opacity: 0 } }

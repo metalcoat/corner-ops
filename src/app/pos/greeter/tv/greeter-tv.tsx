@@ -233,6 +233,7 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
           // eslint-disable-next-line @next/next/no-img-element
           <img key={key} className={`gtSlide gtPicture${showing === key && !welcome ? " on" : ""}`} src={src} alt="" />
         ))}
+        <WeatherArt on={showing === "weather" && !welcome} stamp={weatherStamp} />
         {games.length > 0 && <NflSlide games={games} on={showing === "nfl" && !welcome} />}
         <SeasonFx season={season} />
         {ribbon && <div className="mbRibbon gtRibbon">{ribbon}</div>}
@@ -287,5 +288,40 @@ function NflSlide({ games, on }: { games: NflGame[]; on: boolean }) {
         ))}
       </div>
     </section>
+  );
+}
+
+type WeatherInfo = { sky: { kind: string; rect: number[] } | null; cards: { kind: string; rect: number[] }[] };
+
+/** The moving weather on top of the weather picture (the Pi drew it itself): sun, moon, clouds, rain, snow, storm, fog. */
+function WeatherArt({ on, stamp }: { on: boolean; stamp: number }) {
+  const [info, setInfo] = useState<WeatherInfo | null>(null);
+  useEffect(() => {
+    let stopped = false;
+    void fetch("/api/pos/greeter/weather/info", { cache: "no-store" })
+      .then((r) => r.json() as Promise<WeatherInfo>)
+      .then((next) => { if (!stopped) setInfo(next); })
+      .catch(() => undefined);
+    return () => { stopped = true; };
+  }, [stamp]);
+  if (!info) return null;
+  const spots = [...(info.sky ? [{ ...info.sky, big: true }] : []), ...info.cards.map((c) => ({ ...c, big: false }))];
+  return (
+    <div className={`gtSlide gtWeatherArt${on ? " on" : ""}`} aria-hidden>
+      {spots.map((spot, i) => {
+        const [x, y, w, h] = spot.rect;
+        return (
+          <div key={i} className={`wx ${spot.kind}${spot.big ? " big" : ""}`} style={{ left: x, top: y, width: w, height: h }}>
+            {(spot.kind === "clear" || spot.kind === "partly_cloudy") && <i className="sun" />}
+            {spot.kind === "clear_night" && <><i className="moon" /><i className="star s1" /><i className="star s2" /><i className="star s3" /></>}
+            {["partly_cloudy", "cloudy", "rain", "snow", "storm"].includes(spot.kind) && <><i className="cloud c1" />{spot.kind !== "partly_cloudy" && <i className="cloud c2" />}</>}
+            {spot.kind === "rain" && [0, 1, 2, 3, 4, 5].map((d) => <i key={d} className={`drop d${d}`} />)}
+            {spot.kind === "snow" && [0, 1, 2, 3, 4, 5].map((d) => <i key={d} className={`flake d${d}`} />)}
+            {spot.kind === "storm" && <i className="bolt" />}
+            {spot.kind === "fog" && [0, 1, 2].map((d) => <i key={d} className={`fogband f${d}`} />)}
+          </div>
+        );
+      })}
+    </div>
   );
 }

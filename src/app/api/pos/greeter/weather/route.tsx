@@ -20,7 +20,7 @@ function DayCard({ day, P }: { day: WeatherDay; P: GreeterPalette }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", width: CARD_WIDTH, height: CARDS.height, padding: "32px 36px", borderRadius: 28, background: "rgba(255,255,255,0.08)", border: "2px solid rgba(255,255,255,0.16)" }}>
       {/* The top-right corner (CARD_ICON square) is left empty for the Pi's animated icon. */}
-      <div style={{ display: "flex", flexDirection: "column", width: CARD_WIDTH - CARD_ICON - 90, height: CARD_ICON + 10 }}>
+      <div style={{ display: "flex", flexDirection: "column", width: CARD_WIDTH - CARD_ICON - 90, height: CARD_ICON - 24 }}>
         <div style={{ fontSize: 46, fontWeight: 700, color: P.gold }}>{day.name}</div>
         <div style={{ display: "flex", fontSize: 32, color: P.muted, marginTop: 10, lineHeight: 1.2, overflow: "hidden" }}>{day.forecast}</div>
       </div>
