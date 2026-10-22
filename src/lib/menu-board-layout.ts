@@ -151,7 +151,7 @@ export const TICKER: [string, string][] = [
 
 export const SEASONS: SeasonSpec[] = [
   { key: "halloween", from: "10-21", to: "10-31", ribbon: "Happy Halloween from Corner Deli",
-    swap: { breakfast: "sheet", ogdens: "sheet", fathead: "platter" },
+    swap: { breakfast: "sheet", fathead: "platter" },
     ticker: [["Halloween party?", "Sheet Pizza {Pizza and Wings|Pizza|Sheet Pizza}"], ["50 wings", "{Pizza and Wings|Wings|50 Wings}"], ["Meat Platter", "{Deli Platters|Meat Platter}"]] },
   { key: "thanksgiving", from: "11-12", to: "11-26", ribbon: "Happy Thanksgiving from Corner Deli",
     swap: { breakfast: "turkeyfree", ogdens: "turkeyfree", wildwest: "hotturkey", fathead: "turkeyfree" },

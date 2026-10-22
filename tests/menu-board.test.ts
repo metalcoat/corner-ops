@@ -54,7 +54,7 @@ test("menu board: promos never advertise a sold-out item, and seasons swap promo
   const everyday = buildBoard(2, "everyday", prices).screens.filter((s) => s.kind === "promo").map((s) => s.key);
   // The sold-out Wild West Burger gives its slot to the order-ahead screen, so every TV keeps four slots.
   assert.deepEqual(everyday, ["ogdens", "order"]);
-  const halloween = buildBoard(2, "halloween", prices);
+  const halloween = buildBoard(1, "halloween", prices);
   assert.deepEqual(halloween.screens.filter((s) => s.kind === "promo").map((s) => s.key), ["sheet", "order"]);
   assert.equal(halloween.ribbon, "Happy Halloween from Corner Deli");
   assert.ok(halloween.ticker.some(([bold, text]) => bold === "Halloween party?" && text === "Sheet Pizza $35.00"));
