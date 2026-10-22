@@ -33,6 +33,8 @@ public class MainActivity extends Activity {
     private static final String KEY_URL = "url";
     private static final long RETRY_MS = 15_000;
 
+    /** True while the display is on screen (KeeperService brings it back when it isn't). */
+    static volatile boolean visible = false;
     private WebView web;
     private MusicPlayer music;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -77,6 +79,8 @@ public class MainActivity extends Activity {
         hideSystemBars();
         takeUrl(getIntent());
         takeSetup(getIntent());
+        takeKeep(getIntent());
+        startForegroundService(new Intent(this, KeeperService.class));
         web.loadUrl(savedUrl());
     }
 
@@ -85,6 +89,7 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         if (takeUrl(intent)) web.loadUrl(savedUrl());
         takeSetup(intent);
+        takeKeep(intent);
     }
 
     /** --ez music_setup true shows YouTube for pairing; false hides it and brings the page back. */
@@ -101,6 +106,25 @@ public class MainActivity extends Activity {
         super.onResume();
         hideSystemBars();
         web.onResume();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        visible = true;
+    }
+
+    @Override
+    protected void onStop() {
+        visible = false;
+        if (!settingUp) KeeperService.displayLeft(this);
+        super.onStop();
+    }
+
+    /** --ez keep false lets the TV be used normally for maintenance; --ez keep true turns keeping back on. */
+    private void takeKeep(Intent intent) {
+        if (intent == null || !intent.hasExtra("keep")) return;
+        getSharedPreferences(KeeperService.PREFS, MODE_PRIVATE).edit().putBoolean(KeeperService.KEY_KEEP, intent.getBooleanExtra("keep", true)).apply();
     }
 
     @Override

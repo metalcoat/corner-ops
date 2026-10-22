@@ -6,6 +6,10 @@ because Fully made Fire OS show a "Microphone is on" icon over the menu.
 
 - Plays sound and music without a tap, keeps the screen on, ignores the Back button.
 - Opens itself when the TV starts (boot receiver).
+- Takes the screen back about 4 seconds after anything else comes up (Home, an HDMI input, Live TV, another app) and
+  when the TV wakes (KeeperService). Needs "display over other apps", granted once per TV:
+  `adb shell appops set com.cornerdeli.display SYSTEM_ALERT_WINDOW allow`. For maintenance, turn it off with
+  `adb shell am start -n com.cornerdeli.display/.MainActivity --ez keep false` (and `true` to turn it back on).
 - If the page can't load (server or Wi-Fi down) it retries every 15 seconds.
 - Asks for no microphone, camera or storage access.
 
