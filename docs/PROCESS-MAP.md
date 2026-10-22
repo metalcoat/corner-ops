@@ -328,7 +328,8 @@ flowchart LR
 
 - Greeter on the Fire TV (192.168.6.83, Fully Kiosk): `/pos/greeter/tv` is the web greeter with the same slides as
   the Pi (logo + QR, weather, fun fact, hours, 15 s each), the walk-in welcome and sound, and the menu board's
-  seasons. Background music: audio files in the uploads volume under `greeter-music/<season>/` (halloween,
+  seasons. Background music: a YouTube playlist per season from `src/lib/greeter-playlists.ts` (shown in a small "Now
+  playing" card, since YouTube's player must stay visible); without playlists, audio files in the uploads volume under `greeter-music/<season>/` (halloween,
   thanksgiving, christmas) or `greeter-music/everyday/` (`GET /api/pos/greeter/music?season=`); it pauses for each
   welcome. Only music licensed for business use. Switched over 2026-10-22: `menu-tv.sh` also wakes this TV and keeps
   the greeter page on it; the Pi greeter program still runs on HDMI but isn't shown, and the Pi only keeps its CEC

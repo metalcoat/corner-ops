@@ -11,9 +11,28 @@ const MUSIC_VOLUME = 0.35;
 const MUSIC_REFRESH_MS = 30 * 60_000;
 const HOLIDAY_HELLO: Record<string, string> = { halloween: "Happy Halloween!", thanksgiving: "Happy Thanksgiving!", christmas: "Merry Christmas!" };
 
-type Props = { qrSvg: string; orderUrl: string; season: string; ribbon: string; factCount: number };
+type Props = { qrSvg: string; orderUrl: string; season: string; ribbon: string; factCount: number; playlist: string | null };
+type Music = { pause: () => void; resume: () => void };
 
-export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount }: Props) {
+type YtPlayer = { pauseVideo(): void; playVideo(): void; setVolume(v: number): void; setShuffle(on: boolean): void; playVideoAt(i: number): void; getPlaylist(): string[] | null };
+type YtWindow = Window & { YT?: { Player: new (el: HTMLElement, opts: object) => YtPlayer }; onYouTubeIframeAPIReady?: () => void };
+
+/** Loads the YouTube IFrame API once. */
+function loadYouTube(): Promise<NonNullable<YtWindow["YT"]>> {
+  const w = window as YtWindow;
+  if (w.YT?.Player) return Promise.resolve(w.YT);
+  return new Promise((resolve) => {
+    const previous = w.onYouTubeIframeAPIReady;
+    w.onYouTubeIframeAPIReady = () => { previous?.(); resolve(w.YT!); };
+    if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+      const script = document.createElement("script");
+      script.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(script);
+    }
+  });
+}
+
+export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, playlist }: Props) {
   const [slide, setSlide] = useState(0); // 0 logo + QR, 1 weather, 2 fun fact, 3 hours
   const [fact, setFact] = useState(0);
   const [weatherStamp, setWeatherStamp] = useState(() => Math.floor(Date.now() / WEATHER_MS));
@@ -22,7 +41,8 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount }
   const stage = useRef<HTMLDivElement>(null);
   const state = useRef({ initialized: false, lastId: 0 });
   const audio = useRef<HTMLAudioElement | null>(null);
-  const music = useRef<HTMLAudioElement | null>(null);
+  const music = useRef<Music | null>(null);
+  const youTube = useRef<HTMLDivElement>(null);
 
   // Scale the 1920x1080 stage to the screen.
   useEffect(() => {
@@ -50,11 +70,37 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount }
     return () => window.clearInterval(timer);
   }, [factCount]);
 
-  // Background music for the season (everyday music when the season has none), shuffled.
+  // Background music from the season's YouTube playlist (shuffled, looping). YouTube requires
+  // its player to stay visible, so it sits in the "Now playing" card.
   useEffect(() => {
+    if (!playlist || !youTube.current) return;
+    let player: YtPlayer | null = null;
+    let stopped = false;
+    void loadYouTube().then((YT) => {
+      if (stopped || !youTube.current) return;
+      player = new YT.Player(youTube.current, {
+        width: 356, height: 200,
+        playerVars: { listType: "playlist", list: playlist, autoplay: 1, loop: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1 },
+        events: {
+          onReady: () => {
+            player?.setVolume(MUSIC_VOLUME * 100);
+            player?.setShuffle(true);
+            player?.playVideoAt(Math.floor(Math.random() * Math.max(1, player?.getPlaylist()?.length ?? 1)));
+          },
+          onError: () => window.setTimeout(() => player?.playVideo(), 3_000),
+        },
+      });
+      music.current = { pause: () => player?.pauseVideo(), resume: () => player?.playVideo() };
+    });
+    return () => { stopped = true; music.current = null; };
+  }, [playlist]);
+
+  // Without a playlist: music files for the season (everyday music when the season has none), shuffled.
+  useEffect(() => {
+    if (playlist) return;
     const player = new Audio();
     player.volume = MUSIC_VOLUME;
-    music.current = player;
+    music.current = { pause: () => player.pause(), resume: () => { if (player.src) void player.play().catch(() => undefined); } };
     let tracks: string[] = [];
     let queue: string[] = [];
     const playNext = () => {
@@ -79,7 +125,7 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount }
     void load();
     const timer = window.setInterval(() => void load(), MUSIC_REFRESH_MS);
     return () => { window.clearInterval(timer); player.pause(); player.removeEventListener("ended", playNext); };
-  }, [season]);
+  }, [season, playlist]);
 
   // Walk-ins: same rules as the Pi greeter (never greet one older than 20 s or the first one seen).
   useEffect(() => {
@@ -107,7 +153,7 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount }
         window.clearTimeout(hide);
         hide = window.setTimeout(() => {
           setWelcome(false);
-          if (music.current?.src) void music.current.play().catch(() => undefined);
+          music.current?.resume();
         }, GREETER_WELCOME_MS);
       } catch {
         setOffline(true);
@@ -155,6 +201,12 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount }
           <h1>Welcome to Corner Deli!</h1>
           <p>Someone will be right with you.</p>
         </section>
+        {playlist && (
+          <div className="gtNowPlaying">
+            <span>Now playing</span>
+            <div className="gtYt"><div ref={youTube} /></div>
+          </div>
+        )}
         {offline && <i className="gtOffline" title="Can't reach the store server" />}
       </div>
     </main>

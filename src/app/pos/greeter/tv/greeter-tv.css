@@ -40,3 +40,9 @@ html:has(.greeterTv), body:has(.greeterTv) { margin: 0; height: 100%; background
 .gtStage .mbFx { z-index: 4 }
 .gtOffline { position: absolute; right: 22px; bottom: 22px; width: 18px; height: 18px; border-radius: 50%; background: #d33; z-index: 7 }
 @media (prefers-reduced-motion: reduce) { .gtSlide { transition: none } .gtIdle.on .gtLogo { animation: none } }
+
+/* YouTube music: its player must stay visible, so it gets a small "Now playing" card. */
+.gtNowPlaying { position: absolute; left: 40px; bottom: 40px; z-index: 4; display: grid; gap: 8px; padding: 12px; border-radius: 16px; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.15) }
+.gtNowPlaying span { font-size: 22px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); padding-left: 4px }
+.gtYt { width: 356px; height: 200px; border-radius: 10px; overflow: hidden }
+.gtYt iframe { display: block; width: 356px; height: 200px; border: 0 }

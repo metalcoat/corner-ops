@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import QRCode from "qrcode";
 import { greeterFacts } from "@/lib/greeter-facts";
+import { greeterPlaylist } from "@/lib/greeter-playlists";
 import { storeMonthDay } from "@/lib/menu-board";
 import { SEASONS, seasonFor, type SeasonKey } from "@/lib/menu-board-layout";
 import GreeterTv from "./greeter-tv";
@@ -28,6 +29,7 @@ export default async function GreeterTvPage({ searchParams }: { searchParams: Pr
       season={season}
       ribbon={SEASONS.find((s) => s.key === season)?.ribbon ?? ""}
       factCount={greeterFacts(season).length}
+      playlist={greeterPlaylist(season)}
     />
   );
 }
