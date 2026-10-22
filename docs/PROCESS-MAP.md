@@ -327,7 +327,8 @@ flowchart LR
   off and reopens the menu if anything else is on screen; in the 15 minutes after closing it puts them to sleep
   (on 10:20 AM, off 9:35 PM Sun–Thu, 10:35 PM Fri–Sat, Eastern). Log: `~/.local/state/menu-tv.log`. Runs the dev app.
 
-- Greeter on the Fire TV (192.168.6.83, Corner Deli display app): `/pos/greeter/tv` is the web greeter with the same slides as
+- Greeter on the Fire TV (192.168.6.83, Corner Deli display app): `http://192-168-1-237.nip.io:3000/pos/greeter/tv`
+  (a name, not the bare IP, because YouTube won't play embeds on IP-address pages) is the web greeter with the same slides as
   the Pi (logo + QR, weather, fun fact, hours, 15 s each), the walk-in welcome and sound, and the menu board's
   seasons. Background music: a YouTube playlist per season from `src/lib/greeter-playlists.ts` (shown in a small "Now
   playing" card, since YouTube's player must stay visible); without playlists, audio files in the uploads volume under `greeter-music/<season>/` (halloween,
