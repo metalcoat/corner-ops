@@ -307,6 +307,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
+  cron["store server cron: menu-tv.sh<br/>every 2 min, adb"] -->|"wake, reopen menu, sleep"| tv
   pos[(ordering_menu_items + sizes<br/>prices, available)] -->|"GET /api/pos/menu-board?tv=1..3<br/>every 60 s"| tv["Menu TVs 1–3 (Fire TV, kiosk browser)<br/>/pos/menu-board?tv=N"]
   layout["src/lib/menu-board-layout.ts<br/>screens, promos, ticker, seasons"] --> pos2["buildBoard()"]
   pos --> pos2 --> tv
@@ -318,8 +319,10 @@ flowchart LR
 - Seasons by store date (America/New_York): Halloween 10-21–10-31, Thanksgiving 11-12–11-26 (free turkey dinners on
   Thanksgiving Day), Christmas 11-27–12-25 (gift cards). `?season=` previews one; `?motion=low` calms a slow TV.
 - Store-network only, like the rest of `/pos`. Fonts and the promo photos are in `public/menu-board/`.
-- The TVs are Fire TVs: a kiosk browser app opens the page. The Pis only switch the TVs on and off over HDMI-CEC
-  (`tools/greeter-pi/tv-power.sh`). Dev only so far (port 3000).
+- The TVs are Hisense Fire TVs (TV 1 192.168.6.162, TV 2 .247, TV 3 .231) running Fully Kiosk Browser. The store
+  server's cron runs `tools/menu-tvs/menu-tv.sh` every 2 minutes over adb: during store hours it wakes a TV that is
+  off and reopens the menu if anything else is on screen; in the 15 minutes after closing it puts them to sleep
+  (on 10:20 AM, off 9:35 PM Sun–Thu, 10:35 PM Fri–Sat, Eastern). Log: `~/.local/state/menu-tv.log`. Runs the dev app.
 
 ## 9. Guardrails for assistants
 
