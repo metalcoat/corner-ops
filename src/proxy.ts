@@ -315,7 +315,7 @@ export function proxy(request: NextRequest) {
     !request.nextUrl.hostname.match(/^(localhost|127\.|192\.168\.)/) &&
     // 192-168-1-237.nip.io is the store server by name for the greeter TV (YouTube won't play
     // embeds on a page served from a bare IP); it only resolves to the store network.
-    !request.nextUrl.hostname.match(/^192-168-\d{1,3}-\d{1,3}\.nip\.io$/)
+    !/^192-168-\d{1,3}-\d{1,3}\.nip\.io$/.test(visitorHost(request))
   ) {
     // Inside the container nextUrl's host is the bind address (0.0.0.0:3000); send the visitor to the public name.
     const secure = request.nextUrl.clone();
