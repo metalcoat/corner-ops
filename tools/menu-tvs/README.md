@@ -21,3 +21,13 @@ key means pressing Allow on every TV again).
 Setting up a new TV: turn on developer options (Settings › Device & Software, press **About** 7 times),
 turn on ADB debugging, then from the server `adb connect <ip>:5555`, press Allow on the TV, and
 `adb install` the Fully Kiosk APK (fully-kiosk.com blocks the server, so download it elsewhere).
+
+## Extras turned off (2026-10-22)
+
+Each TV has these switched off with `pm disable-user --user 0 <package>` (no root; undo with
+`adb shell pm enable <package>`): Netflix `com.netflix.ninja`, Amazon Music/Photos `com.amazon.bueller.music`,
+`com.amazon.bueller.photos`, shopping `com.amazon.shoptv.client`, games `com.amazon.gamehub`, the screensaver
+`com.amazon.ftv.screensaver`, recommendations `com.amazon.media.recommendations`, and the two tutorials
+`com.amazon.storm.lightning.tutorial`, `com.amazon.tmm.tutorial`. Fully Kiosk `de.ozerov.fully` is off too.
+Never disable the launcher, settings, input or system UI packages: a TV that can't reach its home screen needs a
+factory reset. Software updates are left on.
