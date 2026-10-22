@@ -9,8 +9,8 @@
 set -u
 ADB=${ADB:-/home/chris/.local/share/android-platform-tools/adb}
 SERVER=${MENU_SERVER:-http://192.168.1.237:3000}
-# address:TV number
-TVS=${MENU_TVS:-"192.168.6.162:1 192.168.6.247:2 192.168.6.231:3"}
+# address:TV number (or "greeter" for the front-door greeter TV)
+TVS=${MENU_TVS:-"192.168.6.162:1 192.168.6.247:2 192.168.6.231:3 192.168.6.83:greeter"}
 OPEN=1020
 
 log() { echo "$(TZ=America/New_York date '+%Y-%m-%d %H:%M:%S') $*"; }
@@ -22,7 +22,8 @@ case "$day" in 5|6) CLOSE=2235 ;; *) CLOSE=2135 ;; esac
 shell() { timeout 20 "$ADB" -s "$1:5555" shell "$2" 2>/dev/null; }
 awake() { shell "$1" "dumpsys power" | grep -q 'mWakefulness=Awake'; }
 showing_menu() { shell "$1" "dumpsys window" | grep 'mCurrentFocus' | grep -q 'de.ozerov.fully'; }
-show_menu() { shell "$1" "am start -a android.intent.action.VIEW -d '$SERVER/pos/menu-board?tv=$2' de.ozerov.fully" >/dev/null; }
+page() { if [ "$1" = greeter ]; then echo "$SERVER/pos/greeter/tv"; else echo "$SERVER/pos/menu-board?tv=$1"; fi; }
+show_menu() { shell "$1" "am start -a android.intent.action.VIEW -d '$(page "$2")' de.ozerov.fully" >/dev/null; }
 
 for entry in $TVS; do
   ip=${entry%:*}; tv=${entry#*:}

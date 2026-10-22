@@ -1,7 +1,8 @@
 # Corner Deli menu TVs
 
 Three Hisense Fire TVs (43QD6QF, Fire OS 8.1) show `/pos/menu-board?tv=1..3` in Fully Kiosk Browser:
-TV 1 `192.168.6.162`, TV 2 `192.168.6.247`, TV 3 `192.168.6.231`. Each has developer options with ADB
+TV 1 `192.168.6.162`, TV 2 `192.168.6.247`, TV 3 `192.168.6.231`. The front-door greeter TV `192.168.6.83` (same model)
+runs `/pos/greeter/tv` the same way and is handled by the same script. Each has developer options with ADB
 debugging on, and has accepted the store server's adb key ("Always allow from this computer").
 
 `menu-tv.sh` runs every 2 minutes from user `chris`'s crontab on the store server. Between 10:20 AM and

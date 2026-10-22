@@ -51,6 +51,10 @@ pkill -f '^/usr/bin/python3 /home/chris/greeter/greeter.py'
 and retries up to three times. Schedule (store hours, from `src/lib/greeter-hours.ts`): on at 10:20 AM
 every day, off at 9:35 PM Sunday to Thursday and 10:35 PM Friday and Saturday. Install:
 
+Since 2026-10-22 the greeter runs on the TV's own Fire TV (`/pos/greeter/tv`, see `tools/menu-tvs/`), and the
+store server turns the TV on over the network. The Pi only keeps the two "off" lines below as a backup; its "on"
+line was removed because it switches the TV to the Pi's input.
+
 ```sh
 scp tools/greeter-pi/tv-power.sh chris@corner-greeter:greeter/
 ssh chris@corner-greeter 'chmod +x ~/greeter/tv-power.sh && (crontab -l 2>/dev/null; cat) | crontab -' <<'CRON'

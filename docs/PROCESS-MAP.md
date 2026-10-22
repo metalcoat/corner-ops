@@ -329,7 +329,9 @@ flowchart LR
   the Pi (logo + QR, weather, fun fact, hours, 15 s each), the walk-in welcome and sound, and the menu board's
   seasons. Background music: audio files in the uploads volume under `greeter-music/<season>/` (halloween,
   thanksgiving, christmas) or `greeter-music/everyday/` (`GET /api/pos/greeter/music?season=`); it pauses for each
-  welcome. Only music licensed for business use. Until the switch-over the Pi greeter still runs.
+  welcome. Only music licensed for business use. Switched over 2026-10-22: `menu-tv.sh` also wakes this TV and keeps
+  the greeter page on it; the Pi greeter program still runs on HDMI but isn't shown, and the Pi only keeps its CEC
+  "off" lines as a backup.
 
 ## 9. Guardrails for assistants
 
