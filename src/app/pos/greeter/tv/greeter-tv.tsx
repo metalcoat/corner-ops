@@ -7,6 +7,8 @@ import SeasonFx from "../../menu-board/season-fx";
 const POLL_MS = 2_000;
 const SLIDE_MS = 15_000;
 const WEATHER_MS = 20 * 60_000;
+const MUSIC_VOLUME = 0.35;
+const MUSIC_REFRESH_MS = 30 * 60_000;
 const HOLIDAY_HELLO: Record<string, string> = { halloween: "Happy Halloween!", thanksgiving: "Happy Thanksgiving!", christmas: "Merry Christmas!" };
 
 type Props = { qrSvg: string; orderUrl: string; season: string; ribbon: string; factCount: number };
@@ -20,6 +22,7 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount }
   const stage = useRef<HTMLDivElement>(null);
   const state = useRef({ initialized: false, lastId: 0 });
   const audio = useRef<HTMLAudioElement | null>(null);
+  const music = useRef<HTMLAudioElement | null>(null);
 
   // Scale the 1920x1080 stage to the screen.
   useEffect(() => {
@@ -47,6 +50,37 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount }
     return () => window.clearInterval(timer);
   }, [factCount]);
 
+  // Background music for the season (everyday music when the season has none), shuffled.
+  useEffect(() => {
+    const player = new Audio();
+    player.volume = MUSIC_VOLUME;
+    music.current = player;
+    let tracks: string[] = [];
+    let queue: string[] = [];
+    const playNext = () => {
+      if (!tracks.length) return;
+      if (!queue.length) queue = [...tracks].sort(() => Math.random() - 0.5);
+      player.src = queue.shift()!;
+      void player.play().catch(() => undefined);
+    };
+    const load = async () => {
+      try {
+        const response = await fetch(`/api/pos/greeter/music?season=${season}`, { cache: "no-store" });
+        const next = ((await response.json()) as { tracks: string[] }).tracks;
+        const changed = next.join() !== tracks.join();
+        tracks = next;
+        if (changed) { queue = []; if (player.paused || !tracks.length) playNext(); }
+      } catch {
+        // keep whatever is playing
+      }
+    };
+    player.addEventListener("ended", playNext);
+    player.addEventListener("error", () => window.setTimeout(playNext, 2_000));
+    void load();
+    const timer = window.setInterval(() => void load(), MUSIC_REFRESH_MS);
+    return () => { window.clearInterval(timer); player.pause(); player.removeEventListener("ended", playNext); };
+  }, [season]);
+
   // Walk-ins: same rules as the Pi greeter (never greet one older than 20 s or the first one seen).
   useEffect(() => {
     audio.current = new Audio("/greeter/welcome.mp3");
@@ -65,12 +99,16 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount }
         setOffline(false);
         if (greeterNext(state.current, latest) === null) return;
         setWelcome(true);
+        music.current?.pause(); // the welcome is spoken over silence, then the music carries on
         if (audio.current) {
           audio.current.currentTime = 0;
           void audio.current.play().catch(() => undefined); // Fully Kiosk allows autoplay
         }
         window.clearTimeout(hide);
-        hide = window.setTimeout(() => setWelcome(false), GREETER_WELCOME_MS);
+        hide = window.setTimeout(() => {
+          setWelcome(false);
+          if (music.current?.src) void music.current.play().catch(() => undefined);
+        }, GREETER_WELCOME_MS);
       } catch {
         setOffline(true);
       } finally {

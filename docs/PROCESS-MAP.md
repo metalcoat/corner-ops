@@ -325,6 +325,12 @@ flowchart LR
   off and reopens the menu if anything else is on screen; in the 15 minutes after closing it puts them to sleep
   (on 10:20 AM, off 9:35 PM Sun–Thu, 10:35 PM Fri–Sat, Eastern). Log: `~/.local/state/menu-tv.log`. Runs the dev app.
 
+- Greeter on the Fire TV (192.168.6.83, Fully Kiosk): `/pos/greeter/tv` is the web greeter with the same slides as
+  the Pi (logo + QR, weather, fun fact, hours, 15 s each), the walk-in welcome and sound, and the menu board's
+  seasons. Background music: audio files in the uploads volume under `greeter-music/<season>/` (halloween,
+  thanksgiving, christmas) or `greeter-music/everyday/` (`GET /api/pos/greeter/music?season=`); it pauses for each
+  welcome. Only music licensed for business use. Until the switch-over the Pi greeter still runs.
+
 ## 9. Guardrails for assistants
 
 - Follow `AGENTS.md`: no merging `main`, no production deploys or production data changes without the owner's
