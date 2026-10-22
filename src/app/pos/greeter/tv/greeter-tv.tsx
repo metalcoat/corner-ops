@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { GREETER_WELCOME_MS, greeterNext } from "@/lib/door-chime-policy";
+import type { NflGame } from "@/lib/greeter-nfl";
 import SeasonFx from "../../menu-board/season-fx";
 
 const POLL_MS = 2_000;
@@ -11,7 +12,12 @@ const MUSIC_VOLUME = 0.35;
 const MUSIC_REFRESH_MS = 30 * 60_000;
 const HOLIDAY_HELLO: Record<string, string> = { halloween: "Happy Halloween!", thanksgiving: "Happy Thanksgiving!", christmas: "Merry Christmas!" };
 
-type Props = { qrSvg: string; orderUrl: string; season: string; ribbon: string; factCount: number; playlist: string | null };
+type Props = { qrSvg: string; orderUrl: string; season: string; ribbon: string; factCount: number; playlist: string | null; nflDate: string | null };
+type SlideKey = "idle" | "nfl" | "weather" | "fact" | "hours";
+// On NFL game days the scores come round twice per turn.
+const EVERYDAY_ORDER: SlideKey[] = ["idle", "weather", "fact", "hours"];
+const GAME_DAY_ORDER: SlideKey[] = ["idle", "nfl", "weather", "fact", "nfl", "hours"];
+const NFL_POLL_MS = 60_000;
 type Music = { pause: () => void; resume: () => void };
 
 type YtPlayer = { pauseVideo(): void; playVideo(): void; setVolume(v: number): void; setShuffle(on: boolean): void; playVideoAt(i: number): void; getPlaylist(): string[] | null };
@@ -36,8 +42,13 @@ function loadYouTube(): Promise<NonNullable<YtWindow["YT"]>> {
   });
 }
 
-export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, playlist }: Props) {
-  const [slide, setSlide] = useState(0); // 0 logo + QR, 1 weather, 2 fun fact, 3 hours
+export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, playlist, nflDate }: Props) {
+  const [slide, setSlide] = useState(0); // position in the slide order
+  const [games, setGames] = useState<NflGame[]>([]);
+  const order = games.length ? GAME_DAY_ORDER : EVERYDAY_ORDER;
+  const orderRef = useRef(order);
+  orderRef.current = order;
+  const showing: SlideKey = order[slide % order.length];
   const [fact, setFact] = useState(0);
   const [weatherStamp, setWeatherStamp] = useState(() => Math.floor(Date.now() / WEATHER_MS));
   const [welcome, setWelcome] = useState(false);
@@ -67,15 +78,33 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
   useEffect(() => {
     const timer = window.setInterval(() => {
       setSlide((s) => {
-        const next = (s + 1) % 4;
+        const list = orderRef.current;
+        const next = (s + 1) % list.length;
         // Move to the next fact once this one is off screen, so the picture loads while hidden.
-        if (next === 3) setFact((f) => (f + 1) % Math.max(1, factCount));
+        if (list[s % list.length] === "fact") setFact((f) => (f + 1) % Math.max(1, factCount));
         return next;
       });
       setWeatherStamp(Math.floor(Date.now() / WEATHER_MS));
     }, SLIDE_MS);
     return () => window.clearInterval(timer);
   }, [factCount]);
+
+  // Today's NFL games and live scores (empty on days without games, so the screen drops out).
+  useEffect(() => {
+    let stopped = false;
+    const load = async () => {
+      try {
+        const response = await fetch(`/api/pos/greeter/nfl${nflDate ? `?date=${encodeURIComponent(nflDate)}` : ""}`, { cache: "no-store" });
+        const next = ((await response.json()) as { games: NflGame[] }).games;
+        if (!stopped) setGames(next);
+      } catch {
+        // keep the last scores
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), NFL_POLL_MS);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [nflDate]);
 
   // Background music from the season's YouTube playlist (shuffled, looping). YouTube requires
   // its player to stay visible, so it sits in the "Now playing" card.
@@ -183,17 +212,16 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
     return () => { stopped = true; window.clearInterval(timer); window.clearInterval(reload); window.clearTimeout(hide); };
   }, []);
 
-  const pictures = [
-    null,
-    `/api/pos/greeter/weather?season=${season}&t=${weatherStamp}`,
-    `/api/pos/greeter/fact?season=${season}&n=${fact}`,
-    `/api/pos/greeter/hours?season=${season}&t=${weatherStamp}`,
+  const pictures: [SlideKey, string][] = [
+    ["weather", `/api/pos/greeter/weather?season=${season}&t=${weatherStamp}`],
+    ["fact", `/api/pos/greeter/fact?season=${season}&n=${fact}`],
+    ["hours", `/api/pos/greeter/hours?season=${season}&t=${weatherStamp}`],
   ];
 
   return (
     <main className="greeterTv">
       <div ref={stage} className="gtStage" data-season={season}>
-        <section className={`gtSlide gtIdle${slide === 0 && !welcome ? " on" : ""}`}>
+        <section className={`gtSlide gtIdle${showing === "idle" && !welcome ? " on" : ""}`}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img className="gtLogo" src="/corner-deli-logo.png" alt="Corner Deli" />
           <div className="gtOrder">
@@ -201,10 +229,11 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
             <div><strong>Scan to order online</strong><span>{orderUrl}</span></div>
           </div>
         </section>
-        {pictures.map((src, i) => src && (
+        {pictures.map(([key, src]) => (
           // eslint-disable-next-line @next/next/no-img-element
-          <img key={i} className={`gtSlide gtPicture${slide === i && !welcome ? " on" : ""}`} src={src} alt="" />
+          <img key={key} className={`gtSlide gtPicture${showing === key && !welcome ? " on" : ""}`} src={src} alt="" />
         ))}
+        {games.length > 0 && <NflSlide games={games} on={showing === "nfl" && !welcome} />}
         <SeasonFx season={season} />
         {ribbon && <div className="mbRibbon gtRibbon">{ribbon}</div>}
         <section className={`gtSlide gtHello${welcome ? " on" : ""}`} aria-live="polite">
@@ -223,5 +252,40 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
         {offline && <i className="gtOffline" title="Can't reach the store server" />}
       </div>
     </main>
+  );
+}
+
+const kickoff = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+
+/** Today's NFL games: kickoff times and channels before, live scores during, finals after. */
+function NflSlide({ games, on }: { games: NflGame[]; on: boolean }) {
+  const sunday = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "long" }).format(new Date(games[0].start));
+  const live = games.some((g) => g.state === "in");
+  return (
+    <section className={`gtSlide gtNfl${on ? " on" : ""}`}>
+      <header>
+        <h2>{sunday === "Sunday" ? "NFL Sunday" : `${sunday} Night Football`}</h2>
+        <span>{live ? "Live scores" : games.every((g) => g.state === "post") ? "Final scores" : "Today's games"}</span>
+      </header>
+      <div className={`gtGames${games.length > 8 ? " many" : ""}`}>
+        {games.map((g) => (
+          <div key={g.id} className={`gtGame ${g.state}${g.favorite ? " fav" : ""}`}>
+            {[g.away, g.home].map((t) => (
+              <div key={t.abbr} className={`gtTeam${g.state === "post" && t.winner ? " won" : ""}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                {t.logo ? <img src={t.logo} alt="" /> : <i />}
+                <b>{t.name}</b>
+                {t.record && g.state === "pre" ? <small>{t.record}</small> : null}
+                <em>{g.state === "pre" ? "" : t.score}</em>
+              </div>
+            ))}
+            <div className="gtStatus">
+              {g.state === "pre" ? `${kickoff.format(new Date(g.start))}${g.network ? ` · ${g.network}` : ""}` : g.detail}
+              {g.state === "in" && <i className="gtLive">LIVE</i>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

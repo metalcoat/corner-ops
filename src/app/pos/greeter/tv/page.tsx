@@ -15,7 +15,7 @@ export const metadata: Metadata = { title: "Welcome | Corner Deli", referrer: "s
 /**
  * The front-door greeter TV (Fire TV, Fully Kiosk): logo and order QR, weather, a fun fact and
  * the hours take turns, and a spoken welcome interrupts on every walk-in. Follows the menu
- * board's holiday seasons; ?season= previews one.
+ * board's holiday seasons; ?season= previews one, ?nfl_date= previews another day's NFL games.
  */
 export default async function GreeterTvPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
@@ -31,6 +31,7 @@ export default async function GreeterTvPage({ searchParams }: { searchParams: Pr
       ribbon={SEASONS.find((s) => s.key === season)?.ribbon ?? ""}
       factCount={greeterFacts(season).length}
       playlist={greeterPlaylist(season)}
+      nflDate={typeof params.nfl_date === "string" ? params.nfl_date : null}
     />
   );
 }
