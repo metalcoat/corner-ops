@@ -23,7 +23,14 @@ final class MusicPlayer {
     private static final String TV_AGENT = "Mozilla/5.0 (Linux; Android 11; AFTOLCBC82) AppleWebKit/537.36 (KHTML, like Gecko) "
         + "Cobalt/25.lts.30.1034943-gold (unlike Gecko) v8/8.8.278.17-jit gles Starboard/15, "
         + "Amazon_ATV_mediatek8695_2025/RS8133 (Amazon, AFTOLCBC82, Wireless) com.amazon.firetv.youtube/25.30.00";
-    private static final String VOLUME_JS = "(function(){var v=document.querySelector('video');if(v){v.volume=%s;}})()";
+    /**
+     * Each new song starts at full volume, so set it the moment a video loads or starts (media events
+     * reach a capturing listener on the document) instead of only on the 3-second check.
+     */
+    private static final String VOLUME_JS = "(function(vol){window.__cdVolume=vol;"
+        + "if(!window.__cdVolumeHook){window.__cdVolumeHook=true;['loadstart','loadedmetadata','play','playing','volumechange'].forEach(function(n){"
+        + "document.addEventListener(n,function(e){var v=e.target;if(v&&v.tagName==='VIDEO'&&Math.abs(v.volume-window.__cdVolume)>0.001)v.volume=window.__cdVolume;},true);});}"
+        + "var v=document.querySelector('video');if(v)v.volume=vol;})(%s)";
     /**
      * After a restart YouTube asks "who's watching": pick the first (the store's) account, and if YouTube
      * lands on its home screen instead of the playlist, go back to the playlist.
