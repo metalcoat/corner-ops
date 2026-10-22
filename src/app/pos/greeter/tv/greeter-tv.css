@@ -20,7 +20,7 @@ html:has(.greeterTv), body:has(.greeterTv) { margin: 0; height: 100%; background
 .gtLogo { width: 450px; height: 450px; border-radius: 50%; box-shadow: 0 20px 60px rgba(0,0,0,.45) }
 .gtIdle.on .gtLogo { animation: gtFloat 6s ease-in-out infinite }
 @keyframes gtFloat { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-14px) } }
-.gtOrder { display: flex; align-items: center; gap: 58px; padding: 26px 58px; border-radius: 22px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18) }
+.gtOrder { position: relative; z-index: 5; display: flex; align-items: center; gap: 58px; padding: 26px 58px; border-radius: 22px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18) }
 .gtQr { width: 238px; height: 238px; padding: 11px; border-radius: 13px; background: #fff; box-sizing: border-box }
 .gtQr svg { display: block; width: 100%; height: 100% }
 .gtOrder div:last-child { display: grid; gap: 11px; text-align: left }
