@@ -109,7 +109,7 @@ export const MENU_SCREENS: MenuScreenSpec[] = [
         { label: "Variety for Two", item: "Appetizers|Variety for TWO" }, { label: "Variety for Four", item: "Appetizers|Variety for Four" }, { label: "Fathead Special", item: "Appetizers|Fathead Special" } ] },
       { kind: "list", title: "Sweets", rows: [
         { label: "Chocolate Overload", item: "Desserts|Chocolate Overload" }, { label: "Rainbow Cake", item: "Desserts|Rainbow Cake" },
-        { label: "Mile High Cake", item: "Desserts|Milky Caramel Mile High Cake" }, { label: "Apple Pie Logs (6)", item: "Desserts|6 Piece Apple Pie Logs" } ] } ],
+        { label: "PB Explosion Cake", item: "Desserts|Peanut Butter Explosion Cake" }, { label: "Apple Pie Logs (6)", item: "Desserts|6 Piece Apple Pie Logs" } ] } ],
     [ { kind: "list", title: "Deli Salads", note: "8 / 16 / 32 oz", rows: ["Potato Salad", "Mac Salad", "Pasta Salad", "Cole Slaw", "AntiPasto"].map((name) => ({
         label: name === "AntiPasto" ? "Antipasto" : name, item: `Deli Salads|${name}`, variants: ["Small 8oz", "Medium 16oz", "Large 32oz"] })) } ] ] },
 ];
