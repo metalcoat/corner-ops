@@ -313,9 +313,10 @@ flowchart LR
   pos --> pos2 --> tv
 ```
 
-- Three menu TVs rotate menu screens (12 s) and promo screens (8 s) with a crawling ticker. Items are named
+- Three menu TVs rotate menu screens (12 s) and promo screens (8 s) with a crawling ticker, all in step: every TV
+  has four slots and counts them (and the ticker) from the server's clock (`serverNow` in the API). Items are named
   "POS category|POS item", so prices and sold-out marks come straight from the POS; a changed price flashes. A promo
-  whose item is sold out or missing is skipped. Missing items are listed in the API's `missing`.
+  whose item is sold out or missing gives its slot to the order-ahead screen. Missing items are listed in the API's `missing`.
 - Seasons by store date (America/New_York): Halloween 10-21–10-31, Thanksgiving 11-12–11-26 (free turkey dinners on
   Thanksgiving Day), Christmas 11-27–12-25 (gift cards). `?season=` previews one; `?motion=low` calms a slow TV.
 - Store-network only, like the rest of `/pos`. Fonts and the promo photos are in `public/menu-board/`.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBoard, seasonFor, type PriceIndex, type PriceIndexItem } from "../src/lib/menu-board-layout";
+import { buildBoard, MENU_TVS, SLOT_SECONDS, seasonFor, type PriceIndex, type PriceIndexItem } from "../src/lib/menu-board-layout";
 
 const item = (cents: number, variants: [string, number, boolean?][] = [], available = true): PriceIndexItem => ({
   basePriceCents: cents, available, variants: variants.map(([name, priceCents, ok = true]) => ({ name, priceCents, available: ok })),
@@ -52,9 +52,14 @@ test("menu board: promos never advertise a sold-out item, and seasons swap promo
     "Pizza and Wings|Pizza": item(1000, [["Sheet Pizza", 3500]]), "Deli Platters|Meat Platter": item(5500),
   });
   const everyday = buildBoard(2, "everyday", prices).screens.filter((s) => s.kind === "promo").map((s) => s.key);
-  assert.deepEqual(everyday, ["ogdens"]);
+  // The sold-out Wild West Burger gives its slot to the order-ahead screen, so every TV keeps four slots.
+  assert.deepEqual(everyday, ["ogdens", "order"]);
   const halloween = buildBoard(2, "halloween", prices);
-  assert.deepEqual(halloween.screens.filter((s) => s.kind === "promo").map((s) => s.key), ["sheet"]);
+  assert.deepEqual(halloween.screens.filter((s) => s.kind === "promo").map((s) => s.key), ["sheet", "order"]);
   assert.equal(halloween.ribbon, "Happy Halloween from Corner Deli");
   assert.ok(halloween.ticker.some(([bold, text]) => bold === "Halloween party?" && text === "Sheet Pizza $35.00"));
+});
+
+test("menu board: every TV has one screen per timeline slot", () => {
+  for (const tv of MENU_TVS) assert.equal(tv.slots.length, SLOT_SECONDS.length, tv.name);
 });

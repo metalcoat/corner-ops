@@ -130,11 +130,18 @@ export const PROMOS: PromoSpec[] = [
   { key: "giftcard", kicker: "For everyone on your list", name: "Corner Deli gift cards", text: "The easy gift for coworkers, teachers and the whole family. Ask at the counter.", badge: { label: "Give the gift of", text: "Subs!" } },
 ];
 
+/**
+ * All TVs follow one timeline so they change screens at the same moment: slot n lasts
+ * SLOT_SECONDS[n] on every TV, counted from the server's clock. Every TV needs one entry per slot.
+ */
+export const SLOT_SECONDS = [12, 8, 12, 8];
 export const MENU_TVS: { name: string; slots: string[] }[] = [
   { name: "Menu TV 1", slots: ["m:pizza", "p:breakfast", "m:subs", "p:tbb"] },
   { name: "Menu TV 2", slots: ["m:burgers", "p:ogdens", "m:dinners", "p:wildwest"] },
-  { name: "Menu TV 3", slots: ["m:apps", "p:fathead", "p:order"] },
+  { name: "Menu TV 3", slots: ["m:apps", "p:fathead", "m:apps", "p:order"] },
 ];
+/** Shown in a promo slot whose item is sold out or missing, so the TVs stay in step. */
+const FALLBACK_PROMO = "order";
 
 /** Ticker lines: [bold, text]; "{item|size}" in the text becomes that POS price. */
 export const TICKER: [string, string][] = [
@@ -249,7 +256,7 @@ export function buildBoard(tv: number, season: SeasonKey, index: PriceIndex): Bo
   const screens = spec.slots.flatMap((slot): BoardScreen[] => {
     const [kind, key] = slot.split(":");
     if (kind === "p") {
-      const promo = buildPromo(seasonSpec?.swap[key] ?? key, index, missing);
+      const promo = buildPromo(seasonSpec?.swap[key] ?? key, index, missing) ?? buildPromo(FALLBACK_PROMO, index, missing);
       return promo ? [promo] : [];
     }
     const screen = MENU_SCREENS.find((s) => s.key === key);

@@ -14,7 +14,8 @@ export async function GET(request: Request) {
   try {
     const board = await menuBoard(Number.isInteger(tv) ? tv : 1, season);
     const version = createHash("sha1").update(JSON.stringify(board)).digest("hex").slice(0, 12);
-    return Response.json({ version, ...board }, { headers: { "cache-control": "no-store" } });
+    // serverNow lets every TV set its clock by the server, so they change screens together.
+    return Response.json({ version, serverNow: Date.now(), ...board }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     console.error("Menu board unavailable", error);
     return Response.json({ error: "The menu is temporarily unavailable." }, { status: 503 });

@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import type { Board, BoardBlock, BoardPrice, BoardScreen } from "@/lib/menu-board-layout";
+import { SLOT_SECONDS, type Board, type BoardBlock, type BoardPrice, type BoardScreen } from "@/lib/menu-board-layout";
 
 const POLL_MS = 60_000;
-const MENU_SECONDS = 12;
-const PROMO_SECONDS = 8;
+const CYCLE_MS = SLOT_SECONDS.reduce((sum, s) => sum + s, 0) * 1000;
+const TICKER_MS = 48_000; // matches the mbCrawl animation in menu-board.css
 const LOGO = "/corner-deli-logo.png";
 
 type Props = { initial: Board & { version?: string }; tv: number; season: string | null; qrSvg: string; lowMotion: boolean };
@@ -152,7 +152,9 @@ export default function MenuBoard({ initial, tv, season, qrSvg, lowMotion }: Pro
   const bar = useRef<HTMLDivElement>(null);
   const version = useRef(initial.version ?? "");
   const prices = useRef(priceMap(initial));
-  const started = useRef(0);
+  // Server clock minus this TV's clock, so every TV counts the same timeline.
+  const offset = useRef(0);
+  const track = useRef<HTMLDivElement>(null);
 
   // Scale the 1920x1080 board to whatever the screen is, centered.
   useEffect(() => {
@@ -172,10 +174,20 @@ export default function MenuBoard({ initial, tv, season, qrSvg, lowMotion }: Pro
     const poll = async () => {
       try {
         const query = new URLSearchParams({ tv: String(tv), ...(season ? { season } : {}) });
+        const sent = Date.now();
         const response = await fetch(`/api/pos/menu-board?${query}`, { cache: "no-store" });
         if (!response.ok) throw new Error(String(response.status));
-        const next = (await response.json()) as Board & { version: string };
+        const next = (await response.json()) as Board & { version: string; serverNow: number };
         if (stopped) return;
+        offset.current = next.serverNow - (sent + Date.now()) / 2;
+        // Restart the ticker at the same point on every TV (a tiny jump at most, once a minute).
+        const el = track.current;
+        if (el) {
+          el.style.animation = "none";
+          void el.offsetWidth;
+          el.style.animation = "";
+          el.style.animationDelay = `-${(Date.now() + offset.current) % TICKER_MS}ms`;
+        }
         setOffline(false);
         if (next.version === version.current) return;
         version.current = next.version;
@@ -187,6 +199,7 @@ export default function MenuBoard({ initial, tv, season, qrSvg, lowMotion }: Pro
         if (!stopped) setOffline(true); // keep showing the last menu
       }
     };
+    void poll(); // right away, to set the clock
     const timer = window.setInterval(() => void poll(), POLL_MS);
     // Reload once a day (4 AM) so a long-running kiosk picks up new versions and frees memory.
     const reload = window.setInterval(() => {
@@ -197,21 +210,22 @@ export default function MenuBoard({ initial, tv, season, qrSvg, lowMotion }: Pro
 
   const count = board.screens.length;
   const showing = count ? cur % count : 0;
-  const seconds = board.screens[showing]?.kind === "promo" ? PROMO_SECONDS : MENU_SECONDS;
 
-  // Rotation, with the progress bar above the ticker.
+  // Rotation on the shared timeline: slot n of every TV runs SLOT_SECONDS[n], counted from the
+  // server's clock, so all the TVs change screens together. The bar shows the slot's progress.
   useEffect(() => {
-    started.current = performance.now();
     let frame = 0;
-    const tick = (now: number) => {
-      const t = (now - started.current) / 1000;
-      if (bar.current) bar.current.style.width = `${Math.min(100, (t / seconds) * 100)}%`;
-      if (t >= seconds) { setCur((c) => (c + 1) % Math.max(1, count)); return; }
+    const tick = () => {
+      let at = (Date.now() + offset.current) % CYCLE_MS;
+      let slot = 0;
+      while (slot < SLOT_SECONDS.length - 1 && at >= SLOT_SECONDS[slot] * 1000) at -= SLOT_SECONDS[slot++] * 1000;
+      if (bar.current) bar.current.style.width = `${Math.min(100, at / (SLOT_SECONDS[slot] * 10))}%`;
+      setCur(slot);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [showing, seconds, count]);
+  }, []);
 
   // Two copies side by side so the crawl loops without a gap.
   const ticker = useMemo(() => [0, 1].flatMap((copy) => board.ticker.map(([bold, text], i) => <span key={`${copy}-${i}`}><b>{bold}</b> <i>·</i> {text}</span>)), [board.ticker]);
@@ -221,11 +235,11 @@ export default function MenuBoard({ initial, tv, season, qrSvg, lowMotion }: Pro
       <div ref={stage} className="mbStage" data-season={board.season}>
         {board.ribbon && <div className="mbRibbon">{board.ribbon}</div>}
         {!lowMotion && <Fx season={board.season} />}
-        {board.screens.map((screen, i) => <Screen key={`${screen.kind}-${screen.key}`} screen={screen} on={i === showing} qrSvg={qrSvg} flashes={flashes} />)}
+        {board.screens.map((screen, i) => <Screen key={`${i}-${screen.kind}-${screen.key}`} screen={screen} on={i === showing} qrSvg={qrSvg} flashes={flashes} />)}
         <div ref={bar} className="mbBar" />
         <div className="mbFoot">
           <span className="mbQrBox"><span className="qr" dangerouslySetInnerHTML={{ __html: qrSvg }} /><span>Order<br />ahead</span></span>
-          <div className="mbTicker"><div className="mbTrack">{ticker}</div></div>
+          <div className="mbTicker"><div ref={track} className="mbTrack">{ticker}</div></div>
           <span className="mbDots">{board.screens.map((s, i) => <span key={i} className={i === showing ? "on" : ""} />)}</span>
         </div>
         {offline && <i className="mbOffline" title="Can't reach the store server" />}
