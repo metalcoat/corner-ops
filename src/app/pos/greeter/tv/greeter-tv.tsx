@@ -126,9 +126,9 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount }
 
   const pictures = [
     null,
-    `/api/pos/greeter/weather?t=${weatherStamp}`,
-    `/api/pos/greeter/fact?n=${fact}`,
-    `/api/pos/greeter/hours?t=${weatherStamp}`,
+    `/api/pos/greeter/weather?season=${season}&t=${weatherStamp}`,
+    `/api/pos/greeter/fact?season=${season}&n=${fact}`,
+    `/api/pos/greeter/hours?season=${season}&t=${weatherStamp}`,
   ];
 
   return (

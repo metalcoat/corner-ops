@@ -1,10 +1,14 @@
 import { createHash } from "node:crypto";
-import { GREETER_FACTS } from "@/lib/greeter-facts";
+import { greeterFacts } from "@/lib/greeter-facts";
 
 export const runtime = "nodejs";
 
-/** How many fun-fact slides there are, and a version that changes when any fact does (the Pi re-downloads then). */
-export async function GET() {
-  const version = createHash("sha1").update(JSON.stringify(GREETER_FACTS)).digest("hex").slice(0, 12);
-  return Response.json({ count: GREETER_FACTS.length, version }, { headers: { "cache-control": "no-store" } });
+/**
+ * How many fun-fact slides there are, and a version that changes when any fact does (the Pi re-downloads then).
+ * ?season= counts that holiday's facts instead.
+ */
+export async function GET(request: Request) {
+  const facts = greeterFacts(new URL(request.url).searchParams.get("season"));
+  const version = createHash("sha1").update(JSON.stringify(facts)).digest("hex").slice(0, 12);
+  return Response.json({ count: facts.length, version }, { headers: { "cache-control": "no-store" } });
 }

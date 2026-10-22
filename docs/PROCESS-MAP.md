@@ -286,7 +286,8 @@ flowchart LR
 - TV hours slide: `src/lib/greeter-hours.ts` (Sunday first; Sun–Thu 10:30 AM–9:30 PM, Fri–Sat 10:30 AM–10:30 PM
   as of 2026-10-19), drawn by `GET /api/pos/greeter/hours` with today's row picked out; the Pi fetches it with the
   weather. Not linked to online-ordering hours (ordering_business_hours is not set up yet).
-- TV fun facts: `src/lib/greeter-facts.ts` (edit freely; keep them short and true). `GET /api/pos/greeter/facts`
+- TV fun facts: `src/lib/greeter-facts.ts` (edit freely; keep them short and true). `HOLIDAY_FACTS` there replace them
+  during a season; the weather, fact and hours pictures take `?season=` for holiday colors (`src/lib/greeter-palette.ts`). `GET /api/pos/greeter/facts`
   gives the count and a version; the Pi downloads `GET /api/pos/greeter/fact?n=` pictures again when the version
   changes (checked at start and every 6 hours).
 - TV weather slide: `GET /api/pos/greeter/weather` draws a PNG from api.weather.gov (forecast for the Ogdensburg

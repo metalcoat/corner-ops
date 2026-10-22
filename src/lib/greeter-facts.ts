@@ -29,3 +29,33 @@ export const GREETER_FACTS: GreeterFact[] = [
   { topic: "Cheese", text: "Traditional mozzarella from southern Italy is made from water buffalo milk." },
   { topic: "Ogdensburg", text: "The St. Lawrence River flowing past Ogdensburg links the Great Lakes to the Atlantic Ocean." },
 ];
+
+/** Holiday facts, shown instead of the everyday ones while the menu board's season is on. */
+export const HOLIDAY_FACTS: Record<string, GreeterFact[]> = {
+  halloween: [
+    { topic: "Halloween", text: "Halloween grew out of Samhain, an ancient Celtic festival marking the end of the harvest." },
+    { topic: "Halloween", text: "The first jack-o’-lanterns were carved from turnips in Ireland and Britain, not pumpkins." },
+    { topic: "Pumpkins", text: "Pumpkins are a fruit: they grow from flowers and carry their seeds inside." },
+    { topic: "Pumpkins", text: "Illinois grows more pumpkins than any other state." },
+    { topic: "Candy", text: "Candy corn dates back to the 1880s, when it was sold as “Chicken Feed.”" },
+  ],
+  thanksgiving: [
+    { topic: "Thanksgiving", text: "The 1621 harvest feast at Plymouth, often called the first Thanksgiving, lasted three days." },
+    { topic: "Thanksgiving", text: "Abraham Lincoln made Thanksgiving a national holiday in 1863." },
+    { topic: "Thanksgiving", text: "Sarah Josepha Hale, who wrote “Mary Had a Little Lamb,” campaigned for years to make Thanksgiving a national holiday." },
+    { topic: "Parades", text: "Macy’s held its first Thanksgiving Day Parade in 1924." },
+    { topic: "Turkeys", text: "Wild turkeys can run up to about 25 miles an hour and fly short distances." },
+  ],
+  christmas: [
+    { topic: "Christmas", text: "Decorating Christmas trees became a tradition in Germany before spreading around the world." },
+    { topic: "Christmas", text: "Rudolph the Red-Nosed Reindeer was created in 1939 for a Montgomery Ward store booklet." },
+    { topic: "Songs", text: "“Jingle Bells” is said to have been written for Thanksgiving, not Christmas." },
+    { topic: "Candy", text: "Legend says candy canes were bent into hooks so they could hang on Christmas trees." },
+    { topic: "Christmas", text: "In 1950 a Seattle mall put up a Douglas fir about 221 feet tall as its Christmas tree." },
+  ],
+};
+
+/** The season's holiday facts, or the everyday facts when there are none. */
+export function greeterFacts(season: string | null | undefined): GreeterFact[] {
+  return HOLIDAY_FACTS[season ?? ""]?.length ? HOLIDAY_FACTS[season ?? ""] : GREETER_FACTS;
+}
