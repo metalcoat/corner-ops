@@ -326,6 +326,9 @@ flowchart LR
   server's cron runs `tools/menu-tvs/menu-tv.sh` every 2 minutes over adb: during store hours it wakes a TV that is
   off and reopens the menu if anything else is on screen; in the 15 minutes after closing it puts them to sleep
   (on 10:20 AM, off 9:35 PM Sun–Thu, 10:35 PM Fri–Sat, Eastern). Log: `~/.local/state/menu-tv.log`. Runs the dev app.
+  Asleep, the Fire TVs drop off the network for long stretches (2026-10-22: woke 6–18 min late), so a Pi on each TV's
+  HDMI wakes it at 10:19 over CEC (`tools/greeter-pi/tv-power.sh wake`, keeps the TV's own input); the server then
+  opens the page. The greeter Pi does this now; the menu TVs' Pis still need setting up.
 
 - Greeter on the Fire TV (192.168.6.83, Corner Deli display app): `http://192-168-1-237.nip.io:3000/pos/greeter/tv`
   (a name, not the bare IP, because YouTube won't play embeds on IP-address pages) is the web greeter with the same slides as

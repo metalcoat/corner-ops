@@ -52,8 +52,10 @@ and retries up to three times. Schedule (store hours, from `src/lib/greeter-hour
 every day, off at 9:35 PM Sunday to Thursday and 10:35 PM Friday and Saturday. Install:
 
 Since 2026-10-22 the greeter runs on the TV's own Fire TV (`/pos/greeter/tv`, see `tools/menu-tvs/`), and the
-store server turns the TV on over the network. The Pi only keeps the two "off" lines below as a backup; its "on"
-line was removed because it switches the TV to the Pi's input.
+store server turns the TV on over the network. The Fire TV drops off the network while asleep, so
+the server can't always wake it; the Pi wakes it at 10:19 with `tv-power.sh wake` (the remote's power-on key over
+HDMI, which keeps the TV on its own input; `on` would switch it to the Pi) and the server then opens the greeter.
+Cron on the Pi since 2026-10-22: `19 10 * * * … tv-power.sh wake` plus the two "off" lines below.
 
 ```sh
 scp tools/greeter-pi/tv-power.sh chris@corner-greeter:greeter/
