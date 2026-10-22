@@ -102,8 +102,8 @@ export const MENU_SCREENS: MenuScreenSpec[] = [
         { label: "Buffalo Chicken", item: "Salads|Buffalo Fried Chicken Sal" }, { label: "Julienne", item: "Salads|Julienne Sal" }, { label: "Cold Plate", item: "Salads|Cold Plate" } ] } ] ] },
   { key: "apps", title: ["Starters ", "& Sweets"], tag: ["Made for sharing", "Deli salads by the tub"], layout: "three", columns: [
     [ { kind: "list", title: "Starters", rows: [
-        { label: "Mozzarella Sticks", item: "Appetizers|Mozzarella Sticks" }, { label: "Pizza Logs", item: "Appetizers|Pizza Logs" }, { label: "Buffalo Chips", item: "Appetizers|Buffalo Chips" },
-        { label: "Cheese Curds", item: "Appetizers|Deep Fried Cheese Curd" }, { label: "Mac & Cheese Bites", item: "Appetizers|Mac & Cheese Bites (6)" }, { label: "Popcorn Chicken", item: "Appetizers|Pop Corn Chicken" },
+        { label: "Mozzarella Sticks (6)", item: "Appetizers|Mozzarella Sticks" }, { label: "Pizza Logs (6)", item: "Appetizers|Pizza Logs" }, { label: "Buffalo Chips", item: "Appetizers|Buffalo Chips" },
+        { label: "Cheese Curds", item: "Appetizers|Deep Fried Cheese Curd" }, { label: "Mac & Cheese Bites (6)", item: "Appetizers|Mac & Cheese Bites (6)" }, { label: "Popcorn Chicken", item: "Appetizers|Pop Corn Chicken" },
         { label: "Breaded Mushrooms", item: "Appetizers|Breaded Mushrooms" }, { label: "Beefy Nachos", item: "Appetizers|Beefy Nachos" }, { label: "Potato Skins", item: "Appetizers|Potato Skins" } ] } ],
     [ { kind: "list", title: "Samplers", rows: [
         { label: "Variety for Two", item: "Appetizers|Variety for TWO" }, { label: "Variety for Four", item: "Appetizers|Variety for Four" }, { label: "Fathead Special", item: "Appetizers|Fathead Special" } ] },

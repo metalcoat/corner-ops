@@ -5,10 +5,10 @@
  * from the playlist's share link.
  */
 export const GREETER_PLAYLISTS: Record<string, string> = {
-  everyday: "",
-  halloween: "",
+  everyday: "PLDIoUOhQQPlXr63I_vwF9GD8sAKh77dWU",
+  halloween: "PLJkeDBmFGaFD-NS7L1wHHUL6j5qNir-do",
   thanksgiving: "",
-  christmas: "",
+  christmas: "RDCLAK5uy_kOeihDkxwRjMxrIyvzrY3K-iUiWeaxZhY",
 };
 
 export function greeterPlaylist(season: string): string | null {
