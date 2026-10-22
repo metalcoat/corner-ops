@@ -16,6 +16,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 
 /**
  * Corner Deli's TV display: one full-screen web page (a menu board or the greeter) and nothing else.
@@ -23,6 +24,9 @@ import android.webkit.WebViewClient;
  *   adb shell am start -n com.cornerdeli.display/.MainActivity -d http://192.168.1.237:3000/pos/menu-board?tv=1
  * Sound plays without a tap, the screen stays on, it opens when the TV starts, and if the page
  * can't load (server or Wi-Fi down) it tries again every 15 seconds. No microphone or camera access.
+ * The greeter's music plays from YouTube behind the page (MusicPlayer). Pair it with the store's
+ * YouTube account once:  adb shell am start -n com.cornerdeli.display/.MainActivity --ez music_setup true
+ * (sign in on YouTube's screen with the remote), then the same with --ez music_setup false.
  */
 public class MainActivity extends Activity {
     private static final String PREFS = "display";
@@ -30,6 +34,7 @@ public class MainActivity extends Activity {
     private static final long RETRY_MS = 15_000;
 
     private WebView web;
+    private MusicPlayer music;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable retry = () -> { if (web != null) web.loadUrl(savedUrl()); };
 
@@ -37,6 +42,8 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON | WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        // Lets the store server inspect the pages over adb (chrome://inspect) when something misbehaves.
+        WebView.setWebContentsDebuggingEnabled(true);
         web = new WebView(this);
         web.setBackgroundColor(Color.BLACK);
         WebSettings settings = web.getSettings();
@@ -61,9 +68,15 @@ public class MainActivity extends Activity {
                 return false; // stay in this app for everything the page opens
             }
         });
-        setContentView(web);
+        music = new MusicPlayer(this);
+        web.addJavascriptInterface(music.new Bridge(), "CornerDeliTv");
+        FrameLayout root = new FrameLayout(this);
+        root.addView(music.view, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        root.addView(web, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        setContentView(root);
         hideSystemBars();
         takeUrl(getIntent());
+        takeSetup(getIntent());
         web.loadUrl(savedUrl());
     }
 
@@ -71,6 +84,16 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         if (takeUrl(intent)) web.loadUrl(savedUrl());
+        takeSetup(intent);
+    }
+
+    /** --ez music_setup true shows YouTube for pairing; false hides it and brings the page back. */
+    private void takeSetup(Intent intent) {
+        if (intent == null || !intent.hasExtra("music_setup")) return;
+        boolean show = intent.getBooleanExtra("music_setup", false);
+        settingUp = show;
+        music.setup(show);
+        if (!show) { web.bringToFront(); web.requestFocus(); }
     }
 
     @Override
@@ -89,20 +112,23 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         handler.removeCallbacks(retry);
+        music.destroy();
         web.destroy();
         super.onDestroy();
     }
 
-    /** Back does nothing, so a stray press can't leave the menu. */
+    private boolean settingUp = false;
+
+    /** Back does nothing (except inside YouTube while pairing), so a stray press can't leave the menu. */
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK) return true;
+        if (keyCode == KeyEvent.KEYCODE_BACK && !settingUp) return true;
         return super.onKeyDown(keyCode, event);
     }
 
     @Override
     public void onBackPressed() {
-        // ignored on purpose
+        if (settingUp && music.view.canGoBack()) music.view.goBack();
     }
 
     private boolean takeUrl(Intent intent) {

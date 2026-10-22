@@ -15,6 +15,10 @@ type Props = { qrSvg: string; orderUrl: string; season: string; ribbon: string; 
 type Music = { pause: () => void; resume: () => void };
 
 type YtPlayer = { pauseVideo(): void; playVideo(): void; setVolume(v: number): void; setShuffle(on: boolean): void; playVideoAt(i: number): void; getPlaylist(): string[] | null };
+/** The Corner Deli display app's YouTube player (signed in to the store's account, so no ads). */
+type TvBridge = { playMusic(list: string, volume: number): void; pauseMusic(): void; resumeMusic(): void };
+const tvBridge = () => (typeof window === "undefined" ? undefined : (window as Window & { CornerDeliTv?: TvBridge }).CornerDeliTv);
+
 type YtWindow = Window & { YT?: { Player: new (el: HTMLElement, opts: object) => YtPlayer }; onYouTubeIframeAPIReady?: () => void };
 
 /** Loads the YouTube IFrame API once. */
@@ -42,6 +46,9 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
   const state = useRef({ initialized: false, lastId: 0 });
   const audio = useRef<HTMLAudioElement | null>(null);
   const music = useRef<Music | null>(null);
+  // In the Corner Deli display app the app plays the music, so the page shows no player.
+  const [inApp, setInApp] = useState(false);
+  useEffect(() => setInApp(Boolean(tvBridge())), []);
   const youTube = useRef<HTMLDivElement>(null);
 
   // Scale the 1920x1080 stage to the screen.
@@ -73,6 +80,12 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
   // Background music from the season's YouTube playlist (shuffled, looping). YouTube requires
   // its player to stay visible, so it sits in the "Now playing" card.
   useEffect(() => {
+    const app = tvBridge();
+    if (playlist && app) {
+      app.playMusic(playlist, MUSIC_VOLUME);
+      music.current = { pause: () => app.pauseMusic(), resume: () => app.resumeMusic() };
+      return () => { app.pauseMusic(); music.current = null; };
+    }
     if (!playlist || !youTube.current) return;
     let player: YtPlayer | null = null;
     let stopped = false;
@@ -201,7 +214,7 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
           <h1>Welcome to Corner Deli!</h1>
           <p>Someone will be right with you.</p>
         </section>
-        {playlist && (
+        {playlist && !inApp && (
           <div className="gtNowPlaying">
             <span>Now playing</span>
             <div className="gtYt"><div ref={youTube} /></div>
