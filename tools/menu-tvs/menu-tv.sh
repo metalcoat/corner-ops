@@ -1,5 +1,5 @@
 #!/bin/sh
-# Corner Deli menu TVs (Fire TVs running Fully Kiosk): keeps each TV on its menu during store
+# Corner Deli menu TVs (Fire TVs running the Corner Deli display app, or Fully Kiosk): keeps each TV on its menu during store
 # hours and turns it on and off, over the network with adb. Run every 2 minutes from cron on
 # the store server (see README.md). Store hours are Eastern time whatever the server clock is:
 # on at 10:20 AM; off at 9:35 PM Sunday to Thursday and 10:35 PM Friday and Saturday.
@@ -21,9 +21,11 @@ case "$day" in 5|6) CLOSE=2235 ;; *) CLOSE=2135 ;; esac
 
 shell() { timeout 20 "$ADB" -s "$1:5555" shell "$2" 2>/dev/null; }
 awake() { shell "$1" "dumpsys power" | grep -q 'mWakefulness=Awake'; }
-showing_menu() { shell "$1" "dumpsys window" | grep 'mCurrentFocus' | grep -q 'de.ozerov.fully'; }
+# The Corner Deli display app (tools/display-app); Fully Kiosk on a TV that doesn't have it yet.
+app() { if shell "$1" "pm path com.cornerdeli.display" | grep -q package:; then echo com.cornerdeli.display; else echo de.ozerov.fully; fi; }
+showing_menu() { shell "$1" "dumpsys window" | grep 'mCurrentFocus' | grep -q -e 'com.cornerdeli.display' -e 'de.ozerov.fully'; }
 page() { if [ "$1" = greeter ]; then echo "$SERVER/pos/greeter/tv"; else echo "$SERVER/pos/menu-board?tv=$1"; fi; }
-show_menu() { shell "$1" "am start -a android.intent.action.VIEW -d '$(page "$2")' de.ozerov.fully" >/dev/null; }
+show_menu() { shell "$1" "am start -a android.intent.action.VIEW -d '$(page "$2")' $(app "$1")" >/dev/null; }
 
 for entry in $TVS; do
   ip=${entry%:*}; tv=${entry#*:}

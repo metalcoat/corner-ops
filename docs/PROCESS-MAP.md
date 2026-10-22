@@ -321,12 +321,13 @@ flowchart LR
 - Seasons by store date (America/New_York): Halloween 10-21–10-31, Thanksgiving 11-12–11-26 (free turkey dinners on
   Thanksgiving Day), Christmas 11-27–12-25 (gift cards). `?season=` previews one; `?motion=low` calms a slow TV.
 - Store-network only, like the rest of `/pos`. Fonts and the promo photos are in `public/menu-board/`.
-- The TVs are Hisense Fire TVs (TV 1 192.168.6.162, TV 2 .247, TV 3 .231) running Fully Kiosk Browser. The store
+- The TVs are Hisense Fire TVs (TV 1 192.168.6.162, TV 2 .247, TV 3 .231) running the Corner Deli display app
+  (`tools/display-app`, replaced Fully Kiosk on 2026-10-22; Fully is still installed but disabled). The store
   server's cron runs `tools/menu-tvs/menu-tv.sh` every 2 minutes over adb: during store hours it wakes a TV that is
   off and reopens the menu if anything else is on screen; in the 15 minutes after closing it puts them to sleep
   (on 10:20 AM, off 9:35 PM Sun–Thu, 10:35 PM Fri–Sat, Eastern). Log: `~/.local/state/menu-tv.log`. Runs the dev app.
 
-- Greeter on the Fire TV (192.168.6.83, Fully Kiosk): `/pos/greeter/tv` is the web greeter with the same slides as
+- Greeter on the Fire TV (192.168.6.83, Corner Deli display app): `/pos/greeter/tv` is the web greeter with the same slides as
   the Pi (logo + QR, weather, fun fact, hours, 15 s each), the walk-in welcome and sound, and the menu board's
   seasons. Background music: a YouTube playlist per season from `src/lib/greeter-playlists.ts` (shown in a small "Now
   playing" card, since YouTube's player must stay visible); without playlists, audio files in the uploads volume under `greeter-music/<season>/` (halloween,
