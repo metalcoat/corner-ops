@@ -8,7 +8,7 @@ import SeasonFx from "../../menu-board/season-fx";
 const POLL_MS = 2_000;
 const SLIDE_MS = 15_000;
 const WEATHER_MS = 20 * 60_000;
-const MUSIC_VOLUME = 0.35;
+const MUSIC_VOLUME = 0.2;
 const MUSIC_REFRESH_MS = 30 * 60_000;
 const HOLIDAY_HELLO: Record<string, string> = { halloween: "Happy Halloween!", thanksgiving: "Happy Thanksgiving!", christmas: "Merry Christmas!" };
 

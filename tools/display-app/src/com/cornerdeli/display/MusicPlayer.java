@@ -24,6 +24,14 @@ final class MusicPlayer {
         + "Cobalt/25.lts.30.1034943-gold (unlike Gecko) v8/8.8.278.17-jit gles Starboard/15, "
         + "Amazon_ATV_mediatek8695_2025/RS8133 (Amazon, AFTOLCBC82, Wireless) com.amazon.firetv.youtube/25.30.00";
     private static final String VOLUME_JS = "(function(){var v=document.querySelector('video');if(v){v.volume=%s;}})()";
+    /**
+     * After a restart YouTube asks "who's watching": pick the first (the store's) account, and if YouTube
+     * lands on its home screen instead of the playlist, go back to the playlist.
+     */
+    private static final String RESUME_JS = "(function(list){var t=document.body?document.body.innerText:'';"
+        + "if(t.indexOf('Watch as guest')>=0&&t.indexOf('@')>=0){var e={key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true};"
+        + "document.dispatchEvent(new KeyboardEvent('keydown',e));document.dispatchEvent(new KeyboardEvent('keyup',e));return;}"
+        + "if(list&&location.hash.indexOf('watch')<0&&t.indexOf('Watch as guest')<0){location.hash='#/watch?list='+list;}})('%s')";
 
     final WebView view;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -48,6 +56,7 @@ final class MusicPlayer {
         handler.postDelayed(new Runnable() {
             @Override public void run() {
                 if (!playlist.isEmpty() && view.getVisibility() != View.VISIBLE) { // hands off while pairing
+                    view.evaluateJavascript(String.format(RESUME_JS, playlist), null);
                     view.evaluateJavascript(String.format(VOLUME_JS, volume), null);
                     view.evaluateJavascript(paused
                         ? "(function(){var v=document.querySelector('video');if(v&&!v.paused)v.pause();})()"
