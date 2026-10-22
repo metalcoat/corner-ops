@@ -24,7 +24,9 @@ awake() { shell "$1" "dumpsys power" | grep -q 'mWakefulness=Awake'; }
 # The Corner Deli display app (tools/display-app); Fully Kiosk on a TV that doesn't have it yet.
 app() { if shell "$1" "pm path com.cornerdeli.display" | grep -q package:; then echo com.cornerdeli.display; else echo de.ozerov.fully; fi; }
 showing_menu() { shell "$1" "dumpsys window" | grep 'mCurrentFocus' | grep -q -e 'com.cornerdeli.display' -e 'de.ozerov.fully'; }
-page() { if [ "$1" = greeter ]; then echo "$SERVER/pos/greeter/tv"; else echo "$SERVER/pos/menu-board?tv=$1"; fi; }
+# The greeter uses the server's nip.io name: YouTube won't play its music on a page served from a bare IP.
+GREETER_SERVER=${GREETER_SERVER:-http://192-168-1-237.nip.io:3000}
+page() { if [ "$1" = greeter ]; then echo "$GREETER_SERVER/pos/greeter/tv"; else echo "$SERVER/pos/menu-board?tv=$1"; fi; }
 show_menu() { shell "$1" "am start -a android.intent.action.VIEW -d '$(page "$2")' $(app "$1")" >/dev/null; }
 
 for entry in $TVS; do
