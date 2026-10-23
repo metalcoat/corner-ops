@@ -7,8 +7,8 @@ debugging on, and has accepted the store server's adb key ("Always allow from th
 
 `menu-tv.sh` runs every 2 minutes from user `chris`'s crontab on the store server. Between 10:20 AM and
 closing (9:35 PM Sunday–Thursday, 10:35 PM Friday–Saturday, Eastern) it wakes any TV that is off and
-reopens the menu if something else is on screen. In the 15 minutes after closing it puts the TVs to
-sleep; after that it leaves them alone until morning.
+reopens the menu if something else is on screen. From closing until 10:20 it keeps them asleep, putting
+back to sleep any TV that wakes up overnight (a Fire TV can wake itself).
 
 ```sh
 */2 * * * * /opt/corner-ops/runtime/tools/menu-tvs/menu-tv.sh >> /home/chris/.local/state/menu-tv.log 2>&1

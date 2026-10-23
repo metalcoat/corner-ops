@@ -35,11 +35,10 @@ for entry in $TVS; do
   if ! shell "$ip" true; then log "TV $tv ($ip): not reachable"; continue; fi
   action=${1:-auto}
   if [ "$action" = auto ]; then
-    # Only turn TVs off in the 15 minutes after closing, so a TV someone turns on later
-    # (cleaning, a late event) is left alone until the next morning.
+    # Closed: keep the TVs asleep. A Fire TV can wake itself overnight (2026-10-22 the greeter woke at
+    # 11 PM and played music all night), so this runs all night, not only right after closing.
     if [ "$hhmm" -ge "$OPEN" ] && [ "$hhmm" -lt "$CLOSE" ]; then action=on
-    elif [ "$hhmm" -ge "$CLOSE" ] && [ "$hhmm" -lt $((CLOSE + 15)) ]; then action=off
-    else continue; fi
+    else action=off; fi
   fi
   case "$action" in
     on)
