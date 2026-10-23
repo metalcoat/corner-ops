@@ -146,7 +146,7 @@ export const PROMOS: PromoSpec[] = [
   { key: "order", kicker: "Skip the wait", name: "Order ahead", text: "Scan with your phone camera or visit ordercornerdeli.com. Pick up when it's ready.", qr: true },
   // Season promos
   { key: "sheet", kicker: "Feeding the trick-or-treat crew?", name: "Sheet Pizza", text: "A full sheet pizza for your Halloween party. Order ahead and pick it up hot.", price: { label: "Just", item: "Pizza and Wings|Pizza", variant: "Sheet Pizza" } },
-  { key: "platter", kicker: "Hosting this year?", name: "Party Platters", text: "Deli meat platters and deli salads by the pound for family and office parties.", price: { label: "Meat platter", item: "Deli Platters|Meat Platter" } },
+  { key: "platter", kicker: "Hosting this year?", name: "Party Platters", text: "Deli meat platters and deli salads by the pound for family and office parties.", photo: "/menu-board/deli-platter.webp", cutout: true, price: { label: "Meat platter", item: "Deli Platters|Meat Platter" } },
   { key: "turkeyfree", kicker: "Our Thanksgiving tradition", name: "Free turkey dinners", text: "On Thanksgiving Day, Corner Deli gives away free turkey dinners. Ask at the counter for details.", badge: { label: "Thanksgiving", text: "Nov 26" } },
   { key: "hotturkey", kicker: "Thanksgiving all month", name: "Hot Turkey Dinner", text: "Hot turkey dinner from our Hot Meals menu, ready any day of the week.", price: { label: "Just", item: "Hot Meat Meals|Hot Turkey" } },
   { key: "giftcard", kicker: "For everyone on your list", name: "Corner Deli gift cards", text: "The easy gift for coworkers, teachers and the whole family. Ask at the counter.", badge: { label: "Give the gift of", text: "Subs!" } },
