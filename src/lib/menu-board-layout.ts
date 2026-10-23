@@ -72,7 +72,7 @@ export const MENU_SCREENS: MenuScreenSpec[] = [
     [ { kind: "grid", title: "Wings", note: "double fried",
         columns: [{ label: "Bone-in", item: "Pizza and Wings|Wings" }, { label: "Boneless", item: "Pizza and Wings|Boneless Wings" }],
         rows: sizes(["10", "12", "15", "20", "24", "30", "50"].map((n) => `${n} Wings`), (n) => n.replace("Wings", "wings")) },
-      { kind: "options", title: "Sauces", note: "pick one, no charge", item: "Pizza and Wings|Wings", group: "Wing Sauce", free: true } ] ] },
+      { kind: "options", title: "Sauces", item: "Pizza and Wings|Wings", group: "Wing Sauce", free: true } ] ] },
   { key: "subs", title: ["Subs ", "& Wraps"], tag: ["Half, full or wrap", "Built your way"], layout: "two", columns: [
     [ { kind: "grid", title: "Deli Subs", columns: SUB_COLUMNS, rows: [sub("Turkey"), sub("Ham"), sub("Roast Beef"), sub("Tuna"), sub("Mixed Italian"), sub("Turkey Club"), sub("BLT"), sub("Veggie")] } ],
     [ { kind: "grid", title: "Hot Subs", columns: SUB_COLUMNS, rows: [sub("Steak"), sub("Chicken Bacon Ranch"), sub("Buffalo Chicken"), sub("Chicken Fajita"), sub("Turkey Big Boss"), sub("Meatball Sub"), sub("Chicken Parmesan", "Chicken Parmesan Sub"), sub("Hot Sausage")] } ] ] },
