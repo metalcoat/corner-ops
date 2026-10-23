@@ -5,7 +5,10 @@ const kitchenPortions: Record<string, string> = {
   "small french fries": "7oz", "large french fries": "11oz",
   "small curly fries": "6oz", "large curly fries": "9oz",
   "small tater tots": "7oz", "large tater tots": "11oz",
-  "onion rings": "7oz", "small waffle fries": "6oz", "large waffle fries": "9oz",
+  "onion rings": "7oz", "small waffle fries": "6oz", "large waffle fries": "10oz",
+  // the same sides when they come as a meal's side choice
+  "small fry": "7oz", "large fry": "11oz", "small curly": "6oz", "large curly": "9oz",
+  "small tots": "7oz", "large tots": "11oz", "small waffle": "6oz", "large waffle": "10oz",
 };
 
 export function kitchenPortionName(itemName: string) {

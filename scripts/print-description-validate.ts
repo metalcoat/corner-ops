@@ -53,7 +53,7 @@ void (async () => {
     if(orderedSplit.findIndex(line=>line.includes("PEPPERONI"))>orderedSplit.findIndex(line=>line.includes("SAUSAGE")))throw new Error(`Split pizza make-line order failed: ${orderedSplit.join(" / ")}`);
     const wholePizza=formatKitchenLines([{quantity:1,header:"Whole Pizza",family:"00-pizza",modifiers:[{name:"Pepperoni",group:"Pizza Toppings",printOrder:10,header:false,print:true,pizzaPortion:"whole",pizzaAmount:"regular"}]}]);
     if(wholePizza.join("|")!=="Whole Pizza|  PEPPERONI")throw new Error(`Whole pizza should use the normal ticket list: ${wholePizza.join("|")}`);
-    const portions=["Small French Fries (7oz)","Large French Fries (11oz)","Small Curly Fries (6oz)","Large Curly Fries (9oz)","Small Tater Tots (7oz)","Large Tater Tots (11oz)","Onion Rings (7oz)","Small Waffle Fries (6oz)","Large Waffle Fries (9oz)"];
+    const portions=["Small French Fries (7oz)","Large French Fries (11oz)","Small Curly Fries (6oz)","Large Curly Fries (9oz)","Small Tater Tots (7oz)","Large Tater Tots (11oz)","Onion Rings (7oz)","Small Waffle Fries (6oz)","Large Waffle Fries (10oz)"];
     if(portions.some(value=>kitchenPortionName(value.replace(/ \([^)]*\)$/,""))!==value))throw new Error("Kitchen portion labels failed.");
     const productionTotals=formatKitchenLines([
       {quantity:2,header:"Small French Fries (7oz)",itemName:"Small French Fries",modifiers:[]},
