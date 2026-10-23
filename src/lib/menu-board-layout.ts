@@ -135,7 +135,7 @@ export const MENU_SCREENS: MenuScreenSpec[] = [
 ];
 
 export const PROMOS: PromoSpec[] = [
-  { key: "breakfast", kicker: "Our signature pie", name: "Breakfast Pizza", text: "American-cheese garlic sauce, eggs, melted cheese and your choice of toppings.", price: { label: "From", item: "Pizza and Wings|Breakfast Pizza", variant: 'Small 12"' } },
+  { key: "breakfast", kicker: "Our signature pie", name: "Breakfast Pizza", text: "American-cheese garlic sauce, eggs, melted cheese and your choice of toppings.", photo: "/menu-board/breakfast-pizza.webp", cutout: true, price: { label: "From", item: "Pizza and Wings|Breakfast Pizza", variant: 'Small 12"' } },
   { key: "tbb", kicker: "Fresh off the toaster", name: "Turkey Big Boss", text: "Toasted sub with turkey, bacon, melted Swiss, tomato and Russian dressing.", photo: "/menu-board/turkey-big-boss.jpg",
     price: { label: "Full sub", item: `${SUBS}|Turkey Big Boss`, variant: "Full Sub" }, extras: [["Half sub", `${SUBS}|Turkey Big Boss`, "1/2 Sub"], ["Wrap", `${SUBS}|Turkey Big Boss`, "Wraps"]] },
   { key: "ogdens", kicker: "Only in Ogdensburg", name: "The Ogdensburger", text: "A bacon burger stacked between two grilled cheese sandwiches used as the buns.", price: { label: "Just", item: "Burgers|Ogdensburger" } },
