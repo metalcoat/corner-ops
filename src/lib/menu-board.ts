@@ -36,18 +36,18 @@ export async function menuBoardPriceIndex(): Promise<PriceIndex> {
     JOIN ordering_menu_item_modifier_groups l ON l.item_id = i.id
     JOIN ordering_modifier_groups g ON g.id = l.group_id AND g.active = TRUE
     JOIN ordering_modifier_options o ON o.group_id = g.id AND o.active = TRUE
-    JOIN ordering_menu_item_variants v ON v.item_id = i.id AND v.active = TRUE
+    LEFT JOIN ordering_menu_item_variants v ON v.item_id = i.id AND v.active = TRUE
     LEFT JOIN ordering_menu_variant_modifier_prices p ON p.variant_id = v.id AND p.option_id = o.id AND p.active = TRUE
     WHERE i.business = 'Corner Deli' AND i.active = TRUE
     ORDER BY o.sort_order, o.name
-  `) as { category: string; item: string; grp: string; option: string; available: boolean; variant: string; cents: number }[];
+  `) as { category: string; item: string; grp: string; option: string; available: boolean; variant: string | null; cents: number }[];
   for (const row of options) {
     const entry = index.get(`${row.category}|${row.item}`.toLowerCase());
     if (!entry) continue;
     const group = ((entry.modifiers ??= {})[row.grp.toLowerCase()] ??= []);
     let option = group.find((o) => o.name === row.option);
     if (!option) group.push((option = { name: row.option, available: Boolean(row.available), prices: {} }));
-    option.prices[row.variant.toLowerCase()] = Number(row.cents);
+    option.prices[(row.variant ?? "").toLowerCase()] = Number(row.cents); // "" = an item without sizes
   }
   return index;
 }

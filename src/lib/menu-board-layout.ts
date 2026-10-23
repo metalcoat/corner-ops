@@ -25,7 +25,9 @@ type GridSpec = { kind: "grid"; title: string; note?: string; columns: GridAxis[
 /** A modifier group's options as a list of names; options priced differently from the rest get their own line. */
 /** `free`: list every available option, priced or not (wing sauces cost nothing). */
 type OptionsSpec = { kind: "options"; title: string; note?: string; item: string; group: string; free?: boolean };
-type ListSpec = { kind: "list"; title: string; note?: string; rows: { label: string; item?: string; items?: string[]; variants?: string[]; note?: string }[] };
+/** `plus`: a modifier option added to the item's price (a Chili Cheeseburger is a cheeseburger plus chili). */
+type AddOn = { group: string; option: string };
+type ListSpec = { kind: "list"; title: string; note?: string; rows: { label: string; item?: string; items?: string[]; variants?: string[]; note?: string; plus?: AddOn }[] };
 type FeatureSpec = { kind: "feature"; title: string; text: string; item: string };
 type BlockSpec = GridSpec | ListSpec | FeatureSpec | OptionsSpec;
 type MenuScreenSpec = { key: string; title: [string, string]; tag: [string, string]; layout: "two" | "three"; columns: BlockSpec[][] };
@@ -36,7 +38,7 @@ export type PromoSpec = {
   name: string;
   text: string;
   /** Badge price from the POS: the item, and its size when it has several. */
-  price?: { label: string; item: string; variant?: string };
+  price?: { label: string; item: string; variant?: string; plus?: AddOn };
   /** Badge text instead of a price, such as a date. */
   badge?: { label: string; text: string };
   /** Small line under a photo, built from POS prices: [label, item, size]. */
@@ -83,7 +85,7 @@ export const MENU_SCREENS: MenuScreenSpec[] = [
         { label: "Hamburger", item: "Burgers|Hamburger", note: "¼ lb" }, { label: "Cheeseburger", item: "Burgers|Cheeseburger (1/4lbs)", note: "¼ lb" },
         { label: "Double Cheeseburger", item: "Burgers|Double Cheeseburger (1/2lbs)", note: "½ lb" }, { label: "Triple Cheeseburger", item: "Burgers|Triple Cheeseburger (3/4lbs)", note: "¾ lb" },
         { label: "Wild West Burger", item: "Burgers|Wild West Burger" }, { label: "Bus Driver Burger", item: "Burgers|Bus Driver Burger (1/2lbs)" },
-        { label: "Cactus Burger", item: "Burgers|Cactus Burger" }, { label: "Chili Cheeseburger", item: "Burgers|Chili Cheeseburger" }, { label: "Ogdensburger", item: "Burgers|Ogdensburger" }, { label: "Cordon Blue Burger", item: "Burgers|Cordon Blue Burger" } ] } ],
+        { label: "Cactus Burger", item: "Burgers|Cactus Burger" }, { label: "Chili Cheeseburger", item: "Burgers|Cheeseburger (1/4lbs)", plus: { group: "Burger Toppings", option: "Chili" } }, { label: "Ogdensburger", item: "Burgers|Ogdensburger" }, { label: "Cordon Blue Burger", item: "Burgers|Cordon Blue Burger" } ] } ],
     [ { kind: "list", title: "Tenders", rows: [
         { label: "2 Chicken Tenders", item: "Tenders/ Finger Foods|2 Chicken Tenders" }, { label: "4 Chicken Tenders", item: "Tenders/ Finger Foods|4 Chicken Tenders" },
         { label: "Tender Dinner", item: "Tenders/ Finger Foods|Chicken Tender Dinner" }, { label: "Nuggets (10)", item: "Tenders/ Finger Foods|Chicken Nuggets (10 piece)" },
@@ -138,7 +140,7 @@ export const PROMOS: PromoSpec[] = [
     price: { label: "Full sub", item: `${SUBS}|Turkey Big Boss`, variant: "Full Sub" }, extras: [["Half sub", `${SUBS}|Turkey Big Boss`, "1/2 Sub"], ["Wrap", `${SUBS}|Turkey Big Boss`, "Wraps"]] },
   { key: "ogdens", kicker: "Only in Ogdensburg", name: "The Ogdensburger", text: "A bacon burger stacked between two grilled cheese sandwiches used as the buns.", price: { label: "Just", item: "Burgers|Ogdensburger" } },
   { key: "chili", kicker: "On our homemade bun", name: "Chili Cheeseburger", text: "A cheeseburger smothered in our chili with chopped onions.", photo: "/menu-board/chili-cheeseburger.webp", cutout: true,
-    price: { label: "Just", item: "Burgers|Chili Cheeseburger" } },
+    price: { label: "Just", item: "Burgers|Cheeseburger (1/4lbs)", plus: { group: "Burger Toppings", option: "Chili" } } },
   { key: "wildwest", kicker: "Saddle up", name: "Wild West Burger", text: "Double cheeseburger with bacon, an onion ring and barbecue sauce.", price: { label: "Just", item: "Burgers|Wild West Burger" } },
   { key: "fathead", kicker: "Share it, or don't", name: "Fathead Special", text: "Four pizza logs, four mozzarella sticks and four wings with marinara. Pick your wing sauce.", price: { label: "Only", item: "Appetizers|Fathead Special" } },
   { key: "order", kicker: "Skip the wait", name: "Order ahead", text: "Scan with your phone camera or visit ordercornerdeli.com. Pick up when it's ready.", qr: true },
@@ -228,6 +230,16 @@ function modifierGroup(index: PriceIndex, missing: Set<string>, item: string, gr
   return { options, usual };
 }
 
+/** The item's price plus one modifier option's (at the item's size, or its only price). */
+function withAddOn(index: PriceIndex, missing: Set<string>, item: string, plus?: AddOn, variant?: string): { cents: number; available: boolean } | null {
+  const base = lookup(index, missing, item, variant);
+  if (!base || !plus) return base;
+  const option = index.get(item.toLowerCase())?.modifiers?.[plus.group.toLowerCase()]?.find((o) => o.name.toLowerCase() === plus.option.toLowerCase());
+  const cents = option?.prices[(variant ?? "").toLowerCase()] ?? Object.values(option?.prices ?? {})[0];
+  if (!option || cents === undefined) { missing.add(`${item} (${plus.group}: ${plus.option})`); return null; }
+  return { cents: base.cents + cents, available: base.available && option.available };
+}
+
 function buildBlock(block: BlockSpec, index: PriceIndex, missing: Set<string>): BoardBlock | null {
   if (block.kind === "options") {
     const group = modifierGroup(index, missing, block.item, block.group, block.free);
@@ -267,7 +279,7 @@ function buildBlock(block: BlockSpec, index: PriceIndex, missing: Set<string>): 
     return rows.length ? { kind: "grid", title: block.title, note: block.note, columns: block.columns.map((c) => c.label), rows } : null;
   }
   const rows = block.rows.flatMap((row) => {
-    const parts = row.items ? row.items.map((item) => lookup(index, missing, item)) : row.variants ? row.variants.map((v) => lookup(index, missing, row.item!, v)) : [lookup(index, missing, row.item!)];
+    const parts = row.items ? row.items.map((item) => lookup(index, missing, item)) : row.variants ? row.variants.map((v) => lookup(index, missing, row.item!, v)) : [withAddOn(index, missing, row.item!, row.plus)];
     if (parts.some((p) => !p)) return [];
     const prices = parts as { cents: number; available: boolean }[];
     return [{ label: row.label, note: row.note, price: { text: prices.map((p) => money(p.cents)).join(" / "), soldOut: prices.every((p) => !p.available) } }];
@@ -291,7 +303,7 @@ function buildPromo(key: string, index: PriceIndex, missing: Set<string>): Board
   if (!promo) { missing.add(`promo ${key}`); return null; }
   let badgeLabel = promo.badge?.label ?? "", badgeText = promo.badge?.text ?? "";
   if (promo.price) {
-    const p = lookup(index, missing, promo.price.item, promo.price.variant);
+    const p = withAddOn(index, missing, promo.price.item, promo.price.plus, promo.price.variant);
     if (!p || !p.available) return null; // never advertise a missing or sold-out item
     badgeLabel = promo.price.label; badgeText = `$${money(p.cents)}`;
   }

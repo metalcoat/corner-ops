@@ -48,7 +48,7 @@ test("menu board: one-size items charge that size; sold out is marked; pairs joi
 
 test("menu board: promos never advertise a sold-out item, and seasons swap promos", () => {
   const prices = index({
-    "Burgers|Ogdensburger": item(1100), "Burgers|Wild West Burger": item(1025, [], false), "Burgers|Chili Cheeseburger": item(900),
+    "Burgers|Ogdensburger": item(1100), "Burgers|Wild West Burger": item(1025, [], false), "Burgers|Cheeseburger (1/4lbs)": { ...item(725), modifiers: { "burger toppings": [{ name: "Chili", available: true, prices: { "": 125 } }] } },
     "Pizza and Wings|Pizza": item(1000, [["Sheet Pizza", 3500]]), "Deli Platters|Meat Platter": item(5500),
   });
   const everyday = buildBoard(2, "everyday", prices).screens.filter((s) => s.kind === "promo").map((s) => s.key);
