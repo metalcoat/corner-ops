@@ -93,7 +93,14 @@ function Screen({ screen, on, qrSvg, flashes }: { screen: BoardScreen; on: boole
       <section className={`mbSlide mbPromo${on ? " on" : ""}`} aria-hidden={!on}>
         <div className={`inner${screen.photo ? " photo" : ""}`}>
           <div><div className="kicker">{screen.kicker}</div><h2>{screen.name}</h2><p>{screen.text}</p></div>
-          {screen.photo ? (
+          {screen.photo && screen.cutout ? (
+            <div className="shot cutout">
+              <div className="ring" /><div className="ring b" />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={screen.photo} alt={screen.name} />
+              {badge}
+            </div>
+          ) : screen.photo ? (
             <div className="shot">
               <div className="frame">
                 {/* eslint-disable-next-line @next/next/no-img-element */}

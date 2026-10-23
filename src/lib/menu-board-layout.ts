@@ -42,6 +42,8 @@ export type PromoSpec = {
   /** Small line under a photo, built from POS prices: [label, item, size]. */
   extras?: [string, string, string?][];
   photo?: string;
+  /** The photo is a cut-out (transparent background): shown free-standing instead of in a frame. */
+  cutout?: boolean;
   qr?: boolean;
 };
 
@@ -81,7 +83,7 @@ export const MENU_SCREENS: MenuScreenSpec[] = [
         { label: "Hamburger", item: "Burgers|Hamburger", note: "¼ lb" }, { label: "Cheeseburger", item: "Burgers|Cheeseburger (1/4lbs)", note: "¼ lb" },
         { label: "Double Cheeseburger", item: "Burgers|Double Cheeseburger (1/2lbs)", note: "½ lb" }, { label: "Triple Cheeseburger", item: "Burgers|Triple Cheeseburger (3/4lbs)", note: "¾ lb" },
         { label: "Wild West Burger", item: "Burgers|Wild West Burger" }, { label: "Bus Driver Burger", item: "Burgers|Bus Driver Burger (1/2lbs)" },
-        { label: "Cactus Burger", item: "Burgers|Cactus Burger" }, { label: "Ogdensburger", item: "Burgers|Ogdensburger" }, { label: "Cordon Blue Burger", item: "Burgers|Cordon Blue Burger" } ] } ],
+        { label: "Cactus Burger", item: "Burgers|Cactus Burger" }, { label: "Chili Cheeseburger", item: "Burgers|Chili Cheeseburger" }, { label: "Ogdensburger", item: "Burgers|Ogdensburger" }, { label: "Cordon Blue Burger", item: "Burgers|Cordon Blue Burger" } ] } ],
     [ { kind: "list", title: "Tenders", rows: [
         { label: "2 Chicken Tenders", item: "Tenders/ Finger Foods|2 Chicken Tenders" }, { label: "4 Chicken Tenders", item: "Tenders/ Finger Foods|4 Chicken Tenders" },
         { label: "Tender Dinner", item: "Tenders/ Finger Foods|Chicken Tender Dinner" }, { label: "Nuggets (10)", item: "Tenders/ Finger Foods|Chicken Nuggets (10 piece)" },
@@ -135,6 +137,8 @@ export const PROMOS: PromoSpec[] = [
   { key: "tbb", kicker: "Fresh off the toaster", name: "Turkey Big Boss", text: "Toasted sub with turkey, bacon, melted Swiss, tomato and Russian dressing.", photo: "/menu-board/turkey-big-boss.jpg",
     price: { label: "Full sub", item: `${SUBS}|Turkey Big Boss`, variant: "Full Sub" }, extras: [["Half sub", `${SUBS}|Turkey Big Boss`, "1/2 Sub"], ["Wrap", `${SUBS}|Turkey Big Boss`, "Wraps"]] },
   { key: "ogdens", kicker: "Only in Ogdensburg", name: "The Ogdensburger", text: "A bacon burger stacked between two grilled cheese sandwiches used as the buns.", price: { label: "Just", item: "Burgers|Ogdensburger" } },
+  { key: "chili", kicker: "On our homemade bun", name: "Chili Cheeseburger", text: "A cheeseburger smothered in our chili with chopped onions.", photo: "/menu-board/chili-cheeseburger.webp", cutout: true,
+    price: { label: "Just", item: "Burgers|Chili Cheeseburger" } },
   { key: "wildwest", kicker: "Saddle up", name: "Wild West Burger", text: "Double cheeseburger with bacon, an onion ring and barbecue sauce.", price: { label: "Just", item: "Burgers|Wild West Burger" } },
   { key: "fathead", kicker: "Share it, or don't", name: "Fathead Special", text: "Four pizza logs, four mozzarella sticks and four wings with marinara. Pick your wing sauce.", price: { label: "Only", item: "Appetizers|Fathead Special" } },
   { key: "order", kicker: "Skip the wait", name: "Order ahead", text: "Scan with your phone camera or visit ordercornerdeli.com. Pick up when it's ready.", qr: true },
@@ -153,7 +157,7 @@ export const PROMOS: PromoSpec[] = [
 export const SLOT_SECONDS = [12, 8, 12, 8];
 export const MENU_TVS: { name: string; slots: string[] }[] = [
   { name: "Menu TV 1", slots: ["m:pizza", "p:breakfast", "m:subs", "p:tbb"] },
-  { name: "Menu TV 2", slots: ["m:burgers", "p:ogdens", "m:dinners", "p:wildwest"] },
+  { name: "Menu TV 2", slots: ["m:burgers", "p:chili", "m:dinners", "p:wildwest"] },
   { name: "Menu TV 3", slots: ["m:apps", "p:fathead", "m:sweets", "p:order"] },
 ];
 /** Shown in a promo slot whose item is sold out or missing, so the TVs stay in step. */
@@ -170,10 +174,10 @@ export const SEASONS: SeasonSpec[] = [
     swap: { breakfast: "sheet", fathead: "platter" },
     ticker: [["Halloween party?", "Sheet Pizza {Pizza and Wings|Pizza|Sheet Pizza}"], ["50 wings", "{Pizza and Wings|Wings|50 Wings}"], ["Meat Platter", "{Deli Platters|Meat Platter}"]] },
   { key: "thanksgiving", from: "11-12", to: "11-26", ribbon: "Happy Thanksgiving from Corner Deli",
-    swap: { breakfast: "turkeyfree", ogdens: "turkeyfree", wildwest: "hotturkey", fathead: "turkeyfree" },
+    swap: { breakfast: "turkeyfree", ogdens: "turkeyfree", chili: "turkeyfree", wildwest: "hotturkey", fathead: "turkeyfree" },
     ticker: [["Free turkey dinners", "Thanksgiving Day"], ["Hot Turkey Dinner", "{Hot Meat Meals|Hot Turkey}"], ["Meat Platter", "{Deli Platters|Meat Platter}"]] },
   { key: "christmas", from: "11-27", to: "12-25", ribbon: "Merry Christmas from Corner Deli",
-    swap: { breakfast: "giftcard", ogdens: "giftcard", wildwest: "platter", fathead: "giftcard" },
+    swap: { breakfast: "giftcard", ogdens: "giftcard", chili: "giftcard", wildwest: "platter", fathead: "giftcard" },
     ticker: [["Gift cards", "ask at the counter"], ["Holiday party platters", "from {Deli Platters|Meat Platter}"]] },
 ];
 
@@ -192,7 +196,7 @@ export type BoardBlock =
   | { kind: "options"; title: string; note?: string; names: string[]; extras: { label: string; price: BoardPrice }[] };
 export type BoardScreen =
   | { kind: "menu"; key: string; title: [string, string]; tag: [string, string]; layout: "two" | "three"; columns: BoardBlock[][] }
-  | { kind: "promo"; key: string; kicker: string; name: string; text: string; badgeLabel: string; badgeText: string; extras: string; photo?: string; qr?: boolean; example: boolean };
+  | { kind: "promo"; key: string; kicker: string; name: string; text: string; badgeLabel: string; badgeText: string; extras: string; photo?: string; cutout?: boolean; qr?: boolean; example: boolean };
 export type Board = { tv: number; name: string; season: SeasonKey; ribbon: string; screens: BoardScreen[]; ticker: [string, string][]; missing: string[] };
 
 export const money = (cents: number) => (cents / 100).toFixed(2);
@@ -295,7 +299,7 @@ function buildPromo(key: string, index: PriceIndex, missing: Set<string>): Board
     const p = lookup(index, missing, item, size);
     return p ? [`${label} $${money(p.cents)}`] : [];
   }).join(" · ");
-  return { kind: "promo", key: promo.key, kicker: promo.kicker, name: promo.name, text: promo.text, badgeLabel, badgeText, extras, photo: promo.photo, qr: promo.qr, example: false };
+  return { kind: "promo", key: promo.key, kicker: promo.kicker, name: promo.name, text: promo.text, badgeLabel, badgeText, extras, photo: promo.photo, cutout: promo.cutout, qr: promo.qr, example: false };
 }
 
 /** Builds one TV's board (tv is 1-based) for a season from the POS price index. */
