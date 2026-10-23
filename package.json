@@ -87,15 +87,15 @@
     "mobile:ios": "cap sync ios"
   },
   "dependencies": {
-    "@capacitor/android": "^8.5.0",
+    "@capacitor/android": "^8.5.3",
     "@capacitor/app": "^8.1.1",
-    "@capacitor/core": "^8.5.0",
-    "@capacitor/ios": "^8.5.0",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/ios": "^8.5.3",
     "@neondatabase/serverless": "^1.0.2",
     "@types/ws": "^8.18.1",
     "@vercel/blob": "^2.3.0",
-    "next": "^16.3.3",
-    "nodemailer": "^9.0.5",
+    "next": "^16.4.3",
+    "nodemailer": "^10.2.1",
     "openai": "^7.5.0",
     "pg": "^8.23.0",
     "phaser": "^3.90.0",
@@ -121,6 +121,6 @@
   "overrides": {
     "nanoid": "3.3.18",
     "postcss": "8.5.26",
-    "sharp": "0.35.4"
+    "sharp": "0.35.5"
   }
 }
