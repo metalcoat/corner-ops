@@ -9,7 +9,7 @@ const CYCLE_MS = SLOT_SECONDS.reduce((sum, s) => sum + s, 0) * 1000;
 const TICKER_MS = 48_000; // matches the mbCrawl animation in menu-board.css
 const LOGO = "/corner-deli-logo.png";
 
-type Props = { initial: Board & { version?: string }; tv: number; season: string | null; qrSvg: string; lowMotion: boolean };
+type Props = { initial: Board & { version?: string }; layout: string; tv: number; season: string | null; qrSvg: string; lowMotion: boolean };
 
 const vars = (style: Record<string, string | number>) => style as CSSProperties;
 
@@ -130,7 +130,7 @@ function Screen({ screen, on, qrSvg, flashes }: { screen: BoardScreen; on: boole
   );
 }
 
-export default function MenuBoard({ initial, tv, season, qrSvg, lowMotion }: Props) {
+export default function MenuBoard({ initial, layout, tv, season, qrSvg, lowMotion }: Props) {
   const [board, setBoard] = useState(initial);
   const [cur, setCur] = useState(0);
   const [offline, setOffline] = useState(false);
@@ -164,8 +164,10 @@ export default function MenuBoard({ initial, tv, season, qrSvg, lowMotion }: Pro
         const sent = Date.now();
         const response = await fetch(`/api/pos/menu-board?${query}`, { cache: "no-store" });
         if (!response.ok) throw new Error(String(response.status));
-        const next = (await response.json()) as Board & { version: string; serverNow: number };
+        const next = (await response.json()) as Board & { version: string; layout?: string; serverNow: number };
         if (stopped) return;
+        // A new release changed the screens: load the new page rather than draw them with this one.
+        if (next.layout && next.layout !== layout) { window.location.reload(); return; }
         offset.current = next.serverNow - (sent + Date.now()) / 2;
         // Restart the ticker at the same point on every TV (a tiny jump at most, once a minute).
         const el = track.current;
@@ -193,7 +195,7 @@ export default function MenuBoard({ initial, tv, season, qrSvg, lowMotion }: Pro
       if (new Date().getHours() === 4 && performance.now() > 3_600_000) window.location.reload();
     }, 600_000);
     return () => { stopped = true; window.clearInterval(timer); window.clearInterval(reload); };
-  }, [tv, season]);
+  }, [tv, season, layout]);
 
   const count = board.screens.length;
   const showing = count ? cur % count : 0;

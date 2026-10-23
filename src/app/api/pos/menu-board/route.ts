@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { menuBoard } from "@/lib/menu-board";
+import { MENU_LAYOUT_VERSION, menuBoard } from "@/lib/menu-board";
 import { SEASONS, type SeasonKey } from "@/lib/menu-board-layout";
 
 export const runtime = "nodejs";
@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     const board = await menuBoard(Number.isInteger(tv) ? tv : 1, season);
     const version = createHash("sha1").update(JSON.stringify(board)).digest("hex").slice(0, 12);
     // serverNow lets every TV set its clock by the server, so they change screens together.
-    return Response.json({ version, serverNow: Date.now(), ...board }, { headers: { "cache-control": "no-store" } });
+    return Response.json({ version, layout: MENU_LAYOUT_VERSION, serverNow: Date.now(), ...board }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     console.error("Menu board unavailable", error);
     return Response.json({ error: "The menu is temporarily unavailable." }, { status: 503 });

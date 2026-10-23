@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import QRCode from "qrcode";
-import { menuBoard } from "@/lib/menu-board";
+import { MENU_LAYOUT_VERSION, menuBoard } from "@/lib/menu-board";
 import { SEASONS, type SeasonKey } from "@/lib/menu-board-layout";
 import MenuBoard from "./menu-board";
 import "./menu-board.css";
@@ -21,5 +21,5 @@ export default async function MenuBoardPage({ searchParams }: { searchParams: Pr
   const orderUrl = process.env.GREETER_ORDER_URL?.trim() || "https://ordercornerdeli.com";
   const qrSvg = await QRCode.toString(orderUrl, { type: "svg", margin: 0, errorCorrectionLevel: "M", color: { dark: "#111111", light: "#ffffff" } });
   const board = await menuBoard(tv, season);
-  return <MenuBoard initial={board} tv={tv} season={season ?? null} qrSvg={qrSvg} lowMotion={params.motion === "low"} />;
+  return <MenuBoard initial={board} layout={MENU_LAYOUT_VERSION} tv={tv} season={season ?? null} qrSvg={qrSvg} lowMotion={params.motion === "low"} />;
 }
