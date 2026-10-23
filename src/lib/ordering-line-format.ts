@@ -9,6 +9,8 @@ const kitchenPortions: Record<string, string> = {
   // the same sides when they come as a meal's side choice
   "small fry": "7oz", "large fry": "11oz", "small curly": "6oz", "large curly": "9oz",
   "small tots": "7oz", "large tots": "11oz", "small waffle": "6oz", "large waffle": "10oz",
+  // loaded waffle fries start from a large waffle portion; piece counts where the name has none
+  "buffalo chips": "10oz", "apple logs": "6",
 };
 
 export function kitchenPortionName(itemName: string) {
@@ -47,7 +49,7 @@ export function kitchenProductionTotals(items: KitchenProductionItem[]): string[
     if (ounces) {
       if (itemName.includes("french fries")) add("FRENCH FRIES", ounces, quantity, "OZ");
       else if (itemName.includes("curly fries")) add("CURLY FRIES", ounces, quantity, "OZ");
-      else if (itemName.includes("waffle fries")) add("WAFFLE FRIES", ounces, quantity, "OZ");
+      else if (itemName.includes("waffle fries") || itemName.includes("buffalo chips")) add("WAFFLE FRIES", ounces, quantity, "OZ");
       else if (itemName.includes("tater tots")) add("TATER TOTS", ounces, quantity, "OZ");
       else if (itemName.includes("onion rings")) add("ONION RINGS", ounces, quantity, "OZ");
     }
