@@ -467,6 +467,12 @@ export default function MessagesPage() {
         method: "POST",
         body: form,
       });
+      // An expired sign-in used to fail here with only a notice above the thread, so the button
+      // seemed to do nothing. Sign in again and come back to this page (the typed text is lost).
+      if (response.status === 401) {
+        window.location.assign(`/signin?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+        return;
+      }
       if (!response.ok) throw new Error(await responseMessage(response));
       formElement.reset();
       clearPhotoAttachment(false);
