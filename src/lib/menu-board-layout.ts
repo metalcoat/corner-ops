@@ -23,7 +23,8 @@ export type PriceIndex = Map<string, PriceIndexItem>;
 type GridAxis = { label: string; item?: string; variant?: string; topping?: { group: string; option?: string } };
 type GridSpec = { kind: "grid"; title: string; note?: string; columns: GridAxis[]; rows: GridAxis[] };
 /** A modifier group's options as a list of names; options priced differently from the rest get their own line. */
-type OptionsSpec = { kind: "options"; title: string; note?: string; item: string; group: string };
+/** `free`: list every available option, priced or not (wing sauces cost nothing). */
+type OptionsSpec = { kind: "options"; title: string; note?: string; item: string; group: string; free?: boolean };
 type ListSpec = { kind: "list"; title: string; note?: string; rows: { label: string; item?: string; items?: string[]; variants?: string[]; note?: string }[] };
 type FeatureSpec = { kind: "feature"; title: string; text: string; item: string };
 type BlockSpec = GridSpec | ListSpec | FeatureSpec | OptionsSpec;
@@ -71,7 +72,7 @@ export const MENU_SCREENS: MenuScreenSpec[] = [
     [ { kind: "grid", title: "Wings", note: "double fried",
         columns: [{ label: "Bone-in", item: "Pizza and Wings|Wings" }, { label: "Boneless", item: "Pizza and Wings|Boneless Wings" }],
         rows: sizes(["10", "12", "15", "20", "24", "30", "50"].map((n) => `${n} Wings`), (n) => n.replace("Wings", "wings")) },
-      { kind: "feature", title: "Cheesy Breadsticks", text: "Nine pieces baked with garlic sauce", item: "Pizza and Wings|Cheesy Breadsticks" } ] ] },
+      { kind: "options", title: "Sauces", note: "pick one, no charge", item: "Pizza and Wings|Wings", group: "Wing Sauce", free: true } ] ] },
   { key: "subs", title: ["Subs ", "& Wraps"], tag: ["Half, full or wrap", "Built your way"], layout: "two", columns: [
     [ { kind: "grid", title: "Deli Subs", columns: SUB_COLUMNS, rows: [sub("Turkey"), sub("Ham"), sub("Roast Beef"), sub("Tuna"), sub("Mixed Italian"), sub("Turkey Club"), sub("BLT"), sub("Veggie")] } ],
     [ { kind: "grid", title: "Hot Subs", columns: SUB_COLUMNS, rows: [sub("Steak"), sub("Chicken Bacon Ranch"), sub("Buffalo Chicken"), sub("Chicken Fajita"), sub("Turkey Big Boss"), sub("Meatball Sub"), sub("Chicken Parmesan", "Chicken Parmesan Sub"), sub("Hot Sausage")] } ] ] },
@@ -160,7 +161,7 @@ const FALLBACK_PROMO = "order";
 
 /** Ticker lines: [bold, text]; "{item|size}" in the text becomes that POS price. */
 export const TICKER: [string, string][] = [
-  ["Order ahead", "ordercornerdeli.com"], ["Fathead Special", "{Appetizers|Fathead Special}"], ["Breakfast Pizza", 'from {Pizza and Wings|Breakfast Pizza|Small 12"}'],
+  ["Order ahead", "ordercornerdeli.com"], ["Cheesy Breadsticks", "{Pizza and Wings|Cheesy Breadsticks}"], ["Fathead Special", "{Appetizers|Fathead Special}"], ["Breakfast Pizza", 'from {Pizza and Wings|Breakfast Pizza|Small 12"}'],
   ["Fish Fry Dinner", "{Fish|Fish Fry Dinner - 1 Side}"], ["20 wings", "{Pizza and Wings|Wings|20 Wings}"], ["Meat Platter for parties", "{Deli Platters|Meat Platter}"], ["The Ogdensburger", "{Burgers|Ogdensburger}"],
 ];
 
@@ -212,8 +213,8 @@ function lookup(index: PriceIndex, missing: Set<string>, item: string, variant?:
 type ModifierOption = NonNullable<PriceIndexItem["modifiers"]>[string][number];
 
 /** A group's options that carry a price, and the price most of them charge at each size. */
-function modifierGroup(index: PriceIndex, missing: Set<string>, item: string, group: string): { options: ModifierOption[]; usual: (size: string) => number | undefined } | null {
-  const options = index.get(item.toLowerCase())?.modifiers?.[group.toLowerCase()]?.filter((o) => o.available && Object.values(o.prices).some((c) => c > 0));
+function modifierGroup(index: PriceIndex, missing: Set<string>, item: string, group: string, free = false): { options: ModifierOption[]; usual: (size: string) => number | undefined } | null {
+  const options = index.get(item.toLowerCase())?.modifiers?.[group.toLowerCase()]?.filter((o) => o.available && (free || Object.values(o.prices).some((c) => c > 0)));
   if (!options?.length) { missing.add(`${item} (${group})`); return null; }
   const usual = (size: string) => {
     const counts = new Map<number, number>();
@@ -225,8 +226,9 @@ function modifierGroup(index: PriceIndex, missing: Set<string>, item: string, gr
 
 function buildBlock(block: BlockSpec, index: PriceIndex, missing: Set<string>): BoardBlock | null {
   if (block.kind === "options") {
-    const group = modifierGroup(index, missing, block.item, block.group);
+    const group = modifierGroup(index, missing, block.item, block.group, block.free);
     if (!group) return null;
+    if (block.free) return { kind: "options", title: block.title, note: block.note, names: group.options.map((o) => o.name), extras: [] };
     const sizes = index.get(block.item.toLowerCase())!.variants.map((v) => v.name.toLowerCase());
     const premium = group.options.filter((o) => sizes.some((s) => o.prices[s] !== undefined && o.prices[s] !== group.usual(s)));
     const extras = premium.map((o) => {
