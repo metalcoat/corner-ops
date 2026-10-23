@@ -294,6 +294,8 @@ export async function removePushSubscription(actor: PushActor, endpoint: string)
   return pushStatus(actor);
 }
 
+const PUSH_TIMEOUT_MS = 8_000;
+
 async function sendToSubscription(subscription: StoredSubscription, message: PushMessage) {
   const body = encryptedPayload(subscription, message);
   const { authorization } = await vapidAuthorization(subscription.endpoint);
@@ -308,6 +310,9 @@ async function sendToSubscription(subscription: StoredSubscription, message: Pus
     },
     body: requestBody(body),
     cache: "no-store",
+    // A push service that never answers must not hold up whatever sent the message (a team message
+    // from the ops page waits for its pushes); it counts as a failed delivery instead.
+    signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
   });
   if (!response.ok && response.status !== 201) {
     const detail = clean(await response.text().catch(() => ""), 500);
