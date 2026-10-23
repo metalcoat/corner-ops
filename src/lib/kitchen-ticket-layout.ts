@@ -30,38 +30,44 @@ export function ticketAddress(value: string): string {
 }
 
 /**
- * A kitchen ticket: PICKUP / DELIVERY / … large at the top (the first line prints in the header size),
- * then the order number, phone and payment on the left and the customer's name, address and due time on
- * the right, then the items. "ADD ON" tickets keep that word in front of the service.
+ * A kitchen ticket: the service and whether it's paid large at the top ("PICKUP - PAID",
+ * "DELIVERY - DUE $33.50"; the first line prints in the header size), then the order number and phone on
+ * the left and the customer's name, address and time on the right ("ASAP 8:52 PM", or "EXACT Sep 23
+ * 11:00 AM" for a preorder or future order), then the items. No quote line: the time says it.
+ * "ADD ON" tickets keep that word in front of the service and their payment line on the left.
  */
 export function kitchenTicketLayout(payload: Record<string, unknown>): string[] {
   const service = kitchenServiceName(String(payload.serviceType || "") as ServiceType);
   const addOn = String(payload.heading || "") === "ADD ON";
   const timing = (Array.isArray(payload.timingLines) ? payload.timingLines : []).map(String);
   const dueLine = timing.find((line) => /^(DUE|FOR): /.test(line));
-  const due = dueLine ? `${dueLine.startsWith("FOR") ? "FOR" : "DUE"} ${dueLine.replace(/^(DUE|FOR): /, "").replaceAll(",", "")}` : "";
-  // A plain "*** ASAP PICKUP ***" banner repeats the header, so it goes; FUTURE / PREORDER banners and the quote stay.
-  const otherTiming = timing.filter((line) => line !== dueLine && (!/^\*\*\*.*\*\*\*$/.test(line.trim()) || /FUTURE|PREORDER/.test(line)));
+  const exact = timing.some((line) => /FUTURE|PREORDER/.test(line)) || Boolean(dueLine?.startsWith("FOR"));
+  // "DUE: Wed, Sep 23, 11:00 AM" → ASAP shows the time; EXACT also shows the date ("EXACT Sep 23 11:00 AM").
+  const when = (dueLine || "").replace(/^(DUE|FOR): /, "").split(", ");
+  const time = when.at(-1) || "";
+  const due = exact ? `EXACT ${time ? when.slice(-2).join(" ") : "TIME REQUIRED"}` : `ASAP${time ? ` ${time}` : ""}`;
+  const paymentLabel = String(payload.paymentLabel || "");
+  const amountDue = paymentLabel.match(/^AMOUNT DUE: (\$[\d,.]+)$/);
+  const payment = paymentLabel === "PAID" ? "PAID" : amountDue ? `DUE ${amountDue[1]}` : "";
 
   const half = TICKET_COLUMNS / 2;
   const left = [
     payload.orderNumber ? `#${payload.orderNumber}` : "",
     payload.phone ? ticketPhone(String(payload.phone)) : "",
-    payload.paymentLabel ? String(payload.paymentLabel) : "",
+    addOn || !payment ? paymentLabel : "",
     payload.cashier ? `CASHIER: ${payload.cashier}` : "",
   ].filter(Boolean).flatMap((line) => wrap(line, half - 1));
   const right = [
     ...wrap(String(payload.customerName || ""), half - 1),
     ...wrap(ticketAddress(String(payload.deliveryAddress || "")), half - 1),
     ...(payload.deliveryUnit ? wrap(`DROP-OFF: ${payload.deliveryUnit}`, half - 1) : []),
-    ...(due ? wrap(due, half - 1) : []),
+    ...wrap(due, half - 1),
   ];
-  const lines = [addOn ? `ADD ON - ${service}` : service];
+  const lines = [addOn ? `ADD ON - ${service}` : payment ? `${service} - ${payment}` : service];
   for (let i = 0; i < Math.max(left.length, right.length); i++) {
     const l = left[i] ?? "", r = right[i] ?? "";
     lines.push(`${l}${" ".repeat(Math.max(1, TICKET_COLUMNS - l.length - r.length))}${r}`);
   }
-  lines.push(...otherTiming);
   if (payload.orderInstructions) lines.push(...wrap(`INSTRUCTIONS: ${payload.orderInstructions}`, TICKET_COLUMNS));
   if (Array.isArray(payload.lines)) {
     lines.push("-".repeat(TICKET_COLUMNS));

@@ -48,7 +48,7 @@ const paid = printPayloadLines({
 
 // The service prints large on the first line; order number, phone and payment sit on the left,
 // the customer, address and due time on the right of the same rows.
-if (delivery[0] !== "DELIVERY" || paid[0] !== "PICKUP") throw new Error(`Ticket header is wrong: ${delivery[0]} / ${paid[0]}`);
+if (delivery[0] !== "DELIVERY - DUE $24.75" || paid[0] !== "PICKUP - PAID") throw new Error(`Ticket header is wrong: ${delivery[0]} / ${paid[0]}`);
 const deliveryText = delivery.join("\n");
 for (const expected of [
   "#1284",
@@ -58,17 +58,18 @@ for (const expected of [
   "Ogdensburg, NY 13669",
   "DROP-OFF: Lane 14",
   "INSTRUCTIONS: Please ring the side-door bell",
-  "QUOTE: 60 MIN",
-  "DUE Fri Aug 21 3:00 PM",
-  "AMOUNT DUE: $24.75",
+  "ASAP 3:00 PM",
 ]) {
   if (!deliveryText.includes(expected))
     throw new Error(`Delivery ticket is missing: ${expected}`);
 }
+const future = printPayloadLines({ heading: "KITCHEN ORDER", orderNumber: "1286", customerName: "Later Guest", serviceType: "delivery", timingLines: futureTiming, paymentLabel: "PAID", lines: ["1 X SUB"] });
+if (!future.join("\n").includes("EXACT Aug 22 6:15 PM") || future.some((line) => /FUTURE|QUOTE/.test(line)))
+  throw new Error(`Future ticket timing is wrong: ${future.join(" / ")}`);
 if (delivery.some((line) => line.length > 48)) throw new Error("A ticket line is wider than the paper.");
 const nameRow = delivery.find((line) => line.includes("Sarah Smith")) || "";
 if (!nameRow.startsWith("#1284") || !nameRow.endsWith("Sarah Smith")) throw new Error(`Name is not top right: ${nameRow}`);
-if (!paid.some((line) => line.startsWith("PAID")) || paid.some((line) => line.includes("AMOUNT DUE")))
+if (paid.some((line) => line.includes("QUOTE")) || paid.some((line) => line.includes("AMOUNT DUE")))
   throw new Error("Paid ticket status is incorrect.");
 if (
   !pickupTiming.includes("QUOTE: 30 MIN") ||
