@@ -375,4 +375,4 @@ flowchart LR
 5. Missed-call alerts read `rezku_shifts` to know who is on shift — move to the new clock.
 6. Staff re-enable notifications on team.ordercornerdeli.com (old Vercel installs).
 7. Rezku menu capture workflow fails on the runner (needs sudo for browser deps); retire with Rezku.
-8. MX: questions to MX support (terminal model, fees, receipts, PIN debit tips) before ordering hardware.
+8. MX: questions to MX support (terminal model, fees, receipts, PIN debit tips, can the Dejavoo Z6 read our own gift card stripes for the POS) before ordering hardware.
