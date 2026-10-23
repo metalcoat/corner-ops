@@ -26,6 +26,28 @@ export async function menuBoardPriceIndex(): Promise<PriceIndex> {
     if (!entry) index.set(key, (entry = { basePriceCents: Number(row.base_price_cents), available: Boolean(row.available), variants: [] }));
     if (row.variant !== null) entry.variants.push({ name: row.variant, priceCents: Number(row.variant_cents), available: Boolean(row.variant_available) });
   }
+  // Modifier option prices by size (pizza toppings), for the groups linked to each item.
+  const options = (await sql`
+    SELECT COALESCE(NULLIF(c.display_name, ''), c.name) AS category, i.name AS item, g.name AS grp, o.name AS option, o.sort_order,
+      o.available AND o.active AS available, v.name AS variant, COALESCE(p.price_delta_cents, o.price_delta_cents) AS cents
+    FROM ordering_menu_items i
+    JOIN ordering_menu_categories c ON c.id = i.category_id AND c.active = TRUE
+    JOIN ordering_menu_item_modifier_groups l ON l.item_id = i.id
+    JOIN ordering_modifier_groups g ON g.id = l.group_id AND g.active = TRUE
+    JOIN ordering_modifier_options o ON o.group_id = g.id AND o.active = TRUE
+    JOIN ordering_menu_item_variants v ON v.item_id = i.id AND v.active = TRUE
+    LEFT JOIN ordering_menu_variant_modifier_prices p ON p.variant_id = v.id AND p.option_id = o.id AND p.active = TRUE
+    WHERE i.business = 'Corner Deli' AND i.active = TRUE
+    ORDER BY o.sort_order, o.name
+  `) as { category: string; item: string; grp: string; option: string; available: boolean; variant: string; cents: number }[];
+  for (const row of options) {
+    const entry = index.get(`${row.category}|${row.item}`.toLowerCase());
+    if (!entry) continue;
+    const group = ((entry.modifiers ??= {})[row.grp.toLowerCase()] ??= []);
+    let option = group.find((o) => o.name === row.option);
+    if (!option) group.push((option = { name: row.option, available: Boolean(row.available), prices: {} }));
+    option.prices[row.variant.toLowerCase()] = Number(row.cents);
+  }
   return index;
 }
 

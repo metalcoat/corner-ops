@@ -45,6 +45,8 @@ html:has(.menuBoard), body:has(.menuBoard) { margin: 0; height: 100%; background
 .mbGrid .h:first-child { text-align: left }
 .mbGrid .p, .mbGrid .na { text-align: right }
 .mbGrid .na { color: rgba(253,248,236,.25) }
+.mbOptions { font-size: 32px; font-weight: 500; line-height: 1.35; margin: 0 0 6px; color: var(--ink) }
+.mbSlide .mbOptions { opacity: 0 }
 .mbFeature { position: relative; overflow: hidden; background: rgba(242,182,50,.1); border: 2px solid rgba(242,182,50,.45); border-radius: 18px; padding: 22px 28px; margin-top: 26px }
 .mbFeature b { font-family: var(--display); font-weight: 400; color: var(--gold); font-size: 38px; display: block }
 .mbFeature span { font-size: 30px; font-weight: 500; line-height: 1.25; display: block }
@@ -58,7 +60,7 @@ html:has(.menuBoard), body:has(.menuBoard) { margin: 0; height: 100%; background
 
 /* entrance motion */
 .mbSlide .mbBlock h3, .mbSlide .mbRow, .mbSlide .mbGrid > span, .mbSlide .mbFeature { opacity: 0 }
-.mbSlide.on .mbBlock h3, .mbSlide.on .mbRow, .mbSlide.on .mbGrid > span, .mbSlide.on .mbFeature { animation: mbRise .55s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(var(--i, 0) * 45ms + 250ms) }
+.mbSlide.on .mbBlock h3, .mbSlide.on .mbRow, .mbSlide.on .mbGrid > span, .mbSlide.on .mbFeature, .mbSlide.on .mbOptions { animation: mbRise .55s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(var(--i, 0) * 45ms + 250ms) }
 .mbSlide.on .mbTop h2 { animation: mbSlam .6s cubic-bezier(.2,.9,.3,1.2) both }
 .mbSlide.on .mbTop img { animation: mbSpin 1s ease both }
 @keyframes mbRise { from { opacity: 0; transform: translateY(26px) } to { opacity: 1; transform: none } }

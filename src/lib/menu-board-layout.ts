@@ -12,15 +12,21 @@ export type PriceIndexItem = {
   available: boolean;
   /** Active sizes in POS order. An item with exactly one size is charged that size's price. */
   variants: { name: string; priceCents: number; available: boolean }[];
+  /** Modifier options by group name (lower case), with each size's price ("small 12\"" → cents). */
+  modifiers?: Record<string, { name: string; available: boolean; prices: Record<string, number> }[]>;
 };
 export type PriceIndex = Map<string, PriceIndexItem>;
 
 /** A price grid: each cell is the item and size named by its row and column together. */
-type GridAxis = { label: string; item?: string; variant?: string };
+/** `topping`: the price of one option from the item's modifier group at the row's size (the usual one when
+ * no option is named, so a premium topping doesn't set the column). */
+type GridAxis = { label: string; item?: string; variant?: string; topping?: { group: string; option?: string } };
 type GridSpec = { kind: "grid"; title: string; note?: string; columns: GridAxis[]; rows: GridAxis[] };
+/** A modifier group's options as a list of names; options priced differently from the rest get their own line. */
+type OptionsSpec = { kind: "options"; title: string; note?: string; item: string; group: string };
 type ListSpec = { kind: "list"; title: string; note?: string; rows: { label: string; item?: string; items?: string[]; variants?: string[]; note?: string }[] };
 type FeatureSpec = { kind: "feature"; title: string; text: string; item: string };
-type BlockSpec = GridSpec | ListSpec | FeatureSpec;
+type BlockSpec = GridSpec | ListSpec | FeatureSpec | OptionsSpec;
 type MenuScreenSpec = { key: string; title: [string, string]; tag: [string, string]; layout: "two" | "three"; columns: BlockSpec[][] };
 
 export type PromoSpec = {
@@ -57,13 +63,15 @@ const sub = (label: string, name = label) => ({ label, item: `${SUBS}|${name}` }
 
 export const MENU_SCREENS: MenuScreenSpec[] = [
   { key: "pizza", title: ["Pizza ", "& Wings"], tag: ['12" to sheet pizza', "Wings tossed in your sauce"], layout: "two", columns: [
-    [ { kind: "grid", title: "Pizza", note: "add toppings at the counter",
-        columns: [{ label: "Cheese", item: "Pizza and Wings|Pizza" }, { label: "Breakfast", item: "Pizza and Wings|Breakfast Pizza" }],
+    [ { kind: "grid", title: "Pizza",
+        columns: [{ label: "Cheese", item: "Pizza and Wings|Pizza" }, { label: "Breakfast", item: "Pizza and Wings|Breakfast Pizza" },
+          { label: "Topping", item: "Pizza and Wings|Pizza", topping: { group: "Pizza Toppings" } }],
         rows: sizes(['Small 12"', 'Regular 14"', 'Jumbo Thin 16"', 'Jumbo Thick 16"', "Sheet Pizza"]) },
-      { kind: "feature", title: "Cheesy Breadsticks", text: "Nine pieces baked with garlic sauce", item: "Pizza and Wings|Cheesy Breadsticks" } ],
+      { kind: "options", title: "Toppings", note: "each", item: "Pizza and Wings|Pizza", group: "Pizza Toppings" } ],
     [ { kind: "grid", title: "Wings", note: "double fried",
         columns: [{ label: "Bone-in", item: "Pizza and Wings|Wings" }, { label: "Boneless", item: "Pizza and Wings|Boneless Wings" }],
-        rows: sizes(["10", "12", "15", "20", "24", "30", "50"].map((n) => `${n} Wings`), (n) => n.replace("Wings", "wings")) } ] ] },
+        rows: sizes(["10", "12", "15", "20", "24", "30", "50"].map((n) => `${n} Wings`), (n) => n.replace("Wings", "wings")) },
+      { kind: "feature", title: "Cheesy Breadsticks", text: "Nine pieces baked with garlic sauce", item: "Pizza and Wings|Cheesy Breadsticks" } ] ] },
   { key: "subs", title: ["Subs ", "& Wraps"], tag: ["Half, full or wrap", "Built your way"], layout: "two", columns: [
     [ { kind: "grid", title: "Deli Subs", columns: SUB_COLUMNS, rows: [sub("Turkey"), sub("Ham"), sub("Roast Beef"), sub("Tuna"), sub("Mixed Italian"), sub("Turkey Club"), sub("BLT"), sub("Veggie")] } ],
     [ { kind: "grid", title: "Hot Subs", columns: SUB_COLUMNS, rows: [sub("Steak"), sub("Chicken Bacon Ranch"), sub("Buffalo Chicken"), sub("Chicken Fajita"), sub("Turkey Big Boss"), sub("Meatball Sub"), sub("Chicken Parmesan", "Chicken Parmesan Sub"), sub("Hot Sausage")] } ] ] },
@@ -100,18 +108,25 @@ export const MENU_SCREENS: MenuScreenSpec[] = [
     [ { kind: "list", title: "Salads", rows: [
         { label: "Small Tossed", item: "Salads|SM Tossed Sal" }, { label: "Large Tossed", item: "Salads|LG Tossed Sal" }, { label: "Grilled Chicken", item: "Salads|Grilled Chicken Sal" },
         { label: "Buffalo Chicken", item: "Salads|Buffalo Fried Chicken Sal" }, { label: "Julienne", item: "Salads|Julienne Sal" }, { label: "Cold Plate", item: "Salads|Cold Plate" } ] } ] ] },
-  { key: "apps", title: ["Starters ", "& Sweets"], tag: ["Made for sharing", "Deli salads by the tub"], layout: "three", columns: [
+  { key: "apps", title: ["Starters ", "& Deli Salads"], tag: ["Made for sharing", "Deli salads by the tub"], layout: "two", columns: [
     [ { kind: "list", title: "Starters", rows: [
         { label: "Mozzarella Sticks (6)", item: "Appetizers|Mozzarella Sticks" }, { label: "Pizza Logs (6)", item: "Appetizers|Pizza Logs" }, { label: "Buffalo Chips", item: "Appetizers|Buffalo Chips" },
         { label: "Cheese Curds", item: "Appetizers|Deep Fried Cheese Curd" }, { label: "Mac & Cheese Bites (6)", item: "Appetizers|Mac & Cheese Bites (6)" }, { label: "Popcorn Chicken", item: "Appetizers|Pop Corn Chicken" },
         { label: "Breaded Mushrooms", item: "Appetizers|Breaded Mushrooms" }, { label: "Beefy Nachos", item: "Appetizers|Beefy Nachos" }, { label: "Potato Skins", item: "Appetizers|Potato Skins" } ] } ],
     [ { kind: "list", title: "Samplers", rows: [
         { label: "Variety for Two", item: "Appetizers|Variety for TWO" }, { label: "Variety for Four", item: "Appetizers|Variety for Four" }, { label: "Fathead Special", item: "Appetizers|Fathead Special" } ] },
-      { kind: "list", title: "Sweets", rows: [
-        { label: "Chocolate Overload", item: "Desserts|Chocolate Overload" }, { label: "Rainbow Cake", item: "Desserts|Rainbow Cake" },
-        { label: "PB Explosion Cake", item: "Desserts|Peanut Butter Explosion Cake" }, { label: "Apple Pie Logs (6)", item: "Desserts|6 Piece Apple Pie Logs" } ] } ],
-    [ { kind: "list", title: "Deli Salads", note: "8 / 16 / 32 oz", rows: ["Potato Salad", "Mac Salad", "Pasta Salad", "Cole Slaw", "AntiPasto"].map((name) => ({
+      { kind: "list", title: "Deli Salads", note: "8 / 16 / 32 oz", rows: ["Potato Salad", "Mac Salad", "Pasta Salad", "Cole Slaw", "AntiPasto"].map((name) => ({
         label: name === "AntiPasto" ? "Antipasto" : name, item: `Deli Salads|${name}`, variants: ["Small 8oz", "Medium 16oz", "Large 32oz"] })) } ] ] },
+  { key: "sweets", title: ["Sweets ", "& Treats"], tag: ["Cakes by the slice", "Save room"], layout: "two", columns: [
+    [ { kind: "list", title: "Cakes", note: "by the slice", rows: [
+        { label: "Chocolate Overload", item: "Desserts|Chocolate Overload" }, { label: "Rainbow Cake", item: "Desserts|Rainbow Cake" },
+        { label: "Peanut Butter Explosion", item: "Desserts|Peanut Butter Explosion Cake" }, { label: "Marshmallow Cookie Dough", item: "Desserts|Marshmallow Cookie Dough Cake" },
+        { label: "Coconut Cloud Cake", item: "Desserts|Coconut Cloud Cake" } ] } ],
+    [ { kind: "list", title: "Pies & Cheesecake", rows: [
+        { label: "Reese's Peanut Butter Pie", item: "Desserts|Reeses Peanut Butter Pie" }, { label: "Sea Salt Caramel Cheesecake", item: "Desserts|Sea Salt Caramel Cheesecake" },
+        { label: "Chocolate PB Mousse Landslide", item: "Desserts|Chocolate Peanut Butter Mousse Landslide" } ] },
+      { kind: "list", title: "Dessert Logs", rows: [
+        { label: "Apple Pie Logs (6)", item: "Desserts|6 Piece Apple Pie Logs" }, { label: "Raspberry Cheesecake Logs (3)", item: "Desserts|3 Piece Raspberry Cheesecake Logs" } ] } ] ] },
 ];
 
 export const PROMOS: PromoSpec[] = [
@@ -138,7 +153,7 @@ export const SLOT_SECONDS = [12, 8, 12, 8];
 export const MENU_TVS: { name: string; slots: string[] }[] = [
   { name: "Menu TV 1", slots: ["m:pizza", "p:breakfast", "m:subs", "p:tbb"] },
   { name: "Menu TV 2", slots: ["m:burgers", "p:ogdens", "m:dinners", "p:wildwest"] },
-  { name: "Menu TV 3", slots: ["m:apps", "p:fathead", "m:apps", "p:order"] },
+  { name: "Menu TV 3", slots: ["m:apps", "p:fathead", "m:sweets", "p:order"] },
 ];
 /** Shown in a promo slot whose item is sold out or missing, so the TVs stay in step. */
 const FALLBACK_PROMO = "order";
@@ -172,7 +187,8 @@ export type BoardPrice = { text: string; soldOut: boolean };
 export type BoardBlock =
   | { kind: "grid"; title: string; note?: string; columns: string[]; rows: { label: string; prices: (BoardPrice | null)[] }[] }
   | { kind: "list"; title: string; note?: string; rows: { label: string; note?: string; price: BoardPrice }[] }
-  | { kind: "feature"; title: string; text: string; price: BoardPrice };
+  | { kind: "feature"; title: string; text: string; price: BoardPrice }
+  | { kind: "options"; title: string; note?: string; names: string[]; extras: { label: string; price: BoardPrice }[] };
 export type BoardScreen =
   | { kind: "menu"; key: string; title: [string, string]; tag: [string, string]; layout: "two" | "three"; columns: BoardBlock[][] }
   | { kind: "promo"; key: string; kicker: string; name: string; text: string; badgeLabel: string; badgeText: string; extras: string; photo?: string; qr?: boolean; example: boolean };
@@ -193,7 +209,33 @@ function lookup(index: PriceIndex, missing: Set<string>, item: string, variant?:
   return { cents: found.basePriceCents, available: found.available };
 }
 
+type ModifierOption = NonNullable<PriceIndexItem["modifiers"]>[string][number];
+
+/** A group's options that carry a price, and the price most of them charge at each size. */
+function modifierGroup(index: PriceIndex, missing: Set<string>, item: string, group: string): { options: ModifierOption[]; usual: (size: string) => number | undefined } | null {
+  const options = index.get(item.toLowerCase())?.modifiers?.[group.toLowerCase()]?.filter((o) => o.available && Object.values(o.prices).some((c) => c > 0));
+  if (!options?.length) { missing.add(`${item} (${group})`); return null; }
+  const usual = (size: string) => {
+    const counts = new Map<number, number>();
+    for (const o of options) { const c = o.prices[size.toLowerCase()]; if (c !== undefined) counts.set(c, (counts.get(c) ?? 0) + 1); }
+    return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
+  };
+  return { options, usual };
+}
+
 function buildBlock(block: BlockSpec, index: PriceIndex, missing: Set<string>): BoardBlock | null {
+  if (block.kind === "options") {
+    const group = modifierGroup(index, missing, block.item, block.group);
+    if (!group) return null;
+    const sizes = index.get(block.item.toLowerCase())!.variants.map((v) => v.name.toLowerCase());
+    const premium = group.options.filter((o) => sizes.some((s) => o.prices[s] !== undefined && o.prices[s] !== group.usual(s)));
+    const extras = premium.map((o) => {
+      // "2.00 / 2.50 / 5.00": the option's prices by size, repeats dropped.
+      const prices = [...new Set(sizes.map((s) => o.prices[s]).filter((c) => c !== undefined).sort((a, b) => a - b))];
+      return { label: o.name, price: { text: prices.map(money).join(" / "), soldOut: false } };
+    });
+    return { kind: "options", title: block.title, note: block.note, names: group.options.filter((o) => !premium.includes(o)).map((o) => o.name), extras };
+  }
   if (block.kind === "feature") {
     const p = lookup(index, missing, block.item);
     return p ? { kind: "feature", title: block.title, text: `${block.text} · $${money(p.cents)}`, price: { text: money(p.cents), soldOut: !p.available } } : null;
@@ -203,6 +245,12 @@ function buildBlock(block: BlockSpec, index: PriceIndex, missing: Set<string>): 
       label: row.label,
       prices: block.columns.map((column) => {
         const item = row.item ?? column.item ?? "", variant = row.variant ?? column.variant;
+        const topping = row.topping ?? column.topping;
+        if (topping && variant) {
+          const group = modifierGroup(index, missing, item, topping.group);
+          const cents = topping.option ? group?.options.find((o) => o.name.toLowerCase() === topping.option!.toLowerCase())?.prices[variant.toLowerCase()] : group?.usual(variant);
+          return cents === undefined ? null : { text: money(cents), soldOut: false };
+        }
         // A size the item doesn't come in (a breakfast sheet pizza, a meatball wrap) shows a dash.
         const found = index.get(item.toLowerCase());
         if (found && variant && !found.variants.some((v) => v.name.toLowerCase() === variant.toLowerCase())) return null;

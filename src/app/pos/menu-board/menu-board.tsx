@@ -35,6 +35,19 @@ function Block({ block, screenKey, flashes, counter }: { block: BoardBlock; scre
     return <div className="mbFeature" style={vars({ "--i": counter.n++ })}><b>{block.title}</b><span>{block.text}</span></div>;
   }
   const head = <h3 style={vars({ "--i": counter.n++ })}>{block.title}{block.note && <small>{block.note}</small>}</h3>;
+  if (block.kind === "options") {
+    return (
+      <div className="mbBlock">
+        {head}
+        <p className="mbOptions" style={vars({ "--i": counter.n++ })}>{block.names.join(" · ")}</p>
+        {block.extras.map((row) => (
+          <div key={row.label} className="mbRow" style={vars({ "--i": counter.n++ })}>
+            <span className="n">{row.label}</span><span className="d" /><span className="p">{row.price.text}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
   if (block.kind === "grid") {
     const headI = counter.n++;
     return (
