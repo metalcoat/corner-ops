@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { normalizeLabelConfig, sampleLabel, sendLabel } from "@/lib/ordering-label-print";
 import { Socket } from "node:net";
 import { validPrinterHost } from "@/lib/printer-network";
+import { kitchenTicketLayout, PIZZA_PORTION_HEADER, pizzaPortionRaster } from "@/lib/kitchen-ticket-layout";
 import { getSql, withTransaction } from "@/lib/db";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
@@ -128,7 +129,11 @@ export async function sendEpsonPrint(
         ]),
         Buffer.from(`${safeLines[0] || "CORNER OPS"}\n`, "ascii"),
         Buffer.from([0x1b, 0x45, 0x00, 0x1b, 0x61, 0x00, 0x1d, 0x21, bodySize]),
-        Buffer.from(`${safeLines.slice(1).join("\n")}\n\n\n`, "ascii"),
+        // The split-pizza header prints as half / whole / half circles over its columns.
+        ...safeLines.slice(1).map((line) => line === PIZZA_PORTION_HEADER
+          ? Buffer.from(pizzaPortionRaster(bodySize & 0x10 ? 24 : 12))
+          : Buffer.from(`${line}\n`, "ascii")),
+        Buffer.from("\n\n", "ascii"),
         Buffer.from([0x1d, 0x21, 0x00, 0x1d, 0x56, 0x42, 0x00]),
       ]);
   await new Promise<void>((resolve, reject) => {
@@ -677,6 +682,7 @@ export async function controlPrintJob(input: {
 }
 
 export function printPayloadLines(payload: Record<string, unknown>) {
+  if ((payload.heading === "KITCHEN ORDER" || payload.heading === "ADD ON") && payload.serviceType) return kitchenTicketLayout(payload);
   const lines = [String(payload.heading || "CORNER OPS")];
   if (payload.orderNumber) lines.push(`ORDER: #${payload.orderNumber}`);
   if (payload.customerName) lines.push(`CUSTOMER: ${payload.customerName}`);

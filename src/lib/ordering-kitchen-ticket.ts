@@ -11,7 +11,7 @@ export type KitchenTicketTimingInput = {
   snapshotLabel?: string;
 };
 
-function serviceName(serviceType: ServiceType): string {
+export function kitchenServiceName(serviceType: ServiceType): string {
   switch (serviceType) {
     case "delivery": return "DELIVERY";
     case "no_contact_delivery": return "NO-CONTACT DELIVERY";
@@ -49,7 +49,7 @@ export function kitchenTicketTimingHeader(input: KitchenTicketTimingInput): stri
   const snapshot = String(input.snapshotLabel || "").trim();
   if (snapshot) return snapshot;
 
-  const fulfillment = serviceName(input.serviceType);
+  const fulfillment = kitchenServiceName(input.serviceType);
   if (input.timingMode === "future") {
     if (!input.scheduledFor) return `*** FUTURE ${fulfillment} ***\nTIME REQUIRED`;
     return `*** FUTURE ${fulfillment} ***\nFOR: ${formatScheduled(input.scheduledFor)}`;
