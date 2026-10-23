@@ -12,24 +12,6 @@ import { MxMerchantError, newReplayId, refundMxPaymentPartially, voidOrRefundMxP
 let ready: Promise<void> | null = null;
 function ensureSchema() {
   ready ??= outsideTransaction(async () => {
-    await getSql()`CREATE TABLE IF NOT EXISTS ordering_mx_reversal_attempts(
-      id UUID PRIMARY KEY,
-      business TEXT NOT NULL,
-      order_id UUID NOT NULL,
-      source_transaction_id UUID NOT NULL,
-      source_reference TEXT NOT NULL,
-      amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
-      full_reversal BOOLEAN NOT NULL,
-      replay_id BIGINT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','failed','applied')),
-      kind TEXT NOT NULL DEFAULT '',
-      mx_reference TEXT NOT NULL DEFAULT '',
-      mx_response JSONB NOT NULL DEFAULT '{}'::jsonb,
-      error TEXT NOT NULL DEFAULT '',
-      created_by TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
-    await getSql()`CREATE INDEX IF NOT EXISTS ordering_mx_reversal_source_idx ON ordering_mx_reversal_attempts(source_transaction_id, status)`;
   }).catch((error) => {
     ready = null;
     throw error;

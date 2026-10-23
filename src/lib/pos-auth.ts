@@ -65,19 +65,6 @@ async function ensurePosAuthSchema(): Promise<void> {
   if (!posAuthSchemaPromise) posAuthSchemaPromise = (async () => {
     await ensureSchema();
     await ensureEmployeeDirectorySchema();
-    const sql = getSql();
-    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pos_role TEXT NOT NULL DEFAULT 'employee'`;
-    await sql`ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_pos_role_check`;
-    await sql`ALTER TABLE employees ADD CONSTRAINT employees_pos_role_check CHECK (pos_role IN ('employee','manager','owner'))`;
-    await sql`
-    CREATE TABLE IF NOT EXISTS pos_pin_attempts (
-      attempt_key TEXT PRIMARY KEY,
-      failed_count INTEGER NOT NULL DEFAULT 0,
-      window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      locked_until TIMESTAMPTZ,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-    `;
   })().catch((error) => { posAuthSchemaPromise = null; throw error; });
   return posAuthSchemaPromise;
 }

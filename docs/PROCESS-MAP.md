@@ -122,6 +122,15 @@ flowchart LR
 ```
 
 - Milestone steps are in `AGENTS.md` (commit → push → `update.sh --force` as chris → verify).
+- **Database schema** (2026-10-23): tables, columns, indexes and constraints come only from `db/migrations/*.sql`;
+  app code never runs `CREATE/ALTER/DROP` (CI `verify_no_runtime_ddl.py`). The `ensure…Schema()` functions that
+  remain only seed rows and fix data. `tools/db-migrate.sh --container NAME` applies new files in order, each in
+  one transaction, recorded in `schema_migrations` with its git blob hash (production's existing format); a file
+  that changed after it was applied stops the run, so changes go in a new file. `update.sh` runs it against
+  `corner-ops-postgres` before restarting the app, `refresh-staging.sh` after restoring the backup.
+  `--adopt` is the one-time first run on a database the app built for itself (dev was adopted 2026-10-23,
+  backup first at `~/.local/state/dev-db-before-migrations-*.dump`); `--status` lists applied/pending.
+  `0014_runtime_schema.sql` was captured by running every old `ensure…Schema()` on a 0001–0013 database.
 - **GitHub Actions only orchestrates; jobs run on the deli's own runner.** liberty-ci-01
   hosts two runners: `liberty-ci-01` (repo `metalcoat/liberty-platform`) and
   `liberty-ci-01-corner-ops` (this repo; labels `self-hosted, Linux, X64, liberty-ci, corner-ops`),
@@ -356,8 +365,9 @@ flowchart LR
 ## 10. Open items before the switch
 
 1. **Corner Deli payroll from the POS clock and POS tips** (today it reads only Rezku tables).
-2. **Runtime vs migration schema:** `main`'s Verify rejects runtime `CREATE/ALTER TABLE`; dev relies on it.
-   Decide and write migrations for production. (Verify fails on the runner until then.)
+2. ~~Runtime vs migration schema~~ done 2026-10-23: the app no longer creates tables; see "Database schema" in §2.
+   Production adopts it at the switch: `tools/db-migrate.sh --container corner-ops-prod-postgres` (it already has
+   0001–0008 recorded, so 0009–0015 apply normally; rehearse on staging first).
 3. Rezku missed clock-out hook in production (see §5).
 4. Production crontab at switch: add missed-clock-outs every 15 min, remove rezku-repair; set `APP_ENV=production`,
    `PAYROLL_NOTIFY_EMAIL`; staff sign in once (new session format).

@@ -17,18 +17,6 @@ function ensureSchema() {
   ready ??= (async () => {
     await ensureOrderingHardwareSchema();
     await ensureOrderingAddressSchema();
-    await getSql()`CREATE TABLE IF NOT EXISTS ordering_item_labels(
-      order_item_id UUID NOT NULL REFERENCES ordering_order_items(id) ON DELETE CASCADE,
-      unit_index INTEGER NOT NULL CHECK (unit_index >= 0),
-      business TEXT NOT NULL,
-      order_id UUID NOT NULL REFERENCES ordering_orders(id) ON DELETE CASCADE,
-      printer_id UUID REFERENCES ordering_hardware_devices(id),
-      print_count INTEGER NOT NULL DEFAULT 1,
-      first_printed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      last_printed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      printed_by TEXT NOT NULL DEFAULT '',
-      PRIMARY KEY (order_item_id, unit_index))`;
-    await getSql()`CREATE INDEX IF NOT EXISTS ordering_item_labels_recent_idx ON ordering_item_labels(business, last_printed_at DESC)`;
   })().catch((error) => {
     ready = null;
     throw error;

@@ -43,17 +43,6 @@ async function ensureNotificationSchema() {
   if (!schemaPromise) {
     schemaPromise = (async () => {
       await ensureWorkforceSchema();
-      await getSql()`
-        CREATE TABLE IF NOT EXISTS three_cx_missed_call_notifications (
-          id UUID PRIMARY KEY,
-          history_id TEXT NOT NULL UNIQUE,
-          dropped_at TIMESTAMPTZ NOT NULL,
-          caller TEXT NOT NULL DEFAULT '',
-          wait_seconds INTEGER NOT NULL DEFAULT 0,
-          recipient_count INTEGER NOT NULL DEFAULT 0,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `;
     })().catch((error) => {
       schemaPromise = null;
       throw error;

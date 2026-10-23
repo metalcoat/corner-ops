@@ -51,6 +51,8 @@ tables="$(docker exec corner-ops-staging-postgres psql -U cornerops -d cornerops
 employees="$(docker exec corner-ops-staging-postgres psql -U cornerops -d cornerops -Atc "SELECT count(*) FROM employees" 2>/dev/null || echo 0)"
 (( tables > 50 && employees > 0 )) || { echo "Restore looks incomplete ($tables tables, $employees employees); see $STAGING/restore.log." >&2; exit 1; }
 log "Restored $tables tables, $employees employees"
+# Production's schema plus the migrations this commit adds (the app no longer creates its own tables).
+"$STAGING/app/tools/db-migrate.sh" --container corner-ops-staging-postgres
 log "Restoring $(basename "$uploads")"
 docker run --rm -i -v corner-ops-staging_uploads:/data alpine:3 sh -c 'tar -xzf - -C /data' < "$uploads"
 

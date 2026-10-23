@@ -19,7 +19,6 @@ export async function deliLocation(): Promise<Coordinates | null> {
   if (cached?.address === address) return cached.location;
   try {
     const sql = getSql();
-    await sql`CREATE TABLE IF NOT EXISTS ordering_store_locations(address TEXT PRIMARY KEY, latitude DOUBLE PRECISION NOT NULL, longitude DOUBLE PRECISION NOT NULL, formatted_address TEXT NOT NULL DEFAULT '', geocoded_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
     const saved = (await sql`SELECT latitude,longitude FROM ordering_store_locations WHERE address=${address}`)[0];
     if (saved) {
       cached = { address, location: { latitude: Number(saved.latitude), longitude: Number(saved.longitude) } };

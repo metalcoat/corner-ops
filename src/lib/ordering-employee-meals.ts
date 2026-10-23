@@ -12,10 +12,6 @@ let schemaPromise: Promise<void> | null = null;
 export async function ensureEmployeeMealSchema() {
   if (!schemaPromise) schemaPromise = (async () => {
     await Promise.all([ensureOrderingInventorySchema(), ensureOrderingTimingSchema()]);
-    const sql = getSql();
-    await sql`CREATE TABLE IF NOT EXISTS ordering_employee_meals(id UUID PRIMARY KEY,business TEXT NOT NULL CHECK(business IN('Corner Deli','Tiki')),employee_id UUID NOT NULL REFERENCES employees(id),employee_name TEXT NOT NULL,note TEXT NOT NULL DEFAULT '',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
-    await sql`CREATE INDEX IF NOT EXISTS ordering_employee_meals_employee_idx ON ordering_employee_meals(employee_id,created_at DESC)`;
-    await sql`CREATE TABLE IF NOT EXISTS ordering_employee_meal_lines(id UUID PRIMARY KEY,meal_id UUID NOT NULL REFERENCES ordering_employee_meals(id) ON DELETE CASCADE,menu_item_id UUID NOT NULL REFERENCES ordering_menu_items(id),item_name TEXT NOT NULL,quantity INTEGER NOT NULL CHECK(quantity>0),created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
   })().catch((error) => { schemaPromise = null; throw error; });
   return schemaPromise;
 }

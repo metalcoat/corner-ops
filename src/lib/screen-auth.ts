@@ -16,15 +16,6 @@ const TEN_YEARS = 60 * 60 * 24 * 365 * 10;
 let ready: Promise<void> | null = null;
 function ensureSchema() {
   ready ??= (async () => {
-    await getSql()`CREATE TABLE IF NOT EXISTS ordering_store_screens(
-      id UUID PRIMARY KEY,
-      business TEXT NOT NULL,
-      kind TEXT NOT NULL CHECK (kind IN ('board','labels')),
-      name TEXT NOT NULL,
-      signed_in_by TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      revoked_at TIMESTAMPTZ)`;
   })().catch((error) => {
     ready = null;
     throw error;

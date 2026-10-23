@@ -30,59 +30,8 @@ export async function ensureDriverDeliverySchema() {
   await ensureOrderingPosSchema();
   await ensureOrderingAddressSchema();
   const sql=getSql();
-  await sql`ALTER TABLE ordering_delivery_assignments ADD COLUMN IF NOT EXISTS business TEXT`;
-  await sql`ALTER TABLE ordering_delivery_assignments ALTER COLUMN driver_employee_id DROP NOT NULL`;
-  await sql`ALTER TABLE ordering_delivery_assignments ADD COLUMN IF NOT EXISTS picked_up_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE ordering_delivery_assignments ADD COLUMN IF NOT EXISTS en_route_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE ordering_delivery_assignments ADD COLUMN IF NOT EXISTS arrived_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE ordering_delivery_assignments ADD COLUMN IF NOT EXISTS failed_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE ordering_delivery_assignments ADD COLUMN IF NOT EXISTS returned_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE ordering_delivery_assignments ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`;
-  await sql`ALTER TABLE ordering_delivery_assignments ADD COLUMN IF NOT EXISTS status_note TEXT NOT NULL DEFAULT ''`;
-  await sql`ALTER TABLE ordering_delivery_assignments ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`;
-  await sql`ALTER TABLE ordering_delivery_assignments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`;
   await sql`UPDATE ordering_delivery_assignments d SET business=o.business FROM ordering_orders o WHERE o.id=d.order_id AND d.business IS NULL`;
   await sql`UPDATE ordering_delivery_assignments SET status=CASE status WHEN 'assigned' THEN 'ASSIGNED' WHEN 'out_for_delivery' THEN 'EN_ROUTE' WHEN 'delivered' THEN 'DELIVERED' WHEN 'failed' THEN 'DELIVERY_FAILED' WHEN 'returned' THEN 'RETURNED' WHEN 'cancelled' THEN 'CANCELLED' ELSE status END`;
-  await sql`ALTER TABLE ordering_delivery_assignments DROP CONSTRAINT IF EXISTS ordering_delivery_assignments_status_check`;
-  await sql`ALTER TABLE ordering_delivery_assignments ADD CONSTRAINT ordering_delivery_assignments_status_check CHECK(status IN ('ASSIGNED','READY_FOR_DRIVER','PICKED_UP','EN_ROUTE','ARRIVED','DELIVERED','NO_CONTACT','DELIVERY_FAILED','RETURNED','CANCELLED'))`;
-  await sql`CREATE INDEX IF NOT EXISTS ordering_delivery_assignments_driver_idx ON ordering_delivery_assignments(driver_employee_id,status,updated_at DESC)`;
-  await sql`CREATE TABLE IF NOT EXISTS ordering_delivery_audit(
-    id UUID PRIMARY KEY, delivery_id UUID NOT NULL REFERENCES ordering_delivery_assignments(id) ON DELETE CASCADE,
-    order_id UUID NOT NULL REFERENCES ordering_orders(id) ON DELETE CASCADE, employee_id UUID REFERENCES employees(id),
-    device_session_id UUID, action TEXT NOT NULL, previous_status TEXT, new_status TEXT, details JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
-  await sql`CREATE TABLE IF NOT EXISTS ordering_delivery_tracking_sessions(
-    id UUID PRIMARY KEY, delivery_id UUID NOT NULL REFERENCES ordering_delivery_assignments(id) ON DELETE CASCADE,
-    driver_id UUID NOT NULL REFERENCES employees(id), device_session_id UUID, started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    stopped_at TIMESTAMPTZ, stop_reason TEXT NOT NULL DEFAULT '')`;
-  await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_delivery_tracking_active_idx ON ordering_delivery_tracking_sessions(delivery_id) WHERE stopped_at IS NULL`;
-  await sql`CREATE TABLE IF NOT EXISTS ordering_delivery_locations(
-    id UUID PRIMARY KEY, tracking_session_id UUID NOT NULL REFERENCES ordering_delivery_tracking_sessions(id) ON DELETE CASCADE,
-    delivery_id UUID NOT NULL REFERENCES ordering_delivery_assignments(id) ON DELETE CASCADE, driver_id UUID NOT NULL REFERENCES employees(id),
-    device_session_id UUID, client_event_id TEXT NOT NULL, captured_at TIMESTAMPTZ NOT NULL, received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    latitude NUMERIC(10,7) NOT NULL, longitude NUMERIC(10,7) NOT NULL, accuracy_meters NUMERIC(9,2), metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    UNIQUE(driver_id,client_event_id))`;
-  await sql`CREATE TABLE IF NOT EXISTS ordering_delivery_proofs(
-    id UUID PRIMARY KEY, order_id UUID NOT NULL REFERENCES ordering_orders(id) ON DELETE CASCADE,
-    delivery_id UUID NOT NULL REFERENCES ordering_delivery_assignments(id) ON DELETE CASCADE, employee_id UUID NOT NULL REFERENCES employees(id),
-    storage_reference TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, captured_at TIMESTAMPTZ NOT NULL,
-    latitude NUMERIC(10,7), longitude NUMERIC(10,7), accuracy_meters NUMERIC(9,2), proof_type TEXT NOT NULL,
-    employee_note TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
-  await sql`CREATE TABLE IF NOT EXISTS ordering_delivery_tracking_tokens(
-    id UUID PRIMARY KEY, delivery_id UUID NOT NULL REFERENCES ordering_delivery_assignments(id) ON DELETE CASCADE,
-    order_id UUID NOT NULL REFERENCES ordering_orders(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE, token_value TEXT NOT NULL DEFAULT '',
-    expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
-  await sql`ALTER TABLE ordering_delivery_tracking_tokens ADD COLUMN IF NOT EXISTS token_value TEXT NOT NULL DEFAULT ''`;
-  await sql`CREATE TABLE IF NOT EXISTS ordering_delivery_customer_notifications(
-    id UUID PRIMARY KEY, delivery_id UUID NOT NULL REFERENCES ordering_delivery_assignments(id) ON DELETE CASCADE,
-    order_id UUID NOT NULL REFERENCES ordering_orders(id) ON DELETE CASCADE, tracking_token_id UUID REFERENCES ordering_delivery_tracking_tokens(id),
-    channel TEXT NOT NULL, destination TEXT NOT NULL, classification TEXT NOT NULL DEFAULT 'transactional', payload TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'queued', queued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), sent_at TIMESTAMPTZ, failed_at TIMESTAMPTZ, failure TEXT NOT NULL DEFAULT '')`;
-  await sql`CREATE TABLE IF NOT EXISTS ordering_driver_dispatch_settings(business TEXT PRIMARY KEY CHECK(business IN('Corner Deli','Tiki')),show_live_driver BOOLEAN NOT NULL DEFAULT FALSE,call_link_template TEXT NOT NULL DEFAULT '',updated_by UUID REFERENCES employees(id),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
-  // Small crews: one driver gets every delivery without a manager handing them out,
-  // and whoever is free (e.g. the morning cashier) can take one from the tablet.
-  await sql`ALTER TABLE ordering_driver_dispatch_settings ADD COLUMN IF NOT EXISTS auto_assign_solo BOOLEAN NOT NULL DEFAULT TRUE`;
-  await sql`ALTER TABLE ordering_driver_dispatch_settings ADD COLUMN IF NOT EXISTS anyone_can_deliver BOOLEAN NOT NULL DEFAULT TRUE`;
 }
 
 export async function driverActor(): Promise<DriverActor | null> {

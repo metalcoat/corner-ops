@@ -28,20 +28,6 @@ export function ensureCustomerDisplaySchema() {
   if (!schemaPromise) schemaPromise = (async () => {
     await ensureOrderingHardwareSchema();
     await ensureOrderingCustomerSchema();
-    const sql = getSql();
-    await sql`CREATE TABLE IF NOT EXISTS ordering_customer_display_sessions (
-      business TEXT NOT NULL, station_key TEXT NOT NULL, order_id UUID REFERENCES ordering_orders(id) ON DELETE SET NULL,
-      payload JSONB NOT NULL DEFAULT '{}'::jsonb, response JSONB NOT NULL DEFAULT '{}'::jsonb,
-      response_version INTEGER NOT NULL DEFAULT 0, response_handled_version INTEGER NOT NULL DEFAULT 0,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '12 hours',
-      PRIMARY KEY (business, station_key)
-    )`;
-    await sql`CREATE TABLE IF NOT EXISTS ordering_customer_checkout_responses (
-      id UUID PRIMARY KEY, business TEXT NOT NULL, station_key TEXT NOT NULL, order_id UUID NOT NULL REFERENCES ordering_orders(id) ON DELETE CASCADE,
-      response_type TEXT NOT NULL CHECK(response_type IN ('tip','signature','receipt')),
-      details JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )`;
-    await sql`CREATE INDEX IF NOT EXISTS ordering_customer_checkout_response_order_idx ON ordering_customer_checkout_responses(order_id,created_at)`;
   })().catch(error => { schemaPromise = null; throw error; });
   return schemaPromise;
 }

@@ -59,7 +59,6 @@ function decode(token: string): EmployeeSession | null {
 export async function createEmployeeSession(business: Business, suppliedPin: string, device: { label?: string; userAgent?: string } = {}): Promise<EmployeeSession> {
   await ensureSchema();
   await ensureEmployeeDirectorySchema();
-  await getSql()`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pos_role TEXT NOT NULL DEFAULT 'employee'`;
   const employee = await employeeByPin(business, suppliedPin);
   if (!employee) throw new AuthenticationError("PIN not recognized for this location.");
   const payload: EmployeeSession = {
@@ -81,13 +80,6 @@ export async function createEmployeeSession(business: Business, suppliedPin: str
     path: "/",
     maxAge: EMPLOYEE_SESSION_SECONDS,
   });
-  await getSql()`
-    CREATE TABLE IF NOT EXISTS employee_app_sessions (
-      id UUID PRIMARY KEY, employee_id UUID NOT NULL REFERENCES employees(id), business TEXT NOT NULL,
-      device_label TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '',
-      authenticated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      expires_at TIMESTAMPTZ NOT NULL, ended_at TIMESTAMPTZ
-    )`;
   await getSql()`INSERT INTO employee_app_sessions(id,employee_id,business,device_label,user_agent,expires_at) VALUES(${payload.deviceSessionId},${payload.employeeId},${payload.business},${String(device.label||"").slice(0,120)},${String(device.userAgent||"").slice(0,500)},${new Date(payload.expiresAt)})`;
   return payload;
 }

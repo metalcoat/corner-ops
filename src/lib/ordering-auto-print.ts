@@ -7,7 +7,6 @@ import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 let schemaPromise: Promise<void> | null = null;
 async function ensureSchema() {
   if (!schemaPromise) schemaPromise = (async () => {
-    await getSql()`CREATE TABLE IF NOT EXISTS ordering_external_print_settings (business TEXT PRIMARY KEY CHECK (business IN ('Corner Deli','Tiki')), auto_print_enabled BOOLEAN NOT NULL DEFAULT FALSE, updated_by TEXT NOT NULL DEFAULT '', updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
     await getSql()`INSERT INTO ordering_external_print_settings (business) VALUES ('Corner Deli'), ('Tiki') ON CONFLICT DO NOTHING`;
   })().catch((error) => { schemaPromise = null; throw error; });
   return schemaPromise;

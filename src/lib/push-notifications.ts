@@ -185,8 +185,6 @@ export async function ensurePushSchema(): Promise<void> {
   if (!pushSchemaPromise) {
     pushSchemaPromise = (async () => {
       await ensureSchema();
-      const sql = getSql();
-      await sql`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT ''`;
     })().catch((error) => {
       pushSchemaPromise = null;
       throw error;

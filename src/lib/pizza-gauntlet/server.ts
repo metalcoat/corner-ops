@@ -9,11 +9,6 @@ let schema: Promise<void> | null = null;
 export function ensureGauntletSchema() {
   if (!schema)
     schema = (async () => {
-      const sql = getSql();
-      await sql`CREATE TABLE IF NOT EXISTS pizza_gauntlet_runs(id UUID PRIMARY KEY,token_hash TEXT NOT NULL,player_name TEXT NOT NULL DEFAULT 'Anonymous Cook',status TEXT NOT NULL DEFAULT 'active' CHECK(status IN('active','won','lost','abandoned')),stage INTEGER NOT NULL DEFAULT 1,stage_orders INTEGER NOT NULL DEFAULT 0,sequence INTEGER NOT NULL DEFAULT 0,active_seconds INTEGER NOT NULL DEFAULT 0,stats JSONB NOT NULL DEFAULT '{}'::jsonb,checkpoints JSONB NOT NULL DEFAULT '[]'::jsonb,started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),completed_at TIMESTAMPTZ)`;
-      await sql`ALTER TABLE pizza_gauntlet_runs ADD COLUMN IF NOT EXISTS game_version TEXT NOT NULL DEFAULT 'legacy'`;
-      await sql`CREATE INDEX IF NOT EXISTS pizza_gauntlet_runs_board_idx ON pizza_gauntlet_runs(status,completed_at DESC)`;
-      await sql`CREATE TABLE IF NOT EXISTS pizza_gauntlet_rewards(id UUID PRIMARY KEY,run_id UUID NOT NULL UNIQUE REFERENCES pizza_gauntlet_runs(id),code TEXT NOT NULL UNIQUE,prize_type TEXT NOT NULL,terms JSONB NOT NULL,completion_stats JSONB NOT NULL,issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),expires_at TIMESTAMPTZ,redeemed_at TIMESTAMPTZ,redeemed_by TEXT,redemption_note TEXT NOT NULL DEFAULT '')`;
     })();
   return schema;
 }

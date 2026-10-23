@@ -32,11 +32,6 @@ let pinColumnsReady: Promise<void> | null = null;
 /** The salted-PIN columns (migration 0005), so fresh databases work too. */
 export function ensureEmployeePinColumns(): Promise<void> {
   pinColumnsReady ??= (async () => {
-    const sql = getSql();
-    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin_salt TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin_hash_version INTEGER NOT NULL DEFAULT 1`;
-    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS pin_fingerprint TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE employees ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1`;
   })().catch((error) => {
     pinColumnsReady = null;
     throw error;

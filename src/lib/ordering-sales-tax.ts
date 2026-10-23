@@ -15,15 +15,6 @@ export function ensureTaxRateHistory(): Promise<void> {
   historyReady ??= (async () => {
     await ensureOrderingDeliverySchema();
     const sql = getSql();
-    await sql`CREATE TABLE IF NOT EXISTS ordering_tax_rate_history(
-      id BIGSERIAL PRIMARY KEY,
-      business TEXT NOT NULL CHECK (business IN ('Corner Deli','Tiki')),
-      tax_rate_bps INTEGER NOT NULL CHECK (tax_rate_bps >= 0 AND tax_rate_bps <= 10000),
-      prices_include_tax BOOLEAN NOT NULL,
-      delivery_fee_taxable BOOLEAN NOT NULL,
-      effective_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      changed_by TEXT NOT NULL DEFAULT '')`;
-    await sql`CREATE INDEX IF NOT EXISTS ordering_tax_rate_history_idx ON ordering_tax_rate_history(business, effective_at DESC)`;
     // Seed with today's settings as the rate for all earlier orders.
     await sql`INSERT INTO ordering_tax_rate_history(business,tax_rate_bps,prices_include_tax,delivery_fee_taxable,effective_at,changed_by)
       SELECT business,tax_rate_bps,prices_include_tax,delivery_fee_taxable,'1970-01-01','initial settings' FROM ordering_business_tax_settings s

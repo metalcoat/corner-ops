@@ -12,7 +12,6 @@ test("taking someone off a shift for time off remembers them, and giving it back
   assert.match(actions, /if \(off\.length\) timeOffEmployeeId = currentEmployee/);
   assert.match(actions, /employeeId === timeOffEmployeeId && status !== "Cancelled"\) timeOffEmployeeId = null/);
   assert.match(actions, /time_off_employee_id = \$\{timeOffEmployeeId\}/);
-  assert.match(source("src/lib/workforce.ts"), /ADD COLUMN IF NOT EXISTS time_off_employee_id UUID/);
   assert.match(source("db/migrations/0012_schedule_time_off_employee.sql"), /ADD COLUMN IF NOT EXISTS time_off_employee_id uuid/);
 });
 

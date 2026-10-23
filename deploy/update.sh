@@ -254,10 +254,12 @@ clean_runtime_checkout
 validation_failed=false
 (
   cd "$RUNTIME_DIR"
-  npm ci
+  npm ci --no-audit --no-fund
   npm run typecheck
   npm run build
-  git restore --worktree -- tsconfig.tsbuildinfo
+  if git ls-files --error-unmatch tsconfig.tsbuildinfo >/dev/null 2>&1; then
+    git restore --worktree -- tsconfig.tsbuildinfo
+  fi
   git diff --check
   git diff --quiet
   git diff --cached --quiet
@@ -284,6 +286,16 @@ fi
 
 log "Starting candidate ${remote_sha}; persistent volumes are unchanged."
 docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build postgres
+# The app no longer creates its own tables: apply db/migrations before the new app starts.
+# The running app keeps serving if this fails (migrations only add to the schema).
+for _ in $(seq 1 30); do
+  [[ "$(docker inspect corner-ops-postgres --format '{{.State.Health.Status}}' 2>/dev/null)" == healthy ]] && break
+  sleep 2
+done
+if ! "${RUNTIME_DIR}/tools/db-migrate.sh" --container corner-ops-postgres; then
+  record_candidate_failure "$remote_sha" "database migrations failed" "$runtime_sha"
+  exit 1
+fi
 docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --no-build --force-recreate asterisk
 docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --no-build --force-recreate app
 
@@ -310,5 +322,7 @@ write_state current_successful_commit "$remote_sha"
 write_state failed_commit ""
 write_state failure_reason ""
 record_result success
-git -C "$RUNTIME_DIR" restore --worktree -- tsconfig.tsbuildinfo
+if git -C "$RUNTIME_DIR" ls-files --error-unmatch tsconfig.tsbuildinfo >/dev/null 2>&1; then
+  git -C "$RUNTIME_DIR" restore --worktree -- tsconfig.tsbuildinfo
+fi
 log "Successfully deployed ${remote_sha}."

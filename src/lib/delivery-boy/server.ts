@@ -12,10 +12,6 @@ const digest = (s: string) => createHash("sha256").update(s).digest("hex");
 export function ensureDeliverySchema() {
   if (!schema)
     schema = (async () => {
-      const sql = getSql();
-      await sql`CREATE TABLE IF NOT EXISTS delivery_boy_runs(id UUID PRIMARY KEY,token_hash TEXT NOT NULL,player_name TEXT NOT NULL DEFAULT 'Anonymous Driver',status TEXT NOT NULL DEFAULT 'active',stage INTEGER NOT NULL DEFAULT 1,sequence INTEGER NOT NULL DEFAULT 0,active_seconds INTEGER NOT NULL DEFAULT 0,score INTEGER NOT NULL DEFAULT 0,delivered INTEGER NOT NULL DEFAULT 0,missed INTEGER NOT NULL DEFAULT 0,hits INTEGER NOT NULL DEFAULT 0,checkpoints JSONB NOT NULL DEFAULT '[]'::jsonb,started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),completed_at TIMESTAMPTZ)`;
-      await sql`ALTER TABLE delivery_boy_runs ADD COLUMN IF NOT EXISTS game_version TEXT NOT NULL DEFAULT 'legacy'`;
-      await sql`CREATE TABLE IF NOT EXISTS delivery_boy_rewards(id UUID PRIMARY KEY,run_id UUID NOT NULL UNIQUE REFERENCES delivery_boy_runs(id),code TEXT NOT NULL UNIQUE,prize_type TEXT NOT NULL,terms JSONB NOT NULL,completion_stats JSONB NOT NULL,issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),expires_at TIMESTAMPTZ,redeemed_at TIMESTAMPTZ,redeemed_by TEXT,redemption_note TEXT NOT NULL DEFAULT '')`;
     })();
   return schema;
 }

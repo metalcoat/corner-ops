@@ -7,21 +7,6 @@ export function ensureOrderingAddressSchema(): Promise<void> {
   if (!schemaPromise)
     schemaPromise = (async () => {
       await ensureOrderingSchema();
-      const sql = getSql();
-      await sql`
-      CREATE TABLE IF NOT EXISTS ordering_order_delivery_addresses (
-        order_id UUID PRIMARY KEY REFERENCES ordering_orders(id) ON DELETE CASCADE,
-        entered_address TEXT NOT NULL, formatted_address TEXT NOT NULL, line1 TEXT NOT NULL,
-        line2 TEXT NOT NULL DEFAULT '', city TEXT NOT NULL, state TEXT NOT NULL,
-        postal_code TEXT NOT NULL, country TEXT NOT NULL DEFAULT 'US', latitude NUMERIC(10,7) NOT NULL,
-        longitude NUMERIC(10,7) NOT NULL, provider TEXT NOT NULL, provider_reference_id TEXT NOT NULL DEFAULT '',
-        validation_status TEXT NOT NULL CHECK (validation_status IN ('validated')),
-        validated_at TIMESTAMPTZ NOT NULL, route_distance_miles NUMERIC(7,2),
-        route_duration_seconds INTEGER, route_provider TEXT NOT NULL DEFAULT '', route_calculated_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `;
-      await sql`ALTER TABLE ordering_order_delivery_addresses ADD COLUMN IF NOT EXISTS delivery_notes_snapshot TEXT NOT NULL DEFAULT ''`;
     })().catch((error) => {
       schemaPromise = null;
       throw error;

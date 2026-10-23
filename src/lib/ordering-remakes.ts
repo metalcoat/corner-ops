@@ -88,12 +88,6 @@ async function ensureRemakeSchema() {
     await ensureDriverDeliverySchema();
     await ensureOrderingInventorySchema();
     await ensureOrderingMenuOverrideSchema();
-    await getSql()`CREATE TABLE IF NOT EXISTS ordering_manager_remakes (
-      id UUID PRIMARY KEY, original_order_id UUID NOT NULL REFERENCES ordering_orders(id),
-      remake_order_id UUID NOT NULL UNIQUE REFERENCES ordering_orders(id),
-      client_mutation_id UUID NOT NULL UNIQUE, reason TEXT NOT NULL,
-      special_item TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`;
   })().catch((error) => { schemaPromise = null; throw error; });
   return schemaPromise;
 }

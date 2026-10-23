@@ -46,25 +46,6 @@ let ready: Promise<void> | null = null;
 function ensureSchema() {
   ready ??= (async () => {
     await ensureMxPaymentSchema();
-    const sql = getSql();
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'keyed'`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS station_key TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS terminal_id TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS terminal_payment_id TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS status_message TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS reviewed_by TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS review_note TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS auth_reference TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS payment_token TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS auth_code TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS authorized_at TIMESTAMPTZ`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS tip_cents INTEGER NOT NULL DEFAULT 0`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS completion_replay_id BIGINT`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS completion_started_at TIMESTAMPTZ`;
-    await sql`ALTER TABLE ordering_mx_checkout_sessions ADD COLUMN IF NOT EXISTS capture_base_cents INTEGER`;
-    // One sale in flight per terminal, even if two requests race past the busy check.
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_mx_terminal_one_active_idx ON ordering_mx_checkout_sessions(terminal_id) WHERE channel='terminal' AND status IN ('sending','sent')`;
   })().catch((error) => { ready = null; throw error; });
   return ready;
 }

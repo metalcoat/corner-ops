@@ -29,10 +29,6 @@ export function networkCookie(ip: string): string {
 }
 
 export async function ensurePosNetworkSchema() {
-  const sql = getSql();
-  await sql`CREATE TABLE IF NOT EXISTS pos_network_access_requests(id UUID PRIMARY KEY,ip_address TEXT NOT NULL,requester_note TEXT NOT NULL DEFAULT '',status TEXT NOT NULL CHECK(status IN('pending','approved','denied')),requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),reviewed_at TIMESTAMPTZ,reviewed_by TEXT NOT NULL DEFAULT '')`;
-  await sql`CREATE UNIQUE INDEX IF NOT EXISTS pos_network_pending_ip_idx ON pos_network_access_requests(ip_address) WHERE status='pending'`;
-  await sql`CREATE TABLE IF NOT EXISTS pos_network_allowlist(ip_address TEXT PRIMARY KEY,label TEXT NOT NULL DEFAULT '',approved_request_id UUID REFERENCES pos_network_access_requests(id),approved_by TEXT NOT NULL,approved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),active BOOLEAN NOT NULL DEFAULT TRUE)`;
 }
 
 export async function ipAllowed(ip: string): Promise<boolean> {

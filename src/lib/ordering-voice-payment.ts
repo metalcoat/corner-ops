@@ -41,15 +41,6 @@ function voicePaymentTarget(){
 
 export async function ensureVoicePaymentSchema(){
   await ensureOrderingAiSchema();
-  const sql=getSql();
-  await sql`CREATE TABLE IF NOT EXISTS ordering_voice_payment_sessions(
-    id UUID PRIMARY KEY,business TEXT NOT NULL,call_id TEXT NOT NULL,order_id UUID NOT NULL REFERENCES ordering_orders(id),caller_phone TEXT NOT NULL DEFAULT '',
-    amount_cents INTEGER NOT NULL CHECK(amount_cents>0),replay_id BIGINT NOT NULL UNIQUE,status TEXT NOT NULL DEFAULT 'awaiting_call',attempt_count INTEGER NOT NULL DEFAULT 0,
-    provider_transaction_reference TEXT NOT NULL DEFAULT '',brand TEXT NOT NULL DEFAULT '',last4 TEXT NOT NULL DEFAULT '',failure_code TEXT NOT NULL DEFAULT '',
-    expires_at TIMESTAMPTZ NOT NULL,claimed_at TIMESTAMPTZ,completed_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(business,call_id)
-  )`;
-  await sql`CREATE INDEX IF NOT EXISTS ordering_voice_payment_lookup_idx ON ordering_voice_payment_sessions(business,caller_phone,status,created_at DESC)`;
 }
 
 export async function prepareVoicePayment(callId:string){

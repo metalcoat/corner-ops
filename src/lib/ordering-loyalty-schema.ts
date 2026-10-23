@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
-import { ensureTableConstraint } from "@/lib/schema-constraints";
 
 const JUMBO_THIN_LOYALTY_ID = "9f2ea950-10c0-4c2b-bf19-00c8d19f6210";
 
@@ -12,43 +11,6 @@ export function ensureOrderingLoyaltySchema(): Promise<void> {
   ready = (async () => {
     await ensureOrderingPromotionSchema();
     const sql = getSql();
-    await sql`ALTER TABLE ordering_loyalty_programs ADD COLUMN IF NOT EXISTS customer_name TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE ordering_loyalty_programs ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1`;
-    await sql`ALTER TABLE ordering_loyalty_programs ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 10000`;
-    await sql`ALTER TABLE ordering_loyalty_programs ADD COLUMN IF NOT EXISTS stackable BOOLEAN NOT NULL DEFAULT FALSE`;
-    await sql`ALTER TABLE ordering_loyalty_programs ADD COLUMN IF NOT EXISTS updated_by TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE ordering_loyalty_ledger ADD COLUMN IF NOT EXISTS order_item_id UUID REFERENCES ordering_order_items(id)`;
-    await sql`ALTER TABLE ordering_loyalty_ledger ADD COLUMN IF NOT EXISTS related_event_id UUID REFERENCES ordering_loyalty_ledger(id)`;
-    await sql`ALTER TABLE ordering_loyalty_ledger ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL DEFAULT ''`;
-    await sql`ALTER TABLE ordering_loyalty_ledger ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb`;
-    await ensureTableConstraint("ordering_loyalty_ledger", "ordering_loyalty_ledger_entry_type_check", `CHECK(entry_type IN ('earn','redeem','void_reversal','redemption_reversal','manager_adjustment','reversal','adjustment','expire'))`);
-    // Earning is incremental per order (see ordering-loyalty-earn.ts): one earn
-    // row per cumulative total, so add-ons earn and retries cannot double-earn.
-    // Legacy rows (no earnedThroughUnits) were already limited to one per order.
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_loyalty_earn_progress_idx ON ordering_loyalty_ledger(program_id,order_id,(COALESCE(metadata->>'earnedThroughUnits','legacy'))) WHERE entry_type='earn'`;
-    await sql`DROP INDEX IF EXISTS ordering_loyalty_earn_once_idx`;
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS ordering_loyalty_reverse_once_idx ON ordering_loyalty_ledger(related_event_id,entry_type) WHERE related_event_id IS NOT NULL`;
-    await sql`
-      CREATE TABLE IF NOT EXISTS ordering_order_loyalty_applications (
-        id UUID PRIMARY KEY,
-        order_id UUID NOT NULL REFERENCES ordering_orders(id) ON DELETE CASCADE,
-        order_item_id UUID NOT NULL REFERENCES ordering_order_items(id),
-        customer_id UUID NOT NULL REFERENCES ordering_customers(id),
-        program_id UUID NOT NULL REFERENCES ordering_loyalty_programs(id),
-        program_version INTEGER NOT NULL,
-        label_snapshot TEXT NOT NULL,
-        configuration_snapshot JSONB NOT NULL,
-        consumed_quantity INTEGER NOT NULL DEFAULT 1 CHECK(consumed_quantity > 0),
-        base_discount_cents INTEGER NOT NULL DEFAULT 0 CHECK(base_discount_cents >= 0),
-        modifier_discount_cents INTEGER NOT NULL DEFAULT 0 CHECK(modifier_discount_cents >= 0),
-        discount_cents INTEGER NOT NULL DEFAULT 0 CHECK(discount_cents >= 0),
-        redemption_event_id UUID REFERENCES ordering_loyalty_ledger(id),
-        requested_by TEXT NOT NULL,
-        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        UNIQUE(order_id, program_id, order_item_id)
-      )
-    `;
-    await sql`CREATE INDEX IF NOT EXISTS ordering_order_loyalty_order_idx ON ordering_order_loyalty_applications(order_id,applied_at)`;
     const jumboThin = await sql`
       SELECT variant.id
       FROM ordering_menu_item_variants variant
