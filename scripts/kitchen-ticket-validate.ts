@@ -64,7 +64,7 @@ for (const expected of [
     throw new Error(`Delivery ticket is missing: ${expected}`);
 }
 const future = printPayloadLines({ heading: "KITCHEN ORDER", orderNumber: "1286", customerName: "Later Guest", serviceType: "delivery", timingLines: futureTiming, paymentLabel: "PAID", lines: ["1 X SUB"] });
-if (!future.join("\n").includes("EXACT Aug 22 6:15 PM") || future.some((line) => /FUTURE|QUOTE/.test(line)))
+if (!future.join("\n").includes("PREORDER 8/22 6:15 PM") || future.some((line) => /FUTURE|QUOTE/.test(line)))
   throw new Error(`Future ticket timing is wrong: ${future.join(" / ")}`);
 if (delivery.some((line) => line.length > 48)) throw new Error("A ticket line is wider than the paper.");
 const nameRow = delivery.find((line) => line.includes("Sarah Smith")) || "";

@@ -32,7 +32,7 @@ export function ticketAddress(value: string): string {
 /**
  * A kitchen ticket: the service and whether it's paid large at the top ("PICKUP - PAID",
  * "DELIVERY - DUE $33.50"; the first line prints in the header size), then the order number and phone on
- * the left and the customer's name, address and time on the right ("ASAP 8:52 PM", or "EXACT Sep 23
+ * the left and the customer's name, address and time on the right ("ASAP 8:52 PM", or "PREORDER 9/23
  * 11:00 AM" for a preorder or future order), then the items. No quote line: the time says it.
  * "ADD ON" tickets keep that word in front of the service and their payment line on the left.
  */
@@ -42,10 +42,12 @@ export function kitchenTicketLayout(payload: Record<string, unknown>): string[] 
   const timing = (Array.isArray(payload.timingLines) ? payload.timingLines : []).map(String);
   const dueLine = timing.find((line) => /^(DUE|FOR): /.test(line));
   const exact = timing.some((line) => /FUTURE|PREORDER/.test(line)) || Boolean(dueLine?.startsWith("FOR"));
-  // "DUE: Wed, Sep 23, 11:00 AM" → ASAP shows the time; EXACT also shows the date ("EXACT Sep 23 11:00 AM").
+  // "DUE: Wed, Sep 23, 11:00 AM" → ASAP shows the time; a preorder also shows the date ("PREORDER 9/23 11:00 AM").
   const when = (dueLine || "").replace(/^(DUE|FOR): /, "").split(", ");
   const time = when.at(-1) || "";
-  const due = exact ? `EXACT ${time ? when.slice(-2).join(" ") : "TIME REQUIRED"}` : `ASAP${time ? ` ${time}` : ""}`;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const day = (when.at(-2) || "").replace(/^([A-Z][a-z]{2}) (\d+)$/, (_, m: string, d: string) => `${months.indexOf(m) + 1}/${d}`);
+  const due = exact ? `PREORDER ${time ? `${day} ${time}` : "TIME REQUIRED"}` : `ASAP${time ? ` ${time}` : ""}`;
   const paymentLabel = String(payload.paymentLabel || "");
   const amountDue = paymentLabel.match(/^AMOUNT DUE: (\$[\d,.]+)$/);
   const payment = paymentLabel === "PAID" ? "PAID" : amountDue ? `DUE ${amountDue[1]}` : "";
