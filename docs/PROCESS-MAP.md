@@ -345,7 +345,8 @@ flowchart LR
   seasons. Background music: a YouTube playlist per season from `src/lib/greeter-playlists.ts` (shown in a small "Now
   playing" card, since YouTube's player must stay visible); without playlists, audio files in the uploads volume under `greeter-music/<season>/` (halloween,
   thanksgiving, christmas) or `greeter-music/everyday/` (`GET /api/pos/greeter/music?season=`); it pauses for each
-  welcome. On NFL game days an "NFL today" screen (kickoffs, live scores, finals; Bills picked out) comes round
+  welcome. Music and welcome volumes (0–100, table `greeter_tv_settings`) are set in POS Settings › Operations and
+  reach the TV with each walk-in poll (`GET /api/pos/greeter` returns `volumes`). On NFL game days an "NFL today" screen (kickoffs, live scores, finals; Bills picked out) comes round
   twice per turn, from ESPN's public scoreboard via `GET /api/pos/greeter/nfl` (`src/lib/greeter-nfl.ts`). Switched over 2026-10-22: `menu-tv.sh` also wakes this TV and keeps
   the greeter page on it; the Pi greeter program still runs on HDMI but isn't shown, and the Pi only keeps its CEC
   "off" lines as a backup.

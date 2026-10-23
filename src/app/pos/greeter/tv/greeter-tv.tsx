@@ -8,7 +8,6 @@ import SeasonFx from "../../menu-board/season-fx";
 const POLL_MS = 2_000;
 const SLIDE_MS = 15_000;
 const WEATHER_MS = 20 * 60_000;
-const MUSIC_VOLUME = 0.13;
 const MUSIC_REFRESH_MS = 30 * 60_000;
 const HOLIDAY_HELLO: Record<string, string> = { halloween: "Happy Halloween!", thanksgiving: "Happy Thanksgiving!", christmas: "Merry Christmas!" };
 
@@ -18,7 +17,7 @@ type SlideKey = "idle" | "nfl" | "weather" | "fact" | "hours";
 const EVERYDAY_ORDER: SlideKey[] = ["idle", "weather", "fact", "hours"];
 const GAME_DAY_ORDER: SlideKey[] = ["idle", "nfl", "weather", "fact", "nfl", "hours"];
 const NFL_POLL_MS = 60_000;
-type Music = { pause: () => void; resume: () => void };
+type Music = { pause(): void; resume(): void; volume(level: number): void };
 
 type YtPlayer = { pauseVideo(): void; playVideo(): void; setVolume(v: number): void; setShuffle(on: boolean): void; playVideoAt(i: number): void; getPlaylist(): string[] | null };
 /** The Corner Deli display app's YouTube player (signed in to the store's account, so no ads). */
@@ -57,6 +56,11 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
   const state = useRef({ initialized: false, lastId: 0 });
   const audio = useRef<HTMLAudioElement | null>(null);
   const music = useRef<Music | null>(null);
+  // Volumes (0-1) from POS Settings > Operations, refreshed with every walk-in poll.
+  const volume = useRef({ music: 0.13, greeting: 1 });
+  const [musicVolume, setMusicVolume] = useState(0.13);
+  const greeting = useRef(false); // true while the welcome is on screen (music paused)
+  useEffect(() => { music.current?.volume(musicVolume); }, [musicVolume]);
   // In the Corner Deli display app the app plays the music, so the page shows no player.
   const [inApp, setInApp] = useState(false);
   useEffect(() => setInApp(Boolean(tvBridge())), []);
@@ -111,8 +115,9 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
   useEffect(() => {
     const app = tvBridge();
     if (playlist && app) {
-      app.playMusic(playlist, MUSIC_VOLUME);
-      music.current = { pause: () => app.pauseMusic(), resume: () => app.resumeMusic() };
+      app.playMusic(playlist, volume.current.music);
+      // playMusic also un-pauses, so a new volume waits until a greeting has finished.
+      music.current = { pause: () => app.pauseMusic(), resume: () => app.resumeMusic(), volume: (level) => { if (!greeting.current) app.playMusic(playlist, level); } };
       return () => { app.pauseMusic(); music.current = null; };
     }
     if (!playlist || !youTube.current) return;
@@ -125,14 +130,14 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
         playerVars: { listType: "playlist", list: playlist, autoplay: 1, loop: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1, origin: window.location.origin },
         events: {
           onReady: () => {
-            player?.setVolume(MUSIC_VOLUME * 100);
+            player?.setVolume(volume.current.music * 100);
             player?.setShuffle(true);
             player?.playVideoAt(Math.floor(Math.random() * Math.max(1, player?.getPlaylist()?.length ?? 1)));
           },
           onError: () => window.setTimeout(() => player?.playVideo(), 3_000),
         },
       });
-      music.current = { pause: () => player?.pauseVideo(), resume: () => player?.playVideo() };
+      music.current = { pause: () => player?.pauseVideo(), resume: () => player?.playVideo(), volume: (level) => player?.setVolume(level * 100) };
     });
     return () => { stopped = true; music.current = null; };
   }, [playlist]);
@@ -141,8 +146,8 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
   useEffect(() => {
     if (playlist) return;
     const player = new Audio();
-    player.volume = MUSIC_VOLUME;
-    music.current = { pause: () => player.pause(), resume: () => { if (player.src) void player.play().catch(() => undefined); } };
+    player.volume = volume.current.music;
+    music.current = { pause: () => player.pause(), resume: () => { if (player.src) void player.play().catch(() => undefined); }, volume: (level) => { player.volume = level; } };
     let tracks: string[] = [];
     let queue: string[] = [];
     const playNext = () => {
@@ -182,11 +187,17 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
       try {
         const response = await fetch("/api/pos/greeter", { cache: "no-store" });
         if (!response.ok) throw new Error(String(response.status));
-        const { latest } = (await response.json()) as { latest: { id: number; ageSeconds: number } | null };
+        const { latest, volumes } = (await response.json()) as { latest: { id: number; ageSeconds: number } | null; volumes?: { music: number; greeting: number } };
         if (stopped) return;
         setOffline(false);
+        if (volumes) {
+          volume.current = { music: volumes.music / 100, greeting: volumes.greeting / 100 };
+          setMusicVolume(volume.current.music);
+          if (audio.current) audio.current.volume = volume.current.greeting;
+        }
         if (greeterNext(state.current, latest) === null) return;
         setWelcome(true);
+        greeting.current = true;
         music.current?.pause(); // the welcome is spoken over silence, then the music carries on
         if (audio.current) {
           audio.current.currentTime = 0;
@@ -195,7 +206,9 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
         window.clearTimeout(hide);
         hide = window.setTimeout(() => {
           setWelcome(false);
+          greeting.current = false;
           music.current?.resume();
+          music.current?.volume(volume.current.music);
         }, GREETER_WELCOME_MS);
       } catch {
         setOffline(true);
