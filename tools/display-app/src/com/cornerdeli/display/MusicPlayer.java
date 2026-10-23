@@ -24,13 +24,20 @@ final class MusicPlayer {
         + "Cobalt/25.lts.30.1034943-gold (unlike Gecko) v8/8.8.278.17-jit gles Starboard/15, "
         + "Amazon_ATV_mediatek8695_2025/RS8133 (Amazon, AFTOLCBC82, Wireless) com.amazon.firetv.youtube/25.30.00";
     /**
-     * Each new song starts at full volume, so set it the moment a video loads or starts (media events
-     * reach a capturing listener on the document) instead of only on the 3-second check.
+     * Each new song starts at full volume, and YouTube sets the volume itself when a song starts. Setting it
+     * back from a media event still let about half a second through at full volume, so the page's volume
+     * control is replaced: whatever YouTube asks for, the video plays at the store's level, and a video is
+     * turned down before it starts. Runs when each page starts loading and again every 3 seconds.
      */
     private static final String VOLUME_JS = "(function(vol){window.__cdVolume=vol;"
-        + "if(!window.__cdVolumeHook){window.__cdVolumeHook=true;['loadstart','loadedmetadata','play','playing','volumechange'].forEach(function(n){"
-        + "document.addEventListener(n,function(e){var v=e.target;if(v&&v.tagName==='VIDEO'&&Math.abs(v.volume-window.__cdVolume)>0.001)v.volume=window.__cdVolume;},true);});}"
-        + "var v=document.querySelector('video');if(v)v.volume=vol;})(%s)";
+        + "var P=HTMLMediaElement.prototype;if(!window.__cdVolumeHook){window.__cdVolumeHook=true;"
+        + "var d=Object.getOwnPropertyDescriptor(P,'volume');window.__cdSet=d.set;"
+        + "Object.defineProperty(P,'volume',{configurable:true,get:function(){return this.__cdAsked===undefined?1:this.__cdAsked;},"
+        + "set:function(x){this.__cdAsked=x;d.set.call(this,window.__cdVolume);}});"
+        + "var play=P.play;P.play=function(){d.set.call(this,window.__cdVolume);return play.apply(this,arguments);};"
+        + "['loadstart','loadedmetadata','play','playing'].forEach(function(n){"
+        + "document.addEventListener(n,function(e){var v=e.target;if(v instanceof HTMLMediaElement)d.set.call(v,window.__cdVolume);},true);});}"
+        + "document.querySelectorAll('video,audio').forEach(function(v){window.__cdSet.call(v,vol);});})(%s)";
     /**
      * After a restart YouTube asks "who's watching": pick the first (the store's) account, and if YouTube
      * lands on its home screen instead of the playlist, go back to the playlist.
@@ -57,7 +64,15 @@ final class MusicPlayer {
         settings.setUserAgentString(TV_AGENT);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, true);
-        view.setWebViewClient(new WebViewClient());
+        view.setWebViewClient(new WebViewClient() {
+            // Turn the volume down before YouTube's own scripts start a song.
+            @Override public void onPageStarted(WebView v, String url, android.graphics.Bitmap icon) {
+                v.evaluateJavascript(String.format(VOLUME_JS, volume), null);
+            }
+            @Override public void onPageCommitVisible(WebView v, String url) {
+                v.evaluateJavascript(String.format(VOLUME_JS, volume), null);
+            }
+        });
         view.setVisibility(View.INVISIBLE);
         // Keep the volume where the store wants it and the music in the state the page asked for.
         handler.postDelayed(new Runnable() {
@@ -76,6 +91,7 @@ final class MusicPlayer {
 
     void play(String list, double vol) {
         volume = Math.max(0, Math.min(1, vol));
+        view.evaluateJavascript(String.format(VOLUME_JS, volume), null);
         paused = false;
         if (list == null || list.isEmpty() || list.equals(playlist)) return;
         playlist = list;
