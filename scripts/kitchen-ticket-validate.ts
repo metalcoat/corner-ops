@@ -53,7 +53,7 @@ const deliveryText = delivery.join("\n");
 for (const expected of [
   "#1284",
   "Sarah Smith",
-  "315-555-1212",
+  "(315) 555-1212",
   "1121 Paterson Street,",
   "Ogdensburg, NY 13669",
   "DROP-OFF: Lane 14",

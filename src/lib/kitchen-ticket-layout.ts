@@ -18,6 +18,17 @@ function wrap(text: string, width: number): string[] {
   return rows;
 }
 
+/** (315) 555-1212 from +13155551212 or 315-555-1212; anything else as given. */
+export function ticketPhone(value: string): string {
+  const digits = value.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+  return digits.length === 10 ? `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}` : value;
+}
+
+/** The address as a driver reads it: no country, no ZIP+4 ("412 Jay Street, Ogdensburg, NY 13669"). */
+export function ticketAddress(value: string): string {
+  return value.replace(/,\s*(USA|United States)\s*$/i, "").replace(/\b(\d{5})-\d{4}\b/, "$1").trim();
+}
+
 /**
  * A kitchen ticket: PICKUP / DELIVERY / … large at the top (the first line prints in the header size),
  * then the order number, phone and payment on the left and the customer's name, address and due time on
@@ -35,13 +46,13 @@ export function kitchenTicketLayout(payload: Record<string, unknown>): string[] 
   const half = TICKET_COLUMNS / 2;
   const left = [
     payload.orderNumber ? `#${payload.orderNumber}` : "",
-    payload.phone ? String(payload.phone) : "",
+    payload.phone ? ticketPhone(String(payload.phone)) : "",
     payload.paymentLabel ? String(payload.paymentLabel) : "",
     payload.cashier ? `CASHIER: ${payload.cashier}` : "",
   ].filter(Boolean).flatMap((line) => wrap(line, half - 1));
   const right = [
     ...wrap(String(payload.customerName || ""), half - 1),
-    ...wrap(String(payload.deliveryAddress || ""), half - 1),
+    ...wrap(ticketAddress(String(payload.deliveryAddress || "")), half - 1),
     ...(payload.deliveryUnit ? wrap(`DROP-OFF: ${payload.deliveryUnit}`, half - 1) : []),
     ...(due ? wrap(due, half - 1) : []),
   ];
