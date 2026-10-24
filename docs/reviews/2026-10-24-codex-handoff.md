@@ -24,6 +24,7 @@ Codex with this repository open; everything it needs is in the repo.
 | Business day | `src/lib/business-day.ts`, `src/lib/ordering-operational-report.ts` | DST edges (2026-11-01, 2027-03-14), year ends, report ranges. |
 | Void/payment guards | `ordering-payments.ts` (`commitTender` cancelled check, store-credit reversal), `mx-terminal-payments.ts` (`completeWithTip`), `ordering-hardware.ts` (retry skip), lifecycle `transitions` | Anything legitimate now refused? A voided order with an authorized terminal hold. |
 | DB pool | `src/lib/db.ts` | `idle_in_transaction_session_timeout` 5 min: any transaction that waits on an outside call that long? `release(err)` semantics. |
+| Security fixes | `credential-resets.ts`, `rate-limit.ts` (`clientIp`, `clearRateLimit`), `api/auth/session`, customer code verification (`auth/phone`, `customer-email-auth.ts`, `account/phone`), `safe-image-response.ts` | Is `cf-connecting-ip` trustworthy on every path that reaches the app (direct :3000 too)? Do staff photos still display (HEIC from iPhones)? Any login now locked out wrongly? |
 | Store dashboard / tips SQL | `ordering-store-dashboard.ts`, `ordering-tips.ts` | Eastern day boundary at 8 PM and across DST. |
 
 ## 3. Open items to confirm or fix
@@ -57,7 +58,7 @@ MX sandbox; dev `.env` is sandbox):
 >    §2 for what to try to break. Report anything wrong with file:line and a concrete failing scenario.
 > 2. Independently look for anything the review missed that would lose an order, charge a customer wrongly,
 >    leave staff unaware of an order, or take production down. Don't just re-check the listed findings.
-> 3. Confirm or refute the Open items O1–O19 and the Decide items D1–D17 (some are inferred; say which you
+> 3. Confirm or refute the Open items O1–O19, the Decide items D1–D17 and the security items SD1–SD9 (some are inferred; say which you
 >    verified). For each confirmed Open item, propose a fix; implement only small, behavior-preserving ones.
 > 4. Run `npx tsc --noEmit`, `npm test`, and the dev-database suites (`npm run test:ordering:lifecycle`,
 >    `test:payments`, `test:online-checkout-preflight`, `test:ordering-availability`, `test:order-void`,
