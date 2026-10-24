@@ -30,6 +30,8 @@ if ! flock -n 9; then
   exit 0
 fi
 
+# One log per run (every minute); keep a week of them.
+find "$LOG_DIR" -maxdepth 1 -type f -name 'update-*.log' -mtime +7 -delete 2>/dev/null || true
 readonly RUN_LOG="${LOG_DIR}/update-$(date -u +%Y%m%dT%H%M%SZ).log"
 exec > >(tee -a "$RUN_LOG") 2>&1
 
@@ -296,7 +298,9 @@ if ! "${RUNTIME_DIR}/tools/db-migrate.sh" --container corner-ops-postgres; then
   record_candidate_failure "$remote_sha" "database migrations failed" "$runtime_sha"
   exit 1
 fi
-docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --no-build --force-recreate asterisk
+# Asterisk carries live phone calls: compose recreates it only when its image or
+# settings changed, instead of dropping calls on every app deploy.
+docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --no-build asterisk
 docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --no-build --force-recreate app
 
 if ! wait_for_health; then
@@ -326,3 +330,6 @@ if git -C "$RUNTIME_DIR" ls-files --error-unmatch tsconfig.tsbuildinfo >/dev/nul
   git -C "$RUNTIME_DIR" restore --worktree -- tsconfig.tsbuildinfo
 fi
 log "Successfully deployed ${remote_sha}."
+# The build cache and replaced images filled the disk once; keep three days of cache.
+docker builder prune -f --filter until=72h >/dev/null 2>&1 || log "WARNING: docker builder prune failed."
+docker image prune -f --filter until=24h >/dev/null 2>&1 || true
