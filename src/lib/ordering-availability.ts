@@ -195,19 +195,41 @@ export async function resolveOrderingAvailability(input: {
   return { open: false, orderable: false, reason: "Same-day ordering is closed. Future ordering may still be available.", opensAt: nextOpen, cutoffAt: null, nextAvailableAt: nextOpen, sourceRule: source, timezone };
 }
 
+// The day's orderable slots change only when hours or closures change, so they are
+// kept for a minute: the public slot list is fetched on every date/service toggle
+// and each slot is a full availability check (several queries).
+const SLOT_CACHE_MS = 60_000;
+const slotCache = new Map<string, { at: number; slots: Promise<Date[]> }>();
+
+async function orderableSlotsForDay(business: OrderingBusiness, serviceType: string, businessDate: string, interval: number): Promise<Date[]> {
+  const noon = new Date(`${businessDate}T12:00:00Z`);
+  const probe = await resolveOrderingAvailability({ business, serviceType, at: noon });
+  if (probe.sourceRule === "emergency_closure" || probe.sourceRule === "unconfigured") return [];
+  const day = { year: Number(businessDate.slice(0, 4)), month: Number(businessDate.slice(5, 7)), day: Number(businessDate.slice(8, 10)) };
+  const candidates: Date[] = [];
+  for (let minute = 0; minute < 1440; minute += interval) candidates.push(wallTimeUtc(day, minute, probe.timezone));
+  // Same checks as before, eight at a time instead of one after another.
+  const slots: Date[] = [];
+  for (let index = 0; index < candidates.length; index += 8) {
+    const batch = candidates.slice(index, index + 8);
+    const resolved = await Promise.all(batch.map((candidate) => resolveOrderingAvailability({ business, serviceType, at: candidate })));
+    batch.forEach((candidate, offset) => { if (resolved[offset].orderable) slots.push(candidate); });
+  }
+  return slots;
+}
+
 export async function listFutureOrderingSlots(input: { business: OrderingBusiness; serviceType: string; businessDate: string; now?: Date; intervalMinutes?: number; leadMinutes?: number }): Promise<Date[]> {
   // The earliest slot leaves time to make the order (leadMinutes, usually the quoted prep time).
   const earliest = new Date((input.now ?? new Date()).getTime() + Math.max(0, input.leadMinutes ?? 0) * 60_000);
   const interval = Math.max(5, Math.min(60, input.intervalMinutes ?? 15));
-  const noon = new Date(`${input.businessDate}T12:00:00Z`);
-  const probe = await resolveOrderingAvailability({ business: input.business, serviceType: input.serviceType, at: noon });
-  if (probe.sourceRule === "emergency_closure" || probe.sourceRule === "unconfigured") return [];
-  const slots: Date[] = [];
-  for (let minute = 0; minute < 1440; minute += interval) {
-    const candidate = wallTimeUtc({ year: Number(input.businessDate.slice(0, 4)), month: Number(input.businessDate.slice(5, 7)), day: Number(input.businessDate.slice(8, 10)) }, minute, probe.timezone);
-    if (candidate <= earliest) continue;
-    const resolved = await resolveOrderingAvailability({ business: input.business, serviceType: input.serviceType, at: candidate });
-    if (resolved.orderable) slots.push(candidate);
+  const key = `${input.business}|${input.serviceType}|${input.businessDate}|${interval}`;
+  const now = Date.now();
+  let cached = slotCache.get(key);
+  if (!cached || now - cached.at > SLOT_CACHE_MS) {
+    cached = { at: now, slots: orderableSlotsForDay(input.business, input.serviceType, input.businessDate, interval) };
+    cached.slots.catch(() => slotCache.delete(key));
+    slotCache.set(key, cached);
+    if (slotCache.size > 500) for (const [entry, value] of slotCache) if (now - value.at > SLOT_CACHE_MS) slotCache.delete(entry);
   }
-  return slots;
+  return (await cached.slots).filter((slot) => slot > earliest);
 }
