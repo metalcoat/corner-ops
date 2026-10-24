@@ -46,7 +46,14 @@ export async function snapshotAndFormatOrder(orderId: string, onlyItemIds?: stri
     UPDATE ordering_order_items line SET item_print_name_snapshot=COALESCE(
       (SELECT NULLIF(print_name,'') FROM ordering_item_variant_print_overrides WHERE variant_id=line.variant_id),
       (SELECT NULLIF(print_name,'') FROM ordering_item_overrides WHERE item_id=line.item_id),
-      NULLIF(line.variant_name_snapshot,''),line.item_name_snapshot)
+      -- No print name set: the size alone only when it already says what the item is
+      -- ("20 Wings", or a plain "Pizza"/"Wings" item); otherwise keep the item's name,
+      -- or "Meatball Sub - Full Sub" printed as just "Full Sub" and the kitchen can't tell which sub.
+      CASE
+        WHEN COALESCE(line.variant_name_snapshot,'')='' THEN line.item_name_snapshot
+        WHEN lower(line.item_name_snapshot) IN ('pizza','wings') OR strpos(lower(line.variant_name_snapshot),lower(line.item_name_snapshot))>0 THEN line.variant_name_snapshot
+        ELSE line.item_name_snapshot||' - '||line.variant_name_snapshot
+      END)
     WHERE line.order_id=${orderId}
   `;
   await sql`
