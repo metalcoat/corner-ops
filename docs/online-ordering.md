@@ -163,7 +163,8 @@ no money taken), `PAYMENT_PROVIDER`, `GOOGLE_CLIENT_ID/SECRET`, `ADDRESS_PROVIDE
 `DELI_ORIGIN_LATITUDE/LONGITUDE`, `SMTP_*` / `CUSTOMER_EMAIL_FROM`, and `TELNYX_*` (already there) for sign-in
 codes.
 
-**Store setup in the production database**
+**Store setup in the production database** (production has none of it today; copy dev's once with
+`tools/promote-dev-config.sh`, rehearsed 2026-10-24 — see [switch-runbook.md](switch-runbook.md))
 - [ ] Ordering hours (`ordering_operating_windows`) configured. Unconfigured hours make the website look closed
       (no ASAP, no slots) while the send step skips the hours check.
 - [ ] Menu: web visibility per item/category, breakfast/lunch schedules, sold-out flags, delivery fee bands and
