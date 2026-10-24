@@ -1,3 +1,14 @@
+import { clientIp, consumeRateLimit } from "@/lib/rate-limit";
+import { RateLimitError } from "@/lib/http";
+
+// Scores come from the player's browser, so prize codes are capped: a few winning
+// runs per visitor per day, and a daily limit for the whole game.
+async function limitPrizes(request: Request, game: string) {
+  await consumeRateLimit([
+    { scope: `${game}-prize`, discriminator: `ip:${clientIp(request)}`, maxFailures: 2, windowSeconds: 86_400, blockSeconds: 86_400 },
+    { scope: `${game}-prize`, discriminator: "business:all:daily", maxFailures: 40, windowSeconds: 86_400, blockSeconds: 3_600 },
+  ]);
+}
 import {
   checkpointDelivery,
   completeDeliveryRun,
@@ -17,6 +28,7 @@ export async function POST(request: Request) {
       return Response.json(
         await checkpointDelivery(b.checkpoint, String(b.token || "")),
       );
+    if (action === "complete") await limitPrizes(request, "delivery-boy");
     if (action === "complete")
       return Response.json(
         await completeDeliveryRun(String(b.runId), String(b.token || "")),
@@ -38,6 +50,8 @@ export async function POST(request: Request) {
       );
     return Response.json({ error: "Unknown action." }, { status: 400 });
   } catch (e) {
+    if (e instanceof RateLimitError)
+      return Response.json({ error: "That's the most prizes allowed today. Come back tomorrow!" }, { status: 429 });
     return Response.json(
       { error: e instanceof Error ? e.message : "Route failed." },
       { status: 409 },

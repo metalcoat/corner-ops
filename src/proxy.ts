@@ -61,6 +61,9 @@ const selfAuthorizedApiPaths = [
   // The label station checks its own sign-in (an employee or its screen pass).
   "/api/ordering/labels",
   "/api/pizza-gauntlet/run",
+  // Prize redemption checks the POS manager sign-in in the route (orderingManagerActor).
+  "/api/pizza-gauntlet/redeem",
+  "/api/delivery-boy/redeem",
   "/api/pizza-gauntlet/leaderboard",
   "/api/delivery-boy/run",
   "/api/delivery-boy/leaderboard",

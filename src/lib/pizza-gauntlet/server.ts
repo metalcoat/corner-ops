@@ -102,7 +102,9 @@ export async function completeRun(runId: string, token: string) {
     );
   const rewardCode = code(),
     expires = new Date(Date.now() + PRIZE.expiresDays * 86400000).toISOString();
-  await getSql()`UPDATE pizza_gauntlet_runs SET status='won',completed_at=NOW(),updated_at=NOW() WHERE id=${runId}`;
+  // Claim the win once: a repeated or parallel "complete" can't mint a second code.
+  if (!(await getSql()`UPDATE pizza_gauntlet_runs SET status='won',completed_at=NOW(),updated_at=NOW() WHERE id=${runId} AND status='active' RETURNING id`)[0])
+    return (await getSql()`SELECT code,prize_type,issued_at,expires_at FROM pizza_gauntlet_rewards WHERE run_id=${runId}`)[0];
   return (
     await getSql()`INSERT INTO pizza_gauntlet_rewards(id,run_id,code,prize_type,terms,completion_stats,expires_at)VALUES(${randomUUID()},${runId},${rewardCode},${PRIZE.name},${JSON.stringify(PRIZE)}::jsonb,${JSON.stringify(stats)}::jsonb,${expires}) RETURNING code,prize_type,issued_at,expires_at`
   )[0];
@@ -198,7 +200,8 @@ export async function completeArcadeRun(
       perfects: data.perfects,
       ruined: data.ruined,
     };
-  await getSql()`UPDATE pizza_gauntlet_runs SET status='won',stats=${JSON.stringify(finalStats)}::jsonb,completed_at=NOW(),updated_at=NOW() WHERE id=${data.runId}`;
+  if (!(await getSql()`UPDATE pizza_gauntlet_runs SET status='won',stats=${JSON.stringify(finalStats)}::jsonb,completed_at=NOW(),updated_at=NOW() WHERE id=${data.runId} AND status='active' RETURNING id`)[0])
+    return (await getSql()`SELECT code,prize_type,issued_at,expires_at FROM pizza_gauntlet_rewards WHERE run_id=${data.runId}`)[0];
   return (
     await getSql()`INSERT INTO pizza_gauntlet_rewards(id,run_id,code,prize_type,terms,completion_stats,expires_at)VALUES(${randomUUID()},${data.runId},${rewardCode},${PRIZE.name},${JSON.stringify(PRIZE)}::jsonb,${JSON.stringify(finalStats)}::jsonb,${expires}) RETURNING code,prize_type,issued_at,expires_at`
   )[0];
