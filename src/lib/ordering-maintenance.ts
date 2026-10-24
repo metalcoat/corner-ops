@@ -1,3 +1,4 @@
+import { remindUnresolvedVoidMoney } from "@/lib/ordering-void-money";
 import { releaseHeldKitchenOrders } from "@/lib/ordering-auto-print";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { retryDuePrintJobs } from "@/lib/ordering-hardware";
@@ -25,7 +26,11 @@ export async function runOrderingMaintenance(business: OrderingBusiness) {
     console.error("Scheduled-order release sweep failed", error);
     return { released: 0 };
   });
-  return { business, printRetryOrders: print.orders, restoredReopenedOrders: reopen.restored, terminalCardsCaptured: terminal.captured, scheduledOrdersReleased: held.released };
+  const voidMoney = await remindUnresolvedVoidMoney(business).catch((error) => {
+    console.error("Voided-money reminder failed", error);
+    return { sent: false };
+  });
+  return { business, voidMoneyReminderSent: voidMoney.sent, printRetryOrders: print.orders, restoredReopenedOrders: reopen.restored, terminalCardsCaptured: terminal.captured, scheduledOrdersReleased: held.released };
 }
 
 /**

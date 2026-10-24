@@ -5,6 +5,7 @@ import Link from "next/link";
 import PosPinGate, { type PosSessionView } from "../../pos-pin-gate";
 import ItemCancellationPanel from "./item-cancellation-panel";
 import BulkCashVoidPanel from "./bulk-cash-void-panel";
+import VoidMoneyPanel from "./void-money-panel";
 import { formatOrderModifier } from "@/lib/ordering-line-format";
 type Order = {
   id: string;
@@ -76,7 +77,9 @@ export default function OrderCenterClient() {
     const timer = window.setInterval(() => setClock(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
+  const [voidMoneyRefresh, setVoidMoneyRefresh] = useState(0);
   const load = useCallback(async () => {
+    setVoidMoneyRefresh((value) => value + 1);
     if (!session?.authenticated) return;
     const p = new URLSearchParams({
       view,
@@ -352,6 +355,7 @@ export default function OrderCenterClient() {
           <Link href="/pos/deli/drivers">DRIVERS / DISPATCH</Link>
         </nav>
       </header>
+      <VoidMoneyPanel refreshKey={voidMoneyRefresh} />
       <div className="ocTools">
         <button onClick={() => move(-1)}>‹</button>
         <button
@@ -541,6 +545,12 @@ export default function OrderCenterClient() {
                       onChange={(e) => setVoidReason(e.target.value)}
                     />
                   </label>
+                  {["paid", "partially_paid"].includes(selected.payment_status) && (
+                    <p className="ocVoidNotice">
+                      Voiding doesn&apos;t refund the payment. Before closing, refund it or leave store credit from
+                      &quot;Needs refund or credit&quot; at the top of Orders.
+                    </p>
+                  )}
                   <div>
                     <button
                       type="button"

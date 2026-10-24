@@ -32,6 +32,8 @@ export default function ItemCancellationPanel({ orderId, item, onDone, onClose }
   const [tenderId, setTenderId] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // Owner rule: the refund (or store credit) can wait, but must be settled by end of day.
+  const [refundLater, setRefundLater] = useState(false);
 
   useEffect(() => {
     setQuote(null);
@@ -84,7 +86,7 @@ export default function ItemCancellationPanel({ orderId, item, onDone, onClose }
         await onDone({ kind: "courtesy_credit", creditCents: courtesyCreditCents });
         return;
       }
-      const response = await fetch(`/api/ordering/order-center/${orderId}/items/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ itemId: item.id, quantity, reason, paymentTransactionId: quote.refundRequiredCents ? tenderId : undefined, refundMethod: "original", clientMutationId: crypto.randomUUID() }) });
+      const response = await fetch(`/api/ordering/order-center/${orderId}/items/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ itemId: item.id, quantity, reason, paymentTransactionId: quote.refundRequiredCents && !refundLater ? tenderId : undefined, refundMethod: quote.refundRequiredCents && refundLater ? "later" : "original", clientMutationId: crypto.randomUUID() }) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "The item refund could not be completed.");
       await onDone({ kind: "cancelled" });
@@ -109,10 +111,11 @@ export default function ItemCancellationPanel({ orderId, item, onDone, onClose }
       </div>
       <label>Reason<textarea autoFocus maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
       {quote && <div className="cancelQuote"><span>Item charge with tax <b>{money(quote.orderReductionCents)}</b></span>{courtesyCredit ? <span>Future-order credit <b>{money(courtesyCreditCents)}</b></span> : <><span>Checkout adjustment <b>−{money(quote.orderReductionCents)}</b></span><span>Refund required <b>{money(quote.refundRequiredCents)}</b></span></>}</div>}
-      {!courtesyCredit && quote && quote.refundRequiredCents > 0 && <label>Payment being refunded<select value={tenderId} onChange={(event) => setTenderId(event.target.value)}><option value="">Choose original payment</option>{tenders.map((tender) => <option key={tender.id} value={tender.id}>{tender.tender_type.replaceAll("_", " ")} · {money(tender.amount_cents)}</option>)}</select></label>}
+      {!courtesyCredit && quote && quote.refundRequiredCents > 0 && <label className="ocRefundLater"><input type="checkbox" checked={refundLater} onChange={(event) => setRefundLater(event.target.checked)} /> Refund or leave credit later (before closing, from &quot;Needs refund or credit&quot;)</label>}
+      {!courtesyCredit && quote && quote.refundRequiredCents > 0 && !refundLater && <label>Payment being refunded<select value={tenderId} onChange={(event) => setTenderId(event.target.value)}><option value="">Choose original payment</option>{tenders.map((tender) => <option key={tender.id} value={tender.id}>{tender.tender_type.replaceAll("_", " ")} · {money(tender.amount_cents)}</option>)}</select></label>}
       {courtesyCredit && !quote?.customerId && <p className="ocDialogError">A customer account is required for future-order credit.</p>}
       {error && <p className="ocDialogError" role="alert">{error}</p>}
-      <div><button type="button" disabled={busy} onClick={onClose}>BACK</button><button className={courtesyCredit ? "primary" : "danger"} disabled={busy || reason.trim().length < 3 || !quote || (courtesyCredit ? !quote.customerId : quote.refundRequiredCents > 0 && !tenderId)}>{busy ? "SAVING…" : courtesyCredit ? `ISSUE ${money(courtesyCreditCents)} CREDIT` : "REMOVE & REFUND ITEM"}</button></div>
+      <div><button type="button" disabled={busy} onClick={onClose}>BACK</button><button className={courtesyCredit ? "primary" : "danger"} disabled={busy || reason.trim().length < 3 || !quote || (courtesyCredit ? !quote.customerId : quote.refundRequiredCents > 0 && !refundLater && !tenderId)}>{busy ? "SAVING…" : courtesyCredit ? `ISSUE ${money(courtesyCreditCents)} CREDIT` : refundLater && (quote?.refundRequiredCents || 0) > 0 ? "REMOVE ITEM · REFUND LATER" : "REMOVE & REFUND ITEM"}</button></div>
     </form>
   );
 }
