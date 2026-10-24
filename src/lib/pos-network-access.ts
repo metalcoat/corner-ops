@@ -22,7 +22,9 @@ export function validApprovalToken(requestId: string, ip: string, supplied: stri
 }
 
 export function networkCookie(ip: string): string {
-  const expiresAt = Date.now() + 30 * 86_400_000;
+  // A week: an approval that expires or is turned off stops working within 7 days
+  // (the access page re-checks the allowlist and re-issues it while still approved).
+  const expiresAt = Date.now() + 7 * 86_400_000;
   const encoded = Buffer.from(JSON.stringify({ ip, expiresAt })).toString("base64url");
   const signature = createHmac("sha256", secret()).update(encoded).digest("base64url");
   return `${encoded}.${signature}`;
@@ -34,7 +36,7 @@ export async function ensurePosNetworkSchema() {
 export async function ipAllowed(ip: string): Promise<boolean> {
   if (localIp(ip)) return true;
   await ensurePosNetworkSchema();
-  const rows = await getSql()`SELECT 1 FROM pos_network_allowlist WHERE ip_address=${ip} AND active=TRUE`;
+  const rows = await getSql()`SELECT 1 FROM pos_network_allowlist WHERE ip_address=${ip} AND active=TRUE AND (expires_at IS NULL OR expires_at > NOW())`;
   return Boolean(rows[0]);
 }
 

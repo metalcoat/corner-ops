@@ -10,10 +10,10 @@ export async function GET(request: Request) {
     const location=forwardedHost&&!/^(localhost|127\.)/.test(forwardedHost)?`https://${forwardedHost}/pos/deli`:`${forwardedProto}://${forwardedHost}/pos/deli`;
     return new Response(null, { status: 303, headers: {
       Location: location,
-      "Set-Cookie": `${POS_NETWORK_COOKIE}=${networkCookie(ip)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
+      "Set-Cookie": `${POS_NETWORK_COOKIE}=${networkCookie(ip)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`,
     } });
   }
   const response = isoJson({ allowed, ip });
-  if (allowed) response.headers.append("Set-Cookie", `${POS_NETWORK_COOKIE}=${networkCookie(ip)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`);
+  if (allowed) response.headers.append("Set-Cookie", `${POS_NETWORK_COOKIE}=${networkCookie(ip)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`);
   return response;
 }

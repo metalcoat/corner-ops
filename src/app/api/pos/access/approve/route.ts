@@ -20,6 +20,16 @@ async function openRequest(id: string, token: string) {
   return row;
 }
 
+async function ownerSignedIn() {
+  const session = await getSession().catch(() => null);
+  return Boolean(session && (session.role === "Owner" || session.role === "Co-Owner"));
+}
+
+function signInFirst(url: URL) {
+  const back = `${url.pathname}${url.search}`;
+  return page("Sign in to approve", `<p>Only the owner can approve a new POS network. Sign in, then open this link again.</p><p><a href="/signin?returnTo=${encodeURIComponent(back)}">Sign in</a></p>`, 401);
+}
+
 const unavailable = () => page("Link no longer valid", "<p>This approval link is invalid, expired (links last 24 hours), or the request was already reviewed. Ask the device to request access again.</p>", 403);
 
 // GET only shows a confirmation; email link scanners must never approve.
@@ -27,6 +37,8 @@ export async function GET(request: Request) {
   const url = new URL(request.url), id = url.searchParams.get("id") || "", token = url.searchParams.get("token") || "";
   const row = await openRequest(id, token);
   if (!row || !approvalRequestOpen(row)) return unavailable();
+  // Holding the emailed link isn't enough: only a signed-in owner can approve.
+  if (!(await ownerSignedIn())) return signInFirst(url);
   return page(
     "Approve POS network?",
     `<p>A device at <strong>${escapeHtml(String(row.ip_address))}</strong> asked for access to the Corner Deli POS.</p><p>Note: ${escapeHtml(String(row.requester_note || "Not provided"))}</p><p>Only approve if you recognize this device or location.</p><form method="post"><input type="hidden" name="id" value="${escapeHtml(id)}"><input type="hidden" name="token" value="${escapeHtml(token)}"><button class="approve" name="decision" value="approve">Approve this network</button><button name="decision" value="deny">Deny</button></form>`,
@@ -39,7 +51,8 @@ export async function POST(request: Request) {
   const row = await openRequest(id, token);
   if (!row || !approvalRequestOpen(row)) return unavailable();
   const session = await getSession().catch(() => null);
-  const reviewer = session && (session.role === "Owner" || session.role === "Co-Owner") ? `email approval (${session.email})` : "email approval";
+  if (!session || (session.role !== "Owner" && session.role !== "Co-Owner")) return signInFirst(new URL(`/api/pos/access/approve?id=${encodeURIComponent(id)}&token=${encodeURIComponent(token)}`, request.url));
+  const reviewer = `owner approval (${session.email})`;
   const sql = getSql();
   if (decision === "deny") {
     await sql`UPDATE pos_network_access_requests SET status='denied',reviewed_at=NOW(),reviewed_by=${reviewer} WHERE id=${id} AND status='pending'`;
@@ -49,6 +62,6 @@ export async function POST(request: Request) {
   // Conditional update so a request can be approved once, only while pending and unexpired.
   const [approved] = await sql`UPDATE pos_network_access_requests SET status='approved',reviewed_at=NOW(),reviewed_by=${reviewer} WHERE id=${id} AND status='pending' AND requested_at > NOW() - INTERVAL '24 hours' RETURNING ip_address`;
   if (!approved) return unavailable();
-  await sql`INSERT INTO pos_network_allowlist(ip_address,label,approved_request_id,approved_by) VALUES(${approved.ip_address},'Approved POS network',${id},${reviewer}) ON CONFLICT(ip_address) DO UPDATE SET active=TRUE,approved_request_id=EXCLUDED.approved_request_id,approved_by=EXCLUDED.approved_by,approved_at=NOW()`;
+  await sql`INSERT INTO pos_network_allowlist(ip_address,label,approved_request_id,approved_by,expires_at) VALUES(${approved.ip_address},'Approved POS network',${id},${reviewer},NOW()+INTERVAL '90 days') ON CONFLICT(ip_address) DO UPDATE SET active=TRUE,approved_request_id=EXCLUDED.approved_request_id,approved_by=EXCLUDED.approved_by,approved_at=NOW(),expires_at=NOW()+INTERVAL '90 days'`;
   return page("POS network approved", "<p>The requesting device can refresh its access page now.</p>");
 }

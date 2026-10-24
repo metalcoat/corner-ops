@@ -19,14 +19,15 @@ async function assertVoiceOrderReady(orderId:string){
 }
 
 export function voicePaymentInternalAuthorized(value:string|null){
-  const expected=process.env.VOICE_PAYMENT_INTERNAL_SECRET?.trim()||process.env.THREE_CX_CRM_SECRET?.trim()||"";
+  // Its own secret only: the 3CX CRM secret must not unlock card payments.
+  const expected=process.env.VOICE_PAYMENT_INTERNAL_SECRET?.trim()||"";
   if(!expected||!value)return false;
   const left=Buffer.from(expected),right=Buffer.from(value);
   return left.length===right.length&&timingSafeEqual(left,right);
 }
 
 export function voicePaymentSandboxReady(){
-  return process.env.MX_ENVIRONMENT?.trim().toLowerCase()!=="production"&&Boolean(process.env.VOICE_PAYMENT_INTERNAL_SECRET?.trim()||process.env.THREE_CX_CRM_SECRET?.trim())&&Boolean(voicePaymentTarget());
+  return process.env.MX_ENVIRONMENT?.trim().toLowerCase()!=="production"&&Boolean(process.env.VOICE_PAYMENT_INTERNAL_SECRET?.trim())&&Boolean(voicePaymentTarget());
 }
 
 function voicePaymentTarget(){
