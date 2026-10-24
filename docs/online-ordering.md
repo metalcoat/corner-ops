@@ -130,18 +130,18 @@ MX Checkout API with a browser-side charge (card data never touches our server):
 Before the website takes real orders in production (owner sign-off for each production step):
 
 **Hosting**
-- [ ] Add the public hostnames (`ordercornerdeli.com`, `www.ordercornerdeli.com`) to `PRODUCTION_HOSTS` in
-      `src/proxy.ts`, or production answers 404 (`APP_ENV=production`). Decide whether www redirects to the apex.
-- [ ] Cloudflare: route those hostnames to the production app (:3001) on the production tunnel and stop
+- [x] `ordercornerdeli.com` and `www.ordercornerdeli.com` are production hosts; www redirects to the bare name and
+      `/` opens `/order` (owner decision 2026-10-24: the address goes straight to ordering).
+- [ ] Cloudflare: route `ordercornerdeli.com` and `www` to the production app (:3001) on the production tunnel and stop
       pointing them at Rezku (Cloudflare change, owner only).
-- [ ] A customer-host branch in the proxy: the public hostnames serve only customer pages, `/api/customer/*`,
-      `/_next` and assets (not `/ops`, `/pos` or other APIs). Don't serve customers from `ops.*`.
-- [ ] Delivery tracking links: built today on `team.ordercornerdeli.com` (`publicTeamBaseUrl`), where `/track` is
-      denied, so texted links would 404. Build them from `CUSTOMER_APP_URL`.
+- [x] The customer host serves only customer pages, `/api/customer/*`, `/_next` and assets
+      (`src/lib/customer-domain-routing.ts`); everything else is a 404. Don't serve customers from `ops.*`.
+- [x] Delivery tracking links use `CUSTOMER_APP_URL`, else https://ordercornerdeli.com in production.
 - [ ] `CUSTOMER_APP_URL` set to the public origin; register its `/api/customer/auth/google/callback` with Google.
 - [ ] SMS cost caps on sign-in codes (per IP, daily, US/CA only) before Telnyx is live for customers.
 
-**Production `.env`** (none of these are in production today): `MX_MERCHANT_ID`, `MX_CONSUMER_KEY`,
+**Production `.env`** (none of these are in production today; card checkout refuses to run on production until
+`MX_ENVIRONMENT=production`): `MX_MERCHANT_ID`, `MX_CONSUMER_KEY`,
 `MX_CONSUMER_SECRET`, `MX_BUSINESS_ID`, **`MX_ENVIRONMENT=production`** (unset = sandbox: orders would show paid with
 no money taken), `PAYMENT_PROVIDER`, `GOOGLE_CLIENT_ID/SECRET`, `ADDRESS_PROVIDER`, `GOOGLE_MAPS_API_KEY`,
 `DELI_ORIGIN_LATITUDE/LONGITUDE`, `SMTP_*` / `CUSTOMER_EMAIL_FROM`, and `TELNYX_*` (already there) for sign-in
