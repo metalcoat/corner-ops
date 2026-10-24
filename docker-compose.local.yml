@@ -1,7 +1,15 @@
 name: corner-ops
 
+# Container logs: at most 3 x 10 MB per container (Docker keeps them forever otherwise).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   asterisk:
+    logging: *default-logging
     build:
       context: ./asterisk
       dockerfile: Dockerfile
@@ -30,6 +38,7 @@ services:
       start_period: 10s
 
   app:
+    logging: *default-logging
     build:
       context: .
       dockerfile: Dockerfile
@@ -115,6 +124,7 @@ services:
   # Website price job: signs in to Sysco / US Foods / PFG and sends prices to the
   # app. Not started by `up`; deploy/supplier-prices-sync.sh --website runs it.
   supplier-prices:
+    logging: *default-logging
     profiles: ["tools"]
     build:
       context: .
@@ -166,6 +176,7 @@ services:
       - cornerops
 
   postgres:
+    logging: *default-logging
     image: postgres:17-bookworm
     container_name: corner-ops-postgres
     restart: unless-stopped

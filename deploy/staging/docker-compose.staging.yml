@@ -4,8 +4,16 @@
 # sandbox. Built and refreshed by deploy/staging/refresh-staging.sh.
 name: corner-ops-staging
 
+# Container logs: at most 3 x 10 MB per container (Docker keeps them forever otherwise).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
+    logging: *default-logging
     image: postgres:17-bookworm
     container_name: corner-ops-staging-postgres
     restart: unless-stopped
@@ -23,6 +31,7 @@ services:
     networks: [staging]
 
   app:
+    logging: *default-logging
     build:
       context: /opt/corner-ops/staging/app
       dockerfile: Dockerfile
