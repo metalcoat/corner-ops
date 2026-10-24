@@ -68,20 +68,20 @@ All checks passed after the fixes: `npx tsc --noEmit`, `npm test` (274), and the
 
 | # | Sev | Finding | Where |
 |---|---|---|---|
-| O1 | medium | Two tabs paying the same order at once can still leave one charge unrecorded ("no remaining balance" at the second confirm). Needs one active checkout session per order and an automatic MX void on mismatch. | `payments/mx/route.ts` |
-| O2 | medium | Delivery and loyalty routes can change the amount due between `initialize` and `confirm`; the session amount is fixed at initialize. | `delivery/route.ts`, `loyalty/route.ts` |
-| O3 | medium | Item cancellations are ignored by `recalculateOrder`, `applyPromotionsToOrder` and `revalidateDraft`: a cancelled item comes back on reopen, or Send fails "total changed". | `ordering-orders.ts:412`, `ordering-promotions.ts:63`, lifecycle `revalidateDraft` |
-| O4 | medium | After a full refund `payment_status` becomes `unpaid` with the full amount due; Order Center shows it overdue and it can return to the KDS. | `reverseTender`, `ordering-order-center.ts:95` |
+| O1 | medium | Two tabs paying the same order at once can still leave one charge unrecorded ("no remaining balance" at the second confirm). Needs one active checkout session per order and an automatic MX void on mismatch. | **Fixed 2026-10-24:** one payment attempt per order (shared replayId under a per-order lock; MX dedupes it, verified in the sandbox); `npm run test:online-checkout-mx-sandbox`. |
+| O2 | medium | Delivery and loyalty routes can change the amount due between `initialize` and `confirm`; the session amount is fixed at initialize. | **Fixed 2026-10-24:** a charge whose amount no longer matches the order is voided at MX and the customer pays the current total. |
+| O3 | medium | Item cancellations are ignored by `recalculateOrder`, `applyPromotionsToOrder` and `revalidateDraft`: a cancelled item comes back on reopen, or Send fails "total changed". | **Fixed 2026-10-24:** recalculate, promotions and send use the remaining units; `npm run test:cancelled-item-reopen`. |
+| O4 | medium | After a full refund `payment_status` becomes `unpaid` with the full amount due; Order Center shows it overdue and it can return to the KDS. | **Fixed 2026-10-24:** refunds on completed/voided orders leave nothing due (refunded / partially_refunded); Order Center lists go by amount due. |
 | O5 | medium | Items can be added while another terminal sends the order (no row lock in the additions route). | `api/ordering/orders/[id]/additions` |
 | O6 | medium | Loyalty redemption isn't locked per customer; two concurrent sends can spend one reward. Plain `Error` at finalize. | `ordering-loyalty.ts:22` |
 | O7 | medium | Send re-applies promotions to a paid order; if promotions changed mid-checkout the paid order is over/under-paid. | lifecycle `applyPromotionsToOrder` call |
 | O8 | medium | Free included choices are charged on sized items with per-size modifier prices (variant override overwrites the free price). No such data in dev today (0 rows), so latent. | `ordering-orders-with-variants.ts:131` |
-| O9 | medium | The future-slot list runs ~500 queries per request, unauthenticated, re-called on every toggle. | `ordering-availability.ts:198` |
+| O9 | medium | The future-slot list runs ~500 queries per request, unauthenticated, re-called on every toggle. | **Fixed 2026-10-24:** day slots computed 8 at a time and cached 60 s (≈300 ms → <10 ms). |
 | O10 | medium | The order-number counter row stays locked while a whole cart is priced; a big web cart stalls order creation on every channel. | `ordering-orders.ts:99`, `ordering-timed-orders.ts:94` |
 | O11 | low-medium | A timed-out partial MX refund is marked failed; a retry with a new replayId can refund twice. | `mx-merchant.ts:87`, `mx-refunds.ts:84` |
-| O12 | low-medium | Voided delivery orders stay on the driver app; inventory never restored on void/cancel. | `ordering-driver-delivery.ts:80`, `ordering-inventory.ts:39` |
+| O12 | low-medium | Voided delivery orders stay on the driver app; inventory never restored on void/cancel. | **Fixed 2026-10-24:** voids put unstarted food back in stock and cancel the delivery assignment. |
 | O13 | low | Option sold-out per item (`available_override`) is shown in the menu but not enforced by cart/send. | `ordering-menu.ts` vs `ordering-orders.ts:139` |
-| O14 | low | Confirmation email says "Pickup"/"Total due at pickup" for delivery and omits the delivery fee line; the confirmation page says "sent" from payment status alone. | `customer-order-confirmation.ts:65`, `order-confirmation.tsx:160` |
+| O14 | low | Confirmation email says "Pickup"/"Total due at pickup" for delivery and omits the delivery fee line; the confirmation page says "sent" from payment status alone. | **Fixed 2026-10-24:** delivery wording, discount and delivery-fee lines in the email and page; page reflects paid-but-not-sent. |
 | O15 | low | Quantities are clamped instead of rejected; no order-level cap; pizza portion/amount not validated (bad value → 500); whole + both halves of one topping charged twice. | cart route, `ordering-pizza-toppings.ts` |
 | O16 | low | The scheduler has one trigger at 3 AM; a deploy on that minute skips the day; a retry re-sends notifications. | `scheduler.ts:136` |
 | O17 | low | `db-migrate.sh` records a migration in a separate transaction from applying it. `0014` is ~3,000 lines in one transaction: run it on production with the store closed. | `tools/db-migrate.sh` |

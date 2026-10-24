@@ -106,11 +106,15 @@ MX Checkout API with a browser-side charge (card data never touches our server):
       customer is asked to wait rather than risk a second charge.
    2. **Preflight**: `preflightDraftSubmit` runs every send rule and rolls back. A failure (closed, breakfast
       over, under the delivery minimum, price changed) is shown before any charge.
-   3. A checkout session row (`ordering_mx_checkout_sessions`: amount, `replayId`, `client_mutation_id`,
-      30-minute expiry) and an MX token are returned to the browser.
+   3. One payment attempt per order: under a per-order lock, an open session for the same amount is reused
+      (same `replayId`; MX treats a repeat charge with it as the same payment and rejects a different card on
+      it, verified in the sandbox). A new session starts after a decline (`retryAfterDecline`, so another card
+      can be tried) or when the amount changed. The session row (`ordering_mx_checkout_sessions`: amount,
+      `replayId`, `client_mutation_id`, 30-minute expiry) and a fresh MX token go to the browser.
 2. The browser charges MX directly (`mx-keyed-payment-dialog.tsx`).
 3. **confirm**: the server looks the payment up at MX by `replayId`, requires "approved" and the exact session
-   amount, then `commitTender` (idempotent on the session's `client_mutation_id`) and `submitDraftOrder`.
+   amount, and that the order still owes exactly that amount (otherwise the charge is voided at MX and the
+   customer is asked to pay the current total), then `commitTender` (idempotent on the session's `client_mutation_id`) and `submitDraftOrder`.
    - If a send rule still fails after the charge (something changed between preflight and confirm), the
      customer is told the card was charged and the store alerted (409, `paymentRecorded`); the paid draft
      appears on every POS's online-order alert until staff send it from the Order Center.
@@ -170,7 +174,5 @@ lost-confirm recovery (close the tab right after the card approves, then pay aga
 Tracked in [reviews/2026-10-24-production-review.md](reviews/2026-10-24-production-review.md):
 
 - No rate limit on `initialize` (card-testing risk); sign-in codes are limited (3 per 15 min, 5 tries).
-- Two tabs paying the same order at the same moment can still produce one unrecorded charge.
 - Order-ahead slots have no prep lead time or capacity cap.
 - Pay-at-pickup orders have no per-customer limit and earn loyalty before payment.
-- The slot list makes ~500 queries per request (unauthenticated).
