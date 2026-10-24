@@ -134,7 +134,12 @@ Before the website takes real orders in production (owner sign-off for each prod
       `src/proxy.ts`, or production answers 404 (`APP_ENV=production`). Decide whether www redirects to the apex.
 - [ ] Cloudflare: route those hostnames to the production app (:3001) on the production tunnel and stop
       pointing them at Rezku (Cloudflare change, owner only).
+- [ ] A customer-host branch in the proxy: the public hostnames serve only customer pages, `/api/customer/*`,
+      `/_next` and assets (not `/ops`, `/pos` or other APIs). Don't serve customers from `ops.*`.
+- [ ] Delivery tracking links: built today on `team.ordercornerdeli.com` (`publicTeamBaseUrl`), where `/track` is
+      denied, so texted links would 404. Build them from `CUSTOMER_APP_URL`.
 - [ ] `CUSTOMER_APP_URL` set to the public origin; register its `/api/customer/auth/google/callback` with Google.
+- [ ] SMS cost caps on sign-in codes (per IP, daily, US/CA only) before Telnyx is live for customers.
 
 **Production `.env`** (none of these are in production today): `MX_MERCHANT_ID`, `MX_CONSUMER_KEY`,
 `MX_CONSUMER_SECRET`, `MX_BUSINESS_ID`, **`MX_ENVIRONMENT=production`** (unset = sandbox: orders would show paid with

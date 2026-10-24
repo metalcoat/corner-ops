@@ -90,7 +90,44 @@ All checks passed after the fixes: `npx tsc --noEmit`, `npm test` (274), and the
 
 ## Security pass
 
-See the section added below when the auth/security pass finished.
+### Fixed
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| S1 | high | PIN-reset completion answered "That PIN is already assigned at this location", and the link stayed valid for 30 min with no limit: an employee could map every coworker's (and owner's) PIN. | Generic message; a link that hits a taken PIN is spent (`credential-resets.ts`). |
+| S2 | high | Rate limits keyed on the first `X-Forwarded-For` value, which the client controls behind Cloudflare; a successful login also cleared the business-wide counter. Made 4-digit employee/deli-board PIN logins brute-forceable from the internet (a hit can change direct-deposit details). | `clientIp` prefers `cf-connecting-ip`; business counters are never cleared on success; same IP source for reset requests and address suggestions. |
+| S3 | high | Stored XSS: staff photo uploads trust the declared type, and photos were served with it (an SVG with a script ran on the ops site with the owner's session). | Photos are served only as raster types with `nosniff` and a sandbox CSP (`safe-image-response.ts`). Upload-side magic-byte checks still open (S-open). |
+| S4 | medium-high | Customer code verification (SMS, email, phone add) read `attempts`, compared, then wrote: parallel guesses all passed the 5-try limit. | Attempt counted atomically before comparing; codes single-use. |
+| S5 | medium-high | Owner/staff password login had no rate limit. | 10 failures per 15 min per IP and per account. |
+| S6 | medium | Any clocked-in employee could merge customer records (moving orders and loyalty). | Manager required. |
+| S7 | low-medium | Reflected XSS on the manager menu-media page (`itemId` into HTML); open redirect after sign-in (`returnTo=/%09/evil.com`). | UUID-only item id; same-origin return path. |
+
+### Needs a decision
+
+| # | Sev | Finding | Recommendation |
+|---|---|---|---|
+| SD1 | **critical (live on dev)** | dev.ordercornerdeli.com shows customer sign-in codes on screen (`DEV_SHOW_SMS_CODES=true`, no Telnyx): anyone on the internet can sign in as any phone number and see that customer's addresses, orders and loyalty. Worse if the AI phone line has put real customers in the dev database (inferred; not checked). | Turn the setting off in `/opt/corner-ops/.env` or put Cloudflare Access in front of dev; or show codes only to store-network visitors. |
+| SD2 | high (launch) | SMS pumping: phone sign-in allows any +1 number (incl. Caribbean premium codes) with only 3 codes per phone per 15 min; no per-IP or daily cap or captcha. Email codes likewise (email bombing). | Per-IP and global daily caps with an alert; US/CA area codes only; captcha. |
+| SD3 | medium (launch) | Customer host routing: production would 404 the public hostnames, and delivery tracking links are built on `team.ordercornerdeli.com`, where `/track` is denied. Serving customers from `ops.*` would share a site with owner sessions. | A customer-host branch in the proxy (customer pages + `/api/customer/*` only); tracking URLs from `CUSTOMER_APP_URL`. |
+| SD4 | medium | dev.* and ops.* are the same site to browsers, so SameSite cookies don't stop dev pages from making requests to production. | Reject cross-site non-GET requests by `Origin`/`Sec-Fetch-Site` in the proxy; long term, move dev to another domain. |
+| SD5 | medium | POS network approval works for anyone holding the emailed link (owner session optional); approvals never expire; the 30-day network cookie isn't re-checked. | Owner session on approve, expiry, re-check. |
+| SD6 | medium | Port 3000 is published on `0.0.0.0` (Docker bypasses ufw) and the proxy trusts `cf-connecting-ip` from anyone who reaches it directly (LAN/VPN). | Bind to 127.0.0.1 or firewall DOCKER-USER; check which LAN devices call :3000 first (greeter TV). |
+| SD7 | medium | `VOICE_PAYMENT_INTERNAL_SECRET` falls back to `THREE_CX_CRM_SECRET` (empty on dev), so one secret unlocks voice payments, the AI-phone session context and CRM lookups. | Separate secrets, no fallback (Asterisk and app change together). |
+| SD8 | medium | Game prize codes can be minted with forged scores (client-reported, no sign-in or caps); the redeem routes are unreachable for most staff (proxy wants an owner session, route wants a POS manager). | Caps per device/IP, conditional status update, fix the redeem policy. |
+| SD9 | medium | Email-only customers can place unlimited pay-at-pickup orders, and an unverified phone typed at checkout becomes the account's primary phone (a later phone sign-in by the real owner lands in that account). | SMS-verified phone for pay-later; keep unverified phones on the order only. |
+
+### Open (smaller)
+
+Raw `error.message` from several public customer routes (Postgres text on a bad id); Google Maps validate route
+unauthenticated and unlimited (cost); cookie `Secure` flag off on dev (http `APP_URL`) and keyed on `NODE_ENV` for
+the customer cookie; shared `SESSION_SECRET` HMAC without a token type; client `X-Forwarded-Host` drives host
+rules; password/PIN reset requests unlimited and claimable twice in a race; push subscriptions accept any https
+endpoint (blind SSRF); upload paths not UUID-checked; upload type checks by declared MIME only; POS sessions not
+revocable server-side (no session version); 10-year screen passes creatable by any PIN user.
+
+Sound: all cron routes (constant-time bearer, closed when unset), 3CX/Telnyx/OpenAI webhook checks, Google OAuth
+state and redirect, customer order access by session-bound cart, parameterized SQL everywhere, ASCII-filtered
+printer output, no `NEXT_PUBLIC_*` secrets, driver and employee routes scoped to their user, Postgres not published.
 
 ## What was checked and found sound
 
