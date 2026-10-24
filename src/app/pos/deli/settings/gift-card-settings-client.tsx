@@ -1,7 +1,8 @@
 "use client";
+import { randomId } from "@/app/client-id";
 import { useState } from "react";
 const cents = (value: string) => Math.round(Number(value) * 100),
-  key = () => crypto.randomUUID(),
+  key = () => randomId(),
   money = (value: number) =>
     new Intl.NumberFormat("en-US", {
       style: "currency",

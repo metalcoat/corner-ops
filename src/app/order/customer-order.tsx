@@ -1,4 +1,5 @@
 "use client";
+import { randomId } from "@/app/client-id";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import PizzaToppingSelector from "@/components/pizza-topping-selector";
@@ -266,7 +267,7 @@ export default function CustomerOrder() {
     [addingAddress, setAddingAddress] = useState(false),
     [addressLabel, setAddressLabel] = useState("Home"),
     [makeDefaultAddress, setMakeDefaultAddress] = useState(true),
-    [addressSessionToken] = useState(() => crypto.randomUUID()),
+    [addressSessionToken] = useState(() => randomId()),
     [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>(
       [],
     ),
@@ -510,7 +511,7 @@ export default function CustomerOrder() {
   }, [deliveryDistanceMiles, estimated, serviceType]);
   function add(line: Omit<CartLine, "key">) {
     setCart((rows) => {
-      const next = { ...line, key: crypto.randomUUID() };
+      const next = { ...line, key: randomId() };
       return consolidateQuantities(
         [...rows, next],
         ({ key: _key, quantity: _quantity, ...configuration }) => configuration,

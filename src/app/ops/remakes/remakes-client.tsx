@@ -1,4 +1,5 @@
 "use client";
+import { randomId } from "@/app/client-id";
 
 import { useEffect, useState } from "react";
 import { storeLocalTimeToIso } from "@/lib/ordering-remake-time";
@@ -26,7 +27,7 @@ export default function ManagerRemakesClient() {
   const [deliveryNotes, setDeliveryNotes] = useState("");
   const [timing, setTiming] = useState<"asap" | "scheduled">("asap");
   const [scheduled, setScheduled] = useState("");
-  const [mutationId, setMutationId] = useState(() => crypto.randomUUID());
+  const [mutationId, setMutationId] = useState(() => randomId());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<Result | null>(null);
@@ -65,7 +66,7 @@ export default function ManagerRemakesClient() {
       setServiceType(detail.service_type === "delivery" ? "delivery" : "pickup");
       setCustomerName(detail.customer_name || ""); setPhone(detail.customer_phone || "");
       setAddress(detail.delivery_address || ""); setUnit(detail.delivery_unit || "");
-      setDeliveryNotes(""); setTiming("asap"); setScheduled(""); setMutationId(crypto.randomUUID());
+      setDeliveryNotes(""); setTiming("asap"); setScheduled(""); setMutationId(randomId());
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not open this order."); }
   }
 
@@ -82,7 +83,7 @@ export default function ManagerRemakesClient() {
       }) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not send the remake.");
-      setResult(body); setMutationId(crypto.randomUUID());
+      setResult(body); setMutationId(randomId());
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not send the remake."); }
     finally { setBusy(false); }
   }

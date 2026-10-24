@@ -1,4 +1,5 @@
 "use client";
+import { randomId } from "@/app/client-id";
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -34,7 +35,7 @@ export default function VoidMoneyPanel({ refreshKey }: { refreshKey: number }) {
       const response = await fetch("/api/ordering/order-center/void-money", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ orderId: order.orderId, transactionId: tender.id, amountCents: Math.min(order.owedCents, tender.remainingCents), method, clientMutationId: crypto.randomUUID() }),
+        body: JSON.stringify({ orderId: order.orderId, transactionId: tender.id, amountCents: Math.min(order.owedCents, tender.remainingCents), method, clientMutationId: randomId() }),
       });
       const body = (await response.json()) as { orders?: Owed[]; error?: string };
       if (!response.ok) throw new Error(body.error || "That didn't go through.");

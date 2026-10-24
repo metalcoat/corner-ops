@@ -1,4 +1,5 @@
 "use client";
+import { randomId } from "@/app/client-id";
 // The driver tablet: a list of today's deliveries (who, where, how much to
 // collect) beside the selected order (what's in the bag), with 3CX calling,
 // navigation, status buttons, proof photos, and foreground GPS for tracking.
@@ -147,7 +148,7 @@ function proofDb() {
   });
 }
 async function queueProofUpload(deliveryId: string, file: File, note: string) {
-  const db = await proofDb(), record = { id: crypto.randomUUID(), deliveryId, file, note, capturedAt: new Date().toISOString() };
+  const db = await proofDb(), record = { id: randomId(), deliveryId, file, note, capturedAt: new Date().toISOString() };
   await new Promise<void>((resolve, reject) => {
     const request = db.transaction("proofs", "readwrite").objectStore("proofs").put(record);
     request.onsuccess = () => resolve();
@@ -315,7 +316,7 @@ export default function DriverDeliveries() {
         if (previous && position.timestamp - previous.at < GPS_MIN_INTERVAL_MS && metresBetween(previous, here) < GPS_MIN_METRES) return;
         lastSent.current = { at: position.timestamp, ...here };
         const body = {
-          clientEventId: crypto.randomUUID(),
+          clientEventId: randomId(),
           capturedAt: new Date(position.timestamp).toISOString(),
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,

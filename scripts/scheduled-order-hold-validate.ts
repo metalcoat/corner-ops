@@ -29,9 +29,9 @@ async function main(): Promise<void> {
         business: "Corner Deli", source: "web", serviceType: "pickup", createdBy: actor.id,
         customerFirstName: "Hold", callerPhone: "3155550178", items: [{ itemId: String(item.id), quantity: 1 }],
       });
-      // Due in 6 hours. On Halloween or Super Bowl Sunday nothing is held, and the test says so.
-      await sql`UPDATE ordering_orders SET timing_mode='future', scheduled_for=NOW()+INTERVAL '6 hours', quoted_lead_max_minutes=30 WHERE id=${draft.id}`;
-      // Needs the store to take orders for that time (run it during the day).
+      // Due in 2 hours. On Halloween or Super Bowl Sunday nothing is held, and the test says so.
+      await sql`UPDATE ordering_orders SET timing_mode='future', scheduled_for=NOW()+INTERVAL '2 hours', quoted_lead_max_minutes=30 WHERE id=${draft.id}`;
+      // Needs the store to take orders for that time (run it at least 2 hours before closing).
       await submitDraftOrder(String(draft.id), "Corner Deli", actor);
       const order = (await sql`SELECT kitchen_release_at, scheduled_for, status FROM ordering_orders WHERE id=${draft.id}`)[0];
       const holiday = !order.kitchen_release_at;

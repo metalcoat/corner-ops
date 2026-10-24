@@ -1,4 +1,5 @@
 "use client";
+import { randomId } from "@/app/client-id";
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -86,7 +87,7 @@ export default function ItemCancellationPanel({ orderId, item, onDone, onClose }
         await onDone({ kind: "courtesy_credit", creditCents: courtesyCreditCents });
         return;
       }
-      const response = await fetch(`/api/ordering/order-center/${orderId}/items/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ itemId: item.id, quantity, reason, paymentTransactionId: quote.refundRequiredCents && !refundLater ? tenderId : undefined, refundMethod: quote.refundRequiredCents && refundLater ? "later" : "original", clientMutationId: crypto.randomUUID() }) });
+      const response = await fetch(`/api/ordering/order-center/${orderId}/items/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ itemId: item.id, quantity, reason, paymentTransactionId: quote.refundRequiredCents && !refundLater ? tenderId : undefined, refundMethod: quote.refundRequiredCents && refundLater ? "later" : "original", clientMutationId: randomId() }) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "The item refund could not be completed.");
       await onDone({ kind: "cancelled" });
