@@ -877,7 +877,9 @@ export default function PosClient({
     if ((event.target as HTMLElement).closest("input, textarea, select")) return;
     menuPanMovedRef.current = false;
     menuPanRef.current = { pointerId: event.pointerId, startY: event.clientY, scrollTop: event.currentTarget.scrollTop };
-    event.currentTarget.setPointerCapture(event.pointerId);
+    // Capture the pointer only once it starts dragging (moveMenuPan): capturing on
+    // press sends the mouse click to the panel instead of the item button, so
+    // clicking a menu item with a mouse did nothing.
   }
 
   function moveMenuPan(event: React.PointerEvent<HTMLElement>) {
@@ -885,6 +887,7 @@ export default function PosClient({
     if (!pan || pan.pointerId !== event.pointerId) return;
     const distance = event.clientY - pan.startY;
     if (Math.abs(distance) > 5) {
+      if (!event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.setPointerCapture(event.pointerId);
       menuPanMovedRef.current = true;
       if (item86Timer.current !== null) window.clearTimeout(item86Timer.current);
       item86Timer.current = null;
