@@ -137,3 +137,9 @@ export async function clearRateLimit(policies: RateLimitPolicy[]): Promise<void>
     `;
   }
 }
+
+/** Counts this request against every policy (not only failures), refusing once any is over its limit. */
+export async function consumeRateLimit(policies: RateLimitPolicy[]): Promise<void> {
+  await assertRateLimit(policies);
+  await recordRateLimitFailure(policies);
+}

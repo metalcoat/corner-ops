@@ -7,6 +7,7 @@ import { normalizeCallerPhone } from "@/lib/ordering-core";
 import { displayPhone } from "@/lib/ordering-customers";
 import { sendTransactionalSms } from "@/lib/sms-notifications";
 import { smsCodesShownOnScreen } from "@/lib/sms-test-mode";
+import { limitSignInCodeRequest, usOrCanadaMobile } from "@/lib/customer-abuse-limits";
 
 export const runtime = "nodejs";
 const digest=(phone:string,code:string)=>createHmac("sha256",process.env.SESSION_SECRET||"").update(`${phone}:${code}`).digest("hex");
@@ -19,6 +20,8 @@ export async function POST(request:Request){
     await ensureCustomerOrderingSchema();
     const sql=getSql();
     if(body.action==="request"){
+      if(!usOrCanadaMobile(phone))throw new Error("Enter a US or Canadian mobile number.");
+      await limitSignInCodeRequest(request,"sms");
       const recent=await sql`SELECT COUNT(*)::integer count FROM ordering_customer_login_phone_codes WHERE normalized_phone=${phone} AND created_at>NOW()-INTERVAL '15 minutes'`;
       if(Number(recent[0]?.count||0)>=3)throw new Error("Too many codes requested. Wait 15 minutes and try again.");
       const match=(await sql`SELECT customer.id FROM ordering_customer_phones phone JOIN ordering_customers customer ON customer.id=phone.customer_id WHERE customer.business='Corner Deli' AND customer.active=TRUE AND customer.merged_into_customer_id IS NULL AND phone.normalized_phone=${phone} ORDER BY phone.is_primary DESC,customer.created_at LIMIT 1`)[0];

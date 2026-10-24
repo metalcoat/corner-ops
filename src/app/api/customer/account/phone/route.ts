@@ -1,3 +1,4 @@
+import { limitSignInCodeRequest, usOrCanadaMobile } from "@/lib/customer-abuse-limits";
 import { isoJson } from "@/lib/timestamp-values";
 import { createHash, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import { getSql } from "@/lib/db";
@@ -21,6 +22,8 @@ export async function POST(request:Request){
     }
     const phone=normalizeCallerPhone(String(body.phone||""));if(!/^\+1\d{10}$/.test(phone))throw new Error("Enter a valid 10-digit phone number.");
     if(action==="request"){
+      if(!usOrCanadaMobile(phone))throw new Error("Enter a US or Canadian mobile number.");
+      await limitSignInCodeRequest(request,"sms");
       const recent=await sql`SELECT COUNT(*)::int count FROM ordering_customer_phone_codes WHERE customer_id=${session.customerId} AND created_at>NOW()-INTERVAL '15 minutes'`;
       if(Number(recent[0]?.count||0)>=5)throw new Error("Too many verification requests. Try again in 15 minutes.");
       const code=String(randomInt(0,1000000)).padStart(6,"0");

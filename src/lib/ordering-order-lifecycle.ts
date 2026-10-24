@@ -543,7 +543,10 @@ async function runDraftSubmit(
         order.timing_mode === "asap" ? new Date(order.created_at) : null,
       allowPreOpenAsap: order.timing_mode === "asap",
     });
-    if (availability.sourceRule !== "unconfigured" && !availability.orderable) {
+    // Staff channels may send when no hours are set up yet; the website may
+    // not (no hours set up means closed online).
+    const websiteOrder = String(order.source || "").toLowerCase() === "web";
+    if ((availability.sourceRule !== "unconfigured" || websiteOrder) && !availability.orderable) {
       const reason = String(override?.reason || "").trim();
       if (!override?.approved || !canManagePos(actor) || !reason) {
         throw new OrderConflictError(

@@ -3,7 +3,7 @@ import { isoJson } from "@/lib/timestamp-values";
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 import { getSql } from "@/lib/db";
-import { apiError, unauthorized } from "@/lib/http";
+import { apiError, RateLimitError, unauthorized } from "@/lib/http";
 import {
   customerSessionHash,
   readCustomerOrderingSession,
@@ -30,6 +30,7 @@ import {
   retrieveMxPayment,
 } from "@/lib/mx-merchant";
 import { cardBillingContactForOrder } from "@/lib/card-billing-contact";
+import { limitCardCheckoutStart } from "@/lib/customer-abuse-limits";
 export const runtime = "nodejs";
 const business = "Corner Deli" as const;
 async function owned(request: Request, id: string) {
@@ -134,6 +135,8 @@ export async function POST(
         if (applied.sendError) return paidButNotSent(applied.sendError);
         return isoJson({ recovered: true, payment: applied.payment, order: applied.order }, { status: 201 });
       }
+      // Each start hands the browser a fresh MX token: limit them per visitor.
+      await limitCardCheckoutStart(request, owner.hash);
       // Run every send rule now, so hours, menu schedules or the delivery
       // minimum stop the customer before the card is charged.
       await preflightDraftSubmit(orderId, business, actor);
@@ -170,6 +173,10 @@ export async function POST(
     if (applied.sendError) return paidButNotSent(applied.sendError);
     return isoJson({ payment: applied.payment, order: applied.order }, { status: 201 });
   } catch (e) {
+    if (
+      e instanceof RateLimitError
+    )
+      return isoJson({ error: "Too many payment attempts. Please wait an hour or call the store." }, { status: 429 });
     if (
       e instanceof MxMerchantError ||
       e instanceof PaymentConflictError ||

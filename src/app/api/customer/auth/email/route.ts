@@ -4,11 +4,13 @@ import {
   verifyCustomerEmailCode,
 } from "@/lib/customer-email-auth";
 import { customerSessionCookie } from "@/lib/customer-ordering-session";
+import { limitSignInCodeRequest } from "@/lib/customer-abuse-limits";
 export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     if (body.action === "request") {
+      await limitSignInCodeRequest(request, "email");
       await requestCustomerEmailCode(body.email);
       return isoJson({ sent: true });
     }

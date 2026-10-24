@@ -327,6 +327,25 @@ export function proxy(request: NextRequest) {
     secure.port = "";
     return NextResponse.redirect(secure, 308);
   }
+  // Cookies are SameSite, but dev.ordercornerdeli.com and ops.ordercornerdeli.com
+  // are the same "site" to browsers, so SameSite doesn't stop a page on one
+  // from posting to the other. Browsers mark every request with where it came
+  // from; refuse state changes that didn't come from this exact origin.
+  // Server-to-server calls (webhooks, cron, phone bridge) send no such headers.
+  // The ops business switch posts from one ops domain to the other on purpose;
+  // its one-time code is the authorization.
+  if (request.method !== "GET" && request.method !== "HEAD" && request.method !== "OPTIONS" && path !== "/api/auth/ops-switch/complete") {
+    const fetchSite = request.headers.get("sec-fetch-site");
+    const origin = request.headers.get("origin");
+    let foreignOrigin = false;
+    if (origin && origin !== "null") {
+      try { foreignOrigin = new URL(origin).host.toLowerCase() !== (request.headers.get("x-forwarded-host") || request.headers.get("host") || "").split(",")[0].trim().toLowerCase(); }
+      catch { foreignOrigin = true; }
+    }
+    if (fetchSite === "cross-site" || fetchSite === "same-site" || (!fetchSite && foreignOrigin)) {
+      return NextResponse.json({ error: "Cross-site request refused." }, { status: 403 });
+    }
+  }
   if (removedVendorPaths.some((prefix) => matchesPath(path, prefix))) {
     return new NextResponse("Not Found", { status: 404 });
   }

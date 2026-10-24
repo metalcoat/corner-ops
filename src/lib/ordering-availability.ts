@@ -195,7 +195,9 @@ export async function resolveOrderingAvailability(input: {
   return { open: false, orderable: false, reason: "Same-day ordering is closed. Future ordering may still be available.", opensAt: nextOpen, cutoffAt: null, nextAvailableAt: nextOpen, sourceRule: source, timezone };
 }
 
-export async function listFutureOrderingSlots(input: { business: OrderingBusiness; serviceType: string; businessDate: string; now?: Date; intervalMinutes?: number }): Promise<Date[]> {
+export async function listFutureOrderingSlots(input: { business: OrderingBusiness; serviceType: string; businessDate: string; now?: Date; intervalMinutes?: number; leadMinutes?: number }): Promise<Date[]> {
+  // The earliest slot leaves time to make the order (leadMinutes, usually the quoted prep time).
+  const earliest = new Date((input.now ?? new Date()).getTime() + Math.max(0, input.leadMinutes ?? 0) * 60_000);
   const interval = Math.max(5, Math.min(60, input.intervalMinutes ?? 15));
   const noon = new Date(`${input.businessDate}T12:00:00Z`);
   const probe = await resolveOrderingAvailability({ business: input.business, serviceType: input.serviceType, at: noon });
@@ -203,7 +205,7 @@ export async function listFutureOrderingSlots(input: { business: OrderingBusines
   const slots: Date[] = [];
   for (let minute = 0; minute < 1440; minute += interval) {
     const candidate = wallTimeUtc({ year: Number(input.businessDate.slice(0, 4)), month: Number(input.businessDate.slice(5, 7)), day: Number(input.businessDate.slice(8, 10)) }, minute, probe.timezone);
-    if (candidate <= (input.now ?? new Date())) continue;
+    if (candidate <= earliest) continue;
     const resolved = await resolveOrderingAvailability({ business: input.business, serviceType: input.serviceType, at: candidate });
     if (resolved.orderable) slots.push(candidate);
   }
