@@ -2,7 +2,7 @@ name: Verify Corner Ops Schema Baseline
 
 on:
   push:
-    branches: [main]
+    branches: [main, agent/pos-ordering-foundation]
   pull_request:
     branches: [main]
 
