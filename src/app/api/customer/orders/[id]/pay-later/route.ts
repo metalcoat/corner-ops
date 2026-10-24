@@ -28,6 +28,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (order.service_type === "delivery" && !(await sql`SELECT 1 FROM ordering_order_delivery_addresses WHERE order_id=${orderId} AND validation_status='validated' LIMIT 1`)[0])
       throw new OrderConflictError("Validate the delivery address before submitting the order.");
     if (order.status !== "draft") throw new OrderConflictError("This order is no longer awaiting submission.");
+    // Owner rule (2026-10-24): at most 2 pay-at-pickup/delivery orders per customer
+    // or phone number in 20 minutes; card orders aren't limited.
+    const recentUnpaid = (await sql`
+      SELECT COUNT(*)::int count FROM ordering_orders recent, ordering_orders this_order
+      WHERE this_order.id=${orderId} AND recent.business='Corner Deli' AND recent.source='web' AND recent.id<>this_order.id
+        AND recent.status NOT IN ('draft','cancelled') AND recent.paid_cents=0 AND recent.submitted_at>NOW()-INTERVAL '20 minutes'
+        AND ((this_order.customer_id IS NOT NULL AND recent.customer_id=this_order.customer_id)
+          OR (COALESCE(this_order.phone_snapshot,'')<>'' AND regexp_replace(recent.phone_snapshot,'\\D','','g')=regexp_replace(this_order.phone_snapshot,'\\D','','g')))`)[0];
+    if (Number(recentUnpaid?.count || 0) >= 2)
+      throw new OrderConflictError("You've placed 2 pay-at-pickup orders in the last 20 minutes. Please pay by card for this one, or call the store at (315) 393-2271.");
     const submitted = await submitDraftOrder(orderId, business, { id: `web:${hash.slice(0, 16)}`, name: "Online customer", type: "web" });
     await dispatchSubmittedOrderPrintJobs(orderId, business);
     after(async () => {
