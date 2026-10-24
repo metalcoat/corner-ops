@@ -119,7 +119,16 @@ MX Checkout API with a browser-side charge (card data never touches our server):
      customer is told the card was charged and the store alerted (409, `paymentRecorded`); the paid draft
      appears on every POS's online-order alert until staff send it from the Order Center.
    - A failed first print attempt never fails the request; retries and the chime cover it.
-4. Refunds of online card payments are manager tender reversals at the POS (`reverseTender` → MX void/refund).
+4. **Saved cards** (`src/lib/mx-saved-cards.ts`, owner request 2026-10-24): a signed-in customer can tick "Save this
+   card for next time" in the card dialog. After the payment is approved the dialog sends the same card straight to
+   MX's `/vault` endpoint with a limited-use token (MX customer created on first use, `ordering_customers.mx_customer_id`);
+   the server then reads the customer's cards back from MX and stores only MX's vault token, brand, last 4 and expiry in
+   `ordering_customer_payment_methods` (with the consent source). Next time the customer picks "Visa ····1111" and the
+   server charges the token (`initialize` with `savedCardId`, same one-attempt/replayId rules). Cards are removed from
+   the account page (deleted at MX). Card numbers never reach Corner Ops, so PCI scope stays as before. POS phone orders:
+   the keyed-card dialog lists the attached customer's saved cards ("CHARGE VISA ····1111" after ticking that the
+   customer agreed on the call) and can save a keyed card for them. `npm run test:saved-cards-mx-sandbox`.
+5. Refunds of online card payments are manager tender reversals at the POS (`reverseTender` → MX void/refund).
 
 ## 5. After the order is sent
 

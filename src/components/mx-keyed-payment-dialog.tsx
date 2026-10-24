@@ -17,6 +17,9 @@ export type MxPaymentInitialization = {
   cardPresent?: boolean;
   authorizationIndicator?: string;
   posData?: Record<string, string>;
+  /** POS phone orders: cards the attached customer saved, and whether a keyed card can be saved for them. */
+  savedCards?: Array<{ id: string; brand: string; last4: string }>;
+  canSaveCard?: boolean;
 };
 
 export default function MxKeyedPaymentDialog({
@@ -24,6 +27,8 @@ export default function MxKeyedPaymentDialog({
   onApproved,
   onCancel,
   onDeclined,
+  saveCard,
+  onChargeSaved,
 }: {
   payment: MxPaymentInitialization;
   onApproved: (replayId: number) => Promise<void>;
@@ -34,8 +39,33 @@ export default function MxKeyedPaymentDialog({
    * didn't answer (the charge may have gone through).
    */
   onDeclined?: () => Promise<MxPaymentInitialization | null>;
+  /**
+   * Offer "Save this card": after an approval the dialog sends the same card
+   * straight to MX's vault (never to Corner Ops) with a limited-use token from
+   * start(), then calls saved() so the server records MX's token.
+   */
+  /** Charge one of payment.savedCards instead of typing a card (the caller confirms consent). */
+  onChargeSaved?: (savedCardId: string) => Promise<void>;
+  saveCard?: {
+    label: string;
+    start: () => Promise<{ token: string; vaultUrl: string; mxCustomerId: string } | null>;
+    saved: () => Promise<void>;
+  };
 }) {
   const [payment, setPayment] = useState(initialPayment);
+  const [saveThisCard, setSaveThisCard] = useState(false);
+  const [consented, setConsented] = useState(false);
+  async function chargeSaved(id: string) {
+    if (!onChargeSaved || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onChargeSaved(id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The saved card could not be charged.");
+      setBusy(false);
+    }
+  }
   const [number, setNumber] = useState("");
   const [expiry, setExpiry] = useState("");
   const [cvv, setCvv] = useState("");
@@ -130,6 +160,29 @@ export default function MxKeyedPaymentDialog({
           result?.authMessage || result?.message || "MX declined the payment.",
         );
       }
+      if (saveCard && saveThisCard) {
+        // The payment is approved; saving is a bonus and never blocks the order.
+        try {
+          const vault = await saveCard.start();
+          if (vault) {
+            const saved = await fetch(`${vault.vaultUrl}?token=${encodeURIComponent(vault.token)}&customerid=${encodeURIComponent(vault.mxCustomerId)}`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                number: digits,
+                expiryMonth: match[1].padStart(2, "0"),
+                expiryYear: year,
+                ...(billingZip ? { avsZip: billingZip.replace(/\s/g, "") } : {}),
+                ...(billingStreet ? { avsStreet: billingStreet.trim() } : {}),
+                ...(payment.customerName ? { name: payment.customerName } : {}),
+              }),
+            });
+            if (saved.ok) await saveCard.saved();
+          }
+        } catch {
+          // The card wasn't saved; the customer can add it from their account.
+        }
+      }
       setNumber("");
       setExpiry("");
       setCvv("");
@@ -214,6 +267,26 @@ export default function MxKeyedPaymentDialog({
               placeholder="ZIP code"
               required
             />
+          </label>
+        )}
+        {onChargeSaved && (payment.savedCards || []).length > 0 && (
+          <fieldset className="mxSavedCards">
+            <legend>Saved cards</legend>
+            <label className="mxSaveCard">
+              <input type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)} />
+              The customer said OK to charge their saved card
+            </label>
+            {(payment.savedCards || []).map((card) => (
+              <button type="button" key={card.id} disabled={busy || !consented} onClick={() => void chargeSaved(card.id)}>
+                CHARGE {card.brand.toUpperCase()} ····{card.last4}
+              </button>
+            ))}
+          </fieldset>
+        )}
+        {saveCard && (
+          <label className="mxSaveCard">
+            <input type="checkbox" checked={saveThisCard} onChange={(event) => setSaveThisCard(event.target.checked)} />
+            {saveCard.label}
           </label>
         )}
         <small>

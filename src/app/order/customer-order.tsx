@@ -253,7 +253,7 @@ export default function CustomerOrder() {
     [email, setEmail] = useState(""),
     [review, setReview] = useState<any>(null),
     [completedOrder, setCompletedOrder] = useState<any>(null),
-    [paymentChoice, setPaymentChoice] = useState<"card" | "pickup" | null>(
+    [paymentChoice, setPaymentChoice] = useState<"card" | "pickup" | `saved:${string}` | null>(
       null,
     ),
     [paymentOpen, setPaymentOpen] = useState(false),
@@ -283,7 +283,17 @@ export default function CustomerOrder() {
       formattedAddress: string;
     } | null>(null),
     [rewardApplied, setRewardApplied] = useState(false),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [savedCards, setSavedCards] = useState<Array<{ id: string; brand: string; last4: string; expMonth: number | null; expYear: number | null }>>([]);
+  const signedIn = Boolean(catalog?.customer.authenticated || phoneVerified);
+  // Cards the signed-in customer saved at MX ("Visa ····1111"); only MX's token is kept.
+  useEffect(() => {
+    if (!signedIn) { setSavedCards([]); return; }
+    fetch("/api/customer/account/cards", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : { cards: [] }))
+      .then((body) => setSavedCards(body.cards || []))
+      .catch(() => setSavedCards([]));
+  }, [signedIn]);
   useEffect(() => {
     setAddressPortal(document.getElementById("delivery-address-top"));
   }, []);
@@ -596,6 +606,7 @@ export default function CustomerOrder() {
     const priced = review || (await price());
     if (!priced) return;
     if (paymentChoice === "card") await payWithMx(priced);
+    if (paymentChoice?.startsWith("saved:")) await payWithSavedCard(priced, paymentChoice.slice(6));
     if (paymentChoice === "pickup") await submitPayLater(priced);
   }
   async function placeOrder() {
@@ -707,6 +718,34 @@ export default function CustomerOrder() {
       setBusy(false);
     }
   }
+  /** One tap: charge a card saved on the customer's account (server side, at MX). */
+  async function payWithSavedCard(order: any, savedCardId: string) {
+    if (!order?.id || busy) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/customer/orders/${encodeURIComponent(order.id)}/payments/mx`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "initialize", savedCardId }),
+      });
+      const body = await response.json();
+      if (body.paymentRecorded) {
+        setReview(null);
+        setCart([]);
+        setMessage(body.error);
+        return;
+      }
+      if (!response.ok) throw new Error(body.error || "The saved card could not be charged.");
+      setReview(null);
+      setCart([]);
+      window.location.assign(`/order/confirmation?orderId=${encodeURIComponent(body.order.id)}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The saved card could not be charged.");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function confirmMxPayment(replayId: number) {
     if (!review?.id) return;
     try {
@@ -812,6 +851,16 @@ export default function CustomerOrder() {
         <MxKeyedPaymentDialog
           payment={mxPayment}
           onApproved={confirmMxPayment}
+          saveCard={signedIn ? {
+            label: "Save this card for next time",
+            start: async () => {
+              const response = await fetch("/api/customer/account/cards", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "start" }) });
+              return response.ok ? response.json() : null;
+            },
+            saved: async () => {
+              await fetch("/api/customer/account/cards", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "saved", source: "checkout" }) });
+            },
+          } : undefined}
           onDeclined={async () => {
             // A declined card: start a new attempt so another card can be tried.
             if (!review?.id) return null;
@@ -1368,6 +1417,17 @@ export default function CustomerOrder() {
               >
                 Credit or debit
               </button>
+              {savedCards.map((card) => (
+                <button
+                  key={card.id}
+                  type="button"
+                  className="choiceButton"
+                  aria-pressed={paymentChoice === `saved:${card.id}`}
+                  onClick={() => setPaymentChoice(`saved:${card.id}`)}
+                >
+                  {card.brand} ····{card.last4}
+                </button>
+              ))}
               {serviceType !== "curbside" && (
                 <button
                   type="button"
@@ -1404,7 +1464,7 @@ export default function CustomerOrder() {
               ? "Placing order…"
               : placeOrderBlocker
                 ? placeOrderBlocker
-                : paymentChoice === "card"
+                : paymentChoice === "card" || paymentChoice?.startsWith("saved:")
                   ? "Place order and pay"
                   : `Place order — pay at ${serviceType === "delivery" ? "delivery" : "pickup"}`}
           </button>

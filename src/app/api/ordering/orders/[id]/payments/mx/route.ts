@@ -21,6 +21,7 @@ import {
   retrieveMxPayment,
 } from "@/lib/mx-merchant";
 import { cardBillingContactForOrder } from "@/lib/card-billing-contact";
+import { chargeSavedCard, listSavedCards, startCardSave, syncSavedCards } from "@/lib/mx-saved-cards";
 import { paymentProviderStatus } from "@/lib/payment-provider";
 export const runtime = "nodejs";
 import { settleOpenTerminalSales, TerminalSaleRecordedError } from "@/lib/mx-terminal-payments";
@@ -62,6 +63,7 @@ export async function POST(
         throw new PaymentConflictError(
           "Enter a card amount within the remaining balance.",
         );
+      const orderCustomerId = (await sql`SELECT customer_id FROM ordering_orders WHERE id=${orderId} AND business=${business}`)[0]?.customer_id as string | null;
       const initialized = await initializeMxPayment(),
         replayId = newReplayId(),
         customer = await cardBillingContactForOrder(orderId, business);
@@ -77,9 +79,20 @@ export async function POST(
         requireAvsStreet: !customer?.street1,
         // Card-present payments go through the reader; a card keyed on the POS was read over the phone.
         ...mxPresentment("phone"),
+        // Cards the attached customer saved; staff charge one only with the customer's OK on the call.
+        savedCards: orderCustomerId ? await listSavedCards(orderCustomerId) : [],
+        canSaveCard: Boolean(orderCustomerId),
       });
     }
-    if (body.action !== "confirm")
+    if (body.action === "save_card_start" || body.action === "save_card_saved") {
+      // Saving the keyed card for the attached customer, who agreed on the call.
+      // The dialog sends the card straight to MX's vault; we only record MX's token.
+      const customerId = (await sql`SELECT customer_id FROM ordering_orders WHERE id=${orderId} AND business=${business}`)[0]?.customer_id;
+      if (!customerId) throw new MxMerchantError("Attach a customer to save their card.");
+      if (body.action === "save_card_start") return isoJson(await startCardSave(String(customerId)));
+      return isoJson({ cards: await syncSavedCards(String(customerId), `staff:${actor.id}:phone_consent`) });
+    }
+    if (body.action !== "confirm" && body.action !== "charge_saved_card")
       throw new MxMerchantError("Unknown MX payment action.");
     const replayId = Number(body.replayId),
       session = (
@@ -91,7 +104,14 @@ export async function POST(
       new Date(session.expires_at).getTime() < Date.now()
     )
       throw new MxMerchantError("This MX payment session expired.");
-    const data = await retrieveMxPayment(replayId);
+    let data: Record<string, unknown>;
+    if (body.action === "charge_saved_card") {
+      // Phone order: the customer said OK to charging their saved card.
+      if (body.customerConsented !== true) throw new MxMerchantError("Confirm the customer agreed to use their saved card.");
+      const customerId = (await sql`SELECT customer_id FROM ordering_orders WHERE id=${orderId} AND business=${business}`)[0]?.customer_id;
+      if (!customerId) throw new MxMerchantError("Attach the customer to use their saved card.");
+      data = await chargeSavedCard({ customerId: String(customerId), paymentMethodId: String(body.savedCardId || ""), amountCents: Number(session.amount_cents), replayId });
+    } else data = await retrieveMxPayment(replayId);
     if (Math.round(Number(data.amount) * 100) !== Number(session.amount_cents))
       throw new MxMerchantError(
         "The MX approval amount does not match this order.",
@@ -118,7 +138,7 @@ export async function POST(
         last4: String(card.last4 || "")
           .replace(/\D/g, "")
           .slice(-4),
-        details: { replayId, channel: "pos_keyed" },
+        details: { replayId, channel: body.action === "charge_saved_card" ? "pos_saved_card" : "pos_keyed" },
       },
     });
     await sql`UPDATE ordering_mx_checkout_sessions SET status='completed',provider_transaction_reference=${reference},completed_at=NOW() WHERE id=${session.id}`;

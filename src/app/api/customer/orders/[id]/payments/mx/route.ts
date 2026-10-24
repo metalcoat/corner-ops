@@ -31,6 +31,7 @@ import {
   voidOrRefundMxPayment,
 } from "@/lib/mx-merchant";
 import { cardBillingContactForOrder } from "@/lib/card-billing-contact";
+import { chargeSavedCard } from "@/lib/mx-saved-cards";
 import { limitCardCheckoutStart } from "@/lib/customer-abuse-limits";
 export const runtime = "nodejs";
 const business = "Corner Deli" as const;
@@ -184,6 +185,18 @@ export async function POST(
         await tx`INSERT INTO ordering_mx_checkout_sessions(id,business,order_id,amount_cents,replay_id,client_mutation_id,created_by,expires_at)VALUES(${randomUUID()},${business},${orderId},${amount},${fresh},${randomUUID()},${actor.id},NOW()+INTERVAL '30 minutes')`;
         return fresh;
       });
+      if (body.savedCardId) {
+        // Pay with a card saved on the signed-in customer's account: charged
+        // server side on MX's vault token with this attempt's replayId (a retry
+        // can't charge twice), then recorded and sent like a typed card.
+        const session = (await sql`SELECT * FROM ordering_mx_checkout_sessions WHERE replay_id=${replayId} AND order_id=${orderId} LIMIT 1`)[0];
+        const customerId = readCustomerOrderingSession(request)?.customerId;
+        if (!session || !customerId) throw new MxMerchantError("This payment session expired.");
+        const charged = await chargeSavedCard({ customerId, paymentMethodId: String(body.savedCardId), amountCents: amount, replayId });
+        const applied = await applyApprovedPayment(orderId, session, charged, actor);
+        if (applied.sendError) return paidButNotSent(applied.sendError);
+        return isoJson({ payment: applied.payment, order: applied.order, paidWithSavedCard: true }, { status: 201 });
+      }
       const init = await initializeMxPayment(),
         customer = await cardBillingContactForOrder(orderId, business);
       return isoJson({

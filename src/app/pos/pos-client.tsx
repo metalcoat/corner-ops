@@ -4925,7 +4925,11 @@ export default function PosClient({
         </div>
       )}
       {mxTerminalSale&&<MxTerminalPaymentDialog sale={mxTerminalSale} onApproved={finishMxTerminalSale} onClose={()=>{setMxTerminalSale(null);setPaymentBusy(false)}}/>}
-      {mxPayment&&<MxKeyedPaymentDialog payment={mxPayment} onApproved={confirmMxPayment} onCancel={()=>{setMxPayment(null);setPaymentBusy(false)}}/>}
+      {mxPayment&&<MxKeyedPaymentDialog payment={mxPayment} onApproved={confirmMxPayment} onCancel={()=>{setMxPayment(null);setPaymentBusy(false)}}
+        onChargeSaved={async(savedCardId)=>{const draft=savedDraft||activeTab;if(!draft)return;const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"charge_saved_card",replayId:mxPayment.replayId,savedCardId,customerConsented:true})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The saved card could not be charged.");setMxPayment(null);setPaymentBusy(false);applyMxApproval(draft,result)}}
+        saveCard={mxPayment.canSaveCard?{label:"Save this card for the customer (they agreed on the call)",
+          start:async()=>{const draft=savedDraft||activeTab;if(!draft)return null;const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"save_card_start"})});return response.ok?response.json():null},
+          saved:async()=>{const draft=savedDraft||activeTab;if(!draft)return;await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"save_card_saved"})})}}:undefined}/>}
       {checkoutOpen && (savedDraft || activeTab) && (
         <div
           className="posCheckoutSideBackdrop"
