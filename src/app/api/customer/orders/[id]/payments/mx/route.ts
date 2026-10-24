@@ -2,7 +2,7 @@ import { mxPresentment } from "@/lib/mx-presentment";
 import { isoJson } from "@/lib/timestamp-values";
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
-import { getSql } from "@/lib/db";
+import { getSql, withTransaction } from "@/lib/db";
 import { apiError, RateLimitError, unauthorized } from "@/lib/http";
 import {
   customerSessionHash,
@@ -28,6 +28,7 @@ import {
   MxMerchantError,
   newReplayId,
   retrieveMxPayment,
+  voidOrRefundMxPayment,
 } from "@/lib/mx-merchant";
 import { cardBillingContactForOrder } from "@/lib/card-billing-contact";
 import { limitCardCheckoutStart } from "@/lib/customer-abuse-limits";
@@ -54,6 +55,21 @@ async function applyApprovedPayment(orderId: string, session: CheckoutSession, d
   if (!reference) throw new MxMerchantError("MX Merchant did not return a payment reference.");
   const card = (data.cardAccount || {}) as Record<string, unknown>;
   const replayId = Number(session.replay_id);
+  // The order changed after this payment started (delivery address, reward, another
+  // payment): never record a charge for the wrong amount. Cancel it at MX and ask
+  // the customer to pay the current total.
+  const due = Number((await checkoutState(orderId, business)).order.amount_due_cents);
+  if (due !== Number(session.amount_cents)) {
+    try {
+      await voidOrRefundMxPayment(reference);
+    } catch (error) {
+      console.error(`[online-checkout] order ${orderId}: MX payment ${reference} for a changed order could not be voided`, error);
+      await getSql()`UPDATE ordering_mx_checkout_sessions SET status='needs_review',provider_transaction_reference=${reference},status_message='Order changed during payment; void at MX failed. Refund it in MX Merchant.' WHERE id=${String(session.id)}`;
+      throw new MxMerchantError("Your order changed while you were paying. We couldn't cancel that charge automatically, so the store will refund it. Please call the store at (315) 393-2271.");
+    }
+    await getSql()`UPDATE ordering_mx_checkout_sessions SET status='voided',provider_transaction_reference=${reference},status_message='Order changed during payment; voided at MX.' WHERE id=${String(session.id)}`;
+    throw new MxMerchantError("Your order changed while you were paying, so we cancelled that charge. Please review the total and pay again.");
+  }
   const payment = await commitTender({
     orderId,
     business,
@@ -126,6 +142,7 @@ export async function POST(
       // An earlier attempt may have been approved at MX while its confirm never
       // reached us (lost connection, timeout). Apply it instead of charging again.
       const earlier = await sql`SELECT * FROM ordering_mx_checkout_sessions WHERE order_id=${orderId} AND business=${business} AND status='initialized' AND created_at>NOW()-INTERVAL '6 hours' ORDER BY created_at DESC LIMIT 5`;
+      const unpaid: CheckoutSession[] = [];
       for (const session of earlier) {
         let found: Record<string, unknown> | null;
         try {
@@ -133,7 +150,7 @@ export async function POST(
         } catch {
           throw new MxMerchantError("We couldn't check on your earlier payment attempt. Please wait a minute and try again.");
         }
-        if (!found || !String(found.status || "").toLowerCase().includes("approve")) continue;
+        if (!found || !String(found.status || "").toLowerCase().includes("approve")) { unpaid.push(session); continue; }
         const applied = await applyApprovedPayment(orderId, session, found, actor);
         if (applied.sendError) return paidButNotSent(applied.sendError);
         return isoJson({ recovered: true, payment: applied.payment, order: applied.order }, { status: 201 });
@@ -147,10 +164,28 @@ export async function POST(
         amount = Number(state.order.amount_due_cents);
       if (amount <= 0)
         throw new PaymentConflictError("This order has no remaining balance.");
+      // One payment attempt per order: a second tab (or a reload) gets the same
+      // replayId, and MX treats a repeat charge with it as the same payment
+      // (verified in the MX sandbox, Oct 2026), so the customer can't be charged
+      // twice. A new attempt starts only after a decline (retryAfterDecline) or
+      // when the amount changed.
+      const replayId = await withTransaction(async () => {
+        const tx = getSql();
+        await tx`SELECT pg_advisory_xact_lock(hashtext(${`mx-online-checkout:${orderId}`}))`;
+        const open = (await tx`SELECT id,replay_id,amount_cents FROM ordering_mx_checkout_sessions WHERE order_id=${orderId} AND business=${business} AND status='initialized' AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1`)[0];
+        const unpaidIds = unpaid.map((row) => String(row.id));
+        if (open && Number(open.amount_cents) === amount && body.retryAfterDecline !== true) {
+          await tx`UPDATE ordering_mx_checkout_sessions SET expires_at=NOW()+INTERVAL '30 minutes' WHERE id=${open.id}`;
+          return Number(open.replay_id);
+        }
+        // Older attempts that MX shows no approved payment for are finished.
+        if (unpaidIds.length) await tx`UPDATE ordering_mx_checkout_sessions SET status=${body.retryAfterDecline === true ? "declined" : "superseded"} WHERE id=ANY(${unpaidIds}::uuid[]) AND status='initialized'`;
+        const fresh = newReplayId();
+        await tx`INSERT INTO ordering_mx_checkout_sessions(id,business,order_id,amount_cents,replay_id,client_mutation_id,created_by,expires_at)VALUES(${randomUUID()},${business},${orderId},${amount},${fresh},${randomUUID()},${actor.id},NOW()+INTERVAL '30 minutes')`;
+        return fresh;
+      });
       const init = await initializeMxPayment(),
-        replayId = newReplayId(),
         customer = await cardBillingContactForOrder(orderId, business);
-      await sql`INSERT INTO ordering_mx_checkout_sessions(id,business,order_id,amount_cents,replay_id,client_mutation_id,created_by,expires_at)VALUES(${randomUUID()},${business},${orderId},${amount},${replayId},${randomUUID()},${actor.id},NOW()+INTERVAL '30 minutes')`;
       return isoJson({
         ...init,
         amount: amount / 100,
@@ -169,7 +204,15 @@ export async function POST(
       session = (
         await sql`SELECT * FROM ordering_mx_checkout_sessions WHERE replay_id=${replayId} AND order_id=${orderId} LIMIT 1`
       )[0];
-    if (!session || session.status !== "initialized")
+    if (!session) throw new MxMerchantError("This payment session expired.");
+    if (session.status === "completed") {
+      // Already recorded (a retried confirm, or the other tab): report the order.
+      const order = (await sql`SELECT * FROM ordering_orders WHERE id=${orderId}`)[0];
+      return isoJson({ order, duplicate: true }, { status: 201 });
+    }
+    // A superseded or declined attempt can still have been charged (an old tab):
+    // look it up and apply it, or void it if the order changed.
+    if (!["initialized", "superseded", "declined"].includes(String(session.status)))
       throw new MxMerchantError("This payment session expired.");
     const data = await retrieveMxPayment(replayId);
     const applied = await applyApprovedPayment(orderId, session, data, actor);

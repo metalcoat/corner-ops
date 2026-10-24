@@ -812,6 +812,17 @@ export default function CustomerOrder() {
         <MxKeyedPaymentDialog
           payment={mxPayment}
           onApproved={confirmMxPayment}
+          onDeclined={async () => {
+            // A declined card: start a new attempt so another card can be tried.
+            if (!review?.id) return null;
+            const response = await fetch(`/api/customer/orders/${encodeURIComponent(review.id)}/payments/mx`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ action: "initialize", retryAfterDecline: true }),
+            });
+            const next = await response.json().catch(() => null);
+            return response.ok && next?.token ? next : null;
+          }}
           onCancel={() => {
             setMxPayment(null);
             setPaymentOpen(false);

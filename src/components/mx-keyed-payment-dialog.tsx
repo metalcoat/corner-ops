@@ -20,14 +20,22 @@ export type MxPaymentInitialization = {
 };
 
 export default function MxKeyedPaymentDialog({
-  payment,
+  payment: initialPayment,
   onApproved,
   onCancel,
+  onDeclined,
 }: {
   payment: MxPaymentInitialization;
   onApproved: (replayId: number) => Promise<void>;
   onCancel: () => void;
+  /**
+   * After a decline, a fresh payment attempt (new replayId) for trying another
+   * card: MX rejects a second card on the same replayId. Not called when MX
+   * didn't answer (the charge may have gone through).
+   */
+  onDeclined?: () => Promise<MxPaymentInitialization | null>;
 }) {
+  const [payment, setPayment] = useState(initialPayment);
   const [number, setNumber] = useState("");
   const [expiry, setExpiry] = useState("");
   const [cvv, setCvv] = useState("");
@@ -112,10 +120,16 @@ export default function MxKeyedPaymentDialog({
         !String(result?.status || "")
           .toLowerCase()
           .includes("approve")
-      )
+      ) {
+        // MX answered with a decline: the next card needs a new attempt.
+        if (result && onDeclined) {
+          const next = await onDeclined().catch(() => null);
+          if (next) setPayment(next);
+        }
         throw new Error(
           result?.authMessage || result?.message || "MX declined the payment.",
         );
+      }
       setNumber("");
       setExpiry("");
       setCvv("");
