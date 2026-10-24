@@ -3,7 +3,9 @@
 How code, servers, scheduled jobs, outside services and the weekly business
 processes connect. Shared by every assistant (Codex and Claude) and by people.
 **Keep it current:** when you change a flow below, update this file in the same
-commit. Last full review: 2026-10-12.
+commit. Last full review: 2026-10-12. The software itself (request path, order engine, payments, printing) is in
+[ARCHITECTURE.md](ARCHITECTURE.md); online ordering in [online-ordering.md](online-ordering.md); the 2026-10-24
+production review in [reviews/2026-10-24-production-review.md](reviews/2026-10-24-production-review.md).
 
 Contents: [All programs](#0-all-programs) · [Machines](#1-machines-and-environments) ·
 [Code to running app](#2-code-to-running-app) ·
@@ -148,9 +150,9 @@ flowchart LR
 | Scheduler (payroll capture, weather, missed shifts, overtime, bank sync, expenses) | 07:00 and 08:00 UTC | `corner-ops-cron-scheduler.timer` |
 | Schedule delivery (schedule texts/emails) | every 5 min | `corner-ops-cron-schedule-delivery.timer` |
 | Rezku repair | every 15 min (**remove at switch**) | — |
-| Ordering maintenance | — | `corner-ops-cron-maintenance.timer` |
+| Ordering maintenance (print retries, abandoned reopens, terminal capture) | **not yet** (add at the switch; until then it runs only while a KDS is open) | `corner-ops-cron-maintenance.timer` (every minute) |
 | Interim Monday payroll email (until the switch) | 12:00 + 13:00 UTC Mondays → acts at 8 AM Eastern: `deploy/staging/monday-payroll-preview.sh` (fresh backup → staging → puts back the saved Payroll Relief employee list + matches, `staging/payroll-relief-{roster,matches}.json` → email owner; approve on staging) | — |
-| Missed clock-outs + Monday payroll (8 AM / 5 PM) | **not yet** | `deploy/systemd/corner-ops-cron-missed-clock-outs.timer` (every 15 min; install with `install-timers.sh`) |
+| Missed clock-outs + Monday payroll (8 AM / 5 PM) | **not yet** | `deploy/systemd/corner-ops-cron-missed-clock-outs.timer` (every 15 min; in the repo but **not installed** as of 2026-10-24; install with `install-timers.sh`) |
 | Supplier price files + Sync now + website searches + payroll sends | — | `corner-ops-supplier-prices.timer` (every 5 min) |
 | Supplier website prices | — | `corner-ops-supplier-website.timer` (twice daily) |
 
@@ -311,7 +313,7 @@ flowchart LR
   walk-in's id, kind and age.
 - Camera clock: GMT-4 with time server sync and its own DST rule off (the firmware ignores it); set GMT-5 on the
   first Sunday of November and GMT-4 on the second Sunday of March.
-- Dev only so far (port 3000). The service is not installed until the camera line is in place.
+- Dev only so far (port 3000). `corner-ops-door-chime.service` is installed and enabled on the store server (seen 2026-10-24).
 
 ## 8b. TV menu board (Corner Deli)
 
