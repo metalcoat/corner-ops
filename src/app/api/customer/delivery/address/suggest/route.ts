@@ -1,3 +1,4 @@
+import { clientIp } from "@/lib/rate-limit";
 import { isoJson } from "@/lib/timestamp-values";
 import {
   normalizeAddressInput,
@@ -10,7 +11,7 @@ const requests = new Map<string, number[]>();
 export async function POST(request: Request) {
   try {
     const key =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+      clientIp(request);
     const now = Date.now();
     const recent = (requests.get(key) || []).filter(
       (time) => now - time < 60_000,

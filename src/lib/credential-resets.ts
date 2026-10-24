@@ -190,7 +190,18 @@ export async function completeEmployeePinReset(input: { token: string; pin: stri
   const reset = await activeReset("employee-pin", clean(input.token, 500));
   if (!reset.business) throw new Error("The employee reset record is incomplete.");
   const sql = getSql();
-  await assertEmployeePinAvailable({business:reset.business,pin:String(input.pin || ""),excludeEmployeeId:String(reset.subject_id)});
+  // "Already assigned" would confirm a coworker's PIN; a link that hits one is
+  // spent, so it can't be used to try PINs one after another.
+  const pinTaken = async () => {
+    await sql`UPDATE credential_reset_tokens SET used_at = NOW() WHERE id = ${reset.id} AND used_at IS NULL`;
+    return new Error("That PIN can't be used. Request a new reset link and choose a different PIN.");
+  };
+  try {
+    await assertEmployeePinAvailable({business:reset.business,pin:String(input.pin || ""),excludeEmployeeId:String(reset.subject_id)});
+  } catch (error) {
+    if (error instanceof Error && /already assigned/i.test(error.message)) throw await pinTaken();
+    throw error;
+  }
   const next = employeePinUpdate(reset.business, String(input.pin || ""));
   let updated: Array<{ id: string }>;
   try {
@@ -203,7 +214,7 @@ export async function completeEmployeePinReset(input: { token: string; pin: stri
       RETURNING id
     ` as unknown as Array<{ id: string }>;
   } catch (error) {
-    if (isEmployeePinUniqueViolation(error)) throw new Error("That PIN is already assigned at this location.");
+    if (isEmployeePinUniqueViolation(error)) throw await pinTaken();
     throw error;
   }
   if (!updated[0]) throw new Error("This employee account is no longer active.");

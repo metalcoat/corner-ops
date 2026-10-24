@@ -31,11 +31,11 @@ export async function POST(request:Request){
     if(action==="verify"){
       const rows=await sql`SELECT * FROM ordering_customer_phone_codes WHERE customer_id=${session.customerId} AND normalized_phone=${phone} AND used_at IS NULL ORDER BY created_at DESC LIMIT 1`,row=rows[0];
       if(!row||new Date(row.expires_at).getTime()<Date.now())throw new Error("That verification code expired. Request a new one.");
-      if(Number(row.attempts)>=5)throw new Error("Too many attempts. Request a new code.");
-      await sql`UPDATE ordering_customer_phone_codes SET attempts=attempts+1 WHERE id=${row.id}`;
+      // Claim the attempt atomically so parallel guesses can't all pass the limit.
+      if(!(await sql`UPDATE ordering_customer_phone_codes SET attempts=attempts+1 WHERE id=${row.id} AND attempts<5 RETURNING id`)[0])throw new Error("Too many attempts. Request a new code.");
       const supplied=hash(String(body.code||"").trim()),expected=Buffer.from(String(row.code_hash),"hex");
       if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected))throw new Error("That verification code is not correct.");
-      await sql`UPDATE ordering_customer_phone_codes SET used_at=NOW() WHERE id=${row.id}`;
+      if(!(await sql`UPDATE ordering_customer_phone_codes SET used_at=NOW() WHERE id=${row.id} AND used_at IS NULL RETURNING id`)[0])throw new Error("That verification code expired. Request a new one.");
       const existing=await sql`SELECT id FROM ordering_customer_phones WHERE customer_id=${session.customerId} AND normalized_phone=${phone}`;
       if(!existing[0])await sql`INSERT INTO ordering_customer_phones(id,customer_id,normalized_phone,display_phone,label,is_primary)VALUES(${randomUUID()},${session.customerId},${phone},${displayPhone(phone)},'Mobile',NOT EXISTS(SELECT 1 FROM ordering_customer_phones WHERE customer_id=${session.customerId}))`;
       return isoJson({verified:true});

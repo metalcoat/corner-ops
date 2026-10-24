@@ -1,3 +1,4 @@
+import { safeImageHeaders } from "@/lib/safe-image-response";
 import { get } from "@/lib/storage";
 import { getEmployeeSession } from "@/lib/employee-auth";
 import { employeeVisibleProfilePhoto } from "@/lib/employee-profile";
@@ -25,7 +26,7 @@ export async function GET(request: Request) {
     if (result.statusCode !== 200 || !result.stream) return new Response("Employee photo not found.", { status: 404 });
     return new Response(result.stream, {
       headers: {
-        "Content-Type": result.blob.contentType || photo.contentType,
+        ...safeImageHeaders(result.blob.contentType || photo.contentType),
         "Content-Disposition": `inline; filename="${photo.fileName.replaceAll('"', '')}"`,
         "Content-Length": String(result.blob.size || photo.size),
         "X-Content-Type-Options": "nosniff",

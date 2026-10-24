@@ -31,9 +31,10 @@ export async function POST(request:Request){
     }
     if(body.action==="verify"){
       const code=String(body.code||"").replace(/\D/g,"");if(!/^\d{6}$/.test(code))throw new Error("Enter the 6-digit code.");
-      const row=(await sql`SELECT * FROM ordering_customer_login_phone_codes WHERE normalized_phone=${phone} AND used_at IS NULL AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1`)[0];
-      if(!row||Number(row.attempts)>=5||!equal(String(row.code_hash),digest(phone,code))){if(row)await sql`UPDATE ordering_customer_login_phone_codes SET attempts=attempts+1 WHERE id=${row.id}`;throw new Error("The code is incorrect or expired.")}
-      await sql`UPDATE ordering_customer_login_phone_codes SET used_at=NOW() WHERE id=${row.id}`;
+      // Count the attempt before comparing, in one statement, so parallel guesses can't all see attempts<5.
+      const row=(await sql`UPDATE ordering_customer_login_phone_codes SET attempts=attempts+1 WHERE id=(SELECT id FROM ordering_customer_login_phone_codes WHERE normalized_phone=${phone} AND used_at IS NULL AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1) AND attempts<5 RETURNING *`)[0];
+      if(!row||!equal(String(row.code_hash),digest(phone,code)))throw new Error("The code is incorrect or expired.");
+      if(!(await sql`UPDATE ordering_customer_login_phone_codes SET used_at=NOW() WHERE id=${row.id} AND used_at IS NULL RETURNING id`)[0])throw new Error("The code is incorrect or expired.");
       let customerId=String(row.customer_id||"");
       if(!customerId){customerId=randomUUID();const label=`Customer ${phone.slice(-4)}`;await sql`INSERT INTO ordering_customers(id,business,display_name)VALUES(${customerId},'Corner Deli',${label})`;await sql`INSERT INTO ordering_customer_phones(id,customer_id,normalized_phone,display_phone,label,is_primary)VALUES(${randomUUID()},${customerId},${phone},${displayPhone(phone)},'Mobile',TRUE)`}
       await sql`UPDATE ordering_orders SET customer_id=${customerId} WHERE business='Corner Deli' AND source='web' AND customer_id IS NULL AND regexp_replace(phone_snapshot,'\\D','','g') IN (${phone.slice(-10)},${phone.replace(/\D/g,"")})`;

@@ -125,7 +125,7 @@ test("audit write failure fails closed without including sensitive values in log
 });
 test("ordinary administrator review remains redacted", async () => {
   const route = loadSource("src/app/api/employment-forms/route.ts", {
-    "next/server": { NextResponse: Response }, "@/lib/auth": { ...auth, getSession: async () => identity("Owner") },
+    "next/server": { NextResponse: Response }, "@/lib/rate-limit": { clientIp: () => "203.0.113.9" }, "@/lib/auth": { ...auth, getSession: async () => identity("Owner") },
     "@/lib/db": { getSql: () => async () => [] },
     "@/lib/employment-forms": { getEmploymentForm: async () => completed, ensureEmploymentFormsSchema: async () => undefined },
     "@/lib/sensitive-redaction": { redactEmploymentSensitiveData }, "@/lib/i9-validation": {},
@@ -135,7 +135,7 @@ test("ordinary administrator review remains redacted", async () => {
 });
 test("Employee Hub still withholds completed tax and identity answers", async () => {
   const route = loadSource("src/app/api/employee/forms/route.ts", {
-    "next/server": { NextResponse: Response },
+    "next/server": { NextResponse: Response }, "@/lib/rate-limit": { clientIp: () => "203.0.113.9" },
     "@/lib/employee-auth": { getEmployeeSession: async () => ({ business: "Tiki", employeeId }) },
     "@/lib/employment-forms": { getEmploymentForm: async () => completed }, "@/lib/i9-validation": {},
   });

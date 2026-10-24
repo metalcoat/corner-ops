@@ -33,8 +33,13 @@ function key(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+/**
+ * Behind the Cloudflare tunnel cf-connecting-ip is set by Cloudflare and can't
+ * be forged; the first X-Forwarded-For entry is whatever the client sent.
+ */
 export function clientIp(request: Request): string {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+  return request.headers.get("cf-connecting-ip")?.trim()
+    || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
     || request.headers.get("x-real-ip")?.trim()
     || "unknown";
 }
@@ -123,6 +128,9 @@ export async function clearRateLimit(policies: RateLimitPolicy[]): Promise<void>
   await ensureRateLimitSchema();
   const sql = getSql();
   for (const policy of policies) {
+    // One person signing in must not reset the business-wide counter that
+    // limits guessing across many addresses.
+    if (policy.discriminator.startsWith("business:")) continue;
     await sql`
       DELETE FROM security_rate_limits
       WHERE scope = ${policy.scope} AND discriminator_hash = ${key(policy.discriminator)}

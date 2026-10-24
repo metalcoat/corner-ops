@@ -55,19 +55,15 @@ export async function verifyCustomerEmailCode(
   if (!/^\d{6}$/.test(code)) throw new Error("Enter the 6-digit code.");
   await ensureCustomerOrderingSchema();
   const sql = getSql();
+  // Count the attempt before comparing, in one statement, so parallel guesses
+  // can't all see attempts < 5.
   const row = (
-    await sql`SELECT * FROM ordering_customer_email_codes WHERE email=${email} AND used_at IS NULL AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1`
+    await sql`UPDATE ordering_customer_email_codes SET attempts=attempts+1 WHERE id=(SELECT id FROM ordering_customer_email_codes WHERE email=${email} AND used_at IS NULL AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1) AND attempts<5 RETURNING *`
   )[0];
-  if (
-    !row ||
-    Number(row.attempts) >= 5 ||
-    !equal(String(row.code_hash), digest(email, code))
-  ) {
-    if (row)
-      await sql`UPDATE ordering_customer_email_codes SET attempts=attempts+1 WHERE id=${row.id}`;
+  if (!row || !equal(String(row.code_hash), digest(email, code)))
     throw new Error("The code is incorrect or expired.");
-  }
-  await sql`UPDATE ordering_customer_email_codes SET used_at=NOW() WHERE id=${row.id}`;
+  if (!(await sql`UPDATE ordering_customer_email_codes SET used_at=NOW() WHERE id=${row.id} AND used_at IS NULL RETURNING id`)[0])
+    throw new Error("The code is incorrect or expired.");
   let customer = (
     await sql`SELECT id FROM ordering_customers WHERE business='Corner Deli' AND lower(email)=${email} AND active=TRUE ORDER BY created_at LIMIT 1`
   )[0];
