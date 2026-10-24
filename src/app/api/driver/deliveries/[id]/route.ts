@@ -1,3 +1,4 @@
+import { customerSiteBaseUrl } from "@/lib/customer-domain-routing";
 import { isoJson } from "@/lib/timestamp-values";
 import { driverActor } from "@/lib/ordering-driver-delivery";
 import { driverOrderDetail } from "@/lib/ordering-driver-orders";
@@ -10,7 +11,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     const actor = await driverActor();
     if (!actor) return isoJson({ error: "Employee sign-in required." }, { status: 401 });
     if (!actor.driver && !actor.manager) return isoJson({ error: "Driver or dispatcher access required." }, { status: 403 });
-    return isoJson({ order: await driverOrderDetail(actor, (await params).id, cornerOpsBaseUrl()) });
+    return isoJson({ order: await driverOrderDetail(actor, (await params).id, customerSiteBaseUrl(cornerOpsBaseUrl())) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Order could not be loaded.";
     if (message.includes("assigned") || message.includes("not found")) return isoJson({ error: message }, { status: 404 });

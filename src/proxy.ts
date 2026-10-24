@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { isInternalRequest } from "@/lib/internal-request";
 import { hmacSignature } from "@/lib/security-keys";
 import { isTeamHost, teamRoute } from "@/lib/team-domain-routing";
+import { CUSTOMER_HOST, CUSTOMER_WWW_HOST, customerRoute, isCustomerHost } from "@/lib/customer-domain-routing";
 import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "corner_ops_session";
@@ -21,6 +22,8 @@ const PRODUCTION_HOSTS = new Set([
   "ops.atthedocks.com",
   "team.ordercornerdeli.com",
   "team.atthedocks.com",
+  CUSTOMER_HOST,
+  CUSTOMER_WWW_HOST,
   "localhost",
   "127.0.0.1",
 ]);
@@ -334,9 +337,35 @@ export function proxy(request: NextRequest) {
   );
   if (response.status === 421) return response;
 
-  // Team domains only serve workforce features. Inside the container nextUrl's
-  // host is the bind address, so read the visitor's host from the headers.
+  // Inside the container nextUrl's host is the bind address, so read the
+  // visitor's host from the headers.
   const host = visitorHost(request);
+
+  // The public ordering site only serves customer pages and the customer API.
+  if (isCustomerHost(host)) {
+    if (host === CUSTOMER_WWW_HOST) {
+      const bare = request.nextUrl.clone();
+      bare.protocol = "https:";
+      bare.host = CUSTOMER_HOST;
+      bare.port = "";
+      return NextResponse.redirect(bare, 308);
+    }
+    const route = customerRoute(path);
+    if (route === "deny") return new Response(null, { status: 404 });
+    if (route === "home") {
+      const order = request.nextUrl.clone();
+      order.pathname = "/order";
+      order.protocol = "https:";
+      order.host = host;
+      order.port = "";
+      return NextResponse.redirect(order);
+    }
+    // Customers should find the ordering site in search; staff hosts stay noindex.
+    response.headers.delete("X-Robots-Tag");
+    return response;
+  }
+
+  // Team domains only serve workforce features.
   if (isTeamHost(host)) {
     const route = teamRoute(path);
     if (route === "deny") return new Response(null, { status: 404 });

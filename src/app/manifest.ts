@@ -1,9 +1,26 @@
 import type { MetadataRoute } from "next";
 import { headers } from "next/headers";
 import { siteBrandForHost } from "@/lib/site-brand";
+import { isCustomerHost } from "@/lib/customer-domain-routing";
 
 export default async function manifest(): Promise<MetadataRoute.Manifest> {
-  const brand = siteBrandForHost((await headers()).get("host") || "");
+  const host = ((await headers()).get("host") || "").split(":")[0];
+  // The public ordering site installs as "Corner Deli" and opens the menu.
+  if (isCustomerHost(host)) {
+    return {
+      id: "/order",
+      name: "Corner Deli",
+      short_name: "Corner Deli",
+      description: "Order Corner Deli for pickup or delivery.",
+      start_url: "/order",
+      scope: "/",
+      display: "standalone",
+      background_color: "#ffffff",
+      theme_color: "#0f172a",
+      icons: [{ src: "/corner-deli-logo.png", sizes: "512x512", type: "image/png", purpose: "any" }],
+    };
+  }
+  const brand = siteBrandForHost(host);
   const appName = brand.teamHost ? brand.name : "Ops";
   const iconSizes = brand.icon.endsWith(".png") ? "512x512" : "any";
   const iconType = brand.icon.endsWith(".png") ? "image/png" : "image/svg+xml";
