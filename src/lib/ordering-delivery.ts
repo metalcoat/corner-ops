@@ -201,6 +201,14 @@ export async function saveDeliveryPricingSettings(input: DeliveryPricingSettings
   return getDeliveryPricingSettings(input.business);
 }
 
+/**
+ * What the delivery minimum is measured against: merchandise after discounts
+ * (promotions, rewards), the policy's minimum_basis. Owner confirmed 2026-10-24.
+ */
+export function merchandiseAfterDiscounts(order: { subtotal_cents?: unknown; discount_cents?: unknown }): number {
+  return Math.max(0, Number(order.subtotal_cents || 0) - Number(order.discount_cents || 0));
+}
+
 export async function quoteDelivery(input: {
   business: OrderingBusiness;
   distanceMiles: number;

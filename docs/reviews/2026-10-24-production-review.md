@@ -60,7 +60,7 @@ All checks passed after the fixes: `npx tsc --noEmit`, `npm test` (274), and the
 | D12 | medium | dev.ordercornerdeli.com is public with on-screen sign-in codes (anyone can sign in as any phone on dev). | **Done 2026-10-24:** on-screen codes off. |
 | D13 | medium | Online-order chime is lost when a POS idle-locks or reloads (polling stops; first poll after unlock is a silent baseline). | **Done 2026-10-24:** the first poll after unlock/reload rings for orders from the last 10 min and paid-but-unsent ones. |
 | D14 | medium | Pay-at-pickup orders have no per-customer limit and earn loyalty at send, before payment. | Business call. |
-| D15 | medium | Delivery minimum measured before discounts (policy says after). | Use subtotal − discount. |
+| D15 | medium | Delivery minimum measured before discounts (policy says after). | **Done 2026-10-24** (owner decision): the minimum is measured on merchandise after discounts at send, on the website, POS, AI phone and landmark deliveries (`merchandiseAfterDiscounts`). |
 | D16 | low | The KDS hides in-store orders paid up front (filter `payment_status <> 'paid' OR online`, commit 1d18b27). | Confirm that's intended. |
 | D17 | low | Order-ahead slots have no prep lead time (12:15 offered at 12:14) or capacity cap. | **Done 2026-10-24:** slots start after the quoted prep time (no capacity cap yet). |
 

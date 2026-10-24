@@ -90,7 +90,7 @@ Everything is decided on the server; the browser's own price estimate is only a 
 | Promotions | applied on the draft, re-applied at send |
 | Ordering hours, special hours, closures, ASAP grace | timing quote at cart; **preflight at pay**; send |
 | Menu schedules (breakfast, lunch) at the fulfillment time | **preflight at pay**; send |
-| Delivery distance, fee band, minimum | delivery route (distance/fee); **preflight at pay**; send |
+| Delivery distance, fee band, minimum (after discounts) | delivery route (distance/fee); **preflight at pay**; send |
 | Name and phone present | preflight; send |
 
 Prices include tax (`tax_cents` = 0); totals are integer cents.
@@ -173,5 +173,4 @@ Tracked in [reviews/2026-10-24-production-review.md](reviews/2026-10-24-producti
 - Two tabs paying the same order at the same moment can still produce one unrecorded charge.
 - Order-ahead slots have no prep lead time or capacity cap.
 - Pay-at-pickup orders have no per-customer limit and earn loyalty before payment.
-- Delivery minimum is measured before discounts.
 - The slot list makes ~500 queries per request (unauthenticated).

@@ -10,7 +10,7 @@ import { addressForOrder, routeDeliveryAddress } from "@/lib/ordering-address";
 import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
 import { getSql, withTransaction } from "@/lib/db";
 import { readIdempotencyKey } from "@/lib/pos-offline-sync-policy";
-import { quoteDelivery } from "@/lib/ordering-delivery";
+import { merchandiseAfterDiscounts, quoteDelivery } from "@/lib/ordering-delivery";
 
 export const runtime = "nodejs";
 
@@ -152,7 +152,7 @@ export async function POST(request: Request) {
       try { route = await routeDeliveryAddress(validatedAddress); } catch { /* Routing remains optional until origin coordinates are configured. */ }
       await saveOrderDeliveryAddress({ orderId: String(order.id), address: validatedAddress, line2: String(body.deliveryUnit || ""), customerAddressId, route });
       if (route) {
-        const delivery = await quoteDelivery({ business, distanceMiles: route.distanceMiles, merchandiseSubtotalCents: Number(order.subtotal_cents) });
+        const delivery = await quoteDelivery({ business, distanceMiles: route.distanceMiles, merchandiseSubtotalCents: merchandiseAfterDiscounts(order as { subtotal_cents?: unknown; discount_cents?: unknown }) });
         const rows = await getSql()`UPDATE ordering_orders SET delivery_fee_cents=${delivery.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${delivery.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${delivery.deliveryFeeCents}-paid_cents),updated_at=NOW() WHERE id=${order.id} RETURNING *`;
         order = rows[0] as typeof order;
       }

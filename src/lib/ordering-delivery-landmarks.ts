@@ -4,7 +4,7 @@ import {
   validateDeliveryAddress,
 } from "@/lib/ordering-address";
 import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
-import { quoteDelivery } from "@/lib/ordering-delivery";
+import { merchandiseAfterDiscounts, quoteDelivery } from "@/lib/ordering-delivery";
 import { getSql } from "@/lib/db";
 
 const landmarks: Array<{ aliases: RegExp; address: string }> = [
@@ -96,12 +96,12 @@ export async function attachSpokenDeliveryAddress(
   const route = await routeDeliveryAddress(address),
     sql = getSql();
   const order = (
-    await sql`SELECT subtotal_cents FROM ordering_orders WHERE id=${orderId}`
+    await sql`SELECT subtotal_cents,discount_cents FROM ordering_orders WHERE id=${orderId}`
   )[0];
   const quote = await quoteDelivery({
     business: "Corner Deli",
     distanceMiles: route.distanceMiles,
-    merchandiseSubtotalCents: Number(order.subtotal_cents),
+    merchandiseSubtotalCents: merchandiseAfterDiscounts(order),
   });
   await saveOrderDeliveryAddress({
     orderId,

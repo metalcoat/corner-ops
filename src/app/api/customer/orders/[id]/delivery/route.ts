@@ -6,7 +6,7 @@ import {
   customerSessionHash,
 } from "@/lib/customer-ordering-session";
 import { ensureCustomerOrderingSchema } from "@/lib/customer-ordering-schema";
-import { quoteDelivery } from "@/lib/ordering-delivery";
+import { merchandiseAfterDiscounts, quoteDelivery } from "@/lib/ordering-delivery";
 import { getSql } from "@/lib/db";
 import { addCustomerAddress } from "@/lib/ordering-customers";
 
@@ -22,7 +22,7 @@ export async function POST(
     const sql = getSql(),
       hash = customerSessionHash(session.sessionId);
     const order = (
-      await sql`SELECT o.id,o.status,o.service_type,o.subtotal_cents,o.customer_id FROM ordering_customer_web_carts c JOIN ordering_orders o ON o.id=c.order_id WHERE c.order_id=${id} AND c.session_hash=${hash} AND c.replaced_at IS NULL LIMIT 1`
+      await sql`SELECT o.id,o.status,o.service_type,o.subtotal_cents,o.discount_cents,o.customer_id FROM ordering_customer_web_carts c JOIN ordering_orders o ON o.id=c.order_id WHERE c.order_id=${id} AND c.session_hash=${hash} AND c.replaced_at IS NULL LIMIT 1`
     )[0];
     if (!order)
       return isoJson({ error: "Order not found." }, { status: 404 });
@@ -72,7 +72,7 @@ export async function POST(
     const quote = await quoteDelivery({
       business: "Corner Deli",
       distanceMiles: route.distanceMiles,
-      merchandiseSubtotalCents: Number(order.subtotal_cents),
+      merchandiseSubtotalCents: merchandiseAfterDiscounts(order),
     });
     let customerAddressId = saved ? String(saved.id) : null;
     if (!saved && order.customer_id) {

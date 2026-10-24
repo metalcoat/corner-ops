@@ -14,6 +14,7 @@ import { pizzaToppingPriceCents } from "@/lib/ordering-pizza-toppings";
 import { resolveOrderingAvailability } from "@/lib/ordering-availability";
 import { canManagePos } from "@/lib/ordering-route-auth";
 import {
+  merchandiseAfterDiscounts,
   quoteDelivery,
   recordDeliveryMinimumResolution,
 } from "@/lib/ordering-delivery";
@@ -602,7 +603,7 @@ async function runDraftSubmit(
       const delivery = await quoteDelivery({
         business,
         distanceMiles: Number(addresses[0].route_distance_miles),
-        merchandiseSubtotalCents: number(order.subtotal_cents),
+        merchandiseSubtotalCents: merchandiseAfterDiscounts(order),
         managerBypassApproved: Boolean(
           override?.approved && canManagePos(actor),
         ),

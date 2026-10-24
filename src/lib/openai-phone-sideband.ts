@@ -21,7 +21,7 @@ import {
   requestOpenAiVoicePayment,
 } from "@/lib/openai-phone-ordering";
 import { attachSpokenDeliveryAddress } from "@/lib/ordering-delivery-landmarks";
-import { quoteDelivery } from "@/lib/ordering-delivery";
+import { merchandiseAfterDiscounts, quoteDelivery } from "@/lib/ordering-delivery";
 
 const sockets = new Map<string, WebSocket>();
 
@@ -721,7 +721,7 @@ export function startOpenAiSideband(
         const quote = await quoteDelivery({
           business: "Corner Deli",
           distanceMiles: Number(call.route_distance_miles),
-          merchandiseSubtotalCents: Number(result.subtotal_cents),
+          merchandiseSubtotalCents: merchandiseAfterDiscounts(result as { subtotal_cents?: unknown; discount_cents?: unknown }),
         });
         await sql`UPDATE ordering_orders SET delivery_fee_cents=${quote.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${quote.deliveryFeeCents}-paid_cents),version=version+1,updated_at=NOW() WHERE id=${String(result.id)}`;
         Object.assign(

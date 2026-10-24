@@ -3,7 +3,7 @@ import { apiError, unauthorized } from "@/lib/http";
 import { addressForOrder, routeDeliveryAddress } from "@/lib/ordering-address";
 import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
 import { getSql } from "@/lib/db";
-import { quoteDelivery } from "@/lib/ordering-delivery";
+import { merchandiseAfterDiscounts, quoteDelivery } from "@/lib/ordering-delivery";
 import { appendConfiguredOrderItemsWithVariants, type VariantConfiguredOrderItemInput } from "@/lib/ordering-orders-with-variants";
 import { orderingActor } from "@/lib/ordering-route-auth";
 import { randomUUID } from "node:crypto";
@@ -30,7 +30,7 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
         if(!validatedAddress)return isoJson({error:"Validate the delivery address."},{status:409});
         let route=null;try{route=await routeDeliveryAddress(validatedAddress)}catch{/* Routing may be temporarily unavailable. */}
         await saveOrderDeliveryAddress({orderId:id,address:validatedAddress,line2:String(body.deliveryUnit||""),customerAddressId:null,route});formattedAddress=validatedAddress.formattedAddress;
-        if(route){const quote=await quoteDelivery({business:"Corner Deli",distanceMiles:route.distanceMiles,merchandiseSubtotalCents:Number(order.subtotal_cents)});deliveryFeeCents=quote.deliveryFeeCents}
+        if(route){const quote=await quoteDelivery({business:"Corner Deli",distanceMiles:route.distanceMiles,merchandiseSubtotalCents:merchandiseAfterDiscounts(order)});deliveryFeeCents=quote.deliveryFeeCents}
       }
       const updated=(await sql`UPDATE ordering_orders SET service_type=${requestedService},delivery_fee_cents=${deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${deliveryFeeCents}-paid_cents),payment_status=CASE WHEN paid_cents<=0 THEN 'unpaid' WHEN paid_cents>=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${deliveryFeeCents}) THEN 'paid' ELSE 'partially_paid' END,version=version+1,updated_at=NOW() WHERE id=${id} RETURNING *`)[0];
       await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${id},${updated.version},'order_fulfillment_changed',${actor.type},${actor.id},${JSON.stringify({from:previousService,to:requestedService,deliveryFeeCents,deliveryAddress:formattedAddress,actorName:actor.name})}::jsonb)`;order=updated;
