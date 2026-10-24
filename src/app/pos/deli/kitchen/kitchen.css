@@ -9,3 +9,7 @@
 }
 .kitchenProductionTotals strong { font-size: .8rem; letter-spacing: .08em; }
 .kitchenProductionTotals b { font-size: 1.15rem; }
+/* Scheduled orders: the due time stands out from ASAP tickets. */
+.kitchenDue{margin:0;padding:10px 12px;background:#6d28d9;color:#fff;font-size:1.45rem;font-weight:950;letter-spacing:.04em;text-align:center}
+.kitchenScheduled{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin-bottom:16px;padding:12px 14px;border:2px solid #7c3aed;border-radius:12px;background:#1e1036;font-size:1.05rem;font-weight:800}
+.kitchenScheduled strong{color:#c4b5fd;letter-spacing:.1em;font-size:.85rem;width:100%}

@@ -159,7 +159,9 @@ stateDiagram-v2
   locked: re-applies promotions, checks ordering hours (manager override with a reason), customer name/phone,
   delivery address, driving distance, delivery fee and minimum, then `revalidateDraft` re-prices every line and
   checks menu schedules. Only then does it move the order to `sent_to_kitchen`, finalize loyalty redemptions,
-  earn loyalty, insert the kitchen print job and deplete inventory. Web, kiosk and AI orders then push-notify the
+  earn loyalty, insert the kitchen print job and deplete inventory. A future order gets `kitchen_release_at` (prep
+  time before it is due, except Halloween and Super Bowl Sunday); until then it isn't printed, listed on the KDS
+  board or chimed, and `releaseHeldKitchenOrders` (ordering maintenance) releases it once. Web, kiosk and AI orders then push-notify the
   POS stations.
 - **Preflight** (`preflightDraftSubmit`) runs the same rules and rolls back (a savepoint when nested). Online
   checkout calls it before charging the card.
@@ -263,6 +265,5 @@ architecture:
 
 - Production can't serve the public ordering hostnames yet (host gate, tunnel ingress, env vars).
 - Voids don't refund; refunds are a separate manager step.
-- Future (scheduled) orders print and show on the KDS when placed, not when due.
 - Ordering maintenance isn't scheduled in production.
 - Backups stay on the store server's disk.

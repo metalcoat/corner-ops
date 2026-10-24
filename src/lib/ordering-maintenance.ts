@@ -1,3 +1,4 @@
+import { releaseHeldKitchenOrders } from "@/lib/ordering-auto-print";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { retryDuePrintJobs } from "@/lib/ordering-hardware";
 import { restoreAbandonedReopenedOrders } from "@/lib/ordering-order-lifecycle";
@@ -20,7 +21,11 @@ export async function runOrderingMaintenance(business: OrderingBusiness) {
     console.error("Terminal auto-capture sweep failed", error);
     return { captured: 0 };
   });
-  return { business, printRetryOrders: print.orders, restoredReopenedOrders: reopen.restored, terminalCardsCaptured: terminal.captured };
+  const held = await releaseHeldKitchenOrders(business).catch((error) => {
+    console.error("Scheduled-order release sweep failed", error);
+    return { released: 0 };
+  });
+  return { business, printRetryOrders: print.orders, restoredReopenedOrders: reopen.restored, terminalCardsCaptured: terminal.captured, scheduledOrdersReleased: held.released };
 }
 
 /**

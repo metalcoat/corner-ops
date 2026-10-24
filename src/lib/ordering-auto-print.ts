@@ -3,6 +3,8 @@ import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 import { canManagePos } from "@/lib/ordering-route-auth";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
+import { randomUUID } from "node:crypto";
+import { notifyPosStationsOfOnlineOrder } from "@/lib/push-notifications";
 
 let schemaPromise: Promise<void> | null = null;
 async function ensureSchema() {
@@ -36,4 +38,40 @@ export async function dispatchSubmittedOrderPrintJobs(orderId: string, business:
   }
   await dispatchOrderPrintJobs(orderId, business);
   return { dispatched: true, paused: false };
+}
+
+const ONLINE_SOURCES = ["web", "online", "customer_web", "kiosk", "ai_phone"];
+
+/**
+ * Releases scheduled orders whose prep time has come (ordering-kitchen-release.ts):
+ * prints the kitchen ticket (auto-print settings apply) and notifies the POS for
+ * online orders, once per order. Runs from ordering maintenance every minute.
+ */
+export async function releaseHeldKitchenOrders(business: OrderingBusiness) {
+  const sql = getSql();
+  const due = await sql`
+    SELECT id, source, display_number, service_type, first_name_snapshot, last_name_snapshot FROM ordering_orders
+    WHERE business=${business} AND status='sent_to_kitchen'
+      AND kitchen_release_at<=NOW() AND kitchen_release_at>NOW()-INTERVAL '12 hours'
+      AND NOT EXISTS(SELECT 1 FROM ordering_order_events ev WHERE ev.order_id=ordering_orders.id AND ev.event_type='kitchen_released')
+    ORDER BY kitchen_release_at LIMIT 25`;
+  let released = 0;
+  for (const order of due) {
+    const claimed = await sql`
+      INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)
+      SELECT ${randomUUID()},id,version,'kitchen_released','system','kitchen-release','{}'::jsonb FROM ordering_orders
+      WHERE id=${order.id} AND NOT EXISTS(SELECT 1 FROM ordering_order_events ev WHERE ev.order_id=${order.id} AND ev.event_type='kitchen_released')
+      RETURNING id`;
+    if (!claimed.length) continue;
+    released += 1;
+    await dispatchSubmittedOrderPrintJobs(String(order.id), business).catch((error) => console.error(`Kitchen release print failed for ${order.id}`, error));
+    const source = String(order.source || "").toLowerCase();
+    if (ONLINE_SOURCES.includes(source))
+      await notifyPosStationsOfOnlineOrder({
+        business, orderId: String(order.id), displayNumber: String(order.display_number), source,
+        serviceType: String(order.service_type || "online"),
+        customerName: `${String(order.first_name_snapshot || "")} ${String(order.last_name_snapshot || "")}`.trim(),
+      }).catch(() => undefined);
+  }
+  return { released };
 }

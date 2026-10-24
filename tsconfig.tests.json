@@ -25,6 +25,7 @@
     "src/lib/business-day.ts",
     "src/lib/customer-domain-routing.ts",
     "src/lib/phone-region.ts",
+    "src/lib/ordering-kitchen-release.ts",
     "src/lib/ordering-reopen-policy.ts",
     "src/lib/ordering-loyalty-earn.ts",
     "src/lib/driver-call-link.ts",

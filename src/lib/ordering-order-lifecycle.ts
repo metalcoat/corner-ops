@@ -18,6 +18,7 @@ import {
   recordDeliveryMinimumResolution,
 } from "@/lib/ordering-delivery";
 import { assertMenuTargetsAvailable } from "@/lib/ordering-menu-availability";
+import { kitchenReleaseAt } from "@/lib/ordering-kitchen-release";
 import { applyPromotionsToOrder } from "@/lib/ordering-promotions";
 import {
   earnLoyaltyForOrder,
@@ -661,12 +662,20 @@ async function runDraftSubmit(
         ticketLines.push(`SERVICE CHANGE: ${String(details.from || "").toUpperCase()} -> ${String(details.to || "").toUpperCase()}`);
     }
 
+    // Future orders wait for their prep time before the kitchen sees them
+    // (add-ons to an order already in the kitchen go right away).
+    const releaseAt = reopenDetails ? null : kitchenReleaseAt({
+      timingMode: order.timing_mode,
+      scheduledFor: order.scheduled_for ? new Date(order.scheduled_for) : null,
+      quotedLeadMaxMinutes: number(order.quoted_lead_max_minutes),
+    });
     const updated = await sql`
       UPDATE ordering_orders
       SET status = 'sent_to_kitchen', submitted_at = NOW(), locked_at = NOW(),
+          kitchen_release_at = ${releaseAt ? releaseAt.toISOString() : null}::timestamptz,
           version = version + 1, updated_at = NOW()
       WHERE id = ${orderId} AND business = ${business} AND status = 'draft' AND version = ${order.version}
-      RETURNING id, business, source, display_number, status, payment_status, service_type, version,
+      RETURNING id, business, source, display_number, status, payment_status, service_type, version, kitchen_release_at,
                 subtotal_cents, discount_cents, tax_cents, tip_cents, total_cents, paid_cents, amount_due_cents,
                 first_name_snapshot, last_name_snapshot,
                 delivery_fee_cents, special_instructions, created_at, updated_at, submitted_at, started_at, ready_at, completed_at, cancelled_at
@@ -728,8 +737,10 @@ async function runDraftSubmit(
   }));
   if (!result) return null;
   const source = String(result.order.source || "").toLowerCase();
+  // A held scheduled order notifies the POS when it's released (releaseHeldKitchenOrders).
   if (
     !result.alreadySubmitted &&
+    !(result.order as { kitchen_release_at?: unknown }).kitchen_release_at &&
     ["web", "online", "customer_web", "kiosk", "ai_phone"].includes(source)
   ) {
     await notifyPosStationsOfOnlineOrder({
@@ -822,6 +833,7 @@ export async function listKitchenOrders(
     SELECT id, business, source, display_number, status, payment_status, service_type, version,
            subtotal_cents, total_cents, special_instructions, created_at, submitted_at, started_at,
            ready_at, completed_at, cancelled_at, voided_at, voided_by, void_reason, pre_void_status, pre_void_payment_status, NOW() AS server_now,
+           timing_mode, scheduled_for, promised_at, kitchen_release_at, (status='sent_to_kitchen' AND kitchen_release_at>NOW()) AS held_until_prep,
            reopen.previous_status AS reopened_from_status, (status='draft' AND reopen.previous_status IS NOT NULL) AS editing_at_pos
     FROM ordering_orders
     LEFT JOIN LATERAL (
@@ -841,8 +853,10 @@ export async function listKitchenOrders(
         )
       ))
       AND (status IN ('sent_to_kitchen', 'in_progress', 'ready') OR reopen.previous_status IS NOT NULL OR COALESCE(completed_at, cancelled_at, updated_at) > NOW() - INTERVAL '8 hours')
-    ORDER BY CASE COALESCE(reopen.previous_status, status) WHEN 'ready' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'sent_to_kitchen' THEN 3 ELSE 4 END,
-             submitted_at, created_at
+    ORDER BY (status='sent_to_kitchen' AND kitchen_release_at>NOW()),
+             CASE COALESCE(reopen.previous_status, status) WHEN 'ready' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'sent_to_kitchen' THEN 3 ELSE 4 END,
+             -- Scheduled orders line up by when they're due, not when they were placed.
+             CASE WHEN timing_mode='future' THEN scheduled_for ELSE submitted_at END, created_at
   `;
   const result = [];
   for (const order of rows) {

@@ -5,6 +5,9 @@ import { kitchenServiceName } from "@/lib/ordering-kitchen-ticket";
 export const TICKET_COLUMNS = 48;
 /** The split-pizza column header formatKitchenLines prints; the printer draws circles in its place. */
 export const PIZZA_PORTION_HEADER = "LEFT        |WHOLE       |RIGHT";
+/** A ticket line printed large and inverted (white on black); still readable as plain text. */
+export const DUE_BANNER = /^\*\*\* (.+) \*\*\*$/;
+export function dueBanner(text: string): string { return `*** ${text} ***`; }
 
 function wrap(text: string, width: number): string[] {
   const rows: string[] = [];
@@ -66,6 +69,8 @@ export function kitchenTicketLayout(payload: Record<string, unknown>): string[] 
     ...wrap(due, half - 1),
   ];
   const lines = [addOn ? `ADD ON - ${service}` : payment ? `${service} - ${payment}` : service];
+  // Scheduled orders: a large white-on-black due banner under the header (see DUE_BANNER).
+  if (exact && time) lines.push(dueBanner(`DUE ${day ? `${day} ` : ""}${time}`));
   for (let i = 0; i < Math.max(left.length, right.length); i++) {
     const l = left[i] ?? "", r = right[i] ?? "";
     lines.push(`${l}${" ".repeat(Math.max(1, TICKET_COLUMNS - l.length - r.length))}${r}`);

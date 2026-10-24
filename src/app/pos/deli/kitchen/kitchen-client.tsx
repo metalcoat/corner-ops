@@ -44,8 +44,22 @@ type KitchenOrder = {
   special_instructions: string;
   submitted_at: string;
   server_now: string;
+  timing_mode?: "asap" | "future" | null;
+  scheduled_for?: string | null;
+  kitchen_release_at?: string | null;
+  held_until_prep?: boolean;
   items: KitchenItem[];
 };
+
+function clock(value: string | null | undefined): string {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+}
+
+function dueDay(value: string, serverNow: string): string {
+  const day = (at: string) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "numeric", day: "numeric" }).format(new Date(at));
+  return day(value) === day(serverNow) ? "" : `${day(value)} `;
+}
 
 const statusLabels: Record<KitchenStatus, string> = {
   sent_to_kitchen: "SUBMITTED",
@@ -105,7 +119,10 @@ export default function KitchenClient() {
     return () => window.clearInterval(clock);
   }, []);
 
-  const activeCount = useMemo(() => orders.filter((order) => order.status === "sent_to_kitchen" || order.status === "in_progress" || order.status === "ready" || order.editing_at_pos).length, [orders]);
+  // Scheduled orders wait off the board until their prep time (they print then too).
+  const heldOrders = useMemo(() => orders.filter((order) => order.held_until_prep), [orders]);
+  const boardOrders = useMemo(() => orders.filter((order) => !order.held_until_prep), [orders]);
+  const activeCount = useMemo(() => boardOrders.filter((order) => order.status === "sent_to_kitchen" || order.status === "in_progress" || order.status === "ready" || order.editing_at_pos).length, [boardOrders]);
 
   // The kitchen display is a wall screen: it never idle-locks, and it must not
   // broadcast a lock or end the shared POS session, which would log out every
@@ -157,13 +174,18 @@ export default function KitchenClient() {
     </header>
     {error && <div className="kitchenError" role="alert">{error}</div>}
     {loading && <div className="kitchenEmpty">Loading kitchen queue…</div>}
-    {!loading && !orders.length && <div className="kitchenEmpty">No active kitchen orders.</div>}
+    {!loading && !boardOrders.length && <div className="kitchenEmpty">No active kitchen orders.</div>}
+    {heldOrders.length > 0 && <section className="kitchenScheduled" aria-label="Scheduled orders">
+      <strong>SCHEDULED · ON THE BOARD AT PREP TIME</strong>
+      {heldOrders.map((order) => <span key={order.id}>#{order.display_number} · {serviceLabels[order.service_type]} · DUE {order.scheduled_for ? `${dueDay(order.scheduled_for, order.server_now)}${clock(order.scheduled_for)}` : "?"} · starts {clock(order.kitchen_release_at)}</span>)}
+    </section>}
     <section className="kitchenGrid" aria-label="Kitchen orders">
-      {orders.map((order) => <article className={`kitchenTicket ${order.editing_at_pos ? order.reopened_from_status || "sent_to_kitchen" : order.status}`} key={order.id} aria-label={`Order ${order.display_number}`}>
+      {boardOrders.map((order) => <article className={`kitchenTicket ${order.editing_at_pos ? order.reopened_from_status || "sent_to_kitchen" : order.status}`} key={order.id} aria-label={`Order ${order.display_number}`}>
         <header>
           <div><strong>#{order.display_number}</strong><span>{order.editing_at_pos ? "EDITING AT POS" : order.status === "draft" ? "DRAFT" : statusLabels[order.status]}</span></div>
-          <div><b>{serviceLabels[order.service_type]}</b><time>{elapsed(order.submitted_at, order.server_now, tick)}</time></div>
+          <div><b>{serviceLabels[order.service_type]}</b><time>{elapsed(order.kitchen_release_at || order.submitted_at, order.server_now, tick)}</time></div>
         </header>
+        {order.timing_mode === "future" && order.scheduled_for && <p className="kitchenDue">SCHEDULED · DUE {dueDay(order.scheduled_for, order.server_now)}{clock(order.scheduled_for)}</p>}
         <div className="kitchenItems">
           {kitchenProductionTotals(order.items).length > 0 && <section className="kitchenProductionTotals"><strong>PRODUCTION TOTALS</strong>{kitchenProductionTotals(order.items).map((line) => <b key={line}>{line}</b>)}</section>}
           {order.items.map((item) => {

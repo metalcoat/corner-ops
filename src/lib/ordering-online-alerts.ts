@@ -17,13 +17,13 @@ export const ONLINE_ALERT_SOURCES = ["web", "online", "customer_web", "kiosk", "
 export async function listWaitingOnlineOrders(business: OrderingBusiness) {
   await ensureOrderingPosSchema();
   return getSql()`
-    SELECT id, status, source, created_at, submitted_at,
+    SELECT id, status, source, created_at, COALESCE(kitchen_release_at, submitted_at) AS submitted_at,
            (status = 'draft') AS paid_not_sent
     FROM ordering_orders
     WHERE business = ${business}
       AND source = ANY(${ONLINE_ALERT_SOURCES})
       AND (
-        status = 'sent_to_kitchen'
+        (status = 'sent_to_kitchen' AND (kitchen_release_at IS NULL OR kitchen_release_at <= NOW()))
         OR (status = 'draft' AND paid_cents > 0 AND created_at > NOW() - INTERVAL '1 day')
       )
     ORDER BY submitted_at NULLS LAST, created_at

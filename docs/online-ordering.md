@@ -123,7 +123,10 @@ MX Checkout API with a browser-side charge (card data never touches our server):
   online-order poll that chimes on every signed-in POS until acknowledged.
 - Confirmation email (`customer-order-confirmation.ts`) after the response, idempotent; failure never blocks.
 - Delivery: assignment for drivers (`ordering-driver-delivery.ts`), tracking link `/track/[token]`, proof photos.
-- Scheduled (future) orders are sent and printed **when placed**, not when due (see §7).
+- Scheduled (future) orders are held from the kitchen printer, the kitchen screen and the online-order chime until
+  their prep time (quoted prep + 10 min, at least 35 min before due), then released once by ordering maintenance
+  (`ordering-kitchen-release.ts`). On Halloween and Super Bowl Sunday they go to the kitchen when placed. The ticket
+  prints a large white-on-black "DUE …" banner and the kitchen screen a purple "SCHEDULED · DUE …" bar.
 
 ## 6. Launch checklist
 
@@ -169,7 +172,6 @@ Tracked in [reviews/2026-10-24-production-review.md](reviews/2026-10-24-producti
 - No rate limit on `initialize` (card-testing risk); sign-in codes are limited (3 per 15 min, 5 tries).
 - Two tabs paying the same order at the same moment can still produce one unrecorded charge.
 - Order-ahead slots have no prep lead time or capacity cap.
-- Future orders print at placement; the KDS sorts by send time.
 - Pay-at-pickup orders have no per-customer limit and earn loyalty before payment.
 - Delivery minimum is measured before discounts.
 - The slot list makes ~500 queries per request (unauthenticated).

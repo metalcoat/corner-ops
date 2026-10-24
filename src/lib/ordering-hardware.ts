@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { normalizeLabelConfig, sampleLabel, sendLabel } from "@/lib/ordering-label-print";
 import { Socket } from "node:net";
 import { validPrinterHost } from "@/lib/printer-network";
-import { kitchenTicketLayout, PIZZA_PORTION_HEADER, pizzaPortionRaster } from "@/lib/kitchen-ticket-layout";
+import { DUE_BANNER, kitchenTicketLayout, PIZZA_PORTION_HEADER, pizzaPortionRaster } from "@/lib/kitchen-ticket-layout";
 import { getSql, withTransaction } from "@/lib/db";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
@@ -132,7 +132,10 @@ export async function sendEpsonPrint(
         // The split-pizza header prints as half / whole / half circles over its columns.
         ...safeLines.slice(1).map((line) => line === PIZZA_PORTION_HEADER
           ? Buffer.from(pizzaPortionRaster(bodySize & 0x10 ? 24 : 12))
-          : Buffer.from(`${line}\n`, "ascii")),
+          : DUE_BANNER.test(line)
+            // Scheduled order's due time: centered, bold, header size, white on black.
+            ? Buffer.concat([Buffer.from([0x1b, 0x61, 0x01, 0x1b, 0x45, 0x01, 0x1d, 0x42, 0x01, 0x1d, 0x21, headerSize]), Buffer.from(` ${line.replace(DUE_BANNER, "$1")} \n`, "ascii"), Buffer.from([0x1d, 0x42, 0x00, 0x1b, 0x45, 0x00, 0x1b, 0x61, 0x00, 0x1d, 0x21, bodySize])])
+            : Buffer.from(`${line}\n`, "ascii")),
         Buffer.from("\n\n", "ascii"),
         Buffer.from([0x1d, 0x21, 0x00, 0x1d, 0x56, 0x42, 0x00]),
       ]);
@@ -756,12 +759,16 @@ export async function dispatchOrderPrintJobs(
     jobs =
       await sql`SELECT * FROM ordering_print_jobs WHERE order_id=${orderId} AND business=${business}
         AND (${includeKitchen} OR purpose<>'kitchen_production') AND (${jobId}::uuid IS NULL OR id=${jobId}::uuid)
+        -- A scheduled order's kitchen ticket waits for its release time; once released it
+        -- counts as fresh from then, not from when it was placed.
+        AND NOT (purpose='kitchen_production' AND EXISTS(SELECT 1 FROM ordering_orders o WHERE o.id=ordering_print_jobs.order_id AND o.kitchen_release_at>NOW()))
         -- A retry never prints a kitchen ticket for an order voided since it failed.
         AND NOT (${retryOnly} AND purpose='kitchen_production' AND EXISTS(SELECT 1 FROM ordering_orders o WHERE o.id=ordering_print_jobs.order_id AND o.status='cancelled'))
         AND (
           (NOT ${retryOnly} AND status='queued')
           OR (${retryOnly} AND status='queued' AND queued_at<NOW()-INTERVAL '1 minute')
-          OR (NOT ${retryOnly} AND status='not_configured' AND (${jobId}::uuid IS NOT NULL OR purpose<>'kitchen_production' OR created_at>NOW()-${FRESH_UNSENT_KITCHEN_INTERVAL}::interval))
+          OR (NOT ${retryOnly} AND status='not_configured' AND (${jobId}::uuid IS NOT NULL OR purpose<>'kitchen_production'
+            OR GREATEST(created_at, COALESCE((SELECT o.kitchen_release_at FROM ordering_orders o WHERE o.id=ordering_print_jobs.order_id), created_at))>NOW()-${FRESH_UNSENT_KITCHEN_INTERVAL}::interval))
           OR (status='failed' AND COALESCE(next_attempt_at,NOW())<=NOW() AND retry_count<${MAX_AUTOMATIC_PRINT_ATTEMPTS} AND COALESCE(payload->>'openCashDrawer','false')<>'true')
           OR (status='attempting' AND COALESCE(attempted_at,queued_at)<NOW()-${STALE_ATTEMPT_INTERVAL}::interval AND COALESCE(payload->>'openCashDrawer','false')<>'true')
         )
