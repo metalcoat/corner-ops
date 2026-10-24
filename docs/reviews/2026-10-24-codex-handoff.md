@@ -25,6 +25,13 @@ Codex with this repository open; everything it needs is in the repo.
 | Void/payment guards | `ordering-payments.ts` (`commitTender` cancelled check, store-credit reversal), `mx-terminal-payments.ts` (`completeWithTip`), `ordering-hardware.ts` (retry skip), lifecycle `transitions` | Anything legitimate now refused? A voided order with an authorized terminal hold. |
 | DB pool | `src/lib/db.ts` | `idle_in_transaction_session_timeout` 5 min: any transaction that waits on an outside call that long? `release(err)` semantics. |
 | Security fixes | `credential-resets.ts`, `rate-limit.ts` (`clientIp`, `clearRateLimit`), `api/auth/session`, customer code verification (`auth/phone`, `customer-email-auth.ts`, `account/phone`), `safe-image-response.ts` | Is `cf-connecting-ip` trustworthy on every path that reaches the app (direct :3000 too)? Do staff photos still display (HEIC from iPhones)? Any login now locked out wrongly? |
+| Customer host | `src/lib/customer-domain-routing.ts`, `src/proxy.ts`, `src/app/manifest.ts`, `robots.ts`, `sitemap.ts`, `src/lib/customer-seo.ts` | Can anything other than customer pages and `/api/customer` be reached on ordercornerdeli.com (path tricks, `X-Forwarded-Host`)? Does the cross-site guard in the proxy block any legitimate flow (ops business switch, payment station, Capacitor app, webhooks)? |
+| Abuse limits | `customer-abuse-limits.ts`, `phone-region.ts`, `rate-limit.ts` (`consumeRateLimit`), pay-later 2-in-20-min rule | Limits a real customer hits by accident; ways around them. |
+| Closed without hours, slot lead time, delivery minimum after discounts | lifecycle (`websiteOrder`), `ordering-availability.ts` (`leadMinutes`), `ordering-delivery.ts` (`merchandiseAfterDiscounts`) and its callers | Staff channels unchanged? AI phone / POS / website agree on the minimum? |
+| Scheduled-order hold | `ordering-kitchen-release.ts`, lifecycle (`kitchen_release_at`), `ordering-hardware.ts` (dispatch filter), `ordering-auto-print.ts` (`releaseHeldKitchenOrders`), `ordering-online-alerts.ts`, KDS client, `kitchen-ticket-layout.ts` (`DUE_BANNER`), migration 0017 | Released exactly once? Printed when auto-print is paused then resumed? Reopened/add-on orders? DST and the Halloween / Super Bowl exceptions? The ESC/POS inverted banner on a real printer. |
+| Voided money | `ordering-void-money.ts`, `api/ordering/order-center/void-money`, `void-money-panel.tsx`, item-cancel `refundMethod: "later"` | Is "owed" right after partial refunds, item cancellations, tips, gift cards, split checks? Can it go negative or double-refund? Only managers? |
+| Kitchen screen paid-up-front rule; chime after unlock; menu-edit persistence | lifecycle `listKitchenOrders`, `pos-offline-sync-policy.ts`, `use-online-order-alert.ts`, `ordering-db.ts` | Old orders chiming on every reload; orders lingering on the board. |
+| Ops | `deploy/update.sh` (Asterisk only when changed, prunes), `deploy/offsite-backup.sh`, `.github/workflows/*`, zod override | Prune removing something still needed; backup script failure modes (no alert today). |
 | Store dashboard / tips SQL | `ordering-store-dashboard.ts`, `ordering-tips.ts` | Eastern day boundary at 8 PM and across DST. |
 
 ## 3. Open items to confirm or fix
@@ -51,7 +58,7 @@ MX sandbox; dev `.env` is sandbox):
 
 > Read AGENTS.md, then docs/PROCESS-MAP.md, docs/ARCHITECTURE.md, docs/online-ordering.md and
 > docs/reviews/2026-10-24-production-review.md. Claude did a production-readiness review of this repository on
-> 2026-10-24 and committed fixes after 36c9eda on agent/pos-ordering-foundation. Do an independent second
+> 2026-10-24 and committed fixes and the owner's decisions after 36c9eda on agent/pos-ordering-foundation. Do an independent second
 > review, with online ordering (customer website → MX card payment → kitchen) as the top priority:
 >
 > 1. Review every change in `git diff 36c9eda..HEAD` for correctness. Follow docs/reviews/2026-10-24-codex-handoff.md
@@ -61,9 +68,13 @@ MX sandbox; dev `.env` is sandbox):
 > 3. Confirm or refute the Open items O1–O19, the Decide items D1–D17 and the security items SD1–SD9 (some are inferred; say which you
 >    verified). For each confirmed Open item, propose a fix; implement only small, behavior-preserving ones.
 > 4. Run `npx tsc --noEmit`, `npm test`, and the dev-database suites (`npm run test:ordering:lifecycle`,
->    `test:payments`, `test:online-checkout-preflight`, `test:ordering-availability`, `test:order-void`,
->    `test:item-cancellation`, `test:promotions`, `test:delivery-pricing`); they run inside rolled-back
+>    `test:payments`, `test:online-checkout-preflight`, `test:scheduled-order-hold`, `test:void-money`,
+>    `test:ordering-availability`, `test:order-void`, `test:item-cancellation`, `test:promotions`, `test:delivery-pricing`); they run inside rolled-back
 >    transactions on the dev database.
+>
+> The owner's decisions in the review's Decide table (marked Done) are business rules: check the code does what
+> they say, don't argue the rule. Validation scripts must never send real email, texts or pushes: dev holds real
+> credentials, so stub any sender.
 >
 > Rules: follow AGENTS.md. Never touch production (/opt/corner-ops/production, port 3001, the prod database),
 > Cloudflare, or main. Don't print secrets from any .env. Pushing to agent/pos-ordering-foundation redeploys the
