@@ -847,7 +847,10 @@ export async function listKitchenOrders(
     WHERE business = ${business}
       AND (${includeRecent} OR (
         (status IN ('sent_to_kitchen', 'in_progress', 'ready') OR reopen.previous_status IS NOT NULL)
-        AND (payment_status <> 'paid' OR source IN ('web','online','customer_web','kiosk','ai_phone') OR order_origin IN ('employee_meal','complaint_remake'))
+        -- A counter order leaves the board once it's paid (paid = picked up), except one paid up
+        -- front (at or within 3 minutes of sending): that one stays until the kitchen completes it.
+        AND (payment_status <> 'paid' OR source IN ('web','online','customer_web','kiosk','ai_phone') OR order_origin IN ('employee_meal','complaint_remake')
+          OR paid_at <= COALESCE(submitted_at, created_at) + INTERVAL '3 minutes')
         AND NOT EXISTS (
           SELECT 1 FROM ordering_delivery_assignments delivery
           WHERE delivery.order_id=ordering_orders.id AND delivery.status='DELIVERED'
