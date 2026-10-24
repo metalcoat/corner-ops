@@ -51,6 +51,12 @@ async function main(): Promise<void> {
       // Never email from a test: dev holds real mail settings.
       const sent: string[] = [];
       const fakeSend = async (message: { subject: string }) => { sent.push(message.subject); return { configured: true, sent: 1, failures: [] }; };
+      const failingSend = async () => ({ configured: true, sent: 0, failures: ["smtp down"] });
+      const failed = await remindUnresolvedVoidMoney("Corner Deli", new Date(late.getTime() + 4 * 3_600_000), failingSend);
+      const tooSoon = await remindUnresolvedVoidMoney("Corner Deli", new Date(late.getTime() + 4 * 3_600_000), fakeSend);
+      if ((failed as { reason?: string }).reason !== "send_failed" || (tooSoon as { reason?: string }).reason !== "retry_later") throw new Error("A failed reminder should be retried later, not marked sent.");
+      await sql`UPDATE ordering_operations_audit SET created_at=NOW()-INTERVAL '31 minutes' WHERE action='void_money_reminder_failed'`;
+      results.failedReminderRetries = true;
       const first = await remindUnresolvedVoidMoney("Corner Deli", new Date(late.getTime() + 4 * 3_600_000), fakeSend);
       const second = await remindUnresolvedVoidMoney("Corner Deli", new Date(late.getTime() + 4 * 3_600_000), fakeSend);
       if (sent.length !== 1) throw new Error("The closing reminder should go out exactly once.");

@@ -107,3 +107,21 @@ I treated the owner's chosen rules as requirements. “Code verified” means I 
 The actual MX replayId shape after a decline then approval, duplicate-charge deduplication, and browser-token permissions were **not verified**. retrieveMxPayment expects a top-level approved status (src/lib/mx-merchant.ts:16), while findMxPaymentByReplayId accepts records but returns only its first record (:18). Use controlled sandbox attempts and inspect the full response shape; do not assume one record or idempotency. The existing test:mx-terminal:e2e uses a local MX stand-in and temporarily changes dev hardware settings, so it cannot answer those provider questions.
 
 Next code work should prioritize a durable charged-but-unsent recovery path, order-level refund serialization, MX session freezing/reconciliation, and durable scheduled-order release/printing. Add focused rollback fixtures for the concurrency and cancellation scenarios. No production deployment is authorized.
+
+## Claude's follow-up (2026-10-24)
+
+| Codex # | Status |
+|---|---|
+| 1 Charged order, generic failure | **Fixed:** any error after the payment is recorded returns `paymentRecorded` with "your card was charged" and leaves the paid draft on the POS alert. A durable reconciliation job for an approval that never reached `commitTender` is still open (with O1). |
+| 2 Void-money over-refund race | **Fixed:** `resolveVoidMoney` locks the order and re-reads what's owed inside one transaction. |
+| 3 MX session not frozen | Open (O1/O2/O7); needs MX sandbox answers first. |
+| 4 Held orders missing release | **Fixed:** no 12-hour cutoff (7-day safety), release claim requires `sent_to_kitchen`, and no dispatch path prints a kitchen ticket for a voided order. Paused auto-print still means "print by hand" (unchanged behavior). |
+| 5 Reminder recorded before sending; 14-day window | **Fixed:** the day is marked only after a successful send; failures retry every 30 minutes; the list covers 90 days by order creation. |
+| 6 Paid drafts dropped from alerts | Codex's fix kept; after a reload only paid drafts from the last day ring again (older ones stay listed without chiming). |
+| 7 Cancelled items return (O3) | Open. |
+| 8 Refunded looks overdue (O4) | Open. |
+| 9 Direct :3000 IP spoofing (SD6) | Open: binding :3000 to localhost would break the greeter TV and LAN devices; needs a plan with the owner. |
+| 10 Burst past rate limits | **Fixed:** `consumeRateLimit` is one atomic upsert per policy; `npm run test:rate-limit-burst` (30 parallel → exactly 5 through). |
+| 11 Pay-later race | **Fixed:** count and send under per-customer and per-phone advisory locks in one transaction. |
+
+Not pushed until after store hours (pushing redeploys dev, which runs the TVs and phone line).

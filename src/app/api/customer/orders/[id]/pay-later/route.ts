@@ -1,6 +1,6 @@
 import { isoJson } from "@/lib/timestamp-values";
 import { after } from "next/server";
-import { getSql } from "@/lib/db";
+import { getSql, withTransaction } from "@/lib/db";
 import { apiError, unauthorized } from "@/lib/http";
 import { ensureCustomerOrderingSchema } from "@/lib/customer-ordering-schema";
 import { customerSessionHash, readCustomerOrderingSession } from "@/lib/customer-ordering-session";
@@ -29,16 +29,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       throw new OrderConflictError("Validate the delivery address before submitting the order.");
     if (order.status !== "draft") throw new OrderConflictError("This order is no longer awaiting submission.");
     // Owner rule (2026-10-24): at most 2 pay-at-pickup/delivery orders per customer
-    // or phone number in 20 minutes; card orders aren't limited.
-    const recentUnpaid = (await sql`
-      SELECT COUNT(*)::int count FROM ordering_orders recent, ordering_orders this_order
-      WHERE this_order.id=${orderId} AND recent.business='Corner Deli' AND recent.source='web' AND recent.id<>this_order.id
-        AND recent.status NOT IN ('draft','cancelled') AND recent.paid_cents=0 AND recent.submitted_at>NOW()-INTERVAL '20 minutes'
-        AND ((this_order.customer_id IS NOT NULL AND recent.customer_id=this_order.customer_id)
-          OR (COALESCE(this_order.phone_snapshot,'')<>'' AND regexp_replace(recent.phone_snapshot,'\\D','','g')=regexp_replace(this_order.phone_snapshot,'\\D','','g')))`)[0];
-    if (Number(recentUnpaid?.count || 0) >= 2)
-      throw new OrderConflictError("You've placed 2 pay-at-pickup orders in the last 20 minutes. Please pay by card for this one, or call the store at (315) 393-2271.");
-    const submitted = await submitDraftOrder(orderId, business, { id: `web:${hash.slice(0, 16)}`, name: "Online customer", type: "web" });
+    // or phone number in 20 minutes; card orders aren't limited. Count and send under
+    // per-customer and per-phone locks so two tabs can't both slip in a third order.
+    const submitted = await withTransaction(async () => {
+      const tx = getSql(); // the transaction's connection: the locks hold until commit
+      const who = (await tx`SELECT customer_id, regexp_replace(COALESCE(phone_snapshot,''),'\\D','','g') phone FROM ordering_orders WHERE id=${orderId}`)[0];
+      if (who?.customer_id) await tx`SELECT pg_advisory_xact_lock(hashtext(${`pay-later:customer:${who.customer_id}`}))`;
+      if (who?.phone) await tx`SELECT pg_advisory_xact_lock(hashtext(${`pay-later:phone:${who.phone}`}))`;
+      const recentUnpaid = (await tx`
+        SELECT COUNT(*)::int count FROM ordering_orders recent, ordering_orders this_order
+        WHERE this_order.id=${orderId} AND recent.business='Corner Deli' AND recent.source='web' AND recent.id<>this_order.id
+          AND recent.status NOT IN ('draft','cancelled') AND recent.paid_cents=0 AND recent.submitted_at>NOW()-INTERVAL '20 minutes'
+          AND ((this_order.customer_id IS NOT NULL AND recent.customer_id=this_order.customer_id)
+            OR (COALESCE(this_order.phone_snapshot,'')<>'' AND regexp_replace(recent.phone_snapshot,'\\D','','g')=regexp_replace(this_order.phone_snapshot,'\\D','','g')))`)[0];
+      if (Number(recentUnpaid?.count || 0) >= 2)
+        throw new OrderConflictError("You've placed 2 pay-at-pickup orders in the last 20 minutes. Please pay by card for this one, or call the store at (315) 393-2271.");
+      return submitDraftOrder(orderId, business, { id: `web:${hash.slice(0, 16)}`, name: "Online customer", type: "web" });
+    });
     await dispatchSubmittedOrderPrintJobs(orderId, business);
     after(async () => {
       await sendCustomerOrderConfirmation(orderId);

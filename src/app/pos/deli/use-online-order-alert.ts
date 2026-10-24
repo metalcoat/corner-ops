@@ -232,7 +232,9 @@ export function useOnlineOrderAlert(
         const recent = orders
           .filter((order) => {
             const at = Date.parse(String(order.submitted_at || order.created_at || ""));
-            return order.paid_not_sent === true || (Number.isFinite(at) && Date.now() - at < MISSED_WHILE_AWAY_MS);
+            if (!Number.isFinite(at)) return false;
+            // Paid-but-unsent orders from the last day ring again after a reload; older ones stay listed silently.
+            return Date.now() - at < (order.paid_not_sent === true ? 24 * 60 * 60_000 : MISSED_WHILE_AWAY_MS);
           })
           .map((order) => String(order.id));
         const fresh = reconcileOnlineAlerts(

@@ -78,9 +78,12 @@ async function applyApprovedPayment(orderId: string, session: CheckoutSession, d
   try {
     order = (await submitDraftOrder(orderId, business, actor)).order as Record<string, unknown>;
   } catch (error) {
-    if (!(error instanceof OrderConflictError)) throw error;
-    console.error(`[online-checkout] order ${orderId} was paid but not sent: ${error.message}`);
-    return { payment, order: null, sendError: error.message };
+    // Any failure after the payment is recorded (a send rule, a loyalty change, a
+    // database error) still tells the customer they were charged; the paid draft
+    // stays on the POS online-order alert until staff send it.
+    const message = error instanceof OrderConflictError ? error.message : "The order couldn't be sent automatically.";
+    console.error(`[online-checkout] order ${orderId} was paid but not sent`, error);
+    return { payment, order: null, sendError: message };
   }
   try {
     await dispatchSubmittedOrderPrintJobs(orderId, business);

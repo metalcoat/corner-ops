@@ -52,7 +52,8 @@ export async function releaseHeldKitchenOrders(business: OrderingBusiness) {
   const due = await sql`
     SELECT id, source, display_number, service_type, first_name_snapshot, last_name_snapshot FROM ordering_orders
     WHERE business=${business} AND status='sent_to_kitchen'
-      AND kitchen_release_at<=NOW() AND kitchen_release_at>NOW()-INTERVAL '12 hours'
+      -- No short cutoff: an order released while maintenance was down still goes out when it's back.
+      AND kitchen_release_at<=NOW() AND kitchen_release_at>NOW()-INTERVAL '7 days'
       AND NOT EXISTS(SELECT 1 FROM ordering_order_events ev WHERE ev.order_id=ordering_orders.id AND ev.event_type='kitchen_released')
     ORDER BY kitchen_release_at LIMIT 25`;
   let released = 0;
@@ -60,7 +61,8 @@ export async function releaseHeldKitchenOrders(business: OrderingBusiness) {
     const claimed = await sql`
       INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)
       SELECT ${randomUUID()},id,version,'kitchen_released','system','kitchen-release','{}'::jsonb FROM ordering_orders
-      WHERE id=${order.id} AND NOT EXISTS(SELECT 1 FROM ordering_order_events ev WHERE ev.order_id=${order.id} AND ev.event_type='kitchen_released')
+      WHERE id=${order.id} AND status='sent_to_kitchen'
+        AND NOT EXISTS(SELECT 1 FROM ordering_order_events ev WHERE ev.order_id=${order.id} AND ev.event_type='kitchen_released')
       RETURNING id`;
     if (!claimed.length) continue;
     released += 1;
