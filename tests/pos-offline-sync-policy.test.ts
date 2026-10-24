@@ -75,3 +75,10 @@ test("singleFlight releases after a failure", async () => {
   fail = false;
   assert.equal(await poll(), "ok");
 });
+
+test("orders that arrived just before the first poll still ring (POS was locked or reloading)", () => {
+  const state = createOnlineAlertState();
+  assert.deepEqual(reconcileOnlineAlerts(state, ["old", "new"], ["new", "gone"]), ["new"]);
+  assert.deepEqual([...state.pending], ["new"]);
+  assert.deepEqual(reconcileOnlineAlerts(state, ["old", "new"]), []);
+});

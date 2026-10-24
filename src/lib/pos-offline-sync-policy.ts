@@ -47,16 +47,20 @@ export function createOnlineAlertState(): OnlineAlertState {
 
 /**
  * Fold the latest list of waiting online order ids into the alert state.
- * The first poll only establishes a baseline. Orders that left the waiting
- * list (kitchen opened/started them) no longer need an alert.
+ * The first poll establishes a baseline, except for `recentIds` (orders that
+ * arrived in the last few minutes): those still ring, so an order that came in
+ * while this POS was locked or reloading isn't missed. Orders that left the
+ * waiting list (kitchen opened/started them) no longer need an alert.
  * Returns ids that are new since the previous poll.
  */
-export function reconcileOnlineAlerts(state: OnlineAlertState, waitingIds: readonly string[]): string[] {
+export function reconcileOnlineAlerts(state: OnlineAlertState, waitingIds: readonly string[], recentIds: readonly string[] = []): string[] {
   const waiting = new Set(waitingIds);
   if (!state.initialized) {
     waiting.forEach((id) => state.known.add(id));
     state.initialized = true;
-    return [];
+    const missed = recentIds.filter((id) => waiting.has(id));
+    missed.forEach((id) => state.pending.add(id));
+    return missed;
   }
   for (const id of [...state.pending]) if (!waiting.has(id)) state.pending.delete(id);
   const fresh = [...waiting].filter((id) => !state.known.has(id));

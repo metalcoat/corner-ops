@@ -21,9 +21,13 @@ export function ensureOrderingSchema(): Promise<void> {
       for (const category of categoryPaths) {
         const parts = String(category.name).split(" / ").map((part) => part.trim()).filter(Boolean);
         if (parts.length < 2) {
-          await sql`UPDATE ordering_menu_categories SET display_name = ${parts[0] || String(category.name)}, parent_id = NULL,
-            presentation_only = CASE WHEN EXISTS (SELECT 1 FROM ordering_menu_items WHERE category_id = ${category.id}) THEN FALSE ELSE presentation_only END
-            WHERE id = ${category.id}`;
+          // Fill in a missing display name only: managers rename and re-parent
+          // categories in the menu editor, and a restart must not undo that.
+          await sql`UPDATE ordering_menu_categories SET display_name = ${parts[0] || String(category.name)}
+            WHERE id = ${category.id} AND COALESCE(display_name, '') = ''`;
+          // A category that holds items can't be a heading only.
+          await sql`UPDATE ordering_menu_categories SET presentation_only = FALSE
+            WHERE id = ${category.id} AND presentation_only AND EXISTS (SELECT 1 FROM ordering_menu_items WHERE category_id = ${category.id})`;
           continue;
         }
         const parentName = parts.slice(0, -1).join(" / ");
@@ -33,7 +37,8 @@ export function ensureOrderingSchema(): Promise<void> {
           ON CONFLICT (business, name) DO UPDATE SET active = TRUE, updated_at = NOW()
           RETURNING id
         `;
-        await sql`UPDATE ordering_menu_categories SET parent_id = ${parents[0].id}, display_name = ${parts[parts.length - 1]}, presentation_only = FALSE WHERE id = ${category.id}`;
+        // Only the first time (no parent yet); later edits in the menu editor stand.
+        await sql`UPDATE ordering_menu_categories SET parent_id = ${parents[0].id}, display_name = ${parts[parts.length - 1]}, presentation_only = FALSE WHERE id = ${category.id} AND parent_id IS NULL`;
       }
 
       // Egg already exists as a priced deli modifier. Recorded burger orders
@@ -48,9 +53,9 @@ export function ensureOrderingSchema(): Promise<void> {
         JOIN ordering_modifier_groups salad ON salad.business = burger.business AND salad.name = 'Salad Egg Mod'
         JOIN ordering_modifier_options egg ON egg.group_id = salad.id AND egg.name = 'Egg' AND egg.active = TRUE
         WHERE burger.business = 'Corner Deli' AND burger.name = 'Burger Toppings'
-        ON CONFLICT (group_id, name) DO UPDATE
-        SET price_delta_cents = EXCLUDED.price_delta_cents, available = TRUE, active = TRUE, updated_at = NOW()
+        ON CONFLICT (group_id, name) DO NOTHING
       `;
+      // (Added once; its price and availability are managed in the menu editor afterwards.)
     })().catch((error) => {
       orderingSchemaPromise = null;
       throw error;

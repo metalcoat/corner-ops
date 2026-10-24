@@ -9,7 +9,10 @@ import {
   singleFlight,
 } from "@/lib/pos-offline-sync-policy";
 
-type AlertOrder = { id: string };
+type AlertOrder = { id: string; submitted_at?: string | null; created_at?: string | null; paid_not_sent?: boolean };
+
+/** Orders that arrived this recently still ring when a POS unlocks or reloads. */
+const MISSED_WHILE_AWAY_MS = 10 * 60_000;
 
 const rendered = new Map<string, AudioBuffer>();
 /** Sounds are rendered once per device (a few milliseconds each) and reused. */
@@ -225,9 +228,17 @@ export function useOnlineOrderAlert(
         if (!response.ok || stopped) return;
         const payload = (await response.json()) as { orders?: AlertOrder[] };
         if (stopped) return;
+        const orders = payload.orders || [];
+        const recent = orders
+          .filter((order) => {
+            const at = Date.parse(String(order.submitted_at || order.created_at || ""));
+            return order.paid_not_sent === true || (Number.isFinite(at) && Date.now() - at < MISSED_WHILE_AWAY_MS);
+          })
+          .map((order) => String(order.id));
         const fresh = reconcileOnlineAlerts(
           alertState.current,
-          (payload.orders || []).map((order) => String(order.id)),
+          orders.map((order) => String(order.id)),
+          recent,
         );
         setPendingOnlineOrders(alertState.current.pending.size);
         if (fresh.length) {
