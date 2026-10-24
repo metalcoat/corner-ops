@@ -84,7 +84,7 @@ export default function WeekCopyPanel({ business, shifts, busy, runAction }: Pro
     <div className="weekCopyIntro">
       <p className="wfEyebrow">Reuse any schedule</p>
       <h2>Copy a past week</h2>
-      <p>Pick any date inside the source and target weeks. Corner Ops finds the Monday automatically, copies every non-cancelled shift as a draft, skips exact duplicates, and leaves former employees unassigned.</p>
+      <p>Pick any date inside the source and target weeks. Corner Ops finds the Monday automatically, copies every non-cancelled shift as a draft, skips exact duplicates, and leaves former employees unassigned. Days off aren't copied: a shift that was reassigned, opened or cancelled for someone's time off goes back to them.</p>
     </div>
     <form className="weekCopyForm" onSubmit={copyWeek}>
       <label>

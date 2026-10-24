@@ -1,10 +1,11 @@
-import { del, put } from "@vercel/blob";
+import { del, put } from "@/lib/storage";
 import { getEmployeeSession, type EmployeeSession } from "@/lib/employee-auth";
 import { apiError, unauthorized } from "@/lib/http";
 import {
   employeeConversationDashboard,
   markConversationMessageSeen,
   sendConversationMessage,
+  toggleConversationReaction,
   TEAM_CONVERSATION_KEY,
 } from "@/lib/message-conversations";
 import { deleteEmployeeMessage } from "@/lib/message-deletion";
@@ -149,6 +150,9 @@ export async function POST(request: Request) {
     const action = String(body.action || "message-send");
     if (action === "message-seen") {
       return Response.json(await markConversationMessageSeen(session, body.messageId));
+    }
+    if (action === "reaction") {
+      return Response.json(await toggleConversationReaction(session, body.messageId, body.reaction));
     }
     if (action === "delete") {
       return Response.json(await deleteEmployeeMessage(session, String(body.id || "")));

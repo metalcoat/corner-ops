@@ -1,0 +1,13 @@
+.screenGate{min-height:100dvh;display:grid;place-items:center;padding:20px;background:#101712;color:#eef3ec;font-family:system-ui,sans-serif}
+.screenGate section{width:min(460px,100%);display:grid;gap:14px;padding:28px;border-radius:18px;background:#1a241d;border:1px solid #2c3a30}
+.screenGate h1{margin:0;font-size:2rem}
+.screenGate p{margin:0;color:#b6c4b9}
+.screenEyebrow{font-size:.75rem;font-weight:900;letter-spacing:.14em;color:#8fd0a2!important}
+.screenGate form,.screenGate label{display:grid;gap:8px}
+.screenGate label{font-weight:700}
+.screenGate input{min-height:52px;padding:10px 12px;border-radius:10px;border:1px solid #3a4b3f;background:#0f1611;color:#fff;font:inherit;font-size:1.2rem}
+.screenGate input[type=password]{letter-spacing:.4em}
+.screenGate button{min-height:56px;border:0;border-radius:12px;background:#2fa65a;color:#fff;font:inherit;font-size:1.1rem;font-weight:850;cursor:pointer}
+.screenGate button:disabled{opacity:.5}
+.screenAlt{color:#8fd0a2;text-align:center}
+.screenError{padding:10px 12px;border-radius:10px;background:#4a1f1a;color:#ffd6cf!important;font-weight:700}

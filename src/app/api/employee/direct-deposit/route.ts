@@ -1,3 +1,4 @@
+import { clientIp } from "@/lib/rate-limit";
 import { NextRequest, NextResponse } from "next/server";
 import { getEmployeeSession } from "@/lib/employee-auth";
 import { latestDirectDepositAssignmentWasRescinded } from "@/lib/direct-deposit-admin";
@@ -10,7 +11,7 @@ import {
 
 function metadata(request: NextRequest) {
   return {
-    ipAddress: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown",
+    ipAddress: clientIp(request),
     userAgent: request.headers.get("user-agent") || "unknown",
   };
 }

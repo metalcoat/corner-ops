@@ -1,0 +1,149 @@
+@font-face { font-family: "MB Slab"; src: url("/menu-board/fonts/alfa-slab-one.woff2") format("woff2"); font-weight: 400; font-display: swap }
+@font-face { font-family: "MB Condensed"; src: url("/menu-board/fonts/barlow-condensed-500.woff2") format("woff2"); font-weight: 500; font-display: swap }
+@font-face { font-family: "MB Condensed"; src: url("/menu-board/fonts/barlow-condensed-600.woff2") format("woff2"); font-weight: 600; font-display: swap }
+@font-face { font-family: "MB Condensed"; src: url("/menu-board/fonts/barlow-condensed-700.woff2") format("woff2"); font-weight: 700; font-display: swap }
+
+html:has(.menuBoard), body:has(.menuBoard) { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none }
+
+/* The board is drawn at 1920x1080 and scaled to the screen. Seasons only change the tokens. */
+.menuBoard { position: fixed; inset: 0; background: #000 }
+.mbStage {
+  --stage-a: #1f4a2c; --stage-b: #0f1d14; --ink: #fdf8ec; --muted: #a9bcab; --gold: #f2b632; --orange: #f06a24; --teal: #1d8f6a; --line: #2a4532;
+  --glow-a: rgba(29,143,106,.22); --glow-b: rgba(240,106,36,.12);
+  --display: "MB Slab", "Rockwell", Georgia, serif; --menu: "MB Condensed", "Arial Narrow", system-ui, sans-serif;
+  position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden; transform-origin: 0 0;
+  background: radial-gradient(ellipse at 50% 0%, var(--stage-a) 0%, var(--stage-b) 62%); color: var(--ink); font-family: var(--menu);
+}
+.mbStage[data-season="halloween"] { --stage-a: #3a1d4a; --stage-b: #0b0610; --gold: #ff9a1f; --orange: #8be04e; --teal: #5b2a78; --line: #3b2a48; --muted: #cbb8d8; --glow-a: rgba(255,154,31,.18); --glow-b: rgba(139,224,78,.10) }
+.mbStage[data-season="thanksgiving"] { --stage-a: #5a2e12; --stage-b: #1e1008; --gold: #f4b43a; --orange: #e8622a; --teal: #9a3d16; --line: #5b3a22; --muted: #d9bfa0; --glow-a: rgba(232,98,42,.25); --glow-b: rgba(244,180,58,.14) }
+.mbStage[data-season="christmas"] { --stage-a: #1c4a30; --stage-b: #0a1a10; --gold: #f2d27a; --orange: #e0393e; --teal: #b0202a; --line: #2d5a3c; --muted: #c8dccb; --glow-a: rgba(224,57,62,.2); --glow-b: rgba(242,210,122,.12) }
+.mbStage::before { content: ""; position: absolute; inset: -20%; background: radial-gradient(circle at 30% 40%, var(--glow-a), transparent 40%), radial-gradient(circle at 75% 65%, var(--glow-b), transparent 38%); animation: mbDrift 24s ease-in-out infinite alternate }
+@keyframes mbDrift { from { transform: translate(-4%, -3%) } to { transform: translate(4%, 3%) } }
+
+.mbSlide { position: absolute; inset: 0; padding: 56px 72px 0; display: grid; grid-template-rows: auto 1fr; gap: 30px; opacity: 0; transition: opacity .7s ease }
+.mbSlide.on { opacity: 1 }
+.mbTop { display: flex; align-items: center; gap: 30px }
+.mbTop img { width: 120px; height: 120px; border-radius: 50%; box-shadow: 0 8px 26px rgba(0,0,0,.5) }
+.mbTop h2 { font-family: var(--display); font-weight: 400; font-size: 92px; line-height: 1; margin: 0; letter-spacing: .01em }
+.mbTop h2 em { font-style: normal; color: var(--gold) }
+.mbTag { margin-left: auto; font-size: 34px; font-weight: 600; color: var(--muted); text-align: right; line-height: 1.15 }
+.mbTag b { display: block; color: var(--orange); font-size: 40px }
+.mbStage[data-season]:not([data-season="everyday"]) .mbTag { display: none }
+.mbCols { display: grid; gap: 54px; align-content: start }
+.mbCols.two { grid-template-columns: 1fr 1fr }
+.mbCols.three { grid-template-columns: 1.15fr 1fr 1fr }
+.mbBlock + .mbBlock { margin-top: 30px }
+.mbBlock h3 { font-family: var(--display); font-weight: 400; font-size: 46px; color: var(--gold); margin: 0 0 12px; display: flex; align-items: baseline; gap: 18px }
+.mbBlock h3 small { font-family: var(--menu); font-size: 26px; color: var(--muted); font-weight: 500; letter-spacing: .04em }
+.mbRow { display: flex; align-items: baseline; gap: 12px; font-size: 44px; line-height: 1.34; font-weight: 600 }
+.mbRow .n { white-space: nowrap }
+.mbRow .d { flex: 1; border-bottom: 3px dotted rgba(253,248,236,.25); transform: translateY(-8px) }
+.mbRow .note { font-size: 26px; color: var(--muted); font-weight: 500 }
+.mbStage .p { font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap }
+.mbGrid { display: grid; column-gap: 26px; font-size: 44px; line-height: 1.36; font-weight: 600; align-items: baseline }
+.mbGrid .h { font-size: 26px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); text-align: right; padding-bottom: 4px; border-bottom: 2px solid var(--line) }
+.mbGrid .h:first-child { text-align: left }
+.mbGrid .p, .mbGrid .na { text-align: right }
+.mbGrid .na { color: rgba(253,248,236,.25) }
+.mbOptions { font-size: 32px; font-weight: 500; line-height: 1.35; margin: 0 0 6px; color: var(--ink) }
+.mbSlide .mbOptions { opacity: 0 }
+.mbFeature { position: relative; overflow: hidden; background: rgba(242,182,50,.1); border: 2px solid rgba(242,182,50,.45); border-radius: 18px; padding: 22px 28px; margin-top: 26px }
+.mbFeature b { font-family: var(--display); font-weight: 400; color: var(--gold); font-size: 38px; display: block }
+.mbFeature span { font-size: 30px; font-weight: 500; line-height: 1.25; display: block }
+.mbSlide.on .mbFeature::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.18) 50%, transparent 70%); animation: mbShine 3.5s ease-in-out 1.2s infinite }
+@keyframes mbShine { from { transform: translateX(-100%) } to { transform: translateX(100%) } }
+.mbStage .out .n, .mbStage .out.p, .mbStage .out .p { text-decoration: line-through; text-decoration-thickness: 3px; color: rgba(253,248,236,.35) }
+.mbSold { display: none; font-size: 24px; letter-spacing: .1em; font-weight: 700; color: #fff; background: #b4321f; border-radius: 6px; padding: 0 10px; margin-left: 10px; vertical-align: 4px }
+.mbRow.out .mbSold { display: inline-block }
+.mbFlash { animation: mbFlash 2.4s ease }
+@keyframes mbFlash { 0%, 30% { color: var(--stage-b); background: var(--gold); box-shadow: 0 0 0 8px var(--gold) } 100% { background: transparent; box-shadow: 0 0 0 8px transparent } }
+
+/* entrance motion */
+.mbSlide .mbBlock h3, .mbSlide .mbRow, .mbSlide .mbGrid > span, .mbSlide .mbFeature { opacity: 0 }
+.mbSlide.on .mbBlock h3, .mbSlide.on .mbRow, .mbSlide.on .mbGrid > span, .mbSlide.on .mbFeature, .mbSlide.on .mbOptions { animation: mbRise .55s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(var(--i, 0) * 45ms + 250ms) }
+.mbSlide.on .mbTop h2 { animation: mbSlam .6s cubic-bezier(.2,.9,.3,1.2) both }
+.mbSlide.on .mbTop img { animation: mbSpin 1s ease both }
+@keyframes mbRise { from { opacity: 0; transform: translateY(26px) } to { opacity: 1; transform: none } }
+@keyframes mbSlam { from { opacity: 0; transform: translateX(-60px) } to { opacity: 1; transform: none } }
+@keyframes mbSpin { from { transform: rotate(-200deg) scale(.6); opacity: 0 } to { transform: none; opacity: 1 } }
+
+/* promos */
+.mbPromo { grid-template-rows: 1fr; padding: 0 0 92px }
+.mbPromo .inner { display: grid; grid-template-columns: 1.1fr .9fr; align-items: center; gap: 40px; padding: 0 110px }
+.mbPromo .inner.photo { grid-template-columns: .82fr 1.18fr; gap: 30px; padding: 0 70px 0 110px }
+.mbPromo .kicker { font-size: 40px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--orange) }
+.mbPromo h2 { font-family: var(--display); font-weight: 400; font-size: 150px; line-height: .98; margin: 12px 0 26px }
+.mbPromo .inner.photo h2 { font-size: 128px }
+.mbPromo p { font-size: 46px; line-height: 1.25; font-weight: 500; color: var(--muted); margin: 0; max-width: 28ch }
+.mbPromo .art, .mbPromo .shot { position: relative; display: grid; place-items: center; height: 760px }
+.mbPromo .ring { position: absolute; width: 640px; height: 640px; border-radius: 50%; border: 6px dashed rgba(242,182,50,.45) }
+.mbPromo .ring.b { width: 520px; height: 520px; border: 3px solid var(--teal); opacity: .6 }
+.mbBurst { position: relative; width: 470px; height: 470px; display: grid; place-items: center; text-align: center; background: var(--gold); color: #1a1406;
+  clip-path: polygon(50% 0, 61% 12%, 77% 6%, 80% 22%, 96% 25%, 90% 40%, 100% 50%, 90% 60%, 96% 75%, 80% 78%, 77% 94%, 61% 88%, 50% 100%, 39% 88%, 23% 94%, 20% 78%, 4% 75%, 10% 60%, 0 50%, 10% 40%, 4% 25%, 20% 22%, 23% 6%, 39% 12%) }
+.mbBurst span { font-weight: 700; font-size: 38px; letter-spacing: .08em; text-transform: uppercase; display: block }
+.mbBurst b { font-family: var(--display); font-weight: 400; font-size: 92px; line-height: 1; display: block; font-variant-numeric: tabular-nums }
+.mbBurst.qr { background: #fff; clip-path: none; border-radius: 36px; width: 440px; height: 440px; padding: 34px }
+.mbBurst.qr svg { width: 100%; height: 100% }
+.mbPromo .frame { position: relative; width: 1000px; max-width: 100%; aspect-ratio: 1100 / 594; border-radius: 34px; overflow: hidden; transform: rotate(-3deg);
+  box-shadow: 0 0 0 10px var(--ink), 0 0 0 16px var(--gold), 0 40px 80px rgba(0,0,0,.6) }
+.mbPromo .frame img { width: 100%; height: 100%; object-fit: cover; display: block }
+.mbPromo .frame::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(0,0,0,.35)) }
+.mbPromo .shot.cutout img { position: relative; max-height: 700px; max-width: 100%; object-fit: contain; filter: drop-shadow(0 34px 40px rgba(0,0,0,.6)) }
+.mbPromo.on .shot.cutout img { animation: mbRise .8s .3s both }
+.mbPromo .shot .mbBurst { position: absolute; right: -10px; top: 40px; width: 290px; height: 290px }
+.mbPromo .shot .mbBurst b { font-size: 70px }
+.mbPromo .shot .mbBurst span { font-size: 28px }
+.mbPromo .label { position: absolute; left: 40px; bottom: 70px; background: var(--orange); color: #fff; font-family: var(--display); font-size: 40px; padding: 8px 26px 12px; border-radius: 14px; transform: rotate(-3deg); box-shadow: 0 10px 24px rgba(0,0,0,.4) }
+.mbStage[data-season="halloween"] .mbPromo .label, .mbStage[data-season="halloween"] .mbRibbon { color: #140a1a }
+.mbPromo.on .kicker { animation: mbSlam .6s .1s both }
+.mbPromo.on h2 { animation: mbSlam .7s .25s both }
+.mbPromo.on p { animation: mbRise .7s .5s both }
+.mbPromo.on .mbBurst { animation: mbPop .8s .4s cubic-bezier(.2,1.6,.4,1) both, mbThrob 2.4s 1.4s ease-in-out infinite }
+.mbPromo.on .mbBurst.qr { animation: mbPop .8s .4s cubic-bezier(.2,1.6,.4,1) both }
+.mbPromo.on .ring { animation: mbTurn 30s linear infinite }
+.mbPromo.on .ring.b { animation-direction: reverse; animation-duration: 22s }
+.mbPromo.on .frame { animation: mbSlam .8s .2s both }
+.mbPromo.on .frame img { animation: mbKenBurns 9s ease-out both }
+.mbPromo.on .label { animation: mbRise .6s .9s both }
+@keyframes mbPop { from { transform: scale(0) rotate(-30deg) } to { transform: none } }
+@keyframes mbThrob { 0%, 100% { transform: scale(1) rotate(0) } 50% { transform: scale(1.06) rotate(3deg) } }
+@keyframes mbTurn { to { transform: rotate(360deg) } }
+@keyframes mbKenBurns { from { transform: scale(1.14) translate(2%, 1%) } to { transform: scale(1) } }
+
+/* season extras */
+.mbRibbon { position: absolute; top: 0; right: 72px; z-index: 3; background: var(--orange); color: #fff; font-family: var(--display); font-size: 34px; padding: 6px 40px 10px; border-radius: 0 0 22px 22px; box-shadow: 0 8px 20px rgba(0,0,0,.35) }
+.mbFx { position: absolute; inset: 0; pointer-events: none; overflow: hidden }
+.mbFx span { position: absolute; top: -80px; animation: mbFall linear infinite }
+.mbFx .leaf { width: 34px; height: 34px; border-radius: 0 60% 0 60%; opacity: .5 }
+.mbFx .snow { width: 14px; height: 14px; border-radius: 50%; background: #fff; opacity: .8; filter: blur(1px) }
+.mbFx .bat { width: 90px; height: 40px; background: #050207; opacity: .75; animation-name: mbFly; animation-timing-function: ease-in-out;
+  clip-path: polygon(50% 30%, 56% 12%, 60% 30%, 75% 8%, 100% 20%, 88% 40%, 92% 62%, 75% 52%, 62% 70%, 50% 90%, 38% 70%, 25% 52%, 8% 62%, 12% 40%, 0 20%, 25% 8%, 40% 30%, 44% 12%) }
+.mbFx .fog { width: 1400px; height: 260px; top: auto; bottom: 60px; border-radius: 50%; background: radial-gradient(ellipse, rgba(203,184,216,.16), transparent 70%); animation-name: mbFog; animation-timing-function: ease-in-out }
+@keyframes mbFall { to { transform: translate(var(--dx), 1240px) rotate(var(--rot)) } }
+@keyframes mbFly { 0% { transform: translate(-200px, 0) scale(var(--sc), 1) } 25% { transform: translate(600px, -60px) scale(var(--sc), .6) } 50% { transform: translate(1100px, 30px) scale(var(--sc), 1) } 75% { transform: translate(1600px, -40px) scale(var(--sc), .6) } 100% { transform: translate(2200px, 10px) scale(var(--sc), 1) } }
+@keyframes mbFog { 0%, 100% { transform: translateX(-500px) } 50% { transform: translateX(900px) } }
+
+/* footer: QR, ticker, screen dots, progress bar */
+.mbBar { position: absolute; left: 0; bottom: 92px; height: 6px; background: var(--orange); width: 0; z-index: 2 }
+.mbFoot { position: absolute; left: 0; right: 0; bottom: 0; height: 92px; display: flex; align-items: center; background: rgba(0,0,0,.35); border-top: 2px solid var(--line); font-size: 32px; font-weight: 600; z-index: 2 }
+.mbQrBox { flex: none; display: flex; align-items: center; gap: 18px; padding: 0 30px 0 56px; height: 100%; background: var(--teal); color: #fff; font-size: 30px; line-height: 1.05; z-index: 1 }
+.mbQrBox .qr { width: 68px; height: 68px; background: #fff; border-radius: 8px; padding: 6px; box-sizing: border-box }
+.mbQrBox .qr svg { display: block; width: 100%; height: 100% }
+.mbTicker { flex: 1; overflow: hidden; height: 100%; display: flex; align-items: center; -webkit-mask: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); mask: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent) }
+.mbTrack { display: flex; gap: 70px; white-space: nowrap; padding-left: 40px; animation: mbCrawl 48s linear infinite; font-size: 34px }
+.mbTrack b { color: var(--gold) }
+.mbTrack i { font-style: normal; color: var(--orange) }
+@keyframes mbCrawl { to { transform: translateX(-50%) } }
+.mbDots { flex: none; display: flex; gap: 14px; padding: 0 56px 0 30px }
+.mbDots span { width: 18px; height: 18px; border-radius: 50%; background: var(--line) }
+.mbDots span.on { background: var(--gold) }
+.mbOffline { position: absolute; right: 16px; top: 16px; width: 16px; height: 16px; border-radius: 50%; background: #d33; z-index: 4 }
+
+/* ?motion=low: keep the slide changes and the ticker, drop the rest (for a TV that stutters). */
+.menuBoard.low .mbStage::before, .menuBoard.low .mbFx, .menuBoard.low .mbFeature::after { display: none }
+.menuBoard.low .mbSlide * { animation: none !important; opacity: 1 !important }
+@media (prefers-reduced-motion: reduce) {
+  .mbStage *, .mbStage::before { animation: none !important }
+  .mbSlide .mbBlock h3, .mbSlide .mbRow, .mbSlide .mbGrid > span, .mbSlide .mbFeature { opacity: 1 }
+  .mbFx { display: none }
+}

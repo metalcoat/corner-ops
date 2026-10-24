@@ -1,4 +1,4 @@
-import { getSql } from "@/lib/db";
+import { getSql, withTransaction } from "@/lib/db";
 import { recordAuditEvent } from "@/lib/audit";
 import { ensureFinanceOperationsSchema } from "@/lib/finance-operations-schema";
 import type { Business } from "@/lib/types";
@@ -104,9 +104,9 @@ export async function createVendorBill(input: {
   void inventoryChecks;
 
   const id = crypto.randomUUID();
-  const sql = getSql();
-  const queries = [
-    sql`
+  await withTransaction(async () => {
+    const sql = getSql();
+    await sql`
       INSERT INTO vendor_bills (
         id, business, vendor, invoice_number, invoice_date, due_date, subtotal, tax_amount,
         total_amount, category, account_code, status, notes, file_name, content_type,
@@ -118,20 +118,19 @@ export async function createVendorBill(input: {
         ${clean(input.fileName, 255)}, ${clean(input.contentType, 160)}, ${clean(input.blobUrl, 1000)},
         ${clean(input.blobPathname, 1000)}, ${clean(input.actor, 240)}
       )
-    `,
-  ];
+    `;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    queries.push(sql`
+    await sql`
       INSERT INTO vendor_bill_lines (
         id, bill_id, line_number, inventory_item_id, description, quantity, unit, unit_price, line_total
       ) VALUES (
         ${crypto.randomUUID()}, ${id}, ${index + 1}, ${line.inventoryItemId}, ${line.description},
         ${line.quantity}, ${line.unit}, ${line.unitPrice}, ${line.lineTotal}
       )
-    `);
+    `;
     if (line.inventoryItemId && line.unitPrice > 0) {
-      queries.push(sql`
+      await sql`
         INSERT INTO inventory_purchases (
           id, business, inventory_item_id, vendor, purchase_date, quantity, unit,
           unit_price, total_amount, bill_id, source
@@ -139,17 +138,17 @@ export async function createVendorBill(input: {
           ${crypto.randomUUID()}, ${input.business}, ${line.inventoryItemId}, ${vendor}, ${invoiceDate},
           ${line.quantity}, ${line.unit}, ${line.unitPrice}, ${line.lineTotal}, ${id}, 'Vendor bill'
         )
-      `);
-      queries.push(sql`
+      `;
+      await sql`
         UPDATE inventory_items SET
           current_quantity = current_quantity + ${line.quantity},
           preferred_vendor = CASE WHEN preferred_vendor = '' THEN ${vendor} ELSE preferred_vendor END,
           updated_at = NOW()
         WHERE id = ${line.inventoryItemId} AND business = ${input.business}
-      `);
+      `;
     }
   }
-  await sql.transaction(queries);
+  });
 
   return { id, created: true, lines: lines.length, totalAmount };
 }

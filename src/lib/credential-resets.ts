@@ -1,11 +1,12 @@
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
+import { assertEmployeePinAvailable, employeePinUpdate, isEmployeePinUniqueViolation } from "@/lib/employee-pin-security";
 import { ensureSchema, getSql } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
-import { assertEmployeePinAvailable, createEmployeePinRecord, isEmployeePinUniqueViolation } from "@/lib/employee-pin-security";
-import { employeePinLabel } from "@/lib/employee-pin";
 import { cornerOpsBaseUrl, sendTransactionalEmail } from "@/lib/transactional-email";
 import { ensureUserSchema } from "@/lib/users";
 import type { Business } from "@/lib/types";
+import { employeePinLabel } from "@/lib/employee-pin";
+import { recordEmployeePinAudit } from "@/lib/employee-pin-audit";
 
 const RESET_MINUTES = 30;
 type ResetKind = "app-password" | "employee-pin";
@@ -40,7 +41,6 @@ function passwordRecord(password: string): { salt: string; hash: string } {
   const salt = randomBytes(18).toString("base64url");
   return { salt, hash: scryptSync(password, salt, 64).toString("base64url") };
 }
-
 
 export function ensureCredentialResetSchema(): Promise<void> {
   if (!resetSchemaPromise) {
@@ -189,22 +189,35 @@ export async function requestEmployeePinReset(input: {
 export async function completeEmployeePinReset(input: { token: string; pin: string }): Promise<void> {
   const reset = await activeReset("employee-pin", clean(input.token, 500));
   if (!reset.business) throw new Error("The employee reset record is incomplete.");
-  const pin = await assertEmployeePinAvailable({ business: reset.business, pin: input.pin, employeeName: "Employee", excludeEmployeeId: reset.subject_id });
-  const record = createEmployeePinRecord(reset.business, pin, "Employee");
   const sql = getSql();
+  // "Already assigned" would confirm a coworker's PIN; a link that hits one is
+  // spent, so it can't be used to try PINs one after another.
+  const pinTaken = async () => {
+    await sql`UPDATE credential_reset_tokens SET used_at = NOW() WHERE id = ${reset.id} AND used_at IS NULL`;
+    return new Error("That PIN can't be used. Request a new reset link and choose a different PIN.");
+  };
   try {
-    const updated = await sql`
+    await assertEmployeePinAvailable({business:reset.business,pin:String(input.pin || ""),excludeEmployeeId:String(reset.subject_id)});
+  } catch (error) {
+    if (error instanceof Error && /already assigned/i.test(error.message)) throw await pinTaken();
+    throw error;
+  }
+  const next = employeePinUpdate(reset.business, String(input.pin || ""));
+  let updated: Array<{ id: string }>;
+  try {
+    updated = await sql`
       UPDATE employees
-      SET pin_hash = ${record.hash}, pin_salt = ${record.salt}, pin_hash_version = ${record.version},
-          pin_fingerprint = ${record.fingerprint}, pin_enabled = TRUE,
-          session_version = session_version + 1, updated_at = NOW()
+      SET pin_hash = ${next.hash}, pin_salt = ${next.salt}, pin_hash_version = ${next.version},
+        pin_fingerprint = ${next.fingerprint}, pin_enabled = TRUE,
+        session_version = session_version + 1, updated_at = NOW()
       WHERE id = ${reset.subject_id} AND business = ${reset.business} AND active = TRUE
       RETURNING id
     ` as unknown as Array<{ id: string }>;
-    if (!updated[0]) throw new Error("This employee account is no longer active.");
   } catch (error) {
-    if (isEmployeePinUniqueViolation(error)) throw new Error("That PIN is already in use at this location.");
+    if (isEmployeePinUniqueViolation(error)) throw await pinTaken();
     throw error;
   }
+  if (!updated[0]) throw new Error("This employee account is no longer active.");
+  await recordEmployeePinAudit({employeeId:updated[0].id,business:reset.business,action:"pin_reset",actor:"employee-self-service"});
   await sql`UPDATE credential_reset_tokens SET used_at = NOW() WHERE id = ${reset.id}`;
 }

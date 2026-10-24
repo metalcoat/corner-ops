@@ -1,0 +1,26 @@
+export type SiteBrand = {
+  name: string;
+  icon: string;
+  teamHost: boolean;
+};
+
+// Hosts not listed below (the dev and staging sites by IP, localhost) use the Corner Deli logo as their icon
+// and favicon; the public hosts keep their own.
+const OWNER_BRAND: SiteBrand = { name: "Corner Ops", icon: "/corner-deli-logo.png", teamHost: false };
+
+export function siteBrandForHost(hostname: string): SiteBrand {
+  switch (hostname.toLowerCase().split(":")[0]) {
+    case "ordercornerdeli.com":
+    case "www.ordercornerdeli.com":
+    case "ops.ordercornerdeli.com":
+      return { name: "Corner Deli", icon: "/corner-deli-logo.png", teamHost: false };
+    case "ops.atthedocks.com":
+      return { name: "At the Docks", icon: "/at-the-docks-logo.svg", teamHost: false };
+    case "team.ordercornerdeli.com":
+      return { name: "Corner Deli", icon: "/corner-deli-logo.png", teamHost: true };
+    case "team.atthedocks.com":
+      return { name: "At the Docks", icon: "/at-the-docks-logo.svg", teamHost: true };
+    default:
+      return OWNER_BRAND;
+  }
+}

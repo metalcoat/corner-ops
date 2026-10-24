@@ -1,10 +1,12 @@
+import PolicyPage from "../policy-page/policy-page";
+
 export const metadata = {
   title: "SMS Terms and Conditions | Corner Deli",
 };
 
 export default function TermsPage() {
   return (
-    <main style={{ maxWidth: 820, margin: "0 auto", padding: "2rem 1.25rem", lineHeight: 1.6 }}>
+    <PolicyPage>
       <h1>Corner Deli SMS Terms and Conditions</h1>
       <p><strong>Effective date:</strong> August 17, 2026</p>
       <p>
@@ -55,6 +57,6 @@ export default function TermsPage() {
       </p>
 
       <p><a href="/privacy">SMS Privacy Policy</a> · <a href="/sms-help">SMS Help</a></p>
-    </main>
+    </PolicyPage>
   );
 }

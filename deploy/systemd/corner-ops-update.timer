@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Corner Ops development branch for updates
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=60
+Persistent=true
+Unit=corner-ops-update.service
+
+[Install]
+WantedBy=timers.target

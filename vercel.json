@@ -1,5 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": false
+  },
   "crons": [
     {
       "path": "/api/cron/scheduler-0700",
@@ -8,14 +11,6 @@
     {
       "path": "/api/cron/scheduler-0800",
       "schedule": "0 8 * * *"
-    },
-    {
-      "path": "/api/cron/rezku-repair",
-      "schedule": "*/15 * * * *"
-    },
-    {
-      "path": "/api/cron/schedule-delivery",
-      "schedule": "*/5 * * * *"
     }
   ]
 }

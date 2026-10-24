@@ -1,11 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import * as XLSX from "xlsx";
 import { ensureSchema, getSql } from "@/lib/db";
+import type { Business } from "@/lib/types";
 import { ValidationError } from "@/lib/http";
 import { decryptIntegrationSecret as decryptSecret, encryptIntegrationSecret as encryptSecret } from "@/lib/integration-crypto";
-import { consumeOAuthState, createOAuthState } from "@/lib/oauth-state";
 import { reversePostedBankTransaction } from "@/lib/journal-reversal";
-import type { Business } from "@/lib/types";
+import { constantTimeEqual } from "@/lib/security-keys";
 
 const TIME_ZONE = "America/New_York";
 const REVIEW_THRESHOLD = 0.9;
@@ -66,6 +66,26 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function signedState(payload: Record<string, unknown>): string {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET is required.");
+  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = createHmac("sha256", secret).update(encoded).digest("base64url");
+  return `${encoded}.${signature}`;
+}
+
+function readSignedState(value: string): Record<string, unknown> {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET is required.");
+  const [encoded, supplied] = value.split(".");
+  if (!encoded || !supplied) throw new Error("Integration authorization state is invalid.");
+  const expected = createHmac("sha256", secret).update(encoded).digest("base64url");
+  if (!constantTimeEqual(expected, supplied)) throw new Error("Integration authorization state is invalid.");
+  const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as Record<string, unknown>;
+  if (Number(payload.expiresAt || 0) < Date.now()) throw new Error("Integration authorization state expired.");
+  return payload;
+}
+
 function allowedOrigin(origin: string): string {
   const url = new URL(origin);
   if (url.protocol !== "https:" && url.hostname !== "localhost") throw new Error("Integration callback requires HTTPS.");
@@ -75,15 +95,6 @@ function allowedOrigin(origin: string): string {
 export async function ensureIntegrationSchema(): Promise<void> {
   await ensureSchema();
   const sql = getSql();
-
-
-
-
-
-
-
-
-
 
   await sql`
     INSERT INTO accounting_accounts (id, business, code, name, account_type)
@@ -458,7 +469,11 @@ export async function syncBankConnection(connectionId: string, expectedBusiness?
         modified += 1;
       }
       for (const transaction of page.removed || []) {
-        const current = await getSql()`SELECT id FROM bank_transactions WHERE external_transaction_id = ${transaction.transaction_id} AND business = ${connection.business} LIMIT 1` as unknown as Array<{ id: string }>;
+        const current = await getSql()`
+          SELECT id FROM bank_transactions
+          WHERE external_transaction_id = ${transaction.transaction_id} AND business = ${connection.business}
+          LIMIT 1
+        ` as unknown as Array<{ id: string }>;
         if (current[0]) {
           const reversal = await reversePostedBankTransaction({ transactionId: current[0].id, business: connection.business, actor: "Plaid sync", reason: "Plaid removed the transaction" });
           await getSql()`UPDATE bank_transactions SET removed = TRUE, review_status = 'Needs Review', updated_at = NOW() WHERE id = ${current[0].id} AND business = ${connection.business}`;
@@ -555,12 +570,12 @@ async function squareRequest<T>(path: string, accessToken: string, init?: Reques
   return payload as T;
 }
 
-export async function squareAuthorizationUrl(origin: string): Promise<string> {
+export function squareAuthorizationUrl(origin: string): string {
   const applicationId = process.env.SQUARE_APPLICATION_ID?.trim();
   if (!applicationId || !process.env.SQUARE_APPLICATION_SECRET?.trim()) throw new Error("Square is not configured.");
   const safeOrigin = allowedOrigin(origin);
   const redirectUri = `${safeOrigin}/api/square/callback`;
-  const state = await createOAuthState({ origin: safeOrigin, redirectUri, business: "Tiki", expiresAt: Date.now() + 10 * 60_000 });
+  const state = signedState({ origin: safeOrigin, redirectUri, business: "Tiki", expiresAt: Date.now() + 10 * 60_000 });
   const url = new URL(`${squareConnectBase()}/oauth2/authorize`);
   url.searchParams.set("client_id", applicationId);
   url.searchParams.set("scope", "MERCHANT_PROFILE_READ PAYMENTS_READ ORDERS_READ ITEMS_READ");
@@ -572,7 +587,7 @@ export async function squareAuthorizationUrl(origin: string): Promise<string> {
 
 export async function exchangeSquareAuthorization(code: string, state: string) {
   await ensureIntegrationSchema();
-  const payload = await consumeOAuthState(state);
+  const payload = readSignedState(state);
   const origin = allowedOrigin(String(payload.origin || ""));
   const redirectUri = String(payload.redirectUri || `${origin}/api/square/callback`);
   const applicationId = process.env.SQUARE_APPLICATION_ID?.trim();
@@ -888,15 +903,56 @@ export async function createOperationIssue(input: {
 
 export async function integrationDashboard(business: Business, includeGlobal = false) {
   await ensureIntegrationSchema();
-  const connections = await getSql()`SELECT id, provider, business, institution_name, status, metadata, last_sync_at, created_at, updated_at FROM integration_connections WHERE business = ${business} ORDER BY provider, created_at` as unknown as Array<Record<string, unknown>>;
-  const accounts = await getSql()`SELECT id, business, institution_name, name, official_name, mask, account_type, account_subtype, current_balance, available_balance, currency, active, updated_at FROM bank_accounts WHERE business = ${business} ORDER BY institution_name, name` as unknown as Array<Record<string, unknown>>;
-  const transactions = await getSql()`SELECT id, transaction_date, merchant_name, description, signed_amount, direction, pending, category, account_code, classification_source, confidence, review_status, user_override FROM bank_transactions WHERE business = ${business} AND removed = FALSE ORDER BY transaction_date DESC, created_at DESC LIMIT 150` as unknown as Array<Record<string, unknown>>;
-  const accountingAccounts = await getSql()`SELECT code, name, account_type FROM accounting_accounts WHERE business = ${business} AND active = TRUE ORDER BY code` as unknown as Array<Record<string, unknown>>;
-  const syncRuns = await getSql()`SELECT id, connection_id, provider, business, status, records_added, records_modified, records_removed, message, started_at, completed_at FROM integration_sync_runs WHERE business = ${business} ORDER BY started_at DESC LIMIT 40` as unknown as Array<Record<string, unknown>>;
-  const issues = await getSql()`SELECT id, business, issue_type, severity, title, details, reference, status, first_seen_at, last_seen_at FROM operation_issues WHERE business = ${business} AND status = 'Open' ORDER BY severity DESC, last_seen_at DESC LIMIT 50` as unknown as Array<Record<string, unknown>>;
-  const schedulerRuns = includeGlobal ? await getSql()`SELECT id, run_key, local_date, local_hour, status, details, started_at, completed_at FROM scheduler_runs ORDER BY started_at DESC LIMIT 20` as unknown as Array<Record<string, unknown>> : [];
-  const payrollRuns = await getSql()`SELECT id, business, week_start, week_end, status, generated_by, generated_at, updated_at FROM payroll_runs WHERE business = ${business} ORDER BY week_start DESC LIMIT 20` as unknown as Array<Record<string, unknown>>;
-  const squareSummary = business === "Tiki" ? await getSql()`SELECT COALESCE(SUM(amount), 0) AS sales, COALESCE(SUM(tip_amount), 0) AS tips, COUNT(*) AS payments FROM square_payments WHERE status = 'COMPLETED' AND created_at_square >= NOW() - INTERVAL '30 days'` as unknown as Array<Record<string, unknown>> : [];
+  const connections = await getSql()`
+    SELECT id, provider, business, institution_name, status, metadata, last_sync_at, created_at, updated_at
+    FROM integration_connections WHERE business = ${business} ORDER BY provider, created_at
+  ` as unknown as Array<Record<string, unknown>>;
+  const accounts = await getSql()`
+    SELECT id, business, institution_name, name, official_name, mask, account_type, account_subtype,
+      current_balance, available_balance, currency, active, updated_at
+    FROM bank_accounts WHERE business = ${business} ORDER BY institution_name, name
+  ` as unknown as Array<Record<string, unknown>>;
+  const transactions = await getSql()`
+    SELECT id, transaction_date, merchant_name, description, signed_amount, direction, pending,
+      category, account_code, classification_source, confidence, review_status, user_override
+    FROM bank_transactions
+    WHERE business = ${business} AND removed = FALSE
+    ORDER BY transaction_date DESC, created_at DESC
+    LIMIT 150
+  ` as unknown as Array<Record<string, unknown>>;
+  const accountingAccounts = await getSql()`
+    SELECT code, name, account_type FROM accounting_accounts
+    WHERE business = ${business} AND active = TRUE
+    ORDER BY code
+  ` as unknown as Array<Record<string, unknown>>;
+  const syncRuns = await getSql()`
+    SELECT id, connection_id, provider, business, status, records_added, records_modified,
+      records_removed, message, started_at, completed_at
+    FROM integration_sync_runs WHERE business = ${business} ORDER BY started_at DESC LIMIT 40
+  ` as unknown as Array<Record<string, unknown>>;
+  const issues = await getSql()`
+    SELECT id, business, issue_type, severity, title, details, reference, status, first_seen_at, last_seen_at
+    FROM operation_issues WHERE business = ${business} AND status = 'Open'
+    ORDER BY severity DESC, last_seen_at DESC LIMIT 50
+  ` as unknown as Array<Record<string, unknown>>;
+  // Scheduler runs span both businesses, so only show them to users with access to both.
+  const schedulerRuns = includeGlobal
+    ? await getSql()`
+        SELECT id, run_key, local_date, local_hour, status, details, started_at, completed_at
+        FROM scheduler_runs ORDER BY started_at DESC LIMIT 20
+      ` as unknown as Array<Record<string, unknown>>
+    : [];
+  const payrollRuns = await getSql()`
+    SELECT id, business, week_start, week_end, status, generated_by, generated_at, updated_at
+    FROM payroll_runs WHERE business = ${business} ORDER BY week_start DESC LIMIT 20
+  ` as unknown as Array<Record<string, unknown>>;
+  const squareSummary = business === "Tiki"
+    ? await getSql()`
+        SELECT COALESCE(SUM(amount), 0) AS sales, COALESCE(SUM(tip_amount), 0) AS tips, COUNT(*) AS payments
+        FROM square_payments
+        WHERE status = 'COMPLETED' AND created_at_square >= NOW() - INTERVAL '30 days'
+      ` as unknown as Array<Record<string, unknown>>
+    : [];
 
   return {
     configuration: {

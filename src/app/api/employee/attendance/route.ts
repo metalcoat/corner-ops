@@ -4,6 +4,7 @@ import {
   submitEmployeeAttendanceCase,
 } from "@/lib/attendance";
 import { getEmployeeSession } from "@/lib/employee-auth";
+import { confirmMissedClockOut, employeeMissedClockOutCases, submitMissedClockOutTime } from "@/lib/missed-clock-outs";
 import { getSql } from "@/lib/db";
 import { apiError, unauthorized } from "@/lib/http";
 
@@ -14,7 +15,8 @@ export async function GET() {
   try {
     const session = await getEmployeeSession();
     if (!session) return unauthorized();
-    return Response.json(await employeeAttendanceCases(session));
+    const [attendance, clockOuts] = await Promise.all([employeeAttendanceCases(session), employeeMissedClockOutCases(session)]);
+    return Response.json({ ...attendance, clockOuts });
   } catch (error) {
     return apiError(error);
   }
@@ -34,6 +36,19 @@ export async function POST(request: Request) {
         correctionEnd: String(body.correctionEnd || ""),
         reason: String(body.reason || ""),
       }));
+    }
+
+    if (action === "clock-out-time") {
+      return Response.json(await submitMissedClockOutTime(session, {
+        id: String(body.id || ""),
+        leftAt: String(body.leftAt || ""),
+        note: String(body.note || ""),
+      }));
+    }
+
+    // "That's right": the clock-out on the punch (Rezku's, or the automatic close) is correct.
+    if (action === "clock-out-confirm") {
+      return Response.json(await confirmMissedClockOut(session, { id: String(body.id || "") }));
     }
 
     if (action === "did-not-work") {

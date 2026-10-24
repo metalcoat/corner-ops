@@ -1,0 +1,87 @@
+import { isoJson } from "@/lib/timestamp-values";
+import { apiError, unauthorized } from "@/lib/http";
+import type { OrderingBusiness } from "@/lib/ordering-core";
+import { assertOrderReadyForCheckout, checkoutState, commitTender, PaymentConflictError, printPaidReceipt, reprintPaymentReceipt, reverseTender, setCheckoutTip, type CheckoutTenderType } from "@/lib/ordering-payments";
+import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
+import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
+import { paymentStationProfile, PaymentStationError } from "@/lib/ordering-payment-stations";
+import { submitPaidDraft } from "@/lib/ordering-paid-draft-submit";
+import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
+import { localDevToolsAllowed } from "@/lib/local-dev-tools";
+
+export const runtime = "nodejs";
+import { settleOpenTerminalSales, TerminalSaleRecordedError } from "@/lib/mx-terminal-payments";
+
+function businessFrom(value: unknown): OrderingBusiness {
+  if (value === "Corner Deli" || value === "Tiki") return value;
+  throw new PaymentConflictError("Unknown business.");
+}
+
+function tenderFrom(value: unknown): CheckoutTenderType {
+  if (value === "cash" || value === "card" || value === "gift_card") return value;
+  throw new PaymentConflictError("Cash, approved credit/debit, or gift card tender is required.");
+}
+
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const url = new URL(request.url);
+    const business = businessFrom(url.searchParams.get("business"));
+    if (!await orderingActor(business)) return unauthorized();
+    const { id } = await context.params;
+    await assertOrderReadyForCheckout(id, business);
+    return isoJson(await checkoutState(id, business, url.searchParams.get("checkId")));
+  } catch (error) {
+    if (error instanceof PaymentConflictError) return isoJson({ error: error.message }, { status: 409 });
+    return apiError(error);
+  }
+}
+
+export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const body = await request.json() as Record<string, unknown>;
+    const business = businessFrom(body.business);
+    const actor = await orderingActor(business);
+    if (!actor) return unauthorized();
+    const { id } = await context.params;
+    const stationKey=String(body.stationKey||"");
+    const station=stationKey?await paymentStationProfile(business,stationKey):null;
+    if(station?.station_mode==="order_taker")throw new PaymentStationError("This device is an order-taking station. Send the check to the payment station.");
+    if (body.action === "reverse") return isoJson(await reverseTender({orderId:id,business,transactionId:String(body.transactionId||""),amountCents:Number(body.amountCents),clientMutationId:String(body.clientMutationId||""),reason:String(body.reason||""),actor}),{status:201});
+    if (body.action === "reprint") {const result=await reprintPaymentReceipt({orderId:id,business,transactionId:String(body.transactionId||""),reason:String(body.reason||""),actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});return isoJson(result,{status:201})}
+    if (body.action === "print_paid_receipt") {const result=await printPaidReceipt({orderId:id,business,itemized:body.itemized===true,receiptPrinterId:body.receiptPrinterId?String(body.receiptPrinterId):undefined,actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false,jobId:result.printJobId});return isoJson(result,{status:201})}
+    if (body.action === "set_tip") {await assertOrderReadyForCheckout(id,business);return isoJson(await setCheckoutTip({orderId:id,business,checkId:body.checkId?String(body.checkId):null,tipCents:Number(body.tipCents),actor}),{status:200});}
+    // A terminal sale on this order may still charge the card; settle it before taking cash or a gift card.
+    await settleOpenTerminalSales({ business, orderId: id, actor });
+    const result=await commitTender({
+      orderId: id,
+      business,
+      tenderType: tenderFrom(body.tenderType),
+      amountTenderedCents: Number(body.amountTenderedCents),
+      clientMutationId: String(body.clientMutationId || ""),
+      checkId: body.checkId ? String(body.checkId) : null,
+      actor,
+      receiptPrinterId: body.receiptPrinterId ? String(body.receiptPrinterId) : undefined,
+      cashControlMode: "till",
+      stationKey,
+      giftCardNumber: body.giftCardNumber ? String(body.giftCardNumber) : undefined,
+      giftCardPin: body.giftCardPin ? String(body.giftCardPin) : undefined,
+      providerApproval: body.testCard === true && localDevToolsAllowed(process.env, request.headers.get("host")) && canManagePos(actor) ? {
+        provider: "test",
+        transactionReference: `local-test-${String(body.clientMutationId || "")}`,
+        brand: "TEST",
+        last4: "4242",
+        details: { simulated: true, localDevelopment: true },
+      } : undefined,
+    });
+    if(result.order.payment_status==="paid"&&result.order.status==="draft"){
+      const unsent=await submitPaidDraft(id,business,actor);
+      if(unsent)return unsent;
+      await dispatchSubmittedOrderPrintJobs(id,business);
+    }else await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});
+    return isoJson(result,{status:201});
+  } catch (error) {
+    if (error instanceof TerminalSaleRecordedError) return isoJson({ error: error.message, checkout: error.checkout }, { status: 409 });
+    if (error instanceof PaymentConflictError || error instanceof PaymentStationError) return isoJson({ error: error.message }, { status: 409 });
+    return apiError(error);
+  }
+}

@@ -1,6 +1,6 @@
 import { Resend } from "resend";
 import { schedulePublicationIdempotencyKey, scheduleStateHash } from "@/lib/schedule-publication-key";
-import { getSql } from "@/lib/db";
+import { getSql, withTransaction } from "@/lib/db";
 import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import { ensureStaffNotificationSchema } from "@/lib/staff-notifications";
 import type { SmsRecipient } from "@/lib/sms-notifications";
@@ -444,9 +444,10 @@ export async function publishBusinessScheduleWeek(input: {
     }
 
     publicationId = row.id;
-    await sql.transaction([
-      sql`DELETE FROM schedule_publication_deliveries WHERE publication_id = ${publicationId}`,
-      sql`
+    await withTransaction(async () => {
+      const transactionSql = getSql();
+      await transactionSql`DELETE FROM schedule_publication_deliveries WHERE publication_id = ${publicationId}`;
+      await transactionSql`
         UPDATE schedule_publications SET
           published_by = ${input.actor},
           shift_count = ${shifts.length},
@@ -467,43 +468,15 @@ export async function publishBusinessScheduleWeek(input: {
           delivery_status = 'Pending',
           published_at = NOW()
         WHERE id = ${publicationId}
-      `,
-    ]);
+      `;
+    });
   }
 
-  const messageQueries = contacts.map((employee) => {
-    const messageId = crypto.randomUUID();
-    return sql`
-      WITH inserted AS (
-        INSERT INTO employee_messages (
-          id, business, conversation_key, sender_name,
-          recipient_employee_id, message_type, body
-        ) VALUES (
-          ${messageId}::uuid, ${input.business}, ${`owner:${employee.id}`}, ${input.actor},
-          ${employee.id}::uuid, 'Conversation',
-          ${`Your ${input.business} schedule was ${scheduleVerb} for ${rangeLabel}.${hubUrl ? ` Review it in the Employee Portal: ${hubUrl}` : " Review it in the Employee Hub."}`}
-        )
-        RETURNING id
-      )
-      INSERT INTO employee_message_recipients (message_id, employee_id)
-      SELECT inserted.id, ${employee.id}::uuid
-      FROM inserted
-      ON CONFLICT (message_id, employee_id) DO NOTHING
-    `;
-  });
-  const emailJobQueries = emailContacts.map((employee) => sql`
-    INSERT INTO schedule_publication_deliveries (
-      id, publication_id, employee_id, channel, destination, subject, body, idempotency_key
-    ) VALUES (
-      ${crypto.randomUUID()}, ${publicationId}, ${employee.id}, 'Email', ${clean(employee.email, 255)},
-      ${emailSubject}, ${emailBody(employee)}, ${`schedule/${publicationId}/${employee.id}/email`}
-    )
-    ON CONFLICT (publication_id, employee_id, channel) DO NOTHING
-  `);
-
   try {
-    await sql.transaction([
-      sql`
+    await withTransaction(async () => {
+      const transactionSql = getSql();
+      // Shifts of employees who are no longer active go back to Open.
+      await transactionSql`
         UPDATE schedule_shifts s SET
           employee_id = CASE
             WHEN s.employee_id IS NULL OR EXISTS (
@@ -524,11 +497,38 @@ export async function publishBusinessScheduleWeek(input: {
           AND s.starts_at >= (${input.weekStart}::date::timestamp AT TIME ZONE ${TIME_ZONE})
           AND s.starts_at < (((${input.weekStart}::date + 7)::timestamp) AT TIME ZONE ${TIME_ZONE})
           AND s.status <> 'Cancelled'
-      `,
-      ...messageQueries,
-      ...emailJobQueries,
-      sql`UPDATE schedule_publications SET delivery_status = 'Queued' WHERE id = ${publicationId}`,
-    ]);
+      `;
+      for (const employee of contacts) {
+        await transactionSql`
+          WITH inserted AS (
+            INSERT INTO employee_messages (
+              id, business, conversation_key, sender_name,
+              recipient_employee_id, message_type, body
+            ) VALUES (
+              ${crypto.randomUUID()}::uuid, ${input.business}, ${`owner:${employee.id}`}, ${input.actor},
+              ${employee.id}::uuid, 'Conversation',
+              ${`Your ${input.business} schedule was ${scheduleVerb} for ${rangeLabel}.${hubUrl ? ` Review it in the Employee Portal: ${hubUrl}` : " Review it in the Employee Hub."}`}
+            )
+            RETURNING id
+          )
+          INSERT INTO employee_message_recipients (message_id, employee_id)
+          SELECT inserted.id, ${employee.id}::uuid
+          FROM inserted
+          ON CONFLICT (message_id, employee_id) DO NOTHING
+        `;
+      }
+      for (const employee of emailContacts) {
+        await transactionSql`
+          INSERT INTO schedule_publication_deliveries (
+            id, publication_id, employee_id, channel, destination, subject, body, idempotency_key
+          ) VALUES (
+            ${crypto.randomUUID()}, ${publicationId}, ${employee.id}, 'Email', ${clean(employee.email, 255)},
+            ${emailSubject}, ${emailBody(employee)}, ${`schedule/${publicationId}/${employee.id}/email`}
+          ) ON CONFLICT (publication_id, employee_id, channel) DO NOTHING
+        `;
+      }
+      await transactionSql`UPDATE schedule_publications SET delivery_status = 'Queued' WHERE id = ${publicationId}`;
+    });
   } catch (error) {
     await sql`
       UPDATE schedule_publications SET delivery_status = 'Failed',

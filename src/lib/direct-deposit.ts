@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { ensureSchema, getSql } from "@/lib/db";
 import { requireStrongSecret } from "@/lib/secret-strength";
+import { ensureSchema, getSql } from "@/lib/db";
 import { getEmploymentFormProfile } from "@/lib/employment-forms";
 import { cornerOpsBaseUrl, ownerNotificationEmails, sendTransactionalEmail } from "@/lib/transactional-email";
 import type { Business } from "@/lib/types";
@@ -45,7 +45,6 @@ export function ensureDirectDepositSchema(): Promise<void> {
   if (!schemaPromise) {
     schemaPromise = (async () => {
       await ensureSchema();
-      const sql = getSql();
     })().catch((error) => {
       schemaPromise = null;
       throw error;
@@ -55,7 +54,10 @@ export function ensureDirectDepositSchema(): Promise<void> {
 }
 
 function encryptionKey(): Buffer {
-  const secret = requireStrongSecret(process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY, "EMPLOYMENT_FORMS_ENCRYPTION_KEY");
+  const secret = requireStrongSecret(
+    process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY,
+    "EMPLOYMENT_FORMS_ENCRYPTION_KEY",
+  );
   return createHash("sha256").update(secret, "utf8").digest();
 }
 

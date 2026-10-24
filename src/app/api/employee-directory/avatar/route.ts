@@ -1,4 +1,5 @@
-import { get } from "@vercel/blob";
+import { safeImageHeaders } from "@/lib/safe-image-response";
+import { get } from "@/lib/storage";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { ownerEmployeeProfilePhoto } from "@/lib/employee-profile";
 import { apiError, unauthorized } from "@/lib/http";
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
     if (result.statusCode !== 200 || !result.stream) return new Response("Employee photo not found.", { status: 404 });
     return new Response(result.stream, {
       headers: {
-        "Content-Type": result.blob.contentType || photo.contentType,
+        ...safeImageHeaders(result.blob.contentType || photo.contentType),
         "Content-Disposition": `inline; filename="${photo.fileName.replaceAll('"', '')}"`,
         "Content-Length": String(result.blob.size || photo.size),
         "X-Content-Type-Options": "nosniff",

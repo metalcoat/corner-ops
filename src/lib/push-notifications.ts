@@ -10,6 +10,7 @@ import {
 import { ensureSchema, getSql } from "@/lib/db";
 import { legacySessionSecret, openApplicationSecret, sealApplicationSecret } from "@/lib/security-keys";
 import type { Business } from "@/lib/types";
+import { publicTeamBaseUrl } from "@/lib/public-team-url";
 
 const P256_ORDER = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
 const PUSH_SUBJECT = process.env.PUSH_SUBJECT?.trim() || `mailto:${process.env.APP_EMAIL?.trim() || "admin@invalid.local"}`;
@@ -27,6 +28,7 @@ type PushSubscriptionInput = {
   keys: { p256dh: string; auth: string };
   userAgent?: string;
   deviceLabel?: string;
+  origin?: string;
 };
 
 type PushMessage = {
@@ -43,6 +45,10 @@ type StoredSubscription = {
   endpoint: string;
   p256dh: string;
   auth: string;
+  /** Where the phone subscribed from (https://host); empty for subscriptions saved before this was recorded. */
+  origin?: string;
+  audience_type?: string;
+  business?: string | null;
 };
 
 function clean(value: unknown, max = 500): string {
@@ -179,7 +185,6 @@ export async function ensurePushSchema(): Promise<void> {
   if (!pushSchemaPromise) {
     pushSchemaPromise = (async () => {
       await ensureSchema();
-      const sql = getSql();
     })().catch((error) => {
       pushSchemaPromise = null;
       throw error;
@@ -206,6 +211,26 @@ export async function pushStatus(actor: PushActor) {
     : await getSql()`SELECT COUNT(*)::int AS count FROM push_subscriptions WHERE audience_type = 'employee' AND employee_id = ${identity.employeeId} AND business = ${identity.business} AND active = TRUE`;
   const count = Number((rows as unknown as Array<{ count: number }>)[0]?.count || 0);
   return { actorType: actor.type, publicKey: await pushPublicKey(), subscribedDevices: count };
+}
+
+/** The web address a request came from (https://host), as the browser reports it. */
+export function requestOrigin(headers: Headers): string {
+  const origin = headers.get("origin");
+  if (origin && /^https?:\/\/[^/]+$/i.test(origin)) return origin.toLowerCase();
+  const host = (headers.get("x-forwarded-host") || headers.get("host") || "").split(",")[0].trim().toLowerCase();
+  const proto = (headers.get("x-forwarded-proto") || "https").split(",")[0].trim();
+  return host ? `${proto}://${host}` : "";
+}
+
+/**
+ * Subscriptions from before the web address was recorded belong to an old install (the
+ * app moved from corner-ops.vercel.app). A tap on their notifications opens the current
+ * site instead of the old address, which no longer works.
+ */
+export function destinationFor(subscription: StoredSubscription, url: string, bases: { owner: string; employee: (business: Business) => string }): string {
+  if (subscription.origin || !url.startsWith("/")) return url;
+  const base = subscription.audience_type === "employee" ? bases.employee((subscription.business || "Corner Deli") as Business) : bases.owner;
+  return base ? `${base.replace(/\/+$/, "")}${url}` : url;
 }
 
 export async function savePushSubscription(actor: PushActor, input: PushSubscriptionInput) {
@@ -240,6 +265,21 @@ export async function savePushSubscription(actor: PushActor, input: PushSubscrip
       last_error = '',
       updated_at = NOW()
   `;
+  const origin = clean(input.origin, 300).toLowerCase();
+  if (origin) {
+    await getSql()`UPDATE push_subscriptions SET origin = ${origin} WHERE endpoint = ${endpoint}`;
+    // Turning notifications on from the current site replaces this person's older install on the
+    // same kind of phone (e.g. the one from the old address), so each message arrives once.
+    const label = clean(input.deviceLabel, 120);
+    if (label) {
+      await getSql()`
+        UPDATE push_subscriptions SET active = FALSE, last_error = ${`Replaced by a newer install on ${origin}`}, updated_at = NOW()
+        WHERE active = TRUE AND endpoint <> ${endpoint} AND device_label = ${label} AND origin <> ${origin}
+          AND audience_type = ${identity.audienceType}::text
+          AND (${identity.audienceType}::text <> 'owner' OR LOWER(owner_email) = LOWER(${identity.ownerEmail}::text))
+          AND (${identity.audienceType}::text <> 'employee' OR (employee_id = ${identity.employeeId}::uuid AND business = ${identity.business}::text))`;
+    }
+  }
   return pushStatus(actor);
 }
 
@@ -254,6 +294,8 @@ export async function removePushSubscription(actor: PushActor, endpoint: string)
   return pushStatus(actor);
 }
 
+const PUSH_TIMEOUT_MS = 8_000;
+
 async function sendToSubscription(subscription: StoredSubscription, message: PushMessage) {
   const body = encryptedPayload(subscription, message);
   const { authorization } = await vapidAuthorization(subscription.endpoint);
@@ -264,10 +306,13 @@ async function sendToSubscription(subscription: StoredSubscription, message: Pus
       "Content-Encoding": "aes128gcm",
       "Content-Type": "application/octet-stream",
       TTL: "86400",
-      Urgency: "normal",
+      Urgency: message.category === "online_order" ? "high" : "normal",
     },
     body: requestBody(body),
     cache: "no-store",
+    // A push service that never answers must not hold up whatever sent the message (a team message
+    // from the ops page waits for its pushes); it counts as a failed delivery instead.
+    signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
   });
   if (!response.ok && response.status !== 201) {
     const detail = clean(await response.text().catch(() => ""), 500);
@@ -278,6 +323,8 @@ async function sendToSubscription(subscription: StoredSubscription, message: Pus
 }
 
 async function deliver(subscriptions: StoredSubscription[], message: PushMessage) {
+  if (process.env.LOCAL_DEVELOPMENT === "true" && process.env.VALIDATION_DISABLE_OUTBOUND === "1")
+    return { attempted: 0, delivered: 0, failed: 0 };
   await ensurePushSchema();
   let delivered = 0;
   let failed = 0;
@@ -287,7 +334,7 @@ async function deliver(subscriptions: StoredSubscription[], message: PushMessage
       let responseStatus: number | null = null;
       let errorText = "";
       try {
-        await sendToSubscription(subscription, message);
+        await sendToSubscription(subscription, { ...message, url: destinationFor(subscription, message.url, { owner: process.env.APP_URL?.trim() || "", employee: publicTeamBaseUrl }) });
         delivered += 1;
         await getSql()`UPDATE push_subscriptions SET last_used_at = NOW(), failure_count = 0, last_error = '', updated_at = NOW() WHERE id = ${subscription.id}`;
       } catch (error) {
@@ -328,19 +375,46 @@ async function employeeSubscriptions(input: { business: Business; recipientEmplo
   await ensurePushSchema();
   if (input.recipientEmployeeId) {
     return await getSql()`
-      SELECT id, endpoint, p256dh, auth FROM push_subscriptions
+      SELECT id, endpoint, p256dh, auth, origin, audience_type, business FROM push_subscriptions
       WHERE audience_type = 'employee' AND business = ${input.business}
         AND employee_id = ${input.recipientEmployeeId} AND active = TRUE
       ORDER BY updated_at DESC
     ` as unknown as StoredSubscription[];
   }
   return await getSql()`
-    SELECT id, endpoint, p256dh, auth FROM push_subscriptions
+    SELECT id, endpoint, p256dh, auth, origin, audience_type, business FROM push_subscriptions
     WHERE audience_type = 'employee' AND business = ${input.business}
       AND active = TRUE
       AND (${input.excludeEmployeeId || null}::uuid IS NULL OR employee_id <> ${input.excludeEmployeeId || null}::uuid)
     ORDER BY updated_at DESC
   ` as unknown as StoredSubscription[];
+}
+
+export async function notifyPosStationsOfOnlineOrder(input: {
+  business: Business;
+  orderId: string;
+  displayNumber: string;
+  source: string;
+  serviceType: string;
+  customerName: string;
+}) {
+  await ensurePushSchema();
+  const subscriptions = await getSql()`
+    SELECT id, endpoint, p256dh, auth, origin, audience_type, business FROM push_subscriptions
+    WHERE audience_type = 'employee' AND business = ${input.business}
+      AND active = TRUE AND device_label LIKE 'POS/KDS:%'
+    ORDER BY updated_at DESC
+  ` as unknown as StoredSubscription[];
+  const service = clean(input.serviceType, 60).replaceAll("_", " ").toUpperCase();
+  const customer = clean(input.customerName, 100);
+  return deliver(subscriptions, {
+    title: `NEW ${service || "ONLINE"} ORDER #${clean(input.displayNumber, 30)}`,
+    body: customer ? `${customer} · Tap to open the kitchen queue.` : "Tap to open the kitchen queue.",
+    url: "/pos/deli/kitchen",
+    tag: `new-order-${clean(input.orderId, 100)}`,
+    category: "online_order",
+    business: input.business,
+  });
 }
 
 function senderLabel(value: string): string {
@@ -436,8 +510,8 @@ export async function notifyOwnersOfOperationalPush(input: {
 export async function sendTestPush(actor: PushActor) {
   await ensurePushSchema();
   const subscriptions = actor.type === "owner"
-    ? await getSql()`SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE audience_type = 'owner' AND LOWER(owner_email) = LOWER(${actor.email}) AND active = TRUE` as unknown as StoredSubscription[]
-    : await getSql()`SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE audience_type = 'employee' AND employee_id = ${actor.employeeId} AND business = ${actor.business} AND active = TRUE` as unknown as StoredSubscription[];
+    ? await getSql()`SELECT id, endpoint, p256dh, auth, origin, audience_type, business FROM push_subscriptions WHERE audience_type = 'owner' AND LOWER(owner_email) = LOWER(${actor.email}) AND active = TRUE` as unknown as StoredSubscription[]
+    : await getSql()`SELECT id, endpoint, p256dh, auth, origin, audience_type, business FROM push_subscriptions WHERE audience_type = 'employee' AND employee_id = ${actor.employeeId} AND business = ${actor.business} AND active = TRUE` as unknown as StoredSubscription[];
   return deliver(subscriptions, {
     title: "Corner Ops notifications are working",
     body: actor.type === "owner" ? "Owner messages and operational alerts can reach this device." : "Messages and employee alerts can reach this device.",

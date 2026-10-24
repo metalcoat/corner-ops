@@ -119,7 +119,6 @@ export function ensureRezkuProductSalesSchema(): Promise<void> {
   if (!productSalesSchemaPromise) {
     productSalesSchemaPromise = (async () => {
       await ensureSchema();
-      const sql = getSql();
     })().catch((error) => {
       productSalesSchemaPromise = null;
       throw error;

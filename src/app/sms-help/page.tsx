@@ -1,10 +1,12 @@
+import PolicyPage from "../policy-page/policy-page";
+
 export const metadata = {
   title: "SMS Help | Corner Deli",
 };
 
 export default function SmsHelpPage() {
   return (
-    <main style={{ maxWidth: 820, margin: "0 auto", padding: "2rem 1.25rem", lineHeight: 1.6 }}>
+    <PolicyPage>
       <h1>Corner Deli SMS Help</h1>
       <p>
         Corner Deli uses SMS for employee operational communications such as schedules, schedule
@@ -19,6 +21,6 @@ export default function SmsHelpPage() {
         and data rates may apply.
       </p>
       <p><a href="/privacy">SMS Privacy Policy</a> · <a href="/terms">SMS Terms and Conditions</a></p>
-    </main>
+    </PolicyPage>
   );
 }

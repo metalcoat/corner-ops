@@ -61,6 +61,7 @@ type Props = {
   timeOff: ScheduleTimeOff[];
   busy: boolean;
   runAction: (body: Record<string, unknown>, success: string) => Promise<Record<string, unknown> | null>;
+  deleteTimeOff: (request: ScheduleTimeOff) => Promise<void>;
 };
 
 type EditorState = {
@@ -304,7 +305,7 @@ function TimeSelect({ value, onChange, required = false, allowBlank = false, opt
   </select>;
 }
 
-export default function ScheduleBoard({ business, employees, shifts, timeOff, busy, runAction }: Props) {
+export default function ScheduleBoard({ business, employees, shifts, timeOff, busy, runAction, deleteTimeOff }: Props) {
   const [weekStart, setWeekStart] = useState(() => startOfMonday(new Date()));
   const [copiedShift, setCopiedShift] = useState<ScheduleShift | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -751,8 +752,8 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
                 }}
                 onDrop={(event) => void onDrop(event, day, row.employeeId)}
               >
-                {approvedDayOff && <div className="scheduleTimeOffCellBadge approved">Approved off</div>}
-                {!approvedDayOff && pendingDayOff && <div className="scheduleTimeOffCellBadge pending">Time off pending</div>}
+                {approvedDayOff && <div className="scheduleTimeOffCellBadge approved">Approved off<button type="button" disabled={busy} title={`Delete ${row.name}'s time off`} aria-label={`Delete ${row.name}'s time off`} onClick={() => void deleteTimeOff(approvedDayOff)}>×</button></div>}
+                {!approvedDayOff && pendingDayOff && <div className="scheduleTimeOffCellBadge pending">Time off pending<button type="button" disabled={busy} title={`Delete ${row.name}'s time-off request`} aria-label={`Delete ${row.name}'s time-off request`} onClick={() => void deleteTimeOff(pendingDayOff)}>×</button></div>}
                 <div className="scheduleCellActions">
                   <button type="button" disabled={Boolean(approvedDayOff)} title={approvedDayOff ? `${row.name} has approved time off` : `Add ${row.name} shift`} onClick={() => setEditor(defaultEditor(row.employeeId, day, row.employee || undefined))}>+</button>
                   {copiedShift && <button type="button" disabled={Boolean(approvedDayOff)} onClick={() => void pasteShift(day, row.employeeId)}>Paste</button>}

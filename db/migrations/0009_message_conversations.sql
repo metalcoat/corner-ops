@@ -1,9 +1,10 @@
 -- Stable messaging channels with per-message recipient snapshots.
 -- A new employee can participate in future team messages without inheriting messages
 -- sent before their employee record existed.
+-- Safe to run again: dev and production already had parts of this from the app itself.
 
 ALTER TABLE public.employee_messages
-  ADD COLUMN conversation_key text;
+  ADD COLUMN IF NOT EXISTS conversation_key text;
 
 UPDATE public.employee_messages
 SET conversation_key = CASE
@@ -22,22 +23,37 @@ WHERE conversation_key IS NULL OR conversation_key = '';
 ALTER TABLE public.employee_messages
   ALTER COLUMN conversation_key SET NOT NULL;
 
-CREATE TABLE public.employee_message_recipients (
+CREATE TABLE IF NOT EXISTS public.employee_message_recipients (
   message_id uuid NOT NULL,
   employee_id uuid NOT NULL,
   created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY public.employee_message_recipients
-  ADD CONSTRAINT employee_message_recipients_pkey PRIMARY KEY (message_id, employee_id);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.employee_message_recipients'::regclass AND contype = 'p') THEN
+    ALTER TABLE ONLY public.employee_message_recipients
+    ADD CONSTRAINT employee_message_recipients_pkey PRIMARY KEY (message_id, employee_id);
+  END IF;
+END $$;
 
-ALTER TABLE ONLY public.employee_message_recipients
-  ADD CONSTRAINT employee_message_recipients_message_fkey
-  FOREIGN KEY (message_id) REFERENCES public.employee_messages(id) ON DELETE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.employee_message_recipients'::regclass AND contype = 'f' AND confrelid = 'public.employee_messages'::regclass) THEN
+    ALTER TABLE ONLY public.employee_message_recipients
+    ADD CONSTRAINT employee_message_recipients_message_fkey
+    FOREIGN KEY (message_id) REFERENCES public.employee_messages(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
-ALTER TABLE ONLY public.employee_message_recipients
-  ADD CONSTRAINT employee_message_recipients_employee_fkey
-  FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.employee_message_recipients'::regclass AND contype = 'f' AND confrelid = 'public.employees'::regclass) THEN
+    ALTER TABLE ONLY public.employee_message_recipients
+    ADD CONSTRAINT employee_message_recipients_employee_fkey
+    FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
 -- Team-message history is snapshotted to employees who already existed when the
 -- message was sent. This intentionally excludes employees added afterward.
@@ -77,9 +93,9 @@ UPDATE public.employee_messages
 SET message_type = 'Conversation'
 WHERE message_type IN ('Team', 'Announcement');
 
-CREATE INDEX employee_messages_conversation_idx
+CREATE INDEX IF NOT EXISTS employee_messages_conversation_idx
   ON public.employee_messages (business, conversation_key, created_at, id)
   WHERE deleted_at IS NULL;
 
-CREATE INDEX employee_message_recipients_employee_idx
+CREATE INDEX IF NOT EXISTS employee_message_recipients_employee_idx
   ON public.employee_message_recipients (employee_id, message_id);

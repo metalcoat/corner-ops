@@ -2,7 +2,8 @@ import { getSql } from "@/lib/db";
 import { ConflictError } from "@/lib/http";
 import { ensureScheduleMealSchema, normalizeScheduledMealFields } from "@/lib/schedule-meal-storage";
 import { normalizeScheduleTimeRange } from "@/lib/schedule-time-range";
-import { enforceScheduleTimeOff } from "@/lib/schedule-time-off";
+import { toTimestampDate } from "@/lib/timestamp-values";
+import { enforceScheduleTimeOff, scheduleTimeOffConflicts } from "@/lib/schedule-time-off";
 import type { Business } from "@/lib/types";
 
 function clean(value: unknown, max = 500): string {
@@ -85,12 +86,28 @@ export async function updateScheduleShiftSafely(input: {
     });
   }
 
+  // Taking someone off a shift for their time off (reassign, open or cancel) remembers them, so a week
+  // copy schedules them as usual instead of copying the day off. Giving the shift back clears it.
+  const currentEmployee = current.employee_id ? String(current.employee_id) : null;
+  let timeOffEmployeeId = current.time_off_employee_id ? String(current.time_off_employee_id) : null;
+  if (currentEmployee && (employeeId !== currentEmployee || status === "Cancelled")) {
+    const off = await scheduleTimeOffConflicts({
+      business: input.business,
+      employeeId: currentEmployee,
+      startsAt: toTimestampDate(current.starts_at) ?? start,
+      endsAt: toTimestampDate(current.ends_at) ?? end,
+    });
+    if (off.length) timeOffEmployeeId = currentEmployee;
+  }
+  if (employeeId && employeeId === timeOffEmployeeId && status !== "Cancelled") timeOffEmployeeId = null;
+
   const expectedUpdatedAt = input.expectedUpdatedAt
     ? new Date(input.expectedUpdatedAt).toISOString()
     : null;
   const updated = await sql`
     UPDATE schedule_shifts SET
       employee_id = ${employeeId},
+      time_off_employee_id = ${timeOffEmployeeId},
       position = ${clean(input.position ?? current.position, 100)},
       starts_at = ${start.toISOString()},
       ends_at = ${end.toISOString()},
