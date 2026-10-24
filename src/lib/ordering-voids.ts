@@ -37,6 +37,18 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
     `;
     if (!updated[0]) throw new OrderVoidError("This order changed while the void was being recorded.");
     await reverseLoyaltyForOrder(input.orderId,input.actor,reason);
+    // Food the kitchen never started goes back into stock; once started it's waste, left as sold.
+    if (order.status === "sent_to_kitchen" || order.status === "draft") {
+      await sql`
+        INSERT INTO ordering_inventory_movements(id,business,inventory_item_id,location_id,delta_quantity,unit,reason,order_id,order_item_id,inventory_link_id,related_movement_id,estimated_unit_cost_cents,note,source,created_by,details)
+        SELECT gen_random_uuid(),sale.business,sale.inventory_item_id,sale.location_id,-sale.delta_quantity,sale.unit,'reversal',sale.order_id,sale.order_item_id,sale.inventory_link_id,sale.id,sale.estimated_unit_cost_cents,sale.note,'order_void',${input.actor.id},jsonb_build_object('voidReason',${reason}::text)
+        FROM ordering_inventory_movements sale
+        WHERE sale.order_id=${input.orderId} AND sale.reason='sale' AND sale.delta_quantity<>0
+          AND NOT EXISTS(SELECT 1 FROM ordering_inventory_movements back WHERE back.related_movement_id=sale.id AND back.reason='reversal')`;
+    }
+    // A voided delivery comes off the driver's list (unless it was already delivered or returned).
+    await sql`UPDATE ordering_delivery_assignments SET status='CANCELLED',cancelled_at=NOW(),status_note=${`Order voided: ${reason}`.slice(0,500)},updated_at=NOW()
+      WHERE order_id=${input.orderId} AND status NOT IN ('DELIVERED','RETURNED','CANCELLED')`;
     await reconcileOrderTips(input.orderId,input.business);
     await sql`
       INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)
