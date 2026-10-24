@@ -53,6 +53,8 @@ export async function sendTransactionalEmail(input: {
   text: string;
   idempotencyKey?: string;
 }): Promise<{ configured: boolean; sent: number; failures: string[] }> {
+  if (process.env.LOCAL_DEVELOPMENT === "true" && process.env.VALIDATION_DISABLE_OUTBOUND === "1")
+    return { configured: false, sent: 0, failures: ["Outbound email is disabled in validation scripts."] };
   const recipients = (Array.isArray(input.to) ? input.to : [input.to])
     .map((value) => clean(value, 320).toLowerCase())
     .filter((value) => /^\S+@\S+\.\S+$/.test(value));

@@ -323,6 +323,8 @@ async function sendToSubscription(subscription: StoredSubscription, message: Pus
 }
 
 async function deliver(subscriptions: StoredSubscription[], message: PushMessage) {
+  if (process.env.LOCAL_DEVELOPMENT === "true" && process.env.VALIDATION_DISABLE_OUTBOUND === "1")
+    return { attempted: 0, delivered: 0, failed: 0 };
   await ensurePushSchema();
   let delivered = 0;
   let failed = 0;

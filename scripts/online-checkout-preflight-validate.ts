@@ -65,8 +65,8 @@ async function main(): Promise<void> {
         results.sendsAfterPassingPreflight = true;
       }
 
-      // A paid web draft that could not be sent rings the POS alert.
-      await sql`UPDATE ordering_orders SET paid_cents=total_cents,amount_due_cents=0,payment_status='paid' WHERE id=${noPhone.id}`;
+      // A paid web draft keeps ringing until staff resolve it, even after a day.
+      await sql`UPDATE ordering_orders SET paid_cents=total_cents,amount_due_cents=0,payment_status='paid',created_at=NOW()-INTERVAL '2 days' WHERE id=${noPhone.id}`;
       const waiting = await listWaitingOnlineOrders("Corner Deli");
       const alert = waiting.find((row) => String(row.id) === String(noPhone.id));
       if (!alert || alert.paid_not_sent !== true) throw new Error("A paid but unsent online order is missing from the POS alert list.");

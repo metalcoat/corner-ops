@@ -27,6 +27,7 @@ type TelnyxMessagePayload = {
 const SMS_CONCURRENCY = 6;
 
 function configuration() {
+  if (process.env.LOCAL_DEVELOPMENT === "true" && process.env.VALIDATION_DISABLE_OUTBOUND === "1") return null;
   const apiKey = process.env.TELNYX_API_KEY?.trim();
   const from = process.env.TELNYX_FROM_NUMBER?.trim();
   if (!apiKey || !from) return null;
@@ -162,6 +163,8 @@ export async function deliverSms(input: {
 }
 
 export async function sendTransactionalSms(phone: string, text: string) {
+  if (process.env.LOCAL_DEVELOPMENT === "true" && process.env.VALIDATION_DISABLE_OUTBOUND === "1")
+    throw new Error("Outbound SMS is disabled in validation scripts.");
   const configured = configuration();
   if (!configured) throw new Error("SMS verification is not configured.");
   const to = normalizeSmsPhone(phone);
