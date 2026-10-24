@@ -230,7 +230,8 @@ async function finishCompletion(session: Session, business: OrderingBusiness, ac
 async function completeWithTip(session: Session, business: OrderingBusiness, actor: OrderingActor, tipCents: number): Promise<TerminalPaymentOutcome> {
   if (session.status === "authorized") {
     const balance = await checkoutState(String(session.order_id), business, session.check_id || null);
-    const dueCents = Math.max(0, Number(balance.check?.amount_due_cents ?? balance.order.amount_due_cents));
+    // A voided order keeps its amount due; never capture a hold on it.
+    const dueCents = String(balance.order.status) === "cancelled" ? 0 : Math.max(0, Number(balance.check?.amount_due_cents ?? balance.order.amount_due_cents));
     if (dueCents === 0) {
       await voidTerminalAuthorization({ business, orderId: String(session.order_id), sessionId: String(session.id) });
       return { state: "failed", sessionId: String(session.id), message: "This order has nothing left to pay, so the card was released without charging it." };

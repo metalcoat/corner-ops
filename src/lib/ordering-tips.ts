@@ -146,7 +146,7 @@ export async function tipAction(
         periodStart = body.periodStart ? String(body.periodStart) : null,
         periodEnd = body.periodEnd ? String(body.periodEnd) : null,
         rows =
-          await sql`SELECT allocation.* FROM ordering_tip_allocations allocation JOIN ordering_orders orders ON orders.id=allocation.order_id WHERE allocation.business='Corner Deli' AND allocation.status='eligible' AND (${employeeId}::text IS NULL OR allocation.employee_id::text=${employeeId}) AND (${periodStart}::date IS NULL OR orders.paid_at::date>=${periodStart}::date) AND (${periodEnd}::date IS NULL OR orders.paid_at::date<=${periodEnd}::date) FOR UPDATE`;
+          await sql`SELECT allocation.* FROM ordering_tip_allocations allocation JOIN ordering_orders orders ON orders.id=allocation.order_id WHERE allocation.business='Corner Deli' AND allocation.status='eligible' AND (${employeeId}::text IS NULL OR allocation.employee_id::text=${employeeId}) AND (${periodStart}::date IS NULL OR (orders.paid_at AT TIME ZONE 'America/New_York')::date>=${periodStart}::date) AND (${periodEnd}::date IS NULL OR (orders.paid_at AT TIME ZONE 'America/New_York')::date<=${periodEnd}::date) FOR UPDATE`;
       if (!rows.length)
         throw new TipError("There are no eligible tips to pay out.");
       const id = randomUUID(),

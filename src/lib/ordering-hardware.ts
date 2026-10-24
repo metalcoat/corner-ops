@@ -756,6 +756,8 @@ export async function dispatchOrderPrintJobs(
     jobs =
       await sql`SELECT * FROM ordering_print_jobs WHERE order_id=${orderId} AND business=${business}
         AND (${includeKitchen} OR purpose<>'kitchen_production') AND (${jobId}::uuid IS NULL OR id=${jobId}::uuid)
+        -- A retry never prints a kitchen ticket for an order voided since it failed.
+        AND NOT (${retryOnly} AND purpose='kitchen_production' AND EXISTS(SELECT 1 FROM ordering_orders o WHERE o.id=ordering_print_jobs.order_id AND o.status='cancelled'))
         AND (
           (NOT ${retryOnly} AND status='queued')
           OR (${retryOnly} AND status='queued' AND queued_at<NOW()-INTERVAL '1 minute')

@@ -287,6 +287,12 @@ export default function CustomerOrder() {
   useEffect(() => {
     setAddressPortal(document.getElementById("delivery-address-top"));
   }, []);
+  // The priced review is a server draft built from these choices; once any of
+  // them changes, Place order must price a new draft instead of paying the old one.
+  useEffect(() => {
+    setReview(null);
+    setRewardApplied(false);
+  }, [serviceType, timing, scheduledFor, firstName, lastName, phone, email, deliveryAddress, deliveryUnit, deliveryInstructions]);
   const selectedDeliveryLocation = DELIVERY_LOCATION_PRESETS.find(
     (location) => location.id === selectedDeliveryLocationId,
   );
@@ -673,8 +679,25 @@ export default function CustomerOrder() {
           },
         ),
         body = await response.json();
+      if (body.paymentRecorded) {
+        // An earlier attempt was charged; the store has to send the order.
+        setReview(null);
+        setCart([]);
+        setMessage(body.error);
+        setBusy(false);
+        return;
+      }
       if (!response.ok)
         throw new Error(body.error || "Could not start secure checkout.");
+      if (body.recovered) {
+        // An earlier attempt was approved but its confirmation never arrived.
+        setReview(null);
+        setCart([]);
+        window.location.assign(
+          `/order/confirmation?orderId=${encodeURIComponent(body.order.id)}`,
+        );
+        return;
+      }
       setMxPayment(body);
       setPaymentOpen(true);
     } catch (e) {
@@ -696,6 +719,14 @@ export default function CustomerOrder() {
           },
         ),
         result = await response.json();
+      if (result.paymentRecorded) {
+        setMxPayment(null);
+        setPaymentOpen(false);
+        setReview(null);
+        setCart([]);
+        setMessage(result.error);
+        return;
+      }
       if (!response.ok)
         throw new Error(result.error || "Payment could not be verified.");
       setMxPayment(null);

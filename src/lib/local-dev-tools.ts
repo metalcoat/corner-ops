@@ -15,6 +15,9 @@ export function isProductionHost(host: string | null | undefined): boolean {
 
 export function localDevToolsAllowed(env: Record<string, string | undefined> = process.env, requestHost?: string | null): boolean {
   if (env.LOCAL_DEVELOPMENT !== "true") return false;
+  // The self-hosted production compose sets APP_ENV=production; a copied
+  // LOCAL_DEVELOPMENT line must never turn these tools on there.
+  if (env.APP_ENV?.trim().toLowerCase() === "production") return false;
   if (env.VERCEL || env.VERCEL_ENV) return false;
   if (isProductionHost(env.APP_URL)) return false;
   if (requestHost && isProductionHost(requestHost)) return false;

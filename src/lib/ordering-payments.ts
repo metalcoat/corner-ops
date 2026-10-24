@@ -154,6 +154,11 @@ export async function reverseTender(input: { orderId: string; business: Ordering
       await sql`INSERT INTO ordering_gift_card_ledger(id,gift_card_id,business,order_id,entry_type,delta_balance_cents,balance_after_cents,payment_transaction_id,operation_key,related_entry_id,created_by,approved_by,note,metadata) VALUES(${randomUUID()},${ledger.gift_card_id},${input.business},${input.orderId},'reversal',${amount},${balance},${reversalId},${`payment-reversal:${input.clientMutationId}`},${ledger.id},${input.actor.id},${input.actor.id},${reversalReason},${JSON.stringify({sourcePaymentId:source.id,partial:amount<Number(source.amount_cents)-reversed})}::jsonb)`;
       await sql`UPDATE ordering_gift_cards SET current_balance_cents=${balance},status=CASE WHEN status='depleted' THEN 'active' ELSE status END WHERE id=${ledger.gift_card_id}`;
     }
+    if (source.tender_type === "store_credit") {
+      // Give the account credit back; otherwise the customer silently loses it.
+      if (!source.customer_id) throw new PaymentConflictError("This account-credit payment has no customer to return the credit to.");
+      await sql`INSERT INTO ordering_store_credit_ledger(id,business,customer_id,order_id,entry_type,delta_balance_cents,reason,created_by,approved_by) VALUES(${randomUUID()},${input.business},${source.customer_id},${input.orderId},'reversal',${amount},${reversalReason},${input.actor.id},${input.actor.name})`;
+    }
     if(source.tender_type==="cash"&&source.details?.registerSessionId){
       // Cash leaves the drawer now, so post it to the station's currently open session; never rewrite a closed/counted session.
       const originalSessionId=String(source.details.registerSessionId),original=(await sql`SELECT id,terminal_id,status FROM ordering_register_sessions WHERE id=${originalSessionId} FOR UPDATE`)[0];
@@ -270,6 +275,8 @@ export async function commitTender(input: {
     `;
     const order = rows[0];
     if (!order) throw new PaymentConflictError("Order was not found.");
+    // A void leaves amount_due in place, so the balance alone would accept money here.
+    if (order.status === "cancelled") throw new PaymentConflictError("This order was voided, so it cannot take a payment.");
     const check = input.checkId ? (await sql`SELECT id,total_cents,paid_cents,amount_due_cents FROM ordering_checks WHERE id=${input.checkId} AND order_id=${input.orderId} FOR UPDATE`)[0] : null;
     if (input.checkId && !check) throw new PaymentConflictError("Check was not found.");
     const due = Number(check?.amount_due_cents ?? order.amount_due_cents);

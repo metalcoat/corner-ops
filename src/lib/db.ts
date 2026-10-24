@@ -32,9 +32,27 @@ function taggedQuery(query: (text: string, values?: unknown[]) => Promise<{ rows
   };
 }
 
+/**
+ * One pool per process. An idle client that loses its connection (Postgres
+ * restart, network blip) emits "error" on the pool; without a listener Node
+ * treats it as unhandled and the whole app exits. A request waiting for a
+ * free client gives up after 10 s instead of hanging, and a transaction left
+ * open and idle (a bug, or a request that died mid-way) is closed by Postgres
+ * after 5 minutes so its row locks don't stall every register.
+ */
+function createPostgresPool(): Pool {
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    connectionTimeoutMillis: 10_000,
+    idle_in_transaction_session_timeout: 300_000,
+  });
+  pool.on("error", (error) => console.error("[db] idle PostgreSQL client error", error));
+  return pool;
+}
+
 function getPostgresClient(): SqlClient {
   if (!postgresPool) {
-    postgresPool = new Pool({ connectionString: process.env.DATABASE_URL });
+    postgresPool = createPostgresPool();
   }
 
   return taggedQuery((text, values) => postgresPool!.query(text, values));
@@ -57,6 +75,11 @@ export function getSql(): SqlClient {
   return queryClient;
 }
 
+/** True while running inside withTransaction (nested calls join the outer transaction). */
+export function inTransaction(): boolean {
+  return Boolean(transactionClient.getStore());
+}
+
 /**
  * Runs queries on the shared connection even inside withTransaction, so a
  * record (like a processor refund that already happened) survives a rollback.
@@ -71,18 +94,24 @@ export async function withTransaction<T>(operation: () => Promise<T>): Promise<T
     throw new Error("Interactive transactions are available only through the local PostgreSQL driver.");
   }
   if (transactionClient.getStore()) return operation();
-  if (!postgresPool) postgresPool = new Pool({ connectionString: process.env.DATABASE_URL });
+  if (!postgresPool) postgresPool = createPostgresPool();
   const client = await postgresPool.connect();
+  let broken: Error | undefined;
   try {
     await client.query("BEGIN");
     const result = await transactionClient.run(taggedQuery((text, values) => client.query(text, values)), operation);
     await client.query("COMMIT");
     return result;
   } catch (error) {
-    await client.query("ROLLBACK");
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      // The connection is unusable; discard it rather than return it to the pool.
+      broken = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+    }
     throw error;
   } finally {
-    client.release();
+    client.release(broken);
   }
 }
 

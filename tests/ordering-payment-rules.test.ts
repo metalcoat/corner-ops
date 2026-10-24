@@ -60,6 +60,7 @@ test("local dev tools are refused on production hosts even with LOCAL_DEVELOPMEN
   assert.equal(localDevToolsAllowed({ LOCAL_DEVELOPMENT: "true", VERCEL_ENV: "production" }), false);
   assert.equal(localDevToolsAllowed({ LOCAL_DEVELOPMENT: "true", APP_URL: "https://corner-ops.vercel.app" }), false);
   assert.equal(localDevToolsAllowed({ LOCAL_DEVELOPMENT: "true" }, "corner-ops.vercel.app"), false);
+  assert.equal(localDevToolsAllowed({ LOCAL_DEVELOPMENT: "true", APP_ENV: "production" }), false);
   assert.equal(isProductionHost("https://preview-123.vercel.app/x"), true);
   assert.equal(isProductionHost("127.0.0.1:3000"), false);
 });

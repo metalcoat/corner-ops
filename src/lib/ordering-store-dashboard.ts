@@ -7,16 +7,16 @@ export async function orderingStoreDashboard(){
   const sql=getSql();
   const [summary,timedOrders,unpaidOrders,deliveries,activity,openOrders]=await Promise.all([
     sql`SELECT
-      COUNT(*) FILTER(WHERE created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York'))::int orders_today,
+      COUNT(*) FILTER(WHERE created_at>=(date_trunc('day',NOW() AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York'))::int orders_today,
       COUNT(*) FILTER(WHERE status NOT IN('completed','cancelled'))::int open_orders,
       COUNT(*) FILTER(WHERE timing_mode='future' AND scheduled_for>=NOW() AND scheduled_for<NOW()+INTERVAL '4 hours' AND status NOT IN('completed','cancelled'))::int timed_upcoming,
       COUNT(*) FILTER(WHERE amount_due_cents>0 AND status NOT IN('completed','cancelled'))::int unpaid_open,
-      COALESCE(SUM(total_cents) FILTER(WHERE created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York') AND status<>'cancelled'),0)::int sales_cents
+      COALESCE(SUM(total_cents) FILTER(WHERE created_at>=(date_trunc('day',NOW() AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York') AND status NOT IN('draft','cancelled')),0)::int sales_cents
       FROM ordering_orders WHERE business='Corner Deli'`,
     sql`SELECT id,display_number,status,service_type,scheduled_for,COALESCE(NULLIF(trim(first_name_snapshot||' '||last_name_snapshot),''),'Guest') customer_name
       FROM ordering_orders WHERE business='Corner Deli' AND timing_mode='future' AND scheduled_for>=NOW()-INTERVAL '30 minutes' AND scheduled_for<NOW()+INTERVAL '8 hours' AND status NOT IN('completed','cancelled') ORDER BY scheduled_for LIMIT 30`,
     sql`SELECT id,display_number,status,payment_status,service_type,created_at,scheduled_for,amount_due_cents,COALESCE(NULLIF(trim(first_name_snapshot||' '||last_name_snapshot),''),'Guest') customer_name
-      FROM ordering_orders WHERE business='Corner Deli' AND created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York') AND amount_due_cents>0 AND status<>'cancelled' ORDER BY COALESCE(scheduled_for,created_at),created_at LIMIT 60`,
+      FROM ordering_orders WHERE business='Corner Deli' AND created_at>=(date_trunc('day',NOW() AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York') AND amount_due_cents>0 AND status<>'cancelled' ORDER BY COALESCE(scheduled_for,created_at),created_at LIMIT 60`,
     sql`SELECT d.id delivery_id,d.status,d.status delivery_status,d.driver_employee_id,d.driver_employee_id assigned_employee_id,d.assigned_at,d.picked_up_at,d.en_route_at,d.arrived_at,d.delivered_at,d.failed_at,d.updated_at,
       o.display_number,o.status order_status,o.timing_mode,o.scheduled_for,o.created_at,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,e.name driver_name,
       address.formatted_address delivery_address,address.latitude::double precision destination_latitude,address.longitude::double precision destination_longitude,
@@ -29,11 +29,11 @@ export async function orderingStoreDashboard(){
           AND EXISTS(SELECT 1 FROM ordering_delivery_tracking_sessions s WHERE s.id=l.tracking_session_id AND s.stopped_at IS NULL)
         ORDER BY l.captured_at DESC LIMIT 1
       )location ON TRUE
-      WHERE d.business='Corner Deli' AND (d.status NOT IN('DELIVERED','RETURNED','CANCELLED') OR d.updated_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York'))
+      WHERE d.business='Corner Deli' AND (d.status NOT IN('DELIVERED','RETURNED','CANCELLED') OR d.updated_at>=(date_trunc('day',NOW() AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York'))
       ORDER BY CASE d.status WHEN 'DELIVERY_FAILED' THEN 0 WHEN 'NO_CONTACT' THEN 1 WHEN 'EN_ROUTE' THEN 2 WHEN 'READY_FOR_DRIVER' THEN 3 ELSE 4 END,COALESCE(o.scheduled_for,o.created_at) LIMIT 60`,
     sql`SELECT a.id,a.action,a.new_status,a.created_at,o.display_number,e.name employee_name
       FROM ordering_delivery_audit a JOIN ordering_orders o ON o.id=a.order_id LEFT JOIN employees e ON e.id=a.employee_id
-      WHERE o.business='Corner Deli' AND a.created_at>=(CURRENT_DATE AT TIME ZONE 'America/New_York') ORDER BY a.created_at DESC LIMIT 30`,
+      WHERE o.business='Corner Deli' AND a.created_at>=(date_trunc('day',NOW() AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York') ORDER BY a.created_at DESC LIMIT 30`,
     // Every open order with where it is right now, for the status board monitor.
     sql`SELECT o.id,o.display_number,o.status,o.service_type,o.timing_mode,o.scheduled_for,o.created_at,o.updated_at,
       COALESCE(NULLIF(trim(o.first_name_snapshot||' '||LEFT(o.last_name_snapshot,1)),''),'Guest') customer_name,

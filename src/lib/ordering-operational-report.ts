@@ -4,21 +4,13 @@ import { ensureOrderingGiftCardSchema } from "@/lib/ordering-gift-card-schema";
 import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { salesTaxReport } from "@/lib/ordering-sales-tax";
+import { businessDayBoundary } from "@/lib/business-day";
 
 const MAX_RANGE_DAYS = 366;
 const OVERDUE_MINUTES = 30;
 const integer = (value: unknown) => Number(value || 0);
 
-function dateBoundary(value: string, end = false): Date {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("Report dates must use YYYY-MM-DD.");
-  const target = new Date(`${value}T12:00:00Z`); if (end) target.setUTCDate(target.getUTCDate()+1);
-  const key = target.toISOString().slice(0,10);
-  const approximate = new Date(`${key}T04:00:00Z`);
-  const parts = new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(approximate);
-  const values=Object.fromEntries(parts.map(part=>[part.type,part.value]));
-  const representedHour=Number(values.hour); const representedMinute=Number(values.minute);
-  return new Date(approximate.getTime()+(4-representedHour)*3_600_000-representedMinute*60_000);
-}
+const dateBoundary = businessDayBoundary;
 
 export async function orderingOperationalReport(input: { business: OrderingBusiness; start: string; end: string }) {
   await Promise.all([ensureOrderingPromotionSchema(), ensureOrderingDeliverySchema(), ensureOrderingGiftCardSchema()]);

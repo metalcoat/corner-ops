@@ -34,6 +34,16 @@ function items(value: unknown): VariantConfiguredOrderItemInput[] {
         row.modifierQuantities && typeof row.modifierQuantities === "object"
           ? (row.modifierQuantities as Record<string, number>)
           : {},
+      // Light / extra choices ("Light Mayo"): only the three known levels.
+      modifierAmounts:
+        row.modifierAmounts && typeof row.modifierAmounts === "object"
+          ? Object.fromEntries(
+              Object.entries(row.modifierAmounts as Record<string, unknown>).filter(
+                (entry): entry is [string, "light" | "normal" | "heavy"] =>
+                  entry[1] === "light" || entry[1] === "normal" || entry[1] === "heavy",
+              ),
+            )
+          : {},
       modifierDeclines: Array.isArray(row.modifierDeclines)
         ? row.modifierDeclines.map(String)
         : [],
@@ -48,6 +58,28 @@ function items(value: unknown): VariantConfiguredOrderItemInput[] {
       specialInstructions: String(row.specialInstructions || "").slice(0, 500),
     };
   });
+}
+
+/**
+ * The website menu hides items and categories turned off for the web channel
+ * (POS-only, staff items, retired categories); a hand-built request must not
+ * be able to order them either. Mirrors the filters in orderingMenu(…, "web").
+ */
+async function assertItemsShownOnWebsite(itemIds: string[]) {
+  const ids = [...new Set(itemIds.filter(Boolean))];
+  if (!ids.length) return;
+  const shown = await getSql()`
+    SELECT i.id::text AS id
+    FROM ordering_menu_items i
+    LEFT JOIN ordering_item_overrides o ON o.item_id=i.id
+    LEFT JOIN ordering_item_channel_overrides ch ON ch.item_id=i.id AND ch.channel='web'
+    JOIN ordering_menu_categories c ON c.id=COALESCE(ch.category_id,o.category_id,i.category_id) AND c.business=i.business AND c.active=TRUE
+    LEFT JOIN ordering_category_overrides co ON co.category_id=c.id
+    LEFT JOIN ordering_category_channel_overrides cch ON cch.category_id=c.id AND cch.channel='web'
+    WHERE i.business='Corner Deli' AND i.active=TRUE AND i.id::text = ANY(${ids})
+      AND COALESCE(ch.visible,o.visible,TRUE)=TRUE
+      AND COALESCE(cch.visible,co.visible,TRUE)=TRUE`;
+  if (shown.length !== ids.length) throw new Error("This menu item is not available online.");
 }
 
 export async function POST(request: Request) {
@@ -172,6 +204,8 @@ export async function POST(request: Request) {
       customerId = String(created.customer.id);
       await sql`UPDATE ordering_customers SET email=CASE WHEN email='' THEN ${email} ELSE email END WHERE id=${customerId}`;
     }
+    const cartItems = items(body.items);
+    await assertItemsShownOnWebsite(cartItems.map((item) => item.itemId));
     const order = await createTimedDraftOrder({
       business: "Corner Deli",
       source: "web",
@@ -183,7 +217,7 @@ export async function POST(request: Request) {
       createdBy: `web:${sessionHash.slice(0, 16)}`,
       createdByName: "Website guest",
       orderOrigin: "web",
-      items: items(body.items),
+      items: cartItems,
       timingMode,
       requestedFor,
     });
@@ -248,7 +282,7 @@ export async function POST(request: Request) {
     const message =
       error instanceof Error ? error.message : "The cart could not be priced.";
     const safe =
-      /^(Add at least|An invalid|Choose|The selected|This item|This menu item|Menu item|Item quantity|Required|Invalid|A selected|Ordering|Pickup|Delivery|Future)/.test(
+      /^(Add at least|An invalid|Choose|The selected|This item|This menu item|Menu item|Item quantity|Required|Invalid|A selected|Ordering|Pickup|Delivery|Future|That time|ASAP ordering|Modifier choices|Modifier intensity)/.test(
         message,
       ) || message.endsWith("is currently unavailable.");
     return isoJson(

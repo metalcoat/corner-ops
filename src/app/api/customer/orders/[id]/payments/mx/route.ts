@@ -15,6 +15,7 @@ import {
   PaymentConflictError,
 } from "@/lib/ordering-payments";
 import {
+  preflightDraftSubmit,
   submitDraftOrder,
   OrderConflictError,
 } from "@/lib/ordering-order-lifecycle";
@@ -22,6 +23,7 @@ import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
 import { sendCustomerOrderConfirmation } from "@/lib/customer-order-confirmation";
 import {
   ensureMxPaymentSchema,
+  findMxPaymentByReplayId,
   initializeMxPayment,
   MxMerchantError,
   newReplayId,
@@ -40,6 +42,64 @@ async function owned(request: Request, id: string) {
     )[0];
   return row ? { row, hash } : null;
 }
+type Actor = { id: string; name: string; type: "web" };
+type CheckoutSession = Record<string, unknown>;
+
+/** Records an MX approval for a checkout session, then sends the order to the kitchen. */
+async function applyApprovedPayment(orderId: string, session: CheckoutSession, data: Record<string, unknown>, actor: Actor) {
+  if (Math.round(Number(data.amount) * 100) !== Number(session.amount_cents))
+    throw new MxMerchantError("Payment amount does not match the order.");
+  const reference = String(data.id || data.reference || "");
+  if (!reference) throw new MxMerchantError("MX Merchant did not return a payment reference.");
+  const card = (data.cardAccount || {}) as Record<string, unknown>;
+  const replayId = Number(session.replay_id);
+  const payment = await commitTender({
+    orderId,
+    business,
+    tenderType: "card",
+    amountTenderedCents: Number(session.amount_cents),
+    clientMutationId: String(session.client_mutation_id),
+    actor,
+    providerApproval: {
+      provider: "mx_merchant",
+      transactionReference: reference,
+      brand: String(card.cardType || ""),
+      last4: String(card.last4 || "").slice(-4),
+      details: { replayId, channel: "online" },
+    },
+  });
+  await getSql()`UPDATE ordering_mx_checkout_sessions SET status='completed',provider_transaction_reference=${reference},completed_at=NOW()WHERE id=${String(session.id)}`;
+  // The card is charged now. A send rule that fails here (it passed the
+  // preflight at initialize, so something changed in between) must not look
+  // like a failed payment: the customer is told it was charged and the order
+  // stays on the POS alert list as a paid draft until staff send it.
+  let order: Record<string, unknown> | null = null;
+  try {
+    order = (await submitDraftOrder(orderId, business, actor)).order as Record<string, unknown>;
+  } catch (error) {
+    if (!(error instanceof OrderConflictError)) throw error;
+    console.error(`[online-checkout] order ${orderId} was paid but not sent: ${error.message}`);
+    return { payment, order: null, sendError: error.message };
+  }
+  try {
+    await dispatchSubmittedOrderPrintJobs(orderId, business);
+  } catch (error) {
+    // Print retries and the POS alert cover a failed first print attempt.
+    console.error(`[online-checkout] first print attempt for order ${orderId} failed`, error);
+  }
+  after(() => sendCustomerOrderConfirmation(orderId).then(() => {}));
+  return { payment, order, sendError: "" };
+}
+
+function paidButNotSent(message: string) {
+  return isoJson(
+    {
+      error: `Your card was charged, but your order still needs a quick check by the store before it is made (${message}) The store has been alerted. Please don't pay again.`,
+      paymentRecorded: true,
+    },
+    { status: 409 },
+  );
+}
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -49,22 +109,34 @@ export async function POST(
       owner = await owned(request, orderId);
     if (!owner) return unauthorized();
     const body = (await request.json()) as Record<string, unknown>,
-      actor = {
+      actor: Actor = {
         id: `web:${owner.hash.slice(0, 16)}`,
         name: "Online customer",
-        type: "web" as const,
+        type: "web",
       },
       sql = getSql();
-    if (body.action === "pay_later") {
-      const submitted = await submitDraftOrder(orderId, business, actor);
-      await dispatchSubmittedOrderPrintJobs(orderId, business);
-      after(() => sendCustomerOrderConfirmation(orderId).then(() => {}));
-      return isoJson({ order: submitted.order }, { status: 201 });
-    }
     await ensureMxPaymentSchema();
     if (body.action === "initialize") {
       if (owner.row.status !== "draft")
         throw new MxMerchantError("This order is no longer awaiting payment.");
+      // An earlier attempt may have been approved at MX while its confirm never
+      // reached us (lost connection, timeout). Apply it instead of charging again.
+      const earlier = await sql`SELECT * FROM ordering_mx_checkout_sessions WHERE order_id=${orderId} AND business=${business} AND status='initialized' AND created_at>NOW()-INTERVAL '6 hours' ORDER BY created_at DESC LIMIT 5`;
+      for (const session of earlier) {
+        let found: Record<string, unknown> | null;
+        try {
+          found = await findMxPaymentByReplayId(Number(session.replay_id));
+        } catch {
+          throw new MxMerchantError("We couldn't check on your earlier payment attempt. Please wait a minute and try again.");
+        }
+        if (!found || !String(found.status || "").toLowerCase().includes("approve")) continue;
+        const applied = await applyApprovedPayment(orderId, session, found, actor);
+        if (applied.sendError) return paidButNotSent(applied.sendError);
+        return isoJson({ recovered: true, payment: applied.payment, order: applied.order }, { status: 201 });
+      }
+      // Run every send rule now, so hours, menu schedules or the delivery
+      // minimum stop the customer before the card is charged.
+      await preflightDraftSubmit(orderId, business, actor);
       const state = await checkoutState(orderId, business),
         amount = Number(state.order.amount_due_cents);
       if (amount <= 0)
@@ -94,30 +166,9 @@ export async function POST(
     if (!session || session.status !== "initialized")
       throw new MxMerchantError("This payment session expired.");
     const data = await retrieveMxPayment(replayId);
-    if (Math.round(Number(data.amount) * 100) !== Number(session.amount_cents))
-      throw new MxMerchantError("Payment amount does not match the order.");
-    const reference = String(data.id || data.reference || ""),
-      card = (data.cardAccount || {}) as Record<string, unknown>;
-    const payment = await commitTender({
-      orderId,
-      business,
-      tenderType: "card",
-      amountTenderedCents: Number(session.amount_cents),
-      clientMutationId: String(session.client_mutation_id),
-      actor,
-      providerApproval: {
-        provider: "mx_merchant",
-        transactionReference: reference,
-        brand: String(card.cardType || ""),
-        last4: String(card.last4 || "").slice(-4),
-        details: { replayId, channel: "online" },
-      },
-    });
-    await sql`UPDATE ordering_mx_checkout_sessions SET status='completed',provider_transaction_reference=${reference},completed_at=NOW()WHERE id=${session.id}`;
-    const submitted = await submitDraftOrder(orderId, business, actor);
-    await dispatchSubmittedOrderPrintJobs(orderId, business);
-    after(() => sendCustomerOrderConfirmation(orderId).then(() => {}));
-    return isoJson({ payment, order: submitted.order }, { status: 201 });
+    const applied = await applyApprovedPayment(orderId, session, data, actor);
+    if (applied.sendError) return paidButNotSent(applied.sendError);
+    return isoJson({ payment: applied.payment, order: applied.order }, { status: 201 });
   } catch (e) {
     if (
       e instanceof MxMerchantError ||

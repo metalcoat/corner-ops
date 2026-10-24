@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { getSql, withTransaction } from "@/lib/db";
+import { getSql, inTransaction, withTransaction } from "@/lib/db";
 import { depleteInventoryForOrder } from "@/lib/ordering-inventory";
 import { ensureOrderingInventorySchema } from "@/lib/ordering-inventory-schema";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
@@ -90,15 +90,40 @@ type ModifierSnapshot = {
     import("@/lib/ordering-pizza-toppings").PizzaToppingAmount | null;
 };
 
+// Cancelling a sent order goes through the void flow (manager, reason,
+// loyalty and tip reversal), never through a kitchen status change.
 const transitions: Record<KitchenOrderStatus, readonly KitchenOrderStatus[]> = {
-  sent_to_kitchen: ["in_progress", "cancelled"],
-  in_progress: ["ready", "cancelled"],
-  ready: ["completed", "cancelled"],
+  sent_to_kitchen: ["in_progress"],
+  in_progress: ["ready"],
+  ready: ["completed"],
   completed: [],
   cancelled: [],
 };
 
 export class OrderConflictError extends Error {}
+
+/** Thrown inside the transaction to roll back a checkout preflight. */
+class DraftPreflightPassed extends Error {}
+
+/**
+ * A preflight's repricing must never persist. At top level its own
+ * transaction rolls back; nested inside a caller's transaction (which
+ * withTransaction joins), a savepoint undoes it.
+ */
+async function rollbackOnPreflight<T>(preflight: boolean, run: () => Promise<T>): Promise<T | null> {
+  const savepoint = preflight && inTransaction();
+  const sql = getSql();
+  if (savepoint) await sql`SAVEPOINT draft_preflight`;
+  try {
+    const value = await run();
+    if (savepoint) await sql`RELEASE SAVEPOINT draft_preflight`;
+    return value;
+  } catch (error) {
+    if (savepoint) await sql`ROLLBACK TO SAVEPOINT draft_preflight`;
+    if (error instanceof DraftPreflightPassed) return null;
+    throw error;
+  }
+}
 
 export async function reopenOrderForAdditions(
   orderId: string,
@@ -398,14 +423,22 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
     subtotal += lineTotal;
   }
 
-  await assertMenuTargetsAvailable({
-    business: order.business,
-    at:
-      order.timing_mode === "future" && order.scheduled_for
-        ? new Date(order.scheduled_for)
-        : new Date(),
-    targets: availabilityTargets,
-  });
+  try {
+    await assertMenuTargetsAvailable({
+      business: order.business,
+      at:
+        order.timing_mode === "future" && order.scheduled_for
+          ? new Date(order.scheduled_for)
+          : new Date(),
+      targets: availabilityTargets,
+    });
+  } catch (error) {
+    // A menu schedule rule (breakfast, lunch) is a send rule the customer can
+    // act on, not a server fault.
+    if (error instanceof Error && / is not available for the scheduled fulfillment time\.$/.test(error.message))
+      throw new OrderConflictError(error.message);
+    throw error;
+  }
 
   const total = Math.max(
     0,
@@ -431,13 +464,34 @@ export async function submitDraftOrder(
   actor: OrderingActor,
   override?: { approved: boolean; reason: string },
 ) {
+  return (await runDraftSubmit(orderId, business, actor, override, false))!;
+}
+
+/**
+ * Runs every send rule (ordering hours, menu schedules, delivery minimum and
+ * fee, prices, sold-out items, customer details) without sending, and rolls
+ * back. Online checkout calls it before the card is charged, so a rule that
+ * would block the send is shown to the customer instead of after payment.
+ * Throws OrderConflictError like submitDraftOrder.
+ */
+export async function preflightDraftSubmit(orderId: string, business: OrderingBusiness, actor: OrderingActor): Promise<void> {
+  await runDraftSubmit(orderId, business, actor, undefined, true);
+}
+
+async function runDraftSubmit(
+  orderId: string,
+  business: OrderingBusiness,
+  actor: OrderingActor,
+  override: { approved: boolean; reason: string } | undefined,
+  preflight: boolean,
+) {
   await ensureOrderingPosSchema();
   await ensureOrderingAddressSchema();
   await ensureOrderingMenuOverrideSchema();
   await ensureOrderingAccountSchema();
   await ensureRestaurantPlatformSchema();
   await ensureOrderingInventorySchema();
-  const result = await withTransaction(async () => {
+  const result = await rollbackOnPreflight(preflight, () => withTransaction(async () => {
     // Draft pricing follows current promotion configuration until Send locks it.
     await applyPromotionsToOrder(orderId);
     const sql = getSql();
@@ -470,6 +524,7 @@ export async function submitDraftOrder(
       ? await sql`SELECT event_type,details FROM ordering_order_events WHERE order_id=${orderId} AND created_at>=${reopenRows[0].created_at} AND event_type IN('order_item_cancelled','order_fulfillment_changed') ORDER BY created_at,id`
       : [];
     if (reopenDetails && !addedItemIds.length && !adjustmentEvents.length) {
+      if (preflight) throw new DraftPreflightPassed();
       const priorStatus = ["sent_to_kitchen", "in_progress", "ready", "completed"].includes(String(reopenDetails.previousStatus)) ? String(reopenDetails.previousStatus) : "sent_to_kitchen";
       const restored = await sql`UPDATE ordering_orders SET status=${priorStatus},locked_at=NOW(),version=version+1,updated_at=NOW() WHERE id=${orderId} AND business=${business} AND status='draft' AND version=${order.version} RETURNING *`;
       if (!restored.length) throw new OrderConflictError("This order changed while checkout was opening. Refresh and try again.");
@@ -590,6 +645,8 @@ export async function submitDraftOrder(
       );
     }
     await revalidateDraft(order);
+    // Preflight: every send rule above passed; roll back the repricing and stop.
+    if (preflight) throw new DraftPreflightPassed();
     const ticketLines = reopenDetails
       ? (addedItemIds.length ? await snapshotAndFormatOrder(orderId, addedItemIds) : [])
       : await snapshotAndFormatOrder(orderId);
@@ -665,7 +722,8 @@ export async function submitDraftOrder(
       await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${updated[0].version},'order_addition_submitted',${actor.type},${actor.id},${JSON.stringify({ addedItemIds, previousTotalCents: Number(reopenDetails.previousTotalCents || 0), newTotalCents: Number(updated[0].total_cents), additionalAmountDueCents: Number(updated[0].amount_due_cents), actorName: actor.name })}::jsonb)`;
     await depleteInventoryForOrder(orderId, business, actor);
     return { order: updated[0], alreadySubmitted: false, kitchenTicketCreated: true };
-  });
+  }));
+  if (!result) return null;
   const source = String(result.order.source || "").toLowerCase();
   if (
     !result.alreadySubmitted &&
