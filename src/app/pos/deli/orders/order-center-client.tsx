@@ -110,14 +110,15 @@ export default function OrderCenterClient() {
   const overdue = orders.filter((o) => o.overdue_unpaid),
     open = orders.filter(
       (o) =>
-        !o.overdue_unpaid && o.status !== "cancelled" && !["paid", "refunded"].includes(o.payment_status),
+        !o.overdue_unpaid && o.status !== "cancelled" && Number(o.amount_due_cents) > 0,
     ),
     paid = orders.filter((o) =>
-      o.status === "cancelled" || ["paid", "refunded"].includes(o.payment_status),
+      o.status === "cancelled" || Number(o.amount_due_cents) <= 0,
     );
   const searchingHistory = query.trim().length > 0;
-  const futureUnpaid = orders.filter((o) => !["paid", "refunded"].includes(o.payment_status));
-  const futurePaid = orders.filter((o) => ["paid", "refunded"].includes(o.payment_status));
+  // Anything with nothing left to pay (paid, refunded, partially refunded) counts as settled.
+  const futureUnpaid = orders.filter((o) => Number(o.amount_due_cents) > 0);
+  const futurePaid = orders.filter((o) => Number(o.amount_due_cents) <= 0);
   async function details(order: Order) {
     const r = await fetch(`/api/ordering/order-center/${order.id}`);
     const b = await r.json();
@@ -265,7 +266,7 @@ export default function OrderCenterClient() {
       {list.length === 0 && <p className="ocEmpty">No matching orders.</p>}
       <div className="ocOrderGrid">
       {list.map((o) => {
-        const unpaid = !["paid", "refunded"].includes(o.payment_status);
+        const unpaid = Number(o.amount_due_cents) > 0;
         const pickupAttention = unpaid && o.service_type === "pickup" && o.status !== "cancelled" && clock - new Date(o.created_at).getTime() >= 40 * 60 * 1000;
         return (
         <button className={`ocOrder ${pickupAttention ? "pickupAttention" : ""}`} key={o.id} onClick={() => void details(o)}>

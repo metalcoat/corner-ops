@@ -29,19 +29,19 @@ export async function listOrders(input: { business: OrderingBusiness; date?: str
       COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),NULLIF(c.display_name,''),'Guest') customer_name,
       COALESCE(NULLIF(o.phone_snapshot,''),p.display_phone,o.caller_phone) customer_phone,
       a.formatted_address delivery_address,a.line2 delivery_unit,
-      ((o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.payment_status NOT IN ('paid','refunded') AND o.status <> 'cancelled') overdue_unpaid,
-      (o.service_type='pickup' AND o.payment_status NOT IN ('paid','refunded') AND o.status<>'cancelled' AND o.created_at<=NOW()-INTERVAL '40 minutes') pickup_attention
+      ((o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled') overdue_unpaid,
+      (o.service_type='pickup' AND o.amount_due_cents > 0 AND o.status<>'cancelled' AND o.created_at<=NOW()-INTERVAL '40 minutes') pickup_attention
     FROM ordering_orders o
     LEFT JOIN ordering_customers c ON c.id=o.customer_id
     LEFT JOIN LATERAL (SELECT display_phone FROM ordering_customer_phones WHERE customer_id=c.id ORDER BY is_primary DESC,created_at LIMIT 1) p ON TRUE
     LEFT JOIN ordering_order_delivery_addresses a ON a.order_id=o.id
     WHERE o.business=${input.business}
-      AND (CASE WHEN ${searchingHistory} THEN o.created_at >= NOW()-(${searchDays}::text||' days')::interval WHEN ${futureOnly} THEN o.scheduled_for > NOW() AND o.status <> 'cancelled' WHEN ${openOnly} THEN o.payment_status NOT IN ('paid','refunded') AND o.status <> 'cancelled' ELSE ((o.created_at AT TIME ZONE ${timezone})::date=${date}::date OR (${includeOverdue} AND (o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.payment_status NOT IN ('paid','refunded') AND o.status <> 'cancelled')) END)
+      AND (CASE WHEN ${searchingHistory} THEN o.created_at >= NOW()-(${searchDays}::text||' days')::interval WHEN ${futureOnly} THEN o.scheduled_for > NOW() AND o.status <> 'cancelled' WHEN ${openOnly} THEN o.amount_due_cents > 0 AND o.status <> 'cancelled' ELSE ((o.created_at AT TIME ZONE ${timezone})::date=${date}::date OR (${includeOverdue} AND (o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled')) END)
       AND (${q}='' OR o.display_number ILIKE ${like} OR o.first_name_snapshot ILIKE ${like} OR o.last_name_snapshot ILIKE ${like}
         OR trim(o.first_name_snapshot||' '||o.last_name_snapshot) ILIKE ${like} OR c.display_name ILIKE ${like}
         OR regexp_replace(COALESCE(NULLIF(o.phone_snapshot,''),p.display_phone,o.caller_phone),'[^0-9]','','g') LIKE ${digitLike}
         OR a.formatted_address ILIKE ${like} OR a.line1 ILIKE ${like})
-    ORDER BY CASE WHEN ${includeOverdue} AND (o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.payment_status NOT IN ('paid','refunded') AND o.status <> 'cancelled' THEN 0 WHEN o.payment_status IN ('paid','refunded') THEN 2 ELSE 1 END,
+    ORDER BY CASE WHEN ${includeOverdue} AND (o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled' THEN 0 WHEN o.amount_due_cents <= 0 THEN 2 ELSE 1 END,
       CASE WHEN ${futureOnly} THEN o.scheduled_for END ASC, CASE WHEN ${openOnly} THEN o.created_at END ASC, o.created_at DESC
   `;
 }
