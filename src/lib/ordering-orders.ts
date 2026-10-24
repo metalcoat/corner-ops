@@ -425,7 +425,8 @@ export async function recalculateOrder(orderId: string): Promise<void> {
         version = version + 1,
         updated_at = NOW()
     FROM (
-      SELECT COALESCE(SUM(line_total_cents), 0)::INTEGER AS subtotal_cents
+      -- Cancelled quantities stay cancelled (same proration as cancelOrderItem).
+      SELECT COALESCE(SUM(CASE WHEN quantity > 0 THEN ROUND(line_total_cents::numeric * GREATEST(quantity - COALESCE(cancelled_quantity, 0), 0) / quantity) ELSE 0 END), 0)::INTEGER AS subtotal_cents
       FROM ordering_order_items
       WHERE order_id = ${orderId}
     ) totals

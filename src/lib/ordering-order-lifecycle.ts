@@ -229,7 +229,7 @@ function number(value: unknown): number {
 async function revalidateDraft(order: OrderRow): Promise<void> {
   const sql = getSql();
   const items = (await sql`
-    SELECT id, item_id, item_name_snapshot, variant_id, variant_name_snapshot, quantity,
+    SELECT id, item_id, item_name_snapshot, variant_id, variant_name_snapshot, quantity, COALESCE(cancelled_quantity, 0) AS cancelled_quantity,
            unit_price_cents, modifier_total_cents, combo_total_cents, line_total_cents
     FROM ordering_order_items
     WHERE order_id = ${order.id}
@@ -241,12 +241,15 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
     );
 
   let subtotal = 0;
+  let cancelledLines = 0;
   const availabilityTargets: Array<{
     type: "item" | "variant" | "modifier_option";
     id: string;
     label: string;
   }> = [];
   for (const item of items) {
+    // A line whose units were all cancelled no longer needs to be orderable.
+    if (number((item as { cancelled_quantity?: unknown }).cancelled_quantity) >= number(item.quantity)) { cancelledLines += 1; continue; }
     availabilityTargets.push({
       type: "item",
       id: item.item_id,
@@ -422,7 +425,10 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
         `The total for ${item.item_name_snapshot} changed. Review and rebuild the order before submitting.`,
       );
     }
-    subtotal += lineTotal;
+    // Cancelled units don't count (same proration as cancelOrderItem).
+    const cancelled = number((item as { cancelled_quantity?: unknown }).cancelled_quantity);
+    if (cancelled > 0) cancelledLines += 1;
+    subtotal += number(item.quantity) > 0 ? Math.round((lineTotal * Math.max(0, number(item.quantity) - cancelled)) / number(item.quantity)) : 0;
   }
 
   try {
@@ -450,9 +456,11 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
       number(order.tip_cents) +
       number(order.delivery_fee_cents),
   );
+  // Repeated partial cancellations of one line can round a cent differently.
+  const drift = Math.abs(subtotal - number(order.subtotal_cents));
   if (
-    subtotal !== number(order.subtotal_cents) ||
-    total !== number(order.total_cents)
+    drift > cancelledLines ||
+    Math.abs(total - number(order.total_cents)) > cancelledLines
   ) {
     throw new OrderConflictError(
       "The order total changed. Review and rebuild the order before submitting.",
