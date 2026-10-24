@@ -187,7 +187,7 @@ export default function KitchenClient() {
         </header>
         {order.timing_mode === "future" && order.scheduled_for && <p className="kitchenDue">SCHEDULED · DUE {dueDay(order.scheduled_for, order.server_now)}{clock(order.scheduled_for)}</p>}
         <div className="kitchenItems">
-          {kitchenProductionTotals(order.items).length > 0 && <section className="kitchenProductionTotals"><strong>PRODUCTION TOTALS</strong>{kitchenProductionTotals(order.items).map((line) => <b key={line}>{line}</b>)}</section>}
+          {kitchenProductionTotals(order.items.map((item) => ({ ...item, side_names: item.modifiers.filter((modifier) => modifier.selection_state !== "removed").map((modifier) => modifier.option_name_snapshot) }))).length > 0 && <section className="kitchenProductionTotals"><strong>PRODUCTION TOTALS</strong>{kitchenProductionTotals(order.items.map((item) => ({ ...item, side_names: item.modifiers.filter((modifier) => modifier.selection_state !== "removed").map((modifier) => modifier.option_name_snapshot) }))).map((line) => <b key={line}>{line}</b>)}</section>}
           {order.items.map((item) => {
             const orderedModifiers=item.modifiers.filter(modifier=>modifier.print_on_ticket!==false).toSorted((left,right)=>kitchenModifierOrder(item,left)-kitchenModifierOrder(item,right)||left.option_name_snapshot.localeCompare(right.option_name_snapshot));
             const headerModifiers=orderedModifiers.filter(modifier=>modifier.header_modifier_snapshot).map(modifier=>formatOrderModifier(modifier,"ticket"));

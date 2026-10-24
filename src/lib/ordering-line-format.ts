@@ -24,6 +24,8 @@ export type KitchenProductionItem = {
   variant_name_snapshot?: string;
   item_print_name_snapshot?: string;
   quantity: number;
+  /** Side choices on the item (a burger meal's "Small Fry"), counted into the fry totals too. */
+  side_names?: string[];
 };
 
 /**
@@ -52,6 +54,17 @@ export function kitchenProductionTotals(items: KitchenProductionItem[]): string[
       else if (itemName.includes("waffle fries") || itemName.includes("buffalo chips")) add("WAFFLE FRIES", ounces, quantity, "OZ");
       else if (itemName.includes("tater tots")) add("TATER TOTS", ounces, quantity, "OZ");
       else if (itemName.includes("onion rings")) add("ONION RINGS", ounces, quantity, "OZ");
+    }
+    // A meal's fried side ("Small Fry", "Large Curly (9oz)") is the same make-line product.
+    for (const side of item.side_names || []) {
+      const sideName = kitchenKey(side);
+      const sideOunces = Number(side.match(/\b(\d+(?:\.\d+)?)\s*oz\b/i)?.[1] || 0)
+        || Number(kitchenPortionName(side.replace(/\s*\([^)]*\)\s*$/, "")).match(/\((\d+(?:\.\d+)?)oz\)/i)?.[1] || 0);
+      if (!sideOunces) continue;
+      const family = /\bwaffle\b/.test(sideName) ? "WAFFLE FRIES" : /\bcurly\b/.test(sideName) ? "CURLY FRIES"
+        : /\btots?\b/.test(sideName) ? "TATER TOTS" : /\bonion rings?\b/.test(sideName) ? "ONION RINGS"
+        : /\bfr(y|ies)\b/.test(sideName) ? "FRENCH FRIES" : "";
+      if (family) add(family, sideOunces, quantity, "OZ");
     }
     if (itemName.includes("wing")) {
       const count = Number((item.variant_name_snapshot || item.item_print_name_snapshot || "").match(/\b(\d+)\b/)?.[1] || 0);

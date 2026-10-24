@@ -23,7 +23,7 @@ function pizzaColumnLines(modifiers:PrintableModifier[]){
 }
 
 export function formatKitchenLines(lines: PrintableLine[]): string[] {
-  const productionTotals = kitchenProductionTotals(lines.map((line) => ({ item_name_snapshot: line.itemName || line.header, variant_name_snapshot: line.variantName, item_print_name_snapshot: line.header, quantity: line.quantity })));
+  const productionTotals = kitchenProductionTotals(lines.map((line) => ({ item_name_snapshot: line.itemName || line.header, variant_name_snapshot: line.variantName, item_print_name_snapshot: line.header, quantity: line.quantity, side_names: line.modifiers.filter((modifier) => modifier.print).map((modifier) => modifier.name) })));
   const output: string[] = productionTotals.length ? ["*** PRODUCTION TOTALS ***", ...productionTotals, ""] : [];
   const ordered=lines.map((line,index)=>({...line,family:line.family||kitchenItemFamily(line.header),sequence:line.sequence??index})).sort((a,b)=>String(a.family).localeCompare(String(b.family))||Number(a.sequence)-Number(b.sequence));
   for (const line of ordered) {
