@@ -24,6 +24,9 @@ export function paymentProviderStatus(): PaymentProviderStatus {
   const missing = Object.entries(required)
     .filter(([, value]) => !value?.trim())
     .map(([name]) => name);
+  // Production must not take cards against the sandbox.
+  if (process.env.APP_ENV?.trim().toLowerCase() === "production" && process.env.MX_ENVIRONMENT?.trim().toLowerCase() !== "production")
+    missing.push("MX_ENVIRONMENT=production");
   const configured = missing.length === 0;
   return {
     provider: "mx_merchant",

@@ -7,7 +7,7 @@
 // the POS polls its status, and the approved payment is then read back from
 // the Checkout API by replayId, so the amount and card come from MX itself.
 import { randomInt } from "node:crypto";
-import { MxMerchantError, MxMerchantUnreachableError } from "@/lib/mx-merchant";
+import { MxMerchantError, MxMerchantUnreachableError, mxSandboxOnProduction } from "@/lib/mx-merchant";
 
 /**
  * MX's answer never arrived (timeout, dropped connection, gateway error), so a
@@ -23,6 +23,7 @@ function api2Base() {
   return (process.env.MX_TEST_TERMINAL_API_BASE_URL?.trim() || "https://sandbox-api2.mxmerchant.com").replace(/\/+$/, "");
 }
 function credentials() {
+  if (mxSandboxOnProduction()) throw new MxMerchantError("Card payments are off: this production server is not set to MX production (MX_ENVIRONMENT).");
   const merchantId = process.env.MX_MERCHANT_ID?.trim(), key = process.env.MX_CONSUMER_KEY?.trim(), secret = process.env.MX_CONSUMER_SECRET?.trim();
   if (!merchantId || !key || !secret) throw new MxMerchantError("MX Merchant is not configured.");
   return { merchantId, key, basic: `Basic ${Buffer.from(`${key}:${secret}`).toString("base64")}` };
