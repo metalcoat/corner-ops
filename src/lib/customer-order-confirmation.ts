@@ -12,7 +12,7 @@ export async function customerOrderConfirmation(orderId: string): Promise<any> {
     SELECT id,display_number,status,payment_status,service_type,timing_mode,
       scheduled_for,timing_message_snapshot,first_name_snapshot,last_name_snapshot,
       phone_snapshot,email_snapshot,subtotal_cents,discount_cents,tax_cents,
-      tip_cents,total_cents,paid_cents,created_at,confirmation_email_sent_at
+      tip_cents,delivery_fee_cents,total_cents,paid_cents,created_at,confirmation_email_sent_at
     FROM ordering_orders WHERE id=${orderId} AND business='Corner Deli' AND source='web' LIMIT 1
   `
   )[0] as Record<string, any> | undefined;
@@ -50,6 +50,7 @@ export async function sendCustomerOrderConfirmation(orderId: string) {
     return { configured: true, sent: 0, failures: [] };
   const name =
     `${order.first_name_snapshot} ${order.last_name_snapshot}`.trim();
+  const delivery = ["delivery", "no_contact_delivery"].includes(String(order.service_type));
   const details = order.lines.map(
     (line: Record<string, any>) =>
       `${line.quantity}× ${line.variant_name ? `${line.variant_name} ` : ""}${line.name} — ${money(line.line_total_cents)}${line.special_instructions ? `\n   Note: ${line.special_instructions}` : ""}`,
@@ -62,16 +63,19 @@ export async function sendCustomerOrderConfirmation(orderId: string) {
       `Thanks${name ? `, ${name}` : ""}! Your Corner Deli order is confirmed.`,
       "",
       `Order #${order.display_number}`,
-      `Pickup: ${order.timing_message_snapshot || "Pickup"}`,
+      `${delivery ? "Delivery" : "Pickup"}: ${order.timing_message_snapshot || (delivery ? "Delivery" : "Pickup")}`,
       "",
       ...details,
       "",
       ...(order.discount_cents
         ? [`Discount: -${money(order.discount_cents)}`]
         : []),
+      ...(Number(order.delivery_fee_cents) > 0
+        ? [`Delivery fee: ${money(Number(order.delivery_fee_cents))}`]
+        : []),
       order.payment_status === "paid"
         ? `Total paid: ${money(order.paid_cents)}`
-        : `Total due at pickup: ${money(order.total_cents)}`,
+        : `Total due at ${delivery ? "delivery" : "pickup"}: ${money(order.total_cents)}`,
       "",
       "All sales final: Once an order is placed, it cannot be cancelled and no refunds are given.",
       "",

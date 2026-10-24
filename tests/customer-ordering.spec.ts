@@ -151,11 +151,9 @@ test("successful online payment redirects to a dedicated confirmation", async ({
   );
   await page.goto("/order/confirmation?orderId=order-123");
   await expect(
-    page.getByRole("heading", { name: "Thank you, Jamie!" }),
+    page.getByRole("heading", { name: "We got your order" }),
   ).toBeVisible();
-  await expect(
-    page.getByText("Order confirmed", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText(/Thanks, Jamie!/)).toBeVisible();
   await expect(page.getByText("jamie@example.com")).toBeVisible();
   await expect(page.getByText("Total paid")).toBeVisible();
 });

@@ -157,7 +157,9 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
         </div>
         <p>
           Thanks, {order.first_name_snapshot}!{" "}
-          {order.payment_status === "paid" ? "Your payment was approved and your order was sent to Corner Deli." : "Your order was sent to Corner Deli."}
+          {order.status === "draft"
+            ? order.payment_status === "paid" ? "Your payment was approved. The store is checking your order and will start it shortly." : "Your order hasn't been sent yet."
+            : order.payment_status === "paid" ? "Your payment was approved and your order was sent to Corner Deli." : "Your order was sent to Corner Deli."}
         </p>
         <div className="confirmationLines">
           {order.lines.map((line: any, index: number) => (
@@ -169,6 +171,18 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
               <strong>{money(line.line_total_cents)}</strong>
             </div>
           ))}
+          {Number(order.discount_cents) > 0 && (
+            <div>
+              <span>Discount</span>
+              <strong>−{money(Number(order.discount_cents))}</strong>
+            </div>
+          )}
+          {Number(order.delivery_fee_cents) > 0 && (
+            <div>
+              <span>Delivery fee</span>
+              <strong>{money(Number(order.delivery_fee_cents))}</strong>
+            </div>
+          )}
           <div className="confirmationTotal">
             <span>{due ? (delivering ? "Due at delivery" : "Due at pickup") : "Total paid"}</span>
             <strong>{money(due || order.paid_cents || order.total_cents)}</strong>
