@@ -588,8 +588,10 @@ export function applyFryPlacementSpeech(items: SpokenOrderItem[], customerText: 
   if(!topping && !side) return items;
   return items.map(item=>({...item,modifiers:item.modifiers?.map(mod=> /nacho cheese|gravy/i.test(mod.name) && new RegExp(/gravy/i.test(mod.name)?"gravy":"cheese","i").test(customerText) ? {...mod,placement:side?"side" as const:"topping" as const}:mod)}));
 }
-export function parseCartOperation(value: unknown): CartOperation {
-  if (typeof value !== "string" || !["add", "replace_item", "remove_item", "read"].includes(value)) throw new AiToolError("INVALID_INPUT", "Unknown cart operation.", "Use add, replace_item, remove_item, or read.", 400);
+export function parseCartOperation(value: unknown, items?: unknown): CartOperation {
+  // A missing operation is still refused (never guess with a live cart), but the model is told exactly how to
+  // retry: a dev replay (2026-10-25) dropped an item after a bare "Unknown cart operation".
+  if (typeof value !== "string" || !["add", "replace_item", "remove_item", "read"].includes(value)) throw new AiToolError("INVALID_INPUT", "Unknown cart operation.", Array.isArray(items) && items.length ? "Nothing changed. Send the same call again with operation \"add\" to add these items (or replace_item with targetLineId to change a line)." : "Use add, replace_item, remove_item, or read.", 400);
   return value as CartOperation;
 }
 
@@ -791,7 +793,7 @@ export function startOpenAiSideband(
           "Ask the caller to try again.",
           403,
         );
-      let operation = parseCartOperation(args.operation);
+      let operation = parseCartOperation(args.operation, args.items);
       let targetItem = String(args.targetLineId || args.targetItem || "");
       spokenItems = applyFryPlacementSpeech(spokenItems,lastCustomerTranscript);
       const pendingApplied = await applyPendingModifierAnswer({

@@ -31,6 +31,7 @@ import {
   parseCartOperation,
   applyFryPlacementSpeech,
   compactPhoneOrderResult,
+  compactPhoneMenuResult,
 } from "@/lib/openai-phone-sideband";
 
 export const runtime = "nodejs";
@@ -657,7 +658,7 @@ export async function POST(request: Request) {
     if (args.steakStyleDoubleMeatDecision) resolvedQuestions.add("steak_style_double_meat");
     if (requestedName === "price_order")
       await getSql()`UPDATE ordering_call_sessions SET deferred_required_fields=${JSON.stringify([...resolvedQuestions])}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
-    const requestedOperation = requestedName === "price_order" ? parseCartOperation(args.operation) : "read",
+    const requestedOperation = requestedName === "price_order" ? parseCartOperation(args.operation, args.items) : "read",
       pendingApplied =
         requestedName === "price_order"
           ? await applyPendingModifierAnswer({
@@ -706,7 +707,13 @@ export async function POST(request: Request) {
             ],
             customerText: String(args.customerText || ""),
           })
-        : await executeAiOrderingTool(name, args, "Corner Deli", actor);
+        : await executeAiOrderingTool(name, args, "Corner Deli", actor).then((value) =>
+            // The full menu payload was ~54 KB per search: costly on every later turn, and once rejected by
+            // Gemini (1007) in a replay. The phone model only needs names, sizes, prices and options.
+            requestedName === "menu_search" && value && typeof value === "object" && Array.isArray((value as Record<string, any>).categories)
+              ? { query: (value as Record<string, any>).query, results: compactPhoneMenuResult((value as Record<string, any>).categories) }
+              : value,
+          );
     const orderId = String(
       args.orderId ||
         (result && typeof result === "object"

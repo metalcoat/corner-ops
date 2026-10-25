@@ -394,7 +394,7 @@ async function main() {
   );
   assert.ok(
     !orderingToolSource.match(/enum: \["add", "replace_item", "remove_item", "replace_order"/) &&
-      mcpSource.includes("parseCartOperation(args.operation)"),
+      mcpSource.includes("parseCartOperation(args.operation, args.items)"),
     "Voice providers must not be able to silently discard an active cart.",
   );
   const jumbo = await menuCatalog("Corner Deli", new Date(), "jumbo thin");

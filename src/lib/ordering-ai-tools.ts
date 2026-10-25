@@ -1243,6 +1243,23 @@ export async function priceSpokenOrder(input: {
         .trim();
       if (cupName !== requested.name.trim() && allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(cupName)))
         requested = { ...requested, name: cupName, variant: undefined };
+      // "Loaded fries", "large tater tot poutine": the fry item plus its Fry Option, not dishes of their own.
+      const fryDish = /^(?:(small|sm|large|lg)\s+)?(?:(curly|waffle|french)\s+)?(?:(tater\s+tots?|tots|fr(?:ies|y))\s+)?(?:(loaded|poutine)(?:\s+(?:fr(?:ies|y)|tater\s+tots?|tots))?)$|^(?:(small|sm|large|lg)\s+)?(loaded)\s+(?:(curly|waffle|french)\s+)?(fr(?:ies|y)|tater\s+tots?|tots)$/i.exec(requested.name.trim());
+      if (fryDish) {
+        const size = fryDish[1] || fryDish[5] || /\b(small|large)\b/i.exec(requested.variant || "")?.[1], style = fryDish[2] || fryDish[7], kind = fryDish[3] || fryDish[8] || "", option = fryDish[4] || fryDish[6];
+        const base = /tot/i.test(kind) ? "Tater Tots" : style && !/french/i.test(style) ? `${style[0].toUpperCase()}${style.slice(1).toLowerCase()} Fries` : "French Fries";
+        const sized = size ? `${/^s/i.test(size) ? "Small" : "Large"} ${base}` : base.toLowerCase();
+        requested = { ...requested, name: sized, variant: undefined, modifiers: [...(requested.modifiers || []), { name: /poutine/i.test(option) ? "poutine" : "loaded" }] };
+      }
+      // "Side of sauce: medium" (the model's shape for "a side of medium sauce"): that sauce's 4oz cup.
+      if (/^(?:a\s+)?(?:side|cup)\s+of\s+(?:wing\s+)?sauce$|^(?:wing\s+)?sauce(?:\s+cup)?$/i.test(requested.name.trim()) && requested.modifiers?.length === 1) {
+        const wanted = spokenKey(requested.modifiers[0].name.replace(/\s+sauce$/i, ""));
+        const cup = allItems
+          .filter((row) => /\b4\s*oz\b|\(\s*4\s*oz\s*\)/i.test(row.name) && [spokenKey(normalizedSpokenName(row.name)), spokenKey(normalizedSpokenName(row.name)).replace(/\s+sauce$/, "")].includes(wanted))
+          .map((row) => row.name)
+          .sort()[0];
+        if (cup) requested = { ...requested, name: cup, variant: undefined, modifiers: [] };
+      }
       const mashedPhrase = /^(?:(small|sm|medium|med)\s+)?mashed(?:\s+potato(?:e)?s?)?(?:\s+(?:and|with|w\/?)\s+(?:some\s+)?(gravy))?$/i.exec(requested.name.trim());
       if (mashedPhrase && (mashedPhrase[1] || mashedPhrase[2])) {
         // "mashed potatoes and gravy" is the mashed side plus its Gravy option, not a dish called that.
@@ -1554,6 +1571,8 @@ export async function priceSpokenOrder(input: {
           : subVariant ||
             macSaladSize ||
             (spokenVariant &&
+            // A size asked for on an item that comes one way ("small cheese curds") isn't an error.
+            item.variants.some((row) => spokenKey(row.name) !== "") &&
             !/^(bone in|boneles|boneless)$/.test(spokenVariant)
               ? spokenVariant
               : nameVariant || ""),

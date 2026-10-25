@@ -53,7 +53,7 @@ async function main(){
       toolsListed:listed.result?.tools?.some((tool:{name:string})=>tool.name==="price_order")&&listed.result?.tools?.some((tool:{name:string})=>tool.name==="menu_search"),
       handoffToolListed:listed.result?.tools?.some((tool:{name:string})=>tool.name==="request_human_handoff"),
       handoffPolicy:phone.PHONE_INSTRUCTIONS.includes("after two failed clarification attempts")&&phone.PHONE_INSTRUCTIONS.includes("asks for a person"),
-      callBound:called.result?.isError!==true&&called.result?.content?.[0]?.text?.includes("categories"),
+      callBound:called.result?.isError!==true&&/"(?:categories|results)"/.test(String(called.result?.content?.[0]?.text||"")),
       unadvertisedToolRejected:unadvertised.error?.code===-32602,
       lookupLimitedToCallerId:Array.isArray(JSON.parse(foreignLookup.result?.content?.[0]?.text||"{}").customers)&&!String(foreignLookup.result?.content?.[0]?.text||"").includes("email"),
       unconfirmedSendBlocked:blocked.result?.isError===true,

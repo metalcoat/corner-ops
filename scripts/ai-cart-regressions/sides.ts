@@ -39,6 +39,24 @@ async function main() {
         }
       });
     }
+    // Replays of real calls (2026-10-25): fry dishes, sizes on one-size items, sauce cups, no operation.
+    const replayCases: Array<[string, any, RegExp, RegExp | null]> = [
+      ["'Loaded Fries' small", { operation: "add", items: [{ name: "Loaded Fries", variant: "Small French Fries" }] }, /^Small French Fries$/, /Loaded/],
+      ["'small tater tot poutine'", { operation: "add", items: [{ name: "small tater tot poutine" }] }, /^Small Tater Tots$/, /Poutine/],
+      ["'Poutine' large", { operation: "add", items: [{ name: "Poutine", variant: "Large" }] }, /^Large French Fries$/, /Poutine/],
+      ["small cheese curds (one size)", { operation: "add", items: [{ name: "Deep Fried Cheese Curds", variant: "Small" }] }, /Cheese Curd/, null],
+      ["side of sauce: medium", { operation: "add", items: [{ name: "Side of Sauce", variant: "4oz", modifiers: [{ name: "Medium" }] }] }, /Medium/, null],
+    ];
+    for (const [label, args, item, mod] of replayCases) {
+      await h.check(label, async () => {
+        const m = await h.newMcpCall();
+        const r = await m.invoke(args);
+        assert.ok(!r.isError && !r.body.pending, JSON.stringify(r.body));
+        const line = (await h.dbLines(r.orderId!))[0];
+        assert.match(line.name, item);
+        if (mod) assert.ok(line.mods.some((value: string) => mod.test(value)), JSON.stringify(line.mods));
+      });
+    }
     // Owner request 2026-10-25: a side asked for with an item that doesn't offer it becomes its own 4oz cup.
     await h.check("fries with ranch adds the fries and a ranch cup", async () => {
       const m = await h.newMcpCall();
