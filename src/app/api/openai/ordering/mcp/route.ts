@@ -741,12 +741,22 @@ export async function POST(request: Request) {
       spokenAddress &&
       orderId
     ) {
+      // An address Google can't place is a question for the caller, not an internal error that hands them off
+      // (dev replay 2026-10-25: "Claxton-Hepburn Medical Center").
       const delivery = await attachSpokenDeliveryAddress(
         orderId,
         spokenAddress,
         String(args.deliveryUnit || savedAddress?.line2 || ""),
         savedAddress ? String(savedAddress.id) : null,
-      );
+      ).catch((error: unknown) => {
+        throw new AiToolError(
+          "INVALID_INPUT",
+          "I couldn't verify that delivery address.",
+          "Ask the caller to repeat the street number and street. For an address outside Ogdensburg, also ask for city, state, and ZIP.",
+          409,
+          { field: "deliveryAddress", reason: error instanceof Error ? error.message : "address_validation_failed" },
+        );
+      });
       const updated = (
         await getSql()`SELECT total_cents,amount_due_cents,delivery_fee_cents FROM ordering_orders WHERE id=${orderId}`
       )[0];

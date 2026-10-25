@@ -25,7 +25,7 @@ const landmarks: Array<{ aliases: RegExp; address: string }> = [
     address: "17 Commerce Street, Ogdensburg, NY 13669",
   },
   {
-    aliases: /^(?:the )?(?:hospital|claxton(?: hepburn)?|claxton-hepburn)$/i,
+    aliases: /^(?:the )?(?:hospital|(?:claxton(?:[\s-]+hepburn)?)(?:\s+(?:medical\s+center|hospital|er|emergency(?:\s+room)?))?)$/i,
     address: "214 King Street, Ogdensburg, NY 13669",
   },
   {

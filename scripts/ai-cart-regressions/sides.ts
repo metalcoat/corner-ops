@@ -47,6 +47,8 @@ async function main() {
       ["small cheese curds (one size)", { operation: "add", items: [{ name: "Deep Fried Cheese Curds", variant: "Small" }] }, /Cheese Curd/, null],
       ["side of sauce: medium", { operation: "add", items: [{ name: "Side of Sauce", variant: "4oz", modifiers: [{ name: "Medium" }] }] }, /Medium/, null],
     ];
+    replayCases.push(["cheeseburger deluxe (owner: mayo, lettuce, tomato, onion, pickles)", { operation: "add", items: [{ name: "Cheeseburger Deluxe" }], burgerFriesDecision: "declined" }, /^Cheeseburger/, /Pickles/]);
+    replayCases.push(["bacon cheeseburger deluxe, no mayo", { operation: "add", items: [{ name: "Bacon Cheeseburger Deluxe", modifiers: [{ name: "Mayo", remove: true }] }], burgerFriesDecision: "declined" }, /burger/i, /Raw Onions/]);
     for (const [label, args, item, mod] of replayCases) {
       await h.check(label, async () => {
         const m = await h.newMcpCall();

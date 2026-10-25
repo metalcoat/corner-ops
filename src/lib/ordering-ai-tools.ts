@@ -200,8 +200,25 @@ export function normalizeSpokenModifier(
     .flatMap((group) => group.options.map((option) => ({ group, option })));
   const known = (name: string) =>
     options.some(({ group, option }) => modifierAliases(option.name, group.name).some((alias) => spokenKey(alias) === spokenKey(name)));
-  const shorter = next.name.replace(/\s+(?:sauce|dip|dipping sauce)$/i, "");
+  const shorter = next.name.replace(/\s+(?:sauce|dip|dipping sauce|dressing|cheese)$/i, "");
   if (shorter !== next.name && !known(next.name) && known(shorter)) next = { ...next, name: shorter };
+  // "Extra Russian dressing" is the item's "Xtra Russian" option.
+  if (!known(next.name) && (next.amount === "extra" || /^(?:extra|xtra)\s/i.test(next.name))) {
+    const base = shorter.replace(/^(?:extra|xtra)\s+/i, "");
+    const extra = [`Xtra ${base}`, `Extra ${base}`].find(known);
+    if (extra) next = { ...next, name: extra, amount: undefined };
+  }
+  // How callers say options the menu names differently (dev replays 2026-10-25).
+  if (!known(next.name)) {
+    const spoken = spokenKey(next.name);
+    const synonyms: Array<[RegExp, string]> = [
+      [/^american(?: cheese)?$/, "America"],
+      [/^(?:well done|crisp(?:y)?(?: cooked)?|extra crispy|dark(?: cooked)?|burnt|well cooked)$/, "Dark Cooked"],
+      [/^(?:light(?:ly)?(?: cooked| done)?|soft)$/, "Lightly Cooked"],
+      [/^(?:parm(?:esan)?(?: cheese)?|parm shaker)$/, "Parm Shakers"],
+    ];
+    for (const [pattern, option] of synonyms) if (pattern.test(spoken) && known(option)) { next = { ...next, name: option }; break; }
+  }
   if (!next.group && !next.remove) {
     // "BBQ" fits several groups on a dinner (included cup, extra cups, sauced tenders): the required one wins.
     const holders = groups.filter(
@@ -1239,10 +1256,33 @@ export async function priceSpokenOrder(input: {
       // "side of ranch", "ranch sauce", "a cup of blue cheese": the 4oz cup item when that's what it names.
       const cupName = requested.name
         .replace(/^(?:an?\s+)?(?:extra\s+)?(?:side|cup|container)\s+of\s+/i, "")
-        .replace(/\s+(?:sauce|dip|cup|on the side)$/i, "")
+        .replace(/\s*\(?\b4\s*oz\b\)?/gi, " ")
+        .replace(/\s+on\s+(?:the\s+)?side\b/gi, " ")
+        .replace(/\s+(?:dip|cup)$/i, "")
+        .replace(/\s+/g, " ")
         .trim();
-      if (cupName !== requested.name.trim() && allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(cupName)))
-        requested = { ...requested, name: cupName, variant: undefined };
+      const cupNameShort = cupName.replace(/\s+sauce$/i, "");
+      for (const candidate of [cupName, cupNameShort])
+        if (candidate !== requested.name.trim() && allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(candidate))) {
+          requested = { ...requested, name: candidate, variant: undefined };
+          break;
+        }
+      // "Bacon cheeseburger": the burger plus its Bacon option (there's no separate item).
+      const baconBurger = /^((?:deluxe|double|triple)\s+)?bacon\s+(.*burger.*)$/i.exec(requested.name.trim());
+      if (baconBurger && !allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(requested.name)))
+        requested = { ...requested, name: `${baconBurger[1] || ""}${baconBurger[2]}`, modifiers: [{ name: "Bacon" }, ...(requested.modifiers || [])] };
+      // "Steak sandwich" when the menu only has the "Steak" sub.
+      const sandwichless = requested.name.replace(/\s+(?:sandwich|sammich|hoagie|hero)$/i, "").trim();
+      if (sandwichless !== requested.name.trim() && !allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(requested.name)) && allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(sandwichless)))
+        requested = { ...requested, name: sandwichless };
+      // "Cheeseburger deluxe": the burger with mayo, lettuce, tomato, onion and pickles (owner, 2026-10-25).
+      const deluxe = /^(?:deluxe\s+)?(.*?burger.*?)(?:\s+deluxe)?$/i.exec(requested.name.trim());
+      if (deluxe && /\bdeluxe\b/i.test(requested.name)) {
+        const toppings = ["Mayo", "Lettuce", "Tomatoes", "Raw Onions", "Pickles"].filter(
+          (topping) => !(requested.modifiers || []).some((modifier) => spokenKey(modifier.name).includes(spokenKey(topping)) || spokenKey(topping).includes(spokenKey(modifier.name).replace(/^no /, ""))),
+        );
+        requested = { ...requested, name: deluxe[1].replace(/\s+deluxe\b/i, "").trim(), modifiers: [...toppings.map((name) => ({ name })), ...(requested.modifiers || [])] };
+      }
       // "Loaded fries", "large tater tot poutine": the fry item plus its Fry Option, not dishes of their own.
       const fryDish = /^(?:(small|sm|large|lg)\s+)?(?:(curly|waffle|french)\s+)?(?:(tater\s+tots?|tots|fr(?:ies|y))\s+)?(?:(loaded|poutine)(?:\s+(?:fr(?:ies|y)|tater\s+tots?|tots))?)$|^(?:(small|sm|large|lg)\s+)?(loaded)\s+(?:(curly|waffle|french)\s+)?(fr(?:ies|y)|tater\s+tots?|tots)$/i.exec(requested.name.trim());
       if (fryDish) {
