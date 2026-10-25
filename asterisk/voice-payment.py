@@ -229,14 +229,41 @@ class Recognizer:
         self.parts.append(json.loads(self.engine.FinalResult()).get("text",""))
         return " ".join(word for part in self.parts for word in part.split() if word!="[unk]")
 
-def listen(phrases,max_keys,max_seconds=20,silence_end=1.8,voice_level=120):
-    """Listen for speech and keypad at the same time. Returns ('keys'|'speech'|'none', value)."""
-    discard_prompt_echo()
+def _record_audio(stop,chunks):
+    """Like _drain_audio, but keeps what the caller says while a prompt plays (they often answer over it)."""
+    while not stop.is_set():
+        ready,_,_=select.select([3],[],[],0.05)
+        if ready:
+            try:chunks.append(os.read(3,3200))
+            except BlockingIOError:pass
+
+def prompt_and_record(name):
+    """Play an answerable prompt. Returns (key pressed, audio the caller spoke during it)."""
+    chunks=[];stop=threading.Event();worker=threading.Thread(target=_record_audio,args=(stop,chunks),daemon=True)
+    worker.start()
+    try:value=agi_result(agi(f'STREAM FILE voice-payment/{name} "0123456789#*"'))
+    finally:
+        stop.set();worker.join(timeout=0.25)
+    return (chr(value) if value>0 else ""),b"".join(chunks)
+
+def listen(phrases,max_keys,max_seconds=20,silence_end=1.8,voice_level=120,preroll=b""):
+    """Listen for speech and keypad at the same time. Returns ('keys'|'speech'|'none', value).
+    preroll is audio the caller already spoke over the prompt; it counts as the start of the answer."""
+    if not preroll:discard_prompt_echo()
     if not Recognizer.available():
         key=wait_digit(int(max_seconds*1000))
         return ("keys",collect_keys(key,max_keys)) if key else ("none","")
     recognizer=Recognizer(phrases)
     state={"started":False,"last_voice":time.monotonic(),"done":False}
+    if preroll:
+        # Feed what was said over the prompt; the end-of-answer clock starts from its last voiced chunk.
+        quiet=0
+        for index in range(0,len(preroll),3200):
+            chunk=preroll[index:index+3200]
+            if audioop.rms(chunk,2)>voice_level:state["started"]=True;quiet=0
+            else:quiet+=len(chunk)
+            recognizer.feed(chunk)
+        state["last_voice"]=time.monotonic()-quiet/(RATE*2)
     stop=threading.Event()
     def reader():
         deadline=time.monotonic()+max_seconds
@@ -267,9 +294,9 @@ def listen(phrases,max_keys,max_seconds=20,silence_end=1.8,voice_level=120):
 NUMBER_PHRASES=SPOKEN_NUMBERS
 
 def ask(prompt_name,phrases,max_keys,**options):
-    pressed=prompt(prompt_name,interruptible=True)
+    pressed,spoken=prompt_and_record(prompt_name)
     if pressed:return "keys",collect_keys(pressed,max_keys)
-    return listen(phrases,max_keys,**options)
+    return listen(phrases,max_keys,preroll=spoken,**options)
 
 # ---------------------------------------------------------------- flow
 

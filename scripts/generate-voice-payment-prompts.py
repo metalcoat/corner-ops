@@ -30,6 +30,8 @@ PROMPTS={
     "dtmf-security-code":"Enter the three or four digit security code, then press pound.",
     "dtmf-billing-zip":"Enter the five digit billing zip code.",
     "dtmf-confirm":"Press 1 if that is correct, or press 2 to try again.",
+    # say-confirm/-expiration/-security-code/-billing-zip are currently copies of confirm-yes/expiration/
+    # security-code/billing-zip (same voice); delete them and re-run to record the wording below.
     "say-card-number":"Please say your card number, or type it on the keypad.",
     "card-in-groups":"Let's take it four digits at a time.",
     "card-invalid":"Sorry, that didn't come through as a valid card number.",

@@ -85,8 +85,8 @@ def run(answers):
     prompts, pending_keys, result = [], [], None
     feeder = None
 
-    def feed(pcm):
-        time.sleep(0.25)  # the caller starts after the prompt ends
+    def feed(pcm, delay=0.25):
+        time.sleep(delay)  # by default the caller starts after the prompt ends
         for i in range(0, len(pcm), 3200):
             os.write(audio_write, pcm[i:i + 3200])
             time.sleep(0.1)
@@ -111,6 +111,11 @@ def run(answers):
                 elif kind == "say":
                     feeder = threading.Thread(target=feed, args=(value,), daemon=True)
                     feeder.start()
+                elif kind == "over":
+                    # The caller starts answering while the prompt is still playing (prompt lasts 2.5 s).
+                    feeder = threading.Thread(target=feed, args=(value, 0.0), daemon=True)
+                    feeder.start()
+                    time.sleep(2.5)
         elif command.startswith("WAIT FOR DIGIT"):
             if pending_keys:
                 reply = f"200 result={ord(pending_keys.pop(0))}"
@@ -189,6 +194,16 @@ check("no at confirmation, amex", run({
     "say-security-code": [("say", digits(voice, "4567"))],
     "say-billing-zip": [("keys", "13669")],
 }), AMEX, cvv="4567")
+
+# 6. Talking over the prompts: the answer starts before the prompt finishes and is still heard whole.
+voice = "Kore"
+check("talk over prompts", run({
+    "say-card-number": [("over", digits(voice, VISA))],
+    "say-confirm": [("over", speech(voice, [["yes"]]))],
+    "say-expiration": [("over", expiry_speech(voice))],
+    "say-security-code": [("over", digits(voice, "123", 3))],
+    "say-billing-zip": [("over", digits(voice, "13669", 5))],
+}), VISA)
 
 # 5. Silence everywhere: the caller goes to an employee and nothing is charged.
 outcome = run({})
