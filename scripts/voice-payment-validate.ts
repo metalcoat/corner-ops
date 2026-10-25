@@ -30,17 +30,16 @@ assert.match(agi,/threading\.Thread\(target=_drain_audio,args=\(stop,\),daemon=T
 assert.match(agi,/def _drain_audio\(stop\)/);
 assert.match(agi,/def playback\(command\)/);
 assert.match(agi,/def say_digits\(value\)/);
-assert.match(agi,/prompt\("confirm-ending"\);say_digits\(last4\)/);
 assert.match(agi,/def valid_luhn\(value\)/);
 assert.match(agi,/def card_complete\(digits\)/);
 assert.match(agi,/def parse_expiry\(text/);
 assert.match(agi,/if not 1<=month<=12:return ""/);
-assert.match(agi,/if heard=="1":return True/);
+assert.match(agi,/def best\(how,heard,convert,ok\)/);
 assert.match(agi,/get_digits\("say-security-code"/);
 assert.match(agi,/get_digits\("say-billing-zip",\(5,\)\)/);
 assert.doesNotMatch(agi,/stderr\.write\(f"[^"]*\{(?:card|digits|heard|group|expiry|cvv|zipcode)/);
 assert.match(agi,/code":failure_stage/);
-for(const stage of ["card_recognition_failed","card_confirmation_failed","expiration_recognition_failed","security_code_recognition_failed","billing_zip_recognition_failed","provider_payment_failed"])
+for(const stage of ["card_recognition_failed","expiration_recognition_failed","security_code_recognition_failed","billing_zip_recognition_failed","provider_payment_failed"])
   assert.match(agi,new RegExp(stage));
 assert.match(lib,/Secure payment failed:/);
 assert.match(lib,/state='ended'/);

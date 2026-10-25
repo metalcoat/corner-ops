@@ -185,14 +185,13 @@ check("bad whole number then groups", run({
     "say-billing-zip": [("say", digits(voice, "13669", 5))],
 }), VISA)
 
-# 4. "No" at the read-back starts the card over; Amex reads 4-6-5 and needs a 4-digit code.
+# 4. Amex reads 4-6-5 and needs a 4-digit code; a wrong-length keyed zip is asked again.
 voice = "Aoede"
-check("no at confirmation, amex", run({
-    "say-card-number": [("say", digits(voice, VISA)), ("say", speech(voice, [[NAMES[int(d)] for d in AMEX[0:4]], [NAMES[int(d)] for d in AMEX[4:10]], [NAMES[int(d)] for d in AMEX[10:]]]))],
-    "say-confirm": [("say", speech(voice, [["no"]])), ("keys", "1")],
+check("amex, wrong keyed zip", run({
+    "say-card-number": [("say", speech(voice, [[NAMES[int(d)] for d in AMEX[0:4]], [NAMES[int(d)] for d in AMEX[4:10]], [NAMES[int(d)] for d in AMEX[10:]]]))],
     "say-expiration": [("keys", "0428")],
     "say-security-code": [("say", digits(voice, "4567"))],
-    "say-billing-zip": [("keys", "13669")],
+    "say-billing-zip": [("keys", "1366#"), ("keys", "13669")],
 }), AMEX, cvv="4567")
 
 # 6. Talking over the prompts: the answer starts before the prompt finishes and is still heard whole.

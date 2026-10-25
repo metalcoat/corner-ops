@@ -63,6 +63,18 @@ for n in range(int(os.environ.get("N","150"))):
         graw=speak(voice,[[say_digit(d,oh) for d in p]])
         res["group_total"]+=1
         if (vp.words_to_digits(hear(graw,vp.SPOKEN_NUMBERS)) or "")==p:res["group_ok"]+=1
+# Zip codes and security codes use Vosk's next-best guesses when the best one has the wrong length.
+res["zip_ok"]=res["zip_total"]=0
+for n in range(40):
+    voice=random.choice(voices);zipcode="".join(random.choice("0123456789") for _ in range(5))
+    if n%4==0:zipcode=zipcode[:2]+zipcode[2]*2+zipcode[4]  # doubled digits, like 13669
+    raw=speak(voice,[[say_digit(d,False) for d in zipcode]])
+    if raw is None:continue
+    r=vp.Recognizer(vp.SPOKEN_NUMBERS)
+    for i in range(0,len(raw),3200):r.feed(raw[i:i+3200])
+    res["zip_total"]+=1
+    if vp.best("speech",r.candidates(),vp.as_digits,lambda value:len(value)==5)==zipcode:res["zip_ok"]+=1
+    else:samples.append([voice,"zip",zipcode])
 for voice in voices:
     for words,exp in [(["oh","four","twenty_eight"],"0428"),(["twelve","thirty"],"1230"),(["September","twenty_twenty_seven"],"0927"),(["one","two","two","eight"],"1228")]:
         raw=speak(voice,[words])
@@ -82,4 +94,5 @@ assert len(voices)>=4,summary
 assert res["whole_wrong_valid"]==0,summary
 assert res["whole_total"]>=40 and res["whole_ok"]>=0.9*res["whole_total"],summary
 assert res["group_ok"]>=0.95*res["group_total"],summary
+assert res["zip_ok"]>=0.95*res["zip_total"],summary
 assert res["exp_ok"]>=res["exp_total"]-2 and res["yn_ok"]>=res["yn_total"]-1,summary

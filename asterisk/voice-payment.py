@@ -23,6 +23,7 @@ API=os.environ.get("VOICE_PAYMENT_API_URL","http://127.0.0.1:3000/api/internal/v
 SECRET=os.environ.get("VOICE_PAYMENT_INTERNAL_SECRET","")
 VOSK_MODEL=os.environ.get("VOICE_PAYMENT_VOSK_MODEL","/opt/vosk-model")
 RATE=16000  # EAGI_AUDIO_FORMAT=slin16
+ALTERNATIVES=3
 
 # ---------------------------------------------------------------- spoken number parsing
 
@@ -220,14 +221,31 @@ class Recognizer:
     def __init__(self,phrases):
         from vosk import KaldiRecognizer
         self.engine=KaldiRecognizer(Recognizer._model,RATE,json.dumps([*phrases,"[unk]"]));self.parts=[]
+        self.engine.SetMaxAlternatives(ALTERNATIVES)
+
+    @staticmethod
+    def _alternatives(raw):
+        result=json.loads(raw)
+        texts=[alt.get("text","") for alt in result.get("alternatives",[])] or [result.get("text","")]
+        cleaned=[" ".join(word for word in text.split() if word!="[unk]") for text in texts]
+        return list(dict.fromkeys(cleaned)) or [""]
 
     def feed(self,chunk):
         # Vosk closes a segment at each pause ("4111, 1111, ..."): keep every segment, not just the last.
-        if self.engine.AcceptWaveform(chunk):self.parts.append(json.loads(self.engine.Result()).get("text",""))
+        if self.engine.AcceptWaveform(chunk):self.parts.append(self._alternatives(self.engine.Result()))
+
+    def candidates(self):
+        """What was heard, best guess first, then Vosk's next-best guesses (a missed "six six" in a zip
+        usually shows up in the second or third)."""
+        self.parts.append(self._alternatives(self.engine.FinalResult()))
+        parts=[part for part in self.parts if any(part)] or [[""]]
+        combos=[("",0)]
+        for part in parts[:6]:
+            combos=sorted(((f"{text} {alt}".strip(),rank+index) for text,rank in combos for index,alt in enumerate(part[:ALTERNATIVES])),key=lambda item:item[1])[:50]
+        return list(dict.fromkeys(text for text,_ in combos))
 
     def text(self):
-        self.parts.append(json.loads(self.engine.FinalResult()).get("text",""))
-        return " ".join(word for part in self.parts for word in part.split() if word!="[unk]")
+        return self.candidates()[0]
 
 def _record_audio(stop,chunks):
     """Like _drain_audio, but keeps what the caller says while a prompt plays (they often answer over it)."""
@@ -288,8 +306,8 @@ def listen(phrases,max_keys,max_seconds=20,silence_end=1.8,voice_level=120,prero
     finally:
         stop.set();worker.join(timeout=1)
     if key:return "keys",collect_keys(key,max_keys)
-    heard=recognizer.text() if state["started"] else ""
-    return ("speech",heard) if heard else ("none","")
+    heard=recognizer.candidates() if state["started"] else []
+    return ("speech",heard) if heard and heard[0] else ("none","")
 
 NUMBER_PHRASES=SPOKEN_NUMBERS
 
@@ -309,6 +327,20 @@ def group_prompt(index,size,remaining):
     if size==remaining:return {4:"last-four",5:"last-five"}.get(size,"next-four")
     return "next-six" if size==6 else "next-four"
 
+def best(how,heard,convert,ok):
+    """Keys are taken as typed. Speech: the best guess, or for short answers (zip, code, expiry, a group)
+    the first of Vosk's next-best guesses that has the right shape. Never used for the whole card
+    number, where a second guess could be a different valid card."""
+    if how=="keys":
+        value=convert(heard)
+        return value if value and ok(value) else ""
+    for text in heard:
+        value=convert(text)
+        if value and ok(value):return value
+    return ""
+
+as_digits=lambda text:text if text.isdigit() else (words_to_digits(text) or "")
+
 def card_in_groups():
     """Four digits at a time (Amex 4-6-5). Short answers are the easiest to hear correctly."""
     card=""
@@ -317,8 +349,8 @@ def card_in_groups():
         group=""
         for _ in range(3):
             how,heard=ask(group_prompt(index,size,sum(sizes)-len(card)),NUMBER_PHRASES,19 if index==0 else size,max_seconds=12,silence_end=1.6)
-            group=heard if how=="keys" else words_to_digits(heard) or ""
-            if index==0 and how=="keys" and card_complete(group):return group  # keyed the whole number
+            if index==0 and how=="keys" and card_complete(heard):return heard  # keyed the whole number
+            group=best(how,heard,as_digits,lambda value,size=size:len(value)==size)
             if len(group)==size:break
             prompt("try-again");group=""
         if not group:return ""
@@ -330,7 +362,7 @@ def get_card_number():
     """The whole number in one go, spoken or keyed. If it doesn't come out as a valid card
     (a dropped or extra digit fails the Luhn check), fall back to four digits at a time."""
     how,heard=ask("say-card-number",NUMBER_PHRASES,19,max_seconds=30,silence_end=2.2)
-    digits=heard if how=="keys" else words_to_digits(heard) or ""
+    digits=heard if how=="keys" else words_to_digits(heard[0]) or "" if heard else ""
     if card_complete(digits):return digits
     for _ in range(2):
         prompt("card-in-groups")
@@ -339,22 +371,10 @@ def get_card_number():
         prompt("card-invalid")
     return ""
 
-def get_confirmation(last4):
-    for _ in range(2):
-        prompt("confirm-ending");say_digits(last4)
-        how,heard=ask("say-confirm",SPOKEN_YES_NO,1,max_seconds=8,silence_end=1.0)
-        if how=="keys":
-            if heard=="1":return True
-            if heard=="2":return False
-        else:
-            answer=yes_or_no(heard)
-            if answer is not None:return answer
-    return False
-
 def get_expiry():
     for _ in range(3):
         how,heard=ask("say-expiration",[*SPOKEN_NUMBERS,"thousand",*SPOKEN_MONTHS],6,max_seconds=12)
-        expiry=parse_expiry(heard)
+        expiry=best(how,heard,parse_expiry,bool)
         if expiry:return expiry
         prompt("try-again")
     return ""
@@ -362,8 +382,8 @@ def get_expiry():
 def get_digits(prompt_name,lengths,max_seconds=12):
     for _ in range(3):
         how,heard=ask(prompt_name,NUMBER_PHRASES,max(lengths),max_seconds=max_seconds)
-        digits=heard if how=="keys" else words_to_digits(heard) or ""
-        if len(digits) in lengths:return digits
+        digits=best(how,heard,as_digits,lambda value:len(value) in lengths)
+        if digits:return digits
         prompt("try-again")
     return ""
 
@@ -392,15 +412,10 @@ def main():
         call_id=sys.argv[1].strip() if len(sys.argv)>1 else ""
         verified_caller=sys.argv[2].strip() if len(sys.argv)>2 else ""
         session=api({"action":"claim","callId":call_id,"callerPhone":verified_caller or environment.get("agi_callerid","")})
-        card=""
-        for _ in range(3):
-            failure_stage="card_recognition_failed"
-            card=get_card_number()
-            if not card:break
-            failure_stage="card_confirmation_failed"
-            if get_confirmation(card[-4:]):break
-            card=""
-            prompt("try-again")
+        # No read-back of the last four (owner request 2026-10-25): a misheard number fails the card check
+        # and is asked again; the processor declines a wrong one.
+        failure_stage="card_recognition_failed"
+        card=get_card_number()
         if not card:raise RuntimeError("recognition")
         failure_stage="expiration_recognition_failed"
         expiry=get_expiry()
