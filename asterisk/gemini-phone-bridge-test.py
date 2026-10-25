@@ -252,6 +252,17 @@ async def main():
         {"result": result, "log": log},
     )
 
+    # 12. "Um" is not silence: a handoff "because the caller was silent" right after they spoke is refused.
+    log = await run(
+        [transcript("Um"),
+         {"toolCall": {"functionCalls": [{"id": "h1", "name": "request_human_handoff", "args": {"reason": "customer was silent for too long"}}]}},
+         "WAIT_TOOL_RESPONSE"],
+        [],
+    )
+    refused = first_result(log, 0) if log["toolResponses"] else {}
+    check("silence handoff right after the caller spoke is refused", log["app"].count("handoff") == 1 and refused.get("error", {}).get("code") == "HANDOFF_NOT_NEEDED", {"app": log["app"], "result": refused})
+    check("a real request for a person still transfers", gp.silence_handoff_blocked("caller asked for a manager", 1) is False, {})
+
     # 10. A Gemini error mid-call (e.g. close 1007) transfers the caller at once (was ~20 s of silence).
     import uuid as uuid_module
 

@@ -213,6 +213,15 @@ def payment_not_ready(error):
     return {"error": {"code": "PAYMENT_NOT_READY", "message": message, "remedy": remedy}}
 
 
+SILENCE_HANDOFF = re.compile(r"silen|quiet|no (?:answer|response)|not respond|didn.t respond|unresponsive|wait(?:ed|ing)? (?:too )?long|can.t wait|no reply", re.IGNORECASE)
+
+
+def silence_handoff_blocked(reason, seconds_since_caller_spoke):
+    """A transfer "because the caller went silent" while the caller spoke moments ago is the model
+    misreading a pause or an "um"; real requests for a person, complaints etc. are never blocked."""
+    return bool(SILENCE_HANDOFF.search(str(reason or ""))) and seconds_since_caller_spoke < 30
+
+
 def join_transcript(current, chunk):
     """Gemini sends transcription in pieces, some without a leading space ("on the"+"fries")."""
     chunk = str(chunk)
@@ -599,6 +608,7 @@ async def bridge(reader, writer, call_id):
     playback = SpeechOutput(writer, emit)
     customer_transcript = ""
     tool_gate = ToolCallGate()
+    last_customer_speech = time.monotonic()
     closing_tasks = set()
     model_turns = 0
     closing_interrupted = False
@@ -718,7 +728,7 @@ async def bridge(reader, writer, call_id):
         async def model_audio():
             nonlocal output_state, customer_transcript, user_turn_open
             nonlocal customer_turn_id
-            nonlocal assistant_transcript, model_turns, closing_interrupted
+            nonlocal assistant_transcript, model_turns, closing_interrupted, last_customer_speech
             async for raw in gemini:
                 message = json.loads(raw)
                 server = message.get("serverContent", {})
@@ -746,6 +756,7 @@ async def bridge(reader, writer, call_id):
                         customer_turn_id += 1
                         await emit("userSpeechStart", playback.snapshot())
                     customer_transcript = join_transcript(customer_transcript, transcription["text"])
+                    last_customer_speech = time.monotonic()
                 output_transcription = server.get("outputTranscription", {})
                 if output_transcription.get("text"):
                     assistant_transcript = join_transcript(assistant_transcript, output_transcription["text"])
@@ -842,6 +853,15 @@ async def bridge(reader, writer, call_id):
                     else:
                         async def execute():
                             if name == "request_human_handoff":
+                                if silence_handoff_blocked(arguments.get("reason", ""), time.monotonic() - last_customer_speech):
+                                    # "Um" is not silence (dev test call 2026-10-25 was transferred 2 s after "Um").
+                                    return {
+                                        "error": {
+                                            "code": "HANDOFF_NOT_NEEDED",
+                                            "message": "The caller is still on the line and just spoke.",
+                                            "remedy": "Do not transfer. Say something short like: Take your time, what can I get for you? Then wait.",
+                                        }
+                                    }
                                 value = await app_action(
                                     call_id,
                                     "handoff",
