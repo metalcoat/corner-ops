@@ -1954,6 +1954,9 @@ export async function priceSpokenOrder(input: {
         (left, right) => dependencyPriority(left) - dependencyPriority(right),
       );
       for (const originalModifier of spokenModifiers) {
+        // Burgers are all cooked well done (owner, 2026-10-25): asking for it is fine, there's nothing to add.
+        if (/^(?:well[\s-]?done|cooked well|well cooked)$/i.test(originalModifier.name.trim()) && item.modifiers.some((group) => group.name === "Burger Toppings"))
+          continue;
         const sideCup = sideCupFor(item.modifiers, originalModifier);
         if (sideCup) {
           extraCups.push({ name: sideCup, quantity: 1 });
