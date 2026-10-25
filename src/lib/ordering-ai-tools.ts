@@ -788,6 +788,18 @@ function strictMatch<T>(
   code: "ITEM_NOT_ON_MENU" | "INVALID_MODIFIER" | "INVALID_VARIANT",
   kind: string,
 ) {
+  // Several menu items match ("mashed potatoes": Small and Medium): that's a question for the caller,
+  // not "we don't have it" (dev test call 2026-10-25).
+  const ambiguous = (candidates: Array<{ row: T }>) => {
+    if (code !== "ITEM_NOT_ON_MENU")
+      return new AiToolError(code, `${kind} is ambiguous: ${query}.`, "Ask one short clarification question.", 409);
+    const names = [...new Set(candidates.map((candidate) => terms(candidate.row)[0]))].slice(0, 4);
+    const question = `Which one would you like: ${names.slice(0, -1).join(", ")}${names.length > 1 ? " or " : ""}${names[names.length - 1]}?`;
+    return new AiToolError("FOLLOW_UP_REQUIRED", question, `Ask: ${question}`, 409, {
+      options: names,
+      pendingItem: { category: spokenKey(query), customerRequest: query, missingRequiredFields: ["menu item"] },
+    });
+  };
   const wanted = spokenKey(query),
     all = rows.map((row) => ({ row, terms: terms(row).map(spokenKey) })),
     exact = all.filter((candidate) => candidate.terms.includes(wanted)),
@@ -799,12 +811,7 @@ function strictMatch<T>(
     }));
   if (exact.length === 1) return exact[0].row;
   if (exact.length > 1)
-    throw new AiToolError(
-      code,
-      `${kind} is ambiguous: ${query}.`,
-      "Ask one short clarification question.",
-      409,
-    );
+    throw ambiguous(exact);
   const contained = indexed
       .map((candidate) => ({
         ...candidate,
@@ -826,12 +833,7 @@ function strictMatch<T>(
     );
   if (bestContained.length === 1) return bestContained[0].row;
   if (bestContained.length > 1)
-    throw new AiToolError(
-      code,
-      `${kind} is ambiguous: ${query}.`,
-      "Ask one short clarification question.",
-      409,
-    );
+    throw ambiguous(bestContained);
   const partial = indexed.filter(
     (candidate) =>
       wanted.length >= 3 &&
@@ -845,12 +847,7 @@ function strictMatch<T>(
   );
   if (partial.length === 1) return partial[0].row;
   if (partial.length > 1)
-    throw new AiToolError(
-      code,
-      `${kind} is ambiguous: ${query}.`,
-      "Ask one short clarification question.",
-      409,
-    );
+    throw ambiguous(partial);
   const ranked = indexed
       .map((candidate) => ({
         ...candidate,
@@ -1124,6 +1121,16 @@ export async function priceSpokenOrder(input: {
       return [burgerLine, ...fryLines];
     });
   const resolved: AiItemInput[] = spokenItems.map((requested) => {
+      const mashedPhrase = /^(?:(small|sm|medium|med)\s+)?mashed(?:\s+potato(?:e)?s?)?(?:\s+(?:and|with|w\/?)\s+(?:some\s+)?(gravy))?$/i.exec(requested.name.trim());
+      if (mashedPhrase && (mashedPhrase[1] || mashedPhrase[2])) {
+        // "mashed potatoes and gravy" is the mashed side plus its Gravy option, not a dish called that.
+        const size = mashedPhrase[1] ? (/^s/i.test(mashedPhrase[1]) ? "Small" : "Medium") : "";
+        requested = {
+          ...requested,
+          name: size ? `${size} Mashed Potatoes` : "mashed potatoes",
+          modifiers: [...(requested.modifiers || []), ...(mashedPhrase[2] ? [{ name: "Gravy" }] : [])],
+        };
+      }
       const fryPhrase = /^(small|large) (?:french )?fries?\s+(?:with\s+)?(nacho(?: cheese)?|cheese sauce|gravy)(.*)$/i.exec(requested.name);
       if(fryPhrase && !/cheese and gravy/i.test(requested.name)) requested = {...requested, name: fryPhrase[1]+" French Fries", modifiers:[...(requested.modifiers || []),{name: /^gravy$/i.test(fryPhrase[2]) ? "Gravy" : "Nacho Cheese", placement: /\b(?:on (?:the )?(?:fries|them|top)|over)\b/i.test(fryPhrase[3]) ? "topping" : "side"}]};
       const rawName = spokenKey(requested.name),
