@@ -74,6 +74,60 @@ export type SpokenOrderItem = {
     amount?: "regular" | "extra" | "double_extra" | "triple_extra";
   }>;
 };
+
+type RemovalGroup = {
+  id: string;
+  name: string;
+  presentationContext?: string;
+  options: Array<{ id: string; name: string; available: boolean }>;
+};
+
+/** Recipe omissions are real catalog selections (e.g. No Tomato), not missing toppings. */
+export function resolveSpokenModifierRemoval(
+  groups: RemovalGroup[],
+  edit: NonNullable<SpokenOrderItem["modifiers"]>[number],
+) {
+  const negative =
+    /^(?:no|without|remove|hold|skip|leave off|take off)\s+(.+)$/i.exec(
+      edit.name.trim(),
+    );
+  if (!negative && !edit.remove) return null;
+  const key = (value: string) =>
+    spokenKey(value).replace(/\btomatoe\b/g, "tomato");
+  const choices = groups
+    .filter(
+      (group) =>
+        group.presentationContext !== "hidden" &&
+        (!edit.group || edit.group === group.name),
+    )
+    .flatMap((group) =>
+      group.options
+        .filter((option) => option.available)
+        .map((option) => ({ group, option })),
+    );
+  const matches = (name: string) =>
+    choices.filter(({ group, option }) =>
+      modifierAliases(option.name, group.name).some(
+        (alias) => key(alias) === key(name),
+      ),
+    );
+  const choose = (candidates: typeof choices, remove: boolean) => {
+    if (candidates.length !== 1)
+      throw new AiToolError(
+        "INVALID_MODIFIER",
+        "That removal is invalid or ambiguous.",
+        "Ask which ingredient and modifier group the caller means.",
+        409,
+      );
+    return { ...candidates[0], remove };
+  };
+  const literal = matches(edit.name);
+  if (literal.length) return choose(literal, Boolean(edit.remove));
+  const subject = negative?.[1] || edit.name;
+  const omission = matches(`no ${subject}`);
+  if (omission.length) return choose(omission, false);
+  return choose(matches(subject), true);
+}
 const services: ServiceType[] = [
   "undecided",
   "pickup",
@@ -1628,7 +1682,13 @@ export async function priceSpokenOrder(input: {
       spokenModifiers.sort(
         (left, right) => dependencyPriority(left) - dependencyPriority(right),
       );
-      for (const requestedModifier of spokenModifiers) {
+      for (const originalModifier of spokenModifiers) {
+        const removal = resolveSpokenModifierRemoval(item.modifiers, originalModifier);
+        if (removal?.remove) {
+          modifierSelections[removal.group.id] = (modifierSelections[removal.group.id] || []).filter(id => id !== removal.option.id);
+          continue;
+        }
+        const requestedModifier = removal ? {...originalModifier, name: removal.option.name, group: removal.group.name, remove: false} : originalModifier;
         const placementMatch = /^(?:(?:put|add|with) (?:the )?)?(nacho cheese|gravy)\b/i.exec(requestedModifier.name.replace(/chesse/gi,"cheese")),
           friesPlacement = /French Fries$/i.test(item.name) && placementMatch,
           raw = friesPlacement ? spokenKey(placementMatch[1]) : spokenKey(requestedModifier.name),

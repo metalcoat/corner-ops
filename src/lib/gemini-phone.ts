@@ -1,4 +1,4 @@
-export const DEFAULT_GEMINI_PHONE_MODEL = "gemini-3.1-flash-live-preview";
+export const DEFAULT_GEMINI_PHONE_MODEL = "gemini-2.5-flash-native-audio-latest";
 
 const apiRoot = "https://generativelanguage.googleapis.com/v1beta";
 

@@ -58,29 +58,389 @@ async function main() {
     modifiers: [{ name: flavor }],
   });
   try {
-    await check("identical wing configurations remain separate addressable lines", async () => {
-      const order = await price([wing("Mild"), wing("Mild")]);
-      const lines = await cart.incrementalSpokenCart(order.id, "read", "", []);
-      assert.equal(lines.length, 2);
-      assert.notEqual(lines[0].lineId, lines[1].lineId);
-      const edited = await cart.incrementalSpokenCart(order.id, "replace_item", lines[1].lineId!, [{ name: "Wings", modifiers: [{ name: "Hot", group: "Wing Sauce" }] }]);
-      await price(edited, order.id);
-      const after = await cart.incrementalSpokenCart(order.id, "read", "", []);
-      assert.ok(after[0].modifiers?.some(m => m.name === "Mild"));
-      assert.ok(after[1].modifiers?.some(m => m.name === "Hot"));
-    });
-    await check("omitted flavor recovers only from the exact edited wing line", async () => {
-      const order = await price([wing("Mild"), wing("Suicide")]);
-      const lines = await cart.incrementalSpokenCart(order.id, "read", "", []);
-      const edited = await cart.incrementalSpokenCart(order.id, "replace_item", lines[1].lineId!, [{ name: "Wings", modifiers: [{ name: "Celery" }] }]);
-      await price(edited, order.id);
-      const after = await cart.incrementalSpokenCart(order.id, "read", "", []);
-      assert.ok(after[0].modifiers?.some(m => m.name === "Mild"));
-      assert.ok(!after[0].modifiers?.some(m => m.name === "Celery"));
-      assert.ok(after[1].modifiers?.some(m => m.name === "Suicide"));
-      assert.ok(!after[1].modifiers?.some(m => m.name === "Mild"));
-      assert.ok(after[1].modifiers?.some(m => m.name === "Celery"));
-    });
+    await check(
+      "call replay: 30 medium + 20 hot becomes 20 medium + 10 hot atomically",
+      async () => {
+        const order = await price([
+          { name: "Turkey Big Boss", modifiers: [{ name: "No Tomato" }] },
+          {
+            name: "large pizza",
+            modifiers: [
+              { name: "Pepperoni" },
+              { name: "Onions", portion: "left_half" },
+            ],
+          },
+          {
+            name: "Wings",
+            variant: "30 Wings",
+            quantity: 1,
+            modifiers: [{ name: "Medium" }, { name: "Blue Cheese" }],
+          },
+          {
+            name: "Wings",
+            variant: "20 Wings",
+            quantity: 1,
+            modifiers: [{ name: "Hot" }],
+          },
+          { name: "Caramel Cheesecake" },
+        ]);
+        const before = await cart.incrementalSpokenCart(
+          order.id,
+          "read",
+          "",
+          [],
+        );
+        const originalWings = before.filter((line) => line.name === "Wings");
+        const payload: SpokenOrderItem[] = [
+          {
+            name: "Wings",
+            variant: "20 Wings",
+            quantity: 1,
+            modifiers: [{ name: "Medium", portion: "whole" }],
+          },
+          {
+            name: "Wings",
+            variant: "10 Wings",
+            quantity: 1,
+            modifiers: [{ name: "Hot", portion: "whole" }],
+          },
+        ];
+        await price(
+          await cart.incrementalSpokenCart(
+            order.id,
+            "replace_item",
+            originalWings[0].lineId!,
+            payload,
+          ),
+          order.id,
+        );
+        const after = await cart.incrementalSpokenCart(
+          order.id,
+          "read",
+          "",
+          [],
+        );
+        const wings = after.filter((line) => line.name === "Wings");
+        assert.equal(wings.length, 2);
+        assert.equal(wings[0].variant, "20 Wings");
+        assert.equal(wings[1].variant, "10 Wings");
+        assert.deepEqual(
+          wings.map((line) => line.lineId),
+          originalWings.map((line) => line.lineId),
+        );
+        assert.ok(
+          wings[0].modifiers?.some((mod) => /Blue Cheese/.test(mod.name)),
+        );
+        assert.deepEqual(
+          after.filter((line) => line.name !== "Wings"),
+          before.filter((line) => line.name !== "Wings"),
+        );
+      },
+    );
+    await check(
+      "explicit batch line IDs allow separate flavor changes",
+      async () => {
+        const order = await price([wing("Mild"), wing("Hot")]);
+        const before = await cart.incrementalSpokenCart(
+          order.id,
+          "read",
+          "",
+          [],
+        );
+        await price(
+          await cart.incrementalSpokenCart(order.id, "replace_item", "", [
+            { ...wing("Medium"), lineId: before[0].lineId },
+            { ...wing("Suicide"), lineId: before[1].lineId },
+          ]),
+          order.id,
+        );
+        const after = await cart.incrementalSpokenCart(
+          order.id,
+          "read",
+          "",
+          [],
+        );
+        assert.ok(after[0].modifiers?.some((mod) => mod.name === "Medium"));
+        assert.ok(after[1].modifiers?.some((mod) => mod.name === "Suicide"));
+      },
+    );
+    await check(
+      "ambiguous wing batch requires line selection and leaves cart unchanged",
+      async () => {
+        const order = await price([wing("Mild"), wing("Mild")]);
+        const before = await snapshot(order.id);
+        await assert.rejects(
+          cart.incrementalSpokenCart(order.id, "replace_item", "", [
+            wing("Mild"),
+            wing("Mild"),
+          ]),
+          (error: any) =>
+            error.code === "FOLLOW_UP_REQUIRED" &&
+            error.details.cartLines.length === 2,
+        );
+        assert.equal(await snapshot(order.id), before);
+      },
+    );
+    await check(
+      "duplicate stale or invalid batch corrections leave all lines unchanged",
+      async () => {
+        const order = await price([wing("Mild"), wing("Hot")]);
+        const lines = await cart.incrementalSpokenCart(
+          order.id,
+          "read",
+          "",
+          [],
+        );
+        const before = await snapshot(order.id);
+        for (const edits of [
+          [
+            { ...wing("Mild"), lineId: lines[0].lineId },
+            { ...wing("Hot"), lineId: lines[0].lineId },
+          ],
+          [
+            { ...wing("Mild"), lineId: lines[0].lineId },
+            { ...wing("Hot"), lineId: "stale-id" },
+          ],
+          [
+            { ...wing("Medium"), lineId: lines[0].lineId },
+            {
+              ...wing("Hot"),
+              lineId: lines[1].lineId,
+              modifiers: [{ name: "avocado" }],
+            },
+          ],
+        ]) {
+          await assert.rejects(
+            cart.incrementalSpokenCart(order.id, "replace_item", "", edits),
+          );
+          assert.equal(await snapshot(order.id), before);
+        }
+      },
+    );
+    for (const modifier of [
+      { name: "No Tomato", remove: false },
+      { name: "Tomatoes", remove: true },
+      { name: "without tomatoes" },
+    ]) {
+      await check(
+        "initial Turkey Big Boss omission: " + JSON.stringify(modifier),
+        async () => {
+          const result = await price([
+            { name: "Turkey Big Boss", quantity: 1, modifiers: [modifier] },
+          ]);
+          const line = (
+            await cart.incrementalSpokenCart(result.id, "read", "", [])
+          )[0];
+          assert.ok(
+            line.modifiers?.some(
+              (mod) =>
+                mod.name === "No Tomato" && mod.group === "Big Boss mods",
+            ),
+          );
+        },
+      );
+      await check(
+        "existing Turkey Big Boss omission: " + JSON.stringify(modifier),
+        async () => {
+          const result = await price([
+            { name: "Turkey Big Boss", quantity: 1 },
+          ]);
+          const line = (
+            await cart.incrementalSpokenCart(result.id, "read", "", [])
+          )[0];
+          const items = await cart.incrementalSpokenCart(
+            result.id,
+            "replace_item",
+            line.lineId!,
+            [{ name: "Turkey Big Boss", quantity: 1, modifiers: [modifier] }],
+          );
+          await price(items, result.id);
+          const changed = (
+            await cart.incrementalSpokenCart(result.id, "read", "", [])
+          )[0];
+          assert.equal(changed.lineId, line.lineId);
+          assert.ok(
+            changed.modifiers?.some(
+              (mod) =>
+                mod.name === "No Tomato" && mod.group === "Big Boss mods",
+            ),
+          );
+        },
+      );
+    }
+    await check(
+      "Big Boss omission survives accompaniment edit and cart repricing",
+      async () => {
+        const result = await price([
+          {
+            name: "Turkey Big Boss",
+            quantity: 1,
+            modifiers: [{ name: "No Tomato" }],
+          },
+        ]);
+        const line = (
+          await cart.incrementalSpokenCart(result.id, "read", "", [])
+        )[0];
+        await price(
+          await cart.incrementalSpokenCart(
+            result.id,
+            "replace_item",
+            line.lineId!,
+            [{ name: "Turkey Big Boss", modifiers: [{ name: "No Russian" }] }],
+          ),
+          result.id,
+        );
+        await price(
+          await cart.incrementalSpokenCart(result.id, "add", "", [
+            { name: "large fries" },
+          ]),
+          result.id,
+        );
+        const after = (
+          await cart.incrementalSpokenCart(result.id, "read", "", [])
+        ).find((item) => item.lineId === line.lineId)!;
+        assert.ok(after.modifiers?.some((mod) => mod.name === "No Tomato"));
+        assert.ok(after.modifiers?.some((mod) => mod.name === "No Russian"));
+      },
+    );
+    await check(
+      "explicitly removing No Tomato restores the original recipe",
+      async () => {
+        const result = await price([
+          { name: "Turkey Big Boss", modifiers: [{ name: "No Tomato" }] },
+        ]);
+        const line = (
+          await cart.incrementalSpokenCart(result.id, "read", "", [])
+        )[0];
+        await price(
+          await cart.incrementalSpokenCart(
+            result.id,
+            "replace_item",
+            line.lineId!,
+            [
+              {
+                name: "Turkey Big Boss",
+                modifiers: [{ name: "No Tomato", remove: true }],
+              },
+            ],
+          ),
+          result.id,
+        );
+        assert.ok(
+          !(
+            await cart.incrementalSpokenCart(result.id, "read", "", [])
+          )[0].modifiers?.some((mod) => mod.name === "No Tomato"),
+        );
+      },
+    );
+    await check(
+      "unknown or incorrectly scoped omissions cannot change the cart",
+      async () => {
+        const result = await price([{ name: "Turkey Big Boss" }]);
+        const line = (
+          await cart.incrementalSpokenCart(result.id, "read", "", [])
+        )[0];
+        const before = await snapshot(result.id);
+        for (const modifier of [
+          { name: "avocado", remove: true },
+          { name: "No Tomato", group: "Double Cheese" },
+        ]) {
+          await assert.rejects(
+            cart.incrementalSpokenCart(
+              result.id,
+              "replace_item",
+              line.lineId!,
+              [{ name: "Turkey Big Boss", modifiers: [modifier] }],
+            ),
+            (error: any) => error.code === "INVALID_MODIFIER",
+          );
+          assert.equal(await snapshot(result.id), before);
+        }
+      },
+    );
+    await check(
+      "removal-only tomato payload resolves for every configured Big Boss",
+      async () => {
+        for (const name of [
+          "Ham Big Boss",
+          "Pig Big Boss",
+          "Salami Big Boss",
+        ]) {
+          const result = await price([
+            { name, modifiers: [{ name: "Tomatoes", remove: true }] },
+          ]);
+          assert.ok(
+            (
+              await cart.incrementalSpokenCart(result.id, "read", "", [])
+            )[0].modifiers?.some((mod) => mod.name === "No Tomato"),
+          );
+        }
+      },
+    );
+    await check(
+      "identical wing configurations remain separate addressable lines",
+      async () => {
+        const order = await price([wing("Mild"), wing("Mild")]);
+        const lines = await cart.incrementalSpokenCart(
+          order.id,
+          "read",
+          "",
+          [],
+        );
+        assert.equal(lines.length, 2);
+        assert.notEqual(lines[0].lineId, lines[1].lineId);
+        const edited = await cart.incrementalSpokenCart(
+          order.id,
+          "replace_item",
+          lines[1].lineId!,
+          [
+            {
+              name: "Wings",
+              modifiers: [{ name: "Hot", group: "Wing Sauce" }],
+            },
+          ],
+        );
+        await price(edited, order.id);
+        const after = await cart.incrementalSpokenCart(
+          order.id,
+          "read",
+          "",
+          [],
+        );
+        assert.ok(after[0].modifiers?.some((m) => m.name === "Mild"));
+        assert.ok(after[1].modifiers?.some((m) => m.name === "Hot"));
+      },
+    );
+    await check(
+      "omitted flavor recovers only from the exact edited wing line",
+      async () => {
+        const order = await price([wing("Mild"), wing("Suicide")]);
+        const lines = await cart.incrementalSpokenCart(
+          order.id,
+          "read",
+          "",
+          [],
+        );
+        const edited = await cart.incrementalSpokenCart(
+          order.id,
+          "replace_item",
+          lines[1].lineId!,
+          [{ name: "Wings", modifiers: [{ name: "Celery" }] }],
+        );
+        await price(edited, order.id);
+        const after = await cart.incrementalSpokenCart(
+          order.id,
+          "read",
+          "",
+          [],
+        );
+        assert.ok(after[0].modifiers?.some((m) => m.name === "Mild"));
+        assert.ok(!after[0].modifiers?.some((m) => m.name === "Celery"));
+        assert.ok(after[1].modifiers?.some((m) => m.name === "Suicide"));
+        assert.ok(!after[1].modifiers?.some((m) => m.name === "Mild"));
+        assert.ok(after[1].modifiers?.some((m) => m.name === "Celery"));
+      },
+    );
     const order = await price([wing("Mild"), wing("Hot")]),
       id = String(order.id);
     const initial = await cart.incrementalSpokenCart(id, "read", "", []);

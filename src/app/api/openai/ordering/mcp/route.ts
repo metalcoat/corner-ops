@@ -107,7 +107,7 @@ const spokenItemSchema = {
       description:
         "Canonical item name, for example Pizza, Wings, or Large French Fries.",
     },
-    lineId: { type: "string" },
+    lineId: { type: "string", description: "Stable existing cart lineId; include each corrected line's own ID for batch edits." },
     variant: {
       type: "string",
       description: "Size/form, for example Jumbo Thin or 20 Wings.",
@@ -744,7 +744,7 @@ export async function POST(request: Request) {
       orderId: orderId || undefined,
       customerId: args.customerId ? String(args.customerId) : undefined,
       outcome: "success",
-      inputSummary: { customerItems: args.items || [], source: "realtime_mcp" },
+      inputSummary: { customerItems: args.items || [], operation: args.operation || "", targetLineId: args.targetLineId || args.targetItem || "", source: "realtime_mcp" },
       resultSummary: {
         orderId,
         itemIds:
@@ -789,7 +789,7 @@ export async function POST(request: Request) {
       orderId: args.orderId ? String(args.orderId) : undefined,
       outcome: known.status >= 500 ? "error" : "blocked",
       errorCode: known.code,
-      inputSummary: { customerItems: args.items || [], source: "realtime_mcp" },
+      inputSummary: { customerItems: args.items || [], operation: args.operation || "", targetLineId: args.targetLineId || args.targetItem || "", source: "realtime_mcp" },
       resultSummary: { message: known.message, details: known.details },
       durationMs: Date.now() - started,
       model: String(call.selected_model || OPENAI_PHONE_MODEL),

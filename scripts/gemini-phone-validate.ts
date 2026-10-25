@@ -44,7 +44,8 @@ async function main() {
     }),
   );
   assert.ok(declarations.length > 0, "Shared ordering tools were not listed.");
-  const model = "gemini-3.1-flash-live-preview";
+  const {DEFAULT_GEMINI_PHONE_MODEL}=await import("../src/lib/gemini-phone");
+  const model=process.argv.find(value=>value.startsWith("--model="))?.slice(8) || DEFAULT_GEMINI_PHONE_MODEL;
   if(!offline) {
   const socket = new WebSocket(
     `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(key)}`,
@@ -59,7 +60,7 @@ async function main() {
         JSON.stringify({
           setup: {
             model: `models/${model}`,
-            generationConfig: { responseModalities: ["AUDIO"] },
+            generationConfig: { responseModalities: ["AUDIO"], speechConfig: {voiceConfig:{prebuiltVoiceConfig:{voiceName:"Kore"}}} },
             realtimeInputConfig: {
               automaticActivityDetection: {
                 disabled: false,
@@ -164,6 +165,7 @@ async function main() {
       status: "passed",
       model,
       liveWebSocketSetup: !offline,
+      configuredVoice: "Kore",
       audioSocketRouting: true,
       sharedOrderingTools: declarations.length,
     }),

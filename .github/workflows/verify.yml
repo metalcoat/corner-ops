@@ -60,7 +60,7 @@ jobs:
               psql -v ON_ERROR_STOP=1 -f "$file"
             fi
           done < <(find db/migrations -maxdepth 1 -type f -name '*.sql' | sort)
-          { echo 'SET session_replication_role=replica;'; gzip -dc tests/fixtures/ai-menu.sql.gz; echo 'SET session_replication_role=origin;'; } | psql -v ON_ERROR_STOP=1
+          { echo 'BEGIN; SET LOCAL session_replication_role=replica;'; gzip -dc tests/fixtures/ai-menu.sql.gz; echo 'COMMIT;'; } | psql -v ON_ERROR_STOP=1
       - name: Dedicated AI regression suites
         shell: bash
         run: |
@@ -75,6 +75,10 @@ jobs:
           npm run test:openai-phone
           npm run test:gemini-phone-routing
           npm run test:gemini-phone -- --offline
+      - name: Gemini bridge playback and fixed voice regression
+        shell: bash
+        run: |
+          docker run --rm -v "$PWD/asterisk:/bridge:ro" python:3.12-slim sh -c 'pip install --disable-pip-version-check websockets==15.0.1 && python /bridge/gemini-phone.py --self-test'
   build:
     runs-on: [self-hosted]  # liberty-ci-01 on the deli network
     timeout-minutes: 15

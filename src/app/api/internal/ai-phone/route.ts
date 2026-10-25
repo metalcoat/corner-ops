@@ -49,7 +49,7 @@ export async function GET(request: Request) {
   }
   if (action === "session") {
     const row = (
-      await getSql()`SELECT caller_phone,line_label FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} AND selected_provider='gemini' AND state='ai' LIMIT 1`
+      await getSql()`SELECT caller_phone,line_label,selected_model FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} AND selected_provider='gemini' AND state='ai' LIMIT 1`
     )[0];
     if (!row)
       return isoJson(
@@ -65,7 +65,7 @@ export async function GET(request: Request) {
       ),
     ]);
     return isoJson({
-      model: settings.geminiModel,
+      model: String(row.selected_model || settings.geminiModel),
       greeting:
         "Thanks for calling Corner Deli, is this going to be pickup or delivery?",
       instructions: `${buildPhoneInstructions({

@@ -18,6 +18,15 @@ APP_URL = os.environ.get("GEMINI_PHONE_APP_URL", "http://127.0.0.1:3000").rstrip
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
 INTERNAL_SECRET = os.environ.get("VOICE_PAYMENT_INTERNAL_SECRET", "")
 MCP_TOKEN = os.environ.get("OPENAI_ORDERING_MCP_TOKEN", "")
+GEMINI_PHONE_VOICE = "Kore"
+
+
+def speech_generation_config():
+    """One fixed speaker configuration for the entire native-audio session."""
+    return {
+        "responseModalities": ["AUDIO"],
+        "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": GEMINI_PHONE_VOICE}}},
+    }
 
 
 def http_json(url, method="GET", payload=None, token=None):
@@ -522,14 +531,7 @@ async def bridge(reader, writer, call_id):
                 {
                     "setup": {
                         "model": f"models/{model}",
-                        "generationConfig": {
-                            "responseModalities": ["AUDIO"],
-                            "speechConfig": {
-                                "voiceConfig": {
-                                    "prebuiltVoiceConfig": {"voiceName": "Kore"}
-                                }
-                            },
-                        },
+                        "generationConfig": speech_generation_config(),
                         "realtimeInputConfig": {
                             "automaticActivityDetection": {
                                 "disabled": False,
@@ -552,7 +554,10 @@ async def bridge(reader, writer, call_id):
                 }
             )
         )
-        await gemini.recv()
+        setup_ack = json.loads(await gemini.recv())
+        if "setupComplete" not in setup_ack:
+            raise RuntimeError("Gemini did not confirm the pinned voice session")
+        await emit("sessionConfigured", {"provider": "gemini", "model": model, "voice": GEMINI_PHONE_VOICE})
         await gemini.send(
             json.dumps(
                 {
@@ -853,6 +858,10 @@ async def main():
 
 
 async def self_test():
+    config = speech_generation_config()
+    assert config["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"] == "Kore"
+    config["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"] = "test-mutation"
+    assert speech_generation_config()["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"] == "Kore"
     class Writer:
         def __init__(self):
             self.frames = []
@@ -915,7 +924,7 @@ async def self_test():
     assert [name for name, _ in events].count("playbackComplete") == 1
     worker.cancel()
     await asyncio.gather(worker, return_exceptions=True)
-    print(json.dumps({"status": "passed", "frames": len(writer.frames)}))
+    print(json.dumps({"status": "passed", "frames": len(writer.frames), "voice": GEMINI_PHONE_VOICE, "sessionVoicePinned": True}))
 
 
 if __name__ == "__main__":

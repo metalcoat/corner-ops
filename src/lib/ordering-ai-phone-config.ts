@@ -1,3 +1,4 @@
+import { DEFAULT_GEMINI_PHONE_MODEL } from "@/lib/gemini-phone";
 import { getSql } from "@/lib/db";
 import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
 import { resolveOrderingAvailability } from "@/lib/ordering-availability";
@@ -28,7 +29,7 @@ export async function getAiPhoneSettings(): Promise<AiPhoneSettings> {
   const provider = (row?.provider || "openai") as AiPhoneProvider;
   const openaiModel = String(row?.openai_model || "gpt-realtime-1.5");
   const geminiModel = String(
-    row?.gemini_model || "gemini-3.1-flash-live-preview",
+    row?.gemini_model || DEFAULT_GEMINI_PHONE_MODEL,
   );
   return {
     enabled: row?.enabled !== false,

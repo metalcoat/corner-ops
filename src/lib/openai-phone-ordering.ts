@@ -44,11 +44,11 @@ export const OPENAI_PRICE_ORDER_TOOL = {
       operation: {
         type: "string",
         enum: ["add", "replace_item", "remove_item", "read"],
-        description: "Use add for new food, replace_item for a correction or modifier to an existing item, remove_item to delete/decrease one item, and read when only updating payment/customer details.",
+        description: "Use add for new food, replace_item for corrections or modifiers to existing lines (include each item's own lineId for a batch), remove_item to delete/decrease one item, and read when only updating payment/customer details.",
       },
       targetLineId: {
         type: "string",
-        description: "Stable lineId from the latest cart; required for replace_item and remove_item.",
+        description: "Stable lineId from the latest cart for a single replace_item or remove_item. For batch corrections, put the separate lineId on each item.",
       },
       targetItem: {
         type: "string",
@@ -74,7 +74,7 @@ export const OPENAI_PRICE_ORDER_TOOL = {
               description:
                 "Customer's actual requested menu name or confirmed exact alias; never an inferred substitute.",
             },
-            lineId: { type: "string" },
+            lineId: { type: "string", description: "Stable existing cart lineId; required on each item in a batch correction." },
             variant: { type: "string" },
             quantity: { type: "integer", minimum: 1 },
             modifiers: {

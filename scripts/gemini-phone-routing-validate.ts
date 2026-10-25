@@ -19,7 +19,7 @@ async function main() {
   await ensureOrderingAiSchema();
   const sql = getSql();
   const current = (
-    await sql`SELECT provider,enabled FROM ordering_ai_phone_settings WHERE business='Corner Deli'`
+    await sql`SELECT provider,enabled,gemini_model,model FROM ordering_ai_phone_settings WHERE business='Corner Deli'`
   )[0];
   let callId = "";
   const cfdCallId = `gemini-cfd-${Date.now()}`;
@@ -47,9 +47,10 @@ async function main() {
     assert.match(decision, /^gemini\|[0-9a-f-]{36}\|3155550187$/);
     callId = decision.split("|")[1];
     const routedCall = (
-      await sql`SELECT caller_phone FROM ordering_call_sessions WHERE three_cx_call_id=${callId}`
+      await sql`SELECT caller_phone,selected_model FROM ordering_call_sessions WHERE three_cx_call_id=${callId}`
     )[0];
     assert.equal(routedCall.caller_phone, "3155550187");
+    await sql`UPDATE ordering_ai_phone_settings SET gemini_model='regression-settings-change-after-call-start' WHERE business='Corner Deli'`;
     const session = await route.GET(
       new Request(
         `http://localhost/api/internal/ai-phone?action=session&callId=${callId}`,
@@ -57,7 +58,7 @@ async function main() {
       ),
     );
     const sessionBody = await session.json();
-    assert.equal(sessionBody.model, "gemini-3.1-flash-live-preview");
+    assert.equal(sessionBody.model, String(routedCall.selected_model), "An active call must keep its original model after settings change.");
     assert.match(sessionBody.instructions, /PRICE_ORDER/);
     await route.POST(
       new Request("http://localhost/api/internal/ai-phone", {
@@ -82,6 +83,7 @@ async function main() {
         providerRouting: true,
         cfdCallerIdFallback: true,
         sessionInstructions: true,
+        activeCallModelPinned: true,
         completionRouting: true,
       }),
     );
@@ -89,7 +91,7 @@ async function main() {
     if (callId)
       await sql`DELETE FROM ordering_call_sessions WHERE three_cx_call_id=${callId}`;
     await sql`DELETE FROM three_cx_live_calls WHERE call_id=${`ai-${cfdCallId}`}`;
-    await sql`UPDATE ordering_ai_phone_settings SET provider=${String(current.provider)},enabled=${Boolean(current.enabled)} WHERE business='Corner Deli'`;
+    await sql`UPDATE ordering_ai_phone_settings SET provider=${String(current.provider)},enabled=${Boolean(current.enabled)},gemini_model=${String(current.gemini_model)},model=${String(current.model)} WHERE business='Corner Deli'`;
   }
 }
 

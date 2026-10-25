@@ -9,6 +9,7 @@ import {
   callerCustomerLookup,
   menuCatalog,
   modifierAliases,
+  resolveSpokenModifierRemoval,
   priceSpokenOrder,
   setAiPaymentDetails,
   serviceType,
@@ -274,43 +275,206 @@ export async function incrementalSpokenCart(
 ) {
   parseCartOperation(operation);
   if (!orderId) {
-    if (operation === "replace_item" || operation === "remove_item") throw new AiToolError("INVALID_INPUT", "No cart line exists.", "Read the cart first.", 409);
+    if (operation === "replace_item" || operation === "remove_item")
+      throw new AiToolError(
+        "INVALID_INPUT",
+        "No cart line exists.",
+        "Read the cart first.",
+        409,
+      );
     return operation === "read" ? [] : changed;
   }
   const current = await spokenCart(orderId);
   if (operation === "read") return current;
-  if (operation === "add") return [...current, ...changed.map(item => ({...item, lineId: randomUUID()}))];
+  if (operation === "add")
+    return [
+      ...current,
+      ...changed.map((item) => ({ ...item, lineId: randomUUID() })),
+    ];
+  if (operation === "replace_item" && changed.length > 1) {
+    const replacements = new Map<string, SpokenOrderItem>();
+    for (const incoming of changed) {
+      let lineId = incoming.lineId;
+      if (!lineId) {
+        // A batched count correction can identify each wing line by its unique
+        // catalog flavor. Never choose by name/order/position alone.
+        const catalog = await menuCatalog(
+          "Corner Deli",
+          new Date(),
+          incoming.name,
+        );
+        const item = catalog
+          .flatMap((category) => category.items || [])
+          .find((item) => cartKey(item.name) === cartKey(incoming.name));
+        const sauce = item?.modifiers?.find(
+          (group: any) => group.name === "Wing Sauce",
+        );
+        const flavors = (sauce?.options || []).filter(
+          (option: any) =>
+            option.available &&
+            (incoming.modifiers || []).some(
+              (mod) =>
+                !mod.remove &&
+                (!mod.group || mod.group === "Wing Sauce") &&
+                modifierAliases(option.name, "Wing Sauce").some(
+                  (alias) => modifierKey(alias) === modifierKey(mod.name),
+                ),
+            ),
+        );
+        if (flavors.length === 1) {
+          const candidates = current.filter(
+            (line) =>
+              cartKey(line.name) === cartKey(incoming.name) &&
+              (line.modifiers || []).some(
+                (mod) =>
+                  mod.group === "Wing Sauce" &&
+                  modifierKey(mod.name) === modifierKey(flavors[0].name),
+              ),
+          );
+          if (candidates.length === 1) lineId = candidates[0].lineId;
+        }
+      }
+      const existing = current.find((line) => line.lineId === lineId);
+      if (!existing)
+        throw new AiToolError(
+          "FOLLOW_UP_REQUIRED",
+          "Which wing order should I change?",
+          "Use a separate current lineId for each correction.",
+          409,
+          {
+            cartLines: current.map((line) => ({
+              lineId: line.lineId,
+              name: line.name,
+              variant: line.variant,
+              modifiers: line.modifiers,
+            })),
+          },
+        );
+      if (replacements.has(lineId!))
+        throw new AiToolError(
+          "INVALID_INPUT",
+          "A cart line cannot be corrected twice in one request.",
+          "Use one correction per lineId.",
+          409,
+        );
+      replacements.set(lineId!, await mergeSpokenCartLine(existing, incoming));
+    }
+    return current.map((line) => replacements.get(line.lineId!) || line);
+  }
   const lineId = targetItem || changed[0]?.lineId;
-  const index = current.findIndex(item => item.lineId === lineId);
-  if (index < 0) throw new AiToolError("INVALID_INPUT", "A current cart line ID is required.", "Read the cart and select its exact lineId.", 409);
+  const index = current.findIndex((item) => item.lineId === lineId);
+  if (index < 0)
+    throw new AiToolError(
+      "INVALID_INPUT",
+      "A current cart line ID is required.",
+      "Read the cart and select its exact lineId.",
+      409,
+    );
   if (operation === "remove_item") {
     const quantity = Math.max(1, Number(changed[0]?.quantity || 1));
-    return current.flatMap((item, i) => i !== index ? [item] : Number(item.quantity || 1) > quantity ? [{...item, quantity: Number(item.quantity || 1)-quantity}] : []);
+    return current.flatMap((item, i) =>
+      i !== index
+        ? [item]
+        : Number(item.quantity || 1) > quantity
+          ? [{ ...item, quantity: Number(item.quantity || 1) - quantity }]
+          : [],
+    );
   }
-  if (operation !== "replace_item" || changed.length !== 1) throw new AiToolError("INVALID_INPUT", "Invalid cart edit.", "Send one replacement with a current lineId.", 409);
-  const existing = current[index], incoming = changed[0];
+  if (operation !== "replace_item" || changed.length !== 1)
+    throw new AiToolError(
+      "INVALID_INPUT",
+      "Invalid cart edit.",
+      "Send corrections with current lineIds.",
+      409,
+    );
+  const replacement = await mergeSpokenCartLine(current[index], changed[0]);
+  return current.map((item, i) => (i === index ? replacement : item));
+}
+async function mergeSpokenCartLine(
+  existing: SpokenOrderItem,
+  incoming: SpokenOrderItem,
+) {
   const catalog = await menuCatalog("Corner Deli", new Date(), existing.name);
-  const item = catalog.flatMap(category => category.items || []).find(item => cartKey(item.name) === cartKey(existing.name));
+  const item = catalog
+    .flatMap((category) => category.items || [])
+    .find((item) => cartKey(item.name) === cartKey(existing.name));
   const groups = item?.modifiers || [];
   let modifiers = [...(existing.modifiers || [])];
   for (const edit of incoming.modifiers || []) {
-    const name = edit.name.replace(/^no\s+/i, "");
-    const matches = groups.flatMap((group: any) => (group.options || []).filter((option: any) => option.available && (!edit.group || edit.group === group.name) && modifierAliases(String(option.name), String(group.name)).some(alias => modifierKey(alias) === modifierKey(name))).map((option: any) => ({group, option})));
+    const removal = resolveSpokenModifierRemoval(groups, edit);
+    const name = removal?.option.name || edit.name;
+    const matches = groups.flatMap((group: any) =>
+      (group.options || [])
+        .filter(
+          (option: any) =>
+            option.available &&
+            (!edit.group || edit.group === group.name) &&
+            modifierAliases(String(option.name), String(group.name)).some(
+              (alias) => modifierKey(alias) === modifierKey(name),
+            ),
+        )
+        .map((option: any) => ({ group, option })),
+    );
     const exact = matches.filter((match: any) => match.option.name === name);
     const sideRequested = /^(?:extra|side(?: of)?)\s+/i.test(edit.name);
-    const scoped = edit.group ? matches : sideRequested ? matches.filter((match:any)=>/\(\s*\d+(?:\.\d+)?\s*oz\s*\)/i.test(match.option.name)) : exact.length === 1 ? exact : matches.filter((match: any) => match.group.name === "Wing Sauce");
-    const match = scoped.length === 1 ? scoped[0] : matches.length === 1 ? matches[0] : undefined;
-    if (!match) throw new AiToolError("INVALID_MODIFIER", "Modifier is invalid or ambiguous.", "Ask which modifier and group the caller means.", 409);
-    const remove = edit.remove || /^no\s+/i.test(edit.name);
-    modifiers = modifiers.filter(mod => !(remove ? modifierKey(mod.name) === modifierKey(match.option.name) && (!mod.group || mod.group === match.group.name) : match.group.maxSelections === 1 && (mod.group === match.group.name || (match.group.options || []).some((option: any) => modifierKey(option.name) === modifierKey(mod.name)))));
-    if(edit.placement && /nacho cheese|gravy/i.test(edit.name)) {
-      const sauce=/gravy/i.test(edit.name)?"gravy":"nacho cheese";
-      modifiers=modifiers.filter(mod=>!mod.name.toLowerCase().startsWith(sauce));
+    const scoped = edit.group
+      ? matches
+      : sideRequested
+        ? matches.filter((match: any) =>
+            /\(\s*\d+(?:\.\d+)?\s*oz\s*\)/i.test(match.option.name),
+          )
+        : exact.length === 1
+          ? exact
+          : matches.filter((match: any) => match.group.name === "Wing Sauce");
+    const match =
+      scoped.length === 1
+        ? scoped[0]
+        : matches.length === 1
+          ? matches[0]
+          : undefined;
+    if (!match)
+      throw new AiToolError(
+        "INVALID_MODIFIER",
+        "Modifier is invalid or ambiguous.",
+        "Ask which modifier and group the caller means.",
+        409,
+      );
+    const remove = removal ? removal.remove : Boolean(edit.remove);
+    modifiers = modifiers.filter(
+      (mod) =>
+        !(remove
+          ? modifierKey(mod.name) === modifierKey(match.option.name) &&
+            (!mod.group || mod.group === match.group.name)
+          : match.group.maxSelections === 1 &&
+            (mod.group === match.group.name ||
+              (match.group.options || []).some(
+                (option: any) =>
+                  modifierKey(option.name) === modifierKey(mod.name),
+              ))),
+    );
+    if (edit.placement && /nacho cheese|gravy/i.test(edit.name)) {
+      const sauce = /gravy/i.test(edit.name) ? "gravy" : "nacho cheese";
+      modifiers = modifiers.filter(
+        (mod) => !mod.name.toLowerCase().startsWith(sauce),
+      );
     }
-    if (!remove && !modifiers.some(mod => mod.name === match.option.name && mod.group === match.group.name)) modifiers.push({...edit, name: match.option.name, group: match.group.name});
+    if (
+      !remove &&
+      !modifiers.some(
+        (mod) =>
+          mod.name === match.option.name && mod.group === match.group.name,
+      )
+    )
+      modifiers.push({
+        ...edit,
+        name: match.option.name,
+        group: match.group.name,
+        remove: false,
+      });
   }
-  return current.map((item, i) => i === index ? {...existing, ...incoming, lineId: existing.lineId, modifiers} : item);
+  return { ...existing, ...incoming, lineId: existing.lineId, modifiers };
 }
+
 export function applyFryPlacementSpeech(items: SpokenOrderItem[], customerText: string): SpokenOrderItem[] {
   if(items.length!==1 || !/fr(?:ies|y)/i.test(items[0].name)) return items;
   const topping=/\b(?:on (?:the )?(?:fries|them|it|top)|over (?:the )?fries)\b/i.test(customerText);
