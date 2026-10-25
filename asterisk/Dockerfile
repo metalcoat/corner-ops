@@ -6,11 +6,21 @@ RUN apt-get update \
       ca-certificates \
       espeak-ng \
       gettext-base \
-      pocketsphinx-en-us \
-      python3-pocketsphinx \
+      python3-pip \
       python3-websockets \
       sox \
+      unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Local speech recognition for the secure payment line (card audio never leaves this container).
+# Vosk US English model (0.22 lgraph, ~200 MB unpacked, ~400 MB RAM during a payment call), pinned by checksum.
+# On natural voices through a phone codec it heard every test card and 4-digit group; the small model missed 1 in 5.
+RUN pip3 install --break-system-packages --no-cache-dir vosk==0.3.45
+ADD --checksum=sha256:d9838b4aaa82a75c4a17f5aca300eaca129aaab2a7cbf951bafbb500eb9c4334 \
+    https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip /tmp/vosk-model.zip
+RUN unzip -q /tmp/vosk-model.zip -d /opt \
+    && mv /opt/vosk-model-en-us-0.22-lgraph /opt/vosk-model \
+    && rm /tmp/vosk-model.zip
 
 COPY pjsip.conf.template /opt/corner-ops-asterisk/pjsip.conf.template
 COPY extensions.conf.template /opt/corner-ops-asterisk/extensions.conf.template
@@ -48,7 +58,14 @@ RUN chmod 0755 /usr/local/bin/corner-ops-asterisk-entrypoint /usr/local/bin/corn
       'dtmf-expiration:Enter the two digit expiration month followed by the two digit year.' \
       'dtmf-security-code:Enter the three or four digit security code, then press pound.' \
       'dtmf-billing-zip:Enter the five digit billing zip code.' \
-      'dtmf-confirm:Press 1 if that is correct, or press 2 to try again.'; do \
+      'dtmf-confirm:Press 1 if that is correct, or press 2 to try again.' \
+      'say-card-number:Please say your card number, or type it on the keypad.' \
+      'card-in-groups:Lets take it four digits at a time.' \
+      'card-invalid:Sorry, that did not come through as a valid card number.' \
+      'say-confirm:Is that right? Say yes, or press 1. Say no, or press 2.' \
+      'say-expiration:What is the expiration date? You can say something like oh four, twenty eight, or type four digits.' \
+      'say-security-code:And the security code on the card?' \
+      'say-billing-zip:And the billing zip code?'; do \
       name="${spec%%:*}"; text="${spec#*:}"; \
       espeak-ng -s 145 -w "/tmp/${name}.wav" "${text}"; \
       sox "/tmp/${name}.wav" -r 8000 -c 1 -e signed-integer -b 16 "/usr/share/asterisk/sounds/en/voice-payment/${name}.wav"; \

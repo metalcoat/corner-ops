@@ -30,6 +30,13 @@ PROMPTS={
     "dtmf-security-code":"Enter the three or four digit security code, then press pound.",
     "dtmf-billing-zip":"Enter the five digit billing zip code.",
     "dtmf-confirm":"Press 1 if that is correct, or press 2 to try again.",
+    "say-card-number":"Please say your card number, or type it on the keypad.",
+    "card-in-groups":"Let's take it four digits at a time.",
+    "card-invalid":"Sorry, that didn't come through as a valid card number.",
+    "say-confirm":"Is that right? Say yes, or press 1. Say no, or press 2.",
+    "say-expiration":"What's the expiration date? You can say something like oh four, twenty eight, or type four digits.",
+    "say-security-code":"And the security code on the card?",
+    "say-billing-zip":"And the billing zip code?",
 }
 
 def main():

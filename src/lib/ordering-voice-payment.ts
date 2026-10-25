@@ -80,7 +80,7 @@ export async function claimVoicePayment(callerPhone:string,callId=""){
 function validLuhn(value:string){let sum=0,alternate=false;for(let i=value.length-1;i>=0;i--){let n=Number(value[i]);if(alternate&&(n*=2)>9)n-=9;sum+=n;alternate=!alternate}return sum%10===0}
 
 /**
- * The secure keypad line's charge. One attempt per session at a time
+ * The secure payment line's charge (card spoken or keyed, recognized locally). One attempt per session at a time
  * (collecting → charging), every send rule checked before MX is called, a lost
  * MX reply looked up by replayId before deciding, the approved amount compared
  * with what the order still owes, and a charge that can't be recorded is voided

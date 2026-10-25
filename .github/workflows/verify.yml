@@ -13,7 +13,7 @@ concurrency:
 jobs:
   ai-regressions:
     runs-on: [self-hosted]
-    timeout-minutes: 25
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:17
@@ -81,6 +81,13 @@ jobs:
         shell: bash
         run: |
           docker run --rm -v "$PWD/asterisk:/bridge:ro" python:3.12-slim sh -c 'pip install --disable-pip-version-check websockets==15.0.1 && python /bridge/gemini-phone.py --self-test && python /bridge/gemini-phone-bridge-test.py /bridge/gemini-phone.py'
+      - name: Secure payment line (speech and keypad, local Vosk)
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -q -t corner-ops-asterisk:ci asterisk/
+          docker run --rm --entrypoint sh -v "$PWD/asterisk:/b:ro" -v "$PWD/tests/fixtures/payment-voice:/w:ro" corner-ops-asterisk:ci -c \
+            'python3 -W ignore /b/voice-payment.py --self-test && python3 -W ignore /b/voice-payment-asr-test.py /b/voice-payment.py /w && python3 -W ignore /b/voice-payment-flow-test.py /b/voice-payment.py /w'
   build:
     runs-on: [self-hosted]  # liberty-ci-01 on the deli network
     timeout-minutes: 15
