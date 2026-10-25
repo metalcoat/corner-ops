@@ -595,6 +595,33 @@ export function parseCartOperation(value: unknown, items?: unknown): CartOperati
   return value as CartOperation;
 }
 
+/**
+ * How a cart line should be said back to the caller (owner, 2026-10-25): "2L" is "two liter", and a fry
+ * made poutine/loaded is "Large Fry Poutine" / "Large Loaded Fry" rather than the item plus its option.
+ */
+export function spokenLine(name: string, variant: string, modifiers: Array<{ name: string }>) {
+  const say = (value: string) =>
+    value
+      .replace(/\b2\s?L\b/gi, "two liter")
+      .replace(/\b(\d+)\s?oz\b/gi, "$1 ounce")
+      .replace(/(\d+)"/g, "$1 inch")
+      .replace(/\s*\((?:\d+\/\d+\s*lbs?)\)/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  const fry = /^(Small|Large)\s+(French Fries|Curly Fries|Waffle Fries|Tater Tots)$/i.exec(name.trim());
+  const poutine = modifiers.find((modifier) => /poutine/i.test(modifier.name));
+  const loaded = modifiers.find((modifier) => /^loaded\b/i.test(modifier.name));
+  let item = say(`${name}${variant ? ` ${variant}` : ""}`);
+  let rest = modifiers;
+  if (fry && (poutine || loaded)) {
+    const kind = { "french fries": "Fry", "curly fries": "Curly Fry", "waffle fries": "Waffle Fry", "tater tots": "Tater Tot" }[fry[2].toLowerCase()] || fry[2];
+    item = poutine ? `${fry[1]} ${kind} Poutine` : `${fry[1]} Loaded ${kind}`;
+    rest = modifiers.filter((modifier) => modifier !== poutine && modifier !== loaded);
+  }
+  const extras = rest.map((modifier) => say(modifier.name)).filter(Boolean);
+  return extras.length ? `${item} with ${extras.join(", ")}` : item;
+}
+
 export async function compactPhoneOrderResult(
   result: Record<string, any>,
   operation: CartOperation,
@@ -618,6 +645,11 @@ export async function compactPhoneOrderResult(
     paymentMethod: String(result.payment_preference || ""),
     tipCents: Number(result.tip_cents || 0),
     lines: (result.lines || []).map((line: Record<string, any>) => ({
+      say: spokenLine(
+        String(line.item_name_snapshot),
+        String(line.variant_name_snapshot || ""),
+        modifiers.filter((modifier) => String(modifier.order_item_id) === String(line.id)).map((modifier) => ({ name: String(modifier.option_name_snapshot) })),
+      ),
       lineId: String(line.cart_line_id),
       name: String(line.item_name_snapshot),
       variant: String(line.variant_name_snapshot || ""),

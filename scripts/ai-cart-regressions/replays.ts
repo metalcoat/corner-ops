@@ -30,6 +30,15 @@ async function main() {
         if (mod) assert.ok(line.mods.some((value: string) => mod.test(value)), JSON.stringify(line.mods));
       });
     }
+    // Owner 2026-10-25: read back "two liter", and a poutine fry as "Large Fry Poutine".
+    await h.check("cart lines carry how to say them", async () => {
+      const m = await h.newMcpCall();
+      const r = await m.invoke({ operation: "add", items: [{ name: "2L Pepsi" }, { name: "large poutine" }], ...decisions });
+      assert.ok(!r.isError && !r.body.pending, JSON.stringify(r.body));
+      const says = (r.body.lines || []).map((line: any) => line.say);
+      assert.ok(says.some((say: string) => /^two liter Pepsi/i.test(say)), JSON.stringify(says));
+      assert.ok(says.includes("Large Fry Poutine"), JSON.stringify(says));
+    });
     await h.check("steak sandwich is the Steak sub", async () => {
       const m = await h.newMcpCall();
       const r = await m.invoke({ operation: "add", items: [{ name: "Steak Sandwich", variant: "Full Sub" }], ...decisions });

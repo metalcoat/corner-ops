@@ -779,6 +779,7 @@ export async function POST(request: Request) {
       (result as Record<string, any>).lines = (result as Record<string, any>).lines.map(
         (line: Record<string, any>, index: number) => ({
           ...line,
+          say: compact.lines[index]?.say,
           lineId: compact.lines[index]?.lineId,
           modifiers: compact.lines[index]?.modifiers || [],
         }),
