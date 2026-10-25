@@ -212,6 +212,12 @@ async def main():
 
     check("delivery goodbye counts as the closing line", gp.is_closing_line("Your order is in! Give us about 40 to 55 minutes, and we'll get it to you as soon as we can. Thanks for calling!"), {})
 
+    usage = gp.new_usage()
+    gp.add_usage(usage, {"promptTokenCount": 1000, "responseTokenCount": 200, "promptTokensDetails": [{"modality": "TEXT", "tokenCount": 800}, {"modality": "AUDIO", "tokenCount": 200}], "responseTokensDetails": [{"modality": "AUDIO", "tokenCount": 200}]})
+    summary = gp.usage_summary(usage, "m")
+    check("call usage is priced by modality", abs(summary["estimatedCostUsd"] - (800 * 0.75 + 200 * 3 + 200 * 12) / 1e6) < 1e-9, summary)
+    check("sliding window is configured", gp.context_window_compression()["slidingWindow"]["targetTokens"] <= gp.context_window_compression()["triggerTokens"], gp.context_window_compression())
+
     # 9. Transcript pieces are joined with spaces so "on the"+"fries" still reads as a fry topping.
     check("transcript pieces keep word breaks", gp.join_transcript("nacho cheese on the", "fries") == "nacho cheese on the fries", gp.join_transcript("nacho cheese on the", "fries"))
     # 11. An order that isn't ready for the card line (no delivery address) goes back to the model to fix,

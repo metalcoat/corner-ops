@@ -871,8 +871,11 @@ function strictMatch<T>(
   // Several menu items match ("mashed potatoes": Small and Medium): that's a question for the caller,
   // not "we don't have it" (dev test call 2026-10-25).
   const ambiguous = (candidates: Array<{ row: T; terms: string[] }>) => {
-    if (code !== "ITEM_NOT_ON_MENU")
-      return new AiToolError(code, `${kind} is ambiguous: ${query}.`, "Ask one short clarification question.", 409);
+    if (code !== "ITEM_NOT_ON_MENU") {
+      // Name the choices, or the model can only retry the same thing (a dev replay looped 25 times).
+      const choices = [...new Set(candidates.map((candidate) => String(terms(candidate.row)[0])))].slice(0, 6);
+      return new AiToolError(code, `${kind} is ambiguous: ${query}. Choices: ${choices.join(", ")}.`, "Ask which one, or send the exact choice name.", 409, { options: choices });
+    }
     const names = [...new Set(candidates.map((candidate) => terms(candidate.row)[0]))].slice(0, 4);
     const question = `Which one would you like: ${names.slice(0, -1).join(", ")}${names.length > 1 ? " or " : ""}${names[names.length - 1]}?`;
     return new AiToolError("FOLLOW_UP_REQUIRED", question, `Ask: ${question}`, 409, {
@@ -2037,9 +2040,22 @@ export async function priceSpokenOrder(input: {
               : explicitSideSauce
                 ? sideSauceKey
                 : raw,
+          // The same option in two groups (Custom: "Custom Sub (1 Free)" and "Custom Sub"): fill the first group that
+          // still has room, so "turkey and ham" puts turkey in the free slot and ham in the paid one (dev replay 2026-10-25).
+          sameNamed = matchingChoices.filter(({ option, group }) => {
+            const optionKey = spokenKey(option.name);
+            return optionKey === key || optionKey.startsWith(`${key} `) || modifierAliases(option.name, group.name).some((alias) => spokenKey(alias) === key);
+          }),
+          capacityChoice =
+            sameNamed.length > 1 && new Set(sameNamed.map(({ option }) => spokenKey(option.name))).size === 1
+              ? [...sameNamed]
+                  .filter(({ group }) => (modifierSelections[group.id] || []).length < (group.maxSelections || Number.MAX_SAFE_INTEGER))
+                  // A required group that is still empty (the free meat) fills first.
+                  .sort((a, b) => Number(!((a.group.minSelections || 0) > (modifierSelections[a.group.id] || []).length)) - Number(!((b.group.minSelections || 0) > (modifierSelections[b.group.id] || []).length)))[0]
+              : undefined,
           { group, option } = strictMatch(
             key,
-            placementChoice ? [placementChoice] : ownToppingChoice ? [ownToppingChoice] : matchingChoices,
+            placementChoice ? [placementChoice] : ownToppingChoice ? [ownToppingChoice] : capacityChoice ? [capacityChoice] : matchingChoices,
             (row) => [
               ...modifierAliases(row.option.name, row.group.name),
               /^russian$/i.test(row.option.name)

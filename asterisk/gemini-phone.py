@@ -230,6 +230,48 @@ def silence_handoff_blocked(reason, seconds_since_caller_spoke):
     return bool(SILENCE_HANDOFF.search(str(reason or ""))) and seconds_since_caller_spoke < 30
 
 
+def context_window_compression():
+    trigger = int(os.environ.get("GEMINI_CONTEXT_TRIGGER_TOKENS", "16000"))
+    target = int(os.environ.get("GEMINI_CONTEXT_TARGET_TOKENS", "8000"))
+    return {"triggerTokens": trigger, "slidingWindow": {"targetTokens": min(target, trigger)}}
+
+
+# USD per 1M tokens (ai.google.dev/gemini-api/docs/pricing, 2026-10-25; Live models).
+LIVE_PRICES = {"input": {"TEXT": 0.75, "AUDIO": 3.00}, "output": {"TEXT": 4.50, "AUDIO": 12.00}}
+
+
+def new_usage():
+    return {"messages": 0, "input": {}, "output": {}, "prompt": 0, "response": 0}
+
+
+def add_usage(usage, metadata):
+    """Sum Gemini's per-response usage; tokens by modality price differently."""
+    if not isinstance(metadata, dict):
+        return
+    usage["messages"] += 1
+    usage["prompt"] += int(metadata.get("promptTokenCount") or 0)
+    usage["response"] += int(metadata.get("responseTokenCount") or 0)
+    for side, key in (("input", "promptTokensDetails"), ("output", "responseTokensDetails")):
+        for row in metadata.get(key) or []:
+            modality = str(row.get("modality") or "TEXT")
+            usage[side][modality] = usage[side].get(modality, 0) + int(row.get("tokenCount") or 0)
+
+
+def usage_summary(usage, model):
+    cost = 0.0
+    for side in ("input", "output"):
+        for modality, tokens in usage[side].items():
+            cost += tokens / 1_000_000 * LIVE_PRICES[side].get(modality, LIVE_PRICES[side]["TEXT"])
+    return {
+        "model": model,
+        "promptTokens": usage["prompt"],
+        "responseTokens": usage["response"],
+        "input": usage["input"],
+        "output": usage["output"],
+        "estimatedCostUsd": round(cost, 4),
+    }
+
+
 def join_transcript(current, chunk):
     """Gemini sends transcription in pieces, some without a leading space ("on the"+"fries")."""
     chunk = str(chunk)
@@ -616,6 +658,7 @@ async def bridge(reader, writer, call_id):
     playback = SpeechOutput(writer, emit)
     customer_transcript = ""
     tool_gate = ToolCallGate()
+    call_usage = new_usage()
     last_customer_speech = time.monotonic()
     closing_tasks = set()
     model_turns = 0
@@ -670,6 +713,9 @@ async def bridge(reader, writer, call_id):
                             "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
                         },
                         "inputAudioTranscription": {},
+                        # The cart lives in the ordering system, so old conversation can go: once the context
+                        # passes the trigger, Gemini keeps only the most recent part (cost per turn stays flat).
+                        "contextWindowCompression": context_window_compression(),
                         "outputAudioTranscription": {},
                         "systemInstruction": {
                             "parts": [{"text": session["instructions"]}]
@@ -739,6 +785,7 @@ async def bridge(reader, writer, call_id):
             nonlocal assistant_transcript, model_turns, closing_interrupted, last_customer_speech
             async for raw in gemini:
                 message = json.loads(raw)
+                add_usage(call_usage, message.get("usageMetadata"))
                 server = message.get("serverContent", {})
                 interrupted = server.get("interrupted") is True
                 if message.get("goAway") is not None:
@@ -975,6 +1022,8 @@ async def bridge(reader, writer, call_id):
         for task in done:
             if not task.cancelled():
                 task.result()
+        if call_usage["messages"]:
+            await emit("callUsage", usage_summary(call_usage, model))
         if telemetry_tasks:
             if close_requested.is_set():
                 for task in telemetry_tasks:

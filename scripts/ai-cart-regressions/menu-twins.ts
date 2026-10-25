@@ -17,6 +17,16 @@ async function main() {
       ["'small potato salad' is the small counter size", { name: "small potato salad" }, /^Potato Salad$/],
       ["Mac Salad by the pound", { name: "Mac Salad", variant: "Feeds 3 · 1.00 lb" }, /^Mac Salad$/],
     ];
+    // Dev replay 2026-10-25: "turkey and ham" on a build-your-own sub was "ambiguous" 25 times in a row
+    // (each meat is in both the free and the paid meat group).
+    await h.check("build-your-own sub with two meats fills the free and the paid meat", async () => {
+      const m = await h.newMcpCall();
+      const r = await m.invoke({ operation: "add", items: [{ name: "Custom", variant: "Full Sub", modifiers: [{ name: "Turkey (Full Portion)" }, { name: "Ham (Full Portion)" }, { name: "American" }, { name: "Mayonnaise" }] }], ...decisions, coldSubCondimentsDecision: "selected" });
+      assert.ok(!r.isError && !r.body.pending, JSON.stringify(r.body));
+      const mods = (await h.dbLines(r.orderId!))[0].mods.join(" ");
+      assert.match(mods, /Custom Sub \(1 Free\):/);
+      assert.match(mods, /Custom Sub:/);
+    });
     for (const [label, item, name] of cases) {
       await h.check(label, async () => {
         const m = await h.newMcpCall();
