@@ -76,7 +76,7 @@ for n in range(40):
     if vp.best("speech",r.candidates(),vp.as_digits,lambda value:len(value)==5)==zipcode:res["zip_ok"]+=1
     else:samples.append([voice,"zip",zipcode])
 for voice in voices:
-    for words,exp in [(["oh","four","twenty_eight"],"0428"),(["twelve","thirty"],"1230"),(["September","twenty_twenty_seven"],"0927"),(["one","two","two","eight"],"1228")]:
+    for words,exp in [(["oh","four","twenty_eight"],"0428"),(["twelve","thirty"],"1230"),(["September","twenty_twenty_seven"],"0927"),(["one","two","two","eight"],"1228"),(["four","twenty_eight"],"0428")]:
         raw=speak(voice,[words])
         if raw is None:continue
         res["exp_total"]+=1;heard=hear(raw,[*vp.SPOKEN_NUMBERS,"thousand",*vp.SPOKEN_MONTHS])

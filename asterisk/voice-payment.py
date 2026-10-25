@@ -379,6 +379,35 @@ def get_expiry():
         prompt("try-again")
     return ""
 
+# Most callers' billing zip (owner, 2026-10-25: 13669 is ~95%). Preferred when the recognizer offers it
+# among its guesses, or when what it heard is one dropped/extra digit away from it.
+COMMON_ZIPS=[z for z in os.environ.get("VOICE_PAYMENT_COMMON_ZIPS","13669").split(",") if re.fullmatch(r"\d{5}",z.strip())]
+
+def one_edit_apart(a,b):
+    if abs(len(a)-len(b))!=1:return False
+    short,long_=(a,b) if len(a)<len(b) else (b,a)
+    return any(long_[:i]+long_[i+1:]==short for i in range(len(long_)))
+
+def zip_from(how,heard):
+    if how=="keys":return heard if len(heard)==5 else ""
+    guesses=[as_digits(text) for text in heard]
+    for common in COMMON_ZIPS:
+        if common in guesses:return common
+    for digits in guesses:
+        if len(digits)==5:return digits
+    for digits in guesses:
+        for common in COMMON_ZIPS:
+            if digits and one_edit_apart(digits,common):return common
+    return ""
+
+def get_zip():
+    for _ in range(3):
+        how,heard=ask("say-billing-zip",NUMBER_PHRASES,5,max_seconds=12)
+        zipcode=zip_from(how,heard)
+        if zipcode:return zipcode
+        prompt("try-again")
+    return ""
+
 def get_digits(prompt_name,lengths,max_seconds=12):
     for _ in range(3):
         how,heard=ask(prompt_name,NUMBER_PHRASES,max(lengths),max_seconds=max_seconds)
@@ -424,13 +453,15 @@ def main():
         cvv=get_digits("say-security-code",(4,) if len(card)==15 else (3,))
         if not cvv:raise RuntimeError("recognition")
         failure_stage="billing_zip_recognition_failed"
-        zipcode=get_digits("say-billing-zip",(5,))
+        zipcode=get_zip()
         if not zipcode:raise RuntimeError("recognition")
         prompt("processing")
         failure_stage="provider_payment_failed"
-        api({"action":"charge","sessionId":session["sessionId"],"cardNumber":card,"expiryMonth":expiry[:2],"expiryYear":expiry[2:],"cvv":cvv,"avsZip":zipcode})
+        charged=api({"action":"charge","sessionId":session["sessionId"],"cardNumber":card,"expiryMonth":expiry[:2],"expiryYear":expiry[2:],"cvv":cvv,"avsZip":zipcode})
         card=expiry=cvv=zipcode=""
-        prompt("approved");agi("SET VARIABLE VOICE_PAYMENT_RESULT approved")
+        # Delivery callers hear the expected time (owner request 2026-10-25: about 40 to 55 minutes).
+        prompt("approved-delivery" if str((charged or {}).get("serviceType",""))=="delivery" else "approved")
+        agi("SET VARIABLE VOICE_PAYMENT_RESULT approved")
     except Exception:
         if session:
             try:api({"action":"abandon","sessionId":session["sessionId"],"code":failure_stage})
@@ -466,6 +497,11 @@ def self_test():
     assert yes_or_no("yes that's right") is True and yes_or_no("no") is False and yes_or_no("um") is None
     assert card_complete("4111111111111111") and card_complete("378282246310005") and not card_complete("4111111111111112")
     assert card_length("3782")==15 and card_length("4111")==16
+    assert zip_from("speech",["one three six nine","one three six six nine"])=="13669"   # common zip among guesses
+    assert zip_from("speech",["one three six nine"])=="13669"                            # one digit dropped
+    assert zip_from("speech",["one three six six two"])=="13662"                         # a real other zip stays
+    assert zip_from("speech",["nine oh two one oh"])=="90210" and zip_from("keys","1366")==""
+    assert parse_expiry("four twenty eight",today)=="0428" and parse_expiry("four two eight",today)=="0428"
     sys.stdout.write(json.dumps({"status":"passed","parsing":True})+"\n")
 
 if __name__=="__main__":

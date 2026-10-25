@@ -154,7 +154,8 @@ export async function chargeVoicePayment(input:{sessionId:string;cardNumber:stri
     sent=false;
     console.error(`[voice-payment] order ${session.order_id} was paid but not sent`,error);
   }
-  return {approved:true,sent,last4,brand,orderId:String(session.order_id)};
+  const serviceType=String((await sql`SELECT service_type FROM ordering_orders WHERE id=${session.order_id}`)[0]?.service_type||"");
+  return {approved:true,sent,last4,brand,orderId:String(session.order_id),serviceType};
 }
 
 export async function abandonVoicePayment(sessionId:string,code="recognition_failed"){

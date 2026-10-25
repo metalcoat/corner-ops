@@ -240,7 +240,7 @@ def join_transcript(current, chunk):
 
 def is_closing_line(text):
     closing = text.lower()
-    return "pickup should be ready" in closing and (
+    return ("pickup should be ready" in closing or "40 to 55 minutes" in closing or "forty to fifty-five minutes" in closing) and (
         "thanks for calling" in closing or "see you then" in closing
     )
 

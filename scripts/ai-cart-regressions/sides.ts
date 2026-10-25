@@ -27,6 +27,25 @@ async function main() {
         assert.match((await h.dbLines(r.orderId!))[0].name, /ranch/i);
       });
     }
+    // Owner request 2026-10-25: a side asked for with an item that doesn't offer it becomes its own 4oz cup.
+    await h.check("fries with ranch adds the fries and a ranch cup", async () => {
+      const m = await h.newMcpCall();
+      const r = await m.invoke({ operation: "add", items: [{ name: "Large French Fries", modifiers: [{ name: "ranch" }] }] });
+      assert.ok(!r.isError && !r.body.pending, JSON.stringify(r.body));
+      const names = (await h.dbLines(r.orderId!)).map((line: any) => line.name);
+      assert.equal(names.length, 2, JSON.stringify(names));
+      assert.ok(names.includes("Large French Fries") && names.some((name: string) => /ranch/i.test(name)), JSON.stringify(names));
+    });
+    await h.check("'can I get a ranch with that' on existing fries adds a cup and keeps the fries", async () => {
+      const m = await h.newMcpCall();
+      const first = await m.invoke({ operation: "add", items: [{ name: "Large French Fries" }] });
+      const line = (await h.readCart(first.orderId!))[0];
+      const r = await m.invoke({ operation: "replace_item", targetLineId: line.lineId, items: [{ name: "Large French Fries", modifiers: [{ name: "side of ranch" }] }] });
+      assert.ok(!r.isError && !r.body.pending, JSON.stringify(r.body));
+      const lines = await h.dbLines(r.orderId!);
+      assert.equal(lines.length, 2, JSON.stringify(lines.map((l: any) => l.name)));
+      assert.equal(lines.find((l: any) => l.name === "Large French Fries")?.mods.length, 0);
+    });
   } finally {
     await h.cleanup();
   }

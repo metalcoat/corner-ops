@@ -210,6 +210,8 @@ async def main():
     log = await run([closing, {"serverContent": {"generationComplete": True, "turnComplete": True}}, "SLEEP", "SLEEP", "SLEEP"], [])
     check("uninterrupted goodbye completes the call", "complete" in log["app"] and "handoff" not in log["app"], log["app"])
 
+    check("delivery goodbye counts as the closing line", gp.is_closing_line("Your order is in! Give us about 40 to 55 minutes, and we'll get it to you as soon as we can. Thanks for calling!"), {})
+
     # 9. Transcript pieces are joined with spaces so "on the"+"fries" still reads as a fry topping.
     check("transcript pieces keep word breaks", gp.join_transcript("nacho cheese on the", "fries") == "nacho cheese on the fries", gp.join_transcript("nacho cheese on the", "fries"))
     # 11. An order that isn't ready for the card line (no delivery address) goes back to the model to fix,

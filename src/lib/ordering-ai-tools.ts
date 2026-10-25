@@ -217,6 +217,21 @@ export function normalizeSpokenModifier(
   }
   return next;
 }
+/** The 4oz cup menu item a spoken side names ("side of ranch", "ranch"), if there is one. */
+export async function sideCupItemName(name: string) {
+  const cleaned = name
+    .replace(/^(?:an?\s+)?(?:extra\s+|side\s+(?:of\s+)?|cup\s+of\s+)/i, "")
+    .replace(/\s+(?:sauce|dip|cup|on the side)$/i, "")
+    .trim();
+  if (!cleaned || /^(?:no|without|hold)\b/i.test(cleaned)) return null;
+  const items = (await menuCatalog("Corner Deli", new Date())).flatMap((category: any) => category.items || []);
+  return (
+    items
+      .map((item: any) => String(item.name))
+      .filter((itemName) => /\b4\s*oz\b|\(\s*4\s*oz\s*\)/i.test(itemName) && spokenKey(normalizedSpokenName(itemName)) === spokenKey(cleaned))
+      .sort()[0] || null
+  );
+}
 const services: ServiceType[] = [
   "undecided",
   "pickup",
@@ -1174,7 +1189,32 @@ export async function priceSpokenOrder(input: {
         });
       return [burgerLine, ...fryLines];
     });
-  const resolved: AiItemInput[] = spokenItems.map((requested) => {
+  // "Large fries, and can I get a ranch with that": ranch isn't a fry option, so it becomes its own 4oz cup
+  // (owner request 2026-10-25) instead of an error the caller has to work around.
+  const extraCups: SpokenOrderItem[] = [];
+  const sideCupFor = (
+    groups: RemovalGroup[],
+    modifier: NonNullable<SpokenOrderItem["modifiers"]>[number],
+  ) => {
+    // An explicit group means the caller (or model) meant an option of this item: a wrong one stays an error.
+    if (modifier.group || modifier.remove || /^(?:no|without|hold)\b/i.test(modifier.name.trim())) return null;
+    const cleaned = modifier.name
+      .replace(/^(?:an?\s+)?(?:extra\s+|side\s+(?:of\s+)?|cup\s+of\s+)/i, "")
+      .replace(/\s+(?:sauce|dip|cup|on the side)$/i, "")
+      .trim();
+    const keys = new Set([spokenKey(modifier.name), spokenKey(cleaned)]);
+    const isOption = groups.some((group) =>
+      group.options.some((option) => modifierAliases(option.name, group.name).some((alias) => keys.has(spokenKey(alias)))),
+    );
+    if (isOption) return null;
+    return (
+      allItems
+        .filter((row) => /\b4\s*oz\b|\(\s*4\s*oz\s*\)/i.test(row.name) && spokenKey(normalizedSpokenName(row.name)) === spokenKey(cleaned))
+        .map((row) => row.name)
+        .sort()[0] || null
+    );
+  };
+  const resolveOne = (requested: SpokenOrderItem): AiItemInput => {
       // "side of ranch", "ranch sauce", "a cup of blue cheese": the 4oz cup item when that's what it names.
       const cupName = requested.name
         .replace(/^(?:an?\s+)?(?:extra\s+)?(?:side|cup|container)\s+of\s+/i, "")
@@ -1799,6 +1839,11 @@ export async function priceSpokenOrder(input: {
         (left, right) => dependencyPriority(left) - dependencyPriority(right),
       );
       for (const originalModifier of spokenModifiers) {
+        const sideCup = sideCupFor(item.modifiers, originalModifier);
+        if (sideCup) {
+          extraCups.push({ name: sideCup, quantity: 1 });
+          continue;
+        }
         const removal = resolveSpokenModifierRemoval(item.modifiers, originalModifier);
         if (removal?.remove) {
           modifierSelections[removal.group.id] = (modifierSelections[removal.group.id] || []).filter(id => id !== removal.option.id);
@@ -2190,7 +2235,9 @@ export async function priceSpokenOrder(input: {
         modifierSelections,
         pizzaToppings,
       };
-    });
+    };
+  const resolved: AiItemInput[] = spokenItems.map(resolveOne);
+  for (let index = 0; index < extraCups.length && index < 10; index++) resolved.push(resolveOne(extraCups[index]));
   const attachPendingFollowUp = <T extends Record<string, any>>(result: T) => {
     if (!mashedGravyPending) return result;
     Object.assign(result, {

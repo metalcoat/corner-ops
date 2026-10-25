@@ -14,6 +14,7 @@ import {
   resolveSpokenModifierRemoval,
   resolveSpokenRecipeRestore,
   conflictingIngredient,
+  sideCupItemName,
   priceSpokenOrder,
   setAiPaymentDetails,
   serviceType,
@@ -427,6 +428,8 @@ async function mergeSpokenCartLine(
     .find((item) => cartKey(item.name) === cartKey(existing.name));
   const groups = item?.modifiers || [];
   let modifiers = [...(existing.modifiers || [])];
+  // A side cup only rides along on an edit of the same item, never on a line being swapped for another item.
+  const sameItem = !incoming.name || ` ${cartKey(existing.name)} `.includes(` ${cartKey(incoming.name)} `);
   const wingLine = /^(?:boneless )?wings?$/i.test(existing.name.trim());
   for (const edit of incoming.modifiers || []) {
     const removal = resolveSpokenModifierRemoval(groups, edit);
@@ -492,6 +495,11 @@ async function mergeSpokenCartLine(
         : matches.length === 1 && !sauceAsFlavor
           ? matches[0]
           : undefined;
+    if (!match && !removal && !edit.group && sameItem && (await sideCupItemName(edit.name))) {
+      // "Can I get a ranch with that": not an option on this item; pricing turns it into its own 4oz cup.
+      modifiers.push({ name: edit.name });
+      continue;
+    }
     if (!match)
       throw new AiToolError(
         "INVALID_MODIFIER",
