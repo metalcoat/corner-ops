@@ -10,6 +10,7 @@ import re
 import os
 import struct
 import time
+import urllib.error
 import urllib.request
 from urllib.parse import quote
 
@@ -190,6 +191,26 @@ class ToolCallGate:
         signature = add_signature(arguments) if name == "price_order" else None
         if signature:
             self.added[(turn_key, signature)] = result
+
+
+def payment_not_ready(error):
+    try:
+        message = str(json.loads(error.read() or b"{}").get("error", ""))
+    except Exception:
+        message = ""
+    message = message or "The order is not ready for card payment."
+    if "delivery address" in message.lower():
+        remedy = (
+            "Call price_order with serviceType delivery and deliveryAddress set to the address the caller "
+            "confirmed (plus deliveryUnit if any), then call request_secure_voice_payment again. "
+            "If you don't have the address, ask for it first."
+        )
+    else:
+        remedy = (
+            "Fix what the message says with price_order or by asking the caller, then call "
+            "request_secure_voice_payment again. If it can't be fixed, call request_human_handoff."
+        )
+    return {"error": {"code": "PAYMENT_NOT_READY", "message": message, "remedy": remedy}}
 
 
 def join_transcript(current, chunk):
@@ -832,11 +853,16 @@ async def bridge(reader, writer, call_id):
                                     close_requested.set()
                                 return value
                             if name == "request_secure_voice_payment":
-                                value = await app_action(
-                                    call_id,
-                                    "payment",
-                                    tipCents=arguments.get("tipCents", 0),
-                                )
+                                try:
+                                    value = await app_action(
+                                        call_id,
+                                        "payment",
+                                        tipCents=arguments.get("tipCents", 0),
+                                    )
+                                except urllib.error.HTTPError as error:
+                                    # The order isn't ready for the card line (e.g. no delivery address on it):
+                                    # tell the model so it can fix it, instead of dropping the call.
+                                    return payment_not_ready(error)
                                 close_requested.set()
                                 return value
                             if name == "complete_call":

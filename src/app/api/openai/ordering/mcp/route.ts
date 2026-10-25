@@ -353,6 +353,10 @@ const tools = [
           description: "Street address or recognized local landmark.",
         },
         deliveryUnit: { type: "string" },
+        customerAddressId: {
+          type: "string",
+          description: "The caller's saved address id, once they confirm they are still going there.",
+        },
         items: { type: "array", items: spokenItemSchema },
         customerText: {
           type: "string",
@@ -710,16 +714,31 @@ export async function POST(request: Request) {
           : "") ||
         "",
     );
+    // A confirmed saved address (customerAddressId) counts even when the model leaves out the street text;
+    // without it the card line refuses delivery orders ("Delivery address is required"), dev call 2026-10-25.
+    const boundCustomerId = String(call.order_customer_id || call.call_customer_id || "");
+    const savedAddress =
+      requestedName === "price_order" && args.serviceType === "delivery" && args.customerAddressId && boundCustomerId
+        ? (
+            await getSql()`SELECT id,line1,line2,city,state,postal_code FROM ordering_customer_addresses WHERE id=${String(args.customerAddressId)} AND customer_id=${boundCustomerId} AND active=TRUE`
+          )[0]
+        : undefined;
+    const spokenAddress =
+      String(args.deliveryAddress || "").trim() ||
+      (savedAddress
+        ? [savedAddress.line1, savedAddress.city, [savedAddress.state, savedAddress.postal_code].filter(Boolean).join(" ")].filter(Boolean).join(", ")
+        : "");
     if (
       requestedName === "price_order" &&
       args.serviceType === "delivery" &&
-      String(args.deliveryAddress || "").trim() &&
+      spokenAddress &&
       orderId
     ) {
       const delivery = await attachSpokenDeliveryAddress(
         orderId,
-        String(args.deliveryAddress),
-        String(args.deliveryUnit || ""),
+        spokenAddress,
+        String(args.deliveryUnit || savedAddress?.line2 || ""),
+        savedAddress ? String(savedAddress.id) : null,
       );
       const updated = (
         await getSql()`SELECT total_cents,amount_due_cents,delivery_fee_cents FROM ordering_orders WHERE id=${orderId}`

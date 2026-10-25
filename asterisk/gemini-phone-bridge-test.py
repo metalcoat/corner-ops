@@ -212,6 +212,46 @@ async def main():
 
     # 9. Transcript pieces are joined with spaces so "on the"+"fries" still reads as a fry topping.
     check("transcript pieces keep word breaks", gp.join_transcript("nacho cheese on the", "fries") == "nacho cheese on the fries", gp.join_transcript("nacho cheese on the", "fries"))
+    # 11. An order that isn't ready for the card line (no delivery address) goes back to the model to fix,
+    #     instead of killing the call (dev test call 2026-10-25 was dropped into a loop).
+    import io, urllib.error
+
+    log = {"app": [], "toolResponses": []}
+    fake = FakeGemini([
+        transcript("card, three dollar tip"),
+        {"toolCall": {"functionCalls": [{"id": "p1", "name": "request_secure_voice_payment", "args": {"tipCents": 300}}]}},
+        "WAIT_TOOL_RESPONSE",
+    ])
+
+    async def payment_action(call_id, action, **values):
+        log["app"].append(action)
+        if action == "payment":
+            raise urllib.error.HTTPError("http://app", 409, "Conflict", {}, io.BytesIO(b'{"error":"Delivery address is required before checkout."}'))
+        return {}
+
+    async def session(call_id):
+        return {"model": "gemini-3.1-flash-live-preview", "greeting": "hi", "instructions": "x"}
+
+    async def tools():
+        return [{"name": "price_order", "inputSchema": {"type": "object"}}]
+
+    saved = (gp.app_session, gp.mcp_tools, gp.app_action, gp.websockets.connect)
+    gp.app_session, gp.mcp_tools, gp.app_action = session, tools, payment_action
+    gp.websockets.connect = lambda *a, **k: fake
+    try:
+        await asyncio.wait_for(gp.bridge(Reader(), Writer(), "call-pay"), 5)
+    except Exception as error:
+        log["exception"] = type(error).__name__
+    finally:
+        gp.app_session, gp.mcp_tools, gp.app_action, gp.websockets.connect = saved
+    responses = [m["toolResponse"] for m in fake.sent if "toolResponse" in m]
+    result = responses[0]["functionResponses"][0]["response"]["result"] if responses else {}
+    check(
+        "payment not ready returns the reason to the model",
+        result.get("error", {}).get("code") == "PAYMENT_NOT_READY" and "deliveryAddress" in result["error"].get("remedy", "") and "exception" not in log,
+        {"result": result, "log": log},
+    )
+
     # 10. A Gemini error mid-call (e.g. close 1007) transfers the caller at once (was ~20 s of silence).
     import uuid as uuid_module
 
