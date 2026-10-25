@@ -15,6 +15,7 @@ async function main() {
     ["extra russian dressing on a Big Boss", [{ name: "Turkey Big Boss", variant: "Full Sub", modifiers: [{ name: "Russian Dressing", amount: "extra" }] }], /^Turkey Big Boss$/, /Xtra Russian/],
     ["burger 'well done' is accepted (all burgers are cooked well done)", [{ name: "Cheeseburger (1/4lbs)", modifiers: [{ name: "Bacon" }, { name: "Well Done" }] }], /^Cheeseburger/, /Bacon/],
     ["julienne salad, no tomatoes", [{ name: "Julienne Salad", modifiers: [{ name: "Tomatoes", remove: true }, { name: "Ranch" }] }], /^Julienne/, /No Tomato/],
+    ["'fish burger' is the Fishburger", [{ name: "fish burger" }], /^Fishburger$/, null],
     ["mild sauce 4oz on side is the mild cup", [{ name: "Mild Sauce 4oz On Side" }], /Mild/, null],
     ["large loaded fries and a 4oz ranch", [{ name: "Large Loaded Fries" }, { name: "Ranch", variant: "4oz" }], /^Large French Fries$/, /Loaded/],
   ];

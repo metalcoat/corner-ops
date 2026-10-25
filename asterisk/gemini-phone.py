@@ -27,7 +27,8 @@ def speech_generation_config():
     """One fixed speaker configuration for the entire native-audio session."""
     return {
         "responseModalities": ["AUDIO"],
-        "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": GEMINI_PHONE_VOICE}}},
+        # English in and out: without it the caller's words were transcribed as German/Korean/Chinese at times.
+        "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": GEMINI_PHONE_VOICE}}, "languageCode": "en-US"},
     }
 
 
@@ -231,8 +232,10 @@ def silence_handoff_blocked(reason, seconds_since_caller_spoke):
 
 
 def context_window_compression():
-    trigger = int(os.environ.get("GEMINI_CONTEXT_TRIGGER_TOKENS", "16000"))
-    target = int(os.environ.get("GEMINI_CONTEXT_TARGET_TOKENS", "8000"))
+    # 16k/8k dropped the start of a 90-second call (the AI asked for name and delivery again); live audio adds
+    # ~25 tokens a second each way, so keep several minutes of conversation.
+    trigger = int(os.environ.get("GEMINI_CONTEXT_TRIGGER_TOKENS", "40000"))
+    target = int(os.environ.get("GEMINI_CONTEXT_TARGET_TOKENS", "24000"))
     return {"triggerTokens": trigger, "slidingWindow": {"targetTokens": min(target, trigger)}}
 
 

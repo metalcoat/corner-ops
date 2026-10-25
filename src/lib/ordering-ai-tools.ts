@@ -893,10 +893,14 @@ function strictMatch<T>(
       const choices = [...new Set(candidates.map((candidate) => String(terms(candidate.row)[0])))].slice(0, 6);
       return new AiToolError(code, `${kind} is ambiguous: ${query}. Choices: ${choices.join(", ")}.`, "Ask which one, or send the exact choice name.", 409, { options: choices });
     }
-    const names = [...new Set(candidates.map((candidate) => terms(candidate.row)[0]))].slice(0, 4);
-    const question = `Which one would you like: ${names.slice(0, -1).join(", ")}${names.length > 1 ? " or " : ""}${names[names.length - 1]}?`;
-    return new AiToolError("FOLLOW_UP_REQUIRED", question, `Ask: ${question}`, 409, {
-      options: names,
+    const all = [...new Set(candidates.map((candidate) => terms(candidate.row)[0]))];
+    const names = all.slice(0, 4);
+    // Many matches ("burger"): ask which kind instead of reading four random ones as if they were all we have.
+    const question = all.length > 4
+      ? `Which ${query} would you like?`
+      : `Which one would you like: ${names.slice(0, -1).join(", ")}${names.length > 1 ? " or " : ""}${names[names.length - 1]}?`;
+    return new AiToolError("FOLLOW_UP_REQUIRED", question, all.length > 4 ? `Ask: ${question} If they aren't sure, name a few from options.` : `Ask: ${question}`, 409, {
+      options: all.slice(0, 12),
       pendingItem: { category: spokenKey(query), customerRequest: query, missingRequiredFields: ["menu item"] },
     });
   };
@@ -915,6 +919,12 @@ function strictMatch<T>(
       terms: candidate.terms.filter((term) => negated(term) === negated(wanted)),
     }));
   if (exact.length === 1) return exact[0].row;
+  if (!exact.length && code === "ITEM_NOT_ON_MENU") {
+    // "fish burger" is the "Fishburger": spacing alone never makes a different item.
+    const squeezed = wanted.replace(/\s+/g, "");
+    const joined = all.filter((candidate) => candidate.terms.some((term) => term.replace(/\s+/g, "") === squeezed));
+    if (joined.length === 1) return joined[0].row;
+  }
   if (exact.length > 1)
     { const same = sameItem(exact); if (same) return same; throw ambiguous(exact); }
   const contained = indexed
