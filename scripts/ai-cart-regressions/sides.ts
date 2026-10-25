@@ -27,6 +27,18 @@ async function main() {
         assert.match((await h.dbLines(r.orderId!))[0].name, /ranch/i);
       });
     }
+    // Dev test call 2026-10-25: "15 barbecue and 15 medium" was refused (the menu says BBQ).
+    for (const flavor of ["Barbecue Sauce", "barbecue", "bar-b-q"]) {
+      await h.check(`wings with '${flavor}' get the BBQ flavor`, async () => {
+        const m = await h.newMcpCall();
+        const r = await m.invoke({ operation: "add", items: [{ name: "Wings", variant: "15 Wings", quantity: 1, modifiers: [{ name: flavor, placement: "topping" }] }, { name: "Wings", variant: "15 Wings", quantity: 1, modifiers: [{ name: "Medium" }] }] });
+        assert.ok(!r.isError, JSON.stringify(r.body));
+        if (!r.body.pending) {
+          const lines = await h.dbLines(r.orderId!);
+          assert.ok(lines.some((line: any) => line.mods.some((mod: string) => /Wing Sauce:BBQ\[/.test(mod))), JSON.stringify(lines.map((l: any) => l.mods)));
+        }
+      });
+    }
     // Owner request 2026-10-25: a side asked for with an item that doesn't offer it becomes its own 4oz cup.
     await h.check("fries with ranch adds the fries and a ranch cup", async () => {
       const m = await h.newMcpCall();

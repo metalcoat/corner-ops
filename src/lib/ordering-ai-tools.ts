@@ -545,6 +545,8 @@ export async function createAiDraft(input: {
 export const spokenKey = (value: string) =>
   value
     .toLocaleLowerCase()
+    // The menu says BBQ; callers (and the model) say barbecue (dev test call 2026-10-25).
+    .replace(/\bbarbe(?:c|q)ue\b|\bbar[\s-]*b[\s-]*q(?:ue)?\b/g, "bbq")
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim()

@@ -200,6 +200,7 @@ const cartKey = (value: string) =>
 const modifierKey = (value: string) =>
   value
     .toLowerCase()
+    .replace(/\bbarbe(?:c|q)ue\b|\bbar[\s-]*b[\s-]*q(?:ue)?\b/g, "bbq")
     .replace(/\(\s*\d+(?:\.\d+)?\s*oz\s*\)/g, "")
     .replace(/&/g, " and ")
     .replace(/\bon side\b/g, "")
