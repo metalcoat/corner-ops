@@ -232,6 +232,22 @@ export async function sideCupItemName(name: string) {
       .sort()[0] || null
   );
 }
+/** "Feeds 3 · 1.00 lb" can be asked for as "a pound", "1 lb", "one pound" or "feeds 3". */
+export function weightVariantAliases(name: string) {
+  const match = /^feeds\s+(\d+)\s*\S*\s*(\d+(?:\.\d+)?)\s*lb/i.exec(name.trim());
+  if (!match) return [];
+  const feeds = match[1], pounds = Number(match[2]);
+  const plain = Number.isInteger(pounds) ? String(pounds) : String(pounds);
+  const words: Record<string, string[]> = {
+    "0.5": ["half pound", "half a pound", "half lb"],
+    "0.75": ["three quarter pound", "three quarters of a pound", "3 quarter pound"],
+    "1": ["pound", "a pound", "one pound"],
+    "1.5": ["pound and a half", "a pound and a half", "one and a half pound"],
+    "2": ["two pound", "two pounds"],
+    "3": ["three pound", "three pounds"],
+  };
+  return [`feeds ${feeds}`, `${plain} lb`, `${plain} pound`, `${plain} pounds`, ...(words[String(pounds)] || [])];
+}
 const services: ServiceType[] = [
   "undecided",
   "pickup",
@@ -866,7 +882,7 @@ function strictMatch<T>(
   };
   // Duplicate menu rows that say the same thing ("Ranch (4oz)" and "4 oz Ranch") aren't a question for the caller.
   const sameItem = (candidates: Array<{ row: T; terms: string[] }>) =>
-    code === "ITEM_NOT_ON_MENU" && new Set(candidates.map((candidate) => spokenKey(String(terms(candidate.row)[1] ?? "")))).size === 1
+    code === "ITEM_NOT_ON_MENU" && new Set(candidates.map((candidate) => spokenKey(String(terms(candidate.row)[1] ?? "")).replace(/\s+/g, ""))).size === 1
       ? [...candidates].sort((a, b) => String(terms(a.row)[0]).localeCompare(String(terms(b.row)[0])))[0].row
       : undefined;
   const wanted = spokenKey(query),
@@ -1394,7 +1410,8 @@ export async function priceSpokenOrder(input: {
           (spokenName.includes("boneles") || spokenVariant.includes("boneles")),
         pizzaLogsPhrase = /\bpizza (?:log|roll)\b/.test(spokenName),
         pizzaPhrase =
-          (!pizzaLogsPhrase && spokenName.includes("pizza")) ||
+          // "Pizza Sub" / "pizza sub" is the sub, not a pizza.
+          (!pizzaLogsPhrase && spokenName.includes("pizza") && !/\bpizza (?:sub|wrap|hero|hoagie)\b/.test(spokenName) && !/\bsub\b/.test(spokenVariant)) ||
           ["jumbo", "large", "16 inch", "16 in", "16"].includes(spokenName),
         varietyPhrase =
           spokenName.includes("variety") ||
@@ -1430,7 +1447,7 @@ export async function priceSpokenOrder(input: {
         );
       const regularMacSalad =
           /\b(?:mac|macaroni) salad\b/.test(spokenName) &&
-          !/\b(?:party|bulk|pound|lb|feed|people)\b/.test(spokenName),
+          !/\b(?:party|bulk|pound|lb|feed|people)\b/.test(`${spokenName} ${spokenKey(requested.variant || "")}`),
         itemQuery = regularMacSalad
           ? "Mac Salad"
           : pizzaLogsPhrase
@@ -1454,6 +1471,10 @@ export async function priceSpokenOrder(input: {
                     : /\bsmall\s+(?:tossed\s+)?salad\b/.test(spokenName)
                       ? "SM Tossed Sal"
                       : requested.name,
+        byWeight = /\b(?:feeds?|lbs?|pounds?|pound)\b/i.test(`${requested.name} ${requested.variant || ""}`),
+        weightPhrase = byWeight && !requested.variant
+          ? /\b(half (?:a )?pound|(?:a )?pound and a half|three quarters? (?:of a )?pound|(?:a|one|two|three) pounds?|\d+(?:\.\d+)?\s*(?:lbs?|pounds?)|feeds \d+)\b/i.exec(requested.name)?.[1]
+          : undefined,
         itemCandidates = regularMacSalad
           ? allItems.filter(
               (row) =>
@@ -1462,7 +1483,31 @@ export async function priceSpokenOrder(input: {
                   /^(?:small|medium|large)\b/i.test(variant.name),
                 ),
             )
-          : allItems,
+          : // Deli salads exist twice: the counter item (Small/Medium/Large) and a by-the-pound catering item
+            // ("Feeds 3 · 1.00 lb"). A weight or "feeds" picks the catering one; otherwise the counter one.
+            allItems.filter((row) => {
+              const catering = row.variants.length > 0 && row.variants.every((variant) => /^feeds\s+\d+/i.test(variant.name));
+              if (!catering) return !byWeight || !allItems.some((twin) => twin !== row && spokenKey(normalizedSpokenName(twin.name)) === spokenKey(normalizedSpokenName(row.name)) && twin.variants.length > 0 && twin.variants.every((variant) => /^feeds\s+\d+/i.test(variant.name)));
+              return byWeight || !allItems.some((twin) => twin !== row && spokenKey(normalizedSpokenName(twin.name)) === spokenKey(normalizedSpokenName(row.name)));
+            }).filter((row) => {
+              // Same-sounding items ("Popcorn Chicken" sub, "Pop Corn Chicken"): the one that has the asked-for size.
+              const wanted = spokenKey(requested.variant || "");
+              const nameKey = (value: string) => spokenKey(normalizedSpokenName(value)).replace(/\s+/g, "");
+              const twins = allItems.filter((twin) => twin !== row && nameKey(twin.name) === nameKey(row.name));
+              if (!twins.length) return true;
+              const sized = (candidate: typeof row) => candidate.variants.some((variant) => spokenKey(variant.name) !== "");
+              if (!wanted) {
+                // "Hamburger" is the burger, "hamburger sub" the sub: a sized twin needs sub/wrap words.
+                const subWords = /\b(?:sub|wrap|hero|hoagie|half|full)\b/.test(spokenName);
+                return subWords ? sized(row) || !twins.some(sized) : !sized(row) || twins.every(sized);
+              }
+              const hasSize = (candidate: typeof row) =>
+                candidate.variants.some((variant) => {
+                  const key = spokenKey(variant.name);
+                  return key !== "" && (key.includes(wanted) || wanted.includes(key));
+                });
+              return hasSize(row) || !twins.some(hasSize);
+            }),
         item = strictMatch(
           itemQuery,
           itemCandidates,
@@ -1487,9 +1532,10 @@ export async function priceSpokenOrder(input: {
             )
           : undefined,
         wingCount =
-          [
-            ...wingSpeech.matchAll(/\b(10|12|15|20|24|25|30|40|50)\b/g),
-          ][0]?.[1] ||
+          // Only wings: "Feeds 50" on a deli salad is not 50 wings.
+          ((item.name === "Wings" || item.name === "Boneless Wings")
+            ? [...wingSpeech.matchAll(/\b(10|12|15|20|24|25|30|40|50)\b/g)][0]?.[1]
+            : "") ||
           ((item.name === "Wings" || item.name === "Boneless Wings") &&
           Number.isInteger(requested.quantity) &&
           [10, 12, 15, 20, 24, 25, 30, 40, 50].includes(
@@ -1510,7 +1556,11 @@ export async function priceSpokenOrder(input: {
               : nameVariant || ""),
         pizzaVariantPrefix =
           item.name === "Pizza" ? pizzaVariantAlias(rawVariant) : undefined,
-        variantWanted = rawVariant;
+        sizeWord = /\b(small|sm|medium|med|large|lg)\b/.exec(spokenName)?.[1],
+        sizeWordVariant = sizeWord
+          ? item.variants.find((row) => spokenKey(row.name).startsWith(spokenKey(sizeWord.replace(/^sm$/, "small").replace(/^med$/, "medium").replace(/^lg$/, "large"))))?.name
+          : undefined,
+        variantWanted = rawVariant || (weightPhrase ? spokenKey(weightPhrase.replace(/^a /i, "")) : "") || (sizeWordVariant ? spokenKey(sizeWordVariant) : "");
       if (
         !variantWanted &&
         item.variants.length > 1 &&
@@ -1553,6 +1603,7 @@ export async function priceSpokenOrder(input: {
                 normalizedSpokenName(row.name),
                 ...row.aliases,
                 ...modifierAliases(row.name, "size"),
+                ...weightVariantAliases(row.name),
               ],
               "INVALID_VARIANT",
               "Menu variant",

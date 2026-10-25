@@ -179,12 +179,15 @@ export async function loadHarness() {
       const row = (await sql`SELECT order_id FROM ordering_call_sessions WHERE three_cx_call_id=${callId}`)[0];
       if (row?.order_id) orders.add(String(row.order_id));
       await sql`DELETE FROM ordering_call_sessions WHERE three_cx_call_id=${callId}`;
+      await sql`DELETE FROM ordering_ai_tool_events WHERE conversation_id=${callId} AND conversation_id LIKE 'rtc_repro_%'`;
     }
     for (const id of orders) {
       // audit rows written by the MCP route for these throwaway repro calls only
       await sql`DELETE FROM ordering_ai_tool_events WHERE order_id=${id} AND conversation_id LIKE 'rtc_repro_%'`;
       await sql`DELETE FROM ordering_orders WHERE id=${id} AND status='draft'`;
     }
+    calls.clear();
+    orders.clear();
   }
   function summary() {
     console.log(JSON.stringify({ passed, failed }));
