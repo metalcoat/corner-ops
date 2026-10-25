@@ -199,7 +199,15 @@ def payment_not_ready(error):
     except Exception:
         message = ""
     message = message or "The order is not ready for card payment."
-    if "delivery address" in message.lower():
+    if "delivery minimum" in message.lower():
+        # e.g. "Delivery minimum is $20.00. Order is $4.25 short." Never a reason to transfer.
+        message = re.sub(r"\s*Manager or owner override.*$", "", message)
+        remedy = (
+            "Do not transfer. Tell the caller the delivery minimum and how much more is needed (from the "
+            "message), and ask whether they'd like to add something or switch to pickup. Update the order "
+            "with price_order, then call request_secure_voice_payment again."
+        )
+    elif "delivery address" in message.lower():
         remedy = (
             "Call price_order with serviceType delivery and deliveryAddress set to the address the caller "
             "confirmed (plus deliveryUnit if any), then call request_secure_voice_payment again. "

@@ -170,6 +170,53 @@ export const conflictingIngredient = (chosen: string, other: string) => {
   const a = ingredientRoot(chosen), b = ingredientRoot(other);
   return Boolean(a && b && a.root === b.root && (a.prefix === "no") !== (b.prefix === "no"));
 };
+/**
+ * Model-supplied modifiers in the item's own terms: a group name that isn't on the item ("Dipping Sauce"
+ * for "Dipping Sauces dinner (4oz)") maps to the item's matching group; "bbq sauce" is "BBQ"
+ * when only the shorter name is an option. Dev test call 2026-10-25: a Chicken Tender Dinner's sauce was
+ * refused twice and the dinner dropped.
+ */
+export function normalizeSpokenModifier(
+  groups: RemovalGroup[],
+  modifier: NonNullable<SpokenOrderItem["modifiers"]>[number],
+) {
+  let next = { ...modifier };
+  if (next.group && !groups.some((group) => group.name === next.group)) {
+    const wanted = spokenKey(next.group);
+    const related = groups.filter((group) => {
+      const key = spokenKey(group.name);
+      return key.includes(wanted) || wanted.includes(key);
+    });
+    const preferred = related.filter((group) => !/\b(?:extra|add)\b/i.test(group.name));
+    const required = related.filter((group) => (group as { minSelections?: number }).minSelections);
+    const pick = related.length === 1 ? related[0] : required.length === 1 ? required[0] : preferred.length === 1 ? preferred[0] : undefined;
+    // Several look-alike groups: let the required one below decide. No look-alike group at all keeps the
+    // caller's group, so "Mild" in "Dressing" stays an error.
+    if (pick) next = { ...next, group: pick.name };
+    else if (related.length) delete next.group;
+  }
+  const options = groups
+    .filter((group) => !next.group || group.name === next.group)
+    .flatMap((group) => group.options.map((option) => ({ group, option })));
+  const known = (name: string) =>
+    options.some(({ group, option }) => modifierAliases(option.name, group.name).some((alias) => spokenKey(alias) === spokenKey(name)));
+  const shorter = next.name.replace(/\s+(?:sauce|dip|dipping sauce)$/i, "");
+  if (shorter !== next.name && !known(next.name) && known(shorter)) next = { ...next, name: shorter };
+  if (!next.group && !next.remove) {
+    // "BBQ" fits several groups on a dinner (included cup, extra cups, sauced tenders): the required one wins.
+    const holders = groups.filter(
+      (group) =>
+        (group as { minSelections?: number }).minSelections &&
+        group.presentationContext !== "hidden" &&
+        group.options.some((option) => option.available && modifierAliases(option.name, group.name).some((alias) => spokenKey(alias) === spokenKey(next.name))),
+    );
+    const anywhere = groups.filter((group) =>
+      group.options.some((option) => modifierAliases(option.name, group.name).some((alias) => spokenKey(alias) === spokenKey(next.name))),
+    );
+    if (holders.length === 1 && anywhere.length > 1) next = { ...next, group: holders[0].name };
+  }
+  return next;
+}
 const services: ServiceType[] = [
   "undecided",
   "pickup",
@@ -790,7 +837,7 @@ function strictMatch<T>(
 ) {
   // Several menu items match ("mashed potatoes": Small and Medium): that's a question for the caller,
   // not "we don't have it" (dev test call 2026-10-25).
-  const ambiguous = (candidates: Array<{ row: T }>) => {
+  const ambiguous = (candidates: Array<{ row: T; terms: string[] }>) => {
     if (code !== "ITEM_NOT_ON_MENU")
       return new AiToolError(code, `${kind} is ambiguous: ${query}.`, "Ask one short clarification question.", 409);
     const names = [...new Set(candidates.map((candidate) => terms(candidate.row)[0]))].slice(0, 4);
@@ -800,6 +847,11 @@ function strictMatch<T>(
       pendingItem: { category: spokenKey(query), customerRequest: query, missingRequiredFields: ["menu item"] },
     });
   };
+  // Duplicate menu rows that say the same thing ("Ranch (4oz)" and "4 oz Ranch") aren't a question for the caller.
+  const sameItem = (candidates: Array<{ row: T; terms: string[] }>) =>
+    code === "ITEM_NOT_ON_MENU" && new Set(candidates.map((candidate) => spokenKey(String(terms(candidate.row)[1] ?? "")))).size === 1
+      ? [...candidates].sort((a, b) => String(terms(a.row)[0]).localeCompare(String(terms(b.row)[0])))[0].row
+      : undefined;
   const wanted = spokenKey(query),
     all = rows.map((row) => ({ row, terms: terms(row).map(spokenKey) })),
     exact = all.filter((candidate) => candidate.terms.includes(wanted)),
@@ -811,7 +863,7 @@ function strictMatch<T>(
     }));
   if (exact.length === 1) return exact[0].row;
   if (exact.length > 1)
-    throw ambiguous(exact);
+    { const same = sameItem(exact); if (same) return same; throw ambiguous(exact); }
   const contained = indexed
       .map((candidate) => ({
         ...candidate,
@@ -833,7 +885,7 @@ function strictMatch<T>(
     );
   if (bestContained.length === 1) return bestContained[0].row;
   if (bestContained.length > 1)
-    throw ambiguous(bestContained);
+    { const same = sameItem(bestContained); if (same) return same; throw ambiguous(bestContained); }
   const partial = indexed.filter(
     (candidate) =>
       wanted.length >= 3 &&
@@ -847,7 +899,7 @@ function strictMatch<T>(
   );
   if (partial.length === 1) return partial[0].row;
   if (partial.length > 1)
-    throw ambiguous(partial);
+    { const same = sameItem(partial); if (same) return same; throw ambiguous(partial); }
   const ranked = indexed
       .map((candidate) => ({
         ...candidate,
@@ -874,7 +926,9 @@ function strictMatch<T>(
         : `Sorry, ${query} isn't an available size or option.`,
     suggestion
       ? `You may offer ${suggestion}, but do not add it without confirmation.`
-      : "Do not add it.",
+      : code === "INVALID_MODIFIER"
+        ? "Do not add it as an option. If it is a dipping sauce or side cup (ranch, blue cheese, nacho), add it as its own item with operation add, e.g. name \"side of ranch\"."
+        : "Do not add it.",
     404,
     suggestion ? { suggestion } : {},
   );
@@ -1121,6 +1175,13 @@ export async function priceSpokenOrder(input: {
       return [burgerLine, ...fryLines];
     });
   const resolved: AiItemInput[] = spokenItems.map((requested) => {
+      // "side of ranch", "ranch sauce", "a cup of blue cheese": the 4oz cup item when that's what it names.
+      const cupName = requested.name
+        .replace(/^(?:an?\s+)?(?:extra\s+)?(?:side|cup|container)\s+of\s+/i, "")
+        .replace(/\s+(?:sauce|dip|cup|on the side)$/i, "")
+        .trim();
+      if (cupName !== requested.name.trim() && allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(cupName)))
+        requested = { ...requested, name: cupName, variant: undefined };
       const mashedPhrase = /^(?:(small|sm|medium|med)\s+)?mashed(?:\s+potato(?:e)?s?)?(?:\s+(?:and|with|w\/?)\s+(?:some\s+)?(gravy))?$/i.exec(requested.name.trim());
       if (mashedPhrase && (mashedPhrase[1] || mashedPhrase[2])) {
         // "mashed potatoes and gravy" is the mashed side plus its Gravy option, not a dish called that.
@@ -1496,7 +1557,7 @@ export async function priceSpokenOrder(input: {
             ]),
         ),
         pizzaToppings: NonNullable<AiItemInput["pizzaToppings"]> = [],
-        spokenModifiers = [...(requested.modifiers || [])],
+        spokenModifiers = (requested.modifiers || []).map((modifier) => normalizeSpokenModifier(item.modifiers, modifier)),
         coldSubEverything =
           subItem &&
           /(?:sub|wrap)/i.test(String(variant?.name || requested.variant || "")) &&

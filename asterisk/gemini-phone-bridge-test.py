@@ -263,6 +263,11 @@ async def main():
     check("silence handoff right after the caller spoke is refused", log["app"].count("handoff") == 1 and refused.get("error", {}).get("code") == "HANDOFF_NOT_NEEDED", {"app": log["app"], "result": refused})
     check("a real request for a person still transfers", gp.silence_handoff_blocked("caller asked for a manager", 1) is False, {})
 
+    # 13. Under the delivery minimum: the model is told to offer adding items or pickup, not to transfer.
+    import io, urllib.error
+    ready = gp.payment_not_ready(urllib.error.HTTPError("http://app", 409, "Conflict", {}, io.BytesIO(b'{"error":"Delivery minimum is $20.00. Order is $4.25 short. Manager or owner override with a reason is required."}')))
+    check("delivery minimum gets an add-or-pickup remedy", "pickup" in ready["error"]["remedy"] and "Do not transfer" in ready["error"]["remedy"] and "Manager" not in ready["error"]["message"], ready)
+
     # 10. A Gemini error mid-call (e.g. close 1007) transfers the caller at once (was ~20 s of silence).
     import uuid as uuid_module
 
