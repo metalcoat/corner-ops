@@ -32,9 +32,12 @@ export async function completeMxAuthorization(input:{paymentToken:string;authCod
 }
 export async function submitMxVoicePayment(input:{amountCents:number;replayId:number;cardNumber:string;expiryMonth:string;expiryYear:string;cvv:string;avsZip:string;avsStreet:string}){
   if(process.env.MX_ENVIRONMENT?.trim().toLowerCase()==="production")throw new MxMerchantError("Voice-card testing is locked to the MX sandbox.");
-  const {merchantId}=credentials(),initialized=await initializeMxPayment(),response=await fetch(`${initialized.paymentUrl}?token=${encodeURIComponent(initialized.token)}&echo=true`,{
+  const {merchantId}=credentials(),initialized=await initializeMxPayment();let response:Response;
+  // A timeout or dropped connection means MX may have charged: callers look the replayId up.
+  try{response=await fetch(`${initialized.paymentUrl}?token=${encodeURIComponent(initialized.token)}&echo=true`,{
     method:"POST",headers:{"content-type":"application/json",accept:"application/json"},cache:"no-store",signal:AbortSignal.timeout(20_000),body:JSON.stringify({merchantId,tenderType:"Card",paymentType:"Sale",amount:input.amountCents/100,replayId:input.replayId,source:"API",...mxPresentment("phone"),cardAccount:{number:input.cardNumber,expiryMonth:input.expiryMonth,expiryYear:input.expiryYear,cvv:input.cvv,avsZip:input.avsZip,avsStreet:input.avsStreet}})
-  });
+  })}catch(error){throw new MxMerchantUnreachableError(error instanceof Error&&error.name==="TimeoutError"?"MX did not answer in time.":"Could not reach MX.")}
+  if([502,503,504].includes(response.status))throw new MxMerchantUnreachableError(`MX is not responding (${response.status}).`);
   const data=await response.json().catch(()=>null) as Record<string,unknown>|null;
   if(!response.ok||!String(data?.status||"").toLowerCase().includes("approve"))throw new MxMerchantError(String(data?.authMessage||data?.message||"MX declined the sandbox payment."));
   if(!data)throw new MxMerchantError("MX returned an empty sandbox payment response.");

@@ -31,13 +31,30 @@ async function main() {
   let passed = 0,
     saleAttempts = 0,
     uniqueCharges = 0;
-  const approved = new Map<number, string>();
+  const approved = new Map<number, string>(),
+    amounts = new Map<number, number>(),
+    voided = new Set<string>();
   let mode: "timeout" | "commit_failure" | "success" = "timeout",
     currentOrder = "";
   globalThis.fetch = async (input, init) => {
     const url = String(input);
     assert.match(url, /sandbox\.api\.mxmerchant\.com/);
     if (url.includes("/auth/token/")) return Response.json("regression-token");
+    if (init?.method === "DELETE") {
+      voided.add(url.split("/payment/")[1].split("?")[0]);
+      return new Response(null, { status: 204 });
+    }
+    const byId = url.match(/\/payment\/([^?/]+)/)?.[1];
+    if ((init?.method || "GET") === "GET" && byId)
+      return Response.json({ id: byId, status: voided.has(byId) ? "Voided" : "Approved" });
+    if ((init?.method || "GET") === "GET") {
+      // Like the real MX (verified in the sandbox): a lookup by replayId returns the payment it holds.
+      const replay = Number(new URL(url).searchParams.get("replayId"));
+      const id = approved.get(replay);
+      return id
+        ? Response.json({ id, status: "Approved", amount: amounts.get(replay), cardAccount: { cardType: "Visa" } })
+        : new Response("", { status: 404 });
+    }
     assert.equal(init?.method, "POST");
     const body = JSON.parse(String(init?.body));
     saleAttempts++;
@@ -45,6 +62,7 @@ async function main() {
       approved.set(body.replayId, `regression-${randomUUID()}`);
       uniqueCharges++;
     }
+    amounts.set(body.replayId, Number(body.amount));
     if (mode === "timeout") {
       mode = "success";
       throw new DOMException("Simulated lost processor reply", "TimeoutError");
@@ -54,6 +72,7 @@ async function main() {
     return Response.json({
       status: "Approved",
       id: approved.get(body.replayId),
+      amount: Number(body.amount),
       cardAccount: { cardType: "Visa" },
     });
   };
@@ -95,10 +114,10 @@ async function main() {
         reason: "Regression fixture",
       });
       const chargesBefore = uniqueCharges;
-      await assert.rejects(charge(lostReply.sessionId));
-      await charge(lostReply.sessionId);
+      // The lost reply is looked up at MX by replayId and applied in the same call: no second sale.
+      assert.equal((await charge(lostReply.sessionId)).approved, true);
       assert.equal(uniqueCharges - chargesBefore, 1);
-      assert.equal(saleAttempts - before, 2);
+      assert.equal(saleAttempts - before, 1);
       assert.equal(
         (
           await sql`SELECT COUNT(*)::int count FROM ordering_payment_transactions WHERE order_id=${lostReply.order.id} AND transaction_type='payment'`
@@ -106,7 +125,7 @@ async function main() {
         1,
       );
       await assert.rejects(charge(lostReply.sessionId));
-      assert.equal(saleAttempts - before, 2);
+      assert.equal(saleAttempts - before, 1);
       passed++;
       const failedCommit = await make();
       currentOrder = failedCommit.order.id;
@@ -118,9 +137,11 @@ async function main() {
       const recovery = (
         await sql`SELECT status,failure_code,provider_transaction_reference FROM ordering_voice_payment_sessions WHERE id=${failedCommit.sessionId}`
       )[0];
+      // A charge that can't be recorded is voided at MX and kept for staff.
       assert.equal(recovery.status, "approved_unapplied");
-      assert.equal(recovery.failure_code, "order_commit_failed");
+      assert.equal(recovery.failure_code, "order_commit_failed_voided");
       assert.ok(recovery.provider_transaction_reference);
+      assert.ok(voided.has(String(recovery.provider_transaction_reference)));
       const attempts = saleAttempts;
       await assert.rejects(charge(failedCommit.sessionId));
       assert.equal(saleAttempts, attempts);

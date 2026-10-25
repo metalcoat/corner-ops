@@ -2,10 +2,10 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
-import { submitDraftOrder } from "@/lib/ordering-order-lifecycle";
-import { assertOrderReadyForCheckout, commitTender } from "@/lib/ordering-payments";
+import { OrderConflictError, preflightDraftSubmit, submitDraftOrder } from "@/lib/ordering-order-lifecycle";
+import { assertOrderReadyForCheckout, checkoutState, commitTender } from "@/lib/ordering-payments";
 import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
-import { MxMerchantError, newReplayId, submitMxVoicePayment } from "@/lib/mx-merchant";
+import { findMxPaymentByReplayId, MxMerchantError, MxMerchantUnreachableError, newReplayId, submitMxVoicePayment, voidOrRefundMxPayment } from "@/lib/mx-merchant";
 
 const business = "Corner Deli" as const;
 const actor = { id: "sandbox-voice-payment", name: "Automated phone payment", type: "employee" as const, role: "owner" as const };
@@ -16,6 +16,10 @@ export class VoicePaymentError extends Error {}
 async function assertVoiceOrderReady(orderId:string){
   try{await assertOrderReadyForCheckout(orderId,business)}
   catch(error){throw new VoicePaymentError(error instanceof Error?error.message:"Order information is incomplete.")}
+  // Every send rule (hours, delivery area and minimum, sold-out items, prices) before any
+  // card is taken, the same preflight online checkout runs.
+  try{await preflightDraftSubmit(orderId,business,actor)}
+  catch(error){if(error instanceof OrderConflictError)throw new VoicePaymentError(error.message);throw error}
 }
 
 export function voicePaymentInternalAuthorized(value:string|null){
@@ -54,7 +58,11 @@ export async function prepareVoicePayment(callId:string){
   const amount=Number(call.amount_due_cents);
   if(!Number.isSafeInteger(amount)||amount<=0)throw new VoicePaymentError("This order has no card balance due.");
   const id=randomUUID(),replayId=newReplayId();
-  await sql`INSERT INTO ordering_voice_payment_sessions(id,business,call_id,order_id,caller_phone,amount_cents,replay_id,expires_at) VALUES(${id},${business},${callId},${call.order_id},${call.caller_phone},${amount},${replayId},NOW()+INTERVAL '10 minutes') ON CONFLICT(business,call_id) DO UPDATE SET order_id=EXCLUDED.order_id,caller_phone=EXCLUDED.caller_phone,amount_cents=EXCLUDED.amount_cents,replay_id=EXCLUDED.replay_id,status='awaiting_call',attempt_count=0,provider_transaction_reference='',brand='',last4='',failure_code='',expires_at=EXCLUDED.expires_at,claimed_at=NULL,completed_at=NULL,updated_at=NOW()`;
+  await sql`INSERT INTO ordering_voice_payment_sessions(id,business,call_id,order_id,caller_phone,amount_cents,replay_id,expires_at) VALUES(${id},${business},${callId},${call.order_id},${call.caller_phone},${amount},${replayId},NOW()+INTERVAL '10 minutes') ON CONFLICT(business,call_id) DO UPDATE SET order_id=EXCLUDED.order_id,caller_phone=EXCLUDED.caller_phone,amount_cents=EXCLUDED.amount_cents,replay_id=EXCLUDED.replay_id,status='awaiting_call',attempt_count=0,provider_transaction_reference='',brand='',last4='',failure_code='',expires_at=EXCLUDED.expires_at,claimed_at=NULL,completed_at=NULL,updated_at=NOW()
+    WHERE ordering_voice_payment_sessions.status NOT IN ('charging','approved','approved_unapplied','needs_review')`;
+  // A charge in flight, done, or waiting for staff review is never reset to a new attempt.
+  const blocked=(await sql`SELECT status FROM ordering_voice_payment_sessions WHERE business=${business} AND call_id=${callId} AND status IN ('charging','approved','approved_unapplied','needs_review')`)[0];
+  if(blocked)throw new VoicePaymentError("A card payment for this call is already in progress or done.");
   await sql`UPDATE ordering_call_sessions SET state='handoff_pending',handoff_reason='Secure sandbox voice payment',owner_type='none',owner_id='',updated_at=NOW() WHERE three_cx_call_id=${callId}`;
   return {target:voicePaymentTarget(),amountCents:amount};
 }
@@ -71,35 +79,82 @@ export async function claimVoicePayment(callerPhone:string,callId=""){
 
 function validLuhn(value:string){let sum=0,alternate=false;for(let i=value.length-1;i>=0;i--){let n=Number(value[i]);if(alternate&&(n*=2)>9)n-=9;sum+=n;alternate=!alternate}return sum%10===0}
 
+/**
+ * The secure keypad line's charge. One attempt per session at a time
+ * (collecting → charging), every send rule checked before MX is called, a lost
+ * MX reply looked up by replayId before deciding, the approved amount compared
+ * with what the order still owes, and a charge that can't be recorded is voided
+ * at MX or left for staff (needs_review / approved_unapplied, on the POS alert
+ * list). A send or print problem after the payment is recorded doesn't turn the
+ * caller's approved payment into a failure.
+ */
 export async function chargeVoicePayment(input:{sessionId:string;cardNumber:string;expiryMonth:string;expiryYear:string;cvv:string;avsZip:string}){
   if(process.env.MX_ENVIRONMENT?.trim().toLowerCase()==="production")throw new VoicePaymentError("Voice-card testing is sandbox-only.");
   await ensureVoicePaymentSchema();
   const card=digits(input.cardNumber),month=digits(input.expiryMonth).padStart(2,"0"),year=digits(input.expiryYear),cvv=digits(input.cvv),zip=digits(input.avsZip);
   if(card.length<13||card.length>19||!validLuhn(card)||!(/^(0[1-9]|1[0-2])$/).test(month)||!/^\d{2}(\d{2})?$/.test(year)||cvv.length<3||cvv.length>4||zip.length<5)throw new VoicePaymentError("The spoken card details were not valid.");
-  const sql=getSql(),session=(await sql`UPDATE ordering_voice_payment_sessions SET attempt_count=attempt_count+1,updated_at=NOW() WHERE id=${input.sessionId} AND business=${business} AND status='collecting' AND expires_at>NOW() RETURNING *`)[0];
+  const sql=getSql();
+  const pending=(await sql`SELECT * FROM ordering_voice_payment_sessions WHERE id=${input.sessionId} AND business=${business} AND status='collecting' AND expires_at>NOW()`)[0];
+  if(!pending)throw new VoicePaymentError("The sandbox payment session is unavailable or expired.");
+  await assertVoiceOrderReady(String(pending.order_id));
+  const due=Number((await checkoutState(String(pending.order_id),business)).order.amount_due_cents);
+  if(due!==Number(pending.amount_cents))throw new VoicePaymentError("The order total changed during payment. An employee will help finish it.");
+  // Claim the attempt: only one charge per session at a time, and an abandon can't race it.
+  const session=(await sql`UPDATE ordering_voice_payment_sessions SET status='charging',attempt_count=attempt_count+1,updated_at=NOW() WHERE id=${input.sessionId} AND business=${business} AND status='collecting' AND expires_at>NOW() RETURNING *`)[0];
   if(!session)throw new VoicePaymentError("The sandbox payment session is unavailable or expired.");
-  await assertVoiceOrderReady(String(session.order_id));
+  const replayId=Number(session.replay_id);
   const delivery=(await sql`SELECT line1 FROM ordering_order_delivery_addresses WHERE order_id=${session.order_id} LIMIT 1`)[0];
   let data:Record<string,unknown>;
   try{
-    data=await submitMxVoicePayment({amountCents:Number(session.amount_cents),replayId:Number(session.replay_id),cardNumber:card,expiryMonth:month,expiryYear:year.length===2?`20${year}`:year,cvv,avsZip:zip,avsStreet:String(delivery?.line1||"828 Morris St")});
+    data=await submitMxVoicePayment({amountCents:Number(session.amount_cents),replayId,cardNumber:card,expiryMonth:month,expiryYear:year.length===2?`20${year}`:year,cvv,avsZip:zip,avsStreet:String(delivery?.line1||"828 Morris St")});
   }catch(error){
-    await sql`UPDATE ordering_voice_payment_sessions SET status=CASE WHEN attempt_count>=3 THEN 'failed' ELSE 'collecting' END,failure_code='provider_declined',updated_at=NOW() WHERE id=${session.id}`;
-    throw new VoicePaymentError(error instanceof MxMerchantError?error.message:"MX could not complete the sandbox payment.");
+    // MX may have charged even though we didn't get the answer: look it up before deciding.
+    let found:Record<string,unknown>|null=null,lookupFailed=false;
+    try{found=await findMxPaymentByReplayId(replayId)}catch{lookupFailed=true}
+    if(found&&String(found.status||"").toLowerCase().includes("approve"))data=found;
+    else if(lookupFailed||(error instanceof MxMerchantUnreachableError&&!found)){
+      await sql`UPDATE ordering_voice_payment_sessions SET status='needs_review',failure_code='provider_unknown',updated_at=NOW() WHERE id=${session.id} AND status='charging'`;
+      throw new VoicePaymentError("We couldn't confirm the card payment. An employee will check it before charging again.");
+    }else{
+      // A real decline: another card needs a fresh replayId (MX rejects a second card on the same one).
+      await sql`UPDATE ordering_voice_payment_sessions SET status=CASE WHEN attempt_count>=3 THEN 'failed' ELSE 'collecting' END,failure_code='provider_declined',replay_id=${newReplayId()},updated_at=NOW() WHERE id=${session.id} AND status='charging'`;
+      throw new VoicePaymentError(error instanceof MxMerchantError?error.message:"MX could not complete the sandbox payment.");
+    }
   }
   const account=data.cardAccount&&typeof data.cardAccount==="object"?data.cardAccount as Record<string,unknown>:{};
   const reference=String(data.id||data.reference||"");
-  if(!reference)throw new VoicePaymentError("MX approved the payment without a transaction reference.");
+  const brand=String(account.cardType||""),last4=card.slice(-4);
+  const keepForStaff=async(status:"needs_review"|"approved_unapplied",code:string)=>{await sql`UPDATE ordering_voice_payment_sessions SET status=${status},provider_transaction_reference=${reference},brand=${brand},last4=${last4},failure_code=${code},completed_at=NOW(),updated_at=NOW() WHERE id=${session.id}`};
+  if(!reference){await keepForStaff("needs_review","no_provider_reference");throw new VoicePaymentError("MX approved the payment without a reference. An employee will check it.")}
+  // Charged amount must match what the order still owes; otherwise give it back.
+  const owed=Number((await checkoutState(String(session.order_id),business)).order.amount_due_cents);
+  if(Math.round(Number(data.amount)*100)!==Number(session.amount_cents)||owed!==Number(session.amount_cents)){
+    try{await voidOrRefundMxPayment(reference);await keepForStaff("approved_unapplied","amount_mismatch_voided")}
+    catch{await keepForStaff("needs_review","amount_mismatch_void_failed")}
+    throw new VoicePaymentError("The order total changed during payment, so the charge was cancelled. An employee will help finish it.");
+  }
   try{
-    const result=await commitTender({orderId:String(session.order_id),business,tenderType:"card",amountTenderedCents:Number(session.amount_cents),clientMutationId:`voice-payment:${session.id}`,actor,providerApproval:{provider:"mx_merchant",transactionReference:reference,brand:String(account.cardType||""),last4:card.slice(-4),details:{channel:"phone_dtmf_sandbox",replayId:Number(session.replay_id)}}});
-    await sql`UPDATE ordering_voice_payment_sessions SET status='approved',provider_transaction_reference=${reference},brand=${String(account.cardType||"")},last4=${card.slice(-4)},completed_at=NOW(),updated_at=NOW() WHERE id=${session.id}`;
-    await sql`UPDATE ordering_call_sessions SET state='ended',ended_at=NOW(),updated_at=NOW() WHERE three_cx_call_id=${session.call_id}`;
-    if(result.order.payment_status==="paid"&&result.order.status==="draft"){await submitDraftOrder(String(session.order_id),business,actor);await dispatchSubmittedOrderPrintJobs(String(session.order_id),business)}else await dispatchOrderPrintJobs(String(session.order_id),business,{includeKitchenProduction:false});
-    return {approved:true,last4:card.slice(-4),brand:String(account.cardType||""),orderId:String(session.order_id)};
+    await commitTender({orderId:String(session.order_id),business,tenderType:"card",amountTenderedCents:Number(session.amount_cents),clientMutationId:`voice-payment:${session.id}`,actor,providerApproval:{provider:"mx_merchant",transactionReference:reference,brand,last4,details:{channel:"phone_dtmf_sandbox",replayId}}});
   }catch(error){
-    await sql`UPDATE ordering_voice_payment_sessions SET status='approved_unapplied',provider_transaction_reference=${reference},brand=${String(account.cardType||"")},last4=${card.slice(-4)},failure_code='order_commit_failed',completed_at=NOW(),updated_at=NOW() WHERE id=${session.id}`;
+    console.error(`[voice-payment] order ${session.order_id}: MX approved ${reference} but recording it failed`,error);
+    try{await voidOrRefundMxPayment(reference);await keepForStaff("approved_unapplied","order_commit_failed_voided")}
+    catch{await keepForStaff("needs_review","order_commit_failed")}
     throw new VoicePaymentError("MX approved the payment, but the order requires employee review.");
   }
+  // The payment is recorded: from here on the caller's payment succeeded.
+  await sql`UPDATE ordering_voice_payment_sessions SET status='approved',provider_transaction_reference=${reference},brand=${brand},last4=${last4},failure_code='',completed_at=NOW(),updated_at=NOW() WHERE id=${session.id}`;
+  await sql`UPDATE ordering_call_sessions SET state='ended',ended_at=COALESCE(ended_at,NOW()),updated_at=NOW() WHERE three_cx_call_id=${session.call_id}`;
+  let sent=true;
+  try{
+    const order=(await sql`SELECT status,payment_status FROM ordering_orders WHERE id=${session.order_id}`)[0];
+    if(order?.payment_status==="paid"&&order.status==="draft"){await submitDraftOrder(String(session.order_id),business,actor);await dispatchSubmittedOrderPrintJobs(String(session.order_id),business)}
+    else await dispatchOrderPrintJobs(String(session.order_id),business,{includeKitchenProduction:false});
+  }catch(error){
+    // A paid draft stays on the POS online-order alert list until staff send it.
+    sent=false;
+    console.error(`[voice-payment] order ${session.order_id} was paid but not sent`,error);
+  }
+  return {approved:true,sent,last4,brand,orderId:String(session.order_id)};
 }
 
 export async function abandonVoicePayment(sessionId:string,code="recognition_failed"){

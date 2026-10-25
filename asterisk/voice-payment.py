@@ -54,7 +54,9 @@ def keypad(prompt_name,timeout_ms,max_digits):
 def api(payload):
     request=urllib.request.Request(API,data=json.dumps(payload,separators=(",",":")).encode(),headers={"content-type":"application/json","x-voice-payment-secret":SECRET},method="POST")
     try:
-        with urllib.request.urlopen(request,timeout=25) as response:return json.loads(response.read())
+        # Longer than the server's worst case (MX token 12 s + sale 20 s + lookup 12 s), so the
+        # line never gives up on a charge the server is still completing.
+        with urllib.request.urlopen(request,timeout=60) as response:return json.loads(response.read())
     except urllib.error.HTTPError as error:
         try: message=json.loads(error.read()).get("error","")
         except Exception: message=""

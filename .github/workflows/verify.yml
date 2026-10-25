@@ -66,6 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           npm run test:ai-payment-safety
+          npm run test:voice-payment-recovery
           npm run test:ai-cart-safety
           npm run test:ai-natural-aliases
           npm run test:ai-followup-modifiers
