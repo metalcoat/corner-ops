@@ -30,6 +30,7 @@ import {
   incrementalSpokenCart,
   parseCartOperation,
   applyFryPlacementSpeech,
+  compactPhoneOrderResult,
 } from "@/lib/openai-phone-sideband";
 
 export const runtime = "nodejs";
@@ -729,6 +730,23 @@ export async function POST(request: Request) {
         amount_due_cents: Number(updated.amount_due_cents),
         delivery_fee_cents: Number(updated.delivery_fee_cents),
       });
+    }
+    // The model must see each line's id and modifiers (flavor, dressing, No Tomato) to read the cart back
+    // and to target a correction at the right line.
+    if (
+      orderId &&
+      ["price_order", "get_draft"].includes(requestedName) &&
+      Array.isArray((result as Record<string, any>)?.lines) &&
+      (result as Record<string, any>).lines.every((line: Record<string, unknown>) => line.id)
+    ) {
+      const compact = await compactPhoneOrderResult({ ...(result as Record<string, any>), id: orderId }, "read");
+      (result as Record<string, any>).lines = (result as Record<string, any>).lines.map(
+        (line: Record<string, any>, index: number) => ({
+          ...line,
+          lineId: compact.lines[index]?.lineId,
+          modifiers: compact.lines[index]?.modifiers || [],
+        }),
+      );
     }
     if (orderId) {
       resolvedQuestions.delete("cold_sub_condiments");

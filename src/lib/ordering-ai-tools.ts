@@ -123,11 +123,53 @@ export function resolveSpokenModifierRemoval(
   };
   const literal = matches(edit.name);
   if (literal.length) return choose(literal, Boolean(edit.remove));
-  const subject = negative?.[1] || edit.name;
+  const subject = (negative?.[1] || edit.name).replace(/^the\s+/i, "");
   const omission = matches(`no ${subject}`);
   if (omission.length) return choose(omission, false);
   return choose(matches(subject), true);
 }
+/** "tomato" / "add the tomato back" when the recipe has it: the default, i.e. undo "No Tomato" (never add it). */
+export function resolveSpokenRecipeRestore(
+  groups: RemovalGroup[],
+  edit: NonNullable<SpokenOrderItem["modifiers"]>[number],
+) {
+  if (edit.remove || /^(?:no|without|remove|hold|skip|leave off|take off)\s/i.test(edit.name.trim())) return null;
+  const subject = edit.name
+    .trim()
+    .replace(/^(?:add|with|put|regular)\s+(?:the\s+)?/i, "")
+    .replace(/\s+(?:back(?:\s+on)?|on it)$/i, "");
+  const key = (value: string) =>
+    spokenKey(value).replace(/\btomatoe\b/g, "tomato");
+  const choices = groups
+    .filter(
+      (group) =>
+        group.presentationContext !== "hidden" &&
+        (!edit.group || edit.group === group.name),
+    )
+    .flatMap((group) =>
+      group.options
+        .filter((option) => option.available)
+        .map((option) => ({ group, option })),
+    );
+  const matches = (name: string) =>
+    choices.filter(({ group, option }) =>
+      modifierAliases(option.name, group.name).some(
+        (alias) => key(alias) === key(name),
+      ),
+    );
+  if (matches(subject).length || matches(edit.name).length) return null;
+  const omission = matches(`no ${subject}`);
+  return omission.length === 1 ? omission[0] : null;
+}
+/** No X and Xtra/Add X for the same ingredient can't both be on a line; the newer one wins. */
+export const ingredientRoot = (name: string) => {
+  const match = /^(no|xtra|extra|add|light|lite)\s+(.+)$/i.exec(name.trim());
+  return match ? { prefix: match[1].toLowerCase(), root: spokenKey(match[2]).replace(/\btomatoe\b/g, "tomato") } : null;
+};
+export const conflictingIngredient = (chosen: string, other: string) => {
+  const a = ingredientRoot(chosen), b = ingredientRoot(other);
+  return Boolean(a && b && a.root === b.root && (a.prefix === "no") !== (b.prefix === "no"));
+};
 const services: ServiceType[] = [
   "undecided",
   "pickup",
@@ -747,8 +789,14 @@ function strictMatch<T>(
   kind: string,
 ) {
   const wanted = spokenKey(query),
-    indexed = rows.map((row) => ({ row, terms: terms(row).map(spokenKey) })),
-    exact = indexed.filter((candidate) => candidate.terms.includes(wanted));
+    all = rows.map((row) => ({ row, terms: terms(row).map(spokenKey) })),
+    exact = all.filter((candidate) => candidate.terms.includes(wanted)),
+    // "tomato" must never fuzzy-match "No Tomato" (or "no onions" match "Onions").
+    negated = (term: string) => /^(?:no|without|hold|skip|remove|minus)\b/.test(term),
+    indexed = all.map((candidate) => ({
+      ...candidate,
+      terms: candidate.terms.filter((term) => negated(term) === negated(wanted)),
+    }));
   if (exact.length === 1) return exact[0].row;
   if (exact.length > 1)
     throw new AiToolError(
@@ -1688,9 +1736,14 @@ export async function priceSpokenOrder(input: {
           modifierSelections[removal.group.id] = (modifierSelections[removal.group.id] || []).filter(id => id !== removal.option.id);
           continue;
         }
+        const restore = removal ? null : resolveSpokenRecipeRestore(item.modifiers, originalModifier);
+        if (restore) {
+          modifierSelections[restore.group.id] = (modifierSelections[restore.group.id] || []).filter(id => id !== restore.option.id);
+          continue;
+        }
         const requestedModifier = removal ? {...originalModifier, name: removal.option.name, group: removal.group.name, remove: false} : originalModifier;
         const placementMatch = /^(?:(?:put|add|with) (?:the )?)?(nacho cheese|gravy)\b/i.exec(requestedModifier.name.replace(/chesse/gi,"cheese")),
-          friesPlacement = /French Fries$/i.test(item.name) && placementMatch,
+          friesPlacement = /(?:French|Curly|Waffle) Fries$|Tater Tots$/i.test(item.name) && placementMatch,
           raw = friesPlacement ? spokenKey(placementMatch[1]) : spokenKey(requestedModifier.name),
           explicitOnItem = requestedModifier.placement === "topping" || (requestedModifier.placement !== "side" && !/on (?:the )?side/i.test(requestedModifier.name) && /\b(on (?:it|them|the|top|fries)|over|melted)\b/i.test(requestedModifier.name)),
           mealWithIncludedSalad = item.modifiers.some(
@@ -1804,7 +1857,12 @@ export async function priceSpokenOrder(input: {
                     ? wingSauceChoices
                     : choices,
           placementChoice = friesPlacement ? choices.find(({option}) => new RegExp(`^${raw}(?: on (?:the )?(?:side|frie))?$`, "i").test(spokenKey(option.name)) && (/on (?:the )?side/i.test(option.name) === !(requestedModifier.placement === "topping" || explicitOnItem)) ) : undefined,
-          hasSideNacho = choices.some(
+          // An item with its own plain topping (Hot Dog Choices: Nacho Cheese) keeps it; the $1.75 fry cup is for fry items.
+          ownTopping = friesPlacement ? [] : matchingChoices.filter(
+            ({ option, group }) => spokenKey(option.name) === raw && !/fry|side/i.test(group.name),
+          ),
+          ownToppingChoice = ownTopping.find(({ group }) => /^hot dog choices$/i.test(group.name)) || (ownTopping.length === 1 ? ownTopping[0] : undefined),
+          hasSideNacho = !ownToppingChoice && choices.some(
             ({ option }) => spokenKey(option.name) === "nacho cheese on side",
           ),
           key = placementChoice ? spokenKey(placementChoice.option.name) :
@@ -1815,7 +1873,7 @@ export async function priceSpokenOrder(input: {
                 : raw,
           { group, option } = strictMatch(
             key,
-            placementChoice ? [placementChoice] : matchingChoices,
+            placementChoice ? [placementChoice] : ownToppingChoice ? [ownToppingChoice] : matchingChoices,
             (row) => [
               ...modifierAliases(row.option.name, row.group.name),
               /^russian$/i.test(row.option.name)
@@ -1859,7 +1917,13 @@ export async function priceSpokenOrder(input: {
               ? [option.id]
               : [
                   ...new Set([
-                    ...(modifierSelections[group.id] || []),
+                    ...(modifierSelections[group.id] || []).filter(
+                      (id) =>
+                        !conflictingIngredient(
+                          option.name,
+                          group.options.find((entry) => entry.id === id)?.name || "",
+                        ),
+                    ),
                     option.id,
                   ]),
                 ];

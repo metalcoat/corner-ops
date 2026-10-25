@@ -9,7 +9,11 @@ import {
   callerCustomerLookup,
   menuCatalog,
   modifierAliases,
+  normalizedSpokenName,
+  spokenKey,
   resolveSpokenModifierRemoval,
+  resolveSpokenRecipeRestore,
+  conflictingIngredient,
   priceSpokenOrder,
   setAiPaymentDetails,
   serviceType,
@@ -71,7 +75,7 @@ async function spokenCart(orderId: string): Promise<SpokenOrderItem[]> {
     lines =
       await sql`SELECT id,cart_line_id,item_name_snapshot,variant_name_snapshot,quantity FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`,
     modifiers =
-      await sql`SELECT modifier.group_name_snapshot,modifier.order_item_id,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${orderId} AND modifier.selection_state IN('selected','extra') AND (modifier.print_on_ticket=TRUE OR modifier.pizza_topping_portion IS NOT NULL) ORDER BY modifier.created_at,modifier.id`;
+      await sql`SELECT modifier.group_name_snapshot,modifier.order_item_id,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${orderId} AND modifier.selection_state IN('selected','extra') AND (modifier.print_on_ticket=TRUE OR modifier.pizza_topping_portion IS NOT NULL) ORDER BY modifier.created_at,modifier.print_order_snapshot,modifier.group_name_snapshot,modifier.option_name_snapshot,modifier.id`;
   return lines.map((line) => ({
     lineId: String(line.cart_line_id),
     name: String(line.item_name_snapshot),
@@ -219,6 +223,16 @@ export async function attachStandaloneModifierAnswer(
     .map(modifierKey)
     .filter(Boolean);
   if (!requestedParts.length) return null;
+  // "nachos" / "chili" are dishes (Nachos w/ Cheese, Cup Chili), not the fries' cheese cup or chili sauce: a part
+  // that names a dish only attaches when it is exactly a modifier on the line ("gravy", "ranch", "celery").
+  const dishKeys = (await menuCatalog("Corner Deli", new Date()))
+    .flatMap((category) => category.items || [])
+    .filter((item: any) => !/\b4\s*oz\b|\(\s*4\s*oz\s*\)/i.test(String(item.name)))
+    .map((item: any) => ` ${normalizedSpokenName(String(item.name))} `);
+  const namesDish = (part: string) => {
+    const key = spokenKey(part);
+    return dishKeys.some((dish) => dish.startsWith(` ${key} `) || dish.endsWith(` ${key} `));
+  };
   const current = await spokenCart(orderId);
   const attachments = [];
   for (const line of [...current].reverse()) {
@@ -238,10 +252,12 @@ export async function attachStandaloneModifierAnswer(
       .map(
         (part) =>
           choices.find((choice: any) =>
-            modifierAliases(
-              String(choice.option.name),
-              String(choice.group.name),
-            ).some((alias) => modifierKey(alias) === part),
+            namesDish(part)
+              ? modifierKey(String(choice.option.name)) === part
+              : modifierAliases(
+                  String(choice.option.name),
+                  String(choice.group.name),
+                ).some((alias) => modifierKey(alias) === part),
           )?.option,
       )
       .filter(Boolean);
@@ -361,6 +377,17 @@ export async function incrementalSpokenCart(
     }
     return current.map((line) => replacements.get(line.lineId!) || line);
   }
+  if (operation === "remove_item" && changed.length > 1) {
+    const ids = changed.map((item) => item.lineId || "");
+    if (ids.some((id) => !current.some((line) => line.lineId === id)) || new Set(ids).size !== ids.length)
+      throw new AiToolError(
+        "INVALID_INPUT",
+        "Each removal needs its own current cart line ID.",
+        "Read the cart and send each exact lineId once.",
+        409,
+      );
+    return current.filter((line) => !ids.includes(line.lineId!));
+  }
   const lineId = targetItem || changed[0]?.lineId;
   const index = current.findIndex((item) => item.lineId === lineId);
   if (index < 0)
@@ -400,9 +427,42 @@ async function mergeSpokenCartLine(
     .find((item) => cartKey(item.name) === cartKey(existing.name));
   const groups = item?.modifiers || [];
   let modifiers = [...(existing.modifiers || [])];
+  const wingLine = /^(?:boneless )?wings?$/i.test(existing.name.trim());
   for (const edit of incoming.modifiers || []) {
     const removal = resolveSpokenModifierRemoval(groups, edit);
-    const name = removal?.option.name || edit.name;
+    const restore = removal ? null : resolveSpokenRecipeRestore(groups, edit);
+    if (restore) {
+      // "tomato" / "add the tomato back": the recipe default, so drop the omission.
+      modifiers = modifiers.filter(
+        (mod) =>
+          !(modifierKey(mod.name) === modifierKey(restore.option.name) &&
+            (!mod.group || mod.group === restore.group.name)),
+      );
+      continue;
+    }
+    // "nacho cheese on the fries" / "gravy on top" pick the on-fries option; otherwise on the side.
+    const fryTopping = /^(?:(?:put|add|with)\s+)?(?:the\s+)?(nacho cheese|gravy)\b(.*)$/i.exec(edit.name.trim());
+    const fryOption = fryTopping
+      ? groups
+          .flatMap((group: any) => (group.options || []).map((option: any) => ({ group, option })))
+          .filter(({ option }: any) =>
+            option.available &&
+            new RegExp(`^${fryTopping[1]} on ${
+              edit.placement === "topping" ||
+              (edit.placement !== "side" && /\b(?:on (?:the )?(?:fries|them|it|top)|over|melted)\b/i.test(fryTopping[2]))
+                ? "fries"
+                : "side"
+            }$`, "i").test(option.name),
+          )
+      : [];
+    const sauceAsFlavor =
+      wingLine && !edit.group && !removal && /\s+sauce$/i.test(edit.name.trim()) &&
+      !/\b(?:extra|side|cup|oz|ounce)\b/i.test(edit.name);
+    const name =
+      removal?.option.name ||
+      (fryOption.length === 1 ? fryOption[0].option.name : "") ||
+      (sauceAsFlavor ? edit.name.trim().replace(/\s+sauce$/i, "") : "") ||
+      edit.name;
     const matches = groups.flatMap((group: any) =>
       (group.options || [])
         .filter(
@@ -423,13 +483,13 @@ async function mergeSpokenCartLine(
         ? matches.filter((match: any) =>
             /\(\s*\d+(?:\.\d+)?\s*oz\s*\)/i.test(match.option.name),
           )
-        : exact.length === 1
+        : exact.length === 1 && !sauceAsFlavor
           ? exact
           : matches.filter((match: any) => match.group.name === "Wing Sauce");
     const match =
       scoped.length === 1
         ? scoped[0]
-        : matches.length === 1
+        : matches.length === 1 && !sauceAsFlavor
           ? matches[0]
           : undefined;
     if (!match)
@@ -445,12 +505,16 @@ async function mergeSpokenCartLine(
         !(remove
           ? modifierKey(mod.name) === modifierKey(match.option.name) &&
             (!mod.group || mod.group === match.group.name)
-          : match.group.maxSelections === 1 &&
-            (mod.group === match.group.name ||
-              (match.group.options || []).some(
-                (option: any) =>
-                  modifierKey(option.name) === modifierKey(mod.name),
-              ))),
+          : (match.group.maxSelections === 1 &&
+              // Only this group's own choice: a "Sweet & Sassy (4oz)" cup is not the Sweet and Sassy flavor.
+              (mod.group
+                ? mod.group === match.group.name
+                : (match.group.options || []).some(
+                    (option: any) =>
+                      modifierKey(option.name) === modifierKey(mod.name),
+                  ))) ||
+            ((!mod.group || mod.group === match.group.name) &&
+              conflictingIngredient(match.option.name, mod.name))),
     );
     if (edit.placement && /nacho cheese|gravy/i.test(edit.name)) {
       const sauce = /gravy/i.test(edit.name) ? "gravy" : "nacho cheese";
@@ -472,9 +536,42 @@ async function mergeSpokenCartLine(
         remove: false,
       });
   }
-  return { ...existing, ...incoming, lineId: existing.lineId, modifiers };
+  // "make it 20" on a wing line arrives as quantity 20: that is the wing count, not 20 orders.
+  const wingCount =
+    wingLine && !incoming.variant && [10, 12, 15, 20, 24, 25, 30, 40, 50].includes(Number(incoming.quantity))
+      ? Number(incoming.quantity)
+      : 0;
+  // A shorter name ("fries") for the same line keeps the line's full name ("Large French Fries").
+  const sameLine = ` ${cartKey(existing.name)} `.includes(` ${cartKey(incoming.name || "")} `);
+  return {
+    ...existing,
+    ...incoming,
+    ...(sameLine ? { name: existing.name } : {}),
+    ...(wingCount ? { variant: `${wingCount} Wings`, quantity: 1 } : {}),
+    lineId: existing.lineId,
+    modifiers,
+  };
 }
 
+/** Ask "blue cheese, ranch, or celery?" only for a touched wing line that has none, judged on the merged cart
+ * lines (catalog names like "Blue Cheese (4oz)"), not just on what this edit said. */
+export function wingNeedsAddOnQuestion(
+  operation: CartOperation,
+  targetItem: string | undefined,
+  touchedItems: SpokenOrderItem[],
+  mergedItems: SpokenOrderItem[],
+) {
+  const touchedLineIds = new Set([targetItem, ...touchedItems.map((item) => item.lineId)].filter(Boolean));
+  const lines =
+    operation === "add" ? touchedItems : mergedItems.filter((item) => touchedLineIds.has(item.lineId));
+  return lines.some(
+    (item) =>
+      /^(?:boneless )?wings?$/i.test(String(item.name)) &&
+      !(item.modifiers || []).some((modifier) =>
+        /^(?:side of |extra )?(blue cheese|ranch|celery)\b/i.test(String(modifier.name)),
+      ),
+  );
+}
 export function applyFryPlacementSpeech(items: SpokenOrderItem[], customerText: string): SpokenOrderItem[] {
   if(items.length!==1 || !/fr(?:ies|y)/i.test(items[0].name)) return items;
   const topping=/\b(?:on (?:the )?(?:fries|them|it|top)|over (?:the )?fries)\b/i.test(customerText);
@@ -493,7 +590,7 @@ export async function compactPhoneOrderResult(
 ) {
   const sql = getSql(),
     modifiers =
-      await sql`SELECT modifier.order_item_id,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${String(result.id)} AND modifier.selection_state IN('selected','extra') AND modifier.print_on_ticket=TRUE ORDER BY modifier.created_at,modifier.id`;
+      await sql`SELECT modifier.order_item_id,modifier.group_name_snapshot,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${String(result.id)} AND modifier.selection_state IN('selected','extra') AND modifier.print_on_ticket=TRUE ORDER BY modifier.created_at,modifier.print_order_snapshot,modifier.group_name_snapshot,modifier.option_name_snapshot,modifier.id`;
   const totalCents = Number(result.total_cents),
     amountDueCents = Number(result.amount_due_cents);
   return {
@@ -839,13 +936,7 @@ export function startOpenAiSideband(
       }
       const wingNeedsAddOn =
         args.wingAddOnDecision !== "declined" &&
-        touchedItems.some(
-          (item) =>
-            /^(?:boneless )?wings?$/i.test(String(item.name)) &&
-            !(item.modifiers || []).some((modifier) =>
-              /^(blue cheese|ranch|celery)$/i.test(String(modifier.name)),
-            ),
-        );
+        wingNeedsAddOnQuestion(operation, targetItem, touchedItems, spokenItems);
       const hamburgerSteakItems = touchedItems.filter((item) =>
           /^hamburger steak(?:\s*\(meal\))?$/i.test(String(item.name).trim()),
         ),
