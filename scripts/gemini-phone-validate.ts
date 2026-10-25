@@ -8,7 +8,8 @@ import { localValidationEnv } from "./validation-env";
 async function main() {
   localValidationEnv();
   const key = process.env.GEMINI_API_KEY || "";
-  assert.ok(key, "GEMINI_API_KEY is required for the live validation.");
+  const offline=process.argv.includes("--offline");
+  if(!offline) assert.ok(key, "GEMINI_API_KEY is required for the live validation.");
   process.env.OPENAI_ORDERING_MCP_TOKEN = `gemini-validation-${randomUUID()}`;
   const { POST } = await import("../src/app/api/openai/ordering/mcp/route");
   const listed = await POST(
@@ -44,6 +45,7 @@ async function main() {
   );
   assert.ok(declarations.length > 0, "Shared ordering tools were not listed.");
   const model = "gemini-3.1-flash-live-preview";
+  if(!offline) {
   const socket = new WebSocket(
     `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(key)}`,
   );
@@ -94,6 +96,7 @@ async function main() {
     });
   });
   socket.close();
+  }
   const dialplan = readFileSync("asterisk/extensions.conf.template", "utf8");
   const bridge = readFileSync("asterisk/gemini-phone.py", "utf8");
   const phonePrompt = readFileSync("src/lib/openai-phone-prompt.ts", "utf8");
@@ -160,7 +163,7 @@ async function main() {
     JSON.stringify({
       status: "passed",
       model,
-      liveWebSocketSetup: true,
+      liveWebSocketSetup: !offline,
       audioSocketRouting: true,
       sharedOrderingTools: declarations.length,
     }),

@@ -61,27 +61,29 @@ async function main() {
       "add",
       [{ name: "blue cheese, ranch and celery", quantity: 1 }],
     );
-    assert.equal(wing?.targetItem, "Wings");
+    const wingId=String(order.lines.find((line:any)=>line.item_name_snapshot==="Wings")?.cart_line_id);
+    const fryId=String(order.lines.find((line:any)=>line.item_name_snapshot==="Large French Fries")?.cart_line_id);
+    assert.equal(wing?.targetItem, wingId);
     assert.ok(
       wing?.items[0].modifiers?.some(
         (value) => value.name === "Blue Cheese (4oz)",
       ),
     );
-    assert.equal(ranch?.targetItem, "Wings");
+    assert.equal(ranch?.targetItem, wingId);
     assert.ok(
       ranch?.items[0].modifiers?.some((value) => value.name === "Ranch (4oz)"),
     );
-    assert.equal(celery?.targetItem, "Wings");
+    assert.equal(celery?.targetItem, wingId);
     assert.ok(
       celery?.items[0].modifiers?.some((value) => value.name === "Celery"),
     );
-    assert.equal(nacho?.targetItem, "Large French Fries");
+    assert.equal(nacho?.targetItem, fryId);
     assert.ok(
       nacho?.items[0].modifiers?.some(
         (value) => value.name === "Nacho Cheese on Side",
       ),
     );
-    assert.equal(blueAndCelery?.targetItem, "Wings");
+    assert.equal(blueAndCelery?.targetItem, wingId);
     assert.ok(
       blueAndCelery?.items[0].modifiers?.some((value) =>
         /Blue Cheese/.test(value.name),
@@ -92,7 +94,7 @@ async function main() {
         (value) => value.name === "Celery",
       ),
     );
-    assert.equal(allSides?.targetItem, "Wings");
+    assert.equal(allSides?.targetItem, wingId);
     assert.ok(
       ["Blue Cheese (4oz)", "Ranch (4oz)", "Celery"].every((name) =>
         allSides?.items[0].modifiers?.some((value) => value.name === name),

@@ -28,6 +28,8 @@ import {
 import {
   applyPendingModifierAnswer,
   incrementalSpokenCart,
+  parseCartOperation,
+  applyFryPlacementSpeech,
 } from "@/lib/openai-phone-sideband";
 
 export const runtime = "nodejs";
@@ -105,6 +107,7 @@ const spokenItemSchema = {
       description:
         "Canonical item name, for example Pizza, Wings, or Large French Fries.",
     },
+    lineId: { type: "string" },
     variant: {
       type: "string",
       description: "Size/form, for example Jumbo Thin or 20 Wings.",
@@ -120,6 +123,9 @@ const spokenItemSchema = {
             description:
               "Exact spoken modifier such as Pepperoni, Onions, Mild, or Nacho Cheese.",
           },
+          group: { type: "string" },
+          remove: { type: "boolean" },
+          placement: { type: "string", enum: ["side", "topping"] },
           portion: {
             type: "string",
             enum: ["whole", "left_half", "right_half"],
@@ -326,7 +332,7 @@ const tools = [
   {
     name: "price_order",
     description:
-      "PRIMARY phone-order tool. Incrementally update the server-priced cart. Send only changed items; replace_order is only for an intentional full reset.",
+      "PRIMARY phone-order tool. Incrementally update the server-priced cart. Send only changed items. Edits require the stable lineId returned by the cart.",
     inputSchema: {
       type: "object",
       properties: {
@@ -335,7 +341,8 @@ const tools = [
           type: "string",
           enum: ["add", "replace_item", "remove_item", "read"],
         },
-        targetItem: { type: "string" },
+        targetLineId: { type: "string" },
+        targetItem: { type: "string", description: "Stable cart lineId" },
         serviceType: {
           type: "string",
           enum: ["undecided", "pickup", "delivery"],
@@ -645,20 +652,7 @@ export async function POST(request: Request) {
     if (args.steakStyleDoubleMeatDecision) resolvedQuestions.add("steak_style_double_meat");
     if (requestedName === "price_order")
       await getSql()`UPDATE ordering_call_sessions SET deferred_required_fields=${JSON.stringify([...resolvedQuestions])}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
-    const requestedOperation = ([
-        "add",
-        "replace_item",
-        "remove_item",
-        "replace_order",
-        "read",
-      ].includes(String(args.operation))
-        ? String(args.operation)
-        : "replace_order") as
-        | "add"
-        | "replace_item"
-        | "remove_item"
-        | "replace_order"
-        | "read",
+    const requestedOperation = requestedName === "price_order" ? parseCartOperation(args.operation) : "read",
       pendingApplied =
         requestedName === "price_order"
           ? await applyPendingModifierAnswer({
@@ -666,8 +660,8 @@ export async function POST(request: Request) {
               pendingItem: call.pending_item || null,
               customerText: String(args.customerText || ""),
               operation: requestedOperation,
-              targetItem: String(args.targetItem || ""),
-              items: Array.isArray(args.items) ? (args.items as any) : [],
+              targetItem: String(args.targetLineId || args.targetItem || ""),
+              items: applyFryPlacementSpeech(Array.isArray(args.items) ? (args.items as any) : [],String(args.customerText || "")),
             })
           : null,
       phoneItems =
@@ -679,17 +673,6 @@ export async function POST(request: Request) {
             pendingApplied!.items,
           )
         : [];
-    if (
-      requestedName === "price_order" &&
-      requestedOperation === "replace_order" &&
-      call.order_id
-    )
-      throw new AiToolError(
-        "INVALID_INPUT",
-        "An active phone cart cannot be reset wholesale.",
-        "Use add, replace_item, or remove_item so existing requested items are preserved.",
-        409,
-      );
     const result =
       requestedName === "price_order"
         ? await priceSpokenOrder({
@@ -819,6 +802,7 @@ export async function POST(request: Request) {
             text: JSON.stringify({
               ok: false,
               pending: true,
+              code: "FOLLOW_UP_REQUIRED",
               requiredFollowUp: known.message,
               details: known.details,
             }),

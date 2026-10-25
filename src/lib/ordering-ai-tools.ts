@@ -5,7 +5,6 @@ import type { OrderingBusiness, ServiceType } from "@/lib/ordering-core";
 import type { VariantConfiguredOrderItemInput } from "@/lib/ordering-orders-with-variants";
 import { createTimedDraftOrder } from "@/lib/ordering-timed-orders";
 import { orderingMenuWithVariants } from "@/lib/ordering-menu-variants";
-import { consolidateQuantities } from "@/lib/cart-line-consolidation";
 import { PIZZA_TOPPING_COOK_WARNING } from "@/lib/ordering-pizza-toppings";
 import { applyScheduledMenuAvailability } from "@/lib/ordering-menu-availability";
 import {
@@ -59,13 +58,18 @@ export class AiToolError extends Error {
 
 export type AiItemInput = VariantConfiguredOrderItemInput & {
   quantity: number;
+  lineId?: string;
 };
 export type SpokenOrderItem = {
+  lineId?: string;
   name: string;
   variant?: string;
   quantity?: number;
   modifiers?: Array<{
     name: string;
+    group?: string;
+    remove?: boolean;
+    placement?: "side" | "topping";
     portion?: "whole" | "left_half" | "right_half";
     amount?: "regular" | "extra" | "double_extra" | "triple_extra";
   }>;
@@ -283,7 +287,7 @@ async function pricedOrder(orderId: string, business: OrderingBusiness) {
       404,
     );
   const lines =
-    await sql`SELECT id,item_id,item_name_snapshot,variant_id,variant_name_snapshot,quantity,unit_price_cents,modifier_total_cents,combo_total_cents,line_total_cents,special_instructions FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`;
+    await sql`SELECT id,cart_line_id,cart_line_id AS "lineId",item_id,item_name_snapshot,variant_id,variant_name_snapshot,quantity,unit_price_cents,modifier_total_cents,combo_total_cents,line_total_cents,special_instructions FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`;
   const promotions =
     await sql`SELECT promotion_id,label_snapshot,discount_cents FROM ordering_order_promotion_applications WHERE order_id=${orderId} ORDER BY application_sequence`;
   const heavyPizzas =
@@ -352,6 +356,9 @@ export async function createAiDraft(input: {
   lastName?: string;
   scheduledFor?: Date | null;
 }) {
+  const ids=input.items.map(item=>item.lineId).filter((id): id is string=>Boolean(id));
+  if(new Set(ids).size!==ids.length || ids.some(id=>! /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id))) throw new AiToolError("INVALID_INPUT","Cart line IDs must be unique UUIDs.","Read the current cart IDs.",409);
+  return withTransaction(async()=>{
   await validateAiCatalogIds(input.business, input.items);
   const timing = input.scheduledFor ? "future" : "asap";
   const order = await createTimedDraftOrder({
@@ -369,7 +376,12 @@ export async function createAiDraft(input: {
     timingMode: timing,
     requestedFor: input.scheduledFor || null,
   });
+  const lines = await getSql()`SELECT id FROM ordering_order_items WHERE order_id=${String(order.id)} ORDER BY sort_order,created_at,id`;
+  for (let index = 0; index < lines.length; index++) {
+    if (input.items[index]?.lineId) await getSql()`UPDATE ordering_order_items SET cart_line_id=${input.items[index].lineId} WHERE id=${lines[index].id}`;
+  }
   return pricedOrder(String(order.id), input.business);
+  });
 }
 
 export const spokenKey = (value: string) =>
@@ -835,7 +847,7 @@ async function validateAiCatalogIds(
       !item.variants.some((row) => row.defaultVariant)
     )
       throw new AiToolError(
-        "INVALID_VARIANT",
+        "FOLLOW_UP_REQUIRED",
         "A required size or variant is missing.",
         "Ask for a valid size.",
         409,
@@ -1009,8 +1021,9 @@ export async function priceSpokenOrder(input: {
         });
       return [burgerLine, ...fryLines];
     });
-  const resolved: AiItemInput[] = consolidateQuantities(
-    spokenItems.map((requested) => {
+  const resolved: AiItemInput[] = spokenItems.map((requested) => {
+      const fryPhrase = /^(small|large) (?:french )?fries?\s+(?:with\s+)?(nacho(?: cheese)?|cheese sauce|gravy)(.*)$/i.exec(requested.name);
+      if(fryPhrase && !/cheese and gravy/i.test(requested.name)) requested = {...requested, name: fryPhrase[1]+" French Fries", modifiers:[...(requested.modifiers || []),{name: /^gravy$/i.test(fryPhrase[2]) ? "Gravy" : "Nacho Cheese", placement: /\b(?:on (?:the )?(?:fries|them|top)|over)\b/i.test(fryPhrase[3]) ? "topping" : "side"}]};
       const rawName = spokenKey(requested.name),
         rawInputVariant = spokenKey(requested.variant || "");
       if (
@@ -1020,7 +1033,7 @@ export async function priceSpokenOrder(input: {
         !/\b(?:poutine|poutin|pountine|poutene|protein)\b/.test(rawName)
       )
         throw new AiToolError(
-          "INVALID_VARIANT",
+          "FOLLOW_UP_REQUIRED",
           "Tater tots require a size.",
           "Ask: Small or large?",
           409,
@@ -1041,8 +1054,8 @@ export async function priceSpokenOrder(input: {
         !/\b(?:poutine|poutin|pountine|poutene|protein)\b/.test(rawName)
       )
         throw new AiToolError(
-          "INVALID_VARIANT",
-          "Fries require a size.",
+          "FOLLOW_UP_REQUIRED",
+          "Small or large?",
           "Ask: Small or large?",
           409,
           {
@@ -1063,19 +1076,9 @@ export async function priceSpokenOrder(input: {
           name: `${rawInputVariant === "large" ? "Large" : "Small"} French Fries`,
           variant: undefined,
         };
-      const wingSauceVariant =
-        /^(mild|medium|hot|suicide|bbq|sweet and sassy|plain|sweet and sour|garlic parmesan|open pit bbq)$/i.exec(
-          String(requested.variant || "").trim(),
-        );
+      const wingSauceVariant = allItems.filter(entry => /wings?$/i.test(entry.name)).flatMap(entry => entry.modifiers.filter(group => group.name === "Wing Sauce").flatMap(group => group.options.map(option => ({group, option})))).find(({group, option}) => modifierAliases(option.name, group.name).some(alias => spokenKey(alias) === spokenKey(requested.variant || "")));
       if (spokenKey(requested.name).includes("wing") && wingSauceVariant)
-        requested = {
-          ...requested,
-          variant: undefined,
-          modifiers: [
-            ...(requested.modifiers || []),
-            { name: wingSauceVariant[1] },
-          ],
-        };
+        requested = {...requested, variant: undefined, modifiers: [...(requested.modifiers || []), {name: wingSauceVariant.option.name, group: "Wing Sauce"}]};
       const initialName = spokenKey(requested.name),
         initialVariant = spokenKey(requested.variant || ""),
         poutineRequested = /\b(poutine|poutin|pountine|poutene|protein)\b/.test(
@@ -1107,7 +1110,7 @@ export async function priceSpokenOrder(input: {
                 : "French Fries";
         if (!size)
           throw new AiToolError(
-            "INVALID_VARIANT",
+            "FOLLOW_UP_REQUIRED",
             "Small or large?",
             "Ask the returned size question.",
             409,
@@ -1143,7 +1146,7 @@ export async function priceSpokenOrder(input: {
           );
       if (wingRequest && !explicitWingCount)
         throw new AiToolError(
-          "INVALID_VARIANT",
+          "FOLLOW_UP_REQUIRED",
           "How many wings?",
           "Ask exactly: How many wings?",
           409,
@@ -1158,7 +1161,7 @@ export async function priceSpokenOrder(input: {
         );
       if (spokenKey(requested.name) === "frie")
         throw new AiToolError(
-          "INVALID_VARIANT",
+          "FOLLOW_UP_REQUIRED",
           "Fries require a size.",
           "Ask: Small or large?",
           409,
@@ -1207,7 +1210,7 @@ export async function priceSpokenOrder(input: {
         );
       if (varietyPhrase && !varietySize)
         throw new AiToolError(
-          "INVALID_VARIANT",
+          "FOLLOW_UP_REQUIRED",
           "The variety basket requires a size.",
           "Ask: Variety for two or four?",
           409,
@@ -1306,7 +1309,7 @@ export async function priceSpokenOrder(input: {
             .map((row) => row.name),
           category = spokenKey(item.name);
         throw new AiToolError(
-          "INVALID_VARIANT",
+          "FOLLOW_UP_REQUIRED",
           category === "pizza"
             ? "What size?"
             : `${item.name} requires a size or option.`,
@@ -1589,96 +1592,27 @@ export async function priceSpokenOrder(input: {
             { name: "Celery" },
           );
       }
-      const extraWingSauce =
-        (item.name === "Wings" || item.name === "Boneless Wings") &&
-        (/\b(extra sauce|extra saucy|saucy)\b/.test(spokenName) ||
-          spokenModifiers.some((value) =>
-            /^(extra sauce|extra saucy|saucy)$/.test(spokenKey(value.name)),
-          ));
-      if (extraWingSauce) {
-        for (let index = spokenModifiers.length - 1; index >= 0; index--)
-          if (
-            /^(extra sauce|extra saucy|saucy)$/.test(
-              spokenKey(spokenModifiers[index].name),
-            )
-          )
-            spokenModifiers.splice(index, 1);
-        const explicitlyRequestedSideFlavor =
-            /(?:extra|side(?: of)?)\s+(mild|medium|hot|suicide|bbq|sweet and sassy|sweet and sour|garlic parmesan|garlic parm|open pit bbq)(?:\s+sauce)?|\b(mild|medium|hot|suicide|bbq|sweet and sassy|sweet and sour|garlic parmesan|garlic parm|open pit bbq)(?:\s+sauce)?\s+on (?:the )?side\b/i.exec(
-              spokenName,
-            ),
-          explicitFlavor =
-            explicitlyRequestedSideFlavor?.[1] ||
-            explicitlyRequestedSideFlavor?.[2] ||
-            "",
-          flavor =
-            explicitFlavor.replace("garlic parm", "garlic parmesan") ||
-            spokenModifiers
-              .map((value) => spokenKey(value.name))
-              .find((value) =>
-                [
-                  "mild",
-                  "medium",
-                  "hot",
-                  "suicide",
-                  "bbq",
-                  "sweet and sassy",
-                  "sweet and sour",
-                  "garlic parmesan",
-                  "open pit bbq",
-                ].includes(value),
-              ) ||
-            [
-              "garlic parmesan",
-              "sweet and sassy",
-              "sweet and sour",
-              "open pit bbq",
-              "suicide",
-              "medium",
-              "mild",
-              "hot",
-              "bbq",
-            ].find((value) => spokenName.includes(value)),
-          cup =
-            flavor &&
-            (
-              {
-                mild: "Mild Sauce (4oz)",
-                medium: "Medium (4oz)",
-                hot: "Hot Sauce (4oz)",
-                suicide: "Suicide Sauce (4oz)",
-                bbq: "BBQ Sauce (4oz)",
-                "sweet and sassy": "Sweet & Sassy (4oz)",
-                "sweet and sour": "Sweet & Sour (4oz)",
-                "garlic parmesan": "Garlic Parmesan (4oz)",
-                "open pit bbq": "BBQ Sauce (4oz)",
-              } as Record<string, string>
-            )[flavor];
-        if (
-          cup &&
-          !spokenModifiers.some(
-            (value) => spokenKey(value.name) === spokenKey(cup),
-          )
-        )
-          spokenModifiers.push({ name: cup });
+      if (item.name === "Wings" || item.name === "Boneless Wings") {
+        const flavorOptions = item.modifiers.find(group => group.name === "Wing Sauce")?.options.filter(option => option.available) || [];
+        const aliases = flavorOptions.flatMap(option => modifierAliases(option.name,"Wing Sauce").map(alias => ({option,key:spokenKey(alias)}))).sort((a,b) => b.key.length-a.key.length);
+        const extra = /\b(extra sauce|extra saucy|saucy)\b/.test(spokenName) || spokenModifiers.some(mod => /^(extra sauce|extra saucy|saucy)$/.test(spokenKey(mod.name)));
+        if (extra) {
+          const texts = [spokenName, ...spokenModifiers.map(mod => spokenKey(mod.name))];
+          const flavor = aliases.find(({key}) => texts.some(text => (" "+text+" ").includes(" "+key+" ")));
+          const cup = flavor && item.modifiers.filter(group => group.name !== "Wing Sauce").flatMap(group => group.options.map(option => ({group,option}))).find(({option}) => option.available && /\(\s*\d+(?:\.\d+)?\s*oz\s*\)/i.test(option.name) && modifierAliases(option.name, "Extra Sauce").some(alias => spokenKey(alias).replace(/\s+sauce$/, "") === flavor.key.replace(/\s+sauce$/, "")));
+          for(let index=spokenModifiers.length-1; index>=0; index--) if (/^(extra sauce|extra saucy|saucy)$/.test(spokenKey(spokenModifiers[index].name))) spokenModifiers.splice(index,1);
+          if(cup && !spokenModifiers.some(mod => mod.name===cup.option.name)) spokenModifiers.push({name:cup.option.name,group:cup.group.name});
+        }
       }
-      if (
-        (item.name === "Wings" || item.name === "Boneless Wings") &&
-        !spokenModifiers.length
-      ) {
-        const sauce = [
-          "garlic parmesan",
-          "sweet and sassy",
-          "sweet and sour",
-          "open pit bbq",
-          "suicide",
-          "medium",
-          "mild",
-          "hot",
-          "bbq",
-          "plain",
-        ].find((value) => spokenName.includes(value));
-        if (sauce) spokenModifiers.push({ name: sauce });
+      if (item.name === "Wings" || item.name === "Boneless Wings") {
+        const group = item.modifiers.find(group => group.name === "Wing Sauce");
+        const sauces = (group?.options || []).filter(option => option.available);
+        const hasFlavor = spokenModifiers.some(mod => !mod.remove && mod.group !== "Extra Sauce" && sauces.some(option => modifierAliases(option.name, "Wing Sauce").some(alias => spokenKey(alias) === spokenKey(mod.name))));
+        if (!hasFlavor) {
+          const candidates = sauces.flatMap(option => modifierAliases(option.name, "Wing Sauce").map(alias => ({option, key: spokenKey(alias)}))).sort((a,b) => b.key.length-a.key.length);
+          const sauce = candidates.find(({key}) => (" " + spokenName + " ").includes(" " + key + " "));
+          if (sauce) spokenModifiers.push({name: sauce.option.name, group: "Wing Sauce"});
+        }
       }
       const dependencyPriority = (modifier: { name: string }) => {
         const key = spokenKey(modifier.name);
@@ -1695,15 +1629,15 @@ export async function priceSpokenOrder(input: {
         (left, right) => dependencyPriority(left) - dependencyPriority(right),
       );
       for (const requestedModifier of spokenModifiers) {
-        const raw = spokenKey(requestedModifier.name),
-          explicitOnItem = /\b(on (it|the|top)|over|melted)\b/i.test(
-            requestedModifier.name,
-          ),
+        const placementMatch = /^(?:(?:put|add|with) (?:the )?)?(nacho cheese|gravy)\b/i.exec(requestedModifier.name.replace(/chesse/gi,"cheese")),
+          friesPlacement = /French Fries$/i.test(item.name) && placementMatch,
+          raw = friesPlacement ? spokenKey(placementMatch[1]) : spokenKey(requestedModifier.name),
+          explicitOnItem = requestedModifier.placement === "topping" || (requestedModifier.placement !== "side" && !/on (?:the )?side/i.test(requestedModifier.name) && /\b(on (?:it|them|the|top|fries)|over|melted)\b/i.test(requestedModifier.name)),
           mealWithIncludedSalad = item.modifiers.some(
             (group) => group.name === "Choose a Salad (Dinner)",
           ),
           allChoices = item.modifiers
-            .filter((group) => group.presentationContext !== "hidden")
+            .filter((group) => group.presentationContext !== "hidden" && (!requestedModifier.group || group.name === requestedModifier.group))
             .flatMap((group) =>
               group.options.map((option) => ({ group, option })),
             )
@@ -1809,10 +1743,11 @@ export async function priceSpokenOrder(input: {
                       )
                     ? wingSauceChoices
                     : choices,
+          placementChoice = friesPlacement ? choices.find(({option}) => new RegExp(`^${raw}(?: on (?:the )?(?:side|frie))?$`, "i").test(spokenKey(option.name)) && (/on (?:the )?side/i.test(option.name) === !(requestedModifier.placement === "topping" || explicitOnItem)) ) : undefined,
           hasSideNacho = choices.some(
             ({ option }) => spokenKey(option.name) === "nacho cheese on side",
           ),
-          key =
+          key = placementChoice ? spokenKey(placementChoice.option.name) :
             raw === "nacho cheese" && !explicitOnItem && hasSideNacho
               ? "nacho cheese on side"
               : explicitSideSauce
@@ -1820,7 +1755,7 @@ export async function priceSpokenOrder(input: {
                 : raw,
           { group, option } = strictMatch(
             key,
-            matchingChoices,
+            placementChoice ? [placementChoice] : matchingChoices,
             (row) => [
               ...modifierAliases(row.option.name, row.group.name),
               /^russian$/i.test(row.option.name)
@@ -2037,7 +1972,7 @@ export async function priceSpokenOrder(input: {
                 : spokenKey(missingRequired.name).includes("cheese")
                   ? `What cheese: ${choices.join(", ")}?`
                   : `Choose ${missingRequired.name}: ${choices.join(", ")}?`;
-        throw new AiToolError("INVALID_MODIFIER", question, question, 409, {
+        throw new AiToolError("FOLLOW_UP_REQUIRED", question, question, 409, {
           group: missingRequired.name,
           options: choices,
           pendingItem: {
@@ -2054,6 +1989,7 @@ export async function priceSpokenOrder(input: {
         Number(requested.quantity) === Number(wingCount) &&
         (item.name === "Wings" || item.name === "Boneless Wings");
       return {
+        lineId: requested.lineId || randomUUID(),
         itemId: item.id,
         variantId: variant?.id || null,
         quantity: wingCountWasQuantity
@@ -2062,9 +1998,7 @@ export async function priceSpokenOrder(input: {
         modifierSelections,
         pizzaToppings,
       };
-    }),
-    ({ quantity: _quantity, ...configuration }) => configuration,
-  );
+    });
   const attachPendingFollowUp = <T extends Record<string, any>>(result: T) => {
     if (!mashedGravyPending) return result;
     Object.assign(result, {

@@ -114,11 +114,11 @@ async function main() {
       "A fry supplied as a burger modifier must become a separate French Fries line.",
     );
 
-    result = await price("salt and vinegar chips");
-    assert.equal(
-      result.lines[0].item_name_snapshot,
-      "Humpty Dumpty Salt & Vinegar",
-    );
+    const chips = (await sql`SELECT active,available FROM ordering_menu_items WHERE business='Corner Deli' AND name='Humpty Dumpty Salt & Vinegar'`)[0];
+    if(chips?.active && chips?.available) {
+      result = await price("salt and vinegar chips");
+      assert.equal(result.lines[0].item_name_snapshot,"Humpty Dumpty Salt & Vinegar");
+    } else await assert.rejects(price("salt and vinegar chips"),(error:any)=>error.code==="ITEM_NOT_ON_MENU");
 
     result = await price("large fries with nacho");
     assert.equal(result.lines[0].item_name_snapshot, "Large French Fries");
@@ -641,7 +641,7 @@ async function main() {
     const wingWithAddons = await incrementalSpokenCart(
       wingBase.id,
       "replace_item",
-      "Wings",
+      String(wingBase.lines[0].cart_line_id),
       [{
         name: "Wings",
         variant: "10 Wings",

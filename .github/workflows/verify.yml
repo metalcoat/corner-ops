@@ -11,6 +11,70 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ai-regressions:
+    runs-on: [self-hosted]
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: corner_ops_ai_test
+        ports: ["45432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U postgres -d corner_ops_ai_test"
+          --health-interval=5s --health-timeout=5s --health-retries=10
+    env:
+      PGHOST: localhost
+      PGPORT: 45432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: corner_ops_ai_test
+      CI: "true"
+      LOCAL_DEVELOPMENT: "true"
+      VALIDATION_DATABASE_URL: postgresql://postgres:postgres@localhost:45432/corner_ops_ai_test
+      APP_EMAIL: owner@example.test
+      APP_ENV: test
+      GEMINI_API_KEY: "ci-schema-test"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Generate test secrets
+        shell: bash
+        run: |
+          echo "SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "VOICE_PAYMENT_INTERNAL_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "EMPLOYMENT_FORMS_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Build isolated regression database and menu fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r file; do
+            name=$(basename "$file")
+            if [[ "$name" == 0001* || "$name" > 0007_schedule_delivery_queue.sql ]]; then
+              psql -v ON_ERROR_STOP=1 -f "$file"
+            fi
+          done < <(find db/migrations -maxdepth 1 -type f -name '*.sql' | sort)
+          { echo 'SET session_replication_role=replica;'; gzip -dc tests/fixtures/ai-menu.sql.gz; echo 'SET session_replication_role=origin;'; } | psql -v ON_ERROR_STOP=1
+      - name: Dedicated AI regression suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:ai-payment-safety
+          npm run test:ai-cart-safety
+          npm run test:ai-natural-aliases
+          npm run test:ai-followup-modifiers
+          npm run test:ai-phone-conversation
+          npm run test:ai-order-regressions
+          npm run test:ai-ordering
+          npm run test:openai-phone
+          npm run test:gemini-phone-routing
+          npm run test:gemini-phone -- --offline
   build:
     runs-on: [self-hosted]  # liberty-ci-01 on the deli network
     timeout-minutes: 15
@@ -26,6 +90,7 @@ jobs:
         shell: bash
         run: |
           echo "SESSION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "VOICE_PAYMENT_INTERNAL_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
           echo "EMPLOYMENT_FORMS_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: npm ci

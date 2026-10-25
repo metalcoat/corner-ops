@@ -1,0 +1,3 @@
+The compressed SQL fixture contains menu configuration only, captured from the Corner Deli development catalog on 2026-10-24: items, categories, variants, aliases, modifier groups/options/defaults/presentation, local menu fields and combo definitions. It contains no orders, customers, payment credentials, employees, phone transcripts or provider settings.
+
+CI loads it into a fresh database after applying migrations. Inactive products remain inactive. Update this fixture deliberately when the configured menu changes; the cart safety suite iterates every available Wing Sauce option rather than a copied flavor list. PostgreSQL restore requires a superuser because category parent references are circular.

@@ -394,7 +394,7 @@ async function main() {
   );
   assert.ok(
     !orderingToolSource.match(/enum: \["add", "replace_item", "remove_item", "replace_order"/) &&
-      mcpSource.includes("An active phone cart cannot be reset wholesale."),
+      mcpSource.includes("parseCartOperation(args.operation)"),
     "Voice providers must not be able to silently discard an active cart.",
   );
   const jumbo = await menuCatalog("Corner Deli", new Date(), "jumbo thin");
@@ -509,12 +509,12 @@ async function main() {
     assert.ok(incremented.lines.some((line:Record<string,any>)=>line.item_name_snapshot==="Cheeseburger (1/4lbs)"),"Incremental shorthand must resolve the quarter-pound cheeseburger.");
     const wingAnswer=await attachStandaloneModifierAnswer(String(priced.id),"add",[{name:"blue cheese",quantity:1}]);
     assert.equal(wingAnswer?.operation,"replace_item","A standalone wing add-on answer must attach to the existing wings.");
-    assert.equal(wingAnswer?.targetItem,"Wings");
+    assert.equal(wingAnswer?.targetItem,String(priced.lines.find((line:any)=>line.item_name_snapshot==="Wings")?.cart_line_id));
     assert.ok(wingAnswer?.items[0].modifiers?.some(modifier=>modifier.name==="Blue Cheese (4oz)"));
     const withFries=await incrementalSpokenCart(String(priced.id),"add","",[{name:"large fry",quantity:1}]);
     await priceSpokenOrder({business:"Corner Deli",actor:{id:"validation",name:"Validation",type:"employee",role:"employee"},service:"pickup",orderId:String(priced.id),callerPhone:"3155550100",firstName:"Chris",items:withFries});
     const fryAnswer=await attachStandaloneModifierAnswer(String(priced.id),"add",[{name:"nacho cheese",quantity:1}]);
-    assert.equal(fryAnswer?.targetItem,"Large French Fries","A standalone fry upsell answer must attach to the existing fries.");
+    assert.equal(fryAnswer?.targetItem,(await incrementalSpokenCart(String(priced.id),"read","",[])).find(line=>line.name==="Large French Fries")?.lineId,"A standalone fry upsell answer must attach to the existing fries.");
     assert.ok(fryAnswer?.items[0].modifiers?.some(modifier=>modifier.name==="Nacho Cheese on Side"));
     const compactOrder=await compactPhoneOrderResult(incremented,"add");
     assert.ok(JSON.stringify(compactOrder).length<JSON.stringify(incremented).length,"Realtime pricing must return a compact cart instead of database-shaped rows.");

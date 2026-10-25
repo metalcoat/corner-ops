@@ -1,13 +1,7 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { loadEnvFile } from "node:process";
-
-loadEnvFile("/opt/corner-ops/.env");
-const host=execFileSync("docker",["inspect","corner-ops-postgres","--format","{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],{encoding:"utf8"}).trim();
-if(!process.env.POSTGRES_PASSWORD)throw new Error("POSTGRES_PASSWORD is required.");
-process.env.DATABASE_DRIVER="postgres";
-process.env.DATABASE_URL=`postgresql://cornerops:${encodeURIComponent(process.env.POSTGRES_PASSWORD)}@${host}:5432/cornerops`;
+import {randomUUID} from "node:crypto";
+import {localValidationEnv} from "./validation-env";
+localValidationEnv();
 process.env.OPENAI_ORDERING_MCP_TOKEN=`validation-${randomUUID()}`;
 process.env.OPENAI_PHONE_TEST_DIDS="3155550200";
 process.env.OPENAI_PHONE_DID_LINES="3155550200=TEST LINE";
@@ -33,12 +27,12 @@ async function main(){
     const initialized=await(await invoke({jsonrpc:"2.0",id:2,method:"initialize",params:{}})).json();
     const listed=await(await invoke({jsonrpc:"2.0",id:3,method:"tools/list"})).json();
     const called=await(await invoke({jsonrpc:"2.0",id:4,method:"tools/call",params:{name:"menu_search",arguments:{callId,query:"Pizza"}}})).json();
-    const unadvertised=await(await invoke({jsonrpc:"2.0",id:10,method:"tools/call",params:{name:"create_draft",arguments:{callId,serviceType:"pickup",items:[]}}})).json();
+    const unadvertised=await(await invoke({jsonrpc:"2.0",id:10,method:"tools/call",params:{name:"create_draft",arguments:{callId,operation:"add",serviceType:"pickup",items:[]}}})).json();
     const foreignLookup=await(await invoke({jsonrpc:"2.0",id:11,method:"tools/call",params:{name:"customer_lookup",arguments:{callId,query:"315"}}})).json();
     const blocked=await(await invoke({jsonrpc:"2.0",id:5,method:"tools/call",params:{name:"send",arguments:{callId,orderId:randomUUID(),customerConfirmed:false}}})).json();
     const shadowed=await(await invoke({jsonrpc:"2.0",id:6,method:"tools/call",params:{name:"send",arguments:{callId,orderId:randomUUID(),customerConfirmed:true}}})).json();
-    const namelessOrder=await(await invoke({jsonrpc:"2.0",id:7,method:"tools/call",params:{name:"price_order",arguments:{callId,serviceType:"pickup",items:[{name:"Pizza",quantity:1}]}}})).json();
-    const genericPizza=await(await invoke({jsonrpc:"2.0",id:8,method:"tools/call",params:{name:"price_order",arguments:{callId,serviceType:"pickup",firstName:"Pat",lastName:"Example",items:[{name:"Pizza",quantity:1}]}}})).json();
+    const namelessOrder=await(await invoke({jsonrpc:"2.0",id:7,method:"tools/call",params:{name:"price_order",arguments:{callId,operation:"add",serviceType:"pickup",items:[{name:"Pizza",quantity:1}]}}})).json();
+    const genericPizza=await(await invoke({jsonrpc:"2.0",id:8,method:"tools/call",params:{name:"price_order",arguments:{callId,operation:"add",serviceType:"pickup",firstName:"Pat",lastName:"Example",items:[{name:"Pizza",quantity:1}]}}})).json();
     const describedItem=await(await invoke({jsonrpc:"2.0",id:9,method:"tools/call",params:{name:"menu_search",arguments:{callId,query:"Turkey Big Boss"}}})).json();
     const pending=(await sql`SELECT pending_item,order_id FROM ordering_call_sessions WHERE three_cx_call_id=${callId}`)[0];
     const result={
@@ -65,7 +59,7 @@ async function main(){
       unconfirmedSendBlocked:blocked.result?.isError===true,
       shadowSendHeld:shadowed.result?.content?.[0]?.text?.includes("ORDER_REVIEW_PENDING")===true,
       namelessOrderBlocked:namelessOrder.result?.isError===true&&namelessOrder.result?.content?.[0]?.text?.includes("first and last name"),
-      genericPizzaPending:genericPizza.result?.isError===true&&genericPizza.result?.content?.[0]?.text?.includes("What size?")&&pending.pending_item?.missingRequiredFields?.[0]==="size"&&!pending.order_id,
+      genericPizzaPending:JSON.parse(genericPizza.result?.content?.[0]?.text||"{}").pending===true&&genericPizza.result?.content?.[0]?.text?.includes("What size?")&&pending.pending_item?.missingRequiredFields?.[0]==="size"&&!pending.order_id,
       liveDescriptions:describedItem.result?.isError!==true&&describedItem.result?.content?.[0]?.text?.includes('"description"'),
     };
     console.log(JSON.stringify(result,null,2));

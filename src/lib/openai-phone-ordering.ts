@@ -46,9 +46,13 @@ export const OPENAI_PRICE_ORDER_TOOL = {
         enum: ["add", "replace_item", "remove_item", "read"],
         description: "Use add for new food, replace_item for a correction or modifier to an existing item, remove_item to delete/decrease one item, and read when only updating payment/customer details.",
       },
+      targetLineId: {
+        type: "string",
+        description: "Stable lineId from the latest cart; required for replace_item and remove_item.",
+      },
       targetItem: {
         type: "string",
-        description: "Existing canonical cart item name affected by replace_item or remove_item.",
+        description: "Stable lineId affected by replace_item or remove_item.",
       },
       serviceType: { type: "string", enum: ["pickup", "delivery"] },
       deliveryAddress: {
@@ -70,6 +74,7 @@ export const OPENAI_PRICE_ORDER_TOOL = {
               description:
                 "Customer's actual requested menu name or confirmed exact alias; never an inferred substitute.",
             },
+            lineId: { type: "string" },
             variant: { type: "string" },
             quantity: { type: "integer", minimum: 1 },
             modifiers: {
@@ -78,6 +83,9 @@ export const OPENAI_PRICE_ORDER_TOOL = {
                 type: "object",
                 properties: {
                   name: { type: "string" },
+                  group: { type: "string" },
+                  remove: { type: "boolean" },
+                  placement: { type: "string", enum: ["side", "topping"] },
                   portion: {
                     type: "string",
                     enum: ["whole", "left_half", "right_half"],

@@ -91,7 +91,9 @@
     "test:customer-ordering:e2e": "playwright test tests/customer-ordering.spec.ts",
     "mobile:sync": "cap sync",
     "mobile:android": "cap sync android && cd android && ./gradlew assembleRelease",
-    "mobile:ios": "cap sync ios"
+    "mobile:ios": "cap sync ios",
+    "test:ai-cart-safety": "tsx scripts/ai-cart-safety-validate.ts",
+    "test:ai-payment-safety": "tsx scripts/ai-payment-safety-validate.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",

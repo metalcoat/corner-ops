@@ -77,7 +77,7 @@ async function main() {
     {
       key: "ambiguous-fries",
       items: [{ name: "fries", quantity: 1 }],
-      errorCode: "INVALID_VARIANT",
+      errorCode: "FOLLOW_UP_REQUIRED",
     },
     {
       key: "invalid-avocado",
@@ -93,7 +93,7 @@ async function main() {
     {
       key: "generic-pizza-pending-size",
       items: [{ name: "Pizza", quantity: 1 }],
-      errorCode: "INVALID_VARIANT",
+      errorCode: "FOLLOW_UP_REQUIRED",
     },
     {
       key: "invalid-turkey-burger",
@@ -114,7 +114,7 @@ async function main() {
     {
       key: "wings-missing-count",
       items: [{ name: "Wings", quantity: 1, modifiers: [{ name: "Mild" }] }],
-      errorCode: "INVALID_VARIANT",
+      errorCode: "FOLLOW_UP_REQUIRED",
     },
     {
       key: "large-poutine-alias",
@@ -125,7 +125,7 @@ async function main() {
     {
       key: "tater-tot-poutine-missing-size",
       items: [{ name: "tater tot poutine", quantity: 1 }],
-      errorCode: "INVALID_VARIANT",
+      errorCode: "FOLLOW_UP_REQUIRED",
     },
     {
       key: "large-tater-tot-poutine",
@@ -393,7 +393,7 @@ async function main() {
     {
       key: "sampler-platter-requires-size",
       items: [{ name: "sampler platter", quantity: 1 }],
-      errorCode: "INVALID_VARIANT",
+      errorCode: "FOLLOW_UP_REQUIRED",
     },
     {
       key: "buffalo-chicken-burger-build",
@@ -478,7 +478,7 @@ async function main() {
     {
       key: "hot-roast-beef-sandwich",
       items: [{ name: "hot roast beef sandwich", quantity: 1 }],
-      errorCode: "INVALID_MODIFIER",
+      errorCode: "FOLLOW_UP_REQUIRED",
     },
     {
       key: "hot-roast-beef-default-meal",

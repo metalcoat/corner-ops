@@ -1,3 +1,4 @@
+import { PhoneSpeechState, needsSpeechRecovery } from "@/lib/phone-speech-state";
 import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { getSql } from "@/lib/db";
@@ -62,15 +63,16 @@ async function latency(
 const text = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
 
-type CartOperation =
-  "add" | "replace_item" | "remove_item" | "replace_order" | "read";
+export type CartOperation =
+  "add" | "replace_item" | "remove_item" | "read";
 async function spokenCart(orderId: string): Promise<SpokenOrderItem[]> {
   const sql = getSql(),
     lines =
-      await sql`SELECT id,item_name_snapshot,variant_name_snapshot,quantity FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`,
+      await sql`SELECT id,cart_line_id,item_name_snapshot,variant_name_snapshot,quantity FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id`,
     modifiers =
-      await sql`SELECT modifier.order_item_id,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${orderId} AND modifier.selection_state IN('selected','extra') AND (modifier.print_on_ticket=TRUE OR modifier.pizza_topping_portion IS NOT NULL) ORDER BY modifier.created_at,modifier.id`;
+      await sql`SELECT modifier.group_name_snapshot,modifier.order_item_id,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${orderId} AND modifier.selection_state IN('selected','extra') AND (modifier.print_on_ticket=TRUE OR modifier.pizza_topping_portion IS NOT NULL) ORDER BY modifier.created_at,modifier.id`;
   return lines.map((line) => ({
+    lineId: String(line.cart_line_id),
     name: String(line.item_name_snapshot),
     variant: String(line.variant_name_snapshot || "") || undefined,
     quantity: Number(line.quantity),
@@ -80,6 +82,7 @@ async function spokenCart(orderId: string): Promise<SpokenOrderItem[]> {
         Array.from(
           { length: Math.max(1, Number(modifier.quantity || 1)) },
           () => ({
+            group: String(modifier.group_name_snapshot),
             name: String(modifier.option_name_snapshot),
             portion: (modifier.pizza_topping_portion ||
               undefined) as SpokenOrderItem["modifiers"] extends Array<infer M>
@@ -127,9 +130,8 @@ export async function applyPendingModifierAnswer(input: {
   const activeName = String(
     pending.activeItem || pending.category || pending.customerRequest || "",
   );
-  const line = [...current]
-    .reverse()
-    .find((item) => cartKey(item.name) === cartKey(activeName));
+  const candidates = current.filter(item => pending.lineId ? item.lineId === pending.lineId : cartKey(item.name) === cartKey(activeName));
+  const line = candidates.length === 1 ? candidates[0] : undefined;
   if ((pending.missingRequiredFields || []).includes("mashed size")) {
     const size = /\b(small|medium)\b/i.exec(input.customerText)?.[1];
     if (!size) return { ...input };
@@ -138,7 +140,7 @@ export async function applyPendingModifierAnswer(input: {
     return {
       ...input,
       operation: line ? ("replace_item" as CartOperation) : input.operation,
-      targetItem: line?.name || input.targetItem,
+      targetItem: line?.lineId || input.targetItem,
       items: [
         {
           ...target,
@@ -162,7 +164,7 @@ export async function applyPendingModifierAnswer(input: {
     return {
       ...input,
       operation: "replace_item" as CartOperation,
-      targetItem: line.name,
+      targetItem: line.lineId!,
       items: [
         affirmative(input.customerText)
           ? {
@@ -193,6 +195,7 @@ const modifierKey = (value: string) =>
   value
     .toLowerCase()
     .replace(/\(\s*\d+(?:\.\d+)?\s*oz\s*\)/g, "")
+    .replace(/&/g, " and ")
     .replace(/\bon side\b/g, "")
     .replace(/^(?:add|extra|xtra)\s+/g, "")
     .replace(/[^a-z0-9]+/g, " ")
@@ -216,6 +219,7 @@ export async function attachStandaloneModifierAnswer(
     .filter(Boolean);
   if (!requestedParts.length) return null;
   const current = await spokenCart(orderId);
+  const attachments = [];
   for (const line of [...current].reverse()) {
     const catalog = await menuCatalog("Corner Deli", new Date(), line.name),
       item = catalog
@@ -241,9 +245,9 @@ export async function attachStandaloneModifierAnswer(
       )
       .filter(Boolean);
     if (selected.length !== requestedParts.length) continue;
-    return {
+    attachments.push({
       operation: "replace_item" as CartOperation,
-      targetItem: line.name,
+      targetItem: line.lineId!,
       items: [
         {
           ...line,
@@ -253,9 +257,14 @@ export async function attachStandaloneModifierAnswer(
           ],
         },
       ],
-    };
+    });
   }
-  return null;
+  if(requestedParts.some(part=>/nacho|gravy/.test(part))) {
+    const fries=attachments.filter(entry=>/fries$/i.test(entry.items[0].name));
+    if(fries.length===1) return fries[0];
+  }
+  if(attachments.length>1) throw new AiToolError("FOLLOW_UP_REQUIRED", "Which item should I change?", "Ask which cart line the caller means.", 409);
+  return attachments[0] || null;
 }
 export async function incrementalSpokenCart(
   orderId: string | null,
@@ -263,81 +272,57 @@ export async function incrementalSpokenCart(
   targetItem: string,
   changed: SpokenOrderItem[],
 ) {
-  if (!orderId || operation === "replace_order") return changed;
+  parseCartOperation(operation);
+  if (!orderId) {
+    if (operation === "replace_item" || operation === "remove_item") throw new AiToolError("INVALID_INPUT", "No cart line exists.", "Read the cart first.", 409);
+    return operation === "read" ? [] : changed;
+  }
   const current = await spokenCart(orderId);
   if (operation === "read") return current;
-  const target = cartKey(targetItem || changed[0]?.name || "");
-  if (changed.length === 1 && (operation === "add" || operation === "replace_item")) {
-    const incoming = changed[0],
-      wingFlavor = /^(plain|mild|medium|hot|bbq|barbecue|garlic parmesan|honey mustard|cajun|sweet and sassy)$/i,
-      incomingHasFlavor = (incoming.modifiers || []).some((modifier) =>
-        wingFlavor.test(modifier.name.trim()),
-      ),
-      existingIndex = current.findLastIndex(
-        (item) =>
-          /wings?$/i.test(item.name.trim()) &&
-          cartKey(item.name) === cartKey(incoming.name) &&
-          cartKey(item.variant || "") === cartKey(incoming.variant || "") &&
-          (item.modifiers || []).some((modifier) =>
-            wingFlavor.test(modifier.name.trim()),
-          ),
-      );
-    // Gemini commonly sends only newly requested wing add-ons on the follow-up
-    // turn. Preserve the already selected required flavor instead of replacing
-    // it and producing INVALID_MODIFIER: Wing Sauce.
-    if (!incomingHasFlavor && existingIndex >= 0) {
-      const existing = current[existingIndex], seen = new Set<string>();
-      const modifiers = [...(existing.modifiers || []), ...(incoming.modifiers || [])]
-        .filter((modifier) => {
-          const key = modifierKey(modifier.name);
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-      return current.map((item, index) =>
-        index === existingIndex ? { ...existing, ...incoming, modifiers } : item,
-      );
-    }
-  }
-  if (operation === "add") {
-    if (changed.length === 1) {
-      const incoming = changed[0],
-        incomingModifiers = new Set(
-          (incoming.modifiers || []).map((modifier) => modifierKey(modifier.name)),
-        ),
-        existingIndex = current.findLastIndex(
-          (item) =>
-            cartKey(item.name) === cartKey(incoming.name) &&
-            cartKey(item.variant || "") === cartKey(incoming.variant || "") &&
-            Number(item.quantity || 1) === Number(incoming.quantity || 1) &&
-            (item.modifiers || []).every((modifier) =>
-              incomingModifiers.has(modifierKey(modifier.name)),
-            ) &&
-            incomingModifiers.size > (item.modifiers || []).length,
-        );
-      if (existingIndex >= 0)
-        return current.map((item, index) =>
-          index === existingIndex ? incoming : item,
-        );
-    }
-    return [...current, ...changed];
-  }
-  const matches = (item: SpokenOrderItem) => cartKey(item.name) === target;
-  if (operation === "replace_item")
-    return [...current.filter((item) => !matches(item)), ...changed];
+  if (operation === "add") return [...current, ...changed.map(item => ({...item, lineId: randomUUID()}))];
+  const lineId = targetItem || changed[0]?.lineId;
+  const index = current.findIndex(item => item.lineId === lineId);
+  if (index < 0) throw new AiToolError("INVALID_INPUT", "A current cart line ID is required.", "Read the cart and select its exact lineId.", 409);
   if (operation === "remove_item") {
-    const removeQuantity = Math.max(1, Number(changed[0]?.quantity || 1));
-    let remaining = removeQuantity;
-    return current.flatMap((item) => {
-      if (!matches(item) || remaining <= 0) return [item];
-      const quantity = Math.max(1, Number(item.quantity || 1)),
-        taken = Math.min(quantity, remaining);
-      remaining -= taken;
-      return quantity > taken ? [{ ...item, quantity: quantity - taken }] : [];
-    });
+    const quantity = Math.max(1, Number(changed[0]?.quantity || 1));
+    return current.flatMap((item, i) => i !== index ? [item] : Number(item.quantity || 1) > quantity ? [{...item, quantity: Number(item.quantity || 1)-quantity}] : []);
   }
-  return changed;
+  if (operation !== "replace_item" || changed.length !== 1) throw new AiToolError("INVALID_INPUT", "Invalid cart edit.", "Send one replacement with a current lineId.", 409);
+  const existing = current[index], incoming = changed[0];
+  const catalog = await menuCatalog("Corner Deli", new Date(), existing.name);
+  const item = catalog.flatMap(category => category.items || []).find(item => cartKey(item.name) === cartKey(existing.name));
+  const groups = item?.modifiers || [];
+  let modifiers = [...(existing.modifiers || [])];
+  for (const edit of incoming.modifiers || []) {
+    const name = edit.name.replace(/^no\s+/i, "");
+    const matches = groups.flatMap((group: any) => (group.options || []).filter((option: any) => option.available && (!edit.group || edit.group === group.name) && modifierAliases(String(option.name), String(group.name)).some(alias => modifierKey(alias) === modifierKey(name))).map((option: any) => ({group, option})));
+    const exact = matches.filter((match: any) => match.option.name === name);
+    const sideRequested = /^(?:extra|side(?: of)?)\s+/i.test(edit.name);
+    const scoped = edit.group ? matches : sideRequested ? matches.filter((match:any)=>/\(\s*\d+(?:\.\d+)?\s*oz\s*\)/i.test(match.option.name)) : exact.length === 1 ? exact : matches.filter((match: any) => match.group.name === "Wing Sauce");
+    const match = scoped.length === 1 ? scoped[0] : matches.length === 1 ? matches[0] : undefined;
+    if (!match) throw new AiToolError("INVALID_MODIFIER", "Modifier is invalid or ambiguous.", "Ask which modifier and group the caller means.", 409);
+    const remove = edit.remove || /^no\s+/i.test(edit.name);
+    modifiers = modifiers.filter(mod => !(remove ? modifierKey(mod.name) === modifierKey(match.option.name) && (!mod.group || mod.group === match.group.name) : match.group.maxSelections === 1 && (mod.group === match.group.name || (match.group.options || []).some((option: any) => modifierKey(option.name) === modifierKey(mod.name)))));
+    if(edit.placement && /nacho cheese|gravy/i.test(edit.name)) {
+      const sauce=/gravy/i.test(edit.name)?"gravy":"nacho cheese";
+      modifiers=modifiers.filter(mod=>!mod.name.toLowerCase().startsWith(sauce));
+    }
+    if (!remove && !modifiers.some(mod => mod.name === match.option.name && mod.group === match.group.name)) modifiers.push({...edit, name: match.option.name, group: match.group.name});
+  }
+  return current.map((item, i) => i === index ? {...existing, ...incoming, lineId: existing.lineId, modifiers} : item);
 }
+export function applyFryPlacementSpeech(items: SpokenOrderItem[], customerText: string): SpokenOrderItem[] {
+  if(items.length!==1 || !/fr(?:ies|y)/i.test(items[0].name)) return items;
+  const topping=/\b(?:on (?:the )?(?:fries|them|it|top)|over (?:the )?fries)\b/i.test(customerText);
+  const side=/\bon (?:the )?side\b/i.test(customerText);
+  if(!topping && !side) return items;
+  return items.map(item=>({...item,modifiers:item.modifiers?.map(mod=> /nacho cheese|gravy/i.test(mod.name) && new RegExp(/gravy/i.test(mod.name)?"gravy":"cheese","i").test(customerText) ? {...mod,placement:side?"side" as const:"topping" as const}:mod)}));
+}
+export function parseCartOperation(value: unknown): CartOperation {
+  if (typeof value !== "string" || !["add", "replace_item", "remove_item", "read"].includes(value)) throw new AiToolError("INVALID_INPUT", "Unknown cart operation.", "Use add, replace_item, remove_item, or read.", 400);
+  return value as CartOperation;
+}
+
 export async function compactPhoneOrderResult(
   result: Record<string, any>,
   operation: CartOperation,
@@ -361,6 +346,7 @@ export async function compactPhoneOrderResult(
     paymentMethod: String(result.payment_preference || ""),
     tipCents: Number(result.tip_cents || 0),
     lines: (result.lines || []).map((line: Record<string, any>) => ({
+      lineId: String(line.cart_line_id),
       name: String(line.item_name_snapshot),
       variant: String(line.variant_name_snapshot || ""),
       quantity: Number(line.quantity),
@@ -369,6 +355,7 @@ export async function compactPhoneOrderResult(
           (modifier) => String(modifier.order_item_id) === String(line.id),
         )
         .map((modifier) => ({
+          group: String(modifier.group_name_snapshot),
           name: String(modifier.option_name_snapshot),
           quantity: Number(modifier.quantity || 1),
           portion: modifier.pizza_topping_portion || undefined,
@@ -428,12 +415,13 @@ export function startOpenAiSideband(
   const openedAt = Date.now(),
     hardStop = setTimeout(() => socket.close(), 4 * 60 * 60 * 1000),
     firstAudio = new Set<string>();
+  const speech = new PhoneSpeechState();
   let ping: ReturnType<typeof setInterval> | undefined,
     turnTimer: ReturnType<typeof setTimeout> | undefined,
     bargeInTimer: ReturnType<typeof setTimeout> | undefined,
     lastSpeechStoppedAt = 0,
     lastTurnId = "",
-    responseActive = false,
+
     customerSpeaking = false,
     customerTurnPending = false,
     toolUsedForTurn = false,
@@ -471,7 +459,7 @@ export function startOpenAiSideband(
       if (
         socket.readyState === WebSocket.OPEN &&
         !customerSpeaking &&
-        !responseActive
+        !speech.busy
       )
         socket.send(
           JSON.stringify({
@@ -522,23 +510,6 @@ export function startOpenAiSideband(
       let spokenItems = Array.isArray(args.items)
         ? (args.items as SpokenOrderItem[])
         : [];
-      const sauceMatch = lastCustomerTranscript.match(
-        /\b(mild|medium|hot|suicide|bbq|sweet and sassy|plain|sweet and sour|garlic parmesan|open pit bbq)\b/i,
-      );
-      if (/\bwings?\b/i.test(lastCustomerTranscript) && sauceMatch) {
-        for (const item of spokenItems) {
-          if (!/^(?:boneless )?wings?$/i.test(String(item.name))) continue;
-          const modifiers = Array.isArray(item.modifiers) ? item.modifiers : [];
-          if (
-            !modifiers.some((modifier) =>
-              /^(mild|medium|hot|suicide|bbq|sweet and sassy|plain|sweet and sour|garlic parmesan|open pit bbq)$/i.test(
-                String(modifier.name),
-              ),
-            )
-          )
-            item.modifiers = [...modifiers, { name: sauceMatch[1] }];
-        }
-      }
       const sql = getSql();
       const call = (
         await sql`SELECT call.id,call.order_id,call.caller_phone,call.customer_id call_customer_id,call.pending_item,call.deferred_required_fields,orders.service_type,orders.customer_id,orders.first_name_snapshot,orders.last_name_snapshot,address.route_distance_miles FROM ordering_call_sessions call LEFT JOIN ordering_orders orders ON orders.id=call.order_id LEFT JOIN ordering_order_delivery_addresses address ON address.order_id=orders.id WHERE call.business='Corner Deli' AND call.three_cx_call_id=${callId} AND call.state IN('ai','handoff_pending') LIMIT 1`
@@ -550,49 +521,9 @@ export function startOpenAiSideband(
           "Ask the caller to try again.",
           403,
         );
-      let operation = (
-        [
-          "add",
-          "replace_item",
-          "remove_item",
-          "replace_order",
-          "read",
-        ].includes(String(args.operation))
-          ? String(args.operation)
-          : "replace_order"
-      ) as CartOperation;
-      if (call.order_id) {
-        const savedWingSauces = await sql`
-          SELECT items.item_name_snapshot,modifier.option_name_snapshot
-          FROM ordering_order_items items
-          JOIN ordering_order_item_modifiers modifier ON modifier.order_item_id=items.id
-          WHERE items.order_id=${String(call.order_id)}
-            AND modifier.group_name_snapshot='Wing Sauce'
-          ORDER BY items.sort_order,modifier.created_at
-        `;
-        for (const item of spokenItems) {
-          if (!/^(?:boneless )?wings?$/i.test(String(item.name))) continue;
-          const modifiers = Array.isArray(item.modifiers) ? item.modifiers : [];
-          const hasSauce = modifiers.some((modifier) =>
-            /^(mild|medium|hot|suicide|bbq|sweet and sassy|plain|sweet and sour|garlic parmesan|open pit bbq)$/i.test(
-              String(modifier.name),
-            ),
-          );
-          if (!hasSauce) {
-            const saved = savedWingSauces.find((entry) =>
-              /boneless/i.test(String(item.name))
-                ? /boneless/i.test(String(entry.item_name_snapshot))
-                : !/boneless/i.test(String(entry.item_name_snapshot)),
-            );
-            if (saved)
-              item.modifiers = [
-                ...modifiers,
-                { name: String(saved.option_name_snapshot) },
-              ];
-          }
-        }
-      }
-      let targetItem = String(args.targetItem || "");
+      let operation = parseCartOperation(args.operation);
+      let targetItem = String(args.targetLineId || args.targetItem || "");
+      spokenItems = applyFryPlacementSpeech(spokenItems,lastCustomerTranscript);
       const pendingApplied = await applyPendingModifierAnswer({
         orderId: call.order_id ? String(call.order_id) : null,
         pendingItem: call.pending_item || null,
@@ -891,6 +822,7 @@ export function startOpenAiSideband(
                 ? {
                     ok: false,
                     pending: true,
+                    code: "FOLLOW_UP_REQUIRED",
                     requiredFollowUp: known.message,
                     details: known.details,
                   }
@@ -1062,17 +994,18 @@ export function startOpenAiSideband(
         key = `${callId}:${eventId}`;
       if (type === "input_audio_buffer.speech_started") {
         customerSpeaking = true;
+        speech.interrupt();
         if (turnTimer) {
           clearTimeout(turnTimer);
           turnTimer = undefined;
         }
-        if (responseActive) {
+        if (speech.busy) {
           if (bargeInTimer) clearTimeout(bargeInTimer);
           bargeInTimer = setTimeout(() => {
             bargeInTimer = undefined;
             if (
               customerSpeaking &&
-              responseActive &&
+              speech.busy &&
               socket.readyState === WebSocket.OPEN
             ) {
               socket.send(JSON.stringify({ type: "response.cancel" }));
@@ -1117,7 +1050,8 @@ export function startOpenAiSideband(
         void event(callId, key, type, "customer", "Customer", value);
         scheduleTurn();
       } else if (type === "response.created") {
-        responseActive = true;
+        speech.start();
+        lastAssistantTranscript = "";
         if (lastSpeechStoppedAt)
           void latency(
             callId,
@@ -1126,7 +1060,8 @@ export function startOpenAiSideband(
             Date.now() - lastSpeechStoppedAt,
             model,
           );
-      } else if (type === "response.output_audio.delta") {
+      } else if (type === "response.output_audio.delta" || type === "output_audio_buffer.started") {
+        speech.audio();
         const responseId = String(row.response_id || "");
         if (responseId && !firstAudio.has(responseId)) {
           firstAudio.add(responseId);
@@ -1213,11 +1148,16 @@ export function startOpenAiSideband(
         void event(callId, key, type, "tool", "Ordering tool completed");
       } else if (type === "response.mcp_call.failed")
         void event(callId, key, type, "error", "Ordering tool failed");
-      else if (type === "output_audio_buffer.stopped" && hangupAfterPlayback) {
-        hangupAfterPlayback = false;
-        void hangup();
+      else if (type === "output_audio_buffer.stopped" || type === "output_audio_buffer.cleared") {
+        speech.drained();
+        if (hangupAfterPlayback && !speech.busy && !speech.interrupted) {
+          hangupAfterPlayback = false;
+          void hangup();
+        }
+        scheduleTurn();
       } else if (type === "response.done") {
-        responseActive = false;
+        speech.done();
+        if(hangupAfterPlayback && !speech.busy && !speech.interrupted) { hangupAfterPlayback=false; void hangup(); }
         const status = String(row.response?.status || ""),
           errorCode = String(row.response?.status_details?.error?.code || ""),
           errorMessage = text(row.response?.status_details?.error?.message),
@@ -1226,7 +1166,7 @@ export function startOpenAiSideband(
             /\b(and|or|with|for|to|the|a|do|does|would|could)$/.test(
               lastAssistantTranscript.toLowerCase(),
             ),
-          truncated = status === "failed" || unfinished;
+          truncated = needsSpeechRecovery(status, unfinished, speech.interrupted);
         if (status === "failed")
           console.error("OpenAI realtime response failed.", {
             callId,
@@ -1279,7 +1219,7 @@ export function startOpenAiSideband(
             if (
               socket.readyState !== WebSocket.OPEN ||
               customerSpeaking ||
-              responseActive ||
+              speech.busy ||
               retryTurn !== lastTurnId
             )
               return;
@@ -1297,8 +1237,8 @@ export function startOpenAiSideband(
             );
           };
           if (delayMs) {
-            rateLimitRetryTimer = setTimeout(retry, delayMs);
-          } else retry();
+            rateLimitRetryTimer = setTimeout(() => speech.recover(retry), delayMs);
+          } else speech.recover(retry);
         }
       } else if (type === "error") {
         void event(
