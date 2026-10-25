@@ -212,6 +212,36 @@ async def main():
 
     # 9. Transcript pieces are joined with spaces so "on the"+"fries" still reads as a fry topping.
     check("transcript pieces keep word breaks", gp.join_transcript("nacho cheese on the", "fries") == "nacho cheese on the fries", gp.join_transcript("nacho cheese on the", "fries"))
+    # 10. A Gemini error mid-call (e.g. close 1007) transfers the caller at once (was ~20 s of silence).
+    import uuid as uuid_module
+
+    class PacketReader:
+        def __init__(self):
+            self.data = bytes([0x01, 0x00, 0x10]) + uuid_module.uuid4().bytes
+
+        async def readexactly(self, n):
+            if not self.data:
+                await asyncio.sleep(3600)
+            chunk, self.data = self.data[:n], self.data[n:]
+            return chunk
+
+    actions = []
+
+    async def failing_bridge(reader, writer, call_id):
+        raise RuntimeError("simulated Gemini close 1007")
+
+    async def record_action(call_id, action, **values):
+        actions.append(action)
+        return {}
+
+    original_bridge, original_action = gp.bridge, gp.app_action
+    gp.bridge, gp.app_action = failing_bridge, record_action
+    writer = Writer()
+    try:
+        await asyncio.wait_for(gp.handle(PacketReader(), writer), 5)
+    finally:
+        gp.bridge, gp.app_action = original_bridge, original_action
+    check("bridge failure hands off and releases the call", actions[:1] == ["handoff"] and b"\x00\x00\x00" in writer.frames, {"actions": actions, "frames": [f.hex() for f in writer.frames]})
     print(json.dumps({"status": "passed", "checks": len(checks)}))
 
 

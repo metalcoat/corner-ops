@@ -946,12 +946,18 @@ async def handle(reader, writer):
     except (asyncio.IncompleteReadError, ConnectionError):
         pass
     except Exception as error:
-        print(f"Gemini bridge call failed: {type(error).__name__}", flush=True)
+        # Close code/reason only (e.g. 1007 from Gemini); never message content.
+        closed = getattr(error, "rcvd", None)
+        detail = f" code={closed.code} reason={str(closed.reason)[:160]}" if closed is not None else ""
+        print(f"Gemini bridge call failed: {type(error).__name__}{detail}", flush=True)
         if call_id:
             try:
                 await app_action(call_id, "handoff", reason="Gemini bridge failed.")
             except Exception:
                 pass
+            # Tell Asterisk the media app is done so the dialplan transfers the caller to an employee
+            # right away; a plain socket close left the caller in silence until they hung up.
+            await terminate_audiosocket(writer)
     finally:
         if call_id:
             try:
