@@ -5,8 +5,8 @@ import { sendRawToPrinter } from "@/lib/printer-network";
 
 export type LabelLanguage = "zpl" | "tspl" | "escpos";
 export const LABEL_LANGUAGES: Array<{ value: LabelLanguage; label: string; hint: string }> = [
-  { value: "zpl", label: "ZPL", hint: "Volcora V-LBPTZ, Zebra and most Ethernet label printers" },
-  { value: "tspl", label: "TSPL", hint: "Rollo, Munbyn, Xprinter, TSC and most budget label printers" },
+  { value: "zpl", label: "ZPL", hint: "Zebra and ZPL-compatible label printers" },
+  { value: "tspl", label: "TSPL", hint: "Volcora, Rollo, Munbyn, Xprinter, TSC and most budget label printers" },
   { value: "escpos", label: "ESC/POS", hint: "Epson TM-L90 and other receipt-style label printers" },
 ];
 
