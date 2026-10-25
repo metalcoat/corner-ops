@@ -6,6 +6,7 @@ import audioop
 import base64
 import hashlib
 import json
+import re
 import os
 import struct
 import time
@@ -103,8 +104,18 @@ def voice_safe_tool_result(value):
     """Keep operational draft language out of provider-facing tool results."""
     safe = scrub_internal_order_language(value)
     if isinstance(safe, dict):
-        safe["voiceInstruction"] = "Do not narrate internal order state. Continue the customer-facing checkout sequence only."
+        if is_failed_tool_result(safe):
+            # An error must reach the model intact; "continue checkout" would tell it to ignore the failure.
+            safe["voiceInstruction"] = "Do not narrate internal order state. Fix or ask about this before continuing."
+        else:
+            safe["voiceInstruction"] = "Do not narrate internal order state. Continue the customer-facing checkout sequence only."
     return safe
+
+
+def is_failed_tool_result(value):
+    return isinstance(value, dict) and (
+        "error" in value or value.get("ok") is False or value.get("pending") is True
+    )
 
 
 def scrub_internal_order_language(value):
@@ -114,12 +125,86 @@ def scrub_internal_order_language(value):
         return value
     safe = {}
     for key, item in value.items():
-        if isinstance(item, str) and "draft" in item.lower() and key.lower() in (
-            "status", "message", "instruction"
-        ):
-            continue
+        if isinstance(item, str) and "draft" in item.lower():
+            if key.lower() == "status":
+                continue
+            if key.lower() in ("message", "instruction", "remedy"):
+                # Reword rather than drop: an error without its message leaves the model guessing.
+                item = re.sub(r"\bdraft(s?)\b", r"order\1", item, flags=re.IGNORECASE)
         safe[key] = scrub_internal_order_language(item)
     return safe
+
+
+CLOSING_GRACE_SECONDS = 0.8
+
+MUTATING_TOOLS = {
+    "price_order",
+    "create_draft",
+    "update_draft",
+    "attach_delivery_address",
+    "send",
+}
+
+
+def add_signature(arguments):
+    """Item names of an add, so a re-worded repeat of the same add in one turn isn't applied twice."""
+    if arguments.get("operation") != "add":
+        return None
+    names = sorted(
+        " ".join(str(item.get("name", "")).lower().split())
+        for item in arguments.get("items") or []
+        if isinstance(item, dict)
+    )
+    return json.dumps(names) if names else None
+
+
+class ToolCallGate:
+    """Duplicate protection for model tool calls.
+
+    A logical turn is the caller's turn plus the model turns inside it: it advances on new caller
+    speech and on every model turnComplete, so a later identical request is a new request. Within a
+    logical turn an identical call, or an add of the same items, returns the first result instead of
+    running twice. A failed call (error / follow-up) changed nothing on the server, so it is never
+    cached and never blocks a corrected call. Different changes in one turn ("add fries and make the
+    wings hot") both run.
+    """
+
+    def __init__(self):
+        self.results = {}
+        self.added = {}
+
+    def lookup(self, turn_key, name, arguments):
+        _, key = logical_tool_key(turn_key, name, arguments)
+        if key in self.results:
+            return key, self.results[key]
+        signature = add_signature(arguments) if name == "price_order" else None
+        if signature and (turn_key, signature) in self.added:
+            return key, self.added[(turn_key, signature)]
+        return key, None
+
+    def record(self, turn_key, name, arguments, result):
+        if is_failed_tool_result(result):
+            return
+        _, key = logical_tool_key(turn_key, name, arguments)
+        self.results[key] = result
+        signature = add_signature(arguments) if name == "price_order" else None
+        if signature:
+            self.added[(turn_key, signature)] = result
+
+
+def join_transcript(current, chunk):
+    """Gemini sends transcription in pieces, some without a leading space ("on the"+"fries")."""
+    chunk = str(chunk)
+    if current and chunk and current[-1].isalnum() and chunk[0].isalnum():
+        return f"{current} {chunk}"
+    return current + chunk
+
+
+def is_closing_line(text):
+    closing = text.lower()
+    return "pickup should be ready" in closing and (
+        "thanks for calling" in closing or "see you then" in closing
+    )
 
 
 async def read_packet(reader):
@@ -492,8 +577,11 @@ async def bridge(reader, writer, call_id):
 
     playback = SpeechOutput(writer, emit)
     customer_transcript = ""
-    tool_results = {}
-    turn_mutation_keys = {}
+    tool_gate = ToolCallGate()
+    closing_tasks = set()
+    model_turns = 0
+    closing_interrupted = False
+    cancelled_tool_calls = set()
     user_turn_open = False
     customer_turn_id = 0
     order_mutation_lock = asyncio.Lock()
@@ -581,7 +669,12 @@ async def bridge(reader, writer, call_id):
         async def caller_audio():
             nonlocal input_state
             while not close_requested.is_set():
-                kind, payload = await read_packet(reader)
+                try:
+                    kind, payload = await read_packet(reader)
+                except (asyncio.IncompleteReadError, ConnectionError):
+                    if close_requested.is_set():
+                        return
+                    raise
                 if kind == 0x00:
                     break
                 if kind == 0x10 and payload:
@@ -604,12 +697,21 @@ async def bridge(reader, writer, call_id):
         async def model_audio():
             nonlocal output_state, customer_transcript, user_turn_open
             nonlocal customer_turn_id
-            nonlocal assistant_transcript
+            nonlocal assistant_transcript, model_turns, closing_interrupted
             async for raw in gemini:
                 message = json.loads(raw)
                 server = message.get("serverContent", {})
                 interrupted = server.get("interrupted") is True
+                if message.get("goAway") is not None:
+                    await emit("goAway", {**playback.snapshot(), "timeLeft": message["goAway"].get("timeLeft")})
+                cancellation = message.get("toolCallCancellation", {})
+                if cancellation.get("ids"):
+                    # Calls run before the next message is read, so a cancelled call has usually already
+                    # finished; its result stays in the cart and the next price_order/get_draft shows it.
+                    cancelled_tool_calls.update(str(value) for value in cancellation["ids"])
+                    await emit("toolCallCancellation", {**playback.snapshot(), "ids": cancellation["ids"]})
                 if interrupted:
+                    closing_interrupted = True
                     if not user_turn_open:
                         user_turn_open = True
                         customer_turn_id += 1
@@ -622,10 +724,10 @@ async def bridge(reader, writer, call_id):
                         user_turn_open = True
                         customer_turn_id += 1
                         await emit("userSpeechStart", playback.snapshot())
-                    customer_transcript += str(transcription["text"])
+                    customer_transcript = join_transcript(customer_transcript, transcription["text"])
                 output_transcription = server.get("outputTranscription", {})
                 if output_transcription.get("text"):
-                    assistant_transcript += str(output_transcription["text"])
+                    assistant_transcript = join_transcript(assistant_transcript, output_transcription["text"])
                 for part in (
                     []
                     if interrupted
@@ -646,13 +748,28 @@ async def bridge(reader, writer, call_id):
                     await playback.generation_complete()
                 if server.get("turnComplete") is True:
                     await playback.generation_complete()
-                    closing = assistant_transcript.lower()
+                    closing = assistant_transcript
+                    was_interrupted = closing_interrupted
+                    closing_interrupted = False
+                    model_turns += 1
                     await flush_assistant_transcript()
-                    if "pickup should be ready" in closing and ("thanks for calling" in closing or "see you then" in closing):
-                        await playback.wait_until_complete()
-                        value = await app_action(call_id, "complete")
-                        if value.get("closeBridge"):
-                            close_requested.set()
+                    if is_closing_line(closing) and not was_interrupted:
+                        closing_turn = customer_turn_id
+
+                        async def finish_call():
+                            await playback.wait_until_complete()
+                            await asyncio.sleep(CLOSING_GRACE_SECONDS)
+                            # A caller who talks over the goodbye ("wait, add a drink") stays on the line;
+                            # keep reading Gemini meanwhile so that speech is noticed.
+                            if customer_turn_id != closing_turn or user_turn_open:
+                                await emit("closingInterrupted", playback.snapshot())
+                                return
+                            value = await app_action(call_id, "complete")
+                            if value.get("closeBridge"):
+                                close_requested.set()
+                                await terminate_audiosocket(writer)
+
+                        closing_tasks.add(asyncio.create_task(finish_call()))
                 tool_call = message.get("toolCall", {})
                 responses = []
                 if tool_call.get("functionCalls") and user_turn_open:
@@ -666,24 +783,18 @@ async def bridge(reader, writer, call_id):
                     )
                     if name == "price_order" and customer_transcript.strip():
                         arguments["customerText"] = customer_transcript.strip()
-                    normalized_arguments, tool_call_key = logical_tool_key(
-                        customer_turn_id, name, arguments
+                    turn_key = f"{customer_turn_id}.{model_turns}"
+                    normalized_arguments, _ = logical_tool_key(
+                        turn_key, name, arguments
                     )
                     argument_hash = hashlib.sha256(
                         normalized_arguments.encode()
                     ).hexdigest()
-                    is_mutation = name in {
-                        "price_order",
-                        "submit_order",
-                        "modify_order",
-                    }
-                    prior_mutation_key = turn_mutation_keys.get(customer_turn_id)
-                    conflicting_mutation = bool(
-                        is_mutation
-                        and prior_mutation_key
-                        and prior_mutation_key != tool_call_key
+                    is_mutation = name in MUTATING_TOOLS
+                    tool_call_key, cached_result = tool_gate.lookup(
+                        turn_key, name, arguments
                     )
-                    duplicate = tool_call_key in tool_results or conflicting_mutation
+                    duplicate = cached_result is not None
                     if name != "complete_call" and (
                         playback.active_generation_id is not None
                         or playback.active_playback_id is not None
@@ -705,16 +816,8 @@ async def bridge(reader, writer, call_id):
                         },
                     )
                     tool_started = time.monotonic()
-                    if conflicting_mutation:
-                        result = {
-                            "error": {
-                                "code": "DUPLICATE_TOOL_CALL",
-                                "message": "Only one order mutation is allowed for this customer turn.",
-                                "retryable": False,
-                            }
-                        }
-                    elif duplicate:
-                        result = tool_results[tool_call_key]
+                    if duplicate:
+                        result = cached_result
                     else:
                         async def execute():
                             if name == "request_human_handoff":
@@ -750,12 +853,11 @@ async def bridge(reader, writer, call_id):
                             )
 
                         if is_mutation:
-                            turn_mutation_keys[customer_turn_id] = tool_call_key
                             async with order_mutation_lock:
                                 result = await execute()
                         else:
                             result = await execute()
-                        tool_results[tool_call_key] = result
+                        tool_gate.record(turn_key, name, arguments, result)
                     await emit(
                         "toolCallEnd",
                         {
@@ -767,10 +869,10 @@ async def bridge(reader, writer, call_id):
                             "retryCount": 0,
                             "isDuplicate": duplicate,
                             "result": (
-                                "rejected_duplicate"
-                                if conflicting_mutation
-                                else "cached"
+                                "cached"
                                 if duplicate
+                                else "failed"
+                                if is_failed_tool_result(result)
                                 else "completed"
                             ),
                         },
@@ -785,6 +887,10 @@ async def bridge(reader, writer, call_id):
                             "response": {"result": result},
                         }
                     )
+                # Gemini cancelled these (the caller spoke over them); it no longer waits for an answer.
+                responses = [
+                    row for row in responses if str(row.get("id")) not in cancelled_tool_calls
+                ]
                 if responses and not close_requested.is_set():
                     await gemini.send(
                         json.dumps({"toolResponse": {"functionResponses": responses}})
@@ -795,6 +901,14 @@ async def bridge(reader, writer, call_id):
                     # payment/handoff without a silent Gemini cleanup delay.
                     await terminate_audiosocket(writer)
                     break
+            if not close_requested.is_set():
+                # Gemini ended the session (normal close or goAway) while the caller is still on the
+                # line: hand the call to an employee instead of dropping it.
+                await emit("geminiSessionEnded", playback.snapshot())
+                value = await app_action(call_id, "handoff", reason="Gemini session ended.")
+                close_requested.set()
+                if value.get("closeBridge", True):
+                    await terminate_audiosocket(writer)
 
         tasks = [
             asyncio.create_task(caller_audio()),
@@ -802,7 +916,7 @@ async def bridge(reader, writer, call_id):
             asyncio.create_task(playback.run()),
         ]
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        for task in pending:
+        for task in [*pending, *closing_tasks]:
             task.cancel()
         for task in done:
             if not task.cancelled():

@@ -80,7 +80,7 @@ jobs:
       - name: Gemini bridge playback and fixed voice regression
         shell: bash
         run: |
-          docker run --rm -v "$PWD/asterisk:/bridge:ro" python:3.12-slim sh -c 'pip install --disable-pip-version-check websockets==15.0.1 && python /bridge/gemini-phone.py --self-test'
+          docker run --rm -v "$PWD/asterisk:/bridge:ro" python:3.12-slim sh -c 'pip install --disable-pip-version-check websockets==15.0.1 && python /bridge/gemini-phone.py --self-test && python /bridge/gemini-phone-bridge-test.py /bridge/gemini-phone.py'
   build:
     runs-on: [self-hosted]  # liberty-ci-01 on the deli network
     timeout-minutes: 15

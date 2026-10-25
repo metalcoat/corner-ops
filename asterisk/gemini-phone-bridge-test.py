@@ -1,0 +1,218 @@
+"""Offline regression test for asterisk/gemini-phone.py's call loop (2026-10-25 fixes; each case failed before).
+
+Drives bridge() with a scripted fake Gemini Live socket, fake AudioSocket reader/writer and fake
+app/MCP endpoints. No network, no database, no phone call: it proves the bridge's decisions, not
+real speech. Run: python3 asterisk/gemini-phone-bridge-test.py asterisk/gemini-phone.py
+(needs Python 3.12 for audioop, plus websockets; CI runs it in python:3.12-slim).
+"""
+import asyncio, importlib.machinery, importlib.util, json, sys, warnings
+
+warnings.filterwarnings("ignore")
+path = sys.argv[1] if len(sys.argv) > 1 else "/usr/local/bin/corner-ops-gemini-phone"
+gp_name = path
+loader = importlib.machinery.SourceFileLoader("gp", path)
+spec = importlib.util.spec_from_loader("gp", loader)
+gp = importlib.util.module_from_spec(spec)
+loader.exec_module(gp)
+
+
+class FakeGemini:
+    def __init__(self, script):
+        self.script = list(script)  # server messages (dict) or ("wait_for_tool_response",)
+        self.sent = []
+        self.inbox = asyncio.Queue()
+        self.tool_response_seen = asyncio.Event()
+
+    async def send(self, raw):
+        msg = json.loads(raw)
+        self.sent.append(msg)
+        if "toolResponse" in msg:
+            self.tool_response_seen.set()
+
+    async def recv(self):
+        return json.dumps({"setupComplete": {}})
+
+    def __aiter__(self):
+        return self._gen()
+
+    async def _gen(self):
+        for item in self.script:
+            if item == "WAIT_TOOL_RESPONSE":
+                await asyncio.wait_for(self.tool_response_seen.wait(), 2)
+                self.tool_response_seen.clear()
+                continue
+            if item == "SLEEP":
+                await asyncio.sleep(0.1)
+                continue
+            yield json.dumps(item)
+        # normal close (code 1000), like a GoAway / session-limit close
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+class Reader:
+    async def readexactly(self, n):
+        await asyncio.sleep(3600)
+
+
+class Writer:
+    def __init__(self):
+        self.frames = []
+
+    def write(self, v):
+        self.frames.append(v)
+
+    async def drain(self):
+        pass
+
+    def close(self):
+        pass
+
+    async def wait_closed(self):
+        pass
+
+
+async def run(script, mcp_results):
+    log = {"mcp": [], "app": [], "events": []}
+    fake = FakeGemini(script)
+    results = list(mcp_results)
+
+    async def app_session(call_id):
+        return {"model": "gemini-2.5-flash-native-audio-latest", "greeting": "hi", "instructions": "x"}
+
+    async def mcp_tools():
+        return [{"name": "price_order", "inputSchema": {"type": "object"}}]
+
+    gp.CLOSING_GRACE_SECONDS = 0.05
+
+    async def mcp_call(call_id, name, arguments, request_id=None):
+        log["mcp"].append((name, arguments, request_id))
+        return gp.voice_safe_tool_result(results.pop(0) if results else {"ok": True})
+
+    async def app_action(call_id, action, **values):
+        if action == "event":
+            log["events"].append((values["label"], values.get("detail", {})))
+        else:
+            log["app"].append(action)
+        if action == "complete":
+            return {"closeBridge": True}
+        return {}
+
+    gp.app_session, gp.mcp_tools, gp.mcp_call, gp.app_action = app_session, mcp_tools, mcp_call, app_action
+    gp.websockets.connect = lambda *a, **k: fake
+    writer = Writer()
+    try:
+        await asyncio.wait_for(gp.handle_bridge if False else gp.bridge(Reader(), writer, "call-1"), 5)
+    except Exception as e:  # noqa
+        log["exception"] = type(e).__name__
+    await asyncio.sleep(0.05)
+    log["toolResponses"] = [m["toolResponse"] for m in fake.sent if "toolResponse" in m]
+    return log
+
+
+def tool_call(cid, args):
+    return {"toolCall": {"functionCalls": [{"id": cid, "name": "price_order", "args": args}]}}
+
+
+def transcript(text):
+    return {"serverContent": {"inputTranscription": {"text": text}}}
+
+
+AUDIO = {"serverContent": {"modelTurn": {"parts": [{"inlineData": {"data": "AAAAAAAAAAA=" * 40}}]}}}
+DONE = {"serverContent": {"generationComplete": True, "turnComplete": True}}
+
+
+def first_result(log, index):
+    return log["toolResponses"][index]["functionResponses"][0]["response"]["result"]
+
+
+async def main():
+    checks = []
+
+    def check(name, condition, detail):
+        checks.append(name)
+        assert condition, f"{name}: {json.dumps(detail, default=str)}"
+
+    # 1. A corrected retry after a validation error in the same caller turn runs (was DUPLICATE_TOOL_CALL).
+    log = await run(
+        [transcript("I want 30 wings total, 10 hot and 20 medium"),
+         tool_call("a", {"operation": "replace_item", "items": [{"name": "Wings", "variant": "20 Wings"}]}),
+         "WAIT_TOOL_RESPONSE",
+         tool_call("b", {"operation": "replace_item", "items": [{"name": "Wings", "variant": "20 Wings", "lineId": "L1"}, {"name": "Wings", "variant": "10 Wings", "lineId": "L2"}]}),
+         "WAIT_TOOL_RESPONSE"],
+        [{"error": {"code": "INVALID_INPUT", "message": "Send corrections for the draft with current lineIds."}}],
+    )
+    check("corrected retry after an error runs", len(log["mcp"]) == 2 and "error" not in first_result(log, 1), log)
+    error = first_result(log, 0)["error"]
+    check("error message survives the draft-word scrub", "order with current lineIds" in error.get("message", ""), error)
+    check("error result is not told to continue checkout", "Continue the customer-facing checkout" not in first_result(log, 0).get("voiceInstruction", ""), first_result(log, 0))
+
+    # 2. The same add in a new model turn is a new request (was answered from cache, nothing added).
+    log = await run(
+        [transcript("add a large fries"),
+         tool_call("a", {"operation": "add", "items": [{"name": "Large French Fries", "quantity": 1}]}),
+         "WAIT_TOOL_RESPONSE", AUDIO, DONE, "SLEEP",
+         tool_call("b", {"operation": "add", "items": [{"name": "Large French Fries", "quantity": 1}]}),
+         "WAIT_TOOL_RESPONSE",
+         transcript("and another large fries")],
+        [{"ok": True, "lines": ["fries"]}],
+    )
+    check("identical add in a later model turn runs", len(log["mcp"]) == 2, log["mcp"])
+
+    # 3. A repeated identical call inside one model turn still runs once (duplicate protection kept).
+    log = await run(
+        [transcript("add a large fries"),
+         tool_call("a", {"operation": "add", "items": [{"name": "Large French Fries", "quantity": 1}]}),
+         "WAIT_TOOL_RESPONSE",
+         tool_call("b", {"operation": "add", "items": [{"name": "large french fries"}]}),
+         "WAIT_TOOL_RESPONSE"],
+        [{"ok": True}],
+    )
+    check("re-worded repeat of the same add in one turn runs once", len(log["mcp"]) == 1, log["mcp"])
+
+    # 4. Two different changes in one caller turn both run (was one change per turn).
+    log = await run(
+        [transcript("add fries and make the wings hot"),
+         tool_call("a", {"operation": "add", "items": [{"name": "Large French Fries"}]}),
+         "WAIT_TOOL_RESPONSE",
+         tool_call("b", {"operation": "replace_item", "targetLineId": "W1", "items": [{"name": "Wings", "modifiers": [{"name": "Hot"}]}]}),
+         "WAIT_TOOL_RESPONSE"],
+        [{"ok": True}, {"ok": True}],
+    )
+    check("two different changes in one turn both run", len(log["mcp"]) == 2, log["mcp"])
+
+    # 5. toolCallCancellation is recorded (was ignored silently).
+    log = await run(
+        [transcript("add a turkey sub"),
+         tool_call("a", {"operation": "add", "items": [{"name": "Turkey", "quantity": 1}]}),
+         {"toolCallCancellation": {"ids": ["a"]}},
+         "WAIT_TOOL_RESPONSE"],
+        [{"ok": True}],
+    )
+    check("tool call cancellation is recorded", any(name == "toolCallCancellation" for name, _ in log["events"]), log["events"])
+
+    # 6. Gemini closing the session mid-order hands the caller to an employee (was a silent drop).
+    log = await run([transcript("add a turkey sub"), tool_call("a", {"operation": "add", "items": [{"name": "Turkey"}]}), "WAIT_TOOL_RESPONSE"], [{"ok": True}])
+    check("session end mid-order hands off", "handoff" in log["app"] and "complete" not in log["app"], log["app"])
+    configured = [detail for name, detail in log["events"] if name == "sessionConfigured"]
+    check("sessionConfigured telemetry is sent", len(configured) == 1, configured)
+
+    # 7. A caller who talks over the goodbye is not hung up on (was hung up).
+    closing = {"serverContent": {"outputTranscription": {"text": "Your pickup should be ready in 15 minutes. Thanks for calling, see you then!"}, "modelTurn": {"parts": [{"inlineData": {"data": "AAAAAAAAAAA=" * 400}}]}}}
+    log = await run([closing, {"serverContent": {"interrupted": True}}, transcript("wait, add a drink"), {"serverContent": {"turnComplete": True}}, "SLEEP", "SLEEP"], [])
+    check("interrupted goodbye does not complete the call", "complete" not in log["app"], log["app"])
+
+    # 8. An uninterrupted goodbye still ends the call normally.
+    log = await run([closing, {"serverContent": {"generationComplete": True, "turnComplete": True}}, "SLEEP", "SLEEP", "SLEEP"], [])
+    check("uninterrupted goodbye completes the call", "complete" in log["app"] and "handoff" not in log["app"], log["app"])
+
+    # 9. Transcript pieces are joined with spaces so "on the"+"fries" still reads as a fry topping.
+    check("transcript pieces keep word breaks", gp.join_transcript("nacho cheese on the", "fries") == "nacho cheese on the fries", gp.join_transcript("nacho cheese on the", "fries"))
+    print(json.dumps({"status": "passed", "checks": len(checks)}))
+
+
+asyncio.run(main())
