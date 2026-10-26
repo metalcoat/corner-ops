@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { ensureOrderingTimingSchema } from "@/lib/ordering-timing-schema";
 import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
+import { MAX_SMS_BYPASS_HOURS } from "@/lib/online-order-verification";
+import { smsVerificationBypassUntil } from "@/lib/sms-verification-bypass";
 
 export const runtime = "nodejs";
 const business = "Corner Deli" as const;
@@ -50,13 +52,17 @@ export async function GET() {
   if (!actor) return isoJson({ error: "Manager access required." }, { status: 403 });
   await ensureOrderingTimingSchema();
   const sql = getSql();
-  const [settings, weekly, specials, emergency] = await Promise.all([
-    sql`SELECT timezone FROM ordering_business_ordering_settings WHERE business=${business}`,
+  const [settings, weekly, specials, emergency, smsBypassUntil] = await Promise.all([
+    sql`SELECT timezone,sms_verification_bypass_by FROM ordering_business_ordering_settings WHERE business=${business}`,
     sql`SELECT id,service_type,weekday,opens_at::text,closes_at::text,ordering_opens_at::text,ordering_cutoff_at::text,active,sort_order FROM ordering_operating_windows WHERE business=${business} ORDER BY service_type,weekday,sort_order,opens_at`,
     sql`SELECT id,business_date,service_type,status,opens_at::text,closes_at::text,ordering_opens_at::text,ordering_cutoff_at::text,label FROM ordering_special_hours WHERE business=${business} AND business_date>=CURRENT_DATE-INTERVAL '30 days' ORDER BY business_date,service_type`,
     sql`SELECT id,service_type,starts_at,ends_at,reason,internal_note,customer_message,created_by,created_at FROM ordering_emergency_closures WHERE business=${business} AND reopened_at IS NULL AND (ends_at IS NULL OR ends_at>=NOW()) ORDER BY starts_at DESC`,
+    smsVerificationBypassUntil(business),
   ]);
-  return isoJson({ timezone: settings[0]?.timezone || "America/New_York", weekly, specials, emergency });
+  return isoJson({
+    timezone: settings[0]?.timezone || "America/New_York", weekly, specials, emergency,
+    smsBypass: smsBypassUntil ? { until: smsBypassUntil.toISOString(), by: String(settings[0]?.sms_verification_bypass_by || "") } : null,
+  });
 }
 
 export async function PATCH(request: Request) {
@@ -120,6 +126,17 @@ export async function PATCH(request: Request) {
       await sql`INSERT INTO ordering_menu_availability_rules(id,business,target_type,target_id,enabled,days_of_week,starts_at,ends_at,valid_from,valid_through,updated_by) VALUES(${id},${business},${targetType},${targetId},${body.enabled !== false},${days},${startsAt}::time,${endsAt}::time,${body.validFrom ? String(body.validFrom) : null}::date,${body.validThrough ? String(body.validThrough) : null}::date,${actor.id}) ON CONFLICT(business,target_type,target_id) DO UPDATE SET enabled=EXCLUDED.enabled,days_of_week=EXCLUDED.days_of_week,starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,valid_from=EXCLUDED.valid_from,valid_through=EXCLUDED.valid_through,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
       await audit(actor, "menu_availability_updated", targetType, targetId, String(body.reason || "").trim(), { days, startsAt, endsAt });
       return isoJson({ ok: true, id });
+    }
+    if (action === "sms_bypass") {
+      // Pay-later orders skip the texted code until then (texting down, a rush). Card orders never need it.
+      const hours = Number(body.hours);
+      const off = body.off === true;
+      if (!off && (!Number.isFinite(hours) || hours <= 0 || hours > MAX_SMS_BYPASS_HOURS)) throw new Error(`Choose between a few minutes and ${MAX_SMS_BYPASS_HOURS} hours.`);
+      const until = off ? null : new Date(Date.now() + hours * 3600_000);
+      const by = off ? "" : String(actor.name || actor.id);
+      await sql`INSERT INTO ordering_business_ordering_settings(business,sms_verification_bypass_until,sms_verification_bypass_by,updated_by) VALUES(${business},${until},${by},${actor.id}) ON CONFLICT(business) DO UPDATE SET sms_verification_bypass_until=EXCLUDED.sms_verification_bypass_until,sms_verification_bypass_by=EXCLUDED.sms_verification_bypass_by,updated_by=EXCLUDED.updated_by,updated_at=NOW()`;
+      await audit(actor, off ? "sms_verification_restored" : "sms_verification_bypassed", "ordering_settings", business, String(body.reason || "").trim(), { until });
+      return isoJson({ ok: true, until: until?.toISOString() ?? null });
     }
     if (action === "emergency_close") {
       const id = randomUUID();

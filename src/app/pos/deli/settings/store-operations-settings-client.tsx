@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 type WindowRow = { id: string; service_type: string; weekday: number; opens_at: string; closes_at: string; ordering_opens_at: string | null; ordering_cutoff_at: string | null; active: boolean };
 type Closure = { id: string; service_type: string; reason: string; customer_message: string; starts_at: string; ends_at: string | null };
 type Special = { id: string; business_date: string; service_type: string; status: string; opens_at: string | null; closes_at: string | null; label: string };
-type Operations = { timezone: string; weekly: WindowRow[]; specials: Special[]; emergency: Closure[] };
+type Operations = { timezone: string; weekly: WindowRow[]; specials: Special[]; emergency: Closure[]; smsBypass: { until: string; by: string } | null };
 const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export default function StoreOperationsSettingsClient() {
@@ -60,6 +60,13 @@ export default function StoreOperationsSettingsClient() {
       <button type="button" disabled={!special.businessDate} onClick={() => void update({ action: "upsert_special", ...special })}>Save special date</button>
     </div>
     {data.specials.map((item) => <p className="posSettingsHint" key={item.id}>{String(item.business_date).slice(0, 10)} · {item.service_type} · {item.status === "closed" ? "Closed" : `${item.opens_at?.slice(0, 5)}–${item.closes_at?.slice(0, 5)}`} {item.label ? `· ${item.label}` : ""}</p>)}
+    <h2>Texted code for pay-later online orders</h2>
+    {data.smsBypass
+      ? <div className="posSettingsWarning"><strong>TEXTED CODE OFF until {new Date(data.smsBypass.until).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}</strong><p>Online orders paid in cash at pickup or delivery go through without a code{data.smsBypass.by ? ` (switched off by ${data.smsBypass.by})` : ""}. It turns itself back on then.</p><button type="button" onClick={() => void update({ action: "sms_bypass", off: true })}>Turn the code back on now</button></div>
+      : <p className="posSettingsHint">On: a guest paying cash at pickup or delivery confirms their mobile number with a texted code. Card orders and signed-in customers never need one.</p>}
+    <div className="posTools">
+      {[["1 hour", 1], ["4 hours", 4], ["24 hours", 24]].map(([label, hours]) => <button type="button" key={label} onClick={() => void update({ action: "sms_bypass", hours })}>Skip the code for {label}</button>)}
+    </div>
     <h2>Emergency status</h2>
     {data.emergency.map((item) => <div className="posSettingsWarning" key={item.id}><strong>EMERGENCY CLOSED · {item.service_type}</strong><p>{item.customer_message || item.reason}</p><button type="button" onClick={() => void update({ action: "reopen", id: item.id, reason: "Reopened from Store Operations" })}>Reopen now</button></div>)}
     {!data.emergency.length && <p className="posSettingsHint">No emergency closure is active.</p>}

@@ -34,6 +34,7 @@
     "src/lib/alert-sounds.ts",
     "src/lib/supplier-web-extract.ts",
     "src/lib/mx-presentment.ts",
+    "src/lib/online-order-verification.ts",
     "src/lib/square-tip-fee.ts",
     "src/lib/timestamp-values.ts",
     "src/lib/postgres-string-timestamps.ts",

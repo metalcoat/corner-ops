@@ -75,7 +75,7 @@ test("customer catalog is public, customer-safe, and browsable while ordering is
   expect((await quote.json()).quote).toBeTruthy();
 });
 
-test("guest web carts require phone verification before pricing or payment", async ({
+test("guests can order by card without a texted code; paying at pickup needs one", async ({
   request,
 }) => {
   const catalogResponse = await request.get(
@@ -114,10 +114,24 @@ test("guest web carts require phone verification before pricing or payment", asy
       ],
     },
   });
-  expect(response.status()).toBe(403);
-  const body = await response.json();
-  expect(body.code).toBe("sms_verification_required");
-  expect(body.error).toContain("Verify your mobile number");
+  // Pricing is open to guests (it can still be refused for store hours).
+  expect([201, 409]).toContain(response.status());
+  if (response.status() !== 201) return;
+  const cart = (await response.json()).cart;
+  const payLater = await request.post(`/api/customer/orders/${cart.id}/pay-later`);
+  if (payLater.status() === 403) {
+    const body = await payLater.json();
+    expect(body.code).toBe("sms_verification_required");
+    expect(body.error).toContain("Verify your mobile number");
+  } else {
+    // Only when a manager has switched the code off in Store Operations.
+    const catalogNow = await (await request.get("/api/customer/catalog?serviceType=pickup")).json();
+    expect(catalogNow.customer.smsCodeSkipped).toBe(true);
+  }
+  // A card payment is never turned away for a missing code or account.
+  const card = await request.post(`/api/customer/orders/${cart.id}/payments/mx`, { data: { action: "initialize" } });
+  expect(card.status()).not.toBe(401);
+  expect(card.status()).not.toBe(403);
 });
 
 test("successful online payment redirects to a dedicated confirmation", async ({

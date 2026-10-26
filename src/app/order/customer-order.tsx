@@ -118,6 +118,8 @@ type Catalog = {
   };
   customer: {
     authenticated: boolean;
+    /** A manager switched the texted code off for pay-later orders for now. */
+    smsCodeSkipped?: boolean;
     profile?: {
       firstName: string;
       lastName: string;
@@ -610,8 +612,10 @@ export default function CustomerOrder() {
     if (paymentChoice?.startsWith("saved:")) await payWithSavedCard(priced, paymentChoice.slice(6));
     if (paymentChoice === "pickup") await submitPayLater(priced);
   }
+  /** Only cash at pickup or delivery needs the texted code; cards are paid up front. */
+  const payLaterNeedsCode = !catalog?.customer.authenticated && !phoneVerified && !catalog?.customer.smsCodeSkipped;
   async function placeOrder() {
-    if (!catalog?.customer.authenticated && !phoneVerified) {
+    if (paymentChoice === "pickup" && payLaterNeedsCode) {
       setPhoneVerifyOpen(true);
       return;
     }
@@ -833,6 +837,12 @@ export default function CustomerOrder() {
         { method: "POST" },
       );
       const result = await response.json();
+      // The manager's switch ran out while this page was open: ask for the code now.
+      if (response.status === 403 && result.code === "sms_verification_required") {
+        setCatalog((current) => current ? { ...current, customer: { ...current.customer, smsCodeSkipped: false } } : current);
+        setPhoneVerifyOpen(true);
+        return;
+      }
       if (!response.ok)
         throw new Error(result.error || "Could not submit the order.");
       window.location.assign(
@@ -1442,6 +1452,9 @@ export default function CustomerOrder() {
                 </button>
               )}
             </div>
+          )}
+          {paymentChoice === "pickup" && payLaterNeedsCode && (
+            <p className="paymentNote">We’ll text a code to your mobile number to confirm a pay-later order. Paying by card skips this step.</p>
           )}
           {serviceType === "curbside" && (
             <p className="paymentNote">Curbside orders are paid online, so we can bring them straight out to your car.</p>

@@ -366,6 +366,12 @@ flowchart LR
 - Run test sends against staging or with mocks; dev .env holds real credentials.
 - Dev has no Telnyx settings, so it can't text. `DEV_SHOW_SMS_CODES=true` in the dev .env shows customer sign-in and
   verification codes on screen instead (test mode); it can never switch on where Telnyx is configured (production).
+- Online orders (2026-10-26): only a guest paying cash at pickup or delivery must confirm their mobile number with a
+  texted code (`/api/customer/orders/[id]/pay-later`); card orders and signed-in customers never need one
+  (`src/lib/online-order-verification.ts`). A manager can skip the code for 1/4/24 h in POS settings → Store
+  Operations (audited; switches itself back on, `ordering_business_ordering_settings.sms_verification_bypass_until`,
+  migration 0023). A guest's order goes on the customer record for the phone typed, but never reads or adds to that
+  account (saved addresses, saved cards, profile) — only a signed-in session does.
 - Timestamps from Postgres come back as raw text (production behaviour); dev-only APIs return ISO via `isoJson`.
 
 ## 10. Open items before the switch

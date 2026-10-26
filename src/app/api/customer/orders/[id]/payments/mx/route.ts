@@ -36,8 +36,9 @@ import { limitCardCheckoutStart } from "@/lib/customer-abuse-limits";
 export const runtime = "nodejs";
 const business = "Corner Deli" as const;
 async function owned(request: Request, id: string) {
+  // Card orders don't need a texted code or an account: the browser that built the cart pays.
   const s = readCustomerOrderingSession(request);
-  if (!s?.customerId || !s.authenticatedAt) return null;
+  if (!s) return null;
   await ensureCustomerOrderingSchema();
   const hash = customerSessionHash(s.sessionId),
     row = (
@@ -190,8 +191,9 @@ export async function POST(
         // server side on MX's vault token with this attempt's replayId (a retry
         // can't charge twice), then recorded and sent like a typed card.
         const session = (await sql`SELECT * FROM ordering_mx_checkout_sessions WHERE replay_id=${replayId} AND order_id=${orderId} LIMIT 1`)[0];
-        const customerId = readCustomerOrderingSession(request)?.customerId;
-        if (!session || !customerId) throw new MxMerchantError("This payment session expired.");
+        const signedIn = readCustomerOrderingSession(request);
+        const customerId = signedIn?.authenticatedAt ? signedIn.customerId : null;
+        if (!session || !customerId) throw new MxMerchantError("Sign in to pay with a saved card.");
         const charged = await chargeSavedCard({ customerId, paymentMethodId: String(body.savedCardId), amountCents: amount, replayId });
         const applied = await applyApprovedPayment(orderId, session, charged, actor);
         if (applied.sendError) return paidButNotSent(applied.sendError);

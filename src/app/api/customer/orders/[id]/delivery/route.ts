@@ -33,8 +33,11 @@ export async function POST(
       );
     const body = (await request.json()) as Record<string, unknown>;
     const requestedAddressId = String(body.customerAddressId || "");
+    // Only a signed-in customer's own address book: a guest's order can be on a
+    // customer record found by phone, and a guest must not read or add to it.
+    const ownAccount = Boolean(session.authenticatedAt && session.customerId && String(session.customerId) === String(order.customer_id || ""));
     const saved =
-      requestedAddressId && order.customer_id
+      requestedAddressId && ownAccount
         ? (
             await sql`SELECT * FROM ordering_customer_addresses WHERE id=${requestedAddressId} AND customer_id=${order.customer_id} AND active=TRUE LIMIT 1`
           )[0]
@@ -75,7 +78,7 @@ export async function POST(
       merchandiseSubtotalCents: merchandiseAfterDiscounts(order),
     });
     let customerAddressId = saved ? String(saved.id) : null;
-    if (!saved && order.customer_id) {
+    if (!saved && ownAccount) {
       customerAddressId = await addCustomerAddress({
         business: "Corner Deli",
         customerId: String(order.customer_id),

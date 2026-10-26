@@ -152,14 +152,6 @@ export async function POST(request: Request) {
         },
         { status: 400 },
       );
-    if (!authenticatedCustomer)
-      return isoJson(
-        {
-          error: "Verify your mobile number before placing this order.",
-          code: "sms_verification_required",
-        },
-        { status: 403 },
-      );
     const requestedFor =
       timingMode === "future"
         ? new Date(String(body.scheduledFor || ""))
@@ -171,7 +163,9 @@ export async function POST(request: Request) {
       );
     const sessionHash = customerSessionHash(session.sessionId);
     await sql`INSERT INTO ordering_customer_web_sessions(session_hash,customer_id,authenticated_at,last_seen_at,expires_at) VALUES(${sessionHash},${session.customerId},${session.authenticatedAt ? new Date(session.authenticatedAt).toISOString() : null},NOW(),${new Date(session.expiresAt).toISOString()}) ON CONFLICT(session_hash) DO UPDATE SET last_seen_at=NOW(),expires_at=EXCLUDED.expires_at`;
-    let customerId = session.customerId;
+    // A guest (not signed in) gets the customer record for the phone they typed, like a
+    // phone order on the POS, but never the account itself: nothing on it is changed.
+    let customerId = authenticatedCustomer ? session.customerId : null;
     if (customerId && needsSavedPhone) {
       await addCustomerPhone({
         business: "Corner Deli",

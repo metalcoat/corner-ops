@@ -7,6 +7,8 @@ import { customerSessionHash, readCustomerOrderingSession } from "@/lib/customer
 import { submitDraftOrder, OrderConflictError } from "@/lib/ordering-order-lifecycle";
 import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
 import { sendCustomerOrderConfirmation } from "@/lib/customer-order-confirmation";
+import { smsCodeRequired } from "@/lib/online-order-verification";
+import { smsVerificationBypassUntil } from "@/lib/sms-verification-bypass";
 
 export const runtime = "nodejs";
 const business = "Corner Deli" as const;
@@ -16,8 +18,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const { id: orderId } = await context.params;
     const session = readCustomerOrderingSession(request);
-    if (!session?.customerId || !session.authenticatedAt) return unauthorized();
+    if (!session) return unauthorized();
     await ensureCustomerOrderingSchema();
+    const signedIn = Boolean(session.customerId && session.authenticatedAt);
+    if (smsCodeRequired({ payment: "pay_later", signedIn, bypassUntil: await smsVerificationBypassUntil(business) }))
+      return isoJson({ error: "Verify your mobile number to pay at pickup or delivery, or pay by card.", code: "sms_verification_required" }, { status: 403 });
     const hash = customerSessionHash(session.sessionId), sql = getSql();
     const order = (
       await sql`SELECT orders.id,orders.status,orders.source,orders.service_type FROM ordering_customer_web_carts carts JOIN ordering_orders orders ON orders.id=carts.order_id WHERE carts.order_id=${orderId} AND carts.session_hash=${hash} AND carts.replaced_at IS NULL LIMIT 1`

@@ -1,3 +1,4 @@
+import { smsVerificationBypassUntil } from "@/lib/sms-verification-bypass";
 import { isoJson } from "@/lib/timestamp-values";
 import { orderingMenuWithVariants } from "@/lib/ordering-menu-variants";
 import { applyScheduledMenuAvailability } from "@/lib/ordering-menu-availability";
@@ -152,6 +153,8 @@ export async function GET(request: Request) {
       },
       customer: {
         authenticated: Boolean(session.customerId && session.authenticatedAt),
+        // A manager switched the texted code off for pay-later orders (Store Operations).
+        smsCodeSkipped: Boolean(await smsVerificationBypassUntil("Corner Deli")),
         profile: profile
           ? {
               firstName: profile.first_name,
