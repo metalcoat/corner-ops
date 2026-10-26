@@ -275,6 +275,29 @@ def usage_summary(usage, model):
     }
 
 
+STALL_SECONDS = float(os.environ.get("GEMINI_STALL_SECONDS", "8"))
+
+
+def conversation_progress(message):
+    """AI speech, a tool call, a finished AI turn or real caller words: anything but silence."""
+    server = message.get("serverContent", {})
+    return bool(
+        message.get("toolCall")
+        or server.get("modelTurn")
+        or server.get("turnComplete")
+        or re.search(r"[A-Za-z]{2}", str(server.get("inputTranscription", {}).get("text", "")))
+    )
+
+
+def stall_nudge_message():
+    return {
+        "clientContent": {
+            "turns": [{"role": "user", "parts": [{"text": "(The caller hasn't heard anything for a while. Continue: answer what they last said, or briefly repeat your last question.)"}]}],
+            "turnComplete": True,
+        }
+    }
+
+
 def join_transcript(current, chunk):
     """Gemini sends transcription in pieces, some without a leading space ("on the"+"fries")."""
     chunk = str(chunk)
@@ -663,6 +686,7 @@ async def bridge(reader, writer, call_id):
     tool_gate = ToolCallGate()
     call_usage = new_usage()
     last_customer_speech = time.monotonic()
+    last_progress = time.monotonic()
     closing_tasks = set()
     model_turns = 0
     closing_interrupted = False
@@ -709,7 +733,9 @@ async def bridge(reader, writer, call_id):
                             "automaticActivityDetection": {
                                 "disabled": False,
                                 "startOfSpeechSensitivity": "START_SENSITIVITY_LOW",
-                                "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
+                                # HIGH: decide sooner that the caller stopped. With LOW, kitchen/road noise after
+                                # "delivery" kept the turn open and the AI never answered (dev call 2026-10-26).
+                                "endOfSpeechSensitivity": "END_SENSITIVITY_HIGH",
                                 "prefixPaddingMs": 40,
                                 "silenceDurationMs": 350,
                             },
@@ -786,10 +812,13 @@ async def bridge(reader, writer, call_id):
             nonlocal output_state, customer_transcript, user_turn_open
             nonlocal customer_turn_id
             nonlocal assistant_transcript, model_turns, closing_interrupted, last_customer_speech
+            nonlocal last_progress
             async for raw in gemini:
                 message = json.loads(raw)
                 add_usage(call_usage, message.get("usageMetadata"))
                 server = message.get("serverContent", {})
+                if conversation_progress(message):
+                    last_progress = time.monotonic()
                 interrupted = server.get("interrupted") is True
                 if message.get("goAway") is not None:
                     await emit("goAway", {**playback.snapshot(), "timeLeft": message["goAway"].get("timeLeft")})
@@ -1014,10 +1043,28 @@ async def bridge(reader, writer, call_id):
                 if value.get("closeBridge", True):
                     await terminate_audiosocket(writer)
 
+        async def stall_watchdog():
+            """If nothing moves for a while (no AI speech, tool call, or caller words), ask Gemini to carry on
+            instead of leaving the caller in silence."""
+            nonlocal last_progress
+            nudges = 0
+            while not close_requested.is_set():
+                await asyncio.sleep(0.25)
+                if playback.state in ("ASSISTANT_SPEAKING", "TOOL_EXECUTING") or playback.assistant_speaking:
+                    last_progress = time.monotonic()
+                    continue
+                if time.monotonic() - last_progress < STALL_SECONDS or nudges >= 3:
+                    continue
+                nudges += 1
+                last_progress = time.monotonic()
+                await emit("stallNudge", {**playback.snapshot(), "nudge": nudges})
+                await gemini.send(json.dumps(stall_nudge_message()))
+
         tasks = [
             asyncio.create_task(caller_audio()),
             asyncio.create_task(model_audio()),
             asyncio.create_task(playback.run()),
+            asyncio.create_task(stall_watchdog()),
         ]
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in [*pending, *closing_tasks]:

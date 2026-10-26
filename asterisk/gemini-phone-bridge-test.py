@@ -260,6 +260,12 @@ async def main():
         {"result": result, "log": log},
     )
 
+    # 14. A stall (Gemini still "hearing" the caller after "delivery", dev call 2026-10-26) gets a nudge.
+    gp.STALL_SECONDS = 0.3
+    log = await run([transcript("delivery"), {"serverContent": {"interrupted": True}}] + ["SLEEP"] * 10, [])
+    check("a silent stall is nudged", any(name == "stallNudge" for name, _ in log["events"]), [name for name, _ in log["events"]][-6:])
+    gp.STALL_SECONDS = 8
+
     # 12. "Um" is not silence: a handoff "because the caller was silent" right after they spoke is refused.
     log = await run(
         [transcript("Um"),
