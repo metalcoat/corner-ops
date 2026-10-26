@@ -21,7 +21,7 @@ PROMPTS={
     "billing-zip":"Say the five digit billing zip code.",
     "confirm-ending":"I heard a card ending in",
     "confirm-yes":"Say yes if that is correct, or no to try again.",
-    "try-again":"I did not understand that group. Please say each digit clearly.",
+    "try-again":"Sorry, I didn't catch that. Please say it again, or use the keypad.",
     "processing":"Please wait while I securely process the sandbox payment.",
     "approved":"Your test payment was approved and your order is complete. Thank you for calling Corner Deli.",
     "employee-help":"I could not complete the secure test payment. I will transfer you to an employee.",
@@ -30,8 +30,6 @@ PROMPTS={
     "dtmf-security-code":"Enter the three or four digit security code, then press pound.",
     "dtmf-billing-zip":"Enter the five digit billing zip code.",
     "dtmf-confirm":"Press 1 if that is correct, or press 2 to try again.",
-    # say-confirm/-expiration/-security-code/-billing-zip are currently copies of confirm-yes/expiration/
-    # security-code/billing-zip (same voice); delete them and re-run to record the wording below.
     "approved-delivery":"Your payment was approved and your order is in. Give us about forty to fifty-five minutes, and we'll get it to you as soon as we can. Thanks for calling Corner Deli.",
     "say-card-number":"Please say your card number, or type it on the keypad.",
     "card-in-groups":"Let's take it four digits at a time.",
