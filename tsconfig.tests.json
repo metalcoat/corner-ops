@@ -42,6 +42,7 @@
     "src/lib/payroll-schedule-compare.ts",
     "src/lib/payroll-auto-rules.ts",
     "src/lib/games/rampage/*.ts",
+    "src/lib/games/sub-mission/*.ts",
     "src/lib/games/pizza-rush/engine.ts",
     "tests/**/*.ts"
   ]

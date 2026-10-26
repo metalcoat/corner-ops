@@ -43,6 +43,15 @@ const games = [
     prize: "HIGH SCORE GLORY",
     color: "delivery",
   },
+  {
+    href: "/game/sub-mission",
+    icon: "🛎️",
+    title: "SUB-MISSION: Over the Counter",
+    tag: "DUCK · DODGE · FEED",
+    copy: "A hangry customer is reaching over the counter for your collar. Duck so they hit the sneeze guard, ring the bell, and feed them into a food coma.",
+    prize: "EMPLOYEE OF THE MONTH",
+    color: "pizza",
+  },
 ];
 export default function Games() {
   return (
