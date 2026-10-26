@@ -677,6 +677,7 @@ export async function POST(request: Request) {
             pendingApplied!.operation,
             pendingApplied!.targetItem,
             pendingApplied!.items,
+            String(args.customerText || ""),
           )
         : [];
     const result =

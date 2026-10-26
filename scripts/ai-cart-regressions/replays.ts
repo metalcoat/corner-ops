@@ -39,6 +39,21 @@ async function main() {
       assert.ok(says.some((say: string) => /^two liter Pepsi/i.test(say)), JSON.stringify(says));
       assert.ok(says.includes("Large Fry Poutine"), JSON.stringify(says));
     });
+    // Dev test call 2026-10-26: "large pepperoni pizza ... half jalapeños" became a second pizza.
+    await h.check("a half topping after a pizza asks same pizza or second", async () => {
+      const m = await h.newMcpCall();
+      await m.invoke({ operation: "add", items: [{ name: "Pizza", variant: "Jumbo Thin", modifiers: [{ name: "Pepperoni" }] }], customerText: "a large pepperoni pizza" });
+      const r = await m.invoke({ operation: "add", items: [{ name: "Pizza", variant: "Jumbo Thin", modifiers: [{ name: "Jalapenos", portion: "left_half" }] }], customerText: "half of jalapenos" });
+      assert.ok(r.body.pending === true && /second pizza/i.test(String(r.body.requiredFollowUp)), JSON.stringify(r.body));
+      const ok = await m.invoke({ operation: "add", items: [{ name: "Pizza", variant: "Jumbo Thin", modifiers: [{ name: "Jalapenos", portion: "left_half" }] }], customerText: "a second pizza with half jalapenos" });
+      assert.ok(!ok.isError && !ok.body.pending, JSON.stringify(ok.body));
+    });
+    await h.check("readback text leaves out ounces and inches", async () => {
+      const m = await h.newMcpCall();
+      const r = await m.invoke({ operation: "add", items: [{ name: "Pizza", variant: "Jumbo Thin", modifiers: [{ name: "Pepperoni" }] }, { name: "side of ranch" }], ...decisions });
+      const says = (r.body.lines || []).map((line: any) => line.say).join(" | ");
+      assert.doesNotMatch(says, /\d\s*(?:ounce|oz|inch|")/i, says);
+    });
     await h.check("steak sandwich is the Steak sub", async () => {
       const m = await h.newMcpCall();
       const r = await m.invoke({ operation: "add", items: [{ name: "Steak Sandwich", variant: "Full Sub" }], ...decisions });

@@ -290,6 +290,7 @@ export async function incrementalSpokenCart(
   operation: CartOperation,
   targetItem: string,
   changed: SpokenOrderItem[],
+  customerText = "",
 ) {
   parseCartOperation(operation);
   if (!orderId) {
@@ -304,6 +305,26 @@ export async function incrementalSpokenCart(
   }
   const current = await spokenCart(orderId);
   if (operation === "read") return current;
+  // Dev test call 2026-10-26: "a large pepperoni pizza ... half jalapeños" became two pizzas. A new pizza whose
+  // only toppings are half toppings, with a pizza already in the cart, is asked about unless the caller said so.
+  if (
+    operation === "add" &&
+    !/\b(?:another|second|2nd|two|2|separate|new|other|extra)\b/i.test(customerText) &&
+    current.some((line) => /^pizza$/i.test(line.name)) &&
+    changed.some(
+      (item) =>
+        /^pizza$/i.test(item.name) &&
+        (item.modifiers || []).length > 0 &&
+        (item.modifiers || []).every((modifier) => modifier.portion === "left_half" || modifier.portion === "right_half"),
+    )
+  )
+    throw new AiToolError(
+      "FOLLOW_UP_REQUIRED",
+      "Is that half on the pizza you already ordered, or a second pizza?",
+      "Ask: Is that half on the same pizza, or a second pizza? Same pizza: replace_item on that pizza's lineId keeping its toppings. Second pizza: add again after the caller says so.",
+      409,
+      { options: ["Same pizza", "Second pizza"] },
+    );
   if (operation === "add")
     return [
       ...current,
@@ -596,15 +617,18 @@ export function parseCartOperation(value: unknown, items?: unknown): CartOperati
 }
 
 /**
- * How a cart line should be said back to the caller (owner, 2026-10-25): "2L" is "two liter", and a fry
+ * How a cart line should be said back to the caller (owner, 2026-10-25/26): "2L" is "two liter", no
+ * ounces/inches/pounds, and a fry
  * made poutine/loaded is "Large Fry Poutine" / "Large Loaded Fry" rather than the item plus its option.
  */
 export function spokenLine(name: string, variant: string, modifiers: Array<{ name: string }>) {
   const say = (value: string) =>
     value
+      // Sizes like 4oz, 16", 1/4lbs are for the staff; callers don't need them read out (owner, 2026-10-26).
       .replace(/\b2\s?L\b/gi, "two liter")
-      .replace(/\b(\d+)\s?oz\b/gi, "$1 ounce")
-      .replace(/(\d+)"/g, "$1 inch")
+      .replace(/\s*\(\s*\d+(?:\.\d+)?\s*oz\s*\)/gi, "")
+      .replace(/\b\d+(?:\.\d+)?\s?oz\b/gi, "")
+      .replace(/\s*\d+\s*(?:"|inch(?:es)?)/gi, "")
       .replace(/\s*\((?:\d+\/\d+\s*lbs?)\)/gi, "")
       .replace(/\s+/g, " ")
       .trim();
@@ -870,6 +894,7 @@ export function startOpenAiSideband(
         operation,
         targetItem,
         touchedItems,
+        lastCustomerTranscript,
       );
       await sql`UPDATE ordering_call_sessions SET deferred_required_fields=${JSON.stringify([...resolvedQuestions])}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
       // A model-supplied customerId is honored only when it matches the

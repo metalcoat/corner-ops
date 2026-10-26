@@ -1026,7 +1026,14 @@ async def bridge(reader, writer, call_id):
             if not task.cancelled():
                 task.result()
         if call_usage["messages"]:
-            await emit("callUsage", usage_summary(call_usage, model))
+            # Sent directly (not as a background telemetry task): calls that end in the payment line cancel
+            # pending telemetry, which dropped the cost of exactly the calls that order.
+            summary = usage_summary(call_usage, model)
+            print(json.dumps({"callId": call_id, "event": "callUsage", **summary}), flush=True)
+            try:
+                await app_action(call_id, "event", eventType="gemini.callUsage", eventKey=f"{call_id}:gemini:callUsage", label="callUsage", detail=summary)
+            except Exception as error:
+                print(json.dumps({"callId": call_id, "event": "telemetryError", "error": type(error).__name__}), flush=True)
         if telemetry_tasks:
             if close_requested.is_set():
                 for task in telemetry_tasks:
