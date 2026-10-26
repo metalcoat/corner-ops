@@ -50,7 +50,7 @@ export type Foe = {
   t: number;
   dur: number;
   attack: Attack | null;
-  /** Hank's double choke: the second reach comes right after a sidestep. */
+  /** Choklet's double choke: the second reach comes right after a sidestep. */
   second: boolean;
   starGiven: boolean;
   hitT: number;
@@ -141,7 +141,7 @@ export class Game {
     this.state = state;
     this.stateT = 0;
     if (state === "title") this.audio.play("title");
-    if (state === "intro" || state === "fight") this.audio.play(this.foe.c.id === "hank" ? "boss" : "stage2");
+    if (state === "intro" || state === "fight") this.audio.play(this.foe.c.id === "choklet" ? "boss" : "stage2");
     if (state === "koed" || state === "champion") this.audio.play("victory");
     if (state === "gameover") this.audio.stopMusic();
   }
@@ -160,7 +160,7 @@ export class Game {
     return Math.round(this.foe.c.hangry * (1 + (this.circuit - 1) * 0.2));
   }
 
-  /** Starts at the customer picked on the title screen (practice on Hank if you like). */
+  /** Starts at the customer picked on the title screen (practice on Choklet if you like). */
   startGame(first = this.pickIndex) {
     this.bout = first;
     this.circuit = 1;
@@ -347,8 +347,8 @@ export class Game {
         if (me.t >= 22) this.meTo("idle");
         return;
       case "grabbed": {
-        const hank = this.foe.c.id === "hank";
-        me.chill -= hank ? 0.2 : 0.15;
+        const choklet = this.foe.c.id === "choklet";
+        me.chill -= choklet ? 0.2 : 0.15;
         if (punchPressed) {
           me.grip--;
           this.bell = 8;
@@ -1077,7 +1077,7 @@ function drawThrown(ctx: CanvasRenderingContext2D, thrown: Thrown, frame: number
 export function drawCustomer(ctx: CanvasRenderingContext2D, c: Customer, pose: Pose, t: number, frame: number, flash: boolean) {
   const S = c.colors;
   const skin = flash ? "#fcfcfc" : S.skin;
-  const big = c.id === "hank" ? 1.15 : 1;
+  const big = c.id === "choklet" ? 1.15 : 1;
   ctx.save();
   ctx.scale(big, big);
   let hx = 0, hy = 0;
@@ -1092,7 +1092,7 @@ export function drawCustomer(ctx: CanvasRenderingContext2D, c: Customer, pose: P
   // Torso.
   rect(ctx, -24, -50, 48, 52, S.shirt);
   rect(ctx, -8, -50, 16, 4, "#00000030");
-  if (c.id === "hank") drawText(ctx, "HANGRY", 0, -36, "#fcfcfc", { align: "center" });
+  if (c.id === "choklet") drawText(ctx, "CHOKLET", 0, -36, "#fcfcfc", { align: "center" });
   if (c.id === "carol") for (let i = -10; i <= 10; i += 4) rect(ctx, i, -48, 2, 2, "#f8f8f8");
   if (c.id === "randy") rect(ctx, -24, -50, 6, 52, "#2a4a2a");
   // Neck and head.
@@ -1211,8 +1211,8 @@ function drawHead(ctx: CanvasRenderingContext2D, c: Customer, hx: number, hy: nu
     rect(ctx, x + 8, y + 12, 2, 3, "#101010");
     rect(ctx, x + 16, y + 12, 2, 3, "#101010");
     if (angry) {
-      limb(ctx, x + 5, y + 7, x + 11, y + 10, 2, c.id === "hank" ? S.hair : "#402010");
-      limb(ctx, x + 21, y + 7, x + 15, y + 10, 2, c.id === "hank" ? S.hair : "#402010");
+      limb(ctx, x + 5, y + 7, x + 11, y + 10, 2, c.id === "choklet" ? S.hair : "#402010");
+      limb(ctx, x + 21, y + 7, x + 15, y + 10, 2, c.id === "choklet" ? S.hair : "#402010");
     }
   }
   if (c.id === "carol") {

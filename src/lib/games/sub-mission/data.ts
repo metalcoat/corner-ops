@@ -79,8 +79,8 @@ export const CUSTOMERS: readonly Customer[] = [
     koLine: "...FIVE STARS. FIVE. DON'T TELL ANYONE.",
   },
   {
-    id: "hank",
-    name: "HANGRY HANK",
+    id: "choklet",
+    name: "CHOKLET",
     title: "THE OVER-THE-COUNTER CHOKER",
     hangry: 180,
     speed: 0.85,
@@ -92,8 +92,8 @@ export const CUSTOMERS: readonly Customer[] = [
     ],
     throws: "review",
     colors: { skin: "#d89060", hair: "#3a2010", shirt: "#b02818", accent: "#202848" },
-    intro: "HASN'T EATEN SINCE TUESDAY. CLEARS THE SNEEZE GUARD IN A SINGLE BOUND.",
-    taunts: ["WHERE'S MY ITALIAN!", "I SAID LIGHT MAYO!", "I'VE BEEN WAITING 45 SECONDS!", "I CAN SEE THE SUB! I CAN SEE IT!"],
+    intro: "HASN'T EATEN SINCE TUESDAY. JUST GUM. CLEARS THE SNEEZE GUARD IN A SINGLE BOUND.",
+    taunts: ["WHERE'S MY ITALIAN!", "I SAID LIGHT MAYO!", "I'VE BEEN WAITING 45 SECONDS!", "I CAN SEE THE SUB! I CAN SEE IT!", "THIS GUM LOST ITS FLAVOR IN 2019!"],
     koLine: "...I WAS JUST HANGRY. SORRY ABOUT YOUR COLLAR.",
   },
 ];
