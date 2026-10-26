@@ -114,6 +114,7 @@ export class Game {
   shake = 0;
   bell = 0;
   koBonus = 0;
+  pickIndex = 0;
   review = "";
   tip = "";
   endReason = "";
@@ -157,8 +158,9 @@ export class Game {
     return Math.round(this.foe.c.hangry * (1 + (this.circuit - 1) * 0.2));
   }
 
-  startGame() {
-    this.bout = 0;
+  /** Starts at the customer picked on the title screen (practice on Hank if you like). */
+  startGame(first = this.pickIndex) {
+    this.bout = first;
     this.circuit = 1;
     this.score = 0;
     this.stars = 0;
@@ -185,11 +187,19 @@ export class Game {
   }
 
   /** A tap on the screen: starts the game from the menus. */
-  tap(_x: number, _y: number) {
+  tap(x: number, _y: number) {
     this.audio.unlock();
-    if (this.state === "title") this.startGame();
-    else if (this.state === "scores") this.setState("title");
+    if (this.state === "title") {
+      if (x < SCREEN_W * 0.3) this.cyclePick(-1);
+      else if (x > SCREEN_W * 0.7) this.cyclePick(1);
+      else this.startGame();
+    } else if (this.state === "scores") this.setState("title");
     else if (this.state === "pause") this.setState("fight");
+  }
+
+  private cyclePick(step: number) {
+    this.pickIndex = (this.pickIndex + step + CUSTOMERS.length) % CUSTOMERS.length;
+    this.audio.sfx("move");
   }
 
   // ---------------------------------------------------------------- update
@@ -204,6 +214,8 @@ export class Game {
     switch (this.state) {
       case "title":
         if (this.stateT === 1 && !this.scoresLoaded) void this.loadScores();
+        if (this.input.pressed("left")) this.cyclePick(-1);
+        if (this.input.pressed("right")) this.cyclePick(1);
         if (go) {
           this.audio.sfx("ready");
           this.startGame();
@@ -443,11 +455,11 @@ export class Game {
         this.foeTo("recover", 30);
       } else if (kind !== "jumbo") {
         damage = Math.ceil(damage / 2);
-        if (armored) this.float(160, 40, "HE'S NOT STOPPING!", "#f87858");
+        if (armored) this.float(160, 30, "NOT STOPPING!", "#f87858");
       }
     } else if (this.rand() < spec.block) {
       this.audio.sfx("tink");
-      this.float(160, 46, "BLOCKED!", "#bcbcbc");
+      this.float(108, 58, "BLOCKED!", "#bcbcbc");
       // A blocked sub gets a quick slap back.
       if (kind === "hook") this.startAttack("slap", 14);
       return;
@@ -458,13 +470,13 @@ export class Game {
     this.shake = Math.max(this.shake, kind === "jumbo" ? 14 : 4);
     this.audio.sfx(kind === "jab" ? "hit" : "bossHit");
     this.burst(160, 52, kind === "jumbo" ? 24 : 8);
-    this.float(160 + (this.rand() - 0.5) * 30, 40, kind === "jab" ? `PICKLE +${damage}` : kind === "hook" ? `SUB +${damage}` : `JUMBO +${damage}`, "#58d838");
+    this.float(214, 58, kind === "jab" ? `PICKLE +${damage}` : kind === "hook" ? `SUB +${damage}` : `JUMBO +${damage}`, "#58d838");
     if (f.hangry <= 0) this.foodComa();
   }
 
   private whiff() {
     this.audio.sfx("tink");
-    this.float(160, 50, "WHIFF", "#bcbcbc");
+    this.float(108, 58, "WHIFF", "#bcbcbc");
   }
 
   private addStar(label: string) {
@@ -893,7 +905,7 @@ export class Game {
 
   private drawTitle(ctx: CanvasRenderingContext2D) {
     drawStore(ctx, this.frame, 3);
-    const c = CUSTOMERS[Math.floor(this.frame / 240) % CUSTOMERS.length];
+    const c = CUSTOMERS[this.pickIndex];
     ctx.save();
     ctx.translate(160, COUNTER_Y);
     drawCustomer(ctx, c, this.frame % 240 < 180 ? "guard" : "windChoke", 0, this.frame, false);
@@ -906,9 +918,13 @@ export class Game {
     drawText(ctx, "SUB-MISSION", SCREEN_W / 2 + 2, 12 + bob + 2, "#600010", { align: "center", scale: 3 });
     drawText(ctx, "SUB-MISSION", SCREEN_W / 2, 12 + bob, "#f8d838", { align: "center", scale: 3 });
     drawText(ctx, "OVER THE COUNTER", SCREEN_W / 2, 40, "#f87858", { align: "center" });
-    drawText(ctx, `NEXT: ${c.name}`, SCREEN_W / 2, 136, "#fcfcfc", { align: "center" });
+    drawText(ctx, "<", 104, 132, "#f8d838", { scale: 2 });
+    drawText(ctx, ">", 206, 132, "#f8d838", { scale: 2 });
+    drawText(ctx, c.name, SCREEN_W / 2, 136, "#fcfcfc", { align: "center" });
     drawText(ctx, "DUCK. DODGE. FEED. RING THE BELL.", SCREEN_W / 2, 148, "#bcbcbc", { align: "center" });
     if (this.frame % 60 < 40) drawText(ctx, "PRESS START", SCREEN_W / 2, 164, "#f8d838", { align: "center" });
+    rect(ctx, 4, 52, 88, 56, "#000000b0");
+    rect(ctx, 240, 52, 76, 58, "#000000b0");
     drawText(ctx, "TOP SERVERS", 8, 56, "#a4e4fc");
     const list = this.scores.slice(0, 5);
     if (!list.length) drawText(ctx, "NO SCORES YET", 8, 66, "#7c7c7c");
@@ -993,9 +1009,6 @@ function drawStore(ctx: CanvasRenderingContext2D, frame: number, lineLength: num
     rect(ctx, x, 50 + bob, 8, 8, ["#f0c090", "#a86838", "#d89060"][i % 3]);
     rect(ctx, x - 1, 58 + bob, 10, 10, ["#4878c8", "#c05890", "#3a6a3a", "#b02818"][i % 4]);
   }
-  // Now serving.
-  rect(ctx, 118, 14, 84, 14, "#202020");
-  drawText(ctx, "NOW SERVING", 160, 18, "#f83818", { align: "center" });
 }
 
 function drawSneezeGuard(ctx: CanvasRenderingContext2D) {
