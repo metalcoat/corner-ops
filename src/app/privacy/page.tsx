@@ -1,14 +1,37 @@
 import PolicyPage from "../policy-page/policy-page";
 
 export const metadata = {
-  title: "SMS Privacy Policy | Corner Deli",
+  title: "Privacy Policy | Corner Deli",
 };
 
 export default function PrivacyPage() {
   return (
     <PolicyPage>
-      <h1>Corner Deli SMS Privacy Policy</h1>
-      <p><strong>Effective date:</strong> August 17, 2026</p>
+      <h1>Corner Deli Privacy Policy</h1>
+      <p><strong>Effective date:</strong> October 26, 2026 (online ordering); August 17, 2026 (SMS program)</p>
+
+      <h2>Online ordering</h2>
+      <p>
+        When you order from Corner Deli online or by phone we collect what we need to make and deliver
+        your order: your name, phone number, email address if you give it, delivery address and notes, the
+        items you order, and your order history and rewards. We use it to prepare, deliver and confirm
+        your order, to contact you about it, to keep your account and rewards, and to keep our records.
+      </p>
+      <p>
+        <strong>Payment security.</strong> Card payments are processed by our payment processor over an
+        encrypted (HTTPS) connection. Corner Deli never receives or stores your full card number or
+        security code. If you choose to save a card, it is stored by our payment processor and we keep only
+        the card type, last four digits and expiration date so you can pick it next time; you can remove it
+        from your account at any time.
+      </p>
+      <p>
+        We do not sell your information. We share it only with service providers that help us run ordering
+        (payment processing, address lookup and maps, text and email delivery, sign-in with Google), only as
+        needed for that service. The site uses a sign-in cookie to keep you logged in. To ask about or
+        correct your information, call (315) 393-2271 or visit us at 828 Morris St, Ogdensburg, NY 13669.
+      </p>
+
+      <h2>Text message (SMS) program</h2>
       <p>
         Corner Deli uses Corner Ops to send employees operational text messages related to work,
         including schedules, schedule changes, shift reminders, attendance or timekeeping notices,

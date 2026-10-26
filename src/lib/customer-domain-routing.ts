@@ -6,7 +6,7 @@
 export const CUSTOMER_HOST = "ordercornerdeli.com";
 export const CUSTOMER_WWW_HOST = "www.ordercornerdeli.com";
 
-const CUSTOMER_PAGES = ["/order", "/menu", "/account", "/track", "/privacy", "/terms", "/refund-policy", "/sms-help"];
+const CUSTOMER_PAGES = ["/order", "/menu", "/account", "/track", "/privacy", "/terms", "/refund-policy", "/delivery-policy", "/sms-help"];
 const CUSTOMER_FILES = ["/favicon.ico", "/corner-deli-logo.png", "/corner-ops-icon.svg", "/manifest.webmanifest", "/robots.txt", "/sitemap.xml"];
 
 function within(pathname: string, prefix: string): boolean {

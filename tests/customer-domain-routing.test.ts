@@ -4,7 +4,7 @@ import { customerRoute, customerSiteBaseUrl, isCustomerHost } from "../src/lib/c
 
 test("the ordering site serves customer pages and the customer API only", () => {
   assert.equal(customerRoute("/"), "home");
-  for (const path of ["/order", "/order/confirmation", "/menu", "/account/sign-in", "/track/abc", "/privacy", "/terms", "/refund-policy",
+  for (const path of ["/order", "/order/confirmation", "/menu", "/account/sign-in", "/track/abc", "/privacy", "/terms", "/refund-policy", "/delivery-policy",
     "/api/customer/cart", "/api/customer/orders/1/payments/mx", "/api/health", "/_next/static/x.js", "/corner-deli-logo.png", "/manifest.webmanifest"])
     assert.equal(customerRoute(path), "allow", path);
   for (const path of ["/ops", "/ops/payroll-control", "/pos", "/pos/deli", "/employee", "/signin", "/team", "/scan",

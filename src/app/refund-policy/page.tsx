@@ -1,16 +1,16 @@
 import PolicyPage from "../policy-page/policy-page";
 
 export const metadata = {
-  title: "Refund Policy | Corner Deli",
+  title: "Refund & Cancellation Policy | Corner Deli",
 };
 
 export default function RefundPolicyPage() {
   return (
     <PolicyPage>
-      <h1>Corner Deli Refund Policy</h1>
+      <h1>Corner Deli Refund &amp; Cancellation Policy</h1>
       <p><strong>Effective date:</strong> October 20, 2026</p>
 
-      <h2>All sales are final</h2>
+      <h2>Cancellations and refunds: all sales are final</h2>
       <p>
         All online orders placed with Corner Deli are final. Once an order is placed, it cannot be
         cancelled, and no refunds are given.

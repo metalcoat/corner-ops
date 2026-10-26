@@ -1467,3 +1467,12 @@
 }
 .phoneTestCode{margin:10px 0;padding:10px 12px;border:1px dashed #d97706;border-radius:8px;background:#fffbeb;color:#92400e;font-size:14px}.phoneTestCode b{font-size:18px;letter-spacing:2px}
 .paymentNote{margin:6px 0 10px;color:var(--muted);font-size:13px}
+
+/* Card-processor website requirements: accepted cards, secure checkout, contact and policies on every screen. */
+.paymentAcceptance { display:grid; gap:8px; margin:10px 0; padding:10px 12px; border:1px solid #d9d2bf; border-radius:10px; background:#fff; font-size:13px; line-height:1.4; }
+.cardLogos { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.cardLogos img { display:block; }
+.siteFooter { margin-top:24px; padding:16px max(12px,calc((100vw - 1100px)/2)); background:var(--green); color:#fff; display:grid; gap:10px; font-size:13px; }
+.siteFooter div:first-child { display:flex; flex-wrap:wrap; gap:6px 14px; }
+.siteFooter nav { display:flex; flex-wrap:wrap; gap:6px 14px; }
+.siteFooter a { color:#fff; }

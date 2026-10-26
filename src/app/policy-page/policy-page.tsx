@@ -21,7 +21,10 @@ export default function PolicyPage({ children }: { children: ReactNode }) {
         <strong>Corner Deli</strong>
         <span>828 Morris St · Ogdensburg, NY 13669</span>
         <span>(315) 393-2271</span>
-        <a href="/refund-policy">Refund Policy</a>
+        <a href="/refund-policy">Refund &amp; Cancellation</a>
+        <a href="/delivery-policy">Delivery &amp; Pickup</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
       </footer>
     </div>
   );

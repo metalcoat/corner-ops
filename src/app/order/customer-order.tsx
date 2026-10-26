@@ -1452,6 +1452,15 @@ export default function CustomerOrder() {
               <span>{timing === "asap" && catalog.availability.opensAt ? <>We open at {new Date(catalog.availability.opensAt).toLocaleString([], { weekday:"short", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })}. Your estimated {serviceType === "delivery" ? "delivery time is about 1 hour after opening" : "pickup time is about 30 minutes after opening"}.</> : "Choose the date and time you want this preorder ready."}</span>
             </aside>
           )}
+          <aside className="paymentAcceptance" aria-label="Cards we accept">
+            <div className="cardLogos">
+              {[["visa", "Visa"], ["mastercard", "Mastercard"], ["americanexpress", "American Express"], ["discover", "Discover"]].map(([file, name]) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={file} src={`/card-logos/${file}.svg`} alt={name} width={48} height={32} />
+              ))}
+            </div>
+            <span>Secure checkout. Card payments are processed by our payment processor over an encrypted connection; Corner Deli never sees or stores your full card number. All prices are in U.S. dollars.</span>
+          </aside>
           <aside className="orderCancellationNotice">
             <strong>All sales final</strong>
             <span>Once you place this order and it is sent to Corner Deli, it cannot be cancelled and no refunds are given. <a href="/refund-policy">Refund policy</a></span>
@@ -1564,6 +1573,25 @@ export default function CustomerOrder() {
       {active && (
         <ItemDialog item={active} onClose={() => setActive(null)} onAdd={add} />
       )}
+      <footer className="siteFooter">
+        <div>
+          <strong>Corner Deli</strong>
+          <span>828 Morris St · Ogdensburg, NY 13669</span>
+          <a href="tel:+13153932271">(315) 393-2271</a>
+        </div>
+        <nav aria-label="Policies">
+          <a href="/refund-policy">Refund &amp; Cancellation</a>
+          <a href="/delivery-policy">Delivery &amp; Pickup</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+        </nav>
+        <div className="cardLogos" aria-label="Cards we accept">
+          {[["visa", "Visa"], ["mastercard", "Mastercard"], ["americanexpress", "American Express"], ["discover", "Discover"]].map(([file, name]) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={file} src={`/card-logos/${file}.svg`} alt={name} width={40} height={27} />
+          ))}
+        </div>
+      </footer>
     </main>
   );
 }

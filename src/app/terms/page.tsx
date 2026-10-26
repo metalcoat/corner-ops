@@ -1,14 +1,32 @@
 import PolicyPage from "../policy-page/policy-page";
 
 export const metadata = {
-  title: "SMS Terms and Conditions | Corner Deli",
+  title: "Terms and Conditions | Corner Deli",
 };
 
 export default function TermsPage() {
   return (
     <PolicyPage>
-      <h1>Corner Deli SMS Terms and Conditions</h1>
-      <p><strong>Effective date:</strong> August 17, 2026</p>
+      <h1>Corner Deli Terms and Conditions</h1>
+      <p><strong>Effective date:</strong> October 26, 2026 (online ordering); August 17, 2026 (SMS program)</p>
+
+      <h2>Online ordering</h2>
+      <p>
+        Corner Deli, 828 Morris St, Ogdensburg, NY 13669, (315) 393-2271, sells the food and drinks shown on
+        this site for pickup or delivery. Prices are in U.S. dollars and include sales tax; delivery fees,
+        any delivery minimum and the total are shown before you place your order. Menu items, prices and
+        availability can change; the price shown when you place your order is the price you pay.
+      </p>
+      <p>
+        By placing an order you confirm the details are correct and authorize the charge to your card, or
+        agree to pay at pickup or delivery where that is offered. Orders are subject to our{" "}
+        <a href="/refund-policy">Refund &amp; Cancellation Policy</a> (all sales are final) and our{" "}
+        <a href="/delivery-policy">Delivery &amp; Pickup Policy</a>. Your information is handled as described
+        in our <a href="/privacy">Privacy Policy</a>. We may refuse or cancel an order we cannot fulfil; if
+        we do, any payment for it is returned.
+      </p>
+
+      <h2>Text message (SMS) program</h2>
       <p>
         The Corner Deli employee SMS program provides work-related operational notifications,
         including schedules, schedule changes, shift reminders, attendance or timekeeping notices,
