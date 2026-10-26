@@ -41,7 +41,8 @@ export default function DeliveryPolicyPage() {
       <p>
         Please make sure your address, phone number and delivery notes are correct so the driver can reach
         you. If there is a problem with a delivery or pickup, call us right away at{" "}
-        <a href="tel:+13153932271">(315) 393-2271</a>. Orders cannot be cancelled once placed; see our{" "}
+        <a href="tel:+13153932271">(315) 393-2271</a> or email{" "}
+        <a href="mailto:bills@ordercornerdeli.com">bills@ordercornerdeli.com</a>. Orders cannot be cancelled once placed; see our{" "}
         <a href="/refund-policy">Refund &amp; Cancellation Policy</a>.
       </p>
     </PolicyPage>

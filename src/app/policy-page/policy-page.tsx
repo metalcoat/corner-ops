@@ -18,9 +18,10 @@ export default function PolicyPage({ children }: { children: ReactNode }) {
       </header>
       <main className="policyBody">{children}</main>
       <footer className="policyFooter">
-        <strong>Corner Deli</strong>
+        <strong>Corner Deli (Mike&apos;s Corner Deli, LLC)</strong>
         <span>828 Morris St · Ogdensburg, NY 13669</span>
         <span>(315) 393-2271</span>
+        <a href="mailto:bills@ordercornerdeli.com">bills@ordercornerdeli.com</a>
         <a href="/refund-policy">Refund &amp; Cancellation</a>
         <a href="/delivery-policy">Delivery &amp; Pickup</a>
         <a href="/privacy">Privacy</a>

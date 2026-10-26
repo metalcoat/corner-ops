@@ -28,7 +28,9 @@ export default function PrivacyPage() {
         We do not sell your information. We share it only with service providers that help us run ordering
         (payment processing, address lookup and maps, text and email delivery, sign-in with Google), only as
         needed for that service. The site uses a sign-in cookie to keep you logged in. To ask about or
-        correct your information, call (315) 393-2271 or visit us at 828 Morris St, Ogdensburg, NY 13669.
+        correct your information, call (315) 393-2271, email{" "}
+        <a href="mailto:bills@ordercornerdeli.com">bills@ordercornerdeli.com</a>, or visit us at 828 Morris St,
+        Ogdensburg, NY 13669. Corner Deli is operated by Mike&apos;s Corner Deli, LLC.
       </p>
 
       <h2>Text message (SMS) program</h2>

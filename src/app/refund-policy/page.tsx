@@ -25,7 +25,8 @@ export default function RefundPolicyPage() {
       <h2>Questions</h2>
       <p>
         If you have a question about your order, call Corner Deli at{" "}
-        <a href="tel:+13153932271">(315) 393-2271</a>.
+        <a href="tel:+13153932271">(315) 393-2271</a> or email{" "}
+        <a href="mailto:bills@ordercornerdeli.com">bills@ordercornerdeli.com</a>.
       </p>
 
       <p><a href="/order">Back to ordering</a></p>

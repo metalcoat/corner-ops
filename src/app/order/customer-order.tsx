@@ -1576,8 +1576,10 @@ export default function CustomerOrder() {
       <footer className="siteFooter">
         <div>
           <strong>Corner Deli</strong>
+          <span>Mike&apos;s Corner Deli, LLC</span>
           <span>828 Morris St · Ogdensburg, NY 13669</span>
           <a href="tel:+13153932271">(315) 393-2271</a>
+          <a href="mailto:bills@ordercornerdeli.com">bills@ordercornerdeli.com</a>
         </div>
         <nav aria-label="Policies">
           <a href="/refund-policy">Refund &amp; Cancellation</a>

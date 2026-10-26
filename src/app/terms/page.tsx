@@ -12,7 +12,8 @@ export default function TermsPage() {
 
       <h2>Online ordering</h2>
       <p>
-        Corner Deli, 828 Morris St, Ogdensburg, NY 13669, (315) 393-2271, sells the food and drinks shown on
+        Corner Deli (Mike&apos;s Corner Deli, LLC), 828 Morris St, Ogdensburg, NY 13669, (315) 393-2271,{" "}
+        <a href="mailto:bills@ordercornerdeli.com">bills@ordercornerdeli.com</a>, sells the food and drinks shown on
         this site for pickup or delivery. Prices are in U.S. dollars and include sales tax; delivery fees,
         any delivery minimum and the total are shown before you place your order. Menu items, prices and
         availability can change; the price shown when you place your order is the price you pay.
