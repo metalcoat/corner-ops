@@ -118,7 +118,9 @@ test("guests can order by card without a texted code; paying at pickup needs one
   expect([201, 409]).toContain(response.status());
   if (response.status() !== 201) return;
   const cart = (await response.json()).cart;
-  const payLater = await request.post(`/api/customer/orders/${cart.id}/pay-later`);
+  // The session cookie is Secure; send it back by hand when the test runs over plain http.
+  const headers = { cookie: String(response.headers()["set-cookie"] || "").split(";")[0] };
+  const payLater = await request.post(`/api/customer/orders/${cart.id}/pay-later`, { headers });
   if (payLater.status() === 403) {
     const body = await payLater.json();
     expect(body.code).toBe("sms_verification_required");
@@ -129,7 +131,7 @@ test("guests can order by card without a texted code; paying at pickup needs one
     expect(catalogNow.customer.smsCodeSkipped).toBe(true);
   }
   // A card payment is never turned away for a missing code or account.
-  const card = await request.post(`/api/customer/orders/${cart.id}/payments/mx`, { data: { action: "initialize" } });
+  const card = await request.post(`/api/customer/orders/${cart.id}/payments/mx`, { headers, data: { action: "initialize" } });
   expect(card.status()).not.toBe(401);
   expect(card.status()).not.toBe(403);
 });
