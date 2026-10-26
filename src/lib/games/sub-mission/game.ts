@@ -28,6 +28,8 @@ export const STEP_MS = 1000 / 60;
 export const GAME_ID = "sub-mission";
 
 const COUNTER_Y = 120;
+/** Top of the sneeze guard glass. */
+const GUARD_Y = 76;
 const MAX_CHILL = 100;
 const MAX_STARS = 3;
 /** Knockdowns in one bout before you clock out for good. */
@@ -778,7 +780,7 @@ export class Game {
   private drawStuckFace(ctx: CanvasRenderingContext2D) {
     const c = this.foe.c;
     const wob = Math.round(Math.sin(this.frame / 3));
-    const x = 140, y = 92;
+    const x = 140, y = GUARD_Y + 2;
     ctx.fillStyle = c.colors.skin;
     ctx.fillRect(x - 4, y, 48, 22);
     ctx.fillRect(x, y - 3, 40, 28);
@@ -1012,17 +1014,17 @@ function drawStore(ctx: CanvasRenderingContext2D, frame: number, lineLength: num
 }
 
 function drawSneezeGuard(ctx: CanvasRenderingContext2D) {
-  rect(ctx, 62, 90, 196, 2, "#c8d0d8");
-  rect(ctx, 62, 92, 196, 28, "#c0e8ff30");
-  rect(ctx, 64, 92, 2, 28, "#a8b0b8");
-  rect(ctx, 254, 92, 2, 28, "#a8b0b8");
+  rect(ctx, 62, GUARD_Y - 2, 196, 2, "#c8d0d8");
+  rect(ctx, 62, GUARD_Y, 196, COUNTER_Y - GUARD_Y, "#c0e8ff30");
+  rect(ctx, 64, GUARD_Y, 2, COUNTER_Y - GUARD_Y, "#a8b0b8");
+  rect(ctx, 254, GUARD_Y, 2, COUNTER_Y - GUARD_Y, "#a8b0b8");
   ctx.fillStyle = "#ffffff38";
-  for (const x of [84, 92, 190]) {
+  for (const x of [92, 100, 198]) {
     ctx.beginPath();
-    ctx.moveTo(x, 92);
-    ctx.lineTo(x + 6, 92);
-    ctx.lineTo(x - 8, 120);
-    ctx.lineTo(x - 14, 120);
+    ctx.moveTo(x, GUARD_Y);
+    ctx.lineTo(x + 6, GUARD_Y);
+    ctx.lineTo(x - 16, COUNTER_Y);
+    ctx.lineTo(x - 22, COUNTER_Y);
     ctx.fill();
   }
 }
