@@ -17,7 +17,7 @@ type DeliveryTracker = {
   deliveredAt: string | null;
   destination: Coordinates | null;
   etaMinutes: number | null;
-  location: (Coordinates & { accuracyMeters: number | null; capturedAt: string }) | null;
+  location: (Coordinates & { accuracyMeters: number | null; capturedAt: string; heading?: number | null }) | null;
 };
 type Payload = { order: any; delivery: DeliveryTracker | null; store: Coordinates | null; mapTileUrl: string | null };
 
@@ -123,7 +123,7 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
   const [title, detail] = headline(order, delivery, step);
   const points: MapPoint[] = [];
   if (delivery?.location) {
-    points.push({ id: "driver", kind: "driver", latitude: delivery.location.latitude, longitude: delivery.location.longitude, accuracyMeters: delivery.location.accuracyMeters, label: delivery.driverFirstName || "Driver", stale: Date.now() - new Date(delivery.location.capturedAt).getTime() > 3 * 60_000 });
+    points.push({ id: "driver", kind: "driver", latitude: delivery.location.latitude, longitude: delivery.location.longitude, accuracyMeters: delivery.location.accuracyMeters, label: delivery.driverFirstName || "Driver", stale: Date.now() - new Date(delivery.location.capturedAt).getTime() > 3 * 60_000, heading: delivery.location.heading ?? null });
     if (delivery.destination) points.push({ id: "home", kind: "home", ...delivery.destination, label: "You" });
     if (data.store) points.push({ id: "store", kind: "store", ...data.store });
   }

@@ -13,6 +13,8 @@ export type MapPoint = {
   /** Draws a soft circle of this radius (metres) around the point. */
   accuracyMeters?: number | null;
   stale?: boolean;
+  /** Direction of travel in degrees (0 = north); draws an arrow on the pin. */
+  heading?: number | null;
 };
 
 const TILE = 256;
@@ -94,6 +96,9 @@ export default function StreetMap({
           return (
             <div key={point.id} className={`streetMapMarker ${point.kind}${point.stale ? " stale" : ""}`} style={{ transform: `translate(${x}px, ${y}px)` }}>
               {radius > 14 && <i className="streetMapAccuracy" style={{ width: radius * 2, height: radius * 2 }} />}
+              {point.heading != null && Number.isFinite(point.heading) && (
+                <i className="streetMapHeading" style={{ transform: `rotate(${point.heading}deg)` }} aria-hidden="true" />
+              )}
               <span className="streetMapPin">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d={ICONS[point.kind]} /></svg>
               </span>

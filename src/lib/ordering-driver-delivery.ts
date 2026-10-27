@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { driverMotion } from "@/lib/driver-motion";
 import { getEmployeeSession, type EmployeeSession } from "@/lib/employee-auth";
 import { getSql, withTransaction } from "@/lib/db";
 import { toIsoTimestamp, toIsoTimestampOrEmpty } from "@/lib/timestamp-values";
@@ -18,7 +19,7 @@ export const DELIVERY_STATUSES = ["ASSIGNED","READY_FOR_DRIVER","PICKED_UP","EN_
 export type DriverDeliveryStatus = typeof DELIVERY_STATUSES[number];
 export type DriverActor = EmployeeSession & { manager: boolean; driver: boolean };
 export type CustomerTrackingView={token_id:string;expires_at:string;delivery_id:string;status:string;delivered_at:string|null;updated_at:string;display_number:string;order_status:string;proof_id:string|null;proof_captured_at:string|null;location:DriverPosition|null;destination:{latitude:number;longitude:number}|null;etaMinutes:number|null};
-export type DriverPosition={latitude:number;longitude:number;accuracyMeters:number|null;capturedAt:string;approximate:true};
+export type DriverPosition={latitude:number;longitude:number;accuracyMeters:number|null;capturedAt:string;approximate:true;heading?:number|null};
 
 const transitions: Record<DriverDeliveryStatus, DriverDeliveryStatus[]> = {
   ASSIGNED:["READY_FOR_DRIVER","PICKED_UP","CANCELLED"], READY_FOR_DRIVER:["PICKED_UP","CANCELLED"],
@@ -72,21 +73,26 @@ async function audit(deliveryId:string,orderId:string,actor:DriverActor,action:s
 
 export async function listDriverDeliveries(actor:DriverActor,input:{query?:string;dispatch?:boolean}){
   await ensureDriverDeliverySchema();const q=String(input.query||"").trim(),digits=q.replace(/\D/g,""),like=`%${q}%`,digitLike=`%${digits}%`;
-  return getSql()`SELECT d.id delivery_id,d.status delivery_status,d.driver_employee_id assigned_employee_id,d.assigned_at,d.en_route_at,d.updated_at delivery_updated_at,
+  const rows = await getSql()`SELECT d.id delivery_id,d.status delivery_status,d.driver_employee_id assigned_employee_id,d.assigned_at,d.en_route_at,d.updated_at delivery_updated_at,
     o.id order_id,o.display_number,o.status order_status,o.payment_status,o.payment_preference,o.total_cents,o.paid_cents,o.amount_due_cents,o.tip_cents,o.service_type,o.timing_mode,o.scheduled_for,o.created_at,
     (SELECT COALESCE(SUM(GREATEST(i.quantity-COALESCE(i.cancelled_quantity,0),0)),0)::int FROM ordering_order_items i WHERE i.order_id=o.id) item_count,
     COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,o.phone_snapshot delivery_phone,
     a.formatted_address delivery_address,a.line2 delivery_unit,a.delivery_notes_snapshot delivery_notes,a.latitude destination_latitude,a.longitude destination_longitude,
     e.name driver_name,e.position driver_position,
-    location.latitude::double precision driver_latitude,location.longitude::double precision driver_longitude,location.captured_at driver_location_captured_at
+    location.latitude::double precision driver_latitude,location.longitude::double precision driver_longitude,location.captured_at driver_location_captured_at,
+    location.heading driver_reported_heading,location.speed driver_reported_speed,
+    previous.latitude::double precision driver_previous_latitude,previous.longitude::double precision driver_previous_longitude,previous.captured_at driver_previous_captured_at
     FROM ordering_delivery_assignments d JOIN ordering_orders o ON o.id=d.order_id JOIN ordering_order_delivery_addresses a ON a.order_id=o.id
     LEFT JOIN employees e ON e.id=d.driver_employee_id
-    LEFT JOIN LATERAL(SELECT latitude,longitude,captured_at FROM ordering_delivery_locations WHERE driver_id=d.driver_employee_id ORDER BY captured_at DESC LIMIT 1)location ON TRUE
+    LEFT JOIN LATERAL(SELECT latitude,longitude,captured_at,(metadata->>'heading')::double precision heading,(metadata->>'speed')::double precision speed FROM ordering_delivery_locations WHERE driver_id=d.driver_employee_id ORDER BY captured_at DESC LIMIT 1)location ON TRUE
+    LEFT JOIN LATERAL(SELECT latitude,longitude,captured_at FROM ordering_delivery_locations WHERE driver_id=d.driver_employee_id AND captured_at<location.captured_at AND captured_at>location.captured_at-INTERVAL '3 minutes' ORDER BY captured_at DESC LIMIT 1)previous ON TRUE
     WHERE d.business=${actor.business} AND o.service_type IN('delivery','no_contact_delivery')
       AND (${actor.manager&&Boolean(input.dispatch)} OR d.driver_employee_id=${actor.employeeId} OR (${actor.driver} AND d.driver_employee_id IS NULL AND d.status IN('ASSIGNED','READY_FOR_DRIVER')))
       AND (${q}='' OR o.display_number ILIKE ${like} OR o.first_name_snapshot ILIKE ${like} OR o.last_name_snapshot ILIKE ${like} OR trim(o.first_name_snapshot||' '||o.last_name_snapshot) ILIKE ${like} OR regexp_replace(o.phone_snapshot,'[^0-9]','','g') LIKE ${digitLike} OR a.formatted_address ILIKE ${like})
       AND (d.status NOT IN('DELIVERED','RETURNED','CANCELLED') OR d.updated_at>NOW()-INTERVAL '24 hours') ORDER BY COALESCE(o.scheduled_for,o.created_at),o.created_at`;
+  return rows.map((row): Record<string, any> => Object.assign({}, row, driverMotion(row as Record<string, unknown>)));
 }
+
 
 export function deliveryRoutePlans(
   deliveries: Array<Record<string, unknown>>,
@@ -247,11 +253,11 @@ export async function liveDriverForDelivery(delivery:{business:string;delivery_i
   if(!["EN_ROUTE","ARRIVED"].includes(String(delivery.status)))return{location:null,destination,etaMinutes:null};
   const enabled=Boolean((await sql`SELECT show_live_driver FROM ordering_driver_dispatch_settings WHERE business=${delivery.business}`)[0]?.show_live_driver);
   const currentStop=enabled&&!(await sql`SELECT 1 FROM ordering_delivery_assignments WHERE driver_employee_id=${delivery.driver_employee_id} AND id<>${delivery.delivery_id} AND status IN('EN_ROUTE','ARRIVED') AND en_route_at>${delivery.en_route_at} LIMIT 1`).length;
-  const row=currentStop?(await sql`SELECT latitude::double precision latitude,longitude::double precision longitude,accuracy_meters,captured_at FROM ordering_delivery_locations WHERE delivery_id=${delivery.delivery_id} AND captured_at>NOW()-INTERVAL '15 minutes' ORDER BY captured_at DESC LIMIT 1`)[0]:null;
+  const row=currentStop?(await sql`SELECT latitude::double precision latitude,longitude::double precision longitude,accuracy_meters,captured_at,(metadata->>'heading')::double precision heading,(metadata->>'speed')::double precision speed FROM ordering_delivery_locations WHERE delivery_id=${delivery.delivery_id} AND captured_at>NOW()-INTERVAL '15 minutes' ORDER BY captured_at DESC LIMIT 1`)[0]:null;
   if(!row)return{location:null,destination,etaMinutes:null};
   const exact={latitude:Number(row.latitude),longitude:Number(row.longitude)};
   return{destination,etaMinutes:destination&&delivery.status==="EN_ROUTE"?Math.max(1,Math.round(straightLineMiles(exact,destination)*3)):null,
-    location:{latitude:Math.round(exact.latitude*1000)/1000,longitude:Math.round(exact.longitude*1000)/1000,accuracyMeters:row.accuracy_meters==null?null:Math.max(100,Number(row.accuracy_meters)),capturedAt:new Date(row.captured_at).toISOString(),approximate:true} as DriverPosition};
+    location:{latitude:Math.round(exact.latitude*1000)/1000,longitude:Math.round(exact.longitude*1000)/1000,accuracyMeters:row.accuracy_meters==null?null:Math.max(100,Number(row.accuracy_meters)),capturedAt:new Date(row.captured_at).toISOString(),approximate:true,heading:row.heading!=null&&Number(row.speed)>=0.9?Math.round(Number(row.heading)):null} as DriverPosition};
 }
 export async function customerTracking(token:string):Promise<CustomerTrackingView|null>{await ensureDriverDeliverySchema();const hash=createHash("sha256").update(token).digest("hex"),sql=getSql(),row=(await sql`SELECT t.id token_id,t.expires_at,d.id delivery_id,d.business,d.status,d.delivered_at,d.updated_at,d.driver_employee_id,d.en_route_at,o.display_number,o.status order_status,a.latitude destination_latitude,a.longitude destination_longitude,p.id proof_id,p.captured_at proof_captured_at FROM ordering_delivery_tracking_tokens t JOIN ordering_delivery_assignments d ON d.id=t.delivery_id JOIN ordering_orders o ON o.id=t.order_id LEFT JOIN ordering_order_delivery_addresses a ON a.order_id=o.id LEFT JOIN LATERAL(SELECT id,captured_at FROM ordering_delivery_proofs WHERE delivery_id=d.id ORDER BY created_at DESC LIMIT 1)p ON TRUE WHERE t.token_hash=${hash} AND t.revoked_at IS NULL AND t.expires_at>NOW()`)[0];if(!row)return null;
   const live=await liveDriverForDelivery({business:String(row.business),delivery_id:String(row.delivery_id),status:String(row.status),driver_employee_id:row.driver_employee_id,en_route_at:row.en_route_at,destination_latitude:row.destination_latitude,destination_longitude:row.destination_longitude});

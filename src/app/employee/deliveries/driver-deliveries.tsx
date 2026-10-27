@@ -36,6 +36,8 @@ type Delivery = {
   destination_latitude: number | string | null;
   destination_longitude: number | string | null;
   driver_latitude: number | null;
+  driver_heading?: number | null;
+  driver_speed_mph?: number | null;
   driver_longitude: number | null;
   driver_location_captured_at: string | null;
 };
@@ -324,7 +326,12 @@ export default function DriverDeliveries() {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
           accuracy: position.coords.accuracy,
-          metadata: { source: "vehicle-tablet" },
+          metadata: {
+            source: "vehicle-tablet",
+            // Direction (degrees from north) and speed (m/s) when the phone knows them, for the dispatch map.
+            heading: Number.isFinite(position.coords.heading) ? position.coords.heading : null,
+            speed: Number.isFinite(position.coords.speed) ? position.coords.speed : null,
+          },
         };
         const url = `/api/driver/deliveries/${trackingId}/location`;
         fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
@@ -558,8 +565,9 @@ export default function DriverDeliveries() {
             kind: "driver",
             latitude: Number(delivery.driver_latitude),
             longitude: Number(delivery.driver_longitude),
-            label: `${(delivery.driver_name || "Driver").split(" ")[0]} · ${clock(delivery.driver_location_captured_at!)}`,
+            label: `${(delivery.driver_name || "Driver").split(" ")[0]} · ${delivery.driver_speed_mph != null && age < 2 * 60_000 ? `${Math.round(delivery.driver_speed_mph)} mph · ` : ""}${clock(delivery.driver_location_captured_at!)}`,
             stale: age > 5 * 60_000,
+            heading: delivery.driver_heading ?? null,
           });
       }
     }

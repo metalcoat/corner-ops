@@ -15,3 +15,6 @@
 .streetMapCredit a{color:inherit}
 @keyframes streetMapPulse{0%{box-shadow:0 0 0 0 #1f7a3d88}70%{box-shadow:0 0 0 16px #1f7a3d00}100%{box-shadow:0 0 0 0 #1f7a3d00}}
 @media (prefers-reduced-motion:reduce){.streetMapMarker{transition:none}.streetMapMarker.driver .streetMapPin{animation:none}}
+.streetMapHeading{position:absolute;left:-30px;top:-30px;width:60px;height:60px;pointer-events:none}
+.streetMapHeading::before{content:"";position:absolute;left:50%;top:0;transform:translateX(-50%);border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:14px solid #1f7a3d;filter:drop-shadow(0 1px 1px #0006)}
+.streetMapMarker.stale .streetMapHeading{display:none}
