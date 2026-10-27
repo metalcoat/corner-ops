@@ -203,6 +203,8 @@ export default function DriverDeliveries() {
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
   const [online, setOnline] = useState(true);
+  // What the phone's GPS is actually doing: a blocked permission used to look like "GPS ON" (dev test 2026-10-27).
+  const [gps, setGps] = useState<"waiting" | "sending" | "blocked" | "unavailable" | "rejected">("waiting");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<OrderDetail | null>(null);
   const [detailError, setDetailError] = useState("");
@@ -310,6 +312,7 @@ export default function DriverDeliveries() {
     if (watch.current !== null) navigator.geolocation.clearWatch(watch.current);
     activeTracking.current = trackingId;
     lastSent.current = null;
+    setGps("waiting");
     watch.current = navigator.geolocation.watchPosition(
       (position) => {
         const here = { latitude: position.coords.latitude, longitude: position.coords.longitude }, previous = lastSent.current;
@@ -324,9 +327,11 @@ export default function DriverDeliveries() {
           metadata: { source: "vehicle-tablet" },
         };
         const url = `/api/driver/deliveries/${trackingId}/location`;
-        fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => enqueue(url, body));
+        fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+          .then((response) => setGps(response.ok ? "sending" : "rejected"))
+          .catch(() => enqueue(url, body));
       },
-      () => undefined,
+      (error) => setGps(error.code === error.PERMISSION_DENIED ? "blocked" : "unavailable"),
       { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 },
     );
     return () => {
@@ -575,7 +580,8 @@ export default function DriverDeliveries() {
           <span><b>{current.length}</b> open</span>
           {toCollect > 0 && <span className="collect"><b>{money(toCollect)}</b> to collect</span>}
         </div>
-        <span className={online ? "online" : "offline"}>{online ? (trackingId ? "GPS ON" : "ONLINE") : `OFFLINE · ${queued().length} QUEUED`}</span>
+        <span className={online ? "online" : "offline"}>{online ? (trackingId ? { waiting: "GPS · WAITING FOR LOCATION", sending: "GPS ON", blocked: "GPS BLOCKED", unavailable: "GPS · NO SIGNAL", rejected: "GPS · NOT ACCEPTED" }[gps] : "ONLINE") : `OFFLINE · ${queued().length} QUEUED`}</span>
+        {trackingId && gps === "blocked" && <p className="gpsHelp" role="alert">Location is blocked for this site. Allow it: iPhone → Settings → Privacy &amp; Security → Location Services → Safari Websites → While Using; Android Chrome → tap the lock icon by the address → Location → Allow. Then reload this page.</p>}
       </header>
       <div className="driverTools">
         <input aria-label="Search orders" placeholder="Order #, name, phone, address" value={query} onChange={(e) => setQuery(e.target.value)} />

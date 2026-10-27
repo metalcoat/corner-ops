@@ -144,3 +144,5 @@
   .driverTools{flex-wrap:wrap}
   .driverTools input{flex-basis:100%}
 }
+
+.gpsHelp { margin:6px 0; padding:8px 10px; border-radius:8px; background:#fde8e8; color:#7a1010; font-size:13px; }
