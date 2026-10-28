@@ -93,7 +93,7 @@ type Item = {
     }>;
   }>;
 };
-type Category = { id: string; displayName: string; items: Item[] };
+type Category = { id: string; displayName: string; description?: string; items: Item[] };
 type Catalog = {
   availability: {
     open: boolean;
@@ -1027,6 +1027,9 @@ export default function CustomerOrder() {
                 key={category.id}
               >
                 <h2>{category.displayName}</h2>
+                {category.description && (
+                  <p className="categoryNote">{category.description}</p>
+                )}
                 <div className="itemGrid">
                   {category.items.map((item) => (
                     <button

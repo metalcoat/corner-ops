@@ -3,7 +3,7 @@ import { ensureOrderingChannelSchema } from "@/lib/ordering-channel-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
 
-type CategoryRow = { id: string; name: string; display_name: string; parent_id: string | null; presentation_only: boolean; sort_order: number };
+type CategoryRow = { id: string; name: string; display_name: string; description: string | null; parent_id: string | null; presentation_only: boolean; sort_order: number };
 type ItemRow = { id: string; category_id: string; name: string; description: string; sku: string; base_price_cents: number; taxable: boolean; available: boolean; sort_order: number; image_url:string|null; image_alt:string|null };
 type ModifierRow = {
   item_id: string; group_id: string; group_name: string; prompt: string;
@@ -46,14 +46,14 @@ export function groupDependentModifiers(groups:OrderingModifierGroupView[]){
   without.splice(dressingIndex<0?without.length:dressingIndex+1,0,...crumbly);
   return without;
 }
-export type OrderingMenuCategoryView = { id: string; name: string; displayName: string; parentId: string | null; presentationOnly: boolean; sortOrder: number; items: OrderingMenuItemView[] };
+export type OrderingMenuCategoryView = { id: string; name: string; displayName: string; description: string; parentId: string | null; presentationOnly: boolean; sortOrder: number; items: OrderingMenuItemView[] };
 
 export type OrderingMenuChannel="pos"|"web";
 export async function orderingMenu(business: OrderingBusiness,channel:OrderingMenuChannel="pos"): Promise<OrderingMenuCategoryView[]> {
   await ensureOrderingChannelSchema();
   await ensureOrderingMenuOverrideSchema();
   const sql = getSql();
-  const categories = (await sql`SELECT c.id,c.name,COALESCE(ch.display_name,o.display_name,c.display_name) display_name,CASE WHEN ch.parent_id_overridden THEN ch.parent_id WHEN o.parent_id_overridden THEN o.parent_id ELSE c.parent_id END parent_id,c.presentation_only,COALESCE(ch.sort_order,o.sort_order,c.sort_order) sort_order FROM ordering_menu_categories c LEFT JOIN ordering_category_overrides o ON o.category_id=c.id LEFT JOIN ordering_category_channel_overrides ch ON ch.category_id=c.id AND ch.channel=${channel} WHERE c.business=${business} AND c.active=TRUE AND COALESCE(ch.visible,o.visible,TRUE)=TRUE ORDER BY COALESCE(ch.sort_order,o.sort_order,c.sort_order),c.name`) as CategoryRow[];
+  const categories = (await sql`SELECT c.id,c.name,COALESCE(ch.display_name,o.display_name,c.display_name) display_name,o.description,CASE WHEN ch.parent_id_overridden THEN ch.parent_id WHEN o.parent_id_overridden THEN o.parent_id ELSE c.parent_id END parent_id,c.presentation_only,COALESCE(ch.sort_order,o.sort_order,c.sort_order) sort_order FROM ordering_menu_categories c LEFT JOIN ordering_category_overrides o ON o.category_id=c.id LEFT JOIN ordering_category_channel_overrides ch ON ch.category_id=c.id AND ch.channel=${channel} WHERE c.business=${business} AND c.active=TRUE AND COALESCE(ch.visible,o.visible,TRUE)=TRUE ORDER BY COALESCE(ch.sort_order,o.sort_order,c.sort_order),c.name`) as CategoryRow[];
   const items = (await sql`SELECT i.id,COALESCE(ch.category_id,o.category_id,i.category_id) category_id,COALESCE(ch.display_name,o.display_name,i.name) name,COALESCE(ch.description,o.description,i.description) description,i.sku,i.base_price_cents,i.taxable,i.available,COALESCE(ch.sort_order,o.sort_order,i.sort_order) sort_order,CASE WHEN (${channel}='pos' AND media.show_pos) OR (${channel}='web' AND media.show_web) THEN '/api/ordering/media/'||media.id ELSE NULL END image_url,media.alt_text image_alt FROM ordering_menu_items i LEFT JOIN ordering_item_overrides o ON o.item_id=i.id LEFT JOIN ordering_item_channel_overrides ch ON ch.item_id=i.id AND ch.channel=${channel} LEFT JOIN LATERAL(SELECT * FROM ordering_menu_media m WHERE m.target_type='item' AND m.target_id=i.id AND m.is_primary ORDER BY uploaded_at DESC LIMIT 1) media ON TRUE WHERE i.business=${business} AND i.active=TRUE AND COALESCE(ch.visible,o.visible,TRUE)=TRUE ORDER BY COALESCE(ch.sort_order,o.sort_order,i.sort_order),i.name`) as ItemRow[];
   const modifiers = (await sql`
     SELECT link.item_id, grp.id AS group_id, grp.name AS group_name, grp.prompt,
@@ -123,6 +123,7 @@ export async function orderingMenu(business: OrderingBusiness,channel:OrderingMe
     id: category.id,
     name: category.name,
     displayName: category.display_name || category.name,
+    description: category.description || "",
     parentId: category.parent_id,
     presentationOnly: Boolean(category.presentation_only),
     sortOrder: Number(category.sort_order),

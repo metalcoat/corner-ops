@@ -40,6 +40,7 @@ export async function GET(request: Request) {
     const categories = scheduled.map((category: any) => ({
       id: category.id,
       displayName: category.displayName,
+      description: category.description || "",
       parentId: category.parentId,
       presentationOnly: category.presentationOnly,
       items: category.items.filter((item: any) => item.available).map((item: any) => ({
