@@ -8,6 +8,7 @@ import {
   pizzaToppingPriceCents,
   type PizzaToppingSelection,
 } from "@/lib/ordering-pizza-toppings";
+import { pointsRewardFitsCart } from "@/lib/ordering-points-rules";
 import {
   formatModifierIntensity,
   supportsSubModifierIntensity,
@@ -145,6 +146,11 @@ type Catalog = {
       formattedAddress: string;
       primary: boolean;
     }>;
+    points?: {
+      active: boolean;
+      balance: number;
+      rewards: Array<{ id: string; label: string; points: number; kind: string; itemIds: string[]; variantIds: string[]; optionIds: string[] }>;
+    } | null;
     loyaltyAvailableAfterSignIn: boolean;
     giftCardsAcceptedAtPayment: boolean;
   };
@@ -287,6 +293,7 @@ export default function CustomerOrder() {
       formattedAddress: string;
     } | null>(null),
     [rewardApplied, setRewardApplied] = useState(false),
+    [pointsUsed, setPointsUsed] = useState<Array<{ id: string; label: string; points: number; discount_cents: number }>>([]),
     [busy, setBusy] = useState(false),
     [savedCards, setSavedCards] = useState<Array<{ id: string; brand: string; last4: string; expMonth: number | null; expYear: number | null }>>([]);
   const signedIn = Boolean(catalog?.customer.authenticated || phoneVerified);
@@ -306,6 +313,7 @@ export default function CustomerOrder() {
   useEffect(() => {
     setReview(null);
     setRewardApplied(false);
+    setPointsUsed([]);
   }, [serviceType, timing, scheduledFor, firstName, lastName, phone, email, deliveryAddress, deliveryUnit, deliveryInstructions]);
   const selectedDeliveryLocation = DELIVERY_LOCATION_PRESETS.find(
     (location) => location.id === selectedDeliveryLocationId,
@@ -596,6 +604,7 @@ export default function CustomerOrder() {
       }
       setReview(priced);
       setRewardApplied(false);
+      setPointsUsed([]);
       setPaymentChoice(null);
       return priced;
     } catch (e) {
@@ -678,6 +687,29 @@ export default function CustomerOrder() {
       setMessage(
         error instanceof Error ? error.message : "Reward could not be applied.",
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function changePoints(method: "POST" | "DELETE", body: Record<string, string>) {
+    if (!review?.id || busy) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch(
+        `/api/customer/orders/${encodeURIComponent(review.id)}/points`,
+        { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
+      );
+      if (!response.ok) throw new Error(await failure(response));
+      const result = await response.json();
+      setReview((current: any) => ({
+        ...current,
+        discountCents: Number(result.order.discount_cents),
+        totalCents: Number(result.order.total_cents),
+      }));
+      setPointsUsed(result.redemptions || []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Points could not be used.");
     } finally {
       setBusy(false);
     }
@@ -1550,6 +1582,41 @@ export default function CustomerOrder() {
                         </button>
                       </div>
                     ))}
+                  {catalog.customer.points?.active && (() => {
+                    const points = catalog.customer.points!;
+                    const available = Math.floor(points.balance - pointsUsed.reduce((sum, row) => sum + Number(row.points), 0));
+                    const cartLines = cart.map((line) => ({
+                      itemId: line.item.id,
+                      variantId: line.variantId,
+                      optionIds: [...Object.values(line.modifierSelections).flat(), ...line.pizzaToppings.map((topping) => topping.modifierOptionId)],
+                    }));
+                    const usable = points.rewards.filter((reward) => reward.points <= available && pointsRewardFitsCart(reward, cartLines));
+                    return (
+                      <div className="loyaltyRewardOffer">
+                        <div>
+                          <strong>You have {available} reward points</strong>
+                          <small>
+                            {usable.length
+                              ? "Use them on something in this order:"
+                              : "Nothing in this order can use your points yet."}
+                          </small>
+                          {pointsUsed.map((row) => (
+                            <small key={row.id}>
+                              {row.label}: −{money(Number(row.discount_cents))} ({row.points} points){" "}
+                              <button type="button" className="linkButton" disabled={busy} onClick={() => void changePoints("DELETE", { redemptionId: row.id })}>
+                                Remove
+                              </button>
+                            </small>
+                          ))}
+                        </div>
+                        {usable.map((reward) => (
+                          <button type="button" className="choiceButton" key={reward.id} disabled={busy} onClick={() => void changePoints("POST", { rewardId: reward.id })}>
+                            Use {reward.points} points: {reward.label}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                   {paymentChoice === "card" && (
                     <small>
                       Secure card entry opens over this page. Your order stays

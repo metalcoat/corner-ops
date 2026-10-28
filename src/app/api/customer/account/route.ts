@@ -3,6 +3,7 @@ import { listSavedCards } from "@/lib/mx-saved-cards";
 import { readCustomerOrderingSession } from "@/lib/customer-ordering-session";
 import { ensureOrderingLoyaltySchema } from "@/lib/ordering-loyalty-schema";
 import { loyaltyHistory, loyaltyStatus } from "@/lib/ordering-loyalty";
+import { pointsStatus } from "@/lib/ordering-points";
 import { getSql } from "@/lib/db";
 import { addCustomerAddress } from "@/lib/ordering-customers";
 export const runtime = "nodejs";
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
     sql`SELECT id,label,display_phone,is_primary FROM ordering_customer_phones WHERE customer_id=${session.customerId} ORDER BY is_primary DESC,created_at`,
     sql`SELECT id,label,line1,line2,city,state,postal_code,is_primary FROM ordering_customer_addresses WHERE customer_id=${session.customerId} AND active=TRUE ORDER BY is_primary DESC,last_used_at DESC NULLS LAST,created_at`,
   ]);
-  return isoJson({ customer, programs, history, orders, phones, addresses, paymentMethods: await listSavedCards(session.customerId), paymentProvider: "mx" });
+  return isoJson({ customer, programs, points: await pointsStatus(session.customerId), history, orders, phones, addresses, paymentMethods: await listSavedCards(session.customerId), paymentProvider: "mx" });
 }
 
 export async function PATCH(request: Request) {

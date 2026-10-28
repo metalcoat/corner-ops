@@ -25,6 +25,7 @@ import {
   earnLoyaltyForOrder,
   finalizeLoyaltyRedemptions,
 } from "@/lib/ordering-loyalty";
+import { earnPointsForOrder, finalizePointsRedemptions } from "@/lib/ordering-points";
 import { kitchenTicketTimingLines } from "@/lib/ordering-kitchen-ticket";
 import { compareKitchenItems } from "@/lib/ordering-line-format";
 import { ensureRestaurantPlatformSchema } from "@/lib/restaurant-platform";
@@ -695,7 +696,9 @@ async function runDraftSubmit(
       );
     await sql`UPDATE restaurant_table_sessions SET status='sent',updated_at=NOW() WHERE order_id=${orderId} AND status IN('open','ordering')`;
     await finalizeLoyaltyRedemptions(orderId);
+    await finalizePointsRedemptions(orderId);
     await earnLoyaltyForOrder(orderId, actor);
+    await earnPointsForOrder(orderId, actor);
     await sql`
       INSERT INTO ordering_order_events (id, order_id, order_version, event_type, actor_type, actor_id, details)
       VALUES (${randomUUID()}, ${orderId}, ${updated[0].version}, 'status_changed', ${actor.type}, ${actor.id},
@@ -824,8 +827,10 @@ export async function transitionKitchenOrder(input: {
     if (
       input.nextStatus === "sent_to_kitchen" ||
       input.nextStatus === "completed"
-    )
+    ) {
       await earnLoyaltyForOrder(input.orderId, input.actor);
+      await earnPointsForOrder(input.orderId, input.actor);
+    }
     return rows[0];
   });
 }

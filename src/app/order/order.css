@@ -1480,3 +1480,12 @@
 .siteFooter div:first-child { display:flex; flex-wrap:wrap; gap:6px 14px; }
 .siteFooter nav { display:flex; flex-wrap:wrap; gap:6px 14px; }
 .siteFooter a { color:#fff; }
+.linkButton {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

@@ -1,2 +1,3 @@
 import LoyaltySettingsClient from "../loyalty-settings-client";
-export default function LoyaltyPage() { return <LoyaltySettingsClient />; }
+import PointsSettingsClient from "../points-settings-client";
+export default function LoyaltyPage() { return <><LoyaltySettingsClient /><PointsSettingsClient /></>; }

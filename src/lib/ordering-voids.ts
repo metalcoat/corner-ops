@@ -4,6 +4,7 @@ import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { canManagePos, type OrderingActor } from "@/lib/ordering-route-auth";
 import { reverseLoyaltyForOrder } from "@/lib/ordering-loyalty";
+import { reversePointsForOrder } from "@/lib/ordering-points";
 import { reconcileOrderTips } from "@/lib/ordering-tips";
 import { ensureOrderingTipSchema } from "@/lib/ordering-tip-schema";
 
@@ -37,6 +38,7 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
     `;
     if (!updated[0]) throw new OrderVoidError("This order changed while the void was being recorded.");
     await reverseLoyaltyForOrder(input.orderId,input.actor,reason);
+    await reversePointsForOrder(input.orderId,input.actor,reason);
     // Food the kitchen never started goes back into stock; once started it's waste, left as sold.
     if (order.status === "sent_to_kitchen" || order.status === "draft") {
       await sql`

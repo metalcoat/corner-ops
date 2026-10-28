@@ -37,6 +37,7 @@ import {
   pizzaToppingPriceCents,
   type PizzaToppingSelection,
 } from "@/lib/ordering-pizza-toppings";
+import { pointsRewardFitsCart } from "@/lib/ordering-points-rules";
 import { itemNeedsConfiguration } from "@/lib/ordering-menu-presentation";
 import Link from "next/link";
 import { isHumanTextEntry, KeyboardWedgeDetector } from "@/lib/barcode-scanner";
@@ -105,6 +106,7 @@ type SavedDraft = {
   promotions: Array<{ label: string; discountCents: number }>;
   orderItemIds: string[];
   loyalty: Array<{ label: string; discountCents: number }>;
+  pointsUsed?: number;
   reopened?: boolean;
   originalServiceType?: PosServiceType;
   checkoutOnly?: boolean;
@@ -152,6 +154,12 @@ type LoyaltyStatus = {
   progress: number;
   rewardsAvailable: number;
   upgrades?: Array<{ variantId: string; name: string; extraCents: number }>;
+};
+
+type PointsStatusView = {
+  active: boolean;
+  balance: number;
+  rewards: Array<{ id: string; label: string; points: number; kind: string; itemIds: string[]; variantIds: string[]; optionIds: string[] }>;
 };
 
 type SubmittedOrder = {
@@ -825,7 +833,9 @@ export default function PosClient({
   const [selectedCustomerAddressId, setSelectedCustomerAddressId] =
     useState("");
   const [orderOrigin, setOrderOrigin] = useState<"pos" | "phone">("pos");
-  const [loyalty, setLoyalty] = useState<LoyaltyStatus[]>([]),
+  const [points, setPoints] = useState<PointsStatusView | null>(null),
+    [pointsCode, setPointsCode] = useState<{ orderId: string; last4: string; testCode?: string; verified: boolean; entry: string } | null>(null),
+    [loyalty, setLoyalty] = useState<LoyaltyStatus[]>([]),
     [redeeming, setRedeeming] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const menuPanelRef = useRef<HTMLElement>(null);
@@ -980,8 +990,10 @@ export default function PosClient({
     };
   }, [customerOpen, customerQuery]);
   useEffect(() => {
+    setPointsCode(null);
     if (!customer) {
       setLoyalty([]);
+      setPoints(null);
       return;
     }
     const controller = new AbortController();
@@ -990,8 +1002,14 @@ export default function PosClient({
       { signal: controller.signal },
     )
       .then((r) => r.json())
-      .then((body) => setLoyalty(body.programs || []))
-      .catch(() => setLoyalty([]));
+      .then((body) => {
+        setLoyalty(body.programs || []);
+        setPoints(body.points || null);
+      })
+      .catch(() => {
+        setLoyalty([]);
+        setPoints(null);
+      });
     return () => controller.abort();
   }, [customer]);
   useEffect(() => {
@@ -2674,6 +2692,67 @@ export default function PosClient({
     }
   }
 
+  // Spending points on a staff-taken order needs the code texted to the customer's own phone.
+  async function pointsDraft() {
+    let draft = savedDraft;
+    if (!draft) draft = await saveDraft();
+    if (!draft) throw new Error("Save the order before using points.");
+    return draft;
+  }
+  async function requestPointsCode() {
+    if (redeeming) return;
+    setRedeeming(true);
+    setCheckoutError("");
+    try {
+      const draft = await pointsDraft();
+      const response = await fetch("/api/ordering/points/code", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ orderId: draft.id, action: "request" }) }),
+        body = await response.json();
+      if (!response.ok) throw new Error(body.error || "The code could not be sent.");
+      setPointsCode({ orderId: draft.id, last4: body.last4, testCode: body.testCode, verified: false, entry: "" });
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "The code could not be sent.");
+    } finally {
+      setRedeeming(false);
+    }
+  }
+  async function verifyPointsCode() {
+    if (redeeming || !pointsCode) return;
+    setRedeeming(true);
+    setCheckoutError("");
+    try {
+      const response = await fetch("/api/ordering/points/code", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ orderId: pointsCode.orderId, action: "verify", code: pointsCode.entry }) }),
+        body = await response.json();
+      if (!response.ok) throw new Error(body.error || "The code is incorrect or expired.");
+      setPointsCode({ ...pointsCode, verified: true, entry: "" });
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "The code is incorrect or expired.");
+    } finally {
+      setRedeeming(false);
+    }
+  }
+  async function redeemPoints(rewardId: string) {
+    if (redeeming) return;
+    setRedeeming(true);
+    setCheckoutError("");
+    try {
+      const draft = await pointsDraft();
+      if (!pointsCode?.verified || pointsCode.orderId !== draft.id) throw new Error("The order changed. Text the customer a new code.");
+      const response = await fetch("/api/ordering/points/redeem", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ orderId: draft.id, rewardId }) }),
+        body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Points could not be used.");
+      setSavedDraft({
+        ...draft,
+        totalCents: Number(body.order.total_cents),
+        promotions: (body.promotions || []).map((row: { label: string; discount_cents: number }) => ({ label: row.label, discountCents: Number(row.discount_cents) })),
+        loyalty: (body.applications || []).map((row: { label: string; discount_cents: number }) => ({ label: row.label, discountCents: Number(row.discount_cents) })),
+        pointsUsed: (body.redemptions || []).reduce((sum: number, row: { points: number }) => sum + Number(row.points), 0),
+      });
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "Points could not be used.");
+    } finally {
+      setRedeeming(false);
+    }
+  }
   async function redeemLoyalty(programId: string, cartLineId: string) {
     if (redeeming) return;
     setRedeeming(true);
@@ -3940,6 +4019,56 @@ export default function PosClient({
                   ))}
               </div>
             )}
+          {customer && points?.active && cart.length > 0 && (() => {
+            const available = Math.floor(points.balance - (savedDraft?.pointsUsed || 0));
+            const cartLines = cart.map((line) => ({
+              itemId: line.itemId,
+              variantId: line.variantId,
+              optionIds: [...Object.values(line.modifierSelections).flat(), ...line.pizzaToppings.map((topping) => topping.modifierOptionId)],
+            }));
+            const usable = points.rewards.filter((reward) => reward.points <= available && pointsRewardFitsCart(reward, cartLines));
+            const verified = Boolean(pointsCode?.verified && savedDraft && pointsCode.orderId === savedDraft.id);
+            return (
+              <div className="posCustomerChoices" aria-label="Reward points">
+                <strong>{available} REWARD POINTS</strong>
+                {!usable.length ? (
+                  <span>NOTHING IN THIS ORDER CAN USE POINTS</span>
+                ) : !verified ? (
+                  pointsCode && savedDraft && pointsCode.orderId === savedDraft.id ? (
+                    <>
+                      <span>
+                        CODE TEXTED TO ···{pointsCode.last4}. ASK THE CUSTOMER TO READ IT BACK.
+                        {pointsCode.testCode ? ` (TEST CODE: ${pointsCode.testCode})` : ""}
+                      </span>
+                      <input
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="6-digit code"
+                        value={pointsCode.entry}
+                        onChange={(event) => setPointsCode({ ...pointsCode, entry: event.target.value.replace(/\D/g, "") })}
+                      />
+                      <button type="button" disabled={redeeming || pointsCode.entry.length !== 6} onClick={() => void verifyPointsCode()}>
+                        VERIFY CODE
+                      </button>
+                      <button type="button" disabled={redeeming} onClick={() => void requestPointsCode()}>
+                        SEND A NEW CODE
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" disabled={redeeming} onClick={() => void requestPointsCode()}>
+                      TEXT CODE TO USE POINTS
+                    </button>
+                  )
+                ) : (
+                  usable.map((reward) => (
+                    <button type="button" key={reward.id} disabled={redeeming} onClick={() => void redeemPoints(reward.id)}>
+                      USE {reward.points} PTS: {reward.label.toUpperCase()}
+                    </button>
+                  ))
+                )}
+              </div>
+            );
+          })()}
           {customer && customer.phones?.length > 1 && (
             <div
               className="posCustomerChoices"

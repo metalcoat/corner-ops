@@ -9,6 +9,7 @@ import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
 import { customerOrderingSession } from "@/lib/customer-ordering-session";
 import { paymentProviderStatus } from "@/lib/payment-provider";
 import { loyaltyStatus } from "@/lib/ordering-loyalty";
+import { pointsStatus } from "@/lib/ordering-points";
 
 export const runtime = "nodejs";
 
@@ -131,6 +132,10 @@ export async function GET(request: Request) {
       session.customerId && session.authenticatedAt
         ? await loyaltyStatus(session.customerId)
         : [];
+    const points =
+      session.customerId && session.authenticatedAt
+        ? await pointsStatus(session.customerId)
+        : null;
     const savedAddresses =
       session.customerId && session.authenticatedAt
         ? await getSql()`SELECT id,label,line1,line2,city,state,postal_code,standardized_address,provider,provider_reference_id,latitude,longitude,is_primary
@@ -165,6 +170,7 @@ export async function GET(request: Request) {
             }
           : null,
         loyalty,
+        points,
         addresses: savedAddresses.map((address) => ({
           id: String(address.id),
           label: String(address.label || "Address"),

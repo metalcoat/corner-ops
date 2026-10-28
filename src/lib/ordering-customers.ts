@@ -303,6 +303,7 @@ export async function mergeCustomers(input: {
       throw new Error("Both customers must be active canonical records.");
     await sql`UPDATE ordering_orders SET customer_id=${input.survivorId},updated_at=NOW() WHERE customer_id=${input.mergedId}`;
     await sql`UPDATE ordering_loyalty_ledger SET customer_id=${input.survivorId} WHERE customer_id=${input.mergedId}`;
+    await sql`UPDATE ordering_points_ledger SET customer_id=${input.survivorId} WHERE customer_id=${input.mergedId}`;
     await sql`UPDATE ordering_order_loyalty_applications application SET customer_id=${input.survivorId} FROM ordering_orders orders WHERE application.customer_id=${input.mergedId} AND application.redemption_event_id IS NULL AND orders.id=application.order_id AND orders.status='draft'`;
     await sql`UPDATE ordering_customer_addresses a SET customer_id=${input.survivorId},is_primary=FALSE,updated_at=NOW() WHERE customer_id=${input.mergedId} AND NOT EXISTS (SELECT 1 FROM ordering_customer_addresses s WHERE s.customer_id=${input.survivorId} AND s.active=TRUE AND a.active=TRUE AND ((s.standardized_address<>'' AND lower(s.standardized_address)=lower(a.standardized_address)) OR (lower(s.line1)=lower(a.line1) AND lower(s.line2)=lower(a.line2) AND s.postal_code=a.postal_code)))`;
     await sql`UPDATE ordering_customer_addresses SET active=FALSE WHERE customer_id=${input.mergedId}`;
