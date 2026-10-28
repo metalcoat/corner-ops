@@ -29,6 +29,7 @@ import {
 } from "@/lib/openai-phone-ordering";
 import { attachSpokenDeliveryAddress } from "@/lib/ordering-delivery-landmarks";
 import { merchandiseAfterDiscounts, quoteDelivery } from "@/lib/ordering-delivery";
+import { addOpenAiUsage, newOpenAiCallUsage, openAiUsageSummary } from "@/lib/openai-phone-usage";
 
 const sockets = new Map<string, WebSocket>();
 
@@ -740,6 +741,7 @@ export function startOpenAiSideband(
     { headers: { Authorization: `Bearer ${apiKey}` } },
   );
   sockets.set(callId, socket);
+  const callUsage = newOpenAiCallUsage();
   const openedAt = Date.now(),
     hardStop = setTimeout(() => socket.close(), 4 * 60 * 60 * 1000),
     firstAudio = new Set<string>();
@@ -1480,6 +1482,7 @@ export function startOpenAiSideband(
         scheduleTurn();
       } else if (type === "response.done") {
         speech.done();
+        addOpenAiUsage(callUsage, row.response?.usage);
         if(hangupAfterPlayback && !speech.busy && !speech.interrupted) { hangupAfterPlayback=false; void hangup(); }
         const status = String(row.response?.status || ""),
           errorCode = String(row.response?.status_details?.error?.code || ""),
@@ -1603,6 +1606,8 @@ export function startOpenAiSideband(
     if (sockets.get(callId) === socket) sockets.delete(callId);
     const connectedMs = Date.now() - openedAt;
     void (async () => {
+      if (callUsage.responses)
+        await event(callId, `${callId}:openai:callUsage`, "openai.callUsage", "system", "callUsage", JSON.stringify(openAiUsageSummary(callUsage, model))).catch(() => undefined);
       const call = (
         await getSql()`SELECT state,bridge_action,handoff_reason FROM ordering_call_sessions WHERE business='Corner Deli' AND three_cx_call_id=${callId} LIMIT 1`
       )[0];

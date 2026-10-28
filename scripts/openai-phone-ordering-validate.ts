@@ -7,10 +7,11 @@ process.env.OPENAI_PHONE_TEST_DIDS="3155550200";
 process.env.OPENAI_PHONE_DID_LINES="3155550200=TEST LINE";
 
 async function main(){
-  const [{getSql},phone,{POST}]=await Promise.all([
+  const [{getSql},phone,{POST},usage]=await Promise.all([
     import("../src/lib/db"),
     import("../src/lib/openai-phone-ordering"),
     import("../src/app/api/openai/ordering/mcp/route"),
+    import("../src/lib/openai-phone-usage"),
   ]);
   const sql=getSql(),callId=`rtc_${randomUUID()}`,authorization=`Bearer ${process.env.OPENAI_ORDERING_MCP_TOKEN}`;
   try{
@@ -60,6 +61,8 @@ async function main(){
       shadowSendHeld:shadowed.result?.content?.[0]?.text?.includes("ORDER_REVIEW_PENDING")===true,
       namelessOrderBlocked:namelessOrder.result?.isError===true&&namelessOrder.result?.content?.[0]?.text?.includes("first and last name"),
       genericPizzaPending:JSON.parse(genericPizza.result?.content?.[0]?.text||"{}").pending===true&&genericPizza.result?.content?.[0]?.text?.includes("What size?")&&pending.pending_item?.missingRequiredFields?.[0]==="size"&&!pending.order_id,
+      // 1,000 fresh + 9,000 cached text in, 500 audio in (100 cached), 200 audio out on mini.
+      callUsageCost:(()=>{const u=usage.newOpenAiCallUsage();usage.addOpenAiUsage(u,{input_token_details:{text_tokens:10000,audio_tokens:500,cached_tokens_details:{text_tokens:9000,audio_tokens:100}},output_token_details:{audio_tokens:200}});usage.addOpenAiUsage(u,null);const r=usage.openAiUsageSummary(u,"gpt-realtime-mini");return r.responses===1&&r.cached.TEXT===9000&&r.estimatedCostUsd===Math.round((1000*0.6+9000*0.06+400*10+100*0.3+200*20)/1e6*1e4)/1e4&&usage.openAiRealtimeRates("gpt-realtime-1.5").audio===32;})(),
       liveDescriptions:describedItem.result?.isError!==true&&describedItem.result?.content?.[0]?.text?.includes('"description"'),
     };
     console.log(JSON.stringify(result,null,2));
