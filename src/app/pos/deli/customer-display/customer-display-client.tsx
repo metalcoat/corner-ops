@@ -488,6 +488,7 @@ export default function CustomerDisplayClient() {
           <div>
             <small>TOTAL</small>
             <strong>{money(data?.totalCents ?? 0)}</strong>
+            <small className="displayTaxNote">All prices include sales tax</small>
           </div>
         </footer>
       )}

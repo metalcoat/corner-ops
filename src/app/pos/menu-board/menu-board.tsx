@@ -264,6 +264,7 @@ export default function MenuBoard({ initial, layout, tv, season, qrSvg, lowMotio
         <div className="mbFoot">
           <span className="mbQrBox"><span className="qr" dangerouslySetInnerHTML={{ __html: qrSvg }} /><span>Order<br />ahead</span></span>
           <div className="mbTicker"><div ref={track} className="mbTrack">{ticker}</div></div>
+          <span className="mbTaxNote">All prices include sales tax</span>
           <span className="mbDots">{board.screens.map((s, i) => <span key={i} className={i === showing ? "on" : ""} />)}</span>
         </div>
         {offline && <i className="mbOffline" title="Can't reach the store server" />}

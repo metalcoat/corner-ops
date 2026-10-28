@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { receiptTaxLine } from "@/lib/receipt-tax";
+import { receiptBreakdownRows, receiptTaxLine, type ReceiptBreakdown } from "@/lib/receipt-tax";
 import { normalizeLabelConfig, sampleLabel, sendLabel } from "@/lib/ordering-label-print";
 import { Socket } from "node:net";
 import { validPrinterHost } from "@/lib/printer-network";
@@ -709,8 +709,12 @@ export function printPayloadLines(payload: Record<string, unknown>) {
     for (const line of payload.lines)
       lines.push(typeof line === "string" ? line : JSON.stringify(line));
   }
-  // Customer receipts: tax-included order total with the included sales tax on its own line (NY).
-  if (payload.orderTotalCents !== undefined) {
+  // Customer receipts: the price before tax and the sales tax shown separately (NY Tax Law 1132(a)).
+  if (payload.receipt && typeof payload.receipt === "object") {
+    lines.push("--------------------------------");
+    for (const [label, amount] of receiptBreakdownRows(payload.receipt as ReceiptBreakdown)) lines.push(`${label.toUpperCase()}: ${amount}`);
+  } else if (payload.orderTotalCents !== undefined) {
+    // Receipts queued before the before-tax breakdown existed.
     lines.push(`ORDER TOTAL (TAX INCLUDED): $${(Number(payload.orderTotalCents) / 100).toFixed(2)}`);
     lines.push(receiptTaxLine(Number(payload.salesTaxIncludedCents || 0)).toUpperCase());
   }

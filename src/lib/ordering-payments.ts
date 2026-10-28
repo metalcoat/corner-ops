@@ -14,7 +14,7 @@ import {reconcileOrderTips} from "@/lib/ordering-tips";
 import {ensureOrderingTipSchema} from "@/lib/ordering-tip-schema";
 import { tipChangeError } from "@/lib/ordering-payment-rules";
 import { ensureOrderingHardwareSchema } from "@/lib/ordering-hardware-schema";
-import { orderIncludedTax } from "@/lib/ordering-sales-tax";
+import { orderReceiptBreakdown } from "@/lib/ordering-sales-tax";
 
 export type CheckoutTenderType = "cash" | "card" | "gift_card";
 
@@ -223,7 +223,7 @@ export async function reprintPaymentReceipt(input:{orderId:string;business:Order
 
 export async function printPaidReceipt(input:{orderId:string;business:OrderingBusiness;itemized:boolean;receiptPrinterId?:string;actor:OrderingActor}){
   await ensureOrderingAccountSchema();
-  return withTransaction(async()=>{const sql=getSql();const order=(await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];if(!order)throw new PaymentConflictError("Order was not found.");if(order.payment_status!=="paid")throw new PaymentConflictError("The order must be fully paid before printing its final receipt.");let lines:string[]|undefined;if(input.itemized){const items=await sql`SELECT item.id,item.quantity,item.item_name_snapshot,item.variant_name_snapshot,item.line_total_cents FROM ordering_order_items item WHERE item.order_id=${input.orderId} ORDER BY item.sort_order,item.created_at,item.id`;lines=[];for(const item of items){lines.push(`${item.quantity}x ${item.item_name_snapshot}${item.variant_name_snapshot?` — ${item.variant_name_snapshot}`:""}  $${(Number(item.line_total_cents)/100).toFixed(2)}`);const modifiers=await sql`SELECT option_name_snapshot,quantity FROM ordering_order_item_modifiers WHERE order_item_id=${item.id} ORDER BY print_order_snapshot,created_at,id`;for(const modifier of modifiers)lines.push(`  ${Number(modifier.quantity)>1?`${modifier.quantity}x `:""}${modifier.option_name_snapshot}`);}}const payload={heading:input.itemized?"ITEMIZED PAID RECEIPT":"PAID RECEIPT",orderNumber:String(order.display_number),customerName:`${order.first_name_snapshot||""} ${order.last_name_snapshot||""}`.trim(),serviceType:order.service_type,orderTotalCents:Number(order.total_cents),salesTaxIncludedCents:(await orderIncludedTax(input.orderId)).taxCents,totalPaidCents:Number(order.paid_cents),remainingDueCents:0,cashier:input.actor.name,receiptPrinterId:input.receiptPrinterId||"",...(lines?{lines}:{})};const pending=(await sql`SELECT id FROM ordering_print_jobs WHERE order_id=${input.orderId} AND purpose='paid_receipt' AND payload->>'customerReceiptPending'='true' ORDER BY created_at DESC LIMIT 1 FOR UPDATE`)[0],id=String(pending?.id||randomUUID());if(pending)await sql`UPDATE ordering_print_jobs SET status='queued',event_subtype=${input.itemized?"pos_itemized":"pos_non_itemized"},error_message='',payload=${JSON.stringify(payload)}::jsonb WHERE id=${id}`;else await sql`INSERT INTO ordering_print_jobs(id,business,order_id,purpose,event_subtype,status,actor_type,actor_id,error_message,payload) VALUES(${id},${input.business},${input.orderId},'paid_receipt',${input.itemized?"pos_itemized":"pos_non_itemized"},'queued',${input.actor.type},${input.actor.id},'',${JSON.stringify(payload)}::jsonb)`;return {printJobId:id};});
+  return withTransaction(async()=>{const sql=getSql();const order=(await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];if(!order)throw new PaymentConflictError("Order was not found.");if(order.payment_status!=="paid")throw new PaymentConflictError("The order must be fully paid before printing its final receipt.");let lines:string[]|undefined;if(input.itemized){const items=await sql`SELECT item.id,item.quantity,item.item_name_snapshot,item.variant_name_snapshot,item.line_total_cents FROM ordering_order_items item WHERE item.order_id=${input.orderId} ORDER BY item.sort_order,item.created_at,item.id`;lines=[];for(const item of items){lines.push(`${item.quantity}x ${item.item_name_snapshot}${item.variant_name_snapshot?` — ${item.variant_name_snapshot}`:""}  $${(Number(item.line_total_cents)/100).toFixed(2)}`);const modifiers=await sql`SELECT option_name_snapshot,quantity FROM ordering_order_item_modifiers WHERE order_item_id=${item.id} ORDER BY print_order_snapshot,created_at,id`;for(const modifier of modifiers)lines.push(`  ${Number(modifier.quantity)>1?`${modifier.quantity}x `:""}${modifier.option_name_snapshot}`);}}const payload={heading:input.itemized?"ITEMIZED PAID RECEIPT":"PAID RECEIPT",orderNumber:String(order.display_number),customerName:`${order.first_name_snapshot||""} ${order.last_name_snapshot||""}`.trim(),serviceType:order.service_type,receipt:await orderReceiptBreakdown(input.orderId),totalPaidCents:Number(order.paid_cents),remainingDueCents:0,cashier:input.actor.name,receiptPrinterId:input.receiptPrinterId||"",...(lines?{lines}:{})};const pending=(await sql`SELECT id FROM ordering_print_jobs WHERE order_id=${input.orderId} AND purpose='paid_receipt' AND payload->>'customerReceiptPending'='true' ORDER BY created_at DESC LIMIT 1 FOR UPDATE`)[0],id=String(pending?.id||randomUUID());if(pending)await sql`UPDATE ordering_print_jobs SET status='queued',event_subtype=${input.itemized?"pos_itemized":"pos_non_itemized"},error_message='',payload=${JSON.stringify(payload)}::jsonb WHERE id=${id}`;else await sql`INSERT INTO ordering_print_jobs(id,business,order_id,purpose,event_subtype,status,actor_type,actor_id,error_message,payload) VALUES(${id},${input.business},${input.orderId},'paid_receipt',${input.itemized?"pos_itemized":"pos_non_itemized"},'queued',${input.actor.type},${input.actor.id},'',${JSON.stringify(payload)}::jsonb)`;return {printJobId:id};});
 }
 
 export async function commitTender(input: {
@@ -369,7 +369,7 @@ export async function commitTender(input: {
     const alreadySent = order.status !== "draft" && order.status !== "confirmed";
     const purpose = alreadySent ? "payment_update" : "paid_receipt";
     // Receipts show the tax inside the tax-included total on its own line (NY).
-    const receiptTax = await orderIncludedTax(input.orderId);
+    const receipt = await orderReceiptBreakdown(input.orderId);
     await sql`
       INSERT INTO ordering_print_jobs (
         id, business, order_id, check_id, payment_transaction_id, purpose, event_subtype, status,
@@ -383,7 +383,7 @@ export async function commitTender(input: {
           orderNumber: String(order.display_number), customerName: `${order.first_name_snapshot || ""} ${order.last_name_snapshot || ""}`.trim(),
           serviceType: order.service_type, phone: order.phone_snapshot || "", paidThisUpdateCents: applied,
           totalPaidCents: newPaid, remainingDueCents: remaining, paid: remaining === 0,
-          orderTotalCents: newPaid + remaining, salesTaxIncludedCents: receiptTax.taxCents,
+          receipt,
           cashier: input.actor.name,
           receiptPrinterId: input.receiptPrinterId || "",
           openCashDrawer: tillCash,

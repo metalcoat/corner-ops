@@ -1,8 +1,8 @@
 import { getSql } from "@/lib/db";
 import { ensureCustomerOrderingSchema } from "@/lib/customer-ordering-schema";
 import { sendTransactionalEmail } from "@/lib/transactional-email";
-import { orderIncludedTax } from "@/lib/ordering-sales-tax";
-import { receiptTaxLine } from "@/lib/receipt-tax";
+import { orderReceiptBreakdown } from "@/lib/ordering-sales-tax";
+import { receiptBreakdownRows } from "@/lib/receipt-tax";
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -24,10 +24,12 @@ export async function customerOrderConfirmation(orderId: string): Promise<any> {
       line_total_cents,special_instructions
     FROM ordering_order_items WHERE order_id=${orderId} ORDER BY sort_order,created_at,id
   `) as Array<Record<string, any>>;
-  const tax = await orderIncludedTax(orderId);
+  const receipt = await orderReceiptBreakdown(orderId);
   return {
     ...order,
-    sales_tax_included_cents: tax.taxCents,
+    receipt,
+    receipt_rows: receiptBreakdownRows(receipt),
+    sales_tax_included_cents: receipt.taxCents,
     email_delivery_configured: Boolean(
       (process.env.RESEND_API_KEY?.trim() &&
         (process.env.EMPLOYEE_NOTIFICATION_FROM_EMAIL?.trim() ||
@@ -74,13 +76,14 @@ export async function sendCustomerOrderConfirmation(orderId: string) {
       ...(order.discount_cents
         ? [`Discount: -${money(order.discount_cents)}`]
         : []),
-      ...(Number(order.delivery_fee_cents) > 0
+      ...(Number(order.delivery_fee_cents) > 0 && !order.receipt.untaxedFeeCents
         ? [`Delivery fee: ${money(Number(order.delivery_fee_cents))}`]
         : []),
+      "",
+      ...order.receipt_rows.map(([label, amount]: [string, string]) => `${label}: ${amount}`),
       order.payment_status === "paid"
-        ? `Total paid: ${money(order.paid_cents)}`
-        : `Total due at ${delivery ? "delivery" : "pickup"}: ${money(order.total_cents)}`,
-      receiptTaxLine(order.sales_tax_included_cents),
+        ? `Paid: ${money(order.paid_cents)}`
+        : `Due at ${delivery ? "delivery" : "pickup"}: ${money(Math.max(0, order.total_cents - order.paid_cents))}`,
       "",
       "All sales final: Once an order is placed, it cannot be cancelled and no refunds are given.",
       "",

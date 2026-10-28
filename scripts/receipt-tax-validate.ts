@@ -32,8 +32,12 @@ async function main() {
     check(tax.taxCents === expected, `Included tax should be ${expected}, got ${tax.taxCents}`);
     const confirmation = await customerOrderConfirmation(orderId);
     check(confirmation.sales_tax_included_cents === expected && confirmation.total_cents === 2244, "Online confirmation should carry the included tax without changing the total.");
-    const printed = printPayloadLines({ heading: "PAID RECEIPT", orderNumber: "1", orderTotalCents: 2244, salesTaxIncludedCents: expected, totalPaidCents: 2244, remainingDueCents: 0 });
-    check(printed.includes("ORDER TOTAL (TAX INCLUDED): $22.44") && printed.includes(`SALES TAX INCLUDED: $${(expected / 100).toFixed(2)}`), `Printed receipt lines are missing the tax: ${printed.join(" | ")}`);
+    check(confirmation.receipt.beforeTaxCents + confirmation.receipt.taxCents === 2244, "Before tax plus tax must equal the total.");
+    const { orderReceiptBreakdown } = await import("../src/lib/ordering-sales-tax");
+    const printed = printPayloadLines({ heading: "PAID RECEIPT", orderNumber: "1", receipt: await orderReceiptBreakdown(orderId), totalPaidCents: 2244, remainingDueCents: 0 });
+    check(printed.includes(`SUBTOTAL BEFORE TAX: $${((2244 - expected) / 100).toFixed(2)}`) && printed.includes(`SALES TAX (8%): $${(expected / 100).toFixed(2)}`) && printed.includes("TOTAL (TAX INCLUDED): $22.44"), `Printed receipt lines are missing the tax: ${printed.join(" | ")}`);
+    const older = printPayloadLines({ heading: "PAID RECEIPT", orderNumber: "1", orderTotalCents: 2244, salesTaxIncludedCents: expected });
+    check(older.includes("ORDER TOTAL (TAX INCLUDED): $22.44"), "Receipts queued earlier still print.");
     const kitchen = printPayloadLines({ heading: "PAYMENT UPDATE", orderNumber: "1", totalPaidCents: 100 });
     check(!kitchen.some((line) => line.includes("SALES TAX")), "Payloads without an order total don't print a tax line.");
     console.log(JSON.stringify({ rateBps, orderTotalCents: 2244, salesTaxIncludedCents: expected, printed: printed.slice(-5) }, null, 2));

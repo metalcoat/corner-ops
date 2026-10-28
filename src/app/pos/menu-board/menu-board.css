@@ -164,3 +164,5 @@ html:has(.menuBoard), body:has(.menuBoard) { margin: 0; height: 100%; background
 .mbRewards.on .mbTop h2 { animation: mbSlam .7s .15s both }
 .mbRewards.on .card { animation: mbRise .7s both; animation-delay: calc(var(--i, 0) * 180ms + 350ms) }
 .mbRewards.on .bonus { animation: mbPop .8s .9s cubic-bezier(.2,1.6,.4,1) both }
+
+.mbTaxNote { flex: none; padding-left: 26px; font-size: 22px; font-weight: 500; color: var(--muted); white-space: nowrap }

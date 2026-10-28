@@ -83,6 +83,9 @@
   color: var(--muted);
   font-size: 15px;
 }
+.confirmationDue {
+  font-weight: 600;
+}
 .accountOrderHeading,
 .accountOrder summary,
 .accountOrderDetails > div {
@@ -1492,4 +1495,10 @@
   font: inherit;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.taxNote {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
 }

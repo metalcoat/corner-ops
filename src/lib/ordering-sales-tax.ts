@@ -8,7 +8,7 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingDeliverySchema } from "@/lib/ordering-delivery-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
-import { includedTax } from "@/lib/receipt-tax";
+import { includedTax, receiptBreakdown, type ReceiptBreakdown } from "@/lib/receipt-tax";
 
 let historyReady: Promise<void> | null = null;
 /** Every tax rate the store has used, so old orders keep their old rate. */
@@ -57,7 +57,13 @@ export function taxableSplit(row: Record<string, unknown>) {
  * shown separately when prices include tax). Same math as the sales tax report,
  * at the rate in effect when the order was placed. Prices and totals are unchanged.
  */
-export async function orderIncludedTax(orderId: string): Promise<{ taxCents: number; rateBps: number }> {
+export async function orderReceiptBreakdown(orderId: string): Promise<ReceiptBreakdown> {
+  const tax = await orderIncludedTax(orderId);
+  const [order] = await getSql()`SELECT total_cents,tip_cents,COALESCE(delivery_fee_cents,0) delivery_fee_cents FROM ordering_orders WHERE id=${orderId}`;
+  return receiptBreakdown({ totalCents: Number(order?.total_cents || 0), tipCents: Number(order?.tip_cents || 0), deliveryFeeCents: Number(order?.delivery_fee_cents || 0), deliveryFeeTaxable: tax.deliveryFeeTaxable, taxCents: tax.taxCents, rateBps: tax.rateBps });
+}
+
+export async function orderIncludedTax(orderId: string): Promise<{ taxCents: number; rateBps: number; deliveryFeeTaxable: boolean }> {
   await ensureTaxRateHistory();
   const [row] = await getSql()`
     SELECT COALESCE(lines.line_cents,0)::float8 line_cents, COALESCE(lines.taxable_line_cents,0)::float8 taxable_line_cents,
@@ -69,9 +75,10 @@ export async function orderIncludedTax(orderId: string): Promise<{ taxCents: num
     LEFT JOIN LATERAL (SELECT tax_rate_bps,delivery_fee_taxable,prices_include_tax FROM ordering_tax_rate_history h
       WHERE h.business=o.business AND h.effective_at<=o.created_at ORDER BY h.effective_at DESC, h.id DESC LIMIT 1) rate ON TRUE
     WHERE o.id=${orderId}`;
-  if (!row || row.prices_include_tax === false) return { taxCents: 0, rateBps: Number(row?.tax_rate_bps || 0) };
+  const deliveryFeeTaxable = row?.delivery_fee_taxable !== false;
+  if (!row || row.prices_include_tax === false) return { taxCents: 0, rateBps: Number(row?.tax_rate_bps || 0), deliveryFeeTaxable };
   const { taxable, rate } = taxableSplit(row);
-  return { taxCents: includedTax(taxable, rate), rateBps: rate };
+  return { taxCents: includedTax(taxable, rate), rateBps: rate, deliveryFeeTaxable };
 }
 
 export { includedTax };

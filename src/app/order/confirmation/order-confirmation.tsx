@@ -177,19 +177,21 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
               <strong>−{money(Number(order.discount_cents))}</strong>
             </div>
           )}
-          {Number(order.delivery_fee_cents) > 0 && (
+          {Number(order.delivery_fee_cents) > 0 && !order.receipt?.untaxedFeeCents && (
             <div>
               <span>Delivery fee</span>
               <strong>{money(Number(order.delivery_fee_cents))}</strong>
             </div>
           )}
-          <div className="confirmationTotal">
-            <span>{due ? (delivering ? "Due at delivery" : "Due at pickup") : "Total paid"}</span>
+          {(order.receipt_rows || []).map(([label, amount]: [string, string]) => (
+            <div key={label} className={label.startsWith("Total") ? "confirmationTotal" : "confirmationTax"}>
+              <span>{label}</span>
+              <strong>{amount}</strong>
+            </div>
+          ))}
+          <div className="confirmationDue">
+            <span>{due ? (delivering ? "Due at delivery" : "Due at pickup") : "Paid"}</span>
             <strong>{money(due || order.paid_cents || order.total_cents)}</strong>
-          </div>
-          <div className="confirmationTax">
-            <span>Sales tax included</span>
-            <strong>{money(Number(order.sales_tax_included_cents || 0))}</strong>
           </div>
         </div>
         <p className="confirmationEmail">

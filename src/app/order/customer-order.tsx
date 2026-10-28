@@ -1015,6 +1015,7 @@ export default function CustomerOrder() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
+            <small className="taxNote">All prices include sales tax.</small>
           </div>
           {!query.trim() && featuredItems.length > 0 && (
             <section className="featuredItems" id="featured-items">
@@ -1152,6 +1153,7 @@ export default function CustomerOrder() {
                   <strong>{money(Number(review.totalCents))}</strong>
                 </div>
               )}
+            <small className="taxNote">All prices include sales tax.</small>
           </div>
           {serviceType === "delivery" && catalog && (
             <p className="deliveryNote">
