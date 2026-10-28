@@ -312,6 +312,26 @@ async def main():
     finally:
         gp.bridge, gp.app_action = original_bridge, original_action
     check("bridge failure hands off and releases the call", actions[:1] == ["handoff"] and b"\x00\x00\x00" in writer.frames, {"actions": actions, "frames": [f.hex() for f in writer.frames]})
+
+    # Tool results stay in the Live context and are re-billed each turn (2026-10-28): empty fields, default
+    # modifier quantities and raw cents go; ids, display totals, tipCents, false/zero and pizza portions stay.
+    cart = gp.voice_safe_tool_result({
+        "ok": True, "orderId": "o1", "totalCents": 1599, "totalDisplay": "$15.99", "amountDueCents": 1599,
+        "amountDueDisplay": "$15.99", "tipCents": 0, "paymentMethod": "", "warnings": [],
+        "lines": [{"say": "Pizza Jumbo Thin with half Mushrooms", "lineId": "L1", "variant": "Jumbo Thin", "quantity": 1,
+                   "modifiers": [{"group": "Pizza Toppings", "name": "Mushrooms", "quantity": 1, "portion": "left_half"},
+                                 {"group": "Wing Sauce", "name": "Mild", "quantity": 2}]}],
+    })
+    modifiers = cart["lines"][0]["modifiers"]
+    check("compact cart drops raw cents and empty fields", not {"totalCents", "amountDueCents", "paymentMethod", "warnings"} & set(cart), cart)
+    check("compact cart keeps ids, totals, tip and quantities", cart["orderId"] == "o1" and cart["totalDisplay"] == "$15.99" and cart["tipCents"] == 0 and cart["lines"][0]["quantity"] == 1 and cart["lines"][0]["lineId"] == "L1", cart)
+    check("compact cart keeps portions and non-default modifier quantities", "quantity" not in modifiers[0] and modifiers[0]["portion"] == "left_half" and modifiers[1]["quantity"] == 2, modifiers)
+    failed = gp.voice_safe_tool_result({"ok": False, "error": {"code": "ITEM_NOT_ON_MENU", "message": "No match."}, "pending": False})
+    check("compact error keeps ok false and the error", failed["ok"] is False and failed["error"]["code"] == "ITEM_NOT_ON_MENU" and failed["pending"] is False, failed)
+    usage = gp.new_usage()
+    gp.add_usage(usage, {"promptTokenCount": 10, "cachedContentTokenCount": 4, "toolUsePromptTokenCount": 2, "promptTokensDetails": [{"modality": "TEXT", "tokenCount": 10}]})
+    summary = gp.usage_summary(usage, "m")
+    check("usage summary reports cached and tool-use prompt tokens", summary["cachedTokens"] == 4 and summary["toolUsePromptTokens"] == 2 and summary["messages"] == 1, summary)
     print(json.dumps({"status": "passed", "checks": len(checks)}))
 
 

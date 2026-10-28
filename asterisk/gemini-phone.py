@@ -102,9 +102,33 @@ async def mcp_call(call_id, name, arguments, request_id=None):
     return body
 
 
+# Raw cents duplicate totalDisplay/amountDueDisplay and must never be spoken; tipCents stays (it is sent back).
+DROPPED_RESULT_KEYS = {"totalCents", "amountDueCents"}
+
+
+def compact_tool_result(value, top=True):
+    """Tool results stay in the Live context and are re-billed every turn: drop empty fields, default
+    modifier quantities and raw cents. False, 0 and error details are kept."""
+    if isinstance(value, list):
+        return [compact_tool_result(item, False) for item in value]
+    if not isinstance(value, dict):
+        return value
+    compact = {}
+    for key, item in value.items():
+        if top and key in DROPPED_RESULT_KEYS:
+            continue
+        if key == "quantity" and item == 1 and "group" in value:
+            continue
+        item = compact_tool_result(item, False)
+        if item is None or item == "" or item == [] or item == {}:
+            continue
+        compact[key] = item
+    return compact
+
+
 def voice_safe_tool_result(value):
     """Keep operational draft language out of provider-facing tool results."""
-    safe = scrub_internal_order_language(value)
+    safe = compact_tool_result(scrub_internal_order_language(value))
     if isinstance(safe, dict):
         if is_failed_tool_result(safe):
             # An error must reach the model intact; "continue checkout" would tell it to ignore the failure.
@@ -244,7 +268,7 @@ LIVE_PRICES = {"input": {"TEXT": 0.75, "AUDIO": 3.00}, "output": {"TEXT": 4.50, 
 
 
 def new_usage():
-    return {"messages": 0, "input": {}, "output": {}, "prompt": 0, "response": 0}
+    return {"messages": 0, "input": {}, "output": {}, "prompt": 0, "response": 0, "cached": 0, "toolUsePrompt": 0}
 
 
 def add_usage(usage, metadata):
@@ -254,6 +278,9 @@ def add_usage(usage, metadata):
     usage["messages"] += 1
     usage["prompt"] += int(metadata.get("promptTokenCount") or 0)
     usage["response"] += int(metadata.get("responseTokenCount") or 0)
+    # Live has no explicit cache; this shows whether Google applies any implicit caching to the prompt.
+    usage["cached"] += int(metadata.get("cachedContentTokenCount") or 0)
+    usage["toolUsePrompt"] += int(metadata.get("toolUsePromptTokenCount") or 0)
     for side, key in (("input", "promptTokensDetails"), ("output", "responseTokensDetails")):
         for row in metadata.get(key) or []:
             modality = str(row.get("modality") or "TEXT")
@@ -269,6 +296,9 @@ def usage_summary(usage, model):
         "model": model,
         "promptTokens": usage["prompt"],
         "responseTokens": usage["response"],
+        "cachedTokens": usage["cached"],
+        "toolUsePromptTokens": usage["toolUsePrompt"],
+        "messages": usage["messages"],
         "input": usage["input"],
         "output": usage["output"],
         "estimatedCostUsd": round(cost, 4),
@@ -1001,6 +1031,7 @@ async def bridge(reader, writer, call_id):
                             "argumentHash": argument_hash,
                             "retryCount": 0,
                             "isDuplicate": duplicate,
+                            "resultChars": len(json.dumps(result, separators=(",", ":"))),
                             "result": (
                                 "cached"
                                 if duplicate
