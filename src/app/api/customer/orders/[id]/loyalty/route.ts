@@ -23,7 +23,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       WHERE id=${String(body.programId || "")} AND business='Corner Deli' AND active=TRUE
     `;
     if (!program) throw new Error("That loyalty reward is unavailable.");
-    const rule = program.reward_rule as { variantIds?: string[]; itemIds?: string[]; categoryIds?: string[] };
+    const rule = program.reward_rule as { variantIds?: string[]; itemIds?: string[]; categoryIds?: string[]; capVariantId?: string | null };
     const [line] = await sql`
       SELECT line.id
       FROM ordering_order_items line
@@ -32,9 +32,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         AND (line.variant_id=ANY(${rule.variantIds || []}::uuid[])
           OR line.item_id=ANY(${rule.itemIds || []}::uuid[])
           OR item.category_id=ANY(${rule.categoryIds || []}::uuid[]))
-      ORDER BY line.sort_order,line.created_at,line.id LIMIT 1
+      ORDER BY (line.variant_id IS NOT DISTINCT FROM ${rule.capVariantId || null}::uuid) DESC,line.sort_order,line.created_at,line.id LIMIT 1
     `;
-    if (!line) throw new Error("Add an eligible Jumbo Thin pizza before using this reward.");
+    if (!line) throw new Error("Add an eligible Jumbo pizza before using this reward.");
     const applications = await requestLoyaltyRedemption({
       orderId,
       orderItemId: String(line.id),

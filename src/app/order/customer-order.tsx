@@ -132,6 +132,7 @@ type Catalog = {
       progress: number;
       quantityRequired: number;
       rewardsAvailable: number;
+      upgrades?: Array<{ variantId: string; name: string; extraCents: number }>;
     }>;
     addresses?: Array<{
       id: string;
@@ -1526,6 +1527,14 @@ export default function CustomerOrder() {
                             Base pizza is free. Added toppings are charged
                             normally.
                           </small>
+                          {program.upgrades?.map((upgrade) => (
+                            <small key={upgrade.variantId}>
+                              Upgrade to {upgrade.name} +
+                              {money(upgrade.extraCents)}: order a{" "}
+                              {upgrade.name} instead and the reward covers the
+                              rest.
+                            </small>
+                          ))}
                         </div>
                         <button
                           type="button"

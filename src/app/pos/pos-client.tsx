@@ -151,6 +151,7 @@ type LoyaltyStatus = {
   quantityRequired: number;
   progress: number;
   rewardsAvailable: number;
+  upgrades?: Array<{ variantId: string; name: string; extraCents: number }>;
 };
 
 type SubmittedOrder = {
@@ -3916,6 +3917,12 @@ export default function PosClient({
                   .map((program) => (
                     <div key={program.programId}>
                       <strong>{program.name}</strong>
+                      {program.upgrades?.map((upgrade) => (
+                        <span key={upgrade.variantId}>
+                          UPGRADE TO {upgrade.name.toUpperCase()} +
+                          {money(upgrade.extraCents)}
+                        </span>
+                      ))}
                       {cart.map((line) => (
                         <button
                           disabled={
