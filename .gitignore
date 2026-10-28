@@ -13,3 +13,9 @@ out/
 
 # Display app build output (tools/display-app/build.sh)
 tools/display-app/build/
+
+# Car tablet build output (tools/car-tablet/build.sh)
+tools/car-tablet/build/
+tools/car-tablet/app/build/
+tools/car-tablet/.gradle/
+tools/car-tablet/local.properties
