@@ -2,7 +2,7 @@ import { getSql } from "@/lib/db";
 import { ensureOrderingSchema } from "@/lib/ordering-db";
 import { ensureOrderingVariantSchema } from "@/lib/ordering-variant-schema";
 import { createHash } from "node:crypto";
-import { buildBoard, seasonFor, MENU_SCREENS, MENU_TVS, PROMOS, SEASONS, SLOT_SECONDS, TICKER, type Board, type PriceIndex, type SeasonKey } from "@/lib/menu-board-layout";
+import { buildBoard, seasonFor, MENU_SCREENS, MENU_TVS, PROMOS, REWARDS_TEASER, SEASONS, SLOT_SECONDS, TICKER, type Board, type PriceIndex, type SeasonKey } from "@/lib/menu-board-layout";
 
 type Row = { category: string; item: string; base_price_cents: number; available: boolean; variant: string | null; variant_cents: number | null; variant_available: boolean | null };
 
@@ -66,4 +66,4 @@ export async function menuBoard(tv: number, season?: SeasonKey): Promise<Board> 
  * Changes when the screens, promos or TVs are edited (a new release), not when a price does. A TV
  * whose page was loaded before that reloads, so it never draws new board data with old page code.
  */
-export const MENU_LAYOUT_VERSION = createHash("sha1").update(JSON.stringify([MENU_SCREENS, PROMOS, MENU_TVS, SEASONS, SLOT_SECONDS, TICKER])).digest("hex").slice(0, 12);
+export const MENU_LAYOUT_VERSION = createHash("sha1").update(JSON.stringify([MENU_SCREENS, PROMOS, MENU_TVS, SEASONS, SLOT_SECONDS, TICKER, REWARDS_TEASER])).digest("hex").slice(0, 12);

@@ -153,14 +153,34 @@ export const PROMOS: PromoSpec[] = [
 ];
 
 /**
+ * "Rewards coming soon" teaser. While enabled it gets its own slot at the end of the
+ * rotation and all three TVs show it together; set enabled to false to take it out.
+ * A tease only: no point values, no QR code or sign-up until the new online ordering is live.
+ */
+export const REWARDS_TEASER = {
+  enabled: true,
+  seconds: 12,
+  kicker: "Coming soon",
+  title: ["Corner Deli ", "Rewards"] as [string, string],
+  sub: "Launching in the next 1–2 months with our new online ordering",
+  teasers: [
+    { badge: "Jumbo card", head: "Buy 10 Jumbos, Get 1 FREE", text: "Every Jumbo 16\", thick or thin, counts. Your free one is a Jumbo Thin, or make it thick for $1." },
+    { badge: "Points", head: "Earn points on almost every order", text: "Spend them on free food: fries, mozz sticks, pizza logs, even a free pizza." },
+  ],
+  bonus: "Double points Mon & Tue lunch",
+  fine: "Details at launch. Jumbo Thursday and other discounts don't earn.",
+};
+
+/**
  * All TVs follow one timeline so they change screens at the same moment: slot n lasts
  * SLOT_SECONDS[n] on every TV, counted from the server's clock. Every TV needs one entry per slot.
  */
-export const SLOT_SECONDS = [12, 8, 12, 8];
+export const SLOT_SECONDS = [12, 8, 12, 8, ...(REWARDS_TEASER.enabled ? [REWARDS_TEASER.seconds] : [])];
+const TEASER_SLOT = REWARDS_TEASER.enabled ? ["r:rewards"] : [];
 export const MENU_TVS: { name: string; slots: string[] }[] = [
-  { name: "Menu TV 1", slots: ["m:pizza", "p:breakfast", "m:subs", "p:tbb"] },
-  { name: "Menu TV 2", slots: ["m:burgers", "p:chili", "m:dinners", "p:wildwest"] },
-  { name: "Menu TV 3", slots: ["m:apps", "p:fathead", "m:sweets", "p:order"] },
+  { name: "Menu TV 1", slots: ["m:pizza", "p:breakfast", "m:subs", "p:tbb", ...TEASER_SLOT] },
+  { name: "Menu TV 2", slots: ["m:burgers", "p:chili", "m:dinners", "p:wildwest", ...TEASER_SLOT] },
+  { name: "Menu TV 3", slots: ["m:apps", "p:fathead", "m:sweets", "p:order", ...TEASER_SLOT] },
 ];
 /** Shown in a promo slot whose item is sold out or missing, so the TVs stay in step. */
 const FALLBACK_PROMO = "order";
@@ -198,6 +218,7 @@ export type BoardBlock =
   | { kind: "options"; title: string; note?: string; names: string[]; extras: { label: string; price: BoardPrice }[] };
 export type BoardScreen =
   | { kind: "menu"; key: string; title: [string, string]; tag: [string, string]; layout: "two" | "three"; columns: BoardBlock[][] }
+  | { kind: "rewards"; key: string; kicker: string; title: [string, string]; sub: string; teasers: { badge: string; head: string; text: string }[]; bonus: string; fine: string }
   | { kind: "promo"; key: string; kicker: string; name: string; text: string; badgeLabel: string; badgeText: string; extras: string; photo?: string; cutout?: boolean; qr?: boolean; example: boolean };
 export type Board = { tv: number; name: string; season: SeasonKey; ribbon: string; screens: BoardScreen[]; ticker: [string, string][]; missing: string[] };
 
@@ -321,6 +342,10 @@ export function buildBoard(tv: number, season: SeasonKey, index: PriceIndex): Bo
   const missing = new Set<string>();
   const screens = spec.slots.flatMap((slot): BoardScreen[] => {
     const [kind, key] = slot.split(":");
+    if (kind === "r") {
+      const { kicker, title, sub, teasers, bonus, fine } = REWARDS_TEASER;
+      return [{ kind: "rewards", key, kicker, title, sub, teasers, bonus, fine }];
+    }
     if (kind === "p") {
       const promo = buildPromo(seasonSpec?.swap[key] ?? key, index, missing) ?? buildPromo(FALLBACK_PROMO, index, missing);
       return promo ? [promo] : [];

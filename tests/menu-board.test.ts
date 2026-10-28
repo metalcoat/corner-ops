@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBoard, MENU_TVS, SLOT_SECONDS, seasonFor, type PriceIndex, type PriceIndexItem } from "../src/lib/menu-board-layout";
+import { buildBoard, MENU_TVS, REWARDS_TEASER, SLOT_SECONDS, seasonFor, type PriceIndex, type PriceIndexItem } from "../src/lib/menu-board-layout";
 
 const item = (cents: number, variants: [string, number, boolean?][] = [], available = true): PriceIndexItem => ({
   basePriceCents: cents, available, variants: variants.map(([name, priceCents, ok = true]) => ({ name, priceCents, available: ok })),
@@ -62,4 +62,16 @@ test("menu board: promos never advertise a sold-out item, and seasons swap promo
 
 test("menu board: every TV has one screen per timeline slot", () => {
   for (const tv of MENU_TVS) assert.equal(tv.slots.length, SLOT_SECONDS.length, tv.name);
+});
+
+test("menu board: the rewards teaser has its own slot on every TV while enabled, with no QR or point values", () => {
+  const board = buildBoard(1, "everyday", index({}));
+  const teaser = board.screens.filter((s) => s.kind === "rewards");
+  assert.equal(teaser.length, REWARDS_TEASER.enabled ? 1 : 0);
+  if (REWARDS_TEASER.enabled) {
+    for (const tv of MENU_TVS) assert.equal(tv.slots.at(-1), "r:rewards", tv.name);
+    assert.equal(SLOT_SECONDS.at(-1), REWARDS_TEASER.seconds);
+    const text = JSON.stringify(REWARDS_TEASER).toLowerCase();
+    assert.ok(!text.includes("ordercornerdeli") && !text.includes("sign up") && !/\d+ points/.test(text));
+  }
 });

@@ -87,6 +87,34 @@ function Block({ block, screenKey, flashes, counter }: { block: BoardBlock; scre
 }
 
 function Screen({ screen, on, qrSvg, flashes }: { screen: BoardScreen; on: boolean; qrSvg: string; flashes: Set<string> }) {
+  if (screen.kind === "rewards") {
+    return (
+      <section className={`mbSlide mbRewards${on ? " on" : ""}`} aria-hidden={!on}>
+        <div className="mbTop">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={LOGO} alt="Corner Deli" />
+          <div>
+            <div className="kicker">{screen.kicker}</div>
+            <h2>{screen.title[0]}<em>{screen.title[1]}</em></h2>
+          </div>
+        </div>
+        <div className="body">
+          <p className="sub">{screen.sub}</p>
+          <div className="cards">
+            {screen.teasers.map((teaser, i) => (
+              <div className="card" key={teaser.head} style={{ "--i": i } as CSSProperties}>
+                <span className="badge">{teaser.badge}</span>
+                <h3>{teaser.head}</h3>
+                <p>{teaser.text}</p>
+              </div>
+            ))}
+          </div>
+          <div className="bonus">{screen.bonus}</div>
+          <small className="fine">{screen.fine}</small>
+        </div>
+      </section>
+    );
+  }
   if (screen.kind === "promo") {
     const badge = screen.badgeText && <div className="mbBurst"><div><span>{screen.badgeLabel}</span><b>{screen.badgeText}</b></div></div>;
     return (
