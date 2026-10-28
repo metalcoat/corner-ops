@@ -6,6 +6,7 @@ import PosPinGate, { type PosSessionView } from "../../pos-pin-gate";
 import ItemCancellationPanel from "./item-cancellation-panel";
 import BulkCashVoidPanel from "./bulk-cash-void-panel";
 import VoidMoneyPanel from "./void-money-panel";
+import OrderCarPhotos from "./order-car-photos";
 import { formatOrderModifier } from "@/lib/ordering-line-format";
 type Order = {
   id: string;
@@ -453,6 +454,7 @@ export default function OrderCenterClient() {
                 {selected.delivery_address} {selected.delivery_unit}
               </p>
             )}
+            {selected.service_type.includes("delivery") && <OrderCarPhotos orderId={selected.id} />}
             <h3>Items</h3>
             {(selected.items || []).map((i: any) => (
               <article key={i.id}>

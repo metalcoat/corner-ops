@@ -7,3 +7,4 @@
 .ocVoidMoney header{display:grid;gap:2px}.ocVoidMoney header strong{color:#b91c1c;letter-spacing:.06em}.ocVoidMoney header span{font-size:.9rem;color:#374151}
 .ocVoidMoneyRow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.ocVoidMoneyRow>span{flex:1 1 260px}
 .ocVoidNotice{margin:6px 0;padding:8px;border:2px solid #f59e0b;background:#fffbeb;color:#92400e;font-weight:800}
+.ocCarPhotos .carPhotoGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}.ocCarPhotos .carPhotoGrid img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px}.ocCarPhotos .carPhotoGrid button{display:grid;gap:3px;text-align:left}.ocCarPhotos p button{margin:2px 4px}

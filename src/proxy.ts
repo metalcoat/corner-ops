@@ -52,6 +52,8 @@ const selfAuthorizedApiPaths = [
   "/api/cron",
   "/api/customer",
   "/api/driver",
+  // The delivery-car tablet checks its own bearer token (from pairing) in each route.
+  "/api/car-tablet",
   "/api/ordering/store-dashboard",
   "/api/mobile/android/version",
   "/api/ordering/customer-display",
@@ -200,6 +202,7 @@ function isDeliPosApi(path: string): boolean {
       "tips",
       "labels",
       "device-setup",
+      "car-tablets",
     ].some((part) => matchesPath(path, `/api/ordering/${part}`)) ||
     path === "/api/ordering/delivery/quote" ||
     path === "/api/ordering/hardware/status" ||

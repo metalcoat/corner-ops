@@ -16,6 +16,7 @@ Contents: [All programs](#0-all-programs) · [Machines](#1-machines-and-environm
 [Sign-ins by hand](#7-sign-ins-done-by-a-person) ·
 [Outside services](#8-outside-services) ·
 [Walk-ins](#8a-entrance-walk-ins-corner-deli) ·
+[Car tablet](#8c-delivery-car-tablet-corner-deli-dev) ·
 [Guardrails](#9-guardrails-for-assistants) ·
 [Open items](#10-open-items-before-the-switch)
 
@@ -356,6 +357,39 @@ flowchart LR
   twice per turn, from ESPN's public scoreboard via `GET /api/pos/greeter/nfl` (`src/lib/greeter-nfl.ts`). Switched over 2026-10-22: `menu-tv.sh` also wakes this TV and keeps
   the greeter page on it; the Pi greeter program still runs on HDMI but isn't shown, and the Pi only keeps its CEC
   "off" lines as a backup.
+
+## 8c. Delivery car tablet (Corner Deli, dev)
+
+```mermaid
+flowchart LR
+  tab["Car tablet (Android, tools/car-tablet)<br/>kiosk: device owner + lock task<br/>foreground service: GPS + cameras"] -->|"Bearer token from pairing<br/>dev.ordercornerdeli.com /api/car-tablet/*"| app["Corner Ops dev :3000"]
+  app --> loc[(car_tablet_locations<br/>every point)]
+  app -->|"driver out on a delivery"| dl[(ordering_delivery_locations)]
+  dl --> map["Store dashboard map · dispatch · customer tracker"]
+  app --> ph[(car_tablet_photos<br/>files: uploads volume car-tablet/)]
+  pos["POS Settings › Car tablet<br/>pair · status · Snap cabin/road"] -->|car_tablet_commands| app
+  app -->|"long poll GET /api/car-tablet/commands"| tab
+```
+
+- Pairing: a manager presses **Pair car tablet** in POS Settings › Car tablet; an 8-character code (and QR,
+  `cornerops-car://pair?...`) works once for 15 minutes. The tablet trades it for a long-lived token (only its SHA-256
+  is stored, `car_tablets.token_hash`); **Unpair** revokes it. Migration 0027.
+- The driver signs in on the tablet with their POS PIN (rate-limited); with nobody signed in the tablet works for the
+  only Driver on the clock. It then acts as that driver through `ordering-driver-delivery.ts` (claim, picked up =
+  PICKED_UP + EN_ROUTE, arrived, delivered), so audit, tracking links and the customer text work as on the phone.
+- GPS: points every ~5 s while moving, queued on the tablet (SQLite) and sent in batches of up to 500
+  (`POST /api/car-tablet/locations`, idempotent per point id). All go to `car_tablet_locations`; points during an active
+  tracking session are also copied into `ordering_delivery_locations` (`client_event_id` `car:<point>:<delivery>`).
+- Photos: front camera = cabin, rear camera = road (through the windshield), JPEG, no audio ever. Reasons: manual,
+  delivery_complete (taken when the driver taps Delivered; also saved as the delivery's proof photo, which no-contact
+  orders need), remote_request (POS **Snap cabin/road/both**, on the settings page and on delivery orders in Order Center;
+  managers only). Files are in the uploads volume, so the nightly `backup-db.sh` uploads archive includes them.
+- Heartbeat every 30 s (battery, charging, network, signal, app version, queue sizes); online = heard from in 90 s.
+  Shown on the store dashboard strip and the settings page.
+- App build: `tools/car-tablet/build.sh` (Gradle in the `eclipse-temurin:17-jdk` container, SDK in
+  `~/.local/share/android-sdk`, key `~/.config/corner-ops/car-tablet.jks`, never committed), published to dev with
+  `tools/car-tablet/publish-dev.sh` → `https://dev.ordercornerdeli.com/downloads/corner-ops-car-tablet.apk`.
+  Provisioning steps: `tools/car-tablet/README.md`.
 
 ## 9. Guardrails for assistants
 
