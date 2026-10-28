@@ -35,7 +35,7 @@ function settingsFrom(row: Row | undefined): PointsSettings {
     bonusDays: ((row?.bonus_days as number[] | undefined) ?? [1, 2]).map(Number),
     bonusStart: String(row?.bonus_start ?? "10:30").slice(0, 5),
     bonusEnd: String(row?.bonus_end ?? "14:00").slice(0, 5),
-    expiryMonths: Number(row?.expiry_months ?? 12),
+    expiryMonths: Number(row?.expiry_months ?? 6),
   };
 }
 
@@ -47,18 +47,18 @@ export async function pointsRewards(business = "Corner Deli", includeInactive = 
   return getSql()`SELECT * FROM ordering_points_rewards WHERE business=${business} AND (active OR ${includeInactive}) ORDER BY points,sort_order,label`;
 }
 
-/** The customer's balance after expiring points that sat 12 months (configurable) with no orders. */
+/** The customer's balance after expiring points that sat 6 months (a setting) with no qualifying purchase. */
 export async function pointsBalance(customerId: string, business = "Corner Deli", settings?: PointsSettings): Promise<number> {
   const sql = getSql();
   const config = settings || (await pointsSettings(business));
-  const [row] = await sql`SELECT COALESCE(SUM(points),0) balance,MAX(created_at) FILTER (WHERE entry_type IN ('earn','redeem')) last_activity FROM ordering_points_ledger WHERE customer_id=${customerId} AND business=${business}`;
+  const [row] = await sql`SELECT COALESCE(SUM(points),0) balance,MAX(created_at) FILTER (WHERE entry_type='earn') last_activity FROM ordering_points_ledger WHERE customer_id=${customerId} AND business=${business}`;
   let balance = Number(row?.balance || 0);
   const last = row?.last_activity ? new Date(String(row.last_activity)) : null;
   if (balance > 0 && last && config.expiryMonths > 0) {
     const cutoff = new Date();
     cutoff.setMonth(cutoff.getMonth() - config.expiryMonths);
     if (last < cutoff) {
-      const reason = `No orders for ${config.expiryMonths} months`;
+      const reason = `No qualifying purchase for ${config.expiryMonths} months`;
       await sql`INSERT INTO ordering_points_ledger(id,business,customer_id,entry_type,points,reason,description,created_by,metadata) VALUES(${randomUUID()},${business},${customerId},'expiry',${-balance},${reason},'Points expired','system',${JSON.stringify({ lastActivity: last.toISOString() })}::jsonb)`;
       balance = 0;
     }

@@ -79,6 +79,10 @@
   padding-top: 16px;
   font-size: 20px;
 }
+.confirmationTax {
+  color: var(--muted);
+  font-size: 15px;
+}
 .accountOrderHeading,
 .accountOrder summary,
 .accountOrderDetails > div {

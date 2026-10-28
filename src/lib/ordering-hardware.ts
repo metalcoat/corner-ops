@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { receiptTaxLine } from "@/lib/receipt-tax";
 import { normalizeLabelConfig, sampleLabel, sendLabel } from "@/lib/ordering-label-print";
 import { Socket } from "node:net";
 import { validPrinterHost } from "@/lib/printer-network";
@@ -707,6 +708,11 @@ export function printPayloadLines(payload: Record<string, unknown>) {
     lines.push("--------------------------------");
     for (const line of payload.lines)
       lines.push(typeof line === "string" ? line : JSON.stringify(line));
+  }
+  // Customer receipts: tax-included order total with the included sales tax on its own line (NY).
+  if (payload.orderTotalCents !== undefined) {
+    lines.push(`ORDER TOTAL (TAX INCLUDED): $${(Number(payload.orderTotalCents) / 100).toFixed(2)}`);
+    lines.push(receiptTaxLine(Number(payload.salesTaxIncludedCents || 0)).toUpperCase());
   }
   for (const key of [
     "paidThisUpdateCents",

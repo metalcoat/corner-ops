@@ -8,6 +8,7 @@
 import { getSql } from "@/lib/db";
 import { ensureOrderingDeliverySchema } from "@/lib/ordering-delivery-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
+import { includedTax } from "@/lib/receipt-tax";
 
 let historyReady: Promise<void> | null = null;
 /** Every tax rate the store has used, so old orders keep their old rate. */
@@ -36,11 +37,44 @@ export async function recordTaxRateChange(business: OrderingBusiness, changedBy:
       WHERE last.tax_rate_bps=s.tax_rate_bps AND last.prices_include_tax=s.prices_include_tax AND last.delivery_fee_taxable=s.delivery_fee_taxable)`;
 }
 
-/** Tax included in a tax-inclusive amount, rounded to the cent. */
-export function includedTax(grossCents: number, rateBps: number) {
-  if (grossCents <= 0 || rateBps <= 0) return 0;
-  return Math.round((grossCents * rateBps) / (10_000 + rateBps));
+/**
+ * An order's sales split: what the customer paid for food and delivery (tax
+ * included, tips excluded) and the taxable part of it. Discounts reduce taxable
+ * sales proportionally; delivery fees follow the store setting.
+ */
+export function taxableSplit(row: Record<string, unknown>) {
+  const lineCents = Number(row.line_cents), taxableLines = Number(row.taxable_line_cents);
+  const discount = Math.min(Number(row.discount_cents || 0), lineCents);
+  const share = lineCents > 0 ? taxableLines / lineCents : 0;
+  const fee = Number(row.delivery_fee_cents || 0);
+  const gross = Math.round(lineCents - discount + fee);
+  const taxable = Math.round(taxableLines - discount * share + (row.delivery_fee_taxable === false ? 0 : fee));
+  return { gross, taxable: Math.min(taxable, gross), rate: Number(row.tax_rate_bps || 0) };
 }
+
+/**
+ * Sales tax included in one order's total, for customer receipts (NY requires it
+ * shown separately when prices include tax). Same math as the sales tax report,
+ * at the rate in effect when the order was placed. Prices and totals are unchanged.
+ */
+export async function orderIncludedTax(orderId: string): Promise<{ taxCents: number; rateBps: number }> {
+  await ensureTaxRateHistory();
+  const [row] = await getSql()`
+    SELECT COALESCE(lines.line_cents,0)::float8 line_cents, COALESCE(lines.taxable_line_cents,0)::float8 taxable_line_cents,
+      o.discount_cents, COALESCE(o.delivery_fee_cents,0) delivery_fee_cents, rate.tax_rate_bps, rate.delivery_fee_taxable, rate.prices_include_tax
+    FROM ordering_orders o
+    LEFT JOIN LATERAL (SELECT SUM(i.line_total_cents::numeric*(i.quantity-i.cancelled_quantity)/NULLIF(i.quantity,0)) line_cents,
+        SUM(i.line_total_cents::numeric*(i.quantity-i.cancelled_quantity)/NULLIF(i.quantity,0)) FILTER (WHERE COALESCE(m.taxable,TRUE)) taxable_line_cents
+      FROM ordering_order_items i LEFT JOIN ordering_menu_items m ON m.id=i.item_id WHERE i.order_id=o.id) lines ON TRUE
+    LEFT JOIN LATERAL (SELECT tax_rate_bps,delivery_fee_taxable,prices_include_tax FROM ordering_tax_rate_history h
+      WHERE h.business=o.business AND h.effective_at<=o.created_at ORDER BY h.effective_at DESC, h.id DESC LIMIT 1) rate ON TRUE
+    WHERE o.id=${orderId}`;
+  if (!row || row.prices_include_tax === false) return { taxCents: 0, rateBps: Number(row?.tax_rate_bps || 0) };
+  const { taxable, rate } = taxableSplit(row);
+  return { taxCents: includedTax(taxable, rate), rateBps: rate };
+}
+
+export { includedTax };
 
 export type SalesTaxDay = {
   date: string;
@@ -107,15 +141,7 @@ export async function salesTaxReport(input: { business: OrderingBusiness; start:
       AND t.created_at>=${input.start.toISOString()} AND t.created_at<${input.end.toISOString()}
       AND o.voided_at IS NULL AND o.status<>'cancelled'`;
 
-  const split = (row: Record<string, unknown>) => {
-    const lineCents = Number(row.line_cents), taxableLines = Number(row.taxable_line_cents);
-    const discount = Math.min(Number(row.discount_cents || 0), lineCents);
-    const share = lineCents > 0 ? taxableLines / lineCents : 0;
-    const fee = Number(row.delivery_fee_cents || 0);
-    const gross = Math.round(lineCents - discount + fee);
-    const taxable = Math.round(taxableLines - discount * share + (row.delivery_fee_taxable === false ? 0 : fee));
-    return { gross, taxable: Math.min(taxable, gross), rate: Number(row.tax_rate_bps || 0) };
-  };
+  const split = taxableSplit;
 
   const byDay = new Map<string, SalesTaxDay>();
   for (const row of orders) {

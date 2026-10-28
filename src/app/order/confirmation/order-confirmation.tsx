@@ -187,6 +187,10 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
             <span>{due ? (delivering ? "Due at delivery" : "Due at pickup") : "Total paid"}</span>
             <strong>{money(due || order.paid_cents || order.total_cents)}</strong>
           </div>
+          <div className="confirmationTax">
+            <span>Sales tax included</span>
+            <strong>{money(Number(order.sales_tax_included_cents || 0))}</strong>
+          </div>
         </div>
         <p className="confirmationEmail">
           {order.email_delivery_configured ? (

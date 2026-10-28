@@ -43,7 +43,7 @@ async function main() {
   const wednesday = "2026-11-04T17:00:00Z", mondayLunch = "2026-11-02T16:00:00Z";
   const result: Record<string, unknown> = {};
   try {
-    await sql`UPDATE ordering_points_settings SET active=TRUE,online_rate=1.1,store_rate=1,staff_phone_orders_earn=TRUE,bonus_multiplier=2,bonus_days='{1,2}',bonus_start='10:30',bonus_end='14:00',expiry_months=12 WHERE business='Corner Deli'`;
+    await sql`UPDATE ordering_points_settings SET active=TRUE,online_rate=1.1,store_rate=1,staff_phone_orders_earn=TRUE,bonus_multiplier=2,bonus_days='{1,2}',bonus_start='10:30',bonus_end='14:00',expiry_months=6 WHERE business='Corner Deli'`;
     await sql`INSERT INTO ordering_customers(id,business,display_name,first_name) VALUES(${customerId},'Corner Deli','Points Validator','Points')`;
     await sql`INSERT INTO ordering_customer_phones(id,customer_id,normalized_phone,display_phone,label,is_primary) VALUES(${randomUUID()},${customerId},${phone},'(315) 555-0142','Mobile',TRUE)`;
 
@@ -95,9 +95,9 @@ async function main() {
     check((await points.pointsBalance(customerId)) === 96 - 22, "Voids should take back earned points and return spent ones, once.");
     result.spending = { codeRequired: true, wrongCodeRejected: true, freeFriesDiscountCents: Number(fries.base_price_cents), pointsSpent: Number(friesReward.points), voidsReversed: true };
 
-    await sql`UPDATE ordering_points_ledger SET created_at=NOW()-INTERVAL '13 months' WHERE customer_id=${customerId}`;
-    check((await points.pointsBalance(customerId)) === 0, "Points should expire after 12 months with no orders.");
-    result.expiry = { after13MonthsIdle: 0 };
+    await sql`UPDATE ordering_points_ledger SET created_at=NOW()-INTERVAL '7 months' WHERE customer_id=${customerId}`;
+    check((await points.pointsBalance(customerId)) === 0, "Points should expire after 6 months with no qualifying purchase.");
+    result.expiry = { after7MonthsWithoutPurchase: 0 };
     console.log(JSON.stringify(result, null, 2));
   } finally {
     await sql`DELETE FROM ordering_points_redeem_codes WHERE customer_id=${customerId}`;

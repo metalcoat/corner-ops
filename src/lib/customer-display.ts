@@ -4,6 +4,8 @@ import { ensureOrderingHardwareSchema } from "@/lib/ordering-hardware-schema";
 import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { sendTransactionalEmail } from "@/lib/transactional-email";
+import { orderIncludedTax } from "@/lib/ordering-sales-tax";
+import { receiptTaxLine } from "@/lib/receipt-tax";
 import { ValidationError } from "@/lib/http";
 
 export type CustomerDisplayPayload = {
@@ -102,7 +104,7 @@ export async function submitCustomerDisplayResponse(stationKey:string, input:Rec
     if(method==="email"){
       const email=String(input.email||order.email_snapshot||order.customer_email||"").trim().toLowerCase();
       if(!/^\S+@\S+\.\S+$/.test(email))throw new Error("Enter a valid receipt email.");
-      const sent=await sendTransactionalEmail({to:email,subject:`Corner Deli receipt #${order.display_number}`,text:["Corner Deli",`Receipt #${order.display_number}`,`Order total: $${(Number(order.total_cents)/100).toFixed(2)}`,`Paid: $${(Number(order.paid_cents)/100).toFixed(2)}`,"", "Thank you for your order."].join("\n"),idempotencyKey:`customer-receipt-${order.id}`});
+      const sent=await sendTransactionalEmail({to:email,subject:`Corner Deli receipt #${order.display_number}`,text:["Corner Deli",`Receipt #${order.display_number}`,`Order total: $${(Number(order.total_cents)/100).toFixed(2)}`,receiptTaxLine((await orderIncludedTax(String(order.id))).taxCents),`Paid: $${(Number(order.paid_cents)/100).toFixed(2)}`,"", "Thank you for your order."].join("\n"),idempotencyKey:`customer-receipt-${order.id}`});
       if(sent.sent!==1)throw new Error(sent.failures[0]||"Receipt email is not configured.");
       details.email=email;
       // Store the receipt address on this order only. It is unverified input from the
@@ -113,7 +115,7 @@ export async function submitCustomerDisplayResponse(stationKey:string, input:Rec
       const printerId=String((session.payload||{}).receiptPrinterId||"");
       const pending=(await sql`SELECT id,payload FROM ordering_print_jobs WHERE order_id=${order.id} AND purpose='paid_receipt' AND payload->>'customerReceiptPending'='true' ORDER BY created_at DESC LIMIT 1`)[0],id=String(pending?.id||randomUUID());
       if(pending)await sql`UPDATE ordering_print_jobs SET status='queued',event_subtype='customer_requested',error_message='',payload=(payload-'customerReceiptPending')||${JSON.stringify({receiptPrinterId:printerId})}::jsonb WHERE id=${id}`;
-      else await sql`INSERT INTO ordering_print_jobs(id,business,order_id,purpose,event_subtype,status,actor_type,actor_id,error_message,payload) VALUES(${id},'Corner Deli',${order.id},'paid_receipt','customer_requested','queued','customer','customer-display','',${JSON.stringify({heading:'PAID RECEIPT',orderNumber:String(order.display_number),customerName:`${order.first_name_snapshot||''} ${order.last_name_snapshot||''}`.trim(),serviceType:order.service_type,totalPaidCents:Number(order.paid_cents),remainingDueCents:0,receiptPrinterId:printerId})}::jsonb)`;
+      else await sql`INSERT INTO ordering_print_jobs(id,business,order_id,purpose,event_subtype,status,actor_type,actor_id,error_message,payload) VALUES(${id},'Corner Deli',${order.id},'paid_receipt','customer_requested','queued','customer','customer-display','',${JSON.stringify({heading:'PAID RECEIPT',orderNumber:String(order.display_number),customerName:`${order.first_name_snapshot||''} ${order.last_name_snapshot||''}`.trim(),serviceType:order.service_type,orderTotalCents:Number(order.total_cents),salesTaxIncludedCents:(await orderIncludedTax(String(order.id))).taxCents,totalPaidCents:Number(order.paid_cents),remainingDueCents:0,receiptPrinterId:printerId})}::jsonb)`;
       await dispatchOrderPrintJobs(String(order.id),'Corner Deli',{includeKitchenProduction:false,jobId:id});
       details.printJobId=id;
     }

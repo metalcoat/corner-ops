@@ -41,7 +41,7 @@ export default function PointsSettingsClient() {
         ))}</fieldset>
         <label>Bonus from<input type="time" value={settings.bonusStart} onChange={(event) => set({ bonusStart: event.target.value })} /></label>
         <label>Bonus until<input type="time" value={settings.bonusEnd} onChange={(event) => set({ bonusEnd: event.target.value })} /></label>
-        <label>Points expire after this many months with no orders (0 = never)<input type="number" min="0" value={settings.expiryMonths} onChange={(event) => set({ expiryMonths: Number(event.target.value) })} /></label>
+        <label>Points expire after this many months with no qualifying purchase (0 = never)<input type="number" min="0" value={settings.expiryMonths} onChange={(event) => set({ expiryMonths: Number(event.target.value) })} /></label>
       </div>
       <div className="promotionForm">
         <h3>Rewards</h3>
