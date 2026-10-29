@@ -9,7 +9,7 @@ export type CarTabletRow = {
   online: boolean; lastSeenAt: string | null; batteryPercent: number | null; charging: boolean | null;
   networkType: string; signalLevel: number | null; appVersion: string;
   device: { model?: string; androidVersion?: string; kiosk?: boolean; deviceOwner?: boolean; gpsState?: string; queuedPoints?: number | null; queuedPhotos?: number | null };
-  location: { latitude: number; longitude: number; accuracyMeters: number | null; speedMph: number | null; capturedAt: string | null } | null;
+  location: { latitude: number; longitude: number; accuracyMeters: number | null; speedMph: number | null; heading?: number | null; capturedAt: string | null } | null;
   driver: { name: string; automatic: boolean } | null;
   pendingCommands: number; photosToday: number;
 };
