@@ -53,6 +53,18 @@ class Navigator(val xs: DoubleArray, val ys: DoubleArray, val steps: List<Step>)
         return Progress(done, off, next, (stepAlong[next] - done).coerceAtLeast(0.0), (totalMetres - done).coerceAtLeast(0.0))
     }
 
+    /** A point `metres` along the route and the direction there (degrees from north), for the test drive. */
+    fun positionAt(metres: Double): Triple<Double, Double, Float> {
+        val d = metres.coerceIn(0.0, totalMetres)
+        var i = 0
+        while (i < xs.size - 2 && along[i + 1] < d) i++
+        val span = along[i + 1] - along[i]
+        val t = if (span > 0) (d - along[i]) / span else 0.0
+        val dx = xs[i + 1] - xs[i]; val dy = ys[i + 1] - ys[i]
+        val heading = ((Math.toDegrees(kotlin.math.atan2(dx, dy)) + 360) % 360).toFloat()
+        return Triple(xs[i] + dx * t, ys[i] + dy * t, heading)
+    }
+
     /** Left the route for long enough (3 fixes in a row) that a new route is needed. */
     val offRoute get() = offRouteFixes >= 3
 

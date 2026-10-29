@@ -48,4 +48,11 @@ class NavigatorTest {
         assertEquals("0.2 miles", Navigator.distanceText(300.0))
         assertEquals("1 mile", Navigator.distanceText(1609.0))
     }
+
+    @Test fun testDriveFollowsTheRoute() {
+        val nav = route()
+        val (x, y, heading) = nav.positionAt(600.0)
+        assertEquals(500.0, x, 0.01); assertEquals(100.0, y, 0.01); assertEquals(0f, heading, 0.5f)
+        assertEquals(90f, nav.positionAt(100.0).third, 0.5f)
+    }
 }

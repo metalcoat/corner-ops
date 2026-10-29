@@ -400,7 +400,9 @@ flowchart LR
   Google Maps can't follow those rules, so the tablet (app 1.1.0) has its own Drive screen: street map downloaded once
   (`GET /api/car-tablet/streets`), route + turn-by-turn steps from `POST /api/car-tablet/route`, heading-up map,
   spoken directions (Android text-to-speech), re-route after 3 off-route fixes, GPS every second while driving.
-  Google Maps stays as a backup button. To refresh after
+  Google Maps stays as a backup button. Testing: POS Settings › Route tester (`/pos/deli/settings/route-test`,
+  `POST /api/ordering/car-tablets/route-preview`) plans any address and simulates the drive with the tablet's
+  wording in the browser; the tablet's staff menu has "Test drive" (pretend car along the route, app 1.1.1). To refresh after
   the owner edits the artifact: export its `stops` and `streets` and rerun `tools/route-map/build-route-map.py`.
 - Belmont Courts (2026-10-29): `src/lib/complex-buildings.ts` + `src/lib/route-map/belmont-courts.json` (owner's
   hand-drawn site map matched to OSM outlines; 17 buildings, Courts 100–400, unit ranges like 151–158). A delivery

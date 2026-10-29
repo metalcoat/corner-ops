@@ -72,6 +72,9 @@ class MainActivity : Activity() {
     private var lastRouteAt = 0L
     private var heading = 0f
     private var arrivedSaid = false
+    /** Test drive: a pretend car moves along the route (3× real speed) so the screen and voice can be tried indoors. */
+    private var simulating = false
+    private var simMetres = 0.0
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var pairServer: String? = null
@@ -455,18 +458,25 @@ class MainActivity : Activity() {
 
     // ---------- drive ----------
 
-    private fun startDrive(delivery: JSONObject) {
+    private fun startDrive(delivery: JSONObject, test: Boolean = false) {
         driving = delivery; navigator = null; arrivedSaid = false; heading = app.status.bearing ?: 0f
+        simulating = test; simMetres = 0.0
         TrackerService.instance?.setFastGps(true)
         show("drive")
         requestRoute()
     }
 
     private fun stopDrive() {
-        driving = null; navigator = null
+        driving = null; navigator = null; simulating = false
         TrackerService.instance?.setFastGps(false)
         tts?.stop()
         show(if (feedDriver == null && app.status.driverName == null) "signin" else "main")
+    }
+
+    private companion object {
+        /** Corner Deli, 828 Morris St. */
+        const val DELI_LAT = 44.69365
+        const val DELI_LNG = -75.48202
     }
 
     private fun say(text: String) { if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "nav") }
@@ -475,9 +485,12 @@ class MainActivity : Activity() {
     private fun requestRoute() {
         val delivery = driving ?: return
         val status = app.status
-        if (status.lat == null || status.lng == null) { banner?.text = "Waiting for GPS…"; return }
+        // A test drive indoors (no GPS fix) starts from the deli.
+        val startLat = status.lat ?: if (simulating) DELI_LAT else null
+        val startLng = status.lng ?: if (simulating) DELI_LNG else null
+        if (startLat == null || startLng == null) { banner?.text = "Waiting for GPS…"; return }
         rerouting = true; lastRouteAt = System.currentTimeMillis()
-        val from = JSONObject().put("latitude", status.lat).put("longitude", status.lng)
+        val from = JSONObject().put("latitude", startLat).put("longitude", startLng)
         worker.execute {
             try {
                 val map = driveView?.streets ?: StreetMapData.refresh(this, app.api)
@@ -520,10 +533,17 @@ class MainActivity : Activity() {
     private fun updateDrive() {
         val status = app.status
         val view = driveView ?: return
-        val lat = status.lat ?: return; val lng = status.lng ?: return
-        val x = Flat.x(lng); val y = Flat.y(lat)
+        val lat = status.lat ?: if (simulating) DELI_LAT else return
+        val lng = status.lng ?: if (simulating) DELI_LNG else return
+        var x = Flat.x(lng); var y = Flat.y(lat)
         // Point the map the way the car is going (when it's moving; a parked GPS heading wanders).
         if ((status.speedMps ?: 0f) > 2f) status.bearing?.let { heading = it }
+        val simNav = navigator
+        if (simulating && simNav != null) {
+            simMetres += 11.0 * 3          // ~25 mph, 3× speed, one tick a second
+            val (sx, sy, sh) = simNav.positionAt(simMetres)
+            x = sx; y = sy; heading = sh
+        }
         view.car = x to y
         view.heading = heading
         val nav = navigator
@@ -537,7 +557,7 @@ class MainActivity : Activity() {
             if (!arrivedSaid) { arrivedSaid = true; say("You have arrived") }
         } else {
             banner?.text = if (step == null) "Follow the blue line" else if (step.maneuver == "arrive") "Arrive in ${Navigator.distanceText(progress.toNextMetres)}" else "${Navigator.distanceText(progress.toNextMetres)} · ${step.instruction}"
-            subBanner?.text = "${Navigator.distanceText(progress.remainingMetres)} to go · $label"
+            subBanner?.text = "${if (simulating) "TEST DRIVE · " else ""}${Navigator.distanceText(progress.remainingMetres)} to go · $label"
             nav.announcement(progress)?.let { say(it) }
             if (nav.offRoute && !rerouting && System.currentTimeMillis() - lastRouteAt > 8_000) { banner?.text = "Finding a new route…"; requestRoute() }
         }
@@ -654,6 +674,10 @@ class MainActivity : Activity() {
                     "Update ${info.optString("versionName")} is ready: hold the title again and choose Install update"
                 } else "Up to date (${BuildConfig.VERSION_NAME})"
             }
+        }
+        options += "Test drive to the current delivery (pretend car)" to {
+            val current = list().firstOrNull { it.optString("deliveryId") == selectedId } ?: list().firstOrNull()
+            if (current == null) app.toast("No delivery to test with") else startDrive(current, test = true)
         }
         options += "Unpair this tablet" to {
             confirm("Unpair? The tablet stops tracking until paired again.") { app.prefs.token = null; feedDriver = null; deliveries = JSONArray(); show("pair") }
