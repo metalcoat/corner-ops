@@ -219,7 +219,11 @@ export async function ingestPoints(tablet: CarTablet, points: CarPoint[]) {
  * On arrival the tablet is asked for a road photo, saved as that delivery's proof photo.
  */
 async function applyGpsStops(tablet: CarTablet, driverId: string, points: CarPoint[]) {
-  const rows = await getSql()`SELECT d.id,d.status,d.order_id,d.en_route_at,d.arrived_at,a.latitude::float8 latitude,a.longitude::float8 longitude
+  // arrived_at is when the server heard about it; after a dead zone that's later than the car's actual stop,
+  // so the stop's start comes from the car's own first point near the address (≈60 m box) when there is one.
+  const rows = await getSql()`SELECT d.id,d.status,d.order_id,d.en_route_at,a.latitude::float8 latitude,a.longitude::float8 longitude,
+      COALESCE((SELECT MIN(l.captured_at) FROM car_tablet_locations l WHERE l.tablet_id=${tablet.id} AND l.captured_at>=d.en_route_at
+        AND abs(l.latitude-a.latitude)<0.00055 AND abs(l.longitude-a.longitude)<0.00075),d.arrived_at) arrived_at
     FROM ordering_delivery_assignments d JOIN ordering_order_delivery_addresses a ON a.order_id=d.order_id
     WHERE d.business=${tablet.business} AND d.driver_employee_id=${driverId} AND d.status IN('EN_ROUTE','ARRIVED')
       AND a.latitude IS NOT NULL AND a.longitude IS NOT NULL`;
