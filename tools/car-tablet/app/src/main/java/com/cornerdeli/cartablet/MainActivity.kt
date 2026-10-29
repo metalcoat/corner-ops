@@ -48,6 +48,7 @@ class MainActivity : Activity() {
     private lateinit var toastLine: TextView
     private lateinit var content: FrameLayout
     private var deliveries = JSONArray()
+    private var route: JSONObject? = null
     private var feedDriver: JSONObject? = null
     private var selectedId: String? = null
     private var busy = false
@@ -317,6 +318,7 @@ class MainActivity : Activity() {
                     lastFeedJson = json
                     feedDriver = reply.optJSONObject("driver")
                     deliveries = reply.optJSONArray("deliveries") ?: JSONArray()
+                    route = reply.optJSONObject("route")
                     if (feedDriver == null) app.update { it.copy(driverName = null) }
                     if (screen == "main") show("main")
                 }
@@ -356,6 +358,10 @@ class MainActivity : Activity() {
             val status = current.optString("status")
             val id = current.optString("deliveryId")
             right.addView(button("Navigate", Color.rgb(37, 99, 235)) { navigate(current) })
+            route?.optString("navigationUrl")?.takeIf { it.startsWith("https://") && (route?.optJSONArray("order")?.length() ?: 0) > 1 }?.let { url ->
+                val minutes = route?.optInt("loopMinutes")?.takeIf { it > 0 }
+                right.addView(button("Navigate whole route${minutes?.let { " · $it min" } ?: ""}", Color.rgb(30, 64, 175)) { openMaps(url) })
+            }
             if (!mine) right.addView(button("Take this delivery", Color.rgb(124, 58, 237)) { action(id, "claim", "Taken") })
             if (mine && status in listOf("ASSIGNED", "READY_FOR_DRIVER", "PICKED_UP")) right.addView(button("Picked up · leaving", Color.rgb(217, 119, 6)) { action(id, "picked_up", "On the way") })
             if (mine && status == "EN_ROUTE") right.addView(button("Arrived", Color.rgb(8, 145, 178)) { action(id, "arrived", "Arrived") })
@@ -401,7 +407,17 @@ class MainActivity : Activity() {
 
     private fun clock(iso: String) = runCatching { DateTimeFormatter.ofPattern("h:mm a").withZone(ZoneId.of("America/New_York")).format(Instant.parse(iso)) }.getOrDefault(iso)
 
+    /** Google Maps directions from the server: routed onto the preferred streets (Jay, Greene, Lafayette). */
+    private fun openMaps(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage("com.google.android.apps.maps"))
+        } catch (_: Exception) {
+            runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }.onFailure { app.toast("Google Maps isn't installed") }
+        }
+    }
+
     private fun navigate(delivery: JSONObject) {
+        delivery.optString("navigationUrl").takeIf { it.startsWith("https://") }?.let { openMaps(it); return }
         val lat = delivery.optDouble("latitude")
         val lng = delivery.optDouble("longitude")
         val target = if (!lat.isNaN() && !lng.isNaN()) "$lat,$lng" else Uri.encode(delivery.optString("address"))
@@ -487,7 +503,15 @@ class MainActivity : Activity() {
         else options += "Leave kiosk mode (until 'Back to kiosk')" to { staffUnlocked = true; runCatching { stopLockTask() } }
         options += "Android settings" to { staffUnlocked = true; runCatching { stopLockTask() }; startActivity(Intent(Settings.ACTION_SETTINGS)) }
         app.status.updateUrl?.let { url -> options += "Install update ${app.status.updateVersion}" to { installUpdate(url) } }
-        options += "Check for app update" to { background(null, "Checking…") { val info = app.api.get("/api/car-tablet/app"); "Server has ${info.optString("versionName")} (this is ${BuildConfig.VERSION_NAME})" } }
+        options += "Check for app update" to {
+            background(null, "Checking…") {
+                val info = app.api.get("/api/car-tablet/app")
+                if (info.optInt("versionCode") > BuildConfig.VERSION_CODE) {
+                    app.update { it.copy(updateVersion = info.optString("versionName"), updateUrl = app.prefs.serverUrl.trimEnd('/') + info.optString("downloadPath")) }
+                    "Update ${info.optString("versionName")} is ready: hold the title again and choose Install update"
+                } else "Up to date (${BuildConfig.VERSION_NAME})"
+            }
+        }
         options += "Unpair this tablet" to {
             confirm("Unpair? The tablet stops tracking until paired again.") { app.prefs.token = null; feedDriver = null; deliveries = JSONArray(); show("pair") }
         }

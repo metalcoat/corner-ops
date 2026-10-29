@@ -8,12 +8,16 @@ import {
   captureProof,
   changeDeliveryStatus,
   claimDeliveries,
+  deliveryRoutePlans,
   deliveryStaffing,
   listDriverDeliveries,
   syncDeliveryAssignments,
   type DriverActor,
 } from "@/lib/ordering-driver-delivery";
 import { driverOrderDetail } from "@/lib/ordering-driver-orders";
+import { deliLocation } from "@/lib/deli-location";
+import { legNavigationUrl } from "@/lib/delivery-street-router";
+import { ogdensburgRouter } from "@/lib/route-map/ogdensburg-router";
 import {
   isOnline,
   normalizePairingCode,
@@ -260,7 +264,7 @@ const ACTIVE = ["ASSIGNED", "READY_FOR_DRIVER", "PICKED_UP", "EN_ROUTE", "ARRIVE
 /** The driver's deliveries (and unclaimed ones they may take), in the shape the tablet draws. */
 export async function tabletDeliveries(tablet: CarTablet) {
   const actor = await tabletActor(tablet);
-  if (!actor) return { driver: null, deliveries: [] };
+  if (!actor) return { driver: null, deliveries: [], route: null };
   await syncDeliveryAssignments(tablet.business);
   const rows = await listDriverDeliveries(actor, {});
   const deliveries = [];
@@ -304,7 +308,20 @@ export async function tabletDeliveries(tablet: CarTablet) {
   // The driver's own deliveries first, out-the-door ones before those still in the store.
   const rank = (status: string) => ["ARRIVED", "NO_CONTACT", "EN_ROUTE", "PICKED_UP", "READY_FOR_DRIVER", "ASSIGNED", "DELIVERY_FAILED"].indexOf(status);
   deliveries.sort((a, b) => Number(b.mine) - Number(a.mine) || rank(a.status) - rank(b.status));
-  return { driver: { employeeId: actor.employeeId, name: actor.name }, deliveries };
+  // Navigate: from where the car is, on the preferred streets (Google Maps pinned to them).
+  let route: { navigationUrl: string | null; order: string[]; loopMinutes: number | null } | null = null;
+  try {
+    const car = (await getSql()`SELECT last_latitude::float8 latitude,last_longitude::float8 longitude FROM car_tablets WHERE id=${tablet.id}`)[0];
+    const here = car?.latitude != null ? { latitude: Number(car.latitude), longitude: Number(car.longitude) } : await deliLocation();
+    if (here) for (const delivery of deliveries)
+      if (delivery.latitude != null && delivery.longitude != null)
+        Object.assign(delivery, { navigationUrl: legNavigationUrl(ogdensburgRouter(), here, { latitude: delivery.latitude, longitude: delivery.longitude }) });
+    const plan = deliveryRoutePlans(rows.filter((row) => row.assigned_employee_id === actor.employeeId) as Array<Record<string, unknown>>, new Date(), await deliLocation())[0]?.plan;
+    if (plan?.stops.length) route = { navigationUrl: plan.navigationUrl, order: plan.stops.map((stop) => stop.deliveryId), loopMinutes: "loopMinutes" in plan ? Number(plan.loopMinutes) : null };
+  } catch (error) {
+    console.error("[car-tablet] route", error);
+  }
+  return { driver: { employeeId: actor.employeeId, name: actor.name }, deliveries, route };
 }
 
 export const TABLET_ACTIONS = ["claim", "picked_up", "arrived", "delivered", "no_contact", "failed", "returned"] as const;

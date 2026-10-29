@@ -388,6 +388,15 @@ flowchart LR
   delivery's address at ≤2.5 m/s marks it ARRIVED (and asks the tablet for a road photo saved as the proof photo);
   driving 200 m away after a stop of ≥20 s marks it DELIVERED (customer text as usual). Notes in the delivery audit say
   "GPS: …". A no-contact order without its proof photo stays ARRIVED.
+- Street routing (2026-10-29): `src/lib/delivery-street-router.ts` plans each driver's round trip from the deli on
+  `src/lib/route-map/ogdensburg.json` — OpenStreetMap roads with one-ways and traffic lights, plus the owner's stop
+  signs and preferred/avoid streets from the "Ogdensburg Stop Sign Map" claude.ai artifact
+  (https://claude.ai/artifact/AkqCd4pFzQiY9AnBqah8rM; preferred Jay/Greene/Lafayette, avoid Knox/Montgomery). Each
+  stop sign costs 12 s, a light 20 s; preferred streets cost ×0.65, avoid ×2.5. Stops: due-soon orders first, then
+  cheapest, improved by 2-opt; back to the deli. Google Maps links pin spare waypoints (up to 9 in all) onto
+  preferred streets. Used by the store dashboard (blue line, loop minutes, stop signs, % preferred), dispatch and the
+  car tablet's Navigate / Navigate whole route; falls back to the straight-line planner off the map. To refresh after
+  the owner edits the artifact: export its `stops` and `streets` and rerun `tools/route-map/build-route-map.py`.
 - Heartbeat every 30 s (battery, charging, network, signal, app version, queue sizes); online = heard from in 90 s.
   Shown on the store dashboard strip and the settings page.
 - Store dashboard: `/pos/dashboard` (outside the POS menu; signs in once with the status board's screen pass;

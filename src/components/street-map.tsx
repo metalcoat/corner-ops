@@ -45,13 +45,18 @@ const ICONS: Record<MapPoint["kind"], string> = {
   stop: "M12 3a6 6 0 016 6c0 4.5-6 11-6 11S6 13.5 6 9a6 6 0 016-6zm0 3.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5z",
 };
 
+/** A route drawn under the markers, as [latitude, longitude] points. */
+export type MapLine = { id: string; points: Array<[number, number]> };
+
 export default function StreetMap({
   points,
+  lines = [],
   tileUrl,
   height = 320,
   label = "Delivery map",
 }: {
   points: MapPoint[];
+  lines?: MapLine[];
   tileUrl?: string | null;
   height?: number;
   label?: string;
@@ -90,6 +95,11 @@ export default function StreetMap({
     content = (
       <>
         <div className="streetMapTiles">{tiles}</div>
+        {lines.length > 0 && (
+          <svg className="streetMapLines" width={width} height={height} aria-hidden="true">
+            {lines.map((line) => <polyline key={line.id} points={line.points.map(([lat, lng]) => `${(worldX(lng, zoom) - left).toFixed(1)},${(worldY(lat, zoom) - top).toFixed(1)}`).join(" ")} />)}
+          </svg>
+        )}
         {usable.map((point) => {
           const x = worldX(point.longitude, zoom) - left, y = worldY(point.latitude, zoom) - top;
           const radius = point.accuracyMeters ? point.accuracyMeters / metresPerPixel(point.latitude, zoom) : 0;

@@ -14,6 +14,8 @@ import {
   planDeliveryRoute,
   type DeliveryRoutePlan,
 } from "@/lib/ordering-delivery-route";
+import { planStreetRoute } from "@/lib/delivery-street-router";
+import { ogdensburgRouter } from "@/lib/route-map/ogdensburg-router";
 
 export const DELIVERY_STATUSES = ["ASSIGNED","READY_FOR_DRIVER","PICKED_UP","EN_ROUTE","ARRIVED","DELIVERED","NO_CONTACT","DELIVERY_FAILED","RETURNED","CANCELLED"] as const;
 export type DriverDeliveryStatus = typeof DELIVERY_STATUSES[number];
@@ -156,10 +158,15 @@ export function deliveryRoutePlans(
       }];
     });
     if (!stops.length) return [];
+    // Street-by-street round trip on the Ogdensburg map (preferred streets, stop signs, one-ways) when every
+    // stop is on it; the straight-line planner otherwise.
+    let plan: DeliveryRoutePlan | null = null;
+    try { plan = planStreetRoute(stops, origin, ogdensburgRouter(), now, storeOrigin ?? origin); }
+    catch (error) { console.error("[routes] street planner", error); }
     return [{
       driverEmployeeId,
       driverName: String(rows[0].driver_name || "Driver"),
-      plan: planDeliveryRoute(stops, origin, now),
+      plan: plan ?? planDeliveryRoute(stops, origin, now),
     }];
   });
 }
