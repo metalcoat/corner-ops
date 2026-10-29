@@ -52,3 +52,26 @@ test("snap requests name the cameras to fire", () => {
   assert.deepEqual(snapCameras("road"), ["road"]);
   assert.deepEqual(snapCameras("selfie"), []);
 });
+
+test("GPS alone works out which house the car stopped at, and when it drove off", async () => {
+  const { stopTransitions } = await import("../src/lib/car-tablet-rules.js");
+  const at = (seconds: number) => new Date(Date.UTC(2026, 9, 29, 18, 0, seconds));
+  const house = { latitude: 44.6950, longitude: -75.4900 };
+  const deliveries = [
+    { id: "jay", status: "EN_ROUTE", ...house, enRouteAt: at(0), arrivedAt: null },
+    { id: "green", status: "EN_ROUTE", latitude: 44.7000, longitude: -75.5000, enRouteAt: at(0), arrivedAt: null },
+  ];
+  const point = (seconds: number, latitude: number, longitude: number, speed: number | null) =>
+    ({ id: `p-${seconds}-xxxx`, capturedAt: at(seconds), latitude, longitude, accuracy: 5, speed, heading: null });
+  const points = [
+    point(60, 44.6948, -75.4900, 12), // driving past at 27 mph: not a stop
+    point(70, 44.6951, -75.4901, 0.4), // stopped ~15 m from the door
+    point(80, 44.6951, -75.4901, 0),
+    point(130, 44.6980, -75.4900, 11), // ~330 m up the street
+  ];
+  assert.deepEqual(stopTransitions(deliveries, points).map(({ deliveryId, action }) => `${deliveryId}:${action}`), ["jay:arrived", "jay:delivered"]);
+  // A quick pause (10 s) and away isn't a delivery.
+  assert.deepEqual(stopTransitions(deliveries, [point(70, 44.6951, -75.4901, 0), point(78, 44.6980, -75.49, 11)]).map((t) => t.action), ["arrived"]);
+  // Points from before the car left the store don't count (the store is not the customer).
+  assert.deepEqual(stopTransitions([{ ...deliveries[0], enRouteAt: at(100) }], [point(70, 44.6951, -75.4901, 0)]), []);
+});

@@ -1,4 +1,4 @@
-import StoreDashboard from "./store-dashboard";
-import "./store-dashboard.css";
-export const dynamic="force-dynamic";
-export default function StoreDashboardPage(){return <StoreDashboard/>}
+import { redirect } from "next/navigation";
+
+/** The dashboard lives outside the POS menu now (owner request 2026-10-29). */
+export default function StoreDashboardPage() { redirect("/pos/dashboard"); }

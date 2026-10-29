@@ -20,6 +20,7 @@ import {
   pairingCode,
   PAIRING_MINUTES,
   PHOTO_REASONS,
+  stopTransitions,
   type CarCamera,
   type CarPhotoReason,
   type CarPoint,
@@ -173,7 +174,7 @@ export async function tabletStatus(tablet: CarTablet) {
  * dashboard and customer tracker show the car like a driver phone.
  */
 export async function ingestPoints(tablet: CarTablet, points: CarPoint[]) {
-  if (!points.length) return { accepted: 0, deliveryPoints: 0 };
+  if (!points.length) return { accepted: 0, deliveryPoints: 0, stops: [] };
   const driver = await effectiveDriver(tablet);
   const columns = {
     ids: points.map((point) => point.id),
@@ -184,7 +185,7 @@ export async function ingestPoints(tablet: CarTablet, points: CarPoint[]) {
     speeds: points.map((point) => point.speed),
     headings: points.map((point) => point.heading),
   };
-  return withTransaction(async () => {
+  const result = await withTransaction(async () => {
     const sql = getSql();
     const inserted = await sql`INSERT INTO car_tablet_locations(id,tablet_id,driver_employee_id,client_event_id,captured_at,latitude,longitude,accuracy_meters,speed_mps,heading)
       SELECT gen_random_uuid(),${tablet.id},${driver?.employeeId ?? null},p.id,p.captured_at,p.latitude,p.longitude,p.accuracy,p.speed,p.heading
@@ -209,6 +210,45 @@ export async function ingestPoints(tablet: CarTablet, points: CarPoint[]) {
     }
     return { accepted: inserted.length, deliveryPoints };
   });
+  const stops = driver ? await applyGpsStops(tablet, driver.employeeId, points).catch((error) => { console.error("[car-tablet] GPS stops", error); return []; }) : [];
+  return { ...result, stops };
+}
+
+/**
+ * Marks deliveries arrived/delivered from where the car stopped (stopTransitions), as the driver.
+ * On arrival the tablet is asked for a road photo, saved as that delivery's proof photo.
+ */
+async function applyGpsStops(tablet: CarTablet, driverId: string, points: CarPoint[]) {
+  const rows = await getSql()`SELECT d.id,d.status,d.order_id,d.en_route_at,d.arrived_at,a.latitude::float8 latitude,a.longitude::float8 longitude
+    FROM ordering_delivery_assignments d JOIN ordering_order_delivery_addresses a ON a.order_id=d.order_id
+    WHERE d.business=${tablet.business} AND d.driver_employee_id=${driverId} AND d.status IN('EN_ROUTE','ARRIVED')
+      AND a.latitude IS NOT NULL AND a.longitude IS NOT NULL`;
+  if (!rows.length) return [];
+  const when = (value: unknown) => { const iso = toIsoTimestamp(value); return iso ? new Date(iso) : null; };
+  const transitions = stopTransitions(rows.map((row) => ({
+    id: String(row.id), status: String(row.status), latitude: Number(row.latitude), longitude: Number(row.longitude),
+    enRouteAt: when(row.en_route_at), arrivedAt: when(row.arrived_at),
+  })), points);
+  if (!transitions.length) return [];
+  const actor = await tabletActor(tablet);
+  if (!actor) return [];
+  const done = [];
+  for (const transition of transitions) {
+    try {
+      if (transition.action === "arrived") {
+        await changeDeliveryStatus(actor, transition.deliveryId, "ARRIVED", "GPS: the car stopped at the address");
+        const orderId = String(rows.find((row) => String(row.id) === transition.deliveryId)?.order_id || "");
+        await queueSnap(tablet.business, tablet.id, ["road"], "GPS stop at the address", orderId, { proof: true }).catch(() => undefined);
+      } else {
+        await changeDeliveryStatus(actor, transition.deliveryId, "DELIVERED", "GPS: the car drove off after stopping at the address");
+      }
+      done.push(transition);
+    } catch (error) {
+      // e.g. a no-contact order whose proof photo hasn't arrived yet: it stays Arrived for the driver to finish.
+      console.warn("[car-tablet] GPS stop", transition, error instanceof Error ? error.message : error);
+    }
+  }
+  return done;
 }
 
 const ACTIVE = ["ASSIGNED", "READY_FOR_DRIVER", "PICKED_UP", "EN_ROUTE", "ARRIVED", "NO_CONTACT", "DELIVERY_FAILED"];
@@ -314,7 +354,7 @@ export async function savePhoto(tablet: CarTablet, file: File, meta: {
   const orderId = delivery ? String(delivery.order_id) : meta.orderId && uuid.test(meta.orderId)
     ? ((await sql`SELECT id FROM ordering_orders WHERE id=${meta.orderId} AND business=${tablet.business}`)[0]?.id ?? null) : null;
   const command = meta.commandId && uuid.test(meta.commandId)
-    ? (await sql`SELECT id FROM car_tablet_commands WHERE id=${meta.commandId} AND tablet_id=${tablet.id}`)[0] : undefined;
+    ? (await sql`SELECT id,payload FROM car_tablet_commands WHERE id=${meta.commandId} AND tablet_id=${tablet.id}`)[0] : undefined;
   const driver = await effectiveDriver(tablet);
   const id = randomUUID();
   const day = meta.capturedAt.toISOString().slice(0, 10);
@@ -326,8 +366,8 @@ export async function savePhoto(tablet: CarTablet, file: File, meta: {
     ON CONFLICT(tablet_id,client_photo_id) DO NOTHING`;
   if (command) await finishSnapIfComplete(String(command.id));
   // The road photo taken as the driver taps Delivered doubles as the delivery's proof photo
-  // (no-contact orders need one before they can be marked delivered).
-  if (meta.reason === "delivery_complete" && delivery && !["DELIVERED", "RETURNED", "CANCELLED"].includes(String(delivery.status))) {
+  // (no-contact orders need one before they can be marked delivered). A GPS-stop snap (command payload proof) counts too.
+  if ((meta.reason === "delivery_complete" || command?.payload?.proof === true) && delivery && !["DELIVERED", "RETURNED", "CANCELLED"].includes(String(delivery.status))) {
     const actor = await tabletActor(tablet);
     if (actor) {
       const order = (await sql`SELECT service_type FROM ordering_orders WHERE id=${delivery.order_id}`)[0];
@@ -350,13 +390,13 @@ async function finishSnapIfComplete(commandId: string) {
       AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements_text(c.payload->'cameras') cam WHERE NOT EXISTS(SELECT 1 FROM car_tablet_photos p WHERE p.command_id=c.id AND p.camera=cam))`;
 }
 
-export async function queueSnap(business: TabletBusiness, tabletId: string, cameras: CarCamera[], requestedBy: string, orderId?: string | null) {
+export async function queueSnap(business: TabletBusiness, tabletId: string, cameras: CarCamera[], requestedBy: string, orderId?: string | null, extra: { proof?: boolean } = {}) {
   if (!cameras.length) throw new ValidationError("Choose the cabin camera, the road camera or both.");
   const tablet = (await getSql()`SELECT id FROM car_tablets WHERE id=${tabletId} AND business=${business} AND revoked_at IS NULL AND token_hash IS NOT NULL`)[0];
   if (!tablet) throw new ValidationError("That car tablet isn't paired.");
   const id = randomUUID();
   await getSql()`INSERT INTO car_tablet_commands(id,tablet_id,kind,payload,requested_by,expires_at)
-    VALUES(${id},${tabletId},'snap',${JSON.stringify({ cameras, orderId: orderId || null })}::jsonb,${requestedBy.slice(0, 120)},NOW()+INTERVAL '10 minutes')`;
+    VALUES(${id},${tabletId},'snap',${JSON.stringify({ cameras, orderId: orderId || null, ...extra })}::jsonb,${requestedBy.slice(0, 120)},NOW()+INTERVAL '10 minutes')`;
   return { ok: true, commandId: id };
 }
 

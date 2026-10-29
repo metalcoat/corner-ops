@@ -8,10 +8,12 @@ import "./screen-gate.css";
 type Kind = "board" | "labels";
 const TITLES: Record<Kind, string> = { board: "Status board", labels: "Label station" };
 
-export default function ScreenGate({ kind, children }: { kind: Kind; children: ReactNode }) {
+/** title/returnTo let another always-on page (the store dashboard) reuse the status board's screen pass. */
+export default function ScreenGate({ kind, children, title, returnTo }: { kind: Kind; children: ReactNode; title?: string; returnTo?: string }) {
+  const heading = title || TITLES[kind];
   const [state, setState] = useState<"loading" | "ready" | "signin" | "keep">("loading");
   const [pin, setPin] = useState("");
-  const [name, setName] = useState(TITLES[kind]);
+  const [name, setName] = useState(title || TITLES[kind]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -72,11 +74,11 @@ export default function ScreenGate({ kind, children }: { kind: Kind; children: R
   return (
     <main className="screenGate">
       <section>
-        <p className="screenEyebrow">CORNER DELI · {TITLES[kind].toUpperCase()}</p>
+        <p className="screenEyebrow">CORNER DELI · {heading.toUpperCase()}</p>
         {state === "keep" ? (
           <>
             <h1>Keep this screen signed in?</h1>
-            <p>It will stay on the {TITLES[kind].toLowerCase()} and never time out. A manager can sign it out any time under Settings → Printers &amp; devices.</p>
+            <p>It will stay on the {heading.toLowerCase()} and never time out. A manager can sign it out any time under Settings → Printers &amp; devices.</p>
             <label>
               Name this screen
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === "board" ? "Front monitor" : "Sub station"} />
@@ -98,7 +100,7 @@ export default function ScreenGate({ kind, children }: { kind: Kind; children: R
               </label>
               <button disabled={busy || pin.length < 4}>{busy ? "Signing in…" : "Sign in"}</button>
             </form>
-            <a className="screenAlt" href={`/signin?returnTo=${encodeURIComponent(kind === "board" ? "/pos/board" : "/pos/labels")}`}>
+            <a className="screenAlt" href={`/signin?returnTo=${encodeURIComponent(returnTo || (kind === "board" ? "/pos/board" : "/pos/labels"))}`}>
               Or sign in with the office login
             </a>
           </>

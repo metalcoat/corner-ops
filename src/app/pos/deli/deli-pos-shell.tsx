@@ -13,7 +13,7 @@ import { dismissOfflineOrder, offlineOrders, retryOfflineOrder, syncOfflineOrder
 
 const centerWorkspaces = [
   { label: "Menu", href: "/pos/deli" },
-  { label: "Dashboard", href: "/pos/deli/dashboard" },
+  { label: "Dashboard", href: "/pos/dashboard" },
   { label: "Customers", href: "/pos/deli/customers" },
   { label: "Kitchen", href: "/pos/deli/kitchen" },
   { label: "Payments", href: "/pos/deli/payments" },

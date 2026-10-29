@@ -15,7 +15,7 @@ const OTHER = [
   { href: "/employee/deliveries", title: "Driver tablet" },
   { href: "/employee/stock", title: "Stock sheet (count & requests)" },
   { href: "/pos/deli/inventory/costs", title: "Supplier costs" },
-  { href: "/pos/deli/dashboard", title: "Manager dashboard" },
+  { href: "/pos/dashboard", title: "Manager dashboard" },
   { href: "/pos/deli/settings", title: "Settings" },
   { href: "/setup", title: "Set up a tablet" },
   { href: "/pos/tiki", title: "Tiki POS" },

@@ -384,8 +384,15 @@ flowchart LR
   delivery_complete (taken when the driver taps Delivered; also saved as the delivery's proof photo, which no-contact
   orders need), remote_request (POS **Snap cabin/road/both**, on the settings page and on delivery orders in Order Center;
   managers only). Files are in the uploads volume, so the nightly `backup-db.sh` uploads archive includes them.
+- GPS stops (2026-10-29, `stopTransitions` in `src/lib/car-tablet-rules.ts`): a point within 60 m of an on-the-way
+  delivery's address at ≤2.5 m/s marks it ARRIVED (and asks the tablet for a road photo saved as the proof photo);
+  driving 200 m away after a stop of ≥20 s marks it DELIVERED (customer text as usual). Notes in the delivery audit say
+  "GPS: …". A no-contact order without its proof photo stays ARRIVED.
 - Heartbeat every 30 s (battery, charging, network, signal, app version, queue sizes); online = heard from in 90 s.
   Shown on the store dashboard strip and the settings page.
+- Store dashboard: `/pos/dashboard` (outside the POS menu; signs in once with the status board's screen pass;
+  `/pos/deli/dashboard` redirects). Order: car tablets, live map + routes, phone (avg time to answer, missed = rang
+  over `THREE_CX_IGNORE_SECONDS` (4) with nobody answering, long rings, call-backs), orders, deliveries, door walk-ins (one line).
 - App build: `tools/car-tablet/build.sh` (Gradle in the `eclipse-temurin:17-jdk` container, SDK in
   `~/.local/share/android-sdk`, key `~/.config/corner-ops/car-tablet.jks`, never committed), published to dev with
   `tools/car-tablet/publish-dev.sh` → `https://dev.ordercornerdeli.com/downloads/corner-ops-car-tablet.apk`.

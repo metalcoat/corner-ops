@@ -29,7 +29,7 @@ const VIEWS: View[] = [
   { id: "kiosk", name: "Self-order kiosk", what: "Customers order and pay on their own.", href: "/kiosk/deli", where: "store", tips: ["Use Android screen pinning or a kiosk browser (like Fully Kiosk) to lock it to this page."] },
   { id: "board", name: "Deli board", what: "The big order board for staff.", href: "/deli-board", where: "store", tips: ["Staff sign in with their PIN."] },
   { id: "board", name: "Status board", what: "The order status monitor for staff: in the kitchen, ready, out for delivery, coming up. Never times out.", href: "/pos/board", where: "store", tips: ["Best on a computer connected to a TV or monitor; make the browser full screen (F11)."] },
-  { id: "dashboard", name: "Manager dashboard", what: "Today's sales, open orders, deliveries and tasks.", href: "/pos/deli/dashboard", where: "store", tips: [] },
+  { id: "dashboard", name: "Manager dashboard", what: "Today's sales, open orders, deliveries and tasks.", href: "/pos/dashboard", where: "store", tips: [] },
   { id: "driver", name: "Driver tablet", what: "Deliveries in the car: who, where, what to collect, call the customer, navigate.", href: "/employee/deliveries", where: "anywhere", tips: ["Install the 3CX app and set it as the default phone app so calls go out on the deli line.", "Allow location access, and keep it in split screen with Google Maps so tracking keeps running."] },
   { id: "dispatch", name: "Dispatch board", what: "Managers assign deliveries and watch drivers on the map.", href: "/employee/deliveries?dispatch=1", where: "anywhere", tips: [] },
 ];

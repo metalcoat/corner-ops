@@ -98,3 +98,48 @@ export function snapCameras(value: unknown): CarCamera[] {
   if (value === "both") return ["cabin", "road"];
   return CAMERAS.includes(value as CarCamera) ? [value as CarCamera] : [];
 }
+
+/** Within this of the address with the car (nearly) stopped = arrived. */
+export const ARRIVE_METRES = 60;
+export const STOPPED_MPS = 2.5;
+/** Arrived, then this far away = the car has left the stop. */
+export const DEPART_METRES = 200;
+/** A real drop-off: at least this long between arriving and leaving. */
+export const MIN_STOP_SECONDS = 20;
+
+export type StopDelivery = { id: string; status: string; latitude: number; longitude: number; enRouteAt: Date | null; arrivedAt: Date | null };
+export type StopTransition = { deliveryId: string; action: "arrived" | "delivered"; at: Date };
+
+export function metresBetween(a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }): number {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude), dLng = toRad(b.longitude - a.longitude);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.latitude)) * Math.cos(toRad(b.latitude)) * Math.sin(dLng / 2) ** 2;
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+/**
+ * Which delivery the car stopped at, from GPS alone (owner request 2026-10-29): a slow or stopped
+ * point near an on-the-way delivery's address marks it arrived; driving off (DEPART_METRES away,
+ * after at least MIN_STOP_SECONDS) marks an arrived delivery delivered. Points are replayed in
+ * time order, so a batch sent after a dead zone gives the same answer as live points.
+ */
+export function stopTransitions(deliveries: StopDelivery[], points: CarPoint[]): StopTransition[] {
+  const state = new Map(deliveries.map((delivery) => [delivery.id, { ...delivery }]));
+  const transitions: StopTransition[] = [];
+  for (const point of [...points].sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime())) {
+    for (const delivery of state.values()) {
+      if (delivery.enRouteAt && point.capturedAt < delivery.enRouteAt) continue;
+      const distance = metresBetween(point, delivery);
+      if (delivery.status === "EN_ROUTE" && distance <= ARRIVE_METRES && (point.speed == null || point.speed <= STOPPED_MPS)) {
+        delivery.status = "ARRIVED";
+        delivery.arrivedAt = point.capturedAt;
+        transitions.push({ deliveryId: delivery.id, action: "arrived", at: point.capturedAt });
+      } else if (delivery.status === "ARRIVED" && delivery.arrivedAt && distance >= DEPART_METRES
+        && point.capturedAt.getTime() - delivery.arrivedAt.getTime() >= MIN_STOP_SECONDS * 1000) {
+        delivery.status = "DELIVERED";
+        transitions.push({ deliveryId: delivery.id, action: "delivered", at: point.capturedAt });
+      }
+    }
+  }
+  return transitions;
+}
