@@ -15,6 +15,7 @@ import android.location.Location
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
+import android.os.PowerManager
 import android.os.Build
 import android.telephony.TelephonyManager
 import androidx.core.app.NotificationCompat
@@ -166,8 +167,17 @@ class TrackerService : LifecycleService() {
         val wakeAt = if (quiet) System.currentTimeMillis() + reply.optLong("wakeInMinutes") * 60_000 else 0L
         app.update { it.copy(quiet = quiet, wakeAt = wakeAt, gps = if (quiet) "off overnight" else it.gps) }
         if (!::location.isInitialized) return
-        if (quiet && locationOn) { location.stop(); locationOn = false }
-        if (!quiet && !locationOn) { location.start(); locationOn = true; lastKept = null }
+        if (quiet && locationOn) { location.stop(); locationOn = false; Kiosk.screenOff(this) }
+        if (!quiet && !locationOn) {
+            location.start(); locationOn = true; lastKept = null
+            // Morning: screen back on, on the app.
+            Kiosk.nightOver(this)
+            @Suppress("DEPRECATION")
+            runCatching {
+                getSystemService(PowerManager::class.java).newWakeLock(PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE, "cornerops:morning").acquire(10_000)
+                startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        }
     }
 
     private fun heartbeat() {

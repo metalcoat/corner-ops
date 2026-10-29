@@ -60,6 +60,23 @@ object Kiosk {
         runCatching { dpm.addUserRestriction(admin, UserManager.DISALLOW_ADD_USER) }
     }
 
+    /**
+     * Overnight: screen off and no "stay awake while charging", so a tablet left in the car is a black
+     * screen to anyone looking in (owner 2026-10-29). Needs device owner (force-lock policy).
+     */
+    fun screenOff(context: Context) {
+        if (!isDeviceOwner(context)) return
+        runCatching { dpm(context).setGlobalSetting(admin(context), Settings.Global.STAY_ON_WHILE_PLUGGED_IN, "0") }
+        runCatching { dpm(context).lockNow() }
+    }
+
+    /** Morning: back to staying awake on car power. */
+    fun nightOver(context: Context) {
+        if (!isDeviceOwner(context)) return
+        val plugged = BatteryManager.BATTERY_PLUGGED_AC or BatteryManager.BATTERY_PLUGGED_USB or BatteryManager.BATTERY_PLUGGED_WIRELESS
+        runCatching { dpm(context).setGlobalSetting(admin(context), Settings.Global.STAY_ON_WHILE_PLUGGED_IN, plugged.toString()) }
+    }
+
     /** Staff exit: hand the tablet back as a normal device until the app is opened again. */
     fun removeDeviceOwner(context: Context) {
         if (!isDeviceOwner(context)) return

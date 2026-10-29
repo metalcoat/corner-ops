@@ -408,7 +408,7 @@ flowchart LR
   `feedVersion` changes (the commands long poll answers early when it does); photos are 1280×960 JPEG q80. Overnight
   quiet time (`quietTime` in `car-tablet-rules.ts`, store hours from `src/lib/greeter-hours.ts`): from 30 min after
   close to 30 min before opening the tablet turns GPS off (the car is parked at the deli), checks in every 15 min,
-  polls for snaps every 5 min and dims its "Closed" screen.
+  polls for snaps every 5 min and turns the screen off (device owner `lockNow`, stay-awake-on-charge off; power button shows "Closed" for 15 s; app 1.0.3), waking it at the end of quiet time.
 - Store dashboard: `/pos/dashboard` (outside the POS menu; signs in once with the status board's screen pass;
   `/pos/deli/dashboard` redirects). Order: car tablets, live map + routes, phone (avg time to answer, missed = rang
   over `THREE_CX_IGNORE_SECONDS` (4) with nobody answering, long rings, call-backs), orders, deliveries, door walk-ins (one line).

@@ -58,6 +58,7 @@ class MainActivity : Activity() {
     private var lastFeedAt = 0L
     private var lastFeedJson = ""
     private var loadedFeedVersion: String? = null
+    private var lastTouchAt = System.currentTimeMillis()
     private var pairServer: String? = null
     private var pairCode: String? = null
 
@@ -77,6 +78,8 @@ class MainActivity : Activity() {
                 else -> "main"
             }
             if (wanted != screen) show(wanted)
+            // Overnight the screen stays off: woken by the power button, it goes off again after 15 s untouched.
+            if (status.quiet && !staffUnlocked && System.currentTimeMillis() - lastTouchAt > 15_000) { lastTouchAt = System.currentTimeMillis(); Kiosk.screenOff(this@MainActivity) }
             main.postDelayed(this, 1_000)
         }
     }
@@ -110,12 +113,18 @@ class MainActivity : Activity() {
         // Android's permission and battery dialogs can't open inside lock task, so lock only once they're done.
         val needsBatteryPrompt = !asking && askBatteryExemption()
         if (Kiosk.isDeviceOwner(this) && !staffUnlocked && !asking && !needsBatteryPrompt && !inLockTask()) runCatching { startLockTask() }
+        lastTouchAt = System.currentTimeMillis()
         main.post(tick)
     }
 
     override fun onPause() {
         main.removeCallbacks(tick)
         super.onPause()
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        lastTouchAt = System.currentTimeMillis()
+        return super.dispatchTouchEvent(event)
     }
 
     @Deprecated("Back does nothing in the car")
@@ -262,7 +271,7 @@ class MainActivity : Activity() {
         val box = column(48).apply { gravity = Gravity.CENTER }
         box.addView(text("Closed", 44f, bold = true).apply { gravity = Gravity.CENTER })
         val wake = app.status.wakeAt.takeIf { it > 0 }?.let { DateTimeFormatter.ofPattern("h:mm a").withZone(ZoneId.of("America/New_York")).format(Instant.ofEpochMilli(it)) }
-        box.addView(text("GPS is off while the car is parked overnight.${wake?.let { " The tablet wakes at $it." } ?: ""}", 22f, Color.LTGRAY).apply { gravity = Gravity.CENTER })
+        box.addView(text("The screen and GPS are off overnight.${wake?.let { " The tablet wakes at $it." } ?: ""}", 22f, Color.LTGRAY).apply { gravity = Gravity.CENTER })
         return box
     }
 
