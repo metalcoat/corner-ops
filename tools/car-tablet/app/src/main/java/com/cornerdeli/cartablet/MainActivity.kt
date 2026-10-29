@@ -25,6 +25,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.speech.tts.TextToSpeech
+import java.util.Locale
 import android.window.OnBackInvokedDispatcher
 import org.json.JSONArray
 import org.json.JSONObject
@@ -59,6 +61,19 @@ class MainActivity : Activity() {
     private var lastFeedJson = ""
     private var loadedFeedVersion: String? = null
     private var lastTouchAt = System.currentTimeMillis()
+
+    // Drive screen (our own turn-by-turn on the owner's street rules).
+    private var driving: JSONObject? = null
+    private var navigator: Navigator? = null
+    private var driveView: DriveView? = null
+    private var banner: TextView? = null
+    private var subBanner: TextView? = null
+    private var rerouting = false
+    private var lastRouteAt = 0L
+    private var heading = 0f
+    private var arrivedSaid = false
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
     private var pairServer: String? = null
     private var pairCode: String? = null
 
@@ -74,10 +89,12 @@ class MainActivity : Activity() {
             val wanted = when {
                 !app.prefs.paired -> "pair"
                 status.quiet -> "quiet"
+                driving != null -> "drive"
                 feedDriver == null && app.status.driverName == null -> "signin"
                 else -> "main"
             }
             if (wanted != screen) show(wanted)
+            if (screen == "drive") updateDrive()
             // Overnight the screen stays off: woken by the power button, it goes off again after 15 s untouched.
             if (status.quiet && !staffUnlocked && System.currentTimeMillis() - lastTouchAt > 15_000) { lastTouchAt = System.currentTimeMillis(); Kiosk.screenOff(this@MainActivity) }
             main.postDelayed(this, 1_000)
@@ -87,6 +104,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleLink(intent)
+        tts = TextToSpeech(this) { status -> ttsReady = status == TextToSpeech.SUCCESS; tts?.language = Locale.US }
         app.prefs.lastDeliveries?.let { runCatching { deliveries = JSONObject(it).optJSONArray("deliveries") ?: JSONArray() } }
         buildFrame()
         Kiosk.apply(this)
@@ -261,6 +279,7 @@ class MainActivity : Activity() {
             "pair" -> pairingView()
             "signin" -> signInView()
             "quiet" -> quietView()
+            "drive" -> driveScreen()
             else -> mainView()
         })
         // Dim the screen overnight; normal brightness otherwise.
@@ -384,10 +403,10 @@ class MainActivity : Activity() {
             }
             val status = current.optString("status")
             val id = current.optString("deliveryId")
-            right.addView(button("Navigate", Color.rgb(37, 99, 235)) { navigate(current) })
+            right.addView(button("Navigate", Color.rgb(37, 99, 235)) { startDrive(current) })
             route?.optString("navigationUrl")?.takeIf { it.startsWith("https://") && (route?.optJSONArray("order")?.length() ?: 0) > 1 }?.let { url ->
                 val minutes = route?.optInt("loopMinutes")?.takeIf { it > 0 }
-                right.addView(button("Navigate whole route${minutes?.let { " · $it min" } ?: ""}", Color.rgb(30, 64, 175)) { openMaps(url) })
+                right.addView(button("Whole route in Google Maps${minutes?.let { " · $it min" } ?: ""}", Color.rgb(30, 64, 175)) { openMaps(url) })
             }
             if (!mine) right.addView(button("Take this delivery", Color.rgb(124, 58, 237)) { action(id, "claim", "Taken") })
             if (mine && status in listOf("ASSIGNED", "READY_FOR_DRIVER", "PICKED_UP")) right.addView(button("Picked up · leaving", Color.rgb(217, 119, 6)) { action(id, "picked_up", "On the way") })
@@ -434,6 +453,102 @@ class MainActivity : Activity() {
 
     private fun clock(iso: String) = runCatching { DateTimeFormatter.ofPattern("h:mm a").withZone(ZoneId.of("America/New_York")).format(Instant.parse(iso)) }.getOrDefault(iso)
 
+    // ---------- drive ----------
+
+    private fun startDrive(delivery: JSONObject) {
+        driving = delivery; navigator = null; arrivedSaid = false; heading = app.status.bearing ?: 0f
+        TrackerService.instance?.setFastGps(true)
+        show("drive")
+        requestRoute()
+    }
+
+    private fun stopDrive() {
+        driving = null; navigator = null
+        TrackerService.instance?.setFastGps(false)
+        tts?.stop()
+        show(if (feedDriver == null && app.status.driverName == null) "signin" else "main")
+    }
+
+    private fun say(text: String) { if (ttsReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "nav") }
+
+    /** Route from where the car is now (the server knows the street rules). Off the map: Google Maps instead. */
+    private fun requestRoute() {
+        val delivery = driving ?: return
+        val status = app.status
+        if (status.lat == null || status.lng == null) { banner?.text = "Waiting for GPS…"; return }
+        rerouting = true; lastRouteAt = System.currentTimeMillis()
+        val from = JSONObject().put("latitude", status.lat).put("longitude", status.lng)
+        worker.execute {
+            try {
+                val map = driveView?.streets ?: StreetMapData.refresh(this, app.api)
+                val reply = app.api.post("/api/car-tablet/route", JSONObject().put("from", from).put("deliveryId", delivery.optString("deliveryId")))
+                main.post {
+                    rerouting = false
+                    driveView?.streets = map
+                    val route = reply.optJSONObject("route")
+                    if (route == null) { app.toast("No street route for this address: opening Google Maps"); stopDrive(); navigate(delivery); return@post }
+                    val (nav, path) = routeFromJson(route)
+                    navigator = nav
+                    driveView?.route = path
+                    reply.optJSONObject("destination")?.let { d -> driveView?.destination = Flat.x(d.getDouble("longitude")) to Flat.y(d.getDouble("latitude")); subBanner?.tag = d.optString("label") }
+                    updateDrive()
+                }
+            } catch (error: IOException) {
+                main.post { rerouting = false; banner?.text = "No signal for directions: ${error.message}" }
+            }
+        }
+    }
+
+    private fun driveScreen(): View {
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        banner = text("Planning the route…", 30f, Color.WHITE, true).apply { setBackgroundColor(Color.rgb(22, 101, 52)); setPadding(px(18), px(12), px(18), px(4)) }
+        subBanner = text("", 19f, Color.rgb(220, 252, 231)).apply { setBackgroundColor(Color.rgb(22, 101, 52)); setPadding(px(18), 0, px(18), px(10)) }
+        driveView = DriveView(this).apply { streets = StreetMapData.load(this@MainActivity) }
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(px(8), 0, px(8), 0) }
+        val delivery = driving
+        fun add(view: Button) = buttons.addView(view, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(px(4), px(6), px(4), px(6)) })
+        if (delivery != null && delivery.optBoolean("mine")) add(button("Delivered", Color.rgb(22, 163, 74)) { delivered(delivery) })
+        add(button("Google Maps", Color.rgb(55, 65, 81)) { delivery?.let { navigate(it) } })
+        add(button("Back", Color.rgb(75, 85, 99)) { stopDrive() })
+        root.addView(banner)
+        root.addView(subBanner)
+        root.addView(driveView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(buttons)
+        return root
+    }
+
+    private fun updateDrive() {
+        val status = app.status
+        val view = driveView ?: return
+        val lat = status.lat ?: return; val lng = status.lng ?: return
+        val x = Flat.x(lng); val y = Flat.y(lat)
+        // Point the map the way the car is going (when it's moving; a parked GPS heading wanders).
+        if ((status.speedMps ?: 0f) > 2f) status.bearing?.let { heading = it }
+        view.car = x to y
+        view.heading = heading
+        val nav = navigator
+        if (nav == null) { if (!rerouting && System.currentTimeMillis() - lastRouteAt > 10_000) requestRoute(); view.invalidate(); return }
+        val progress = nav.update(x, y)
+        val step = nav.steps.getOrNull(progress.nextStep)
+        val label = subBanner?.tag as? String ?: ""
+        if (nav.arrived(progress)) {
+            banner?.text = "You have arrived"
+            subBanner?.text = label
+            if (!arrivedSaid) { arrivedSaid = true; say("You have arrived") }
+        } else {
+            banner?.text = if (step == null) "Follow the blue line" else if (step.maneuver == "arrive") "Arrive in ${Navigator.distanceText(progress.toNextMetres)}" else "${Navigator.distanceText(progress.toNextMetres)} · ${step.instruction}"
+            subBanner?.text = "${Navigator.distanceText(progress.remainingMetres)} to go · $label"
+            nav.announcement(progress)?.let { say(it) }
+            if (nav.offRoute && !rerouting && System.currentTimeMillis() - lastRouteAt > 8_000) { banner?.text = "Finding a new route…"; requestRoute() }
+        }
+        view.invalidate()
+    }
+
+    override fun onDestroy() {
+        tts?.shutdown()
+        super.onDestroy()
+    }
+
     /** Google Maps directions from the server: routed onto the preferred streets (Jay, Greene, Lafayette). */
     private fun openMaps(url: String) {
         try {
@@ -479,6 +594,7 @@ class MainActivity : Activity() {
                     if (delivery.optBoolean("noContact") && !sent) throw IOException("No-contact orders need the photo uploaded first. ${if (photo == null) "The camera didn't take it." else "No signal; try again in a moment."}")
                     app.api.post("/api/car-tablet/deliveries/${delivery.optString("deliveryId")}", JSONObject().put("action", "delivered"))
                     lastFeedAt = 0
+                    main.post { if (driving?.optString("deliveryId") == delivery.optString("deliveryId")) stopDrive() }
                     "Delivered${if (photo != null && !sent) " (photo will upload when there's signal)" else ""}"
                 }
             }

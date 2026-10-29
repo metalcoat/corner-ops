@@ -26,10 +26,48 @@ export const SIGNAL_SECONDS = 20;
 /** How much the planner favours a preferred street / penalises an avoided one (cost, not the time shown). */
 export const PREFER_FACTOR = 0.65;
 export const AVOID_FACTOR = 2.5;
+/** How much of an avoid street a trip may drive to reach (or leave) an address on it. */
+export const AVOID_NEAR_METRES = 250;
 const DROP_OFF_MINUTES = 4;
 
 type Edge = { to: number; metres: number; seconds: number; cost: number; name: number; stop: boolean; pref: "prefer" | "avoid" | null };
-export type StreetLeg = { seconds: number; metres: number; stopSigns: number; preferredMetres: number; avoidMetres: number; path: Array<[number, number]>; streets: string[] };
+export type DriveManeuver = "depart" | "straight" | "slight_left" | "slight_right" | "left" | "right" | "sharp_left" | "sharp_right" | "uturn" | "arrive";
+/** One spoken/shown direction: where it happens, what to do, and how far the next stretch runs. */
+export type DriveStep = { latitude: number; longitude: number; maneuver: DriveManeuver; instruction: string; street: string; metres: number };
+export type StreetLeg = { seconds: number; metres: number; stopSigns: number; preferredMetres: number; avoidMetres: number; path: Array<[number, number]>; streets: string[]; steps: DriveStep[] };
+
+function bearing(a: [number, number], b: [number, number]) {
+  const rad = Math.PI / 180, y = Math.sin((b[1] - a[1]) * rad) * Math.cos(b[0] * rad);
+  const x = Math.cos(a[0] * rad) * Math.sin(b[0] * rad) - Math.sin(a[0] * rad) * Math.cos(b[0] * rad) * Math.cos((b[1] - a[1]) * rad);
+  return (Math.atan2(y, x) / rad + 360) % 360;
+}
+const COMPASS = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"];
+const shortName = (name: string) => name || "the road";
+
+/** Turn-by-turn directions along a path of street edges: a step wherever the street name changes. */
+function driveSteps(points: Array<[number, number]>, names: string[]): DriveStep[] {
+  if (points.length < 2) return [];
+  const steps: DriveStep[] = [];
+  let street = names[0], start = 0;
+  const stretch = (from: number, to: number) => { let total = 0; for (let i = from; i < to; i++) total += metres(points[i], points[i + 1]); return total; };
+  steps.push({ latitude: points[0][0], longitude: points[0][1], maneuver: "depart", street, metres: 0,
+    instruction: `Head ${COMPASS[Math.round(bearing(points[0], points[1]) / 45) % 8]} on ${shortName(street)}` });
+  for (let i = 1; i < names.length; i++) {
+    if (!names[i] || names[i] === street) continue;
+    steps.at(-1)!.metres = stretch(start, i);
+    let delta = bearing(points[i], points[i + 1]) - bearing(points[i - 1], points[i]);
+    delta = ((delta + 540) % 360) - 180;
+    const size = Math.abs(delta), side = delta > 0 ? "right" : "left";
+    const maneuver: DriveManeuver = size < 25 ? "straight" : size < 55 ? (`slight_${side}` as DriveManeuver) : size < 125 ? side : size < 165 ? (`sharp_${side}` as DriveManeuver) : "uturn";
+    const verb = maneuver === "straight" ? "Continue onto" : maneuver === "uturn" ? "Make a U-turn onto" : maneuver.startsWith("slight") ? `Bear ${side} onto` : maneuver.startsWith("sharp") ? `Turn sharp ${side} onto` : `Turn ${side} onto`;
+    street = names[i]; start = i;
+    steps.push({ latitude: points[i][0], longitude: points[i][1], maneuver, street, metres: 0, instruction: `${verb} ${shortName(street)}` });
+  }
+  steps.at(-1)!.metres = stretch(start, points.length - 1);
+  const last = points.at(-1)!;
+  steps.push({ latitude: last[0], longitude: last[1], maneuver: "arrive", street, metres: 0, instruction: "You have arrived" });
+  return steps;
+}
 
 function metres(a: [number, number], b: [number, number]) {
   const rad = Math.PI / 180, dLat = (b[0] - a[0]) * rad, dLng = (b[1] - a[1]) * rad;
@@ -63,6 +101,8 @@ export class StreetRouter {
   readonly data: RouteMapData;
   private adjacency: Edge[][];
   private routable: number[];
+  /** Street names (indexes) at each node, for "an avoid street is fine only if you're starting or ending on it". */
+  private nodeNames = new Map<number, Set<number>>();
 
   constructor(data: RouteMapData) {
     this.data = data;
@@ -86,22 +126,39 @@ export class StreetRouter {
         if (oneway !== 1) add(path[i], path[i - 1]);
       }
     }
-    // Snap only to nodes on named public streets that can be driven to and back from the middle of town
-    // (one-way pieces at the map's edge can be dead ends), so every stop is reachable.
+    for (const [nameIndex, , , path] of data.ways) for (const node of path) { const set = this.nodeNames.get(node) ?? new Set(); set.add(nameIndex); this.nodeNames.set(node, set); }
+    // Snap only to nodes on named public streets in the biggest part of the network where every node can be
+    // driven to and back from every other (one-way pieces at the map's edge can be dead ends).
     const named = new Set<number>();
     for (const [nameIndex, , , path] of data.ways) if (data.names[nameIndex]) for (const node of path) named.add(node);
-    const reverse: number[][] = data.nodes.map(() => []);
+    const core = this.largestStronglyConnected();
+    this.routable = [...named].filter((node) => core.has(node));
+  }
+
+  /** Kosaraju: the largest set of nodes all reachable from one another, following one-way rules. */
+  private largestStronglyConnected(): Set<number> {
+    const count = this.data.nodes.length, reverse: number[][] = Array.from({ length: count }, () => []);
     this.adjacency.forEach((edges, from) => { for (const edge of edges) reverse[edge.to].push(from); });
-    const lat = data.nodes.reduce((sum, node) => sum + node[0], 0) / data.nodes.length, lng = data.nodes.reduce((sum, node) => sum + node[1], 0) / data.nodes.length;
-    let centre = 0, centreDistance = Infinity;
-    for (const node of named) { const d = metres(data.nodes[node], [lat, lng]); if (d < centreDistance) { centreDistance = d; centre = node; } }
-    const reach = (next: (node: number) => number[]) => {
-      const seen = new Set([centre]), queue = [centre];
-      while (queue.length) for (const to of next(queue.pop()!)) if (!seen.has(to)) { seen.add(to); queue.push(to); }
-      return seen;
-    };
-    const forward = reach((node) => this.adjacency[node].map((edge) => edge.to)), backward = reach((node) => reverse[node]);
-    this.routable = [...named].filter((node) => forward.has(node) && backward.has(node));
+    const seen = new Uint8Array(count), order: number[] = [];
+    for (let root = 0; root < count; root++) {
+      if (seen[root]) continue;
+      const stack: Array<[number, number]> = [[root, 0]]; seen[root] = 1;
+      while (stack.length) {
+        const top = stack[stack.length - 1], edges = this.adjacency[top[0]];
+        if (top[1] < edges.length) { const next = edges[top[1]++].to; if (!seen[next]) { seen[next] = 1; stack.push([next, 0]); } }
+        else { order.push(top[0]); stack.pop(); }
+      }
+    }
+    const component = new Int32Array(count).fill(-1), sizes: number[] = [];
+    for (let i = order.length - 1; i >= 0; i--) {
+      const root = order[i]; if (component[root] >= 0) continue;
+      const id = sizes.length, queue = [root]; component[root] = id; let size = 0;
+      while (queue.length) { const node = queue.pop()!; size++; for (const from of reverse[node]) if (component[from] < 0) { component[from] = id; queue.push(from); } }
+      sizes.push(size);
+    }
+    const biggest = sizes.indexOf(Math.max(...sizes)), core = new Set<number>();
+    for (let node = 0; node < count; node++) if (component[node] === biggest) core.add(node);
+    return core;
   }
 
   /** Metres from a point to the nearest drivable street node (to tell if it's on this map at all). */
@@ -120,8 +177,27 @@ export class StreetRouter {
     return best;
   }
 
-  /** Cheapest way out of `from` to every node: cost (with preferences) and the edge used to reach each node. */
-  private search(from: number) {
+  /**
+   * Where a trip may use an avoid street: only the last/first stretch (within AVOID_NEAR_METRES) of the avoid
+   * street a stop or the start is on, so a delivery on Knox St is reachable but Knox St is never a shortcut.
+   */
+  private allowedAvoid(nodes: number[]): Set<string> {
+    const allowed = new Set<string>();
+    for (const end of nodes) {
+      const names = this.nodeNames.get(end) ?? new Set<number>();
+      for (const [nameIndex, , , path] of this.data.ways) {
+        if (!names.has(nameIndex)) continue;
+        for (const node of path) if (metres(this.data.nodes[node], this.data.nodes[end]) <= AVOID_NEAR_METRES) allowed.add(`${nameIndex}:${node}`);
+      }
+    }
+    return allowed;
+  }
+
+  /**
+   * Cheapest way out of `from` to every node: cost (with preferences) and the edge used to reach each node.
+   * Avoid streets are closed except those in `allowedAvoid` (null: all open, the fallback).
+   */
+  private search(from: number, allowedAvoid: Set<string> | null = null) {
     const cost = new Float64Array(this.data.nodes.length).fill(Infinity);
     const via: Array<Edge | null> = new Array(this.data.nodes.length).fill(null);
     const previous = new Int32Array(this.data.nodes.length).fill(-1);
@@ -131,6 +207,7 @@ export class StreetRouter {
       const [current, node] = heap.pop();
       if (current > cost[node]) continue;
       for (const edge of this.adjacency[node]) {
+        if (edge.pref === "avoid" && allowedAvoid && !(allowedAvoid.has(`${edge.name}:${edge.to}`) && allowedAvoid.has(`${edge.name}:${node}`))) continue;
         const next = current + edge.cost;
         if (next < cost[edge.to]) { cost[edge.to] = next; via[edge.to] = edge; previous[edge.to] = node; heap.push(next, edge.to); }
       }
@@ -145,27 +222,34 @@ export class StreetRouter {
     edges.reverse(); nodes.reverse();
     const streets: string[] = [];
     for (const edge of edges) { const name = this.data.names[edge.name]; if (name && streets.at(-1) !== name) streets.push(name); }
+    const path = nodes.map((node) => this.data.nodes[node]);
     return {
       seconds: edges.reduce((sum, edge) => sum + edge.seconds, 0),
       metres: edges.reduce((sum, edge) => sum + edge.metres, 0),
       stopSigns: edges.filter((edge) => edge.stop).length,
       preferredMetres: edges.filter((edge) => edge.pref === "prefer").reduce((sum, edge) => sum + edge.metres, 0),
       avoidMetres: edges.filter((edge) => edge.pref === "avoid").reduce((sum, edge) => sum + edge.metres, 0),
-      path: nodes.map((node) => this.data.nodes[node]),
+      path,
       streets,
+      steps: driveSteps(path, edges.map((edge) => this.data.names[edge.name])),
     };
   }
 
   route(from: Coordinate, to: Coordinate): StreetLeg | null {
     const a = this.nearest(from), b = this.nearest(to);
     if (a < 0 || b < 0) return null;
-    return this.leg(this.search(a), a, b);
+    return this.leg(this.search(a, this.allowedAvoid([a, b])), a, b) ?? this.leg(this.search(a), a, b);
   }
 
   /** Legs between every pair of points (index 0 is where the run starts). */
   matrix(points: Coordinate[]) {
     const snapped = points.map((point) => this.nearest(point));
-    const searches = snapped.map((node) => this.search(node));
+    const allowed = this.allowedAvoid(snapped);
+    // Closed avoid streets can cut a stop off (one-ways): then that start point searches with everything open.
+    const searches = snapped.map((node) => {
+      const strict = this.search(node, allowed);
+      return snapped.every((target) => Number.isFinite(strict.cost[target])) ? strict : this.search(node);
+    });
     return {
       cost: snapped.map((_, i) => snapped.map((node) => searches[i].cost[node])),
       leg: (i: number, j: number) => this.leg(searches[i], snapped[i], snapped[j]),

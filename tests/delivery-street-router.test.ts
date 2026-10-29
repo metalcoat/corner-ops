@@ -49,3 +49,21 @@ test("a round trip visits every stop once, comes back, and pins Google Maps to t
   assert.ok(plan.navigationUrl!.includes(`destination=${lat(0)}%2C${lng(0)}`), "ends back at the deli");
   assert.ok(plan.loopMinutes >= 1 && plan.path.length > 4);
 });
+
+test("an avoid street is closed unless the trip starts or ends on it", () => {
+  // Busy St avoided, Quiet St neutral: the 4-block (~470 m) run along Busy St must go round on Quiet St.
+  const router = new StreetRouter(base({ "Busy Street": "avoid" }, []));
+  assert.deepEqual(router.route(from, to)!.streets, ["Cross Street", "Quiet Street", "Cross Street"]);
+  // A house in the middle of Busy St: reach it, using Busy St only for the last block.
+  const leg = router.route({ latitude: lat(1), longitude: lng(0) }, { latitude: lat(0), longitude: lng(1) })!;
+  assert.equal(leg.streets.at(-1), "Busy Street");
+  assert.ok(leg.avoidMetres < 250, String(leg.avoidMetres));
+});
+
+test("turn-by-turn steps name each street and the turn onto it", () => {
+  const leg = new StreetRouter(base({ "Busy Street": "avoid" }, [])).route(from, to)!;
+  assert.deepEqual(leg.steps.map((step) => step.maneuver), ["depart", "right", "right", "arrive"]);
+  assert.equal(leg.steps[0].instruction, "Head north on Cross Street");
+  assert.equal(leg.steps[1].instruction, "Turn right onto Quiet Street");
+  assert.ok(leg.steps[1].metres > 400, String(leg.steps[1].metres));
+});

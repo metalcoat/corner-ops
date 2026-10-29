@@ -395,7 +395,12 @@ flowchart LR
   stop sign costs 12 s, a light 20 s; preferred streets cost ×0.65, avoid ×2.5. Stops: due-soon orders first, then
   cheapest, improved by 2-opt; back to the deli. Google Maps links pin spare waypoints (up to 9 in all) onto
   preferred streets. Used by the store dashboard (blue line, loop minutes, stop signs, % preferred), dispatch and the
-  car tablet's Navigate / Navigate whole route; falls back to the straight-line planner off the map. To refresh after
+  car tablet; falls back to the straight-line planner off the map. Avoid streets are closed (owner 2026-10-29: "we don't
+  want it driving on those streets if deliveries aren't going that way") except the last/first 250 m to a stop on one.
+  Google Maps can't follow those rules, so the tablet (app 1.1.0) has its own Drive screen: street map downloaded once
+  (`GET /api/car-tablet/streets`), route + turn-by-turn steps from `POST /api/car-tablet/route`, heading-up map,
+  spoken directions (Android text-to-speech), re-route after 3 off-route fixes, GPS every second while driving.
+  Google Maps stays as a backup button. To refresh after
   the owner edits the artifact: export its `stops` and `streets` and rerun `tools/route-map/build-route-map.py`.
 - Belmont Courts (2026-10-29): `src/lib/complex-buildings.ts` + `src/lib/route-map/belmont-courts.json` (owner's
   hand-drawn site map matched to OSM outlines; 17 buildings, Courts 100–400, unit ranges like 151–158). A delivery

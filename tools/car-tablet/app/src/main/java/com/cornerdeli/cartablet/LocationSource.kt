@@ -27,13 +27,14 @@ class LocationSource(private val context: Context, private val onFix: (Location)
         false
     }
 
+    /** Every 5 s normally; every second while the Drive screen is navigating. */
     @SuppressLint("MissingPermission")
-    fun start() {
+    fun start(intervalMs: Long = Rules.MOVING_INTERVAL_MS) {
         stop()
         if (fusedAvailable()) {
             try {
-                val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, Rules.MOVING_INTERVAL_MS)
-                    .setMinUpdateIntervalMillis(2_000)
+                val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, intervalMs)
+                    .setMinUpdateIntervalMillis(minOf(intervalMs, 2_000))
                     .setWaitForAccurateLocation(false)
                     .build()
                 val callback = object : LocationCallback() {
@@ -52,7 +53,7 @@ class LocationSource(private val context: Context, private val onFix: (Location)
         for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
             try {
                 if (manager.allProviders.contains(provider))
-                    manager.requestLocationUpdates(provider, Rules.MOVING_INTERVAL_MS, 0f, listener, Looper.getMainLooper())
+                    manager.requestLocationUpdates(provider, intervalMs, 0f, listener, Looper.getMainLooper())
             } catch (_: Throwable) {
             }
         }

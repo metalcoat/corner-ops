@@ -103,7 +103,7 @@ class TrackerService : LifecycleService() {
 
     private fun onFix(fix: Location) {
         val accuracy = if (fix.hasAccuracy()) fix.accuracy else null
-        app.update { it.copy(gps = "ok", lastFixAt = System.currentTimeMillis(), lat = fix.latitude, lng = fix.longitude, accuracy = accuracy, speedMps = if (fix.hasSpeed()) fix.speed else null) }
+        app.update { it.copy(gps = "ok", lastFixAt = System.currentTimeMillis(), lat = fix.latitude, lng = fix.longitude, accuracy = accuracy, speedMps = if (fix.hasSpeed()) fix.speed else null, bearing = if (fix.hasBearing()) fix.bearing else it.bearing) }
         val candidate = Rules.Fix(fix.time, fix.latitude, fix.longitude, accuracy)
         if (!Rules.keepFix(lastKept, candidate)) return
         lastKept = candidate
@@ -158,6 +158,15 @@ class TrackerService : LifecycleService() {
 
     private fun contact(ok: Boolean, error: String = "") {
         app.update { if (ok) it.copy(connected = true, lastContactAt = System.currentTimeMillis(), lastError = "") else it.copy(connected = false, lastError = error) }
+    }
+
+    private var fastGps = false
+
+    /** A fix every second while the Drive screen is navigating; back to every 5 s after. */
+    fun setFastGps(on: Boolean) {
+        if (on == fastGps || !::location.isInitialized || !locationOn) return
+        fastGps = on
+        location.start(if (on) 1_000L else Rules.MOVING_INTERVAL_MS)
     }
 
     /** Quiet time (overnight, car parked at the deli): GPS off. Back on when the server says it's over. */

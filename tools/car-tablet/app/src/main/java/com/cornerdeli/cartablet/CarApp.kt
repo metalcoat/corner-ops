@@ -18,6 +18,7 @@ class CarApp : Application() {
         val lng: Double? = null,
         val accuracy: Float? = null,
         val speedMps: Float? = null,
+        val bearing: Float? = null,
         val connected: Boolean = false,
         val lastContactAt: Long = 0,
         val lastError: String = "",

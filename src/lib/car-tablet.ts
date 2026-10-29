@@ -348,6 +348,25 @@ export async function tabletDeliveries(tablet: CarTablet) {
   return { driver: { employeeId: actor.employeeId, name: actor.name }, deliveries, route };
 }
 
+/** Drive screen route to one delivery (see /api/car-tablet/route). */
+export async function tabletDriveRoute(tablet: CarTablet, from: { latitude: number; longitude: number }, deliveryId: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(deliveryId)) throw new ValidationError("Choose a delivery.");
+  const row = (await getSql()`SELECT a.formatted_address,a.line2,a.latitude::float8 latitude,a.longitude::float8 longitude,o.display_number
+    FROM ordering_delivery_assignments d JOIN ordering_order_delivery_addresses a ON a.order_id=d.order_id JOIN ordering_orders o ON o.id=d.order_id
+    WHERE d.id=${deliveryId} AND d.business=${tablet.business}`)[0];
+  if (!row || row.latitude == null) throw new ValidationError("That delivery has no map location.");
+  const building = complexBuilding({ address: row.formatted_address, unit: row.line2, latitude: row.latitude, longitude: row.longitude });
+  const to = building ? { latitude: building.latitude, longitude: building.longitude } : { latitude: Number(row.latitude), longitude: Number(row.longitude) };
+  const router = ogdensburgRouter();
+  if (router.distanceToNetwork(from) > 800 || router.distanceToNetwork(to) > 800) return { route: null, reason: "off_map", destination: { ...to, label: String(row.formatted_address) } };
+  const leg = router.route(from, to);
+  if (!leg) return { route: null, reason: "no_route", destination: { ...to, label: String(row.formatted_address) } };
+  return {
+    route: { path: leg.path, steps: leg.steps, seconds: Math.round(leg.seconds), metres: Math.round(leg.metres), stopSigns: leg.stopSigns, streets: leg.streets },
+    destination: { ...to, label: `#${row.display_number} · ${String(row.formatted_address).split(",")[0]}${building ? ` · ${building.label}` : ""}` },
+  };
+}
+
 export const TABLET_ACTIONS = ["claim", "picked_up", "arrived", "delivered", "no_contact", "failed", "returned"] as const;
 export type TabletAction = typeof TABLET_ACTIONS[number];
 
