@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { getSql, withTransaction } from "@/lib/db";
 import { employeeByPin } from "@/lib/employee-pin-security";
 import { AuthenticationError, PermissionError, ValidationError } from "@/lib/http";
-import { get, put } from "@/lib/storage";
+import { del, get, put } from "@/lib/storage";
 import { toIsoTimestamp } from "@/lib/timestamp-values";
 import {
   captureProof,
@@ -558,6 +558,15 @@ export async function listPhotos(business: TabletBusiness, filter: { tabletId?: 
     latitude: row.latitude == null ? null : Number(row.latitude), longitude: row.longitude == null ? null : Number(row.longitude),
     url: `/api/ordering/car-tablets/photos/${row.id}`,
   }));
+}
+
+/** Manager clean-up (test shots, mistakes). A copy saved as a delivery's proof photo is kept with the delivery. */
+export async function deletePhotos(business: TabletBusiness, photoIds: string[]) {
+  const ids = photoIds.filter((id) => /^[0-9a-f-]{36}$/i.test(id)).slice(0, 200);
+  if (!ids.length) throw new ValidationError("Choose the photos to delete.");
+  const rows = await getSql()`DELETE FROM car_tablet_photos WHERE business=${business} AND id=ANY(${ids}::uuid[]) RETURNING storage_reference`;
+  await del(rows.map((row) => String(row.storage_reference))).catch((error) => console.error("[car-tablet] photo files", error));
+  return { ok: true, deleted: rows.length };
 }
 
 export async function photoFile(business: TabletBusiness, photoId: string) {

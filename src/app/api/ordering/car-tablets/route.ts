@@ -2,7 +2,7 @@ import { apiError, ValidationError } from "@/lib/http";
 import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
 import { isoJson } from "@/lib/timestamp-values";
 import { formatPairingCode, snapCameras } from "@/lib/car-tablet-rules";
-import { createPairing, listPhotos, listTablets, queueSnap, renameTablet, revokeTablet } from "@/lib/car-tablet";
+import { createPairing, deletePhotos, listPhotos, listTablets, queueSnap, renameTablet, revokeTablet } from "@/lib/car-tablet";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +21,7 @@ export async function GET() {
   }
 }
 
-/** Manager actions: pair (new or again), rename, unpair, snap now. */
+/** Manager actions: pair (new or again), rename, unpair, snap now, delete photos. */
 export async function POST(request: Request) {
   try {
     const actor = await orderingActor(BUSINESS);
@@ -40,6 +40,8 @@ export async function POST(request: Request) {
         return isoJson(await revokeTablet(BUSINESS, String(tabletId)));
       case "snap":
         return isoJson(await queueSnap(BUSINESS, String(tabletId), snapCameras(body.camera), actor.name, body.orderId ? String(body.orderId) : null));
+      case "delete_photos":
+        return isoJson(await deletePhotos(BUSINESS, Array.isArray(body.photoIds) ? body.photoIds.map(String) : []));
       default:
         throw new ValidationError("Unknown car tablet action.");
     }

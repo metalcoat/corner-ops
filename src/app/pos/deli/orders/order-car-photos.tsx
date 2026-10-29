@@ -24,7 +24,7 @@ export default function OrderCarPhotos({ orderId }: { orderId: string }) {
   if (!photos || (!photos.length && !(manager && tablets.length))) return null;
   return <div className="ocCarPhotos">
     <h3>Car tablet photos</h3>
-    <CarPhotoGrid photos={photos} />
+    <CarPhotoGrid photos={photos} canDelete={manager} onChanged={() => void load()} />
     {manager && tablets.map((tablet) => <p key={tablet.id}>
       {tablet.name} ({tablet.online ? "online" : "offline"}):{" "}
       {(["cabin", "road", "both"] as const).map((camera) => <button key={camera} type="button" onClick={() => void snapNow(tablet.id, camera, orderId)

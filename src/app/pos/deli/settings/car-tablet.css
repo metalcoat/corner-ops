@@ -17,3 +17,10 @@
 .carPhotoViewer{position:fixed;inset:0;z-index:1000;background:#000d;display:grid;place-items:center;align-content:center;gap:10px;padding:16px}
 .carPhotoViewer img{max-width:min(96vw,1200px);max-height:80vh;border-radius:8px}
 .carPhotoViewer p{color:#fff!important;margin:0}.carPhotoViewer a{color:#9fd3ff}
+.carPhotoCell{position:relative}
+.carPhotoCell>button{width:100%}
+.carPhotoCell.picked>button{outline:3px solid #a1361f;outline-offset:1px}
+.carPhotoPick{position:absolute;top:10px;left:10px;background:#fff;border-radius:6px;padding:4px;display:flex;box-shadow:0 1px 4px #0004}
+.carPhotoPick input{width:22px;height:22px;margin:0}
+.carPhotoTools{margin:6px 0}
+.carTabletSettings button.danger,.carPhotoViewer button.danger,.ocCarPhotos button.danger{background:#a1361f!important;border-color:#a1361f!important;color:#fff!important}

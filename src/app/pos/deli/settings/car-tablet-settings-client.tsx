@@ -38,22 +38,48 @@ export async function snapNow(tabletId: string, camera: "cabin" | "road" | "both
   if (!response.ok) throw new Error(payload.error || "The tablet couldn't be asked for a photo.");
 }
 
-export function CarPhotoGrid({ photos }: { photos: CarPhoto[] }) {
+async function deletePhotos(photoIds: string[]) {
+  const response = await fetch("/api/ordering/car-tablets", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "delete_photos", photoIds }) });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "The photos couldn't be deleted.");
+}
+
+/** Photo thumbnails with a full-size viewer; managers can delete one or several (`canDelete`). */
+export function CarPhotoGrid({ photos, canDelete = false, onChanged }: { photos: CarPhoto[]; canDelete?: boolean; onChanged?: () => void }) {
   const [open, setOpen] = useState<CarPhoto | null>(null);
-  if (!photos.length) return <p className="posSettingsHint">No photos yet.</p>;
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [note, setNote] = useState("");
+  async function remove(ids: string[]) {
+    if (!window.confirm(`Delete ${ids.length === 1 ? "this photo" : `${ids.length} photos`}? This can't be undone.`)) return;
+    try { await deletePhotos(ids); setNote(`Deleted ${ids.length === 1 ? "1 photo" : `${ids.length} photos`}.`); setPicked(new Set()); setOpen(null); onChanged?.(); }
+    catch (error) { setNote(error instanceof Error ? error.message : "The photos couldn't be deleted."); }
+  }
+  if (!photos.length) return <>{note && <p role="status">{note}</p>}<p className="posSettingsHint">No photos yet.</p></>;
+  const toggle = (id: string) => setPicked((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   return <>
-    <div className="carPhotoGrid">{photos.map((photo) => <button type="button" key={photo.id} onClick={() => setOpen(photo)}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={photo.url} alt={`${photo.camera} photo ${clock(photo.capturedAt)}`} loading="lazy" />
-      <span><b>{photo.camera === "cabin" ? "Cabin" : "Road"}</b> · {clock(photo.capturedAt)}</span>
-      <small>{REASONS[photo.reason] || photo.reason}{photo.requestedBy ? ` (${photo.requestedBy})` : ""}{photo.displayNumber ? ` · #${photo.displayNumber}` : ""}</small>
-    </button>)}</div>
+    {canDelete && <div className="posTools carPhotoTools">
+      <button type="button" onClick={() => setPicked(picked.size === photos.length ? new Set() : new Set(photos.map((photo) => photo.id)))}>{picked.size === photos.length ? "Select none" : "Select all"}</button>
+      <button type="button" className="danger" disabled={!picked.size} onClick={() => void remove([...picked])}>Delete selected{picked.size ? ` (${picked.size})` : ""}</button>
+    </div>}
+    {note && <p role="status">{note}</p>}
+    <div className="carPhotoGrid">{photos.map((photo) => <div className={`carPhotoCell${picked.has(photo.id) ? " picked" : ""}`} key={photo.id}>
+      <button type="button" onClick={() => setOpen(photo)}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={photo.url} alt={`${photo.camera} photo ${clock(photo.capturedAt)}`} loading="lazy" />
+        <span><b>{photo.camera === "cabin" ? "Cabin" : "Road"}</b> · {clock(photo.capturedAt)}</span>
+        <small>{REASONS[photo.reason] || photo.reason}{photo.requestedBy ? ` (${photo.requestedBy})` : ""}{photo.displayNumber ? ` · #${photo.displayNumber}` : ""}</small>
+      </button>
+      {canDelete && <label className="carPhotoPick"><input type="checkbox" checked={picked.has(photo.id)} onChange={() => toggle(photo.id)} aria-label="Select photo" /></label>}
+    </div>)}</div>
     {open && <div className="carPhotoViewer" role="dialog" aria-modal="true" aria-label="Car tablet photo" onClick={() => setOpen(null)}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={open.url} alt={`${open.camera} photo`} />
       <p>{open.tabletName} · {open.camera === "cabin" ? "Cabin" : "Road"} · {clock(open.capturedAt)} · {REASONS[open.reason] || open.reason}{open.driverName ? ` · ${open.driverName}` : ""}
         {open.latitude != null && open.longitude != null && <> · <a href={`https://www.google.com/maps/search/?api=1&query=${open.latitude},${open.longitude}`} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>map</a></>}</p>
-      <button type="button">Close</button>
+      <div className="posTools">
+        {canDelete && <button type="button" className="danger" onClick={(event) => { event.stopPropagation(); void remove([open.id]); }}>Delete photo</button>}
+        <button type="button">Close</button>
+      </div>
     </div>}
   </>;
 }
@@ -157,6 +183,6 @@ export default function CarTabletSettingsClient() {
     {message && <p role="status">{message}</p>}
 
     <h3>Latest photos</h3>
-    <CarPhotoGrid photos={photos} />
+    <CarPhotoGrid photos={photos} canDelete onChanged={() => void load()} />
   </section>;
 }
