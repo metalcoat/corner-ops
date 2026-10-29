@@ -20,7 +20,7 @@ export async function orderingStoreDashboard(){
       FROM ordering_orders WHERE business='Corner Deli' AND created_at>=(date_trunc('day',NOW() AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York') AND amount_due_cents>0 AND status<>'cancelled' ORDER BY COALESCE(scheduled_for,created_at),created_at LIMIT 60`,
     sql`SELECT d.id delivery_id,d.status,d.status delivery_status,d.driver_employee_id,d.driver_employee_id assigned_employee_id,d.assigned_at,d.picked_up_at,d.en_route_at,d.arrived_at,d.delivered_at,d.failed_at,d.updated_at,
       o.display_number,o.status order_status,o.timing_mode,o.scheduled_for,o.created_at,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,e.name driver_name,
-      address.formatted_address delivery_address,address.latitude::double precision destination_latitude,address.longitude::double precision destination_longitude,
+      address.formatted_address delivery_address,address.line2 delivery_unit,address.latitude::double precision destination_latitude,address.longitude::double precision destination_longitude,
       location.latitude::double precision driver_latitude,location.longitude::double precision driver_longitude,location.accuracy_meters::double precision driver_accuracy_meters,location.captured_at driver_location_captured_at,
       location.heading driver_reported_heading,location.speed driver_reported_speed,
       previous.latitude::double precision driver_previous_latitude,previous.longitude::double precision driver_previous_longitude,previous.captured_at driver_previous_captured_at

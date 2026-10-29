@@ -17,6 +17,7 @@ import {
 import { driverOrderDetail } from "@/lib/ordering-driver-orders";
 import { deliLocation } from "@/lib/deli-location";
 import { legNavigationUrl } from "@/lib/delivery-street-router";
+import { complexBuilding } from "@/lib/complex-buildings";
 import { ogdensburgRouter } from "@/lib/route-map/ogdensburg-router";
 import {
   isOnline,
@@ -225,7 +226,7 @@ export async function ingestPoints(tablet: CarTablet, points: CarPoint[]) {
 async function applyGpsStops(tablet: CarTablet, driverId: string, points: CarPoint[]) {
   // arrived_at is when the server heard about it; after a dead zone that's later than the car's actual stop,
   // so the stop's start comes from the car's own first point near the address (≈60 m box) when there is one.
-  const rows = await getSql()`SELECT d.id,d.status,d.order_id,d.en_route_at,a.latitude::float8 latitude,a.longitude::float8 longitude,
+  const rows = await getSql()`SELECT d.id,d.status,d.order_id,d.en_route_at,a.latitude::float8 latitude,a.longitude::float8 longitude,a.formatted_address,a.line2,
       COALESCE((SELECT MIN(l.captured_at) FROM car_tablet_locations l WHERE l.tablet_id=${tablet.id} AND l.captured_at>=d.en_route_at
         AND abs(l.latitude-a.latitude)<0.00055 AND abs(l.longitude-a.longitude)<0.00075),d.arrived_at) arrived_at
     FROM ordering_delivery_assignments d JOIN ordering_order_delivery_addresses a ON a.order_id=d.order_id
@@ -233,10 +234,13 @@ async function applyGpsStops(tablet: CarTablet, driverId: string, points: CarPoi
       AND a.latitude IS NOT NULL AND a.longitude IS NOT NULL`;
   if (!rows.length) return [];
   const when = (value: unknown) => { const iso = toIsoTimestamp(value); return iso ? new Date(iso) : null; };
-  const transitions = stopTransitions(rows.map((row) => ({
-    id: String(row.id), status: String(row.status), latitude: Number(row.latitude), longitude: Number(row.longitude),
-    enRouteAt: when(row.en_route_at), arrivedAt: when(row.arrived_at),
-  })), points);
+  const transitions = stopTransitions(rows.map((row) => {
+    const building = complexBuilding({ address: row.formatted_address, unit: row.line2, latitude: row.latitude, longitude: row.longitude });
+    return {
+      id: String(row.id), status: String(row.status), latitude: building?.latitude ?? Number(row.latitude), longitude: building?.longitude ?? Number(row.longitude),
+      enRouteAt: when(row.en_route_at), arrivedAt: when(row.arrived_at),
+    };
+  }), points);
   if (!transitions.length) return [];
   const actor = await tabletActor(tablet);
   if (!actor) return [];
@@ -282,6 +286,7 @@ export async function tabletDeliveries(tablet: CarTablet) {
         console.error("[car-tablet] order detail", error);
       }
     }
+    const building = complexBuilding({ address: row.delivery_address, unit: row.delivery_unit, latitude: row.destination_latitude, longitude: row.destination_longitude });
     deliveries.push({
       deliveryId: String(row.delivery_id),
       orderId: String(row.order_id),
@@ -291,10 +296,12 @@ export async function tabletDeliveries(tablet: CarTablet) {
       customerName: String(row.customer_name || "Guest"),
       phone: String(row.delivery_phone || ""),
       address: String(row.delivery_address || ""),
-      unit: String(row.delivery_unit || ""),
+      // Belmont Courts: the building shows with the unit, and Navigate / GPS stops use the building.
+      unit: [String(row.delivery_unit || ""), building?.label].filter(Boolean).join(" · "),
+      building: building?.label ?? null,
       notes: String(row.delivery_notes || ""),
-      latitude: row.destination_latitude == null ? null : Number(row.destination_latitude),
-      longitude: row.destination_longitude == null ? null : Number(row.destination_longitude),
+      latitude: building?.latitude ?? (row.destination_latitude == null ? null : Number(row.destination_latitude)),
+      longitude: building?.longitude ?? (row.destination_longitude == null ? null : Number(row.destination_longitude)),
       serviceType: String(row.service_type),
       noContact: row.service_type === "no_contact_delivery",
       scheduledFor: toIsoTimestamp(row.scheduled_for),

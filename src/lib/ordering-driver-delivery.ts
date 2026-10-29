@@ -15,6 +15,7 @@ import {
   type DeliveryRoutePlan,
 } from "@/lib/ordering-delivery-route";
 import { planStreetRoute } from "@/lib/delivery-street-router";
+import { complexBuilding } from "@/lib/complex-buildings";
 import { ogdensburgRouter } from "@/lib/route-map/ogdensburg-router";
 
 export const DELIVERY_STATUSES = ["ASSIGNED","READY_FOR_DRIVER","PICKED_UP","EN_ROUTE","ARRIVED","DELIVERED","NO_CONTACT","DELIVERY_FAILED","RETURNED","CANCELLED"] as const;
@@ -142,14 +143,16 @@ export function deliveryRoutePlans(
         row.destination_longitude === undefined
       )
         return [];
-      const latitude = Number(row.destination_latitude);
-      const longitude = Number(row.destination_longitude);
+      // In an apartment complex (Belmont Courts) the stop is the customer's building, not the complex's front address.
+      const building = complexBuilding({ address: row.delivery_address, unit: row.delivery_unit, latitude: row.destination_latitude, longitude: row.destination_longitude });
+      const latitude = building?.latitude ?? Number(row.destination_latitude);
+      const longitude = building?.longitude ?? Number(row.destination_longitude);
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
       return [{
         deliveryId: String(row.delivery_id),
         displayNumber: String(row.display_number),
         customerName: String(row.customer_name),
-        address: String(row.delivery_address),
+        address: building ? `${String(row.delivery_address)} · ${building.label}` : String(row.delivery_address),
         latitude,
         longitude,
         timingMode: String(row.timing_mode || "asap"),

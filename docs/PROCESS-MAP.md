@@ -397,6 +397,11 @@ flowchart LR
   preferred streets. Used by the store dashboard (blue line, loop minutes, stop signs, % preferred), dispatch and the
   car tablet's Navigate / Navigate whole route; falls back to the straight-line planner off the map. To refresh after
   the owner edits the artifact: export its `stops` and `streets` and rerun `tools/route-map/build-route-map.py`.
+- Belmont Courts (2026-10-29): `src/lib/complex-buildings.ts` + `src/lib/route-map/belmont-courts.json` (owner's
+  hand-drawn site map matched to OSM outlines; 17 buildings, Courts 100–400, unit ranges like 151–158). A delivery
+  in the complex with a 3-digit unit (unit line, "Apt/#/Unit 153" or "Belmont Courts 153"; the complex's own "436" is
+  not a unit) shows "Bldg 151–158 · Court 100" on the tablet and route cards, and Navigate, route stops and GPS stops use
+  that building.
 - Heartbeat every 30 s (battery, charging, network, signal, app version, queue sizes); online = heard from in 90 s.
   Shown on the store dashboard strip and the settings page.
 - Store dashboard: `/pos/dashboard` (outside the POS menu; signs in once with the status board's screen pass;
