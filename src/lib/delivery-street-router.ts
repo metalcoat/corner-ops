@@ -302,7 +302,8 @@ export function planStreetRoute(input: DeliveryRouteStopInput[], origin: Coordin
   const waypoints: string[] = [];
   legs.forEach((current, i) => {
     for (const [lat, lng] of viaPoints(current, router, Math.floor(spare / legs.length) + (i < spare % legs.length ? 1 : 0))) waypoints.push(`${lat},${lng}`);
-    if (i < planned.length) waypoints.push(`${planned[i].latitude},${planned[i].longitude}`);
+    // Several orders for one address (an apartment block) are one stop for Google.
+    if (i < planned.length && waypoints.at(-1) !== `${planned[i].latitude},${planned[i].longitude}`) waypoints.push(`${planned[i].latitude},${planned[i].longitude}`);
   });
   const destination = end >= 0 ? `${points[end].latitude},${points[end].longitude}` : waypoints.pop()!;
   const parameters = new URLSearchParams({ api: "1", travelmode: "driving", destination });
