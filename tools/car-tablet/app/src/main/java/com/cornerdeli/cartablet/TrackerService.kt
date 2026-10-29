@@ -44,6 +44,8 @@ class TrackerService : LifecycleService() {
     private var nextUploadAt = 0L
     @Volatile private var running = true
     private var commandThread: Thread? = null
+    private var lastHeartbeatAt = 0L
+    private var locationOn = false
     private val handledCommands = object : LinkedHashMap<String, Boolean>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?) = size > 100
     }
@@ -58,6 +60,7 @@ class TrackerService : LifecycleService() {
         camera = PhotoTaker(this, this)
         location = LocationSource(this, ::onFix)
         location.start()
+        locationOn = true
         scheduler.scheduleWithFixedDelay({ safely { upload() } }, 3, 10, TimeUnit.SECONDS)
         scheduler.scheduleWithFixedDelay({ safely { heartbeat() } }, 1, 30, TimeUnit.SECONDS)
         scheduler.scheduleWithFixedDelay({ safely { checkForUpdate() } }, 20, 6 * 3600, TimeUnit.SECONDS)
@@ -69,7 +72,7 @@ class TrackerService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         if (intent?.getBooleanExtra(EXTRA_CAMERA, false) == true) promote(true)
         // Play services isn't usable before the first unlock after boot; switch once it is.
-        if (::location.isInitialized && !location.usingFused && location.fusedAvailable()) location.start()
+        if (::location.isInitialized && locationOn && !location.usingFused && location.fusedAvailable()) location.start()
         scheduler.execute { safely { upload(force = true) } }
         return START_STICKY
     }
@@ -156,7 +159,21 @@ class TrackerService : LifecycleService() {
         app.update { if (ok) it.copy(connected = true, lastContactAt = System.currentTimeMillis(), lastError = "") else it.copy(connected = false, lastError = error) }
     }
 
+    /** Quiet time (overnight, car parked at the deli): GPS off. Back on when the server says it's over. */
+    private fun applyQuiet(reply: JSONObject) {
+        if (!reply.has("quiet")) return
+        val quiet = reply.optBoolean("quiet")
+        val wakeAt = if (quiet) System.currentTimeMillis() + reply.optLong("wakeInMinutes") * 60_000 else 0L
+        app.update { it.copy(quiet = quiet, wakeAt = wakeAt, gps = if (quiet) "off overnight" else it.gps) }
+        if (!::location.isInitialized) return
+        if (quiet && locationOn) { location.stop(); locationOn = false }
+        if (!quiet && !locationOn) { location.start(); locationOn = true; lastKept = null }
+    }
+
     private fun heartbeat() {
+        // Every 30 s while open; every 15 minutes overnight.
+        if (app.status.quiet && System.currentTimeMillis() - lastHeartbeatAt < 15 * 60_000L) return
+        lastHeartbeatAt = System.currentTimeMillis()
         val status = app.status
         if (status.lastFixAt > 0 && System.currentTimeMillis() - status.lastFixAt > 60_000 && status.gps == "ok") app.update { it.copy(gps = "no fix") }
         if (!app.prefs.paired) return
@@ -179,7 +196,8 @@ class TrackerService : LifecycleService() {
         try {
             val reply = app.api.post("/api/car-tablet/heartbeat", body)
             val driver = reply.optJSONObject("driver")
-            app.update { it.copy(driverName = driver?.optString("name"), driverAutomatic = driver?.optBoolean("automatic") ?: false) }
+            app.update { it.copy(driverName = driver?.optString("name"), driverAutomatic = driver?.optBoolean("automatic") ?: false, feedVersion = reply.optString("feedVersion").ifBlank { it.feedVersion }) }
+            applyQuiet(reply)
             contact(true)
         } catch (error: IOException) {
             contact(false, error.message ?: "No connection")
@@ -218,15 +236,20 @@ class TrackerService : LifecycleService() {
         while (running) {
             if (!app.prefs.paired) { sleep(5_000); continue }
             try {
-                val commands = app.api.get("/api/car-tablet/commands?wait=25").optJSONArray("commands")
+                val reply = app.api.get("/api/car-tablet/commands?wait=25&feed=${java.net.URLEncoder.encode(app.status.feedVersion ?: "", "UTF-8")}")
+                val commands = reply.optJSONArray("commands")
                 failures = 0
                 contact(true)
+                reply.optString("feedVersion").takeIf { it.isNotBlank() }?.let { version -> app.update { it.copy(feedVersion = version) } }
+                applyQuiet(reply)
                 for (index in 0 until (commands?.length() ?: 0)) {
                     val command = commands!!.getJSONObject(index)
                     val id = command.getString("id")
                     synchronized(handledCommands) { if (handledCommands.put(id, true) != null) null else id } ?: continue
                     if (command.optString("kind") == "snap") scheduler.execute { safely { snap(id, command.optJSONObject("payload") ?: JSONObject()) } }
                 }
+                // Overnight: ask again every 5 minutes instead of straight away (a POS snap waits that long).
+                if (app.status.quiet && (commands?.length() ?: 0) == 0) sleep(5 * 60_000L)
             } catch (error: IOException) {
                 failures++
                 contact(false, error.message ?: "No connection")

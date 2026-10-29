@@ -18,6 +18,7 @@ import { driverOrderDetail } from "@/lib/ordering-driver-orders";
 import { deliLocation } from "@/lib/deli-location";
 import { legNavigationUrl } from "@/lib/delivery-street-router";
 import { complexBuilding } from "@/lib/complex-buildings";
+import { GREETER_HOURS } from "@/lib/greeter-hours";
 import { ogdensburgRouter } from "@/lib/route-map/ogdensburg-router";
 import {
   isOnline,
@@ -25,6 +26,7 @@ import {
   pairingCode,
   PAIRING_MINUTES,
   PHOTO_REASONS,
+  quietTime,
   stopTransitions,
   type CarCamera,
   type CarPhotoReason,
@@ -166,11 +168,26 @@ export async function recordHeartbeat(tablet: CarTablet, body: Record<string, un
   return tabletStatus(tablet);
 }
 
+/**
+ * Changes whenever anything the tablet's delivery list shows could have changed (a delivery order added,
+ * moved on, assigned), so the tablet reloads the list only then instead of every few seconds.
+ */
+export async function feedVersion(tablet: CarTablet): Promise<string> {
+  const row = (await getSql()`SELECT md5(COALESCE(string_agg(o.id::text||o.status||o.updated_at::text||COALESCE(d.status,'')||COALESCE(d.driver_employee_id::text,'')||COALESCE(d.updated_at::text,''),',' ORDER BY o.id),'')) version
+    FROM ordering_orders o LEFT JOIN LATERAL(SELECT status,driver_employee_id,updated_at FROM ordering_delivery_assignments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) d ON TRUE
+    WHERE o.business=${tablet.business} AND o.service_type IN('delivery','no_contact_delivery')
+      AND (o.status NOT IN('draft','completed','cancelled') OR d.updated_at>NOW()-INTERVAL '10 minutes')`)[0];
+  const driver = (await getSql()`SELECT driver_employee_id FROM car_tablets WHERE id=${tablet.id}`)[0]?.driver_employee_id;
+  return `${String(row?.version || "")}:${String(driver || "")}`.slice(0, 80);
+}
+
 /** What the tablet shows in its header: who is driving and whether anything is waiting for it. */
 export async function tabletStatus(tablet: CarTablet) {
   const driver = await effectiveDriver(tablet);
   const pending = Number((await getSql()`SELECT COUNT(*)::int count FROM car_tablet_commands WHERE tablet_id=${tablet.id} AND completed_at IS NULL AND expires_at>NOW()`)[0]?.count || 0);
-  return { tablet: { id: tablet.id, name: tablet.name, business: tablet.business }, driver, pendingCommands: pending, serverTime: new Date().toISOString() };
+  return { tablet: { id: tablet.id, name: tablet.name, business: tablet.business }, driver, pendingCommands: pending, serverTime: new Date().toISOString(),
+    // Overnight (30 min after close to 30 min before opening): no GPS, check in every 15 minutes.
+    ...quietTime(GREETER_HOURS), feedVersion: await feedVersion(tablet) };
 }
 
 /**
@@ -439,13 +456,19 @@ function pendingCommandRows(tabletId: string) {
  * Long poll: returns as soon as a command is waiting, or empty after `waitSeconds`. A command
  * handed out but not finished is offered again after 45 s (the tablet may have lost signal).
  */
-export async function waitForCommands(tablet: CarTablet, waitSeconds: number, signal?: AbortSignal) {
+export async function waitForCommands(tablet: CarTablet, waitSeconds: number, signal?: AbortSignal, knownFeed?: string) {
   const deadline = Date.now() + Math.max(0, Math.min(waitSeconds, 30)) * 1000;
   await getSql()`UPDATE car_tablets SET last_seen_at=NOW() WHERE id=${tablet.id}`;
-  for (;;) {
+  for (let tick = 0; ; tick++) {
     const rows = await pendingCommandRows(tablet.id);
-    if (rows.length || Date.now() >= deadline || signal?.aborted)
-      return rows.map((row) => ({ id: String(row.id), kind: String(row.kind), payload: row.payload, createdAt: toIsoTimestamp(row.created_at) }));
+    // The delivery list changed: answer now so the tablet reloads it (checked every 2 s).
+    const feed = knownFeed != null && tick % 2 === 0 ? await feedVersion(tablet) : knownFeed;
+    if (rows.length || feed !== knownFeed || Date.now() >= deadline || signal?.aborted)
+      return {
+        commands: rows.map((row) => ({ id: String(row.id), kind: String(row.kind), payload: row.payload, createdAt: toIsoTimestamp(row.created_at) })),
+        feedVersion: feed ?? null,
+        ...quietTime(GREETER_HOURS),
+      };
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 }

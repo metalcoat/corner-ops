@@ -75,3 +75,17 @@ test("GPS alone works out which house the car stopped at, and when it drove off"
   // Points from before the car left the store don't count (the store is not the customer).
   assert.deepEqual(stopTransitions([{ ...deliveries[0], enRouteAt: at(100) }], [point(70, 44.6951, -75.4901, 0)]), []);
 });
+
+test("the tablet goes quiet from 30 min after close until 30 min before opening", async () => {
+  const { quietTime } = await import("../src/lib/car-tablet-rules.js");
+  const week = [...Array(5).fill({ opens: "10:30", closes: "21:30" }), { opens: "10:30", closes: "22:30" }, { opens: "10:30", closes: "22:30" }];
+  const hours = [week[0], week[1], week[2], week[3], week[4], week[5], week[6]]; // Sun..Sat
+  // Thursday 2026-10-29 (EDT, UTC-4).
+  const at = (utc: string) => quietTime(hours, new Date(utc));
+  assert.deepEqual(at("2026-10-29T17:00:00Z"), { quiet: false, wakeInMinutes: 0 }); // 1:00 PM open
+  assert.deepEqual(at("2026-10-30T01:45:00Z"), { quiet: false, wakeInMinutes: 0 }); // 9:45 PM, closed 15 min
+  assert.deepEqual(at("2026-10-30T02:05:00Z"), { quiet: true, wakeInMinutes: 715 }); // 10:05 PM → wake 10:00 AM
+  assert.deepEqual(at("2026-10-30T13:59:00Z"), { quiet: true, wakeInMinutes: 1 }); // 9:59 AM
+  assert.deepEqual(at("2026-10-31T02:45:00Z"), { quiet: false, wakeInMinutes: 0 }); // Friday 10:45 PM, open till 10:30 + 30
+  assert.equal(quietTime([], new Date()).quiet, false);
+});

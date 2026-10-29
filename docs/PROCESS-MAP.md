@@ -404,6 +404,11 @@ flowchart LR
   that building.
 - Heartbeat every 30 s (battery, charging, network, signal, app version, queue sizes); online = heard from in 90 s.
   Shown on the store dashboard strip and the settings page.
+- Data use (app 1.0.2, 2026-10-29, the SIM has ~3 GB/month): the tablet reloads its delivery list only when
+  `feedVersion` changes (the commands long poll answers early when it does); photos are 1280×960 JPEG q80. Overnight
+  quiet time (`quietTime` in `car-tablet-rules.ts`, store hours from `src/lib/greeter-hours.ts`): from 30 min after
+  close to 30 min before opening the tablet turns GPS off (the car is parked at the deli), checks in every 15 min,
+  polls for snaps every 5 min and dims its "Closed" screen.
 - Store dashboard: `/pos/dashboard` (outside the POS menu; signs in once with the status board's screen pass;
   `/pos/deli/dashboard` redirects). Order: car tablets, live map + routes, phone (avg time to answer, missed = rang
   over `THREE_CX_IGNORE_SECONDS` (4) with nobody answering, long rings, call-backs), orders, deliveries, door walk-ins (one line).

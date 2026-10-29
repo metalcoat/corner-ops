@@ -41,10 +41,10 @@ class PhotoTaker(private val context: Context, private val owner: LifecycleOwner
                     val rotation = context.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: 0
                     val capture = ImageCapture.Builder()
                         .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                        .setJpegQuality(85)
+                        .setJpegQuality(80)
                         .setTargetRotation(rotation)
                         .setResolutionSelector(ResolutionSelector.Builder()
-                            .setResolutionStrategy(ResolutionStrategy(Size(1920, 1440), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
+                            .setResolutionStrategy(ResolutionStrategy(Size(1280, 960), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
                             .build())
                         .build()
                     provider.unbindAll()

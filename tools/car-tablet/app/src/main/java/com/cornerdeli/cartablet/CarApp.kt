@@ -27,6 +27,11 @@ class CarApp : Application() {
         val toastAt: Long = 0,
         val updateVersion: String? = null,
         val updateUrl: String? = null,
+        /** Overnight quiet time from the server (store hours): no GPS, few check-ins. */
+        val quiet: Boolean = false,
+        val wakeAt: Long = 0,
+        /** Changes when the delivery list does; the screen reloads the list only then. */
+        val feedVersion: String? = null,
     )
 
     override fun onCreate() {

@@ -57,15 +57,22 @@ class MainActivity : Activity() {
     private var askedPermissions = false
     private var lastFeedAt = 0L
     private var lastFeedJson = ""
+    private var loadedFeedVersion: String? = null
     private var pairServer: String? = null
     private var pairCode: String? = null
 
     private val tick = object : Runnable {
         override fun run() {
             renderStatus()
-            if (app.prefs.paired && System.currentTimeMillis() - lastFeedAt > 10_000) refreshFeed()
+            // Reload the list when the server says it changed (or every 2 minutes, in case a signal was missed).
+            val status = app.status
+            if (app.prefs.paired && !status.quiet && (status.feedVersion != loadedFeedVersion || System.currentTimeMillis() - lastFeedAt > 120_000)) {
+                loadedFeedVersion = status.feedVersion
+                refreshFeed()
+            }
             val wanted = when {
                 !app.prefs.paired -> "pair"
+                status.quiet -> "quiet"
                 feedDriver == null && app.status.driverName == null -> "signin"
                 else -> "main"
             }
@@ -244,8 +251,19 @@ class MainActivity : Activity() {
         content.addView(when (which) {
             "pair" -> pairingView()
             "signin" -> signInView()
+            "quiet" -> quietView()
             else -> mainView()
         })
+        // Dim the screen overnight; normal brightness otherwise.
+        window.attributes = window.attributes.apply { screenBrightness = if (which == "quiet") 0.05f else -1f }
+    }
+
+    private fun quietView(): View {
+        val box = column(48).apply { gravity = Gravity.CENTER }
+        box.addView(text("Closed", 44f, bold = true).apply { gravity = Gravity.CENTER })
+        val wake = app.status.wakeAt.takeIf { it > 0 }?.let { DateTimeFormatter.ofPattern("h:mm a").withZone(ZoneId.of("America/New_York")).format(Instant.ofEpochMilli(it)) }
+        box.addView(text("GPS is off while the car is parked overnight.${wake?.let { " The tablet wakes at $it." } ?: ""}", 22f, Color.LTGRAY).apply { gravity = Gravity.CENTER })
+        return box
     }
 
     // ---------- pairing ----------

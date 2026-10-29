@@ -143,3 +143,35 @@ export function stopTransitions(deliveries: StopDelivery[], points: CarPoint[]):
   }
   return transitions;
 }
+
+/** Store hours (Sunday first, "HH:MM" store time), as in src/lib/greeter-hours.ts. */
+export type StoreDay = { opens: string; closes: string } | null;
+/** Deliveries stop about 30 min after closing; the tablet wakes 30 min before opening. */
+export const QUIET_AFTER_CLOSE_MINUTES = 30;
+export const WAKE_BEFORE_OPEN_MINUTES = 30;
+
+function storeClock(now: Date, timeZone: string) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now).map((p) => [p.type, p.value]));
+  return { day: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(String(parts.weekday)), minutes: Number(parts.hour) * 60 + Number(parts.minute) };
+}
+const minutesOf = (value: string) => { const [h, m] = value.split(":").map(Number); return h * 60 + m; };
+
+/**
+ * Overnight quiet time for the car tablet (owner 2026-10-29: the car stays at the deli, so no GPS and
+ * few check-ins): from 30 min after close until 30 min before opening. Returns minutes until it wakes.
+ */
+export function quietTime(hours: readonly StoreDay[], now = new Date(), timeZone = "America/New_York"): { quiet: boolean; wakeInMinutes: number } {
+  if (hours.length !== 7) return { quiet: false, wakeInMinutes: 0 };
+  const { day, minutes } = storeClock(now, timeZone);
+  // Walk forward from yesterday: the latest "awake" window that has started tells us where we are.
+  for (let offset = -1; offset <= 7; offset++) {
+    const index = (((day + offset) % 7) + 7) % 7, hoursToday = hours[index];
+    if (!hoursToday) continue;
+    const start = offset * 1440 + minutesOf(hoursToday.opens) - WAKE_BEFORE_OPEN_MINUTES;
+    let end = offset * 1440 + minutesOf(hoursToday.closes) + QUIET_AFTER_CLOSE_MINUTES;
+    if (end <= start) end += 1440; // closes after midnight
+    if (minutes >= start && minutes < end) return { quiet: false, wakeInMinutes: 0 };
+    if (start > minutes) return { quiet: true, wakeInMinutes: start - minutes };
+  }
+  return { quiet: false, wakeInMinutes: 0 };
+}
