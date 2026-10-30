@@ -1,7 +1,7 @@
 "use client";
 // A small dependency-free slippy map: raster tiles plus markers, auto-fitted to
 // the points it is given. Used by the customer delivery tracker and dispatch.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import "./street-map.css";
 
 export type MapPoint = {
@@ -54,12 +54,20 @@ export default function StreetMap({
   tileUrl,
   height = 320,
   label = "Delivery map",
+  center,
+  zoom: fixedZoom,
+  controls,
 }: {
   points: MapPoint[];
   lines?: MapLine[];
   tileUrl?: string | null;
   height?: number;
   label?: string;
+  /** With `zoom`: keep this spot in the middle (e.g. follow the car) instead of fitting every point. */
+  center?: { latitude: number; longitude: number } | null;
+  zoom?: number;
+  /** Buttons drawn over the map (zoom, show all). */
+  controls?: ReactNode;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -74,9 +82,10 @@ export default function StreetMap({
   const template = tileUrl || DEFAULT_TILE_URL;
   let content = null;
   if (width > 0 && usable.length) {
-    const zoom = fitZoom(usable, width, height);
+    const zoom = fixedZoom ? Math.max(4, Math.min(MAX_ZOOM, Math.round(fixedZoom))) : fitZoom(usable, width, height);
     const xs = usable.map((p) => worldX(p.longitude, zoom)), ys = usable.map((p) => worldY(p.latitude, zoom));
-    const centerX = (Math.min(...xs) + Math.max(...xs)) / 2, centerY = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const centerX = fixedZoom && center ? worldX(center.longitude, zoom) : (Math.min(...xs) + Math.max(...xs)) / 2;
+    const centerY = fixedZoom && center ? worldY(center.latitude, zoom) : (Math.min(...ys) + Math.max(...ys)) / 2;
     const left = centerX - width / 2, top = centerY - height / 2, count = 2 ** zoom;
     const tiles = [];
     for (let ty = Math.floor(top / TILE); ty <= Math.floor((top + height) / TILE); ty++) {
@@ -122,6 +131,7 @@ export default function StreetMap({
   return (
     <div className="streetMap" ref={box} style={{ height }} role="img" aria-label={label}>
       {content}
+      {controls && <div className="streetMapControls">{controls}</div>}
       <small className="streetMapCredit">
         © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors
       </small>

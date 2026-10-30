@@ -20,3 +20,6 @@
 .streetMapMarker.stale .streetMapHeading{display:none}
 .streetMapLines{position:absolute;inset:0;pointer-events:none}
 .streetMapLines polyline{fill:none;stroke:#1f6feb;stroke-width:5;stroke-opacity:.75;stroke-linejoin:round;stroke-linecap:round}
+.streetMapControls{position:absolute;top:10px;right:10px;display:grid;gap:6px;z-index:5}
+.streetMapControls button{min-width:44px;min-height:44px;border:1px solid #9aa5b1;border-radius:8px;background:#fff;color:#17202a;font:800 18px/1 system-ui,sans-serif;box-shadow:0 2px 6px #0003;cursor:pointer;padding:0 10px}
+.streetMapControls button[aria-pressed="true"]{background:#17202a;color:#fff}
