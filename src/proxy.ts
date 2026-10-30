@@ -196,6 +196,7 @@ function isDeliPosApi(path: string): boolean {
       "inventory",
       "supplier-costs",
       "register",
+      "stale-drafts",
       "offline-sync",
       "payment-stations",
       "payments",

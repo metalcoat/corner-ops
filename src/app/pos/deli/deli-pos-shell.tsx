@@ -1,5 +1,6 @@
 "use client";
 
+import StaleDraftAlert from "./stale-draft-alert";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
@@ -174,6 +175,7 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
     <div className="deliShellWorkspace">
       <div className={`deliMenuWorkspace ${menuActive ? "active" : "inactive"}`} aria-hidden={!menuActive}><PosClient business="Corner Deli" idleLockSeconds={idleLockSeconds} embedded /></div>
       {!menuActive && <div className="deliRoutedWorkspace">{children}</div>}
+      {session?.authenticated && <StaleDraftAlert />}
     </div>
   </div>;
 }

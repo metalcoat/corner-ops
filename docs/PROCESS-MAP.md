@@ -431,6 +431,10 @@ flowchart LR
 - Voids: lines or orders the kitchen hasn't got, anyone (`orderLineWasSent`). Sent lines, sent or paid orders, and
   refunds need a manager: signed in, or a manager's PIN typed in (`managerApprovalFromPin`, same attempt limits as
   sign-in); the reason and `approvedByName` are on the order event.
+- Stale draft alert (`src/lib/ordering-stale-drafts.ts`, `src/app/pos/deli/stale-draft-alert.tsx`): orders staff rang on a
+  POS and never sent (not web, AI, or reopened sent orders), idle for the set minutes (10), pop up on the chosen stations
+  (Back pos 1), checked every 30 s, until sent, deleted (voided, kept in history) or snoozed 5 min. Minutes and stations:
+  Settings → Operations (`stale_draft_alert_*`, migration 0032). `ordering_orders.created_station` records the station.
 - POS Orders cards (`/pos/deli/orders`, `listOrders` in `src/lib/ordering-order-center.ts`): "Taken by" = the POS
   employee in `ordering_orders.created_by` (else Online / AI phone / Kiosk), plus who sent it to the kitchen
   (`submitted_by`, recorded from 2026-10-30, migration 0031) and who took the latest payment when different. Delivery

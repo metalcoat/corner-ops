@@ -146,6 +146,7 @@ export async function POST(request: Request) {
     } else {
       order = await createTimedDraftOrder(draftInput);
     }
+    if(body.stationKey)await getSql()`UPDATE ordering_orders SET created_station=${String(body.stationKey).trim().toLowerCase().slice(0,80)} WHERE id=${order.id}`;
     if(body.tableSessionId){const sessionId=String(body.tableSessionId);const linked=await getSql()`UPDATE restaurant_table_sessions session SET order_id=${order.id},status='ordering',updated_at=NOW() FROM restaurant_tables table_row JOIN restaurant_floor_plans floor ON floor.id=table_row.floor_plan_id JOIN restaurant_locations location ON location.id=floor.location_id JOIN restaurant_concepts concept ON concept.id=location.concept_id WHERE session.id=${sessionId} AND session.table_id=table_row.id AND session.order_id IS NULL AND session.status='open' AND concept.legacy_business=${business} RETURNING session.id,table_row.label`;if(!linked.length){await getSql()`DELETE FROM ordering_orders WHERE id=${order.id}`;return isoJson({error:"The table session is no longer available."},{status:409})}await getSql()`UPDATE ordering_orders SET first_name_snapshot=${String(linked[0].label)},updated_at=NOW() WHERE id=${order.id}`}
     if (validatedAddress) {
       let route = null;

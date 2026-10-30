@@ -2565,6 +2565,7 @@ export default function PosClient({
       // The same key is reused if this draft is replayed from the offline queue, so a draft the
       // server created before the connection dropped is returned instead of duplicated.
       idempotencyKey:reopenedDraft?undefined:mutationId,
+      stationKey:stationProfile?.station_key||localStorage.getItem("corner-ops-station-key")||"",
       business,serviceType,timingMode,
       scheduledFor:timingMode === "future" ? new Date(scheduledFor).toISOString() : null,
       deliveryAddress:serviceType === "delivery" ? deliveryValidatedInput : undefined,
