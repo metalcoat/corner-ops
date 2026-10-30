@@ -43,6 +43,7 @@
     "src/lib/payroll-schedule-compare.ts",
     "src/lib/payroll-auto-rules.ts",
     "src/lib/car-tablet-rules.ts",
+    "src/lib/till-reset-rules.ts",
     "src/lib/delivery-street-router.ts",
     "src/lib/complex-buildings.ts",
     "src/lib/games/rampage/*.ts",

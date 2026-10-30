@@ -44,7 +44,7 @@ export async function POST(request: Request) {
       // Unpaid orders from devices without a payment station share one non-cash terminal for idempotency bookkeeping.
       terminal=(await sql`INSERT INTO ordering_pos_terminals(id,business,name,terminal_key,terminal_type,location_label,allow_cash,allow_offline_cash) VALUES(${randomUUID()},'Corner Deli','Offline order entry','offline-unpaid','pos','Unassigned POS devices',FALSE,FALSE) ON CONFLICT(business,terminal_key) DO UPDATE SET last_seen_at=NOW(),updated_at=NOW() RETURNING id`)[0];
     }
-    const register=amount===null?undefined:(await sql`SELECT id,status FROM ordering_register_sessions WHERE terminal_id=${terminal.id} AND status IN('open','counting','needs_review') ORDER BY opened_at DESC LIMIT 1`)[0];
+    const register=amount===null?undefined:(await sql`SELECT id,status FROM ordering_register_sessions WHERE terminal_id=${terminal.id} AND status IN('open','counting','needs_review','resetting') ORDER BY opened_at DESC LIMIT 1`)[0];
     if (amount !== null && register?.status !== "open") return isoJson({ error: "The original register must still be open before this offline cash order can sync." }, { status: 409 });
     const existing=(await sql`SELECT * FROM ordering_offline_mutations WHERE terminal_id=${terminal.id} AND client_mutation_id=${mutationId} LIMIT 1`)[0];
     if(existing?.status==='applied')return isoJson(existing.result);
