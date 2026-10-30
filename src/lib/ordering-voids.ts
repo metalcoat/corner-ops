@@ -10,8 +10,7 @@ import { ensureOrderingTipSchema } from "@/lib/ordering-tip-schema";
 
 export class OrderVoidError extends Error {}
 
-export async function voidSentOrder(input: { orderId: string; business: OrderingBusiness; reason: string; actor: OrderingActor }) {
-  if (!canManagePos(input.actor)) throw new OrderVoidError("Manager or owner authorization is required to void a sent order.");
+export async function voidSentOrder(input: { orderId: string; business: OrderingBusiness; reason: string; actor: OrderingActor; approver?: OrderingActor }) {
   const reason = input.reason.trim();
   if (reason.length < 3) throw new OrderVoidError("A void reason is required.");
   if (reason.length > 500) throw new OrderVoidError("Void reason must be 500 characters or fewer.");
@@ -20,12 +19,14 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
   return withTransaction(async () => {
     const sql = getSql();
     const rows = await sql`
-      SELECT id, display_number, status, payment_status, version, voided_at
+      SELECT id, display_number, status, payment_status, version, voided_at, submitted_at, paid_cents
       FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE
     `;
     const order = rows[0];
     if (!order) throw new OrderVoidError("Order was not found.");
     if (order.voided_at) return { order, alreadyVoided: true };
+    // Never sent and nothing paid: anyone can void it. Otherwise a manager, signed in or by PIN.
+    if ((order.submitted_at || Number(order.paid_cents) > 0) && !canManagePos(input.approver || input.actor)) throw new OrderVoidError("Manager or owner authorization is required: enter a manager PIN to void an order the kitchen already has or that was paid for.");
     if (!['draft','sent_to_kitchen','in_progress','ready','completed'].includes(String(order.status))) {
       throw new OrderVoidError("This order can no longer be cancelled or voided.");
     }
@@ -55,7 +56,7 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
     await sql`
       INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)
       VALUES(${randomUUID()},${input.orderId},${updated[0].version},'order_voided',${input.actor.type},${input.actor.id},
-        CAST(${JSON.stringify({ reason, actorName: input.actor.name, actorRole: input.actor.role, previousFulfillmentStatus: order.status, previousPaymentStatus: order.payment_status, paymentWasNotRefunded: true })} AS jsonb))
+        CAST(${JSON.stringify({ reason, actorName: input.actor.name, actorRole: input.actor.role, previousFulfillmentStatus: order.status, previousPaymentStatus: order.payment_status, paymentWasNotRefunded: true, approvedById: input.approver?.id || null, approvedByName: input.approver?.name || null })} AS jsonb))
     `;
     return { order: updated[0], alreadyVoided: false };
   });

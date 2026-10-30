@@ -131,34 +131,23 @@ export default function OrderCenterClient() {
     const b = await r.json();
     if (r.ok) setSelected(b.order);
   }
-  // Paying a sent order does not need it pulled back to draft: hand it to the
-  // POS checkout as-is (the same handoff the payment station uses).
-  function cashOut(order: Order) {
-    localStorage.setItem("corner-ops-checkout-order", JSON.stringify({ id: order.id, displayNumber: order.display_number, totalCents: Number(order.total_cents), deliveryFeeCents: Number((order as Order & { delivery_fee_cents?: number }).delivery_fee_cents || 0), timingMessage: "", kitchenTimingLabel: "", scheduledFor: order.scheduled_for, promotions: [], loyalty: [], orderItemIds: [], checkoutOnly: true }));
-    setSelected(null);
-    router.push("/pos/deli");
-    window.dispatchEvent(new Event("corner-ops-checkout-order"));
-  }
-  // Any unpaid order can be paid from here, whenever the customer pays. Paying an order that was never sent
-  // to the kitchen (a draft) sends it there once paid, so that is confirmed first.
+  // Any open order loads whole into the regular POS screen: add, void, then pay. A never-sent order
+  // goes to the kitchen once paid, so taking payment on one is confirmed first.
   function takePayment(order: Order) {
     if (order.status === "draft") {
       const older = isoDate(new Date(order.created_at)) !== isoDate(new Date());
       if (!window.confirm(`Order #${order.display_number} was never sent to the kitchen${older ? ` (it is from ${new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", day: "numeric" }).format(new Date(order.created_at))})` : ""}. Taking payment sends it to the kitchen. Continue?`)) return;
     }
-    cashOut(order);
+    void reopen(order, true);
   }
-  async function reopen(order: Order) {
-    // Editing a sent order takes it off the kitchen line until it is sent
-    // again, so it is only done on an explicit Edit with confirmation.
-    if (order.status !== "draft" && !window.confirm(`Edit order #${order.display_number}? The kitchen screen will show it as being edited until you send the changes. If nothing is changed it returns to the kitchen automatically after 15 minutes.`)) return;
+  async function reopen(order: Order, checkout = false) {
     setReopenBusy(true);
     setError("");
     try {
       const response = await fetch(`/api/ordering/order-center/${encodeURIComponent(order.id)}/reopen`, { method: "POST" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not reopen this order.");
-      localStorage.setItem("corner-ops-reopened-order", JSON.stringify({ id: order.id, displayNumber: order.display_number, totalCents: Number(body.order.total_cents), deliveryFeeCents: Number(body.order.delivery_fee_cents || 0), timingMessage: body.order.timing_message_snapshot || "", kitchenTimingLabel: body.order.kitchen_timing_label_snapshot || "", scheduledFor: body.order.scheduled_for, orderItemIds: body.orderItemIds || [], serviceType: body.order.service_type, originalServiceType: body.order.service_type, openCheckout: true }));
+      localStorage.setItem("corner-ops-reopened-order", JSON.stringify({ id: order.id, displayNumber: order.display_number, totalCents: Number(body.order.total_cents), deliveryFeeCents: Number(body.order.delivery_fee_cents || 0), timingMessage: body.order.timing_message_snapshot || "", kitchenTimingLabel: body.order.kitchen_timing_label_snapshot || "", scheduledFor: body.order.scheduled_for, orderItemIds: body.orderItemIds || [], serviceType: body.order.service_type, originalServiceType: body.order.service_type, openCheckout: checkout }));
       setSelected(null);
       router.push("/pos/deli");
       window.dispatchEvent(new Event("corner-ops-order-reopened"));
@@ -285,7 +274,7 @@ export default function OrderCenterClient() {
         const unpaid = Number(o.amount_due_cents) > 0;
         const pickupAttention = unpaid && o.service_type === "pickup" && o.status !== "cancelled" && clock - new Date(o.created_at).getTime() >= 40 * 60 * 1000;
         return (
-        <button className={`ocOrder ${pickupAttention ? "pickupAttention" : ""}`} key={o.id} onClick={() => void details(o)}>
+        <button className={`ocOrder ${pickupAttention ? "pickupAttention" : ""}`} key={o.id} disabled={reopenBusy} onClick={() => void (unpaid && o.status !== "cancelled" && !o.voided_at ? reopen(o) : details(o))}>
           {o.overdue_unpaid && (
             <em>
               UNPAID FROM{" "}
@@ -347,7 +336,7 @@ export default function OrderCenterClient() {
             {o.driver_name ? `Driver: ${o.driver_name}` : `Driver on clock at ${o.due_at ? new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(new Date(o.due_at)) : "order time"}: ${o.drivers_on_clock || "none"}`}
           </small>}
           {pickupAttention && <em className="pickupAlert">PICKUP UNPAID 40+ MINUTES</em>}
-          {unpaid && o.status !== "cancelled" && !o.voided_at && <span className="ocTapToPay">TAP TO TAKE PAYMENT</span>}
+          {unpaid && o.status !== "cancelled" && !o.voided_at && <span className="ocTapToPay">TAP TO OPEN · ADD · PAY</span>}
         </button>
       )})}
       </div>

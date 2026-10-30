@@ -424,9 +424,13 @@ flowchart LR
   `tools/car-tablet/publish-dev.sh` → `https://dev.ordercornerdeli.com/downloads/corner-ops-car-tablet.apk`.
   Provisioning steps: `tools/car-tablet/README.md`.
 
-- POS Orders: tapping an unpaid card (any day, any status) opens it with a big TAKE PAYMENT button that hands the
-  order to the POS checkout (cash, card, MX terminal); a draft is sent to the kitchen once paid (confirmed first),
-  an order already in the kitchen keeps its status.
+- POS Orders: tapping an unpaid card (any day, any status) loads the whole order into the regular POS screen (reopen
+  flow): customer, type, lines, totals and payments so far. Staff add items, void lines or the whole order, send, or pay
+  there. A sent order stays "being edited" on the kitchen screen until sent; left alone with no changes it returns after
+  15 minutes. Only the changes print (ADD ON ticket with VOID/REMOVE lines). A never-sent order goes to the kitchen once paid.
+- Voids: lines or orders the kitchen hasn't got, anyone (`orderLineWasSent`). Sent lines, sent or paid orders, and
+  refunds need a manager: signed in, or a manager's PIN typed in (`managerApprovalFromPin`, same attempt limits as
+  sign-in); the reason and `approvedByName` are on the order event.
 - POS Orders cards (`/pos/deli/orders`, `listOrders` in `src/lib/ordering-order-center.ts`): "Taken by" = the POS
   employee in `ordering_orders.created_by` (else Online / AI phone / Kiosk), plus who sent it to the kitchen
   (`submitted_by`, recorded from 2026-10-30, migration 0031) and who took the latest payment when different. Delivery

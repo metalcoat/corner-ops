@@ -15,6 +15,15 @@ export function effectiveReopen<T extends ReopenDetails>(details: T | undefined 
 }
 
 /**
+ * Has the kitchen already got this line? Decides who may void it: unsent lines anyone, sent lines a manager.
+ * A never-sent order has no sent lines; while a sent order is reopened, only the lines it had at reopen were sent.
+ */
+export function orderLineWasSent(input: { submittedAt: unknown; reopenedItemIds?: string[] | null; itemId: string }): boolean {
+  if (!input.submittedAt) return false;
+  return input.reopenedItemIds ? input.reopenedItemIds.map(String).includes(input.itemId) : true;
+}
+
+/**
  * Status to put an abandoned reopened order back into, or null when it must
  * stay in draft because it has unsent changes (new lines or adjustments).
  */

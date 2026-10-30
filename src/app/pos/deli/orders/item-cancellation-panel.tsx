@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type Item = { id: string; item_name_snapshot: string; quantity: number; cancelled_quantity?: number };
 type Tender = { id: string; tender_type: string; transaction_type: string; status: string; amount_cents: number };
-type Quote = { orderReductionCents: number; refundRequiredCents: number; discountCents: number; taxCents: number; customerId?: string | null };
+type Quote = { managerRequired?: boolean; orderReductionCents: number; refundRequiredCents: number; discountCents: number; taxCents: number; customerId?: string | null };
 type Resolution = "forgot" | "full_refund" | "minor" | "medium" | "large";
 
 const money = (c: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(c / 100);
@@ -18,7 +18,9 @@ const resolutionReason: Record<Resolution, string> = {
   large: "Large item issue — 60% future-order credit",
 };
 
-export default function ItemCancellationPanel({ orderId, item, onDone, onClose }: {
+export default function ItemCancellationPanel({ orderId, item, onDone, onClose, staff = false }: {
+  /** Signed in below manager: no refunds or credits here, and a manager PIN for anything the kitchen already has. */
+  staff?: boolean;
   orderId: string;
   item: Item;
   onDone: (result?: { kind: "cancelled" | "courtesy_credit"; creditCents?: number }) => Promise<void>;
@@ -35,6 +37,7 @@ export default function ItemCancellationPanel({ orderId, item, onDone, onClose }
   const [busy, setBusy] = useState(false);
   // Owner rule: the refund (or store credit) can wait, but must be settled by end of day.
   const [refundLater, setRefundLater] = useState(false);
+  const [managerPin, setManagerPin] = useState("");
 
   useEffect(() => {
     setQuote(null);
@@ -87,7 +90,7 @@ export default function ItemCancellationPanel({ orderId, item, onDone, onClose }
         await onDone({ kind: "courtesy_credit", creditCents: courtesyCreditCents });
         return;
       }
-      const response = await fetch(`/api/ordering/order-center/${orderId}/items/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ itemId: item.id, quantity, reason, paymentTransactionId: quote.refundRequiredCents && !refundLater ? tenderId : undefined, refundMethod: quote.refundRequiredCents && refundLater ? "later" : "original", clientMutationId: randomId() }) });
+      const response = await fetch(`/api/ordering/order-center/${orderId}/items/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ managerPin: managerPin || undefined, itemId: item.id, quantity, reason, paymentTransactionId: quote.refundRequiredCents && !refundLater ? tenderId : undefined, refundMethod: quote.refundRequiredCents && refundLater ? "later" : "original", clientMutationId: randomId() }) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "The item refund could not be completed.");
       await onDone({ kind: "cancelled" });
@@ -103,20 +106,21 @@ export default function ItemCancellationPanel({ orderId, item, onDone, onClose }
       <h3>Resolve item problem</h3>
       <strong>{item.item_name_snapshot}</strong>
       <label>Quantity<select value={quantity} onChange={(event) => setQuantity(Number(event.target.value))}>{Array.from({ length: available }, (_, index) => <option key={index + 1}>{index + 1}</option>)}</select></label>
-      <div className="ocResolutionChoices" role="group" aria-label="Item resolution">
+      {!staff && <div className="ocResolutionChoices" role="group" aria-label="Item resolution">
         <button type="button" className={resolution === "forgot" ? "selected" : ""} onClick={() => choose("forgot")}><strong>WE FORGOT IT</strong><span>Remove item and refund it</span></button>
         <button type="button" className={resolution === "full_refund" ? "selected" : ""} onClick={() => choose("full_refund")}><strong>FULL REFUND</strong><span>Remove and refund full item charge</span></button>
         <button type="button" className={resolution === "minor" ? "selected" : ""} onClick={() => choose("minor")}><strong>MINOR · 10%</strong><span>{money(courtesyCreditCents)} future credit</span></button>
         <button type="button" className={resolution === "medium" ? "selected" : ""} onClick={() => choose("medium")}><strong>MEDIUM · 30%</strong><span>{money(courtesyCreditCents)} future credit</span></button>
         <button type="button" className={resolution === "large" ? "selected" : ""} onClick={() => choose("large")}><strong>LARGE · 60%</strong><span>{money(courtesyCreditCents)} future credit</span></button>
-      </div>
+      </div>}
       <label>Reason<textarea autoFocus maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
       {quote && <div className="cancelQuote"><span>Item charge with tax <b>{money(quote.orderReductionCents)}</b></span>{courtesyCredit ? <span>Future-order credit <b>{money(courtesyCreditCents)}</b></span> : <><span>Checkout adjustment <b>−{money(quote.orderReductionCents)}</b></span><span>Refund required <b>{money(quote.refundRequiredCents)}</b></span></>}</div>}
       {!courtesyCredit && quote && quote.refundRequiredCents > 0 && <label className="ocRefundLater"><input type="checkbox" checked={refundLater} onChange={(event) => setRefundLater(event.target.checked)} /> Refund or leave credit later (before closing, from &quot;Needs refund or credit&quot;)</label>}
       {!courtesyCredit && quote && quote.refundRequiredCents > 0 && !refundLater && <label>Payment being refunded<select value={tenderId} onChange={(event) => setTenderId(event.target.value)}><option value="">Choose original payment</option>{tenders.map((tender) => <option key={tender.id} value={tender.id}>{tender.tender_type.replaceAll("_", " ")} · {money(tender.amount_cents)}</option>)}</select></label>}
       {courtesyCredit && !quote?.customerId && <p className="ocDialogError">A customer account is required for future-order credit.</p>}
+      {staff && quote?.managerRequired && <label>Manager PIN (the kitchen already has this item)<input type="password" inputMode="numeric" autoComplete="off" maxLength={4} value={managerPin} onChange={(event) => setManagerPin(event.target.value)} /></label>}
       {error && <p className="ocDialogError" role="alert">{error}</p>}
-      <div><button type="button" disabled={busy} onClick={onClose}>BACK</button><button className={courtesyCredit ? "primary" : "danger"} disabled={busy || reason.trim().length < 3 || !quote || (courtesyCredit ? !quote.customerId : quote.refundRequiredCents > 0 && !refundLater && !tenderId)}>{busy ? "SAVING…" : courtesyCredit ? `ISSUE ${money(courtesyCreditCents)} CREDIT` : refundLater && (quote?.refundRequiredCents || 0) > 0 ? "REMOVE ITEM · REFUND LATER" : "REMOVE & REFUND ITEM"}</button></div>
+      <div><button type="button" disabled={busy} onClick={onClose}>BACK</button><button className={courtesyCredit ? "primary" : "danger"} disabled={busy || reason.trim().length < 3 || !quote || (staff && quote.managerRequired && managerPin.length < 4) || (courtesyCredit ? !quote.customerId : quote.refundRequiredCents > 0 && !refundLater && !tenderId)}>{busy ? "SAVING…" : courtesyCredit ? `ISSUE ${money(courtesyCreditCents)} CREDIT` : refundLater && (quote?.refundRequiredCents || 0) > 0 ? "REMOVE ITEM · REFUND LATER" : "REMOVE & REFUND ITEM"}</button></div>
     </form>
   );
 }

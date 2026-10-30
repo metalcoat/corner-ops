@@ -572,6 +572,13 @@ export default function PosClient({
   const [reopenedItems, setReopenedItems] = useState<ReopenedOrderItem[]>([]);
   const [reopenedCancelItem, setReopenedCancelItem] =
     useState<ReopenedOrderItem | null>(null);
+  // The order loaded from POS → Orders: who it's for and what's been paid, plus its void dialog.
+  const [reopenedOrder, setReopenedOrder] = useState<Record<string, any> | null>(null);
+  const [voidOrderOpen, setVoidOrderOpen] = useState(false);
+  const [voidOrderReason, setVoidOrderReason] = useState("");
+  const [voidOrderPin, setVoidOrderPin] = useState("");
+  const [voidOrderError, setVoidOrderError] = useState("");
+  const [voidOrderBusy, setVoidOrderBusy] = useState(false);
   async function refreshReopenedOrder(orderId: string) {
     const response = await fetch(
       `/api/ordering/order-center/${encodeURIComponent(orderId)}`,
@@ -581,6 +588,7 @@ export default function PosClient({
     if (!response.ok || !payload.order)
       throw new Error(payload.error || "Could not load the reopened order.");
     setReopenedItems(payload.order.items || []);
+    setReopenedOrder(payload.order);
     setSavedDraft((current) =>
       current?.id === orderId
         ? {
@@ -590,6 +598,21 @@ export default function PosClient({
           }
         : current,
     );
+  }
+  async function voidReopenedOrder() {
+    if (!savedDraft) return;
+    setVoidOrderBusy(true);
+    setVoidOrderError("");
+    try {
+      const response = await fetch(`/api/ordering/order-center/${encodeURIComponent(savedDraft.id)}/void`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reason: voidOrderReason, managerPin: voidOrderPin || undefined }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "The order could not be voided.");
+      localStorage.removeItem("corner-ops-reopened-order");
+      window.location.assign("/pos/deli/orders");
+    } catch (error) {
+      setVoidOrderError(error instanceof Error ? error.message : "The order could not be voided.");
+      setVoidOrderBusy(false);
+    }
   }
   function invalidateEditableDraft() {
     setSavedDraft((current) => (current?.reopened ? current : null));
@@ -2668,7 +2691,9 @@ export default function PosClient({
         (sum, row) => sum + row.discountCents,
         0,
       );
+      // A loaded order's total includes lines that aren't in the local cart.
       if (
+        !reopenedDraft &&
         Number(payload.order.total_cents) !==
         subtotalCents - promotionDiscount + draft.deliveryFeeCents
       ) {
@@ -3695,6 +3720,9 @@ export default function PosClient({
     "session" in session
       ? (session.session as PosEmployeeSession | undefined)
       : undefined;
+  const canManageOrders = posEmployee ? posEmployee.posRole !== "employee" : true;
+  const reopenedLineSent = (lineId: string) => Boolean(reopenedOrder?.submitted_at) && (savedDraft?.orderItemIds || []).includes(lineId);
+  const voidOrderNeedsManager = !canManageOrders && Boolean(reopenedOrder?.submitted_at || Number(reopenedOrder?.paid_cents || 0) > 0);
   const canManageBarcodes = posEmployee
     ? posEmployee.posRole !== "employee"
     : "role" in session &&
@@ -3977,9 +4005,9 @@ export default function PosClient({
               </>
             ) : (
               <>
-                <strong>+ CUSTOMER</strong>
+                <strong>{savedDraft?.reopened && reopenedOrder?.id === savedDraft.id ? `${reopenedOrder.first_name_snapshot || ""} ${reopenedOrder.last_name_snapshot || ""}`.trim() || "+ CUSTOMER" : "+ CUSTOMER"}</strong>
                 <span>
-                  {business === "Tiki" ? "Optional" : "Name and phone required"}
+                  {savedDraft?.reopened && reopenedOrder?.phone_snapshot ? reopenedOrder.phone_snapshot : business === "Tiki" ? "Optional" : "Name and phone required"}
                 </span>
               </>
             )}
@@ -4383,6 +4411,19 @@ export default function PosClient({
               CLEAR
             </button>
           </div>
+          {savedDraft?.reopened && reopenedOrder?.id === savedDraft.id && (
+            <section className="posReopenedSummary" aria-label={`Order ${savedDraft.displayNumber}`}>
+              <strong>#{savedDraft.displayNumber} · {String(reopenedOrder.service_type || "").replaceAll("_", " ").toUpperCase()}</strong>
+              <span>{[`${reopenedOrder.first_name_snapshot || ""} ${reopenedOrder.last_name_snapshot || ""}`.trim() || reopenedOrder.customer_name, reopenedOrder.phone_snapshot || reopenedOrder.customer_phone].filter(Boolean).join(" · ") || "No customer"}</span>
+              {reopenedOrder.delivery_address && <span>{reopenedOrder.delivery_address}</span>}
+              <span>{reopenedOrder.submitted_at ? "Sent to the kitchen" : "Not sent to the kitchen yet"}</span>
+              <b>Total {money(Number(reopenedOrder.total_cents))} · Paid {money(Number(reopenedOrder.paid_cents))} · Due {money(Number(reopenedOrder.amount_due_cents))}</b>
+              <div>
+                <a href={`/pos/deli/orders?orderId=${encodeURIComponent(savedDraft.id)}`}>ORDER DETAILS</a>
+                <button type="button" className="danger" onClick={() => { setVoidOrderOpen(true); setVoidOrderError(""); }}>VOID WHOLE ORDER</button>
+              </div>
+            </section>
+          )}
           <div className="posCartLines">
             {reopenedItems
               .filter(
@@ -4426,7 +4467,7 @@ export default function PosClient({
                       <small>Note: {line.special_instructions}</small>
                     )}
                     <div className="posReopenedLineFooter">
-                      <small>EXISTING ITEM · LOCKED</small>
+                      <small>{reopenedLineSent(line.id) ? "SENT TO KITCHEN" : "NOT SENT YET"}</small>
                       <button
                         type="button"
                         onClick={() => setReopenedCancelItem(line)}
@@ -4616,7 +4657,7 @@ export default function PosClient({
               className="submitOrder"
               aria-disabled={Boolean(sendRequirement)}
               disabled={
-                !cart.length ||
+                (!cart.length && !savedDraft?.reopened) ||
                 submittingOrder ||
                 savingDraft ||
                 Boolean(sendRequirement)
@@ -4941,6 +4982,7 @@ export default function PosClient({
             <ItemCancellationPanel
               orderId={savedDraft.id}
               item={reopenedCancelItem}
+              staff={!canManageOrders}
               onClose={() => setReopenedCancelItem(null)}
               onDone={async (result) => {
                 setReopenedCancelItem(null);
@@ -4952,6 +4994,19 @@ export default function PosClient({
                 );
               }}
             />
+          </section>
+        </div>
+      )}
+      {voidOrderOpen && savedDraft?.reopened && (
+        <div className="posModalBackdrop" role="presentation">
+          <section className="posCustomerDialog posReopenedVoidDialog" role="dialog" aria-modal="true" aria-label={`Void order ${savedDraft.displayNumber}`}>
+            <form className="ocItemCancel" onSubmit={(event) => { event.preventDefault(); void voidReopenedOrder(); }}>
+              <h3>Void order #{savedDraft.displayNumber}</h3>
+              <label>Reason<textarea autoFocus maxLength={500} value={voidOrderReason} onChange={(event) => setVoidOrderReason(event.target.value)} /></label>
+              {voidOrderNeedsManager && <label>Manager PIN (the kitchen already has this order or it was paid)<input type="password" inputMode="numeric" autoComplete="off" maxLength={4} value={voidOrderPin} onChange={(event) => setVoidOrderPin(event.target.value)} /></label>}
+              {voidOrderError && <p className="ocDialogError" role="alert">{voidOrderError}</p>}
+              <div><button type="button" disabled={voidOrderBusy} onClick={() => setVoidOrderOpen(false)}>BACK</button><button className="danger" disabled={voidOrderBusy || voidOrderReason.trim().length < 3 || (voidOrderNeedsManager && voidOrderPin.length < 4)}>{voidOrderBusy ? "VOIDING…" : "VOID WHOLE ORDER"}</button></div>
+            </form>
           </section>
         </div>
       )}

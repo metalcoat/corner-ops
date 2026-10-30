@@ -132,6 +132,13 @@ export async function authenticateDeliPosPin(suppliedPin: unknown, attemptKeys: 
   };
 }
 
+/** A manager's PIN typed in to approve something for whoever is signed in. Same attempt limits as sign-in; signs nobody in. */
+export async function managerApprovalFromPin(suppliedPin: unknown, attemptKeys: { ipKey: string; businessKey: string }) {
+  const session = await authenticateDeliPosPin(suppliedPin, attemptKeys);
+  if (session.posRole !== "manager" && session.posRole !== "owner") throw new Error("That PIN is not a manager's.");
+  return { id: session.employeeId, name: session.name, type: "employee" as const, role: session.posRole };
+}
+
 export async function clockInDeliPosEmployee(session: PosSession) {
   if (session.business !== "Corner Deli") throw new Error("Corner Deli employee session required.");
   return withTransaction(async () => {
