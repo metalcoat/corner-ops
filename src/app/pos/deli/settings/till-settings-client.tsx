@@ -43,14 +43,23 @@ export default function TillSettingsClient() {
       setMessage(`${till.name}: ${reset ? "back to the defaults" : "saved"}. It now resets to ${money(body.resetCents)}${body.settings.bag ? ` with a ${money(body.settings.bag.reduce((t: number, i: FloatItem) => t + i.targetCents, 0))} change bag` : ""}.`); await load();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Till settings could not be saved."); } finally { setBusy(""); }
   }
+  async function retire(till: Till) {
+    if (!window.confirm(`Retire ${till.name}? It stops showing here; its history is kept. Only for a till no station uses.`)) return;
+    setBusy(till.id); setMessage("");
+    try {
+      const response = await fetch("/api/ordering/register/tills", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "retire", terminalId: till.id }) }), body = await response.json();
+      if (!response.ok) throw new Error(body.error || "The till could not be retired.");
+      setMessage(`${till.name} retired.`); await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "The till could not be retired."); } finally { setBusy(""); }
+  }
   const change = (id: string, part: "float" | "bag", key: string, row: Row) => setForms(current => ({ ...current, [id]: { ...current[id], [part]: { ...current[id][part], [key]: row } } }));
   return <section className="posSettingsCard tillSettings"><p className="posDevEyebrow">Register</p><h2>Tills</h2><p>What each till is reset to at closeout, and the change bag if it has one. Staff count every bill and coin; the POS then tells them exactly what to leave in the till and the bag, and emails the owner the summary with anything that falls short.</p>
     {message && <p role="status" className="posSettingsHint">{message}</p>}
-    {tills.map(till => { const form = forms[till.id]; if (!form) return null; return <article key={till.id}><h3>{till.name} <small>({till.label}{till.stations ? ` · ${till.stations}` : ""}{till.configured ? "" : " · defaults"})</small></h3>
+    {tills.map(till => { const form = forms[till.id]; if (!form) return null; return <article key={till.id}><h3>{till.name} <small>({till.label}{till.stations ? ` · ${till.stations}` : " · no station uses it"}{till.configured ? "" : " · defaults"})</small></h3>
       <PlanTable title="Till float (left in the drawer)" form={form.float} onChange={(key, row) => change(till.id, "float", key, row)} />
       <label className="tillBagToggle"><input type="checkbox" checked={form.bagOn} onChange={e => setForms(current => ({ ...current, [till.id]: { ...current[till.id], bagOn: e.target.checked } }))} /> This till has a separate change bag</label>
       {form.bagOn && <PlanTable title="Change bag" form={form.bag} onChange={(key, row) => change(till.id, "bag", key, row)} />}
-      <div className="posTools"><button disabled={busy === till.id} onClick={() => void save(till)}>SAVE {till.name.toUpperCase()}</button>{till.configured && <button className="danger" disabled={busy === till.id} onClick={() => void save(till, true)}>USE DEFAULTS</button>}</div></article>; })}
+      <div className="posTools"><button disabled={busy === till.id} onClick={() => void save(till)}>SAVE {till.name.toUpperCase()}</button>{till.configured && <button className="danger" disabled={busy === till.id} onClick={() => void save(till, true)}>USE DEFAULTS</button>}{!till.stations && <button className="danger" disabled={busy === till.id} onClick={() => void retire(till)}>RETIRE THIS TILL</button>}</div></article>; })}
     {!tills.length && !message && <p>Loading tills…</p>}
   </section>;
 }

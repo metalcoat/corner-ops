@@ -81,6 +81,24 @@ export async function saveTillSettings(input:{terminalId:string;settings:unknown
   return {id:String(terminal.id),name:String(terminal.name),terminalKey:String(terminal.terminal_key),...tillReset(terminal)};
 }
 
+/** Retires a till no station uses any more: it leaves Settings → Tills; its history stays. An empty open session is closed. */
+export async function retireTill(input:{terminalId:string;actor:OrderingActor}){
+  if(!canManagePos(input.actor))throw new RegisterError("Manager or owner approval is required to retire a till.");
+  await ensureOrderingPosSchema();
+  return withTransaction(async()=>{
+    const sql=getSql(),terminal=(await sql`SELECT * FROM ordering_pos_terminals WHERE id=${input.terminalId} AND business='Corner Deli' FOR UPDATE`)[0];
+    if(!terminal)throw new RegisterError("Till not found.");
+    const stations=await sql`SELECT name FROM ordering_payment_stations WHERE business='Corner Deli' AND active=TRUE AND LOWER(COALESCE(NULLIF(shared_register_key,''),station_key))=${terminal.terminal_key}`;
+    if(stations.length)throw new RegisterError(`${terminal.name} is still used by ${stations.map(row=>row.name).join(", ")}. Move that station to another till in Settings → Printers & devices first.`);
+    const session=(await sql`SELECT session.*,(SELECT COUNT(*) FROM ordering_cash_drawer_movements movement WHERE movement.register_session_id=session.id AND movement.movement_type<>'opening_float')::int movements FROM ordering_register_sessions session WHERE session.terminal_id=${terminal.id} AND session.status IN('open','counting','needs_review','resetting') LIMIT 1 FOR UPDATE`)[0];
+    if(session&&(Number(session.movements)>0||Number(session.expected_cash_cents)>0))throw new RegisterError(`${terminal.name} has an open session with cash in it. Close it out on the Register page first.`);
+    if(session)await sql`UPDATE ordering_register_sessions SET status='closed',closed_by=${input.actor.id},closed_at=NOW(),notes=CONCAT_WS(E'\n',NULLIF(notes,''),'Till retired (no cash in it).') WHERE id=${session.id}`;
+    await sql`UPDATE ordering_pos_terminals SET active=FALSE,allow_cash=FALSE,updated_at=NOW() WHERE id=${terminal.id}`;
+    await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,employee_id,terminal_id,actor,reason,details) VALUES(${randomUUID()},'Corner Deli','register_till_retired',${input.actor.id},${terminal.id},${input.actor.name},'Till retired',${JSON.stringify({closedEmptySessionId:session?.id||null})}::jsonb)`;
+    return {id:String(terminal.id),name:String(terminal.name),retired:true};
+  });
+}
+
 /** What the till should open with: the amount the last closeout confirmed was left in it. */
 async function lastReset(terminalId:string){
   const sql=getSql();

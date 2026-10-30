@@ -428,8 +428,8 @@ flowchart LR
 
 - POS → Reports → SET TILL / REGISTER (`/pos/deli/register`, `src/lib/ordering-registers.ts`). Each POS station's
   `shared_register_key` is its till (`ordering_pos_terminals.terminal_key`); on dev: `upfront-register` (station
-  Upfront) = front, and `back-register` (Back pos 1) = back (confirmed by Chris 2026-10-30; the old `receipt` till was
-  retired). Only a manager can open, count or close out a till; cash sales, refunds, paid in/out and drops move the
+  Upfront) = front, and `back-register` (Back pos 1) = back (confirmed by Chris 2026-10-30). A till no station uses can be
+  retired in Settings → Tills (inactive, history kept; an empty open session is closed). Only a manager can open, count or close out a till; cash sales, refunds, paid in/out and drops move the
   session's expected cash.
 - Close: START BLIND CLOSE COUNT → how many of each coin/bill (pennies … $100) plus a checks total, and for a till with
   a change bag a second count of the bag; the POS adds it up (drawer cash + checks vs expected) and flags fewer than 30
