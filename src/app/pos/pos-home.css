@@ -1,14 +1,20 @@
 html:has(.posHome),body:has(.posHome){background:#101712}
-.posHome{min-height:100dvh;display:grid;align-content:center;gap:28px;max-width:1100px;margin:auto;padding:24px 16px;color:#eef3ec;font-family:system-ui,sans-serif}
+.posHome{min-height:100dvh;display:grid;align-content:start;gap:26px;max-width:1180px;margin:auto;padding:28px 16px 40px;color:#eef3ec;font-family:system-ui,sans-serif}
 .posHome header p{margin:0;font-size:.8rem;font-weight:900;letter-spacing:.16em;color:#8fd0a2}
 .posHome h1{margin:4px 0 0;font-size:clamp(2rem,5vw,3rem)}
-.posHomeMain{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.posHomeMain a{display:grid;gap:10px;align-content:start;min-height:220px;padding:26px;border-radius:20px;background:#1a241d;border:2px solid #2c3a30;color:inherit;text-decoration:none;transition:border-color .15s,transform .15s}
-.posHomeMain a:hover,.posHomeMain a:focus-visible{border-color:#2fa65a;transform:translateY(-2px)}
-.posHomeMain span{font-size:3rem;line-height:1}
-.posHomeMain strong{font-size:2rem}
-.posHomeMain small{color:#b6c4b9;font-size:1rem}
-.posHomeOther{display:flex;flex-wrap:wrap;gap:8px}
-.posHomeOther a{padding:10px 14px;border-radius:10px;background:#18211b;border:1px solid #2c3a30;color:#b6c4b9;text-decoration:none;font-weight:650}
-.posHomeOther a:hover{color:#fff;border-color:#3e5244}
-@media (max-width:760px){.posHomeMain{grid-template-columns:1fr}.posHomeMain a{min-height:0}}
+.posHomeSection h2{display:flex;align-items:baseline;gap:12px;margin:0 0 10px;font-size:.9rem;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:#8fd0a2}
+.posHomeSection h2 small{font-size:.8rem;font-weight:600;letter-spacing:0;text-transform:none;color:#8a9a8f}
+.posHomeSection nav{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.posHomeSection nav a{display:grid;gap:6px;align-content:start;min-height:120px;padding:18px;border-radius:16px;background:#1a241d;border:2px solid #2c3a30;color:inherit;text-decoration:none;transition:border-color .15s,transform .15s}
+.posHomeSection nav a:hover,.posHomeSection nav a:focus-visible{border-color:#2fa65a;transform:translateY(-2px)}
+.posHomeSection nav a span{font-size:2rem;line-height:1}
+.posHomeSection nav a strong{display:flex;align-items:center;gap:8px;font-size:1.3rem}
+.posHomeSection nav a strong em{font-style:normal;font-size:.68rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border-radius:999px;background:#3a2f12;color:#f5d27a}
+.posHomeSection nav a small{color:#b6c4b9;font-size:.95rem}
+.posHomeSection.compact nav{display:flex;flex-wrap:wrap;gap:8px}
+.posHomeSection.compact nav a{min-height:0;padding:10px 14px;border-radius:10px;border-width:1px;background:#18211b}
+.posHomeSection.compact nav a strong{font-size:1rem;font-weight:650;color:#b6c4b9}
+.posHomeDefault{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:14px 16px;border-radius:12px;background:#18211b;border:1px solid #2c3a30;color:#b6c4b9}
+.posHomeDefault select{min-height:42px;border-radius:8px;border:1px solid #3e5244;background:#101712;color:#eef3ec;padding:0 10px;font:inherit}
+.posHomeDefault small{flex-basis:100%;color:#8a9a8f}
+@media (max-width:640px){.posHomeSection nav{grid-template-columns:1fr}.posHomeSection nav a{min-height:0}}

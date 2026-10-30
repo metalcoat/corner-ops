@@ -3,8 +3,9 @@ const manifest = {
   name: "Corner Deli POS",
   short_name: "Deli POS",
   description: "Corner Deli point of sale.",
-  start_url: "/pos/deli",
-  scope: "/pos/deli",
+  // The home screen (/pos) decides per device: registers can open the POS straight away.
+  start_url: "/pos",
+  scope: "/pos",
   display: "standalone",
   background_color: "#0f172a",
   theme_color: "#0f172a",
