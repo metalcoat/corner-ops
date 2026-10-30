@@ -429,11 +429,16 @@ flowchart LR
 - POS → Reports → SET TILL / REGISTER (`/pos/deli/register`, `src/lib/ordering-registers.ts`). Each POS station's
   `shared_register_key` is its till (`ordering_pos_terminals.terminal_key`); on dev: `upfront-register` (station
   Upfront) and `back-register` (Back pos 1). Cash sales, refunds, paid in/out and drops move the session's expected cash.
-- Close: START BLIND CLOSE COUNT → counted cash → "less than $30 in $1 bills?" (yes texts the owner) → a count that is
-  off goes to manager review → then the required reset step (status `resetting`, migration 0028): "You closed out the
-  till. Did you reset it?" with the amount to take out for the deposit. Staff tap "Yes — front till has $100.00 in it"
+- Close: START BLIND CLOSE COUNT → how many of each coin/bill (pennies … $100) plus a checks total; the POS adds it up
+  (cash + checks vs expected) and flags fewer than 30 $1 bills itself (texts the owner) → a count that is off goes to
+  manager review → then the required reset step (status `resetting`, migration 0028): "You closed out the
+  till. Did you reset it?" listing exactly how many of each bill/coin to leave (`planTillReset`: the $100 float is
+  $10 coin, 25 × $1, 5 × $5, 4 × $10 when the drawer has them, topped up with small bills; migration 0029) and what
+  goes in the deposit (with all checks). Staff tap "Yes — front till has $100.00 in it"
   or enter what is actually left with a note. Who/when/amount is stored on the session (`reset_confirmed_*`), audit
-  `register_closed`. Cash can't be taken and the till can't reopen until this is done.
+  `register_closed`. Cash can't be taken and the till can't reopen until this is done. Then the owner gets a closeout
+  summary: push to owner devices (`notifyOwnersOfOperationalPush`) and a text to `pos_role='owner'` employees where
+  texting is set up (dev can't text); audit `register_closeout_notified`.
 - Reset amount per till: front $100, back $0 (`src/lib/till-reset-rules.ts`: a key/name containing "back" is $0,
   anything else $100); a manager can override it on the Register page (`ordering_pos_terminals.reset_cash_cents`).
 - Open: one tap "Open with $X", X = the amount confirmed at the last closeout; a different amount needs a note
