@@ -485,6 +485,30 @@ export async function submitDraftOrder(
  * would block the send is shown to the customer instead of after payment.
  * Throws OrderConflictError like submitDraftOrder.
  */
+async function setOrderDeliveryFee(orderId: string, feeCents: number) {
+  // payment_status follows the balance, so a fee added after a payment can't leave an order PAID with money due.
+  await getSql()`UPDATE ordering_orders SET delivery_fee_cents=${feeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${feeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${feeCents}-paid_cents),payment_status=CASE WHEN paid_cents>0 AND GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${feeCents}-paid_cents)>0 THEN 'partially_paid' ELSE payment_status END,updated_at=NOW() WHERE id=${orderId}`;
+}
+
+/**
+ * Saves on a draft the promotions and delivery fee that Send would apply, so a payment taken before Send
+ * charges the real total. preflightDraftSubmit can't do this: it checks the rules, then rolls everything back.
+ */
+export async function syncDraftTotals(orderId: string, business: OrderingBusiness): Promise<void> {
+  await withTransaction(async () => {
+    const sql = getSql();
+    const order = (await sql`SELECT status,service_type FROM ordering_orders WHERE id=${orderId} AND business=${business} FOR UPDATE`)[0];
+    if (order?.status !== "draft") return;
+    await applyPromotionsToOrder(orderId);
+    if (order.service_type !== "delivery" && order.service_type !== "no_contact_delivery") return;
+    const address = (await sql`SELECT validation_status,route_distance_miles FROM ordering_order_delivery_addresses WHERE order_id=${orderId}`)[0];
+    if (address?.validation_status !== "validated" || address.route_distance_miles == null) return;
+    const priced = (await sql`SELECT subtotal_cents,discount_cents,delivery_fee_cents FROM ordering_orders WHERE id=${orderId}`)[0];
+    const quote = await quoteDelivery({ business, distanceMiles: Number(address.route_distance_miles), merchandiseSubtotalCents: merchandiseAfterDiscounts(priced) });
+    if (quote.deliveryFeeCents !== number(priced.delivery_fee_cents)) await setOrderDeliveryFee(orderId, quote.deliveryFeeCents);
+  });
+}
+
 export async function preflightDraftSubmit(orderId: string, business: OrderingBusiness, actor: OrderingActor): Promise<void> {
   await runDraftSubmit(orderId, business, actor, undefined, true);
 }
@@ -647,7 +671,7 @@ async function runDraftSubmit(
           reason,
         });
       }
-      await sql`UPDATE ordering_orders SET delivery_fee_cents=${delivery.deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${delivery.deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${delivery.deliveryFeeCents}-paid_cents),updated_at=NOW() WHERE id=${orderId}`;
+      await setOrderDeliveryFee(orderId, delivery.deliveryFeeCents);
       order.delivery_fee_cents = delivery.deliveryFeeCents;
       order.total_cents = Math.max(
         0,
@@ -681,7 +705,7 @@ async function runDraftSubmit(
     });
     const updated = await sql`
       UPDATE ordering_orders
-      SET status = 'sent_to_kitchen', submitted_at = NOW(), submitted_by = ${String(actor.id || '')}, locked_at = NOW(),
+      SET status = 'sent_to_kitchen', submitted_at = NOW(), submitted_by = ${String(actor.id || "")}, locked_at = NOW(),
           kitchen_release_at = ${releaseAt ? releaseAt.toISOString() : null}::timestamptz,
           version = version + 1, updated_at = NOW()
       WHERE id = ${orderId} AND business = ${business} AND status = 'draft' AND version = ${order.version}

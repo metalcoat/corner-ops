@@ -1,6 +1,7 @@
 import { isoJson } from "@/lib/timestamp-values";
 import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
+import { syncDraftTotals } from "@/lib/ordering-order-lifecycle";
 import { assertOrderReadyForCheckout, checkoutState, commitTender, PaymentConflictError, printPaidReceipt, reprintPaymentReceipt, reverseTender, setCheckoutTip, type CheckoutTenderType } from "@/lib/ordering-payments";
 import { canManagePos, orderingActor } from "@/lib/ordering-route-auth";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
@@ -29,6 +30,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (!await orderingActor(business)) return unauthorized();
     const { id } = await context.params;
     await assertOrderReadyForCheckout(id, business);
+    await syncDraftTotals(id, business);
     return isoJson(await checkoutState(id, business, url.searchParams.get("checkId")));
   } catch (error) {
     if (error instanceof PaymentConflictError) return isoJson({ error: error.message }, { status: 409 });

@@ -24,6 +24,7 @@ import {
 import { ensureOrderingPromotionSchema } from "@/lib/ordering-promotion-schema";
 import {
   submitDraftOrder,
+  syncDraftTotals,
   OrderConflictError,
 } from "@/lib/ordering-order-lifecycle";
 import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
@@ -2501,6 +2502,8 @@ export async function replaceAiDraft(input: {
     await getSql()`DELETE FROM ordering_orders WHERE id=${temporary.id}`;
     throw error;
   }
+  // The temporary draft carries no delivery fee; put back what this cart owes for the saved address.
+  await syncDraftTotals(input.orderId, input.business);
   return pricedOrder(input.orderId, input.business);
 }
 

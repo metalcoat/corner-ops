@@ -17,6 +17,7 @@ import {
 import {
   preflightDraftSubmit,
   submitDraftOrder,
+  syncDraftTotals,
   OrderConflictError,
 } from "@/lib/ordering-order-lifecycle";
 import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
@@ -161,6 +162,7 @@ export async function POST(
       await limitCardCheckoutStart(request, owner.hash);
       // Run every send rule now, so hours, menu schedules or the delivery
       // minimum stop the customer before the card is charged.
+      await syncDraftTotals(orderId, business);
       await preflightDraftSubmit(orderId, business, actor);
       const state = await checkoutState(orderId, business),
         amount = Number(state.order.amount_due_cents);

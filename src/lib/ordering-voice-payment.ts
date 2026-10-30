@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
-import { OrderConflictError, preflightDraftSubmit, submitDraftOrder } from "@/lib/ordering-order-lifecycle";
+import { OrderConflictError, preflightDraftSubmit, submitDraftOrder, syncDraftTotals } from "@/lib/ordering-order-lifecycle";
 import { assertOrderReadyForCheckout, checkoutState, commitTender } from "@/lib/ordering-payments";
 import { ensureOrderingAiSchema } from "@/lib/ordering-ai-schema";
 import { findMxPaymentByReplayId, MxMerchantError, MxMerchantUnreachableError, newReplayId, submitMxVoicePayment, voidOrRefundMxPayment } from "@/lib/mx-merchant";
@@ -16,6 +16,8 @@ export class VoicePaymentError extends Error {}
 async function assertVoiceOrderReady(orderId:string){
   try{await assertOrderReadyForCheckout(orderId,business)}
   catch(error){throw new VoicePaymentError(error instanceof Error?error.message:"Order information is incomplete.")}
+  // The balance charged must already include what Send adds (delivery fee, promotions).
+  await syncDraftTotals(orderId,business);
   // Every send rule (hours, delivery area and minimum, sold-out items, prices) before any
   // card is taken, the same preflight online checkout runs.
   try{await preflightDraftSubmit(orderId,business,actor)}
@@ -55,7 +57,7 @@ export async function prepareVoicePayment(callId:string){
   if(!call?.order_id)throw new VoicePaymentError("A priced order is required before voice payment.");
   if(call.payment_preference!=="card")throw new VoicePaymentError("The customer must choose card before voice payment.");
   await assertVoiceOrderReady(String(call.order_id));
-  const amount=Number(call.amount_due_cents);
+  const amount=Number((await checkoutState(String(call.order_id),business)).order.amount_due_cents);
   if(!Number.isSafeInteger(amount)||amount<=0)throw new VoicePaymentError("This order has no card balance due.");
   const id=randomUUID(),replayId=newReplayId();
   await sql`INSERT INTO ordering_voice_payment_sessions(id,business,call_id,order_id,caller_phone,amount_cents,replay_id,expires_at) VALUES(${id},${business},${callId},${call.order_id},${call.caller_phone},${amount},${replayId},NOW()+INTERVAL '10 minutes') ON CONFLICT(business,call_id) DO UPDATE SET order_id=EXCLUDED.order_id,caller_phone=EXCLUDED.caller_phone,amount_cents=EXCLUDED.amount_cents,replay_id=EXCLUDED.replay_id,status='awaiting_call',attempt_count=0,provider_transaction_reference='',brand='',last4='',failure_code='',expires_at=EXCLUDED.expires_at,claimed_at=NULL,completed_at=NULL,updated_at=NOW()

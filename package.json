@@ -82,7 +82,7 @@
     "test:voice-payment": "tsx scripts/voice-payment-validate.ts",
     "test:ai-cart-regressions": "tsx scripts/ai-cart-regressions/bigboss.ts && tsx scripts/ai-cart-regressions/wings.ts && tsx scripts/ai-cart-regressions/wing-sauces.ts && tsx scripts/ai-cart-regressions/fries.ts && tsx scripts/ai-cart-regressions/modifier-order.ts && tsx scripts/ai-cart-regressions/mashed.ts && tsx scripts/ai-cart-regressions/sides.ts && tsx scripts/ai-cart-regressions/menu-twins.ts && tsx scripts/ai-cart-regressions/replays.ts",
     "test:ai-menu-sweep": "tsx scripts/ai-menu-sweep.ts",
-    "test:voice-payment-recovery": "tsx scripts/voice-payment-recovery/lost-reply-abandon.ts && tsx scripts/voice-payment-recovery/no-send-preflight.ts && tsx scripts/voice-payment-recovery/amount-drift.ts && tsx scripts/voice-payment-recovery/agi-timeout-race.ts",
+    "test:voice-payment-recovery": "tsx scripts/voice-payment-recovery/lost-reply-abandon.ts && tsx scripts/voice-payment-recovery/no-send-preflight.ts && tsx scripts/voice-payment-recovery/amount-drift.ts && tsx scripts/voice-payment-recovery/agi-timeout-race.ts && tsx scripts/voice-payment-recovery/delivery-fee-before-charge.ts",
     "test:ai-phone-conversation": "tsx scripts/ai-phone-conversation-validate.ts",
     "test:ai-followup-modifiers": "tsx scripts/ai-followup-modifier-validate.ts",
     "test:ai-order-regressions": "tsx scripts/ai-order-regression-validate.ts",
