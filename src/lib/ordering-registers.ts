@@ -23,6 +23,7 @@ function resetPlanFor(session:Record<string,any>,settings:TillSettings):ResetPla
 const countLine=(counts:Partial<DenominationCounts>)=>DENOMINATIONS.filter(d=>(counts[d.key]||0)>0).map(d=>`${counts[d.key]} × ${d.label.replace(/ bills$/,"")}`).join(", ")||"nothing";
 
 /** Owner closeout email/push: totals, what was left and deposited, and every shortfall. */
+const shortLabel=(label:string)=>label.replace(/ bills$/,"");
 function closeoutSummary(terminal:Record<string,any>,session:Record<string,any>,closedBy:string){
   const till=tillReset(terminal),plan=session.reset_plan as ResetPlan|null,checks=Number(session.counted_checks_cents||0);
   const counted=Number(session.counted_cash_cents),expected=Number(session.expected_cash_cents),overShort=Number(session.over_short_cents||0),left=Number(session.reset_confirmed_cents),target=Number(session.reset_expected_cents);
@@ -30,19 +31,33 @@ function closeoutSummary(terminal:Record<string,any>,session:Record<string,any>,
   if(overShort!==0)issues.push(`Drawer ${overShort>0?"over":"short"} ${money(Math.abs(overShort))} (counted ${money(counted)}, expected ${money(expected)}).`);
   if(left!==target)issues.push(`${till.label} left with ${money(left)} instead of ${money(target)}: ${session.reset_note||"no note"}.`);
   for(const flag of [...(plan?.flags||[]),...(plan?.bag?.flags||[])])if(!issues.includes(flag))issues.push(flag);
-  const bagLine=plan?.bag?`Change bag: counted ${money(plan.bag.countedCents)}, now ${money(plan.bag.leaveCents)} (${countLine(plan.bag.leave)}).`:"";
   const deposit=plan?plan.depositCents+checks:counted-left;
-  const text=[
-    `${terminal.name} (${till.label}) closed out by ${closedBy} at ${new Date().toLocaleString("en-US",{timeZone:"America/New_York"})}.`,
+  // One item per line so it reads on a phone.
+  const pieceLines=(counts:Partial<DenominationCounts>)=>{const rows=DENOMINATIONS.filter(d=>(counts[d.key]||0)>0).map(d=>`${shortLabel(d.label)}: ${counts[d.key]} = ${money((counts[d.key]||0)*d.cents)}`);return rows.length?rows:["(nothing)"]};
+  const lines=[
+    `Till: ${terminal.name} (${till.label})`,
+    `Closed by: ${closedBy}`,
+    `Time: ${new Date().toLocaleString("en-US",{timeZone:"America/New_York"})}`,
     "",
-    `Counted ${money(counted)}${checks?` (incl. ${money(checks)} in checks)`:""}; expected ${money(expected)}; over/short ${money(overShort)}.`,
-    `Left in the till: ${money(left)}${plan&&plan.leaveCents>0?` (${countLine(plan.leave)})`:""}.`,
-    ...(bagLine?[bagLine]:[]),
-    `Deposit: ${money(deposit)}${plan?` (${countLine(plan.deposit)}${checks?`, checks ${money(checks)}`:""})`:""}.`,
+    issues.length?`NEEDS A LOOK (${issues.length}):`:"Everything checks out.",
+    ...issues.map(issue=>`- ${issue}`),
     "",
-    issues.length?`NEEDS A LOOK (${issues.length}):\n- ${issues.join("\n- ")}`:"No shortfalls.",
-    plan?`\nCount: ${countLine(parseDenominationCounts(session.counted_denominations))}${plan.bag?`; bag ${countLine(plan.bag.counted)}`:""}.`:"",
-  ].filter((line,index,all)=>line!==""||all[index-1]!=="").join("\n");
+    "DRAWER COUNT",
+    ...(plan?pieceLines(parseDenominationCounts(session.counted_denominations)):[]),
+    `Checks: ${money(checks)}`,
+    `Total counted${checks?" (cash + checks)":""}: ${money(counted)}`,
+    `Expected: ${money(expected)}`,
+    `Over/short: ${money(overShort)}`,
+    "",
+    `LEAVE IN TILL: ${money(left)}`,
+    ...(plan&&plan.leaveCents>0?pieceLines(plan.leave):[]),
+    ...(plan?.bag?["",`CHANGE BAG: ${money(plan.bag.leaveCents)}`,...pieceLines(plan.bag.leave),`Bag was counted at: ${money(plan.bag.countedCents)}`]:[]),
+    "",
+    `DEPOSIT: ${money(deposit)}`,
+    ...(plan?pieceLines(plan.deposit).filter(line=>line!=="(nothing)"||!checks):[]),
+    ...(checks?[`Checks: ${money(checks)}`]:[]),
+  ];
+  const text=lines.join("\n");
   const subject=`Till closeout: ${terminal.name} — ${issues.length?`${issues.length} to check`:"OK"}`;
   const short=`${terminal.name} closed by ${closedBy}. Over/short ${money(overShort)}. Left ${money(left)}${plan?.bag?`, bag ${money(plan.bag.leaveCents)}`:""}. Deposit ${money(deposit)}.${issues.length?` ${issues.length} to check: ${issues.join(" ")}`:""}`;
   return {subject,text,short};
@@ -114,6 +129,8 @@ export async function updateRegister(input:{stationKey:string;action:string;amou
     const sql=getSql();
     const current=(await sql`SELECT * FROM ordering_register_sessions WHERE terminal_id=${terminal.id} AND status IN('open','counting','needs_review','resetting') ORDER BY opened_at DESC LIMIT 1 FOR UPDATE`)[0];
     const till=tillReset(terminal);
+    // Chris, 2026-10-30: only a manager does the till (open, count, closeout, reset); cash sales stay open to everyone.
+    if(["open","start_count","close","confirm_reset"].includes(input.action)&&!canManagePos(input.actor))throw new RegisterError("Only a manager can open, count or close out the till.");
     if(input.action==="open"){
       if(current)throw new RegisterError("This register is already open or awaiting review.");
       // Opens with what the last closeout confirmed was left in the till (or the till's reset amount the first time).

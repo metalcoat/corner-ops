@@ -428,7 +428,9 @@ flowchart LR
 
 - POS → Reports → SET TILL / REGISTER (`/pos/deli/register`, `src/lib/ordering-registers.ts`). Each POS station's
   `shared_register_key` is its till (`ordering_pos_terminals.terminal_key`); on dev: `upfront-register` (station
-  Upfront) and `back-register` (Back pos 1). Cash sales, refunds, paid in/out and drops move the session's expected cash.
+  Upfront) = front, and `back-register` (Back pos 1) = back (confirmed by Chris 2026-10-30; the old `receipt` till was
+  retired). Only a manager can open, count or close out a till; cash sales, refunds, paid in/out and drops move the
+  session's expected cash.
 - Close: START BLIND CLOSE COUNT → how many of each coin/bill (pennies … $100) plus a checks total, and for a till with
   a change bag a second count of the bag; the POS adds it up (drawer cash + checks vs expected) and flags fewer than 30
   $1 bills itself (texts the owner) → a count that is off goes to manager review → then the required reset step
@@ -442,7 +444,8 @@ flowchart LR
   0028–0030; NULL = defaults by name). Defaults: front $100 = $5 quarters (limit $10), $25 ones, $30 fives, $40 tens;
   back $0 plus a $60 change bag = $2 quarters, $28 ones, $30 fives. A short denomination is made up from the next size
   up within the limits; below a minimum, over a limit, off target or short is flagged.
-- After the reset the owner gets the closeout summary: email to `ownerNotificationEmails()` (ALERT_TO_EMAIL /
+- After the reset the owner gets the closeout summary (one item per line: NEEDS A LOOK items, drawer count by
+  denomination, checks, total, expected, over/short, leave-in-till, change bag, deposit): email to `ownerNotificationEmails()` (ALERT_TO_EMAIL /
   APP_EMAIL, via `sendTransactionalEmail`), push to owner devices, and a text to `pos_role='owner'` employees where
   texting is set up (dev can't text); audit `register_closeout_notified`.
 - Open: one tap "Open with $X", X = the amount confirmed at the last closeout; a different amount needs a note
