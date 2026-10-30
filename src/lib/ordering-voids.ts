@@ -10,7 +10,7 @@ import { ensureOrderingTipSchema } from "@/lib/ordering-tip-schema";
 
 export class OrderVoidError extends Error {}
 
-export async function voidSentOrder(input: { orderId: string; business: OrderingBusiness; reason: string; actor: OrderingActor; approver?: OrderingActor }) {
+export async function voidSentOrder(input: { orderId: string; business: OrderingBusiness; reason: string; actor: OrderingActor; approver?: OrderingActor; silent?: boolean }) {
   const reason = input.reason.trim();
   if (reason.length < 3) throw new OrderVoidError("A void reason is required.");
   if (reason.length > 500) throw new OrderVoidError("Void reason must be 500 characters or fewer.");
@@ -54,7 +54,7 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
       WHERE order_id=${input.orderId} AND status NOT IN ('DELIVERED','RETURNED','CANCELLED')`;
     await reconcileOrderTips(input.orderId,input.business);
     // The kitchen already has this order: tell it. is_reprint because an order's first kitchen ticket is one-per-order.
-    if (order.submitted_at) {
+    if (order.submitted_at && !input.silent) {
       const lines = await sql`SELECT quantity-cancelled_quantity quantity,item_name_snapshot,variant_name_snapshot FROM ordering_order_items WHERE order_id=${input.orderId} AND quantity>cancelled_quantity ORDER BY sort_order,created_at,id`;
       const approvedBy = (input.approver || input.actor).name;
       await sql`INSERT INTO ordering_print_jobs(id,business,order_id,purpose,event_subtype,status,is_reprint,actor_type,actor_id,error_message,payload) VALUES(${randomUUID()},${input.business},${input.orderId},'kitchen_production','order_void','not_configured',TRUE,${input.actor.type},${input.actor.id},'Kitchen printer not configured.',${JSON.stringify({

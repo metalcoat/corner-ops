@@ -435,7 +435,8 @@ flowchart LR
 - Voids: lines or orders the kitchen hasn't got, anyone (`orderLineWasSent`). Sent lines, sent or paid orders, and
   refunds need a manager: signed in, or a manager's PIN typed in (`managerApprovalFromPin`, same attempt limits as
   sign-in); the reason and `approvedByName` are on the order event. Voiding a whole order the kitchen already has prints
-  a VOID WHOLE ORDER notice (`event_subtype='order_void'`, the one kitchen job a cancelled order still prints).
+  a VOID WHOLE ORDER notice (`event_subtype='order_void'`, the one kitchen job a cancelled order still prints). CLEAR ACTIVE TEST
+  ORDERS (dev only) voids silently, with no notice, because dev is wired to the real store printers.
 - Stale draft alert (`src/lib/ordering-stale-drafts.ts`, `src/app/pos/deli/stale-draft-alert.tsx`): orders staff rang on a
   POS and never sent (not web, AI, or reopened sent orders), idle for the set minutes (10), pop up on the chosen stations
   (Back pos 1), checked every 30 s, until sent, deleted (voided, kept in history) or snoozed 5 min. Minutes and stations:

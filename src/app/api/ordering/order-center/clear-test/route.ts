@@ -18,14 +18,14 @@ export async function POST() {
       SELECT id FROM ordering_orders
       WHERE business = 'Corner Deli'
         AND status IN ('draft', 'sent_to_kitchen', 'in_progress', 'ready', 'completed')
-        AND payment_status NOT IN ('paid', 'refunded')
+        AND (payment_status NOT IN ('paid', 'refunded') OR amount_due_cents > 0)
       ORDER BY created_at
     `;
     let cleared = 0;
     const skipped: string[] = [];
     for (const candidate of candidates) {
       try {
-        await voidSentOrder({ orderId: String(candidate.id), business: "Corner Deli", reason: "Cleared from local test environment", actor });
+        await voidSentOrder({ orderId: String(candidate.id), business: "Corner Deli", reason: "Cleared from local test environment", actor, silent: true });
         await cancelPaymentQueueEntries("Corner Deli", String(candidate.id));
         cleared += 1;
       } catch (error) {
