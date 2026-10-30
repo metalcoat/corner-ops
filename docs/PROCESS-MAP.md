@@ -424,6 +424,12 @@ flowchart LR
   `tools/car-tablet/publish-dev.sh` → `https://dev.ordercornerdeli.com/downloads/corner-ops-car-tablet.apk`.
   Provisioning steps: `tools/car-tablet/README.md`.
 
+- POS Orders cards (`/pos/deli/orders`, `listOrders` in `src/lib/ordering-order-center.ts`): "Taken by" = the POS
+  employee in `ordering_orders.created_by` (else Online / AI phone / Kiosk), plus who sent it to the kitchen
+  (`submitted_by`, recorded from 2026-10-30, migration 0031) and who took the latest payment when different. Delivery
+  cards show the assigned driver (`ordering_delivery_assignments`), else drivers on the clock (`time_entries`,
+  role Driver) when the order was due (scheduled_for, promised_at, else created_at).
+
 ## 8d. Till closeout (Corner Deli POS, dev)
 
 - POS → Reports → SET TILL / REGISTER (`/pos/deli/register`, `src/lib/ordering-registers.ts`). Each POS station's

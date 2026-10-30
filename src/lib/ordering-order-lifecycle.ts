@@ -681,7 +681,7 @@ async function runDraftSubmit(
     });
     const updated = await sql`
       UPDATE ordering_orders
-      SET status = 'sent_to_kitchen', submitted_at = NOW(), locked_at = NOW(),
+      SET status = 'sent_to_kitchen', submitted_at = NOW(), submitted_by = ${String(actor.id || '')}, locked_at = NOW(),
           kitchen_release_at = ${releaseAt ? releaseAt.toISOString() : null}::timestamptz,
           version = version + 1, updated_at = NOW()
       WHERE id = ${orderId} AND business = ${business} AND status = 'draft' AND version = ${order.version}

@@ -27,6 +27,12 @@ type Order = {
   delivery_unit: string | null;
   overdue_unpaid?: boolean;
   pickup_attention?: boolean;
+  taken_by?: string | null;
+  sent_by?: string | null;
+  paid_by?: string | null;
+  driver_name?: string | null;
+  drivers_on_clock?: string | null;
+  due_at?: string | null;
   voided_at?: string | null;
   void_reason?: string;
   items?: Array<Record<string, unknown>>;
@@ -323,6 +329,14 @@ export default function OrderCenterClient() {
           <small className="source">
             {label(o.order_origin || o.source)} → {label(o.service_type)}
           </small>
+          <small className="takenBy">
+            Taken by: {o.taken_by || "unknown"}
+            {o.sent_by && o.sent_by !== o.taken_by ? ` · sent to kitchen by ${o.sent_by}` : ""}
+            {o.paid_by && o.paid_by !== o.taken_by ? ` · payment taken by ${o.paid_by}` : ""}
+          </small>
+          {o.service_type === "delivery" && <small className="driver">
+            {o.driver_name ? `Driver: ${o.driver_name}` : `Driver on clock at ${o.due_at ? new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(new Date(o.due_at)) : "order time"}: ${o.drivers_on_clock || "none"}`}
+          </small>}
           {pickupAttention && <em className="pickupAlert">PICKUP UNPAID 40+ MINUTES</em>}
         </button>
       )})}

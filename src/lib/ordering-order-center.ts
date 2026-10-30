@@ -30,8 +30,24 @@ export async function listOrders(input: { business: OrderingBusiness; date?: str
       COALESCE(NULLIF(o.phone_snapshot,''),p.display_phone,o.caller_phone) customer_phone,
       a.formatted_address delivery_address,a.line2 delivery_unit,
       ((o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled') overdue_unpaid,
-      (o.service_type='pickup' AND o.amount_due_cents > 0 AND o.status<>'cancelled' AND o.created_at<=NOW()-INTERVAL '40 minutes') pickup_attention
+      (o.service_type='pickup' AND o.amount_due_cents > 0 AND o.status<>'cancelled' AND o.created_at<=NOW()-INTERVAL '40 minutes') pickup_attention,
+      -- Who took it: the POS employee who rang it (created_by is their id), else where it came from.
+      CASE o.source WHEN 'web' THEN 'Online' WHEN 'ai_phone' THEN 'AI phone' WHEN 'kiosk' THEN 'Kiosk'
+        ELSE COALESCE(taker.name,NULLIF(o.created_by,'')) END taken_by,
+      sender.name sent_by,payer.name paid_by,
+      driver.name driver_name,
+      COALESCE(o.scheduled_for,o.promised_at,o.created_at) due_at,
+      on_clock.names drivers_on_clock
     FROM ordering_orders o
+    LEFT JOIN employees taker ON taker.id::text=o.created_by
+    LEFT JOIN employees sender ON sender.id::text=o.submitted_by
+    LEFT JOIN LATERAL (SELECT e.name FROM ordering_payment_transactions t JOIN employees e ON e.id::text=t.created_by WHERE t.order_id=o.id ORDER BY t.created_at DESC LIMIT 1) payer ON TRUE
+    LEFT JOIN LATERAL (SELECT e.name FROM ordering_delivery_assignments d JOIN employees e ON e.id=d.driver_employee_id WHERE d.order_id=o.id AND d.cancelled_at IS NULL ORDER BY d.assigned_at DESC NULLS LAST LIMIT 1) driver ON TRUE
+    -- No driver assigned: whoever was on the clock as a driver when the order was due.
+    LEFT JOIN LATERAL (SELECT string_agg(DISTINCT e.name,', ') names FROM time_entries t JOIN employees e ON e.id=t.employee_id
+      WHERE o.service_type='delivery' AND t.business=o.business AND (t.role_group='Driver' OR e.role_group='Driver')
+        AND t.clock_in<=COALESCE(o.scheduled_for,o.promised_at,o.created_at)
+        AND (t.clock_out IS NULL OR t.clock_out>=COALESCE(o.scheduled_for,o.promised_at,o.created_at))) on_clock ON TRUE
     LEFT JOIN ordering_customers c ON c.id=o.customer_id
     LEFT JOIN LATERAL (SELECT display_phone FROM ordering_customer_phones WHERE customer_id=c.id ORDER BY is_primary DESC,created_at LIMIT 1) p ON TRUE
     LEFT JOIN ordering_order_delivery_addresses a ON a.order_id=o.id
