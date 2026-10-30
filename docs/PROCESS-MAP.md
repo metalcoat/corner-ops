@@ -429,18 +429,22 @@ flowchart LR
 - POS → Reports → SET TILL / REGISTER (`/pos/deli/register`, `src/lib/ordering-registers.ts`). Each POS station's
   `shared_register_key` is its till (`ordering_pos_terminals.terminal_key`); on dev: `upfront-register` (station
   Upfront) and `back-register` (Back pos 1). Cash sales, refunds, paid in/out and drops move the session's expected cash.
-- Close: START BLIND CLOSE COUNT → how many of each coin/bill (pennies … $100) plus a checks total; the POS adds it up
-  (cash + checks vs expected) and flags fewer than 30 $1 bills itself (texts the owner) → a count that is off goes to
-  manager review → then the required reset step (status `resetting`, migration 0028): "You closed out the
-  till. Did you reset it?" listing exactly how many of each bill/coin to leave (`planTillReset`: the $100 float is
-  $10 coin, 25 × $1, 5 × $5, 4 × $10 when the drawer has them, topped up with small bills; migration 0029) and what
-  goes in the deposit (with all checks). Staff tap "Yes — front till has $100.00 in it"
-  or enter what is actually left with a note. Who/when/amount is stored on the session (`reset_confirmed_*`), audit
-  `register_closed`. Cash can't be taken and the till can't reopen until this is done. Then the owner gets a closeout
-  summary: push to owner devices (`notifyOwnersOfOperationalPush`) and a text to `pos_role='owner'` employees where
+- Close: START BLIND CLOSE COUNT → how many of each coin/bill (pennies … $100) plus a checks total, and for a till with
+  a change bag a second count of the bag; the POS adds it up (drawer cash + checks vs expected) and flags fewer than 30
+  $1 bills itself (texts the owner) → a count that is off goes to manager review → then the required reset step
+  (status `resetting`): "You closed out the till. Did you reset it?" listing exactly how many of each bill/coin to
+  leave in the till, what goes in the change bag (topped up from the drawer or trimmed into the deposit) and what goes
+  in the deposit (with all checks), plus any flags. Staff tap "Yes — front till has $100.00 in it" or enter what is
+  actually left with a note. Who/when/amount is stored on the session (`reset_confirmed_*`, `bag_confirmed_cents`),
+  audit `register_closed`. Cash can't be taken and the till can't reopen until this is done.
+- Float rules (`src/lib/till-reset-rules.ts` `planCloseout`/`planFloat`): per till a list of allowed bills/coins with
+  target, minimum and limit, edited in POS Settings → Tills (`ordering_pos_terminals.till_settings`, migrations
+  0028–0030; NULL = defaults by name). Defaults: front $100 = $5 quarters (limit $10), $25 ones, $30 fives, $40 tens;
+  back $0 plus a $60 change bag = $2 quarters, $28 ones, $30 fives. A short denomination is made up from the next size
+  up within the limits; below a minimum, over a limit, off target or short is flagged.
+- After the reset the owner gets the closeout summary: email to `ownerNotificationEmails()` (ALERT_TO_EMAIL /
+  APP_EMAIL, via `sendTransactionalEmail`), push to owner devices, and a text to `pos_role='owner'` employees where
   texting is set up (dev can't text); audit `register_closeout_notified`.
-- Reset amount per till: front $100, back $0 (`src/lib/till-reset-rules.ts`: a key/name containing "back" is $0,
-  anything else $100); a manager can override it on the Register page (`ordering_pos_terminals.reset_cash_cents`).
 - Open: one tap "Open with $X", X = the amount confirmed at the last closeout; a different amount needs a note
   (audit `register_opened` records expected vs actual). Expected cash at the next close starts from that amount.
 

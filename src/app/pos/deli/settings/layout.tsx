@@ -6,7 +6,7 @@ import "./settings.css";
 
 const links = [
   ["Overview", "/pos/deli/settings"], ["Menu", "/pos/deli/settings/menu"],
-  ["Printers & devices", "/pos/deli/settings/hardware"], ["Operations", "/pos/deli/settings/operations"],
+  ["Printers & devices", "/pos/deli/settings/hardware"], ["Operations", "/pos/deli/settings/operations"], ["Tills", "/pos/deli/settings/tills"],
   ["Delivery", "/pos/deli/settings/delivery"], ["Car tablet", "/pos/deli/settings/car-tablet"], ["Route tester", "/pos/deli/settings/route-test"], ["Promotions", "/pos/deli/settings/promotions"],
   ["Loyalty", "/pos/deli/settings/loyalty"], ["Gift Cards", "/pos/deli/settings/gift-cards"],
   ["Barcode", "/pos/deli/settings/barcode"],

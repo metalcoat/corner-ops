@@ -115,3 +115,5 @@
 .posSettingsCard.posSettingsCard .soundPicker button b{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#e7dfd0;color:#24553e;font-size:.75rem}
 .posSettingsCard.posSettingsCard .soundPicker button[aria-checked="true"]{border-color:#24553e;background:#e3f1e7;box-shadow:0 0 0 2px #24553e33}
 .posSettingsCard.posSettingsCard .soundPicker button[aria-checked="true"] b{background:#24553e;color:#fff}
+.tillSettings .tillPlanTable{width:100%;border-collapse:collapse}.tillSettings .tillPlanTable th,.tillSettings .tillPlanTable td{padding:4px 6px;text-align:left;border-bottom:1px solid #e4ddd0}.tillSettings .tillPlanTable input[type=number]{width:100%;max-width:120px}.tillSettings .tillPlanTable tr.off td{color:#8a8274}.tillSettings .tillBagToggle{display:flex;gap:8px;align-items:center;margin:10px 0}
+.tillSettings article article{overflow-x:auto}

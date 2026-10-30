@@ -1,26 +1,5 @@
-// What a till is reset to at closeout. Corner Deli: the front (upfront) till keeps a $100 float,
-// the back till is emptied to $0. A manager can set a different amount per till on the Register page.
-export const FRONT_TILL_RESET_CENTS = 10000;
-export const BACK_TILL_RESET_CENTS = 0;
-
-export function defaultTillResetCents(till: { terminalKey?: string; name?: string }) {
-  const label = `${till.terminalKey || ""} ${till.name || ""}`.toLowerCase();
-  return /\bback\b|back[-_ ]/.test(label) ? BACK_TILL_RESET_CENTS : FRONT_TILL_RESET_CENTS;
-}
-
-export function tillResetCents(till: { terminalKey?: string; name?: string; resetCashCents?: number | null }) {
-  const configured = till.resetCashCents;
-  return configured != null && Number.isSafeInteger(Number(configured)) && Number(configured) >= 0 ? Number(configured) : defaultTillResetCents(till);
-}
-
-export function tillLabel(till: { terminalKey?: string; name?: string }) {
-  return defaultTillResetCents(till) === BACK_TILL_RESET_CENTS ? "back till" : "front till";
-}
-
-/** Cash to take out of the drawer at closeout so the reset amount stays in it. */
-export function cashToRemoveCents(countedCents: number, resetCents: number) {
-  return Math.max(0, countedCents - resetCents);
-}
+// Till closeout rules. Corner Deli: the front (upfront) till keeps a $100 float in quarters, $1, $5 and $10;
+// the back till is emptied to $0 and keeps a separate $60 change bag. Managers edit both in POS Settings → Tills.
 
 export const DENOMINATIONS = [
   { key: "pennies", label: "Pennies", cents: 1 },
@@ -36,9 +15,74 @@ export const DENOMINATIONS = [
 ] as const;
 export type DenominationKey = (typeof DENOMINATIONS)[number]["key"];
 export type DenominationCounts = Record<DenominationKey, number>;
+const CENTS = Object.fromEntries(DENOMINATIONS.map((d) => [d.key, d.cents])) as Record<DenominationKey, number>;
+const LABEL = Object.fromEntries(DENOMINATIONS.map((d) => [d.key, d.label])) as Record<DenominationKey, string>;
+const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
-/** How the $100 front float is made up when the drawer has it: $10 in coin, 25 × $1, 5 × $5, 4 × $10. */
-export const PREFERRED_100_FLOAT: Partial<DenominationCounts> = { pennies: 50, nickels: 20, dimes: 25, quarters: 24, ones: 25, fives: 5, tens: 4 };
+/** One denomination allowed in a float or change bag: what it should hold, the least it may hold, the most. */
+export type FloatItem = { key: DenominationKey; targetCents: number; minCents: number; maxCents: number };
+/** `float` is what stays in the till (empty = reset to $0); `bag` is a separate change bag counted at close. */
+export type TillSettings = { float: FloatItem[]; bag: FloatItem[] | null };
+
+// Chris, 2026-10-30: front $100 = $5 quarters (up to $10), $25 ones, $30 fives, $40 tens; never coin under a
+// quarter or a $20+. Minimums $5 quarters, $25 ones, $25 fives. Back till $0 plus a $60 bag: $2 quarters, $28 ones, $30 fives.
+export const FRONT_TILL_FLOAT: FloatItem[] = [
+  { key: "quarters", targetCents: 500, minCents: 500, maxCents: 1000 },
+  { key: "ones", targetCents: 2500, minCents: 2500, maxCents: 4000 },
+  { key: "fives", targetCents: 3000, minCents: 2500, maxCents: 4500 },
+  { key: "tens", targetCents: 4000, minCents: 0, maxCents: 5000 },
+];
+export const BACK_TILL_BAG: FloatItem[] = [
+  { key: "quarters", targetCents: 200, minCents: 100, maxCents: 500 },
+  { key: "ones", targetCents: 2800, minCents: 1500, maxCents: 4000 },
+  { key: "fives", targetCents: 3000, minCents: 1000, maxCents: 4000 },
+];
+
+export function isBackTill(till: { terminalKey?: string; name?: string }) {
+  return /\bback\b|back[-_ ]/.test(`${till.terminalKey || ""} ${till.name || ""}`.toLowerCase());
+}
+
+export function tillLabel(till: { terminalKey?: string; name?: string }) {
+  return isBackTill(till) ? "back till" : "front till";
+}
+
+export function defaultTillSettings(till: { terminalKey?: string; name?: string }): TillSettings {
+  return isBackTill(till) ? { float: [], bag: BACK_TILL_BAG.map((i) => ({ ...i })) } : { float: FRONT_TILL_FLOAT.map((i) => ({ ...i })), bag: null };
+}
+
+function parseItems(value: unknown, label: string): FloatItem[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be a list of bills and coins.`);
+  const seen = new Set<string>();
+  return value.map((raw) => {
+    const row = (raw || {}) as Record<string, unknown>, key = String(row.key || "") as DenominationKey;
+    if (!(key in CENTS)) throw new Error(`${label}: unknown bill or coin "${key}".`);
+    if (seen.has(key)) throw new Error(`${label}: ${LABEL[key]} is listed twice.`);
+    seen.add(key);
+    const [targetCents, minCents, maxCents] = [row.targetCents, row.minCents, row.maxCents].map(Number);
+    for (const [name, cents] of [["target", targetCents], ["minimum", minCents], ["limit", maxCents]] as const) {
+      if (!Number.isSafeInteger(cents) || cents < 0 || cents > 1_000_000) throw new Error(`${label}: the ${LABEL[key]} ${name} must be a dollar amount.`);
+      if (cents % CENTS[key] !== 0) throw new Error(`${label}: the ${LABEL[key]} ${name} must be a multiple of ${money(CENTS[key])}.`);
+    }
+    if (minCents > targetCents || targetCents > maxCents) throw new Error(`${label}: ${LABEL[key]} needs minimum ≤ target ≤ limit.`);
+    return { key, targetCents, minCents, maxCents };
+  }).sort((a, b) => CENTS[a.key] - CENTS[b.key]);
+}
+
+export function parseTillSettings(value: unknown): TillSettings {
+  const input = (value || {}) as Record<string, unknown>;
+  const bag = input.bag == null ? null : parseItems(input.bag, "Change bag");
+  return { float: parseItems(input.float ?? [], "Till float"), bag: bag && bag.length ? bag : null };
+}
+
+/** Stored settings for a till, or the defaults for its name. */
+export function tillSettings(till: { terminalKey?: string; name?: string; settings?: unknown }): TillSettings {
+  if (till.settings) {
+    try { return parseTillSettings(till.settings); } catch { /* fall back to the defaults */ }
+  }
+  return defaultTillSettings(till);
+}
+
+export const planTotalCents = (items: FloatItem[]) => items.reduce((sum, item) => sum + item.targetCents, 0);
 
 export function emptyCounts(): DenominationCounts {
   return Object.fromEntries(DENOMINATIONS.map((d) => [d.key, 0])) as DenominationCounts;
@@ -60,18 +104,20 @@ export function countsTotalCents(counts: Partial<DenominationCounts>) {
   return DENOMINATIONS.reduce((sum, d) => sum + (counts[d.key] || 0) * d.cents, 0);
 }
 
-// Filling the rest of the float prefers small bills, then coin, and uses $20/$50/$100 only when nothing else adds up.
-const FILL_ORDER: DenominationKey[] = ["ones", "fives", "tens", "quarters", "dimes", "nickels", "pennies", "twenties", "fifties", "hundreds"];
-const CENTS = Object.fromEntries(DENOMINATIONS.map((d) => [d.key, d.cents])) as Record<DenominationKey, number>;
+const subtract = (a: DenominationCounts, b: DenominationCounts) => Object.fromEntries(DENOMINATIONS.map((d) => [d.key, a[d.key] - b[d.key]])) as DenominationCounts;
+const add = (a: DenominationCounts, b: DenominationCounts) => Object.fromEntries(DENOMINATIONS.map((d) => [d.key, a[d.key] + b[d.key]])) as DenominationCounts;
 
-/** Exactly `target` cents out of `available` (limited counts), or null when it can't be made. */
-function exactFill(available: DenominationCounts, target: number): DenominationCounts | null {
-  if (target === 0) return emptyCounts();
-  if (target < 0 || target > 1_000_000) return null;
+/**
+ * Makes `target` cents from `available` using the denominations in `order` (earlier ones preferred), or with
+ * `allowUnder` the most it can without going over. Bounded coin change with a per-layer used count.
+ */
+function fill(available: DenominationCounts, target: number, order: DenominationKey[], allowUnder = false): DenominationCounts | null {
+  if (target <= 0) return target === 0 ? emptyCounts() : null;
+  if (target > 1_000_000) return null;
   let reach = new Uint8Array(target + 1);
   reach[0] = 1;
   const layers: Int32Array[] = [];
-  for (const key of FILL_ORDER) {
+  for (const key of order) {
     const d = CENTS[key], limit = available[key], used = new Int32Array(target + 1), next = reach.slice();
     for (let s = d; s <= target && limit > 0; s++) {
       if (!next[s] && next[s - d] && used[s - d] < limit) { next[s] = 1; used[s] = used[s - d] + 1; }
@@ -79,41 +125,74 @@ function exactFill(available: DenominationCounts, target: number): DenominationC
     layers.push(used);
     reach = next;
   }
-  if (!reach[target]) return null;
-  const result = emptyCounts();
   let s = target;
-  for (let i = FILL_ORDER.length - 1; i >= 0; i--) {
-    const k = layers[i][s];
-    result[FILL_ORDER[i]] = k;
-    s -= k * CENTS[FILL_ORDER[i]];
+  if (!reach[s]) {
+    if (!allowUnder) return null;
+    while (s > 0 && !reach[s]) s--;
   }
-  return s === 0 ? result : null;
+  const result = emptyCounts();
+  for (let i = order.length - 1; i >= 0; i--) {
+    const k = layers[i][s];
+    result[order[i]] = k;
+    s -= k * CENTS[order[i]];
+  }
+  return result;
 }
 
-export type ResetPlan = { leave: DenominationCounts; deposit: DenominationCounts; leaveCents: number; depositCents: number; shortCents: number };
+export type FloatPlan = { leave: DenominationCounts; leaveCents: number; targetCents: number; shortCents: number; flags: string[] };
 
 /**
- * Which bills and coins to leave in the till so it holds exactly `targetCents`; everything else goes
- * in the deposit. If the drawer can't make the amount exactly, it leaves as close under it as possible
- * and reports the shortfall.
+ * Which bills and coins to put in a float (till or change bag) from what is `available`. Each allowed
+ * denomination gets its target when there is enough; a shortfall is made up from the next size up within the
+ * limits, then past the limits, and only from the allowed denominations. Anything under a minimum, over a
+ * limit, off target or short overall is flagged.
  */
-export function planTillReset(counted: DenominationCounts, targetCents: number): ResetPlan {
-  const total = countsTotalCents(counted);
-  let leave: DenominationCounts | null = null;
-  if (targetCents >= total) leave = { ...counted };
-  else {
-    const preferred = targetCents === 10000 ? PREFERRED_100_FLOAT : {};
-    const start = emptyCounts();
-    for (const d of DENOMINATIONS) start[d.key] = Math.min(counted[d.key], preferred[d.key] || 0);
-    const rest = emptyCounts();
-    for (const d of DENOMINATIONS) rest[d.key] = counted[d.key] - start[d.key];
-    const fill = exactFill(rest, targetCents - countsTotalCents(start));
-    if (fill) leave = Object.fromEntries(DENOMINATIONS.map((d) => [d.key, start[d.key] + fill[d.key]])) as DenominationCounts;
-    else leave = exactFill(counted, targetCents);
-    for (let t = targetCents - 1; !leave && t >= 0; t--) leave = exactFill(counted, t);
+export function planFloat(available: DenominationCounts, items: FloatItem[], name: string): FloatPlan {
+  const targetCents = planTotalCents(items), leave = emptyCounts();
+  if (!items.length || targetCents === 0) return { leave, leaveCents: 0, targetCents, shortCents: 0, flags: [] };
+  for (const item of items) leave[item.key] = Math.min(available[item.key], Math.floor(item.targetCents / CENTS[item.key]));
+  const remaining = targetCents - countsTotalCents(leave);
+  if (remaining > 0) {
+    const order = items.map((i) => i.key).sort((a, b) => CENTS[b] - CENTS[a]), spare = subtract(available, leave), capped = emptyCounts(), allowed = emptyCounts();
+    for (const item of items) {
+      allowed[item.key] = spare[item.key];
+      capped[item.key] = Math.max(0, Math.min(spare[item.key], Math.floor(item.maxCents / CENTS[item.key]) - leave[item.key]));
+    }
+    const extra = fill(capped, remaining, order) || fill(allowed, remaining, order) || fill(allowed, remaining, order, true) || emptyCounts();
+    for (const key of order) leave[key] += extra[key];
   }
-  const finalLeave = leave || emptyCounts(), deposit = emptyCounts();
-  for (const d of DENOMINATIONS) deposit[d.key] = counted[d.key] - finalLeave[d.key];
-  const leaveCents = countsTotalCents(finalLeave);
-  return { leave: finalLeave, deposit, leaveCents, depositCents: total - leaveCents, shortCents: Math.max(0, targetCents - leaveCents) };
+  const leaveCents = countsTotalCents(leave), shortCents = Math.max(0, targetCents - leaveCents), flags: string[] = [];
+  for (const item of items) {
+    const cents = leave[item.key] * CENTS[item.key], label = LABEL[item.key];
+    if (cents < item.minCents) flags.push(`${name}: only ${money(cents)} in ${label} (minimum ${money(item.minCents)}).`);
+    else if (cents > item.maxCents) flags.push(`${name}: ${money(cents)} in ${label} (over the ${money(item.maxCents)} limit).`);
+    else if (cents < item.targetCents) flags.push(`${name}: ${money(cents)} in ${label} instead of ${money(item.targetCents)}, made up with other bills.`);
+  }
+  if (shortCents > 0) flags.push(`${name}: short ${money(shortCents)} — the drawer can't make ${money(targetCents)} from ${items.map((i) => LABEL[i.key]).join(", ")}.`);
+  return { leave, leaveCents, targetCents, shortCents, flags };
+}
+
+export type ResetPlan = FloatPlan & {
+  deposit: DenominationCounts;
+  depositCents: number;
+  bag: (FloatPlan & { counted: DenominationCounts; countedCents: number }) | null;
+};
+
+/**
+ * The whole closeout: the till float comes out of the drawer count; the change bag is then made up from
+ * what's in the bag plus the rest of the drawer (topped up or trimmed back to its target); everything
+ * else is the deposit.
+ */
+export function planCloseout(drawer: DenominationCounts, bagCounted: DenominationCounts | null, settings: TillSettings): ResetPlan {
+  const till = planFloat(drawer, settings.float, "Till");
+  let pool = subtract(drawer, till.leave), bag: ResetPlan["bag"] = null;
+  if (settings.bag) {
+    const counted = bagCounted || emptyCounts(), countedCents = countsTotalCents(counted);
+    pool = add(pool, counted);
+    const plan = planFloat(pool, settings.bag, "Change bag");
+    if (countedCents !== plan.targetCents) plan.flags.unshift(`Change bag counted ${money(countedCents)}, should be ${money(plan.targetCents)}${countedCents < plan.targetCents ? " (topped up from the drawer)" : " (extra goes in the deposit)"}.`);
+    pool = subtract(pool, plan.leave);
+    bag = { ...plan, counted, countedCents };
+  }
+  return { ...till, deposit: pool, depositCents: countsTotalCents(pool), bag };
 }
