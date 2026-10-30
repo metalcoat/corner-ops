@@ -443,9 +443,8 @@ flowchart LR
 
 ## 8d. Till closeout (Corner Deli POS, dev)
 
-- Till closeout (`/pos/deli/register`, `src/lib/ordering-registers.ts`): managers reach it from the green "CLOSE OUT
-  TILL" button in the POS header, the "Till closeout" tile on the POS home screen (Manager), or POS → Reports → TILL
-  CLOSEOUT / REGISTER. Each POS station's
+- Till closeout (`/pos/deli/register`, `src/lib/ordering-registers.ts`): managers reach it from the "Till closeout" tile on the POS home
+  screen (Manager) or POS → Reports → TILL CLOSEOUT / REGISTER. Each POS station's
   `shared_register_key` is its till (`ordering_pos_terminals.terminal_key`); on dev: `upfront-register` (station
   Upfront) = front, and `back-register` (Back pos 1) = back (confirmed by Chris 2026-10-30). A till no station uses can be
   retired in Settings → Tills (inactive, history kept; an empty open session is closed). Only a manager can open, count or close out a till; cash sales, refunds, paid in/out and drops move the

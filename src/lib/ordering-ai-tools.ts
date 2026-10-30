@@ -2495,14 +2495,14 @@ export async function replaceAiDraft(input: {
       await sql`DELETE FROM ordering_order_items WHERE order_id=${input.orderId}`;
       await sql`UPDATE ordering_order_items SET order_id=${input.orderId} WHERE order_id=${temporary.id}`;
       await sql`UPDATE ordering_order_promotion_applications SET order_id=${input.orderId} WHERE order_id=${temporary.id}`;
-      await sql`UPDATE ordering_orders target SET service_type=source.service_type,timing_mode=source.timing_mode,scheduled_for=source.scheduled_for,timing_message_snapshot=source.timing_message_snapshot,customer_id=source.customer_id,customer_phone_id=source.customer_phone_id,first_name_snapshot=source.first_name_snapshot,last_name_snapshot=source.last_name_snapshot,phone_snapshot=source.phone_snapshot,subtotal_cents=source.subtotal_cents,discount_cents=source.discount_cents,tax_cents=source.tax_cents,tip_cents=source.tip_cents,delivery_fee_cents=0,total_cents=source.total_cents,amount_due_cents=source.amount_due_cents,version=target.version+1,updated_at=NOW() FROM ordering_orders source WHERE target.id=${input.orderId} AND source.id=${temporary.id}`;
+      await sql`UPDATE ordering_orders target SET service_type=source.service_type,timing_mode=source.timing_mode,scheduled_for=source.scheduled_for,timing_message_snapshot=source.timing_message_snapshot,customer_id=source.customer_id,customer_phone_id=source.customer_phone_id,first_name_snapshot=source.first_name_snapshot,last_name_snapshot=source.last_name_snapshot,phone_snapshot=source.phone_snapshot,subtotal_cents=source.subtotal_cents,discount_cents=source.discount_cents,tax_cents=source.tax_cents,tip_cents=target.tip_cents,delivery_fee_cents=0,total_cents=source.total_cents+target.tip_cents,amount_due_cents=GREATEST(0,source.total_cents+target.tip_cents-target.paid_cents),version=target.version+1,updated_at=NOW() FROM ordering_orders source WHERE target.id=${input.orderId} AND source.id=${temporary.id}`;
       await sql`DELETE FROM ordering_orders WHERE id=${temporary.id}`;
     });
   } catch (error) {
     await getSql()`DELETE FROM ordering_orders WHERE id=${temporary.id}`;
     throw error;
   }
-  // The temporary draft carries no delivery fee; put back what this cart owes for the saved address.
+  // The temporary draft carries no delivery fee (the tip is kept above); put back what this cart owes for the saved address.
   await syncDraftTotals(input.orderId, input.business);
   return pricedOrder(input.orderId, input.business);
 }
