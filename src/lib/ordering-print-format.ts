@@ -5,7 +5,7 @@ import { kitchenItemFamily, kitchenModifierOrder as sharedKitchenModifierOrder, 
 export { kitchenItemFamily } from "@/lib/ordering-line-format";
 
 export type PrintableModifier = { name: string; printOrder: number; header: boolean; print: boolean; group?: string; pizzaPortion?: "left_half"|"whole"|"right_half"|null; pizzaAmount?: string|null };
-export type PrintableLine = { quantity: number; header: string; modifiers: PrintableModifier[]; family?: string; sequence?: number; itemName?: string; variantName?: string };
+export type PrintableLine = { note?: string; quantity: number; header: string; modifiers: PrintableModifier[]; family?: string; sequence?: number; itemName?: string; variantName?: string };
 
 export function kitchenModifierOrder(line:PrintableLine,modifier:PrintableModifier){
   return sharedKitchenModifierOrder({item_name_snapshot:line.header,category_name:line.family},{option_name_snapshot:modifier.name,print_order_snapshot:modifier.printOrder,group_name_snapshot:modifier.group});
@@ -33,6 +33,7 @@ export function formatKitchenLines(lines: PrintableLine[]): string[] {
     const pizza=splitPizza?pizzaColumnLines(line.modifiers):[];
     if(pizza.length)output.push(...pizza);
     for (const modifier of line.modifiers.filter((value) => value.print && !value.header && (!value.pizzaPortion||!splitPizza)).sort((a,b)=>kitchenModifierOrder(line,a)-kitchenModifierOrder(line,b)||a.name.localeCompare(b.name))) {const amount=modifier.pizzaAmount&&modifier.pizzaAmount!=="regular"?`${modifier.pizzaAmount==="extra"?"EXTRA":modifier.pizzaAmount==="double_extra"?"2X EXTRA":"3X EXTRA"} `:"";output.push(`  ${amount}${modifier.name.toUpperCase()}`)}
+    if (line.note?.trim()) output.push(`  NOTE: ${line.note.trim()}`);
   }
   return output;
 }
@@ -64,12 +65,12 @@ export async function snapshotAndFormatOrder(orderId: string, onlyItemIds?: stri
     WHERE modifier.order_item_id IN (SELECT id FROM ordering_order_items WHERE order_id=${orderId})
   `;
   const rows = onlyItemIds?.length
-    ? await sql`SELECT line.id,line.quantity,line.item_name_snapshot,line.variant_name_snapshot,COALESCE(NULLIF(line.item_print_name_snapshot,''),line.item_name_snapshot) header,COALESCE(category.display_name,category.name,'') category_name FROM ordering_order_items line LEFT JOIN ordering_menu_items item ON item.id=line.item_id LEFT JOIN ordering_menu_categories category ON category.id=item.category_id WHERE line.order_id=${orderId} AND line.id=ANY(${onlyItemIds}) ORDER BY line.sort_order,line.created_at,line.id`
-    : await sql`SELECT line.id,line.quantity,line.item_name_snapshot,line.variant_name_snapshot,COALESCE(NULLIF(line.item_print_name_snapshot,''),line.item_name_snapshot) header,COALESCE(category.display_name,category.name,'') category_name FROM ordering_order_items line LEFT JOIN ordering_menu_items item ON item.id=line.item_id LEFT JOIN ordering_menu_categories category ON category.id=item.category_id WHERE line.order_id=${orderId} ORDER BY line.sort_order,line.created_at,line.id`;
+    ? await sql`SELECT line.id,line.quantity,line.special_instructions,line.item_name_snapshot,line.variant_name_snapshot,COALESCE(NULLIF(line.item_print_name_snapshot,''),line.item_name_snapshot) header,COALESCE(category.display_name,category.name,'') category_name FROM ordering_order_items line LEFT JOIN ordering_menu_items item ON item.id=line.item_id LEFT JOIN ordering_menu_categories category ON category.id=item.category_id WHERE line.order_id=${orderId} AND line.id=ANY(${onlyItemIds}) ORDER BY line.sort_order,line.created_at,line.id`
+    : await sql`SELECT line.id,line.quantity,line.special_instructions,line.item_name_snapshot,line.variant_name_snapshot,COALESCE(NULLIF(line.item_print_name_snapshot,''),line.item_name_snapshot) header,COALESCE(category.display_name,category.name,'') category_name FROM ordering_order_items line LEFT JOIN ordering_menu_items item ON item.id=line.item_id LEFT JOIN ordering_menu_categories category ON category.id=item.category_id WHERE line.order_id=${orderId} ORDER BY line.sort_order,line.created_at,line.id`;
   const printable: PrintableLine[] = [];
   for (const row of rows) {
     const modifiers = await sql`SELECT COALESCE(NULLIF(option_print_name_snapshot,''),option_name_snapshot) name,group_name_snapshot,print_order_snapshot,header_modifier_snapshot,print_on_ticket,amount,pizza_topping_portion,pizza_topping_amount FROM ordering_order_item_modifiers WHERE order_item_id=${row.id}`;
-    printable.push({ quantity:Number(row.quantity),header:kitchenPortionName(String(row.header)),itemName:String(row.item_name_snapshot),variantName:String(row.variant_name_snapshot || ""),family:kitchenItemFamily(String(row.item_name_snapshot),String(row.category_name)),sequence:printable.length,modifiers:modifiers.map((modifier)=>({name:kitchenPortionName(formatModifierIntensity(String(modifier.name),modifier.amount === "light" || modifier.amount === "heavy" ? modifier.amount : "normal")),group:String(modifier.group_name_snapshot),printOrder:Number(modifier.print_order_snapshot),header:Boolean(modifier.header_modifier_snapshot),print:Boolean(modifier.print_on_ticket),pizzaPortion:modifier.pizza_topping_portion||null,pizzaAmount:modifier.pizza_topping_amount||null})) });
+    printable.push({ note:String(row.special_instructions||""),quantity:Number(row.quantity),header:kitchenPortionName(String(row.header)),itemName:String(row.item_name_snapshot),variantName:String(row.variant_name_snapshot || ""),family:kitchenItemFamily(String(row.item_name_snapshot),String(row.category_name)),sequence:printable.length,modifiers:modifiers.map((modifier)=>({name:kitchenPortionName(formatModifierIntensity(String(modifier.name),modifier.amount === "light" || modifier.amount === "heavy" ? modifier.amount : "normal")),group:String(modifier.group_name_snapshot),printOrder:Number(modifier.print_order_snapshot),header:Boolean(modifier.header_modifier_snapshot),print:Boolean(modifier.print_on_ticket),pizzaPortion:modifier.pizza_topping_portion||null,pizzaAmount:modifier.pizza_topping_amount||null})) });
   }
   return formatKitchenLines(printable);
 }

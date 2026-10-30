@@ -772,8 +772,8 @@ export async function dispatchOrderPrintJobs(
         -- A scheduled order's kitchen ticket waits for its release time; once released it
         -- counts as fresh from then, not from when it was placed.
         AND NOT (purpose='kitchen_production' AND EXISTS(SELECT 1 FROM ordering_orders o WHERE o.id=ordering_print_jobs.order_id AND o.kitchen_release_at>NOW()))
-        -- A voided order never prints a kitchen ticket (a retry, or a held order released after the void).
-        AND NOT (purpose='kitchen_production' AND EXISTS(SELECT 1 FROM ordering_orders o WHERE o.id=ordering_print_jobs.order_id AND o.status='cancelled'))
+        -- A voided order never prints a kitchen ticket (a retry, or a held order released after the void), except its void notice.
+        AND NOT (purpose='kitchen_production' AND event_subtype IS DISTINCT FROM 'order_void' AND EXISTS(SELECT 1 FROM ordering_orders o WHERE o.id=ordering_print_jobs.order_id AND o.status='cancelled'))
         AND (
           (NOT ${retryOnly} AND status='queued')
           OR (${retryOnly} AND status='queued' AND queued_at<NOW()-INTERVAL '1 minute')

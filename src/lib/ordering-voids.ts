@@ -19,7 +19,7 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
   return withTransaction(async () => {
     const sql = getSql();
     const rows = await sql`
-      SELECT id, display_number, status, payment_status, version, voided_at, submitted_at, paid_cents
+      SELECT id, display_number, status, payment_status, version, voided_at, submitted_at, paid_cents, first_name_snapshot, last_name_snapshot
       FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE
     `;
     const order = rows[0];
@@ -53,6 +53,15 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
     await sql`UPDATE ordering_delivery_assignments SET status='CANCELLED',cancelled_at=NOW(),status_note=${`Order voided: ${reason}`.slice(0,500)},updated_at=NOW()
       WHERE order_id=${input.orderId} AND status NOT IN ('DELIVERED','RETURNED','CANCELLED')`;
     await reconcileOrderTips(input.orderId,input.business);
+    // The kitchen already has this order: tell it. is_reprint because an order's first kitchen ticket is one-per-order.
+    if (order.submitted_at) {
+      const lines = await sql`SELECT quantity-cancelled_quantity quantity,item_name_snapshot,variant_name_snapshot FROM ordering_order_items WHERE order_id=${input.orderId} AND quantity>cancelled_quantity ORDER BY sort_order,created_at,id`;
+      const approvedBy = (input.approver || input.actor).name;
+      await sql`INSERT INTO ordering_print_jobs(id,business,order_id,purpose,event_subtype,status,is_reprint,actor_type,actor_id,error_message,payload) VALUES(${randomUUID()},${input.business},${input.orderId},'kitchen_production','order_void','not_configured',TRUE,${input.actor.type},${input.actor.id},'Kitchen printer not configured.',${JSON.stringify({
+        heading: "VOID WHOLE ORDER", orderNumber: String(order.display_number), customerName: `${order.first_name_snapshot || ""} ${order.last_name_snapshot || ""}`.trim(), paymentLabel: `VOID APPROVED BY: ${approvedBy}`, cashier: input.actor.name,
+        lines: lines.map((line) => `VOID: ${line.quantity}x ${String(line.item_name_snapshot).toUpperCase()}${line.variant_name_snapshot ? ` (${line.variant_name_snapshot})` : ""}`),
+      })}::jsonb)`;
+    }
     await sql`
       INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)
       VALUES(${randomUUID()},${input.orderId},${updated[0].version},'order_voided',${input.actor.type},${input.actor.id},

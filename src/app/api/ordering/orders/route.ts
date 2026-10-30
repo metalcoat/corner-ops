@@ -5,6 +5,8 @@ import type { OrderingBusiness, ServiceType } from "@/lib/ordering-core";
 import { ensureOrderingDeliverySchema } from "@/lib/ordering-delivery-schema";
 import { createTimedDraftOrder, ensureTimedDraftOrderSchemas } from "@/lib/ordering-timed-orders";
 import type { OrderTimingMode } from "@/lib/ordering-timing-core";
+import { parseCustomItems, type CustomItemInput } from "@/lib/custom-item-rules";
+import { appendCustomOrderItems } from "@/lib/ordering-custom-items";
 import { orderingActor } from "@/lib/ordering-route-auth";
 import { addressForOrder, routeDeliveryAddress } from "@/lib/ordering-address";
 import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
@@ -126,6 +128,9 @@ export async function POST(request: Request) {
       timingMode,
       requestedFor: readRequestedFor(body.scheduledFor, timingMode),
     };
+    let customItems: CustomItemInput[];
+    try { customItems = parseCustomItems(body.customItems); }
+    catch (error) { return isoJson({ error: error instanceof Error ? error.message : "Custom items are not valid." }, { status: 409 }); }
     const idempotencyKey = readIdempotencyKey(body.idempotencyKey);
     let order: Awaited<ReturnType<typeof createTimedDraftOrder>>;
     if (idempotencyKey) {
@@ -139,13 +144,16 @@ export async function POST(request: Request) {
         if (prior) return { prior };
         const created = await createTimedDraftOrder(draftInput);
         await sql`UPDATE ordering_orders SET idempotency_key=${idempotencyKey} WHERE id=${created.id}`;
+        await appendCustomOrderItems(String(created.id), business, customItems, actor);
         return { created };
       });
       if (outcome.prior) return orderResponse(outcome.prior as { id: unknown }, 200);
       order = outcome.created!;
     } else {
       order = await createTimedDraftOrder(draftInput);
+      await appendCustomOrderItems(String(order.id), business, customItems, actor);
     }
+    if (customItems.length) order = (await getSql()`SELECT * FROM ordering_orders WHERE id=${order.id}`)[0] as typeof order;
     if(body.stationKey)await getSql()`UPDATE ordering_orders SET created_station=${String(body.stationKey).trim().toLowerCase().slice(0,80)} WHERE id=${order.id}`;
     if(body.tableSessionId){const sessionId=String(body.tableSessionId);const linked=await getSql()`UPDATE restaurant_table_sessions session SET order_id=${order.id},status='ordering',updated_at=NOW() FROM restaurant_tables table_row JOIN restaurant_floor_plans floor ON floor.id=table_row.floor_plan_id JOIN restaurant_locations location ON location.id=floor.location_id JOIN restaurant_concepts concept ON concept.id=location.concept_id WHERE session.id=${sessionId} AND session.table_id=table_row.id AND session.order_id IS NULL AND session.status='open' AND concept.legacy_business=${business} RETURNING session.id,table_row.label`;if(!linked.length){await getSql()`DELETE FROM ordering_orders WHERE id=${order.id}`;return isoJson({error:"The table session is no longer available."},{status:409})}await getSql()`UPDATE ordering_orders SET first_name_snapshot=${String(linked[0].label)},updated_at=NOW() WHERE id=${order.id}`}
     if (validatedAddress) {

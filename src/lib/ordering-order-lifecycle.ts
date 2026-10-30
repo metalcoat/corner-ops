@@ -231,7 +231,7 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
   const sql = getSql();
   const items = (await sql`
     SELECT id, item_id, item_name_snapshot, variant_id, variant_name_snapshot, quantity, COALESCE(cancelled_quantity, 0) AS cancelled_quantity,
-           unit_price_cents, modifier_total_cents, combo_total_cents, line_total_cents
+           unit_price_cents, modifier_total_cents, combo_total_cents, line_total_cents, custom_item
     FROM ordering_order_items
     WHERE order_id = ${order.id}
     ORDER BY sort_order, created_at, id
@@ -251,6 +251,13 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
   for (const item of items) {
     // A line whose units were all cancelled no longer needs to be orderable.
     if (number((item as { cancelled_quantity?: unknown }).cancelled_quantity) >= number(item.quantity)) { cancelledLines += 1; continue; }
+    // A custom line's price is whatever staff typed: there is no menu price or availability to check.
+    if ((item as { custom_item?: boolean }).custom_item) {
+      const cancelled = number((item as { cancelled_quantity?: unknown }).cancelled_quantity);
+      if (cancelled > 0) cancelledLines += 1;
+      subtotal += Math.round((number(item.line_total_cents) * (number(item.quantity) - cancelled)) / number(item.quantity));
+      continue;
+    }
     availabilityTargets.push({
       type: "item",
       id: item.item_id,

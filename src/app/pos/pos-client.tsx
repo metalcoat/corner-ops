@@ -71,6 +71,8 @@ type CartLine = {
   comboId: string | null;
   comboSelections: Record<string, string[]>;
   specialInstructions: string;
+  /** Typed in by staff: no menu item behind it. */
+  customItem?: boolean;
 };
 
 function cartLineConfiguration(line: CartLine) {
@@ -574,6 +576,8 @@ export default function PosClient({
     useState<ReopenedOrderItem | null>(null);
   // The order loaded from POS → Orders: who it's for and what's been paid, plus its void dialog.
   const [reopenedOrder, setReopenedOrder] = useState<Record<string, any> | null>(null);
+  const [customItemOpen, setCustomItemOpen] = useState(false);
+  const [customItem, setCustomItem] = useState({ name: "", price: "", quantity: "1", note: "" });
   const [voidOrderOpen, setVoidOrderOpen] = useState(false);
   const [voidOrderReason, setVoidOrderReason] = useState("");
   const [voidOrderPin, setVoidOrderPin] = useState("");
@@ -598,6 +602,13 @@ export default function PosClient({
           }
         : current,
     );
+  }
+  function addCustomItem() {
+    const quantity = Number(customItem.quantity), unitPriceCents = Math.round(Number(customItem.price || 0) * 100);
+    setCart((current) => [...current, { id: crypto.randomUUID(), itemId: "", variantId: null, variantName: "", name: customItem.name.trim(), quantity, unitPriceCents, modifierText: [], comboText: [], modifierSelections: {}, modifierQuantities: {}, modifierAmounts: {}, modifierDeclines: [], pizzaToppings: [], comboId: null, comboSelections: {}, specialInstructions: customItem.note.trim(), customItem: true }]);
+    invalidateEditableDraft();
+    setCustomItem({ name: "", price: "", quantity: "1", note: "" });
+    setCustomItemOpen(false);
   }
   async function voidReopenedOrder() {
     if (!savedDraft) return;
@@ -1534,7 +1545,7 @@ export default function PosClient({
               timingMode === "future" && scheduledFor
                 ? new Date(scheduledFor).toISOString()
                 : null,
-            items: cart.map((line) => {
+            items: cart.filter((line) => !line.customItem).map((line) => {
               const item = allItems.find(
                   (candidate) => candidate.id === line.itemId,
                 ),
@@ -2577,7 +2588,8 @@ export default function PosClient({
       customerLastName:customer?.last_name,
       callerPhone:customer?.phones?.find(phone => phone.id === selectedCustomerPhoneId)?.normalized_phone || customer?.normalized_phone,
       orderOrigin,tableSessionId,
-      items:cart.map(line=>({itemId:line.itemId,variantId:line.variantId,quantity:line.quantity,modifierSelections:line.modifierSelections,modifierQuantities:line.modifierQuantities,modifierAmounts:line.modifierAmounts,modifierDeclines:line.modifierDeclines,pizzaToppings:line.pizzaToppings,comboId:line.comboId,comboSelections:line.comboSelections,specialInstructions:line.specialInstructions})),
+      customItems:cart.filter(line=>line.customItem).map(line=>({name:line.name,priceCents:line.unitPriceCents,quantity:line.quantity,note:line.specialInstructions})),
+      items:cart.filter(line=>!line.customItem).map(line=>({itemId:line.itemId,variantId:line.variantId,quantity:line.quantity,modifierSelections:line.modifierSelections,modifierQuantities:line.modifierQuantities,modifierAmounts:line.modifierAmounts,modifierDeclines:line.modifierDeclines,pizzaToppings:line.pizzaToppings,comboId:line.comboId,comboSelections:line.comboSelections,specialInstructions:line.specialInstructions})),
     };
     setSavingDraft(true);
     setCheckoutError("");
@@ -2671,6 +2683,7 @@ export default function PosClient({
       setSavedDraft(draft);
       if (reopenedDraft) {
         setCart([]);
+        await refreshReopenedOrder(draft.id).catch(() => undefined);
         setCartNotice(
           `Addition saved to order #${draft.displayNumber}. Send it when ready.`,
         );
@@ -2787,7 +2800,8 @@ export default function PosClient({
       let draft = savedDraft;
       if (!draft) draft = await saveDraft();
       if (!draft) throw new Error("Save the order before applying loyalty.");
-      const index = cart.findIndex((line) => line.id === cartLineId),
+      // Custom lines are saved after the menu lines, so only menu lines line up with orderItemIds.
+      const index = cart.filter((line) => !line.customItem).findIndex((line) => line.id === cartLineId),
         orderItemId = draft.orderItemIds[index];
       if (index < 0 || !orderItemId)
         throw new Error("The selected item changed. Review the order.");
@@ -3722,6 +3736,7 @@ export default function PosClient({
       ? (session.session as PosEmployeeSession | undefined)
       : undefined;
   const canManageOrders = posEmployee ? posEmployee.posRole !== "employee" : true;
+  const loadedOrder = Boolean(savedDraft?.reopened && reopenedOrder?.id === savedDraft.id);
   const reopenedLineSent = (lineId: string) => Boolean(reopenedOrder?.submitted_at) && (savedDraft?.orderItemIds || []).includes(lineId);
   const voidOrderNeedsManager = !canManageOrders && Boolean(reopenedOrder?.submitted_at || Number(reopenedOrder?.paid_cents || 0) > 0);
   const canManageBarcodes = posEmployee
@@ -4050,7 +4065,7 @@ export default function PosClient({
             )}
           {customer && points?.active && cart.length > 0 && (() => {
             const available = Math.floor(points.balance - (savedDraft?.pointsUsed || 0));
-            const cartLines = cart.map((line) => ({
+            const cartLines = cart.filter((line) => !line.customItem).map((line) => ({
               itemId: line.itemId,
               variantId: line.variantId,
               optionIds: [...Object.values(line.modifierSelections).flat(), ...line.pizzaToppings.map((topping) => topping.modifierOptionId)],
@@ -4401,6 +4416,7 @@ export default function PosClient({
         <aside className="posCart">
           <div className="posCartHeading posCartHeadingCompact">
             <strong>ORDER ITEMS</strong>
+            {business === "Corner Deli" && <button type="button" onClick={() => setCustomItemOpen(true)}>CUSTOM ITEM</button>}
             <button
               type="button"
               onClick={() => {
@@ -4412,6 +4428,7 @@ export default function PosClient({
               CLEAR
             </button>
           </div>
+          <div className="posCartLines">
           {savedDraft?.reopened && reopenedOrder?.id === savedDraft.id && (
             <section className="posReopenedSummary" aria-label={`Order ${savedDraft.displayNumber}`}>
               <strong>#{savedDraft.displayNumber} · {String(reopenedOrder.service_type || "").replaceAll("_", " ").toUpperCase()}</strong>
@@ -4421,11 +4438,9 @@ export default function PosClient({
               <b>Total {money(Number(reopenedOrder.total_cents))} · Paid {money(Number(reopenedOrder.paid_cents))} · Due {money(Number(reopenedOrder.amount_due_cents))}</b>
               <div>
                 <a href={`/pos/deli/orders?orderId=${encodeURIComponent(savedDraft.id)}`}>ORDER DETAILS</a>
-                <button type="button" className="danger" onClick={() => { setVoidOrderOpen(true); setVoidOrderError(""); }}>VOID WHOLE ORDER</button>
               </div>
             </section>
           )}
-          <div className="posCartLines">
             {reopenedItems
               .filter(
                 (line) =>
@@ -4552,6 +4567,7 @@ export default function PosClient({
                   </button>
                   <button
                     type="button"
+                    hidden={line.customItem}
                     aria-label={`Edit ${line.name}`}
                     className="posLineAction"
                     onClick={() => {
@@ -4582,7 +4598,7 @@ export default function PosClient({
           <div className="posTotals">
             <div>
               <span>Subtotal</span>
-              <strong>{money(subtotalCents)}</strong>
+              <strong>{money(subtotalCents + (loadedOrder ? Number(reopenedOrder?.subtotal_cents || 0) : 0))}</strong>
             </div>
             {visiblePromotions.map((promotion, index) => (
               <div key={`${promotion.label}-${index}`}>
@@ -4614,20 +4630,39 @@ export default function PosClient({
                   </strong>
                 </div>
               )}
+            {loadedOrder && Number(reopenedOrder?.tip_cents || 0) > 0 && (
+              <div>
+                <span>Tip</span>
+                <strong>{money(Number(reopenedOrder?.tip_cents))}</strong>
+              </div>
+            )}
             <div className="grand">
-              <span>{savedDraft ? "Backend total" : "Estimated total"}</span>
+              <span>{savedDraft ? "Total" : "Estimated total"}</span>
               <strong>
                 {money(
-                  savedDraft?.totalCents ??
-                    Math.max(
-                      0,
-                      subtotalCents -
-                        promotionDiscountCents +
-                        (quotedDeliveryFeeCents || 0),
-                    ),
+                  savedDraft
+                    ? savedDraft.totalCents + (loadedOrder ? subtotalCents : 0)
+                    : Math.max(
+                        0,
+                        subtotalCents -
+                          promotionDiscountCents +
+                          (quotedDeliveryFeeCents || 0),
+                      ),
                 )}
               </strong>
             </div>
+            {loadedOrder && Number(reopenedOrder?.paid_cents || 0) > 0 && (
+              <>
+                <div>
+                  <span>Paid</span>
+                  <strong>{money(Number(reopenedOrder?.paid_cents))}</strong>
+                </div>
+                <div>
+                  <span>Due</span>
+                  <strong>{money(Math.max(0, savedDraft!.totalCents + subtotalCents - Number(reopenedOrder?.paid_cents)))}</strong>
+                </div>
+              </>
+            )}
           </div>
           <div className="posCheckoutButtons">
             <button
@@ -4679,6 +4714,11 @@ export default function PosClient({
             >
               CHECKOUT
             </button>
+            {loadedOrder && (
+              <button type="button" className="posVoidWholeOrder" onClick={() => { setVoidOrderOpen(true); setVoidOrderError(""); }}>
+                VOID WHOLE ORDER
+              </button>
+            )}
           </div>
         </aside>
       </section>
@@ -4995,6 +5035,20 @@ export default function PosClient({
                 );
               }}
             />
+          </section>
+        </div>
+      )}
+      {customItemOpen && (
+        <div className="posModalBackdrop" role="presentation">
+          <section className="posCustomerDialog posReopenedVoidDialog" role="dialog" aria-modal="true" aria-label="Custom item">
+            <form className="ocItemCancel" onSubmit={(event) => { event.preventDefault(); addCustomItem(); }}>
+              <h3>Custom item</h3>
+              <label>Name / description<input autoFocus maxLength={80} value={customItem.name} onChange={(event) => setCustomItem((current) => ({ ...current, name: event.target.value }))} /></label>
+              <label>Price each (includes tax; $0 is OK)<input type="number" inputMode="decimal" min="0" max="1000" step="0.01" value={customItem.price} onChange={(event) => setCustomItem((current) => ({ ...current, price: event.target.value }))} /></label>
+              <label>Quantity<input type="number" inputMode="numeric" min="1" max="99" step="1" value={customItem.quantity} onChange={(event) => setCustomItem((current) => ({ ...current, quantity: event.target.value }))} /></label>
+              <label>Kitchen note (optional)<input maxLength={200} value={customItem.note} onChange={(event) => setCustomItem((current) => ({ ...current, note: event.target.value }))} /></label>
+              <div><button type="button" onClick={() => setCustomItemOpen(false)}>BACK</button><button className="primary" disabled={!customItem.name.trim() || customItem.price === "" || !Number.isInteger(Number(customItem.quantity)) || Number(customItem.quantity) < 1 || Number(customItem.quantity) > 99 || Number(customItem.price) < 0 || Number(customItem.price) > 1000}>ADD TO ORDER</button></div>
+            </form>
           </section>
         </div>
       )}

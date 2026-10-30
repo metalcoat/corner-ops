@@ -428,9 +428,14 @@ flowchart LR
   flow): customer, type, lines, totals and payments so far. Staff add items, void lines or the whole order, send, or pay
   there. A sent order stays "being edited" on the kitchen screen until sent; left alone with no changes it returns after
   15 minutes. Only the changes print (ADD ON ticket with VOID/REMOVE lines). A never-sent order goes to the kitchen once paid.
+- Custom items (`src/lib/ordering-custom-items.ts`, migration 0033): staff type a name, price (tax included, $0 OK),
+  quantity and kitchen note on the POS. The line hangs off a hidden inactive "Custom item" menu entry, skips the menu
+  price and availability checks, records who added it (`added_by_name`, event `custom_item_added`), and shows as "Custom
+  item" in the sales report. Line notes print on the kitchen ticket as NOTE: (for every item, since 2026-10-30).
 - Voids: lines or orders the kitchen hasn't got, anyone (`orderLineWasSent`). Sent lines, sent or paid orders, and
   refunds need a manager: signed in, or a manager's PIN typed in (`managerApprovalFromPin`, same attempt limits as
-  sign-in); the reason and `approvedByName` are on the order event.
+  sign-in); the reason and `approvedByName` are on the order event. Voiding a whole order the kitchen already has prints
+  a VOID WHOLE ORDER notice (`event_subtype='order_void'`, the one kitchen job a cancelled order still prints).
 - Stale draft alert (`src/lib/ordering-stale-drafts.ts`, `src/app/pos/deli/stale-draft-alert.tsx`): orders staff rang on a
   POS and never sent (not web, AI, or reopened sent orders), idle for the set minutes (10), pop up on the chosen stations
   (Back pos 1), checked every 30 s, until sent, deleted (voided, kept in history) or snoozed 5 min. Minutes and stations:
