@@ -444,10 +444,15 @@ flowchart LR
   0028–0030; NULL = defaults by name). Defaults: front $100 = $5 quarters (limit $10), $25 ones, $30 fives, $40 tens;
   back $0 plus a $60 change bag = $2 quarters, $28 ones, $30 fives. A short denomination is made up from the next size
   up within the limits; below a minimum, over a limit, off target or short is flagged.
-- After the reset the owner gets the closeout summary (one item per line: NEEDS A LOOK items, drawer count by
-  denomination, checks, total, expected, over/short, leave-in-till, change bag, deposit): email to `ownerNotificationEmails()` (ALERT_TO_EMAIL /
-  APP_EMAIL, via `sendTransactionalEmail`), push to owner devices, and a text to `pos_role='owner'` employees where
-  texting is set up (dev can't text); audit `register_closeout_notified`.
+- After each reset the owner gets that till's summary by push (owner devices) and a text where texting is set up
+  (dev can't text); audit `register_closeout_notified`. There is no per-till email: ONE nightly till email
+  (`maybeSendNightlyTillEmail`, built by `src/lib/till-closeout-report.ts`, HTML table + plain text) goes to
+  `ownerNotificationEmails()` once every till a station takes cash on is closed out for the business day (4 AM–4 AM
+  Eastern), or from the every-minute `ordering-maintenance` cron 45 min after that day's store close
+  (`ordering_operating_windows`/special hours; fallback Sun–Thu 9:30 pm, Fri–Sat 10:30 pm) with the missing till flagged.
+  Columns Front till | Back till | Change bag; rows per counted denomination, checks, total, expected, over/short,
+  left in till/bag, deposit, closed by; then a Discrepancies table (Where | Issue | Amount). A closeout after a
+  deadline email sends an updated one; the same set of closeouts is never sent twice (audit `register_nightly_email_sent`).
 - Open: one tap "Open with $X", X = the amount confirmed at the last closeout; a different amount needs a note
   (audit `register_opened` records expected vs actual). Expected cash at the next close starts from that amount.
 

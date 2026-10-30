@@ -51,6 +51,8 @@ export async function sendTransactionalEmail(input: {
   to: string | string[];
   subject: string;
   text: string;
+  /** Optional HTML body; `text` stays as the plain-text part. */
+  html?: string;
   idempotencyKey?: string;
 }): Promise<{ configured: boolean; sent: number; failures: string[] }> {
   if (process.env.LOCAL_DEVELOPMENT === "true" && process.env.VALIDATION_DISABLE_OUTBOUND === "1")
@@ -78,6 +80,7 @@ export async function sendTransactionalEmail(input: {
           to,
           subject: clean(input.subject, 240),
           text: input.text,
+          ...(input.html ? { html: input.html } : {}),
         });
         sent += 1;
         continue;
@@ -89,6 +92,7 @@ export async function sendTransactionalEmail(input: {
           to,
           subject: clean(input.subject, 240),
           text: input.text,
+          ...(input.html ? { html: input.html } : {}),
         },
         input.idempotencyKey
           ? { headers: { "Idempotency-Key": `${input.idempotencyKey}-${to}` } }

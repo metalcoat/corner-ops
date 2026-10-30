@@ -139,7 +139,9 @@ function fill(available: DenominationCounts, target: number, order: Denomination
   return result;
 }
 
-export type FloatPlan = { leave: DenominationCounts; leaveCents: number; targetCents: number; shortCents: number; flags: string[] };
+/** A discrepancy for the nightly email: what is wrong and by how much (negative = under). */
+export type FloatIssue = { issue: string; amountCents: number };
+export type FloatPlan = { leave: DenominationCounts; leaveCents: number; targetCents: number; shortCents: number; flags: string[]; issues: FloatIssue[] };
 
 /**
  * Which bills and coins to put in a float (till or change bag) from what is `available`. Each allowed
@@ -149,7 +151,7 @@ export type FloatPlan = { leave: DenominationCounts; leaveCents: number; targetC
  */
 export function planFloat(available: DenominationCounts, items: FloatItem[], name: string): FloatPlan {
   const targetCents = planTotalCents(items), leave = emptyCounts();
-  if (!items.length || targetCents === 0) return { leave, leaveCents: 0, targetCents, shortCents: 0, flags: [] };
+  if (!items.length || targetCents === 0) return { leave, leaveCents: 0, targetCents, shortCents: 0, flags: [], issues: [] };
   for (const item of items) leave[item.key] = Math.min(available[item.key], Math.floor(item.targetCents / CENTS[item.key]));
   const remaining = targetCents - countsTotalCents(leave);
   if (remaining > 0) {
@@ -161,15 +163,23 @@ export function planFloat(available: DenominationCounts, items: FloatItem[], nam
     const extra = fill(capped, remaining, order) || fill(allowed, remaining, order) || fill(allowed, remaining, order, true) || emptyCounts();
     for (const key of order) leave[key] += extra[key];
   }
-  const leaveCents = countsTotalCents(leave), shortCents = Math.max(0, targetCents - leaveCents), flags: string[] = [];
+  const leaveCents = countsTotalCents(leave), shortCents = Math.max(0, targetCents - leaveCents), flags: string[] = [], issues: FloatIssue[] = [];
   for (const item of items) {
     const cents = leave[item.key] * CENTS[item.key], label = LABEL[item.key];
-    if (cents < item.minCents) flags.push(`${name}: only ${money(cents)} in ${label} (minimum ${money(item.minCents)}).`);
-    else if (cents > item.maxCents) flags.push(`${name}: ${money(cents)} in ${label} (over the ${money(item.maxCents)} limit).`);
+    if (cents < item.minCents) {
+      flags.push(`${name}: only ${money(cents)} in ${label} (minimum ${money(item.minCents)}).`);
+      issues.push({ issue: `${label} below minimum (${money(cents)} of ${money(item.minCents)})`, amountCents: cents - item.minCents });
+    } else if (cents > item.maxCents) {
+      flags.push(`${name}: ${money(cents)} in ${label} (over the ${money(item.maxCents)} limit).`);
+      issues.push({ issue: `${label} over limit (${money(cents)}, limit ${money(item.maxCents)})`, amountCents: cents - item.maxCents });
+    }
     else if (cents < item.targetCents) flags.push(`${name}: ${money(cents)} in ${label} instead of ${money(item.targetCents)}, made up with other bills.`);
   }
-  if (shortCents > 0) flags.push(`${name}: short ${money(shortCents)} — the drawer can't make ${money(targetCents)} from ${items.map((i) => LABEL[i.key]).join(", ")}.`);
-  return { leave, leaveCents, targetCents, shortCents, flags };
+  if (shortCents > 0) {
+    flags.push(`${name}: short ${money(shortCents)} — the drawer can't make ${money(targetCents)} from ${items.map((i) => LABEL[i.key]).join(", ")}.`);
+    issues.push({ issue: `Can't make ${money(targetCents)} from ${items.map((i) => LABEL[i.key]).join(", ")}`, amountCents: -shortCents });
+  }
+  return { leave, leaveCents, targetCents, shortCents, flags, issues };
 }
 
 export type ResetPlan = FloatPlan & {
@@ -190,6 +200,7 @@ export function planCloseout(drawer: DenominationCounts, bagCounted: Denominatio
     const counted = bagCounted || emptyCounts(), countedCents = countsTotalCents(counted);
     pool = add(pool, counted);
     const plan = planFloat(pool, settings.bag, "Change bag");
+    if (countedCents !== plan.targetCents) plan.issues.unshift({ issue: `Bag counted ${money(countedCents)}, should be ${money(plan.targetCents)}${countedCents < plan.targetCents ? " — topped up from the drawer" : " — extra put in the deposit"}`, amountCents: countedCents - plan.targetCents });
     if (countedCents !== plan.targetCents) plan.flags.unshift(`Change bag counted ${money(countedCents)}, should be ${money(plan.targetCents)}${countedCents < plan.targetCents ? " (topped up from the drawer)" : " (extra goes in the deposit)"}.`);
     pool = subtract(pool, plan.leave);
     bag = { ...plan, counted, countedCents };

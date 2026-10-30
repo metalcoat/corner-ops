@@ -6,6 +6,8 @@ import { sendEpsonPrint } from "@/lib/ordering-hardware";
 import { deliverSms } from "@/lib/sms-notifications";
 import { notifyOwnersOfOperationalPush } from "@/lib/push-notifications";
 import { ownerNotificationEmails, sendTransactionalEmail } from "@/lib/transactional-email";
+import { buildCloseoutEmail, type TillReportInput } from "@/lib/till-closeout-report";
+import { businessDayBoundary, storeWallClockToUtc } from "@/lib/business-day";
 import { DENOMINATIONS, parseDenominationCounts, parseTillSettings, planCloseout, planTotalCents, tillLabel, tillSettings, type DenominationCounts, type ResetPlan, type TillSettings } from "@/lib/till-reset-rules";
 
 export class RegisterError extends Error {}
@@ -61,6 +63,63 @@ function closeoutSummary(terminal:Record<string,any>,session:Record<string,any>,
   const subject=`Till closeout: ${terminal.name} — ${issues.length?`${issues.length} to check`:"OK"}`;
   const short=`${terminal.name} closed by ${closedBy}. Over/short ${money(overShort)}. Left ${money(left)}${plan?.bag?`, bag ${money(plan.bag.leaveCents)}`:""}. Deposit ${money(deposit)}.${issues.length?` ${issues.length} to check: ${issues.join(" ")}`:""}`;
   return {subject,text,short};
+}
+
+// ---- Nightly till email: one email for every till (and its change bag) per business day ----
+
+const capital=(value:string)=>value.replace(/^./,c=>c.toUpperCase());
+/** Business day (4 AM Eastern start) that an instant belongs to, as YYYY-MM-DD. */
+export function businessDateOf(at:Date){return new Date(at.getTime()-4*3600e3).toLocaleDateString("en-CA",{timeZone:"America/New_York"})}
+
+/** Tills a station takes cash on, with that business day's last confirmed closeout (null = not closed out). */
+async function nightlyCloseouts(businessDate:string){
+  const sql=getSql(),from=businessDayBoundary(businessDate).toISOString(),to=businessDayBoundary(businessDate,true).toISOString();
+  const tills=await sql`SELECT terminal.* FROM ordering_pos_terminals terminal WHERE terminal.business='Corner Deli' AND terminal.active=TRUE AND terminal.allow_cash=TRUE AND EXISTS(SELECT 1 FROM ordering_payment_stations station WHERE station.business='Corner Deli' AND station.active=TRUE AND LOWER(COALESCE(NULLIF(station.shared_register_key,''),station.station_key))=terminal.terminal_key) ORDER BY terminal.terminal_key DESC`;
+  const result:Array<TillReportInput&{sessionId:string|null}>=[];
+  for(const terminal of tills){
+    const session=(await sql`SELECT * FROM ordering_register_sessions WHERE terminal_id=${terminal.id} AND status='closed' AND reset_confirmed_at>=${from}::timestamptz AND reset_confirmed_at<${to}::timestamptz ORDER BY reset_confirmed_at DESC LIMIT 1`)[0];
+    const label=capital(tillLabel({terminalKey:terminal.terminal_key,name:terminal.name}));
+    result.push({name:String(terminal.name),label,sessionId:session?String(session.id):null,closeout:session?{
+      closedBy:String(session.reset_confirmed_by_name||""),closedAt:new Date(session.reset_confirmed_at).toISOString(),
+      counted:session.counted_denominations?parseDenominationCounts(session.counted_denominations):null,checksCents:Number(session.counted_checks_cents||0),
+      countedCents:Number(session.counted_cash_cents||0),expectedCents:Number(session.expected_cash_cents||0),overShortCents:Number(session.over_short_cents||0),
+      resetTargetCents:Number(session.reset_expected_cents||0),leftCents:Number(session.reset_confirmed_cents||0),resetNote:String(session.reset_note||""),plan:(session.reset_plan||null) as ResetPlan|null,
+    }:null});
+  }
+  return result;
+}
+
+const FALLBACK_CLOSE=["21:30","21:30","21:30","21:30","21:30","22:30","22:30"]; // Sun … Sat, if store hours aren't set
+/** When the nightly email goes out even if a till isn't closed: 45 minutes after that day's store close. Null = closed all day. */
+async function nightlyEmailDeadline(businessDate:string){
+  const sql=getSql(),[year,month,day]=businessDate.split("-").map(Number),weekday=new Date(Date.UTC(year,month-1,day)).getUTCDay();
+  const special=(await sql`SELECT status,closes_at::text closes_at FROM ordering_special_hours WHERE business='Corner Deli' AND service_type='all' AND business_date=${businessDate}::date LIMIT 1`.catch(()=>[]))[0];
+  if(special?.status==="closed")return null;
+  const weekly=(await sql`SELECT MAX(closes_at)::text closes_at FROM ordering_operating_windows WHERE business='Corner Deli' AND active=TRUE AND service_type='all' AND weekday=${weekday}`.catch(()=>[]))[0];
+  const close=String((special?.status==="custom_hours"&&special.closes_at)||weekly?.closes_at||FALLBACK_CLOSE[weekday]);
+  const [hour,minute]=close.split(":").map(Number);
+  // A close after midnight (e.g. 01:00) belongs to the next calendar day.
+  const closeAt=storeWallClockToUtc(year,month,day+(hour<4?1:0),hour,minute);
+  return new Date(closeAt.getTime()+45*60*1000);
+}
+
+/**
+ * Sends the nightly till email once every till is closed out, or once the deadline has passed (missing tills flagged).
+ * A later closeout after a deadline email sends an updated one; the same set of closeouts is never emailed twice.
+ */
+export async function maybeSendNightlyTillEmail(options:{now?:Date;businessDate?:string;force?:boolean;note?:string}={}){
+  await ensureOrderingPosSchema();
+  const now=options.now||new Date(),businessDate=options.businessDate||businessDateOf(now),sql=getSql();
+  const tills=await nightlyCloseouts(businessDate);
+  if(!tills.length)return {sent:false,reason:"no cash tills"};
+  const allClosed=tills.every(till=>till.closeout),deadline=await nightlyEmailDeadline(businessDate);
+  if(!options.force&&!allClosed&&(!deadline||now<deadline))return {sent:false,reason:deadline?"waiting for every till":"store closed today",businessDate};
+  const signature=tills.map(till=>`${till.name}:${till.sessionId||"open"}`).join("|");
+  if(!options.note&&(await sql`SELECT 1 FROM ordering_pos_audit_events WHERE business='Corner Deli' AND event_type='register_nightly_email_sent' AND details->>'businessDate'=${businessDate} AND details->>'signature'=${signature} LIMIT 1`).length)return {sent:false,reason:"already sent",businessDate};
+  const email=buildCloseoutEmail({businessDate,tills,note:options.note});
+  const result=await sendTransactionalEmail({to:ownerNotificationEmails(),subject:email.subject,text:email.text,html:email.html,idempotencyKey:`till-nightly-${businessDate}-${signature}`});
+  await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,actor,reason,details) VALUES(${randomUUID()},'Corner Deli','register_nightly_email_sent','system',${email.subject},${JSON.stringify({businessDate,signature,allClosed,note:options.note||null,discrepancies:email.discrepancies,result})}::jsonb)`;
+  return {sent:result.sent>0,businessDate,subject:email.subject,result};
 }
 
 /** POS Settings → Tills: every till with its float and change bag (saved or default). */
@@ -192,7 +251,7 @@ export async function updateRegister(input:{stationKey:string;action:string;amou
       if(!canManagePos(input.actor))throw new RegisterError("Manager or owner approval is required.");
       if(current.status!=="needs_review")throw new RegisterError("This register does not have a variance awaiting review.");
       if(reason.length<3)throw new RegisterError("Enter a reason for approving the variance.");
-      await sql`UPDATE ordering_register_sessions SET status='resetting',reset_expected_cents=${till.resetCents},reset_plan=${JSON.stringify(resetPlanFor(current,till.settings))}::jsonb,notes=CONCAT_WS(E'\n',NULLIF(notes,''),${`Variance approved: ${reason}`}) WHERE id=${current.id}`;
+      await sql`UPDATE ordering_register_sessions SET status='resetting',reset_expected_cents=${till.resetCents},reset_plan=${JSON.stringify(resetPlanFor(current,till.settings))}::jsonb,notes=CONCAT_WS(E'\n',NULLIF(notes,''),${`Variance approved: ${reason}`}::text) WHERE id=${current.id}`;
       await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,employee_id,terminal_id,actor,reason,details) VALUES(${randomUUID()},'Corner Deli','register_variance_approved',${input.actor.id},${terminal.id},${input.actor.name},${reason},${JSON.stringify({overShortCents:Number(current.over_short_cents)})}::jsonb)`;
     }else if(input.action==="confirm_reset"){
       // Closeout is not finished until someone confirms what was left in the till; the next opening uses it.
@@ -206,14 +265,15 @@ export async function updateRegister(input:{stationKey:string;action:string;amou
     return (await sql`SELECT * FROM ordering_register_sessions WHERE id=${current.id}`)[0];
   });
   if(input.action==="confirm_reset"){
-    // Owner gets the closeout summary: email, push to owner devices, and a text where texting is set up.
+    // Owner gets this till's summary by push to owner devices and a text where texting is set up.
     const sql=getSql(),summary=closeoutSummary(terminal,updated,input.actor.name);
-    const email=await sendTransactionalEmail({to:ownerNotificationEmails(),subject:summary.subject,text:summary.text,idempotencyKey:`till-closeout-${updated.id}`}).catch(error=>({error:error instanceof Error?error.message:"email failed"}));
     const push=await notifyOwnersOfOperationalPush({business:"Corner Deli",title:summary.subject,body:summary.short,url:"/pos/deli/register",tag:`till-closeout-${updated.id}`}).catch(error=>({error:error instanceof Error?error.message:"push failed"}));
     const recipients=(await sql`SELECT id,name,phone,sms_opt_in FROM employees WHERE business='Corner Deli' AND active=TRUE AND pos_role='owner' ORDER BY name`) as Array<{id:string;name:string;phone:string;sms_opt_in:boolean}>;
     const sms=await deliverSms({recipients:recipients.map(row=>({id:String(row.id),name:String(row.name),phone:String(row.phone||""),smsOptIn:Boolean(row.sms_opt_in)})),text:()=>`Corner Deli closeout: ${summary.short}`}).catch(error=>({error:error instanceof Error?error.message:"text failed"}));
-    await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,employee_id,terminal_id,actor,reason,details) VALUES(${randomUUID()},'Corner Deli','register_closeout_notified',${input.actor.id},${terminal.id},${input.actor.name},${summary.subject},${JSON.stringify({registerSessionId:updated.id,text:summary.text,email,push,sms})}::jsonb)`;
-    return {...updated,ownerNotified:{email,push,sms}};
+    await sql`INSERT INTO ordering_pos_audit_events(id,business,event_type,employee_id,terminal_id,actor,reason,details) VALUES(${randomUUID()},'Corner Deli','register_closeout_notified',${input.actor.id},${terminal.id},${input.actor.name},${summary.subject},${JSON.stringify({registerSessionId:updated.id,text:summary.text,push,sms})}::jsonb)`;
+    // One combined email per night: sent once every till is closed out (or after the deadline; see maybeSendNightlyTillEmail).
+    const nightlyEmail=await maybeSendNightlyTillEmail().catch(error=>({error:error instanceof Error?error.message:"email failed"}));
+    return {...updated,ownerNotified:{push,sms,nightlyEmail}};
   }
   if(input.action==="close"&&lowOnOnes===true){
     const sql=getSql(),recipients=(await sql`SELECT id,name,phone,sms_opt_in FROM employees WHERE business='Corner Deli' AND active=TRUE AND pos_role='owner' ORDER BY name`) as Array<{id:string;name:string;phone:string;sms_opt_in:boolean}>;
