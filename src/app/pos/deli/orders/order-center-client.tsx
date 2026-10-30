@@ -139,6 +139,15 @@ export default function OrderCenterClient() {
     router.push("/pos/deli");
     window.dispatchEvent(new Event("corner-ops-checkout-order"));
   }
+  // Any unpaid order can be paid from here, whenever the customer pays. Paying an order that was never sent
+  // to the kitchen (a draft) sends it there once paid, so that is confirmed first.
+  function takePayment(order: Order) {
+    if (order.status === "draft") {
+      const older = isoDate(new Date(order.created_at)) !== isoDate(new Date());
+      if (!window.confirm(`Order #${order.display_number} was never sent to the kitchen${older ? ` (it is from ${new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", day: "numeric" }).format(new Date(order.created_at))})` : ""}. Taking payment sends it to the kitchen. Continue?`)) return;
+    }
+    cashOut(order);
+  }
   async function reopen(order: Order) {
     // Editing a sent order takes it off the kitchen line until it is sent
     // again, so it is only done on an explicit Edit with confirmation.
@@ -338,6 +347,7 @@ export default function OrderCenterClient() {
             {o.driver_name ? `Driver: ${o.driver_name}` : `Driver on clock at ${o.due_at ? new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(new Date(o.due_at)) : "order time"}: ${o.drivers_on_clock || "none"}`}
           </small>}
           {pickupAttention && <em className="pickupAlert">PICKUP UNPAID 40+ MINUTES</em>}
+          {unpaid && o.status !== "cancelled" && !o.voided_at && <span className="ocTapToPay">TAP TO TAKE PAYMENT</span>}
         </button>
       )})}
       </div>
@@ -453,6 +463,12 @@ export default function OrderCenterClient() {
             {selected.voided_at && (
               <strong>VOIDED · {selected.void_reason}</strong>
             )}
+            {!selected.voided_at && selected.status !== "cancelled" && Number(selected.amount_due_cents) > 0 && (
+              <button className="ocPayNow" disabled={reopenBusy} onClick={() => takePayment(selected)}>
+                TAKE PAYMENT · {money(Number(selected.amount_due_cents))} DUE
+                {selected.status === "draft" && <small>Sends it to the kitchen once paid</small>}
+              </button>
+            )}
             <p>
               <b>{selected.customer_name}</b> ·{" "}
               {selected.customer_phone || "No phone"}
@@ -525,11 +541,8 @@ export default function OrderCenterClient() {
             ))}
             {!selected.voided_at && (
               <div className="ocDetailActions">
-                {selected.status !== "draft" && ["sent_to_kitchen", "in_progress", "ready", "completed"].includes(selected.status) && !["paid", "refunded"].includes(selected.payment_status) && Number(selected.amount_due_cents) > 0 && (
-                  <button className="primary" disabled={reopenBusy} onClick={() => cashOut(selected)}>CASH OUT IN POS</button>
-                )}
                 {["draft", "sent_to_kitchen", "in_progress", "ready", "completed"].includes(selected.status) && (
-                  <button disabled={reopenBusy} onClick={() => void reopen(selected)}>{reopenBusy ? "OPENING…" : selected.status === "draft" ? "OPEN IN POS · CASH OUT / EDIT" : !["paid", "refunded"].includes(selected.payment_status) ? "EDIT ORDER IN POS" : "OPEN IN POS · EDIT / REFUND"}</button>
+                  <button disabled={reopenBusy} onClick={() => void reopen(selected)}>{reopenBusy ? "OPENING…" : selected.status === "draft" ? "OPEN IN POS · EDIT" : !["paid", "refunded"].includes(selected.payment_status) ? "EDIT ORDER IN POS" : "OPEN IN POS · EDIT / REFUND"}</button>
                 )}
               </div>
             )}

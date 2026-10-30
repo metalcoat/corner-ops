@@ -424,6 +424,9 @@ flowchart LR
   `tools/car-tablet/publish-dev.sh` → `https://dev.ordercornerdeli.com/downloads/corner-ops-car-tablet.apk`.
   Provisioning steps: `tools/car-tablet/README.md`.
 
+- POS Orders: tapping an unpaid card (any day, any status) opens it with a big TAKE PAYMENT button that hands the
+  order to the POS checkout (cash, card, MX terminal); a draft is sent to the kitchen once paid (confirmed first),
+  an order already in the kitchen keeps its status.
 - POS Orders cards (`/pos/deli/orders`, `listOrders` in `src/lib/ordering-order-center.ts`): "Taken by" = the POS
   employee in `ordering_orders.created_by` (else Online / AI phone / Kiosk), plus who sent it to the kitchen
   (`submitted_by`, recorded from 2026-10-30, migration 0031) and who took the latest payment when different. Delivery
@@ -432,7 +435,9 @@ flowchart LR
 
 ## 8d. Till closeout (Corner Deli POS, dev)
 
-- POS → Reports → SET TILL / REGISTER (`/pos/deli/register`, `src/lib/ordering-registers.ts`). Each POS station's
+- Till closeout (`/pos/deli/register`, `src/lib/ordering-registers.ts`): managers reach it from the green "CLOSE OUT
+  TILL" button in the POS header, the "Till closeout" tile on the POS home screen (Manager), or POS → Reports → TILL
+  CLOSEOUT / REGISTER. Each POS station's
   `shared_register_key` is its till (`ordering_pos_terminals.terminal_key`); on dev: `upfront-register` (station
   Upfront) = front, and `back-register` (Back pos 1) = back (confirmed by Chris 2026-10-30). A till no station uses can be
   retired in Settings → Tills (inactive, history kept; an empty open session is closed). Only a manager can open, count or close out a till; cash sales, refunds, paid in/out and drops move the
