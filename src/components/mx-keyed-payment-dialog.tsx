@@ -48,12 +48,15 @@ export default function MxKeyedPaymentDialog({
   onChargeSaved?: (savedCardId: string) => Promise<void>;
   saveCard?: {
     label: string;
+    /** Staff on a phone order: ticked unless the customer says no, with what to tell them. Online stays the customer's own choice. */
+    defaultOn?: boolean;
+    notice?: string;
     start: () => Promise<{ token: string; vaultUrl: string; mxCustomerId: string } | null>;
     saved: () => Promise<void>;
   };
 }) {
   const [payment, setPayment] = useState(initialPayment);
-  const [saveThisCard, setSaveThisCard] = useState(false);
+  const [saveThisCard, setSaveThisCard] = useState(Boolean(saveCard?.defaultOn));
   const [consented, setConsented] = useState(false);
   async function chargeSaved(id: string) {
     if (!onChargeSaved || busy) return;
@@ -289,6 +292,7 @@ export default function MxKeyedPaymentDialog({
             {saveCard.label}
           </label>
         )}
+        {saveCard?.notice && <small className="mxSaveCardNotice">{saveCard.notice}</small>}
         <small>
           Card details are sent directly to MX Merchant and never pass through
           Corner Deli servers.

@@ -5,3 +5,4 @@
 
 .mxPaymentDialog label.mxSaveCard{display:flex;align-items:center;gap:10px;font-weight:700}.mxPaymentDialog label.mxSaveCard input{min-height:0;width:22px;height:22px;padding:0}
 .mxPaymentDialog fieldset.mxSavedCards{border:2px solid #cbd5e1;border-radius:12px;padding:10px 12px;display:grid;gap:8px}.mxPaymentDialog fieldset.mxSavedCards legend{font-weight:900;padding:0 6px}.mxPaymentDialog fieldset.mxSavedCards button{background:#1d4ed8;color:#fff;border:0}.mxPaymentDialog fieldset.mxSavedCards button:disabled{background:#cbd5e1;color:#475569}
+.mxPaymentDialog .mxSaveCardNotice{font-weight:700}

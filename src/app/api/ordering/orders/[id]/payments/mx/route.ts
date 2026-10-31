@@ -97,12 +97,12 @@ export async function POST(
       });
     }
     if (body.action === "save_card_start" || body.action === "save_card_saved") {
-      // Saving the keyed card for the attached customer, who agreed on the call.
+      // Saving the keyed card for the attached customer, who was told and didn't say no.
       // The dialog sends the card straight to MX's vault; we only record MX's token.
       const customerId = (await sql`SELECT customer_id FROM ordering_orders WHERE id=${orderId} AND business=${business}`)[0]?.customer_id;
       if (!customerId) throw new MxMerchantError("Attach a customer to save their card.");
       if (body.action === "save_card_start") return isoJson(await startCardSave(String(customerId)));
-      return isoJson({ cards: await syncSavedCards(String(customerId), `staff:${actor.id}:phone_consent`) });
+      return isoJson({ cards: await syncSavedCards(String(customerId), `staff:${actor.id}:phone_notice`) });
     }
     if (body.action === "add_to_card") {
       // Phone call: the customer said OK to adding the fee or tip to the card they already paid with.
