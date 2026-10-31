@@ -11,6 +11,7 @@ test("menu board: seasons by store date", () => {
   assert.equal(seasonFor("10-20"), "everyday");
   assert.equal(seasonFor("10-21"), "halloween");
   assert.equal(seasonFor("10-31"), "halloween");
+  assert.equal(seasonFor("11-01"), "everyday");
   assert.equal(seasonFor("11-12"), "thanksgiving");
   assert.equal(seasonFor("11-27"), "christmas");
   assert.equal(seasonFor("12-26"), "everyday");

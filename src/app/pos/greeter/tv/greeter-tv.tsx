@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { GREETER_WELCOME_MS, greeterNext } from "@/lib/door-chime-policy";
 import type { NflGame } from "@/lib/greeter-nfl";
 import SeasonFx from "../../menu-board/season-fx";
+import SpookyScene from "./spooky-scene";
 
 const POLL_MS = 2_000;
 const SLIDE_MS = 15_000;
@@ -11,7 +12,7 @@ const WEATHER_MS = 20 * 60_000;
 const MUSIC_REFRESH_MS = 30 * 60_000;
 const HOLIDAY_HELLO: Record<string, string> = { halloween: "Happy Halloween!", thanksgiving: "Happy Thanksgiving!", christmas: "Merry Christmas!" };
 
-type Props = { qrSvg: string; orderUrl: string; season: string; ribbon: string; factCount: number; playlist: string | null; nflDate: string | null };
+type Props = { qrSvg: string; orderUrl: string; season: string; followSeason: boolean; ribbon: string; factCount: number; playlist: string | null; nflDate: string | null };
 type SlideKey = "idle" | "nfl" | "weather" | "fact" | "hours";
 // On NFL game days the scores come round twice per turn.
 const EVERYDAY_ORDER: SlideKey[] = ["idle", "weather", "fact", "hours"];
@@ -41,7 +42,8 @@ function loadYouTube(): Promise<NonNullable<YtWindow["YT"]>> {
   });
 }
 
-export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, playlist, nflDate }: Props) {
+export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbon, factCount, playlist, nflDate }: Props) {
+  const spooky = season === "halloween";
   const [slide, setSlide] = useState(0); // position in the slide order
   const [games, setGames] = useState<NflGame[]>([]);
   const order = games.length ? GAME_DAY_ORDER : EVERYDAY_ORDER;
@@ -187,9 +189,11 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
       try {
         const response = await fetch("/api/pos/greeter", { cache: "no-store" });
         if (!response.ok) throw new Error(String(response.status));
-        const { latest, volumes } = (await response.json()) as { latest: { id: number; ageSeconds: number } | null; volumes?: { music: number; greeting: number } };
+        const { latest, volumes, season: liveSeason } = (await response.json()) as { latest: { id: number; ageSeconds: number } | null; volumes?: { music: number; greeting: number }; season?: string };
         if (stopped) return;
         setOffline(false);
+        // A holiday ends at store midnight, not at the 4 AM reload.
+        if (followSeason && liveSeason && liveSeason !== season) { window.location.reload(); return; }
         if (volumes) {
           volume.current = { music: volumes.music / 100, greeting: volumes.greeting / 100 };
           setMusicVolume(volume.current.music);
@@ -223,7 +227,7 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
       if (new Date().getHours() === 4 && performance.now() > 3_600_000) window.location.reload();
     }, 600_000);
     return () => { stopped = true; window.clearInterval(timer); window.clearInterval(reload); window.clearTimeout(hide); };
-  }, []);
+  }, [season, followSeason]);
 
   const pictures: [SlideKey, string][] = [
     ["weather", `/api/pos/greeter/weather?season=${season}&t=${weatherStamp}`],
@@ -235,11 +239,13 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
     <main className="greeterTv">
       <div ref={stage} className="gtStage" data-season={season}>
         <section className={`gtSlide gtIdle${showing === "idle" && !welcome ? " on" : ""}`}>
+          {spooky && <SpookyScene />}
+          {spooky && <h2 className="gtHaunt">Happy Haunting!</h2>}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img className="gtLogo" src="/corner-deli-logo.png" alt="Corner Deli" />
           <div className="gtOrder">
             <div className="gtQr" dangerouslySetInnerHTML={{ __html: qrSvg }} />
-            <div><strong>Scan to order online</strong><span>{orderUrl}</span></div>
+            <div><strong>{spooky ? "Scan for treats, no tricks" : "Scan to order online"}</strong><span>{orderUrl}</span></div>
           </div>
         </section>
         {pictures.map(([key, src]) => (
@@ -251,11 +257,12 @@ export default function GreeterTv({ qrSvg, orderUrl, season, ribbon, factCount, 
         <SeasonFx season={season} />
         {ribbon && <div className="mbRibbon gtRibbon">{ribbon}</div>}
         <section className={`gtSlide gtHello${welcome ? " on" : ""}`} aria-live="polite">
+          {spooky && <SpookyScene />}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/corner-deli-logo.png" alt="" />
           {HOLIDAY_HELLO[season] && <p className="gtHoliday">{HOLIDAY_HELLO[season]}</p>}
           <h1>Welcome to Corner Deli!</h1>
-          <p>Someone will be right with you.</p>
+          <p>{spooky ? "A friendly ghoul will be right with you." : "Someone will be right with you."}</p>
         </section>
         {playlist && !inApp && (
           <div className="gtNowPlaying">

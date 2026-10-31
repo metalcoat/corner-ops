@@ -30,7 +30,7 @@ export async function GET(request: Request) {
       <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 150px", background: `radial-gradient(ellipse at 50% 40%, ${P.glow} 0%, ${P.bg} 72%)`, color: P.ink, fontFamily: "sans-serif", position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", fontSize: 56, fontWeight: 700, color: P.gold, letterSpacing: 2 }}>
           <div style={{ width: 84, height: 84, borderRadius: 42, background: P.gold, color: P.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 60, fontWeight: 700, marginRight: 30 }}>?</div>
-          Did you know?
+          {params.get("season") === "halloween" ? "Boo! Did you know?" : "Did you know?"}
         </div>
         <div style={{ display: "flex", fontSize: size, fontWeight: 700, lineHeight: 1.2, marginTop: 50, maxWidth: 1620 }}>{fact.text}</div>
         <div style={{ position: "absolute", left: 150, bottom: 80, display: "flex", fontSize: 34, color: P.muted, letterSpacing: 3 }}>{fact.topic.toUpperCase()}</div>

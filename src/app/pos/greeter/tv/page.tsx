@@ -28,6 +28,7 @@ export default async function GreeterTvPage({ searchParams }: { searchParams: Pr
       qrSvg={qrSvg}
       orderUrl={orderUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}
       season={season}
+      followSeason={!asked}
       ribbon={SEASONS.find((s) => s.key === season)?.ribbon ?? ""}
       factCount={greeterFacts(season).length}
       playlist={greeterPlaylist(season)}
