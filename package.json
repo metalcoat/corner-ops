@@ -56,6 +56,7 @@
     "test:item-cancellation": "tsx scripts/item-cancellation-validate.ts",
     "test:cancelled-item-reopen": "tsx scripts/cancelled-item-reopen-validate.ts",
     "test:fulfillment-change": "tsx scripts/fulfillment-change-validate.ts",
+    "test:manager-report": "tsx scripts/manager-report-validate.ts",
     "test:split-checks": "tsx scripts/split-check-validate.ts",
     "test:print-description": "tsx scripts/print-description-validate.ts",
     "test:promotions": "tsx scripts/promotion-pricing-validate.ts",

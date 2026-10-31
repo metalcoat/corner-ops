@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { getEmployeeSession } from "@/lib/employee-auth";
 import EmployeeAttendanceBadge from "./attendance-badge";
 import EmployeeEmailPrompt from "./email-prompt";
 import EmployeeInstallPrompt from "./install-prompt";
@@ -8,7 +9,9 @@ import EmployeePinController from "./pin-controller";
 import ProfilePhotoOptimizer from "./profile-photo-optimizer";
 import "./employee-nav.css";
 
-export default function EmployeeLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default async function EmployeeLayout({ children }: Readonly<{ children: ReactNode }>) {
+  const session = await getEmployeeSession();
+  const manager = session?.business === "Corner Deli" && (session.posRole === "manager" || session.posRole === "owner");
   return (
     <div className="employeePortalFrame">
       <ProfilePhotoOptimizer />
@@ -17,6 +20,7 @@ export default function EmployeeLayout({ children }: Readonly<{ children: ReactN
       <EmployeeInstallPrompt />
       <nav className="employeePortalNav" aria-label="Employee Hub navigation">
         <a href="/employee">Home</a>
+        {manager && <a href="/employee/manager">Daily report</a>}
         <a href="/employee/deliveries">My deliveries</a>
         <a href="/employee/stock">Stock sheet</a>
         <a href="/employee/messages">Messages</a>

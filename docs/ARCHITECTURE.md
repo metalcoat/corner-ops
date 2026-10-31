@@ -168,6 +168,8 @@ stateDiagram-v2
 - **Reopen / additions**: a sent order can be reopened for additions; the next send prints only the added items
   ("ADD ON") plus void/service-change lines. `restoreAbandonedReopenedOrders` puts back abandoned reopens.
 - **Pickup / delivery switch**: tapping the type on a reopened order saves at once (`ordering-fulfillment-change.ts`). Delivery uses the order's address, else the customer's most used saved address, else asks; the fee is added or removed then. Send tells the kitchen. A paid fee that comes off shows under "Needs refund or credit". Refused while a driver has the order.
+- **Part of a cash order** goes back as store credit, not till cash (`ordering-refund-policy.ts`, enforced in item voids and "Needs refund or credit"). A whole order still refunds in cash, and so does part of an order with no customer on it.
+- **Daily report** (`ordering-manager-report.ts`): tills, voids, refunds, credits, missed calls and sales by business day, week (Monday start) or month. `/employee/manager` in the employee hub (anywhere) and `/pos/deli/manager` (store), both manager/owner only.
 - **Voids** (`ordering-voids.ts`): manager + reason; reverses loyalty and reconciles tips. **It does not refund
   payments** (recorded as `paymentWasNotRefunded`); refunds are separate tender reversals.
 - **Item cancellations** (`ordering-item-cancellations.ts`): cancel part of a line after send, with refund or

@@ -26,6 +26,7 @@ const SECTIONS: Array<{ title: string; note?: string; items: HomeItem[] }> = [
       { href: "/pos/dashboard", icon: "📊", title: "Store dashboard", detail: "Car tracking, phone, orders, deliveries.", manager: true },
       { href: "/pos/deli/register", icon: "💵", title: "Till closeout", detail: "Count the drawer, reset the till and change bag.", manager: true },
       { href: "/pos/deli/orders", icon: "📋", title: "Order center", detail: "Find, reopen, void and refund orders.", manager: true },
+      { href: "/pos/deli/manager", icon: "🗓️", title: "Daily report", detail: "Tills, voids, credits and missed calls, day by day.", manager: true },
       { href: "/pos/deli/reports", icon: "📈", title: "Reports", detail: "Sales, tips and labor.", manager: true },
       { href: "/pos/deli/settings", icon: "⚙️", title: "Settings", detail: "Menu, printers, delivery, promotions.", manager: true },
       { href: "/pos/deli/settings/car-tablet", icon: "🚗", title: "Car tablet", detail: "Pair, status, photos, snap now.", manager: true },

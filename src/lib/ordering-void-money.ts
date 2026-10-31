@@ -9,6 +9,7 @@
 import { getSql, withTransaction } from "@/lib/db";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { PaymentConflictError, reverseTender, settleTenderAsStoreCredit } from "@/lib/ordering-payments";
+import { cashRefundBecomesCredit } from "@/lib/ordering-refund-policy";
 import { canManagePos, type OrderingActor } from "@/lib/ordering-route-auth";
 import { ownerNotificationEmails, sendTransactionalEmail } from "@/lib/transactional-email";
 
@@ -86,6 +87,7 @@ export async function resolveVoidMoney(input: {
     const amount = Math.trunc(Number(input.amountCents));
     if (!Number.isSafeInteger(amount) || amount <= 0) throw new PaymentConflictError("Enter an amount.");
     if (amount > owed.owedCents || amount > tender.remainingCents) throw new PaymentConflictError(`At most ${(Math.min(owed.owedCents, tender.remainingCents) / 100).toFixed(2)} can come off this payment.`);
+    if (input.method === "refund" && cashRefundBecomesCredit({ tenderType: tender.tenderType, wholeOrder: owed.status === "cancelled", customerId: owed.customerId })) throw new PaymentConflictError("Part of a cash order is left as store credit for next time.");
     const reason = input.reason.trim().length >= 3 ? input.reason.trim() : input.method === "refund" ? "Voided food refunded" : "Voided food left as store credit";
     if (input.method === "store_credit") {
       if (!owed.customerId) throw new PaymentConflictError("Attach a customer to this order before leaving store credit.");

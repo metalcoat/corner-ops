@@ -72,7 +72,7 @@ const capital=(value:string)=>value.replace(/^./,c=>c.toUpperCase());
 export function businessDateOf(at:Date){return new Date(at.getTime()-4*3600e3).toLocaleDateString("en-CA",{timeZone:"America/New_York"})}
 
 /** Tills a station takes cash on, with that business day's last confirmed closeout (null = not closed out). */
-async function nightlyCloseouts(businessDate:string){
+export async function tillCloseoutsForDay(businessDate:string){
   const sql=getSql(),from=businessDayBoundary(businessDate).toISOString(),to=businessDayBoundary(businessDate,true).toISOString();
   const tills=await sql`SELECT terminal.* FROM ordering_pos_terminals terminal WHERE terminal.business='Corner Deli' AND terminal.active=TRUE AND terminal.allow_cash=TRUE AND EXISTS(SELECT 1 FROM ordering_payment_stations station WHERE station.business='Corner Deli' AND station.active=TRUE AND LOWER(COALESCE(NULLIF(station.shared_register_key,''),station.station_key))=terminal.terminal_key) ORDER BY terminal.terminal_key DESC`;
   const result:Array<TillReportInput&{sessionId:string|null}>=[];
@@ -110,7 +110,7 @@ async function nightlyEmailDeadline(businessDate:string){
 export async function maybeSendNightlyTillEmail(options:{now?:Date;businessDate?:string;force?:boolean;note?:string}={}){
   await ensureOrderingPosSchema();
   const now=options.now||new Date(),businessDate=options.businessDate||businessDateOf(now),sql=getSql();
-  const tills=await nightlyCloseouts(businessDate);
+  const tills=await tillCloseoutsForDay(businessDate);
   if(!tills.length)return {sent:false,reason:"no cash tills"};
   const allClosed=tills.every(till=>till.closeout),deadline=await nightlyEmailDeadline(businessDate);
   if(!options.force&&!allClosed&&(!deadline||now<deadline))return {sent:false,reason:deadline?"waiting for every till":"store closed today",businessDate};

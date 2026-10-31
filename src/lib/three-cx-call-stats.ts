@@ -48,6 +48,8 @@ export type CallStats = {
   ringingNow: Array<{ since: string; callerLast4: string }>;
   /** Missed calls and long rings, newest first. */
   attention: CallEvent[];
+  /** Every missed call, newest first. */
+  missedCalls: CallEvent[];
   dataAsOf: string | null;
 };
 
@@ -75,10 +77,10 @@ export async function deliCallStats(now = new Date()): Promise<CallStats> {
   return value;
 }
 
-export async function computeCallStats(now = new Date()): Promise<CallStats> {
+export async function computeCallStats(now = new Date(), since?: Date): Promise<CallStats> {
   await ensureThreeCxCdrSchema();
   const sql = getSql();
-  const start = businessDayStart(now);
+  const start = since ?? businessDayStart(now);
   const config = callReportSettings();
   const longRing = config.issueSeconds;
   const rows = (await sql`SELECT id, record_key, history_id, call_id, duration_seconds, started_at, answered_at, ended_at,
@@ -186,6 +188,7 @@ export async function computeCallStats(now = new Date()): Promise<CallStats> {
     byHour: [...byHour.values()].sort((a, b) => a.hour - b.hour),
     ringingNow,
     attention,
+    missedCalls: [...missedEvents].sort((a, b) => b.at.localeCompare(a.at)),
     dataAsOf: latest?.toISOString() ?? null,
   };
 }

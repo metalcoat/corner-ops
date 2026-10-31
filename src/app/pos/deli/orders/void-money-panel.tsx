@@ -2,6 +2,7 @@
 import { randomId } from "@/app/client-id";
 
 import { useCallback, useEffect, useState } from "react";
+import { cashRefundBecomesCredit } from "@/lib/ordering-refund-policy";
 
 // Voided orders/items still holding the customer's money. Owner rule: refund it
 // or leave it as store credit before the end of the business day.
@@ -68,9 +69,9 @@ export default function VoidMoneyPanel({ refreshKey, onCount }: { refreshKey: nu
                 {order.tenders.map((row) => <option key={row.id} value={row.id}>{tenderLabel(row)}</option>)}
               </select>
             )}
-            <button type="button" className="danger" disabled={Boolean(busy) || !tender} onClick={() => void resolve(order, "refund")}>
+            {!(tender && cashRefundBecomesCredit({ tenderType: tender.tenderType, wholeOrder: order.status === "cancelled", customerId: order.customerId })) && <button type="button" className="danger" disabled={Boolean(busy) || !tender} onClick={() => void resolve(order, "refund")}>
               {busy === `${order.orderId}:refund` ? "REFUNDING…" : `REFUND ${money(amount)}`}
-            </button>
+            </button>}
             <button type="button" className="primary" disabled={Boolean(busy) || !tender || !order.customerId} title={order.customerId ? "" : "Attach a customer to leave store credit"} onClick={() => void resolve(order, "store_credit")}>
               {busy === `${order.orderId}:store_credit` ? "SAVING…" : `LEAVE ${money(amount)} CREDIT`}
             </button>

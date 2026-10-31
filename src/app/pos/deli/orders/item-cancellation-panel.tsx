@@ -2,10 +2,11 @@
 import { randomId } from "@/app/client-id";
 
 import { useEffect, useMemo, useState } from "react";
+import { cashRefundBecomesCredit } from "@/lib/ordering-refund-policy";
 
 type Item = { id: string; item_name_snapshot: string; quantity: number; cancelled_quantity?: number };
 type Tender = { id: string; tender_type: string; transaction_type: string; status: string; amount_cents: number };
-type Quote = { managerRequired?: boolean; orderReductionCents: number; refundRequiredCents: number; discountCents: number; taxCents: number; customerId?: string | null };
+type Quote = { managerRequired?: boolean; orderReductionCents: number; refundRequiredCents: number; discountCents: number; taxCents: number; paidCents?: number; customerId?: string | null };
 type Resolution = "forgot" | "full_refund" | "minor" | "medium" | "large";
 
 const money = (c: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(c / 100);
@@ -69,6 +70,10 @@ export default function ItemCancellationPanel({ orderId, item, onDone, onClose, 
     return Math.min(quote.orderReductionCents, Math.max(25, rounded));
   }, [quote, resolution]);
   const courtesyCredit = courtesyCreditCents > 0;
+  const tender = tenders.find((row) => row.id === tenderId);
+  const partOfOrder = Boolean(quote && quote.refundRequiredCents < Number(quote.paidCents || 0));
+  const cashCredit = Boolean(tender && cashRefundBecomesCredit({ tenderType: tender.tender_type, wholeOrder: !partOfOrder, customerId: quote?.customerId }));
+  const cashNoCustomer = Boolean(tender?.tender_type === "cash" && partOfOrder && !quote?.customerId);
 
   function choose(next: Resolution) {
     setResolution(next);
@@ -117,6 +122,8 @@ export default function ItemCancellationPanel({ orderId, item, onDone, onClose, 
       {quote && <div className="cancelQuote"><span>Item charge with tax <b>{money(quote.orderReductionCents)}</b></span>{courtesyCredit ? <span>Future-order credit <b>{money(courtesyCreditCents)}</b></span> : <><span>Checkout adjustment <b>−{money(quote.orderReductionCents)}</b></span><span>Refund required <b>{money(quote.refundRequiredCents)}</b></span></>}</div>}
       {!courtesyCredit && quote && quote.refundRequiredCents > 0 && <label className="ocRefundLater"><input type="checkbox" checked={refundLater} onChange={(event) => setRefundLater(event.target.checked)} /> Refund or leave credit later (before closing, from &quot;Needs refund or credit&quot;)</label>}
       {!courtesyCredit && quote && quote.refundRequiredCents > 0 && !refundLater && <label>Payment being refunded<select value={tenderId} onChange={(event) => setTenderId(event.target.value)}><option value="">Choose original payment</option>{tenders.map((tender) => <option key={tender.id} value={tender.id}>{tender.tender_type.replaceAll("_", " ")} · {money(tender.amount_cents)}</option>)}</select></label>}
+      {!courtesyCredit && quote && quote.refundRequiredCents > 0 && !refundLater && cashCredit && <p className="ocVoidNotice">Paid in cash: {money(quote.refundRequiredCents)} goes on the customer&apos;s account as credit for next time. No cash leaves the till.</p>}
+      {!courtesyCredit && quote && quote.refundRequiredCents > 0 && !refundLater && cashNoCustomer && <p className="ocVoidNotice">No customer on this order, so {money(quote.refundRequiredCents)} comes back as cash. Attach a customer first to leave it as credit.</p>}
       {courtesyCredit && !quote?.customerId && <p className="ocDialogError">A customer account is required for future-order credit.</p>}
       {staff && quote?.managerRequired && <label>Manager PIN (the kitchen already has this item)<input type="password" inputMode="numeric" autoComplete="off" maxLength={4} value={managerPin} onChange={(event) => setManagerPin(event.target.value)} /></label>}
       {error && <p className="ocDialogError" role="alert">{error}</p>}
