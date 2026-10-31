@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { GREETER_WELCOME_MS, greeterNext } from "@/lib/door-chime-policy";
+import { newArrivals } from "@/lib/curbside-arrival-policy";
 import type { NflGame } from "@/lib/greeter-nfl";
 import SeasonFx from "../../menu-board/season-fx";
 import SpookyScene from "./spooky-scene";
@@ -42,6 +43,39 @@ function loadYouTube(): Promise<NonNullable<YtWindow["YT"]>> {
   });
 }
 
+type CurbsideArrival = { id: number; name: string; car: string; orderNumber: string };
+
+/** Customers waiting outside: rings once for each new one and keeps a card on the right until the order is done. */
+function useCurbsideArrivals(volume: { current: { greeting: number } }) {
+  const [arrivals, setArrivals] = useState<CurbsideArrival[]>([]);
+  useEffect(() => {
+    const seen = { initialized: false, seen: new Set<number>() };
+    const chime = new Audio("/greeter/curbside.wav");
+    chime.preload = "auto";
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const response = await fetch("/api/pos/greeter/arrivals", { cache: "no-store" });
+        if (!response.ok) return;
+        const body = (await response.json()) as { arrivals?: CurbsideArrival[] };
+        if (stopped || !body.arrivals) return;
+        setArrivals(body.arrivals);
+        if (newArrivals(seen, body.arrivals.map((arrival) => arrival.id)).length) {
+          chime.volume = volume.current.greeting;
+          chime.currentTime = 0;
+          void chime.play().catch(() => undefined);
+        }
+      } catch {
+        // The walk-in poll shows the offline dot; this just tries again.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), POLL_MS);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [volume]);
+  return arrivals;
+}
+
 export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbon, factCount, playlist, nflDate }: Props) {
   const spooky = season === "halloween";
   const [slide, setSlide] = useState(0); // position in the slide order
@@ -62,6 +96,7 @@ export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbo
   const volume = useRef({ music: 0.13, greeting: 1 });
   const [musicVolume, setMusicVolume] = useState(0.13);
   const greeting = useRef(false); // true while the welcome is on screen (music paused)
+  const arrivals = useCurbsideArrivals(volume);
   useEffect(() => { music.current?.volume(musicVolume); }, [musicVolume]);
   // In the Corner Deli display app the app plays the music, so the page shows no player.
   const [inApp, setInApp] = useState(false);
@@ -269,6 +304,18 @@ export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbo
             <span>Now playing</span>
             <div className="gtYt"><div ref={youTube} /></div>
           </div>
+        )}
+        {arrivals.length > 0 && (
+          <aside className="gtCurbside" aria-live="polite">
+            <p>Curbside</p>
+            {arrivals.map((arrival) => (
+              <div key={arrival.id}>
+                <strong>{arrival.name}</strong>
+                <span>{arrival.car}</span>
+                {arrival.orderNumber && <em>Order #{arrival.orderNumber}</em>}
+              </div>
+            ))}
+          </aside>
         )}
         {offline && <i className="gtOffline" title="Can't reach the store server" />}
       </div>

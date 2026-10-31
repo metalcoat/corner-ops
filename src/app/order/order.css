@@ -1502,3 +1502,4 @@
   color: var(--muted);
   font-size: 13px;
 }
+.curbsideCheckIn{display:grid;gap:10px;margin:14px 0;padding:14px;border:2px solid var(--green);border-radius:10px;background:#fff}.curbsideCheckIn>strong{font-size:18px}.curbsideCheckIn>span{color:var(--muted);font-size:14px}.curbsideCheckIn.done{background:#eef6e6}.curbsideCheckIn fieldset{margin:0;padding:0;border:0}.curbsideCheckIn legend{padding:0 0 6px;font-weight:700;font-size:14px}.carChoices{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:6px}.carChoices .choiceButton{min-height:42px}.curbsideCheckIn .reviewButton{width:100%}

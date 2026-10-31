@@ -312,6 +312,10 @@ flowchart LR
   The picture leaves the sky beside the temperature and a corner of each day card plain; the Pi animates the weather
   there (sun, moon and stars, clouds, rain, snow, lightning, fog), placed by `GET /api/pos/greeter/weather/info`
   (`src/lib/greeter-weather-layout.ts`). Only those areas are redrawn, about 12 times a second.
+- Curbside check-in: on the order page a curbside customer picks car color and type and taps I'M HERE
+  (`POST /api/customer/orders/[id]/arrival`, table `ordering_curbside_arrivals`). The greeter TV polls
+  `GET /api/pos/greeter/arrivals` (store network only), plays `public/greeter/curbside.wav` once per arrival and shows
+  name, car and order number on the right until the order is completed or 20 minutes pass.
 - Front PC door alarm: `tools/door-alarm-windows` (Go tray program, download
   `/downloads/CornerDeliDoorAlarm.zip`), started from the PC's shell:startup folder.
 - `/api/pos/greeter` is read-only and unauthenticated but store-network only; it returns just the newest

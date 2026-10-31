@@ -9,6 +9,7 @@ import { getSql } from "@/lib/db";
 import { unauthorized } from "@/lib/http";
 import { deliLocation } from "@/lib/deli-location";
 import { webOrderDelivery } from "@/lib/ordering-driver-delivery";
+import { curbsideArrivalForOrder } from "@/lib/curbside-arrivals";
 
 export const runtime = "nodejs";
 
@@ -38,6 +39,7 @@ export async function GET(
   return isoJson({
     order,
     delivery,
+    arrival: order.service_type === "curbside" ? await curbsideArrivalForOrder(id).catch(() => null) : null,
     store: await deliLocation(),
     mapTileUrl: process.env.MAP_TILE_URL?.trim() || null,
   });

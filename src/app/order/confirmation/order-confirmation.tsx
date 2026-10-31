@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import StreetMap, { type MapPoint } from "@/components/street-map";
+import { CAR_COLORS, CAR_TYPES, carLabel, CURBSIDE_CHECK_IN_STATUSES } from "@/lib/curbside-arrival-policy";
 import "../order.css";
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
@@ -19,11 +20,67 @@ type DeliveryTracker = {
   etaMinutes: number | null;
   location: (Coordinates & { accuracyMeters: number | null; capturedAt: string; heading?: number | null }) | null;
 };
-type Payload = { order: any; delivery: DeliveryTracker | null; store: Coordinates | null; mapTileUrl: string | null };
+type Payload = { order: any; delivery: DeliveryTracker | null; store: Coordinates | null; mapTileUrl: string | null; arrival?: { carColor: string; carType: string } | null };
 
 const DELIVERY_STEPS = ["Order placed", "Making it", "Ready", "Out for delivery", "Delivered"];
 const PICKUP_STEPS = ["Order placed", "Making it", "Ready for pickup", "Picked up"];
 const isDelivery = (order: any) => order.service_type === "delivery" || order.service_type === "no_contact_delivery";
+
+/** Curbside: tell the store you're outside and which car to look for. */
+function CurbsideCheckIn({ orderId, initial }: { orderId: string; initial: { carColor: string; carType: string } | null }) {
+  const [arrival, setArrival] = useState(initial);
+  const [carColor, setCarColor] = useState(initial?.carColor || "");
+  const [carType, setCarType] = useState(initial?.carType || "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function checkIn() {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/customer/orders/${encodeURIComponent(orderId)}/arrival`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ carColor, carType }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Could not check you in.");
+      setArrival({ carColor, carType });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not check you in.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (arrival)
+    return (
+      <div className="curbsideCheckIn done" role="status">
+        <strong>We know you&apos;re here!</strong>
+        <span>We&apos;ll bring your order out to your {carLabel(arrival.carColor, arrival.carType)}.</span>
+      </div>
+    );
+  return (
+    <div className="curbsideCheckIn">
+      <strong>Here for curbside pickup?</strong>
+      <span>Tell us which car to look for and we&apos;ll bring it out.</span>
+      <fieldset>
+        <legend>Car color</legend>
+        <div className="carChoices">
+          {CAR_COLORS.map((color) => <button key={color} type="button" className="choiceButton" aria-pressed={carColor === color} onClick={() => setCarColor(color)}>{color}</button>)}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Type of car</legend>
+        <div className="carChoices">
+          {CAR_TYPES.map((type) => <button key={type} type="button" className="choiceButton" aria-pressed={carType === type} onClick={() => setCarType(type)}>{type}</button>)}
+        </div>
+      </fieldset>
+      {error && <p className="orderError" role="alert">{error}</p>}
+      <button type="button" className="reviewButton" disabled={busy || !carColor || !carType} onClick={() => void checkIn()}>
+        {busy ? "Letting them know…" : !carColor ? "Choose your car color" : !carType ? "Choose your type of car" : "I'M HERE"}
+      </button>
+    </div>
+  );
+}
 
 /** Which tracker step the order is on, Domino's-style. */
 function currentStep(order: any, delivery: DeliveryTracker | null) {
@@ -150,6 +207,9 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
             <StreetMap points={points} tileUrl={data.mapTileUrl} height={300} label={`${delivery?.driverFirstName || "Your driver"}'s approximate location`} />
             <small>Approximate location · updated {clock(delivery!.location!.capturedAt)}</small>
           </div>
+        )}
+        {order.service_type === "curbside" && CURBSIDE_CHECK_IN_STATUSES.includes(order.status) && (
+          <CurbsideCheckIn orderId={String(order.id)} initial={data.arrival || null} />
         )}
         <div className="confirmationTiming">
           <span>{delivering ? "Delivery" : order.service_type === "curbside" ? "Curbside pickup" : "Pickup"}</span>
