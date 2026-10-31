@@ -1,0 +1,139 @@
+html:has(.greeterTv), body:has(.greeterTv) { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none }
+
+/* 1920x1080 stage scaled to the screen; seasons recolor the logo/QR and welcome screens. */
+.greeterTv { position: fixed; inset: 0; background: #000 }
+.gtStage {
+  --bg-a: #1f4a2c; --bg-b: #0f1d14; --ink: #fdf8ec; --accent: #f2b632; --muted: #c9d6c8; --orange: #f06a24;
+  --display: "MB Slab", "Rockwell", Georgia, serif;
+  position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden; transform-origin: 0 0;
+  background: radial-gradient(ellipse at 50% 35%, var(--bg-a) 0%, var(--bg-b) 70%); color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.gtStage[data-season="halloween"] { --bg-a: #4a1a6b; --bg-b: #050208; --accent: #ff8a1f; --muted: #d3c0e0; --orange: #ff8a1f }
+.gtStage[data-season="thanksgiving"] { --bg-a: #5a2e12; --bg-b: #1e1008; --accent: #f4b43a; --muted: #d9bfa0; --orange: #e8622a }
+.gtStage[data-season="christmas"] { --bg-a: #1c4a30; --bg-b: #0a1a10; --accent: #f2d27a; --muted: #c8dccb; --orange: #e0393e }
+
+.gtSlide { position: absolute; inset: 0; opacity: 0; transition: opacity .8s ease, transform .8s ease; transform: scale(1.02) }
+.gtSlide.on { opacity: 1; transform: none }
+.gtPicture { width: 1920px; height: 1080px; object-fit: cover }
+.gtIdle, .gtHello { display: grid; place-items: center; align-content: center; gap: 44px; text-align: center }
+.gtLogo { width: 450px; height: 450px; border-radius: 50%; box-shadow: 0 20px 60px rgba(0,0,0,.45) }
+.gtIdle.on .gtLogo { animation: gtFloat 6s ease-in-out infinite }
+@keyframes gtFloat { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-14px) } }
+.gtOrder { position: relative; z-index: 5; display: flex; align-items: center; gap: 58px; padding: 26px 58px; border-radius: 22px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18) }
+.gtQr { width: 238px; height: 238px; padding: 11px; border-radius: 13px; background: #fff; box-sizing: border-box }
+.gtQr svg { display: block; width: 100%; height: 100% }
+.gtOrder div:last-child { display: grid; gap: 11px; text-align: left }
+.gtOrder strong { font-size: 56px; font-weight: 800 }
+.gtOrder span { font-size: 32px; color: var(--muted) }
+
+.gtHello { background: radial-gradient(ellipse at 50% 35%, var(--bg-a) 0%, var(--bg-b) 70%); z-index: 5; gap: 26px }
+.gtHello img { width: 324px; border-radius: 50%; box-shadow: 0 20px 60px rgba(0,0,0,.45) }
+.gtHello h1 { margin: 0; font-size: 118px; line-height: 1.05; font-weight: 900; color: var(--accent); text-shadow: 0 6px 26px rgba(0,0,0,.4) }
+.gtHello p { margin: 0; font-size: 54px }
+.gtHello .gtHoliday { font-family: var(--display); font-size: 64px; color: var(--orange) }
+.gtHello.on img { animation: mbSpin 1s ease both }
+.gtHello.on h1 { animation: mbPop .8s .15s cubic-bezier(.2,1.6,.4,1) both }
+
+.gtRibbon { z-index: 6 }
+.gtStage[data-season="halloween"] .gtRibbon { color: #140a1a }
+.gtStage .mbFx { z-index: 4 }
+.gtOffline { position: absolute; right: 22px; bottom: 22px; width: 18px; height: 18px; border-radius: 50%; background: #d33; z-index: 7 }
+@media (prefers-reduced-motion: reduce) { .gtSlide { transition: none } .gtIdle.on .gtLogo { animation: none } }
+
+/* Halloween night behind the logo and the welcome (spooky-scene.tsx). Only transforms and opacity move: Fire TVs are slow. */
+@font-face { font-family: "GT Creepy"; src: url("/greeter/fonts/creepster.woff2") format("woff2"); font-weight: 400; font-display: swap }
+.gtSpooky { position: absolute; inset: 0; overflow: hidden; pointer-events: none; background: linear-gradient(transparent 52%, rgba(122,40,170,.6) 76%, rgba(255,122,24,.62) 100%) }
+.gtMoon { position: absolute; left: 50%; top: 96px; width: 660px; height: 660px; margin-left: -330px; border-radius: 50%;
+  background: radial-gradient(circle at 42% 38%, #ffd27a 0%, #ff9a2e 52%, #e8620f 100%); box-shadow: 0 0 120px 40px rgba(255,122,24,.32) }
+.gtHello .gtMoon { top: 40px }
+.gtGraveyard { position: absolute; left: 0; bottom: 0; width: 1920px; height: 300px; fill: #050208 }
+.gtGhost { position: absolute; width: 170px; opacity: .9; animation: gtHaunt 7s ease-in-out infinite }
+.gtGhost.g1 { left: 170px; top: 210px }
+.gtGhost.g2 { right: 180px; top: 330px; width: 210px; animation-duration: 9s; animation-delay: -3s }
+.gtGhost.g3 { left: 330px; top: 560px; width: 110px; opacity: .6; animation-duration: 11s; animation-delay: -6s }
+.gtPumpkin { position: absolute; bottom: 26px; width: 250px }
+.gtPumpkin.p1 { left: 90px }
+.gtPumpkin.p2 { right: 90px; width: 300px }
+.gtFace { animation: gtFlicker 3.4s steps(1) infinite }
+.gtPumpkin.p2 .gtFace { animation-delay: -1.3s }
+@keyframes gtHaunt { 0%, 100% { transform: translate(0, 0) rotate(-4deg) } 50% { transform: translate(34px, -46px) rotate(5deg) } }
+@keyframes gtFlicker { 0%, 62%, 70%, 100% { opacity: 1 } 64%, 68% { opacity: .6 } 66% { opacity: .85 } 88% { opacity: .75 } }
+.gtStage[data-season="halloween"] .gtIdle { gap: 26px }
+.gtStage[data-season="halloween"] .gtLogo { position: relative; width: 400px; height: 400px; box-shadow: 0 0 0 8px #050208 }
+.gtStage[data-season="halloween"] .gtOrder { background: rgba(5,2,8,.82); border-color: var(--accent) }
+.gtStage[data-season="halloween"] .gtHello h1, .gtHaunt { position: relative; margin: 0; font-family: "GT Creepy", var(--display); font-weight: 400; color: var(--accent); letter-spacing: .03em; text-shadow: 0 0 34px rgba(255,138,31,.55), 0 6px 0 #050208 }
+.gtHaunt { font-size: 124px; line-height: 1; color: #fff3df }
+.gtStage[data-season="halloween"] .gtHello h1 { font-size: 150px }
+.gtStage[data-season="halloween"] .gtHello img, .gtStage[data-season="halloween"] .gtHello p { position: relative }
+.gtStage[data-season="halloween"] .gtHello img { box-shadow: 0 0 0 8px #050208 }
+.gtStage[data-season="halloween"] .gtHello p { text-shadow: 0 3px 12px #050208 }
+.gtStage[data-season="halloween"] .gtHello .gtHoliday { color: #fff3df; text-shadow: 0 0 14px #050208, 0 3px 0 #050208 }
+@media (prefers-reduced-motion: reduce) { .gtGhost, .gtFace { animation: none } }
+
+/* YouTube music: its player must stay visible, so it gets a small "Now playing" card. */
+.gtNowPlaying { position: absolute; left: 40px; bottom: 40px; z-index: 4; display: grid; gap: 8px; padding: 12px; border-radius: 16px; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.15) }
+.gtNowPlaying span { font-size: 22px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); padding-left: 4px }
+.gtYt { width: 356px; height: 200px; border-radius: 10px; overflow: hidden }
+.gtYt iframe { display: block; width: 356px; height: 200px; border: 0 }
+
+/* NFL today: kickoff times, live scores, finals; the Bills are picked out. */
+.gtNfl { padding: 70px 80px 60px; display: grid; grid-template-rows: auto 1fr; gap: 34px; background: radial-gradient(ellipse at 50% 30%, var(--bg-a) 0%, var(--bg-b) 70%) }
+.gtNfl header { display: flex; align-items: baseline; gap: 30px }
+.gtNfl h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 84px; color: var(--accent) }
+.gtNfl header span { font-size: 36px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase }
+.gtGames { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; align-content: start }
+.gtGames.many { grid-template-columns: repeat(4, 1fr); gap: 16px }
+.gtGame { display: grid; gap: 8px; padding: 18px 22px; border-radius: 18px; background: rgba(255,255,255,.07); border: 2px solid rgba(255,255,255,.12) }
+.gtGame.fav { border-color: var(--accent); background: rgba(255,255,255,.12); box-shadow: 0 0 30px rgba(0,0,0,.35) }
+.gtTeam { display: grid; grid-template-columns: 52px 1fr auto auto; align-items: center; gap: 14px; font-size: 34px; font-weight: 700 }
+.gtTeam img, .gtTeam i { width: 52px; height: 52px; object-fit: contain }
+.gtTeam b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.gtTeam small { font-size: 24px; color: var(--muted); font-weight: 500 }
+.gtTeam em { font-style: normal; font-size: 44px; font-variant-numeric: tabular-nums; min-width: 1.4em; text-align: right }
+.gtGame.post .gtTeam:not(.won) { opacity: .55 }
+.gtStatus { font-size: 26px; color: var(--muted); display: flex; align-items: center; gap: 12px; border-top: 1px solid rgba(255,255,255,.12); padding-top: 8px }
+.gtLive { font-style: normal; font-size: 20px; font-weight: 800; letter-spacing: .1em; color: #fff; background: #d33; border-radius: 6px; padding: 1px 8px; animation: gtBlink 1.6s ease-in-out infinite }
+@keyframes gtBlink { 50% { opacity: .45 } }
+.gtGames.many .gtGame { padding: 12px 18px; gap: 4px }
+.gtGames.many .gtTeam { font-size: 30px; grid-template-columns: 44px 1fr auto auto }
+.gtGames.many .gtTeam img, .gtGames.many .gtTeam i { width: 44px; height: 44px }
+.gtGames.many .gtTeam em { font-size: 38px }
+
+/* Moving weather over the weather picture, in the spots weather/info gives (sky + one per day card). */
+.gtWeatherArt { pointer-events: none; transform: none }
+.wx { position: absolute; overflow: hidden; --u: 1px }
+.wx.big { --u: 2.4px }
+.wx i { position: absolute; display: block }
+.wx .sun { width: calc(80 * var(--u)); height: calc(80 * var(--u)); left: 50%; top: 50%; margin: calc(-40 * var(--u)) 0 0 calc(-40 * var(--u)); border-radius: 50%;
+  background: radial-gradient(circle, #ffd54a 0 55%, transparent 56%), repeating-conic-gradient(rgba(255,213,74,.9) 0 8deg, transparent 8deg 30deg);
+  -webkit-mask: radial-gradient(circle, #000 70%, transparent 71%); mask: radial-gradient(circle, #000 70%, transparent 71%); animation: wxSpin 24s linear infinite; filter: drop-shadow(0 0 calc(12 * var(--u)) rgba(255,200,60,.6)) }
+.wx.partly_cloudy .sun { left: 40%; top: 42% }
+.wx .moon { width: calc(60 * var(--u)); height: calc(60 * var(--u)); left: 50%; top: 45%; margin: calc(-30 * var(--u)) 0 0 calc(-30 * var(--u)); border-radius: 50%; box-shadow: calc(-14 * var(--u)) calc(6 * var(--u)) 0 0 #f4ecd0; animation: wxBob 6s ease-in-out infinite }
+.wx .star { width: calc(5 * var(--u)); height: calc(5 * var(--u)); border-radius: 50%; background: #fff; animation: wxTwinkle 2.4s ease-in-out infinite }
+.wx .s1 { left: 20%; top: 25% } .wx .s2 { left: 75%; top: 20%; animation-delay: .8s } .wx .s3 { left: 70%; top: 70%; animation-delay: 1.6s }
+.wx .cloud { width: calc(90 * var(--u)); height: calc(34 * var(--u)); border-radius: calc(20 * var(--u)); background: #e9eef2;
+  box-shadow: calc(18 * var(--u)) calc(-16 * var(--u)) 0 calc(4 * var(--u)) #e9eef2, calc(48 * var(--u)) calc(-6 * var(--u)) 0 0 #e9eef2; animation: wxDrift 9s ease-in-out infinite alternate }
+.wx .c1 { left: 30%; top: 48% }
+.wx .c2 { left: 12%; top: 30%; opacity: .75; transform: scale(.8); animation-duration: 12s }
+.wx.rain .cloud, .wx.storm .cloud, .wx.snow .cloud { background: #b8c2cc; box-shadow: calc(18 * var(--u)) calc(-16 * var(--u)) 0 calc(4 * var(--u)) #b8c2cc, calc(48 * var(--u)) calc(-6 * var(--u)) 0 0 #b8c2cc }
+.wx .drop { width: calc(3 * var(--u)); height: calc(14 * var(--u)); background: #7fb7ff; border-radius: 2px; top: 60%; animation: wxFall 1s linear infinite }
+.wx .flake { width: calc(7 * var(--u)); height: calc(7 * var(--u)); background: #fff; border-radius: 50%; top: 60%; animation: wxFall 3s linear infinite }
+.wx .d0 { left: 30% } .wx .d1 { left: 42%; animation-delay: .3s } .wx .d2 { left: 54%; animation-delay: .6s } .wx .d3 { left: 66%; animation-delay: .15s } .wx .d4 { left: 36%; animation-delay: .45s } .wx .d5 { left: 60%; animation-delay: .75s }
+.wx .bolt { width: calc(24 * var(--u)); height: calc(46 * var(--u)); left: 48%; top: 58%; background: #ffe066; clip-path: polygon(40% 0, 100% 0, 60% 45%, 90% 45%, 20% 100%, 40% 55%, 10% 55%); animation: wxFlash 3.2s steps(1) infinite }
+.wx .fogband { left: -10%; width: 120%; height: calc(10 * var(--u)); border-radius: 99px; background: rgba(230,236,240,.55); animation: wxDrift 7s ease-in-out infinite alternate }
+.wx .f0 { top: 35% } .wx .f1 { top: 52%; animation-delay: 1s } .wx .f2 { top: 69%; animation-delay: 2s }
+@keyframes wxSpin { to { transform: rotate(360deg) } }
+@keyframes wxBob { 50% { transform: translateY(calc(-6 * var(--u))) } }
+@keyframes wxTwinkle { 50% { opacity: .2 } }
+@keyframes wxDrift { from { translate: calc(-14 * var(--u)) 0 } to { translate: calc(14 * var(--u)) 0 } }
+@keyframes wxFall { from { transform: translateY(0); opacity: 1 } to { transform: translateY(calc(70 * var(--u))); opacity: 0 } }
+@keyframes wxFlash { 0%, 80% { opacity: 0 } 82%, 90% { opacity: 1 } 92%, 100% { opacity: 0 } }
+/* One or two games (Monday/Thursday night): big cards in the middle. */
+.gtGames.few { grid-template-columns: repeat(auto-fit, minmax(0, 760px)); justify-content: center; margin-top: 60px; gap: 40px }
+.gtGames.few .gtGame { padding: 34px 40px; gap: 18px }
+.gtGames.few .gtTeam { font-size: 60px; grid-template-columns: 100px 1fr auto auto; gap: 24px }
+.gtGames.few .gtTeam img, .gtGames.few .gtTeam i { width: 100px; height: 100px }
+.gtGames.few .gtTeam small { font-size: 36px }
+.gtGames.few .gtTeam em { font-size: 76px }
+.gtGames.few .gtStatus { font-size: 40px; padding-top: 16px }

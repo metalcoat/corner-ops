@@ -1,0 +1,10 @@
+[Unit]
+Description=Every 5 minutes: send published staff schedule notifications
+
+[Timer]
+OnBootSec=180
+OnUnitActiveSec=300
+Unit=corner-ops-cron@schedule-delivery.service
+
+[Install]
+WantedBy=timers.target

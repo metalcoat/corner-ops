@@ -1,9 +1,7 @@
-import { squareMoneyToDollars } from "@/lib/square-money";
 import { createHmac } from "node:crypto";
 import { ensureIntegrationSchema } from "@/lib/integrations";
 import { getSql } from "@/lib/db";
 import { decryptIntegrationSecret as decryptSecret, encryptIntegrationSecret as encryptSecret } from "@/lib/integration-crypto";
-import { createOAuthState } from "@/lib/oauth-state";
 import { constantTimeEqual } from "@/lib/security-keys";
 
 const SQUARE_VERSION = process.env.SQUARE_API_VERSION?.trim() || "2026-07-15";
@@ -29,6 +27,9 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function money(value: SquareMoney): number {
+  return Math.round(numberValue(value?.amount)) / 100;
+}
 
 function squareEnvironment(): "sandbox" | "production" {
   return process.env.SQUARE_ENV?.toLowerCase() === "production" ? "production" : "sandbox";
@@ -38,13 +39,19 @@ function squareBase(): string {
   return squareEnvironment() === "production" ? "https://connect.squareup.com" : "https://connect.squareupsandbox.com";
 }
 
-
 function allowedOrigin(origin: string): string {
   const url = new URL(origin);
   if (url.protocol !== "https:" && url.hostname !== "localhost") throw new Error("Square callback requires HTTPS.");
   return url.origin;
 }
 
+function signedState(payload: Record<string, unknown>): string {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET is required.");
+  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = createHmac("sha256", secret).update(encoded).digest("base64url");
+  return `${encoded}.${signature}`;
+}
 
 async function squareRequest<T>(path: string, accessToken: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${squareBase()}${path}`, {
@@ -67,11 +74,6 @@ async function squareRequest<T>(path: string, accessToken: string, init?: Reques
 
 export async function ensureSquareControlSchema(): Promise<void> {
   await ensureIntegrationSchema();
-  const sql = getSql();
-
-
-
-
 }
 
 async function activeConnection(merchantId?: string): Promise<ConnectionRow | null> {
@@ -117,12 +119,12 @@ async function activeToken(connection: ConnectionRow): Promise<string> {
   return accessToken;
 }
 
-export async function squareFullAuthorizationUrl(origin: string): Promise<string> {
+export function squareFullAuthorizationUrl(origin: string): string {
   const applicationId = process.env.SQUARE_APPLICATION_ID?.trim();
   if (!applicationId || !process.env.SQUARE_APPLICATION_SECRET?.trim()) throw new Error("Square is not configured.");
   const safeOrigin = allowedOrigin(origin);
   const redirectUri = `${safeOrigin}/api/square/callback`;
-  const state = await createOAuthState({ origin: safeOrigin, redirectUri, business: "Tiki", expiresAt: Date.now() + 10 * 60_000 });
+  const state = signedState({ origin: safeOrigin, redirectUri, business: "Tiki", expiresAt: Date.now() + 10 * 60_000 });
   const url = new URL(`${squareBase()}/oauth2/authorize`);
   url.searchParams.set("client_id", applicationId);
   url.searchParams.set("scope", "MERCHANT_PROFILE_READ PAYMENTS_READ ORDERS_READ ITEMS_READ INVENTORY_READ");
@@ -142,8 +144,8 @@ async function upsertPayment(connectionId: string, payment: SquareObject): Promi
     ) VALUES (
       ${crypto.randomUUID()}, ${connectionId}, ${paymentId}, ${clean(payment.order_id, 150)},
       ${clean(payment.location_id, 150)}, ${String(payment.created_at)},
-      ${payment.updated_at ? String(payment.updated_at) : null}, ${squareMoneyToDollars(payment.amount_money as SquareMoney)},
-      ${squareMoneyToDollars(payment.tip_money as SquareMoney)}, ${clean(payment.status, 50)}, ${JSON.stringify(payment)}::jsonb
+      ${payment.updated_at ? String(payment.updated_at) : null}, ${money(payment.amount_money as SquareMoney)},
+      ${money(payment.tip_money as SquareMoney)}, ${clean(payment.status, 50)}, ${JSON.stringify(payment)}::jsonb
     )
     ON CONFLICT (external_payment_id) DO UPDATE SET order_id = EXCLUDED.order_id,
       location_id = EXCLUDED.location_id, updated_at_square = EXCLUDED.updated_at_square,
@@ -164,8 +166,8 @@ async function upsertOrder(connectionId: string, order: SquareObject): Promise<v
       ${crypto.randomUUID()}, ${connectionId}, ${externalOrderId}, ${clean(order.location_id, 150)},
       ${clean(order.state, 50)}, ${clean(source.name, 120)}, ${order.created_at ? String(order.created_at) : null},
       ${order.updated_at ? String(order.updated_at) : null}, ${order.closed_at ? String(order.closed_at) : null},
-      ${squareMoneyToDollars(order.total_money as SquareMoney)}, ${squareMoneyToDollars(order.total_tax_money as SquareMoney)},
-      ${squareMoneyToDollars(order.total_tip_money as SquareMoney)}, ${JSON.stringify(order)}::jsonb
+      ${money(order.total_money as SquareMoney)}, ${money(order.total_tax_money as SquareMoney)},
+      ${money(order.total_tip_money as SquareMoney)}, ${JSON.stringify(order)}::jsonb
     )
     ON CONFLICT (external_order_id) DO UPDATE SET location_id = EXCLUDED.location_id,
       state = EXCLUDED.state, source_name = EXCLUDED.source_name,
@@ -187,8 +189,8 @@ async function upsertOrder(connectionId: string, order: SquareObject): Promise<v
       ) VALUES (
         ${crypto.randomUUID()}, ${orderId}, ${externalLineId}, ${clean(line.catalog_object_id, 180)},
         ${clean(line.name, 240)}, ${clean(line.variation_name, 240)}, ${numberValue(line.quantity)},
-        ${squareMoneyToDollars(line.gross_sales_money as SquareMoney)}, ${squareMoneyToDollars(line.total_tax_money as SquareMoney)},
-        ${squareMoneyToDollars(line.total_discount_money as SquareMoney)}, ${squareMoneyToDollars(line.total_money as SquareMoney)},
+        ${money(line.gross_sales_money as SquareMoney)}, ${money(line.total_tax_money as SquareMoney)},
+        ${money(line.total_discount_money as SquareMoney)}, ${money(line.total_money as SquareMoney)},
         ${JSON.stringify(modifiers)}::jsonb, ${JSON.stringify(line)}::jsonb
       )
       ON CONFLICT (square_order_id, external_line_id) DO UPDATE SET catalog_object_id = EXCLUDED.catalog_object_id,
@@ -214,7 +216,7 @@ function catalogDetails(object: SquareObject) {
     parentCatalogId: clean(object.is_deleted ? "" : itemData.category_id || (categoryData.parent_category as SquareObject | undefined)?.id, 180),
     variationOfId: clean(variationData.item_id, 180),
     sku: clean(variationData.sku, 120),
-    price: squareMoneyToDollars(variationData.price_money as SquareMoney),
+    price: money(variationData.price_money as SquareMoney),
     active: !Boolean(object.is_deleted) && variationData.available_for_booking !== false,
   };
 }

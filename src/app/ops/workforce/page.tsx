@@ -2,6 +2,7 @@
 
 import { firstName } from "@/app/client-text";
 import { requestFailure, responseMessage } from "@/app/client-http";
+import { useSiteBrand } from "@/app/brand-context";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import ScheduleBoard, { type ScheduleEmployee, type ScheduleShift, type ScheduleTimeOff } from "./schedule-board";
@@ -112,8 +113,9 @@ function timeOffShiftConflicts(request: TimeOff, shifts: ScheduleShift[]) {
 
 
 export default function WorkforcePage() {
+  const brand = useSiteBrand();
   const [session, setSession] = useState<SessionView | null>(null);
-  const [business, setBusiness] = useState<Business>("Corner Deli");
+  const [business, setBusiness] = useState<Business>(brand.name === "At the Docks" ? "Tiki" : "Corner Deli");
   const [data, setData] = useState<WorkforceData | null>(null);
   const [tab, setTab] = useState<Tab>("schedule");
   const [busy, setBusy] = useState(false);
@@ -213,7 +215,7 @@ export default function WorkforcePage() {
         if (businessRef.current === actionBusiness) {
           const count = payload?.conflictingShifts?.length || 0;
           setNotice(payload?.requiresReassignment
-            ? `Time off approved. ${payload.employeeName || request.employee_name} is already assigned to ${count} conflicting shift${count === 1 ? "" : "s"}. Reassign or open ${count === 1 ? "that shift" : "those shifts"} before publishing/resending.`
+            ? `Time off approved. ${payload.employeeName || request.employee_name} is already assigned to ${count} conflicting shift${count === 1 ? "" : "s"}. Reassign or open ${count === 1 ? "that shift" : "those shifts"} if they shouldn't work.`
             : "Time off approved.");
         }
       }
@@ -222,6 +224,12 @@ export default function WorkforcePage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function deleteTimeOff(request: Pick<TimeOff, "id" | "employee_name" | "starts_on" | "ends_on">) {
+    const days = request.starts_on === request.ends_on ? dateOnly(request.starts_on) : `${dateOnly(request.starts_on)} through ${dateOnly(request.ends_on)}`;
+    if (!window.confirm(`Delete ${request.employee_name}'s time off for ${days}?`)) return;
+    await action({ action: "time-off-delete", id: request.id }, "Time off deleted.").catch(() => undefined);
   }
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
@@ -241,6 +249,7 @@ export default function WorkforcePage() {
   const pendingRequests = currentData?.shiftRequests.filter((request) => request.status === "Pending") || [];
   const pendingCorrections = currentData?.corrections.filter((request) => request.status === "Pending") || [];
   const pendingTimeOff = currentData?.timeOff.filter((request) => request.status === "Pending") || [];
+  const visibleTimeOff = currentData?.timeOff.filter((request) => request.status !== "Cancelled") || [];
   const upcomingShifts = currentData?.shifts.filter((shift) => shift.status !== "Cancelled" && new Date(shift.endsAt).getTime() >= Date.now()).length || 0;
 
   if (!session) return <main className="workforceShell"><div className="workforcePanel"><h1>Loading workforce</h1></div></main>;
@@ -299,6 +308,7 @@ export default function WorkforcePage() {
         timeOff={currentData?.timeOff || []}
         busy={busy}
         runAction={action}
+        deleteTimeOff={deleteTimeOff}
       />
     </>}
 
@@ -324,10 +334,10 @@ export default function WorkforcePage() {
       </article>
       <article className="workforcePanel">
         <div className="wfPanelHeader"><div><p className="wfEyebrow">Requested days away</p><h2>Time off</h2></div></div>
-        <div className="wfList">{(currentData?.timeOff || []).map((request) => {
+        <div className="wfList">{visibleTimeOff.map((request) => {
           const conflicts = timeOffShiftConflicts(request, currentData?.shifts || []);
-          return <div className="wfRequest" key={request.id}><div><strong>{request.employee_name}</strong><span>{dateOnly(request.starts_on)} through {dateOnly(request.ends_on)}</span><small>Submitted {local(request.created_at)} via Employee Hub</small>{request.reason && <p>{request.reason}</p>}{conflicts.length > 0 && <p className="wfTimeOffConflict"><strong>Schedule conflict:</strong> already assigned to {conflicts.map((shift) => `${local(shift.startsAt)}–${new Date(shift.endsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`).join("; ")}. {request.status === "Pending" ? "Approving this request will require reassignment." : request.status === "Approved" ? "Reassign or open the conflicting shift." : ""}</p>}</div><div className="wfActions"><span className={`wfBadge ${request.status.toLowerCase()}`}>{request.status}</span>{request.status === "Pending" && <><button disabled={busy} onClick={() => void approveTimeOff(request)}>Approve</button><button disabled={busy} onClick={() => void action({ action: "time-off-review", id: request.id, approve: false }, "Time off rejected.").catch(() => undefined)}>Reject</button></>}</div></div>;
-        })}{!currentData?.timeOff.length && <p className="wfEmpty">No time-off requests.</p>}</div>
+          return <div className="wfRequest" key={request.id}><div><strong>{request.employee_name}</strong><span>{dateOnly(request.starts_on)} through {dateOnly(request.ends_on)}</span><small>Submitted {local(request.created_at)} via Employee Hub</small>{request.reason && <p>{request.reason}</p>}{conflicts.length > 0 && <p className="wfTimeOffConflict"><strong>Schedule conflict:</strong> already assigned to {conflicts.map((shift) => `${local(shift.startsAt)}–${new Date(shift.endsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`).join("; ")}. {request.status === "Pending" ? "Approving this request will require reassignment." : request.status === "Approved" ? "Reassign or open the conflicting shift." : ""}</p>}</div><div className="wfActions"><span className={`wfBadge ${request.status.toLowerCase()}`}>{request.status}</span>{request.status === "Pending" && <><button disabled={busy} onClick={() => void approveTimeOff(request)}>Approve</button><button disabled={busy} onClick={() => void action({ action: "time-off-review", id: request.id, approve: false }, "Time off rejected.").catch(() => undefined)}>Reject</button></>}<button disabled={busy} onClick={() => void deleteTimeOff(request)}>Delete</button></div></div>;
+        })}{!visibleTimeOff.length && <p className="wfEmpty">No time-off requests.</p>}</div>
       </article>
     </section>}
 

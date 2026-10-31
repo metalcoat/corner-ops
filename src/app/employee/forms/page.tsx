@@ -164,7 +164,7 @@ export default function EmployeeFormsPage() {
               <label>Additional NYC withholding<input name="additionalNyc" type="number" min="0" step="0.01" defaultValue="0" /></label>
               <label>Additional Yonkers withholding<input name="additionalYonkers" type="number" min="0" step="0.01" defaultValue="0" /></label>
             </div></div>
-            <div className="employmentCallout">The 2026 worksheet and instructions remain available through the official-form link. Corner Ops records what you submit; it does not give tax advice because apparently payroll was not complicated enough already.</div>
+            <div className="employmentCallout">The 2026 worksheet and instructions remain available through the official-form link. This site records what you submit; it does not give tax advice.</div>
           </>}
 
           {selected.formType === "I9" && <>

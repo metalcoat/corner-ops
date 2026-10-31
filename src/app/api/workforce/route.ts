@@ -17,6 +17,7 @@ import {
   reviewShiftRequest,
   reviewTimeCorrection,
   reviewTimeOff,
+  deleteTimeOff,
   workforceDashboard,
 } from "@/lib/workforce";
 
@@ -193,6 +194,7 @@ export async function POST(request: Request) {
           notes: body.notes ? String(body.notes) : "",
           actor: session.displayName,
           acknowledgePendingTimeOff: body.acknowledgePendingTimeOff === true,
+          acknowledgeApprovedTimeOff: body.acknowledgeApprovedTimeOff === true,
         }), { status: 201 });
       } catch (error) {
         return actionError(error, "The shift could not be created.");
@@ -220,6 +222,7 @@ export async function POST(request: Request) {
           status: status as "Draft" | "Published" | "Open" | "Cancelled" | undefined,
           notes: body.notes === undefined ? undefined : String(body.notes || ""),
           acknowledgePendingTimeOff: body.acknowledgePendingTimeOff === true,
+          acknowledgeApprovedTimeOff: body.acknowledgeApprovedTimeOff === true,
           expectedUpdatedAt: body.expectedUpdatedAt ? String(body.expectedUpdatedAt) : null,
         }));
       } catch (error) {
@@ -234,6 +237,7 @@ export async function POST(request: Request) {
           weekStart: String(body.weekStart || ""),
           actor: session.displayName,
           allowOvertime: body.allowOvertime === true,
+          allowTimeOffConflicts: body.allowTimeOffConflicts === true,
         });
         if (result.publicationId) {
           after(() => processSchedulePublicationDeliveries({ publicationId: String(result.publicationId), limit: 30 }).catch((error) => {
@@ -287,6 +291,14 @@ export async function POST(request: Request) {
         managerNote: body.managerNote ? String(body.managerNote) : "",
         actor: session.displayName,
       }));
+    }
+
+    if (action === "time-off-delete") {
+      try {
+        return Response.json(await deleteTimeOff({ id: String(body.id || ""), business, actor: session.displayName }));
+      } catch (error) {
+        return actionError(error, "The time off could not be deleted.");
+      }
     }
 
     if (action === "time-correction-review") {

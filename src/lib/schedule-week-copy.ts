@@ -30,46 +30,51 @@ export async function copyScheduleWeekToTarget(input: {
     SELECT
       COUNT(*)::INTEGER AS source_count,
       COUNT(*) FILTER (
-        WHERE s.employee_id IS NOT NULL AND COALESCE(e.active, FALSE) = FALSE
-      )::INTEGER AS inactive_employee_count
+        WHERE COALESCE(s.time_off_employee_id, s.employee_id) IS NOT NULL AND COALESCE(e.active, FALSE) = FALSE
+      )::INTEGER AS inactive_employee_count,
+      COUNT(*) FILTER (WHERE s.time_off_employee_id IS NOT NULL)::INTEGER AS time_off_restored_count
     FROM schedule_shifts s
-    LEFT JOIN employees e ON e.id = s.employee_id AND e.business = s.business
+    LEFT JOIN employees e ON e.id = COALESCE(s.time_off_employee_id, s.employee_id) AND e.business = s.business
     WHERE s.business = ${input.business}
       AND s.starts_at >= (${sourceWeekStart}::date AT TIME ZONE ${TIME_ZONE})
       AND s.starts_at < ((${sourceWeekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
-      AND s.status <> 'Cancelled'
-  ` as unknown as Array<{ source_count: number; inactive_employee_count: number }>;
+      AND (s.status <> 'Cancelled' OR s.time_off_employee_id IS NOT NULL)
+  ` as unknown as Array<{ source_count: number; inactive_employee_count: number; time_off_restored_count: number }>;
 
   const sourceCount = Number(sourceSummary[0]?.source_count || 0);
   const inactiveEmployeeCount = Number(sourceSummary[0]?.inactive_employee_count || 0);
+  const timeOffRestoredCount = Number(sourceSummary[0]?.time_off_restored_count || 0);
   if (!sourceCount) throw new Error("No shifts were found in the selected source week.");
 
   const inserted = await sql`
     WITH source_shifts AS (
       SELECT
         s.*,
+        -- A day off isn't copied: a shift someone was taken off for time off (reassigned, opened or
+        -- cancelled) goes back to them in the target week.
+        COALESCE(s.time_off_employee_id, s.employee_id) AS regular_employee_id,
         COALESCE(e.active, FALSE) AS employee_active,
         ((s.starts_at AT TIME ZONE ${TIME_ZONE}) + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day') AT TIME ZONE ${TIME_ZONE} AS target_starts_at,
         ((s.ends_at AT TIME ZONE ${TIME_ZONE}) + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day') AT TIME ZONE ${TIME_ZONE} AS target_ends_at,
         CASE WHEN s.meal_break_start IS NULL THEN NULL ELSE ((s.meal_break_start AT TIME ZONE ${TIME_ZONE}) + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day') AT TIME ZONE ${TIME_ZONE} END AS target_meal_break_start,
         CASE WHEN s.extra_meal_break_start IS NULL THEN NULL ELSE ((s.extra_meal_break_start AT TIME ZONE ${TIME_ZONE}) + (${targetWeekStart}::date - ${sourceWeekStart}::date) * INTERVAL '1 day') AT TIME ZONE ${TIME_ZONE} END AS target_extra_meal_break_start
       FROM schedule_shifts s
-      LEFT JOIN employees e ON e.id = s.employee_id AND e.business = s.business
+      LEFT JOIN employees e ON e.id = COALESCE(s.time_off_employee_id, s.employee_id) AND e.business = s.business
       WHERE s.business = ${input.business}
         AND s.starts_at >= (${sourceWeekStart}::date AT TIME ZONE ${TIME_ZONE})
         AND s.starts_at < ((${sourceWeekStart}::date + 7) AT TIME ZONE ${TIME_ZONE})
-        AND s.status <> 'Cancelled'
+        AND (s.status <> 'Cancelled' OR s.time_off_employee_id IS NOT NULL)
     ), prepared AS (
       SELECT source_shifts.*,
         CASE
-          WHEN employee_active = TRUE AND employee_id IS NOT NULL AND NOT EXISTS (
+          WHEN employee_active = TRUE AND regular_employee_id IS NOT NULL AND NOT EXISTS (
             SELECT 1 FROM time_off_requests t
             WHERE t.business = source_shifts.business
-              AND t.employee_id = source_shifts.employee_id
+              AND t.employee_id = source_shifts.regular_employee_id
               AND t.status = 'Approved'
               AND t.starts_on <= ((source_shifts.target_ends_at - INTERVAL '1 millisecond') AT TIME ZONE ${TIME_ZONE})::date
               AND t.ends_on >= (source_shifts.target_starts_at AT TIME ZONE ${TIME_ZONE})::date
-          ) THEN employee_id
+          ) THEN regular_employee_id
           ELSE NULL
         END AS target_employee_id
       FROM source_shifts
@@ -105,5 +110,6 @@ export async function copyScheduleWeekToTarget(input: {
     skippedDuplicates: Math.max(0, sourceCount - inserted.length),
     inactiveEmployeesUnassigned: inactiveEmployeeCount,
     copiedUnassigned: inserted.filter((row) => !row.employee_id).length,
+    timeOffShiftsRestored: timeOffRestoredCount,
   };
 }

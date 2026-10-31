@@ -1,6 +1,7 @@
+import { assertEmployeePinAvailable, employeePinUpdate, ensureEmployeePinColumns } from "@/lib/employee-pin-security";
 import { ensureSchema, getSql } from "@/lib/db";
 import { normalizePosition, roleGroupForPosition } from "@/lib/business-positions";
-import { assertEmployeePinAvailable, createEmployeePinRecord } from "@/lib/employee-pin-security";
+import { validateEmployeePin } from "@/lib/employee-pin";
 import { normalizeSmsPhone } from "@/lib/phone";
 import type { Business } from "@/lib/types";
 
@@ -24,94 +25,13 @@ function clean(value: unknown, max = 255): string {
   return String(value ?? "").trim().slice(0, max);
 }
 
-
 export function ensureEmployeeDirectorySchema(): Promise<void> {
   if (!directorySchemaPromise) {
     directorySchemaPromise = (async () => {
       await ensureSchema();
       const sql = getSql();
-
-      await sql`
-        CREATE UNIQUE INDEX IF NOT EXISTS employees_business_email_unique
-        ON employees (business, LOWER(email))
-        WHERE email <> ''
-      `;
-
-      await sql`
-        CREATE OR REPLACE FUNCTION corner_ops_prepare_rezku_employee()
-        RETURNS TRIGGER
-        LANGUAGE plpgsql
-        AS $$
-        BEGIN
-          IF NEW.employee_name IS NULL OR BTRIM(NEW.employee_name) = '' THEN
-            RETURN NEW;
-          END IF;
-
-          IF LOWER(BTRIM(NEW.employee_name)) = 'cover' THEN
-            RETURN NULL;
-          END IF;
-
-          IF LOWER(BTRIM(NEW.employee_name)) = 'can' THEN
-            NEW.employee_name := 'Ken';
-          END IF;
-
-          RETURN NEW;
-        END;
-        $$
-      `;
-
-
-      await sql`
-        CREATE OR REPLACE FUNCTION corner_ops_sync_rezku_employee()
-        RETURNS TRIGGER
-        LANGUAGE plpgsql
-        AS $$
-        DECLARE
-          canonical_name TEXT;
-          employee_position TEXT;
-          employee_role TEXT;
-        BEGIN
-          canonical_name := BTRIM(COALESCE(NEW.employee_name, ''));
-          IF canonical_name = '' OR LOWER(canonical_name) = 'cover' THEN
-            RETURN NEW;
-          END IF;
-          IF LOWER(canonical_name) = 'can' THEN
-            canonical_name := 'Ken';
-          END IF;
-
-          employee_position := COALESCE(NULLIF(BTRIM(NEW.position), ''), 'Employee');
-          employee_role := CASE
-            WHEN NEW.role_group IN ('Driver', 'In-House', 'Ignore') THEN NEW.role_group
-            WHEN LOWER(employee_position) ~ '(driver|deliver)' THEN 'Driver'
-            WHEN LOWER(employee_position) ~ '(training|trainee)' THEN 'Ignore'
-            ELSE 'In-House'
-          END;
-
-          UPDATE employees
-          SET
-            position = employee_position,
-            role_group = employee_role,
-            counts_for_tips = employee_role <> 'Ignore',
-            updated_at = NOW()
-          WHERE business = 'Corner Deli'
-            AND LOWER(BTRIM(name)) = LOWER(canonical_name);
-
-          IF NOT FOUND THEN
-            INSERT INTO employees (
-              id, business, email, name, pin_hash, pin_enabled, position,
-              role_group, counts_for_tips, hourly_rate, tipped_rate, active
-            ) VALUES (
-              gen_random_uuid(), 'Corner Deli', '', canonical_name,
-              'rezku:' || MD5(LOWER(canonical_name)), FALSE,
-              employee_position, employee_role, employee_role <> 'Ignore', 0, 0, TRUE
-            );
-          END IF;
-
-          RETURN NEW;
-        END;
-        $$
-      `;
-
+      // Salted-PIN columns and session_version (revokes devices on PIN/active changes).
+      await ensureEmployeePinColumns();
 
       await sql`
         DELETE FROM rezku_shifts
@@ -206,8 +126,7 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
     const email = clean(input.email, 255).toLowerCase();
     const phone = normalizeSmsPhone(input.phone);
     const smsOptIn = Boolean(input.smsOptIn && phone);
-    const pin = await assertEmployeePinAvailable({ business, pin: input.pin, employeeName: name || "Employee", excludeEmployeeId: undefined });
-    const pinRecord = createEmployeePinRecord(business, pin, name || "Employee");
+    const pin = validateEmployeePin(business, input.pin, name || "Employee");
     const position = normalizePosition(business, input.position || (business === "Tiki" ? "Bartender" : "Pizza"));
     const roleGroup = input.roleGroup === "Ignore" ? "Ignore" : roleGroupForPosition(business, position);
     const countsForTips = input.countsForTips ?? roleGroup !== "Ignore";
@@ -226,11 +145,13 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
     ` as unknown as Array<{ id: string }>;
 
     if (existing[0]) {
+      await assertEmployeePinAvailable({ business, pin, employeeName: name, excludeEmployeeId: existing[0].id });
+      const updatedPin = employeePinUpdate(business, pin, name);
       const rows = await sql`
         UPDATE employees SET
           email = ${email}, phone = ${phone}, sms_opt_in = ${smsOptIn}, name = ${name},
-          pin_hash = ${pinRecord.hash}, pin_salt = ${pinRecord.salt}, pin_hash_version = ${pinRecord.version},
-          pin_fingerprint = ${pinRecord.fingerprint}, pin_enabled = TRUE, session_version = session_version + 1,
+          pin_hash = ${updatedPin.hash}, pin_salt = ${updatedPin.salt}, pin_hash_version = ${updatedPin.version},
+          pin_fingerprint = ${updatedPin.fingerprint}, pin_enabled = TRUE, session_version = session_version + 1,
           position = ${position}, role_group = ${roleGroup}, counts_for_tips = ${countsForTips},
           hourly_rate = ${hourlyRate}, tipped_rate = ${tippedRate}, active = TRUE, updated_at = NOW()
         WHERE id = ${existing[0].id}
@@ -238,13 +159,15 @@ export async function upsertDirectoryEmployees(inputs: DirectoryEmployeeInput[])
       ` as unknown as Array<{ id: string; name: string; email: string; phone: string }>;
       results.push({ ...rows[0], action: "updated" });
     } else {
+      await assertEmployeePinAvailable({ business, pin, employeeName: name });
+      const newPin = employeePinUpdate(business, pin, name);
       const rows = await sql`
         INSERT INTO employees (
           id, business, email, phone, sms_opt_in, name, pin_hash, pin_salt, pin_hash_version, pin_fingerprint,
           pin_enabled, position, role_group, counts_for_tips, hourly_rate, tipped_rate, active
         ) VALUES (
           ${crypto.randomUUID()}, ${business}, ${email}, ${phone}, ${smsOptIn}, ${name},
-          ${pinRecord.hash}, ${pinRecord.salt}, ${pinRecord.version}, ${pinRecord.fingerprint}, TRUE, ${position}, ${roleGroup}, ${countsForTips},
+          ${newPin.hash}, ${newPin.salt}, ${newPin.version}, ${newPin.fingerprint}, TRUE, ${position}, ${roleGroup}, ${countsForTips},
           ${hourlyRate}, ${tippedRate}, TRUE
         )
         RETURNING id, name, email, phone

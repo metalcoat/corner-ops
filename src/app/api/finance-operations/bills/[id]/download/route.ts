@@ -1,4 +1,4 @@
-import { get } from "@vercel/blob";
+import { get } from "@/lib/storage";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { getSql } from "@/lib/db";
 import { ensureFinanceOperationsSchema } from "@/lib/finance-operations-schema";

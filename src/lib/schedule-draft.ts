@@ -21,6 +21,7 @@ export async function createScheduleDraftWithMeals(input: {
   notes?: string;
   actor: string;
   acknowledgePendingTimeOff?: boolean;
+  acknowledgeApprovedTimeOff?: boolean;
 }) {
   await ensureScheduleMealSchema();
   const { start, end } = normalizeScheduleTimeRange(input.startsAt, input.endsAt);
@@ -59,6 +60,7 @@ export async function createScheduleDraftWithMeals(input: {
       startsAt: start,
       endsAt: end,
       acknowledgePendingTimeOff: input.acknowledgePendingTimeOff,
+      acknowledgeApprovedTimeOff: input.acknowledgeApprovedTimeOff,
     });
   }
 

@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { del, put } from "@vercel/blob";
+import { del, put } from "@/lib/storage";
 import { recordAuditEvent } from "@/lib/audit";
 import { canAccessBusiness, getSession } from "@/lib/auth";
 import { assertConfigured } from "@/lib/config";

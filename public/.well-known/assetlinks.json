@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.cornerdeli.team",
+      "sha256_cert_fingerprints": ["F7:26:19:1B:82:0F:AF:93:27:93:85:F4:A8:A4:7E:54:BC:A2:EC:76:CC:E0:A9:1D:0E:4E:65:A8:53:AE:67:44"]
+    }
+  }
+]

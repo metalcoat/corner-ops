@@ -25,13 +25,6 @@ export function ensureWorkforceSchema(): Promise<void> {
   if (!workforceSchemaPromise) {
     workforceSchemaPromise = (async () => {
       await ensureSchema();
-      const sql = getSql();
-
-
-
-
-
-
     })().catch((error) => {
       workforceSchemaPromise = null;
       throw error;
@@ -482,6 +475,21 @@ export async function reviewTimeOff(input: { id: string; business: Business; app
       status: clean(shift.status, 30),
     })),
   };
+}
+
+/** A manager removes a day off (any status). It's kept as Cancelled for the record and drops off the schedule. */
+export async function deleteTimeOff(input: { id: string; business: Business; actor: string }) {
+  await ensureWorkforceSchema();
+  const deleted = await getSql()`
+    UPDATE time_off_requests SET
+      status = 'Cancelled',
+      manager_note = CASE WHEN manager_note = '' THEN 'Deleted by manager' ELSE manager_note END,
+      reviewed_by = ${input.actor}, reviewed_at = NOW()
+    WHERE id = ${input.id} AND business = ${input.business} AND status <> 'Cancelled'
+    RETURNING id
+  ` as unknown as Array<{ id: string }>;
+  if (!deleted[0]) throw new Error("Time-off request not found.");
+  return { id: String(deleted[0].id), deleted: true };
 }
 
 export async function createShiftRequest(session: EmployeeSession, input: {

@@ -1,0 +1,75 @@
+#!/usr/bin/env node
+import {randomUUID} from "node:crypto";
+import {localValidationEnv} from "./validation-env";
+localValidationEnv();
+process.env.OPENAI_ORDERING_MCP_TOKEN=`validation-${randomUUID()}`;
+process.env.OPENAI_PHONE_TEST_DIDS="3155550200";
+process.env.OPENAI_PHONE_DID_LINES="3155550200=TEST LINE";
+
+async function main(){
+  const [{getSql},phone,{POST},usage]=await Promise.all([
+    import("../src/lib/db"),
+    import("../src/lib/openai-phone-ordering"),
+    import("../src/app/api/openai/ordering/mcp/route"),
+    import("../src/lib/openai-phone-usage"),
+  ]);
+  const sql=getSql(),callId=`rtc_${randomUUID()}`,authorization=`Bearer ${process.env.OPENAI_ORDERING_MCP_TOKEN}`;
+  try{
+    const caller=phone.callerFromSipHeaders([{name:"From",value:'"Customer" <sip:+13155550188@example.test>'}]);
+    const forwardedCaller=phone.callerFromSipHeaders([{name:"X-Corner-Ops-Caller",value:"+1 (315) 555-0199"},{name:"From",value:'<sip:asterisk@example.test>'}]);
+    const pollutedCaller=phone.callerFromSipHeaders([{name:"X-Corner-Ops-Caller",value:"FraryFH"},{name:"P-Asserted-Identity",value:'<sip:proj_12abc345def67890@sip.api.openai.com>'}]);
+    const calledDid=phone.calledDidFromSipHeaders([
+      {name:"To",value:'<sip:proj_example@sip.api.openai.com>'},
+      {name:"P-Called-Party-ID",value:'<sip:+13155550200@example.test>'},
+    ]);
+    await phone.registerOpenAiCall(callId,caller,calledDid,phone.lineForDid(calledDid));
+    const invoke=(body:unknown,token=authorization)=>POST(new Request("http://localhost/api/openai/ordering/mcp",{method:"POST",headers:{authorization:token,"content-type":"application/json"},body:JSON.stringify(body)}));
+    const unauthorized=await invoke({jsonrpc:"2.0",id:1,method:"tools/list"},"Bearer wrong");
+    const initialized=await(await invoke({jsonrpc:"2.0",id:2,method:"initialize",params:{}})).json();
+    const listed=await(await invoke({jsonrpc:"2.0",id:3,method:"tools/list"})).json();
+    const called=await(await invoke({jsonrpc:"2.0",id:4,method:"tools/call",params:{name:"menu_search",arguments:{callId,query:"Pizza"}}})).json();
+    const unadvertised=await(await invoke({jsonrpc:"2.0",id:10,method:"tools/call",params:{name:"create_draft",arguments:{callId,operation:"add",serviceType:"pickup",items:[]}}})).json();
+    const foreignLookup=await(await invoke({jsonrpc:"2.0",id:11,method:"tools/call",params:{name:"customer_lookup",arguments:{callId,query:"315"}}})).json();
+    const blocked=await(await invoke({jsonrpc:"2.0",id:5,method:"tools/call",params:{name:"send",arguments:{callId,orderId:randomUUID(),customerConfirmed:false}}})).json();
+    const shadowed=await(await invoke({jsonrpc:"2.0",id:6,method:"tools/call",params:{name:"send",arguments:{callId,orderId:randomUUID(),customerConfirmed:true}}})).json();
+    const namelessOrder=await(await invoke({jsonrpc:"2.0",id:7,method:"tools/call",params:{name:"price_order",arguments:{callId,operation:"add",serviceType:"pickup",items:[{name:"Pizza",quantity:1}]}}})).json();
+    const genericPizza=await(await invoke({jsonrpc:"2.0",id:8,method:"tools/call",params:{name:"price_order",arguments:{callId,operation:"add",serviceType:"pickup",firstName:"Pat",lastName:"Example",items:[{name:"Pizza",quantity:1}]}}})).json();
+    const describedItem=await(await invoke({jsonrpc:"2.0",id:9,method:"tools/call",params:{name:"menu_search",arguments:{callId,query:"Turkey Big Boss"}}})).json();
+    const pending=(await sql`SELECT pending_item,order_id FROM ordering_call_sessions WHERE three_cx_call_id=${callId}`)[0];
+    const result={
+      callerNormalized:caller==="3155550188"&&forwardedCaller==="3155550199"&&pollutedCaller==="",
+      calledDidRestricted:calledDid==="3155550200"&&phone.testDidAllowed(calledDid)&&!phone.testDidAllowed("3155550201"),
+      lineMapped:phone.lineForDid(calledDid)==="TEST LINE",
+      englishGreeting:phone.OPENAI_PHONE_GREETING==="Thanks for calling Corner Deli, is this going to be pickup or delivery?"&&phone.PHONE_INSTRUCTIONS.includes("Ask exactly one question at a time"),
+      menuVocabularyDefaults:phone.PHONE_INSTRUCTIONS.includes("Jumbo Thin 16 inch")&&phone.PHONE_INSTRUCTIONS.includes("Large French Fries")&&phone.PHONE_INSTRUCTIONS.includes("warm, upbeat, enthusiastic"),
+      pizzaSizePolicy:phone.PHONE_INSTRUCTIONS.includes("6 slices")&&phone.PHONE_INSTRUCTIONS.includes("8 slices")&&phone.PHONE_INSTRUCTIONS.includes("12 slices")&&phone.PHONE_INSTRUCTIONS.includes("Thin is only large/jumbo"),
+      wingWorkflow:phone.PHONE_INSTRUCTIONS.includes("bone-in")&&phone.PHONE_INSTRUCTIONS.includes("What sauce?")&&phone.PHONE_INSTRUCTIONS.includes("Split flavors into separate lines")&&phone.PHONE_INSTRUCTIONS.includes("Blue cheese, ranch, or celery?")&&phone.PHONE_INSTRUCTIONS.includes("Mild and Medium are distinct"),
+      wingExtraSauce:phone.PHONE_INSTRUCTIONS.includes("Extra sauce")&&phone.PHONE_INSTRUCTIONS.includes("4oz side cup matching that wing flavor"),
+      pickupPaymentPolicy:phone.PHONE_INSTRUCTIONS.includes("For pickup, never ask cash or card")&&phone.PHONE_INSTRUCTIONS.includes("independently says they want to pay now"),
+      responsiveSpeech:phone.PHONE_INSTRUCTIONS.includes("finish it")&&phone.PHONE_INSTRUCTIONS.includes("Incidental noise"),
+      conciseReadback:phone.PHONE_INSTRUCTIONS.includes("Do not narrate work or repeat every item"),
+      fullRealtimeDefault:phone.OPENAI_PHONE_MODEL==="gpt-realtime-1.5",
+      unauthorized:unauthorized.status===401,
+      protocol:initialized.result?.protocolVersion==="2025-06-18",
+      toolsListed:listed.result?.tools?.some((tool:{name:string})=>tool.name==="price_order")&&listed.result?.tools?.some((tool:{name:string})=>tool.name==="menu_search"),
+      handoffToolListed:listed.result?.tools?.some((tool:{name:string})=>tool.name==="request_human_handoff"),
+      handoffPolicy:phone.PHONE_INSTRUCTIONS.includes("after two failed clarification attempts")&&phone.PHONE_INSTRUCTIONS.includes("asks for a person"),
+      callBound:called.result?.isError!==true&&/"(?:categories|results)"/.test(String(called.result?.content?.[0]?.text||"")),
+      unadvertisedToolRejected:unadvertised.error?.code===-32602,
+      lookupLimitedToCallerId:Array.isArray(JSON.parse(foreignLookup.result?.content?.[0]?.text||"{}").customers)&&!String(foreignLookup.result?.content?.[0]?.text||"").includes("email"),
+      unconfirmedSendBlocked:blocked.result?.isError===true,
+      shadowSendHeld:shadowed.result?.content?.[0]?.text?.includes("ORDER_REVIEW_PENDING")===true,
+      namelessOrderBlocked:namelessOrder.result?.isError===true&&namelessOrder.result?.content?.[0]?.text?.includes("first and last name"),
+      genericPizzaPending:JSON.parse(genericPizza.result?.content?.[0]?.text||"{}").pending===true&&genericPizza.result?.content?.[0]?.text?.includes("What size?")&&pending.pending_item?.missingRequiredFields?.[0]==="size"&&!pending.order_id,
+      // 1,000 fresh + 9,000 cached text in, 500 audio in (100 cached), 200 audio out on mini.
+      callUsageCost:(()=>{const u=usage.newOpenAiCallUsage();usage.addOpenAiUsage(u,{input_token_details:{text_tokens:10000,audio_tokens:500,cached_tokens_details:{text_tokens:9000,audio_tokens:100}},output_token_details:{audio_tokens:200}});usage.addOpenAiUsage(u,null);const r=usage.openAiUsageSummary(u,"gpt-realtime-mini");return r.responses===1&&r.cached.TEXT===9000&&r.estimatedCostUsd===Math.round((1000*0.6+9000*0.06+400*10+100*0.3+200*20)/1e6*1e4)/1e4&&usage.openAiRealtimeRates("gpt-realtime-1.5").audio===32;})(),
+      liveDescriptions:describedItem.result?.isError!==true&&describedItem.result?.content?.[0]?.text?.includes('"description"'),
+    };
+    console.log(JSON.stringify(result,null,2));
+    if(Object.values(result).some(value=>!value))throw new Error("OpenAI phone ordering validation failed.");
+  }finally{
+    await sql`DELETE FROM ordering_call_sessions WHERE three_cx_call_id=${callId}`;
+  }
+}
+
+main().catch(error=>{console.error(error);process.exitCode=1});

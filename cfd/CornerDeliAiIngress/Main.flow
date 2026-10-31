@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<File>
+  <Version>2.1</Version>
+  <Variables>
+    <ArrayOfVariable xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <Variable>
+        <Name>ApiSecret</Name>
+        <InitialValue>"PASTE_EXISTING_CORNEROPS_CRM_SECRET_HERE"</InitialValue>
+        <ShowScopeProperty>false</ShowScopeProperty>
+        <DebuggerVisible>false</DebuggerVisible>
+      </Variable>
+    </ArrayOfVariable>
+  </Variables>
+  <Flows>
+    <MainFlow>
+      <ns0:MainFlow Description="Preserve the external caller ID before transferring the call to AI extension 100." DebugModeActive="False" x:Name="Main" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ns0="clr-namespace:TCX.CFD.Classes.Components;Assembly=3CX Call Flow Designer, Version=16.4.26.0, Culture=neutral, PublicKeyToken=7cb95a1a133e706e">
+        <ns0:WebServiceRestComponent Timeout="2" AuthenticationOAuth2AccessToken="" x:Name="notifyCornerOpsAiIngress" Content="" HeaderList="&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-16&quot;?&gt;&lt;ArrayOfParameter xmlns:xsd=&quot;http://www.w3.org/2001/XMLSchema&quot; xmlns:xsi=&quot;http://www.w3.org/2001/XMLSchema-instance&quot;&gt;&lt;Parameter&gt;&lt;Name&gt;x-corner-ops-crm-secret&lt;/Name&gt;&lt;Value&gt;callflow$.ApiSecret&lt;/Value&gt;&lt;/Parameter&gt;&lt;/ArrayOfParameter&gt;" HttpRequestType="GET" URI="CONCATENATE(&quot;https://dev.ordercornerdeli.com/api/3cx/ai-ring?number=&quot;,session.ani,&quot;&amp;callId=&quot;,session.callid)" ContentType="" AuthenticationUserName="" AuthenticationType="None" DebugModeActive="False" AuthenticationPassword="" AuthenticationApiKey="" />
+        <ns0:TransferComponent TransferToVoicemail="False" Destination="&quot;100&quot;" DebugModeActive="False" DelayMilliseconds="0" x:Name="transferCallToAi" />
+      </ns0:MainFlow>
+    </MainFlow>
+    <ErrorHandlerFlow>
+      <ns0:ErrorHandlerFlow Description="Fail safe: send the call to AI even if caller-ID notification fails." DebugModeActive="False" x:Name="Main" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ns0="clr-namespace:TCX.CFD.Classes.Components;Assembly=3CX Call Flow Designer, Version=16.4.26.0, Culture=neutral, PublicKeyToken=7cb95a1a133e706e">
+        <ns0:TransferComponent TransferToVoicemail="False" Destination="&quot;100&quot;" DebugModeActive="False" DelayMilliseconds="0" x:Name="failSafeTransferCallToAi" />
+      </ns0:ErrorHandlerFlow>
+    </ErrorHandlerFlow>
+    <DisconnectHandlerFlow>
+      <ns0:DisconnectHandlerFlow Description="No disconnect action required." DebugModeActive="False" x:Name="Main" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ns0="clr-namespace:TCX.CFD.Classes.Components;Assembly=3CX Call Flow Designer, Version=16.4.26.0, Culture=neutral, PublicKeyToken=7cb95a1a133e706e" />
+    </DisconnectHandlerFlow>
+  </Flows>
+</File>

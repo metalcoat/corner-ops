@@ -1,3 +1,4 @@
+import { clientIp } from "@/lib/rate-limit";
 import { NextRequest, NextResponse } from "next/server";
 import { canAccessBusiness, getSession, requirePermission } from "@/lib/auth";
 import { getSql } from "@/lib/db";
@@ -24,7 +25,7 @@ function businessValue(value: unknown): Business {
 
 function clientMetadata(request: NextRequest) {
   return {
-    ipAddress: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown",
+    ipAddress: clientIp(request),
     userAgent: request.headers.get("user-agent") || "unknown",
   };
 }

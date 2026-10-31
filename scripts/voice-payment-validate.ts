@@ -1,0 +1,64 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const root=process.cwd(),lib=readFileSync(`${root}/src/lib/ordering-voice-payment.ts`,"utf8"),mx=readFileSync(`${root}/src/lib/mx-merchant.ts`,"utf8"),route=readFileSync(`${root}/src/app/api/internal/voice-payment/route.ts`,"utf8"),proxy=readFileSync(`${root}/src/proxy.ts`,"utf8"),agi=readFileSync(`${root}/asterisk/voice-payment.py`,"utf8"),dialplan=readFileSync(`${root}/asterisk/extensions.conf.template`,"utf8"),prompt=readFileSync(`${root}/src/lib/openai-phone-prompt.ts`,"utf8");
+
+assert.match(lib,/MX_ENVIRONMENT.*production/);
+assert.match(mx,/Voice-card testing is locked to the MX sandbox/);
+assert.match(mx,/randomInt\(1,2_147_483_647\)/);
+assert.doesNotMatch(mx,/Date\.now\(\).*Math\.random/);
+assert.match(route,/x-voice-payment-secret/);
+assert.match(proxy,/\/api\/internal\/voice-payment/);
+assert.doesNotMatch(lib,/card_number\s+TEXT|cvv\s+TEXT|expiry_month\s+TEXT/i);
+assert.doesNotMatch(agi,/print\(|logging\.|logger\./);
+assert.doesNotMatch(agi,/pocketsphinx|debug_recognition|VOICE_PAYMENT_SANDBOX_RECOGNITION/);
+assert.match(agi,/card=expiry=cvv=zipcode=""/);
+assert.match(dialplan,/EAGI_AUDIO_FORMAT=slin16/);
+assert.match(dialplan,/corner-ops-voice-payment/);
+assert.match(dialplan,/AI_CUSTOMER_PHONE=\$\{CUT\(AI_ROUTE,\|,3\)\}/);
+assert.match(dialplan,/corner-ops-voice-payment,\$\{AI_CALL_ID\},\$\{AI_CUSTOMER_PHONE\}/);
+assert.match(agi,/"callId":call_id/);
+assert.match(lib,/call_id=\$\{callId\}/);
+// Speech or keypad at every step, recognized locally (Vosk); keypad still works without the model.
+assert.match(agi,/def get_card_number\(\)/);
+assert.match(agi,/def card_in_groups\(\)/);
+assert.match(agi,/def listen\(phrases,max_keys/);
+assert.match(agi,/WAIT FOR DIGIT/);
+assert.match(agi,/from vosk import KaldiRecognizer/);
+assert.match(agi,/if not Recognizer\.available\(\):/);
+assert.match(agi,/threading\.Thread\(target=_drain_audio,args=\(stop,\),daemon=True\)/);
+assert.match(agi,/def _drain_audio\(stop\)/);
+assert.match(agi,/def playback\(command\)/);
+assert.match(agi,/def say_digits\(value\)/);
+assert.match(agi,/def valid_luhn\(value\)/);
+assert.match(agi,/def card_complete\(digits\)/);
+assert.match(agi,/def parse_expiry\(text/);
+assert.match(agi,/if not 1<=month<=12:return ""/);
+assert.match(agi,/def best\(how,heard,convert,ok\)/);
+assert.match(agi,/get_digits\("say-security-code"/);
+assert.match(agi,/def get_zip\(\)/);
+assert.match(agi,/zipcode=get_zip\(\)/);
+assert.doesNotMatch(agi,/stderr\.write\(f"[^"]*\{(?:card|digits|heard|group|expiry|cvv|zipcode)/);
+assert.match(agi,/code":failure_stage/);
+for(const stage of ["card_recognition_failed","expiration_recognition_failed","security_code_recognition_failed","billing_zip_recognition_failed","provider_payment_failed"])
+  assert.match(agi,new RegExp(stage));
+assert.match(lib,/Secure payment failed:/);
+assert.match(lib,/state='ended'/);
+assert.match(mx,/avsStreet:input\.avsStreet/);
+assert.match(lib,/delivery\?\.line1\|\|"828 Morris St"/);
+assert.match(lib,/CASE WHEN failure_code<>'' THEN failure_code ELSE/);
+assert.match(lib,/await assertVoiceOrderReady\(String\(call\.order_id\)\)/);
+assert.match(lib,/await assertVoiceOrderReady\(String\(pending\.order_id\)\)/);
+assert.match(lib,/keepForStaff\("approved_unapplied"/);
+assert.match(lib,/"order_commit_failed_voided"/);
+assert.match(lib,/findMxPaymentByReplayId\(replayId\)/);
+assert.doesNotMatch(agi,/prompt\("welcome"\)/);
+assert.match(dialplan,/AI_CUSTOMER_PHONE/);
+assert.equal((dialplan.match(/Set\(AGISIGHUP=no\)/g) || []).length,2);
+assert.match(readFileSync(`${root}/asterisk/Dockerfile`,"utf8"),/sox "\$\{source\}" -r 8000/);
+assert.match(lib,/\?`tel:\$\{explicit\}`:explicit/);
+assert.match(lib,/must be an explicit SIP URI for the local payment extension/);
+assert.match(prompt,/must leave the AI audio and transcription path/);
+assert.match(prompt,/Never ask for, repeat, infer, or transcribe a card number/);
+
+console.log(JSON.stringify({sandboxLock:true,authenticatedInternalRoute:true,noSensitiveDatabaseColumns:true,noRecognizerLogging:true,aiTranscriptionBoundary:true,asteriskEagi:true},null,2));

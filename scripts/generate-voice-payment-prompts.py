@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""Generate fixed non-sensitive payment prompts with Gemini TTS."""
+import base64
+import json
+import os
+import pathlib
+import urllib.request
+import urllib.error
+import time
+import wave
+
+PROMPTS={
+    "welcome":"You are now on our secure payment line. Your payment information is not sent to the ordering assistant or saved in a transcript.",
+    "card-number":"Okay, start with the first four numbers.",
+    "next-four":"Now say the next four digits.",
+    "last-four":"Now say the last four digits.",
+    "next-six":"Now say the next six digits.",
+    "last-five":"Now say the last five digits.",
+    "expiration":"Say the two digit expiration month, followed by the two digit year.",
+    "security-code":"Say the three or four digit security code.",
+    "billing-zip":"Say the five digit billing zip code.",
+    "confirm-ending":"I heard a card ending in",
+    "confirm-yes":"Say yes if that is correct, or no to try again.",
+    "try-again":"Sorry, I didn't catch that. Please say it again, or use the keypad.",
+    "processing":"Please wait while I securely process the sandbox payment.",
+    "approved":"Your test payment was approved and your order is complete. Thank you for calling Corner Deli.",
+    "employee-help":"I could not complete the secure test payment. I will transfer you to an employee.",
+    "dtmf-card-number":"Please enter your full card number using the telephone keypad, then press pound.",
+    "dtmf-expiration":"Enter the two digit expiration month followed by the two digit year.",
+    "dtmf-security-code":"Enter the three or four digit security code, then press pound.",
+    "dtmf-billing-zip":"Enter the five digit billing zip code.",
+    "dtmf-confirm":"Press 1 if that is correct, or press 2 to try again.",
+    "approved-delivery":"Your payment was approved and your order is in. Give us about forty to fifty-five minutes, and we'll get it to you as soon as we can. Thanks for calling Corner Deli.",
+    "say-card-number":"Please say your card number, or type it on the keypad.",
+    "card-in-groups":"Let's take it four digits at a time.",
+    "card-invalid":"Sorry, that didn't come through as a valid card number.",
+    "say-confirm":"Is that right? Say yes, or press 1. Say no, or press 2.",
+    "say-expiration":"What's the expiration date? You can say something like oh four, twenty eight, or type four digits.",
+    "say-security-code":"And the security code on the card?",
+    "say-billing-zip":"And the billing zip code?",
+}
+
+def main():
+    key=os.environ.get("GEMINI_API_KEY","").strip()
+    if not key:raise SystemExit("GEMINI_API_KEY is required")
+    output=pathlib.Path("asterisk/voice-payment-prompts");output.mkdir(parents=True,exist_ok=True)
+    url="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent"
+    for name,text in PROMPTS.items():
+        destination=output/f"{name}.wav"
+        if destination.exists() and destination.stat().st_size>44:continue
+        body={"contents":[{"parts":[{"text":f"Speak warmly, clearly, and naturally at a calm phone-service pace. Say exactly: {text}"}]}],"generationConfig":{"responseModalities":["AUDIO"],"speechConfig":{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Kore"}}}}}
+        request=urllib.request.Request(url,data=json.dumps(body).encode(),headers={"content-type":"application/json","x-goog-api-key":key},method="POST")
+        for attempt in range(5):
+            try:
+                with urllib.request.urlopen(request,timeout=60) as response:data=json.loads(response.read())
+                break
+            except urllib.error.HTTPError as error:
+                if error.code!=429 or attempt==4:raise
+                time.sleep(15*(attempt+1))
+        pcm=base64.b64decode(data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"])
+        with wave.open(str(destination),"wb") as target:
+            target.setnchannels(1);target.setsampwidth(2);target.setframerate(24000);target.writeframes(pcm)
+        time.sleep(4)
+
+if __name__=="__main__":main()

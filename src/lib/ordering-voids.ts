@@ -1,0 +1,72 @@
+import { randomUUID } from "node:crypto";
+import { getSql, withTransaction } from "@/lib/db";
+import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
+import type { OrderingBusiness } from "@/lib/ordering-core";
+import { canManagePos, type OrderingActor } from "@/lib/ordering-route-auth";
+import { reverseLoyaltyForOrder } from "@/lib/ordering-loyalty";
+import { reversePointsForOrder } from "@/lib/ordering-points";
+import { reconcileOrderTips } from "@/lib/ordering-tips";
+import { ensureOrderingTipSchema } from "@/lib/ordering-tip-schema";
+
+export class OrderVoidError extends Error {}
+
+export async function voidSentOrder(input: { orderId: string; business: OrderingBusiness; reason: string; actor: OrderingActor; approver?: OrderingActor; silent?: boolean }) {
+  const reason = input.reason.trim();
+  if (reason.length < 3) throw new OrderVoidError("A void reason is required.");
+  if (reason.length > 500) throw new OrderVoidError("Void reason must be 500 characters or fewer.");
+  await ensureOrderingAccountSchema();
+  await ensureOrderingTipSchema();
+  return withTransaction(async () => {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT id, display_number, status, payment_status, version, voided_at, submitted_at, paid_cents, first_name_snapshot, last_name_snapshot
+      FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE
+    `;
+    const order = rows[0];
+    if (!order) throw new OrderVoidError("Order was not found.");
+    if (order.voided_at) return { order, alreadyVoided: true };
+    // Never sent and nothing paid: anyone can void it. Otherwise a manager, signed in or by PIN.
+    if ((order.submitted_at || Number(order.paid_cents) > 0) && !canManagePos(input.approver || input.actor)) throw new OrderVoidError("Manager or owner authorization is required: enter a manager PIN to void an order the kitchen already has or that was paid for.");
+    if (!['draft','sent_to_kitchen','in_progress','ready','completed'].includes(String(order.status))) {
+      throw new OrderVoidError("This order can no longer be cancelled or voided.");
+    }
+    const updated = await sql`
+      UPDATE ordering_orders SET status='cancelled', cancelled_at=NOW(), closed_at=NOW(), voided_at=NOW(),
+        voided_by=${input.actor.id}, void_reason=${reason}, pre_void_status=${order.status},
+        pre_void_payment_status=${order.payment_status}, version=version+1, updated_at=NOW()
+      WHERE id=${input.orderId} AND version=${order.version}
+      RETURNING id,display_number,status,payment_status,version,voided_at,voided_by,void_reason,pre_void_status,pre_void_payment_status
+    `;
+    if (!updated[0]) throw new OrderVoidError("This order changed while the void was being recorded.");
+    await reverseLoyaltyForOrder(input.orderId,input.actor,reason);
+    await reversePointsForOrder(input.orderId,input.actor,reason);
+    // Food the kitchen never started goes back into stock; once started it's waste, left as sold.
+    if (order.status === "sent_to_kitchen" || order.status === "draft") {
+      await sql`
+        INSERT INTO ordering_inventory_movements(id,business,inventory_item_id,location_id,delta_quantity,unit,reason,order_id,order_item_id,inventory_link_id,related_movement_id,estimated_unit_cost_cents,note,source,created_by,details)
+        SELECT gen_random_uuid(),sale.business,sale.inventory_item_id,sale.location_id,-sale.delta_quantity,sale.unit,'reversal',sale.order_id,sale.order_item_id,sale.inventory_link_id,sale.id,sale.estimated_unit_cost_cents,sale.note,'order_void',${input.actor.id},jsonb_build_object('voidReason',${reason}::text)
+        FROM ordering_inventory_movements sale
+        WHERE sale.order_id=${input.orderId} AND sale.reason='sale' AND sale.delta_quantity<>0
+          AND NOT EXISTS(SELECT 1 FROM ordering_inventory_movements back WHERE back.related_movement_id=sale.id AND back.reason='reversal')`;
+    }
+    // A voided delivery comes off the driver's list (unless it was already delivered or returned).
+    await sql`UPDATE ordering_delivery_assignments SET status='CANCELLED',cancelled_at=NOW(),status_note=${`Order voided: ${reason}`.slice(0,500)},updated_at=NOW()
+      WHERE order_id=${input.orderId} AND status NOT IN ('DELIVERED','RETURNED','CANCELLED')`;
+    await reconcileOrderTips(input.orderId,input.business);
+    // The kitchen already has this order: tell it. is_reprint because an order's first kitchen ticket is one-per-order.
+    if (order.submitted_at && !input.silent) {
+      const lines = await sql`SELECT quantity-cancelled_quantity quantity,item_name_snapshot,variant_name_snapshot FROM ordering_order_items WHERE order_id=${input.orderId} AND quantity>cancelled_quantity ORDER BY sort_order,created_at,id`;
+      const approvedBy = (input.approver || input.actor).name;
+      await sql`INSERT INTO ordering_print_jobs(id,business,order_id,purpose,event_subtype,status,is_reprint,actor_type,actor_id,error_message,payload) VALUES(${randomUUID()},${input.business},${input.orderId},'kitchen_production','order_void','not_configured',TRUE,${input.actor.type},${input.actor.id},'Kitchen printer not configured.',${JSON.stringify({
+        heading: "VOID WHOLE ORDER", orderNumber: String(order.display_number), customerName: `${order.first_name_snapshot || ""} ${order.last_name_snapshot || ""}`.trim(), paymentLabel: `VOID APPROVED BY: ${approvedBy}`, cashier: input.actor.name,
+        lines: lines.map((line) => `VOID: ${line.quantity}x ${String(line.item_name_snapshot).toUpperCase()}${line.variant_name_snapshot ? ` (${line.variant_name_snapshot})` : ""}`),
+      })}::jsonb)`;
+    }
+    await sql`
+      INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)
+      VALUES(${randomUUID()},${input.orderId},${updated[0].version},'order_voided',${input.actor.type},${input.actor.id},
+        CAST(${JSON.stringify({ reason, actorName: input.actor.name, actorRole: input.actor.role, previousFulfillmentStatus: order.status, previousPaymentStatus: order.payment_status, paymentWasNotRefunded: true, approvedById: input.approver?.id || null, approvedByName: input.approver?.name || null })} AS jsonb))
+    `;
+    return { order: updated[0], alreadyVoided: false };
+  });
+}

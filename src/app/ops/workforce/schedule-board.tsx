@@ -61,6 +61,7 @@ type Props = {
   timeOff: ScheduleTimeOff[];
   busy: boolean;
   runAction: (body: Record<string, unknown>, success: string) => Promise<Record<string, unknown> | null>;
+  deleteTimeOff: (request: ScheduleTimeOff) => Promise<void>;
 };
 
 type EditorState = {
@@ -304,7 +305,7 @@ function TimeSelect({ value, onChange, required = false, allowBlank = false, opt
   </select>;
 }
 
-export default function ScheduleBoard({ business, employees, shifts, timeOff, busy, runAction }: Props) {
+export default function ScheduleBoard({ business, employees, shifts, timeOff, busy, runAction, deleteTimeOff }: Props) {
   const [weekStart, setWeekStart] = useState(() => startOfMonday(new Date()));
   const [copiedShift, setCopiedShift] = useState<ScheduleShift | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -389,22 +390,22 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       .filter((request) => request.status === "Pending")
       .map((request) => ({ shift, request })),
   );
-  const schedulePublishBlocked = hardBlockingIssueCount > 0 || approvedTimeOffShiftConflicts.length > 0;
+  const schedulePublishBlocked = hardBlockingIssueCount > 0;
   const overtimeApprovalRequired = !schedulePublishBlocked && publishAnalysis.overForty.length > 0;
 
   function confirmTimeOffAssignment(employeeId: string | null, startsAt: string | Date, endsAt: string | Date) {
     const conflicts = assignmentTimeOff(employeeId, startsAt, endsAt);
     const approved = conflicts.find((request) => request.status === "Approved");
     if (approved) {
-      window.alert(`${approved.employee_name} has APPROVED time off ${timeOffLabel(approved)}. Reassign the shift or leave it open.`);
-      return { allowed: false, acknowledgePendingTimeOff: false };
+      const allowed = window.confirm(`${approved.employee_name}: Has approved time off this day (${timeOffLabel(approved)}).\n\nAssign this shift anyway?`);
+      return { allowed, acknowledgePendingTimeOff: allowed, acknowledgeApprovedTimeOff: allowed };
     }
     const pending = conflicts.find((request) => request.status === "Pending");
     if (pending) {
       const allowed = window.confirm(`${pending.employee_name} has a PENDING time-off request ${timeOffLabel(pending)}.\n\nAssign this shift anyway while the request is still pending?`);
-      return { allowed, acknowledgePendingTimeOff: allowed };
+      return { allowed, acknowledgePendingTimeOff: allowed, acknowledgeApprovedTimeOff: false };
     }
-    return { allowed: true, acknowledgePendingTimeOff: false };
+    return { allowed: true, acknowledgePendingTimeOff: false, acknowledgeApprovedTimeOff: false };
   }
 
   const shiftsByCell = useMemo(() => {
@@ -543,6 +544,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
         : "Draft",
       notes: editor.notes,
       acknowledgePendingTimeOff: timeOffCheck.acknowledgePendingTimeOff,
+      acknowledgeApprovedTimeOff: timeOffCheck.acknowledgeApprovedTimeOff,
       expectedUpdatedAt: editor.shift?.updatedAt || null,
     }, editor.shift ? "Shift changes saved." : "Draft shift added.");
     setEditor(null);
@@ -564,6 +566,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       extraMealBreakMinutes: business === "Tiki" ? 0 : moved.extraMealBreakMinutes || 0,
       status: "Draft",
       acknowledgePendingTimeOff: timeOffCheck.acknowledgePendingTimeOff,
+      acknowledgeApprovedTimeOff: timeOffCheck.acknowledgeApprovedTimeOff,
       expectedUpdatedAt: shift.updatedAt || null,
     }, "Shift moved and marked for publishing.");
   }
@@ -585,17 +588,11 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       extraMealBreakMinutes: business === "Tiki" ? 0 : copied.extraMealBreakMinutes || 0,
       notes: copied.notes,
       acknowledgePendingTimeOff: timeOffCheck.acknowledgePendingTimeOff,
+      acknowledgeApprovedTimeOff: timeOffCheck.acknowledgeApprovedTimeOff,
     }, "Copied shift pasted as a draft.");
   }
 
   async function publishWeek() {
-    if (approvedTimeOffShiftConflicts.length) {
-      const details = approvedTimeOffShiftConflicts.slice(0, 10).map(({ shift, request }) =>
-        `${request.employee_name}: ${localDateTime(shift.startsAt)}–${localTime(shift.endsAt)} (${timeOffLabel(request)} approved off)`,
-      );
-      window.alert(`The schedule cannot be published/resend yet. Approved time off conflicts with assigned shifts:\n\n${details.join("\n")}\n\nReassign those shifts or make them open.`);
-      return;
-    }
     if (hardBlockingIssueCount > 0) {
       const details = [
         ...publishAnalysis.overlaps.map((overlap) => `${overlap.employeeName}: overlap at ${localDateTime(overlap.startsAt)}`),
@@ -605,6 +602,13 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
       ];
       window.alert(`The schedule cannot be published yet.\n\n${details.slice(0, 14).join("\n")}`);
       return;
+    }
+    const allowTimeOffConflicts = approvedTimeOffShiftConflicts.length > 0;
+    if (allowTimeOffConflicts) {
+      const details = approvedTimeOffShiftConflicts.slice(0, 10).map(({ shift, request }) =>
+        `${request.employee_name}: ${localDateTime(shift.startsAt)}–${localTime(shift.endsAt)} (${timeOffLabel(request)} approved off)`,
+      );
+      if (!window.confirm(`TIME-OFF WARNING\n\nThese employees have approved time off on a day they are assigned:\n\n${details.join("\n")}\n\nPublish anyway?`)) return;
     }
     if (pendingTimeOffShiftConflicts.length) {
       const names = Array.from(new Set(pendingTimeOffShiftConflicts.map(({ request }) => `${request.employee_name} (${timeOffLabel(request)})`)));
@@ -626,7 +630,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
     )) return;
 
     await runAction(
-      { action: "week-publish", weekStart: weekStartKey, allowOvertime },
+      { action: "week-publish", weekStart: weekStartKey, allowOvertime, allowTimeOffConflicts },
       allowOvertime
         ? "Schedule published with manager overtime approval. Employee Hub and configured notifications were updated."
         : "Schedule published. Employee Hub and configured notifications were updated.",
@@ -676,18 +680,18 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
 
     <section className={`scheduleValidation ${schedulePublishBlocked ? "blocked" : "ready"}`}>
       <div className="scheduleValidationHeader">
-        <div><strong>{schedulePublishBlocked ? "Schedule cannot be published" : overtimeApprovalRequired ? "Overtime approval required" : "Schedule checks passed"}</strong><span>Paid hours, overlap, meals, continuous coverage, and business-specific staffing rules.</span></div>
+        <div><strong>{schedulePublishBlocked ? "Schedule cannot be published" : overtimeApprovalRequired ? "Overtime approval required" : approvedTimeOffShiftConflicts.length ? "Assigned on approved time off" : "Schedule checks passed"}</strong><span>Paid hours, overlap, meals, continuous coverage, and business-specific staffing rules.</span></div>
         <div className="scheduleCheckBadges">
           <span className={publishAnalysis.overThirtyEight.length ? "warning" : "clear"}>{publishAnalysis.overThirtyEight.length} over 38</span>
           <span className={publishAnalysis.overForty.length ? "danger" : "clear"}>{publishAnalysis.overForty.length} over 40</span>
           <span className={publishAnalysis.overlaps.length ? "danger" : "clear"}>{publishAnalysis.overlaps.length} overlap</span>
           <span className={publishAnalysis.coverageGaps.length ? "danger" : "clear"}>{publishAnalysis.coverageGaps.length} gap</span>
           <span className={publishAnalysis.mealPeriodViolations.length ? "warning" : "clear"}>{publishAnalysis.mealPeriodViolations.length} meal</span>
-          <span className={approvedTimeOffShiftConflicts.length ? "danger" : pendingTimeOffShiftConflicts.length ? "warning" : "clear"}>{approvedTimeOffShiftConflicts.length ? `${approvedTimeOffShiftConflicts.length} time-off conflict` : pendingTimeOffShiftConflicts.length ? `${pendingTimeOffShiftConflicts.length} pending off` : "time off clear"}</span>
+          <span className={approvedTimeOffShiftConflicts.length || pendingTimeOffShiftConflicts.length ? "warning" : "clear"}>{approvedTimeOffShiftConflicts.length ? `${approvedTimeOffShiftConflicts.length} on time off` : pendingTimeOffShiftConflicts.length ? `${pendingTimeOffShiftConflicts.length} pending off` : "time off clear"}</span>
           {loneWorkerApplies && <span className={publishAnalysis.loneWorkerViolations.length ? "danger" : "clear"}>{publishAnalysis.loneWorkerViolations.length} alone</span>}
         </div>
       </div>
-      {issueCount > 0 && <details className="scheduleIssueDetails" open={schedulePublishBlocked || overtimeApprovalRequired}>
+      {issueCount > 0 && <details className="scheduleIssueDetails" open={schedulePublishBlocked || overtimeApprovalRequired || approvedTimeOffShiftConflicts.length > 0}>
         <summary>View {issueCount} schedule warning{issueCount === 1 ? "" : "s"}</summary>
         <div className="scheduleIssueList">
           {publishAnalysis.overThirtyEight.map((employee) => <div className="scheduleIssue warning" key={`38-${employee.employeeId}`}><strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} paid hours.</span></div>)}
@@ -696,7 +700,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
           {publishAnalysis.coverageGaps.map((gap) => <div className="scheduleIssue danger" key={`${gap.dateKey}-${gap.startsAt}`}><strong>No employee coverage</strong><span>{localDateTime(gap.startsAt)}–{localTime(gap.endsAt)} ({gap.minutes} minutes).</span></div>)}
           {publishAnalysis.mealPeriodViolations.map((item) => <div className="scheduleIssue warning" key={`${item.shiftId}-${item.code}`}><strong>{item.employeeName}</strong><span>{item.message}</span></div>)}
           {publishAnalysis.loneWorkerViolations.map((item) => <div className="scheduleIssue danger" key={`${item.employeeId}-${item.startsAt}`}><strong>{item.employeeName}</strong><span>Alone {item.minutes} minutes starting {localDateTime(item.startsAt)}.</span></div>)}
-          {approvedTimeOffShiftConflicts.map(({ shift, request }) => <div className="scheduleIssue danger" key={`off-approved-${shift.id}-${request.id}`}><strong>{request.employee_name}</strong><span>Approved off {timeOffLabel(request)} but assigned {localDateTime(shift.startsAt)}–{localTime(shift.endsAt)}. Reassign or open this shift.</span></div>)}
+          {approvedTimeOffShiftConflicts.map(({ shift, request }) => <div className="scheduleIssue warning" key={`off-approved-${shift.id}-${request.id}`}><strong>{request.employee_name}</strong><span>Has approved time off this day ({timeOffLabel(request)}) but is assigned {localDateTime(shift.startsAt)}–{localTime(shift.endsAt)}.</span></div>)}
           {pendingTimeOffShiftConflicts.map(({ shift, request }) => <div className="scheduleIssue warning" key={`off-pending-${shift.id}-${request.id}`}><strong>{request.employee_name}</strong><span>Pending time-off request {timeOffLabel(request)} overlaps {localDateTime(shift.startsAt)}–{localTime(shift.endsAt)}.</span></div>)}
         </div>
       </details>}
@@ -751,10 +755,10 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
                 }}
                 onDrop={(event) => void onDrop(event, day, row.employeeId)}
               >
-                {approvedDayOff && <div className="scheduleTimeOffCellBadge approved">Approved off</div>}
-                {!approvedDayOff && pendingDayOff && <div className="scheduleTimeOffCellBadge pending">Time off pending</div>}
+                {approvedDayOff && <div className="scheduleTimeOffCellBadge approved">Approved off<button type="button" disabled={busy} title={`Delete ${row.name}'s time off`} aria-label={`Delete ${row.name}'s time off`} onClick={() => void deleteTimeOff(approvedDayOff)}>×</button></div>}
+                {!approvedDayOff && pendingDayOff && <div className="scheduleTimeOffCellBadge pending">Time off pending<button type="button" disabled={busy} title={`Delete ${row.name}'s time-off request`} aria-label={`Delete ${row.name}'s time-off request`} onClick={() => void deleteTimeOff(pendingDayOff)}>×</button></div>}
                 <div className="scheduleCellActions">
-                  <button type="button" disabled={Boolean(approvedDayOff)} title={approvedDayOff ? `${row.name} has approved time off` : `Add ${row.name} shift`} onClick={() => setEditor(defaultEditor(row.employeeId, day, row.employee || undefined))}>+</button>
+                  <button type="button" title={approvedDayOff ? `${row.name} has approved time off this day` : `Add ${row.name} shift`} onClick={() => setEditor(defaultEditor(row.employeeId, day, row.employee || undefined))}>+</button>
                   {copiedShift && <button type="button" disabled={Boolean(approvedDayOff)} onClick={() => void pasteShift(day, row.employeeId)}>Paste</button>}
                 </div>
                 <div className="scheduleCellShifts">
@@ -770,7 +774,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
                     const pendingShiftOff = shiftTimeOff.find((request) => request.status === "Pending");
                     const meal = analyzeShiftMealCompliance(shift);
                     return <div
-                      className={`scheduleShiftCard compact ${shift.status.toLowerCase()} ${draggingId === shift.id ? "dragging" : ""} hours-${hourStatus?.risk || "normal"} ${hasOverlap ? "hasOverlap" : ""} ${hasLoneWorker ? "hasLoneWorker" : ""} ${hasMealIssue ? "hasMealIssue" : ""}`}
+                      className={`scheduleShiftCard compact ${shift.status.toLowerCase()} ${draggingId === shift.id ? "dragging" : ""} hours-${hourStatus?.risk || "normal"} ${hasOverlap ? "hasOverlap" : ""} ${hasLoneWorker ? "hasLoneWorker" : ""} ${hasMealIssue ? "hasMealIssue" : ""} ${approvedShiftOff ? "hasApprovedTimeOff" : ""}`}
                       style={{ "--employee-color": color } as CSSProperties}
                       key={shift.id}
                       draggable
@@ -821,7 +825,7 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
             ? <select value={editor.position} onChange={(event) => setEditor((current) => current ? { ...current, position: event.target.value } : current)} required><option value="">Choose position</option>{positionOptions.map((position) => <option key={position} value={position}>{position}</option>)}</select>
             : <input value={editor.position} onChange={(event) => setEditor((current) => current ? { ...current, position: event.target.value } : current)} required />}</label>
 
-          {editorTimeOff.approved.length > 0 && <div className="scheduleTimeOffEditorWarning approved"><strong>Cannot assign this shift</strong><span>{editorTimeOff.approved[0].employee_name} has approved time off {timeOffLabel(editorTimeOff.approved[0])}. Choose another employee, date, or leave the shift open.</span></div>}
+          {editorTimeOff.approved.length > 0 && <div className="scheduleTimeOffEditorWarning approved"><strong>Has approved time off this day</strong><span>{editorTimeOff.approved[0].employee_name} is off {timeOffLabel(editorTimeOff.approved[0])}. You can still assign the shift, but you will be asked to confirm.</span></div>}
           {editorTimeOff.approved.length === 0 && editorTimeOff.pending.length > 0 && <div className="scheduleTimeOffEditorWarning pending"><strong>Pending time-off request</strong><span>{editorTimeOff.pending[0].employee_name} requested {timeOffLabel(editorTimeOff.pending[0])} off. You can still assign the shift, but you will be asked to confirm.</span></div>}
 
           {business === "Corner Deli" && editorPreview && <section className="scheduleMealPlanner">

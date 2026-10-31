@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { ensureSchema, getSql } from "@/lib/db";
 import { requireStrongSecret } from "@/lib/secret-strength";
+import { ensureSchema, getSql } from "@/lib/db";
 import type { Business } from "@/lib/types";
 
 export type EmploymentFormType = "W4" | "IT2104" | "I9" | "PAY_NOTICE" | "MEAL_POLICY";
@@ -98,7 +98,6 @@ export function ensureEmploymentFormsSchema(): Promise<void> {
   if (!employmentSchemaPromise) {
     employmentSchemaPromise = (async () => {
       await ensureSchema();
-      const sql = getSql();
     })().catch((error) => {
       employmentSchemaPromise = null;
       throw error;
@@ -108,7 +107,10 @@ export function ensureEmploymentFormsSchema(): Promise<void> {
 }
 
 function encryptionKey(): Buffer {
-  const secret = requireStrongSecret(process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY, "EMPLOYMENT_FORMS_ENCRYPTION_KEY");
+  const secret = requireStrongSecret(
+    process.env.EMPLOYMENT_FORMS_ENCRYPTION_KEY,
+    "EMPLOYMENT_FORMS_ENCRYPTION_KEY",
+  );
   return createHash("sha256").update(secret, "utf8").digest();
 }
 

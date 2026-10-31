@@ -1,0 +1,26 @@
+Corner Deli door alarm - setup on the front PC
+==============================================
+
+1. Make a folder, for example C:\CornerDeli\DoorAlarm, and put CornerDeliDoorAlarm.exe in it.
+
+2. Double-click CornerDeliDoorAlarm.exe.
+   If Windows shows "Windows protected your PC", click "More info", then "Run anyway".
+   (It is our own program and isn't signed by a software publisher.)
+   A small dot appears in the system tray, bottom right next to the clock
+   (click the ^ arrow if it's hidden; drag it onto the taskbar to keep it visible).
+     green = listening   red = can't reach the store server   grey = muted
+
+3. Right-click the dot and choose "Test chime". Turn the PC speakers up so it's loud.
+
+4. Start it automatically when Windows starts:
+   - Press Windows key + R, type   shell:startup   and press Enter. A folder opens.
+   - Right-click CornerDeliDoorAlarm.exe (in C:\CornerDeli\DoorAlarm) and choose
+     "Show more options" > "Create shortcut".
+   - Move the new shortcut into the Startup folder that opened.
+   It now starts by itself after every restart, like the Dahua viewer.
+
+Other things:
+- Right-click the dot for: Mute for 10 minutes, Open walk-ins dashboard, Quit.
+- Settings are in config.json in the same folder (the store server address).
+- door-alarm.log in the same folder shows connection problems and each walk-in.
+- Make sure the PC doesn't go to sleep: Settings > System > Power > Screen and sleep > "Never".

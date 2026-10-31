@@ -1,3 +1,4 @@
+import { clientIp } from "@/lib/rate-limit";
 import { NextRequest, NextResponse } from "next/server";
 import { requestEmployeePinReset } from "@/lib/credential-resets";
 import type { Business } from "@/lib/types";
@@ -10,7 +11,7 @@ function business(value: unknown): Business {
 }
 
 function ip(request: NextRequest): string {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
+  return clientIp(request);
 }
 
 export async function POST(request: NextRequest) {

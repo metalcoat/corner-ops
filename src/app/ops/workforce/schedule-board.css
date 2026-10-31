@@ -6,7 +6,9 @@
 .scheduleTimeOffCellBadge{margin:3px 4px 1px;border-radius:999px;padding:3px 6px;font-size:.62rem;font-weight:900;text-align:center;text-transform:uppercase;letter-spacing:.03em}
 .scheduleTimeOffCellBadge.approved{background:var(--color-7f1d1d);color:var(--color-fee2e2);border:1px solid var(--color-ef4444)}
 .scheduleTimeOffCellBadge.pending{background:var(--color-78350f);color:var(--color-fef3c7);border:1px solid var(--color-f59e0b)}
-.scheduleGridCell.timeOffApproved .scheduleCellActions button:disabled{cursor:not-allowed;opacity:.35}
+.scheduleTimeOffCellBadge button{margin-left:5px;border:0;background:none;padding:0 2px;color:inherit;font:inherit;font-size:.8rem;line-height:1;cursor:pointer;opacity:.75}
+.scheduleTimeOffCellBadge button:hover{opacity:1}
+.scheduleShiftCard.hasApprovedTimeOff{border:2px solid var(--color-ef4444);border-left-width:4px;box-shadow:0 0 0 1px rgba(239,68,68,.35)}
 .scheduleTimeOffEditorWarning{display:grid;gap:3px;grid-column:1/-1;border-radius:10px;padding:10px 11px}
 .scheduleTimeOffEditorWarning strong{font-size:.82rem}
 .scheduleTimeOffEditorWarning span{font-size:.76rem;line-height:1.35}

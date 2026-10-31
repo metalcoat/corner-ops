@@ -1,6 +1,7 @@
 "use client";
 
 import { responseMessage } from "@/app/client-http";
+import { useSiteBrand } from "@/app/brand-context";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { newYorkDateKey } from "@/lib/schedule-meal-compliance";
 import type { Business } from "@/lib/types";
@@ -154,6 +155,7 @@ function MessageDisclosure({ message, business }: { message: Message; business: 
 }
 
 export default function EmployeePage() {
+  const brand = useSiteBrand();
   const [session, setSession] = useState<EmployeeSession | null>(null);
   const [checked, setChecked] = useState(false);
   const [data, setData] = useState<EmployeeData | null>(null);
@@ -401,7 +403,7 @@ export default function EmployeePage() {
   if (!session) {
     return <main className="employeeLoginShell">
       <section className="employeeLoginCard">
-        <p className="empEyebrow">Corner Ops</p>
+        <p className="empEyebrow">{brand.name}</p>
         <h1>Employee Hub</h1>
         <p>View schedules, trade shifts, message the team, and request time corrections.</p>
         {notice && <div className="empNotice">{notice}</div>}
