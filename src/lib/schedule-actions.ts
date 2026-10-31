@@ -24,6 +24,7 @@ export async function updateScheduleShiftSafely(input: {
   status?: "Draft" | "Published" | "Open" | "Cancelled";
   notes?: string;
   acknowledgePendingTimeOff?: boolean;
+  acknowledgeApprovedTimeOff?: boolean;
   expectedUpdatedAt?: string | null;
 }) {
   await ensureScheduleMealSchema();
@@ -83,6 +84,7 @@ export async function updateScheduleShiftSafely(input: {
       startsAt: start,
       endsAt: end,
       acknowledgePendingTimeOff: input.acknowledgePendingTimeOff,
+      acknowledgeApprovedTimeOff: input.acknowledgeApprovedTimeOff,
     });
   }
 

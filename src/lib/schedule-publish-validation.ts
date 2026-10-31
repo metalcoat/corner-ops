@@ -38,6 +38,7 @@ export async function publishValidatedScheduleWeek(input: {
   weekStart: string;
   actor: string;
   allowOvertime?: boolean;
+  allowTimeOffConflicts?: boolean;
 }) {
   await ensureScheduleMealSchema();
   const weekStart = validWeekStart(input.weekStart);
@@ -100,8 +101,8 @@ export async function publishValidatedScheduleWeek(input: {
   ` as unknown as Array<{ shift_id: string; employee_name: string; starts_at: string }>;
 
   const problems: string[] = [];
-  if (approvedTimeOffConflicts.length) {
-    problems.push(`Approved time off conflicts: ${approvedTimeOffConflicts.slice(0, 8).map((item) => `${item.employee_name} at ${localStamp(item.starts_at)}`).join("; ")}. Reassign or open these shifts.`);
+  if (approvedTimeOffConflicts.length && !input.allowTimeOffConflicts) {
+    problems.push(`Has approved time off this day: ${approvedTimeOffConflicts.slice(0, 8).map((item) => `${item.employee_name} at ${localStamp(item.starts_at)}`).join("; ")}. Confirm these shifts in the schedule publisher.`);
   }
   if (analysis.overForty.length && !input.allowOvertime) {
     problems.push(`Overtime approval required: ${analysis.overForty.map((employee) => `${employee.employeeName} (${employee.hours.toFixed(1)} hrs)`).join(", ")}. Confirm the overtime in the schedule publisher.`);

@@ -25,6 +25,20 @@ test("copying a week gives a day-off shift back to the regular employee instead 
   assert.match(copy, /t\.employee_id = source_shifts\.regular_employee_id[\s\S]*t\.status = 'Approved'/);
 });
 
+test("a manager can assign and publish over approved time off after a warning; employee swaps stay blocked", () => {
+  const timeOff = source("src/lib/schedule-time-off.ts");
+  assert.match(timeOff, /if \(approved && !input\.acknowledgeApprovedTimeOff\)/);
+  assert.equal(source("src/lib/workforce.ts").match(/acknowledgeApprovedTimeOff/g), null);
+  assert.match(source("src/lib/schedule-actions.ts"), /acknowledgeApprovedTimeOff: input\.acknowledgeApprovedTimeOff/);
+  assert.match(source("src/lib/schedule-draft.ts"), /acknowledgeApprovedTimeOff: input\.acknowledgeApprovedTimeOff/);
+  assert.match(source("src/lib/schedule-publish-validation.ts"), /approvedTimeOffConflicts\.length && !input\.allowTimeOffConflicts/);
+  const board = source("src/app/ops/workforce/schedule-board.tsx");
+  assert.match(board, /Has approved time off this day/);
+  assert.match(board, /hasApprovedTimeOff/);
+  assert.match(board, /const schedulePublishBlocked = hardBlockingIssueCount > 0;/);
+  assert.match(board, /action: "week-publish", weekStart: weekStartKey, allowOvertime, allowTimeOffConflicts/);
+});
+
 test("managers can delete a day off from the time-off list and the schedule grid", () => {
   const workforce = source("src/lib/workforce.ts");
   assert.match(workforce, /export async function deleteTimeOff/);

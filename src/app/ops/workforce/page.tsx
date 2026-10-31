@@ -215,7 +215,7 @@ export default function WorkforcePage() {
         if (businessRef.current === actionBusiness) {
           const count = payload?.conflictingShifts?.length || 0;
           setNotice(payload?.requiresReassignment
-            ? `Time off approved. ${payload.employeeName || request.employee_name} is already assigned to ${count} conflicting shift${count === 1 ? "" : "s"}. Reassign or open ${count === 1 ? "that shift" : "those shifts"} before publishing/resending.`
+            ? `Time off approved. ${payload.employeeName || request.employee_name} is already assigned to ${count} conflicting shift${count === 1 ? "" : "s"}. Reassign or open ${count === 1 ? "that shift" : "those shifts"} if they shouldn't work.`
             : "Time off approved.");
         }
       }
