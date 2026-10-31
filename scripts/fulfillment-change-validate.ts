@@ -17,6 +17,7 @@ async function main(): Promise<void> {
   const { changeOrderFulfillment, DeliveryAddressNeededError } = await import("../src/lib/ordering-fulfillment-change");
   const { createAddressValidationToken, validateDeliveryAddress } = await import("../src/lib/ordering-address");
   const { getOrderDetail } = await import("../src/lib/ordering-order-center");
+  const { PaymentConflictError, setCheckoutTip } = await import("../src/lib/ordering-payments");
   const { listUnresolvedVoidMoney } = await import("../src/lib/ordering-void-money");
   const { addCustomerAddress, createCustomer } = await import("../src/lib/ordering-customers");
   await ensureOrderingPosSchema();
@@ -104,6 +105,15 @@ async function main(): Promise<void> {
       await changeOrderFulfillment(id, "Corner Deli", manager, { serviceType: "delivery", deliveryAddress: otherEntered, deliveryValidationToken: createAddressValidationToken(other) });
       assert.equal((await getOrderDetail("Corner Deli", id))?.delivery_address, other.formattedAddress);
       results.deliveryAddressCanChange = true;
+
+      const staff = { id: "fulfillment-staff", name: "Staff", type: "employee" as const, role: "employee" as const };
+      const paid = await row();
+      await assert.rejects(setCheckoutTip({ orderId: id, business: "Corner Deli", tipCents: 300, actor: staff }), PaymentConflictError);
+      await setCheckoutTip({ orderId: id, business: "Corner Deli", tipCents: 300, newCharge: true, actor: staff });
+      assert.equal(Number((await row()).amount_due_cents), 300);
+      await setCheckoutTip({ orderId: id, business: "Corner Deli", tipCents: 0, newCharge: true, actor: staff });
+      assert.equal(Number((await row()).total_cents), Number(paid.total_cents));
+      results.staffCanAddAndUndoPhoneTip = true;
 
       const customer = await createCustomer({ business: "Corner Deli", firstName: "Switch", lastName: "Saved", phone: "3155550182" });
       await addCustomerAddress({ business: "Corner Deli", customerId: String(customer.customer.id), line1: address.line1, city: address.city, state: address.state, postalCode: address.postalCode });

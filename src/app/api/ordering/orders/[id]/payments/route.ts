@@ -51,7 +51,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (body.action === "reverse") return isoJson(await reverseTender({orderId:id,business,transactionId:String(body.transactionId||""),amountCents:Number(body.amountCents),clientMutationId:String(body.clientMutationId||""),reason:String(body.reason||""),actor}),{status:201});
     if (body.action === "reprint") {const result=await reprintPaymentReceipt({orderId:id,business,transactionId:String(body.transactionId||""),reason:String(body.reason||""),actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});return isoJson(result,{status:201})}
     if (body.action === "print_paid_receipt") {const result=await printPaidReceipt({orderId:id,business,itemized:body.itemized===true,receiptPrinterId:body.receiptPrinterId?String(body.receiptPrinterId):undefined,actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false,jobId:result.printJobId});return isoJson(result,{status:201})}
-    if (body.action === "set_tip") {await assertOrderReadyForCheckout(id,business);return isoJson(await setCheckoutTip({orderId:id,business,checkId:body.checkId?String(body.checkId):null,tipCents:Number(body.tipCents),actor}),{status:200});}
+    if (body.action === "set_tip") {await assertOrderReadyForCheckout(id,business);return isoJson(await setCheckoutTip({orderId:id,business,checkId:body.checkId?String(body.checkId):null,tipCents:Number(body.tipCents),newCharge:body.newCharge===true,actor}),{status:200});}
     // A terminal sale on this order may still charge the card; settle it before taking cash or a gift card.
     await settleOpenTerminalSales({ business, orderId: id, actor });
     const result=await commitTender({

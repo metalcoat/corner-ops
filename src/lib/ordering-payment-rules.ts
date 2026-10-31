@@ -18,6 +18,8 @@ export type TipChangeInput = {
   voided: boolean;
   paymentStatus: string;
   isManager: boolean;
+  /** The tip is being added for a new card charge, or taken back off when that charge didn't happen. */
+  newCharge?: boolean;
   /** Order-level tip after this change (differs from tipCents when tipping one split check). */
   resultingOrderTipCents?: number;
 };
@@ -32,7 +34,9 @@ export function tipChangeError(input: TipChangeInput): string | null {
   // while a balance is still due; raising the tip only raises what is still owed, so staff may
   // do that. Lowering a tip, or changing it once the check is fully paid, needs a manager.
   const addingTipToOpenBalance = input.tipCents > input.currentTipCents && input.totalCents > input.paidCents;
-  if (input.paidCents > 0 && input.tipCents !== input.currentTipCents && !input.isManager && !addingTipToOpenBalance) return "Manager or owner authorization is required to change the tip after a payment has been taken.";
+  // A tip asked for over the phone on an order that's already paid is a new charge. If the card doesn't go through, it comes back off.
+  const newChargeTip = input.newCharge === true && input.totalCents + input.tipCents - input.currentTipCents >= input.paidCents;
+  if (input.paidCents > 0 && input.tipCents !== input.currentTipCents && !input.isManager && !addingTipToOpenBalance && !newChargeTip) return "Manager or owner authorization is required to change the tip after a payment has been taken.";
   if (input.totalCents + input.tipCents - input.currentTipCents < input.paidCents) return "The tip cannot be lowered below what has already been paid. Reverse a tender first.";
   return null;
 }

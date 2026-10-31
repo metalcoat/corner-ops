@@ -55,6 +55,7 @@ export async function setCheckoutTip(input: {
   orderId: string;
   business: OrderingBusiness;
   checkId?: string | null;
+  newCharge?: boolean;
   tipCents: number;
   actor: OrderingActor;
 }) {
@@ -70,7 +71,7 @@ export async function setCheckoutTip(input: {
     if (input.checkId && !check) throw new PaymentConflictError("Check was not found.");
     if (check?.status === "voided") throw new PaymentConflictError("Tips cannot be changed on a voided check.");
     const target = check || order, previousTip = Number(target.tip_cents), delta = input.tipCents - previousTip, orderTip = Math.max(0, Number(order.tip_cents) + delta);
-    const error = tipChangeError({ tipCents: input.tipCents, currentTipCents: previousTip, subtotalCents: Number(order.subtotal_cents), totalCents: Number(target.total_cents), paidCents: Number(target.paid_cents), orderStatus: String(order.status), voided: Boolean(order.voided_at), paymentStatus: String(order.payment_status), isManager: canManagePos(input.actor), resultingOrderTipCents: orderTip });
+    const error = tipChangeError({ newCharge: input.newCharge, tipCents: input.tipCents, currentTipCents: previousTip, subtotalCents: Number(order.subtotal_cents), totalCents: Number(target.total_cents), paidCents: Number(target.paid_cents), orderStatus: String(order.status), voided: Boolean(order.voided_at), paymentStatus: String(order.payment_status), isManager: canManagePos(input.actor), resultingOrderTipCents: orderTip });
     if (error) throw new PaymentConflictError(error);
     if (delta === 0) return checkoutState(input.orderId, input.business, input.checkId);
     if (check) await sql`UPDATE ordering_checks SET tip_cents=${input.tipCents},total_cents=GREATEST(0,total_cents+${delta}),amount_due_cents=GREATEST(0,total_cents+${delta}-paid_cents),status=CASE WHEN total_cents+${delta}-paid_cents<=0 THEN 'paid' WHEN paid_cents>0 THEN 'partially_paid' ELSE 'open' END,updated_at=NOW() WHERE id=${input.checkId}`;

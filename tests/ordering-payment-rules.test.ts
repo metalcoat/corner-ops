@@ -17,6 +17,7 @@ test("tip cap is the greater of $100 or the subtotal", () => {
 test("staff may tip an unpaid order but need a manager once payment exists", () => {
   assert.equal(tipChangeError(base), null);
   assert.match(tipChangeError({ ...base, paidCents: 2160, paymentStatus: "paid" }) || "", /Manager or owner/);
+  assert.equal(tipChangeError({ ...base, paidCents: 2160, paymentStatus: "paid", newCharge: true }), null);
   assert.equal(tipChangeError({ ...base, paidCents: 2160, paymentStatus: "paid", isManager: true }), null);
   assert.equal(tipChangeError({ ...base, tipCents: 0, currentTipCents: 0, paidCents: 2160, paymentStatus: "paid" }), null);
 });

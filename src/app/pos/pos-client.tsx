@@ -786,6 +786,11 @@ export default function PosClient({
   const [giftCardNumber, setGiftCardNumber] = useState("");
   const giftCardInputRef = useRef<HTMLInputElement>(null);
   const [tipPromptOpen, setTipPromptOpen] = useState(false);
+  // Charging a customer who's on the phone: never the store terminal, and a card that's cancelled takes its tip back off.
+  const phoneChargeRef = useRef(false);
+  const phoneChargeUndoRef = useRef<{ checkId: string | null; tipCents: number } | null>(null);
+  const [phoneChargeOpen, setPhoneChargeOpen] = useState(false);
+  const [phoneChargeTip, setPhoneChargeTip] = useState("");
   const [cdsTenderType, setCdsTenderType] = useState<
     "" | "cash" | "card" | "gift_card"
   >("");
@@ -3050,7 +3055,7 @@ export default function PosClient({
     // With a card terminal the balance goes to it as checkout opens, so the customer can tap right away.
     // Split checks are charged one check at a time instead.
     const due = Number(payload.check?.amount_due_cents ?? payload.order.amount_due_cents);
-    if (stationProfile?.mx_terminal_ready && checksPayload.checks.length === 1 && due > 0)
+    if (stationProfile?.mx_terminal_ready && !phoneChargeRef.current && checksPayload.checks.length === 1 && due > 0)
       window.setTimeout(() => void startMxPayment(due, payload, checkId, draft), 0);
   }
 
@@ -3498,8 +3503,8 @@ export default function PosClient({
     }
   }
 
-  async function startMxPayment(requestedOverride?:number,stateOverride?:CheckoutState,checkIdOverride?:string,draftOverride?:SavedDraft){const draft=draftOverride||savedDraft||activeTab,activeCheckout=stateOverride||checkoutState;if(!draft||!activeCheckout||paymentBusy)return;setPaymentBusy(true);setCheckoutError("");try{const due=Number(activeCheckout.check?.amount_due_cents??activeCheckout.order.amount_due_cents),requested=requestedOverride??(cashTender.trim()?Math.round(Number(cashTender)*100):due);if(!Number.isSafeInteger(requested)||requested<=0||requested>due)throw new Error("Enter a card amount within the remaining balance.");if(stationProfile?.mx_terminal_ready){const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx-terminal`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"start",checkId:checkIdOverride||selectedCheckId||null,amountCents:requested,stationKey:stationProfile.station_key})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not send the sale to the card terminal.");if(body.state==="approved"){applyMxApproval(draft,body.checkout);setCheckoutError(body.kitchenWarning||"An earlier card sale on the terminal went through and was added to this order. Check the balance before charging again.");setPaymentBusy(false);return}setMxTerminalSale({orderId:draft.id,sessionId:body.sessionId,amountCents:body.state==="authorized"?Number(body.amountCents):requested,message:body.message||"",state:body.state==="authorized"?"authorized":"pending"});return}const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"initialize",checkId:checkIdOverride||selectedCheckId,amountCents:requested})}),body=await response.json();if(!response.ok){if(body.checkout)applyMxApproval(draft,body.checkout);throw new Error(body.error||"Could not start MX checkout.")}setMxPayment(body)}catch(e){setCheckoutError(e instanceof Error?e.message:"Could not start MX checkout.");setPaymentBusy(false)}}
-  function applyMxApproval(draft:SavedDraft,result:CheckoutState){setCheckoutState(result);setCashTender((Number(result.check?.amount_due_cents??result.order.amount_due_cents)/100).toFixed(2));setPayableChecks(checks=>checks.map(check=>result.check&&check.id===result.check.id?{...check,...result.check}:check));closePaidCheckout(draft,result)}
+  async function startMxPayment(requestedOverride?:number,stateOverride?:CheckoutState,checkIdOverride?:string,draftOverride?:SavedDraft){const draft=draftOverride||savedDraft||activeTab,activeCheckout=stateOverride||checkoutState;if(!draft||!activeCheckout||paymentBusy)return;setPaymentBusy(true);setCheckoutError("");try{const due=Number(activeCheckout.check?.amount_due_cents??activeCheckout.order.amount_due_cents),requested=requestedOverride??(cashTender.trim()?Math.round(Number(cashTender)*100):due);if(!Number.isSafeInteger(requested)||requested<=0||requested>due)throw new Error("Enter a card amount within the remaining balance.");if(stationProfile?.mx_terminal_ready&&!phoneChargeRef.current){const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx-terminal`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"start",checkId:checkIdOverride||selectedCheckId||null,amountCents:requested,stationKey:stationProfile.station_key})}),body=await response.json();if(!response.ok)throw new Error(body.error||"Could not send the sale to the card terminal.");if(body.state==="approved"){applyMxApproval(draft,body.checkout);setCheckoutError(body.kitchenWarning||"An earlier card sale on the terminal went through and was added to this order. Check the balance before charging again.");setPaymentBusy(false);return}setMxTerminalSale({orderId:draft.id,sessionId:body.sessionId,amountCents:body.state==="authorized"?Number(body.amountCents):requested,message:body.message||"",state:body.state==="authorized"?"authorized":"pending"});return}const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"initialize",checkId:checkIdOverride||selectedCheckId,amountCents:requested})}),body=await response.json();if(!response.ok){if(body.checkout)applyMxApproval(draft,body.checkout);throw new Error(body.error||"Could not start MX checkout.")}setMxPayment(body)}catch(e){setCheckoutError(e instanceof Error?e.message:"Could not start MX checkout.");setPaymentBusy(false)}}
+  function applyMxApproval(draft:SavedDraft,result:CheckoutState){phoneChargeRef.current=false;phoneChargeUndoRef.current=null;setCheckoutState(result);setCashTender((Number(result.check?.amount_due_cents??result.order.amount_due_cents)/100).toFixed(2));setPayableChecks(checks=>checks.map(check=>result.check&&check.id===result.check.id?{...check,...result.check}:check));closePaidCheckout(draft,result)}
   function finishMxTerminalSale(checkout:unknown,kitchenWarning?:string){const draft=savedDraft||activeTab;setMxTerminalSale(null);setPaymentBusy(false);if(draft&&checkout)applyMxApproval(draft,checkout as CheckoutState);if(kitchenWarning)setCheckoutError(kitchenWarning)}
   async function confirmMxPayment(replayId:number){const draft=savedDraft||activeTab;if(!draft)return;try{const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"confirm",replayId})}),result=await response.json();if(!response.ok)throw new Error(result.error||"MX payment could not be verified.");setMxPayment(null);applyMxApproval(draft,result)}catch(e){setCheckoutError(e instanceof Error?e.message:"MX payment could not be verified.");setMxPayment(null)}finally{setPaymentBusy(false)}}
 
@@ -3532,6 +3537,58 @@ export default function PosClient({
     setTipPromptOpen(true);
   }
 
+  async function openPhoneCharge() {
+    if (!savedDraft?.reopened) return;
+    phoneChargeRef.current = true;
+    await openCheckout(savedDraft);
+    setPhoneChargeTip("");
+    setPhoneChargeOpen(true);
+  }
+  function closePhoneCharge() {
+    setPhoneChargeOpen(false);
+    phoneChargeRef.current = false;
+    phoneChargeUndoRef.current = null;
+  }
+  async function setPhoneChargeTipCents(tipCents: number, checkId: string | null) {
+    const draft = savedDraft;
+    if (!draft) return null;
+    const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ business, action: "set_tip", checkId, tipCents, newCharge: true }) });
+    const payload = (await response.json()) as CheckoutState & { error?: string };
+    if (!response.ok) throw new Error(payload.error || "Tip could not be added.");
+    setCheckoutState(payload);
+    return payload;
+  }
+  /** The tip goes on first so the charge is balance + tip. Saved cards and keying the card are both in the card dialog. */
+  async function startPhoneCharge(addedTipCents: number) {
+    if (!checkoutState) return;
+    setPhoneChargeOpen(false);
+    setCheckoutError("");
+    try {
+      const checkId = selectedCheckId, currentTip = Number((checkoutState.check as { tip_cents?: number } | null)?.tip_cents ?? reopenedOrder?.tip_cents ?? 0);
+      const state = addedTipCents > 0 ? await setPhoneChargeTipCents(currentTip + addedTipCents, checkId) : checkoutState;
+      if (!state) return;
+      if (addedTipCents > 0) phoneChargeUndoRef.current = { checkId, tipCents: currentTip };
+      const due = Number(state.check?.amount_due_cents ?? state.order.amount_due_cents);
+      if (due <= 0) { closePhoneCharge(); return; }
+      setCashTender((due / 100).toFixed(2));
+      window.setTimeout(() => void startMxPayment(due, state, checkId || undefined), 0);
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "Could not start the card payment.");
+      closePhoneCharge();
+    }
+  }
+  async function undoPhoneChargeTip() {
+    const undo = phoneChargeUndoRef.current;
+    phoneChargeRef.current = false;
+    phoneChargeUndoRef.current = null;
+    if (!undo) return;
+    try {
+      await setPhoneChargeTipCents(undo.tipCents, undo.checkId);
+      if (savedDraft) await refreshReopenedOrder(savedDraft.id);
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "The tip is still on the order. Ask a manager to take it off.");
+    }
+  }
   async function applyTipAndStartCard(tipCents: number): Promise<boolean> {
     const draft = savedDraft || activeTab;
     if (!draft || paymentBusy) return false;
@@ -4485,6 +4542,11 @@ export default function PosClient({
               <b>Total {money(Number(reopenedOrder.total_cents))} · Paid {money(Number(reopenedOrder.paid_cents))} · Due {money(Number(reopenedOrder.amount_due_cents))}</b>
               <div>
                 <a href={`/pos/deli/orders?orderId=${encodeURIComponent(savedDraft.id)}`}>ORDER DETAILS</a>
+                {!cart.length && Number(reopenedOrder.paid_cents) > 0 && !String(reopenedOrder.payment_status).includes("refunded") && cardPaymentStatus?.checkoutEnabled && (
+                  <button type="button" onClick={() => void openPhoneCharge()}>
+                    {Number(reopenedOrder.amount_due_cents) > 0 ? `CHARGE ${money(Number(reopenedOrder.amount_due_cents))} · ASK FOR TIP` : "ADD A TIP"}
+                  </button>
+                )}
               </div>
             </section>
           )}
@@ -5217,8 +5279,34 @@ export default function PosClient({
           </section>
         </div>
       )}
+      {phoneChargeOpen && checkoutState && (() => {
+        const dueCents = Number(checkoutState.check?.amount_due_cents ?? checkoutState.order.amount_due_cents);
+        const tipBase = Number(reopenedOrder?.subtotal_cents || 0);
+        return (
+          <div className="posModalBackdrop posTopModalBackdrop">
+            <section className="posTipWindow" role="dialog" aria-modal="true" aria-labelledby="phone-charge-title">
+              <small>CUSTOMER ON THE PHONE</small>
+              <h2 id="phone-charge-title">{dueCents > 0 ? `${money(dueCents)} to charge. Add a tip?` : "Add a tip?"}</h2>
+              <div className="posTipChoices">
+                {[15, 18, 20].map((percent) => (
+                  <button type="button" key={percent} onClick={() => void startPhoneCharge(Math.round((tipBase * percent) / 100))}>
+                    {percent}%<span>{money(Math.round((tipBase * percent) / 100))}</span>
+                  </button>
+                ))}
+                <button type="button" onClick={() => void startPhoneCharge(0)}>{dueCents > 0 ? "NO TIP" : "NEVER MIND"}</button>
+              </div>
+              <label>
+                Custom tip
+                <input type="number" inputMode="decimal" min="0" step="0.01" value={phoneChargeTip} onChange={(event) => setPhoneChargeTip(event.target.value)} />
+              </label>
+              <button type="button" disabled={!phoneChargeTip || Number(phoneChargeTip) <= 0} onClick={() => void startPhoneCharge(Math.round(Number(phoneChargeTip) * 100))}>ADD CUSTOM TIP</button>
+              <button type="button" onClick={() => { closePhoneCharge(); closeCheckout(); }}>CANCEL</button>
+            </section>
+          </div>
+        );
+      })()}
       {mxTerminalSale&&<MxTerminalPaymentDialog sale={mxTerminalSale} onApproved={finishMxTerminalSale} onClose={()=>{setMxTerminalSale(null);setPaymentBusy(false)}}/>}
-      {mxPayment&&<MxKeyedPaymentDialog payment={mxPayment} onApproved={confirmMxPayment} onCancel={()=>{setMxPayment(null);setPaymentBusy(false)}}
+      {mxPayment&&<MxKeyedPaymentDialog payment={mxPayment} onApproved={confirmMxPayment} onCancel={()=>{setMxPayment(null);setPaymentBusy(false);void undoPhoneChargeTip()}}
         onChargeSaved={async(savedCardId)=>{const draft=savedDraft||activeTab;if(!draft)return;const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"charge_saved_card",replayId:mxPayment.replayId,savedCardId,customerConsented:true})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The saved card could not be charged.");setMxPayment(null);setPaymentBusy(false);applyMxApproval(draft,result)}}
         saveCard={mxPayment.canSaveCard?{label:"Save this card for the customer (they agreed on the call)",
           start:async()=>{const draft=savedDraft||activeTab;if(!draft)return null;const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"save_card_start"})});return response.ok?response.json():null},
