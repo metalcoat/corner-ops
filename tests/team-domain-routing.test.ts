@@ -19,3 +19,8 @@ test("team hosts show team pages and keep ordering closed", () => {
     assert.equal(teamRoute(path), "deny", path);
   }
 });
+
+test("team domains serve the Android app's assetlinks file and nothing else under .well-known", () => {
+  assert.equal(teamRoute("/.well-known/assetlinks.json"), "allow");
+  assert.equal(teamRoute("/.well-known/other.json"), "deny");
+});
