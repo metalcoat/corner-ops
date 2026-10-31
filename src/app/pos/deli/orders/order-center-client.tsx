@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import PosPinGate, { type PosSessionView } from "../../pos-pin-gate";
 import ItemCancellationPanel from "./item-cancellation-panel";
-import BulkCashVoidPanel from "./bulk-cash-void-panel";
 import VoidMoneyPanel from "./void-money-panel";
 import OrderCarPhotos from "./order-car-photos";
 import { formatOrderModifier } from "@/lib/ordering-line-format";
@@ -72,7 +71,6 @@ export default function OrderCenterClient() {
     [reopenBusy, setReopenBusy] = useState(false),
     [clearEnabled, setClearEnabled] = useState(false),
     [clearBusy, setClearBusy] = useState(false),
-    [bulkCashOpen, setBulkCashOpen] = useState(false),
     [cancelItem, setCancelItem] = useState<any>(null);
   const [clock, setClock] = useState(() => Date.now());
   const [creditAmount,setCreditAmount]=useState(""),[creditReason,setCreditReason]=useState(""),[creditBusy,setCreditBusy]=useState(false);
@@ -340,7 +338,6 @@ export default function OrderCenterClient() {
       <h1 className="ocScreenReaderTitle">Orders</h1>
       {orderTiles}
       <div id="oc-void-money"><VoidMoneyPanel refreshKey={voidMoneyRefresh} onCount={setVoidMoneyCount} /></div>
-      {bulkCashOpen && <BulkCashVoidPanel onClose={() => setBulkCashOpen(false)} onComplete={load} />}
       <div className="ocControls">
         {error && !selected && <p role="alert">{error}</p>}
         <nav>
@@ -391,9 +388,6 @@ export default function OrderCenterClient() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Order, customer, phone, address (last 60 days)"
           />
-          {clearEnabled && session.session?.posRole === "owner" && (
-            <button type="button" onClick={() => setBulkCashOpen(true)}>BULK VOID CASH ORDERS</button>
-          )}
           {clearEnabled && session.session?.posRole !== "employee" && (
             <button className="danger clearTestOrders" disabled={clearBusy} onClick={() => void clearTestOrders()}>
               {clearBusy ? "CLEARING…" : "CLEAR ACTIVE TEST ORDERS"}

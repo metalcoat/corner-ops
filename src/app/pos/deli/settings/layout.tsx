@@ -1,5 +1,7 @@
+import { headers } from "next/headers";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { localDevToolsAllowed } from "@/lib/local-dev-tools";
 import { getPosSession } from "@/lib/pos-auth";
 import ManagerAccessGate from "../manager-access-gate";
 import "./settings.css";
@@ -16,5 +18,6 @@ export default async function SettingsLayout({ children }: { children: ReactNode
   const session = await getPosSession(true);
   if (!session) return <ManagerAccessGate />;
   if (session.posRole !== "manager" && session.posRole !== "owner") return <ManagerAccessGate denied />;
-  return <div className="managerSettingsWorkspace"><nav aria-label="Settings sections">{links.map(([label, href]) => <Link key={href} href={href}>{label}</Link>)}</nav>{children}</div>;
+  const ownerLinks = session.posRole === "owner" && localDevToolsAllowed(process.env, (await headers()).get("host")) ? [["Bulk void cash orders", "/pos/deli/settings/bulk-cash-void"]] as const : [];
+  return <div className="managerSettingsWorkspace"><nav aria-label="Settings sections">{[...links, ...ownerLinks].map(([label, href]) => <Link key={href} href={href}>{label}</Link>)}</nav>{children}</div>;
 }
