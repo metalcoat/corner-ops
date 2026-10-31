@@ -2077,7 +2077,7 @@ export default function PosClient({
     setDeliveryValidatedInput("");
     setDeliveryRoute(null);
     setAddressError("");
-    setSavedDraft(null);
+    invalidateEditableDraft();
   }
 
   async function validateAddress(
@@ -6460,7 +6460,7 @@ export default function PosClient({
                   autoComplete="off"
                   onChange={(event) => {
                     setDeliveryUnit(event.target.value);
-                    setSavedDraft(null);
+                    invalidateEditableDraft();
                   }}
                 />
               </label>
@@ -6480,7 +6480,7 @@ export default function PosClient({
                     className={deliveryUnit === dropoff ? "selected" : ""}
                     onClick={() => {
                       setDeliveryUnit(dropoff);
-                      setSavedDraft(null);
+                      invalidateEditableDraft();
                       setCheckoutError("");
                     }}
                   >
