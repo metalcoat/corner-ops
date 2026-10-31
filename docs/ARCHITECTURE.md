@@ -167,6 +167,7 @@ stateDiagram-v2
   checkout calls it before charging the card.
 - **Reopen / additions**: a sent order can be reopened for additions; the next send prints only the added items
   ("ADD ON") plus void/service-change lines. `restoreAbandonedReopenedOrders` puts back abandoned reopens.
+- **Pickup / delivery switch**: tapping the type on a reopened order saves at once (`ordering-fulfillment-change.ts`). Delivery uses the order's address, else the customer's most used saved address, else asks; the fee is added or removed then. Send tells the kitchen. A paid fee that comes off shows under "Needs refund or credit". Refused while a driver has the order.
 - **Voids** (`ordering-voids.ts`): manager + reason; reverses loyalty and reconciles tips. **It does not refund
   payments** (recorded as `paymentWasNotRefunded`); refunds are separate tender reversals.
 - **Item cancellations** (`ordering-item-cancellations.ts`): cancel part of a line after send, with refund or

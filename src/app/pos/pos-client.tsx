@@ -625,6 +625,47 @@ export default function PosClient({
       setVoidOrderBusy(false);
     }
   }
+  // A reopened order switches and reprices as soon as its type is tapped; there's no cart to wait for.
+  async function changeReopenedFulfillment(service: "pickup" | "delivery", useEnteredAddress = false) {
+    if (!savedDraft?.reopened || changingFulfillment) return;
+    const orderId = savedDraft.id;
+    setChangingFulfillment(true);
+    setCheckoutError("");
+    try {
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(orderId)}/fulfillment`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ serviceType: service, ...(useEnteredAddress ? { deliveryAddress: deliveryValidatedInput, deliveryUnit, deliveryValidationToken } : {}) }),
+      });
+      const payload = (await response.json()) as { error?: string; needsAddress?: boolean; order?: { delivery_fee_cents?: number } };
+      if (payload.needsAddress) {
+        setDeliveryAddress("");
+        setValidatedAddress(null);
+        setDeliveryValidationToken("");
+        setDeliveryValidatedInput("");
+        setDeliveryRoute(null);
+        setAddressError(payload.error || "Enter the delivery address.");
+        setDeliveryEditorOpen(true);
+        return;
+      }
+      if (!response.ok) throw new Error(payload.error || "Could not change this order.");
+      setServiceType(service);
+      setDeliveryEditorOpen(false);
+      setSavedDraft((current) => (current?.id === orderId ? { ...current, originalServiceType: service } : current));
+      try {
+        const stored = JSON.parse(localStorage.getItem("corner-ops-reopened-order") || "null");
+        if (stored?.id === orderId) localStorage.setItem("corner-ops-reopened-order", JSON.stringify({ ...stored, serviceType: service, originalServiceType: service }));
+      } catch { /* The server already has the change. */ }
+      await refreshReopenedOrder(orderId);
+      const feeCents = Number(payload.order?.delivery_fee_cents || 0);
+      setCartNotice(`${service === "delivery" ? `Switched to delivery · ${money(feeCents)} delivery fee added` : "Switched to pickup · delivery fee removed"}. Press SEND to update the kitchen.`);
+    } catch (error) {
+      setDeliveryEditorOpen(false);
+      setCheckoutError(error instanceof Error ? error.message : "Could not change this order.");
+    } finally {
+      setChangingFulfillment(false);
+    }
+  }
   function invalidateEditableDraft() {
     setSavedDraft((current) => (current?.reopened ? current : null));
   }
@@ -848,6 +889,7 @@ export default function PosClient({
     number | null
   >(null);
   const [deliveryEditorOpen, setDeliveryEditorOpen] = useState(false);
+  const [changingFulfillment, setChangingFulfillment] = useState(false);
   const [customer, setCustomer] = useState<PosCustomer | null>(null),
     [customerOpen, setCustomerOpen] = useState(false),
     [quickAddCaller, setQuickAddCaller] = useState(false),
@@ -2078,7 +2120,7 @@ export default function PosClient({
       setDeliveryRoute(payload.route || null);
       setDeliveryAddress(payload.address.formattedAddress);
       setAddressSessionToken(clientId());
-      setSavedDraft(null);
+      invalidateEditableDraft();
     } catch (error) {
       setValidatedAddress(null);
       setDeliveryValidationToken("");
@@ -3895,7 +3937,12 @@ export default function PosClient({
             key={service}
             type="button"
             className={serviceType === service ? "active" : ""}
+            disabled={changingFulfillment}
             onClick={() => {
+              if (savedDraft?.reopened && (service === "pickup" || service === "delivery")) {
+                if (service !== serviceType) void changeReopenedFulfillment(service);
+                return;
+              }
               setServiceType(service);
               invalidateEditableDraft();
               setDeliveryEditorOpen(false);
@@ -6465,6 +6512,18 @@ export default function PosClient({
                 onClick={() => void validateAddress()}
               >
                 {validatingAddress ? "Validating…" : "VERIFY ADDRESS"}
+              </button>
+            ) : savedDraft?.reopened ? (
+              <button
+                type="button"
+                className="validateAddressButton posSaveAddressButton"
+                disabled={
+                  changingFulfillment ||
+                  Boolean(selectedDeliveryLocation?.requiresDropoff !== false && selectedDeliveryLocation && !deliveryUnit)
+                }
+                onClick={() => void changeReopenedFulfillment("delivery", true)}
+              >
+                {changingFulfillment ? "SAVING…" : "USE THIS ADDRESS"}
               </button>
             ) : (
               <button

@@ -28,7 +28,7 @@ export async function listOrders(input: { business: OrderingBusiness; date?: str
       o.first_name_snapshot,o.last_name_snapshot,o.phone_snapshot,
       COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),NULLIF(c.display_name,''),'Guest') customer_name,
       COALESCE(NULLIF(o.phone_snapshot,''),p.display_phone,o.caller_phone) customer_phone,
-      a.formatted_address delivery_address,a.line2 delivery_unit,
+      CASE WHEN o.service_type='pickup' THEN NULL ELSE a.formatted_address END delivery_address,CASE WHEN o.service_type='pickup' THEN NULL ELSE a.line2 END delivery_unit,
       ((o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled') overdue_unpaid,
       (o.service_type='pickup' AND o.amount_due_cents > 0 AND o.status<>'cancelled' AND o.created_at<=NOW()-INTERVAL '40 minutes') pickup_attention,
       -- Who took it: the POS employee who rang it (created_by is their id), else where it came from.
@@ -66,7 +66,7 @@ export async function getOrderDetail(business: OrderingBusiness, id: string) {
   await ensureOrderingAccountSchema();
   await ensureOrderingCustomerSchema();
   const sql = getSql();
-  const rows = await sql`SELECT o.*,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,COALESCE(NULLIF(o.phone_snapshot,''),o.caller_phone) customer_phone,a.formatted_address delivery_address,a.line2 delivery_unit FROM ordering_orders o LEFT JOIN ordering_order_delivery_addresses a ON a.order_id=o.id WHERE o.business=${business} AND o.id=${id} LIMIT 1`;
+  const rows = await sql`SELECT o.*,COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),'Guest') customer_name,COALESCE(NULLIF(o.phone_snapshot,''),o.caller_phone) customer_phone,CASE WHEN o.service_type='pickup' THEN NULL ELSE a.formatted_address END delivery_address,CASE WHEN o.service_type='pickup' THEN NULL ELSE a.line2 END delivery_unit FROM ordering_orders o LEFT JOIN ordering_order_delivery_addresses a ON a.order_id=o.id WHERE o.business=${business} AND o.id=${id} LIMIT 1`;
   if (!rows[0]) return null;
   const order = rows[0];
   order.items = await sql`SELECT * FROM ordering_order_items WHERE order_id=${id} ORDER BY sort_order,created_at`;

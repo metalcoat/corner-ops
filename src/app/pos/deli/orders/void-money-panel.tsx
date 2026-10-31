@@ -53,7 +53,7 @@ export default function VoidMoneyPanel({ refreshKey, onCount }: { refreshKey: nu
     <section className="ocVoidMoney" aria-label="Needs refund or credit">
       <header>
         <strong>NEEDS REFUND OR CREDIT · {orders.length}</strong>
-        <span>Voided food the customer paid for. Refund it or leave store credit before closing.</span>
+        <span>Voided food or a removed delivery fee the customer paid for. Refund it or leave store credit before closing.</span>
       </header>
       {error && <p className="ocDialogError" role="alert">{error}</p>}
       {orders.map((order) => {
@@ -62,7 +62,7 @@ export default function VoidMoneyPanel({ refreshKey, onCount }: { refreshKey: nu
         const amount = tender ? Math.min(order.owedCents, tender.remainingCents) : 0;
         return (
           <div className="ocVoidMoneyRow" key={order.orderId}>
-            <span><b>#{order.displayNumber}</b> {order.customerName} · {order.status === "cancelled" ? "voided order" : "voided items"} · <b>{money(order.owedCents)}</b></span>
+            <span><b>#{order.displayNumber}</b> {order.customerName} · {order.status === "cancelled" ? "voided order" : "order changed"} · <b>{money(order.owedCents)}</b></span>
             {order.tenders.length > 1 && (
               <select aria-label={`Payment for order ${order.displayNumber}`} value={tenderId} onChange={(event) => setTenderFor({ ...tenderFor, [order.orderId]: event.target.value })}>
                 {order.tenders.map((row) => <option key={row.id} value={row.id}>{tenderLabel(row)}</option>)}

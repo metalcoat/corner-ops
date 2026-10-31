@@ -33,7 +33,8 @@ export async function listUnresolvedVoidMoney(business: OrderingBusiness, orderI
     FROM ordering_orders o
     WHERE o.business=${business} AND o.status<>'draft' AND o.created_at>NOW()-INTERVAL '90 days'
       AND (${orderId ?? null}::uuid IS NULL OR o.id=${orderId ?? null}::uuid)
-      AND (o.status='cancelled' OR EXISTS(SELECT 1 FROM ordering_order_item_cancellations c WHERE c.order_id=o.id))
+      AND (o.status='cancelled' OR EXISTS(SELECT 1 FROM ordering_order_item_cancellations c WHERE c.order_id=o.id)
+        OR EXISTS(SELECT 1 FROM ordering_order_events e WHERE e.order_id=o.id AND e.event_type='order_fulfillment_changed'))
       AND o.paid_cents - CASE WHEN o.status='cancelled' THEN 0 ELSE o.total_cents END > 0
     ORDER BY COALESCE(o.voided_at, o.updated_at)`;
   const result: VoidMoneyOrder[] = [];

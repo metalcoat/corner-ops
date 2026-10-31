@@ -700,7 +700,7 @@ async function runDraftSubmit(
       if (event.event_type === "order_item_cancelled")
         ticketLines.push(`VOID/REMOVE: ${Number(details.quantity || 1)}x ${String(details.itemName || "ITEM").toUpperCase()}`);
       if (event.event_type === "order_fulfillment_changed")
-        ticketLines.push(`SERVICE CHANGE: ${String(details.from || "").toUpperCase()} -> ${String(details.to || "").toUpperCase()}`);
+        ticketLines.push(details.from === details.to ? "DELIVERY ADDRESS CHANGED" : `SERVICE CHANGE: ${String(details.from || "").toUpperCase()} -> ${String(details.to || "").toUpperCase()}`);
     }
 
     // Future orders wait for their prep time before the kitchen sees them
