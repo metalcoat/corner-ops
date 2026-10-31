@@ -5,13 +5,12 @@ import { ensureOrderingLoyaltySchema } from "@/lib/ordering-loyalty-schema";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 import { canManagePos } from "@/lib/ordering-route-auth";
 import { applyPromotionsToOrder } from "@/lib/ordering-promotions";
-import { loyaltyEarnIncrement } from "@/lib/ordering-loyalty-earn";
+import { loyaltyEarnIncrement, loyaltyLineEligible as eligible } from "@/lib/ordering-loyalty-earn";
 
 type Eligibility={itemIds?:string[];categoryIds?:string[];variantIds?:string[];quantityRequired?:number;channels?:string[];serviceTypes?:string[];discountedItemsQualify?:boolean};
 type Reward={itemIds?:string[];categoryIds?:string[];variantIds?:string[];quantity?:number;modifierAllowances?:Array<{groupId:string;quantity:number;intensity?:string}>;expirationDays?:number|null;capVariantId?:string|null};
 type Program={id:string;name:string;customer_name:string;description:string;qualifying_rule:Eligibility;reward_rule:Reward;active:boolean;version:number;priority:number;stackable:boolean};
 
-function eligible(item:Record<string,unknown>,rule:Eligibility|Reward){const itemId=String(item.item_id||""),categoryId=String(item.category_id||""),variantId=item.variant_id?String(item.variant_id):null;return Boolean(rule.itemIds?.includes(itemId)||rule.categoryIds?.includes(categoryId)||(variantId&&rule.variantIds?.includes(variantId)))}
 async function rewardCap(rule:Reward){if(!rule.capVariantId)return null;const rows=await getSql()`SELECT base_price_cents FROM ordering_menu_item_variants WHERE id=${rule.capVariantId}`;return rows[0]?Number(rows[0].base_price_cents):null}
 async function rewardUpgrades(rule:Reward){const cap=await rewardCap(rule);if(cap==null||!rule.variantIds?.length)return [];const variants=await getSql()`SELECT id,name,base_price_cents FROM ordering_menu_item_variants WHERE id=ANY(${rule.variantIds}::uuid[]) AND active=TRUE ORDER BY sort_order,name`;return loyaltyUpgrades(cap,rule.capVariantId,variants.map(row=>({id:String(row.id),name:String(row.name),priceCents:Number(row.base_price_cents)})))}
 export async function loyaltyStatus(customerId:string,business="Corner Deli"){

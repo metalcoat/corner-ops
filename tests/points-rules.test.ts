@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pointsBonusApplies, pointsEarnRate, pointsForCents, pointsRewardDiscount, pointsRewardFitsCart, type PointsSettings } from "../src/lib/ordering-points-rules";
+import { pointsBonusApplies, pointsEarnRate, pointsEligibleCents, pointsForCents, pointsRewardDiscount, pointsRewardFitsCart, type PointsSettings } from "../src/lib/ordering-points-rules";
 
 const settings: PointsSettings = { active: true, onlineRate: 1.1, storeRate: 1, staffPhoneOrdersEarn: true, bonusMultiplier: 2, bonusDays: [1, 2], bonusStart: "10:30", bonusEnd: "14:00", expiryMonths: 12 };
 const order = { source: "pos", orderOrigin: "pos", paymentStatus: "unpaid", callerPhone: "", customerPhones: ["+13155550101"] };
@@ -60,4 +60,37 @@ test("points: reward buttons only for what's in the cart", () => {
   assert.equal(pointsRewardFitsCart({ kind: "upgrade", itemIds: [], variantIds: ["thick"], optionIds: [] }, cart), true);
   assert.equal(pointsRewardFitsCart({ kind: "modifier", itemIds: [], variantIds: [], optionIds: ["bacon"] }, cart), false);
   assert.equal(pointsRewardFitsCart({ kind: "item", itemIds: ["fries"], variantIds: [], optionIds: [] }, cart), false);
+});
+
+const punchCard = [{ variantIds: ["jumbo-thin", "jumbo-thick"], quantityRequired: 10, channels: ["web"], discountedItemsQualify: false }];
+const earnLine = { itemId: "pizza", categoryId: "pizzas", variantId: null as string | null, lineTotalCents: 1000, promoted: false, loyaltyCents: 0, pointsCents: 0 };
+const jumboThin = { ...earnLine, variantId: "jumbo-thin", lineTotalCents: 1550 + 300 };
+const jumboThick = { ...earnLine, variantId: "jumbo-thick", lineTotalCents: 1650 };
+
+test("points: an order of only Jumbos earns nothing, toppings included, whatever the card's own rules", () => {
+  assert.equal(pointsEligibleCents([jumboThin, jumboThick], punchCard), 0);
+  assert.equal(pointsForCents(pointsEligibleCents([jumboThin], punchCard), 1.1), 0);
+});
+
+test("points: a Jumbo earns nothing at any price, the rest of the order earns normally", () => {
+  const fries = { ...earnLine, itemId: "fries", categoryId: "sides", lineTotalCents: 600 };
+  const small = { ...earnLine, variantId: "small", lineTotalCents: 1000 };
+  assert.equal(pointsEligibleCents([jumboThin, fries, small], punchCard), 1600);
+  assert.equal(pointsEligibleCents([{ ...jumboThin, lineTotalCents: 999, promoted: true }, fries], punchCard), 600);
+  assert.equal(pointsEligibleCents([{ ...jumboThin, lineTotalCents: 300, loyaltyCents: 1550 }, fries], punchCard), 600);
+  assert.equal(pointsEligibleCents([{ ...fries, pointsCents: 200 }, { ...fries, promoted: true }], punchCard), 400);
+  assert.equal(pointsForCents(pointsEligibleCents([jumboThin, fries], punchCard), 1.1), 6.6);
+  assert.equal(pointsForCents(pointsEligibleCents([jumboThin, fries], punchCard), 1), 6);
+});
+
+test("points: double lunch points still leave out Jumbos", () => {
+  const fries = { ...earnLine, itemId: "fries", categoryId: "sides", lineTotalCents: 600 };
+  assert.equal(pointsForCents(pointsEligibleCents([jumboThick], punchCard), 1.1, 2), 0);
+  assert.equal(pointsForCents(pointsEligibleCents([jumboThick, fries], punchCard), 1.1, 2), 13.2);
+});
+
+test("points: Jumbos follow the card however it names them, and no card means nothing is left out", () => {
+  assert.equal(pointsEligibleCents([earnLine], [{ categoryIds: ["pizzas"] }]), 0);
+  assert.equal(pointsEligibleCents([earnLine], [{ itemIds: ["pizza"] }]), 0);
+  assert.equal(pointsEligibleCents([jumboThin], []), jumboThin.lineTotalCents);
 });

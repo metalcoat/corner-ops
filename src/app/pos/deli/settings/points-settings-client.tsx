@@ -29,7 +29,7 @@ export default function PointsSettingsClient() {
   return (
     <section className="promotionSettings">
       <h2>Reward points</h2>
-      <p>Customers earn points on every order and spend them on the rewards below. Staff-taken orders need the code texted to the customer before points are used.</p>
+      <p>Customers earn points on almost every order and spend them on the rewards below. Jumbo pizzas earn on the punch card instead of points. Staff-taken orders need the code texted to the customer before points are used.</p>
       <div className="promotionForm">
         <label><input type="checkbox" checked={settings.active} onChange={(event) => set({ active: event.target.checked })} /> Points program on</label>
         <label>Online points per $1<input type="number" step="0.1" min="0" value={settings.onlineRate} onChange={(event) => set({ onlineRate: Number(event.target.value) })} /></label>

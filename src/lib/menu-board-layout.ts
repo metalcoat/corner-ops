@@ -168,7 +168,7 @@ export const REWARDS_TEASER = {
     { badge: "Points", head: "Earn points on almost every order", text: "Spend them on free food: fries, mozz sticks, pizza logs, even a free pizza." },
   ],
   bonus: "Double points Mon & Tue lunch",
-  fine: "Details at launch. Jumbo Thursday and other discounts don't earn.",
+  fine: "Details at launch. Jumbo pizzas earn on the punch card instead of points. Jumbo Thursday and other discounts don't earn.",
 };
 
 /**

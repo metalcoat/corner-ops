@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { loadEnvFile } from "node:process";
 
 // Points rewards against the local dev database: earning by channel, the lunch bonus,
-// caller-ID-only phone earning, discounted lines, the texted code gate for staff,
+// caller-ID-only phone earning, discounted lines, Jumbos, the texted code gate for staff,
 // spending, voids and expiry. Everything it creates is removed afterwards.
 loadEnvFile("/opt/corner-ops/.env");
 const address = execFileSync("docker", ["inspect", "corner-ops-postgres", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"], { encoding: "utf8" }).trim();
@@ -25,12 +25,16 @@ async function main() {
   const [fries] = await sql`SELECT id,base_price_cents FROM ordering_menu_items WHERE business='Corner Deli' AND active AND name='Small French Fries' LIMIT 1`;
   const [friesReward] = await sql`SELECT id,points FROM ordering_points_rewards WHERE business='Corner Deli' AND reward_key='small-fries'`;
   check(fries && friesReward, "Small French Fries and its reward are required.");
+  const [punchCard] = await sql`SELECT qualifying_rule FROM ordering_loyalty_programs WHERE business='Corner Deli' AND name ILIKE '%jumbo%' LIMIT 1`;
+  const [jumbo] = await sql`SELECT id,item_id FROM ordering_menu_item_variants WHERE id=${String((punchCard?.qualifying_rule as { variantIds?: string[] })?.variantIds?.[0])}`;
+  check(jumbo, "The Jumbo punch card and one of its variants are required.");
   const customerId = randomUUID(), phone = "+13155550142", orders: string[] = [];
-  async function order(input: { source: string; origin: string; cents: number; status?: string; paid?: boolean; caller?: string; at: string; promoted?: boolean }) {
+  async function order(input: { source: string; origin: string; cents: number; status?: string; paid?: boolean; caller?: string; at: string; promoted?: boolean; jumbo?: boolean; friesCents?: number }) {
     const id = randomUUID(), line = randomUUID();
     orders.push(id);
     await sql`INSERT INTO ordering_orders(id,business,source,order_origin,customer_id,status,payment_status,service_type,display_number,created_by,subtotal_cents,total_cents,amount_due_cents,caller_phone,scheduled_for,created_at) VALUES(${id},'Corner Deli',${input.source},${input.origin},${customerId},${input.status || "sent_to_kitchen"},${input.paid ? "paid" : "unpaid"},'pickup',${`PTS-${id.slice(0, 8)}`},'validator',${input.cents},${input.cents},${input.cents},${input.caller || ""},${input.at},${input.at})`;
-    await sql`INSERT INTO ordering_order_items(id,order_id,item_id,item_name_snapshot,quantity,unit_price_cents,line_total_cents,sort_order) VALUES(${line},${id},${fries.id},'Points fixture',1,${input.cents},${input.cents},0)`;
+    await sql`INSERT INTO ordering_order_items(id,order_id,item_id,variant_id,item_name_snapshot,quantity,unit_price_cents,line_total_cents,sort_order) VALUES(${line},${id},${input.jumbo ? jumbo.item_id : fries.id},${input.jumbo ? jumbo.id : null},'Points fixture',1,${input.cents},${input.cents},0)`;
+    if (input.friesCents) await sql`INSERT INTO ordering_order_items(id,order_id,item_id,item_name_snapshot,quantity,unit_price_cents,line_total_cents,sort_order) VALUES(${randomUUID()},${id},${fries.id},'Points fixture fries',1,${input.friesCents},${input.friesCents},1)`;
     if (input.promoted) {
       const app = randomUUID();
       const [promotion] = await sql`SELECT id FROM ordering_promotions WHERE business='Corner Deli' LIMIT 1`;
@@ -70,9 +74,19 @@ async function main() {
     const promoted = await order({ source: "web", origin: "web", cents: 1500, at: wednesday, promoted: true });
     await points.earnPointsForOrder(promoted.id, staff);
     check((await earned(promoted.id)) === 0, "Discounted lines must not earn.");
+    const onlyJumbo = await order({ source: "web", origin: "web", cents: 1550, at: wednesday, jumbo: true });
+    await points.earnPointsForOrder(onlyJumbo.id, staff);
+    check((await earned(onlyJumbo.id)) === 0, "A Jumbo must not earn points.");
+    const mixed = await order({ source: "pos", origin: "pos", cents: 1550, friesCents: 1000, at: wednesday, jumbo: true });
+    await points.earnPointsForOrder(mixed.id, staff);
+    check((await earned(mixed.id)) === 10, "A mixed order should earn only on the non-Jumbo items.");
+    const mixedLunch = await order({ source: "web", origin: "web", cents: 1550, friesCents: 1000, at: mondayLunch, jumbo: true });
+    await points.earnPointsForOrder(mixedLunch.id, staff);
+    check((await earned(mixedLunch.id)) === 22, "Double lunch points should still leave out the Jumbo.");
+    await points.reversePointsForOrder(mixedLunch.id, staff, "Validator void");
     const balance = await points.pointsBalance(customerId);
-    check(balance === 96, `Balance should be 96, got ${balance}`);
-    result.earning = { online20: 22, mondayLunchOnline20: 44, inStore10: 10, aiCallerMatch: 10, aiOtherCaller: 0, aiBlocked: 0, staffPhoneUnpaid: 0, staffPhonePaid: 10, discounted: 0, balance };
+    check(balance === 106, `Balance should be 106, got ${balance}`);
+    result.earning = { online20: 22, mondayLunchOnline20: 44, inStore10: 10, aiCallerMatch: 10, aiOtherCaller: 0, aiBlocked: 0, staffPhoneUnpaid: 0, staffPhonePaid: 10, discounted: 0, onlyJumbo: 0, jumboPlus10InStore: 10, jumboPlus10MondayLunchOnline: 22, voidTakesBackReducedAmount: true, balance };
 
     const draft = await order({ source: "pos", origin: "phone", cents: Number(fries.base_price_cents), status: "draft", at: wednesday });
     let blocked = false;
@@ -89,10 +103,10 @@ async function main() {
     check(Number(priced.loyalty_discount_cents) === Number(fries.base_price_cents) && Number(priced.total_cents) === 0, "Free fries should take the whole price off.");
     await sql`UPDATE ordering_orders SET status='sent_to_kitchen' WHERE id=${draft.id}`;
     await points.finalizePointsRedemptions(draft.id); await points.finalizePointsRedemptions(draft.id);
-    check((await points.pointsBalance(customerId)) === 96 - Number(friesReward.points), "Spending should take the reward's points once.");
+    check((await points.pointsBalance(customerId)) === 106 - Number(friesReward.points), "Spending should take the reward's points once.");
     await points.reversePointsForOrder(web.id, staff, "Validator void"); await points.reversePointsForOrder(web.id, staff, "Validator void again");
     await points.reversePointsForOrder(draft.id, staff, "Validator void");
-    check((await points.pointsBalance(customerId)) === 96 - 22, "Voids should take back earned points and return spent ones, once.");
+    check((await points.pointsBalance(customerId)) === 106 - 22, "Voids should take back earned points and return spent ones, once.");
     result.spending = { codeRequired: true, wrongCodeRejected: true, freeFriesDiscountCents: Number(fries.base_price_cents), pointsSpent: Number(friesReward.points), voidsReversed: true };
 
     await sql`UPDATE ordering_points_ledger SET created_at=NOW()-INTERVAL '7 months' WHERE customer_id=${customerId}`;
@@ -103,6 +117,7 @@ async function main() {
     await sql`DELETE FROM ordering_points_redeem_codes WHERE customer_id=${customerId}`;
     await sql`DELETE FROM ordering_order_points_redemptions WHERE customer_id=${customerId}`;
     await sql`DELETE FROM ordering_points_ledger WHERE customer_id=${customerId}`;
+    await sql`DELETE FROM ordering_loyalty_ledger WHERE customer_id=${customerId}`; // the Jumbo fixtures get punch card backfill rows
     if (orders.length) await sql`DELETE FROM ordering_orders WHERE id=ANY(${orders}::uuid[])`;
     await sql`DELETE FROM ordering_customer_phones WHERE customer_id=${customerId}`;
     await sql`DELETE FROM ordering_customers WHERE id=${customerId}`;

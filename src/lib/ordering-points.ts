@@ -4,10 +4,12 @@ import type { OrderingActor } from "@/lib/ordering-route-auth";
 import { canManagePos } from "@/lib/ordering-route-auth";
 import { applyPromotionsToOrder } from "@/lib/ordering-promotions";
 import { recalculateLoyaltyOrder } from "@/lib/ordering-loyalty";
+import type { LoyaltyLineRule } from "@/lib/ordering-loyalty-earn";
 import { sendTransactionalSms } from "@/lib/sms-notifications";
 import {
   pointsBonusApplies,
   pointsEarnRate,
+  pointsEligibleCents,
   pointsForCents,
   pointsRewardDiscount,
   type PointsLine,
@@ -84,10 +86,11 @@ export async function pointsHistory(customerId: string, limit = 12) {
   return getSql()`SELECT ledger.id,ledger.entry_type,ledger.points,ledger.reason,ledger.description,ledger.created_by,ledger.created_at,orders.display_number FROM ordering_points_ledger ledger LEFT JOIN ordering_orders orders ON orders.id=ledger.order_id WHERE ledger.customer_id=${customerId} ORDER BY ledger.created_at DESC,ledger.id LIMIT ${Math.max(1, Math.min(100, limit))}`;
 }
 
-async function orderLines(orderId: string): Promise<Array<PointsLine & { id: string; promoted: boolean; loyaltyCents: number; pointsCents: number }>> {
+async function orderLines(orderId: string): Promise<Array<PointsLine & { id: string; categoryId: string | null; promoted: boolean; loyaltyCents: number; pointsCents: number }>> {
   const sql = getSql();
   const lines = await sql`
     SELECT line.id,line.item_id,line.variant_id,line.unit_price_cents,line.line_total_cents,line.sort_order,
+      (SELECT category_id FROM ordering_menu_items item WHERE item.id=line.item_id) category_id,
       EXISTS(SELECT 1 FROM ordering_order_promotion_allocations allocation JOIN ordering_order_promotion_applications application ON application.id=allocation.application_id WHERE application.order_id=line.order_id AND allocation.order_item_id=line.id AND allocation.discount_cents>0) promoted,
       COALESCE((SELECT SUM(discount_cents) FROM ordering_order_loyalty_applications app WHERE app.order_item_id=line.id),0) loyalty_cents,
       COALESCE((SELECT SUM(discount_cents) FROM ordering_order_points_redemptions points WHERE points.order_item_id=line.id),0) points_cents
@@ -98,6 +101,7 @@ async function orderLines(orderId: string): Promise<Array<PointsLine & { id: str
   return lines.map((line) => ({
     id: String(line.id),
     itemId: String(line.item_id),
+    categoryId: line.category_id ? String(line.category_id) : null,
     variantId: line.variant_id ? String(line.variant_id) : null,
     unitPriceCents: Number(line.unit_price_cents),
     lineTotalCents: Number(line.line_total_cents),
@@ -120,9 +124,18 @@ async function rewardRule(reward: Row): Promise<PointsRewardRule> {
 }
 
 /**
+ * What the Jumbo punch card covers, set in POS settings > Loyalty. Found by name because
+ * managers can edit a program, and paused programs count: a Jumbo never earns points.
+ */
+async function jumboPunchCardRules(business: string): Promise<LoyaltyLineRule[]> {
+  const programs = await getSql()`SELECT qualifying_rule FROM ordering_loyalty_programs WHERE business=${business} AND (name ILIKE '%jumbo%' OR customer_name ILIKE '%jumbo%')`;
+  return programs.map((program) => program.qualifying_rule as LoyaltyLineRule);
+}
+
+/**
  * Earns points for an order that reached the kitchen (or completed, for orders
- * paid at the end). Idempotent: one earn entry per order. Discounted lines,
- * items bought with points or a loyalty reward, tax, tips and fees don't earn.
+ * paid at the end). Idempotent: one earn entry per order. Discounted lines, Jumbo
+ * pizzas, items bought with points or a loyalty reward, tax, tips and fees don't earn.
  */
 export async function earnPointsForOrder(orderId: string, actor: OrderingActor) {
   const sql = getSql();
@@ -133,8 +146,7 @@ export async function earnPointsForOrder(orderId: string, actor: OrderingActor) 
   const phones = (await sql`SELECT normalized_phone FROM ordering_customer_phones WHERE customer_id=${String(order.customer_id)}`).map((row) => String(row.normalized_phone));
   const rate = pointsEarnRate({ source: String(order.source), orderOrigin: String(order.order_origin || ""), paymentStatus: String(order.payment_status || ""), callerPhone: String(order.caller_phone || ""), customerPhones: phones }, settings);
   if (!rate) return;
-  const lines = await orderLines(orderId);
-  const eligibleCents = lines.filter((line) => !line.promoted && !line.loyaltyCents).reduce((sum, line) => sum + Math.max(0, line.lineTotalCents - line.pointsCents), 0);
+  const eligibleCents = pointsEligibleCents(await orderLines(orderId), await jumboPunchCardRules(String(order.business)));
   const orderFor = new Date(String(order.scheduled_for || order.created_at));
   const bonus = pointsBonusApplies(orderFor, settings);
   const points = pointsForCents(eligibleCents, rate, bonus ? settings.bonusMultiplier : 1);

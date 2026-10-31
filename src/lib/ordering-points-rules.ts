@@ -1,4 +1,5 @@
 import { STORE_TIME_ZONE } from "./business-day";
+import { loyaltyLineEligible, type LoyaltyLineRule } from "./ordering-loyalty-earn";
 
 // Pure rules for the points program, kept free of database access so they can be unit tested.
 
@@ -64,6 +65,28 @@ export function pointsBonusApplies(orderFor: Date, settings: PointsSettings): bo
 export function pointsForCents(eligibleCents: number, rate: number, multiplier = 1): number {
   if (eligibleCents <= 0 || rate <= 0) return 0;
   return Math.floor((eligibleCents * rate * multiplier) / 10) / 10;
+}
+
+export type PointsEarnLine = {
+  itemId: string;
+  categoryId: string | null;
+  variantId: string | null;
+  lineTotalCents: number;
+  promoted: boolean;
+  loyaltyCents: number;
+  pointsCents: number;
+};
+
+/**
+ * The food amount an order earns on. Discounted lines, lines bought with a loyalty reward
+ * and the part paid with points don't count, and neither does a line the Jumbo punch card
+ * covers, toppings included and at any price: Jumbos earn on the card instead of points.
+ */
+export function pointsEligibleCents(lines: PointsEarnLine[], jumboRules: LoyaltyLineRule[]): number {
+  return lines
+    .filter((line) => !line.promoted && !line.loyaltyCents)
+    .filter((line) => !jumboRules.some((rule) => loyaltyLineEligible({ item_id: line.itemId, category_id: line.categoryId, variant_id: line.variantId }, rule)))
+    .reduce((sum, line) => sum + Math.max(0, line.lineTotalCents - line.pointsCents), 0);
 }
 
 export type PointsRewardRule = {

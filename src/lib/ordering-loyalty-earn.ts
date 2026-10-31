@@ -13,3 +13,11 @@ export function loyaltyEarnIncrement(qualifyingUnits: number, alreadyEarnedUnits
   const delta = Math.max(0, qualifying - earned);
   return { delta, earnedThroughUnits: earned + delta };
 }
+
+export type LoyaltyLineRule = { itemIds?: string[]; categoryIds?: string[]; variantIds?: string[] };
+
+/** Whether an order line is one a loyalty rule names, by item, category or variant. */
+export function loyaltyLineEligible(item: Record<string, unknown>, rule: LoyaltyLineRule) {
+  const itemId = String(item.item_id || ""), categoryId = String(item.category_id || ""), variantId = item.variant_id ? String(item.variant_id) : null;
+  return Boolean(rule.itemIds?.includes(itemId) || rule.categoryIds?.includes(categoryId) || (variantId && rule.variantIds?.includes(variantId)));
+}
