@@ -51,6 +51,12 @@ const money = (c: number) =>
     c / 100,
   );
 const label = (v: string) => v.replaceAll("_", " ").toUpperCase();
+// Still owes money. Voided or cancelled orders don't, and refunded orders count as paid.
+const isUnpaid = (o: Order) =>
+  Number(o.amount_due_cents) > 0 &&
+  o.status !== "cancelled" &&
+  !o.voided_at &&
+  !["refunded", "partially_refunded"].includes(o.payment_status);
 export default function OrderCenterClient() {
   const router = useRouter();
   const [session, setSession] = useState<PosSessionView | null>(null),
@@ -85,6 +91,7 @@ export default function OrderCenterClient() {
     return () => window.clearInterval(timer);
   }, []);
   const [voidMoneyRefresh, setVoidMoneyRefresh] = useState(0);
+  const [voidMoneyCount, setVoidMoneyCount] = useState(0);
   const load = useCallback(async () => {
     setVoidMoneyRefresh((value) => value + 1);
     if (!session?.authenticated) return;
@@ -114,18 +121,8 @@ export default function OrderCenterClient() {
     const id = new URLSearchParams(window.location.search).get("orderId");
     if (id) void details({ id } as Order);
   }, [session?.authenticated]);
-  const overdue = orders.filter((o) => o.overdue_unpaid),
-    open = orders.filter(
-      (o) =>
-        !o.overdue_unpaid && o.status !== "cancelled" && Number(o.amount_due_cents) > 0,
-    ),
-    paid = orders.filter((o) =>
-      o.status === "cancelled" || Number(o.amount_due_cents) <= 0,
-    );
-  const searchingHistory = query.trim().length > 0;
-  // Anything with nothing left to pay (paid, refunded, partially refunded) counts as settled.
-  const futureUnpaid = orders.filter((o) => Number(o.amount_due_cents) > 0);
-  const futurePaid = orders.filter((o) => Number(o.amount_due_cents) <= 0);
+  // The API's order is kept inside each group, so overdue orders still lead the unpaid ones.
+  const sortedOrders = [...orders.filter(isUnpaid), ...orders.filter((o) => !isUnpaid(o))];
   async function details(order: Order) {
     const r = await fetch(`/api/ordering/order-center/${order.id}`);
     const b = await r.json();
@@ -262,19 +259,15 @@ export default function OrderCenterClient() {
         onAuthenticated={(s) => setSession({ authenticated: true, session: s })}
       />
     );
-  const section = (title: string, list: Order[], closed = false) => (
-    <section className={closed ? "ocSection closed" : "ocSection"}>
-      <h2>
-        {title}
-        <span>{list.length}</span>
-      </h2>
-      {list.length === 0 && <p className="ocEmpty">No matching orders.</p>}
+  const orderTiles = (
+    <section className="ocSection">
+      {sortedOrders.length === 0 && <p className="ocEmpty">No matching orders.</p>}
       <div className="ocOrderGrid">
-      {list.map((o) => {
-        const unpaid = Number(o.amount_due_cents) > 0;
-        const pickupAttention = unpaid && o.service_type === "pickup" && o.status !== "cancelled" && clock - new Date(o.created_at).getTime() >= 40 * 60 * 1000;
+      {sortedOrders.map((o) => {
+        const unpaid = isUnpaid(o);
+        const pickupAttention = unpaid && o.service_type === "pickup" && clock - new Date(o.created_at).getTime() >= 40 * 60 * 1000;
         return (
-        <button className={`ocOrder ${pickupAttention ? "pickupAttention" : ""}`} key={o.id} disabled={reopenBusy} onClick={() => void (unpaid && o.status !== "cancelled" && !o.voided_at ? reopen(o) : details(o))}>
+        <button className={`ocOrder ${pickupAttention ? "pickupAttention" : ""} ${unpaid ? "" : "settled"}`} key={o.id} disabled={reopenBusy} onClick={() => void (unpaid ? reopen(o) : details(o))}>
           {o.overdue_unpaid && (
             <em>
               UNPAID FROM{" "}
@@ -286,7 +279,7 @@ export default function OrderCenterClient() {
             </em>
           )}
           <header><strong>#{o.display_number}</strong><b>{label(o.service_type)}</b></header>
-          <span className={`paymentBadge ${unpaid ? "unpaid" : "paid"}`}>{unpaid ? "UNPAID" : label(o.payment_status)}</span>
+          <span className={`paymentBadge ${unpaid ? "unpaid" : o.payment_status === "unpaid" ? "voided" : "paid"}`}>{unpaid ? "UNPAID" : o.payment_status === "unpaid" ? "VOIDED" : label(o.payment_status)}</span>
           <span className="customer">
             {o.customer_name}{o.customer_phone ? ` · ${o.customer_phone}` : ""}
           </span>
@@ -336,7 +329,7 @@ export default function OrderCenterClient() {
             {o.driver_name ? `Driver: ${o.driver_name}` : `Driver on clock at ${o.due_at ? new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(new Date(o.due_at)) : "order time"}: ${o.drivers_on_clock || "none"}`}
           </small>}
           {pickupAttention && <em className="pickupAlert">PICKUP UNPAID 40+ MINUTES</em>}
-          {unpaid && o.status !== "cancelled" && !o.voided_at && <span className="ocTapToPay">TAP TO OPEN · ADD · PAY</span>}
+          {unpaid && <span className="ocTapToPay">TAP TO OPEN · ADD · PAY</span>}
         </button>
       )})}
       </div>
@@ -344,11 +337,14 @@ export default function OrderCenterClient() {
   );
   return (
     <main className="ocPage">
-      <header>
-        <div>
-          <h1>Orders</h1>
-        </div>
+      <h1 className="ocScreenReaderTitle">Orders</h1>
+      {orderTiles}
+      <div id="oc-void-money"><VoidMoneyPanel refreshKey={voidMoneyRefresh} onCount={setVoidMoneyCount} /></div>
+      {bulkCashOpen && <BulkCashVoidPanel onClose={() => setBulkCashOpen(false)} onComplete={load} />}
+      <div className="ocControls">
+        {error && !selected && <p role="alert">{error}</p>}
         <nav>
+          {voidMoneyCount > 0 && <a className="ocVoidMoneyJump" href="#oc-void-money">NEEDS REFUND OR CREDIT · {voidMoneyCount}</a>}
           <button
             onClick={() => setView("date")}
             className={view === "date" ? "active" : ""}
@@ -369,56 +365,42 @@ export default function OrderCenterClient() {
           </button>
           <Link href="/pos/deli/drivers">DRIVERS / DISPATCH</Link>
         </nav>
-      </header>
-      <VoidMoneyPanel refreshKey={voidMoneyRefresh} />
-      <div className="ocTools">
-        <button onClick={() => move(-1)}>‹</button>
-        <button
-          onClick={() => {
-            setDate(isoDate(new Date()));
-            setView("date");
-          }}
-        >
-          TODAY
-        </button>
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => {
-            setDate(e.target.value);
-            setView("date");
-          }}
-        />
-        <button onClick={() => move(1)}>›</button>
-        <input
-          className="search"
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Order, customer, phone, address"
-        />
-        {clearEnabled && session.session?.posRole === "owner" && (
-          <button type="button" onClick={() => setBulkCashOpen(true)}>BULK VOID CASH ORDERS</button>
-        )}
-        {clearEnabled && session.session?.posRole !== "employee" && (
-          <button className="danger clearTestOrders" disabled={clearBusy} onClick={() => void clearTestOrders()}>
-            {clearBusy ? "CLEARING…" : "CLEAR ACTIVE TEST ORDERS"}
+        <div className="ocTools">
+          <button onClick={() => move(-1)}>‹</button>
+          <button
+            onClick={() => {
+              setDate(isoDate(new Date()));
+              setView("date");
+            }}
+          >
+            TODAY
           </button>
-        )}
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => {
+              setDate(e.target.value);
+              setView("date");
+            }}
+          />
+          <button onClick={() => move(1)}>›</button>
+          <input
+            className="search"
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Order, customer, phone, address (last 60 days)"
+          />
+          {clearEnabled && session.session?.posRole === "owner" && (
+            <button type="button" onClick={() => setBulkCashOpen(true)}>BULK VOID CASH ORDERS</button>
+          )}
+          {clearEnabled && session.session?.posRole !== "employee" && (
+            <button className="danger clearTestOrders" disabled={clearBusy} onClick={() => void clearTestOrders()}>
+              {clearBusy ? "CLEARING…" : "CLEAR ACTIVE TEST ORDERS"}
+            </button>
+          )}
+        </div>
       </div>
-      {error && !selected && <p role="alert">{error}</p>}
-      {bulkCashOpen && <BulkCashVoidPanel onClose={() => setBulkCashOpen(false)} onComplete={load} />}
-      {searchingHistory ? section("SEARCH RESULTS · LAST 60 DAYS", orders) : view === "future" ? <>
-        {section("FUTURE · UNPAID", futureUnpaid)}
-        {section("FUTURE · PAID", futurePaid, true)}
-      </> : <>{view === "date" &&
-        date === isoDate(new Date()) &&
-        section("OVERDUE UNPAID", overdue)}
-      {section(
-        view === "date" ? "TODAY OPEN / UNPAID" : "ALL OPEN / UNPAID",
-        open,
-      )}
-      {view === "date" && section("TODAY PAID / CLOSED", paid, true)}</>}
       {selected && (
         <div
           className="ocBackdrop"
@@ -567,7 +549,7 @@ export default function OrderCenterClient() {
                   {["paid", "partially_paid"].includes(selected.payment_status) && (
                     <p className="ocVoidNotice">
                       Voiding doesn&apos;t refund the payment. Before closing, refund it or leave store credit from
-                      &quot;Needs refund or credit&quot; at the top of Orders.
+                      &quot;Needs refund or credit&quot; at the bottom of Orders.
                     </p>
                   )}
                   <div>

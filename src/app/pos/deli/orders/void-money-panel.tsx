@@ -11,7 +11,7 @@ type Owed = { orderId: string; displayNumber: string; customerName: string; cust
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 const tenderLabel = (tender: Tender) => `${tender.tenderType.replaceAll("_", " ")}${tender.last4 ? ` ····${tender.last4}` : ""} · ${money(tender.remainingCents)}`;
 
-export default function VoidMoneyPanel({ refreshKey }: { refreshKey: number }) {
+export default function VoidMoneyPanel({ refreshKey, onCount }: { refreshKey: number; onCount?: (count: number) => void }) {
   const [orders, setOrders] = useState<Owed[]>([]);
   const [tenderFor, setTenderFor] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
@@ -25,6 +25,7 @@ export default function VoidMoneyPanel({ refreshKey }: { refreshKey: number }) {
   }, []);
 
   useEffect(() => { void load(); }, [load, refreshKey]);
+  useEffect(() => { onCount?.(orders.length); }, [onCount, orders.length]);
 
   async function resolve(order: Owed, method: "refund" | "store_credit") {
     const tender = order.tenders.find((row) => row.id === (tenderFor[order.orderId] || order.tenders[0]?.id));
