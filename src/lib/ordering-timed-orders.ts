@@ -15,6 +15,7 @@ import { applyPromotionsToOrder } from "@/lib/ordering-promotions";
 
 export type CreateTimedDraftOrderInput = {
   business: OrderingBusiness;
+  orderStartedAt?: string | null;
   source: OrderSource;
   serviceType: ServiceType;
   customerId?: string | null;
@@ -91,6 +92,7 @@ export async function createTimedDraftOrder(input: CreateTimedDraftOrderInput): 
   return withTransaction(async () => {
     const base = await createDraftOrderWithVariants({
       business: input.business,
+      orderStartedAt: input.orderStartedAt,
       source: input.source,
       serviceType: input.serviceType,
       customerId: input.customerId,

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import PosPinGate, { type PosSessionView } from "../../pos-pin-gate";
 import ItemCancellationPanel from "./item-cancellation-panel";
+import type { OrderTrailEntry } from "@/lib/ordering-order-trail";
 import VoidMoneyPanel from "./void-money-panel";
 import OrderCarPhotos from "./order-car-photos";
 import { formatOrderModifier } from "@/lib/ordering-line-format";
@@ -36,6 +37,7 @@ type Order = {
   void_reason?: string;
   items?: Array<Record<string, unknown>>;
   events?: Array<Record<string, unknown>>;
+  trail?: OrderTrailEntry[];
 };
 const tz = "America/New_York";
 const isoDate = (date: Date) =>
@@ -386,7 +388,7 @@ export default function OrderCenterClient() {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Order, customer, phone, address (last 60 days)"
+            placeholder="Order, customer, phone, address, employee (last year)"
           />
           {clearEnabled && session.session?.posRole !== "employee" && (
             <button className="danger clearTestOrders" disabled={clearBusy} onClick={() => void clearTestOrders()}>
@@ -450,6 +452,18 @@ export default function OrderCenterClient() {
               </p>
             )}
             {selected.service_type.includes("delivery") && <OrderCarPhotos orderId={selected.id} />}
+            {(selected.trail || []).length > 0 && <>
+              <h3>Who did what</h3>
+              <ol className="ocTrail">
+                {(selected.trail || []).map((entry, index) => (
+                  <li key={index}>
+                    <time>{new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }).format(new Date(entry.at))}</time>
+                    <strong>{entry.label}</strong>
+                    <span>{entry.who}{entry.detail ? ` · ${entry.detail}` : ""}</span>
+                  </li>
+                ))}
+              </ol>
+            </>}
             <h3>Items</h3>
             {(selected.items || []).map((i: any) => (
               <article key={i.id}>

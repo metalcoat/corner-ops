@@ -788,6 +788,8 @@ export default function PosClient({
   );
   const [giftCardNumber, setGiftCardNumber] = useState("");
   const giftCardInputRef = useRef<HTMLInputElement>(null);
+  // When the first item went on, for the order's accountability trail.
+  const orderStartedAtRef = useRef<string | null>(null);
   const [tipPromptOpen, setTipPromptOpen] = useState(false);
   // Charging a customer who's on the phone: never the store terminal, and a card that's cancelled takes its tip back off.
   const phoneChargeRef = useRef(false);
@@ -1527,6 +1529,10 @@ export default function PosClient({
     submittedOrder,
     subtotalCents,
   ]);
+  useEffect(() => {
+    if (!cart.length) orderStartedAtRef.current = null;
+    else orderStartedAtRef.current ??= new Date().toISOString();
+  }, [cart.length]);
   useEffect(() => {
     if (serviceType !== "delivery" || !deliveryRoute || !cart.length) {
       setQuotedDeliveryFeeCents(null);
@@ -2627,6 +2633,7 @@ export default function PosClient({
       // The same key is reused if this draft is replayed from the offline queue, so a draft the
       // server created before the connection dropped is returned instead of duplicated.
       idempotencyKey:reopenedDraft?undefined:mutationId,
+      orderStartedAt:orderStartedAtRef.current,
       stationKey:stationProfile?.station_key||localStorage.getItem("corner-ops-station-key")||"",
       business,serviceType,timingMode,
       scheduledFor:timingMode === "future" ? new Date(scheduledFor).toISOString() : null,

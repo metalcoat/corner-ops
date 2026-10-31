@@ -2,6 +2,7 @@ import { getSql } from "@/lib/db";
 import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
 import { ensureOrderingAccountSchema } from "@/lib/ordering-account-schema";
 import type { OrderingBusiness } from "@/lib/ordering-core";
+import { orderTrail } from "@/lib/ordering-order-trail";
 import { BUSINESS_TIMEZONE, getPosSettings } from "@/lib/ordering-pos-settings";
 
 export function businessDate(value = new Date(), timezone = BUSINESS_TIMEZONE): string {
@@ -55,8 +56,9 @@ export async function listOrders(input: { business: OrderingBusiness; date?: str
       AND (CASE WHEN ${searchingHistory} THEN o.created_at >= NOW()-(${searchDays}::text||' days')::interval WHEN ${futureOnly} THEN o.scheduled_for > NOW() AND o.status <> 'cancelled' WHEN ${openOnly} THEN o.amount_due_cents > 0 AND o.status <> 'cancelled' ELSE ((o.created_at AT TIME ZONE ${timezone})::date=${date}::date OR (${includeOverdue} AND (o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled')) END)
       AND (${q}='' OR o.display_number ILIKE ${like} OR o.first_name_snapshot ILIKE ${like} OR o.last_name_snapshot ILIKE ${like}
         OR trim(o.first_name_snapshot||' '||o.last_name_snapshot) ILIKE ${like} OR c.display_name ILIKE ${like}
-        OR regexp_replace(COALESCE(NULLIF(o.phone_snapshot,''),p.display_phone,o.caller_phone),'[^0-9]','','g') LIKE ${digitLike}
-        OR a.formatted_address ILIKE ${like} OR a.line1 ILIKE ${like})
+        OR (${digits}<>'' AND regexp_replace(COALESCE(NULLIF(o.phone_snapshot,''),p.display_phone,o.caller_phone),'[^0-9]','','g') LIKE ${digitLike})
+        OR a.formatted_address ILIKE ${like} OR a.line1 ILIKE ${like}
+        OR taker.name ILIKE ${like} OR sender.name ILIKE ${like} OR payer.name ILIKE ${like})
     ORDER BY CASE WHEN ${includeOverdue} AND (o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled' THEN 0 WHEN o.amount_due_cents <= 0 THEN 2 ELSE 1 END,
       CASE WHEN ${futureOnly} THEN o.scheduled_for END ASC, CASE WHEN ${openOnly} THEN o.created_at END ASC, o.created_at DESC
   `;
@@ -74,5 +76,10 @@ export async function getOrderDetail(business: OrderingBusiness, id: string) {
     item.modifiers = await sql`SELECT * FROM ordering_order_item_modifiers WHERE order_item_id=${item.id} ORDER BY created_at`;
   }
   order.events = await sql`SELECT event.event_type,event.actor_type,event.actor_id,event.details,event.created_at,COALESCE(NULLIF(event.details->>'actorName',''),employee.name,event.actor_id) actor_name FROM ordering_order_events event LEFT JOIN employees employee ON employee.id::text=event.actor_id WHERE event.order_id=${id} ORDER BY event.created_at`;
+  const payments = await sql`SELECT payment.created_at,payment.transaction_type,payment.tender_type,payment.amount_cents,payment.brand,payment.last4,payment.reason,COALESCE(NULLIF(payment.details->>'actorName',''),employee.name,NULLIF(payment.created_by,''),'Unknown') taken_by
+    FROM ordering_payment_transactions payment LEFT JOIN employees employee ON employee.id::text=payment.created_by WHERE payment.order_id=${id} AND payment.status='approved' ORDER BY payment.created_at`;
+  const taker = (await sql`SELECT CASE ${String(order.source)} WHEN 'web' THEN 'Online' WHEN 'ai_phone' THEN 'AI phone' WHEN 'kiosk' THEN 'Kiosk' ELSE COALESCE((SELECT name FROM employees WHERE id::text=${String(order.created_by)}),NULLIF(${String(order.created_by)},'')) END taken_by`)[0];
+  order.taken_by = taker?.taken_by;
+  order.trail = orderTrail({ createdAt: order.created_at, takenBy: order.taken_by, events: order.events, payments });
   return order;
 }

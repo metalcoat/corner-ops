@@ -26,6 +26,7 @@ void (async () => {
       if (service === "delivery") await sql`INSERT INTO ordering_order_delivery_addresses(order_id,entered_address,formatted_address,line1,city,state,postal_code,latitude,longitude,provider,validation_status,validated_at) VALUES(${id},'412 Jay St','412 Jay St, Utica, NY 13501','412 Jay St','Utica','NY','13501',43.1,-75.2,'validation','validated',NOW())`;
     }
     const todayRows = await listOrders({ business: "Corner Deli", date: today });
+    if ((await listOrders({ business: "Corner Deli", query: "zzz-no-such-customer", searchDays: 365 })).length) throw new Error("A name with no digits matched every order with a phone number.");
     const open = await listOrders({ business: "Corner Deli", allOpen: true });
     if (!todayRows.some((order) => order.delivery_address) || !todayRows.some((order) => order.scheduled_for)) throw new Error("Today address/future presentation data missing.");
     const overdue = todayRows.filter((order) => order.overdue_unpaid);

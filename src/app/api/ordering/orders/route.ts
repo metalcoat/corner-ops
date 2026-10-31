@@ -56,6 +56,12 @@ async function orderResponse(order: { id: unknown }, status: number) {
   return isoJson({ order, promotions, orderItems }, { status });
 }
 
+/** The POS's clock, so only believed if it's a sensible time before now. */
+function startedAt(value: unknown) {
+  const at = typeof value === "string" ? Date.parse(value) : NaN, age = Date.now() - at;
+  return age >= 0 && age <= 12 * 3_600_000 ? new Date(at).toISOString() : null;
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
@@ -124,6 +130,7 @@ export async function POST(request: Request) {
       orderOrigin: body.orderOrigin === "phone" ? "phone" : "pos",
       createdBy: actor.id,
       createdByName: actor.name,
+      orderStartedAt: startedAt(body.orderStartedAt),
       items,
       timingMode,
       requestedFor: readRequestedFor(body.scheduledFor, timingMode),

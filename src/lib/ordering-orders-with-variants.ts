@@ -9,6 +9,7 @@ export type VariantConfiguredOrderItemInput = ConfiguredOrderItemInput & {
 };
 
 export type CreateVariantDraftOrderInput = {
+  orderStartedAt?: string | null;
   business: OrderingBusiness;
   source: OrderSource;
   serviceType: ServiceType;

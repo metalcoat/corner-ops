@@ -22,6 +22,8 @@ export type ConfiguredOrderItemInput = {
 
 export type CreateDraftOrderInput = {
   business: OrderingBusiness;
+  /** When staff rang the first item, which can be well before the order is saved. */
+  orderStartedAt?: string | null;
   source: OrderSource;
   serviceType: ServiceType;
   customerId?: string | null;
@@ -479,7 +481,7 @@ export async function createDraftOrder(input: CreateDraftOrderInput): Promise<Or
         ${randomUUID()}, ${id}, ${items.length ? 2 : 1}, 'order_created',
         ${input.source === "pos" ? "employee" : input.source === "web" ? "web" : input.source === "ai_phone" ? "ai" : "system"},
         ${input.createdBy},
-        CAST(${JSON.stringify({ source: input.source, serviceType: input.serviceType, itemCount: items.length, actorName: input.createdByName || null })} AS jsonb)
+        CAST(${JSON.stringify({ source: input.source, serviceType: input.serviceType, itemCount: items.length, actorName: input.createdByName || null, orderStartedAt: input.orderStartedAt || null })} AS jsonb)
       )
     `;
   } catch (error) {
