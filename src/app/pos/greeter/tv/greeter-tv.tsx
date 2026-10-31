@@ -178,7 +178,7 @@ export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbo
 
   // Walk-ins: same rules as the Pi greeter (never greet one older than 20 s or the first one seen).
   useEffect(() => {
-    audio.current = new Audio("/greeter/welcome.mp3");
+    audio.current = new Audio(season === "halloween" ? "/greeter/welcome-halloween.mp3" : "/greeter/welcome.mp3");
     audio.current.preload = "auto";
     let hide: number | undefined;
     let stopped = false;
