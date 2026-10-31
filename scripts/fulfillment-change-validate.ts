@@ -106,9 +106,9 @@ async function main(): Promise<void> {
       results.deliveryAddressCanChange = true;
 
       const customer = await createCustomer({ business: "Corner Deli", firstName: "Switch", lastName: "Saved", phone: "3155550182" });
-      await addCustomerAddress({ business: "Corner Deli", customerId: String(customer.id), line1: address.line1, city: address.city, state: address.state, postalCode: address.postalCode });
+      await addCustomerAddress({ business: "Corner Deli", customerId: String(customer.customer.id), line1: address.line1, city: address.city, state: address.state, postalCode: address.postalCode });
       const savedDraft = await createDraftOrderWithVariants({
-        business: "Corner Deli", source: "pos", serviceType: "pickup", createdBy: manager.id, customerId: String(customer.id),
+        business: "Corner Deli", source: "pos", serviceType: "pickup", createdBy: manager.id, customerId: String(customer.customer.id),
         customerFirstName: "Switch", callerPhone: "3155550182",
         items: [{ itemId: String(item.id), quantity: 3 }],
       });
