@@ -5283,7 +5283,7 @@ export default function PosClient({
         const dueCents = Number(checkoutState.check?.amount_due_cents ?? checkoutState.order.amount_due_cents);
         const tipBase = Number(reopenedOrder?.subtotal_cents || 0);
         return (
-          <div className="posModalBackdrop posTopModalBackdrop">
+          <div className="posModalBackdrop posTopModalBackdrop posPhoneChargeBackdrop">
             <section className="posTipWindow" role="dialog" aria-modal="true" aria-labelledby="phone-charge-title">
               <small>CUSTOMER ON THE PHONE</small>
               <h2 id="phone-charge-title">{dueCents > 0 ? `${money(dueCents)} to charge. Add a tip?` : "Add a tip?"}</h2>
