@@ -360,6 +360,14 @@ flowchart LR
   the greeter page on it; the Pi greeter program still runs on HDMI but isn't shown, and the Pi only keeps its CEC
   "off" lines as a backup.
 
+## 8b-1. Corner Deli employee app (Android)
+
+`tools/team-app`: a Trusted Web Activity named Corner Deli (`com.cornerdeli.team`) that opens
+`https://team.ordercornerdeli.com/employee`, the employee hub, in Chrome with no URL bar; hub push shows as the app's
+notifications. Sideloaded from `https://dev.ordercornerdeli.com/downloads/corner-deli-team.apk` (uploads volume,
+`tools/team-app/publish-dev.sh`). The URL bar only goes away when production serves `public/.well-known/assetlinks.json`
+on the team domain. Signing key: `~/.config/corner-ops/team-app.jks`.
+
 ## 8c. Delivery car tablet (Corner Deli, dev)
 
 ```mermaid
