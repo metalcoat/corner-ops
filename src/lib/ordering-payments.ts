@@ -94,7 +94,7 @@ export async function checkoutState(orderId: string, business: OrderingBusiness,
   if (!orders[0]) throw new PaymentConflictError("Order was not found.");
   const tenders = await sql`
     SELECT id, tender_type, transaction_type, status, amount_cents, amount_tendered_cents, change_due_cents,
-           brand, last4, related_transaction_id, reason, created_by, created_at, approved_at
+           provider, brand, last4, related_transaction_id, reason, created_by, created_at, approved_at
     FROM ordering_payment_transactions
     WHERE order_id = ${orderId} AND business = ${business} AND (${checkId || null}::uuid IS NULL OR check_id=${checkId || null})
     ORDER BY created_at, id
@@ -132,11 +132,13 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     const reversed = Number((await sql`SELECT COALESCE(SUM(amount_cents),0) amount FROM ordering_payment_transactions WHERE related_transaction_id=${source.id} AND transaction_type IN ('void','refund') AND status='approved'`)[0].amount);
     const inFlightAtMx = viaMx ? await unappliedMxReversalCents(String(source.id), amount) : 0;
     if (amount > Number(source.amount_cents) - reversed - inFlightAtMx) throw new PaymentConflictError("Reversal exceeds the tender's unreversed amount.");
+    // A fee or tip added to the card shares the original MX payment, so refunding either part can't delete that whole payment.
+    const sharesMxPayment = viaMx && (Boolean(source.details?.addedToMxPayment) || (await sql`SELECT 1 FROM ordering_payment_transactions WHERE order_id=${input.orderId} AND status='approved' AND details->>'addedToMxPayment'=${String(source.provider_transaction_reference || "")} LIMIT 1`).length > 0);
     // Card payments taken through Dharma / MX are refunded at MX first; the order only changes once MX approves.
     let mx: MxReversalResult | null = null;
     if (viaMx) {
       try {
-        mx = await reverseMxPayment({ business: input.business, orderId: input.orderId, sourceTransactionId: String(source.id), sourceReference: String(source.provider_transaction_reference || ""), amountCents: amount, fullReversal: reversed === 0 && amount === Number(source.amount_cents), actorId: input.actor.id, authorizationReference: String(source.details?.authorizationReference || "") });
+        mx = await reverseMxPayment({ business: input.business, orderId: input.orderId, sourceTransactionId: String(source.id), sourceReference: String(source.details?.addedToMxPayment || source.provider_transaction_reference || ""), amountCents: amount, fullReversal: !sharesMxPayment && reversed === 0 && amount === Number(source.amount_cents), actorId: input.actor.id, authorizationReference: String(source.details?.authorizationReference || "") });
       } catch (error) {
         throw new PaymentConflictError(error instanceof Error ? error.message : "MX Merchant could not process the refund.");
       }

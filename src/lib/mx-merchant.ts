@@ -89,6 +89,11 @@ async function findMxReturn(original:Record<string,unknown>,sinceMs:number){
  * MX approves it before or after the batch settles (sandbox, Oct 2026; its validation guide has refunds made
  * on unsettled payments).
  */
+/** Raises a sale that hasn't settled. `amountCents` is the new total including the tip. MX only allows going up. */
+export async function adjustMxPayment(input:{paymentId:string;paymentToken:string;amountCents:number;tipCents:number}){
+  const {merchantId}=credentials();
+  await mxFetch(`/payment/${encodeURIComponent(input.paymentId)}?echo=true`,{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({merchantId,tenderType:"Card",amount:(input.amountCents/100).toFixed(2),tip:(input.tipCents/100).toFixed(2),paymentToken:input.paymentToken})});
+}
 export async function refundMxPaymentPartially(input:{paymentId:string;amountCents:number;replayId:number}){
   const original=await getMxPayment(input.paymentId);
   const paymentToken=String(original.paymentToken||"");

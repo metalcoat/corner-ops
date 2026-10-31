@@ -19,6 +19,7 @@
     "test:online-checkout-preflight": "tsx scripts/online-checkout-preflight-validate.ts",
     "test:online-checkout-mx-sandbox": "tsx scripts/online-checkout-mx-sandbox-validate.ts",
     "test:saved-cards-mx-sandbox": "tsx scripts/saved-cards-mx-sandbox-validate.ts",
+    "test:add-to-card-mx-sandbox": "tsx scripts/add-to-card-mx-sandbox-validate.ts",
     "test:scheduled-order-hold": "tsx scripts/scheduled-order-hold-validate.ts",
     "test:pizza-toppings": "tsx scripts/pizza-topping-validate.ts",
     "test:combo-dependencies": "tsx scripts/combo-dependency-validate.ts",

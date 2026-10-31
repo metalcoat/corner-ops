@@ -192,6 +192,9 @@ type CheckoutState = {
     change_due_cents: number;
     status: string;
     related_transaction_id?: string | null;
+    provider?: string;
+    brand?: string;
+    last4?: string;
     reason?: string;
   }>;
 };
@@ -791,6 +794,7 @@ export default function PosClient({
   const phoneChargeUndoRef = useRef<{ checkId: string | null; tipCents: number } | null>(null);
   const [phoneChargeOpen, setPhoneChargeOpen] = useState(false);
   const [phoneChargeTip, setPhoneChargeTip] = useState("");
+  const [addToCard, setAddToCard] = useState<{ state: CheckoutState; checkId: string | null; dueCents: number; tipCents: number; card: string; error: string; busy: boolean } | null>(null);
   const [cdsTenderType, setCdsTenderType] = useState<
     "" | "cash" | "card" | "gift_card"
   >("");
@@ -3571,11 +3575,38 @@ export default function PosClient({
       const due = Number(state.check?.amount_due_cents ?? state.order.amount_due_cents);
       if (due <= 0) { closePhoneCharge(); return; }
       setCashTender((due / 100).toFixed(2));
-      window.setTimeout(() => void startMxPayment(due, state, checkId || undefined), 0);
+      const card = [...(state.tenders || [])].reverse().find((tender) => tender.tender_type === "card" && tender.transaction_type === "payment" && tender.status === "approved" && tender.provider === "mx_merchant");
+      if (card) setAddToCard({ state, checkId, dueCents: due, tipCents: addedTipCents, card: `${card.brand || "CARD"} ····${card.last4 || ""}`.trim(), error: "", busy: false });
+      else window.setTimeout(() => void startMxPayment(due, state, checkId || undefined), 0);
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : "Could not start the card payment.");
       closePhoneCharge();
     }
+  }
+  async function confirmAddToCard() {
+    const draft = savedDraft;
+    if (!addToCard || !draft || addToCard.busy) return;
+    setAddToCard({ ...addToCard, busy: true, error: "" });
+    try {
+      const response = await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "add_to_card", customerConsented: true, checkId: addToCard.checkId, amountCents: addToCard.dueCents, tipCents: addToCard.tipCents, clientMutationId: clientId() }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not add this to the card.");
+      setAddToCard(null);
+      applyMxApproval(draft, result);
+      await refreshReopenedOrder(draft.id).catch(() => undefined);
+    } catch (error) {
+      setAddToCard((current) => current && { ...current, busy: false, error: error instanceof Error ? error.message : "Could not add this to the card." });
+    }
+  }
+  function addToAnotherCard() {
+    if (!addToCard) return;
+    const { dueCents, state, checkId } = addToCard;
+    setAddToCard(null);
+    window.setTimeout(() => void startMxPayment(dueCents, state, checkId || undefined), 0);
+  }
+  function cancelAddToCard() {
+    setAddToCard(null);
+    void undoPhoneChargeTip();
   }
   async function undoPhoneChargeTip() {
     const undo = phoneChargeUndoRef.current;
@@ -5305,6 +5336,19 @@ export default function PosClient({
           </div>
         );
       })()}
+      {addToCard && (
+        <div className="posModalBackdrop posTopModalBackdrop posPhoneChargeBackdrop">
+          <section className="posTipWindow" role="dialog" aria-modal="true" aria-labelledby="add-to-card-title">
+            <small>CUSTOMER ON THE PHONE</small>
+            <h2 id="add-to-card-title">Add {money(addToCard.dueCents)} to {addToCard.card}?</h2>
+            {addToCard.tipCents > 0 && <p>Includes a {money(addToCard.tipCents)} tip.</p>}
+            {addToCard.error && <p role="alert">{addToCard.error}</p>}
+            <button type="button" disabled={addToCard.busy} onClick={() => void confirmAddToCard()}>{addToCard.busy ? "ADDING…" : `CUSTOMER SAID OK · ADD ${money(addToCard.dueCents)}`}</button>
+            <button type="button" disabled={addToCard.busy} onClick={addToAnotherCard}>USE A DIFFERENT CARD</button>
+            <button type="button" disabled={addToCard.busy} onClick={cancelAddToCard}>CANCEL</button>
+          </section>
+        </div>
+      )}
       {mxTerminalSale&&<MxTerminalPaymentDialog sale={mxTerminalSale} onApproved={finishMxTerminalSale} onClose={()=>{setMxTerminalSale(null);setPaymentBusy(false)}}/>}
       {mxPayment&&<MxKeyedPaymentDialog payment={mxPayment} onApproved={confirmMxPayment} onCancel={()=>{setMxPayment(null);setPaymentBusy(false);void undoPhoneChargeTip()}}
         onChargeSaved={async(savedCardId)=>{const draft=savedDraft||activeTab;if(!draft)return;const response=await fetch(`/api/ordering/orders/${encodeURIComponent(draft.id)}/payments/mx`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"charge_saved_card",replayId:mxPayment.replayId,savedCardId,customerConsented:true})}),result=await response.json();if(!response.ok)throw new Error(result.error||"The saved card could not be charged.");setMxPayment(null);setPaymentBusy(false);applyMxApproval(draft,result)}}

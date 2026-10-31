@@ -21,6 +21,7 @@ import {
   retrieveMxPayment,
 } from "@/lib/mx-merchant";
 import { cardBillingContactForOrder } from "@/lib/card-billing-contact";
+import { addToMxCard } from "@/lib/mx-add-to-card";
 import { chargeSavedCard, listSavedCards, startCardSave, syncSavedCards } from "@/lib/mx-saved-cards";
 import { paymentProviderStatus } from "@/lib/payment-provider";
 export const runtime = "nodejs";
@@ -34,6 +35,17 @@ export async function GET() {
   } catch (e) {
     return apiError(e);
   }
+}
+/** Kitchen send and receipts once a card payment is on the order. Returns a response only if the send failed. */
+async function printAndSendPaidOrder(orderId: string, result: Awaited<ReturnType<typeof commitTender>>, actor: NonNullable<Awaited<ReturnType<typeof orderingActor>>>) {
+  if (result.order.payment_status === "paid" && result.order.status === "draft") {
+    const unsent = await submitPaidDraft(orderId, business, actor);
+    if (unsent) return unsent;
+    await dispatchSubmittedOrderPrintJobs(orderId, business);
+  } else {
+    await dispatchOrderPrintJobs(orderId, business, { includeKitchenProduction: false });
+  }
+  return null;
 }
 export async function POST(
   request: Request,
@@ -92,6 +104,13 @@ export async function POST(
       if (body.action === "save_card_start") return isoJson(await startCardSave(String(customerId)));
       return isoJson({ cards: await syncSavedCards(String(customerId), `staff:${actor.id}:phone_consent`) });
     }
+    if (body.action === "add_to_card") {
+      // Phone call: the customer said OK to adding the fee or tip to the card they already paid with.
+      if (body.customerConsented !== true) throw new MxMerchantError("Confirm the customer agreed to add this to their card.");
+      await settleOpenTerminalSales({ business, orderId, actor });
+      const result = await addToMxCard({ orderId, business, checkId: body.checkId ? String(body.checkId) : null, amountCents: Number(body.amountCents), tipCents: Number(body.tipCents || 0), clientMutationId: String(body.clientMutationId || ""), actor });
+      return (await printAndSendPaidOrder(orderId, result, actor)) || isoJson(result, { status: 201 });
+    }
     if (body.action !== "confirm" && body.action !== "charge_saved_card")
       throw new MxMerchantError("Unknown MX payment action.");
     const replayId = Number(body.replayId),
@@ -142,19 +161,7 @@ export async function POST(
       },
     });
     await sql`UPDATE ordering_mx_checkout_sessions SET status='completed',provider_transaction_reference=${reference},completed_at=NOW() WHERE id=${session.id}`;
-    if (
-      result.order.payment_status === "paid" &&
-      result.order.status === "draft"
-    ) {
-      const unsent = await submitPaidDraft(orderId, business, actor);
-      if (unsent) return unsent;
-      await dispatchSubmittedOrderPrintJobs(orderId, business);
-    } else {
-      await dispatchOrderPrintJobs(orderId, business, {
-        includeKitchenProduction: false,
-      });
-    }
-    return isoJson(result, { status: 201 });
+    return (await printAndSendPaidOrder(orderId, result, actor)) || isoJson(result, { status: 201 });
   } catch (e) {
     if (e instanceof TerminalSaleRecordedError) return isoJson({ error: e.message, checkout: e.checkout }, { status: 409 });
     if (e instanceof MxMerchantError || e instanceof PaymentConflictError)
