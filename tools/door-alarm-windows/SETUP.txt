@@ -11,6 +11,12 @@ Corner Deli door alarm - setup on the front PC
      green = listening   red = can't reach the store server   grey = muted
 
 3. Right-click the dot and choose "Test chime". Turn the PC speakers up so it's loud.
+   Then choose "Test curbside alert": a flashing popup appears in the middle of the screen
+   and the curbside bell rings (again every 20 seconds). Click Dismiss to close it.
+
+   Curbside: when a customer taps I'M HERE, the same popup shows their car, name and order
+   number. Click Dismiss once someone is taking the order out. It also closes by itself when
+   the order is completed.
 
 4. Start it automatically when Windows starts:
    - Press Windows key + R, type   shell:startup   and press Enter. A folder opens.
@@ -20,7 +26,10 @@ Corner Deli door alarm - setup on the front PC
    It now starts by itself after every restart, like the Dahua viewer.
 
 Other things:
-- Right-click the dot for: Mute for 10 minutes, Open walk-ins dashboard, Quit.
+- Right-click the dot for: Mute walk-in chime for 10 minutes, Open walk-ins dashboard, Quit.
+  The version number is at the top of that menu.
+- Updating to a new version: right-click the dot > Quit, replace CornerDeliDoorAlarm.exe
+  with the new one, then double-click it.
 - Settings are in config.json in the same folder (the store server address).
 - door-alarm.log in the same folder shows connection problems and each walk-in.
 - Make sure the PC doesn't go to sleep: Settings > System > Power > Screen and sleep > "Never".

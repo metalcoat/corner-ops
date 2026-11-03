@@ -7,6 +7,10 @@
 // (GET /api/pos/greeter: only the newest walk-in's id, kind and age), ignores
 // walk-ins from before it started, reconnects by itself and turns its tray icon
 // red while it can't reach the server. Settings: config.json next to the .exe.
+//
+// It also polls GET /api/pos/greeter/arrivals for curbside customers who tapped I'M HERE:
+// each one rings the curbside bell and opens a flashing always-on-top popup (car, name,
+// order number) that rings again every 20 s until staff click Dismiss or the order is done.
 package main
 
 import (
@@ -32,14 +36,20 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// Shown in the tray menu and the log; bump with each new download.
+const version = "1.1.0"
+
 //go:embed chime.wav
 var chime []byte
+
+//go:embed curbside.wav
+var curbsideBell []byte
 
 const (
 	pollEvery = 2 * time.Second
 	// No answer from the server for this long: icon goes red.
 	staleAfter = 15 * time.Second
-	muteFor       = 10 * time.Minute
+	muteFor    = 10 * time.Minute
 )
 
 type config struct {
@@ -59,16 +69,18 @@ const (
 	sndNoDflt = 0x0002
 )
 
-func ring(times int) {
+func play(sound []byte, times int) {
 	soundLock.Lock()
 	defer soundLock.Unlock()
 	if times < 1 {
 		times = 1
 	}
 	for n := 0; n < times; n++ {
-		playSound.Call(uintptr(unsafe.Pointer(&chime[0])), 0, sndMemory|sndSync|sndNoDflt)
+		playSound.Call(uintptr(unsafe.Pointer(&sound[0])), 0, sndMemory|sndSync|sndNoDflt)
 	}
 }
+
+func ring(times int) { play(chime, times) }
 
 func exeDir() string {
 	path, err := os.Executable()
@@ -129,15 +141,90 @@ var (
 )
 
 type alarm struct {
-	cfg         config
-	client      *http.Client
-	mu          sync.Mutex
-	lastOK      time.Time
-	seen        walkInState
-	lastWalkIn  time.Time
-	mutedUntil  time.Time
+	cfg        config
+	client     *http.Client
+	mu         sync.Mutex
+	lastOK     time.Time
+	seen       walkInState
+	lastWalkIn time.Time
+	mutedUntil time.Time
+
+	// Curbside: its own lock, so the walk-in chime never waits on it.
+	curbMu    sync.Mutex
+	curbside  arrivalState
+	curbErr   string
+	curbTests int64
+	popup     *popup
 
 	status, last, mute *systray.MenuItem
+}
+
+func (a *alarm) fetchArrivals() ([]arrival, error) {
+	response, err := a.client.Get(a.cfg.Server + "/api/pos/greeter/arrivals")
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, response.Body)
+		return nil, fmt.Errorf("server answered HTTP %d", response.StatusCode)
+	}
+	var body struct {
+		Arrivals []arrival `json:"arrivals"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	return body.Arrivals, nil
+}
+
+// pollArrivals is one curbside check. While the server can't be reached, what's on screen
+// stays there and keeps ringing. The curbside bell ignores "Mute" (that's for walk-ins).
+func (a *alarm) pollArrivals() {
+	list, err := a.fetchArrivals()
+	a.curbMu.Lock()
+	var fresh []arrival
+	if err != nil {
+		if err.Error() != a.curbErr {
+			log.Printf("curbside arrivals not reachable: %v", err)
+		}
+		a.curbErr = err.Error()
+	} else {
+		if a.curbErr != "" {
+			log.Printf("curbside arrivals reachable again")
+		}
+		a.curbErr = ""
+		fresh = a.curbside.update(list)
+	}
+	a.curbAlert()
+	a.curbMu.Unlock()
+	for _, c := range fresh {
+		log.Printf("curbside: %s, %s, order #%s (arrival %d)", c.Car, c.Name, c.OrderNumber, c.ID)
+	}
+}
+
+// curbAlert rings if due and refreshes the popup. Call with curbMu held.
+func (a *alarm) curbAlert() {
+	if a.curbside.bell(time.Now()) {
+		go play(curbsideBell, 1)
+	}
+	a.popup.show(a.curbside.shown)
+}
+
+func (a *alarm) dismissArrival(id int64) {
+	a.curbMu.Lock()
+	a.curbside.dismiss(id)
+	a.curbAlert()
+	a.curbMu.Unlock()
+	log.Printf("curbside: arrival %d dismissed", id)
+}
+
+func (a *alarm) testArrival() {
+	a.curbMu.Lock()
+	a.curbTests++
+	a.curbside.addTest(arrival{ID: -a.curbTests, Name: "TEST - nobody is outside", Car: "Silver SUV", OrderNumber: "123"})
+	a.curbAlert()
+	a.curbMu.Unlock()
 }
 
 func (a *alarm) fetch() (*walkIn, error) {
@@ -195,8 +282,8 @@ func (a *alarm) refresh() {
 		a.status.SetTitle("NOT CONNECTED to " + a.cfg.Server)
 	case muted:
 		systray.SetIcon(iconMuted)
-		systray.SetTooltip("Door alarm: muted until " + mutedUntil.Format("3:04 PM"))
-		a.status.SetTitle("Muted until " + mutedUntil.Format("3:04 PM"))
+		systray.SetTooltip("Door alarm: walk-in chime muted until " + mutedUntil.Format("3:04 PM"))
+		a.status.SetTitle("Walk-in chime muted until " + mutedUntil.Format("3:04 PM"))
 	default:
 		systray.SetIcon(iconOK)
 		systray.SetTooltip("Door alarm: listening for walk-ins")
@@ -205,7 +292,7 @@ func (a *alarm) refresh() {
 	if muted {
 		a.mute.SetTitle("Unmute")
 	} else {
-		a.mute.SetTitle("Mute for 10 minutes")
+		a.mute.SetTitle("Mute walk-in chime for 10 minutes")
 	}
 	if !lastWalkIn.IsZero() {
 		a.last.SetTitle("Last walk-in: " + lastWalkIn.Format("3:04:05 PM"))
@@ -215,13 +302,15 @@ func (a *alarm) refresh() {
 func (a *alarm) onReady() {
 	systray.SetIcon(iconOffline)
 	systray.SetTitle("Door alarm")
+	systray.AddMenuItem("Corner Deli door alarm "+version, "").Disable()
 	a.status = systray.AddMenuItem("Connecting...", "")
 	a.status.Disable()
 	a.last = systray.AddMenuItem("Last walk-in: none yet", "")
 	a.last.Disable()
 	systray.AddSeparator()
 	test := systray.AddMenuItem("Test chime", "Play the walk-in chime now")
-	a.mute = systray.AddMenuItem("Mute for 10 minutes", "")
+	testCurbside := systray.AddMenuItem("Test curbside alert", "Show a pretend curbside popup and ring the bell")
+	a.mute = systray.AddMenuItem("Mute walk-in chime for 10 minutes", "")
 	dashboard := systray.AddMenuItem("Open walk-ins dashboard", "")
 	systray.AddSeparator()
 	quit := systray.AddMenuItem("Quit", "Stop the door alarm")
@@ -231,6 +320,8 @@ func (a *alarm) onReady() {
 			select {
 			case <-test.ClickedCh:
 				go ring(a.cfg.Repeat)
+			case <-testCurbside.ClickedCh:
+				a.testArrival()
 			case <-a.mute.ClickedCh:
 				a.mu.Lock()
 				if time.Now().Before(a.mutedUntil) {
@@ -255,6 +346,12 @@ func (a *alarm) onReady() {
 			time.Sleep(pollEvery)
 		}
 	}()
+	go func() {
+		for {
+			a.pollArrivals()
+			time.Sleep(pollEvery)
+		}
+	}()
 }
 
 func main() {
@@ -272,7 +369,8 @@ func main() {
 		return
 	}
 	cfg := loadConfig(dir)
-	log.Printf("starting; server %s", cfg.Server)
+	log.Printf("starting version %s; server %s", version, cfg.Server)
 	a := &alarm{cfg: cfg, client: &http.Client{Timeout: 5 * time.Second}}
+	a.popup = startPopup(a.dismissArrival)
 	systray.Run(a.onReady, func() { log.Printf("stopped") })
 }

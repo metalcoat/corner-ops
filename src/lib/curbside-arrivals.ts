@@ -29,7 +29,7 @@ export function ensureCurbsideArrivalSchema(): Promise<void> {
   return schemaPromise;
 }
 
-/** Records "I'm here". A second tap updates the car but keeps the first arrival, so the TV doesn't ring twice. */
+/** Records "I'm here". A second tap updates the car but keeps the first arrival, so the store PC doesn't alert twice. */
 export async function recordCurbsideArrival(orderId: string, business: string, car: { carColor: string; carType: string }) {
   await ensureCurbsideArrivalSchema();
   await getSql()`
@@ -45,7 +45,7 @@ export async function curbsideArrivalForOrder(orderId: string) {
   return row ? { carColor: String(row.car_color), carType: String(row.car_type) } : null;
 }
 
-/** Customers waiting outside right now, oldest first, for the greeter TV. */
+/** Customers waiting outside right now, oldest first, for the store PC's curbside alert. */
 export async function waitingCurbsideArrivals(business: string) {
   await ensureCurbsideArrivalSchema();
   const rows = await getSql()`
