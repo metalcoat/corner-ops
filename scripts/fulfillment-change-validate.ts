@@ -14,7 +14,10 @@ async function main(): Promise<void> {
   const { ensureOrderingPosSchema } = await import("../src/lib/ordering-pos-schema");
   const { createDraftOrderWithVariants } = await import("../src/lib/ordering-orders-with-variants");
   const { submitDraftOrder, reopenOrderForAdditions, OrderConflictError } = await import("../src/lib/ordering-order-lifecycle");
-  const { changeOrderFulfillment, DeliveryAddressNeededError } = await import("../src/lib/ordering-fulfillment-change");
+  const { changeOrderFulfillment, DeliveryAddressNeededError, ManagerApprovalNeededError } = await import("../src/lib/ordering-fulfillment-change");
+  const { orderTrail } = await import("../src/lib/ordering-order-trail");
+  const { managerReport } = await import("../src/lib/ordering-manager-report");
+  const { businessDateOf } = await import("../src/lib/ordering-registers");
   const { createAddressValidationToken, validateDeliveryAddress } = await import("../src/lib/ordering-address");
   const { getOrderDetail } = await import("../src/lib/ordering-order-center");
   const { PaymentConflictError, setCheckoutTip } = await import("../src/lib/ordering-payments");
@@ -22,6 +25,8 @@ async function main(): Promise<void> {
   const { addCustomerAddress, createCustomer } = await import("../src/lib/ordering-customers");
   await ensureOrderingPosSchema();
   const manager = { id: "fulfillment-manager", name: "Manager", type: "employee" as const, role: "manager" as const };
+  const driver = { id: "fulfillment-driver", name: "Driver", type: "employee" as const, role: "employee" as const };
+  const approver = { id: "fulfillment-approver", name: "Approving Manager", type: "employee" as const, role: "manager" as const };
   const results: Record<string, unknown> = {};
   try {
     await withTransaction(async () => {
@@ -43,12 +48,10 @@ async function main(): Promise<void> {
       const start = await row();
       const pickupTotal = Number(start.total_cents);
 
-      await assert.rejects(changeOrderFulfillment(id, "Corner Deli", manager, { serviceType: "delivery" }), OrderConflictError);
-      results.sentOrderMustBeReopened = true;
-
-      await reopenOrderForAdditions(id, "Corner Deli", manager);
-      await assert.rejects(changeOrderFulfillment(id, "Corner Deli", manager, { serviceType: "delivery" }), DeliveryAddressNeededError);
+      // A sent order switches without reopening it first; a failed switch leaves it with the kitchen.
+      await assert.rejects(changeOrderFulfillment(id, "Corner Deli", driver, { serviceType: "delivery" }), DeliveryAddressNeededError);
       assert.equal((await row()).service_type, "pickup");
+      assert.equal((await row()).status, "sent_to_kitchen");
       results.noAddressLeavesOrderAlone = true;
 
       const known = await sql`SELECT DISTINCT formatted_address FROM ordering_order_delivery_addresses WHERE validation_status='validated' AND route_distance_miles<5`;
@@ -60,9 +63,12 @@ async function main(): Promise<void> {
       }
       assert.equal(usable.length, 2, "two deliverable addresses");
       const [{ entered, address }, { entered: otherEntered, address: other }] = usable;
-      await changeOrderFulfillment(id, "Corner Deli", manager, { serviceType: "delivery", deliveryAddress: entered, deliveryUnit: "Apt 2", deliveryValidationToken: createAddressValidationToken(address) });
+      // Pickup to delivery after sending adds the fee, so anyone can do it.
+      await changeOrderFulfillment(id, "Corner Deli", driver, { serviceType: "delivery", deliveryAddress: entered, deliveryUnit: "Apt 2", deliveryValidationToken: createAddressValidationToken(address) });
       const delivery = await row(), feeCents = Number(delivery.delivery_fee_cents);
       assert.equal(delivery.service_type, "delivery");
+      assert.equal(delivery.status, "draft");
+      results.sentOrderSwitchesToDeliveryWithoutApproval = true;
       assert.ok(feeCents > 0, "delivery fee added");
       assert.equal(Number(delivery.total_cents), pickupTotal + feeCents);
       assert.equal(Number(delivery.amount_due_cents), pickupTotal + feeCents);
@@ -81,7 +87,29 @@ async function main(): Promise<void> {
 
       await sql`UPDATE ordering_delivery_assignments SET status='ASSIGNED' WHERE order_id=${id}`;
       await sql`UPDATE ordering_orders SET paid_cents=total_cents,amount_due_cents=0,payment_status='paid' WHERE id=${id}`;
-      await changeOrderFulfillment(id, "Corner Deli", manager, { serviceType: "pickup" });
+      // Delivery to pickup takes the fee off a sent order: never the driver, even approving themselves.
+      await assert.rejects(changeOrderFulfillment(id, "Corner Deli", driver, { serviceType: "pickup" }), ManagerApprovalNeededError);
+      await assert.rejects(changeOrderFulfillment(id, "Corner Deli", driver, { serviceType: "pickup" }, driver), ManagerApprovalNeededError);
+      assert.equal((await row()).service_type, "delivery");
+      results.driverCantSwitchToPickup = true;
+      await changeOrderFulfillment(id, "Corner Deli", driver, { serviceType: "pickup" }, approver);
+      const switchEvent = (await sql`SELECT event_type,created_at,actor_id,details FROM ordering_order_events WHERE order_id=${id} AND event_type='order_fulfillment_changed' AND details->>'to'='pickup' LIMIT 1`)[0];
+      assert.equal(switchEvent.actor_id, driver.id);
+      assert.equal(switchEvent.details.from, "delivery");
+      assert.equal(switchEvent.details.to, "pickup");
+      assert.equal(switchEvent.details.approvedByName, approver.name);
+      assert.equal(switchEvent.details.previousDeliveryFeeCents, feeCents);
+      assert.equal(switchEvent.details.deliveryFeeCents, 0);
+      assert.equal(switchEvent.details.afterSend, true);
+      const trailLine = orderTrail({ createdAt: new Date(), takenBy: "x", events: [{ ...switchEvent, actor_name: driver.name }], payments: [] }).find((entry) => entry.label === "Changed delivery to pickup");
+      assert.ok(trailLine?.detail?.includes(`Delivery fee $${(feeCents / 100).toFixed(2)} removed`) && trailLine.detail.includes(`approved by ${approver.name}`), trailLine?.detail);
+      results.managerPinApprovesAndIsLogged = trailLine?.detail;
+      const report = await managerReport({ view: "day", date: businessDateOf(new Date()) });
+      const reported = report.fulfillmentSwitches.filter((entry) => entry.orderId === id);
+      assert.ok(reported.some((entry) => entry.toPickup && entry.approvedBy === approver.name && entry.by === driver.name && entry.feeChangeCents === -feeCents && entry.afterSend));
+      assert.ok(reported.some((entry) => !entry.toPickup && entry.feeChangeCents === feeCents));
+      assert.ok((await managerReport({ view: "week", date: businessDateOf(new Date()) })).fulfillmentSwitches.some((entry) => entry.orderId === id && entry.toPickup));
+      results.managerReportShowsSwitches = reported.length;
       const pickup = await row();
       assert.equal(pickup.service_type, "pickup");
       assert.equal(Number(pickup.delivery_fee_cents), 0);
@@ -126,6 +154,9 @@ async function main(): Promise<void> {
       assert.equal(updated.service_type, "delivery");
       assert.ok(Number(updated.delivery_fee_cents) > 0);
       results.savedCustomerAddressUsed = true;
+      // Before it's sent or paid, anyone can switch it back.
+      assert.equal((await changeOrderFulfillment(String(savedDraft.id), "Corner Deli", driver, { serviceType: "pickup" })).service_type, "pickup");
+      results.unsentOrderSwitchesFreely = true;
       throw new Error(ROLLBACK);
     });
   } catch (error) {

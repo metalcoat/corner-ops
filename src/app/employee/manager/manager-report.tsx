@@ -19,8 +19,8 @@ function move(view: ManagerReportView, date: string, step: number) {
 function Section({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
   return <section className="mgrSection"><h2>{title}{count != null && <span>{count}</span>}</h2>{children}</section>;
 }
-function Row({ title, detail, amount, tone }: { title: string; detail?: string; amount?: string; tone?: "bad" | "good" }) {
-  return <div className="mgrRow"><div><strong>{title}</strong>{detail && <small>{detail}</small>}</div>{amount && <b className={tone}>{amount}</b>}</div>;
+function Row({ title, detail, amount, tone, flag }: { title: string; detail?: string; amount?: string; tone?: "bad" | "good"; flag?: boolean }) {
+  return <div className={flag ? "mgrRow flag" : "mgrRow"}><div><strong>{title}</strong>{detail && <small>{detail}</small>}</div>{amount && <b className={tone}>{amount}</b>}</div>;
 }
 
 export default function ManagerReport() {
@@ -111,6 +111,15 @@ export default function ManagerReport() {
           {report.voidedOrders.length + report.voidedItems.length === 0 && <p className="mgrEmpty">No voids.</p>}
           {report.voidedOrders.map((row) => <Row key={row.id} title={`#${row.number} · whole order`} detail={`${when(row.at)} · ${row.by}${row.reason ? ` · ${row.reason}` : ""}`} amount={money(row.amountCents)} />)}
           {report.voidedItems.map((row) => <Row key={row.id} title={`#${row.number} · ${row.item}`} detail={`${when(row.at)} · ${row.by}${row.reason ? ` · ${row.reason}` : ""}`} amount={money(row.amountCents)} />)}
+        </Section>
+
+        <Section title="Pickup/delivery switches" count={report.fulfillmentSwitches.length}>
+          {report.fulfillmentSwitches.length === 0 && <p className="mgrEmpty">No orders switched between pickup and delivery.</p>}
+          {report.fulfillmentSwitches.some((row) => row.toPickup) && <p className="mgrEmpty">Delivery → pickup takes the delivery fee off. Highlighted ones are worth a look.</p>}
+          {report.fulfillmentSwitches.map((row) => <Row key={row.id} flag={row.toPickup}
+            title={`#${row.number} · ${row.toPickup ? "Delivery → pickup" : "Pickup → delivery"}`}
+            detail={`${when(row.at)} · ${row.by}${row.approvedBy ? ` · approved by ${row.approvedBy}` : ""}${row.afterSend ? " · after it was sent" : row.afterPayment ? " · after it was paid" : " · before sending"}`}
+            amount={row.feeChangeCents ? `Fee ${signed(row.feeChangeCents)}` : undefined} tone={row.feeChangeCents < 0 ? "bad" : undefined} />)}
         </Section>
 
         <Section title="Missed calls" count={report.calls.missed}>

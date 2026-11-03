@@ -3,9 +3,9 @@ import { getSql, withTransaction } from "@/lib/db";
 import { addressForOrder, routeDeliveryAddress, validateDeliveryAddress, type ValidatedDeliveryAddress } from "@/lib/ordering-address";
 import { saveOrderDeliveryAddress } from "@/lib/ordering-address-schema";
 import { merchandiseAfterDiscounts, quoteDelivery } from "@/lib/ordering-delivery";
-import { OrderConflictError, syncDraftTotals } from "@/lib/ordering-order-lifecycle";
+import { OrderConflictError, reopenOrderForAdditions, syncDraftTotals } from "@/lib/ordering-order-lifecycle";
 import type { OrderingBusiness } from "@/lib/ordering-core";
-import type { OrderingActor } from "@/lib/ordering-route-auth";
+import { canManagePos, type OrderingActor } from "@/lib/ordering-route-auth";
 
 export type FulfillmentChange = {
   serviceType: "pickup" | "delivery";
@@ -21,6 +21,19 @@ export class DeliveryAddressNeededError extends Error {
     super("Enter the delivery address.");
   }
 }
+
+/**
+ * Thrown when a sent or paid delivery is switched to pickup without a manager.
+ * Taking the delivery fee off is how a driver could pocket it, so only a manager's PIN does it.
+ */
+export class ManagerApprovalNeededError extends Error {
+  constructor() {
+    super("A manager has to approve switching this delivery to pickup. Enter a manager PIN.");
+  }
+}
+
+/** Kitchen statuses a sent order can be switched from; it is reopened first so SEND prints the change. */
+const SENT_STATUSES = ["sent_to_kitchen", "in_progress", "ready", "completed"];
 
 /** A sent order only takes changes while it is reopened from the Order Center. */
 export async function orderOpenForChanges(orderId: string, order: { status?: unknown; submitted_at?: unknown } | undefined): Promise<boolean> {
@@ -63,14 +76,22 @@ async function deliveryAddressForChange(order: Record<string, unknown>, change: 
 /**
  * Switches an open order between pickup and delivery, or changes where a delivery goes,
  * and reprices it straight away. Nothing changes if the address can't be priced.
+ * A sent order is reopened for the change. Delivery to pickup on a sent or paid order
+ * needs a manager: the signed-in employee, or `approver` from a manager's PIN.
  */
-export async function changeOrderFulfillment(orderId: string, business: OrderingBusiness, actor: OrderingActor, change: FulfillmentChange) {
+export async function changeOrderFulfillment(orderId: string, business: OrderingBusiness, actor: OrderingActor, change: FulfillmentChange, approver?: OrderingActor) {
   const sql = getSql();
   const current = (await sql`SELECT * FROM ordering_orders WHERE id=${orderId} AND business=${business}`)[0];
-  if (!await orderOpenForChanges(orderId, current)) throw new OrderConflictError("This order is not open for changes.");
+  const sent = SENT_STATUSES.includes(String(current?.status));
+  if (!sent && !await orderOpenForChanges(orderId, current)) throw new OrderConflictError("This order is not open for changes.");
   const previousService = String(current.service_type);
   const addressChange = change.serviceType === "delivery" && previousService === "delivery" && Boolean(change.deliveryValidationToken);
   if (change.serviceType === previousService && !addressChange) return current;
+  const removesFee = previousService === "delivery" && change.serviceType === "pickup";
+  const lockedIn = Boolean(current.submitted_at) || Number(current.paid_cents) > 0;
+  if (approver && !canManagePos(approver)) throw new ManagerApprovalNeededError();
+  const approvedBy = removesFee && lockedIn ? (canManagePos(actor) ? actor : approver) : undefined;
+  if (removesFee && lockedIn && !approvedBy) throw new ManagerApprovalNeededError();
 
   let deliveryFeeCents = 0, resolved: ResolvedAddress | null = null, route = null, deliveryAddress = "";
   if (change.serviceType === "delivery") {
@@ -90,6 +111,7 @@ export async function changeOrderFulfillment(orderId: string, business: Ordering
   }
 
   await withTransaction(async () => {
+    if (sent) await reopenOrderForAdditions(orderId, business, actor);
     const locked = (await sql`SELECT status FROM ordering_orders WHERE id=${orderId} FOR UPDATE`)[0];
     if (locked?.status !== "draft") throw new OrderConflictError("This order is not open for changes.");
     if (change.serviceType === "pickup") {
@@ -99,7 +121,7 @@ export async function changeOrderFulfillment(orderId: string, business: Ordering
     }
     if (resolved) await saveOrderDeliveryAddress({ orderId, address: resolved.address, line2: resolved.line2, customerAddressId: resolved.customerAddressId, route });
     const updated = (await sql`UPDATE ordering_orders SET service_type=${change.serviceType},delivery_fee_cents=${deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${deliveryFeeCents}-paid_cents),payment_status=CASE WHEN paid_cents<=0 THEN 'unpaid' WHEN paid_cents>=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${deliveryFeeCents}) THEN 'paid' ELSE 'partially_paid' END,version=version+1,updated_at=NOW() WHERE id=${orderId} RETURNING version`)[0];
-    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${updated.version},'order_fulfillment_changed',${actor.type},${actor.id},${JSON.stringify({ from: previousService, to: change.serviceType, deliveryFeeCents, deliveryAddress, actorName: actor.name })}::jsonb)`;
+    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${updated.version},'order_fulfillment_changed',${actor.type},${actor.id},${JSON.stringify({ from: previousService, to: change.serviceType, deliveryFeeCents, previousDeliveryFeeCents: Number(current.delivery_fee_cents || 0), deliveryAddress, actorName: actor.name, actorRole: actor.role || null, afterSend: Boolean(current.submitted_at), afterPayment: Number(current.paid_cents) > 0, approvedById: approvedBy?.id || null, approvedByName: approvedBy?.name || null })}::jsonb)`;
   });
   await syncDraftTotals(orderId, business);
   const order = (await sql`SELECT * FROM ordering_orders WHERE id=${orderId}`)[0];

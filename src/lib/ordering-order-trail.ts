@@ -9,6 +9,17 @@ const iso = (value: unknown) => new Date(String(value)).toISOString();
 const channel = (actorId: string) => (actorId.startsWith("web:") ? "Online" : actorId);
 const words = (value: unknown) => String(value || "").replaceAll("_", " ");
 
+/** "Delivery fee $4.00 removed · approved by Pat" for a pickup/delivery switch; empty when nothing changed hands. */
+export function fulfillmentChangeDetail(details: Record<string, unknown>): string | undefined {
+  const fee = Number(details.deliveryFeeCents || 0), before = Number(details.previousDeliveryFeeCents ?? (details.from === "delivery" ? fee : 0));
+  const parts = [
+    fee > before ? `Delivery fee ${dollars(fee - before)} added` : fee < before ? `Delivery fee ${dollars(before - fee)} removed` : "",
+    details.afterSend ? "after it was sent" : details.afterPayment ? "after it was paid" : "",
+    details.approvedByName ? `approved by ${String(details.approvedByName)}` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : undefined;
+}
+
 export function orderStartedAt(events: Event[], createdAt: unknown): { at: string; exact: boolean } {
   const started = events.find((event) => event.event_type === "order_created")?.details?.orderStartedAt;
   return started ? { at: iso(started), exact: true } : { at: iso(createdAt), exact: false };
@@ -28,7 +39,7 @@ export function orderTrail(input: { createdAt: unknown; takenBy: unknown; events
     if (event.event_type === "order_reopened_for_additions") trail.push({ at, label: "Reopened", who: who(event) });
     if (event.event_type === "order_voided") trail.push({ at, label: "Voided", who: who(event), detail: String(details.reason || "") });
     if (event.event_type === "order_item_cancelled") trail.push({ at, label: "Item voided", who: who(event), detail: `${Number(details.quantity || 1)}× ${String(details.itemName || "item")}` });
-    if (event.event_type === "order_fulfillment_changed") trail.push({ at, label: details.from === details.to ? "Delivery address changed" : `Changed ${words(details.from)} to ${words(details.to)}`, who: who(event) });
+    if (event.event_type === "order_fulfillment_changed") trail.push({ at, label: details.from === details.to ? "Delivery address changed" : `Changed ${words(details.from)} to ${words(details.to)}`, who: who(event), detail: fulfillmentChangeDetail(details) });
   }
   for (const payment of input.payments) {
     const tender = payment.last4 ? `${String(payment.brand || "Card")} ····${String(payment.last4)}` : words(payment.tender_type);

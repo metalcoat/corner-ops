@@ -32,7 +32,7 @@ export async function managerReport(input: { view: ManagerReportView; date: stri
   for (let day = range.start; day <= range.end && day <= today; day = shift(day, 1)) days.push(day);
   const from = businessDayBoundary(range.start).toISOString(), to = businessDayBoundary(range.end, true).toISOString();
   const sql = getSql();
-  const [orders, tenders, voidedOrders, voidedItems, refunds, credits] = await Promise.all([
+  const [orders, tenders, voidedOrders, voidedItems, refunds, credits, switches] = await Promise.all([
     sql`SELECT ((created_at AT TIME ZONE 'America/New_York') - INTERVAL '4 hours')::date::text business_date,COUNT(*)::int orders,COALESCE(SUM(total_cents),0)::bigint sales_cents,COALESCE(SUM(tip_cents),0)::bigint tips_cents,COALESCE(SUM(delivery_fee_cents),0)::bigint delivery_fees_cents
       FROM ordering_orders WHERE business=${BUSINESS} AND created_at>=${from} AND created_at<${to} AND status NOT IN('draft','cancelled') GROUP BY 1`,
     sql`SELECT ((created_at AT TIME ZONE 'America/New_York') - INTERVAL '4 hours')::date::text business_date,tender_type,
@@ -51,6 +51,9 @@ export async function managerReport(input: { view: ManagerReportView; date: stri
     sql`SELECT l.id,l.created_at,l.entry_type,l.delta_balance_cents,l.reason,o.id order_id,o.display_number,COALESCE(NULLIF(c.display_name,''),'Customer') customer_name,COALESCE(e.name,NULLIF(l.created_by,''),'Unknown') by_name
       FROM ordering_store_credit_ledger l LEFT JOIN ordering_orders o ON o.id=l.order_id LEFT JOIN ordering_customers c ON c.id=l.customer_id LEFT JOIN employees e ON e.id::text=l.created_by
       WHERE l.business=${BUSINESS} AND l.created_at>=${from} AND l.created_at<${to} ORDER BY l.created_at DESC LIMIT ${LIST_LIMIT}`,
+    sql`SELECT ev.id,ev.created_at,ev.details,o.id order_id,o.display_number,COALESCE(NULLIF(ev.details->>'actorName',''),e.name,NULLIF(ev.actor_id,''),'Unknown') by_name
+      FROM ordering_order_events ev JOIN ordering_orders o ON o.id=ev.order_id LEFT JOIN employees e ON e.id::text=ev.actor_id
+      WHERE o.business=${BUSINESS} AND ev.event_type='order_fulfillment_changed' AND ev.details->>'from' IS DISTINCT FROM ev.details->>'to' AND ev.created_at>=${from} AND ev.created_at<${to} ORDER BY ev.created_at DESC LIMIT ${LIST_LIMIT}`,
   ]);
   const tills: Array<{ businessDate: string; name: string; closedBy: string; closedAt: string | null; countedCents: number | null; expectedCents: number | null; overShortCents: number | null; inProgress: boolean }> = [];
   for (const day of days) for (const till of await tillCloseoutsForDay(day)) {
@@ -90,6 +93,11 @@ export async function managerReport(input: { view: ManagerReportView; date: stri
     voidedItems: voidedItems.map((row) => ({ id: String(row.id), orderId: String(row.order_id), number: String(row.display_number), at: new Date(row.created_at).toISOString(), item: `${number(row.quantity)}× ${String(row.item_name_snapshot)}`, reason: String(row.reason || ""), by: String(row.actor_name || "Unknown"), amountCents: number(row.amount_cents) })),
     refunds: refunds.map((row) => ({ id: String(row.id), orderId: String(row.order_id || ""), number: String(row.display_number || ""), at: new Date(row.created_at).toISOString(), tender: String(row.tender_type), kind: String(row.transaction_type), reason: String(row.reason || ""), by: String(row.by_name), amountCents: number(row.amount_cents) })),
     credits: credits.map((row) => ({ id: String(row.id), orderId: String(row.order_id || ""), number: String(row.display_number || ""), at: new Date(row.created_at).toISOString(), customer: String(row.customer_name), kind: String(row.entry_type), reason: String(row.reason || ""), by: String(row.by_name), amountCents: number(row.delta_balance_cents) })),
+    fulfillmentSwitches: switches.map((row) => {
+      const details = (row.details || {}) as Record<string, unknown>, to = String(details.to || "");
+      const feeCents = number(details.deliveryFeeCents), before = number(details.previousDeliveryFeeCents);
+      return { id: String(row.id), orderId: String(row.order_id), number: String(row.display_number), at: new Date(row.created_at).toISOString(), from: String(details.from || ""), to, toPickup: to === "pickup", feeChangeCents: feeCents - before, afterSend: Boolean(details.afterSend), afterPayment: Boolean(details.afterPayment), by: String(row.by_name), approvedBy: String(details.approvedByName || "") };
+    }),
     stillOwed: await listUnresolvedVoidMoney(BUSINESS),
     generatedAt: now.toISOString(),
   };

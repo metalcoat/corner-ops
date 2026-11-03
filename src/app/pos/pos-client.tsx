@@ -586,6 +586,8 @@ export default function PosClient({
   const [voidOrderPin, setVoidOrderPin] = useState("");
   const [voidOrderError, setVoidOrderError] = useState("");
   const [voidOrderBusy, setVoidOrderBusy] = useState(false);
+  // Set while a sent or paid delivery waits for a manager's PIN to switch to pickup.
+  const [pickupApproval, setPickupApproval] = useState<{ pin: string; error: string } | null>(null);
   async function refreshReopenedOrder(orderId: string) {
     const response = await fetch(
       `/api/ordering/order-center/${encodeURIComponent(orderId)}`,
@@ -629,7 +631,7 @@ export default function PosClient({
     }
   }
   // A reopened order switches and reprices as soon as its type is tapped; there's no cart to wait for.
-  async function changeReopenedFulfillment(service: "pickup" | "delivery", useEnteredAddress = false) {
+  async function changeReopenedFulfillment(service: "pickup" | "delivery", useEnteredAddress = false, managerPin = "") {
     if (!savedDraft?.reopened || changingFulfillment) return;
     const orderId = savedDraft.id;
     setChangingFulfillment(true);
@@ -638,9 +640,14 @@ export default function PosClient({
       const response = await fetch(`/api/ordering/orders/${encodeURIComponent(orderId)}/fulfillment`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ serviceType: service, ...(useEnteredAddress ? { deliveryAddress: deliveryValidatedInput, deliveryUnit, deliveryValidationToken } : {}) }),
+        body: JSON.stringify({ serviceType: service, ...(useEnteredAddress ? { deliveryAddress: deliveryValidatedInput, deliveryUnit, deliveryValidationToken } : {}), ...(managerPin ? { managerPin } : {}) }),
       });
-      const payload = (await response.json()) as { error?: string; needsAddress?: boolean; order?: { delivery_fee_cents?: number } };
+      const payload = (await response.json()) as { error?: string; needsAddress?: boolean; needsManagerPin?: boolean; order?: { delivery_fee_cents?: number } };
+      if (payload.needsManagerPin) {
+        setPickupApproval({ pin: "", error: managerPin ? payload.error || "Manager PIN not accepted." : "" });
+        return;
+      }
+      setPickupApproval(null);
       if (payload.needsAddress) {
         setDeliveryAddress("");
         setValidatedAddress(null);
@@ -5208,6 +5215,19 @@ export default function PosClient({
               {voidOrderNeedsManager && <label>Manager PIN (the kitchen already has this order or it was paid)<input type="password" inputMode="numeric" autoComplete="off" maxLength={4} value={voidOrderPin} onChange={(event) => setVoidOrderPin(event.target.value)} /></label>}
               {voidOrderError && <p className="ocDialogError" role="alert">{voidOrderError}</p>}
               <div><button type="button" disabled={voidOrderBusy} onClick={() => setVoidOrderOpen(false)}>BACK</button><button className="danger" disabled={voidOrderBusy || voidOrderReason.trim().length < 3 || (voidOrderNeedsManager && voidOrderPin.length < 4)}>{voidOrderBusy ? "VOIDING…" : "VOID WHOLE ORDER"}</button></div>
+            </form>
+          </section>
+        </div>
+      )}
+      {pickupApproval && savedDraft?.reopened && (
+        <div className="posModalBackdrop" role="presentation">
+          <section className="posCustomerDialog posReopenedVoidDialog" role="dialog" aria-modal="true" aria-label={`Switch order ${savedDraft.displayNumber} to pickup`}>
+            <form className="ocItemCancel" onSubmit={(event) => { event.preventDefault(); void changeReopenedFulfillment("pickup", false, pickupApproval.pin); }}>
+              <h3>Switch #{savedDraft.displayNumber} to pickup</h3>
+              <p>This takes the {money(Number(reopenedOrder?.delivery_fee_cents || savedDraft.deliveryFeeCents || 0))} delivery fee off an order the kitchen already has or that was paid, so a manager has to approve it. The switch is logged on the order and the manager report.</p>
+              <label>Manager PIN<input type="password" inputMode="numeric" autoComplete="off" autoFocus maxLength={4} value={pickupApproval.pin} onChange={(event) => setPickupApproval({ pin: event.target.value, error: "" })} /></label>
+              {pickupApproval.error && <p className="ocDialogError" role="alert">{pickupApproval.error}</p>}
+              <div><button type="button" disabled={changingFulfillment} onClick={() => setPickupApproval(null)}>KEEP DELIVERY</button><button className="danger" disabled={changingFulfillment || pickupApproval.pin.length < 4}>{changingFulfillment ? "SWITCHING…" : "APPROVE PICKUP"}</button></div>
             </form>
           </section>
         </div>
