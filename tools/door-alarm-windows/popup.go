@@ -2,9 +2,11 @@
 
 package main
 
-// The curbside popup: a borderless always-on-top window in the middle of the screen that flashes
-// red and yellow, one row per waiting customer (car, name, order number) with its own Dismiss
-// button that only mutes that car (its row turns grey); a row goes when the POS marks it delivered.
+// The curbside popup: an always-on-top panel in one column of the screen (config.json "popup",
+// by default SmartPSS's right-hand camera column) with a big CURBSIDE header and one card per
+// waiting car: car, name, order number. The header and border flash red/yellow; the cards stay
+// steady so they're readable. Nobody touches that screen, so the window never takes focus, has no
+// taskbar button and lets clicks through to SmartPSS. Cars leave when the POS marks them delivered.
 // It lives on its own OS thread with its own message loop, next to the tray icon's.
 
 import (
@@ -23,29 +25,29 @@ var (
 	gdi32    = windows.NewLazySystemDLL("gdi32.dll")
 	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
-	getModuleHandle  = kernel32.NewProc("GetModuleHandleW")
-	registerClassEx  = user32.NewProc("RegisterClassExW")
-	createWindowEx   = user32.NewProc("CreateWindowExW")
-	defWindowProc    = user32.NewProc("DefWindowProcW")
-	destroyWindow    = user32.NewProc("DestroyWindow")
-	getMessage       = user32.NewProc("GetMessageW")
-	translateMessage = user32.NewProc("TranslateMessage")
-	dispatchMessage  = user32.NewProc("DispatchMessageW")
-	postMessage      = user32.NewProc("PostMessageW")
-	sendMessage      = user32.NewProc("SendMessageW")
-	showWindow       = user32.NewProc("ShowWindow")
-	setWindowPos     = user32.NewProc("SetWindowPos")
-	setTimer         = user32.NewProc("SetTimer")
-	killTimer        = user32.NewProc("KillTimer")
-	invalidateRect   = user32.NewProc("InvalidateRect")
-	beginPaint       = user32.NewProc("BeginPaint")
-	endPaint         = user32.NewProc("EndPaint")
-	getClientRect    = user32.NewProc("GetClientRect")
-	fillRect         = user32.NewProc("FillRect")
-	drawText         = user32.NewProc("DrawTextW")
-	getSystemMetrics = user32.NewProc("GetSystemMetrics")
-	loadCursor       = user32.NewProc("LoadCursorW")
-	flashWindowEx    = user32.NewProc("FlashWindowEx")
+	getModuleHandle            = kernel32.NewProc("GetModuleHandleW")
+	setProcessDPIAware         = user32.NewProc("SetProcessDPIAware")
+	registerClassEx            = user32.NewProc("RegisterClassExW")
+	createWindowEx             = user32.NewProc("CreateWindowExW")
+	defWindowProc              = user32.NewProc("DefWindowProcW")
+	getMessage                 = user32.NewProc("GetMessageW")
+	translateMessage           = user32.NewProc("TranslateMessage")
+	dispatchMessage            = user32.NewProc("DispatchMessageW")
+	postMessage                = user32.NewProc("PostMessageW")
+	showWindow                 = user32.NewProc("ShowWindow")
+	setWindowPos               = user32.NewProc("SetWindowPos")
+	setLayeredWindowAttributes = user32.NewProc("SetLayeredWindowAttributes")
+	setTimer                   = user32.NewProc("SetTimer")
+	killTimer                  = user32.NewProc("KillTimer")
+	invalidateRect             = user32.NewProc("InvalidateRect")
+	beginPaint                 = user32.NewProc("BeginPaint")
+	endPaint                   = user32.NewProc("EndPaint")
+	getClientRect              = user32.NewProc("GetClientRect")
+	getDC                      = user32.NewProc("GetDC")
+	releaseDC                  = user32.NewProc("ReleaseDC")
+	fillRect                   = user32.NewProc("FillRect")
+	drawText                   = user32.NewProc("DrawTextW")
+	getSystemMetrics           = user32.NewProc("GetSystemMetrics")
 
 	createFont             = gdi32.NewProc("CreateFontW")
 	createSolidBrush       = gdi32.NewProc("CreateSolidBrush")
@@ -60,19 +62,16 @@ var (
 )
 
 const (
-	wsPopup        = 0x80000000
-	wsChild        = 0x40000000
-	wsVisible      = 0x10000000
-	wsClipChildren = 0x02000000
-	wsExTopmost    = 0x00000008
-	wsExAppWindow  = 0x00040000
+	wsPopup         = 0x80000000
+	wsExTopmost     = 0x00000008
+	wsExTransparent = 0x00000020
+	wsExToolWindow  = 0x00000080
+	wsExLayered     = 0x00080000
+	wsExNoActivate  = 0x08000000
 
-	wmDestroy    = 0x0002
 	wmPaint      = 0x000F
 	wmClose      = 0x0010
 	wmEraseBkgnd = 0x0014
-	wmSetFont    = 0x0030
-	wmCommand    = 0x0111
 	wmTimer      = 0x0113
 	wmApp        = 0x8000
 
@@ -84,37 +83,22 @@ const (
 	swpNoActivate = 0x0010
 	swpShowWindow = 0x0040
 
-	dtSingleLine  = 0x0020
-	dtVCenter     = 0x0004
 	dtCenter      = 0x0001
+	dtWordBreak   = 0x0010
+	dtCalcRect    = 0x0400
 	dtNoPrefix    = 0x0800
-	dtEndEllipsis = 0x8000
+	dtEditControl = 0x2000
 
-	flashwStop      = 0
-	flashwAll       = 0x3
-	flashwTimerNoFG = 0xC
-
+	lwaAlpha    = 0x2
 	srcCopy     = 0x00CC0020
 	transparent = 1
-	idcArrow    = 32512
 	smCxScreen  = 0
 	smCyScreen  = 1
 
 	flashTimer = 1
-	buttonBase = 1000
 )
 
 var hwndTopmost = ^uintptr(0) // (HWND)-1
-
-// Layout in pixels.
-const (
-	popupWidth   = 1100
-	headerHeight = 110
-	rowHeight    = 200
-	popupPadding = 24
-	buttonWidth  = 240
-	buttonHeight = 110
-)
 
 type rect struct{ Left, Top, Right, Bottom int32 }
 
@@ -152,36 +136,57 @@ type paintStruct struct {
 	RgbReserved [32]byte
 }
 
-type flashInfo struct {
-	Size    uint32
-	Hwnd    uintptr
-	Flags   uint32
-	Count   uint32
-	Timeout uint32
-}
-
 func rgb(r, g, b uint32) uintptr { return uintptr(r | g<<8 | b<<16) }
 
+// Colors.
+var (
+	colorRed    = rgb(200, 16, 32)
+	colorYellow = rgb(255, 204, 0)
+	colorPanel  = rgb(11, 15, 25)
+	colorCard   = rgb(31, 41, 55)
+	colorWhite  = rgb(255, 255, 255)
+	colorBlack  = rgb(0, 0, 0)
+	colorMuted  = rgb(203, 213, 225)
+)
+
+// block is one piece of text in the laid-out popup.
+type block struct {
+	text   string
+	font   uintptr
+	color  uintptr // 0: header (follows the flash)
+	r      rect
+	center bool
+}
+
+type fontSet struct{ header, sub, car, name uintptr }
+
 type popup struct {
-	hwnd      uintptr
-	onDismiss func(id int64)
+	hwnd uintptr
+	box  popupBox
 
 	mu   sync.Mutex
-	want []popupRow // set by show(), picked up on the window's thread
+	want []arrival // set by show(), picked up on the window's thread
 
 	// Owned by the window's thread.
-	items   []popupRow
-	buttons []uintptr
+	items   []arrival
 	flash   bool
-	fonts   struct{ header, car, name, button uintptr }
-	brushes [3]uintptr // red, yellow, muted grey
+	fonts   map[int]fontSet
+	brushes map[uintptr]uintptr
+	blocks  []block
+	cards   []rect
+	header  rect
+	border  int32
 }
 
 var thePopup *popup
 
+// makeDPIAware: on a screen with Windows display scaling, work in real pixels so the popup
+// lands where config.json says and its text is sharp.
+func makeDPIAware() { setProcessDPIAware.Call() }
+
 // startPopup creates the (hidden) window. If that fails the bell still rings; the error is logged.
-func startPopup(onDismiss func(id int64)) *popup {
-	p := &popup{onDismiss: onDismiss}
+func startPopup(box popupBox) *popup {
+	p := &popup{box: box, fonts: map[int]fontSet{}, brushes: map[uintptr]uintptr{}}
 	thePopup = p
 	ready := make(chan struct{})
 	go p.run(ready)
@@ -190,7 +195,7 @@ func startPopup(onDismiss func(id int64)) *popup {
 }
 
 // show replaces what the popup lists; an empty list hides it. Safe from any goroutine.
-func (p *popup) show(list []popupRow) {
+func (p *popup) show(list []arrival) {
 	p.mu.Lock()
 	p.want = slices.Clone(list)
 	p.mu.Unlock()
@@ -205,33 +210,47 @@ func font(height int32, weight int32) uintptr {
 	return f
 }
 
+func (p *popup) brush(color uintptr) uintptr {
+	if b, ok := p.brushes[color]; ok {
+		return b
+	}
+	b, _, _ := createSolidBrush.Call(color)
+	p.brushes[color] = b
+	return b
+}
+
+// fontsAt: text sizes for a popup this wide, at this percentage (shrunk to fit more cars).
+func (p *popup) fontsAt(width int, percent int) fontSet {
+	key := width*1000 + percent
+	if f, ok := p.fonts[key]; ok {
+		return f
+	}
+	size := func(base int) int32 { return int32(base * width / 475 * percent / 100) }
+	f := fontSet{header: font(size(72), 900), sub: font(size(34), 800), car: font(size(64), 800), name: font(size(42), 600)}
+	p.fonts[key] = f
+	return f
+}
+
 func (p *popup) run(ready chan struct{}) {
 	runtime.LockOSThread()
 	instance, _, _ := getModuleHandle.Call(0)
 	className, _ := windows.UTF16PtrFromString("CornerDeliCurbsidePopup")
 	title, _ := windows.UTF16PtrFromString("Curbside customer outside")
-	cursor, _, _ := loadCursor.Call(0, idcArrow)
-	class := wndClassEx{WndProc: windows.NewCallback(popupProc), Instance: instance, Cursor: cursor, ClassName: className}
+	class := wndClassEx{WndProc: windows.NewCallback(popupProc), Instance: instance, ClassName: className}
 	class.Size = uint32(unsafe.Sizeof(class))
 	if atom, _, err := registerClassEx.Call(uintptr(unsafe.Pointer(&class))); atom == 0 {
 		log.Printf("curbside popup unavailable: RegisterClassEx: %v", err)
 		close(ready)
 		return
 	}
-	p.fonts.header = font(56, 800)
-	p.fonts.car = font(84, 800)
-	p.fonts.name = font(50, 600)
-	p.fonts.button = font(44, 700)
-	p.brushes[0], _, _ = createSolidBrush.Call(rgb(200, 16, 32))
-	p.brushes[1], _, _ = createSolidBrush.Call(rgb(255, 204, 0))
-	p.brushes[2], _, _ = createSolidBrush.Call(rgb(55, 65, 81))
-	hwnd, _, err := createWindowEx.Call(wsExTopmost|wsExAppWindow, uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(title)),
-		wsPopup|wsClipChildren, 0, 0, popupWidth, 400, 0, 0, instance, 0)
+	hwnd, _, err := createWindowEx.Call(wsExTopmost|wsExToolWindow|wsExNoActivate|wsExLayered|wsExTransparent,
+		uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(title)), wsPopup, 0, 0, 400, 400, 0, 0, instance, 0)
 	if hwnd == 0 {
 		log.Printf("curbside popup unavailable: CreateWindowEx: %v", err)
 		close(ready)
 		return
 	}
+	setLayeredWindowAttributes.Call(hwnd, 0, 255, lwaAlpha) // opaque; layered only so clicks pass through
 	p.hwnd = hwnd
 	close(ready)
 	var m msg
@@ -260,29 +279,11 @@ func popupProc(hwnd, message, wParam, lParam uintptr) uintptr {
 	case wmPaint:
 		p.paint()
 		return 0
-	case wmCommand:
-		if n := int(wParam&0xFFFF) - buttonBase; n >= 0 && n < len(p.items) {
-			id := p.items[n].ID
-			go p.onDismiss(id)
-		}
-		return 0
 	case wmClose:
-		// Alt+F4 counts as Dismiss (mute) for every car on screen.
-		for _, a := range p.items {
-			go p.onDismiss(a.ID)
-		}
-		return 0
-	case wmDestroy:
-		return 0
+		return 0 // only the POS clears it
 	}
 	r, _, _ := defWindowProc.Call(hwnd, message, wParam, lParam)
 	return r
-}
-
-func (p *popup) flashTaskbar(flags uint32) {
-	info := flashInfo{Hwnd: p.hwnd, Flags: flags}
-	info.Size = uint32(unsafe.Sizeof(info))
-	flashWindowEx.Call(uintptr(unsafe.Pointer(&info)))
 }
 
 // update runs on the window's thread after show().
@@ -294,27 +295,22 @@ func (p *popup) update() {
 		if len(p.items) > 0 {
 			killTimer.Call(p.hwnd, flashTimer)
 			showWindow.Call(p.hwnd, swHide)
-			p.flashTaskbar(flashwStop)
-			p.setButtons(nil)
 		}
 		p.items = nil
 		return
 	}
 	if !slices.Equal(want, p.items) {
 		wasHidden := len(p.items) == 0
-		p.setButtons(want)
 		p.items = want
-		height := headerHeight + len(want)*rowHeight + popupPadding
 		screenW, _, _ := getSystemMetrics.Call(smCxScreen)
 		screenH, _, _ := getSystemMetrics.Call(smCyScreen)
-		x := (int(screenW) - popupWidth) / 2
-		y := (int(screenH) - height) / 3
-		setWindowPos.Call(p.hwnd, hwndTopmost, uintptr(x), uintptr(y), popupWidth, uintptr(height), swpNoActivate|swpShowWindow)
+		box := p.box.onScreen(int(screenW), int(screenH))
+		height := p.layout(box)
+		setWindowPos.Call(p.hwnd, hwndTopmost, uintptr(box.X), uintptr(box.Y), uintptr(box.Width), uintptr(height), swpNoActivate|swpShowWindow)
 		showWindow.Call(p.hwnd, swShowNA)
 		if wasHidden {
 			setTimer.Call(p.hwnd, flashTimer, 500, 0)
 		}
-		p.flashTaskbar(flashwAll | flashwTimerNoFG)
 		invalidateRect.Call(p.hwnd, 0, 0)
 		return
 	}
@@ -322,29 +318,82 @@ func (p *popup) update() {
 	setWindowPos.Call(p.hwnd, hwndTopmost, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
 }
 
-func (p *popup) setButtons(list []popupRow) {
-	for _, b := range p.buttons {
-		destroyWindow.Call(b)
-	}
-	p.buttons = nil
-	class, _ := windows.UTF16PtrFromString("BUTTON")
-	label, _ := windows.UTF16PtrFromString("Dismiss")
-	for n, row := range list {
-		if row.Muted {
-			continue
-		}
-		top := headerHeight + n*rowHeight + (rowHeight-buttonHeight)/2
-		b, _, _ := createWindowEx.Call(0, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(label)), wsChild|wsVisible,
-			uintptr(popupWidth-popupPadding-buttonWidth), uintptr(top), buttonWidth, buttonHeight, p.hwnd, uintptr(buttonBase+n), 0, 0)
-		sendMessage.Call(b, wmSetFont, p.fonts.button, 1)
-		p.buttons = append(p.buttons, b)
-	}
-}
+const textFormat = dtWordBreak | dtEditControl | dtNoPrefix
 
-func (p *popup) text(dc uintptr, s string, f uintptr, r rect, format uintptr) {
+// measure returns how tall text wraps to in this width.
+func measure(dc uintptr, s string, f uintptr, width int32, format uintptr) int32 {
 	selectObject.Call(dc, f)
 	str, _ := windows.UTF16FromString(s)
-	drawText.Call(dc, uintptr(unsafe.Pointer(&str[0])), ^uintptr(0), uintptr(unsafe.Pointer(&r)), format|dtSingleLine|dtVCenter|dtNoPrefix|dtEndEllipsis)
+	r := rect{0, 0, width, 0}
+	drawText.Call(dc, uintptr(unsafe.Pointer(&str[0])), ^uintptr(0), uintptr(unsafe.Pointer(&r)), format|dtCalcRect)
+	return r.Bottom
+}
+
+// layout wraps every line to the box's width, shrinking the text until all cars fit its height.
+// It returns the window height (no taller than needed).
+func (p *popup) layout(box popupBox) int {
+	dc, _, _ := getDC.Call(p.hwnd)
+	defer releaseDC.Call(p.hwnd, dc)
+	width := int32(box.Width)
+	for _, percent := range []int{100, 90, 80, 70, 62, 55, 48, 42, 36} {
+		f := p.fontsAt(box.Width, percent)
+		scale := func(v int) int32 { return int32(v * box.Width / 475 * percent / 100) }
+		border, pad, gap := int32(box.Width*12/475), scale(16), scale(14)
+		left, inner := border+pad, width-2*(border+pad)
+		var blocks []block
+		var cards []rect
+		y := border + scale(8)
+		add := func(text string, fnt, color uintptr, center bool, x, w int32) {
+			format := uintptr(textFormat)
+			if center {
+				format |= dtCenter
+			}
+			h := measure(dc, text, fnt, w, format)
+			blocks = append(blocks, block{text: text, font: fnt, color: color, r: rect{x, y, x + w, y + h}, center: center})
+			y += h
+		}
+		add("CURBSIDE", f.header, 0, true, left, inner)
+		sub := "CUSTOMER OUTSIDE"
+		if len(p.items) > 1 {
+			sub = strconv.Itoa(len(p.items)) + " CARS OUTSIDE"
+		}
+		add(sub, f.sub, 0, true, left, inner)
+		y += scale(8)
+		header := y
+		y += gap
+		for _, a := range p.items {
+			top := y
+			y += pad
+			car := a.Car
+			if car == "" {
+				car = "Car"
+			}
+			add(car, f.car, colorYellow, false, left+pad, inner-2*pad)
+			if a.Name != "" {
+				add(a.Name, f.name, colorWhite, false, left+pad, inner-2*pad)
+			}
+			if a.OrderNumber != "" {
+				add("Order #"+a.OrderNumber, f.name, colorMuted, false, left+pad, inner-2*pad)
+			}
+			y += pad
+			cards = append(cards, rect{left, top, left + inner, y})
+			y += gap
+		}
+		total := y + border + pad - gap
+		if int(total) <= box.Height || percent == 36 {
+			p.blocks, p.cards, p.border = blocks, cards, border
+			p.header = rect{0, 0, width, header}
+			if int(total) > box.Height {
+				total = int32(box.Height)
+			}
+			return int(total)
+		}
+	}
+	return box.Height
+}
+
+func (p *popup) fill(dc uintptr, r rect, color uintptr) {
+	fillRect.Call(dc, uintptr(unsafe.Pointer(&r)), p.brush(color))
 }
 
 // paint draws into a memory bitmap first so the flashing doesn't flicker.
@@ -359,73 +408,35 @@ func (p *popup) paint() {
 	bitmap, _, _ := createCompatibleBitmap.Call(screen, w, h)
 	old, _, _ := selectObject.Call(dc, bitmap)
 
-	// Unmuted parts flash red/yellow; a muted car's row is plain grey.
-	flashing := func(r rect) {
-		bg, fg := p.brushes[0], rgb(255, 255, 255)
-		if p.flash {
-			bg, fg = p.brushes[1], rgb(0, 0, 0)
-		}
-		fillRect.Call(dc, uintptr(unsafe.Pointer(&r)), bg)
-		setTextColor.Call(dc, fg)
+	flashBg, flashFg := colorRed, colorWhite
+	if p.flash {
+		flashBg, flashFg = colorYellow, colorBlack
 	}
-	grey := func(r rect) {
-		fillRect.Call(dc, uintptr(unsafe.Pointer(&r)), p.brushes[2])
-		setTextColor.Call(dc, rgb(255, 255, 255))
+	// Flashing border and header band; steady dark panel and cards.
+	p.fill(dc, client, flashBg)
+	p.fill(dc, rect{p.border, p.header.Bottom, client.Right - p.border, client.Bottom - p.border}, colorPanel)
+	for _, c := range p.cards {
+		p.fill(dc, c, colorCard)
 	}
 	setBkMode.Call(dc, transparent)
-	allMuted := true
-	for _, row := range p.items {
-		allMuted = allMuted && row.Muted
-	}
-	headerRect := rect{0, 0, client.Right, headerHeight}
-	if allMuted {
-		grey(rect{0, 0, client.Right, client.Bottom})
-	} else {
-		flashing(rect{0, 0, client.Right, client.Bottom})
-	}
-	header := "CURBSIDE - CUSTOMER OUTSIDE"
-	if len(p.items) > 1 {
-		header = "CURBSIDE - " + strconv.Itoa(len(p.items)) + " CUSTOMERS OUTSIDE"
-	}
-	p.text(dc, header, p.fonts.header, headerRect, dtCenter)
-	for n, row := range p.items {
-		top := int32(headerHeight + n*rowHeight)
-		rowRect := rect{0, top, client.Right, top + rowHeight}
-		if row.Muted {
-			grey(rowRect)
-		} else {
-			flashing(rowRect)
+	for _, b := range p.blocks {
+		color := b.color
+		if color == 0 {
+			color = flashFg
 		}
-		line := rect{popupPadding, top, client.Right - popupPadding, top + 4}
-		fillRect.Call(dc, uintptr(unsafe.Pointer(&line)), p.brushes[1-boolIndex(p.flash && !row.Muted)])
-		textRight := client.Right - popupPadding*2 - buttonWidth
-		if row.Muted {
-			textRight = client.Right - popupPadding
+		setTextColor.Call(dc, color)
+		selectObject.Call(dc, b.font)
+		str, _ := windows.UTF16FromString(b.text)
+		format := uintptr(textFormat)
+		if b.center {
+			format |= dtCenter
 		}
-		car := row.Car
-		if car == "" {
-			car = "Car"
-		}
-		p.text(dc, car, p.fonts.car, rect{popupPadding, top + 10, textRight, top + 115}, 0)
-		who := row.Name
-		if row.OrderNumber != "" {
-			who += "  -  Order #" + row.OrderNumber
-		}
-		if row.Muted {
-			who += "  -  muted, tap DELIVERED TO CAR on the POS"
-		}
-		p.text(dc, who, p.fonts.name, rect{popupPadding, top + 115, textRight, top + rowHeight - 10}, 0)
+		r := b.r
+		drawText.Call(dc, uintptr(unsafe.Pointer(&str[0])), ^uintptr(0), uintptr(unsafe.Pointer(&r)), format)
 	}
 
 	bitBlt.Call(screen, 0, 0, w, h, dc, 0, 0, srcCopy)
 	selectObject.Call(dc, old)
 	deleteObject.Call(bitmap)
 	deleteDC.Call(dc)
-}
-
-func boolIndex(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }

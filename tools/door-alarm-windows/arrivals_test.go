@@ -29,56 +29,44 @@ func sameIDs(got []arrival, want ...int64) bool {
 func TestCurbsideBellAndPopup(t *testing.T) {
 	var s arrivalState
 	start := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
-	at := func(seconds int) time.Time { return start.Add(time.Duration(seconds) * time.Second) }
 	red := arrival{ID: 5, Name: "Pat Lee", Car: "Red SUV", OrderNumber: "12"}
 	blue := arrival{ID: 6, Name: "Sam Roe", Car: "Blue Car", OrderNumber: "13"}
 
-	// Already waiting when the program starts: still alerts.
-	if fresh := s.update([]arrival{red}); !sameIDs(fresh, 5) {
+	// Already waiting when the program starts: still alerts, once.
+	if fresh := s.update([]arrival{red}); !sameIDs(fresh, 5) || !s.bell() {
 		t.Fatalf("first poll: fresh %v", ids(fresh))
 	}
-	if !s.bell(at(0)) {
-		t.Fatal("no bell for a waiting customer")
+	for n := 0; n < 30; n++ {
+		s.update([]arrival{red})
+		if s.bell() {
+			t.Fatal("bell rang twice for the same car")
+		}
 	}
-	if s.bell(at(2)) || s.bell(at(19)) {
-		t.Fatal("bell rang again too soon")
+	if !sameIDs(s.shown, 5) {
+		t.Fatalf("car left the screen on its own: %v", ids(s.shown))
 	}
-	if !s.bell(at(20)) {
-		t.Fatal("no repeat bell after 20 s")
-	}
-	// Dismiss only mutes: the car stays listed, no more bells for it.
-	s.dismiss(5)
-	s.update([]arrival{red})
-	if rows := s.rows(); len(rows) != 1 || !rows[0].Muted {
-		t.Fatalf("after dismiss: rows %+v", rows)
-	}
-	if s.bell(at(45)) {
-		t.Fatal("bell for a muted car")
-	}
-	// A second customer: both listed, bell right away and again every 20 s for the unmuted one.
-	if fresh := s.update([]arrival{red, blue}); !sameIDs(fresh, 6) || !sameIDs(s.shown, 5, 6) {
+	// A second customer: both listed, one bell for the new one.
+	if fresh := s.update([]arrival{red, blue}); !sameIDs(fresh, 6) || !sameIDs(s.shown, 5, 6) || !s.bell() || s.bell() {
 		t.Fatalf("second arrival: fresh %v shown %v", ids(fresh), ids(s.shown))
 	}
-	if !s.bell(at(46)) || s.bell(at(50)) || !s.bell(at(66)) {
-		t.Fatal("bell timing for the second customer")
-	}
-	// Delivered to car on the POS: the server drops it, its row goes.
+	// Delivered to car on the POS: the server drops it, its row goes, no bell.
 	s.update([]arrival{blue})
-	if !sameIDs(s.shown, 6) || s.rows()[0].Muted {
+	if !sameIDs(s.shown, 6) || s.bell() {
 		t.Fatalf("after delivered: shown %v", ids(s.shown))
 	}
 	s.update(nil)
-	if len(s.shown) != 0 || s.bell(at(120)) {
+	if len(s.shown) != 0 {
 		t.Fatal("popup not empty after both delivered")
 	}
-	// A test alert stays although the server doesn't list it, until dismissed.
-	s.addTest(arrival{ID: -1, Name: "Test"})
+	// A test alert rings once and clears itself after 30 s.
+	s.addTest(arrival{ID: -1, Name: "Test"}, start)
 	s.update(nil)
-	if !sameIDs(s.shown, -1) || !s.bell(at(121)) {
+	s.expire(start.Add(29 * time.Second))
+	if !sameIDs(s.shown, -1) || !s.bell() {
 		t.Fatalf("test alert: shown %v", ids(s.shown))
 	}
-	s.dismiss(-1)
-	if len(s.shown) != 0 || s.bell(at(150)) {
-		t.Fatal("test alert not dismissed")
+	s.expire(start.Add(30 * time.Second))
+	if len(s.shown) != 0 {
+		t.Fatal("test alert did not clear")
 	}
 }

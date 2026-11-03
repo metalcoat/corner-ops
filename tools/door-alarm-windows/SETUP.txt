@@ -11,13 +11,13 @@ Corner Deli door alarm - setup on the front PC
      green = listening   red = can't reach the store server   grey = muted
 
 3. Right-click the dot and choose "Test chime". Turn the PC speakers up so it's loud.
-   Then choose "Test curbside alert": a flashing popup appears in the middle of the screen
-   and the curbside bell rings (again every 20 seconds). Click Dismiss to close it.
+   Then choose "Test curbside alert": a CURBSIDE panel appears in the right-hand camera
+   column, the curbside bell rings once, and the test card clears itself after 30 seconds.
 
-   Curbside: when a customer taps I'M HERE, the same popup shows their car, name and order
-   number (several cars are listed together). Dismiss only stops the bell for that car.
-   The car comes off the popup when someone taps DELIVERED TO CAR on the POS (the banner at
-   the top of the POS, or on the order in Orders).
+   Curbside: when a customer taps I'M HERE, the bell rings once and a card with their car,
+   name and order number is added to that panel (several cars stack). It stays until someone
+   taps DELIVERED TO CAR on the POS (the banner at the top of the POS, or on the order in
+   Orders). Nothing on this screen needs clicking.
 
 4. Start it automatically when Windows starts:
    - Press Windows key + R, type   shell:startup   and press Enter. A folder opens.

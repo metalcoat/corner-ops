@@ -9,9 +9,9 @@
 // red while it can't reach the server. Settings: config.json next to the .exe.
 //
 // It also polls GET /api/pos/greeter/arrivals for curbside customers who tapped I'M HERE:
-// each one rings the curbside bell and opens a flashing always-on-top popup (car, name,
-// order number) that rings again every 20 s until staff click Dismiss (mutes that car) and
-// closes once the car is marked DELIVERED TO CAR on the POS (or the order is done).
+// each one rings the curbside bell once and adds a card (car, name, order number) to an
+// always-on-top panel in one column of the screen, until the car is marked DELIVERED TO CAR
+// on the POS (or the order is done).
 package main
 
 import (
@@ -38,7 +38,7 @@ import (
 )
 
 // Shown in the tray menu and the log; bump with each new download.
-const version = "1.2.0"
+const version = "1.3.0"
 
 //go:embed chime.wav
 var chime []byte
@@ -56,6 +56,8 @@ const (
 type config struct {
 	Server string `json:"server"`
 	Repeat int    `json:"repeat"`
+	// Where the curbside popup goes, in pixels of a 1920x1080 screen; scaled on others.
+	Popup popupBox `json:"popup"`
 }
 
 var (
@@ -92,7 +94,7 @@ func exeDir() string {
 }
 
 func loadConfig(dir string) config {
-	cfg := config{Server: "http://192.168.1.237:3000", Repeat: 2}
+	cfg := config{Server: "http://192.168.1.237:3000", Repeat: 2, Popup: defaultPopupBox}
 	path := filepath.Join(dir, "config.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -180,7 +182,7 @@ func (a *alarm) fetchArrivals() ([]arrival, error) {
 }
 
 // pollArrivals is one curbside check. While the server can't be reached, what's on screen
-// stays there and keeps ringing. The curbside bell ignores "Mute" (that's for walk-ins).
+// stays there. The curbside bell ignores "Mute" (that's for walk-ins).
 func (a *alarm) pollArrivals() {
 	list, err := a.fetchArrivals()
 	a.curbMu.Lock()
@@ -204,26 +206,19 @@ func (a *alarm) pollArrivals() {
 	}
 }
 
-// curbAlert rings if due and refreshes the popup. Call with curbMu held.
+// curbAlert rings once for a new car and refreshes the popup. Call with curbMu held.
 func (a *alarm) curbAlert() {
-	if a.curbside.bell(time.Now()) {
+	a.curbside.expire(time.Now())
+	if a.curbside.bell() {
 		go play(curbsideBell, 1)
 	}
-	a.popup.show(a.curbside.rows())
-}
-
-func (a *alarm) dismissArrival(id int64) {
-	a.curbMu.Lock()
-	a.curbside.dismiss(id)
-	a.curbAlert()
-	a.curbMu.Unlock()
-	log.Printf("curbside: arrival %d muted (Dismiss)", id)
+	a.popup.show(a.curbside.shown)
 }
 
 func (a *alarm) testArrival() {
 	a.curbMu.Lock()
 	a.curbTests++
-	a.curbside.addTest(arrival{ID: -a.curbTests, Name: "TEST - nobody is outside", Car: "Silver SUV", OrderNumber: "123"})
+	a.curbside.addTest(arrival{ID: -a.curbTests, Name: "TEST - nobody is outside (clears in 30 seconds)", Car: "Silver SUV", OrderNumber: "123"}, time.Now())
 	a.curbAlert()
 	a.curbMu.Unlock()
 }
@@ -310,7 +305,7 @@ func (a *alarm) onReady() {
 	a.last.Disable()
 	systray.AddSeparator()
 	test := systray.AddMenuItem("Test chime", "Play the walk-in chime now")
-	testCurbside := systray.AddMenuItem("Test curbside alert", "Show a pretend curbside popup and ring the bell")
+	testCurbside := systray.AddMenuItem("Test curbside alert", "Show a pretend curbside card for 30 seconds and ring the bell")
 	a.mute = systray.AddMenuItem("Mute walk-in chime for 10 minutes", "")
 	dashboard := systray.AddMenuItem("Open walk-ins dashboard", "")
 	systray.AddSeparator()
@@ -364,6 +359,7 @@ func main() {
 	if file, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
 		log.SetOutput(file)
 	}
+	makeDPIAware()
 	// One copy only: a second start (e.g. a double-click) just exits.
 	name, _ := windows.UTF16PtrFromString("CornerDeliDoorAlarm")
 	if _, err := windows.CreateMutex(nil, false, name); err == windows.ERROR_ALREADY_EXISTS {
@@ -372,6 +368,6 @@ func main() {
 	cfg := loadConfig(dir)
 	log.Printf("starting version %s; server %s", version, cfg.Server)
 	a := &alarm{cfg: cfg, client: &http.Client{Timeout: 5 * time.Second}}
-	a.popup = startPopup(a.dismissArrival)
+	a.popup = startPopup(cfg.Popup)
 	systray.Run(a.onReady, func() { log.Printf("stopped") })
 }

@@ -313,13 +313,14 @@ flowchart LR
   there (sun, moon and stars, clouds, rain, snow, lightning, fog), placed by `GET /api/pos/greeter/weather/info`
   (`src/lib/greeter-weather-layout.ts`). Only those areas are redrawn, about 12 times a second.
 - Curbside check-in: on the order page a curbside customer picks car color and type and taps I'M HERE
-  (`POST /api/customer/orders/[id]/arrival`, table `ordering_curbside_arrivals`). Only the store PC's door alarm
+  (`POST /api/customer/orders/[id]/arrival`, table `ordering_curbside_arrivals`). Only the back PC's door alarm
   (`tools/door-alarm-windows`) alerts: it polls `GET /api/pos/greeter/arrivals` (store network only), rings its built-in
-  curbside bell and shows a flashing always-on-top popup with car, name and order number, ringing again every 20 s until
-  staff click Dismiss (mutes that car's bell only) or the order is completed or 20 minutes pass. The greeter TV out front
-  shows nothing for curbside. Every Deli POS screen shows a CURBSIDE WAITING banner per car (`GET /api/ordering/curbside`),
-  also on the curbside order in Orders; DELIVERED TO CAR (`POST /api/ordering/curbside`) records who and when
-  (`delivered_at`/`delivered_by_*`, and a `curbside_delivered` order event in Who did what) and the popup closes.
+  curbside bell once per new car and keeps a card (car, name, order number) in an always-on-top, click-through panel in
+  SmartPSS's right-hand camera column (config.json `popup`). The greeter TV out front shows nothing for curbside.
+  Every Deli POS screen shows a CURBSIDE WAITING banner per car (`GET /api/ordering/curbside`), also on the curbside
+  order in Orders; DELIVERED TO CAR (`POST /api/ordering/curbside`) records who and when (`delivered_at`/`delivered_by_*`,
+  and a `curbside_delivered` order event in Who did what) and the card leaves the back PC (also when the order is
+  completed or after 20 minutes).
 - Front PC door alarm: `tools/door-alarm-windows` (Go tray program, download
   `/downloads/CornerDeliDoorAlarm.zip`), started from the PC's shell:startup folder.
 - `/api/pos/greeter` is read-only and unauthenticated but store-network only; it returns just the newest
