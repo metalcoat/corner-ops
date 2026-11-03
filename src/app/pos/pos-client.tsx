@@ -1699,6 +1699,11 @@ export default function PosClient({
       (variant) => variant.id === selectedVariantId,
       ) || null;
   const partySalad = Boolean(configuringItem?.description.includes("1/3 lb per person"));
+  // Sold by the dinner with a minimum (catering turkey dinners): one size per count, picked by typing the count.
+  const dinnerCounts = !partySalad && configuringItem && configuringItem.variants.length > 1 && configuringItem.variants.every((variant) => /^\d+ dinners$/.test(variant.name))
+    ? configuringItem.variants.filter((variant) => variant.available).map((variant) => parseInt(variant.name, 10)).sort((a, b) => a - b)
+    : [];
+  const dinnerCount = dinnerCounts.length > 0;
   const modifierGroupVisible = (group: OrderingModifierGroupView) => {
     if (group.presentationContext === "hidden") return false;
     if (group.presentationContext === "combo_trigger")
@@ -1849,7 +1854,7 @@ export default function PosClient({
         variant
       : variant;
     setSelectedVariantId(lineVariant?.id || "");
-    const existingGuests=lineVariant?.name.match(/^Feeds (\d+)/)?.[1];
+    const existingGuests=lineVariant?.name.match(/^Feeds (\d+)/)?.[1]||lineVariant?.name.match(/^(\d+) dinners$/)?.[1];
     setPartySaladGuests(existingGuests||"1");
     setModifierSelections(
       line
@@ -6073,7 +6078,7 @@ export default function PosClient({
               </button>
             </header>
             <div className="posConfigBody">
-              {partySalad ? <fieldset id="variant-choice" className={!selectedVariant ? "needsSelection" : ""}><legend>How many people?<small>Uses 1/3 lb per person and rounds up to the next 0.25 lb</small></legend><div className="posPartySaladCalculator"><input type="number" inputMode="numeric" min="1" max="120" value={partySaladGuests} onChange={(event)=>{const value=event.target.value,set=Number(value);setPartySaladGuests(value);const match=configuringItem.variants.find(variant=>variant.name.startsWith(`Feeds ${set} ·`));setSelectedVariantId(match?.id||"")}} />{selectedVariant&&<strong>{selectedVariant.name.replace(/^Feeds \d+ · /,"")} · {money(selectedVariant.basePriceCents)}</strong>}</div></fieldset> : configuringItem.variants.filter((variant) => variant.available)
+              {partySalad ? <fieldset id="variant-choice" className={!selectedVariant ? "needsSelection" : ""}><legend>How many people?<small>Uses 1/3 lb per person and rounds up to the next 0.25 lb</small></legend><div className="posPartySaladCalculator"><input type="number" inputMode="numeric" min="1" max="120" value={partySaladGuests} onChange={(event)=>{const value=event.target.value,set=Number(value);setPartySaladGuests(value);const match=configuringItem.variants.find(variant=>variant.name.startsWith(`Feeds ${set} ·`));setSelectedVariantId(match?.id||"")}} />{selectedVariant&&<strong>{selectedVariant.name.replace(/^Feeds \d+ · /,"")} · {money(selectedVariant.basePriceCents)}</strong>}</div></fieldset> : dinnerCount ? <fieldset id="variant-choice" className={!selectedVariant ? "needsSelection" : ""}><legend>How many dinners?<small>{configuringItem.description}</small></legend><div className="posPartySaladCalculator"><input type="number" inputMode="numeric" min={dinnerCounts[0]} max={dinnerCounts[dinnerCounts.length-1]} value={partySaladGuests} onChange={(event)=>{const value=event.target.value;setPartySaladGuests(value);const match=configuringItem.variants.find(variant=>variant.available&&variant.name===`${Number(value)} dinners`);setSelectedVariantId(match?.id||"")}} />{selectedVariant?<strong>{selectedVariant.name} · {money(selectedVariant.basePriceCents)}</strong>:<strong>Enter {dinnerCounts[0]} to {dinnerCounts[dinnerCounts.length-1]}</strong>}</div></fieldset> : configuringItem.variants.filter((variant) => variant.available)
                 .length > 1 && (
                 <fieldset
                   id="variant-choice"

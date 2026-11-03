@@ -1843,7 +1843,12 @@ function ItemDialog({
         {availableVariants.length > 1 && (
           <fieldset>
             <legend>Choose a size</legend>
-            {availableVariants.map((v) => (
+            {/* Sold by headcount (party salads, catering dinners): a list, not a hundred radio rows. */}
+            {availableVariants.length > 12 ? (
+              <select aria-label="Choose a size" value={variantId || ""} onChange={(event) => setVariantId(event.target.value)}>
+                {availableVariants.map((v) => <option key={v.id} value={v.id}>{v.name} · {money(v.basePriceCents)}</option>)}
+              </select>
+            ) : availableVariants.map((v) => (
               <label key={v.id}>
                 <input
                   type="radio"
