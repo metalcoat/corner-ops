@@ -46,34 +46,39 @@ func TestCurbsideBellAndPopup(t *testing.T) {
 	if !s.bell(at(20)) {
 		t.Fatal("no repeat bell after 20 s")
 	}
-	// A second customer: both on screen, bell right away.
+	// Dismiss only mutes: the car stays listed, no more bells for it.
+	s.dismiss(5)
+	s.update([]arrival{red})
+	if rows := s.rows(); len(rows) != 1 || !rows[0].Muted {
+		t.Fatalf("after dismiss: rows %+v", rows)
+	}
+	if s.bell(at(45)) {
+		t.Fatal("bell for a muted car")
+	}
+	// A second customer: both listed, bell right away and again every 20 s for the unmuted one.
 	if fresh := s.update([]arrival{red, blue}); !sameIDs(fresh, 6) || !sameIDs(s.shown, 5, 6) {
 		t.Fatalf("second arrival: fresh %v shown %v", ids(fresh), ids(s.shown))
 	}
-	if !s.bell(at(22)) {
-		t.Fatal("no bell for the second customer")
+	if !s.bell(at(46)) || s.bell(at(50)) || !s.bell(at(66)) {
+		t.Fatal("bell timing for the second customer")
 	}
-	// Dismissed: gone and stays gone while the server still lists it.
-	s.dismiss(5)
-	s.update([]arrival{red, blue})
-	if !sameIDs(s.shown, 6) {
-		t.Fatalf("after dismiss: shown %v", ids(s.shown))
+	// Delivered to car on the POS: the server drops it, its row goes.
+	s.update([]arrival{blue})
+	if !sameIDs(s.shown, 6) || s.rows()[0].Muted {
+		t.Fatalf("after delivered: shown %v", ids(s.shown))
 	}
-	// Order completed: the server drops it, the popup closes, no more bells.
-	if fresh := s.update(nil); len(fresh) != 0 || len(s.shown) != 0 {
-		t.Fatalf("after drop: shown %v", ids(s.shown))
-	}
-	if s.bell(at(60)) {
-		t.Fatal("bell with nothing on screen")
+	s.update(nil)
+	if len(s.shown) != 0 || s.bell(at(120)) {
+		t.Fatal("popup not empty after both delivered")
 	}
 	// A test alert stays although the server doesn't list it, until dismissed.
 	s.addTest(arrival{ID: -1, Name: "Test"})
 	s.update(nil)
-	if !sameIDs(s.shown, -1) || !s.bell(at(61)) {
+	if !sameIDs(s.shown, -1) || !s.bell(at(121)) {
 		t.Fatalf("test alert: shown %v", ids(s.shown))
 	}
 	s.dismiss(-1)
-	if len(s.shown) != 0 || s.bell(at(90)) {
+	if len(s.shown) != 0 || s.bell(at(150)) {
 		t.Fatal("test alert not dismissed")
 	}
 }

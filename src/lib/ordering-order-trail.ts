@@ -1,3 +1,5 @@
+import { carLabel } from "./curbside-arrival-policy";
+
 /** One line per thing that happened to an order, oldest first, for answering "who did this and when?" */
 export type OrderTrailEntry = { at: string; label: string; who: string; detail?: string };
 
@@ -39,6 +41,7 @@ export function orderTrail(input: { createdAt: unknown; takenBy: unknown; events
     if (event.event_type === "order_reopened_for_additions") trail.push({ at, label: "Reopened", who: who(event) });
     if (event.event_type === "order_voided") trail.push({ at, label: "Voided", who: who(event), detail: String(details.reason || "") });
     if (event.event_type === "order_item_cancelled") trail.push({ at, label: "Item voided", who: who(event), detail: `${Number(details.quantity || 1)}× ${String(details.itemName || "item")}` });
+    if (event.event_type === "curbside_delivered") trail.push({ at, label: "Delivered to car (curbside)", who: who(event), detail: carLabel(String(details.carColor || "Other"), String(details.carType || "Other")) });
     if (event.event_type === "order_fulfillment_changed") trail.push({ at, label: details.from === details.to ? "Delivery address changed" : `Changed ${words(details.from)} to ${words(details.to)}`, who: who(event), detail: fulfillmentChangeDetail(details) });
   }
   for (const payment of input.payments) {

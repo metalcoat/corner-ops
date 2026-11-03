@@ -7,6 +7,7 @@ import ItemCancellationPanel from "./item-cancellation-panel";
 import type { OrderTrailEntry } from "@/lib/ordering-order-trail";
 import VoidMoneyPanel from "./void-money-panel";
 import OrderCarPhotos from "./order-car-photos";
+import OrderCurbside from "./order-curbside";
 import { formatOrderModifier } from "@/lib/ordering-line-format";
 type Order = {
   id: string;
@@ -452,6 +453,7 @@ export default function OrderCenterClient() {
               </p>
             )}
             {selected.service_type.includes("delivery") && <OrderCarPhotos orderId={selected.id} />}
+            {selected.service_type === "curbside" && <OrderCurbside orderId={selected.id} onDelivered={() => void details(selected)} />}
             {(selected.trail || []).length > 0 && <>
               <h3>Who did what</h3>
               <ol className="ocTrail">

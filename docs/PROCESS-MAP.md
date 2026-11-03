@@ -316,7 +316,10 @@ flowchart LR
   (`POST /api/customer/orders/[id]/arrival`, table `ordering_curbside_arrivals`). Only the store PC's door alarm
   (`tools/door-alarm-windows`) alerts: it polls `GET /api/pos/greeter/arrivals` (store network only), rings its built-in
   curbside bell and shows a flashing always-on-top popup with car, name and order number, ringing again every 20 s until
-  staff click Dismiss or the order is completed or 20 minutes pass. The greeter TV out front shows nothing for curbside.
+  staff click Dismiss (mutes that car's bell only) or the order is completed or 20 minutes pass. The greeter TV out front
+  shows nothing for curbside. Every Deli POS screen shows a CURBSIDE WAITING banner per car (`GET /api/ordering/curbside`),
+  also on the curbside order in Orders; DELIVERED TO CAR (`POST /api/ordering/curbside`) records who and when
+  (`delivered_at`/`delivered_by_*`, and a `curbside_delivered` order event in Who did what) and the popup closes.
 - Front PC door alarm: `tools/door-alarm-windows` (Go tray program, download
   `/downloads/CornerDeliDoorAlarm.zip`), started from the PC's shell:startup folder.
 - `/api/pos/greeter` is read-only and unauthenticated but store-network only; it returns just the newest

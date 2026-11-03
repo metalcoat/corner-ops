@@ -2,7 +2,7 @@ package main
 
 import "time"
 
-// While an alert is on screen and nobody has clicked Dismiss, the bell rings again this often.
+// While a car on screen isn't muted, the bell rings again this often.
 const bellEvery = 20 * time.Second
 
 // arrival is one entry of GET /api/pos/greeter/arrivals: a curbside customer waiting outside.
@@ -13,29 +13,36 @@ type arrival struct {
 	OrderNumber string `json:"orderNumber"`
 }
 
+// popupRow is one car in the popup. A muted row stays listed, without flashing or bell, until
+// staff tap DELIVERED TO CAR on the POS and the server stops listing it.
+type popupRow struct {
+	arrival
+	Muted bool
+}
+
 // arrivalState decides what the curbside popup shows and when the bell rings. Unlike walk-ins,
 // customers already waiting when the program starts do alert: they are still outside (the server
-// drops them once the order is completed or after 20 minutes). Test alerts have negative ids and
-// stay until dismissed, since the server doesn't list them.
+// drops them once delivered to the car, the order is completed, or after 20 minutes). Test alerts
+// have negative ids and stay until dismissed, since the server doesn't list them.
 type arrivalState struct {
-	shown     []arrival // oldest first, as the server lists them
-	dismissed map[int64]bool
-	unrung    bool // something new appeared since the last bell
-	lastBell  time.Time
+	shown    []arrival // oldest first, as the server lists them
+	muted    map[int64]bool
+	unrung   bool // something new appeared since the last bell
+	lastBell time.Time
 }
 
 // update takes this poll's list and returns the arrivals that are new to the popup.
 func (s *arrivalState) update(list []arrival) []arrival {
-	if s.dismissed == nil {
-		s.dismissed = map[int64]bool{}
+	if s.muted == nil {
+		s.muted = map[int64]bool{}
 	}
 	listed := map[int64]bool{}
 	for _, a := range list {
 		listed[a.ID] = true
 	}
-	for id := range s.dismissed {
+	for id := range s.muted {
 		if !listed[id] {
-			delete(s.dismissed, id)
+			delete(s.muted, id)
 		}
 	}
 	had := map[int64]bool{}
@@ -48,9 +55,6 @@ func (s *arrivalState) update(list []arrival) []arrival {
 	}
 	var fresh []arrival
 	for _, a := range list {
-		if s.dismissed[a.ID] {
-			continue
-		}
 		next = append(next, a)
 		if !had[a.ID] {
 			fresh = append(fresh, a)
@@ -69,9 +73,15 @@ func (s *arrivalState) addTest(a arrival) {
 	s.unrung = true
 }
 
+// dismiss is the popup's Dismiss button: it only stops the bell for that car. The car stays
+// listed until it's marked delivered on the POS. A test alert just goes away.
 func (s *arrivalState) dismiss(id int64) {
-	if s.dismissed == nil {
-		s.dismissed = map[int64]bool{}
+	if id > 0 {
+		if s.muted == nil {
+			s.muted = map[int64]bool{}
+		}
+		s.muted[id] = true
+		return
 	}
 	var next []arrival
 	for _, a := range s.shown {
@@ -80,14 +90,25 @@ func (s *arrivalState) dismiss(id int64) {
 		}
 	}
 	s.shown = next
-	if id > 0 {
-		s.dismissed[id] = true
-	}
 }
 
-// bell reports whether to ring now: right away for a new arrival, then every bellEvery while any is on screen.
+func (s *arrivalState) rows() []popupRow {
+	rows := make([]popupRow, 0, len(s.shown))
+	for _, a := range s.shown {
+		rows = append(rows, popupRow{arrival: a, Muted: s.muted[a.ID]})
+	}
+	return rows
+}
+
+// bell reports whether to ring now: right away for a new arrival, then every bellEvery while any car isn't muted.
 func (s *arrivalState) bell(now time.Time) bool {
-	if len(s.shown) == 0 {
+	ringing := false
+	for _, a := range s.shown {
+		if !s.muted[a.ID] {
+			ringing = true
+		}
+	}
+	if !ringing {
 		s.unrung = false
 		return false
 	}

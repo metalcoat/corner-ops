@@ -4,7 +4,8 @@ package main
 
 // The curbside popup: a borderless always-on-top window in the middle of the screen that flashes
 // red and yellow, one row per waiting customer (car, name, order number) with its own Dismiss
-// button. It lives on its own OS thread with its own message loop, next to the tray icon's.
+// button that only mutes that car (its row turns grey); a row goes when the POS marks it delivered.
+// It lives on its own OS thread with its own message loop, next to the tray icon's.
 
 import (
 	"log"
@@ -166,14 +167,14 @@ type popup struct {
 	onDismiss func(id int64)
 
 	mu   sync.Mutex
-	want []arrival // set by show(), picked up on the window's thread
+	want []popupRow // set by show(), picked up on the window's thread
 
 	// Owned by the window's thread.
-	items   []arrival
+	items   []popupRow
 	buttons []uintptr
 	flash   bool
 	fonts   struct{ header, car, name, button uintptr }
-	brushes [2]uintptr
+	brushes [3]uintptr // red, yellow, muted grey
 }
 
 var thePopup *popup
@@ -189,7 +190,7 @@ func startPopup(onDismiss func(id int64)) *popup {
 }
 
 // show replaces what the popup lists; an empty list hides it. Safe from any goroutine.
-func (p *popup) show(list []arrival) {
+func (p *popup) show(list []popupRow) {
 	p.mu.Lock()
 	p.want = slices.Clone(list)
 	p.mu.Unlock()
@@ -223,6 +224,7 @@ func (p *popup) run(ready chan struct{}) {
 	p.fonts.button = font(44, 700)
 	p.brushes[0], _, _ = createSolidBrush.Call(rgb(200, 16, 32))
 	p.brushes[1], _, _ = createSolidBrush.Call(rgb(255, 204, 0))
+	p.brushes[2], _, _ = createSolidBrush.Call(rgb(55, 65, 81))
 	hwnd, _, err := createWindowEx.Call(wsExTopmost|wsExAppWindow, uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(title)),
 		wsPopup|wsClipChildren, 0, 0, popupWidth, 400, 0, 0, instance, 0)
 	if hwnd == 0 {
@@ -265,7 +267,7 @@ func popupProc(hwnd, message, wParam, lParam uintptr) uintptr {
 		}
 		return 0
 	case wmClose:
-		// Alt+F4 counts as dismissing everything on screen.
+		// Alt+F4 counts as Dismiss (mute) for every car on screen.
 		for _, a := range p.items {
 			go p.onDismiss(a.ID)
 		}
@@ -320,14 +322,17 @@ func (p *popup) update() {
 	setWindowPos.Call(p.hwnd, hwndTopmost, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
 }
 
-func (p *popup) setButtons(list []arrival) {
+func (p *popup) setButtons(list []popupRow) {
 	for _, b := range p.buttons {
 		destroyWindow.Call(b)
 	}
 	p.buttons = nil
 	class, _ := windows.UTF16PtrFromString("BUTTON")
 	label, _ := windows.UTF16PtrFromString("Dismiss")
-	for n := range list {
+	for n, row := range list {
+		if row.Muted {
+			continue
+		}
 		top := headerHeight + n*rowHeight + (rowHeight-buttonHeight)/2
 		b, _, _ := createWindowEx.Call(0, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(label)), wsChild|wsVisible,
 			uintptr(popupWidth-popupPadding-buttonWidth), uintptr(top), buttonWidth, buttonHeight, p.hwnd, uintptr(buttonBase+n), 0, 0)
@@ -354,31 +359,60 @@ func (p *popup) paint() {
 	bitmap, _, _ := createCompatibleBitmap.Call(screen, w, h)
 	old, _, _ := selectObject.Call(dc, bitmap)
 
-	bg, fg := p.brushes[0], rgb(255, 255, 255)
-	if p.flash {
-		bg, fg = p.brushes[1], rgb(0, 0, 0)
+	// Unmuted parts flash red/yellow; a muted car's row is plain grey.
+	flashing := func(r rect) {
+		bg, fg := p.brushes[0], rgb(255, 255, 255)
+		if p.flash {
+			bg, fg = p.brushes[1], rgb(0, 0, 0)
+		}
+		fillRect.Call(dc, uintptr(unsafe.Pointer(&r)), bg)
+		setTextColor.Call(dc, fg)
 	}
-	fillRect.Call(dc, uintptr(unsafe.Pointer(&client)), bg)
+	grey := func(r rect) {
+		fillRect.Call(dc, uintptr(unsafe.Pointer(&r)), p.brushes[2])
+		setTextColor.Call(dc, rgb(255, 255, 255))
+	}
 	setBkMode.Call(dc, transparent)
-	setTextColor.Call(dc, fg)
+	allMuted := true
+	for _, row := range p.items {
+		allMuted = allMuted && row.Muted
+	}
+	headerRect := rect{0, 0, client.Right, headerHeight}
+	if allMuted {
+		grey(rect{0, 0, client.Right, client.Bottom})
+	} else {
+		flashing(rect{0, 0, client.Right, client.Bottom})
+	}
 	header := "CURBSIDE - CUSTOMER OUTSIDE"
 	if len(p.items) > 1 {
 		header = "CURBSIDE - " + strconv.Itoa(len(p.items)) + " CUSTOMERS OUTSIDE"
 	}
-	p.text(dc, header, p.fonts.header, rect{0, 0, client.Right, headerHeight}, dtCenter)
-	for n, a := range p.items {
+	p.text(dc, header, p.fonts.header, headerRect, dtCenter)
+	for n, row := range p.items {
 		top := int32(headerHeight + n*rowHeight)
-		line := rect{popupPadding, top, client.Right, top + 4}
-		fillRect.Call(dc, uintptr(unsafe.Pointer(&line)), p.brushes[1-boolIndex(p.flash)])
+		rowRect := rect{0, top, client.Right, top + rowHeight}
+		if row.Muted {
+			grey(rowRect)
+		} else {
+			flashing(rowRect)
+		}
+		line := rect{popupPadding, top, client.Right - popupPadding, top + 4}
+		fillRect.Call(dc, uintptr(unsafe.Pointer(&line)), p.brushes[1-boolIndex(p.flash && !row.Muted)])
 		textRight := client.Right - popupPadding*2 - buttonWidth
-		car := a.Car
+		if row.Muted {
+			textRight = client.Right - popupPadding
+		}
+		car := row.Car
 		if car == "" {
 			car = "Car"
 		}
 		p.text(dc, car, p.fonts.car, rect{popupPadding, top + 10, textRight, top + 115}, 0)
-		who := a.Name
-		if a.OrderNumber != "" {
-			who += "  -  Order #" + a.OrderNumber
+		who := row.Name
+		if row.OrderNumber != "" {
+			who += "  -  Order #" + row.OrderNumber
+		}
+		if row.Muted {
+			who += "  -  muted, tap DELIVERED TO CAR on the POS"
 		}
 		p.text(dc, who, p.fonts.name, rect{popupPadding, top + 115, textRight, top + rowHeight - 10}, 0)
 	}

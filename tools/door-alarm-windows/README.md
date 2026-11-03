@@ -10,9 +10,11 @@ It is also the only place curbside check-ins alert (the greeter TV out front sta
 `GET /api/pos/greeter/arrivals` every 2 seconds; for each customer who tapped I'M HERE it plays the
 curbside bell (`curbside.wav`) and opens a flashing red/yellow always-on-top popup in the middle of
 the screen with the car ("Red SUV"), the customer's name and the order number, one row and Dismiss
-button per customer. The bell repeats every 20 s until every row is dismissed; a row also goes away
-by itself when the order is completed or after 20 minutes (the server stops listing it). Customers
-already waiting when the program starts do alert. Mute only silences the walk-in chime.
+button per customer; each new customer rings again. The bell repeats every 20 s while any row isn't
+dismissed. Dismiss only mutes that car (its row turns grey and stops flashing); the row goes away when
+staff tap DELIVERED TO CAR on the POS (or the order is completed, or after 20 minutes), because the
+server stops listing it. Customers already waiting when the program starts do alert. The tray's Mute
+only silences the walk-in chime.
 
 - Green tray dot: listening. Red: can't reach the server (walk-ins won't sound). Grey: muted.
 - Right-click the dot: version, Test chime, Test curbside alert, Mute walk-in chime for 10 minutes /

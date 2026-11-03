@@ -10,7 +10,8 @@
 //
 // It also polls GET /api/pos/greeter/arrivals for curbside customers who tapped I'M HERE:
 // each one rings the curbside bell and opens a flashing always-on-top popup (car, name,
-// order number) that rings again every 20 s until staff click Dismiss or the order is done.
+// order number) that rings again every 20 s until staff click Dismiss (mutes that car) and
+// closes once the car is marked DELIVERED TO CAR on the POS (or the order is done).
 package main
 
 import (
@@ -37,7 +38,7 @@ import (
 )
 
 // Shown in the tray menu and the log; bump with each new download.
-const version = "1.1.0"
+const version = "1.2.0"
 
 //go:embed chime.wav
 var chime []byte
@@ -208,7 +209,7 @@ func (a *alarm) curbAlert() {
 	if a.curbside.bell(time.Now()) {
 		go play(curbsideBell, 1)
 	}
-	a.popup.show(a.curbside.shown)
+	a.popup.show(a.curbside.rows())
 }
 
 func (a *alarm) dismissArrival(id int64) {
@@ -216,7 +217,7 @@ func (a *alarm) dismissArrival(id int64) {
 	a.curbside.dismiss(id)
 	a.curbAlert()
 	a.curbMu.Unlock()
-	log.Printf("curbside: arrival %d dismissed", id)
+	log.Printf("curbside: arrival %d muted (Dismiss)", id)
 }
 
 func (a *alarm) testArrival() {

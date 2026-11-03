@@ -15,8 +15,9 @@ Corner Deli door alarm - setup on the front PC
    and the curbside bell rings (again every 20 seconds). Click Dismiss to close it.
 
    Curbside: when a customer taps I'M HERE, the same popup shows their car, name and order
-   number. Click Dismiss once someone is taking the order out. It also closes by itself when
-   the order is completed.
+   number (several cars are listed together). Dismiss only stops the bell for that car.
+   The car comes off the popup when someone taps DELIVERED TO CAR on the POS (the banner at
+   the top of the POS, or on the order in Orders).
 
 4. Start it automatically when Windows starts:
    - Press Windows key + R, type   shell:startup   and press Enter. A folder opens.

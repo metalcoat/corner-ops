@@ -1,6 +1,7 @@
 "use client";
 
 import StaleDraftAlert from "./stale-draft-alert";
+import CurbsideWaitingBanner from "./curbside-waiting";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
@@ -149,6 +150,7 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
     {offlineConflicts.map(row=><div className="deliOfflineBanner offline" role="alert" key={row.id}><strong>OFFLINE ORDER OFF-{row.id.slice(-6).toUpperCase()}{row.amountTenderedCents!=null?` (CASH $${(row.amountTenderedCents/100).toFixed(2)})`:""} DID NOT SYNC: {row.error||"Manual review is required."}</strong><button type="button" onClick={()=>void retryOfflineOrder(row.id).then(result=>setOfflineMessage(result.synced?`${result.synced} order${result.synced===1?"":"s"} synced.`:""))}>RETRY</button><button type="button" onClick={()=>{if(window.confirm("Dismiss this offline order? It will NOT reach the kitchen or register. Ring it in again or record it manually first."))dismissOfflineOrder(row.id)}}>DISMISS</button></div>)}
     {onlineOrderAlerts.pendingOnlineOrders>0&&<div className="deliOfflineBanner" role="alert"><strong>{onlineOrderAlerts.pendingOnlineOrders} NEW ONLINE ORDER{onlineOrderAlerts.pendingOnlineOrders===1?"":"S"} IN THE KITCHEN</strong><button type="button" onClick={onlineOrderAlerts.acknowledgeOnlineOrders}>ACKNOWLEDGE</button></div>}
     {onlineOrderAlerts.soundBlocked&&<button type="button" className="deliOfflineBanner offline deliSoundPrompt">{/* Any tap unlocks audio through the alert hook's pointerdown listener. */}<strong>NEW-ORDER SOUND IS OFF — TAP HERE TO ENABLE IT</strong></button>}
+    {session?.authenticated && <CurbsideWaitingBanner />}
     {androidUpdateUrl ? <a className="deliAndroidUpdate" href={androidUpdateUrl}>ANDROID POS UPDATE AVAILABLE — DOWNLOAD</a> : null}
     {onlineOrderAlerts.alertNotice && <div className="deliAlertNotice" role="status">{onlineOrderAlerts.alertNotice}</div>}
     <header className="deliShellHeader">
