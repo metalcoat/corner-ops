@@ -111,17 +111,20 @@ export async function changeOrderFulfillment(orderId: string, business: Ordering
   }
 
   await withTransaction(async () => {
+    // Queries here must use the transaction's client. The pool client from the top of this
+    // function would wait on this transaction's own row locks and hang the order.
+    const tx = getSql();
     if (sent) await reopenOrderForAdditions(orderId, business, actor);
-    const locked = (await sql`SELECT status FROM ordering_orders WHERE id=${orderId} FOR UPDATE`)[0];
+    const locked = (await tx`SELECT status FROM ordering_orders WHERE id=${orderId} FOR UPDATE`)[0];
     if (locked?.status !== "draft") throw new OrderConflictError("This order is not open for changes.");
     if (change.serviceType === "pickup") {
-      const out = await sql`SELECT 1 FROM ordering_delivery_assignments WHERE order_id=${orderId} AND status IN('PICKED_UP','EN_ROUTE','ARRIVED') LIMIT 1`;
+      const out = await tx`SELECT 1 FROM ordering_delivery_assignments WHERE order_id=${orderId} AND status IN('PICKED_UP','EN_ROUTE','ARRIVED') LIMIT 1`;
       if (out.length) throw new OrderConflictError("A driver already has this order. Call the driver before switching it to pickup.");
-      await sql`UPDATE ordering_delivery_assignments SET status='CANCELLED',cancelled_at=NOW(),status_note='Order switched to pickup',updated_at=NOW() WHERE order_id=${orderId} AND status NOT IN('DELIVERED','RETURNED','CANCELLED')`;
+      await tx`UPDATE ordering_delivery_assignments SET status='CANCELLED',cancelled_at=NOW(),status_note='Order switched to pickup',updated_at=NOW() WHERE order_id=${orderId} AND status NOT IN('DELIVERED','RETURNED','CANCELLED')`;
     }
     if (resolved) await saveOrderDeliveryAddress({ orderId, address: resolved.address, line2: resolved.line2, customerAddressId: resolved.customerAddressId, route });
-    const updated = (await sql`UPDATE ordering_orders SET service_type=${change.serviceType},delivery_fee_cents=${deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${deliveryFeeCents}-paid_cents),payment_status=CASE WHEN paid_cents<=0 THEN 'unpaid' WHEN paid_cents>=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${deliveryFeeCents}) THEN 'paid' ELSE 'partially_paid' END,version=version+1,updated_at=NOW() WHERE id=${orderId} RETURNING version`)[0];
-    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${updated.version},'order_fulfillment_changed',${actor.type},${actor.id},${JSON.stringify({ from: previousService, to: change.serviceType, deliveryFeeCents, previousDeliveryFeeCents: Number(current.delivery_fee_cents || 0), deliveryAddress, actorName: actor.name, actorRole: actor.role || null, afterSend: Boolean(current.submitted_at), afterPayment: Number(current.paid_cents) > 0, approvedById: approvedBy?.id || null, approvedByName: approvedBy?.name || null })}::jsonb)`;
+    const updated = (await tx`UPDATE ordering_orders SET service_type=${change.serviceType},delivery_fee_cents=${deliveryFeeCents},total_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${deliveryFeeCents}),amount_due_cents=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${deliveryFeeCents}-paid_cents),payment_status=CASE WHEN paid_cents<=0 THEN 'unpaid' WHEN paid_cents>=GREATEST(0,subtotal_cents-discount_cents+tax_cents+tip_cents+${deliveryFeeCents}) THEN 'paid' ELSE 'partially_paid' END,version=version+1,updated_at=NOW() WHERE id=${orderId} RETURNING version`)[0];
+    await tx`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)VALUES(${randomUUID()},${orderId},${updated.version},'order_fulfillment_changed',${actor.type},${actor.id},${JSON.stringify({ from: previousService, to: change.serviceType, deliveryFeeCents, previousDeliveryFeeCents: Number(current.delivery_fee_cents || 0), deliveryAddress, actorName: actor.name, actorRole: actor.role || null, afterSend: Boolean(current.submitted_at), afterPayment: Number(current.paid_cents) > 0, approvedById: approvedBy?.id || null, approvedByName: approvedBy?.name || null })}::jsonb)`;
   });
   await syncDraftTotals(orderId, business);
   const order = (await sql`SELECT * FROM ordering_orders WHERE id=${orderId}`)[0];

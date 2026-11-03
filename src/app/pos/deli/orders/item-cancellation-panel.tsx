@@ -35,6 +35,8 @@ export default function ItemCancellationPanel({ orderId, item, onDone, onClose, 
   const [tenders, setTenders] = useState<Tender[]>([]);
   const [tenderId, setTenderId] = useState("");
   const [error, setError] = useState("");
+  // Why no payment can be picked to refund; without it the button is greyed for no visible reason.
+  const [paymentsError, setPaymentsError] = useState("");
   const [busy, setBusy] = useState(false);
   // Owner rule: the refund (or store credit) can wait, but must be settled by end of day.
   const [refundLater, setRefundLater] = useState(false);
@@ -55,6 +57,7 @@ export default function ItemCancellationPanel({ orderId, item, onDone, onClose, 
         const payments = (paymentBody.tenders || []).filter((row: Tender) => row.transaction_type === "payment" && row.status === "approved");
         setTenders(payments);
         setTenderId((current) => current || payments[0]?.id || "");
+        setPaymentsError(paymentResponse.ok ? "" : paymentBody.error || "The order's payments could not be loaded.");
         setError("");
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "The item resolution could not be priced.");
@@ -124,7 +127,9 @@ export default function ItemCancellationPanel({ orderId, item, onDone, onClose, 
       {!courtesyCredit && quote && quote.refundRequiredCents > 0 && !refundLater && <label>Payment being refunded<select value={tenderId} onChange={(event) => setTenderId(event.target.value)}><option value="">Choose original payment</option>{tenders.map((tender) => <option key={tender.id} value={tender.id}>{tender.tender_type.replaceAll("_", " ")} · {money(tender.amount_cents)}</option>)}</select></label>}
       {!courtesyCredit && quote && quote.refundRequiredCents > 0 && !refundLater && cashCredit && <p className="ocVoidNotice">Paid in cash: {money(quote.refundRequiredCents)} goes on the customer&apos;s account as credit for next time. No cash leaves the till.</p>}
       {!courtesyCredit && quote && quote.refundRequiredCents > 0 && !refundLater && cashNoCustomer && <p className="ocVoidNotice">No customer on this order, so {money(quote.refundRequiredCents)} comes back as cash. Attach a customer first to leave it as credit.</p>}
-      {courtesyCredit && !quote?.customerId && <p className="ocDialogError">A customer account is required for future-order credit.</p>}
+      {!courtesyCredit && quote && quote.refundRequiredCents > 0 && !refundLater && tenders.length === 0 && <p className="ocDialogError">No payment on this order can be refunded here{paymentsError ? ` (${paymentsError})` : ""}. Tick &quot;Refund or leave credit later&quot; to remove the item now.</p>}
+      {!quote && !error && <p className="ocVoidNotice">Pricing the item…</p>}
+      {courtesyCredit && !quote?.customerId &&<p className="ocDialogError">A customer account is required for future-order credit.</p>}
       {staff && quote?.managerRequired && <label>Manager PIN (the kitchen already has this item)<input type="password" inputMode="numeric" autoComplete="off" maxLength={4} value={managerPin} onChange={(event) => setManagerPin(event.target.value)} /></label>}
       {error && <p className="ocDialogError" role="alert">{error}</p>}
       <div><button type="button" disabled={busy} onClick={onClose}>BACK</button><button className={courtesyCredit ? "primary" : "danger"} disabled={busy || reason.trim().length < 3 || !quote || (staff && quote.managerRequired && managerPin.length < 4) || (courtesyCredit ? !quote.customerId : quote.refundRequiredCents > 0 && !refundLater && !tenderId)}>{busy ? "SAVING…" : courtesyCredit ? `ISSUE ${money(courtesyCreditCents)} CREDIT` : refundLater && (quote?.refundRequiredCents || 0) > 0 ? "REMOVE ITEM · REFUND LATER" : "REMOVE & REFUND ITEM"}</button></div>
