@@ -28,7 +28,7 @@ export async function findCustomers(business: OrderingBusiness, query = "") {
     SELECT c.id,c.first_name,c.last_name,c.display_name,c.email,c.notes,c.active,c.created_at,c.updated_at,c.last_order_at,
       p.normalized_phone,p.display_phone,
       COALESCE((SELECT json_agg(phone ORDER BY phone.is_primary DESC,phone.last_used_at DESC NULLS LAST,phone.created_at) FROM ordering_customer_phones phone WHERE phone.customer_id=c.id),'[]') phones,
-      COALESCE((SELECT json_agg(email ORDER BY email.is_primary DESC,email.created_at) FROM ordering_customer_emails email WHERE email.customer_id=c.id),'[]') emails,
+      COALESCE((SELECT json_agg(customer_email ORDER BY customer_email.is_primary DESC,customer_email.created_at) FROM ordering_customer_emails customer_email WHERE customer_email.customer_id=c.id),'[]') emails,
       COALESCE((SELECT json_agg(address_row ORDER BY address_row.delivery_order_count DESC,address_row.is_primary DESC,address_row.last_used_at DESC NULLS LAST,address_row.created_at DESC) FROM (SELECT a.*,(SELECT COUNT(*)::integer FROM ordering_order_delivery_addresses used WHERE used.customer_address_id=a.id) delivery_order_count FROM ordering_customer_addresses a WHERE a.customer_id=c.id AND a.active=TRUE) address_row),'[]') addresses
     FROM ordering_customers c
     LEFT JOIN LATERAL (SELECT normalized_phone,display_phone FROM ordering_customer_phones WHERE customer_id=c.id ORDER BY is_primary DESC,created_at LIMIT 1) p ON TRUE
@@ -226,6 +226,14 @@ export async function addCustomerPhone(input: {
   });
 }
 
+const STREET_WORDS: Record<string, string> = { street: "st", avenue: "ave", road: "rd", drive: "dr", lane: "ln", boulevard: "blvd", place: "pl", court: "ct", circle: "cir", terrace: "ter", highway: "hwy", parkway: "pkwy", extension: "ext", north: "n", south: "s", east: "e", west: "w", apartment: "apt" };
+const addressWords = (value: unknown) => String(value || "").toLowerCase().replace(/[.,#]/g, " ").split(/\s+/).filter(Boolean).map((word) => STREET_WORDS[word] || word).join(" ");
+/** True when two saved addresses are the same place written differently (case, punctuation, Street/St, ZIP+4). */
+export function sameAddressKey(a: { line1?: unknown; line2?: unknown; postal_code?: unknown }, b: { line1?: unknown; line2?: unknown; postal_code?: unknown }): boolean {
+  const zip = (value: unknown) => String(value || "").replace(/\D/g, "").slice(0, 5);
+  return addressWords(a.line1) === addressWords(b.line1) && addressWords(a.line2) === addressWords(b.line2) && zip(a.postal_code) === zip(b.postal_code);
+}
+
 export async function addCustomerAddress(input: {
   business: OrderingBusiness;
   customerId: string;
@@ -258,8 +266,10 @@ export async function addCustomerAddress(input: {
     const line1 = input.line1.trim(),
       line2 = String(input.line2 || "").trim(),
       postal = input.postalCode.trim();
-    const existing =
-      await sql`SELECT id FROM ordering_customer_addresses WHERE customer_id=${input.customerId} AND active=TRUE AND lower(line1)=lower(${line1}) AND lower(line2)=lower(${line2}) AND postal_code=${postal}`;
+    // "412 Jay St" 13669-2612 and "412 jay street" 13669 are the same place: compare normalized streets and 5-digit ZIPs.
+    const existing = (
+      await sql`SELECT id,line1,line2,postal_code FROM ordering_customer_addresses WHERE customer_id=${input.customerId} AND active=TRUE ORDER BY is_primary DESC,last_used_at DESC NULLS LAST`
+    ).filter((row) => sameAddressKey(row, { line1, line2, postal_code: postal }));
     if (existing[0]) {
       if (input.isPrimary) {
         await sql`UPDATE ordering_customer_addresses SET is_primary=FALSE,updated_at=NOW() WHERE customer_id=${input.customerId} AND active=TRUE`;

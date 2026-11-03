@@ -53,7 +53,15 @@ void (async () => {
     if (canonical.phones.filter((item: { normalized_phone: string }) => item.normalized_phone === `+1${mainPhone}`).length !== 1) throw new Error("Matching normalized phones were not deduplicated during merge.");
     if (order.customer_id !== a.customer.id || order.first_name_snapshot !== "Sara" || order.phone_snapshot !== `+1${otherPhone}`) throw new Error("Order association/snapshot acceptance failed.");
     if (merged.active || merged.merged_into_customer_id !== a.customer.id || !event.length) throw new Error("Customer merge/audit acceptance failed.");
-    summary = JSON.stringify({ normalizedLookup: true, duplicatePrevented: true, explicitSharedPhone: true, phoneCount: 3, initialAddressCount: 3, selectedPhoneAndAddressSnapshots: true, mergedAddressCount: 4, orderReassociated: true, historicalSnapshotsUnchanged: true, loserMarkedMerged: true, mergeAudit: true }, null, 2);
+    // The same street typed differently (case, "Street", ZIP+4) reuses the saved address.
+    await addCustomerAddress({ business: "Corner Deli", customerId: a.customer.id, label: "Other", line1: "312 jay street.", city: "Ogdensburg", state: "NY", postalCode: "13669-2612" });
+    if ((await findCustomers("Corner Deli", mainPhone)).find((customer) => customer.id === a.customer.id)?.addresses.length !== 4) throw new Error("A near-duplicate address was saved again.");
+    // Each email comes back as its row (address and label), not the customer's main email repeated.
+    await sql`UPDATE ordering_customers SET email='main@example.com' WHERE id=${a.customer.id}`;
+    await sql`INSERT INTO ordering_customer_emails(id,customer_id,normalized_email,display_email,label,is_primary) VALUES(${randomUUID()},${a.customer.id},'second@example.com','second@example.com','Work',FALSE)`;
+    const emails = (await findCustomers("Corner Deli", mainPhone)).find((customer) => customer.id === a.customer.id)?.emails as Array<{ display_email?: string; label?: string }>;
+    if (!emails?.some((item) => item.display_email === "second@example.com" && item.label === "Work")) throw new Error(`Customer emails did not come back as rows: ${JSON.stringify(emails)}`);
+    summary = JSON.stringify({ normalizedLookup: true, duplicatePrevented: true, explicitSharedPhone: true, phoneCount: 3, initialAddressCount: 3, selectedPhoneAndAddressSnapshots: true, mergedAddressCount: 4, nearDuplicateAddressReused: true, emailsReturnedAsRows: true, orderReassociated: true, historicalSnapshotsUnchanged: true, loserMarkedMerged: true, mergeAudit: true }, null, 2);
     throw new Error(ROLLBACK);
   }); } catch (error) { if (!(error instanceof Error) || error.message !== ROLLBACK) throw error; }
   if ((await getSql()`SELECT id FROM ordering_customer_phones WHERE normalized_phone IN (${`+1${mainPhone}`},${`+1${workNumber}`},${`+1${otherPhone}`})`).length) throw new Error("Customer CRM validation left test customers behind.");

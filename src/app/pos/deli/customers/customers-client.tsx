@@ -708,14 +708,14 @@ export default function CustomersClient() {
 
               <h3>EMAILS</h3>
               <div className="customerContactList">
-                {(selected.emails || []).map((item) => (
+                {(selected.emails || []).filter((item) => item?.display_email).map((item) => (
                   <div key={item.id}>
                     <b>{item.label || "Email"}</b>
                     <span>{item.display_email}</span>
                     {item.is_primary && <em>Primary</em>}
                   </div>
                 ))}
-                {!(selected.emails || []).length && <p>No email addresses.</p>}
+                {!(selected.emails || []).some((item) => item?.display_email) && <p>No email addresses.</p>}
               </div>
 
               <h3>ADDRESSES</h3>
