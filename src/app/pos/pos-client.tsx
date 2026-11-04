@@ -5671,6 +5671,7 @@ export default function PosClient({
                     <label>
                       Gift card number
                       <input
+                        inputMode="numeric"
                         ref={giftCardInputRef}
                         data-barcode-context="gift-card"
                         autoComplete="off"
@@ -6836,6 +6837,7 @@ export default function PosClient({
                   <label>
                     Phone number
                     <input
+                      type="tel"
                       required
                       inputMode="tel"
                       autoComplete="tel"

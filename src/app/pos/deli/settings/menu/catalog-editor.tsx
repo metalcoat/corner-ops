@@ -1135,6 +1135,7 @@ function VariantRow({
         onChange={(e) => setName(e.target.value)}
       />
       <input
+        inputMode="decimal"
         aria-label="Variant price"
         value={price}
         onChange={(e) => setPrice(e.target.value)}
@@ -1242,6 +1243,7 @@ function PrintGroupEditor({
             }
           />
           <input
+            inputMode="numeric"
             aria-label={`${option.imported_name} print order`}
             type="number"
             defaultValue={option.print_order}
@@ -1318,6 +1320,7 @@ function GroupEditor({
       <label>
         Min
         <input
+          inputMode="numeric"
           type="number"
           min="0"
           value={min}
@@ -1327,6 +1330,7 @@ function GroupEditor({
       <label>
         Max
         <input
+          inputMode="numeric"
           type="number"
           min="1"
           value={max}
@@ -1361,6 +1365,7 @@ function OptionRow({
     <div className="row">
       <input value={name} onChange={(e) => setName(e.target.value)} />
       <input
+        inputMode="decimal"
         aria-label={`${option.name} price`}
         value={price}
         onChange={(e) => setPrice(e.target.value)}

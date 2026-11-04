@@ -132,6 +132,7 @@ export default function PosSettingsClient() {
           <span>AUTO LOCK AFTER</span>
           <div>
             <input
+              inputMode="numeric"
               type="number"
               min={value === 0 ? 0 : 15}
               max="3600"

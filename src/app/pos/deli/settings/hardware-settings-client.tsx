@@ -452,8 +452,8 @@ export default function HardwareSettingsClient() {
                     ))}
                   </div>
                   <small>
-                    Custom: <input className="hwTiny" type="number" min={25} max={120} value={printer.width} onChange={(e) => setPrinter({ ...printer, width: Number(e.target.value) })} /> ×{" "}
-                    <input className="hwTiny" type="number" min={15} max={200} value={printer.height} onChange={(e) => setPrinter({ ...printer, height: Number(e.target.value) })} /> mm
+                    Custom: <input inputMode="numeric" className="hwTiny" type="number" min={25} max={120} value={printer.width} onChange={(e) => setPrinter({ ...printer, width: Number(e.target.value) })} /> ×{" "}
+                    <input inputMode="numeric" className="hwTiny" type="number" min={15} max={200} value={printer.height} onChange={(e) => setPrinter({ ...printer, height: Number(e.target.value) })} /> mm
                   </small>
                 </div>
                 <div className="hwField">
@@ -478,7 +478,7 @@ export default function HardwareSettingsClient() {
               <div className="hwFields">
                 <label className="hwField">
                   Port
-                  <input type="number" min={1} max={65535} value={printer.port} onChange={(e) => setPrinter({ ...printer, port: Number(e.target.value) })} />
+                  <input inputMode="numeric" type="number" min={1} max={65535} value={printer.port} onChange={(e) => setPrinter({ ...printer, port: Number(e.target.value) })} />
                 </label>
                 {printer.kind !== "label_printer" && (
                   <>

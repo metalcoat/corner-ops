@@ -123,9 +123,9 @@ export default function DeliverySettingsClient() {
       <article className="posSettingsCard">
         <h2>Delivery policy</h2>
         <label><span>Delivery enabled</span><input type="checkbox" checked={settings.enabled} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} /></label>
-        <label><span>Minimum merchandise for delivery</span><div className="posMoneyInput"><b>$</b><input type="number" min="0" step="0.01" value={dollars(settings.minimumOrderCents)} onChange={(event) => setSettings({ ...settings, minimumOrderCents: cents(event.target.value) })} /></div></label>
+        <label><span>Minimum merchandise for delivery</span><div className="posMoneyInput"><b>$</b><input inputMode="decimal" type="number" min="0" step="0.01" value={dollars(settings.minimumOrderCents)} onChange={(event) => setSettings({ ...settings, minimumOrderCents: cents(event.target.value) })} /></div></label>
         <p className="posSettingsHint">Current rule: at least {dollars(settings.minimumOrderCents)} of food, then add the mileage-based delivery fee below.</p>
-        <label><span>Maximum delivery miles</span><input type="number" min="0.1" step="0.1" value={settings.maxDistanceMiles ?? ""} onChange={(event) => setSettings({ ...settings, maxDistanceMiles: Number(event.target.value) })} /></label>
+        <label><span>Maximum delivery miles</span><input inputMode="decimal" type="number" min="0.1" step="0.1" value={settings.maxDistanceMiles ?? ""} onChange={(event) => setSettings({ ...settings, maxDistanceMiles: Number(event.target.value) })} /></label>
         <label><span>Offer add-ons before round-up</span><input type="checkbox" checked={settings.offerUpsellBeforeShortfallFee} onChange={(event) => setSettings({ ...settings, offerUpsellBeforeShortfallFee: event.target.checked })} /></label>
         <label><span>Allow round-up to minimum</span><input type="checkbox" checked={settings.allowShortfallFee} onChange={(event) => setSettings({ ...settings, allowShortfallFee: event.target.checked })} /></label>
         <label><span>Round-up label</span><input type="text" value={settings.shortfallFeeLabel} onChange={(event) => setSettings({ ...settings, shortfallFeeLabel: event.target.value })} /></label>
@@ -136,7 +136,7 @@ export default function DeliverySettingsClient() {
       <article className="posSettingsCard">
         <h2>Tax-inclusive pricing</h2>
         <label><span>Menu prices include tax</span><input type="checkbox" checked={settings.pricesIncludeTax} onChange={(event) => setSettings({ ...settings, pricesIncludeTax: event.target.checked })} /></label>
-        <label><span>Tax rate</span><div className="posMoneyInput"><input type="number" min="0" max="100" step="0.001" value={(settings.taxRateBps / 100).toFixed(3)} onChange={(event) => setSettings({ ...settings, taxRateBps: Math.max(0, Math.round(Number(event.target.value) * 100)) })} /><b>%</b></div></label>
+        <label><span>Tax rate</span><div className="posMoneyInput"><input inputMode="decimal" type="number" min="0" max="100" step="0.001" value={(settings.taxRateBps / 100).toFixed(3)} onChange={(event) => setSettings({ ...settings, taxRateBps: Math.max(0, Math.round(Number(event.target.value) * 100)) })} /><b>%</b></div></label>
         <label><span>Delivery fee taxable</span><input type="checkbox" checked={settings.deliveryFeeTaxable} onChange={(event) => setSettings({ ...settings, deliveryFeeTaxable: event.target.checked })} /></label>
         <label><span>Minimum round-up taxable</span><input type="checkbox" checked={settings.minimumAdjustmentTaxable} onChange={(event) => setSettings({ ...settings, minimumAdjustmentTaxable: event.target.checked })} /></label>
         {!settings.taxRateConfigured && <p className="posSettingsWarning">Tax rate has not yet been explicitly configured. Set it before any production testing.</p>}
@@ -148,13 +148,13 @@ export default function DeliverySettingsClient() {
       <div className="posBandTable">
         <div className="posBandHeader"><span>Over miles</span><span>Through miles</span><span>Fee</span><span></span></div>
         {settings.feeBands.map((band, index) => <div className="posBandRow" key={`${band.minMilesExclusive}-${index}`}>
-          <input type="number" min="0" step="0.1" value={band.minMilesExclusive} onChange={(event) => updateBand(index, { minMilesExclusive: Number(event.target.value) })} />
-          <input type="number" min="0" step="0.1" value={band.maxMilesInclusive} onChange={(event) => {
+          <input inputMode="decimal" type="number" min="0" step="0.1" value={band.minMilesExclusive} onChange={(event) => updateBand(index, { minMilesExclusive: Number(event.target.value) })} />
+          <input inputMode="decimal" type="number" min="0" step="0.1" value={band.maxMilesInclusive} onChange={(event) => {
             const nextMax = Number(event.target.value);
             updateBand(index, { maxMilesInclusive: nextMax });
             if (index === settings.feeBands.length - 1) setSettings((current) => current ? { ...current, maxDistanceMiles: nextMax } : current);
           }} />
-          <div className="posMoneyInput"><b>$</b><input type="number" min="0" step="0.01" value={dollars(band.feeCents)} onChange={(event) => updateBand(index, { feeCents: cents(event.target.value) })} /></div>
+          <div className="posMoneyInput"><b>$</b><input inputMode="decimal" type="number" min="0" step="0.01" value={dollars(band.feeCents)} onChange={(event) => updateBand(index, { feeCents: cents(event.target.value) })} /></div>
           <button type="button" disabled={settings.feeBands.length <= 1} onClick={() => removeBand(index)}>Remove</button>
         </div>)}
       </div>

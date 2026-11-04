@@ -125,6 +125,7 @@ export default function GiftCardSettingsClient() {
         <label>
           Card number
           <input
+            inputMode="numeric"
             value={cardNumber}
             onChange={(e) => setCardNumber(e.target.value)}
             autoComplete="off"

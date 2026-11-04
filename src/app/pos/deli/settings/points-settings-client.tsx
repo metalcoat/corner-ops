@@ -32,23 +32,23 @@ export default function PointsSettingsClient() {
       <p>Customers earn points on almost every order and spend them on the rewards below. Jumbo pizzas earn on the punch card instead of points. Staff-taken orders need the code texted to the customer before points are used.</p>
       <div className="promotionForm">
         <label><input type="checkbox" checked={settings.active} onChange={(event) => set({ active: event.target.checked })} /> Points program on</label>
-        <label>Online points per $1<input type="number" step="0.1" min="0" value={settings.onlineRate} onChange={(event) => set({ onlineRate: Number(event.target.value) })} /></label>
-        <label>In-store and phone points per $1<input type="number" step="0.1" min="0" value={settings.storeRate} onChange={(event) => set({ storeRate: Number(event.target.value) })} /></label>
+        <label>Online points per $1<input inputMode="decimal" type="number" step="0.1" min="0" value={settings.onlineRate} onChange={(event) => set({ onlineRate: Number(event.target.value) })} /></label>
+        <label>In-store and phone points per $1<input inputMode="decimal" type="number" step="0.1" min="0" value={settings.storeRate} onChange={(event) => set({ storeRate: Number(event.target.value) })} /></label>
         <label><input type="checkbox" checked={settings.staffPhoneOrdersEarn} onChange={(event) => set({ staffPhoneOrdersEarn: event.target.checked })} /> Phone orders taken by staff earn points (after they're paid)</label>
-        <label>Bonus multiplier<input type="number" step="0.5" min="1" value={settings.bonusMultiplier} onChange={(event) => set({ bonusMultiplier: Number(event.target.value) })} /></label>
+        <label>Bonus multiplier<input inputMode="decimal" type="number" step="0.5" min="1" value={settings.bonusMultiplier} onChange={(event) => set({ bonusMultiplier: Number(event.target.value) })} /></label>
         <fieldset><legend>Bonus days</legend>{DAYS.map((day, index) => (
           <label key={day}><input type="checkbox" checked={settings.bonusDays.includes(index)} onChange={(event) => set({ bonusDays: event.target.checked ? [...settings.bonusDays, index] : settings.bonusDays.filter((value) => value !== index) })} /> {day}</label>
         ))}</fieldset>
         <label>Bonus from<input type="time" value={settings.bonusStart} onChange={(event) => set({ bonusStart: event.target.value })} /></label>
         <label>Bonus until<input type="time" value={settings.bonusEnd} onChange={(event) => set({ bonusEnd: event.target.value })} /></label>
-        <label>Points expire after this many months with no qualifying purchase (0 = never)<input type="number" min="0" value={settings.expiryMonths} onChange={(event) => set({ expiryMonths: Number(event.target.value) })} /></label>
+        <label>Points expire after this many months with no qualifying purchase (0 = never)<input inputMode="numeric" type="number" min="0" value={settings.expiryMonths} onChange={(event) => set({ expiryMonths: Number(event.target.value) })} /></label>
       </div>
       <div className="promotionForm">
         <h3>Rewards</h3>
         {rewards.map((reward) => (
           <label key={reward.id}>
             <input type="checkbox" checked={reward.active} onChange={(event) => setRewards(rewards.map((row) => (row.id === reward.id ? { ...row, active: event.target.checked } : row)))} /> {reward.label}
-            <input type="number" min="1" value={reward.points} onChange={(event) => setRewards(rewards.map((row) => (row.id === reward.id ? { ...row, points: Number(event.target.value) } : row)))} /> points
+            <input inputMode="numeric" type="number" min="1" value={reward.points} onChange={(event) => setRewards(rewards.map((row) => (row.id === reward.id ? { ...row, points: Number(event.target.value) } : row)))} /> points
           </label>
         ))}
       </div>

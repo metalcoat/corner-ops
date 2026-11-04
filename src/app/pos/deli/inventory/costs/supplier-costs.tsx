@@ -191,7 +191,7 @@ export default function SupplierCosts() {
                 </div>
                 <div className="termRow">
                   <label>Rep<input value={supplierEdit.contactName} onChange={(e) => setSupplierEdit({ ...supplierEdit, contactName: e.target.value })} /></label>
-                  <label>Phone<input value={supplierEdit.phone} onChange={(e) => setSupplierEdit({ ...supplierEdit, phone: e.target.value })} /></label>
+                  <label>Phone<input type="tel" inputMode="tel" autoComplete="tel" value={supplierEdit.phone} onChange={(e) => setSupplierEdit({ ...supplierEdit, phone: e.target.value })} /></label>
                   <label>Account #<input value={supplierEdit.accountNumber} onChange={(e) => setSupplierEdit({ ...supplierEdit, accountNumber: e.target.value })} /></label>
                 </div>
                 <label>Notes<input value={supplierEdit.notes} onChange={(e) => setSupplierEdit({ ...supplierEdit, notes: e.target.value })} placeholder="e.g. fuel surcharge $5, no Saturday delivery" /></label>

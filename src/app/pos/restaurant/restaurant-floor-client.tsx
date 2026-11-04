@@ -156,6 +156,7 @@ export default function RestaurantFloorClient() {
             onChange={(event) => setName(event.target.value)}
           />
           <input
+            inputMode="numeric"
             aria-label="Seats"
             type="number"
             min="1"

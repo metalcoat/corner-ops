@@ -248,6 +248,7 @@ export default function AiPhoneSettingsClient() {
       <label>
         <span>Maximum response words</span>
         <input
+          inputMode="numeric"
           type="number"
           min="2"
           max="30"
@@ -260,6 +261,7 @@ export default function AiPhoneSettingsClient() {
       <label>
         <span>Maximum upsells per order</span>
         <input
+          inputMode="numeric"
           type="number"
           min="0"
           max="3"
@@ -288,6 +290,7 @@ export default function AiPhoneSettingsClient() {
       <label>
         <span>Transcript retention days</span>
         <input
+          inputMode="numeric"
           type="number"
           min="1"
           max="365"

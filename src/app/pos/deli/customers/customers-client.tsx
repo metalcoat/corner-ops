@@ -419,6 +419,7 @@ export default function CustomersClient() {
                 onChange={(event) => setLast(event.target.value)}
               />
               <input
+                type="tel" inputMode="tel" autoComplete="tel"
                 placeholder="Phone"
                 value={phone}
                 onChange={(event) => setPhone(event.target.value)}
@@ -594,6 +595,7 @@ export default function CustomersClient() {
                       ))}
                     </select>
                     <input
+                      inputMode="numeric"
                       type="number"
                       value={adjustment.deltaUnits}
                       onChange={(event) =>
@@ -665,6 +667,7 @@ export default function CustomersClient() {
                   <option>Other</option>
                 </select>
                 <input
+                  type="tel" inputMode="tel" autoComplete="tel"
                   placeholder="Phone number"
                   value={newPhone}
                   onChange={(event) => {
@@ -800,6 +803,7 @@ export default function CustomersClient() {
                   }
                 />
                 <input
+                  inputMode="numeric" autoComplete="postal-code"
                   placeholder="ZIP"
                   value={address.postalCode}
                   onChange={(event) =>
