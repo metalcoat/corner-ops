@@ -2184,16 +2184,20 @@ export default function PosClient({
   useEffect(() => {
     if (
       serviceType !== "delivery" ||
+      deliveryEditorOpen ||
       !customer?.addresses?.length ||
       selectedCustomerAddressId ||
       validatedAddress ||
       validatingAddress
     ) return;
+    // Never auto-pick while the address editor is open: adding a new address and
+    // CLEAR both clear the selection, and re-picking would refill the old address.
     // The API returns addresses ordered by actual delivery usage. If no address
     // has usage history, the first saved address is the deterministic fallback.
     void chooseSavedAddress(customer.addresses[0]);
   }, [
     serviceType,
+    deliveryEditorOpen,
     customer?.id,
     customer?.addresses,
     selectedCustomerAddressId,
