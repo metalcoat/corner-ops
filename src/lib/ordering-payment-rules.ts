@@ -41,6 +41,25 @@ export function tipChangeError(input: TipChangeInput): string | null {
   return null;
 }
 
+/**
+ * Why an order cannot take a payment, or null. Only a void blocks it: an order
+ * that still owes money can be paid whether it is open, at the kitchen, ready,
+ * out with a driver, delivered, picked up, or completed.
+ */
+export function paymentBlocker(order: { status: string; voided: boolean }): string | null {
+  if (order.voided || order.status === "cancelled") return "This order was voided, so it cannot take a payment.";
+  return null;
+}
+
+/**
+ * Paying a never-sent draft also sends it to the kitchen, so checkout first needs
+ * what a send needs (name, phone, delivery address). An order already sent was
+ * past that check; taking its balance doesn't send it again.
+ */
+export function checkoutNeedsSendDetails(status: string): boolean {
+  return status === "draft";
+}
+
 /** Tip amount that should be actively allocated to staff for an order. */
 export function tipAllocationTarget(order: { tipCents: number; paymentStatus: string; voided: boolean; status: string }): number {
   if (order.voided || order.status === "cancelled" || order.paymentStatus !== "paid") return 0;

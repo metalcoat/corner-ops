@@ -112,6 +112,8 @@ type SavedDraft = {
   reopened?: boolean;
   originalServiceType?: PosServiceType;
   checkoutOnly?: boolean;
+  /** Opened from Orders to take the balance of an order already sent; it was not reopened. */
+  sentOrder?: boolean;
   checkId?: string | null;
   paymentQueue?: boolean;
   offlinePayload?: { mutationId: string; orderBody: Record<string, unknown> };
@@ -3028,7 +3030,8 @@ export default function PosClient({
 
   async function openCheckout(draftOverride?: SavedDraft) {
     setLastChangeDueCents(null);
-    if (sendRequirement && !draftOverride?.reopened && !draftOverride?.checkoutOnly) {
+    const target = draftOverride || savedDraft;
+    if (sendRequirement && !target?.reopened && !target?.checkoutOnly) {
       setCheckoutError(sendRequirement);
       return;
     }
@@ -4871,7 +4874,7 @@ export default function PosClient({
               disabled={
                 (!cart.length && !activeTab && !savedDraft) ||
                 savingDraft ||
-                Boolean(sendRequirement)
+                (Boolean(sendRequirement) && !savedDraft?.checkoutOnly)
               }
               onClick={() => void openCheckout()}
             >
@@ -5428,6 +5431,10 @@ export default function PosClient({
                       onClick={() => {
                         setCheckoutMoreOpen(false);
                         setCheckoutOpen(false);
+                        if (savedDraft?.sentOrder) {
+                          window.location.assign(`/pos/deli/orders?orderId=${encodeURIComponent(savedDraft.id)}`);
+                          return;
+                        }
                         setSavedDraft((current) =>
                           current ? { ...current, checkoutOnly: false } : current,
                         );
@@ -5441,6 +5448,10 @@ export default function PosClient({
                       onClick={() => {
                         setCheckoutMoreOpen(false);
                         setCheckoutOpen(false);
+                        if (savedDraft?.sentOrder) {
+                          window.location.assign(`/pos/deli/orders?orderId=${encodeURIComponent(savedDraft.id)}`);
+                          return;
+                        }
                         setSavedDraft((current) =>
                           current ? { ...current, checkoutOnly: false } : current,
                         );

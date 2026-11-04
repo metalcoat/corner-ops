@@ -12,7 +12,7 @@ import { completePaidPaymentQueue } from "@/lib/ordering-payment-stations";
 import { ensureOrderingAddressSchema } from "@/lib/ordering-address-schema";
 import {reconcileOrderTips} from "@/lib/ordering-tips";
 import {ensureOrderingTipSchema} from "@/lib/ordering-tip-schema";
-import { tipChangeError } from "@/lib/ordering-payment-rules";
+import { checkoutNeedsSendDetails, paymentBlocker, tipChangeError } from "@/lib/ordering-payment-rules";
 import { ensureOrderingHardwareSchema } from "@/lib/ordering-hardware-schema";
 import { orderReceiptBreakdown } from "@/lib/ordering-sales-tax";
 
@@ -25,10 +25,11 @@ export async function assertOrderReadyForCheckout(orderId: string, business: Ord
   await ensureOrderingAddressSchema();
   const sql = getSql();
   const order = (await sql`
-    SELECT first_name_snapshot, last_name_snapshot, phone_snapshot, service_type
+    SELECT first_name_snapshot, last_name_snapshot, phone_snapshot, service_type, status
     FROM ordering_orders WHERE id=${orderId} AND business=${business} LIMIT 1
   `)[0];
   if (!order) throw new PaymentConflictError("Order was not found.");
+  if (!checkoutNeedsSendDetails(String(order.status))) return;
   const customerName = `${order.first_name_snapshot || ""} ${order.last_name_snapshot || ""}`.trim();
   if (!customerName) throw new PaymentConflictError("Customer name is required before checkout.");
   if (["pickup", "delivery", "no_contact_delivery"].includes(String(order.service_type)) && !String(order.phone_snapshot || "").trim()) {
@@ -44,6 +45,15 @@ export async function assertOrderReadyForCheckout(orderId: string, business: Ord
     if (address?.validation_status !== "validated") throw new PaymentConflictError("Delivery address is required before checkout.");
     if (address.route_distance_miles == null) throw new PaymentConflictError("Driving distance is required before checkout.");
   }
+}
+
+/** Before money is taken (or a card is sent to MX): the checkout rules plus no payments on a voided order. */
+export async function assertOrderCanTakePayment(orderId: string, business: OrderingBusiness) {
+  const order = (await getSql()`SELECT status, voided_at FROM ordering_orders WHERE id=${orderId} AND business=${business} LIMIT 1`)[0];
+  if (!order) throw new PaymentConflictError("Order was not found.");
+  const blocker = paymentBlocker({ status: String(order.status), voided: Boolean(order.voided_at) });
+  if (blocker) throw new PaymentConflictError(blocker);
+  await assertOrderReadyForCheckout(orderId, business);
 }
 
 function cents(value: number, label: string): number {
@@ -250,6 +260,7 @@ export async function commitTender(input: {
     details?: Record<string, unknown>;
   };
 }) {
+  // Voids are checked under the row lock below, after a retried request is matched to its payment.
   await assertOrderReadyForCheckout(input.orderId, input.business);
   await ensureOrderingTipSchema();
   if (input.tenderType === "gift_card") await ensureOrderingGiftCardSchema(); else await ensureOrderingAccountSchema();
@@ -276,7 +287,7 @@ export async function commitTender(input: {
     }
 
     const rows = await sql`
-      SELECT id, customer_id, display_number, status, payment_status, total_cents, paid_cents, amount_due_cents,
+      SELECT id, customer_id, display_number, status, voided_at, payment_status, total_cents, paid_cents, amount_due_cents,
              first_name_snapshot, last_name_snapshot, phone_snapshot, service_type
       FROM ordering_orders
       WHERE id = ${input.orderId} AND business = ${input.business}
@@ -285,7 +296,8 @@ export async function commitTender(input: {
     const order = rows[0];
     if (!order) throw new PaymentConflictError("Order was not found.");
     // A void leaves amount_due in place, so the balance alone would accept money here.
-    if (order.status === "cancelled") throw new PaymentConflictError("This order was voided, so it cannot take a payment.");
+    const blocker = paymentBlocker({ status: String(order.status), voided: Boolean(order.voided_at) });
+    if (blocker) throw new PaymentConflictError(blocker);
     const check = input.checkId ? (await sql`SELECT id,total_cents,paid_cents,amount_due_cents FROM ordering_checks WHERE id=${input.checkId} AND order_id=${input.orderId} FOR UPDATE`)[0] : null;
     if (input.checkId && !check) throw new PaymentConflictError("Check was not found.");
     const due = Number(check?.amount_due_cents ?? order.amount_due_cents);

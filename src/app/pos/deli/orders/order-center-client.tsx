@@ -129,13 +129,21 @@ export default function OrderCenterClient() {
     const b = await r.json();
     if (r.ok) setSelected(b.order);
   }
-  // Any open order loads whole into the regular POS screen: add, void, then pay. A never-sent order
-  // goes to the kitchen once paid, so taking payment on one is confirmed first.
+  // A never-sent order loads whole into the regular POS screen and goes to the kitchen once paid,
+  // so taking payment on one is confirmed first. Any order already sent (at the kitchen, ready, with
+  // a driver, delivered, picked up, completed) opens straight to checkout: the payment is recorded
+  // and the order keeps its status. Reopening it would put it back to draft and pull it off the
+  // kitchen and driver screens while checkout is open.
   function takePayment(order: Order) {
-    if (order.status === "draft") {
-      const older = isoDate(new Date(order.created_at)) !== isoDate(new Date());
-      if (!window.confirm(`Order #${order.display_number} was never sent to the kitchen${older ? ` (it is from ${new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", day: "numeric" }).format(new Date(order.created_at))})` : ""}. Taking payment sends it to the kitchen. Continue?`)) return;
+    if (order.status !== "draft") {
+      localStorage.setItem("corner-ops-checkout-order", JSON.stringify({ id: order.id, displayNumber: order.display_number, totalCents: Number(order.total_cents), deliveryFeeCents: 0, timingMessage: "", kitchenTimingLabel: "", scheduledFor: order.scheduled_for, promotions: [], loyalty: [], orderItemIds: [], checkoutOnly: true, sentOrder: true }));
+      setSelected(null);
+      router.push("/pos/deli");
+      window.dispatchEvent(new Event("corner-ops-checkout-order"));
+      return;
     }
+    const older = isoDate(new Date(order.created_at)) !== isoDate(new Date());
+    if (!window.confirm(`Order #${order.display_number} was never sent to the kitchen${older ? ` (it is from ${new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", day: "numeric" }).format(new Date(order.created_at))})` : ""}. Taking payment sends it to the kitchen. Continue?`)) return;
     void reopen(order, true);
   }
   async function reopen(order: Order, checkout = false) {

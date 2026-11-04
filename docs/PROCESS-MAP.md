@@ -447,6 +447,9 @@ flowchart LR
   flow): customer, type, lines, totals and payments so far. Staff add items, void lines or the whole order, send, or pay
   there. A sent order stays "being edited" on the kitchen screen until sent; left alone with no changes it returns after
   15 minutes. Only the changes print (ADD ON ticket with VOID/REMOVE lines). A never-sent order goes to the kitchen once paid.
+  Any unpaid order that is not voided can take payment in any status. TAKE PAYMENT on an order already sent (kitchen,
+  ready, with a driver, delivered, picked up, completed) opens checkout only, without reopening it: the payment is recorded,
+  the status stays, and nothing goes to the kitchen again. Name/phone/address checks apply only to never-sent drafts.
 - Custom items (`src/lib/ordering-custom-items.ts`, migration 0033): staff type a name, price (tax included, $0 OK),
   quantity and kitchen note on the POS. The line hangs off a hidden inactive "Custom item" menu entry, skips the menu
   price and availability checks, records who added it (`added_by_name`, event `custom_item_added`), and shows as "Custom

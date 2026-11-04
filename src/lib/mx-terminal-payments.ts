@@ -36,7 +36,7 @@ import type { OrderingBusiness } from "@/lib/ordering-core";
 import { canManagePos, type OrderingActor } from "@/lib/ordering-route-auth";
 import { completeMxAuthorization, ensureMxPaymentSchema, findMxPaymentByReplayId, getMxPayment, MxMerchantError, MxMerchantUnreachableError, newReplayId, voidOrRefundMxPayment } from "@/lib/mx-merchant";
 import { getMxTerminalTransaction, newTerminalReplayId, sendMxTerminalSale, type MxTerminalState } from "@/lib/mx-terminal";
-import { assertOrderReadyForCheckout, checkoutState, commitTender, PaymentConflictError, setCheckoutTip } from "@/lib/ordering-payments";
+import { assertOrderCanTakePayment, checkoutState, commitTender, PaymentConflictError, setCheckoutTip } from "@/lib/ordering-payments";
 import { paymentStationProfile } from "@/lib/ordering-payment-stations";
 import { dispatchOrderPrintJobs } from "@/lib/ordering-hardware";
 import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
@@ -381,7 +381,7 @@ export async function settleOpenTerminalSales(input: { business: OrderingBusines
  */
 export async function startTerminalPayment(input: { business: OrderingBusiness; orderId: string; checkId?: string | null; amountCents?: number | null; stationKey: string; actor: OrderingActor }): Promise<TerminalPaymentOutcome> {
   await ensureSchema();
-  await assertOrderReadyForCheckout(input.orderId, input.business);
+  await assertOrderCanTakePayment(input.orderId, input.business);
   const station = await paymentStationProfile(input.business, input.stationKey);
   if (!station || station.station_mode !== "payment") throw new PaymentConflictError("Card terminal sales must be started from the payment station.");
   if (!station.mx_terminal_ready) throw new PaymentConflictError("This payment station has no MX card terminal ready. Check POS settings → Hardware.");

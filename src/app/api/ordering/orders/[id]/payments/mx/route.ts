@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { apiError, unauthorized } from "@/lib/http";
 import {
-  assertOrderReadyForCheckout,
+  assertOrderCanTakePayment,
   checkoutState,
   commitTender,
   PaymentConflictError,
@@ -59,7 +59,7 @@ export async function POST(
       sql = getSql();
     await ensureMxPaymentSchema();
     if (body.action === "initialize") {
-      await assertOrderReadyForCheckout(orderId, business);
+      await assertOrderCanTakePayment(orderId, business);
       // A terminal sale on this order may still charge the card; settle it before keying another card.
       await settleOpenTerminalSales({ business, orderId, actor });
       const checkId = body.checkId ? String(body.checkId) : null,
