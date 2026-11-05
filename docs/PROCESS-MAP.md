@@ -491,6 +491,7 @@ flowchart LR
   Payments on the tab (cash, check, card run separately) and credits/debits with a reason are recorded from the account
   page, logged in `ordering_operations_audit`. Statements (default: since the last payment, else this month) print on a
   receipt printer or as a full page (`/employee/manager/house-accounts/<id>/statement`, print / save as PDF).
+  Check: `npm run test:house-accounts` (against the dev database, rolled back).
 
 ## 8d. Till closeout (Corner Deli POS, dev)
 

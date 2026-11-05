@@ -122,8 +122,9 @@ export async function setHouseAccountStatus(input: { id: string; status: unknown
 
 async function insertEntry(input: { accountId: string; type: HouseAccountEntryType; deltaCents: number; balanceAfterCents: number; actor: OrderingActor; orderId?: string | null; paymentTransactionId?: string | null; description?: string; reference?: string; method?: string; stationKey?: string; deviceLabel?: string; relatedEntryId?: string | null }) {
   const id = randomUUID();
-  await getSql()`INSERT INTO ordering_house_account_ledger(id,account_id,business,order_id,payment_transaction_id,entry_type,delta_balance_cents,balance_after_cents,description,reference,payment_method,created_by,actor_name,station_key,device_label,related_entry_id)
-    VALUES(${id},${input.accountId},${BUSINESS},${input.orderId || null},${input.paymentTransactionId || null},${input.type},${input.deltaCents},${input.balanceAfterCents},${input.description || ""},${input.reference || ""},${input.method || ""},${input.actor.id},${input.actor.name},${input.stationKey || ""},${input.deviceLabel || ""},${input.relatedEntryId || null})`;
+  // clock_timestamp, not NOW(): entries written in one transaction (a charge and its reversal) still sort in the order they happened.
+  await getSql()`INSERT INTO ordering_house_account_ledger(id,account_id,business,order_id,payment_transaction_id,entry_type,delta_balance_cents,balance_after_cents,description,reference,payment_method,created_by,actor_name,station_key,device_label,related_entry_id,created_at)
+    VALUES(${id},${input.accountId},${BUSINESS},${input.orderId || null},${input.paymentTransactionId || null},${input.type},${input.deltaCents},${input.balanceAfterCents},${input.description || ""},${input.reference || ""},${input.method || ""},${input.actor.id},${input.actor.name},${input.stationKey || ""},${input.deviceLabel || ""},${input.relatedEntryId || null},clock_timestamp())`;
   return id;
 }
 
@@ -256,7 +257,7 @@ export async function houseAccountStatement(input: { id: string; from?: string |
   const row = (await listHouseAccounts({ includeClosed: true, id: input.id }))[0];
   if (!row) return null;
   const sql = getSql(), today = storeToday();
-  const lastPayment = (await sql`SELECT ((MAX(created_at) AT TIME ZONE 'America/New_York')::date)::text day FROM ordering_house_account_ledger WHERE account_id=${input.id} AND entry_type='payment'`)[0]?.day as string | null;
+  const lastPayment = (await sql`SELECT ((MAX(created_at) AT TIME ZONE 'America/New_York')::date)::text last_payment_day FROM ordering_house_account_ledger WHERE account_id=${input.id} AND entry_type='payment'`)[0]?.last_payment_day as string | null;
   const period = statementPeriod({ from: input.from, to: input.to, today, lastPaymentDate: lastPayment });
   const opening = Number((await sql`SELECT COALESCE(SUM(delta_balance_cents),0)::integer cents FROM ordering_house_account_ledger WHERE account_id=${input.id} AND (created_at AT TIME ZONE 'America/New_York')::date < ${period.from}::date`)[0].cents);
   const rows = runningBalance(opening, (await ledgerRows(input.id, period.from, period.to)).map(ledgerEntry));
