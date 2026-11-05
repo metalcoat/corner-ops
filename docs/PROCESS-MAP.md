@@ -480,6 +480,17 @@ flowchart LR
   (`submitted_by`, recorded from 2026-10-30, migration 0031) and who took the latest payment when different. Delivery
   cards show the assigned driver (`ordering_delivery_assignments`), else drivers on the clock (`time_entries`,
   role Driver) when the order was due (scheduled_for, promised_at, else created_at).
+- House accounts / running tabs (`src/lib/ordering-house-accounts.ts`, rules `ordering-house-account-rules.ts`,
+  migration 0036 on the 0014 tables): managers open, edit, hold and close accounts (name, phone, email, notes, optional
+  credit limit) in the Employee Hub → House accounts (`/employee/manager/house-accounts`). At checkout staff tap HOUSE
+  ACCOUNT (also at order-taking stations, for phone orders), pick the account by name or phone, and the order is paid
+  with tender `house_account`; the ledger charge (order, amount, employee, station) commits with the payment, the event
+  `house_account_charged` goes on the order trail, and the receipt carries a charge slip (account, balance after,
+  signature line). Balance = SUM(`delta_balance_cents`). Refunds (`reverseTender`) and voids (`voidSentOrder`, which
+  reverses the charge automatically) post a `reversal` entry; store credit can't be left for a house-account payment.
+  Payments on the tab (cash, check, card run separately) and credits/debits with a reason are recorded from the account
+  page, logged in `ordering_operations_audit`. Statements (default: since the last payment, else this month) print on a
+  receipt printer or as a full page (`/employee/manager/house-accounts/<id>/statement`, print / save as PDF).
 
 ## 8d. Till closeout (Corner Deli POS, dev)
 

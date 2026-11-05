@@ -74,6 +74,7 @@ export default function OrderSearch() {
       <header className="mgrHeader">
         <h1>Order search</h1>
         <a className="osLink" href="/employee/manager">Daily report</a>
+        <a className="osLink" href="/employee/manager/house-accounts">House accounts</a>
       </header>
       <form className="osForm" onSubmit={(event) => { event.preventDefault(); void search(form); }}>
         <nav className="osPresets" aria-label="Date range">

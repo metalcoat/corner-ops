@@ -19,8 +19,8 @@ function businessFrom(value: unknown): OrderingBusiness {
 }
 
 function tenderFrom(value: unknown): CheckoutTenderType {
-  if (value === "cash" || value === "card" || value === "gift_card") return value;
-  throw new PaymentConflictError("Cash, approved credit/debit, or gift card tender is required.");
+  if (value === "cash" || value === "card" || value === "gift_card" || value === "house_account") return value;
+  throw new PaymentConflictError("Cash, approved credit/debit, gift card, or house account tender is required.");
 }
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -47,7 +47,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const { id } = await context.params;
     const stationKey=String(body.stationKey||"");
     const station=stationKey?await paymentStationProfile(business,stationKey):null;
-    if(station?.station_mode==="order_taker")throw new PaymentStationError("This device is an order-taking station. Send the check to the payment station.");
+    // A phone order can go on a house account from the order-taking station: no money changes hands.
+    if(station?.station_mode==="order_taker"&&!(body.action===undefined&&body.tenderType==="house_account"))throw new PaymentStationError("This device is an order-taking station. Send the check to the payment station.");
     if (body.action === "reverse") return isoJson(await reverseTender({orderId:id,business,transactionId:String(body.transactionId||""),amountCents:Number(body.amountCents),clientMutationId:String(body.clientMutationId||""),reason:String(body.reason||""),actor}),{status:201});
     if (body.action === "reprint") {const result=await reprintPaymentReceipt({orderId:id,business,transactionId:String(body.transactionId||""),reason:String(body.reason||""),actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false});return isoJson(result,{status:201})}
     if (body.action === "print_paid_receipt") {const result=await printPaidReceipt({orderId:id,business,itemized:body.itemized===true,receiptPrinterId:body.receiptPrinterId?String(body.receiptPrinterId):undefined,actor});await dispatchOrderPrintJobs(id,business,{includeKitchenProduction:false,jobId:result.printJobId});return isoJson(result,{status:201})}
@@ -67,6 +68,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       stationKey,
       giftCardNumber: body.giftCardNumber ? String(body.giftCardNumber) : undefined,
       giftCardPin: body.giftCardPin ? String(body.giftCardPin) : undefined,
+      houseAccountId: body.houseAccountId ? String(body.houseAccountId) : undefined,
       providerApproval: body.testCard === true && localDevToolsAllowed(process.env, request.headers.get("host")) && canManagePos(actor) ? {
         provider: "test",
         transactionReference: `local-test-${String(body.clientMutationId || "")}`,

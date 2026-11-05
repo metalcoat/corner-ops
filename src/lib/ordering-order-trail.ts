@@ -60,6 +60,8 @@ export function orderTrail(input: { createdAt: unknown; takenBy: unknown; events
     if (event.event_type === "custom_item_added") trail.push({ at, label: "Custom item added", who: who(event), detail: `${Number(details.quantity || 1)}× ${String(details.name || "item")} ${dollars(details.priceCents)}` });
     if (event.event_type === "employee_meal_priced") trail.push({ at, label: "Employee meal", who: who(event), detail: `owes ${dollars(details.employeeOwesCents)}` });
     if (event.event_type === "payment_receipt_reprinted") trail.push({ at, label: "Receipt reprinted", who: who(event), detail: String(details.reason || "") || undefined });
+    if (event.event_type === "house_account_charged") trail.push({ at, label: `Charged to house account ${dollars(details.amountCents)}`, who: who(event), detail: [String(details.accountName || ""), `tab balance ${dollars(details.balanceAfterCents)}`, String(details.deviceLabel || "")].filter(Boolean).join(" · ") });
+    if (event.event_type === "house_account_charge_reversed") trail.push({ at, label: `House-account charge reversed ${dollars(details.amountCents)}`, who: who(event), detail: [String(details.accountName || ""), `tab balance ${dollars(details.balanceAfterCents)}`, String(details.reason || "")].filter(Boolean).join(" · ") });
     if (event.event_type === "kitchen_released") trail.push({ at, label: "Released to kitchen (scheduled order)", who: "System" });
   }
   for (const payment of input.payments) {

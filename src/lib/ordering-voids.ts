@@ -7,6 +7,7 @@ import { reverseLoyaltyForOrder } from "@/lib/ordering-loyalty";
 import { reversePointsForOrder } from "@/lib/ordering-points";
 import { reconcileOrderTips } from "@/lib/ordering-tips";
 import { ensureOrderingTipSchema } from "@/lib/ordering-tip-schema";
+import { reverseTender } from "@/lib/ordering-payments";
 
 export class OrderVoidError extends Error {}
 
@@ -38,6 +39,18 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
       RETURNING id,display_number,status,payment_status,version,voided_at,voided_by,void_reason,pre_void_status,pre_void_payment_status
     `;
     if (!updated[0]) throw new OrderVoidError("This order changed while the void was being recorded.");
+    // Nothing to hand back on a house-account order: the charge comes straight off the tab.
+    const manager = input.approver || input.actor;
+    const houseCharges = await sql`SELECT p.id, p.amount_cents - COALESCE((SELECT SUM(r.amount_cents) FROM ordering_payment_transactions r WHERE r.related_transaction_id=p.id AND r.transaction_type IN ('void','refund') AND r.status='approved'),0) remaining_cents
+      FROM ordering_payment_transactions p WHERE p.order_id=${input.orderId} AND p.tender_type='house_account' AND p.transaction_type='payment' AND p.status='approved' ORDER BY p.created_at`;
+    for (const charge of houseCharges) {
+      if (Number(charge.remaining_cents) <= 0) continue;
+      try {
+        await reverseTender({ orderId: input.orderId, business: input.business, transactionId: String(charge.id), amountCents: Number(charge.remaining_cents), clientMutationId: `house-account-void:${String(charge.id)}`, reason: `Order voided: ${reason}`.slice(0, 500), actor: manager });
+      } catch (error) {
+        throw new OrderVoidError(error instanceof Error ? error.message : "The house-account charge could not be reversed.");
+      }
+    }
     await reverseLoyaltyForOrder(input.orderId,input.actor,reason);
     await reversePointsForOrder(input.orderId,input.actor,reason);
     // Food the kitchen never started goes back into stock; once started it's waste, left as sold.

@@ -150,6 +150,15 @@ type OpenTikiTab = {
   item_count: number;
   updated_at: string;
 };
+type PosHouseAccount = {
+  id: string;
+  name: string;
+  phone: string;
+  status: string;
+  balanceCents: number;
+  creditLimitCents: number | null;
+  blocker: string | null;
+};
 type LoyaltyStatus = {
   programId: string;
   name: string;
@@ -810,6 +819,11 @@ export default function PosClient({
     "" | "cash" | "card" | "gift_card"
   >("");
   const [customTip, setCustomTip] = useState("");
+  // Charge to a house account: the picker, its search and the account chosen.
+  const [houseAccountOpen, setHouseAccountOpen] = useState(false);
+  const [houseAccountQuery, setHouseAccountQuery] = useState("");
+  const [houseAccounts, setHouseAccounts] = useState<PosHouseAccount[] | null>(null);
+  const [houseAccountChoice, setHouseAccountChoice] = useState<PosHouseAccount | null>(null);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [mxPayment,setMxPayment]=useState<MxPaymentInitialization|null>(null);
   const [mxTerminalSale,setMxTerminalSale]=useState<MxTerminalSale|null>(null);
@@ -2207,6 +2221,28 @@ export default function PosClient({
     validatingAddress,
   ]);
 
+  // The house-account picker searches as staff type a name or phone number.
+  useEffect(() => {
+    if (!houseAccountOpen) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      fetch(`/api/ordering/house-accounts?q=${encodeURIComponent(houseAccountQuery.trim())}`, { cache: "no-store", signal: controller.signal })
+        .then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body.error || "House accounts could not be loaded."); setHouseAccounts(body.accounts); })
+        .catch((error) => { if (!controller.signal.aborted) { setHouseAccounts([]); setCheckoutError(error instanceof Error ? error.message : "House accounts could not be loaded."); } });
+    }, houseAccountQuery ? 250 : 0);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [houseAccountOpen, houseAccountQuery]);
+  function openHouseAccountPicker() {
+    setHouseAccountChoice(null);
+    setHouseAccountQuery("");
+    setHouseAccounts(null);
+    setHouseAccountOpen(true);
+  }
+  function chargeHouseAccount(chargeCents: number) {
+    if (!houseAccountChoice) return;
+    setHouseAccountOpen(false);
+    void commitPayment("house_account", undefined, chargeCents, undefined, houseAccountChoice.id);
+  }
   async function applyCustomerCredit() {
     const draft=savedDraft||activeTab;
     if(!draft||paymentBusy)return;
@@ -3335,10 +3371,11 @@ export default function PosClient({
   }
 
   async function commitPayment(
-    tenderType: "cash" | "card" | "gift_card",
+    tenderType: "cash" | "card" | "gift_card" | "house_account",
     stateOverride?: CheckoutState,
     amountOverride?: number,
     checkIdOverride?: string,
+    houseAccountId?: string,
   ) {
     const draft = savedDraft || activeTab;
     const activeCheckout = stateOverride || checkoutState;
@@ -3376,6 +3413,7 @@ export default function PosClient({
             tenderType,
             amountTenderedCents,
             giftCardNumber: giftCardNumberFromInput(giftCardNumber),
+            houseAccountId,
             clientMutationId: clientId(),
             receiptPrinterId: receiptPrinterId || undefined,
             stationKey: stationProfile?.station_key || "",
@@ -5750,7 +5788,61 @@ export default function PosClient({
                     GIFT CARD
                     <small aria-hidden="true">Swipe or enter number</small>
                   </button>
+                  {business === "Corner Deli" && (
+                    <button
+                      type="button"
+                      className="posHouseAccountTender"
+                      disabled={paymentBusy}
+                      onClick={openHouseAccountPicker}
+                    >
+                      HOUSE ACCOUNT
+                      <small aria-hidden="true">Charge to a customer&apos;s tab</small>
+                    </button>
+                  )}
                 </div>
+                {houseAccountOpen && (() => {
+                  const typed = Math.round(Number(cashTender) * 100);
+                  const chargeCents = cashTender && typed > 0 ? Math.min(typed, checkoutDueCents) : checkoutDueCents;
+                  const choice = houseAccountChoice;
+                  const room = choice?.creditLimitCents != null ? choice.creditLimitCents - choice.balanceCents : null;
+                  const overLimit = room != null && chargeCents > room;
+                  return (
+                    <div className="posChangeBackdrop">
+                      <section className="posTipWindow posHouseAccountWindow" role="dialog" aria-modal="true" aria-labelledby="house-account-title">
+                        <small>CHARGE TO HOUSE ACCOUNT</small>
+                        <h2 id="house-account-title">{choice ? `Charge ${money(chargeCents)} to ${choice.name}?` : `Whose account? ${money(chargeCents)}`}</h2>
+                        {!choice && <>
+                          <label>
+                            Search name or phone
+                            <input autoFocus autoComplete="off" value={houseAccountQuery} onChange={(event) => setHouseAccountQuery(event.target.value)} />
+                          </label>
+                          <div className="posHouseAccountList" role="listbox" aria-label="House accounts">
+                            {houseAccounts === null && <p>Loading…</p>}
+                            {houseAccounts?.length === 0 && <p>{houseAccountQuery ? "No account matches. A manager adds accounts in the Employee Hub → House accounts." : "No house accounts yet. A manager adds them in the Employee Hub → House accounts."}</p>}
+                            {houseAccounts?.map((account) => (
+                              <button type="button" role="option" aria-selected={false} key={account.id} disabled={Boolean(account.blocker)} onClick={() => setHouseAccountChoice(account)}>
+                                <strong>{account.name}</strong>
+                                <span>{[account.phone, `owes ${money(account.balanceCents)}`, account.creditLimitCents != null ? `limit ${money(account.creditLimitCents)}` : ""].filter(Boolean).join(" · ")}</span>
+                                {account.blocker && <em>{account.status === "hold" ? "On hold" : account.blocker}</em>}
+                              </button>
+                            ))}
+                          </div>
+                        </>}
+                        {choice && <div className="posHouseAccountConfirm">
+                          <span>{choice.phone || "No phone on file"}</span>
+                          <span>Tab now owes {money(choice.balanceCents)} · after this charge {money(choice.balanceCents + chargeCents)}</span>
+                          {chargeCents < checkoutDueCents && <span>Only {money(chargeCents)} of the {money(checkoutDueCents)} due goes on the account; take the rest another way.</span>}
+                          {overLimit && <strong className="posHouseAccountWarning">Over the {money(choice.creditLimitCents || 0)} limit: only {money(Math.max(0, room || 0))} more can go on this tab.</strong>}
+                        </div>}
+                        <div className="posHouseAccountButtons">
+                          {choice && <button type="button" className="posHouseAccountCharge" disabled={paymentBusy || overLimit || chargeCents <= 0} onClick={() => chargeHouseAccount(chargeCents)}>CHARGE {money(chargeCents)}</button>}
+                          {choice && <button type="button" onClick={() => setHouseAccountChoice(null)}>CHOOSE ANOTHER</button>}
+                          <button type="button" onClick={() => setHouseAccountOpen(false)}>CANCEL</button>
+                        </div>
+                      </section>
+                    </div>
+                  );
+                })()}
                 {cardPaymentStatus?.sandbox && canManagePayments && (
                   <button
                     type="button"

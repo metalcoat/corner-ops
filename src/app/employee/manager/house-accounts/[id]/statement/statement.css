@@ -1,0 +1,16 @@
+.haStatement{max-width:960px;margin:0 auto;padding:24px 20px 40px;background:#fff;color:#111;font-family:system-ui,sans-serif;min-height:100dvh}
+.haStatement .haNoPrint{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:20px}
+.haStatement .haNoPrint a{color:#1d4ed8}
+.haStatement .haNoPrint button{min-height:42px;padding:8px 16px;border:1px solid #1d4ed8;border-radius:8px;background:#1d4ed8;color:#fff;font:inherit;cursor:pointer}
+.haStatement header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:20px;padding-bottom:16px;border-bottom:2px solid #111}
+.haStatement h1{margin:0;font-size:1.8rem}.haStatement header p{margin:4px 0 0;color:#444;text-transform:uppercase;letter-spacing:.08em;font-size:.8rem}
+.haStatement dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0}.haStatement dt{color:#555;font-size:.85rem}.haStatement dd{margin:0}
+.haStatement table{width:100%;margin-top:18px;border-collapse:collapse;font-size:.88rem}
+.haStatement th,.haStatement td{padding:7px 6px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}
+.haStatement th{border-bottom:2px solid #111;font-size:.75rem;text-transform:uppercase;letter-spacing:.04em}
+.haStatement .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.haStatement .opening td{color:#444;font-style:italic}.haStatement .empty{color:#666;text-align:center}
+.haStatement tfoot td{border-top:2px solid #111;border-bottom:0;font-weight:700}
+.haStatement .haFootnote{margin-top:24px;color:#555;font-size:.85rem}
+@media(max-width:640px){.haStatement table{font-size:.78rem}.haStatement th:nth-child(2),.haStatement td:nth-child(2){display:none}}
+@media print{.haStatement .haNoPrint{display:none}.haStatement{padding:0;max-width:none}.haStatement tr{break-inside:avoid}}

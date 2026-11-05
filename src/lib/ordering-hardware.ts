@@ -729,6 +729,9 @@ export function printPayloadLines(payload: Record<string, unknown>) {
         `${key.replace(/([A-Z])/g, " $1").toUpperCase()}: $${(Number(payload[key]) / 100).toFixed(2)}`,
       );
   }
+  // Orders charged to a house account: the charge slip (account, amount, balance after, signature).
+  if (Array.isArray(payload.houseAccountLines))
+    for (const line of payload.houseAccountLines) lines.push(String(line));
   return lines;
 }
 // Automatic retries stop after this many failed attempts; a manager can still

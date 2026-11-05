@@ -15,8 +15,9 @@ import {ensureOrderingTipSchema} from "@/lib/ordering-tip-schema";
 import { checkoutNeedsSendDetails, paymentBlocker, tipChangeError } from "@/lib/ordering-payment-rules";
 import { ensureOrderingHardwareSchema } from "@/lib/ordering-hardware-schema";
 import { orderReceiptBreakdown } from "@/lib/ordering-sales-tax";
+import { chargeHouseAccount, HouseAccountError, houseAccountReceiptLines, reverseHouseAccountCharge } from "@/lib/ordering-house-accounts";
 
-export type CheckoutTenderType = "cash" | "card" | "gift_card";
+export type CheckoutTenderType = "cash" | "card" | "gift_card" | "house_account";
 
 export class PaymentConflictError extends Error {}
 
@@ -178,6 +179,15 @@ export async function reverseTender(input: { orderId: string; business: Ordering
       if (!source.customer_id) throw new PaymentConflictError("This account-credit payment has no customer to return the credit to.");
       await sql`INSERT INTO ordering_store_credit_ledger(id,business,customer_id,order_id,entry_type,delta_balance_cents,reason,created_by,approved_by) VALUES(${randomUUID()},${input.business},${source.customer_id},${input.orderId},'reversal',${amount},${reversalReason},${input.actor.id},${input.actor.name})`;
     }
+    // Refunding or voiding an order put on a house account takes the charge back off the tab.
+    if (source.tender_type === "house_account") {
+      try {
+        await reverseHouseAccountCharge({ sourceTransactionId: String(source.id), reversalTransactionId: reversalId, orderId: input.orderId, amountCents: amount, reason: reversalReason, actor: input.actor });
+      } catch (error) {
+        if (error instanceof HouseAccountError) throw new PaymentConflictError(error.message);
+        throw error;
+      }
+    }
     if(source.tender_type==="cash"&&source.details?.registerSessionId){
       // Cash leaves the drawer now, so post it to the station's currently open session; never rewrite a closed/counted session.
       const originalSessionId=String(source.details.registerSessionId),original=(await sql`SELECT id,terminal_id,status FROM ordering_register_sessions WHERE id=${originalSessionId} FOR UPDATE`)[0];
@@ -216,6 +226,8 @@ export async function settleTenderAsStoreCredit(input: { orderId: string; transa
     if (duplicate[0]) return { duplicate: true };
     const source = (await sql`SELECT * FROM ordering_payment_transactions WHERE id=${input.transactionId} AND order_id=${input.orderId} AND business='Corner Deli' FOR UPDATE`)[0];
     if (!source || source.transaction_type !== "payment" || source.status !== "approved") throw new PaymentConflictError("Approved payment tender was not found.");
+    // Nothing was paid yet: the order is on a tab, so the charge comes off the tab instead.
+    if (source.tender_type === "house_account") throw new PaymentConflictError("This was charged to a house account. Refund it to take the charge off the tab instead of leaving store credit.");
     const reversed = Number((await sql`SELECT COALESCE(SUM(amount_cents),0) amount FROM ordering_payment_transactions WHERE related_transaction_id=${source.id} AND transaction_type IN ('void','refund') AND status='approved'`)[0].amount);
     if (refundCents > Number(source.amount_cents) - reversed) throw new PaymentConflictError("Refund exceeds the tender's remaining refundable amount.");
     const order = (await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business='Corner Deli' FOR UPDATE`)[0];
@@ -241,7 +253,7 @@ export async function reprintPaymentReceipt(input:{orderId:string;business:Order
 
 export async function printPaidReceipt(input:{orderId:string;business:OrderingBusiness;itemized:boolean;receiptPrinterId?:string;actor:OrderingActor}){
   await ensureOrderingAccountSchema();
-  return withTransaction(async()=>{const sql=getSql();const order=(await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];if(!order)throw new PaymentConflictError("Order was not found.");if(order.payment_status!=="paid")throw new PaymentConflictError("The order must be fully paid before printing its final receipt.");let lines:string[]|undefined;if(input.itemized){const items=await sql`SELECT item.id,item.quantity,item.item_name_snapshot,item.variant_name_snapshot,item.line_total_cents FROM ordering_order_items item WHERE item.order_id=${input.orderId} ORDER BY item.sort_order,item.created_at,item.id`;lines=[];for(const item of items){lines.push(`${item.quantity}x ${item.item_name_snapshot}${item.variant_name_snapshot?` — ${item.variant_name_snapshot}`:""}  $${(Number(item.line_total_cents)/100).toFixed(2)}`);const modifiers=await sql`SELECT option_name_snapshot,quantity FROM ordering_order_item_modifiers WHERE order_item_id=${item.id} ORDER BY print_order_snapshot,created_at,id`;for(const modifier of modifiers)lines.push(`  ${Number(modifier.quantity)>1?`${modifier.quantity}x `:""}${modifier.option_name_snapshot}`);}}const payload={heading:input.itemized?"ITEMIZED PAID RECEIPT":"PAID RECEIPT",orderNumber:String(order.display_number),customerName:`${order.first_name_snapshot||""} ${order.last_name_snapshot||""}`.trim(),serviceType:order.service_type,receipt:await orderReceiptBreakdown(input.orderId),totalPaidCents:Number(order.paid_cents),remainingDueCents:0,cashier:input.actor.name,receiptPrinterId:input.receiptPrinterId||"",...(lines?{lines}:{})};const pending=(await sql`SELECT id FROM ordering_print_jobs WHERE order_id=${input.orderId} AND purpose='paid_receipt' AND payload->>'customerReceiptPending'='true' ORDER BY created_at DESC LIMIT 1 FOR UPDATE`)[0],id=String(pending?.id||randomUUID());if(pending)await sql`UPDATE ordering_print_jobs SET status='queued',event_subtype=${input.itemized?"pos_itemized":"pos_non_itemized"},error_message='',payload=${JSON.stringify(payload)}::jsonb WHERE id=${id}`;else await sql`INSERT INTO ordering_print_jobs(id,business,order_id,purpose,event_subtype,status,actor_type,actor_id,error_message,payload) VALUES(${id},${input.business},${input.orderId},'paid_receipt',${input.itemized?"pos_itemized":"pos_non_itemized"},'queued',${input.actor.type},${input.actor.id},'',${JSON.stringify(payload)}::jsonb)`;return {printJobId:id};});
+  return withTransaction(async()=>{const sql=getSql();const order=(await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];if(!order)throw new PaymentConflictError("Order was not found.");if(order.payment_status!=="paid")throw new PaymentConflictError("The order must be fully paid before printing its final receipt.");let lines:string[]|undefined;if(input.itemized){const items=await sql`SELECT item.id,item.quantity,item.item_name_snapshot,item.variant_name_snapshot,item.line_total_cents FROM ordering_order_items item WHERE item.order_id=${input.orderId} ORDER BY item.sort_order,item.created_at,item.id`;lines=[];for(const item of items){lines.push(`${item.quantity}x ${item.item_name_snapshot}${item.variant_name_snapshot?` — ${item.variant_name_snapshot}`:""}  $${(Number(item.line_total_cents)/100).toFixed(2)}`);const modifiers=await sql`SELECT option_name_snapshot,quantity FROM ordering_order_item_modifiers WHERE order_item_id=${item.id} ORDER BY print_order_snapshot,created_at,id`;for(const modifier of modifiers)lines.push(`  ${Number(modifier.quantity)>1?`${modifier.quantity}x `:""}${modifier.option_name_snapshot}`);}}const houseAccountLines=await houseAccountReceiptLines(input.orderId);const payload={heading:input.itemized?"ITEMIZED PAID RECEIPT":"PAID RECEIPT",orderNumber:String(order.display_number),customerName:`${order.first_name_snapshot||""} ${order.last_name_snapshot||""}`.trim(),serviceType:order.service_type,receipt:await orderReceiptBreakdown(input.orderId),totalPaidCents:Number(order.paid_cents),remainingDueCents:0,cashier:input.actor.name,receiptPrinterId:input.receiptPrinterId||"",...(lines?{lines}:{}),...(houseAccountLines.length?{houseAccountLines}:{})};const pending=(await sql`SELECT id FROM ordering_print_jobs WHERE order_id=${input.orderId} AND purpose='paid_receipt' AND payload->>'customerReceiptPending'='true' ORDER BY created_at DESC LIMIT 1 FOR UPDATE`)[0],id=String(pending?.id||randomUUID());if(pending)await sql`UPDATE ordering_print_jobs SET status='queued',event_subtype=${input.itemized?"pos_itemized":"pos_non_itemized"},error_message='',payload=${JSON.stringify(payload)}::jsonb WHERE id=${id}`;else await sql`INSERT INTO ordering_print_jobs(id,business,order_id,purpose,event_subtype,status,actor_type,actor_id,error_message,payload) VALUES(${id},${input.business},${input.orderId},'paid_receipt',${input.itemized?"pos_itemized":"pos_non_itemized"},'queued',${input.actor.type},${input.actor.id},'',${JSON.stringify(payload)}::jsonb)`;return {printJobId:id};});
 }
 
 export async function commitTender(input: {
@@ -257,6 +269,7 @@ export async function commitTender(input: {
   stationKey?: string;
   giftCardNumber?: string;
   giftCardPin?: string;
+  houseAccountId?: string;
   providerApproval?: {
     provider: PaymentProviderKey | "test";
     transactionReference: string;
@@ -319,6 +332,9 @@ export async function commitTender(input: {
     if (input.tenderType === "card" && input.amountTenderedCents > due) {
       throw new PaymentConflictError("Credit tender cannot exceed the remaining balance.");
     }
+    if (input.tenderType === "house_account" && input.amountTenderedCents > due) throw new PaymentConflictError("A house-account charge cannot be more than the balance due.");
+    if (input.tenderType === "house_account" && input.business !== "Corner Deli") throw new PaymentConflictError("House accounts are only set up for Corner Deli.");
+    if (input.tenderType === "house_account" && !input.houseAccountId) throw new PaymentConflictError("Choose the house account to charge.");
     if (input.tenderType === "card" && !input.providerApproval) {
       throw new PaymentConflictError("Credit payments must be approved by the active payment provider before they are recorded.");
     }
@@ -357,6 +373,15 @@ export async function commitTender(input: {
         await sql`UPDATE ordering_payment_transactions SET amount_cents=${applied},amount_tendered_cents=${applied} WHERE id=${transactionId}`;
       } catch (error) {
         if (error instanceof GiftCardError) throw new PaymentConflictError(error.message);
+        throw error;
+      }
+    }
+    let houseAccountLines: string[] | undefined;
+    if (input.tenderType === "house_account") {
+      try {
+        houseAccountLines = (await chargeHouseAccount({ accountId: String(input.houseAccountId), orderId: input.orderId, orderNumber: String(order.display_number), paymentTransactionId: transactionId, amountCents: applied, stationKey, actor: input.actor })).slipLines;
+      } catch (error) {
+        if (error instanceof HouseAccountError) throw new PaymentConflictError(error.message);
         throw error;
       }
     }
@@ -408,6 +433,7 @@ export async function commitTender(input: {
           receiptPrinterId: input.receiptPrinterId || "",
           openCashDrawer: tillCash,
           changeDueCents: change,
+          ...(houseAccountLines ? { houseAccountLines } : {}),
           customerReceiptPending: input.business === "Corner Deli" && purpose === "paid_receipt",
         })} AS jsonb)
       )
