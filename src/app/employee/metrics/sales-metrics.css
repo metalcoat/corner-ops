@@ -50,4 +50,3 @@
 .smMiniKpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:10px}.smMiniKpis strong{font-size:1.3rem;font-variant-numeric:tabular-nums}
 @media(min-width:760px){.smPage{padding:20px 24px}.smSheetBack{place-items:center}.smSheet{border-radius:14px}}
 @media(max-width:700px){.smKpis{grid-template-columns:repeat(2,minmax(0,1fr))}.smKpis strong{font-size:1.45rem}.smGrid{grid-template-columns:minmax(0,1fr)}}
-@media(min-width:1200px){.smGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}

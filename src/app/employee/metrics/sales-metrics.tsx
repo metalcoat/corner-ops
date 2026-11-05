@@ -189,7 +189,7 @@ function ShareBar({ parts, title }: { parts: Array<{ key: string; label: string;
     <ul>{shown.length ? shown.map((part) => <li key={part.key}>
       <span><i className="smKey" style={{ background: part.color }} />{part.label}</span>
       <b>{money(part.cents)}</b>
-      <small>{share(part.cents, whole)}{part.orders !== undefined ? ` · ${part.orders} orders` : ""}</small>
+      <small>{share(part.cents, whole)}{part.orders !== undefined ? ` · ${part.orders} order${part.orders === 1 ? "" : "s"}` : ""}</small>
       {part.change !== undefined && <Change value={part.change ?? null} />}
     </li>) : <li className="smMuted">Nothing in this range.</li>}</ul>
   </div>;
@@ -344,7 +344,7 @@ export default function SalesMetrics() {
         </Card>
         <Card title="Categories">
           {report.categories.length ? <ol className="smItems">{report.categories.map((category) => <li key={category.name}><div className="smRowStatic">
-            <span className="smItemName">{category.name}<small>{category.quantity} sold · {category.items} items</small></span>
+            <span className="smItemName">{category.name}<small>{category.quantity} sold · {category.items} item{category.items === 1 ? "" : "s"}</small></span>
             <span className="smItemValue">{money(category.netCents)}<small className="smChange">{share(category.netCents, report.totals.netCents)}</small></span>
             <span className="smItemTrack"><i style={{ width: `${Math.max(1.5, (category.netCents / categoryTop) * 100)}%`, background: "var(--sm-s2)" }} /></span>
           </div></li>)}</ol> : <p className="smMuted">No items sold in this range.</p>}
