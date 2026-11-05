@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import type { ManagerReport as Report, ManagerReportView } from "@/lib/ordering-manager-report";
+import BusyTimes from "./busy-times";
 import "./manager-report.css";
 
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
@@ -25,6 +26,7 @@ function Row({ title, detail, amount, tone, flag }: { title: string; detail?: st
 
 export default function ManagerReport() {
   const [view, setView] = useState<ManagerReportView>("day");
+  const [mode, setMode] = useState<"report" | "busy">("report");
   const [date, setDate] = useState("");
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState("");
@@ -51,11 +53,14 @@ export default function ManagerReport() {
   return (
     <main className="mgrPage">
       <header className="mgrHeader">
-        <h1>Daily report</h1>
+        <h1>{mode === "busy" ? "Busy times" : "Daily report"}</h1>
         <nav aria-label="Report period">
           {(["day", "week", "month"] as const).map((option) => <button type="button" key={option} className={view === option ? "active" : ""} aria-pressed={view === option} onClick={() => setView(option)}>{option[0].toUpperCase() + option.slice(1)}</button>)}
         </nav>
       </header>
+      <nav className="mgrModes" aria-label="Report">
+        {([["report", "Money & tills"], ["busy", "Busy times"]] as const).map(([option, label]) => <button type="button" key={option} className={mode === option ? "active" : ""} aria-pressed={mode === option} onClick={() => setMode(option)}>{label}</button>)}
+      </nav>
       <div className="mgrDate">
         <button type="button" aria-label="Previous" disabled={!shown} onClick={() => setDate(move(view, shown, -1))}>‹</button>
         <label><strong>{title || "Loading…"}</strong><input type="date" aria-label="Choose a date" value={shown} max={today} onChange={(event) => event.target.value && setDate(event.target.value)} /></label>
@@ -63,7 +68,8 @@ export default function ManagerReport() {
         <button type="button" disabled={!report || (report.start <= today && report.end >= today)} onClick={() => setDate(today)}>Today</button>
       </div>
       {error && <p className="mgrError" role="alert">{error}</p>}
-      {report && totals && <>
+      {report && mode === "busy" && <BusyTimes view={view} date={report.date} onOpenDay={openDay} />}
+      {report && totals && mode === "report" && <>
         <section className="mgrTiles" aria-label="Summary">
           <article><span>Sales</span><strong>{money(totals.salesCents)}</strong><small>{totals.orders} orders</small></article>
           <article><span>Cash</span><strong>{money(totals.cashCents)}</strong><small>Card {money(totals.cardCents)}</small></article>
