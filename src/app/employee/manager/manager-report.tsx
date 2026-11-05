@@ -55,6 +55,7 @@ export default function ManagerReport() {
       <header className="mgrHeader">
         <h1>{mode === "busy" ? "Busy times" : "Daily report"}</h1>
         <a className="osLink" href="/employee/manager/orders">Order search</a>
+        <a className="osLink" href="/employee/metrics">Sales metrics</a>
         <nav aria-label="Report period">
           {(["day", "week", "month"] as const).map((option) => <button type="button" key={option} className={view === option ? "active" : ""} aria-pressed={view === option} onClick={() => setView(option)}>{option[0].toUpperCase() + option.slice(1)}</button>)}
         </nav>
