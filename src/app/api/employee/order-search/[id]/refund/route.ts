@@ -19,6 +19,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const actor = await portalManager(null, null);
       return isoJson(await portalQuoteItem({ orderId, itemId: String(body.itemId || ""), quantity: Number(body.quantity), actor }));
     }
+    await portalManager(null, null); // signed-in manager first, before anything about the request
     if (!clientMutationId) throw new PortalMoneyError("Missing request ID. Reload and try again.", 400);
     const actor = await portalManager(body.pin, pinAttemptKeys(request.headers));
     const result = body.action === "item"

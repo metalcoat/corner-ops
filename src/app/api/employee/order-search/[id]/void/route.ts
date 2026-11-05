@@ -14,6 +14,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const orderId = (await context.params).id;
     const body = await request.json() as Record<string, unknown>;
     const clientMutationId = String(body.clientMutationId || "").slice(0, 120);
+    await portalManager(null, null); // signed-in manager first, before anything about the request
     if (!clientMutationId) throw new PortalMoneyError("Missing request ID. Reload and try again.", 400);
     const actor = await portalManager(body.pin, pinAttemptKeys(request.headers));
     const refund = body.refund === "store_credit" ? "store_credit" : body.refund === "none" ? "none" : "original";
