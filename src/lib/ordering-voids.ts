@@ -10,7 +10,7 @@ import { ensureOrderingTipSchema } from "@/lib/ordering-tip-schema";
 
 export class OrderVoidError extends Error {}
 
-export async function voidSentOrder(input: { orderId: string; business: OrderingBusiness; reason: string; actor: OrderingActor; approver?: OrderingActor; silent?: boolean }) {
+export async function voidSentOrder(input: { orderId: string; business: OrderingBusiness; reason: string; actor: OrderingActor; approver?: OrderingActor; silent?: boolean; via?: string }) {
   const reason = input.reason.trim();
   if (reason.length < 3) throw new OrderVoidError("A void reason is required.");
   if (reason.length > 500) throw new OrderVoidError("Void reason must be 500 characters or fewer.");
@@ -65,7 +65,7 @@ export async function voidSentOrder(input: { orderId: string; business: Ordering
     await sql`
       INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details)
       VALUES(${randomUUID()},${input.orderId},${updated[0].version},'order_voided',${input.actor.type},${input.actor.id},
-        CAST(${JSON.stringify({ reason, actorName: input.actor.name, actorRole: input.actor.role, previousFulfillmentStatus: order.status, previousPaymentStatus: order.payment_status, paymentWasNotRefunded: true, approvedById: input.approver?.id || null, approvedByName: input.approver?.name || null })} AS jsonb))
+        CAST(${JSON.stringify({ reason, actorName: input.actor.name, actorRole: input.actor.role, previousFulfillmentStatus: order.status, previousPaymentStatus: order.payment_status, paymentWasNotRefunded: true, approvedById: input.approver?.id || null, approvedByName: input.approver?.name || null, ...(input.via ? { via: input.via } : {}) })} AS jsonb))
     `;
     return { order: updated[0], alreadyVoided: false };
   });

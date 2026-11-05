@@ -9,6 +9,7 @@ import VoidMoneyPanel from "./void-money-panel";
 import OrderCarPhotos from "./order-car-photos";
 import OrderCurbside from "./order-curbside";
 import { formatOrderModifier } from "@/lib/ordering-line-format";
+import { orderPaymentState } from "@/lib/order-payment-state";
 type Order = {
   id: string;
   customer_id?: string | null;
@@ -19,6 +20,8 @@ type Order = {
   source: string;
   order_origin: string;
   total_cents: number;
+  paid_cents?: number;
+  refunded_cents?: number;
   amount_due_cents: number;
   created_at: string;
   scheduled_for: string | null;
@@ -53,12 +56,10 @@ const money = (c: number) =>
     c / 100,
   );
 const label = (v: string) => v.replaceAll("_", " ").toUpperCase();
-// Still owes money. Voided or cancelled orders don't, and refunded orders count as paid.
-const isUnpaid = (o: Order) =>
-  Number(o.amount_due_cents) > 0 &&
-  o.status !== "cancelled" &&
-  !o.voided_at &&
-  !["refunded", "partially_refunded"].includes(o.payment_status);
+// Still owes money. Voided or cancelled orders don't, and neither do refunded ones (order-payment-state.ts).
+const paymentState = (o: Order) =>
+  orderPaymentState({ status: o.status, paymentStatus: o.payment_status, voided: Boolean(o.voided_at), paidCents: Number(o.paid_cents || 0), dueCents: Number(o.amount_due_cents), refundedCents: Number(o.refunded_cents || 0) });
+const isUnpaid = (o: Order) => paymentState(o).owes;
 export default function OrderCenterClient() {
   const router = useRouter();
   const [session, setSession] = useState<PosSessionView | null>(null),
@@ -288,7 +289,7 @@ export default function OrderCenterClient() {
             </em>
           )}
           <header><strong>#{o.display_number}</strong><b>{label(o.service_type)}</b></header>
-          <span className={`paymentBadge ${unpaid ? "unpaid" : o.payment_status === "unpaid" ? "voided" : "paid"}`}>{unpaid ? "UNPAID" : o.payment_status === "unpaid" ? "VOIDED" : label(o.payment_status)}</span>
+          <span className={`paymentBadge ${unpaid ? "unpaid" : paymentState(o).key === "paid" ? "paid" : "voided"}`}>{unpaid ? "UNPAID" : paymentState(o).label.toUpperCase()}</span>
           <span className="customer">
             {o.customer_name}{o.customer_phone ? ` · ${o.customer_phone}` : ""}
           </span>

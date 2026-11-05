@@ -13,3 +13,8 @@
 .osTrail li{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:8px 2px;border-bottom:1px solid #1e293b}
 .osTrail time{color:var(--mgr-muted);font-size:.82rem;font-variant-numeric:tabular-nums}.osTrail div{display:grid;gap:2px}.osTrail small{color:var(--mgr-muted);overflow-wrap:anywhere}
 @media(max-width:520px){.osTrail li{grid-template-columns:1fr;gap:2px}}
+.osMoney h3{margin:0;font-size:1rem}.osForm textarea{min-height:64px;padding:8px 10px;border:1px solid var(--mgr-line);border-radius:8px;background:var(--mgr-bg);color:var(--mgr-text);font:inherit;font-size:1rem;resize:vertical}
+.osMoney .osActions{flex-wrap:wrap}.mgrPage button.danger{background:#7f1d1d;border-color:#ef4444}
+.osDone{padding:10px;border:1px solid #22c55e;border-radius:8px;background:#052e16;color:#bbf7d0}
+.osConfirm{border-color:var(--mgr-accent)}.osSummaryLine{margin:0;font-size:1.05rem;font-weight:600}
+@media(max-width:520px){.osMoney .osActions button{flex:1 1 100%}}

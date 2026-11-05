@@ -57,3 +57,17 @@ test("the trail also shows kitchen steps, add-ons, tips, credit, reprints and AI
     ["Completed", "Kim"],
   ]);
 });
+test("refunds and voids done from the manager portal say so", () => {
+  const trail = orderTrail({
+    createdAt: at(5), takenBy: "Sam",
+    events: [{ event_type: "order_voided", created_at: at(30), actor_name: "Pat", details: { reason: "Customer cancelled", via: "manager_portal" } }],
+    payments: [
+      { created_at: at(10), transaction_type: "payment", tender_type: "card", amount_cents: 1250, brand: "Visa", last4: "1111", taken_by: "Sam" },
+      { created_at: at(31), transaction_type: "refund", tender_type: "card", amount_cents: 1250, brand: "Visa", last4: "1111", taken_by: "Pat", reason: "Customer cancelled", via: "manager_portal" },
+    ],
+  });
+  assert.deepEqual(trail.slice(-2).map((row) => [row.label, row.who, row.detail]), [
+    ["Voided", "Pat", "Customer cancelled · from manager portal"],
+    ["Refunded $12.50", "Pat", "Visa ····1111 · Customer cancelled · from manager portal"],
+  ]);
+});

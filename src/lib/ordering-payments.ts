@@ -121,7 +121,12 @@ function reason(value: string, action: string): string {
   return cleaned;
 }
 
-export async function reverseTender(input: { orderId: string; business: OrderingBusiness; transactionId: string; amountCents: number; clientMutationId: string; reason: string; actor: OrderingActor }) {
+/**
+ * `moneyBack`: a refund to the customer, not a wrong tender taken off so the order can be paid again,
+ * so the order reads Refunded / Partially refunded and owes nothing even while it's still open.
+ * `via` records where it was done ("manager_portal") on the reversal and in the order's trail.
+ */
+export async function reverseTender(input: { orderId: string; business: OrderingBusiness; transactionId: string; amountCents: number; clientMutationId: string; reason: string; actor: OrderingActor; moneyBack?: boolean; via?: string }) {
   if (!canManagePos(input.actor)) throw new PaymentConflictError("Manager or owner authorization is required to reverse a tender.");
   const reversalReason = reason(input.reason, "reversal");
   const amount = cents(input.amountCents, "Reversal amount");
@@ -156,7 +161,7 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     const order = (await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business=${input.business} FOR UPDATE`)[0];
     if (!order) throw new PaymentConflictError("Order was not found.");
     const reversalId = randomUUID();
-    await sql`INSERT INTO ordering_payment_transactions(id,business,order_id,check_id,customer_id,tender_type,transaction_type,status,amount_cents,amount_tendered_cents,provider,related_transaction_id,client_mutation_id,created_by,approved_at,reason,details) VALUES(${reversalId},${input.business},${input.orderId},${source.check_id},${source.customer_id},${source.tender_type},${mx?.kind ?? "void"},'approved',${amount},${amount},${source.provider},${source.id},${input.clientMutationId},${input.actor.id},NOW(),${reversalReason},${JSON.stringify({actorName:input.actor.name,actorRole:input.actor.role,partial:amount<Number(source.amount_cents)-reversed,...(mx?{mx:mx.details,mxAttemptId:mx.attemptId}:{})})}::jsonb)`;
+    await sql`INSERT INTO ordering_payment_transactions(id,business,order_id,check_id,customer_id,tender_type,transaction_type,status,amount_cents,amount_tendered_cents,provider,related_transaction_id,client_mutation_id,created_by,approved_at,reason,details) VALUES(${reversalId},${input.business},${input.orderId},${source.check_id},${source.customer_id},${source.tender_type},${mx?.kind ?? "void"},'approved',${amount},${amount},${source.provider},${source.id},${input.clientMutationId},${input.actor.id},NOW(),${reversalReason},${JSON.stringify({actorName:input.actor.name,actorRole:input.actor.role,partial:amount<Number(source.amount_cents)-reversed,...(input.via?{via:input.via}:{}),...(mx?{mx:mx.details,mxAttemptId:mx.attemptId}:{})})}::jsonb)`;
     if (mx) {
       await sql`UPDATE ordering_payment_transactions SET provider_transaction_reference=${mx.reference},brand=${source.brand},last4=${source.last4} WHERE id=${reversalId}`;
       await markMxReversalApplied(mx.attemptId);
@@ -184,20 +189,20 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     }
     // Refunding a finished (completed or voided) order gives the money back; it doesn't
     // put the order back up for payment. An open order (a wrong tender reversed so it
-    // can be paid again) still owes the balance.
-    const settled = ["completed", "cancelled"].includes(String(order.status));
+    // can be paid again) still owes the balance, unless the caller says it's money back.
+    const settled = input.moneyBack || ["completed", "cancelled"].includes(String(order.status));
     const newPaid = Math.max(0, Number(order.paid_cents) - amount), remaining = settled ? 0 : Math.max(0, Number(order.total_cents) - newPaid);
     const paymentStatus = settled ? (newPaid === 0 ? "refunded" : "partially_refunded") : newPaid === 0 ? "unpaid" : remaining === 0 ? "paid" : "partially_paid";
     await sql`UPDATE ordering_orders SET paid_cents=${newPaid},amount_due_cents=${remaining},payment_status=${paymentStatus},paid_at=CASE WHEN ${remaining}=0 THEN paid_at ELSE NULL END,version=version+1,updated_at=NOW() WHERE id=${input.orderId}`;
     if (source.check_id) await sql`UPDATE ordering_checks SET paid_cents=GREATEST(0,paid_cents-${amount}),amount_due_cents=LEAST(total_cents,amount_due_cents+${amount}),status=CASE WHEN paid_cents-${amount}<=0 THEN 'open' WHEN amount_due_cents+${amount}>0 THEN 'partially_paid' ELSE 'paid' END,updated_at=NOW() WHERE id=${source.check_id}`;
     const version = Number(order.version)+1;
-    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) VALUES(${randomUUID()},${input.orderId},${version},'payment_reversed',${input.actor.type},${input.actor.id},${JSON.stringify({transactionId:reversalId,sourceTransactionId:source.id,tenderType:source.tender_type,amountCents:amount,reason:reversalReason,actorName:input.actor.name,actorRole:input.actor.role,totalPaidCents:newPaid,remainingDueCents:remaining})}::jsonb)`;
+    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) VALUES(${randomUUID()},${input.orderId},${version},'payment_reversed',${input.actor.type},${input.actor.id},${JSON.stringify({transactionId:reversalId,sourceTransactionId:source.id,tenderType:source.tender_type,amountCents:amount,reason:reversalReason,actorName:input.actor.name,actorRole:input.actor.role,totalPaidCents:newPaid,remainingDueCents:remaining,...(input.via?{via:input.via}:{})})}::jsonb)`;
     await reconcileOrderTips(input.orderId,input.business);
     return { ...(await checkoutState(input.orderId,input.business,source.check_id)), duplicate: false };
   });
 }
 
-export async function settleTenderAsStoreCredit(input: { orderId: string; transactionId: string; refundCents: number; creditCents: number; clientMutationId: string; reason: string; actor: OrderingActor }) {
+export async function settleTenderAsStoreCredit(input: { orderId: string; transactionId: string; refundCents: number; creditCents: number; clientMutationId: string; reason: string; actor: OrderingActor; moneyBack?: boolean; via?: string }) {
   if (!canManagePos(input.actor)) throw new PaymentConflictError("Manager or owner authorization is required to issue refund credit.");
   const reversalReason = reason(input.reason, "refund credit");
   const refundCents = cents(input.refundCents, "Refund amount");
@@ -216,13 +221,13 @@ export async function settleTenderAsStoreCredit(input: { orderId: string; transa
     const order = (await sql`SELECT * FROM ordering_orders WHERE id=${input.orderId} AND business='Corner Deli' FOR UPDATE`)[0];
     if (!order?.customer_id) throw new PaymentConflictError("Attach this order to a customer before issuing credit for next time.");
     const transactionId = randomUUID();
-    await sql`INSERT INTO ordering_payment_transactions(id,business,order_id,check_id,customer_id,tender_type,transaction_type,status,amount_cents,amount_tendered_cents,provider,related_transaction_id,client_mutation_id,created_by,approved_at,reason,details) VALUES(${transactionId},'Corner Deli',${input.orderId},${source.check_id},${order.customer_id},'store_credit','refund','approved',${refundCents},${creditCents},'corner_ops_store_credit',${source.id},${input.clientMutationId},${input.actor.id},NOW(),${reversalReason},${JSON.stringify({actorName:input.actor.name,actorRole:input.actor.role,sourceTenderType:source.tender_type,creditIssuedCents:creditCents,reducedFromRefundCents:refundCents-creditCents})}::jsonb)`;
+    await sql`INSERT INTO ordering_payment_transactions(id,business,order_id,check_id,customer_id,tender_type,transaction_type,status,amount_cents,amount_tendered_cents,provider,related_transaction_id,client_mutation_id,created_by,approved_at,reason,details) VALUES(${transactionId},'Corner Deli',${input.orderId},${source.check_id},${order.customer_id},'store_credit','refund','approved',${refundCents},${creditCents},'corner_ops_store_credit',${source.id},${input.clientMutationId},${input.actor.id},NOW(),${reversalReason},${JSON.stringify({actorName:input.actor.name,actorRole:input.actor.role,sourceTenderType:source.tender_type,creditIssuedCents:creditCents,reducedFromRefundCents:refundCents-creditCents,...(input.via?{via:input.via}:{})})}::jsonb)`;
     await sql`INSERT INTO ordering_store_credit_ledger(id,business,customer_id,order_id,entry_type,delta_balance_cents,reason,created_by,approved_by) VALUES(${randomUUID()},'Corner Deli',${order.customer_id},${input.orderId},'refund',${creditCents},${reversalReason},${input.actor.id},${input.actor.name})`;
-    const settled = ["completed", "cancelled"].includes(String(order.status));
+    const settled = input.moneyBack || ["completed", "cancelled"].includes(String(order.status));
     const newPaid = Math.max(0, Number(order.paid_cents) - refundCents), remaining = settled ? 0 : Math.max(0, Number(order.total_cents) - newPaid);
     await sql`UPDATE ordering_orders SET paid_cents=${newPaid},amount_due_cents=${remaining},payment_status=CASE WHEN ${settled} THEN (CASE WHEN ${newPaid}=0 THEN 'refunded' ELSE 'partially_refunded' END) WHEN ${newPaid}=0 THEN 'unpaid' WHEN ${remaining}=0 THEN 'paid' ELSE 'partially_paid' END,paid_at=CASE WHEN ${remaining}=0 THEN paid_at ELSE NULL END,version=version+1,updated_at=NOW() WHERE id=${input.orderId}`;
     if (source.check_id) await sql`UPDATE ordering_checks SET paid_cents=GREATEST(0,paid_cents-${refundCents}),amount_due_cents=LEAST(total_cents,amount_due_cents+${refundCents}),status=CASE WHEN paid_cents-${refundCents}<=0 THEN 'open' WHEN amount_due_cents+${refundCents}>0 THEN 'partially_paid' ELSE 'paid' END,updated_at=NOW() WHERE id=${source.check_id}`;
-    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) SELECT ${randomUUID()},id,version,'refund_issued_as_store_credit',${input.actor.type},${input.actor.id},${JSON.stringify({transactionId,sourceTransactionId:source.id,refundCents,creditCents,reason:reversalReason,actorName:input.actor.name,actorRole:input.actor.role})}::jsonb FROM ordering_orders WHERE id=${input.orderId}`;
+    await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) SELECT ${randomUUID()},id,version,'refund_issued_as_store_credit',${input.actor.type},${input.actor.id},${JSON.stringify({transactionId,sourceTransactionId:source.id,refundCents,creditCents,reason:reversalReason,actorName:input.actor.name,actorRole:input.actor.role,...(input.via?{via:input.via}:{})})}::jsonb FROM ordering_orders WHERE id=${input.orderId}`;
     await reconcileOrderTips(input.orderId,"Corner Deli");
     return { duplicate: false, transactionId, creditCents };
   });

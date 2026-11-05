@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { orderSearchDetail, searchOrders } from "@/lib/ordering-order-search";
 import "../manager-report.css";
 import "./order-search.css";
+import MoneyActions from "./money-actions";
+import { orderPaymentState } from "@/lib/order-payment-state";
 
 type Results = Awaited<ReturnType<typeof searchOrders>> & { today: string };
 type Detail = NonNullable<Awaited<ReturnType<typeof orderSearchDetail>>>;
@@ -17,11 +19,9 @@ const presets = [{ days: "1", label: "Today" }, { days: "7", label: "7 days" }, 
 const blank = { days: "7", from: "", to: "", name: "", phone: "", last4: "", address: "", number: "", serviceType: "", channel: "", payment: "", tender: "" };
 type Form = typeof blank;
 
-function paymentLabel(order: { paymentStatus: string; voidedAt?: string | null; dueCents: number; status: string }) {
-  if (order.voidedAt || order.status === "cancelled") return { text: "Voided", tone: "bad" };
-  if (order.paymentStatus === "paid") return { text: "Paid", tone: "good" };
-  if (order.paymentStatus.includes("refunded")) return { text: words(order.paymentStatus), tone: "bad" };
-  return order.dueCents > 0 ? { text: `Owes ${money(order.dueCents)}`, tone: "bad" } : { text: words(order.paymentStatus), tone: "" };
+function paymentLabel(order: { paymentStatus: string; voided: boolean; paidCents: number; dueCents: number; refundedCents: number; status: string }) {
+  const state = orderPaymentState(order);
+  return { text: state.label, tone: state.key === "paid" ? "good" : state.key === "other" ? "" : "bad" };
 }
 
 export default function OrderSearch() {
@@ -68,7 +68,7 @@ export default function OrderSearch() {
     if (days) void search(next);
   };
 
-  if (selected) return <OrderDetail order={selected} onBack={() => setSelected(null)} />;
+  if (selected) return <OrderDetail order={selected} onBack={() => { setSelected(null); void search(form); }} onChange={setSelected} />;
   return (
     <main className="mgrPage">
       <header className="mgrHeader">
@@ -106,7 +106,7 @@ export default function OrderSearch() {
         {results.orders.length === 0 && <p className="mgrEmpty">No orders match.</p>}
         <div className="osResults">
           {results.orders.map((order) => {
-            const pay = paymentLabel(order);
+            const pay = paymentLabel({ ...order, voided: Boolean(order.voidedAt) });
             return <button type="button" key={order.id} className="osResult" onClick={() => void open(order)}>
               <span className="osTop"><strong>#{order.number} · {order.customerName}</strong><b>{money(order.totalCents)}</b></span>
               <small>{when(order.createdAt)} · {words(order.serviceType)} · {channels[order.channel] || order.channel}{order.customerPhone ? ` · ${order.customerPhone}` : ""}</small>
@@ -121,8 +121,8 @@ export default function OrderSearch() {
   );
 }
 
-function OrderDetail({ order, onBack }: { order: Detail; onBack: () => void }) {
-  const pay = paymentLabel({ ...order, voidedAt: order.voidReason ? "voided" : null });
+function OrderDetail({ order, onBack, onChange }: { order: Detail; onBack: () => void; onChange: (order: Detail) => void }) {
+  const pay = paymentLabel(order);
   return (
     <main className="mgrPage">
       <header className="mgrHeader">
@@ -132,11 +132,12 @@ function OrderDetail({ order, onBack }: { order: Detail; onBack: () => void }) {
       <section className="mgrTiles osSummary">
         <article><span>Customer</span><strong>{order.customerName || "Guest"}</strong><small>{order.customerPhone || "No phone"}</small></article>
         <article><span>Order</span><strong>{words(order.serviceType)}</strong><small>{channels[order.channel] || order.channel} · taken by {order.takenBy || "unknown"}</small></article>
-        <article><span>Total</span><strong>{money(order.totalCents)}</strong><small>Paid {money(order.paidCents)}{order.tipCents ? ` · tip ${money(order.tipCents)}` : ""}</small></article>
+        <article><span>Total</span><strong>{money(order.totalCents)}</strong><small>Paid {money(order.paidCents)}{order.refundedCents ? ` · refunded ${money(order.refundedCents)}` : ""}{order.tipCents ? ` · tip ${money(order.tipCents)}` : ""}</small></article>
         <article className={pay.tone === "bad" ? "warn" : ""}><span>Status</span><strong>{pay.text}</strong><small>{words(order.status)}</small></article>
       </section>
       {order.deliveryAddress && <p className="mgrEmpty">Deliver to {order.deliveryAddress}{order.deliveryFeeCents ? ` · fee ${money(order.deliveryFeeCents)}` : ""}</p>}
       {order.voidReason && <p className="mgrError">Voided: {order.voidReason}</p>}
+      <MoneyActions key={order.id} order={order} onChange={onChange} />
 
       <section className="mgrSection">
         <h2>Timeline<span>{order.trail.length}</span></h2>
@@ -152,7 +153,7 @@ function OrderDetail({ order, onBack }: { order: Detail; onBack: () => void }) {
         <h2>Payments<span>{order.payments.length}</span></h2>
         {order.payments.length === 0 && <p className="mgrEmpty">No payments.</p>}
         {order.payments.map((payment, index) => <div key={index} className="mgrRow">
-          <div><strong>{payment.kind === "payment" ? "Payment" : words(payment.kind)} · {payment.card || words(payment.tender)}{payment.status !== "approved" ? ` (${payment.status})` : ""}</strong><small>{when(payment.at)} · {payment.by}{payment.reason ? ` · ${payment.reason}` : ""}</small></div>
+          <div><strong>{payment.kind === "payment" ? "Payment" : words(payment.kind)} · {payment.card || words(payment.tender)}{payment.status !== "approved" ? ` (${payment.status})` : ""}</strong><small>{when(payment.at)} · {payment.by}{payment.reason ? ` · ${payment.reason}` : ""}{payment.fromPortal ? " · from manager portal" : ""}</small></div>
           <b className={payment.kind === "payment" ? "" : "bad"}>{payment.kind === "payment" ? "" : "−"}{money(payment.amountCents)}</b>
         </div>)}
       </section>

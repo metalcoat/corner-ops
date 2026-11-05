@@ -459,6 +459,18 @@ flowchart LR
   sign-in); the reason and `approvedByName` are on the order event. Voiding a whole order the kitchen already has prints
   a VOID WHOLE ORDER notice (`event_subtype='order_void'`, the one kitchen job a cancelled order still prints). CLEAR ACTIVE TEST
   ORDERS (dev only) voids silently, with no notice, because dev is wired to the real store printers.
+- Refunds and voids away from the POS (manager portal, `/employee/manager/orders` → an order → Refund or void;
+  `src/lib/manager-portal-refunds.ts`, `POST /api/employee/order-search/[id]/refund` and `/void`): managers and owners
+  signed in to the employee app, each action confirmed with their own PIN (same attempt limits). Refund an amount off one
+  payment, refund items (an item cancellation with its refund), or void the order and refund it, leave it as store credit,
+  or leave it for "Needs refund or credit". Same money paths as the POS (`reverseTender`, `settleTenderAsStoreCredit`,
+  `cancelOrderItem`, `voidSentOrder`): cards go back through MX, cash comes out of the till that took it (it must be open),
+  part of a cash order with a customer becomes store credit. Each is tagged `via: "manager_portal"` and the trail reads
+  "from manager portal". A void prints the kitchen VOID notice like the POS.
+- Refunded orders don't read as unpaid (`src/lib/order-payment-state.ts`): money given back on a sent order is a refund,
+  not a balance due, so it reads Refunded / Partially refunded and stays out of unpaid, overdue and pickup-attention lists in
+  the Order Center and manager order search. Only a draft at checkout (a wrong tender taken off to pay again) still owes.
+  Portal refunds also store it that way (`moneyBack`); POS reversals on an open order still put the balance back due.
 - Stale draft alert (`src/lib/ordering-stale-drafts.ts`, `src/app/pos/deli/stale-draft-alert.tsx`): orders staff rang on a
   POS and never sent (not web, AI, or reopened sent orders), idle for the set minutes (10), pop up on the chosen stations
   (Back pos 1), checked every 30 s, until sent, deleted (voided, kept in history) or snoozed 5 min. Minutes and stations:

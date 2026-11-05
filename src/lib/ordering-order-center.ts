@@ -25,13 +25,13 @@ export async function listOrders(input: { business: OrderingBusiness; date?: str
   const searchingHistory = q.length > 0;
   return getSql()`
     SELECT o.id,o.display_number,o.status,o.payment_status,o.service_type,o.source,o.order_origin,
-      o.total_cents,o.paid_cents,o.amount_due_cents,o.created_at,o.updated_at,o.scheduled_for,o.voided_at,o.void_reason,
+      o.total_cents,o.paid_cents,o.amount_due_cents,o.created_at,o.updated_at,o.scheduled_for,o.voided_at,o.void_reason,refunds.refunded_cents,
       o.first_name_snapshot,o.last_name_snapshot,o.phone_snapshot,
       COALESCE(NULLIF(trim(o.first_name_snapshot||' '||o.last_name_snapshot),''),NULLIF(c.display_name,''),'Guest') customer_name,
       COALESCE(NULLIF(o.phone_snapshot,''),p.display_phone,o.caller_phone) customer_phone,
       CASE WHEN o.service_type='pickup' THEN NULL ELSE a.formatted_address END delivery_address,CASE WHEN o.service_type='pickup' THEN NULL ELSE a.line2 END delivery_unit,
-      ((o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled') overdue_unpaid,
-      (o.service_type='pickup' AND o.amount_due_cents > 0 AND o.status<>'cancelled' AND o.created_at<=NOW()-INTERVAL '40 minutes') pickup_attention,
+      ((o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled' AND (o.status='draft' OR refunds.refunded_cents=0)) overdue_unpaid,
+      (o.service_type='pickup' AND o.amount_due_cents > 0 AND o.status<>'cancelled' AND (o.status='draft' OR refunds.refunded_cents=0) AND o.created_at<=NOW()-INTERVAL '40 minutes') pickup_attention,
       -- Who took it: the POS employee who rang it (created_by is their id), else where it came from.
       CASE o.source WHEN 'web' THEN 'Online' WHEN 'ai_phone' THEN 'AI phone' WHEN 'kiosk' THEN 'Kiosk'
         ELSE COALESCE(taker.name,NULLIF(o.created_by,'')) END taken_by,
@@ -52,14 +52,16 @@ export async function listOrders(input: { business: OrderingBusiness; date?: str
     LEFT JOIN ordering_customers c ON c.id=o.customer_id
     LEFT JOIN LATERAL (SELECT display_phone FROM ordering_customer_phones WHERE customer_id=c.id ORDER BY is_primary DESC,created_at LIMIT 1) p ON TRUE
     LEFT JOIN ordering_order_delivery_addresses a ON a.order_id=o.id
+    -- Money given back. A sent order that was refunded doesn't owe the refund back (see order-payment-state.ts).
+    CROSS JOIN LATERAL (SELECT COALESCE(SUM(r.amount_cents),0)::int refunded_cents FROM ordering_payment_transactions r WHERE r.order_id=o.id AND r.transaction_type IN ('void','refund') AND r.status='approved') refunds
     WHERE o.business=${input.business}
-      AND (CASE WHEN ${searchingHistory} THEN o.created_at >= NOW()-(${searchDays}::text||' days')::interval WHEN ${futureOnly} THEN o.scheduled_for > NOW() AND o.status <> 'cancelled' WHEN ${openOnly} THEN o.amount_due_cents > 0 AND o.status <> 'cancelled' ELSE ((o.created_at AT TIME ZONE ${timezone})::date=${date}::date OR (${includeOverdue} AND (o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled')) END)
+      AND (CASE WHEN ${searchingHistory} THEN o.created_at >= NOW()-(${searchDays}::text||' days')::interval WHEN ${futureOnly} THEN o.scheduled_for > NOW() AND o.status <> 'cancelled' WHEN ${openOnly} THEN o.amount_due_cents > 0 AND o.status <> 'cancelled' AND (o.status='draft' OR refunds.refunded_cents=0) ELSE ((o.created_at AT TIME ZONE ${timezone})::date=${date}::date OR (${includeOverdue} AND (o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled' AND (o.status='draft' OR refunds.refunded_cents=0))) END)
       AND (${q}='' OR o.display_number ILIKE ${like} OR o.first_name_snapshot ILIKE ${like} OR o.last_name_snapshot ILIKE ${like}
         OR trim(o.first_name_snapshot||' '||o.last_name_snapshot) ILIKE ${like} OR c.display_name ILIKE ${like}
         OR (${digits}<>'' AND regexp_replace(COALESCE(NULLIF(o.phone_snapshot,''),p.display_phone,o.caller_phone),'[^0-9]','','g') LIKE ${digitLike})
         OR a.formatted_address ILIKE ${like} OR a.line1 ILIKE ${like}
         OR taker.name ILIKE ${like} OR sender.name ILIKE ${like} OR payer.name ILIKE ${like})
-    ORDER BY CASE WHEN ${includeOverdue} AND (o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled' THEN 0 WHEN o.amount_due_cents <= 0 THEN 2 ELSE 1 END,
+    ORDER BY CASE WHEN ${includeOverdue} AND (o.created_at AT TIME ZONE ${timezone})::date < ${date}::date AND o.amount_due_cents > 0 AND o.status <> 'cancelled' AND (o.status='draft' OR refunds.refunded_cents=0) THEN 0 WHEN o.amount_due_cents <= 0 OR NOT (o.status='draft' OR refunds.refunded_cents=0) THEN 2 ELSE 1 END,
       CASE WHEN ${futureOnly} THEN o.scheduled_for END ASC, CASE WHEN ${openOnly} THEN o.created_at END ASC, o.created_at DESC
   `;
 }
@@ -76,7 +78,7 @@ export async function getOrderDetail(business: OrderingBusiness, id: string) {
     item.modifiers = await sql`SELECT * FROM ordering_order_item_modifiers WHERE order_item_id=${item.id} ORDER BY created_at`;
   }
   order.events = await sql`SELECT event.event_type,event.actor_type,event.actor_id,event.details,event.created_at,COALESCE(NULLIF(event.details->>'actorName',''),employee.name,event.actor_id) actor_name FROM ordering_order_events event LEFT JOIN employees employee ON employee.id::text=event.actor_id WHERE event.order_id=${id} ORDER BY event.created_at`;
-  const payments = await sql`SELECT payment.created_at,payment.transaction_type,payment.tender_type,payment.amount_cents,payment.brand,payment.last4,payment.reason,COALESCE(NULLIF(payment.details->>'actorName',''),employee.name,NULLIF(payment.created_by,''),'Unknown') taken_by
+  const payments = await sql`SELECT payment.created_at,payment.transaction_type,payment.tender_type,payment.amount_cents,payment.brand,payment.last4,payment.reason,payment.details->>'via' via,COALESCE(NULLIF(payment.details->>'actorName',''),employee.name,NULLIF(payment.created_by,''),'Unknown') taken_by
     FROM ordering_payment_transactions payment LEFT JOIN employees employee ON employee.id::text=payment.created_by WHERE payment.order_id=${id} AND payment.status='approved' ORDER BY payment.created_at`;
   const taker = (await sql`SELECT CASE ${String(order.source)} WHEN 'web' THEN 'Online' WHEN 'ai_phone' THEN 'AI phone' WHEN 'kiosk' THEN 'Kiosk' ELSE COALESCE((SELECT name FROM employees WHERE id::text=${String(order.created_by)}),NULLIF(${String(order.created_by)},'')) END taken_by`)[0];
   order.taken_by = taker?.taken_by;

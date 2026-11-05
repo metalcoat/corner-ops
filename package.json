@@ -53,6 +53,7 @@
     "test:tiki-pos": "tsx scripts/tiki-pos-validate.ts",
     "test:order-void": "tsx scripts/order-void-validate.ts",
     "test:void-money": "tsx scripts/void-money-validate.ts",
+    "test:manager-portal-refunds": "tsx scripts/manager-portal-refund-validate.ts",
     "test:rate-limit-burst": "tsx scripts/rate-limit-burst-validate.ts",
     "test:item-cancellation": "tsx scripts/item-cancellation-validate.ts",
     "test:cancelled-item-reopen": "tsx scripts/cancelled-item-reopen-validate.ts",
