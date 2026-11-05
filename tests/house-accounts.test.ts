@@ -123,3 +123,15 @@ test("the POS offers HOUSE ACCOUNT at checkout, also at phone order-taking stati
   assert.match(route, /houseAccountId: body\.houseAccountId/);
   assert.match(read("src/lib/ordering-hardware.ts"), /payload\.houseAccountLines/);
 });
+
+test("any employee signed in at the POS can charge a tab and look one up, with no manager PIN", () => {
+  const proxy = read("src/proxy.ts");
+  assert.match(proxy, /"house-accounts",\s*\]\.some\(\(part\) => matchesPath\(path, `\/api\/ordering\/\$\{part\}`\)\)/);
+  const lookup = read("src/app/api/ordering/house-accounts/[id]/route.ts");
+  assert.match(lookup, /orderingActor\("Corner Deli"\)/);
+  assert.doesNotMatch(lookup, /houseAccountManager|orderingManagerActor/);
+  const houses = read("src/lib/ordering-house-accounts.ts");
+  const printer = houses.slice(houses.indexOf("export async function printHouseAccountStatement"));
+  assert.doesNotMatch(printer.slice(0, printer.indexOf("\n}\n")), /requireManager/);
+  assert.match(read("src/app/pos/deli/deli-pos-shell.tsx"), /\{ label: "Tabs", href: "\/pos\/deli\/house-accounts" \}/);
+});

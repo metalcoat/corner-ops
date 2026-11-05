@@ -491,6 +491,10 @@ flowchart LR
   Payments on the tab (cash, check, card run separately) and credits/debits with a reason are recorded from the account
   page, logged in `ordering_operations_audit`. Statements (default: since the last payment, else this month) print on a
   receipt printer or as a full page (`/employee/manager/house-accounts/<id>/statement`, print / save as PDF).
+  Any POS employee (no manager PIN) can charge a tab and look one up: POS → Tabs (`/pos/deli/house-accounts`) shows
+  the total owed, every charge and payment, and prints the statement (receipt printer, or full page at
+  `/pos/house-accounts/<id>/statement`); `/api/ordering/house-accounts` is on the proxy POS API list. Payments,
+  credits and account changes stay manager-only.
   Check: `npm run test:house-accounts` (against the dev database, rolled back).
 
 ## 8d. Till closeout (Corner Deli POS, dev)

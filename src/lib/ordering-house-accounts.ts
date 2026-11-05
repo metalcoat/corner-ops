@@ -269,9 +269,8 @@ export async function houseAccountReceiptPrinters() {
   return rows.map((row) => ({ id: String(row.id), name: String(row.name) }));
 }
 
-/** Prints the statement on a receipt printer. */
+/** Prints the statement on a receipt printer. Any employee can, so the customer can get their total at the counter. */
 export async function printHouseAccountStatement(input: { id: string; from?: string | null; to?: string | null; printerId: string; actor: OrderingActor }) {
-  requireManager(input.actor);
   const statement = await houseAccountStatement(input);
   if (!statement) throw new HouseAccountError("House account was not found.");
   const printer = /^[0-9a-f-]{36}$/i.test(input.printerId) ? (await getSql()`SELECT id,name,adapter_config FROM ordering_hardware_devices WHERE id=${input.printerId} AND business=${BUSINESS} AND device_type='printer' AND active=TRUE AND adapter_key='network-printer' AND (role='receipt_printer' OR adapter_config->>'receiptEnabled'='true')`)[0] : null;

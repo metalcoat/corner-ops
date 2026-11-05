@@ -205,6 +205,7 @@ function isDeliPosApi(path: string): boolean {
       "labels",
       "device-setup",
       "car-tablets",
+      "house-accounts",
     ].some((part) => matchesPath(path, `/api/ordering/${part}`)) ||
     path === "/api/ordering/delivery/quote" ||
     path === "/api/ordering/hardware/status" ||
