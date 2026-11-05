@@ -306,6 +306,8 @@ export async function reverseGiftEntry(input: {
       await sql`UPDATE ordering_orders SET paid_cents=GREATEST(0,paid_cents-${Number(payment.amount_cents)}),amount_due_cents=LEAST(total_cents,amount_due_cents+${Number(payment.amount_cents)}),payment_status=CASE WHEN paid_cents-${Number(payment.amount_cents)}<=0 THEN 'unpaid' ELSE 'partially_paid' END,version=version+1,updated_at=NOW() WHERE id=${payment.order_id}`;
       if (payment.check_id)
         await sql`UPDATE ordering_checks SET paid_cents=GREATEST(0,paid_cents-${Number(payment.amount_cents)}),amount_due_cents=LEAST(total_cents,amount_due_cents+${Number(payment.amount_cents)}),status=CASE WHEN paid_cents-${Number(payment.amount_cents)}<=0 THEN 'open' ELSE 'partially_paid' END,updated_at=NOW() WHERE id=${payment.check_id}`;
+      // Money came back off the order: the order's own trail says who and why, like a POS tender reversal.
+      await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) SELECT ${randomUUID()},id,version,'payment_reversed',${input.actor.type},${input.actor.id},${JSON.stringify({ transactionId: reversalId, sourceTransactionId: payment.id, tenderType: "gift_card", amountCents: Number(payment.amount_cents), reason: input.reason, actorName: input.actor.name, actorRole: input.actor.role, giftCardLedgerEntryId: source.id })}::jsonb FROM ordering_orders WHERE id=${payment.order_id}`;
     }
     return result;
   });

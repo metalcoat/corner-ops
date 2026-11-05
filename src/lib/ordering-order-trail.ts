@@ -8,8 +8,10 @@ type Payment = { created_at?: unknown; transaction_type?: unknown; tender_type?:
 
 const dollars = (cents: unknown) => `$${(Number(cents || 0) / 100).toFixed(2)}`;
 const iso = (value: unknown) => new Date(String(value)).toISOString();
-const channel = (actorId: string) => (actorId.startsWith("web:") ? "Online" : actorId);
+const channel = (actorId: string) => (actorId.startsWith("web:") ? "Online" : /^(openai|gemini|ai):/.test(actorId) ? "AI phone" : actorId === "kitchen-release" || actorId === "reopen-sweep" ? "System" : actorId);
 const words = (value: unknown) => String(value || "").replaceAll("_", " ");
+/** Kitchen screen steps after the first send, by the status the order moved to. */
+const statusLabels: Record<string, string> = { in_progress: "Started in kitchen", ready: "Marked ready", completed: "Completed", cancelled: "Cancelled", confirmed: "Confirmed" };
 
 /** "Delivery fee $4.00 removed · approved by Pat" for a pickup/delivery switch; empty when nothing changed hands. */
 export function fulfillmentChangeDetail(details: Record<string, unknown>): string | undefined {
@@ -43,6 +45,19 @@ export function orderTrail(input: { createdAt: unknown; takenBy: unknown; events
     if (event.event_type === "order_item_cancelled") trail.push({ at, label: "Item voided", who: who(event), detail: `${Number(details.quantity || 1)}× ${String(details.itemName || "item")}` });
     if (event.event_type === "curbside_delivered") trail.push({ at, label: "Delivered to car (curbside)", who: who(event), detail: carLabel(String(details.carColor || "Other"), String(details.carType || "Other")) });
     if (event.event_type === "order_fulfillment_changed") trail.push({ at, label: details.from === details.to ? "Delivery address changed" : `Changed ${words(details.from)} to ${words(details.to)}`, who: who(event), detail: fulfillmentChangeDetail(details) });
+    if (event.event_type === "status_changed" && statusLabels[String(details.to)]) trail.push({ at, label: statusLabels[String(details.to)], who: who(event) });
+    if (event.event_type === "draft_service_changed") trail.push({ at, label: `Changed ${words(details.from)} to ${words(details.to)}`, who: who(event), detail: "before sending" });
+    if (event.event_type === "order_addition_submitted") trail.push({ at, label: "Add-on sent to kitchen", who: who(event), detail: details.additionalAmountDueCents ? `${dollars(details.additionalAmountDueCents)} more due` : undefined });
+    if (event.event_type === "order_reopen_closed_no_changes") trail.push({ at, label: "Reopen closed with no changes", who: who(event), detail: details.reason === "abandoned_timeout" ? "left open too long" : undefined });
+    if (event.event_type === "tip_updated") trail.push({ at, label: `Tip set to ${dollars(details.orderTipCents ?? details.tipCents)}`, who: who(event), detail: `was ${dollars(details.previousTipCents)}` });
+    if (event.event_type === "store_credit_applied") trail.push({ at, label: `Store credit used ${dollars(details.amountCents)}`, who: who(event) });
+    if (event.event_type === "refund_issued_as_store_credit") trail.push({ at, label: `Refund left as store credit ${dollars(details.creditCents)}`, who: who(event), detail: String(details.reason || "") || undefined });
+    if (event.event_type === "complaint_remake_created") trail.push({ at, label: "Remake made for a complaint", who: who(event), detail: String(details.reason || "") || undefined });
+    if (event.event_type === "complaint_remake_submitted") trail.push({ at, label: `Remake of #${String(details.originalNumber || "?")}`, who: who(event), detail: String(details.reason || "") || undefined });
+    if (event.event_type === "custom_item_added") trail.push({ at, label: "Custom item added", who: who(event), detail: `${Number(details.quantity || 1)}× ${String(details.name || "item")} ${dollars(details.priceCents)}` });
+    if (event.event_type === "employee_meal_priced") trail.push({ at, label: "Employee meal", who: who(event), detail: `owes ${dollars(details.employeeOwesCents)}` });
+    if (event.event_type === "payment_receipt_reprinted") trail.push({ at, label: "Receipt reprinted", who: who(event), detail: String(details.reason || "") || undefined });
+    if (event.event_type === "kitchen_released") trail.push({ at, label: "Released to kitchen (scheduled order)", who: "System" });
   }
   for (const payment of input.payments) {
     const tender = payment.last4 ? `${String(payment.brand || "Card")} ····${String(payment.last4)}` : words(payment.tender_type);

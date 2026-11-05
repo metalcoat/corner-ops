@@ -2497,6 +2497,9 @@ export async function replaceAiDraft(input: {
       await sql`UPDATE ordering_order_promotion_applications SET order_id=${input.orderId} WHERE order_id=${temporary.id}`;
       await sql`UPDATE ordering_orders target SET service_type=source.service_type,timing_mode=source.timing_mode,scheduled_for=source.scheduled_for,timing_message_snapshot=source.timing_message_snapshot,customer_id=source.customer_id,customer_phone_id=source.customer_phone_id,first_name_snapshot=source.first_name_snapshot,last_name_snapshot=source.last_name_snapshot,phone_snapshot=source.phone_snapshot,subtotal_cents=source.subtotal_cents,discount_cents=source.discount_cents,tax_cents=source.tax_cents,tip_cents=target.tip_cents,delivery_fee_cents=0,total_cents=source.total_cents+target.tip_cents,amount_due_cents=GREATEST(0,source.total_cents+target.tip_cents-target.paid_cents),version=target.version+1,updated_at=NOW() FROM ordering_orders source WHERE target.id=${input.orderId} AND source.id=${temporary.id}`;
       await sql`DELETE FROM ordering_orders WHERE id=${temporary.id}`;
+      // The caller switched pickup/delivery mid-call: keep it on the order's trail (a draft, so not a fee-changing switch).
+      if (String(current.service_type) !== input.service)
+        await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) SELECT ${randomUUID()},id,version,'draft_service_changed',${input.actor.type},${input.actor.id},${JSON.stringify({ from: current.service_type, to: input.service, actorName: input.actor.name })}::jsonb FROM ordering_orders WHERE id=${input.orderId}`;
     });
   } catch (error) {
     await getSql()`DELETE FROM ordering_orders WHERE id=${temporary.id}`;

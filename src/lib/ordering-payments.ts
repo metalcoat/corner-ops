@@ -377,7 +377,7 @@ export async function commitTender(input: {
     await sql`
       INSERT INTO ordering_order_events (id, order_id, order_version, event_type, actor_type, actor_id, details)
       SELECT ${randomUUID()}, id, version, 'payment_recorded', ${input.actor.type}, ${input.actor.id},
-             CAST(${JSON.stringify({ transactionId, tenderType: input.tenderType, amountCents: applied, amountTenderedCents: input.amountTenderedCents, changeDueCents: change, remainingDueCents: remaining })} AS jsonb)
+             CAST(${JSON.stringify({ transactionId, tenderType: input.tenderType, amountCents: applied, amountTenderedCents: input.amountTenderedCents, changeDueCents: change, remainingDueCents: remaining, actorName: input.actor.name, brand: input.providerApproval?.brand || null, last4: input.providerApproval?.last4 || null })} AS jsonb)
       FROM ordering_orders WHERE id = ${input.orderId}
     `;
 

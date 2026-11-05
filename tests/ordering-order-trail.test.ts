@@ -28,3 +28,32 @@ test("orders from before the start time was kept say when they were saved", () =
   assert.equal(first.label, "Order saved");
   assert.equal(first.at, at(5));
 });
+
+test("the trail also shows kitchen steps, add-ons, tips, credit, reprints and AI pickup/delivery switches", () => {
+  const trail = orderTrail({
+    createdAt: at(1), takenBy: "AI phone",
+    events: [
+      { event_type: "draft_service_changed", created_at: at(2), actor_id: "openai:call-1", details: { from: "pickup", to: "delivery" } },
+      { event_type: "status_changed", created_at: at(3), actor_id: "openai:call-1", details: { to: "sent_to_kitchen" } },
+      { event_type: "kitchen_released", created_at: at(4), actor_id: "kitchen-release", details: {} },
+      { event_type: "status_changed", created_at: at(5), actor_name: "Kim", details: { from: "sent_to_kitchen", to: "ready" } },
+      { event_type: "tip_updated", created_at: at(6), actor_name: "Pat", details: { orderTipCents: 300, previousTipCents: 0 } },
+      { event_type: "store_credit_applied", created_at: at(7), actor_name: "Pat", details: { amountCents: 500 } },
+      { event_type: "order_addition_submitted", created_at: at(8), actor_name: "Pat", details: { additionalAmountDueCents: 250 } },
+      { event_type: "payment_receipt_reprinted", created_at: at(9), actor_name: "Pat", details: { reason: "Customer asked" } },
+      { event_type: "status_changed", created_at: at(10), actor_name: "Kim", details: { from: "ready", to: "completed" } },
+    ],
+    payments: [],
+  });
+  assert.deepEqual(trail.slice(1).map((row) => [row.label, row.who]), [
+    ["Changed pickup to delivery", "AI phone"],
+    ["Sent to kitchen", "AI phone"],
+    ["Released to kitchen (scheduled order)", "System"],
+    ["Marked ready", "Kim"],
+    ["Tip set to $3.00", "Pat"],
+    ["Store credit used $5.00", "Pat"],
+    ["Add-on sent to kitchen", "Pat"],
+    ["Receipt reprinted", "Pat"],
+    ["Completed", "Kim"],
+  ]);
+});
