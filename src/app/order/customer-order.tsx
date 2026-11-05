@@ -1030,7 +1030,7 @@ export default function CustomerOrder() {
                     onClick={() => setActive(item)}
                   >
                     {item.imageUrl && (
-                      <img src={item.imageUrl} alt={item.imageAlt} />
+                      <img src={item.imageUrl} alt={item.imageAlt || item.displayName} />
                     )}
                     <span>
                       <strong>{item.displayName}</strong>
@@ -1073,7 +1073,7 @@ export default function CustomerOrder() {
                       onClick={() => setActive(item)}
                     >
                       {item.imageUrl && (
-                        <img src={item.imageUrl} alt={item.imageAlt} />
+                        <img src={item.imageUrl} alt={item.imageAlt || item.displayName} />
                       )}
                       <span className="itemCopy">
                         <strong>{item.displayName}</strong>

@@ -1,8 +1,9 @@
 import PolicyPage from "../policy-page/policy-page";
+import { publicPageMetadata } from "../policy-page/metadata";
 
-export const metadata = {
-  title: "Privacy Policy | Corner Deli",
-};
+export function generateMetadata() {
+  return publicPageMetadata("/privacy");
+}
 
 export default function PrivacyPage() {
   return (

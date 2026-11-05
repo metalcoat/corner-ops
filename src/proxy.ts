@@ -3,6 +3,7 @@ import { isInternalRequest } from "@/lib/internal-request";
 import { hmacSignature } from "@/lib/security-keys";
 import { isTeamHost, teamRoute } from "@/lib/team-domain-routing";
 import { CUSTOMER_HOST, CUSTOMER_WWW_HOST, customerRoute, isCustomerHost } from "@/lib/customer-domain-routing";
+import { pageIndexable } from "@/lib/customer-seo";
 import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "corner_ops_session";
@@ -386,8 +387,9 @@ export function proxy(request: NextRequest) {
       order.port = "";
       return NextResponse.redirect(order);
     }
-    // Customers should find the ordering site in search; staff hosts stay noindex.
-    response.headers.delete("X-Robots-Tag");
+    // Customers should find the ordering site in search once production allows
+    // it (ALLOW_INDEXING=true); account/tracking pages and staff hosts stay noindex.
+    if (pageIndexable(host, path)) response.headers.delete("X-Robots-Tag");
     return response;
   }
 

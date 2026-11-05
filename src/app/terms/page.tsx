@@ -1,8 +1,9 @@
 import PolicyPage from "../policy-page/policy-page";
+import { publicPageMetadata } from "../policy-page/metadata";
 
-export const metadata = {
-  title: "Terms and Conditions | Corner Deli",
-};
+export function generateMetadata() {
+  return publicPageMetadata("/terms");
+}
 
 export default function TermsPage() {
   return (

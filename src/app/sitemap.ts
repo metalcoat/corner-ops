@@ -1,12 +1,9 @@
 import type { MetadataRoute } from "next";
-import { CUSTOMER_SITE_URL } from "@/lib/customer-seo";
+import { connection } from "next/server";
+import { customerSitemap } from "@/lib/customer-seo";
 
-export default function sitemap(): MetadataRoute.Sitemap {
-  return [
-    { url: `${CUSTOMER_SITE_URL}/order`, changeFrequency: "daily", priority: 1 },
-    { url: `${CUSTOMER_SITE_URL}/refund-policy`, changeFrequency: "yearly", priority: 0.2 },
-    { url: `${CUSTOMER_SITE_URL}/delivery-policy`, changeFrequency: "yearly", priority: 0.2 },
-    { url: `${CUSTOMER_SITE_URL}/privacy`, changeFrequency: "yearly", priority: 0.2 },
-    { url: `${CUSTOMER_SITE_URL}/terms`, changeFrequency: "yearly", priority: 0.2 },
-  ];
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  // Built per request so PUBLIC_SITE_URL is read from the running server, not the build.
+  await connection();
+  return customerSitemap();
 }

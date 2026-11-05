@@ -1,8 +1,9 @@
 import PolicyPage from "../policy-page/policy-page";
+import { publicPageMetadata } from "../policy-page/metadata";
 
-export const metadata = {
-  title: "Delivery & Pickup Policy | Corner Deli",
-};
+export function generateMetadata() {
+  return publicPageMetadata("/delivery-policy");
+}
 
 export default function DeliveryPolicyPage() {
   return (

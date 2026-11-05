@@ -1,8 +1,9 @@
 import PolicyPage from "../policy-page/policy-page";
+import { publicPageMetadata } from "../policy-page/metadata";
 
-export const metadata = {
-  title: "Refund & Cancellation Policy | Corner Deli",
-};
+export function generateMetadata() {
+  return publicPageMetadata("/refund-policy");
+}
 
 export default function RefundPolicyPage() {
   return (

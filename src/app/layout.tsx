@@ -21,6 +21,8 @@ export async function generateMetadata(): Promise<Metadata> {
     applicationName: appName,
     appleWebApp: { capable: true, title: appName, statusBarStyle: "black-translucent" },
     icons: { icon: brand.icon, apple: brand.icon },
+    // Staff, POS and employee pages are never for search engines; public ordering pages override this (see customer-seo).
+    robots: { index: false, follow: false },
   };
 }
 

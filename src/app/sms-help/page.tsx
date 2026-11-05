@@ -1,8 +1,9 @@
 import PolicyPage from "../policy-page/policy-page";
+import { publicPageMetadata } from "../policy-page/metadata";
 
-export const metadata = {
-  title: "SMS Help | Corner Deli",
-};
+export function generateMetadata() {
+  return publicPageMetadata("/sms-help");
+}
 
 export default function SmsHelpPage() {
   return (
