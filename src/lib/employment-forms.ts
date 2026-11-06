@@ -250,6 +250,8 @@ export async function assignOnboardingPacket(input: {
   hireDate: string;
   actor: string;
   employerSignature: string;
+  /** Add employee leaves the pay notice out until a pay rate is set. */
+  skipPayNotice?: boolean;
 }): Promise<EmploymentFormSummary[]> {
   await ensureEmploymentFormsSchema();
   const employee = await findEmployee(input.business, input.employeeId);
@@ -273,7 +275,7 @@ export async function assignOnboardingPacket(input: {
     insertForm({ business: input.business, employee, type: "W4", actor: input.actor, effectiveDate: input.hireDate, payload: { ...common } }),
     insertForm({ business: input.business, employee, type: "IT2104", actor: input.actor, effectiveDate: input.hireDate, payload: { ...common } }),
     insertForm({ business: input.business, employee, type: "I9", actor: input.actor, effectiveDate: input.hireDate, payload: { ...common } }),
-    insertForm({
+    ...(input.skipPayNotice ? [] : [insertForm({
       business: input.business,
       employee,
       type: "PAY_NOTICE",
@@ -289,7 +291,7 @@ export async function assignOnboardingPacket(input: {
         overtimeRate: hourlyRate * 1.5,
         tipCreditOrAllowance: multipleRates ? Math.max(0, hourlyRate - tippedRate) : 0,
       },
-    }),
+    })]),
     insertForm({ business: input.business, employee, type: "MEAL_POLICY", actor: input.actor, effectiveDate: input.hireDate, employerSignature: input.employerSignature, payload: { ...common, ...mealPolicy } }),
   ]);
 }
@@ -302,6 +304,8 @@ export async function assignRateChange(input: {
   tippedRate: number;
   actor: string;
   employerSignature: string;
+  /** "new-hire" when this is the first pay notice (Add employee had no rate yet). */
+  noticeKind?: "new-hire" | "rate-change";
 }): Promise<EmploymentFormSummary> {
   await ensureEmploymentFormsSchema();
   const employee = await findEmployee(input.business, input.employeeId);
@@ -319,7 +323,7 @@ export async function assignRateChange(input: {
     payload: {
       employer: profile,
       employee: { id: employee.id, name: employee.name, position: employee.position },
-      noticeKind: "rate-change",
+      noticeKind: input.noticeKind || "rate-change",
       formVariant: multipleRates ? "LS55" : "LS54",
       regularRate: input.hourlyRate,
       secondaryRate: multipleRates ? input.tippedRate : null,

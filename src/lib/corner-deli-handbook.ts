@@ -4,13 +4,15 @@ export type HandbookSection = {
   bullets?: string[];
 };
 
-export const CORNER_DELI_HANDBOOK_VERSION = "2026-08-20";
-export const CORNER_DELI_HANDBOOK_EFFECTIVE_DATE = "August 20, 2026";
+// Sections 12 and 13 (alcohol, smoking) are drafts awaiting Chris's review of the wording. When approved,
+// drop "-draft" and the "(draft: owner review)" title notes. Any change to this file asks every employee to sign again.
+export const CORNER_DELI_HANDBOOK_VERSION = "2026-11-06-draft";
+export const CORNER_DELI_HANDBOOK_EFFECTIVE_DATE = "November 6, 2026";
 
 export const CORNER_DELI_HANDBOOK_TITLE = "Corner Deli Employee Handbook";
 
 export const CORNER_DELI_HANDBOOK_INTRO = [
-  "This handbook explains the day-to-day standards expected of Corner Deli employees. The goal is simple: serve customers well, work safely, communicate with the team, protect food quality, handle money honestly, and keep the operation moving efficiently.",
+  "This handbook explains the day-to-day standards expected of employees of Corner Deli (Mike's Corner Deli, LLC). The goal is simple: serve customers well, work safely, communicate with the team, protect food quality, handle money honestly, and keep the operation moving efficiently.",
   "No handbook can cover every situation. Management may make reasonable operational decisions as circumstances require, and policies may be updated when business needs or applicable law change. Employees will be asked to acknowledge material handbook revisions.",
 ];
 
@@ -136,16 +138,30 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "12. Alcohol, drugs, smoking, and impairment",
+    title: "12. Alcohol and drugs: zero tolerance (draft: owner review)",
+    paragraphs: [
+      "Corner Deli has zero tolerance for alcohol at work. There are no warnings and no second chances under this policy.",
+    ],
     bullets: [
-      "Employees may not work while impaired by alcohol, illegal drugs, or any substance that makes them unable to perform their job safely.",
-      "Illegal drug possession, use, or distribution at work is prohibited.",
-      "Smoking and vaping are permitted only in locations and during times allowed by company policy and applicable law, and never in food-preparation or prohibited areas.",
-      "Employees using lawful medication that may affect safe job performance should follow any applicable safety instructions and raise work-safety concerns with management when necessary.",
+      "No drinking alcohol, having alcohol, or being under the influence of alcohol while on shift, anywhere on Corner Deli premises (inside, out front, the back lot, storage and coolers), or in the company vehicle.",
+      "The slightest hint of alcohol is enough. Smelling of alcohol, an open container in your work area, belongings or the company vehicle, or appearing impaired means immediate termination.",
+      "\"Only one drink\" or \"it was last night\" is not an exception. Come to work completely free of alcohol.",
+      "Using, having, selling or being impaired by illegal drugs, or being impaired by cannabis or any other substance, at work, on the premises or in the company vehicle is also grounds for immediate termination.",
+      "A manager who believes an employee may be impaired will remove them from work right away and will not let them drive a company vehicle or their own vehicle on a delivery.",
+      "If you take a lawful medication that could affect your ability to work safely or drive, tell a manager before your shift. You do not have to say what the medication is.",
     ],
   },
   {
-    title: "13. Appearance, hygiene, and readiness for work",
+    title: "13. No smoking or vaping (draft: owner review)",
+    bullets: [
+      "No smoking or vaping of any kind (cigarettes, cigars, e-cigarettes and vapes, or cannabis) inside the building, out front of the store, or in the company vehicle. This applies at all times: on shift, on breaks and off the clock.",
+      "\"Out front\" means the front entrance, the sidewalk and the front parking area: anywhere customers see or walk through.",
+      "If you smoke or vape on a break, go only where a manager says it is allowed, away from doors, and wash your hands before you handle food again.",
+      "Violations will result in discipline up to and including termination.",
+    ],
+  },
+  {
+    title: "14. Appearance, hygiene, and readiness for work",
     bullets: [
       "Arrive in clean, work-appropriate clothing and footwear suitable for the assigned job and restaurant safety requirements.",
       "Follow required hair-restraint, handwashing, glove, jewelry, and personal-hygiene rules for food service.",
@@ -153,7 +169,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "14. Phones, recordings, confidential information, and social media",
+    title: "15. Phones, recordings, confidential information, and social media",
     bullets: [
       "Personal phones should remain put away while actively working unless a manager authorizes a business or emergency use.",
       "Do not disclose customer addresses, phone numbers, payment information, employee private information, passwords, security information, or other confidential business records without authorization.",
@@ -162,7 +178,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "15. Discipline, repeated violations, and employment status",
+    title: "16. Discipline, repeated violations, and employment status",
     paragraphs: [
       "Corner Deli tries to handle ordinary problems reasonably, but repeated violations, serious misconduct, safety violations, dishonesty, attendance failures, or refusal to follow lawful work instructions may result in discipline up to and including termination. Depending on the seriousness of the conduct, management may skip intermediate steps.",
       "Unless a written agreement signed by the owner states otherwise, employment is at will to the extent permitted by New York law. This handbook is not a contract guaranteeing employment for any specific period and does not waive any right provided by law.",

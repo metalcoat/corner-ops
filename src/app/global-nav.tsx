@@ -24,7 +24,7 @@ const links: NavLink[] = [
   { label: "Banking", href: "/ops/banking", activePaths: ["/ops/banking", "/ops/accounting-control", "/ops/expense-control", "/ops/bank-accounts", "/ops/card-statements"] },
   { label: "Finance", href: "/ops/finance-operations", exact: true },
   { label: "Invoices", href: "/ops/finance-operations/invoice-ocr" },
-  { label: "People", href: "/ops/people", activePaths: ["/ops/people", "/ops/workforce", "/ops/attendance", "/ops/payroll-control", "/ops/employees", "/ops/employment-forms"] },
+  { label: "People", href: "/ops/people", activePaths: ["/ops/people", "/ops/workforce", "/ops/attendance", "/ops/payroll-control"] },
   { label: "Overtime", href: "/ops/overtime" },
   { label: "Messages", href: "/ops/messages" },
   { label: "Settings", href: "/ops/settings", activePaths: ["/ops/settings", "/ops/integrations", "/ops/users"] },
@@ -35,10 +35,22 @@ const links: NavLink[] = [
 const teamLinks: NavLink[] = [
   { label: "Team", href: "/team", exact: true },
   { label: "Messages", href: "/ops/messages" },
-  { label: "Staff", href: "/ops/workforce", activePaths: ["/ops/workforce", "/ops/employees", "/ops/employment-forms"] },
+  { label: "People", href: "/ops/people/team", activePaths: ["/ops/people", "/ops/workforce"] },
   { label: "Attendance", href: "/ops/attendance" },
   { label: "Payroll", href: "/ops/payroll-control", activePaths: ["/ops/payroll-control", "/ops/payroll-tip-audit"] },
 ];
+
+/** One row under the main menu on every People page: who works here, then their time and pay. */
+const peopleLinks: Array<NavLink & { deliOnly?: boolean; group: "team" | "time" }> = [
+  { label: "Team", href: "/ops/people/team", group: "team" },
+  { label: "Add employee", href: "/ops/people/add", group: "team" },
+  { label: "Paperwork", href: "/ops/people/paperwork", group: "team" },
+  { label: "Handbook", href: "/ops/people/handbook", group: "team", deliOnly: true },
+  { label: "Schedule", href: "/ops/workforce", group: "time" },
+  { label: "Attendance", href: "/ops/attendance", group: "time" },
+  { label: "Payroll", href: "/ops/payroll-control", group: "time", activePaths: ["/ops/payroll-control", "/ops/payroll-tip-audit"] },
+];
+const peoplePaths = ["/ops/people", "/ops/workforce", "/ops/attendance", "/ops/payroll-control", "/ops/payroll-tip-audit"];
 
 const businessNames: Business[] = ["Corner Deli", "Tiki"];
 const hiddenNavPaths = ["/privacy", "/terms", "/sms-help", "/refund-policy", "/app"];
@@ -261,8 +273,10 @@ export default function GlobalNav({ teamHost = false, brand }: { teamHost?: bool
   }, [pathname, themeEffectsHidden, siteBusiness]);
 
   if (navHidden) return null;
+  const showPeopleNav = peoplePaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
   return (
+    <>
     <nav className={`globalOwnerNav ${open ? "menuOpen" : ""}`} aria-label={teamHost ? "Team features" : "Operations features"} data-business={currentBusiness}>
       <div className="globalNavTopline">
         <a className={`globalBrand ${teamHost ? "" : "globalBrandIconOnly"}`} href={teamHost ? "/team" : "/ops/people"} aria-label={`${brand.name} ${teamHost ? "team" : "operations"} home`}>
@@ -288,5 +302,12 @@ export default function GlobalNav({ teamHost = false, brand }: { teamHost?: bool
         })}
       </div>
     </nav>
+    {showPeopleNav && <nav className="globalPeopleNav" aria-label="People">
+      {peopleLinks.filter((link) => !link.deliOnly || currentBusiness === "Corner Deli").map((link, index, list) => <span key={link.href} className="globalPeopleItem">
+        {index > 0 && list[index - 1].group !== link.group && <i aria-hidden="true" />}
+        <a className={linkIsActive(pathname, link) ? "active" : ""} href={link.href}>{link.label}</a>
+      </span>)}
+    </nav>}
+    </>
   );
 }

@@ -2,7 +2,7 @@
 
 import { responseMessage } from "@/app/client-http";
 import { useEffect, useMemo, useState } from "react";
-import "../control-center.css";
+import "../../control-center.css";
 import "./employee-handbook.css";
 
 type HandbookSection = { title: string; paragraphs?: string[]; bullets?: string[] };
@@ -68,7 +68,7 @@ export default function EmployeeHandbookAdminPage() {
         <p>Review the current handbook, see who has acknowledged the exact version, and open the employee-facing pages used by staff.</p>
       </div>
       <div className="controlActions">
-        <a href="/ops/employment-forms">Manage employment forms</a>
+        <a href="/ops/people/paperwork">Paperwork</a>
         <a href="/employee/forms">Employee forms view</a>
         <a href="/employee/handbook">Employee handbook view</a>
       </div>

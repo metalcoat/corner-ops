@@ -1,0 +1,11 @@
+.welcomeShell .welcomeForm { display: grid; gap: 12px; max-width: 320px; }
+.welcomeShell .welcomeForm label { display: grid; gap: 4px; font-weight: 600; }
+.welcomeShell .welcomeForm input { font-size: 1.4rem; letter-spacing: 0.4em; padding: 10px 12px; border: 1px solid #c8c8c8; border-radius: 8px; }
+.welcomeSteps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.welcomeStep { display: grid; grid-template-columns: 32px 1fr; gap: 12px; align-items: start; padding: 12px; border: 1px solid #e2e2e2; border-radius: 10px; }
+.welcomeStep > div { display: grid; gap: 6px; justify-items: start; }
+.welcomeStep small { color: #555; }
+.welcomeMark { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #b8b8b8; display: grid; place-items: center; font-weight: 700; }
+.welcomeStep.done .welcomeMark { background: #1f7a3d; border-color: #1f7a3d; color: #fff; }
+.welcomeStep.done { background: #f3faf5; }
+.welcomeApp { display: grid; gap: 6px; justify-items: start; }

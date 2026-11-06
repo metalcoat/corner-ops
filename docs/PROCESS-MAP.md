@@ -435,6 +435,36 @@ notifications. Sideloaded from `https://dev.ordercornerdeli.com/downloads/corner
 `tools/team-app/publish-dev.sh`). The URL bar only goes away when production serves `public/.well-known/assetlinks.json`
 on the team domain (allowed in `src/lib/team-domain-routing.ts`). Signing key: `~/.config/corner-ops/team-app.jks`.
 
+## 8b-2. People section and new-hire onboarding
+
+Ops menu **People** has one row of tabs on every People page (`src/app/global-nav.tsx`):
+Team (`/ops/people/team`, each person at `/ops/people/team/<id>?business=…` with Onboarding, Profile & access,
+Paperwork, Pay & payroll, Schedule tabs) · Add employee (`/ops/people/add`) · Paperwork (`/ops/people/paperwork`,
+direct deposit at `/ops/people/paperwork/direct-deposit`) · Handbook (`/ops/people/handbook`, Corner Deli) ·
+Schedule (`/ops/workforce`) · Attendance (`/ops/attendance`) · Payroll (`/ops/payroll-control`).
+The old URLs `/ops/employees`, `/ops/employment-forms`, `/ops/direct-deposit`, `/ops/employee-handbook` redirect
+(`next.config.ts`).
+
+```mermaid
+flowchart LR
+  add["Add employee: name, mobile, consent<br/>(role, rate optional)"] --> emp[(employees: no PIN yet,<br/>pin_enabled false)]
+  add --> pk["forms packet (W-4, IT-2104, I-9, meal;<br/>pay notice if a rate was given)<br/>+ direct-deposit election"]
+  add --> inv[(employee_onboarding_invites<br/>SHA-256 of token, 7 days)]
+  inv --> sms["one text (Telnyx) with /employee/welcome/&lt;token&gt;<br/>off production: logged, link shown to manager"]
+  sms --> wel["new hire picks own PIN → signed in<br/>checklist: forms · handbook · direct deposit · app"]
+  wel --> hub["existing Employee Hub pages<br/>/employee/forms, /handbook, /direct-deposit"]
+  emp --> chk["manager checklist (Team, People, person page)<br/>Resend text = new link, old one revoked"]
+  chk --> pr["Payroll Relief: owner adds them on the site,<br/>refreshes the list and matches on Payroll"]
+```
+
+- Code: `src/lib/employee-onboarding.ts` (database), `employee-onboarding-rules.ts` (token, text, checklist),
+  APIs `/api/employee-directory/onboarding` (managers, workforce permission) and `/api/employee/onboarding` (the link).
+- Text log-only: no Telnyx settings, or `ONBOARDING_SMS_LOG_ONLY=true`; numbers in `SMS_TEST_NUMBERS` still send.
+- A link works for one person only; a resend revokes the older link. After the PIN is chosen the link needs that
+  person's PIN to show the checklist again. Nothing is uploaded to Payroll Relief.
+- Handbook sections 12 (alcohol, zero tolerance) and 13 (no smoking/vaping) are marked draft until Chris approves
+  the wording; any handbook change asks every employee to sign again.
+
 ## 8c. Delivery car tablet (Corner Deli, dev)
 
 ```mermaid
