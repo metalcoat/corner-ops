@@ -61,6 +61,8 @@ jobs:
             fi
           done < <(find db/migrations -maxdepth 1 -type f -name '*.sql' | sort)
           { echo 'BEGIN; SET LOCAL session_replication_role=replica;'; gzip -dc tests/fixtures/ai-menu.sql.gz; echo 'COMMIT;'; } | psql -v ON_ERROR_STOP=1
+          # Menu changes made since the fixture was captured, applied by the same rerunnable scripts as dev/production.
+          npx tsx scripts/configure-burger-deluxe.ts
       - name: Web, POS, loyalty and pizza abuse regressions
         env:
           DATABASE_URL: ${{ env.VALIDATION_DATABASE_URL }}

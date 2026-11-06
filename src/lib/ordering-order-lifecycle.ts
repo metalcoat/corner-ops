@@ -309,6 +309,8 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
     const includedUnits = new Map<string, number>();
     const declinedGroups = new Set(snapshots.filter((snapshot) => snapshot.selection_state === "declined_included").map((snapshot) => snapshot.group_id));
     const selectedOptions = new Map<string, Set<string>>();
+    const groupChargeCarried = new Set<string>();
+    const groupChargeNeeded = new Map<string, number>();
     let modifierTotal = 0;
     for (const snapshot of snapshots) {
       if (
@@ -326,7 +328,8 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
                opt.available AS option_available,
                COALESCE(variant_override.available, TRUE) AS variant_available,
                COALESCE(variant_override.price_delta_cents, def.price_delta_override_cents, opt.price_delta_cents) AS current_price_cents,
-               COALESCE(p.included_choice_count,0) included_choice_count
+               COALESCE(p.included_choice_count,0) included_choice_count,
+               grp.selection_charge_cents
         FROM ordering_menu_item_modifier_groups link
         JOIN ordering_modifier_groups grp ON grp.id = link.group_id AND grp.active = TRUE
         JOIN ordering_modifier_options opt ON opt.id = ${snapshot.option_id} AND opt.group_id = grp.id AND opt.active = TRUE
@@ -365,9 +368,19 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
         (includedUnits.get(snapshot.group_id) || 0) + quantity <=
           number(option.included_choice_count) &&
         number(snapshot.unit_price_delta_cents) === 0;
+      // A charge-once group fee (Deluxe +$0.25) rides on exactly one selected option of the group.
+      const groupCharge = number(option.selection_charge_cents);
+      const carriesGroupCharge =
+        groupCharge > 0 &&
+        !groupChargeCarried.has(snapshot.group_id) &&
+        number(snapshot.unit_price_delta_cents) ===
+          (allowedIncluded ? 0 : currentCharge) + groupCharge;
+      if (carriesGroupCharge) groupChargeCarried.add(snapshot.group_id);
+      else if (groupCharge > 0) groupChargeNeeded.set(snapshot.group_id, groupCharge);
       if (
         currentCharge !== number(snapshot.unit_price_delta_cents) &&
-        !allowedIncluded
+        !allowedIncluded &&
+        !carriesGroupCharge
       ) {
         throw new OrderConflictError(
           `A modifier price on ${item.item_name_snapshot} changed. Review and rebuild the order before submitting.`,
@@ -379,6 +392,11 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
       selectedOptions.get(snapshot.group_id)!.add(snapshot.option_id);
       modifierTotal += number(snapshot.unit_price_delta_cents) * quantity;
     }
+    for (const groupId of groupChargeNeeded.keys())
+      if (!groupChargeCarried.has(groupId))
+        throw new OrderConflictError(
+          `A modifier price on ${item.item_name_snapshot} changed. Review and rebuild the order before submitting.`,
+        );
 
     const groups = await sql`
       SELECT grp.id, grp.name, grp.min_selections, grp.max_selections,

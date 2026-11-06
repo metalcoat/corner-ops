@@ -139,6 +139,17 @@ flowchart LR
   - The secure card line hands the caller to staff on the second failed answer of any kind with "Sorry, we must be having an issue. I'm transferring you to someone who will take your card number." (`transfer-card-help`). Before, it allowed up to about 15 retries.
   - A failed card payment leaves the call `handoff_pending` with a readable reason (`src/lib/ai-handoff-reason.ts`), so the POS "AI PHONE ORDER · NEEDS STAFF" popup shows why, plus the order and total. Before, the call was marked ended and the popup never appeared.
   - Tests: `test:ai-phone-handoff`, `scripts/ai-cart-regressions/hot-meal-gravy.ts`, and case 7 of `asterisk/voice-payment-flow-test.py`.
+- Menu changes from Chris 2026-11-06 (dev; production gets them with the menu copy at the switch):
+  - Burgers come plain. A "Deluxe" group (lettuce, tomato, onion) is on all 12 burgers and costs $0.25 once for any
+    or all of them. Migration 0038 adds `ordering_modifier_groups.selection_charge_cents`, a fee charged once when
+    anything in the group is picked; `src/lib/ordering-modifier-pricing.ts` is the one rule the server, POS, online page
+    and send-time price check share. The fee is stored on the first selected option's order snapshot, so receipts,
+    refunds and totals add up as before (itemized receipts now show charged modifiers, e.g. "Lettuce +$0.25"). The
+    menu editor's group row has a "Charge once" field. Lettuce, Tomatoes and Raw Onions are switched off in Burger
+    Toppings. The AI phone puts spoken lettuce/tomato/onion in Deluxe; "cheeseburger deluxe" still adds mayo and
+    pickles too (owner rule 2026-10-25). Set up by `scripts/configure-burger-deluxe.ts` (rerunnable; CI runs it on the
+    menu fixture), checked by `npm run test:burger-deluxe`.
+  - Pepperoni Chicken Parmesan Sub $12.50 (was $11.50): `scripts/configure-pepperoni-parm-price.ts` (rerunnable).
 - **Database schema** (2026-10-23): tables, columns, indexes and constraints come only from `db/migrations/*.sql`;
   app code never runs `CREATE/ALTER/DROP` (CI `verify_no_runtime_ddl.py`). The `ensure…Schema()` functions that
   remain only seed rows and fix data. `tools/db-migrate.sh --container NAME` applies new files in order, each in

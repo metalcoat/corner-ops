@@ -31,6 +31,7 @@ import {
   formatModifierIntensity,
   supportsSubModifierIntensity,
 } from "@/lib/ordering-modifier-intensity";
+import { groupSelectionChargeCents } from "@/lib/ordering-modifier-pricing";
 import ItemCancellationPanel from "./deli/orders/item-cancellation-panel";
 import {
   formatPizzaTopping,
@@ -1662,6 +1663,7 @@ export default function PosClient({
                       });
                   const selected = line.modifierSelections[group.id] || [];
                   let includedRemaining = line.modifierDeclines.includes(group.id) ? 0 : group.includedChoiceCount;
+                  let pendingGroupCharge = groupSelectionChargeCents(group.selectionChargeCents, selected.length);
                   return group.options
                     .filter((option) => selected.includes(option.id))
                     .flatMap((option) => {
@@ -1677,10 +1679,17 @@ export default function PosClient({
                           ? "regular"
                           : line.modifierAmounts[option.id],
                       };
-                      return [
+                      const rows = [
                         ...(included ? [{ ...modifier, priceCents: 0, quantity: included }] : []),
                         ...(quantity > included ? [{ ...modifier, priceCents: variantOptionPrice(variant, option), quantity: quantity - included }] : []),
                       ];
+                      // Charge-once group fee (Deluxe) on one unit of the first selected option, as the server stores it.
+                      if (pendingGroupCharge && rows.length) {
+                        const first = rows.shift()!;
+                        rows.unshift(...(first.quantity > 1 ? [{ ...first, quantity: first.quantity - 1 }] : []), { ...first, quantity: 1, priceCents: first.priceCents + pendingGroupCharge });
+                        pendingGroupCharge = 0;
+                      }
+                      return rows;
                     });
                 }) || [];
               return {
@@ -1767,6 +1776,7 @@ export default function PosClient({
         });
       }
       let includedRemaining = modifierDeclines.includes(group.id) ? 0 : group.includedChoiceCount;
+      unitPriceCents += groupSelectionChargeCents(group.selectionChargeCents, selected.length);
       for (const option of group.options) {
         const chosen = selected.includes(option.id);
         const available = variantOptionAvailable(selectedVariant, option);
@@ -6336,13 +6346,20 @@ export default function PosClient({
                             .reduce((total, candidate) => total + (group.allowOptionQuantity ? Math.max(1, modifierQuantities[candidate.id] || 1) : 1), 0);
                           const optionQuantity = group.allowOptionQuantity ? Math.max(1, modifierQuantities[option.id] || 1) : 1;
                           const priceDeltaCents =
-                            group.includedChoiceCount > 0 &&
+                            (group.includedChoiceCount > 0 &&
                             !modifierDeclines.includes(group.id) &&
                             (selectedOption
                               ? selectedBefore + optionQuantity <= group.includedChoiceCount
                               : selectedUnits < group.includedChoiceCount)
                               ? 0
-                              : baseDeltaCents;
+                              : baseDeltaCents) +
+                            // Charge-once group (Deluxe): the fee shows on every choice until one is
+                            // picked, then only on the first selected one, which carries it.
+                            ((selectedOption
+                              ? group.options.find((candidate) => selected.includes(candidate.id))?.id === option.id
+                              : selected.length === 0)
+                              ? group.selectionChargeCents
+                              : 0);
                           return (
                             <div className="posModifierChoice" key={option.id}>
                               <button

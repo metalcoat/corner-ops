@@ -765,6 +765,8 @@ export function compactPhoneMenuResult(result: any[]) {
             .map((group: any) => ({
               name: group.name,
               required: Number(group.minSelections) > 0,
+              // Deluxe: one charge for any or all of the group's options, not per option.
+              chargedOnceForAnyCents: Number(group.selectionChargeCents) || undefined,
               options: (group.options || [])
                 .filter((option: any) => option.available)
                 .map((option: any) => ({

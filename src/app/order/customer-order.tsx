@@ -15,6 +15,7 @@ import {
   type ModifierIntensity,
 } from "@/lib/ordering-modifier-intensity";
 import { consolidateQuantities } from "@/lib/cart-line-consolidation";
+import { groupSelectionChargeCents } from "@/lib/ordering-modifier-pricing";
 import {
   DELIVERY_LOCATION_PRESETS,
   deliveryPresetSuggestions,
@@ -46,6 +47,7 @@ type Group = {
   maxSelections: number;
   allowOptionQuantity: boolean;
   includedChoiceCount?: number;
+  selectionChargeCents?: number;
   presentationBehavior: "standard" | "pizza_topping";
   supportsIntensity?: boolean;
   presentationContext?: "ordinary" | "combo_trigger" | "dependent";
@@ -482,7 +484,7 @@ export default function CustomerOrder() {
         .reduce((total, group) => {
           const selected = line.modifierSelections[group.id] || [];
           let allowance = line.modifierDeclines.includes(group.id) ? 0 : (group.includedChoiceCount || 0);
-          return total + group.options.filter((option) => selected.includes(option.id)).reduce((amount, option) => {
+          return total + groupSelectionChargeCents(group.selectionChargeCents, selected.length) + group.options.filter((option) => selected.includes(option.id)).reduce((amount, option) => {
             const quantity = group.allowOptionQuantity ? selected.filter((id) => id === option.id).length : 1;
             const included = Math.min(allowance, quantity);
             allowance -= included;

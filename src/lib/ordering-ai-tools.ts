@@ -778,8 +778,10 @@ export const modifierAliases = (name: string, groupName = "") => {
       simple.replace(/\bdressing\b/g, "").trim(),
       `${simple.replace(/\bdressing\b/g, "").trim()} dressing`,
     );
-  if (/sub mod/.test(group) && /^onions?$/.test(simple))
+  if ((/sub mod/.test(group) || group === "deluxe") && /^onions?$/.test(simple))
     aliases.push("raw onion", "raw onions", "onion", "onions");
+  if (group === "deluxe" && /^tomato$/.test(simple))
+    aliases.push("tomatoes", "tomatos");
   if (/hamburger.*steak/.test(group) && /^onions?$/.test(simple))
     aliases.push(
       "cooked onion",
@@ -1287,9 +1289,13 @@ export async function priceSpokenOrder(input: {
       if (sandwichless !== requested.name.trim() && !allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(requested.name)) && allItems.some((row) => spokenKey(normalizedSpokenName(row.name)) === spokenKey(sandwichless)))
         requested = { ...requested, name: sandwichless };
       // "Cheeseburger deluxe": the burger with mayo, lettuce, tomato, onion and pickles (owner, 2026-10-25).
+      // Lettuce, tomato and onion are the Deluxe group, $0.25 once for any or all (Chris 2026-11-06).
+      // "Deluxe" sent as a burger modifier means the same as "cheeseburger deluxe".
+      if (/burger/i.test(requested.name) && !/\bdeluxe\b/i.test(requested.name) && (requested.modifiers || []).some((modifier) => spokenKey(modifier.name) === "deluxe"))
+        requested = { ...requested, name: `${requested.name.trim()} deluxe`, modifiers: (requested.modifiers || []).filter((modifier) => spokenKey(modifier.name) !== "deluxe") };
       const deluxe = /^(?:deluxe\s+)?(.*?burger.*?)(?:\s+deluxe)?$/i.exec(requested.name.trim());
       if (deluxe && /\bdeluxe\b/i.test(requested.name)) {
-        const toppings = ["Mayo", "Lettuce", "Tomatoes", "Raw Onions", "Pickles"].filter(
+        const toppings = ["Mayo", "Lettuce", "Tomato", "Onion", "Pickles"].filter(
           (topping) => !(requested.modifiers || []).some((modifier) => spokenKey(modifier.name).includes(spokenKey(topping)) || spokenKey(topping).includes(spokenKey(modifier.name).replace(/^no /, ""))),
         );
         requested = { ...requested, name: deluxe[1].replace(/\s+deluxe\b/i, "").trim(), modifiers: [...toppings.map((name) => ({ name })), ...(requested.modifiers || [])] };
@@ -2057,7 +2063,7 @@ export async function priceSpokenOrder(input: {
             ({ group }) => group.name === "Wing Sauce",
           ),
           burgerToppingChoices = choices.filter(
-            ({ group }) => group.name === "Burger Toppings",
+            ({ group }) => group.name === "Burger Toppings" || group.name === "Deluxe",
           ),
           steakToppingChoices = ["Steak", "Chicken Fajita", "Hot Sausage"].includes(item.name)
             ? choices.filter(({ group }) => group.name === "Stk Sub mod (3 for free)")
