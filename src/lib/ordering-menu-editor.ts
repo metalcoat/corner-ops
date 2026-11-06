@@ -431,7 +431,7 @@ export async function mutateMenu(actor: Actor, input: any) {
             : integer(patch.maxSelections);
       if (min < 0 || max < 1 || min > max)
         throw new Error("Modifier minimum cannot exceed maximum.");
-      await sql`UPDATE ordering_modifier_groups SET name=${patch.name === undefined ? before.name : clean(patch.name)},prompt=${patch.prompt === undefined ? before.prompt : clean(patch.prompt, 1000)},min_selections=${min},max_selections=${max},active=${patch.active === undefined ? before.active : Boolean(patch.active)},sort_order=${patch.sortOrder === undefined ? before.sort_order : integer(patch.sortOrder)},updated_at=NOW() WHERE id=${id} AND business=${actor.business}`;
+      await sql`UPDATE ordering_modifier_groups SET name=${patch.name === undefined ? before.name : clean(patch.name)},prompt=${patch.prompt === undefined ? before.prompt : clean(patch.prompt, 1000)},min_selections=${min},max_selections=${max},selection_charge_cents=${patch.selectionChargeCents === undefined ? before.selection_charge_cents : cents(patch.selectionChargeCents)},active=${patch.active === undefined ? before.active : Boolean(patch.active)},sort_order=${patch.sortOrder === undefined ? before.sort_order : integer(patch.sortOrder)},updated_at=NOW() WHERE id=${id} AND business=${actor.business}`;
     } else {
       await sql`UPDATE ordering_modifier_options o SET name=${patch.name === undefined ? before.name : clean(patch.name)},price_delta_cents=${patch.priceDeltaCents === undefined ? before.price_delta_cents : cents(patch.priceDeltaCents)},available=${patch.available === undefined ? before.available : Boolean(patch.available)},active=${patch.active === undefined ? before.active : Boolean(patch.active)},sort_order=${patch.sortOrder === undefined ? before.sort_order : integer(patch.sortOrder)},updated_at=NOW() FROM ordering_modifier_groups g WHERE o.id=${id} AND o.group_id=g.id AND g.business=${actor.business}`;
     }
@@ -443,6 +443,7 @@ export async function mutateMenu(actor: Actor, input: any) {
       minSelections: "min_selections",
       maxSelections: "max_selections",
       priceDeltaCents: "price_delta_cents",
+      selectionChargeCents: "selection_charge_cents",
     };
     await own(
       actor,

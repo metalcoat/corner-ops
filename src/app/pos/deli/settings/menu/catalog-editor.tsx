@@ -35,6 +35,7 @@ type Group = {
   prompt: string;
   min_selections: number;
   max_selections: number;
+  selection_charge_cents: number;
   active: boolean;
   sort_order: number;
 };
@@ -1313,6 +1314,7 @@ function GroupEditor({
 }) {
   const [min, setMin] = useState(group.min_selections),
     [max, setMax] = useState(group.max_selections),
+    [charge, setCharge] = useState(dollars(group.selection_charge_cents || 0)),
     [name, setName] = useState(group.name);
   return (
     <div className="row">
@@ -1337,13 +1339,27 @@ function GroupEditor({
           onChange={(e) => setMax(Number(e.target.value))}
         />
       </label>
+      <label title="Charged once when any choice in this group is picked (Deluxe: any or all +$0.25)">
+        Charge once
+        <input
+          inputMode="decimal"
+          aria-label={`${group.name} charge once for any choice`}
+          value={charge}
+          onChange={(e) => setCharge(e.target.value)}
+        />
+      </label>
       <button
         onClick={() =>
           void post({
             action: "update",
             entity: "modifier_group",
             id: group.id,
-            patch: { name, minSelections: min, maxSelections: max },
+            patch: {
+              name,
+              minSelections: min,
+              maxSelections: max,
+              selectionChargeCents: parseMoney(charge),
+            },
           })
         }
       >

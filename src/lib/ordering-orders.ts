@@ -3,6 +3,7 @@ import { getSql } from "@/lib/db";
 import { ensureOrderingPosSchema } from "@/lib/ordering-pos-schema";
 import type { OrderingBusiness, OrderSource, ServiceType } from "@/lib/ordering-core";
 import { calculateLineTotalCents, validateModifierRequirements } from "@/lib/ordering-core";
+import { groupSelectionChargeCents } from "@/lib/ordering-modifier-pricing";
 import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
 import { normalizePizzaToppings, pizzaToppingPriceCents, type PizzaToppingSelection } from "@/lib/ordering-pizza-toppings";
 import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
@@ -63,6 +64,7 @@ type ModifierRow = {
   parent_option_ids: string[] | null;
   included_choice_count:number|null;
   supports_intensity:boolean;
+  selection_charge_cents:number|null;
 };
 type ComboRow = {
   combo_id: string;
@@ -136,6 +138,7 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
       grp.min_selections,
       grp.max_selections,
       grp.allow_option_quantity,
+      grp.selection_charge_cents,
       opt.id AS option_id,
       opt.name AS option_name,
       opt.available AS option_available,
@@ -152,7 +155,7 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
     ORDER BY link.sort_order, grp.sort_order, opt.sort_order, opt.name
   `) as ModifierRow[];
 
-  const groups = new Map<string, { name: string; min: number; max: number; allowQuantity: boolean; includedChoiceCount:number; supportsIntensity:boolean; context: ModifierRow["presentation_context"]; behavior: ModifierRow["presentation_behavior"]; parentGroupId: string | null; parentOptionIds: string[]; rows: ModifierRow[] }>();
+  const groups = new Map<string, { name: string; min: number; max: number; allowQuantity: boolean; includedChoiceCount:number; selectionChargeCents:number; supportsIntensity:boolean; context: ModifierRow["presentation_context"]; behavior: ModifierRow["presentation_behavior"]; parentGroupId: string | null; parentOptionIds: string[]; rows: ModifierRow[] }>();
   for (const row of modifierRows) {
     if (!groups.has(row.group_id)) {
       groups.set(row.group_id, {
@@ -161,6 +164,7 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
         max: Number(row.max_selections),
         allowQuantity: Boolean(row.allow_option_quantity),
         includedChoiceCount:Number(row.included_choice_count||0),
+        selectionChargeCents:Number(row.selection_charge_cents||0),
         supportsIntensity:Boolean(row.supports_intensity),
         context: row.presentation_context,
         behavior: row.presentation_behavior,
@@ -225,6 +229,15 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
     }
 
     let remainingAllowance = (input.modifierDeclines || []).includes(groupId) ? 0 : group.includedChoiceCount;
+    // A charge-once group fee (Deluxe +$0.25) rides on one unit of the first selected option.
+    let pendingGroupCharge = groupSelectionChargeCents(group.selectionChargeCents, selected.size);
+    modifierUnitDeltaCents += pendingGroupCharge;
+    const pushSnapshot = (snapshot: (typeof modifierSnapshots)[number]) => {
+      if (!pendingGroupCharge) return void modifierSnapshots.push(snapshot);
+      if (snapshot.quantity > 1) modifierSnapshots.push({ ...snapshot, quantity: snapshot.quantity - 1 });
+      modifierSnapshots.push({ ...snapshot, quantity: 1, priceDeltaCents: snapshot.priceDeltaCents + pendingGroupCharge });
+      pendingGroupCharge = 0;
+    };
     for (const row of group.rows) {
       if (!row.option_id || !row.option_name) continue;
       const isSelected = selected.has(row.option_id);
@@ -258,8 +271,8 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
           wasDefault: Boolean(row.default_selected),
           printOnTicket: !row.default_selected || amount !== "normal" || (group.max === 1 && hasDefault && !row.default_selected),
         };
-        if (includedQuantity) modifierSnapshots.push({ ...snapshot, priceDeltaCents: 0, quantity: includedQuantity });
-        if (chargedQuantity) modifierSnapshots.push({ ...snapshot, state: includedQuantity ? "extra" : "selected" });
+        if (includedQuantity) pushSnapshot({ ...snapshot, priceDeltaCents: 0, quantity: includedQuantity });
+        if (chargedQuantity) pushSnapshot({ ...snapshot, state: includedQuantity ? "extra" : "selected" });
       } else if (row.default_selected && !(group.max === 1 && selected.size === 1)) {
         modifierSnapshots.push({
           groupId,

@@ -25,6 +25,7 @@
     "test:combo-dependencies": "tsx scripts/combo-dependency-validate.ts",
     "test:menu-refinement": "tsx scripts/menu-refinement-validate.ts",
     "test:modifier-allowances": "tsx scripts/modifier-allowance-validate.ts",
+    "test:burger-deluxe": "tsx scripts/burger-deluxe-validate.ts",
     "test:external-host": "tsx scripts/external-host-validate.ts",
     "test:pos:auth": "tsx scripts/pos-auth-validate.ts",
     "test:cookie-security": "tsx scripts/cookie-security-validate.ts",
