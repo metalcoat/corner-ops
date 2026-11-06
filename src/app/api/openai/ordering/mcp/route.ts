@@ -364,6 +364,10 @@ const tools = [
           description:
             "The customer's exact latest words. Required when answering a pending size or yes/no modifier question.",
         },
+        serviceChangeRequested: {
+          type: "boolean",
+          description: "True only when the caller clearly asked to switch between pickup and delivery after it was set.",
+        },
         callerPhone: { type: "string" },
         firstName: { type: "string" },
         lastName: { type: "string" },
@@ -680,6 +684,32 @@ export async function POST(request: Request) {
             String(args.customerText || ""),
           )
         : [];
+    // Pickup/delivery, once set, only changes when the caller asks (dev test call 2026-11-06 flipped twice on
+    // mis-heard speech). A different serviceType without serviceChangeRequested changes nothing.
+    if (requestedName === "price_order" && call.order_id) {
+      const current = String(
+        (await getSql()`SELECT service_type FROM ordering_orders WHERE id=${String(call.order_id)}`)[0]?.service_type || "",
+      );
+      const wanted = String(args.serviceType || "");
+      if (["pickup", "delivery"].includes(current) && wanted === "undecided") args.serviceType = current;
+      else if (["pickup", "delivery"].includes(current) && ["pickup", "delivery"].includes(wanted) && wanted !== current && args.serviceChangeRequested !== true)
+        return reply(rpc.id, {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: {
+                  code: "SERVICE_ALREADY_SET",
+                  message: `This order is already ${current}. Nothing changed.`,
+                  remedy: `Keep it ${current} and don't ask again. Only if the caller clearly asked to switch to ${wanted}, send the same change again with serviceChangeRequested true.`,
+                },
+              }),
+            },
+          ],
+          isError: true,
+        });
+    }
+    delete args.serviceChangeRequested;
     const result =
       requestedName === "price_order"
         ? await priceSpokenOrder({

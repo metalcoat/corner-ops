@@ -74,7 +74,7 @@ async function main() {
         "never ask for their first name, last name, full name, or name again",
       ) &&
       returningCustomerPrompt.includes(
-        "ask whether they are still going to the saved address and wait",
+        "confirm the saved address once, exactly “Delivery to 412 J Street, right?”, and wait",
       ) &&
       returningCustomerPrompt.includes("Include the confirmed customerId"),
     "Returning callers must have their name and most-used address confirmed.",
