@@ -38,6 +38,7 @@ PROMPTS={
     "say-expiration":"What's the expiration date? You can say something like oh four, twenty eight, or type four digits.",
     "say-security-code":"And the security code on the card?",
     "say-billing-zip":"And the billing zip code?",
+    "transfer-card-help":"Sorry, we must be having an issue. I'm transferring you to someone who will take your card number.",
 }
 
 def main():

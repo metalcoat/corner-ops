@@ -622,17 +622,19 @@ export function parseCartOperation(value: unknown, items?: unknown): CartOperati
  * ounces/inches/pounds, and a fry
  * made poutine/loaded is "Large Fry Poutine" / "Large Loaded Fry" rather than the item plus its option.
  */
+// Sizes like 4oz, 16", 1/4lbs are for the staff; callers don't need them read out (owner, 2026-10-26).
+const spokenText = (value: string) =>
+  value
+    .replace(/\b2\s?L\b/gi, "two liter")
+    .replace(/\s*\(\s*\d+(?:\.\d+)?\s*oz\s*\)/gi, "")
+    .replace(/\b\d+(?:\.\d+)?\s?oz\b/gi, "")
+    .replace(/\s*\d+\s*(?:"|inch(?:es)?)/gi, "")
+    .replace(/\s*\((?:\d+\/\d+\s*lbs?)\)/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
 export function spokenLine(name: string, variant: string, modifiers: Array<{ name: string }>) {
-  const say = (value: string) =>
-    value
-      // Sizes like 4oz, 16", 1/4lbs are for the staff; callers don't need them read out (owner, 2026-10-26).
-      .replace(/\b2\s?L\b/gi, "two liter")
-      .replace(/\s*\(\s*\d+(?:\.\d+)?\s*oz\s*\)/gi, "")
-      .replace(/\b\d+(?:\.\d+)?\s?oz\b/gi, "")
-      .replace(/\s*\d+\s*(?:"|inch(?:es)?)/gi, "")
-      .replace(/\s*\((?:\d+\/\d+\s*lbs?)\)/gi, "")
-      .replace(/\s+/g, " ")
-      .trim();
+  const say = spokenText;
   const fry = /^(Small|Large)\s+(French Fries|Curly Fries|Waffle Fries|Tater Tots)$/i.exec(name.trim());
   const poutine = modifiers.find((modifier) => /poutine/i.test(modifier.name));
   const loaded = modifiers.find((modifier) => /^loaded\b/i.test(modifier.name));
@@ -647,6 +649,38 @@ export function spokenLine(name: string, variant: string, modifiers: Array<{ nam
   return extras.length ? `${item} with ${extras.join(", ")}` : item;
 }
 
+type WingLine = { name: string; variant: string; quantity: number; modifiers: Array<{ group: string; name: string }> };
+const isWingLine = (name: string) => /^(?:boneless )?wings?$/i.test(name.trim());
+// Dips, celery and sauce cups ride along with the wings; the Wing Sauce group is the flavor.
+const isWingSide = (modifier: { group: string; name: string }) =>
+  modifier.group !== "Wing Sauce" && /^(?:blue cheese|ranch|celery)\b|\(\s*\d+(?:\.\d+)?\s*oz\s*\)|^\d+(?:\.\d+)?\s?oz\b/i.test(modifier.name);
+const wingWord = (name: string) => spokenText(name).toLowerCase().replace(/^garlic parmesan$/, "garlic parm");
+const joinAnd = (parts: string[]) =>
+  parts.length < 2 ? parts.join("") : parts.length === 2 ? parts.join(" and ") : `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1)}`;
+function wingSides(line: WingLine) {
+  return line.modifiers.filter(isWingSide).map((modifier) => wingWord(modifier.name));
+}
+function wingSay(line: WingLine) {
+  const count = /\d+/.exec(line.variant)?.[0] || "";
+  const flavor = line.modifiers.filter((modifier) => !isWingSide(modifier)).map((modifier) => wingWord(modifier.name));
+  const orders = line.quantity > 1 ? `${line.quantity} orders of ` : "";
+  return `${orders}${count ? `${count} ` : ""}${/boneless/i.test(line.name) ? "boneless wings" : "wings"}${flavor.length ? ` ${joinAnd(flavor)}` : ""}`;
+}
+
+/**
+ * Wings said back the way staff say them (Chris, 2026-11-06): "10 wings mild, 10 wings garlic parm, and blue
+ * cheese and celery with those". Count, "wings", flavor; dips/celery once after the wing lines when every line
+ * has the same ones, otherwise on each line. Never bone-in, ounces, sizes, prices or each cup as its own item.
+ */
+export function wingReadback(lines: WingLine[]) {
+  const wings = lines.filter((line) => isWingLine(line.name));
+  if (!wings.length) return "";
+  const sides = wings.map((line) => joinAnd(wingSides(line)));
+  if (sides[0] && sides.every((value) => value === sides[0]))
+    return joinAnd([...wings.map(wingSay), `${sides[0]} with ${wings.length > 1 || wings[0].quantity > 1 ? "those" : "that"}`]);
+  return joinAnd(wings.map((line, index) => (sides[index] ? `${wingSay(line)} with ${sides[index]}` : wingSay(line))));
+}
+
 export async function compactPhoneOrderResult(
   result: Record<string, any>,
   operation: CartOperation,
@@ -656,6 +690,15 @@ export async function compactPhoneOrderResult(
       await sql`SELECT modifier.order_item_id,modifier.group_name_snapshot,modifier.option_name_snapshot,modifier.quantity,modifier.pizza_topping_portion,modifier.pizza_topping_amount FROM ordering_order_item_modifiers modifier JOIN ordering_order_items item ON item.id=modifier.order_item_id WHERE item.order_id=${String(result.id)} AND modifier.selection_state IN('selected','extra') AND modifier.print_on_ticket=TRUE ORDER BY modifier.created_at,modifier.print_order_snapshot,modifier.group_name_snapshot,modifier.option_name_snapshot,modifier.id`;
   const totalCents = Number(result.total_cents),
     amountDueCents = Number(result.amount_due_cents);
+  const wingLineOf = (line: Record<string, any>): WingLine => ({
+    name: String(line.item_name_snapshot),
+    variant: String(line.variant_name_snapshot || ""),
+    quantity: Number(line.quantity || 1),
+    modifiers: modifiers
+      .filter((modifier) => String(modifier.order_item_id) === String(line.id))
+      .map((modifier) => ({ group: String(modifier.group_name_snapshot), name: String(modifier.option_name_snapshot) })),
+  });
+  const wingLines = (result.lines || []).filter((line: Record<string, any>) => isWingLine(String(line.item_name_snapshot))).map(wingLineOf);
   return {
     ok: true,
     operation,
@@ -669,12 +712,15 @@ export async function compactPhoneOrderResult(
     amountDueDisplay: `$${(amountDueCents / 100).toFixed(2)}`,
     paymentMethod: String(result.payment_preference || ""),
     tipCents: Number(result.tip_cents || 0),
+    wingReadback: wingReadback(wingLines) || undefined,
     lines: (result.lines || []).map((line: Record<string, any>) => ({
-      say: spokenLine(
-        String(line.item_name_snapshot),
-        String(line.variant_name_snapshot || ""),
-        modifiers.filter((modifier) => String(modifier.order_item_id) === String(line.id)).map((modifier) => ({ name: String(modifier.option_name_snapshot) })),
-      ),
+      say: isWingLine(String(line.item_name_snapshot))
+        ? wingReadback([wingLineOf(line)])
+        : spokenLine(
+            String(line.item_name_snapshot),
+            String(line.variant_name_snapshot || ""),
+            modifiers.filter((modifier) => String(modifier.order_item_id) === String(line.id)).map((modifier) => ({ name: String(modifier.option_name_snapshot) })),
+          ),
       lineId: String(line.cart_line_id),
       name: String(line.item_name_snapshot),
       variant: String(line.variant_name_snapshot || ""),

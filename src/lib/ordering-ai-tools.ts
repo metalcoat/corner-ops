@@ -1985,7 +1985,14 @@ export async function priceSpokenOrder(input: {
         }
         const requestedModifier = removal ? {...originalModifier, name: removal.option.name, group: removal.group.name, remove: false} : originalModifier;
         const placementMatch = /^(?:(?:put|add|with) (?:the )?)?(nacho cheese|gravy)\b/i.exec(requestedModifier.name.replace(/chesse/gi,"cheese")),
-          friesPlacement = /(?:French|Curly|Waffle) Fries$|Tater Tots$/i.test(item.name) && placementMatch,
+          // A meal's fry side takes the same gravy/nacho placement as a fries item (Chris, 2026-11-06); a mashed side doesn't.
+          mealSides = item.modifiers.find((group) => group.name === "Choose a Side"),
+          mealFrySide =
+            Boolean(mealSides) &&
+            item.modifiers.some((group) => group.name === "Fry Option") &&
+            !spokenModifiers.some((modifier) => /\bmash/i.test(modifier.name)) &&
+            !mealSides!.options.some((option) => /mashed/i.test(option.name) && (modifierSelections[mealSides!.id] || []).includes(option.id)),
+          friesPlacement = (/(?:French|Curly|Waffle) Fries$|Tater Tots$/i.test(item.name) || mealFrySide) && placementMatch,
           raw = friesPlacement ? spokenKey(placementMatch[1]) : spokenKey(requestedModifier.name),
           explicitOnItem = requestedModifier.placement === "topping" || (requestedModifier.placement !== "side" && !/on (?:the )?side/i.test(requestedModifier.name) && /\b(on (?:it|them|the|top|fries)|over|melted)\b/i.test(requestedModifier.name)),
           mealWithIncludedSalad = item.modifiers.some(
@@ -2204,7 +2211,14 @@ export async function priceSpokenOrder(input: {
                 (modifierSelections[group.id] || []).includes(option.id),
             ),
         );
-      if (
+      // Mashed on a hot meat meal always gets gravy on top (Chris, 2026-11-06): add it, never ask.
+      const mashedMods = item.modifiers.find((group) => group.name === "Mashed Mods"),
+        mashedGravy = mashedMods?.options.find((option) => /^Gravy$/i.test(option.name));
+      if (hotMeatMeal && mashedSelected && !gravySelected && mashedMods && mashedGravy)
+        modifierSelections[mashedMods.id] = [
+          ...new Set([...(modifierSelections[mashedMods.id] || []), mashedGravy.id]),
+        ];
+      else if (
         hotMeatMeal &&
         mashedSelected &&
         !gravySelected &&

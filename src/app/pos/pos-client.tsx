@@ -1,5 +1,6 @@
 "use client";
 
+import { aiHandoffReason, cardPaymentInProgress } from "@/lib/ai-handoff-reason";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Business, SessionView } from "@/lib/types";
 import PosPinGate, {
@@ -5103,7 +5104,8 @@ export default function PosClient({
             <header>
               <div>
                 <span>
-                  EMPLOYEE INTERVENTION · LINE{" "}
+                  AI PHONE ORDER ·{" "}
+                  {cardPaymentInProgress(intervention.handoff_reason) ? "PAYING BY CARD" : "NEEDS STAFF"} · LINE{" "}
                   {intervention.line_number || "TEST"}
                 </span>
                 <h2>
@@ -5113,9 +5115,8 @@ export default function PosClient({
                 </h2>
               </div>
             </header>
-            <p>
-              {intervention.handoff_reason ||
-                "The AI transferred this call to the physical deli phones."}
+            <p className="posHandoffReason">
+              <strong>Why:</strong> {aiHandoffReason(intervention.handoff_reason)}
             </p>
             {intervention.open_order_number && (
               <p>

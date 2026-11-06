@@ -210,4 +210,16 @@ checks.append("silence hands off")
 assert outcome["result"] == "failed" and outcome["charge"] is None, outcome
 assert any(call["action"] == "abandon" for call in Api.calls), Api.calls
 
+# 7. Two failed answers hand off (Chris, 2026-11-06): a garbled whole number, then a garbled first group of
+# four, goes straight to staff with the transfer line instead of looping; nothing is charged.
+voice = "Aoede"
+outcome = run({
+    "say-card-number": [("say", digits(voice, VISA[:7] + VISA[8:]))],
+    "card-number": [("say", digits(voice, "41"))],
+})
+checks.append("two misses hand off")
+assert outcome["result"] == "failed" and outcome["charge"] is None, outcome
+assert outcome["prompts"][-1] == "transfer-card-help" and "try-again" not in outcome["prompts"], outcome["prompts"]
+assert any(call["action"] == "abandon" and call.get("code") == "card_recognition_failed" for call in Api.calls), Api.calls
+
 sys.stdout.write(json.dumps({"status": "passed", "checks": checks}) + "\n")

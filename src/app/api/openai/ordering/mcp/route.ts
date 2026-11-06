@@ -785,6 +785,7 @@ export async function POST(request: Request) {
           modifiers: compact.lines[index]?.modifiers || [],
         }),
       );
+      if (compact.wingReadback) (result as Record<string, any>).wingReadback = compact.wingReadback;
     }
     if (orderId) {
       resolvedQuestions.delete("cold_sub_condiments");

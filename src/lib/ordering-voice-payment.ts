@@ -1,3 +1,4 @@
+import { paymentFailureReason } from "@/lib/ai-handoff-reason";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { dispatchSubmittedOrderPrintJobs } from "@/lib/ordering-auto-print";
@@ -163,5 +164,7 @@ export async function chargeVoicePayment(input:{sessionId:string;cardNumber:stri
 export async function abandonVoicePayment(sessionId:string,code="recognition_failed"){
   await ensureVoicePaymentSchema();
   const sql=getSql(),failed=(await sql`UPDATE ordering_voice_payment_sessions SET status='failed',failure_code=CASE WHEN failure_code<>'' THEN failure_code ELSE ${code.slice(0,80)} END,completed_at=NOW(),updated_at=NOW() WHERE id=${sessionId} AND status IN('awaiting_call','collecting') RETURNING call_id`)[0];
-  if(failed?.call_id)await sql`UPDATE ordering_call_sessions SET state='ended',handoff_reason=${`Secure payment failed: ${code.slice(0,80)}`},owner_type='none',owner_id='',claimed_by='',claimed_at=NULL,ended_at=COALESCE(ended_at,NOW()),updated_at=NOW() WHERE business=${business} AND three_cx_call_id=${String(failed.call_id)} AND state='handoff_pending'`;
+  // The caller is now ringing the deli phones (ext 95): keep the call waiting for staff so the POS popup shows
+  // why and the order so far, instead of ending it (dev test call 2026-11-06 vanished from the POS this way).
+  if(failed?.call_id)await sql`UPDATE ordering_call_sessions SET state='handoff_pending',bridge_action='handoff',handoff_reason=${paymentFailureReason(code.slice(0,80))},owner_type='none',owner_id='',claimed_by='',claimed_at=NULL,updated_at=NOW() WHERE business=${business} AND three_cx_call_id=${String(failed.call_id)} AND state='handoff_pending'`;
 }

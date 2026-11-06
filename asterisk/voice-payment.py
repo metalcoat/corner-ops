@@ -318,6 +318,19 @@ def ask(prompt_name,phrases,max_keys,**options):
 
 # ---------------------------------------------------------------- flow
 
+# Two failed answers of any kind (not heard, not a valid card, wrong length) and a person takes the card
+# (Chris, 2026-11-06: callers are often older and hesitant; hand off early instead of looping).
+MAX_MISSES=2
+class TooManyMisses(Exception):pass
+misses=0
+
+def miss(name):
+    """One failed answer. The first gets a short retry prompt; the second goes to staff."""
+    global misses
+    misses+=1
+    if misses>=MAX_MISSES:raise TooManyMisses()
+    prompt(name)
+
 def card_groups(prefix):
     """How a card is read in groups: Amex 4-6-5, everything else 4-4-4-4."""
     return [4,6,5] if card_length(prefix)==15 else [4,4,4,4]
@@ -352,7 +365,7 @@ def card_in_groups():
             if index==0 and how=="keys" and card_complete(heard):return heard  # keyed the whole number
             group=best(how,heard,as_digits,lambda value,size=size:len(value)==size)
             if len(group)==size:break
-            prompt("try-again");group=""
+            miss("try-again");group=""
         if not group:return ""
         card+=group
         if len(card)==sum(card_groups(card)):return card if valid_luhn(card) else ""
@@ -364,11 +377,10 @@ def get_card_number():
     how,heard=ask("say-card-number",NUMBER_PHRASES,19,max_seconds=30,silence_end=2.2)
     digits=heard if how=="keys" else words_to_digits(heard[0]) or "" if heard else ""
     if card_complete(digits):return digits
-    for _ in range(2):
-        prompt("card-in-groups")
-        digits=card_in_groups()
-        if digits:return digits
-        prompt("card-invalid")
+    miss("card-in-groups")
+    digits=card_in_groups()
+    if digits:return digits
+    miss("card-invalid")
     return ""
 
 def get_expiry():
@@ -376,7 +388,7 @@ def get_expiry():
         how,heard=ask("say-expiration",[*SPOKEN_NUMBERS,"thousand",*SPOKEN_MONTHS],6,max_seconds=12)
         expiry=best(how,heard,parse_expiry,bool)
         if expiry:return expiry
-        prompt("try-again")
+        miss("try-again")
     return ""
 
 # Most callers' billing zip (owner, 2026-10-25: 13669 is ~95%). Preferred when the recognizer offers it
@@ -405,7 +417,7 @@ def get_zip():
         how,heard=ask("say-billing-zip",NUMBER_PHRASES,5,max_seconds=12)
         zipcode=zip_from(how,heard)
         if zipcode:return zipcode
-        prompt("try-again")
+        miss("try-again")
     return ""
 
 def get_digits(prompt_name,lengths,max_seconds=12):
@@ -413,7 +425,7 @@ def get_digits(prompt_name,lengths,max_seconds=12):
         how,heard=ask(prompt_name,NUMBER_PHRASES,max(lengths),max_seconds=max_seconds)
         digits=best(how,heard,as_digits,lambda value:len(value) in lengths)
         if digits:return digits
-        prompt("try-again")
+        miss("try-again")
     return ""
 
 def api(payload):
@@ -468,7 +480,7 @@ def main():
             except Exception as cleanup_error:
                 # Never include exception text: an upstream library could place request data in it.
                 sys.stderr.write(f"VOICE_PAYMENT_CLEANUP_ERROR type={type(cleanup_error).__name__}\n");sys.stderr.flush()
-        prompt("employee-help");agi("SET VARIABLE VOICE_PAYMENT_RESULT failed")
+        prompt("transfer-card-help");agi("SET VARIABLE VOICE_PAYMENT_RESULT failed")
 
 def self_test():
     today=datetime.date(2026,10,25)

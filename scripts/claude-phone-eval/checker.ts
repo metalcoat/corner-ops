@@ -60,6 +60,40 @@ async function main() {
   console.log(`${midOrder.status === "ok" ? "PASS" : "FAIL"} quiet  open sauce question mid-order: ${midOrder.status} ${midOrder.ms} ms`);
   if (midOrder.status !== "ok") failures.push(`mid-order open question: ${midOrder.status} ${JSON.stringify(midOrder.mismatches)}`);
 
+  // Dev call 2026-11-06 (b08100aa): "Turkey Big Boss" came through speech-to-text as Hindi noise; the checker
+  // told Gemini to remove the correct sub. A garbled request must never be flagged as "not asked for".
+  const garbled = await checker.checkOrder({
+    stage: "cart",
+    serviceType: "delivery",
+    transcript: [
+      { speaker: "assistant", text: "Excellent! So, what would you like to order today?" },
+      { speaker: "customer", text: "सही जवाब होता है। आपके लिए एक बार" },
+    ],
+    cart: [{ lineId: "b", name: "Turkey Big Boss", variant: "Full Sub", quantity: 1, modifiers: [], lineTotalCents: 1225 }],
+  });
+  cost += garbled.costUsd;
+  ms.push(garbled.ms);
+  console.log(`${garbled.status === "ok" ? "PASS" : "FAIL"} quiet  garbled speech, item in cart: ${garbled.status}`);
+  if (garbled.status !== "ok") failures.push(`garbled request flagged: ${JSON.stringify(garbled.mismatches)}`);
+
+  // Chris 2026-11-06: mashed on a hot meat meal always gets gravy on top; gravy may go on the meal's fries.
+  const gravy = await checker.checkOrder({
+    stage: "final",
+    serviceType: "pickup",
+    transcript: [
+      { speaker: "customer", text: "Can I get a hot turkey with Italian, and mashed potatoes. And a hot roast beef with ranch and fries with gravy on top." },
+      { speaker: "assistant", text: "Here's your order: a hot turkey with Italian and mashed potatoes, and a hot roast beef with ranch and fries with gravy on them. Does that sound right?" },
+    ],
+    cart: [
+      { lineId: "t", name: "Hot Turkey", variant: "", quantity: 1, modifiers: ["SM Tossed Sal", "Italian (On Salad)", "Small Mashed", "Gravy"], lineTotalCents: 1250 },
+      { lineId: "r", name: "Hot Roast Beef", variant: "", quantity: 1, modifiers: ["SM Tossed Sal", "Ranch (On Salad)", "Small French Fries", "Gravy on Fries"], lineTotalCents: 1325 },
+    ],
+  });
+  cost += gravy.costUsd;
+  ms.push(gravy.ms);
+  console.log(`${gravy.status === "ok" ? "PASS" : "FAIL"} quiet  gravy on meal mashed and fries: ${gravy.status}`);
+  if (gravy.status !== "ok") failures.push(`meal gravy flagged: ${JSON.stringify(gravy.mismatches)}`);
+
   // Failure paths: a timeout comes back as status error and a missing key as disabled, never a throw.
   const realKey = process.env.ANTHROPIC_API_KEY;
   const sample = await checker.loadOrderCheckInput(CALLS[4].callId, "final");
