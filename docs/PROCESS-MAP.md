@@ -457,6 +457,12 @@ flowchart LR
   chk --> pr["Payroll Relief: owner adds them on the site,<br/>refreshes the list and matches on Payroll"]
 ```
 
+- **Production (hand deploy 2026-11-06, Chris's go-ahead):** ported into `production/release` (Payroll Relief step
+  hidden there; no `employee_pin_audit`), migrations 0040–0042 applied by hand and recorded in `schema_migrations`.
+  Before-copy `production/release-before-people-onboarding`, image `corner-ops-prod-app:before-people-onboarding`,
+  backup `cornerops-20261106T204005Z.dump`. Rollback: put the before-copy back as `release`, tag the before image
+  `:latest`, `up -d --no-deps app` (new tables are ignored by the old code). Reminders ride production's
+  existing 5-minute schedule-delivery crontab entry.
 - Code: `src/lib/employee-onboarding.ts` (database), `employee-onboarding-rules.ts` (token, text, checklist),
   APIs `/api/employee-directory/onboarding` (managers, workforce permission) and `/api/employee/onboarding` (the link).
 - Text log-only: no Telnyx settings, or `ONBOARDING_SMS_LOG_ONLY=true`; numbers in `SMS_TEST_NUMBERS` still send.
