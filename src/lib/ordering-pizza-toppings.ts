@@ -23,9 +23,19 @@ export function pizzaToppingPriceCents(basePriceCents: number, portion: PizzaTop
 export function normalizePizzaToppings(selections: PizzaToppingSelection[]): PizzaToppingSelection[] {
   const result: PizzaToppingSelection[] = [];
   for (const selection of selections) {
+    if (!selection || typeof selection.modifierOptionId !== "string" || !selection.modifierOptionId
+      || !["whole", "left_half", "right_half"].includes(selection.portion)
+      || !["regular", "extra", "double_extra", "triple_extra"].includes(selection.amount)) {
+      throw new Error("An invalid pizza topping was supplied.");
+    }
     if (!result.some((item) => item.modifierOptionId === selection.modifierOptionId && item.portion === selection.portion && item.amount === selection.amount)) result.push({ ...selection });
   }
   for (const optionId of new Set(result.map((item) => item.modifierOptionId))) {
+    const entries = result.filter((item) => item.modifierOptionId === optionId);
+    if (entries.length > 1 && entries.some((item) => item.portion === "whole")
+      || new Set(entries.map((item) => item.portion)).size !== entries.length) {
+      throw new Error("Choose one topping amount for each pizza half.");
+    }
     for (const amount of ["regular", "extra", "double_extra", "triple_extra"] as const) {
       const left = result.findIndex((item) => item.modifierOptionId === optionId && item.portion === "left_half" && item.amount === amount);
       const right = result.findIndex((item) => item.modifierOptionId === optionId && item.portion === "right_half" && item.amount === amount);
@@ -35,6 +45,28 @@ export function normalizePizzaToppings(selections: PizzaToppingSelection[]): Piz
     }
   }
   return result;
+}
+
+/** Change just the requested section, preserving the opposite half's amount. */
+export function setPizzaToppingAmount(
+  selections: PizzaToppingSelection[],
+  optionId: string,
+  portion: PizzaToppingPortion,
+  amount: PizzaToppingAmount | null,
+): PizzaToppingSelection[] {
+  const current = selections.filter((entry) => entry.modifierOptionId === optionId);
+  const other = selections.filter((entry) => entry.modifierOptionId !== optionId);
+  if (portion === "whole") return normalizePizzaToppings([
+    ...other,
+    ...(amount ? [{ modifierOptionId: optionId, portion, amount }] : []),
+  ]);
+  const oppositePortion = portion === "left_half" ? "right_half" : "left_half";
+  const opposite = current.find((entry) => entry.portion === oppositePortion || entry.portion === "whole");
+  return normalizePizzaToppings([
+    ...other,
+    ...(opposite ? [{ ...opposite, portion: oppositePortion as PizzaToppingPortion }] : []),
+    ...(amount ? [{ modifierOptionId: optionId, portion, amount }] : []),
+  ]);
 }
 
 export function formatPizzaTopping(name: string, portion: PizzaToppingPortion, amount: PizzaToppingAmount, style: "display" | "ticket" = "display"): string {

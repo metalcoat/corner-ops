@@ -1,10 +1,10 @@
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
-import { getSql } from "@/lib/db";
+import { getSql, withTransaction } from "@/lib/db";
 import type { OrderingActor } from "@/lib/ordering-route-auth";
 import { canManagePos } from "@/lib/ordering-route-auth";
 import { applyPromotionsToOrder } from "@/lib/ordering-promotions";
 import { recalculateLoyaltyOrder } from "@/lib/ordering-loyalty";
-import type { LoyaltyLineRule } from "@/lib/ordering-loyalty-earn";
+import { loyaltyEarnPaymentEligible, type LoyaltyLineRule } from "@/lib/ordering-loyalty-earn";
 import { sendTransactionalSms } from "@/lib/sms-notifications";
 import {
   pointsBonusApplies,
@@ -49,23 +49,32 @@ export async function pointsRewards(business = "Corner Deli", includeInactive = 
   return getSql()`SELECT * FROM ordering_points_rewards WHERE business=${business} AND (active OR ${includeInactive}) ORDER BY points,sort_order,label`;
 }
 
-/** The customer's balance after expiring points that sat 6 months (a setting) with no qualifying purchase. */
-export async function pointsBalance(customerId: string, business = "Corner Deli", settings?: PointsSettings): Promise<number> {
+/** Read-only balance, including expiry that has not yet been posted to the ledger. */
+export async function pointsBalanceSnapshot(customerId: string, business = "Corner Deli", settings?: PointsSettings) {
   const sql = getSql();
   const config = settings || (await pointsSettings(business));
-  const [row] = await sql`SELECT COALESCE(SUM(points),0) balance,MAX(created_at) FILTER (WHERE entry_type='earn') last_activity FROM ordering_points_ledger WHERE customer_id=${customerId} AND business=${business}`;
-  let balance = Number(row?.balance || 0);
+  const [row] = await sql`SELECT COALESCE(SUM(points),0) balance,MAX(created_at) FILTER (WHERE (entry_type='earn' OR (entry_type='adjustment' AND points>0 AND metadata->>'kind'='order_earn_adjustment')) AND (order_id IS NULL OR EXISTS(SELECT 1 FROM ordering_orders funded WHERE funded.id=ordering_points_ledger.order_id AND funded.paid_cents>0)) AND NOT EXISTS(SELECT 1 FROM ordering_points_ledger reversed WHERE reversed.related_event_id=ordering_points_ledger.id AND reversed.entry_type='reversal')) last_activity FROM ordering_points_ledger WHERE customer_id=${customerId} AND business=${business}`;
+  const ledgerBalance = Math.round(Number(row?.balance || 0) * 10) / 10;
   const last = row?.last_activity ? new Date(String(row.last_activity)) : null;
-  if (balance > 0 && last && config.expiryMonths > 0) {
-    const cutoff = new Date();
-    cutoff.setMonth(cutoff.getMonth() - config.expiryMonths);
-    if (last < cutoff) {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - config.expiryMonths);
+  const expired = Boolean(ledgerBalance > 0 && last && config.expiryMonths > 0 && last < cutoff);
+  return { balance: expired ? 0 : ledgerBalance, ledgerBalance, expired, lastActivity: last?.toISOString() || null };
+}
+
+/** The customer's balance after posting any due expiry once under the account lock. */
+export async function pointsBalance(customerId: string, business = "Corner Deli", settings?: PointsSettings): Promise<number> {
+  return withTransaction(async()=>{
+    const sql = getSql();
+    await sql`SELECT id FROM ordering_customers WHERE id=${customerId} AND business=${business} FOR UPDATE`;
+    const config = settings || (await pointsSettings(business));
+    const snapshot = await pointsBalanceSnapshot(customerId,business,config);
+    if (snapshot.expired) {
       const reason = `No qualifying purchase for ${config.expiryMonths} months`;
-      await sql`INSERT INTO ordering_points_ledger(id,business,customer_id,entry_type,points,reason,description,created_by,metadata) VALUES(${randomUUID()},${business},${customerId},'expiry',${-balance},${reason},'Points expired','system',${JSON.stringify({ lastActivity: last.toISOString() })}::jsonb)`;
-      balance = 0;
+      await sql`INSERT INTO ordering_points_ledger(id,business,customer_id,entry_type,points,reason,description,created_by,metadata) VALUES(${randomUUID()},${business},${customerId},'expiry',${-snapshot.ledgerBalance},${reason},'Points expired','system',${JSON.stringify({ lastActivity: snapshot.lastActivity })}::jsonb)`;
     }
-  }
-  return Math.round(balance * 10) / 10;
+    return snapshot.balance;
+  });
 }
 
 export async function pointsStatus(customerId: string, business = "Corner Deli"): Promise<PointsStatus> {
@@ -89,12 +98,12 @@ export async function pointsHistory(customerId: string, limit = 12) {
 async function orderLines(orderId: string): Promise<Array<PointsLine & { id: string; categoryId: string | null; promoted: boolean; loyaltyCents: number; pointsCents: number }>> {
   const sql = getSql();
   const lines = await sql`
-    SELECT line.id,line.item_id,line.variant_id,line.unit_price_cents,line.line_total_cents,line.sort_order,
+    SELECT line.id,line.item_id,line.variant_id,line.unit_price_cents,ROUND(line.line_total_cents::numeric*(line.quantity-COALESCE(line.cancelled_quantity,0))/line.quantity)::integer line_total_cents,line.sort_order,
       (SELECT category_id FROM ordering_menu_items item WHERE item.id=line.item_id) category_id,
       EXISTS(SELECT 1 FROM ordering_order_promotion_allocations allocation JOIN ordering_order_promotion_applications application ON application.id=allocation.application_id WHERE application.order_id=line.order_id AND allocation.order_item_id=line.id AND allocation.discount_cents>0) promoted,
       COALESCE((SELECT SUM(discount_cents) FROM ordering_order_loyalty_applications app WHERE app.order_item_id=line.id),0) loyalty_cents,
       COALESCE((SELECT SUM(discount_cents) FROM ordering_order_points_redemptions points WHERE points.order_item_id=line.id),0) points_cents
-    FROM ordering_order_items line WHERE line.order_id=${orderId} ORDER BY line.sort_order,line.created_at,line.id`;
+    FROM ordering_order_items line WHERE line.order_id=${orderId} AND line.quantity>COALESCE(line.cancelled_quantity,0) ORDER BY line.sort_order,line.created_at,line.id`;
   const modifiers = lines.length
     ? await sql`SELECT order_item_id,option_id,unit_price_delta_cents,pizza_topping_amount FROM ordering_order_item_modifiers WHERE order_item_id=ANY(${lines.map((line) => String(line.id))}::uuid[]) AND selection_state IN ('selected','extra') ORDER BY unit_price_delta_cents DESC,created_at,id`
     : [];
@@ -132,26 +141,59 @@ async function jumboPunchCardRules(business: string): Promise<LoyaltyLineRule[]>
   return programs.map((program) => program.qualifying_rule as LoyaltyLineRule);
 }
 
+/** The present order lines' eligible food value, for the staff loyalty card. */
+export async function pointsOrderEligibleCents(orderId:string,business="Corner Deli") {
+  return pointsEligibleCents(await orderLines(orderId),await jumboPunchCardRules(business));
+}
+
 /**
  * Earns points for an order that reached the kitchen (or completed, for orders
  * paid at the end). Idempotent: one earn entry per order. Discounted lines, Jumbo
  * pizzas, items bought with points or a loyalty reward, tax, tips and fees don't earn.
  */
 export async function earnPointsForOrder(orderId: string, actor: OrderingActor) {
-  const sql = getSql();
-  const [order] = await sql`SELECT id,business,customer_id,source,order_origin,payment_status,status,caller_phone,scheduled_for,created_at,created_by FROM ordering_orders WHERE id=${orderId}`;
-  if (!order?.customer_id || !EARNING_STATUSES.includes(String(order.status))) return;
-  if ((await sql`SELECT 1 FROM ordering_points_ledger WHERE order_id=${orderId} AND entry_type='earn'`)[0]) return;
-  const settings = await pointsSettings(String(order.business));
-  const phones = (await sql`SELECT normalized_phone FROM ordering_customer_phones WHERE customer_id=${String(order.customer_id)}`).map((row) => String(row.normalized_phone));
-  const rate = pointsEarnRate({ source: String(order.source), orderOrigin: String(order.order_origin || ""), paymentStatus: String(order.payment_status || ""), callerPhone: String(order.caller_phone || ""), customerPhones: phones }, settings);
-  if (!rate) return;
-  const eligibleCents = pointsEligibleCents(await orderLines(orderId), await jumboPunchCardRules(String(order.business)));
-  const orderFor = new Date(String(order.scheduled_for || order.created_at));
-  const bonus = pointsBonusApplies(orderFor, settings);
-  const points = pointsForCents(eligibleCents, rate, bonus ? settings.bonusMultiplier : 1);
-  if (!points) return;
-  await sql`INSERT INTO ordering_points_ledger(id,business,customer_id,order_id,entry_type,points,description,created_by,metadata) VALUES(${randomUUID()},${order.business},${order.customer_id},${orderId},'earn',${points},${bonus ? "Order points (lunch bonus)" : "Order points"},${actor.id},${JSON.stringify({ eligibleCents, rate, bonus, multiplier: bonus ? settings.bonusMultiplier : 1, source: order.source, orderOrigin: order.order_origin, orderCreatedBy: order.created_by, actorName: actor.name, actorType: actor.type })}::jsonb) ON CONFLICT DO NOTHING`;
+  return withTransaction(async()=>{
+    const sql=getSql();
+    const [order]=await sql`SELECT id,business,customer_id,source,order_origin,payment_status,paid_cents,total_cents,amount_due_cents,status,caller_phone,scheduled_for,created_at,created_by FROM ordering_orders WHERE id=${orderId} FOR UPDATE`;
+    if(!order?.customer_id||(!EARNING_STATUSES.includes(String(order.status))&&order.status!=="draft"))return;
+    await sql`SELECT id FROM ordering_customers WHERE id=${order.customer_id} FOR UPDATE`;
+    const events=await sql`SELECT entry_type,points,metadata FROM ordering_points_ledger WHERE order_id=${orderId} AND (entry_type='earn' OR (entry_type='adjustment' AND metadata->>'kind'='order_earn_adjustment')) ORDER BY created_at,id`;
+    const original=events.find(row=>row.entry_type==='earn');
+    if(order.status==='draft'&&!original)return;
+    const settings=await pointsSettings(String(order.business));
+    const phones=(await sql`SELECT normalized_phone FROM ordering_customer_phones WHERE customer_id=${String(order.customer_id)}`).map(row=>String(row.normalized_phone));
+    const rate=original?Number(original.metadata.rate):pointsEarnRate({source:String(order.source),orderOrigin:String(order.order_origin||""),paymentStatus:String(order.payment_status||""),callerPhone:String(order.caller_phone||""),customerPhones:phones},settings);
+    if(!rate)return;
+    let lines=await orderLines(orderId);
+    if(order.status==='draft'){
+      const [reopen]=await sql`SELECT details FROM ordering_order_events WHERE order_id=${orderId} AND event_type='order_reopened_for_additions' ORDER BY created_at DESC LIMIT 1`;
+      const sentIds=new Set((reopen?.details?.existingItemIds||[]).map(String));
+      if(!sentIds.size)return;
+      lines=lines.filter(line=>sentIds.has(line.id));
+    }
+    const eligibleCents=pointsEligibleCents(lines,await jumboPunchCardRules(String(order.business)));
+    const bonus=original?Boolean(original.metadata.bonus):pointsBonusApplies(new Date(String(order.scheduled_for||order.created_at)),settings);
+    const multiplier=original?Number(original.metadata.multiplier||1):(bonus?settings.bonusMultiplier:1);
+    const total=pointsForCents(eligibleCents,rate,multiplier),earned=events.reduce((sum,row)=>sum+Number(row.points),0),points=Math.round((total-earned)*10)/10;
+    if(!points||(points>0&&(order.status==='draft'||!loyaltyEarnPaymentEligible({payment_status:order.payment_status,paid_cents:order.paid_cents,total_cents:order.total_cents,amount_due_cents:order.amount_due_cents}))))return;
+    if(points>0)await pointsBalance(String(order.customer_id),String(order.business),settings);
+    const metadata={eligibleCents,rate,bonus,multiplier,source:order.source,orderOrigin:order.order_origin,orderCreatedBy:order.created_by,actorName:actor.name,actorType:actor.type,...(original?{kind:"order_earn_adjustment"}: {})};
+    await sql`INSERT INTO ordering_points_ledger(id,business,customer_id,order_id,entry_type,points,description,created_by,metadata) VALUES(${randomUUID()},${order.business},${order.customer_id},${orderId},${original?'adjustment':'earn'},${points},${original?'Order points updated':bonus?'Order points (lunch bonus)':'Order points'},${actor.id},${JSON.stringify(metadata)}::jsonb) ON CONFLICT DO NOTHING`;
+  });
+}
+
+/** Remove earned points after the last paid cent is refunded, preserving rewards spent. */
+export async function clawbackUnpaidPointsEarnings(orderId:string,actor:OrderingActor,reason:string){
+  return withTransaction(async()=>{
+    const sql=getSql();
+    const [order]=await sql`SELECT business,customer_id,paid_cents FROM ordering_orders WHERE id=${orderId} FOR UPDATE`;
+    if(!order?.customer_id||Number(order.paid_cents)>0)return;
+    await sql`SELECT id FROM ordering_customers WHERE id=${order.customer_id} FOR UPDATE`;
+    const [total]=await sql`SELECT COALESCE(SUM(points),0) points FROM ordering_points_ledger earned WHERE order_id=${orderId} AND customer_id=${order.customer_id} AND (entry_type='earn' OR (entry_type='adjustment' AND metadata->>'kind'='order_earn_adjustment')) AND NOT EXISTS(SELECT 1 FROM ordering_points_ledger reversed WHERE reversed.related_event_id=earned.id AND reversed.entry_type='reversal')`;
+    const points=Math.round(Number(total.points)*10)/10;
+    if(points<=0)return;
+    await sql`INSERT INTO ordering_points_ledger(id,business,customer_id,order_id,entry_type,points,reason,description,created_by,metadata) VALUES(${randomUUID()},${order.business},${order.customer_id},${orderId},'adjustment',${-points},${reason},'Fully refunded order points removed',${actor.id},'{"kind":"order_earn_adjustment","cause":"full_payment_refund"}'::jsonb)`;
+  });
 }
 
 const codeDigest = (orderId: string, code: string) => createHmac("sha256", process.env.SESSION_SECRET || "").update(`points:${orderId}:${code}`).digest("hex");
@@ -167,7 +209,7 @@ export function pointsCodesShownOnScreen(env: Record<string, string | undefined>
 }
 
 async function draftOrder(orderId: string) {
-  const [order] = await getSql()`SELECT id,business,customer_id,status FROM ordering_orders WHERE id=${orderId}`;
+  const [order] = await getSql()`SELECT id,business,customer_id,status FROM ordering_orders WHERE id=${orderId} FOR UPDATE`;
   if (!order || order.status !== "draft") throw new Error("Points can only be used on an order that hasn't been sent yet.");
   if (!order.customer_id) throw new Error("Attach the customer before using points.");
   return order;
@@ -215,6 +257,7 @@ export async function pointsCodeVerified(orderId: string) {
  * texted code. Points come off the balance when the order is sent (finalize).
  */
 export async function requestPointsRedemption(input: { orderId: string; rewardId: string; actor: OrderingActor; channel: "web" | "pos"; orderItemId?: string }) {
+  return withTransaction(async()=>{
   const sql = getSql();
   const order = await draftOrder(input.orderId);
   const customerId = String(order.customer_id);
@@ -235,21 +278,28 @@ export async function requestPointsRedemption(input: { orderId: string; rewardId
   await recalculateLoyaltyOrder(input.orderId);
   await applyPromotionsToOrder(input.orderId);
   return recalculateLoyaltyOrder(input.orderId);
+  });
 }
 
 export async function removePointsRedemption(orderId: string, redemptionId: string) {
+  return withTransaction(async()=>{
   await draftOrder(orderId);
   await getSql()`DELETE FROM ordering_order_points_redemptions WHERE id=${redemptionId} AND order_id=${orderId} AND ledger_event_id IS NULL`;
   await recalculateLoyaltyOrder(orderId);
   await applyPromotionsToOrder(orderId);
   return recalculateLoyaltyOrder(orderId);
+  });
 }
 
 /** Takes the points off the balance when the order is sent; fails if the balance no longer covers them. */
 export async function finalizePointsRedemptions(orderId: string) {
+  return withTransaction(async()=>{
   const sql = getSql();
+  const [order]=await sql`SELECT id,customer_id,status FROM ordering_orders WHERE id=${orderId} FOR UPDATE`;
   const redemptions = await sql`SELECT redemption.*,orders.business FROM ordering_order_points_redemptions redemption JOIN ordering_orders orders ON orders.id=redemption.order_id WHERE redemption.order_id=${orderId} AND redemption.ledger_event_id IS NULL FOR UPDATE OF redemption`;
   if (!redemptions.length) return;
+  if(!order||!EARNING_STATUSES.includes(String(order.status)))throw new Error("Submit this order before finalizing points rewards.");
+  if(redemptions.some(row=>String(row.customer_id)!==String(order.customer_id)))throw new Error("The points reward belongs to a different customer.");
   const customerId = String(redemptions[0].customer_id), business = String(redemptions[0].business);
   const needed = redemptions.reduce((sum, row) => sum + Number(row.points), 0);
   if ((await pointsBalance(customerId, business)) < needed) throw new Error("The customer no longer has enough points for the rewards on this order.");
@@ -258,12 +308,13 @@ export async function finalizePointsRedemptions(orderId: string) {
     await sql`INSERT INTO ordering_points_ledger(id,business,customer_id,order_id,entry_type,points,description,created_by,metadata) VALUES(${eventId},${business},${customerId},${orderId},'redeem',${-Number(row.points)},${String(row.label_snapshot)},${String(row.requested_by)},${JSON.stringify({ redemptionId: row.id, rewardId: row.reward_id, discountCents: Number(row.discount_cents), channel: row.channel })}::jsonb)`;
     await sql`UPDATE ordering_order_points_redemptions SET ledger_event_id=${eventId} WHERE id=${String(row.id)}`;
   }
+  });
 }
 
 /** A voided order gives back points spent and takes back points earned. Idempotent. */
 export async function reversePointsForOrder(orderId: string, actor: OrderingActor, reason: string) {
   const sql = getSql();
-  const events = await sql`SELECT * FROM ordering_points_ledger WHERE order_id=${orderId} AND entry_type IN ('earn','redeem')`;
+  const events = await sql`SELECT * FROM ordering_points_ledger WHERE order_id=${orderId} AND (entry_type IN ('earn','redeem') OR (entry_type='adjustment' AND metadata->>'kind'='order_earn_adjustment'))`;
   for (const event of events)
     await sql`INSERT INTO ordering_points_ledger(id,business,customer_id,order_id,entry_type,points,related_event_id,reason,description,created_by,metadata) VALUES(${randomUUID()},${event.business},${event.customer_id},${orderId},'reversal',${-Number(event.points)},${event.id},${reason},${String(event.description)},${actor.id},${JSON.stringify({ reversedEventType: event.entry_type })}::jsonb) ON CONFLICT DO NOTHING`;
 }

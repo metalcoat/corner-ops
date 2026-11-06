@@ -206,7 +206,7 @@ export type Trail = Array<{ x: number; y: number; t: number }>;
 
 export function renderRush(ctx: CanvasRenderingContext2D, g: PizzaRush, trail: Trail, now: number, dpr: number) {
   const { W, H } = g;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.setTransform(ctx.canvas.width / W, 0, 0, ctx.canvas.height / H, 0, 0);
   ctx.save();
   if (g.shake > 0) ctx.translate((Math.random() - 0.5) * 12 * g.shake, (Math.random() - 0.5) * 12 * g.shake);
   drawBackdrop(ctx, W, H, dpr);

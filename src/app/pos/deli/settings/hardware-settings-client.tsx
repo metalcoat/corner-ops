@@ -45,7 +45,7 @@ type Station = {
   payment_terminal_id?: string | null;
   gift_card_reader_id?: string | null;
 };
-type TerminalReview = { id: string; order_id: string; display_number: string; amount_cents: number; provider_transaction_reference: string; status_message: string; created_at: string };
+type TerminalReview = { id: string; order_id: string; display_number: string; amount_cents: number; provider_transaction_reference: string; status_message: string; created_at: string; review_kind?: "terminal" | "web" };
 type Dashboard = {
   locations: Array<{ id: string; name: string }>;
   devices: Device[];
@@ -324,9 +324,9 @@ export default function HardwareSettingsClient() {
       </div>
 
       {reviews.length > 0 && (
-        <section className="hwSection hwAlert">
-          <h3>Card terminal charges to review</h3>
-          <p>The terminal charged these cards, but the POS could not put the charge on the order. Refund or record each one in MX Merchant, then mark it resolved. Until then the order cannot take another payment.</p>
+        <section className="hwSection hwAlert" id="card-payment-reviews">
+          <h3>Card payments to review</h3>
+          <p>Check each payment in MX Merchant before taking another payment from the customer.</p>
           {reviews.map((sale) => (
             <article key={sale.id} className="hwCard">
               <div>
@@ -336,6 +336,7 @@ export default function HardwareSettingsClient() {
                   {sale.provider_transaction_reference && <> · MX payment <code>{sale.provider_transaction_reference}</code></>}
                 </small>
                 <small>{sale.status_message}</small>
+                <p>{sale.review_kind === "web" ? "Online order: void or fully refund the original payment in MX Merchant, then verify it below. Verification checks MX and does not charge or refund the card." : "Terminal order: refund or record the charge in MX Merchant, then mark it resolved."}</p>
               </div>
               <label className="hwField">
                 What was done in MX
@@ -346,17 +347,17 @@ export default function HardwareSettingsClient() {
                 disabled={(reviewNotes[sale.id] || "").trim().length < 3}
                 onClick={() => {
                   setMessage(null);
-                  void fetch("/api/ordering/payments/mx-terminal-review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: sale.id, note: reviewNotes[sale.id] }) })
+                  void fetch("/api/ordering/payments/mx-terminal-review", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: sale.id, note: reviewNotes[sale.id], reviewKind: sale.review_kind || "terminal" }) })
                     .then(async (response) => {
                       const body = await response.json();
                       if (!response.ok) throw new Error(body.error || "Could not resolve the charge.");
                       setReviews(body.sales || []);
-                      setMessage({ text: `Order #${sale.display_number}'s terminal charge marked resolved.`, tone: "good" });
+                      setMessage({ text: sale.review_kind === "web" ? `Order #${sale.display_number}'s payment reversal verified. Checkout can resume.` : `Order #${sale.display_number}'s terminal charge marked resolved.`, tone: "good" });
                     })
                     .catch((error) => setMessage({ text: error instanceof Error ? error.message : "Could not resolve the charge.", tone: "bad" }));
                 }}
               >
-                MARK RESOLVED
+                {sale.review_kind === "web" ? "VERIFY VOID / REFUND IN MX" : "MARK RESOLVED"}
               </button>
             </article>
           ))}

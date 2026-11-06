@@ -1,5 +1,5 @@
 import { isoJson } from "@/lib/timestamp-values";
-import { readCustomerOrderingSession } from "@/lib/customer-ordering-session";
+import { customerSessionHash, readCustomerOrderingSession } from "@/lib/customer-ordering-session";
 import { getSql } from "@/lib/db";
 import { requestLoyaltyRedemption } from "@/lib/ordering-loyalty";
 
@@ -14,8 +14,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const body = (await request.json()) as { programId?: string };
     const sql = getSql();
     const [order] = await sql`
-      SELECT id FROM ordering_orders
-      WHERE id=${orderId} AND customer_id=${session.customerId} AND business='Corner Deli' AND status='draft'
+      SELECT orders.id FROM ordering_orders orders
+      JOIN ordering_customer_web_carts carts ON carts.order_id=orders.id
+      WHERE orders.id=${orderId} AND orders.customer_id=${session.customerId}
+        AND orders.business='Corner Deli' AND orders.source='web' AND orders.status='draft'
+        AND carts.session_hash=${customerSessionHash(session.sessionId)} AND carts.replaced_at IS NULL
     `;
     if (!order) throw new Error("This checkout is no longer available for loyalty redemption.");
     const [program] = await sql`

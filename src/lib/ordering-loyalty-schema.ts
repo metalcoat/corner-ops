@@ -39,12 +39,13 @@ export function ensureOrderingLoyaltySchema(): Promise<void> {
         WHERE business='Corner Deli' AND name='Jumbo Thin Pizza Loyalty'
       `;
       const acceptedOrders = await sql`
-        SELECT orders.id order_id,orders.customer_id,SUM(line.quantity)::integer units
+        SELECT orders.id order_id,orders.customer_id,SUM(line.quantity-COALESCE(line.cancelled_quantity,0))::integer units
         FROM ordering_orders orders
         JOIN ordering_order_items line ON line.order_id=orders.id
         WHERE orders.business='Corner Deli' AND orders.customer_id IS NOT NULL
           AND orders.status IN ('sent_to_kitchen','in_progress','ready','completed')
-          AND line.variant_id=${variantIds[0]}
+          AND orders.payment_status='paid' AND orders.amount_due_cents=0 AND orders.paid_cents>=orders.total_cents
+          AND line.variant_id=${variantIds[0]} AND line.quantity>COALESCE(line.cancelled_quantity,0)
         GROUP BY orders.id,orders.customer_id
       `;
       for (const order of acceptedOrders) {

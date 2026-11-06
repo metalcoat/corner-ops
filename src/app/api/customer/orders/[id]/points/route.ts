@@ -1,5 +1,5 @@
 import { isoJson } from "@/lib/timestamp-values";
-import { readCustomerOrderingSession } from "@/lib/customer-ordering-session";
+import { customerSessionHash, readCustomerOrderingSession } from "@/lib/customer-ordering-session";
 import { getSql } from "@/lib/db";
 import { orderPointsRedemptions, pointsStatus, removePointsRedemption, requestPointsRedemption } from "@/lib/ordering-points";
 
@@ -10,7 +10,11 @@ async function ownedDraft(request: Request, context: { params: Promise<{ id: str
   const session = readCustomerOrderingSession(request);
   if (!session?.customerId || !session.authenticatedAt) throw Object.assign(new Error("Sign in to use your points."), { status: 401 });
   const { id: orderId } = await context.params;
-  const [order] = await getSql()`SELECT id FROM ordering_orders WHERE id=${orderId} AND customer_id=${session.customerId} AND business='Corner Deli' AND status='draft'`;
+  const [order] = await getSql()`SELECT orders.id FROM ordering_orders orders
+    JOIN ordering_customer_web_carts carts ON carts.order_id=orders.id
+    WHERE orders.id=${orderId} AND orders.customer_id=${session.customerId}
+      AND orders.business='Corner Deli' AND orders.source='web' AND orders.status='draft'
+      AND carts.session_hash=${customerSessionHash(session.sessionId)} AND carts.replaced_at IS NULL`;
   if (!order) throw new Error("This checkout is no longer available for points.");
   return { orderId, customerId: session.customerId };
 }

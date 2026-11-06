@@ -113,8 +113,8 @@ export class PizzaRush {
   }
 
   resize(W: number, H: number) {
-    this.W = Math.max(200, W);
-    this.H = Math.max(300, H);
+    this.W = Math.max(200, Math.min(1920, W));
+    this.H = Math.max(300, Math.min(1440, H));
   }
 
   /** Pizza radius for the current screen. */
@@ -138,7 +138,9 @@ export class PizzaRush {
     return { elapsed: Math.floor(this.time), score: this.score, delivered: this.delivered, perfects: this.perfects, ruined: this.strikes };
   }
 
-  start() {
+  start(seed?: number) {
+    if (seed !== undefined) this.rand = mulberry32(seed);
+    this.nextId = 1;
     Object.assign(this, { state: "play", time: 0, score: 0, delivered: 0, perfects: 0, strikes: 0, streak: 0, bestStreak: 0, phaseIndex: 0, banner: 2.5, flash: 0, slowMo: 0, shake: 0 });
     this.flyers = [];
     this.halves = [];
@@ -158,6 +160,7 @@ export class PizzaRush {
 
   /** Advance by dt real seconds. */
   update(dt: number) {
+    if (this.state !== "play") return;
     dt = Math.min(0.05, Math.max(0, dt));
     const sim = this.slowMo > 0 ? dt * 0.45 : dt;
     if (this.slowMo > 0) this.slowMo = Math.max(0, this.slowMo - dt);
@@ -165,7 +168,6 @@ export class PizzaRush {
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt);
     if (this.banner > 0) this.banner = Math.max(0, this.banner - dt);
     this.updateEffects(sim, dt);
-    if (this.state !== "play") return;
 
     this.time += dt;
     const next = PHASES[this.phaseIndex + 1];
@@ -288,6 +290,7 @@ export class PizzaRush {
 
   /** Finger lifted: score the swipe's combo. */
   endStroke() {
+    if (this.state !== "play") { this.strokeHits = 0; return; }
     if (this.strokeHits >= 3) {
       const bonus = this.strokeHits * 50;
       this.score += bonus;

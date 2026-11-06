@@ -13,7 +13,7 @@ export const ONLINE_ALERT_SOURCES = ["web", "online", "customer_web", "kiosk", "
  * It also lists online orders that were paid but are still drafts (a send rule
  * failed after the card was charged), so staff hear about them and send them
  * from the Order Center instead of the customer waiting on food nobody saw,
- * and phone orders whose card payment needs a staff check.
+ * and online or phone orders whose card payment needs a staff check.
  */
 export async function listWaitingOnlineOrders(business: OrderingBusiness) {
   await ensureOrderingPosSchema();
@@ -36,6 +36,10 @@ export async function listWaitingOnlineOrders(business: OrderingBusiness) {
     WHERE business = ${business}
       AND source = ANY(${ONLINE_ALERT_SOURCES})
       AND status = 'draft' AND (paid_cents > 0
+        OR EXISTS (SELECT 1 FROM ordering_mx_checkout_sessions payment
+          WHERE payment.order_id=ordering_orders.id AND ordering_orders.source='web'
+            AND (payment.channel='online' OR (payment.channel='keyed' AND payment.created_by LIKE 'web:%'))
+            AND payment.status='needs_review')
         -- Phone card payments staff must check: MX's answer was lost (needs_review) or
         -- the approval couldn't be recorded (approved_unapplied). The caller was told an
         -- employee would help.

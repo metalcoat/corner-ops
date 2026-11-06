@@ -20,14 +20,14 @@ export async function GET(request: Request) {
     const at = requested ? new Date(requested) : new Date();
     if (!Number.isFinite(at.getTime()))
       return isoJson({ error: "Invalid menu time." }, { status: 400 });
-    const serviceType = ["pickup", "delivery"].includes(
+    const serviceType = ["pickup", "curbside", "delivery"].includes(
       params.get("serviceType") || "",
     )
       ? params.get("serviceType")!
       : "pickup";
     const [raw, availability, delivery] = await Promise.all([
       orderingMenuWithVariants("Corner Deli", "web"),
-      resolveOrderingAvailability({ business: "Corner Deli", serviceType, allowPreOpenAsap: true }),
+      resolveOrderingAvailability({ business: "Corner Deli", serviceType, at, allowPreOpenAsap: !requested }),
       getDeliveryPricingSettings("Corner Deli"),
     ]);
     const scheduled = await applyScheduledMenuAvailability(

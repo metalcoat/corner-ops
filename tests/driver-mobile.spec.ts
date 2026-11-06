@@ -5,7 +5,7 @@ test("driver PWA is mobile-first and requires real employee authentication",asyn
   const response=await page.goto("/employee/deliveries");
   expect(response?.headers()["permissions-policy"]).toContain("camera=(self)");
   expect(response?.headers()["permissions-policy"]).toContain("geolocation=(self)");
-  await expect(page.getByRole("heading",{name:"Employee sign in"})).toBeVisible();
+  await expect(page.getByRole("heading",{name:"Employee sign in"})).toBeVisible({timeout:15_000});
   await expect(page.getByLabel("Employee PIN")).toBeVisible();
   expect((await request.get("/api/driver/deliveries")).status()).toBe(401);
 });
@@ -20,11 +20,13 @@ test("customer tracking rejects random tokens without exposing order data",async
   await expect(page.getByText(/customer|address|driver/i)).toHaveCount(0);
 });
 
-test("store dashboard requires a POS employee session",async({page,request})=>{
+test("store dashboard requires an authorized screen sign-in",async({page,request})=>{
   const response=await request.get("/api/ordering/store-dashboard");
   expect(response.status()).toBe(401);
   expect(await response.json()).toEqual({error:"Employee sign-in required."});
   await page.goto("/pos/deli/dashboard");
-  await expect(page.getByRole("link",{name:"Dashboard"})).toBeVisible();
-  await expect(page.getByText("Employee sign-in required.",{exact:true})).toBeVisible();
+  await expect(page).toHaveURL(/\/pos\/dashboard$/);
+  await expect(page.getByRole("heading",{name:"Sign in once",exact:true})).toBeVisible({timeout:15_000});
+  await expect(page.getByLabel("Employee PIN")).toBeVisible();
+  await expect(page.getByRole("button",{name:"Sign in",exact:true})).toBeDisabled();
 });

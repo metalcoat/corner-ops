@@ -31,6 +31,7 @@ async function main() {
   const customerId = randomUUID(), phone = "+13155550142", orders: string[] = [];
   async function order(input: { source: string; origin: string; cents: number; status?: string; paid?: boolean; caller?: string; at: string; promoted?: boolean; jumbo?: boolean; friesCents?: number }) {
     const id = randomUUID(), line = randomUUID();
+    const paid=input.paid ?? input.status!=="draft";
     orders.push(id);
     await sql`INSERT INTO ordering_orders(id,business,source,order_origin,customer_id,status,payment_status,service_type,display_number,created_by,subtotal_cents,total_cents,amount_due_cents,caller_phone,scheduled_for,created_at) VALUES(${id},'Corner Deli',${input.source},${input.origin},${customerId},${input.status || "sent_to_kitchen"},${input.paid ? "paid" : "unpaid"},'pickup',${`PTS-${id.slice(0, 8)}`},'validator',${input.cents},${input.cents},${input.cents},${input.caller || ""},${input.at},${input.at})`;
     await sql`INSERT INTO ordering_order_items(id,order_id,item_id,variant_id,item_name_snapshot,quantity,unit_price_cents,line_total_cents,sort_order) VALUES(${line},${id},${input.jumbo ? jumbo.item_id : fries.id},${input.jumbo ? jumbo.id : null},'Points fixture',1,${input.cents},${input.cents},0)`;
@@ -41,6 +42,7 @@ async function main() {
       await sql`INSERT INTO ordering_order_promotion_applications(id,order_id,promotion_id,promotion_version,application_sequence,label_snapshot,configuration_snapshot,normal_base_subtotal_cents,resulting_base_subtotal_cents,discount_cents) VALUES(${app},${id},${promotion.id},1,1,'Fixture promo','{}'::jsonb,${input.cents},${input.cents - 100},100)`;
       await sql`INSERT INTO ordering_order_promotion_allocations(id,application_id,order_item_id,consumed_quantity,normal_base_cents,discount_cents) VALUES(${randomUUID()},${app},${line},1,${input.cents},100)`;
     }
+    await sql`UPDATE ordering_orders SET subtotal_cents=${input.cents+(input.friesCents||0)},total_cents=${input.cents+(input.friesCents||0)},paid_cents=${paid?input.cents+(input.friesCents||0):0},amount_due_cents=${paid?0:input.cents+(input.friesCents||0)},payment_status=${paid?"paid":"unpaid"} WHERE id=${id}`;
     return { id, line };
   }
   const earned = async (orderId: string) => Number((await sql`SELECT COALESCE(SUM(points),0) points FROM ordering_points_ledger WHERE order_id=${orderId} AND entry_type='earn'`)[0].points);
@@ -65,10 +67,10 @@ async function main() {
     const aiBlocked = await order({ source: "ai_phone", origin: "ai", cents: 1000, at: wednesday });
     for (const row of [aiMatch, aiOther, aiBlocked]) await points.earnPointsForOrder(row.id, staff);
     check((await earned(aiMatch.id)) === 10 && (await earned(aiOther.id)) === 0 && (await earned(aiBlocked.id)) === 0, "AI phone should earn only for the caller-ID account.");
-    const staffPhone = await order({ source: "pos", origin: "phone", cents: 1000, at: wednesday });
+    const staffPhone = await order({ source: "pos", origin: "phone", cents: 1000, at: wednesday, paid:false });
     await points.earnPointsForOrder(staffPhone.id, staff);
     check((await earned(staffPhone.id)) === 0, "Unpaid staff phone order must not earn.");
-    await sql`UPDATE ordering_orders SET payment_status='paid',status='completed' WHERE id=${staffPhone.id}`;
+    await sql`UPDATE ordering_orders SET payment_status='paid',status='completed',paid_cents=total_cents,amount_due_cents=0 WHERE id=${staffPhone.id}`;
     await points.earnPointsForOrder(staffPhone.id, staff);
     check((await earned(staffPhone.id)) === 10, "Paid staff phone order should earn.");
     const promoted = await order({ source: "web", origin: "web", cents: 1500, at: wednesday, promoted: true });

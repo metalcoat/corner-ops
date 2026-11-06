@@ -6,6 +6,7 @@ import { calculateLineTotalCents, validateModifierRequirements } from "@/lib/ord
 import { ensureOrderingMenuOverrideSchema } from "@/lib/ordering-menu-overrides";
 import { normalizePizzaToppings, pizzaToppingPriceCents, type PizzaToppingSelection } from "@/lib/ordering-pizza-toppings";
 import { ensureOrderingCustomerSchema } from "@/lib/ordering-customer-schema";
+import type { ResolvedItemVariant } from "@/lib/ordering-variant-pricing";
 
 export type ConfiguredOrderItemInput = {
   itemId: string;
@@ -112,7 +113,7 @@ async function nextOrderNumber(business: OrderingBusiness): Promise<string> {
   return String(rows[0].value);
 }
 
-export async function addConfiguredItem(orderId: string, business: OrderingBusiness, input: ConfiguredOrderItemInput): Promise<string> {
+export async function addConfiguredItem(orderId: string, business: OrderingBusiness, input: ConfiguredOrderItemInput, variant?: ResolvedItemVariant): Promise<string> {
   await ensureOrderingMenuOverrideSchema();
   const sql = getSql();
   const quantity = positiveQuantity(input.quantity);
@@ -200,7 +201,7 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
     optionId: string;
     groupName: string;
     optionName: string;
-    state: "selected" | "removed"|"declined_included";
+    state: "selected" | "extra" | "removed"|"declined_included";
     priceDeltaCents: number;
     quantity: number;
     pizzaToppingPortion: string | null;
@@ -223,16 +224,15 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
       if (!validOptionIds.has(selectedId)) throw new Error(`An invalid modifier option was supplied for ${group.name}.`);
     }
 
-    let selectedOrdinal=0;
+    let remainingAllowance = (input.modifierDeclines || []).includes(groupId) ? 0 : group.includedChoiceCount;
     for (const row of group.rows) {
       if (!row.option_id || !row.option_name) continue;
       const isSelected = selected.has(row.option_id);
       if (isSelected && !row.option_available) throw new Error(`${row.option_name} is currently unavailable.`);
       if (isSelected) {
-        selectedOrdinal+=1;
-        const delta = Number(row.price_delta_cents ?? 0);
-        const allowance=(input.modifierDeclines||[]).includes(groupId)?0:group.includedChoiceCount;
-        const chargedDelta=selectedOrdinal<=allowance?0:delta;
+        const override = variant?.modifierPrices.get(row.option_id);
+        if (override && !override.available) throw new Error("A selected modifier is not available for the chosen size or form.");
+        const delta = override?.priceDeltaCents ?? Number(row.price_delta_cents ?? 0);
         const requestedQuantity = Math.trunc(Number(modifierQuantities[row.option_id] ?? 1));
         const optionQuantity = group.allowQuantity ? requestedQuantity : 1;
         const amount = input.modifierAmounts?.[row.option_id] || "normal";
@@ -240,21 +240,26 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
         if (!Number.isSafeInteger(optionQuantity) || optionQuantity < 1 || optionQuantity > 99) {
           throw new Error(`Invalid quantity for ${row.option_name}.`);
         }
-        modifierUnitDeltaCents += chargedDelta * optionQuantity;
-        modifierSnapshots.push({
+        const includedQuantity = Math.min(remainingAllowance, optionQuantity);
+        remainingAllowance -= includedQuantity;
+        const chargedQuantity = optionQuantity - includedQuantity;
+        modifierUnitDeltaCents += delta * chargedQuantity;
+        const snapshot = {
           groupId,
           optionId: row.option_id,
           groupName: group.name,
           optionName: row.option_name,
-          state: "selected",
-          priceDeltaCents: chargedDelta,
-          quantity: optionQuantity,
+          state: "selected" as const,
+          priceDeltaCents: delta,
+          quantity: chargedQuantity,
           pizzaToppingPortion: null,
           pizzaToppingAmount: null,
           amount,
           wasDefault: Boolean(row.default_selected),
           printOnTicket: !row.default_selected || amount !== "normal" || (group.max === 1 && hasDefault && !row.default_selected),
-        });
+        };
+        if (includedQuantity) modifierSnapshots.push({ ...snapshot, priceDeltaCents: 0, quantity: includedQuantity });
+        if (chargedQuantity) modifierSnapshots.push({ ...snapshot, state: includedQuantity ? "extra" : "selected" });
       } else if (row.default_selected && !(group.max === 1 && selected.size === 1)) {
         modifierSnapshots.push({
           groupId,
@@ -279,7 +284,9 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
     const match = toppingGroups.map(([groupId, group]) => ({ groupId, group, row: group.rows.find((row) => row.option_id === topping.modifierOptionId) })).find((candidate) => candidate.row);
     if (!match?.row?.option_name) throw new Error("An invalid pizza topping was supplied.");
     if (!match.row.option_available) throw new Error(`${match.row.option_name} is currently unavailable.`);
-    const delta = pizzaToppingPriceCents(Number(match.row.price_delta_cents ?? 0), topping.portion, topping.amount);
+    const override = variant?.modifierPrices.get(topping.modifierOptionId);
+    if (override && !override.available) throw new Error("A selected modifier is not available for the chosen size or form.");
+    const delta = pizzaToppingPriceCents(override?.priceDeltaCents ?? Number(match.row.price_delta_cents ?? 0), topping.portion, topping.amount);
     modifierUnitDeltaCents += delta;
     modifierSnapshots.push({ groupId: match.groupId, optionId: topping.modifierOptionId, groupName: match.group.name, optionName: match.row.option_name, state: "selected", priceDeltaCents: delta, quantity: 1, pizzaToppingPortion: topping.portion, pizzaToppingAmount: topping.amount,amount:"normal",wasDefault:false,printOnTicket:true });
   }
@@ -365,7 +372,7 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
 
   const lineTotalCents = calculateLineTotalCents({
     quantity,
-    unitPriceCents: Number(item.base_price_cents),
+    unitPriceCents: variant?.basePriceCents ?? Number(item.base_price_cents),
     modifierUnitDeltaCents,
     comboUnitDeltaCents,
   });
@@ -374,12 +381,12 @@ export async function addConfiguredItem(orderId: string, business: OrderingBusin
     INSERT INTO ordering_order_items (
       id, order_id, item_id, item_name_snapshot, category_name_snapshot, quantity, unit_price_cents,
       modifier_total_cents, combo_name_snapshot, combo_total_cents,
-      line_total_cents, special_instructions, sort_order
+      line_total_cents, special_instructions, sort_order, variant_id, variant_name_snapshot, variant_sku_snapshot
     ) VALUES (
-      ${orderItemId}, ${orderId}, ${item.id}, ${item.name}, ${item.category_name_snapshot}, ${quantity}, ${Number(item.base_price_cents)},
+      ${orderItemId}, ${orderId}, ${item.id}, ${item.name}, ${item.category_name_snapshot}, ${quantity}, ${variant?.basePriceCents ?? Number(item.base_price_cents)},
       ${modifierUnitDeltaCents}, ${comboNameSnapshot}, ${comboUnitDeltaCents},
       ${lineTotalCents}, ${String(input.specialInstructions || "")},
-      (SELECT COUNT(*)::INTEGER FROM ordering_order_items WHERE order_id = ${orderId})
+      (SELECT COUNT(*)::INTEGER FROM ordering_order_items WHERE order_id = ${orderId}), ${variant?.variantId ?? null}, ${variant?.variantName ?? ""}, ${variant?.variantSku ?? ""}
     )
   `;
 
@@ -436,7 +443,7 @@ export async function recalculateOrder(orderId: string): Promise<void> {
   `;
 }
 
-export async function createDraftOrder(input: CreateDraftOrderInput): Promise<OrderRow> {
+export async function createDraftOrder(input: CreateDraftOrderInput, variants?: ResolvedItemVariant[]): Promise<OrderRow> {
   await ensureOrderingPosSchema();
   await ensureOrderingCustomerSchema();
   const sql = getSql();
@@ -473,7 +480,7 @@ export async function createDraftOrder(input: CreateDraftOrderInput): Promise<Or
   }
 
   try {
-    for (const item of items) await addConfiguredItem(id, input.business, item);
+    for (let index = 0; index < items.length; index += 1) await addConfiguredItem(id, input.business, items[index], variants?.[index]);
     if (items.length) await recalculateOrder(id);
     await sql`
       INSERT INTO ordering_order_events (id, order_id, order_version, event_type, actor_type, actor_id, details)

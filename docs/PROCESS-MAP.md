@@ -543,6 +543,45 @@ flowchart LR
 - Open: one tap "Open with $X", X = the amount confirmed at the last closeout; a different amount needs a note
   (audit `register_opened` records expected vs actual). Expected cash at the next close starts from that amount.
 
+## 8e. Ordering prices, checkout and rewards
+
+- Web and kiosk customers review the server-priced order before placing it, so they can apply pizza and points
+  rewards before payment. The selected fulfillment time controls menu availability. Estimates include size prices,
+  modifier quantities, included portions and combo surcharges; the server remains authoritative.
+- Included modifiers are counted by portion: one included dressing plus extra portions charges for the extras.
+  Size-specific prices are resolved before allowances, and kitchen submission rechecks the saved choices and prices.
+  Changing the amount of a topping on one pizza half preserves the other half. Tiki tabs and employee meals
+  use the same size/allowance calculation; employee meal consumption and kitchen submission commit together,
+  and inventory is depleted once.
+- Guest carts never change the login email of an existing customer matched by phone. Rewards require both the
+  authenticated customer and ownership of the current web cart.
+- Online card confirmation locks the order while recording payment and checks for a previously recorded tender
+  before considering a reversal. A charged order that cannot be sent stays visible for staff assistance, including
+  on customer retries. Changed-total reversals are claimed once; failed or interrupted reversals remain flagged
+  for staff review. The POS keeps a warning visible, blocks replacement payments, and links managers to
+  Settings → Hardware to verify an actual MX void/full refund before clearing the review. A fully rewarded $0 order goes through the same submission checks without a card charge.
+- Pizza punches and points accrue only on fully paid purchases. A pay-later order earns when its final payment is
+  recorded. Customer and order locks prevent simultaneous reward redemptions from spending the same balance;
+  discounts reserve the affected item quantities so promotions and other rewards cannot discount them again.
+  Where stacking is explicitly allowed, discounts are capped at the affected line’s remaining value.
+  Cancellations reconcile earned credit and return a cancelled line's redeemed reward once. Refund calculations
+  use that line's actual discount, so a free item cannot generate a refund of another item's payment. A partially
+  cancelled rewarded line must be cancelled in full to return its reward correctly. Full monetary refunds remove
+  earned punches and points without returning rewards spent on retained items; refunded purchases do not renew
+  points expiry. Later repayment restores only the missing earned credit.
+- The Jumbo Rush prize game issues rewards only after replaying a bounded input log against a server-derived
+  seed. A run issues one prize, codes redeem once, and only a new validated win consumes the prize quota.
+  Checkpoints and completion use transactional state checks; checkpoint progress/count, starts per IP and loss
+  statistics are bounded.
+- The staff Order Center’s **Points & Jumbo Card** button opens the linked customer’s current balances,
+  pizza-card progress, all activity for the selected order and recent reward history. The order determines
+  the customer; staff authentication and business scoping apply. Viewing this card previews points expiry
+  without changing the reward history.
+- Store-map coordinates use explicit origin settings first, otherwise the geocoded address cache in
+  `ordering_store_locations` (migration 0039). No request handler creates the table.
+- Regression commands and coverage are recorded in [the 2026-11-06 ordering audit](reviews/2026-11-06-ordering-audit.md).
+  CI runs the checkout, loyalty and pizza abuse regressions against a disposable database and sanitized menu fixture.
+
 ## 9. Guardrails for assistants
 
 - Follow `AGENTS.md`: no merging `main`, no production deploys or production data changes without the owner's

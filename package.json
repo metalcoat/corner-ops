@@ -106,7 +106,12 @@
     "mobile:ios": "cap sync ios",
     "test:ai-cart-safety": "tsx scripts/ai-cart-safety-validate.ts",
     "test:ai-payment-safety": "tsx scripts/ai-payment-safety-validate.ts",
-    "test:ai-phone-handoff": "tsx scripts/ai-phone-handoff-validate.ts"
+    "test:ai-phone-handoff": "tsx scripts/ai-phone-handoff-validate.ts",
+    "test:loyalty:regressions": "tsx scripts/loyalty-regressions-validate.ts && tsx scripts/loyalty-card-validate.ts",
+    "test:pizza-pricing:regressions": "tsx scripts/pizza-pricing-regressions-validate.ts && tsx scripts/employee-meal-regressions-validate.ts",
+    "test:pizza-game:regressions": "tsx scripts/pizza-game-regressions-validate.ts",
+    "test:customer-checkout:regressions": "tsx scripts/customer-checkout-race-validate.ts",
+    "test:ordering-audit:e2e": "playwright test tests/customer-ordering.spec.ts tests/customer-checkout-regressions.spec.ts tests/kiosk-ordering.spec.ts tests/pizza-ordering.spec.ts tests/pos-deli.spec.ts tests/deli-order-lifecycle.spec.ts tests/pos-pin-auth.spec.ts tests/pos-workspace-navigation.spec.ts tests/manager-settings-auth.spec.ts tests/driver-mobile.spec.ts tests/pizza-rush.spec.ts tests/order-loyalty-card.spec.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",

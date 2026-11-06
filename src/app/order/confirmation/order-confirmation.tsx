@@ -99,6 +99,9 @@ function currentStep(order: any, delivery: DeliveryTracker | null) {
 
 function headline(order: any, delivery: DeliveryTracker | null, step: number) {
   const driver = delivery?.driverFirstName || "Your driver";
+  if (order.status === "draft") return order.payment_status === "paid"
+    ? ["Your paid order needs a store check", "Your card was charged. The store still needs to send this order to the kitchen. Please don't pay again."]
+    : ["Your order has not been placed", "Return to online ordering to finish checkout."];
   if (order.status === "cancelled") return ["Order cancelled", "Call Corner Deli if this is a surprise."];
   if (!isDelivery(order))
     return [
@@ -192,7 +195,7 @@ export default function OrderConfirmation({ orderId }: { orderId: string }) {
         <p className="eyebrow">Order #{order.display_number}</p>
         <h1>{title}</h1>
         <p className="trackerDetail">{detail}</p>
-        {order.status !== "cancelled" && (
+        {!["draft", "cancelled"].includes(order.status) && (
           <ol className="trackerSteps" style={{ ["--steps" as string]: steps.length }}>
             {steps.map((label, index) => (
               <li key={label} className={index < step ? "done" : index === step ? "now" : ""} aria-current={index === step ? "step" : undefined}>

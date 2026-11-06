@@ -8,6 +8,7 @@ import type { OrderTrailEntry } from "@/lib/ordering-order-trail";
 import VoidMoneyPanel from "./void-money-panel";
 import OrderCarPhotos from "./order-car-photos";
 import OrderCurbside from "./order-curbside";
+import OrderLoyaltyCardButton from "./order-loyalty-card";
 import { formatOrderModifier } from "@/lib/ordering-line-format";
 import { orderPaymentState } from "@/lib/order-payment-state";
 type Order = {
@@ -450,6 +451,7 @@ export default function OrderCenterClient() {
               <b>{selected.customer_name}</b> ·{" "}
               {selected.customer_phone || "No phone"}
             </p>
+            <OrderLoyaltyCardButton key={selected.id} orderId={selected.id} orderNumber={selected.display_number} />
             <p>
               {label(selected.order_origin || selected.source)} ·{" "}
               {label(selected.service_type)} ·{" "}

@@ -14,6 +14,15 @@ export function loyaltyEarnIncrement(qualifyingUnits: number, alreadyEarnedUnits
   return { delta, earnedThroughUnits: earned + delta };
 }
 
+/** An accepted pay-later order is not yet a purchase that can fund a reward. */
+export function loyaltyEarnPaymentEligible(order: {
+  payment_status: unknown; paid_cents: unknown; total_cents: unknown; amount_due_cents: unknown;
+}) {
+  return order.payment_status === "paid"
+    && Number(order.amount_due_cents) <= 0
+    && Number(order.paid_cents) >= Number(order.total_cents);
+}
+
 export type LoyaltyLineRule = { itemIds?: string[]; categoryIds?: string[]; variantIds?: string[] };
 
 /** Whether an order line is one a loyalty rule names, by item, category or variant. */

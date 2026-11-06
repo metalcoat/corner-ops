@@ -119,7 +119,7 @@ test("guests can order by card without a texted code; paying at pickup needs one
   if (response.status() !== 201) return;
   const cart = (await response.json()).cart;
   // The session cookie is Secure; send it back by hand when the test runs over plain http.
-  const headers = { cookie: String(response.headers()["set-cookie"] || "").split(";")[0] };
+  const headers = { cookie: String(response.headers()["set-cookie"] || catalogResponse.headers()["set-cookie"] || "").split(";")[0] };
   const payLater = await request.post(`/api/customer/orders/${cart.id}/pay-later`, { headers });
   if (payLater.status() === 403) {
     const body = await payLater.json();
@@ -171,7 +171,7 @@ test("successful online payment redirects to a dedicated confirmation", async ({
   ).toBeVisible();
   await expect(page.getByText(/Thanks, Jamie!/)).toBeVisible();
   await expect(page.getByText("jamie@example.com")).toBeVisible();
-  await expect(page.getByText("Total paid")).toBeVisible();
+  await expect(page.getByText("Paid", { exact: true })).toBeVisible();
 });
 
 test("customer can choose and review a half-pizza topping", async ({

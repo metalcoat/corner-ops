@@ -1,8 +1,14 @@
-import { execFileSync } from "node:child_process";
 import { loadEnvFile } from "node:process";
+import { Client } from "pg";
 import { expect, test, type Page } from "@playwright/test";
 
-loadEnvFile("/opt/corner-ops/.env");
+if (process.env.POS_TEST_ENV_FILE) loadEnvFile(process.env.POS_TEST_ENV_FILE);
+
+function isolatedDatabase() {
+  const connectionString=process.env.VALIDATION_DATABASE_URL;
+  if (!connectionString || (!/test|regression/.test(new URL(connectionString).pathname) && !(process.env.ORDERING_AUDIT_DATABASE==='1'&&process.env.CI==='true'))) throw new Error("Workspace fixtures require an explicitly isolated test database.");
+  return new Client({connectionString});
+}
 
 async function signIn(page: Page) {
   const pin = process.env.POS_TEST_ACTIVE_PIN;
@@ -14,9 +20,10 @@ async function signIn(page: Page) {
 }
 
 test("POS workspace tabs preserve the unfinished order without a document reload", async ({ page }) => {
+  isolatedDatabase(); // Validate isolation before creating any customer/order fixture.
   await signIn(page);
   const suffix = String(Date.now()).slice(-7);
-  const phone = `31555${suffix}`.slice(0, 10);
+  const phone = `315${suffix}`;
   const created = await page.evaluate(async (customerPhone) => {
     const response = await fetch("/api/ordering/customers", {
       method: "POST",
@@ -71,13 +78,27 @@ test("POS workspace tabs preserve the unfinished order without a document reload
     await expect(page.getByText(/Held order #/)).toBeVisible();
     await ordersLink.click();
     await page.locator(".ocOrder").filter({ hasText: "Workspace Navigation" }).first().click();
-    await page.getByRole("button", { name: "OPEN CHECKOUT / PAY" }).click();
-    await expect(page.getByRole("heading", { name: /Checkout · Order #/ })).toBeVisible();
-    await page.getByRole("button", { name: "BACK TO ORDERS" }).click();
+    await expect(page.getByText(/Held order #/)).toBeVisible();
+    await expect(page.getByRole("article").filter({ hasText: "Pizza Logs" })).toContainText("Shell state note");
+    await page.getByRole("button", { name: "CHECKOUT", exact: true }).click();
+    await expect(page.getByRole("heading", { name: /CHECKOUT\s+Order #/i })).toBeVisible();
+    for (const name of ["Clear payment amount", /HOUSE ACCOUNT/]) {
+      const action=page.getByRole("button",{name});
+      await action.scrollIntoViewIfNeeded();
+      expect(await action.evaluate((element)=>{const rect=element.getBoundingClientRect();return element.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2));})).toBe(true);
+    }
+    await page.getByRole("button", { name: "BACK TO ORDER", exact: true }).click();
+    await ordersLink.click();
     await expect(page.getByRole("heading", { name: "Orders", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => (window as typeof window & { __cornerOpsShellMarker?: string }).__cornerOpsShellMarker)).toBe("mounted");
   } finally {
     if (/^[0-9a-f-]{36}$/i.test(customer.customer.id)) {
-      execFileSync("docker", ["exec", "corner-ops-postgres", "psql", "-U", "cornerops", "-d", "cornerops", "-v", "ON_ERROR_STOP=1", "-c", `UPDATE ordering_orders SET customer_id=NULL WHERE customer_id='${customer.customer.id}'; DELETE FROM ordering_customers WHERE id='${customer.customer.id}' AND first_name='Workspace' AND last_name='Navigation'`]);
+      const db=isolatedDatabase(); await db.connect();
+      try {
+        await db.query("DELETE FROM ordering_print_jobs WHERE order_id IN(SELECT id FROM ordering_orders WHERE customer_id=$1)",[customer.customer.id]);
+        await db.query("DELETE FROM ordering_orders WHERE customer_id=$1",[customer.customer.id]);
+        await db.query("DELETE FROM ordering_customers WHERE id=$1 AND first_name='Workspace' AND last_name='Navigation'",[customer.customer.id]);
+      } finally { await db.end(); }
     }
   }
 });
@@ -94,7 +115,10 @@ test("persistent workspace navigation stays compact across POS viewports", async
     const nav = page.getByRole("navigation", { name: "Corner Deli POS workspaces" });
     await expect(nav).toBeVisible();
     for (const label of ["Menu", "Customers", "Kitchen"]) {
-      await expect(nav.getByRole("link", { name: new RegExp(label) })).toBeVisible();
+      const link=nav.getByRole("link", { name: new RegExp(label) });
+      await expect(link).toBeVisible();
+      await link.scrollIntoViewIfNeeded();
+      expect(await link.evaluate((element)=>{const rect=element.getBoundingClientRect();return element.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2));})).toBe(true);
     }
     await expect(page.getByRole("link", { name: /orders/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /settings/i })).toBeVisible();

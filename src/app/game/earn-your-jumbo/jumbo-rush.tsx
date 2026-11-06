@@ -5,8 +5,9 @@ import { DeliManAudio } from "@/lib/games/deli-man/audio";
 import { randomComplaint } from "@/lib/games/complaints";
 import { MIN_DELIVERED, MAX_STRIKES, PizzaRush, SHIFT_SECONDS, type Stats } from "@/lib/games/pizza-rush/engine";
 import { renderRush, type Trail } from "@/lib/games/pizza-rush/render";
+import { applyRushAction, MAX_RUSH_ACTIONS, type RushAction } from "@/lib/games/pizza-rush/replay";
 
-type Run = { runId: string; token: string };
+type Run = { runId: string; token: string; seed: number };
 type Reward = { code?: string; prize_type?: string; expires_at?: string; error?: string };
 type Leader = { player_name: string; score: number | string; pizzas_made: number; perfects: number; status: string };
 type Mode = "home" | "play" | "paused" | "won" | "lost";
@@ -42,6 +43,7 @@ export default function JumboRush() {
   const chainRef = useRef<Promise<unknown>>(Promise.resolve());
   const seqRef = useRef(0);
   const validRef = useRef(true);
+  const actionsRef = useRef<RushAction[]>([]);
   const trailRef = useRef<Trail>([]);
   const pointerRef = useRef<number | null>(null);
   const [mode, setMode] = useState<Mode>("home");
@@ -55,6 +57,16 @@ export default function JumboRush() {
   const [complaint, setComplaint] = useState("");
   const [leaders, setLeaders] = useState<Leader[] | null>(null);
   const [showLeaders, setShowLeaders] = useState(false);
+  const act = useCallback((action: RushAction) => {
+    const game = gameRef.current;
+    if (!game) return;
+    // Resizing a paused shift still changes the simulation used on resume.
+    if (game.state === "play" || (game.state === "ready" && actionsRef.current.length > 0 && action[0] === 1)) {
+      if (actionsRef.current.length < MAX_RUSH_ACTIONS) actionsRef.current.push(action);
+      else validRef.current = false;
+    }
+    applyRushAction(game, action);
+  }, []);
 
   // Game loop, sizing and sound.
   useEffect(() => {
@@ -83,7 +95,7 @@ export default function JumboRush() {
       const rect = canvas.getBoundingClientRect();
       canvas.width = Math.round(rect.width * dpr);
       canvas.height = Math.round(rect.height * dpr);
-      game.resize(rect.width, rect.height);
+      act([1, Math.max(200, Math.min(1920, rect.width)), Math.max(300, Math.min(1440, rect.height))]);
     };
     fit();
     const observer = new ResizeObserver(fit);
@@ -91,7 +103,7 @@ export default function JumboRush() {
     let raf = 0;
     let last = performance.now();
     const loop = (now: number) => {
-      game.update((now - last) / 1000);
+      if (game.state === "play") act([0, Math.max(0.001, Math.min(0.05, (now - last) / 1000))]);
       last = now;
       trailRef.current = trailRef.current.filter((p) => now - p.t < 160);
       renderRush(ctx, game, trailRef.current, now, dpr);
@@ -104,7 +116,7 @@ export default function JumboRush() {
       audio.dispose();
       if (window.__jumboRush === game) delete window.__jumboRush;
     };
-  }, []);
+  }, [act]);
 
   useEffect(() => {
     audioRef.current?.setMuted(muted);
@@ -119,6 +131,8 @@ export default function JumboRush() {
   useEffect(() => {
     const pause = () => {
       if (gameRef.current?.state === "play" && mode === "play") {
+        act([4]);
+        pointerRef.current = null;
         gameRef.current.state = "ready";
         setMode("paused");
         audioRef.current?.stopMusic();
@@ -131,7 +145,7 @@ export default function JumboRush() {
       window.removeEventListener("blur", pause);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [mode]);
+  }, [mode, act]);
 
   const send = useCallback((body: Record<string, unknown>) => {
     const next = chainRef.current.then(() => post(body)).catch((error) => {
@@ -192,11 +206,16 @@ export default function JumboRush() {
         setReward({ error: `SLICE AT LEAST ${MIN_DELIVERED} PIZZAS TO EARN THE JUMBO.` });
         return;
       }
-      send({ action: "arcade_complete", runId: run.runId, token: run.token, score: stats.score, delivered: stats.delivered, perfects: stats.perfects, ruined: stats.ruined })
+      if (!validRef.current) {
+        setReward({ error: "THE SHIFT COULDN'T BE VALIDATED. PLEASE START A NEW SHIFT." });
+        return;
+      }
+      send({ action: "arcade_complete", runId: run.runId, token: run.token, score: stats.score, delivered: stats.delivered, perfects: stats.perfects, ruined: stats.ruined, replay: actionsRef.current.slice() })
         .then((data) => setReward(data as Reward))
         .catch((error: Error) => setReward({ error: validRef.current ? error.message : "THE SHIFT COULDN'T BE VALIDATED (CONNECTION DROPPED)." }));
     };
-    game.start();
+    actionsRef.current = [[1, game.W, game.H]];
+    game.start(runRef.current?.seed);
     trailRef.current = [];
     audio.play("stage4");
     setMode("play");
@@ -224,10 +243,11 @@ export default function JumboRush() {
   // Swipes.
   const toLocal = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const game = gameRef.current!;
+    return { x: Math.max(-3 * game.W, Math.min(3 * game.W, (event.clientX - rect.left) * game.W / rect.width)), y: Math.max(-3 * game.H, Math.min(3 * game.H, (event.clientY - rect.top) * game.H / rect.height)) };
   };
   const onDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (mode !== "play") return;
+    if (mode !== "play" || pointerRef.current !== null) return;
     event.preventDefault();
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -236,11 +256,11 @@ export default function JumboRush() {
     }
     pointerRef.current = event.pointerId;
     const p = toLocal(event);
-    gameRef.current?.beginStroke(p.x, p.y);
+    act([2, p.x, p.y]);
     trailRef.current = [{ ...p, t: performance.now() }];
   };
   const onMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (pointerRef.current !== event.pointerId) return;
+    if (mode !== "play" || pointerRef.current !== event.pointerId) return;
     const game = gameRef.current!;
     const now = performance.now();
     // Use every coalesced point so fast swipes don't skip over a pizza.
@@ -248,15 +268,15 @@ export default function JumboRush() {
     const points = typeof native.getCoalescedEvents === "function" ? native.getCoalescedEvents() : [];
     const rect = event.currentTarget.getBoundingClientRect();
     for (const e of points.length ? points : [native]) {
-      const p = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      game.swipeTo(p.x, p.y);
+      const p = { x: Math.max(-3 * game.W, Math.min(3 * game.W, (e.clientX - rect.left) * game.W / rect.width)), y: Math.max(-3 * game.H, Math.min(3 * game.H, (e.clientY - rect.top) * game.H / rect.height)) };
+      act([3, p.x, p.y]);
       trailRef.current.push({ ...p, t: now });
     }
   };
   const onUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (pointerRef.current !== event.pointerId) return;
     pointerRef.current = null;
-    gameRef.current?.endStroke();
+    if (gameRef.current?.state === "play") act([4]);
   };
 
   return (

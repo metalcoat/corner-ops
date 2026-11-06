@@ -196,7 +196,9 @@ export async function POST(request: Request) {
         email,
       });
       customerId = String(created.customer.id);
-      await sql`UPDATE ordering_customers SET email=CASE WHEN email='' THEN ${email} ELSE email END WHERE id=${customerId}`;
+      // createCustomer sets email only while creating a new record under its
+      // phone lock. A guest knowing an existing customer's phone must never
+      // attach their email to that account: email is a sign-in identity.
     }
     const cartItems = items(body.items);
     await assertItemsShownOnWebsite(cartItems.map((item) => item.itemId));

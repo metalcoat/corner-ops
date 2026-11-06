@@ -1,8 +1,7 @@
 import { clientIp, consumeRateLimit } from "@/lib/rate-limit";
 import { RateLimitError } from "@/lib/http";
 
-// Scores come from the player's browser, so prize codes are capped: a few winning
-// runs per visitor per day, and a daily limit for the whole game.
+// Only successfully replayed new wins consume the prize budget.
 async function limitPrizes(request: Request, game: string) {
   await consumeRateLimit([
     { scope: `${game}-prize`, discriminator: `ip:${clientIp(request)}`, maxFailures: 2, windowSeconds: 86_400, blockSeconds: 86_400 },
@@ -18,21 +17,37 @@ import {
   startRun,
 } from "@/lib/pizza-gauntlet/server";
 import type { RunCheckpoint } from "@/lib/pizza-gauntlet/types";
+import { MAX_RUSH_BODY_BYTES } from "@/lib/games/pizza-rush/replay";
 export const runtime = "nodejs";
 export async function POST(request: Request) {
+  let action = "";
   try {
-    const body = (await request.json()) as Record<string, unknown>,
-      action = String(body.action || "start");
-    if (action === "start")
+    const reader = request.body?.getReader(), decoder = new TextDecoder();
+    let raw = "", bytes = 0;
+    if (reader) while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_RUSH_BODY_BYTES) {
+        await reader.cancel();
+        return Response.json({ error: "Gameplay replay is too large." }, { status: 413 });
+      }
+      raw += decoder.decode(value, { stream: true });
+    }
+    raw += decoder.decode();
+    const body = JSON.parse(raw) as Record<string, unknown>;
+    action = String(body.action || "start");
+    if (action === "start") {
+      await consumeRateLimit([{ scope: "pizza-gauntlet-start", discriminator: `ip:${clientIp(request)}`, maxFailures: 60, windowSeconds: 900, blockSeconds: 60 }]);
       return Response.json(await startRun(String(body.playerName || "")), {
         status: 201,
       });
+    }
     const token = String(body.token || "");
     if (action === "checkpoint")
       return Response.json(
         await checkpointRun(body.checkpoint as RunCheckpoint, token),
       );
-    if (action === "complete") await limitPrizes(request, "pizza-gauntlet");
     if (action === "complete")
       return Response.json(await completeRun(String(body.runId || ""), token));
     if (action === "arcade_checkpoint")
@@ -50,7 +65,6 @@ export async function POST(request: Request) {
           token,
         ),
       );
-    if (action === "arcade_complete") await limitPrizes(request, "pizza-gauntlet");
     if (action === "arcade_complete")
       return Response.json(
         await completeArcadeRun(
@@ -60,8 +74,10 @@ export async function POST(request: Request) {
             delivered: Number(body.delivered),
             perfects: Number(body.perfects),
             ruined: Number(body.ruined),
+            replay: body.replay,
           },
           token,
+          () => limitPrizes(request, "pizza-gauntlet"),
         ),
       );
     if (action === "arcade_loss")
@@ -80,7 +96,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unknown action." }, { status: 400 });
   } catch (error) {
     if (error instanceof RateLimitError)
-      return Response.json({ error: "That's the most prizes allowed today. Come back tomorrow!" }, { status: 429 });
+      return Response.json({ error: action === "start" ? "Too many new shifts. Please wait a few minutes before clocking in again." : "That's the most prizes allowed today. Come back tomorrow!" }, { status: 429 });
     return Response.json(
       { error: error instanceof Error ? error.message : "Run update failed." },
       { status: 409 },

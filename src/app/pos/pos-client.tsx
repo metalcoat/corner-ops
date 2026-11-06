@@ -1661,25 +1661,27 @@ export default function PosClient({
                         };
                       });
                   const selected = line.modifierSelections[group.id] || [];
+                  let includedRemaining = line.modifierDeclines.includes(group.id) ? 0 : group.includedChoiceCount;
                   return group.options
                     .filter((option) => selected.includes(option.id))
-                    .map((option, index) => ({
+                    .flatMap((option) => {
+                      const quantity = group.allowOptionQuantity ? Math.max(1, line.modifierQuantities[option.id] || 1) : 1;
+                      const included = Math.min(includedRemaining, quantity);
+                      includedRemaining -= included;
+                      const modifier = {
                       groupId: group.id,
                       optionId: option.id,
-                      priceCents:
-                        group.includedChoiceCount > index &&
-                        !line.modifierDeclines.includes(group.id)
-                          ? 0
-                          : variantOptionPrice(variant, option),
-                      quantity: group.allowOptionQuantity
-                        ? Math.max(1, line.modifierQuantities[option.id] || 1)
-                        : 1,
                       intensity:
                         (line.modifierAmounts[option.id] || "normal") ===
                         "normal"
                           ? "regular"
                           : line.modifierAmounts[option.id],
-                    }));
+                      };
+                      return [
+                        ...(included ? [{ ...modifier, priceCents: 0, quantity: included }] : []),
+                        ...(quantity > included ? [{ ...modifier, priceCents: variantOptionPrice(variant, option), quantity: quantity - included }] : []),
+                      ];
+                    });
                 }) || [];
               return {
                 lineId: line.id,
@@ -1764,26 +1766,20 @@ export default function PosClient({
           message: `Choose ${group.minSelections === group.maxSelections ? group.minSelections : `${group.minSelections}-${group.maxSelections}`} ${group.prompt || group.name}`,
         });
       }
+      let includedRemaining = modifierDeclines.includes(group.id) ? 0 : group.includedChoiceCount;
       for (const option of group.options) {
         const chosen = selected.includes(option.id);
         const available = variantOptionAvailable(selectedVariant, option);
         const baseDeltaCents = variantOptionPrice(selectedVariant, option);
-        const selectedOrdinal = group.options
-          .filter((candidate) => selected.includes(candidate.id))
-          .findIndex((candidate) => candidate.id === option.id);
-        const priceDeltaCents =
-          group.includedChoiceCount > 0 &&
-          !modifierDeclines.includes(group.id) &&
-          selectedOrdinal >= 0 &&
-          selectedOrdinal < group.includedChoiceCount
-            ? 0
-            : baseDeltaCents;
         if (chosen && !available) valid = false;
         if (chosen) {
           const optionQuantity = group.allowOptionQuantity
             ? Math.max(1, modifierQuantities[option.id] || 1)
             : 1;
-          unitPriceCents += priceDeltaCents * optionQuantity;
+          const included = Math.min(includedRemaining, optionQuantity);
+          includedRemaining -= included;
+          const priceDeltaCents = baseDeltaCents * (optionQuantity - included);
+          unitPriceCents += priceDeltaCents;
           if (
             !option.defaultSelected ||
             priceDeltaCents !== 0 ||
@@ -6332,22 +6328,21 @@ export default function PosClient({
                             selectedVariant,
                             option,
                           );
-                          const selectedOrdinal = group.options
-                            .filter((candidate) =>
-                              selected.includes(candidate.id),
-                            )
-                            .findIndex(
-                              (candidate) => candidate.id === option.id,
-                            );
+                          const selectedOption = selected.includes(option.id);
+                          const selectedBefore = group.options.slice(0, group.options.findIndex((candidate) => candidate.id === option.id))
+                            .filter((candidate) => selected.includes(candidate.id))
+                            .reduce((total, candidate) => total + (group.allowOptionQuantity ? Math.max(1, modifierQuantities[candidate.id] || 1) : 1), 0);
+                          const selectedUnits = group.options.filter((candidate) => selected.includes(candidate.id))
+                            .reduce((total, candidate) => total + (group.allowOptionQuantity ? Math.max(1, modifierQuantities[candidate.id] || 1) : 1), 0);
+                          const optionQuantity = group.allowOptionQuantity ? Math.max(1, modifierQuantities[option.id] || 1) : 1;
                           const priceDeltaCents =
                             group.includedChoiceCount > 0 &&
                             !modifierDeclines.includes(group.id) &&
-                            (selected.length < group.includedChoiceCount ||
-                              (selectedOrdinal >= 0 &&
-                                selectedOrdinal < group.includedChoiceCount))
+                            (selectedOption
+                              ? selectedBefore + optionQuantity <= group.includedChoiceCount
+                              : selectedUnits < group.includedChoiceCount)
                               ? 0
                               : baseDeltaCents;
-                          const selectedOption = selected.includes(option.id);
                           return (
                             <div className="posModifierChoice" key={option.id}>
                               <button

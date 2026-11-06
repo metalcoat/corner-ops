@@ -45,6 +45,7 @@ type Group = {
   minSelections: number;
   maxSelections: number;
   allowOptionQuantity: boolean;
+  includedChoiceCount?: number;
   presentationBehavior: "standard" | "pizza_topping";
   supportsIntensity?: boolean;
   presentationContext?: "ordinary" | "combo_trigger" | "dependent";
@@ -185,6 +186,10 @@ const money = (c: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
     c / 100,
   );
+function startingPrice(item: Item) {
+  const prices = item.variants.filter((variant) => variant.available).map((variant) => variant.basePriceCents);
+  return prices.length ? Math.min(...prices) : item.basePriceCents;
+}
 async function failure(response: Response) {
   const body = await response.json().catch(() => ({}));
   return body.error || "Something went wrong.";
@@ -320,46 +325,55 @@ export default function CustomerOrder() {
   );
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/customer/catalog?serviceType=${serviceType}`, {
+    const controller = new AbortController();
+    const params = new URLSearchParams({ serviceType });
+    if (timing === "future" && scheduledFor) params.set("scheduledFor", scheduledFor);
+    fetch(`/api/customer/catalog?${params}`, {
       cache: "no-store",
+      signal: controller.signal,
     })
       .then(async (r) => {
         if (!r.ok) throw new Error(await failure(r));
         return r.json();
       })
       .then((value) => {
+        if (controller.signal.aborted) return;
         setCatalog(value);
         if (value.customer?.profile) {
-          setFirstName(value.customer.profile.firstName || "");
-          setLastName(value.customer.profile.lastName || "");
-          setEmail(value.customer.profile.email || "");
-          setPhone(value.customer.profile.phone || "");
+          setFirstName((current) => current || value.customer.profile.firstName || "");
+          setLastName((current) => current || value.customer.profile.lastName || "");
+          setEmail((current) => current || value.customer.profile.email || "");
+          setPhone((current) => current || value.customer.profile.phone || "");
         }
         const defaultAddress =
           value.customer?.addresses?.find((address: any) => address.primary) ||
           value.customer?.addresses?.[0];
-        if (serviceType === "delivery" && defaultAddress) {
+        if (serviceType === "delivery" && defaultAddress && !savedAddressId && !deliveryAddress) {
           setSavedAddressId(defaultAddress.id);
           setDeliveryAddress(defaultAddress.formattedAddress);
           setDeliveryUnit(defaultAddress.line2 || "");
           setAddingAddress(false);
         }
       })
-      .catch((e) => setMessage(e.message))
-      .finally(() => setLoading(false));
-  }, [serviceType]);
+      .catch((e) => { if (!controller.signal.aborted) setMessage(e.message); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [serviceType, timing, scheduledFor]);
+  useEffect(() => { setScheduledFor(""); }, [serviceType]);
   useEffect(() => {
+    setSlots([]);
     if (timing !== "future" || !date) {
-      setSlots([]);
       return;
     }
+    const controller = new AbortController();
     fetch(
       `/api/customer/availability?serviceType=${serviceType}&date=${date}`,
-      { cache: "no-store" },
+      { cache: "no-store", signal: controller.signal },
     )
       .then((r) => r.json())
-      .then((body) => setSlots(body.slots || []))
-      .catch(() => setSlots([]));
+      .then((body) => { if (!controller.signal.aborted) setSlots(body.slots || []); })
+      .catch(() => { if (!controller.signal.aborted) setSlots([]); });
+    return () => controller.abort();
   }, [date, serviceType, timing]);
   useEffect(() => {
     if (
@@ -464,11 +478,18 @@ export default function CustomerOrder() {
   const estimated = cart.reduce((sum, line) => {
     const variant = line.item.variants.find((v) => v.id === line.variantId),
       mods = line.item.modifiers
-        .flatMap((g) => g.options)
-        .filter((o) =>
-          Object.values(line.modifierSelections).flat().includes(o.id),
-        )
-        .reduce((s, o) => s + o.priceDeltaCents, 0),
+        .filter((group) => group.presentationBehavior !== "pizza_topping")
+        .reduce((total, group) => {
+          const selected = line.modifierSelections[group.id] || [];
+          let allowance = line.modifierDeclines.includes(group.id) ? 0 : (group.includedChoiceCount || 0);
+          return total + group.options.filter((option) => selected.includes(option.id)).reduce((amount, option) => {
+            const quantity = group.allowOptionQuantity ? selected.filter((id) => id === option.id).length : 1;
+            const included = Math.min(allowance, quantity);
+            allowance -= included;
+            const price = variant?.modifierPrices.find((value) => value.optionId === option.id)?.priceDeltaCents ?? option.priceDeltaCents;
+            return amount + price * (quantity - included);
+          }, 0);
+        }, 0),
       toppings = line.pizzaToppings.reduce((s, topping) => {
         const option = line.item.modifiers
           .flatMap((g) => g.options)
@@ -488,7 +509,8 @@ export default function CustomerOrder() {
         ((variant?.basePriceCents ?? line.item.basePriceCents) +
           mods +
           toppings +
-          (combo?.basePriceDeltaCents || 0))
+          (combo?.basePriceDeltaCents || 0) +
+          (combo?.groups.reduce((total, group) => total + group.options.filter((option) => (line.comboSelections[group.id] || []).includes(option.id)).reduce((amount, option) => amount + option.priceDeltaCents, 0), 0) || 0))
     );
   }, 0);
   useEffect(() => {
@@ -562,6 +584,7 @@ export default function CustomerOrder() {
             variantId: line.variantId,
             quantity: line.quantity,
             modifierSelections: line.modifierSelections,
+            modifierQuantities: Object.values(line.modifierSelections).flat().reduce<Record<string, number>>((counts, id) => { counts[id] = (counts[id] || 0) + 1; return counts; }, {}),
             modifierDeclines: line.modifierDeclines,
             modifierAmounts: line.modifierAmounts,
             pizzaToppings: line.pizzaToppings,
@@ -605,7 +628,6 @@ export default function CustomerOrder() {
       setReview(priced);
       setRewardApplied(false);
       setPointsUsed([]);
-      setPaymentChoice(null);
       return priced;
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Could not price the order.");
@@ -616,8 +638,8 @@ export default function CustomerOrder() {
   }
   async function completePlaceOrder() {
     if (!paymentChoice || busy) return;
-    const priced = review || (await price());
-    if (!priced) return;
+    if (!review) { await price(); return; }
+    const priced = review;
     if (paymentChoice === "card") await payWithMx(priced);
     if (paymentChoice?.startsWith("saved:")) await payWithSavedCard(priced, paymentChoice.slice(6));
     if (paymentChoice === "pickup") await submitPayLater(priced);
@@ -651,6 +673,10 @@ export default function CustomerOrder() {
       setPhoneTestCode("");
       setPhoneVerified(true);
       setCatalog(current=>current?{...current,customer:{...current.customer,authenticated:true}}:current);
+      const params = new URLSearchParams({ serviceType });
+      if (timing === "future" && scheduledFor) params.set("scheduledFor", scheduledFor);
+      const refreshed = await fetch(`/api/customer/catalog?${params}`, { cache: "no-store" });
+      if (refreshed.ok) setCatalog(await refreshed.json());
       setPhoneVerifyOpen(false);
       setPhoneVerifySent(false);
       setPhoneVerifyCode("");
@@ -738,7 +764,7 @@ export default function CustomerOrder() {
       }
       if (!response.ok)
         throw new Error(body.error || "Could not start secure checkout.");
-      if (body.recovered) {
+      if (body.recovered || body.noPaymentRequired) {
         // An earlier attempt was approved but its confirmation never arrived.
         setReview(null);
         setCart([]);
@@ -1036,14 +1062,7 @@ export default function CustomerOrder() {
                       <strong>{item.displayName}</strong>
                       <em>
                         From{" "}
-                        {money(
-                          Math.min(
-                            item.basePriceCents,
-                            ...item.variants
-                              .filter((variant) => variant.available)
-                              .map((variant) => variant.basePriceCents),
-                          ),
-                        )}
+                        {money(startingPrice(item))}
                       </em>
                     </span>
                   </button>
@@ -1080,7 +1099,7 @@ export default function CustomerOrder() {
                         {item.description && <small>{item.description}</small>}
                         <em>
                           {item.available
-                            ? `From ${money(Math.min(item.basePriceCents, ...item.variants.filter((v) => v.available).map((v) => v.basePriceCents)))}`
+                            ? `From ${money(startingPrice(item))}`
                             : "Unavailable"}
                         </em>
                       </span>
@@ -1525,6 +1544,8 @@ export default function CustomerOrder() {
               ? "Placing order…"
               : placeOrderBlocker
                 ? placeOrderBlocker
+                : !review
+                  ? "Review order"
                 : paymentChoice === "card" || paymentChoice?.startsWith("saved:")
                   ? "Place order and pay"
                   : `Place order — pay at ${serviceType === "delivery" ? "delivery" : "pickup"}`}
@@ -2072,7 +2093,7 @@ function ItemDialog({
                 item,
                 variantId,
                 quantity,
-                modifierSelections: selected,
+                modifierSelections: Object.fromEntries(visibleModifiers.map((group) => [group.id, selected[group.id] || []])),
                 modifierAmounts,
                 modifierDeclines: item.modifiers
                   .filter(

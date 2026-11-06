@@ -87,8 +87,26 @@ export default function KitchenClient() {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    fetch("/api/pos/session", { cache: "no-store" }).then((response) => response.json()).then(setSession)
-      .catch(() => setSession({ authenticated: false }));
+    let initialSessionCurrent = true;
+    const locked = () => {
+      initialSessionCurrent = false;
+      setSession({ authenticated: false });
+    };
+    const authenticated = (event: Event) => {
+      initialSessionCurrent = false;
+      const employee = (event as CustomEvent<PosEmployeeSession>).detail;
+      if (employee?.employeeId) setSession({ authenticated: true, session: employee });
+    };
+    window.addEventListener("corner-ops-pos-locked", locked);
+    window.addEventListener("corner-ops-pos-authenticated", authenticated);
+    fetch("/api/pos/session", { cache: "no-store" }).then((response) => response.json()).then((next: PosSessionView) => {
+      if (initialSessionCurrent) setSession(next);
+    }).catch(() => { if (initialSessionCurrent) setSession({ authenticated: false }); });
+    return () => {
+      initialSessionCurrent = false;
+      window.removeEventListener("corner-ops-pos-locked", locked);
+      window.removeEventListener("corner-ops-pos-authenticated", authenticated);
+    };
   }, []);
 
   const loadOrders = useCallback(async (recent = showRecent) => {
@@ -126,7 +144,7 @@ export default function KitchenClient() {
 
   // The kitchen display is a wall screen: it never idle-locks, and it must not
   // broadcast a lock or end the shared POS session, which would log out every
-  // register tab. It only locks on an explicit request from this screen.
+  // register tab. Explicit locks and shared-session lock events still hide it.
   useEffect(() => {
     const requestLock = () => {
       setSession({ authenticated: false });

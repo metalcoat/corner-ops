@@ -13,6 +13,7 @@ async function main(): Promise<void> {
   const { submitDraftOrder, listKitchenOrders } = await import("../src/lib/ordering-order-lifecycle");
   const { listWaitingOnlineOrders } = await import("../src/lib/ordering-online-alerts");
   const { releaseHeldKitchenOrders } = await import("../src/lib/ordering-auto-print");
+  const { resolveOrderingAvailability } = await import("../src/lib/ordering-availability");
   await ensureOrderingPosSchema();
   const results: Record<string, unknown> = {};
   const actor = { id: "web:hold-validation", name: "Online customer", type: "web" as const };
@@ -29,9 +30,15 @@ async function main(): Promise<void> {
         business: "Corner Deli", source: "web", serviceType: "pickup", createdBy: actor.id,
         customerFirstName: "Hold", callerPhone: "3155550178", items: [{ itemId: String(item.id), quantity: 1 }],
       });
-      // Due in 2 hours. On Halloween or Super Bowl Sunday nothing is held, and the test says so.
-      await sql`UPDATE ordering_orders SET timing_mode='future', scheduled_for=NOW()+INTERVAL '2 hours', quoted_lead_max_minutes=30 WHERE id=${draft.id}`;
-      // Needs the store to take orders for that time (run it at least 2 hours before closing).
+      // Pick a real open slot so this check also runs after closing.
+      let scheduledFor: Date | null = null;
+      for (let hours = 2; hours <= 24 * 14; hours += 1) {
+        const candidate = new Date(Date.now() + hours * 60 * 60_000);
+        const availability = await resolveOrderingAvailability({ business: "Corner Deli", serviceType: "pickup", at: candidate });
+        if (availability.orderable) { scheduledFor = candidate; break; }
+      }
+      if (!scheduledFor) throw new Error("No open pickup slot in the next 14 days for the scheduled-order fixture.");
+      await sql`UPDATE ordering_orders SET timing_mode='future', scheduled_for=${scheduledFor}, quoted_lead_max_minutes=30, sms_verified_at=NOW() WHERE id=${draft.id}`;
       await submitDraftOrder(String(draft.id), "Corner Deli", actor);
       const order = (await sql`SELECT kitchen_release_at, scheduled_for, status FROM ordering_orders WHERE id=${draft.id}`)[0];
       const holiday = !order.kitchen_release_at;

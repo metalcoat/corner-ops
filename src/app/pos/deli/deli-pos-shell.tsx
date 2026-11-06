@@ -113,11 +113,12 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
     return()=>{document.removeEventListener("pointerdown",closeOnPointer);document.removeEventListener("keydown",closeOnEscape)};
   },[statusOpen]);
 
-  async function logout() {
-    try{await fetch("/api/pos/session", { method: "DELETE" })}catch{/* Local lock still applies while offline. */}
+  function logout() {
     localStorage.removeItem("corner-ops-offline-session");
-    window.dispatchEvent(new Event("corner-ops-pos-locked"));
-    window.location.assign("/pos/deli");
+    // The mounted order screen owns locking, cookie removal, and tab broadcasts.
+    // Keep that screen mounted so switching cashiers preserves unfinished work.
+    window.dispatchEvent(new Event("corner-ops-pos-lock-request"));
+    if (!menuActive) router.push("/pos/deli");
   }
 
   async function showStatus(refreshOnly=false) {
@@ -149,7 +150,8 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
   return <div className="deliPosShell">
     {(!online||offlinePending>0||offlineMessage)&&<div className={`deliOfflineBanner ${online?"syncing":"offline"}`} role="status"><strong>{online?offlinePending?`${offlinePending} OFFLINE ORDER${offlinePending===1?"":"S"} WAITING TO SYNC`:offlineMessage:"OFFLINE — CASH ONLY"}</strong>{offlinePending>0&&online&&<button type="button" onClick={()=>void syncOfflineOrders().then(result=>{setOfflinePending(result.remaining);setOfflineMessage(result.synced?`${result.synced} order${result.synced===1?"":"s"} synced.`:result.remaining?"Sync needs attention. Tap system status for connection details.":"")})}>SYNC NOW</button>}</div>}
     {offlineConflicts.map(row=><div className="deliOfflineBanner offline" role="alert" key={row.id}><strong>OFFLINE ORDER OFF-{row.id.slice(-6).toUpperCase()}{row.amountTenderedCents!=null?` (CASH $${(row.amountTenderedCents/100).toFixed(2)})`:""} DID NOT SYNC: {row.error||"Manual review is required."}</strong><button type="button" onClick={()=>void retryOfflineOrder(row.id).then(result=>setOfflineMessage(result.synced?`${result.synced} order${result.synced===1?"":"s"} synced.`:""))}>RETRY</button><button type="button" onClick={()=>{if(window.confirm("Dismiss this offline order? It will NOT reach the kitchen or register. Ring it in again or record it manually first."))dismissOfflineOrder(row.id)}}>DISMISS</button></div>)}
-    {onlineOrderAlerts.pendingOnlineOrders>0&&<div className="deliOfflineBanner" role="alert"><strong>{onlineOrderAlerts.pendingOnlineOrders} NEW ONLINE ORDER{onlineOrderAlerts.pendingOnlineOrders===1?"":"S"} IN THE KITCHEN</strong><button type="button" onClick={onlineOrderAlerts.acknowledgeOnlineOrders}>ACKNOWLEDGE</button></div>}
+    {onlineOrderAlerts.pendingOnlineOrders>0&&<div className="deliOfflineBanner" role="alert"><strong>{onlineOrderAlerts.pendingOnlineOrders} ONLINE ORDER{onlineOrderAlerts.pendingOnlineOrders===1?"":"S"} NEED ATTENTION</strong><button type="button" onClick={onlineOrderAlerts.acknowledgeOnlineOrders}>ACKNOWLEDGE</button></div>}
+    {onlineOrderAlerts.paymentReviews.map(review=><div className="deliOfflineBanner offline" role="alert" key={review.id}><strong>ONLINE PAYMENT NEEDS A MANAGER CHECK · ORDER #{review.display_number}{review.provider_transaction_reference?` · MX ${review.provider_transaction_reference}`:""}</strong><Link href="/pos/deli/settings/hardware#card-payment-reviews">VERIFY IN MX / REVIEW PAYMENT</Link></div>)}
     {onlineOrderAlerts.soundBlocked&&<button type="button" className="deliOfflineBanner offline deliSoundPrompt">{/* Any tap unlocks audio through the alert hook's pointerdown listener. */}<strong>NEW-ORDER SOUND IS OFF — TAP HERE TO ENABLE IT</strong></button>}
     {session?.authenticated && <CurbsideWaitingBanner />}
     {androidUpdateUrl ? <a className="deliAndroidUpdate" href={androidUpdateUrl}>ANDROID POS UPDATE AVAILABLE — DOWNLOAD</a> : null}
