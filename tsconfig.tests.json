@@ -54,6 +54,7 @@
     "src/lib/ordering-house-account-rules.ts",
     "src/lib/delivery-street-router.ts",
     "src/lib/complex-buildings.ts",
+    "src/lib/ordering-employee-drink-rules.ts",
     "src/lib/games/rampage/*.ts",
     "src/lib/games/sub-mission/*.ts",
     "src/lib/games/pizza-rush/engine.ts",

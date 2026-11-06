@@ -787,6 +787,15 @@ export default function PosClient({
   const [employeeMealBreakAcknowledged, setEmployeeMealBreakAcknowledged] = useState(false);
   const [employeeMealSelecting, setEmployeeMealSelecting] = useState(false);
   const [employeeMealEligible, setEmployeeMealEligible] = useState(false);
+  type EmployeeDrinkSize = { key: string; label: string; priceCents: number; items: Array<{ itemId: string; name: string; menuPriceCents: number }> };
+  const [employeeDrinkOpen, setEmployeeDrinkOpen] = useState(false);
+  const [employeeDrinkSizes, setEmployeeDrinkSizes] = useState<EmployeeDrinkSize[]>([]);
+  const [employeeDrinkCounts, setEmployeeDrinkCounts] = useState<Record<string, number>>({});
+  const [employeeDrinkBusy, setEmployeeDrinkBusy] = useState(false);
+  const [employeeDrinkMessage, setEmployeeDrinkMessage] = useState("");
+  const employeeDrinkTotalCents = employeeDrinkSizes.reduce((sum, size) => sum + size.items.reduce((inner, item) => inner + (employeeDrinkCounts[item.itemId] || 0) * size.priceCents, 0), 0);
+  async function openEmployeeDrinks(){setEmployeeDrinkMessage("");setEmployeeDrinkCounts({});setEmployeeDrinkOpen(true);try{const response=await fetch("/api/ordering/employee-drinks",{cache:"no-store"}),payload=await response.json() as {sizes?:EmployeeDrinkSize[];error?:string};if(!response.ok||!payload.sizes)throw new Error(payload.error||"Employee drinks could not be loaded.");setEmployeeDrinkSizes(payload.sizes);}catch(error){setEmployeeDrinkMessage(error instanceof Error?error.message:"Employee drinks could not be loaded.");}}
+  async function submitEmployeeDrinks(){if(employeeDrinkBusy||!employeeDrinkTotalCents)return;setEmployeeDrinkBusy(true);setEmployeeDrinkMessage("");try{const lines=Object.entries(employeeDrinkCounts).filter(([,quantity])=>quantity>0).map(([itemId,quantity])=>({itemId,quantity}));const response=await fetch("/api/ordering/employee-drinks",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({lines})}),payload=await response.json() as {error?:string;orderId?:string;displayNumber?:string;menuTotalCents?:number;employeeTotalCents?:number};if(!response.ok||!payload.orderId||!payload.displayNumber)throw new Error(payload.error||"Employee drinks could not be rung up.");const totalCents=Number(payload.employeeTotalCents||0);const draft:SavedDraft={id:payload.orderId,displayNumber:payload.displayNumber,totalCents,deliveryFeeCents:0,timingMessage:"Employee drinks at cost",kitchenTimingLabel:"EMPLOYEE DRINK",scheduledFor:null,promotions:[{label:"Employee drink price",discountCents:Math.max(0,Number(payload.menuTotalCents||0)-totalCents)}],orderItemIds:[],loyalty:[],checkoutOnly:true};setEmployeeDrinkOpen(false);setEmployeeDrinkCounts({});setSavedDraft(draft);await openCheckout(draft);}catch(error){setEmployeeDrinkMessage(error instanceof Error?error.message:"Employee drinks could not be rung up.");}finally{setEmployeeDrinkBusy(false);}}
   async function openEmployeeMeal(){setEmployeeMealMessage("");try{const response=await fetch("/api/ordering/employee-meals",{cache:"no-store"}),payload=await response.json() as {eligible?:boolean;error?:string};if(!response.ok)throw new Error(payload.error||"Employee meal eligibility could not be checked.");setEmployeeMealEligible(Boolean(payload.eligible));setEmployeeMealMessage(payload.eligible?"":payload.error||"This employee is not eligible for another meal today.");setEmployeeMealOpen(true);}catch(error){setEmployeeMealEligible(false);setEmployeeMealMessage(error instanceof Error?error.message:"Employee meal eligibility could not be checked.");setEmployeeMealOpen(true);}}
   useEffect(() => {
     const open = () => { void openEmployeeMeal(); };
@@ -4043,6 +4052,7 @@ export default function PosClient({
               <span className="posEmployeeName">{posEmployee.name}</span>
             )}
             {business === "Corner Deli" && posEmployee && <button type="button" className="posEmployeeMealButton" onClick={()=>void openEmployeeMeal()}>MEAL</button>}
+            {business === "Corner Deli" && posEmployee && <button type="button" className="posEmployeeMealButton posEmployeeDrinkButton" onClick={()=>void openEmployeeDrinks()}>DRINK</button>}
             {config.utilities.map((utility) =>
               business === "Corner Deli" && utility === "orders" ? (
                 <a key={utility} href="/pos/deli/orders">
@@ -6017,6 +6027,18 @@ export default function PosClient({
             <button type="button" autoFocus onClick={acknowledgeCashSettlement}>
               CHANGE GIVEN · FINISH
             </button>
+          </section>
+        </div>
+      )}
+      {employeeDrinkOpen && (
+        <div className="posModalBackdrop posTopModalBackdrop" role="presentation" onMouseDown={(event)=>{if(event.target===event.currentTarget)setEmployeeDrinkOpen(false)}}>
+          <section className="posEmployeeMealDialog posEmployeeDrinkDialog" role="dialog" aria-modal="true" aria-labelledby="employee-drink-title">
+            <header><div><small>PIN EMPLOYEE · {posEmployee?.name}</small><h2 id="employee-drink-title">Employee drinks at cost</h2></div><button type="button" onClick={()=>setEmployeeDrinkOpen(false)}>CLOSE</button></header>
+            <p>For the signed-in employee only. Price is cost plus deposit and tax, rounded up to the next quarter. Tap a drink to add it; checkout opens for payment.</p>
+            <div className="posEmployeeDrinkSizes">{employeeDrinkSizes.map(size=><div key={size.key}><h3>{size.label} · {money(size.priceCents)} each</h3><div className="posEmployeeMealItems">{size.items.map(item=>{const count=employeeDrinkCounts[item.itemId]||0;return <button type="button" key={item.itemId} className={count?"active":""} onClick={()=>setEmployeeDrinkCounts(current=>({...current,[item.itemId]:Math.min(6,(current[item.itemId]||0)+1)}))}>{count?`${count}× `:""}{item.name}</button>})}</div></div>)}</div>
+            <div className="posEmployeeDrinkChosen">{employeeDrinkSizes.flatMap(size=>size.items.filter(item=>employeeDrinkCounts[item.itemId]).map(item=><span key={item.itemId}>{employeeDrinkCounts[item.itemId]}× {item.name} <button type="button" aria-label={`Remove one ${item.name}`} onClick={()=>setEmployeeDrinkCounts(current=>({...current,[item.itemId]:Math.max(0,(current[item.itemId]||0)-1)}))}>−</button></span>))}</div>
+            {employeeDrinkMessage&&<div className="posCheckoutInlineError" role="status">{employeeDrinkMessage}</div>}
+            <footer><button type="button" disabled={!employeeDrinkTotalCents||employeeDrinkBusy} onClick={()=>setEmployeeDrinkCounts({})}>CLEAR</button><button type="button" className="primary" disabled={!employeeDrinkTotalCents||employeeDrinkBusy} onClick={()=>void submitEmployeeDrinks()}>{employeeDrinkBusy?"RINGING UP…":`CHARGE ${money(employeeDrinkTotalCents)}`}</button></footer>
           </section>
         </div>
       )}
