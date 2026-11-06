@@ -353,8 +353,15 @@ SECOND_OPINION_URL=os.environ.get("VOICE_PAYMENT_SECOND_OPINION_URL") or (
     "http://127.0.0.1:18090/v1/chat/completions" if os.environ.get("VOICE_PAYMENT_SECOND_OPINION","").lower()=="true" else "")
 SECOND_OPINION_TIMEOUT=float(os.environ.get("VOICE_PAYMENT_SECOND_OPINION_TIMEOUT","4"))
 
-def second_opinion(accept):
-    """The second recognizer's reading of the answer just heard, as digits, or "" when it has none."""
+DIGIT_WORDS_GRAMMAR=" | ".join(f'"{word}"' for word in ["zero","oh","one","two","three","four","five","six","seven","eight","nine"])
+
+def digits_grammar(count):
+    """llama.cpp grammar: exactly `count` digit words, so the second opinion can't answer anything else."""
+    return f'root ::= d{" sep d"*(count-1)} "."?\nd ::= ({DIGIT_WORDS_GRAMMAR})\nsep ::= ", " | " "\n'
+
+def second_opinion(accept,count=None):
+    """The second recognizer's reading of the answer just heard, as digits, or "" when it has none.
+    With count, it may only answer exactly that many digit words."""
     audio=b"".join(LAST_LISTEN.get("audio") or [])
     if not SECOND_OPINION_URL or not audio:return ""
     import base64,io,wave
@@ -364,6 +371,7 @@ def second_opinion(accept):
     body={"messages":[{"role":"system","content":"Perform ASR in English."},{"role":"user","content":[
         {"type":"input_audio","input_audio":{"data":base64.b64encode(buffer.getvalue()).decode(),"format":"wav"}}]}],
         "temperature":0,"max_tokens":60}
+    if count:body["grammar"]=digits_grammar(count)
     try:
         request=urllib.request.Request(SECOND_OPINION_URL,data=json.dumps(body).encode(),headers={"content-type":"application/json"},method="POST")
         with urllib.request.urlopen(request,timeout=SECOND_OPINION_TIMEOUT) as response:
@@ -375,14 +383,14 @@ def second_opinion(accept):
     digits=words_to_digits(re.sub(r"[^a-z0-9 ]"," ",text.lower())) or ""
     return digits if accept(digits) else ""
 
-def checked(how,value,accept,step):
+def checked(how,value,accept,step,count=None):
     """Vosk's answer against the second opinion. Agreement (or no second opinion) keeps Vosk's; two different
     readings trust neither, so it's asked again; no Vosk answer takes the second opinion's valid one. Logs only
     which of those happened."""
     # Speech that Vosk turned into nothing still gets a second opinion (dev test call 2026-11-06: a clearly
     # spoken group came back empty and was never checked).
     if how=="keys" or (how=="none" and not (LAST_LISTEN.get("state") or {}).get("started")):return value
-    other=second_opinion(accept)
+    other=second_opinion(accept,count)
     outcome="off" if not SECOND_OPINION_URL else "agree" if value and other==value else "disagree" if value and other else "rescued" if other else "vosk_only" if value else "none"
     sys.stderr.write(f"VOICE_PAYMENT_SECOND_OPINION step={step} outcome={outcome}\n");sys.stderr.flush()
     if outcome=="disagree":return ""
@@ -394,12 +402,13 @@ MAX_MISSES=2
 class TooManyMisses(Exception):pass
 misses=0
 
-def miss(name):
-    """One failed answer. The first gets a short retry prompt; the second goes to staff."""
+def miss(name=None):
+    """One failed answer. The first gets a short retry prompt (or none, when the next question is the retry);
+    the second goes to staff."""
     global misses
     misses+=1
     if misses>=MAX_MISSES:raise TooManyMisses()
-    prompt(name)
+    if name:prompt(name)
 
 def card_groups(prefix):
     """How a card is read in groups: Amex 4-6-5, everything else 4-4-4-4."""
@@ -430,13 +439,15 @@ def card_in_groups():
     for index in range(4):
         sizes=card_groups(card or "4");size=sizes[index]
         group=""
-        for _ in range(3):
-            how,heard=ask(group_prompt(index,size,sum(sizes)-len(card)),NUMBER_PHRASES,19 if index==0 else size,max_seconds=12,silence_end=1.6)
+        for attempt in range(3):
+            # The retry for a group is the keypad prompt itself (still listening for speech too).
+            how,heard=ask(group_prompt(index,size,sum(sizes)-len(card)) if attempt==0 else "type-group",NUMBER_PHRASES,19 if index==0 else size,max_seconds=12,silence_end=1.6)
             if index==0 and how=="keys" and card_complete(heard):return heard  # keyed the whole number
             group=best(how,heard,as_digits,lambda value,size=size:len(value)==size)
-            group=checked(how,group,lambda value,size=size:len(value)==size,f"group{index+1}")
+            group=checked(how,group,lambda value,size=size:len(value)==size,f"group{index+1}",size)
             if len(group)==size:break
-            miss("try-again");group=""
+            # A group the line couldn't get is asked for on the keypad, which is never misheard (Chris, 2026-11-06).
+            miss();group=""
         if not group:return ""
         card+=group
         if len(card)==sum(card_groups(card)):return card if valid_luhn(card) else ""

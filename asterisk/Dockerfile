@@ -81,6 +81,7 @@ RUN chmod 0755 /usr/local/bin/corner-ops-asterisk-entrypoint /usr/local/bin/corn
       'say-expiration:What is the expiration date? You can say something like oh four, twenty eight, or type four digits.' \
       'say-security-code:And the security code on the card?' \
       'say-billing-zip:And the billing zip code?' \
+      'type-group:Sorry, I did not catch that. Please type those digits on the keypad.' \
       'lets-get-card:Okay, lets get your card.' \
       'transfer-person:No problem, let me get you to someone at the store.' \
       'transfer-card-help:Sorry, we must be having an issue. I am transferring you to someone who will take your card number.'; do \

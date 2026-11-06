@@ -234,7 +234,7 @@ outcome = run({
 })
 checks.append("two misses hand off")
 assert outcome["result"] == "failed" and outcome["charge"] is None, outcome
-assert outcome["prompts"][-1] == "transfer-card-help" and outcome["prompts"].count("try-again") == 1, outcome["prompts"]
+assert outcome["prompts"][-1] == "transfer-card-help" and outcome["prompts"].count("type-group") == 1, outcome["prompts"]
 assert outcome["prompts"][0] == "lets-get-card", outcome["prompts"]
 assert any(call["action"] == "abandon" and call.get("code") == "card_recognition_failed" for call in Api.calls), Api.calls
 
@@ -270,7 +270,7 @@ check("second opinion agrees", run({**GROUP_ANSWERS(), **everything_else_answers
 # It hears a different group: neither is trusted, that group is asked again (never a wrong card charged).
 outcome = run({**GROUP_ANSWERS(), **everything_else_answers()}, ["nine nine nine nine"] * 8)
 checks.append("second opinion disagrees: asked again, nothing charged")
-assert outcome["charge"] is None and "try-again" in outcome["prompts"], outcome
+assert outcome["charge"] is None and "type-group" in outcome["prompts"], outcome
 # Speech Vosk turns into nothing ("yes" isn't a number) gets the second opinion's reading of that group.
 GROUPS = [VISA[i:i + 4] for i in range(0, 16, 4)]
 check("second opinion rescues a group Vosk heard as nothing", run({
@@ -279,6 +279,14 @@ check("second opinion rescues a group Vosk heard as nothing", run({
     "next-four": [("say", digits("Kore", GROUPS[1])), ("say", digits("Kore", GROUPS[2]))],
     "last-four": [("say", digits("Kore", GROUPS[3]))],
     **everything_else_answers()}, [spoken(group) for group in GROUPS]), VISA)
+# An unheard group is asked for on the keypad, and typing it works (Chris, 2026-11-06).
+check("unheard group typed on the keypad", run({
+    "say-card-number": [("say", digits("Aoede", VISA[:7] + VISA[8:]))],
+    "card-number": [("say", digits("Kore", VISA[0:4]))],
+    "next-four": [("say", digits("Kore", VISA[4:6])), ("say", digits("Kore", VISA[8:12]))],
+    "type-group": [("keys", VISA[4:8])],
+    "last-four": [("say", digits("Kore", VISA[12:16]))],
+    **everything_else_answers()}), VISA)
 # The second recognizer is down: Vosk alone, as before.
 check("second opinion down: Vosk alone", run({"say-card-number": [("say", digits("Kore", VISA))], **everything_else_answers()}, "down"), VISA)
 

@@ -156,6 +156,8 @@ flowchart LR
     - The card line opens with "Okay, let's get your card."
     - The quick whole-number try isn't a strike.
     - The second opinion checks only four-digit groups, including a group Vosk heard as nothing. LFM3 took 3.6 s and miscounted repeated digits on a whole number.
+    - A group the line couldn't get is asked for again with the keypad prompt "Please type those digits on the keypad" (`type-group`). It still listens for speech too.
+    - The second opinion is held to exactly that many digit words by a llama.cpp grammar (`digits_grammar`).
 - Docker disk cleanup: `update.sh` prunes after each deploy, but only untagged images and build cache older than 72 h, so tagged leftovers piled up. The box got down to 1.6 GB free on 2026-11-06, and 9 GB was freed by hand that day.
   - `deploy/docker-cleanup.sh` removes untagged images, build cache beyond 5 GB, and unused `corner-ops-*` tags older than 14 days. It keeps `:latest`, `:rollback` and `:before-*`, never touches containers, volumes or base images, logs to `deploy/logs/docker-cleanup.log`, and warns when less than 8 GB is free.
   - `--dry-run` lists what it would remove.
