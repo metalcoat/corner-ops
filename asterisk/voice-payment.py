@@ -272,13 +272,15 @@ def listen(phrases,max_keys,max_seconds=20,silence_end=1.8,voice_level=120,prero
         key=wait_digit(int(max_seconds*1000))
         return ("keys",collect_keys(key,max_keys)) if key else ("none","")
     recognizer=Recognizer(phrases)
-    state={"started":False,"last_voice":time.monotonic(),"done":False}
+    state={"started":False,"last_voice":time.monotonic(),"done":False,"peak":0}
+    LAST_LISTEN.clear();LAST_LISTEN.update(started_at=time.monotonic(),state=state)
     if preroll:
         # Feed what was said over the prompt; the end-of-answer clock starts from its last voiced chunk.
         quiet=0
         for index in range(0,len(preroll),3200):
             chunk=preroll[index:index+3200]
-            if audioop.rms(chunk,2)>voice_level:state["started"]=True;quiet=0
+            level=audioop.rms(chunk,2);state["peak"]=max(state["peak"],level)
+            if level>voice_level:state["started"]=True;quiet=0
             else:quiet+=len(chunk)
             recognizer.feed(chunk)
         state["last_voice"]=time.monotonic()-quiet/(RATE*2)
@@ -293,7 +295,8 @@ def listen(phrases,max_keys,max_seconds=20,silence_end=1.8,voice_level=120,prero
             try:chunk=os.read(3,3200)
             except BlockingIOError:continue
             if not chunk:break
-            if audioop.rms(chunk,2)>voice_level:state["started"]=True;state["last_voice"]=time.monotonic()
+            level=audioop.rms(chunk,2);state["peak"]=max(state["peak"],level)
+            if level>voice_level:state["started"]=True;state["last_voice"]=time.monotonic()
             recognizer.feed(chunk)
             if state["started"] and time.monotonic()-state["last_voice"]>silence_end:break
         state["done"]=True
@@ -311,10 +314,35 @@ def listen(phrases,max_keys,max_seconds=20,silence_end=1.8,voice_level=120,prero
 
 NUMBER_PHRASES=SPOKEN_NUMBERS
 
+# Asking for a person goes to the store at once, from any step (Chris, 2026-11-06). These words are in every
+# step's vocabulary so the recognizer can hear them; they never parse as digits.
+PERSON_WORDS=["person","representative","operator","agent","human","someone","somebody","manager","employee","help"]
+class CallerWantsPerson(Exception):pass
+
+def wants_person(heard):
+    return bool(heard) and bool(set(str(heard[0]).split())&set(PERSON_WORDS))
+
+LAST_LISTEN={}
+
+def log_step(prompt_name,how,heard):
+    """Why a step failed, without what was said (dev test call 2026-11-06 could not be diagnosed): keys or
+    speech or nothing, whether speech was detected, peak loudness, and only how many digits came through."""
+    state=LAST_LISTEN.get("state") or {}
+    best=heard if how=="keys" else (heard[0] if heard else "")
+    digits=best if how=="keys" else (words_to_digits(best) or "")
+    words=0 if how=="keys" else len(str(best).split())
+    seconds=round(time.monotonic()-LAST_LISTEN.get("started_at",time.monotonic()),1)
+    sys.stderr.write(f"VOICE_PAYMENT_STEP prompt={prompt_name} how={how} started={bool(state.get('started'))} peak={state.get('peak',0)} words={words} digits={len(digits)} seconds={seconds}\n");sys.stderr.flush()
+
 def ask(prompt_name,phrases,max_keys,**options):
     pressed,spoken=prompt_and_record(prompt_name)
-    if pressed:return "keys",collect_keys(pressed,max_keys)
-    return listen(phrases,max_keys,preroll=spoken,**options)
+    if pressed:
+        keys=collect_keys(pressed,max_keys);LAST_LISTEN.clear();log_step(prompt_name,"keys",keys)
+        return "keys",keys
+    how,heard=listen([*phrases,*PERSON_WORDS],max_keys,preroll=spoken,**options)
+    log_step(prompt_name,how,heard)
+    if how=="speech" and wants_person(heard):raise CallerWantsPerson()
+    return how,heard
 
 # ---------------------------------------------------------------- flow
 
@@ -474,13 +502,15 @@ def main():
         # Delivery callers hear the expected time (owner request 2026-10-25: about 40 to 55 minutes).
         prompt("approved-delivery" if str((charged or {}).get("serviceType",""))=="delivery" else "approved")
         agi("SET VARIABLE VOICE_PAYMENT_RESULT approved")
-    except Exception:
+    except Exception as error:
+        person=isinstance(error,CallerWantsPerson)
+        if person:failure_stage="caller_asked_for_person"
         if session:
             try:api({"action":"abandon","sessionId":session["sessionId"],"code":failure_stage})
             except Exception as cleanup_error:
                 # Never include exception text: an upstream library could place request data in it.
                 sys.stderr.write(f"VOICE_PAYMENT_CLEANUP_ERROR type={type(cleanup_error).__name__}\n");sys.stderr.flush()
-        prompt("transfer-card-help");agi("SET VARIABLE VOICE_PAYMENT_RESULT failed")
+        prompt("transfer-person" if person else "transfer-card-help");agi("SET VARIABLE VOICE_PAYMENT_RESULT failed")
 
 def self_test():
     today=datetime.date(2026,10,25)

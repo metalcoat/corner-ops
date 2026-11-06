@@ -328,6 +328,49 @@ def order_check_nudge(note):
     return {"clientContent": {"turns": [{"role": "user", "parts": [{"text": note}]}], "turnComplete": True}}
 
 
+# A caller who asks for a person or sounds frustrated goes to the store right away (Chris, 2026-11-06: many
+# callers are older and won't work with an automated system). The bridge checks the caller's own words so it
+# doesn't depend on Gemini noticing; Gemini is told to say the line and transfer, and if it hasn't within
+# PERSON_HANDOFF_GRACE_SECONDS the bridge transfers the call itself.
+PERSON_REQUEST = re.compile(
+    r"\b(?:talk|speak)\s+(?:to|with)\s+(?:a\s+|an\s+|the\s+)?(?:real\s+|live\s+|actual\s+)?(?:person|human|someone|somebody|employee|manager|people|store)\b"
+    r"|\b(?:real|live|actual)\s+(?:person|human)\b|\brepresentative\b|\boperator\b|\bhuman\b|\bmanager\b"
+    r"|\b(?:an?\s+)?agent\b|\blet me talk to\b|\btransfer me\b|\bget me (?:a|someone|somebody)\b",
+    re.IGNORECASE,
+)
+FRUSTRATION = re.compile(
+    r"\bthis (?:isn'?t|is not|ain'?t) working\b|\bforget it\b|\bf+u+c+k\w*|\bshit\b|\bdamn\b|\bstupid\b|\bridiculous\b"
+    r"|\buseless\b|\bwhat the hell\b|\bno,?\s+no,?\s+no\b|\bnot what i (?:said|asked|want)",
+    re.IGNORECASE,
+)
+PERSON_REASON = "Caller asked for a person"
+FRUSTRATED_REASON = "Caller sounded frustrated"
+PERSON_HANDOFF_GRACE_SECONDS = 6
+
+
+def person_handoff_reason(text):
+    """Caller words that mean "get me a person": an explicit request, or plain frustration."""
+    value = " ".join(str(text or "").split())
+    if PERSON_REQUEST.search(value):
+        return PERSON_REASON
+    if FRUSTRATION.search(value):
+        return FRUSTRATED_REASON
+    return None
+
+
+def person_handoff_message(reason):
+    return {
+        "clientContent": {
+            "turns": [{"role": "user", "parts": [{"text": (
+                f"({reason.lower()}. Do not try to keep them or ask why. Say exactly: "
+                f"\u201cNo problem, let me get you to someone at the store.\u201d then immediately call "
+                f"request_human_handoff with reason \u201c{reason}\u201d.)"
+            )}]}],
+            "turnComplete": True,
+        }
+    }
+
+
 SILENCE_HANDOFF = re.compile(r"silen|quiet|no (?:answer|response)|not respond|didn.t respond|unresponsive|wait(?:ed|ing)? (?:too )?long|can.t wait|no reply", re.IGNORECASE)
 
 
@@ -814,6 +857,7 @@ async def bridge(reader, writer, call_id):
         if CLAUDE_CHECKER_ENABLED
         else None
     )
+    person_handoff = {"reason": None, "task": None}
 
     async def save_transcript(speaker, text, turn_id):
         value = " ".join(str(text or "").split()).strip()
@@ -964,6 +1008,25 @@ async def bridge(reader, writer, call_id):
                         await emit("userSpeechStart", playback.snapshot())
                     customer_transcript = join_transcript(customer_transcript, transcription["text"])
                     last_customer_speech = time.monotonic()
+                    reason = person_handoff_reason(customer_transcript)
+                    if reason and not person_handoff["reason"] and not close_requested.is_set():
+                        person_handoff["reason"] = reason
+                        await emit("personHandoffRequested", {"reason": reason})
+                        await gemini.send(json.dumps(person_handoff_message(reason)))
+
+                        async def ensure_person_handoff(reason=reason):
+                            # Gemini normally says the line and calls request_human_handoff; if not, transfer anyway.
+                            await asyncio.sleep(PERSON_HANDOFF_GRACE_SECONDS)
+                            if close_requested.is_set():
+                                return
+                            await emit("personHandoffForced", {"reason": reason})
+                            value = await app_action(call_id, "handoff", reason=reason)
+                            if value.get("closeBridge", True):
+                                close_requested.set()
+                                await terminate_audiosocket(writer)
+
+                        person_handoff["task"] = asyncio.create_task(ensure_person_handoff())
+                        closing_tasks.add(person_handoff["task"])
                 output_transcription = server.get("outputTranscription", {})
                 if output_transcription.get("text"):
                     assistant_transcript = join_transcript(assistant_transcript, output_transcription["text"])

@@ -7,6 +7,7 @@ const PAYMENT_FAILURES: Record<string, string> = {
   security_code_recognition_failed: "Card payment failed twice: couldn't understand the security code. Take the card on the phone.",
   billing_zip_recognition_failed: "Card payment failed twice: couldn't understand the billing zip code. Take the card on the phone.",
   provider_payment_failed: "Card payment failed: the card was declined or the payment service didn't answer. Nothing was charged; take the card on the phone.",
+  caller_asked_for_person: "Caller asked for a person during card payment. Take the card on the phone.",
   claim_failed: "Card payment couldn't start: the payment line couldn't find this order. Take the card on the phone.",
   recognition_failed: "Card payment failed twice: couldn't understand the card details. Take the card on the phone.",
 };

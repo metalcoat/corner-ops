@@ -222,4 +222,16 @@ assert outcome["result"] == "failed" and outcome["charge"] is None, outcome
 assert outcome["prompts"][-1] == "transfer-card-help" and "try-again" not in outcome["prompts"], outcome["prompts"]
 assert any(call["action"] == "abandon" and call.get("code") == "card_recognition_failed" for call in Api.calls), Api.calls
 
+# 8. Asking for a person at any step goes to the store at once with "No problem, let me get you to someone
+# at the store." (Chris, 2026-11-06); nothing is charged.
+for voice, step, word, answers in [
+    ("Kore", "say-card-number", "representative", {}),
+    ("Aoede", "say-expiration", "real_person", {"say-card-number": [("keys", VISA + "#")], "say-confirm": [("keys", "1")]}),
+]:
+    outcome = run({**answers, step: [("say", speech(voice, [[word]]))]})
+    checks.append(f"{word.replace('_', ' ')} at {step} hands off")
+    assert outcome["result"] == "failed" and outcome["charge"] is None, outcome
+    assert outcome["prompts"][-1] == "transfer-person", outcome["prompts"]
+    assert any(call["action"] == "abandon" and call.get("code") == "caller_asked_for_person" for call in Api.calls), Api.calls
+
 sys.stdout.write(json.dumps({"status": "passed", "checks": checks}) + "\n")

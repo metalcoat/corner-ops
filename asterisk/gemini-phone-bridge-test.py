@@ -114,6 +114,7 @@ async def run(script, mcp_results, checker=None):
         log["exception"] = type(e).__name__
     await asyncio.sleep(0.05)
     log["toolResponses"] = [m["toolResponse"] for m in fake.sent if "toolResponse" in m]
+    log["sent"] = fake.sent
     return log
 
 
@@ -373,6 +374,21 @@ async def main():
     )
     check("a pending note reaches an idle Gemini as a private nudge", any(n == "orderCheckNote" and d.get("via") == "nudge" for n, d in log["events"]), log["events"])
     gp.CLAUDE_CHECKER_ENABLED = False
+
+    # Asking for a person or sounding frustrated goes to the store at once (Chris, 2026-11-06).
+    for text, want in [
+        ("can I talk to someone at the store", gp.PERSON_REASON), ("I want a real person", gp.PERSON_REASON),
+        ("representative", gp.PERSON_REASON), ("operator please", gp.PERSON_REASON), ("let me talk to the store", gp.PERSON_REASON),
+        ("this isn't working", gp.FRUSTRATED_REASON), ("no, no, no", gp.FRUSTRATED_REASON), ("oh forget it", gp.FRUSTRATED_REASON),
+        ("a turkey big boss and two pizzas", None), ("no tomato on that", None), ("pizza for four people", None), ("no", None),
+    ]:
+        check(f"person handoff wording: {text!r}", gp.person_handoff_reason(text) == want, gp.person_handoff_reason(text))
+    gp.PERSON_HANDOFF_GRACE_SECONDS = 0.2
+    log = await run([transcript("can I just talk to a real person"), "SLEEP", "SLEEP", "SLEEP", "SLEEP", "SLEEP"], [])
+    told = [m for m in log["sent"] if "clientContent" in m and "let me get you to someone at the store" in json.dumps(m)]
+    check("Gemini is told the exact line to say", len(told) == 1, len(told))
+    check("a person request tells Gemini the line and transfers when Gemini doesn't", "handoff" in log["app"] and any(n == "personHandoffRequested" and d.get("reason") == gp.PERSON_REASON for n, d in log["events"]) and any(n == "personHandoffForced" for n, _ in log["events"]), {"app": log["app"], "events": [n for n, _ in log["events"]]})
+    check("the person handoff happens only once", log["app"].count("handoff") == 1, log["app"])
 
     # Tool results stay in the Live context and are re-billed each turn (2026-10-28): empty fields, default
     # modifier quantities and raw cents go; ids, display totals, tipCents, false/zero and pizza portions stay.
