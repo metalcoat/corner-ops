@@ -153,7 +153,9 @@ flowchart LR
 - Docker disk cleanup: `update.sh` prunes after each deploy, but only untagged images and build cache older than 72 h, so tagged leftovers piled up. The box got down to 1.6 GB free on 2026-11-06, and 9 GB was freed by hand that day.
   - `deploy/docker-cleanup.sh` removes untagged images, build cache beyond 5 GB, and unused `corner-ops-*` tags older than 14 days. It keeps `:latest`, `:rollback` and `:before-*`, never touches containers, volumes or base images, logs to `deploy/logs/docker-cleanup.log`, and warns when less than 8 GB is free.
   - `--dry-run` lists what it would remove.
-  - It is meant to run daily from chris's crontab (pending Chris's OK).
+  - It runs daily at 04:40 from chris's crontab (added by Chris 2026-11-06), using the runtime copy.
+  - Under 8 GB free it emails the owner at most once a day (`ALERT_TO_EMAIL`, else `APP_EMAIL`), using the app's SMTP settings (`deploy/send-alert-email.py`). The email includes a plain-English list of what's using space, largest first, each marked safe to clean or keep (`deploy/disk-usage-summary.py`).
+  - `--test-alert` sends that email once without cleaning anything.
   - Phone cart results carry `wingReadback` ("10 wings mild, 10 wings garlic parm, and blue cheese and celery with those") and the prompt reads wings that way.
   - The secure card line hands the caller to staff on the second failed answer of any kind with "Sorry, we must be having an issue. I'm transferring you to someone who will take your card number." (`transfer-card-help`). Before, it allowed up to about 15 retries.
   - A failed card payment leaves the call `handoff_pending` with a readable reason (`src/lib/ai-handoff-reason.ts`), so the POS "AI PHONE ORDER · NEEDS STAFF" popup shows why, plus the order and total. Before, the call was marked ended and the popup never appeared.
