@@ -4,7 +4,7 @@ export type HandbookSection = {
   bullets?: string[];
 };
 
-// Sections 12 and 13 (alcohol, smoking) are drafts awaiting Chris's review of the wording. When approved,
+// Sections 4 (breaks), 12 and 13 (alcohol, smoking) are drafts awaiting Chris's review of the wording. When approved,
 // drop "-draft" and the "(draft: owner review)" title notes. Any change to this file asks every employee to sign again.
 export const CORNER_DELI_HANDBOOK_VERSION = "2026-11-06-draft";
 export const CORNER_DELI_HANDBOOK_EFFECTIVE_DATE = "November 6, 2026";
@@ -53,13 +53,13 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     ],
   },
   {
-    title: "4. Breaks and meal periods",
+    title: "4. Breaks and meal periods (draft: owner review)",
     bullets: [
-      "Meal periods and other breaks are scheduled around business conditions and applicable law. Exact timing may change during a rush.",
-      "Before leaving the work area for a break, give the manager and nearby coworkers a heads-up so coverage is maintained.",
-      "An unpaid meal period is unpaid only when the employee is fully relieved of work duties. Employees on an unpaid meal period are free to leave the premises unless a different lawful arrangement is specifically communicated.",
-      "If an employee is interrupted or performs work during an unpaid meal period, report it so the working time can be recorded and paid.",
-      "Short rest breaks, when provided, are treated as paid time when required by applicable law.",
+      "Your meal break is unpaid, so please clock out when it starts and clock back in when it ends. Meal breaks are the same as any other break: unpaid, and you clock out.",
+      "New York requires a meal break of at least 30 minutes on longer shifts (generally a shift of more than 6 hours that runs through 11 AM to 2 PM, and other times the law sets). Your manager schedules it, and the timing may move during a rush.",
+      "Other breaks aren't usually part of a shift, so check with your manager first if you need one. If a manager okays a short break of under 20 minutes, stay clocked in: the law requires short breaks to be paid.",
+      "Before you leave the work area for a break, give the manager and nearby coworkers a heads-up so the work is covered.",
+      "While you're clocked out for a meal break you are fully off duty and free to leave. If you're asked to work or get interrupted, clock back in or tell your manager so that time is paid.",
     ],
   },
   {

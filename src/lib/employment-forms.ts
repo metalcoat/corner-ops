@@ -269,7 +269,7 @@ export async function assignOnboardingPacket(input: {
     hireDate: input.hireDate,
   };
   const mealPolicy = {
-    statement: "Employees who work a shift requiring a meal period will receive an uninterrupted unpaid meal period of at least 30 minutes, or longer when required by law. Meal periods are scheduled around operational needs and applicable New York law. Employees must be completely relieved of duty. Any interrupted meal period or work performed during a meal period must be reported immediately so all working time is recorded and paid. This acknowledgment does not waive any legal meal-period right.",
+    statement: "Employees who work a shift requiring a meal period will receive an uninterrupted unpaid meal period of at least 30 minutes, or longer when required by law. Meal breaks are unpaid, so the employee must clock out at the start of the meal break and clock back in at the end. Meal periods are scheduled around operational needs and applicable New York law. Other breaks are not usually part of a shift; employees should check with their manager first, and a short break of under 20 minutes that a manager approves stays on the clock and is paid. Employees must be completely relieved of duty during a meal break. Any interrupted meal period or work performed during a meal period must be reported immediately so all working time is recorded and paid. This acknowledgment does not waive any legal meal-period right.",
   };
   return Promise.all([
     insertForm({ business: input.business, employee, type: "W4", actor: input.actor, effectiveDate: input.hireDate, payload: { ...common } }),

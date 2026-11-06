@@ -107,6 +107,10 @@ test("the handbook carries the zero-tolerance alcohol and no-smoking policies", 
   for (const place of ["inside the building", "out front of the store", "company vehicle"]) assert.ok(smoking.includes(place), place);
   assert.match(smoking, /vap/);
   assert.match(smoking, /cannabis/);
+  const breaks = text(/^4\. Breaks/);
+  assert.match(breaks, /unpaid, so please clock out/);
+  assert.match(breaks, /at least 30 minutes/);
+  assert.match(breaks, /check with your manager first/);
   const numbers = CORNER_DELI_HANDBOOK_SECTIONS.map((section) => Number(section.title.split(".")[0]));
   assert.deepEqual(numbers, numbers.map((_, index) => index + 1));
 });
