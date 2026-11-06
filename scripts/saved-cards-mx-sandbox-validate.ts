@@ -56,10 +56,12 @@ async function main(): Promise<void> {
       const replayId = Math.floor(Math.random() * 2e9);
       await sql`INSERT INTO ordering_mx_checkout_sessions(id,business,order_id,amount_cents,replay_id,client_mutation_id,created_by,expires_at) VALUES(${randomUUID()},'Corner Deli',${order.id},${Number(order.amount_due_cents)},${replayId},${randomUUID()},'saved-card-test',NOW()+INTERVAL '30 minutes')`;
       const { chargeSavedCard } = await import("../src/lib/mx-saved-cards");
-      const charged = await chargeSavedCard({ customerId, paymentMethodId: card.id, amountCents: Number(order.amount_due_cents), replayId });
+      const charged = await chargeSavedCard({ customerId, paymentMethodId: card.id, amountCents: Number(order.amount_due_cents), replayId, presentment: "phone" });
       paymentReference = String(charged.id || "");
       if (!/approve/i.test(String(charged.status))) throw new Error("Saved card charge was not approved.");
-      results.savedCardCharged = { amountCents: Number(order.amount_due_cents) };
+      // Sent as a phone order (MOTO posData); MX must not book it as card-present.
+      if (charged.cardPresent === true) throw new Error(`MX booked the saved-card charge as card-present: ${JSON.stringify(charged.posData ?? null)}`);
+      results.savedCardCharged = { amountCents: Number(order.amount_due_cents), cardPresent: charged.cardPresent ?? null, posData: charged.posData ?? null };
 
       // 3. Remove.
       const left = await removeSavedCard(customerId, card.id);

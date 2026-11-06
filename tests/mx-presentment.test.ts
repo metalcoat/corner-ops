@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { mxPresentment } from "../src/lib/mx-presentment.js";
 
 test("keyed MX payments say whether the card was present", () => {
@@ -31,4 +33,12 @@ test("phone orders send MX's MOTO posData (MX FTS review, Oct 2026)", () => {
     partialApprovalSupport: "NotSupported",
     transactionStatus: "Normal",
   });
+});
+
+// Saved cards are only used on phone and online orders, and say so to MX.
+test("saved-card charges are sent as the phone or online order they were used on", () => {
+  const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
+  assert.match(read("src/lib/mx-saved-cards.ts"), /\.\.\.mxPresentment\(input\.presentment\)/);
+  assert.match(read("src/app/api/ordering/orders/[id]/payments/mx/route.ts"), /chargeSavedCard\(\{[^}]*presentment: "phone" \}\)/);
+  assert.match(read("src/app/api/customer/orders/[id]/payments/mx/route.ts"), /chargeSavedCard\(\{[^}]*presentment: "online" \}\)/);
 });

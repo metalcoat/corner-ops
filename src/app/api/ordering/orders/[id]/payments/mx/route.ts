@@ -129,7 +129,7 @@ export async function POST(
       if (body.customerConsented !== true) throw new MxMerchantError("Confirm the customer agreed to use their saved card.");
       const customerId = (await sql`SELECT customer_id FROM ordering_orders WHERE id=${orderId} AND business=${business}`)[0]?.customer_id;
       if (!customerId) throw new MxMerchantError("Attach the customer to use their saved card.");
-      data = await chargeSavedCard({ customerId: String(customerId), paymentMethodId: String(body.savedCardId || ""), amountCents: Number(session.amount_cents), replayId });
+      data = await chargeSavedCard({ customerId: String(customerId), paymentMethodId: String(body.savedCardId || ""), amountCents: Number(session.amount_cents), replayId, presentment: "phone" });
     } else data = await retrieveMxPayment(replayId);
     if (Math.round(Number(data.amount) * 100) !== Number(session.amount_cents))
       throw new MxMerchantError(

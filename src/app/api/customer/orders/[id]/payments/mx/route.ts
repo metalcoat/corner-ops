@@ -196,7 +196,7 @@ export async function POST(
         const signedIn = readCustomerOrderingSession(request);
         const customerId = signedIn?.authenticatedAt ? signedIn.customerId : null;
         if (!session || !customerId) throw new MxMerchantError("Sign in to pay with a saved card.");
-        const charged = await chargeSavedCard({ customerId, paymentMethodId: String(body.savedCardId), amountCents: amount, replayId });
+        const charged = await chargeSavedCard({ customerId, paymentMethodId: String(body.savedCardId), amountCents: amount, replayId, presentment: "online" });
         const applied = await applyApprovedPayment(orderId, session, charged, actor);
         if (applied.sendError) return paidButNotSent(applied.sendError);
         return isoJson({ payment: applied.payment, order: applied.order, paidWithSavedCard: true }, { status: 201 });

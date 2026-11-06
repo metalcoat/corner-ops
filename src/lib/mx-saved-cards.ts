@@ -8,6 +8,7 @@
 // Sale on that token. Verified in the MX sandbox (Oct 2026).
 import { getSql } from "@/lib/db";
 import { initializeMxPayment, MxMerchantError, MxMerchantUnreachableError, mxSandboxOnProduction } from "@/lib/mx-merchant";
+import { mxPresentment } from "@/lib/mx-presentment";
 
 const MAX_SAVED_CARDS = 10; // MX's limit per customer
 
@@ -106,8 +107,12 @@ export async function removeSavedCard(customerId: string, paymentMethodId: strin
   return listSavedCards(customerId);
 }
 
-/** A Sale on a saved card (server side). Returns MX's payment record; throws if declined. */
-export async function chargeSavedCard(input: { customerId: string; paymentMethodId: string; amountCents: number; replayId: number }) {
+/**
+ * A Sale on a saved card (server side). Returns MX's payment record; throws if declined.
+ * Sent with the posData of the channel it was used on (a phone order on the POS, or an online order),
+ * so MX doesn't have to infer whether the card was present.
+ */
+export async function chargeSavedCard(input: { customerId: string; paymentMethodId: string; amountCents: number; replayId: number; presentment: "phone" | "online" }) {
   const row = (await getSql()`SELECT provider_customer_reference,provider_payment_method_reference FROM ordering_customer_payment_methods WHERE id=${input.paymentMethodId} AND customer_id=${input.customerId} AND provider='mx_merchant' AND active AND reusable`)[0];
   if (!row) throw new MxMerchantError("That saved card isn't available. Choose another payment.");
   const { merchantId } = credentials();
@@ -116,6 +121,7 @@ export async function chargeSavedCard(input: { customerId: string; paymentMethod
     body: JSON.stringify({
       merchantId: Number(merchantId), tenderType: "Card", paymentType: "Sale", amount: (input.amountCents / 100).toFixed(2),
       replayId: input.replayId, source: "API", customerId: Number(row.provider_customer_reference),
+      ...mxPresentment(input.presentment),
       cardAccount: { token: String(row.provider_payment_method_reference) },
     }),
   });
