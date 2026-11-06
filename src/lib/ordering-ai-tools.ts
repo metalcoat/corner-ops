@@ -584,6 +584,8 @@ export const spokenKey = (value: string) =>
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
+    // A doubled word from the voice model ("Hot Hot Peppers", dev test call 2026-11-06) is one word.
+    .replace(/\b(\w+)(?: \1\b)+/g, "$1")
     .replace(/s\b/g, "");
 export const normalizedSpokenName = (value: string) =>
   spokenKey(
@@ -790,6 +792,12 @@ export const modifierAliases = (name: string, groupName = "") => {
       "grilled onions",
       "cooked onions on burger steak",
     );
+  if (group === "pizza topping") {
+    // "Bacon Pizza Topping" (the model naming the group, dev test call 2026-11-06) is the topping itself.
+    aliases.push(`${simple} pizza topping`, `${simple} topping`);
+    if (/^peppers?$/.test(simple))
+      aliases.push("sweet pepper", "sweet peppers", "green pepper", "green peppers", "bell pepper", "bell peppers");
+  }
   if (/hamburger.*steak/.test(group) && /^peppers?$/.test(simple))
     aliases.push(
       "cooked pepper",
@@ -2198,6 +2206,17 @@ export async function priceSpokenOrder(input: {
                     option.id,
                   ]),
                 ];
+        // "Extra sauce" arrives as the sauce with amount extra (dev test call 2026-11-06); the menu's way is
+        // the Extra Sauce pizza topping, so add it instead of silently dropping the extra.
+        const sauceTopping =
+          group.name === "Pizza Sauce" && requestedModifier.amount && requestedModifier.amount !== "regular"
+            ? item.modifiers
+                .filter((candidate) => candidate.presentationBehavior === "pizza_topping")
+                .flatMap((candidate) => candidate.options)
+                .find((candidate) => /^extra sauce$/i.test(candidate.name))
+            : undefined;
+        if (sauceTopping && !pizzaToppings.some((topping) => topping.modifierOptionId === sauceTopping.id))
+          pizzaToppings.push({ modifierOptionId: sauceTopping.id, portion: requestedModifier.portion || "whole", amount: "regular" });
       }
       const hotMeatMeal =
           /^(hot turkey|hot roast beef|hot hamburger|hamburger steak)/.test(

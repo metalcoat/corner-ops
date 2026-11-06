@@ -207,7 +207,8 @@ const modifierKey = (value: string) =>
     .replace(/\bon side\b/g, "")
     .replace(/^(?:add|extra|xtra)\s+/g, "")
     .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+    .trim()
+    .replace(/\b(\w+)(?: \1\b)+/g, "$1");
 export async function attachStandaloneModifierAnswer(
   orderId: string | null,
   operation: CartOperation,
@@ -528,9 +529,12 @@ async function mergeSpokenCartLine(
     if (!match)
       throw new AiToolError(
         "INVALID_MODIFIER",
-        "Modifier is invalid or ambiguous.",
-        "Ask which modifier and group the caller means.",
+        `${edit.name} isn't an option on that${matches.length > 1 ? ` (it could be ${matches.slice(0, 3).map((row: any) => row.option.name).join(" or ")})` : ""}.`,
+        matches.length > 1
+          ? "Ask the caller which one they mean; nothing changed."
+          : "Nothing changed. Send the rest of the change again without it, or ask the caller about just that one; never guess a different option.",
         409,
+        { modifier: edit.name, choices: matches.slice(0, 3).map((row: any) => row.option.name) },
       );
     const remove = removal ? removal.remove : Boolean(edit.remove);
     modifiers = modifiers.filter(

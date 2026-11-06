@@ -1250,6 +1250,11 @@ async def bridge(reader, writer, call_id):
                     continue
                 nudges += 1
                 last_progress = time.monotonic()
+                if user_turn_open:
+                    # Gemini heard the caller start but never decided they finished (line noise; dev test call
+                    # 2026-11-06 sat silent for 20 s and ignored two nudges): end the audio turn so it answers.
+                    await emit("audioStreamEnd", playback.snapshot())
+                    await gemini.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
                 await emit("stallNudge", {**playback.snapshot(), "nudge": nudges})
                 await gemini.send(json.dumps(stall_nudge_message()))
 

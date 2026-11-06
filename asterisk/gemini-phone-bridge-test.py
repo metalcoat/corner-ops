@@ -390,6 +390,15 @@ async def main():
     check("a person request tells Gemini the line and transfers when Gemini doesn't", "handoff" in log["app"] and any(n == "personHandoffRequested" and d.get("reason") == gp.PERSON_REASON for n, d in log["events"]) and any(n == "personHandoffForced" for n, _ in log["events"]), {"app": log["app"], "events": [n for n, _ in log["events"]]})
     check("the person handoff happens only once", log["app"].count("handoff") == 1, log["app"])
 
+    # A caller turn Gemini never closes (noise kept it "speaking"; dev test call 2026-11-06 went silent for 20 s)
+    # gets the audio stream ended before the nudge, so Gemini answers.
+    gp.STALL_SECONDS = 0.3
+    log = await run([transcript("sweet")] + ["SLEEP"] * 8, [])
+    ended = [i for i, m in enumerate(log["sent"]) if m.get("realtimeInput", {}).get("audioStreamEnd") is True]
+    nudged = [i for i, m in enumerate(log["sent"]) if "clientContent" in m and "hasn't heard anything" in json.dumps(m)]
+    check("a stuck caller turn is ended before the stall nudge", ended and nudged and ended[0] < nudged[0], {"ended": ended, "nudged": nudged})
+    gp.STALL_SECONDS = 8
+
     # Tool results stay in the Live context and are re-billed each turn (2026-10-28): empty fields, default
     # modifier quantities and raw cents go; ids, display totals, tipCents, false/zero and pizza portions stay.
     cart = gp.voice_safe_tool_result({
