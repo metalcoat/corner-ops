@@ -9,7 +9,8 @@ const business = "Corner Deli" as const;
 
 export async function GET() {
   try {
-    if (!(await orderingActor(business))) return unauthorized();
+    // Same as MEAL: a PIN sign-in is enough (clocked in or not).
+    if (!(await getPosSession(false))) return unauthorized();
     return isoJson(await employeeDrinkMenu(business));
   } catch (error) { return apiError(error); }
 }
