@@ -158,6 +158,13 @@ flowchart LR
     - The second opinion checks only four-digit groups, including a group Vosk heard as nothing. LFM3 took 3.6 s and miscounted repeated digits on a whole number.
     - A group the line couldn't get is asked for again with the keypad prompt "Please type those digits on the keypad" (`type-group`). It still listens for speech too.
     - The second opinion is held to exactly that many digit words by a llama.cpp grammar (`digits_grammar`).
+  - Wording fixes from Chris's 19:41 test call:
+    - Never two questions in one turn.
+    - Choices are asked plainly ("What sauce on the wings?") without reading the option list, and nothing already answered is re-asked.
+    - The pickup goodbye is built by `pickupClosing()` from the wait message.
+    - Pizza lines are said as "jumbo pizza with …", without Classic Sauce / Regular Cooked.
+    - The bridge's silence nudge tells the caller-thinking case (the AI spoke last: wait `GEMINI_CALLER_THINKING_SECONDS`, 20 s, then only "Take your time.") apart from Gemini not answering (answer what the caller said). It never re-asks the question.
+    - Test: `scripts/ai-cart-regressions/wording.ts`.
 - Docker disk cleanup: `update.sh` prunes after each deploy, but only untagged images and build cache older than 72 h, so tagged leftovers piled up. The box got down to 1.6 GB free on 2026-11-06, and 9 GB was freed by hand that day.
   - `deploy/docker-cleanup.sh` removes untagged images, build cache beyond 5 GB, and unused `corner-ops-*` tags older than 14 days. It keeps `:latest`, `:rollback` and `:before-*`, never touches containers, volumes or base images, logs to `deploy/logs/docker-cleanup.log`, and warns when less than 8 GB is free.
   - `--dry-run` lists what it would remove.

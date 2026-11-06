@@ -644,13 +644,19 @@ export function spokenLine(name: string, variant: string, modifiers: Array<{ nam
   const fry = /^(Small|Large)\s+(French Fries|Curly Fries|Waffle Fries|Tater Tots)$/i.exec(name.trim());
   const poutine = modifiers.find((modifier) => /poutine/i.test(modifier.name));
   const loaded = modifiers.find((modifier) => /^loaded\b/i.test(modifier.name));
-  let item = say(`${name}${variant ? ` ${variant}` : ""}`);
+  // "Pizza" + "Jumbo Thin 16\"" is said the way callers say it: "jumbo pizza" (thin is the jumbo default).
+  const pizzaSize = /^pizza$/i.test(name.trim()) ? /^(small|regular|medium|jumbo|large|sheet)\b(.*)$/i.exec(say(variant)) : null;
+  let item = pizzaSize
+    ? `${pizzaSize[1].toLowerCase()}${/thick/i.test(pizzaSize[2]) ? " thick" : ""} pizza`
+    : say(`${name}${variant ? ` ${variant}` : ""}`);
   let rest = modifiers;
   if (fry && (poutine || loaded)) {
     const kind = { "french fries": "Fry", "curly fries": "Curly Fry", "waffle fries": "Waffle Fry", "tater tots": "Tater Tot" }[fry[2].toLowerCase()] || fry[2];
     item = poutine ? `${fry[1]} ${kind} Poutine` : `${fry[1]} Loaded ${kind}`;
     rest = modifiers.filter((modifier) => modifier !== poutine && modifier !== loaded);
   }
+  // A pizza's house defaults aren't said ("regular pizza", not "regular pizza with Classic Sauce").
+  if (pizzaSize) rest = rest.filter((modifier) => !/^(?:regular cooked|classic sauce)$/i.test(modifier.name.trim()));
   const extras = rest.map((modifier) => say(modifier.name)).filter(Boolean);
   return extras.length ? `${item} with ${extras.join(", ")}` : item;
 }

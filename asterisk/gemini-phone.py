@@ -438,7 +438,7 @@ UNSTICK_SECONDS = float(os.environ.get("GEMINI_UNSTICK_SECONDS", "2.5"))
 
 def unstick_message(words):
     said = " ".join(str(words or "").split())[:300]
-    text = f"(The caller said: \u201c{said}\u201d. Answer that now.)" if said else stall_nudge_message()["clientContent"]["turns"][0]["parts"][0]["text"]
+    text = f"(The caller said: \u201c{said}\u201d. Answer that now.)" if said else stall_nudge_message(True)["clientContent"]["turns"][0]["parts"][0]["text"]
     return {"clientContent": {"turns": [{"role": "user", "parts": [{"text": text}]}], "turnComplete": True}}
 
 
@@ -453,13 +453,19 @@ def conversation_progress(message):
     )
 
 
-def stall_nudge_message():
-    return {
-        "clientContent": {
-            "turns": [{"role": "user", "parts": [{"text": "(The caller hasn't heard anything for a while. Continue: answer what they last said, or briefly repeat your last question.)"}]}],
-            "turnComplete": True,
-        }
-    }
+# Silence after the AI's own question is the caller thinking (many are older): wait this long, then only
+# "Take your time." Re-asking the question (the old nudge) talked over a caller who was about to order
+# (dev test call 2026-11-06 19:41).
+CALLER_THINKING_SECONDS = float(os.environ.get("GEMINI_CALLER_THINKING_SECONDS", "20"))
+
+
+def stall_nudge_message(caller_turn=True):
+    text = (
+        "(The caller spoke and hasn't heard an answer. Answer what they last said, in one short sentence.)"
+        if caller_turn
+        else "(The caller hasn't answered yet. Say only \u201cTake your time.\u201d and wait. Don't repeat your question.)"
+    )
+    return {"clientContent": {"turns": [{"role": "user", "parts": [{"text": text}]}], "turnComplete": True}}
 
 
 def join_transcript(current, chunk):
@@ -851,6 +857,7 @@ async def bridge(reader, writer, call_id):
     call_usage = new_usage()
     last_customer_speech = time.monotonic()
     last_progress = time.monotonic()
+    last_assistant_done = 0.0
     closing_tasks = set()
     model_turns = 0
     closing_interrupted = False
@@ -985,7 +992,7 @@ async def bridge(reader, writer, call_id):
             nonlocal output_state, customer_transcript, user_turn_open
             nonlocal customer_turn_id
             nonlocal assistant_transcript, model_turns, closing_interrupted, last_customer_speech
-            nonlocal last_progress
+            nonlocal last_progress, last_assistant_done
             async for raw in gemini:
                 message = json.loads(raw)
                 add_usage(call_usage, message.get("usageMetadata"))
@@ -1058,6 +1065,7 @@ async def bridge(reader, writer, call_id):
                 if server.get("generationComplete") is True:
                     await playback.generation_complete()
                 if server.get("turnComplete") is True:
+                    last_assistant_done = time.monotonic()
                     await playback.generation_complete()
                     closing = assistant_transcript
                     was_interrupted = closing_interrupted
@@ -1272,7 +1280,8 @@ async def bridge(reader, writer, call_id):
                 if playback.state in ("ASSISTANT_SPEAKING", "TOOL_EXECUTING") or playback.assistant_speaking:
                     last_progress = time.monotonic()
                     continue
-                if time.monotonic() - last_progress < STALL_SECONDS or nudges >= 3:
+                caller_turn = last_customer_speech > last_assistant_done
+                if time.monotonic() - last_progress < (STALL_SECONDS if caller_turn else CALLER_THINKING_SECONDS) or nudges >= 3:
                     continue
                 nudges += 1
                 last_progress = time.monotonic()
@@ -1281,8 +1290,8 @@ async def bridge(reader, writer, call_id):
                     # 2026-11-06 sat silent for 20 s and ignored two nudges): end the audio turn so it answers.
                     await emit("audioStreamEnd", playback.snapshot())
                     await gemini.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
-                await emit("stallNudge", {**playback.snapshot(), "nudge": nudges})
-                await gemini.send(json.dumps(stall_nudge_message()))
+                await emit("stallNudge", {**playback.snapshot(), "nudge": nudges, "callerTurn": caller_turn})
+                await gemini.send(json.dumps(stall_nudge_message(caller_turn)))
 
         async def order_check_watch():
             """Deliver a pending check note once Gemini and the caller are both quiet."""

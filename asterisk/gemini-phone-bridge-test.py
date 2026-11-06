@@ -395,7 +395,7 @@ async def main():
     gp.STALL_SECONDS = 0.3
     log = await run([transcript("sweet")] + ["SLEEP"] * 8, [])
     ended = [i for i, m in enumerate(log["sent"]) if m.get("realtimeInput", {}).get("audioStreamEnd") is True]
-    nudged = [i for i, m in enumerate(log["sent"]) if "clientContent" in m and "hasn't heard anything" in json.dumps(m)]
+    nudged = [i for i, m in enumerate(log["sent"]) if "clientContent" in m and "hasn't heard an answer" in json.dumps(m)]
     check("a stuck caller turn is ended before the stall nudge", ended and nudged and ended[0] < nudged[0], {"ended": ended, "nudged": nudged})
     gp.STALL_SECONDS = 8
 
@@ -406,6 +406,17 @@ async def main():
     told = [m for m in log["sent"] if "clientContent" in m and "The caller said" in json.dumps(m) and "card" in json.dumps(m)]
     check("a frozen turn gets the caller's own words, once", len(told) == 1 and any(n == "unstickTurn" for n, _ in log["events"]), {"told": len(told), "events": [n for n, _ in log["events"]]})
     gp.UNSTICK_SECONDS = 2.5
+
+    # After the AI's own question, silence is the caller thinking: no re-asking over them, only "Take your time."
+    # after CALLER_THINKING_SECONDS (dev test call 2026-11-06 19:41 re-asked as the caller started to order).
+    gp.STALL_SECONDS, gp.CALLER_THINKING_SECONDS = 0.2, 0.8
+    log = await run([AUDIO, DONE] + ["SLEEP"] * 6, [])
+    early = [m for m in log["sent"] if "clientContent" in m and "Say exactly" not in json.dumps(m)]
+    check("no nudge while the caller is thinking", not early, early)
+    log = await run([AUDIO, DONE] + ["SLEEP"] * 14, [])
+    nudges = [json.dumps(m) for m in log["sent"] if "clientContent" in m and "Say exactly" not in json.dumps(m)]
+    check("after the thinking time only 'Take your time.'", nudges and "Take your time" in nudges[0] and "repeat" not in nudges[0].replace("Don't repeat", ""), nudges)
+    gp.STALL_SECONDS, gp.CALLER_THINKING_SECONDS = 8, 20
 
     # Tool results stay in the Live context and are re-billed each turn (2026-10-28): empty fields, default
     # modifier quantities and raw cents go; ids, display totals, tipCents, false/zero and pizza portions stay.
