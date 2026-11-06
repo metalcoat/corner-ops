@@ -107,7 +107,13 @@ test("the handbook carries the zero-tolerance alcohol and no-smoking policies", 
   for (const place of ["inside the building", "out front of the store", "company vehicle"]) assert.ok(smoking.includes(place), place);
   assert.match(smoking, /vap/);
   assert.match(smoking, /cannabis/);
-  const breaks = text(/^4\. Breaks/);
+  const callOuts = text(/Call-outs/);
+  assert.match(callOuts, /text the manager at least 4 hours before/);
+  assert.match(callOuts, /I need coverage/);
+  assert.match(callOuts, /No-call\/no-show .* immediate termination, except in an extreme outside emergency/);
+  assert.match(callOuts, /don't have to find your own coverage to use sick leave/);
+  assert.match(callOuts, /3 or more work days in a row/);
+  const breaks = text(/Breaks and meal/);
   assert.match(breaks, /unpaid, so please clock out/);
   assert.match(breaks, /at least 30 minutes/);
   assert.match(breaks, /check with your manager first/);

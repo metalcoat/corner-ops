@@ -45,6 +45,7 @@ export default function EmployeeHandbookAdminPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [notice, setNotice] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+  const [sending, setSending] = useState(false);
 
   async function load() {
     const response = await fetch("/api/employment-handbook", { cache: "no-store" });
@@ -59,6 +60,17 @@ export default function EmployeeHandbookAdminPage() {
   const employees = useMemo(() => data?.employees.filter((employee) => showInactive || employee.active) || [], [data?.employees, showInactive]);
   const active = data?.employees.filter((employee) => employee.active) || [];
   const signed = active.filter((employee) => employee.acknowledged).length;
+  async function sendUnsigned(count: number) {
+    if (!window.confirm(`Send the handbook to ${count} employee${count === 1 ? "" : "s"} who haven't signed this version? They get an app message, a notification, an email, and a text if they agreed to texts.`)) return;
+    setSending(true);
+    try {
+      const response = await fetch("/api/employment-handbook", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "send-unsigned" }) });
+      const payload = await response.json() as { sent?: number; error?: string };
+      setNotice(response.ok ? `Handbook sent to ${payload.sent} employee${payload.sent === 1 ? "" : "s"}.` : payload.error || "Could not send.");
+    } finally {
+      setSending(false);
+    }
+  }
 
   return <main className="controlPage handbookAdminPage">
     <header className="controlHeader">
@@ -88,7 +100,10 @@ export default function EmployeeHandbookAdminPage() {
       <section className="controlCard handbookStatusCard">
         <div className="handbookStatusHeader">
           <div><p className="eyebrow">Signature status</p><h2>Employee acknowledgments</h2></div>
-          <label><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} /> Show inactive employees</label>
+          <div className="handbookSendControls">
+            <label><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} /> Show inactive employees</label>
+            <button type="button" disabled={sending || /draft/i.test(data.handbook.version) || active.length === signed} title={/draft/i.test(data.handbook.version) ? "Finish the draft sections first" : ""} onClick={() => void sendUnsigned(active.length - signed)}>{sending ? "Sending…" : `Send to ${Math.max(0, active.length - signed)} who haven't signed`}</button>
+          </div>
         </div>
         <div className="tableWrap"><table><thead><tr><th>Employee</th><th>Position</th><th>Status</th><th>Signed</th><th>Signature</th><th>Version</th></tr></thead><tbody>
           {employees.map((employee) => <tr key={employee.employeeId}>

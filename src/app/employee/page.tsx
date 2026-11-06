@@ -77,12 +77,28 @@ type EmployeeData = {
   availability: Availability[];
   recentTime: TimeRecord[];
   directory: DirectoryEmployee[];
+  coverageNeeded?: Array<{ id: string; requester: string; shift: string; takenBy: string | null }>;
 };
 type Tab = "schedule" | "messages" | "requests" | "time" | "availability";
 
 const businessNames: Business[] = ["Corner Deli", "Tiki"];
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const shortWeekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** "I need coverage" on one of my shifts: one message to the whole team (handbook section 3). */
+function CoverageForm({ shift, busy, onSend, onCancel }: { shift: Shift; busy: boolean; onSend: (note: string, sickLeave: boolean) => void; onCancel: () => void }) {
+  const [note, setNote] = useState("");
+  const [sick, setSick] = useState(false);
+  const late = new Date(shift.startsAt).getTime() - Date.now() < 4 * 60 * 60 * 1000;
+  return <div className="employeeCoverageForm">
+    {late
+      ? <p className="employeeCoverageLate"><strong>Less than 4 hours before your shift.</strong> Text the manager right now as well. You still have this shift until a manager approves someone covering it.</p>
+      : <p>This sends your shift to the whole team so someone can pick it up. Also text the manager. You still have this shift until a manager approves someone covering it.</p>}
+    <label><input type="checkbox" checked={sick} onChange={(event) => setSick(event.target.checked)} /> I&apos;m sick (sick leave). You don&apos;t have to find your own cover for sick leave, and the team isn&apos;t told why.</label>
+    <label>Note for the manager (optional)<input value={note} maxLength={300} onChange={(event) => setNote(event.target.value)} /></label>
+    <div><button type="button" disabled={busy} onClick={() => onSend(note, sick)}>Send to the team</button><button type="button" disabled={busy} onClick={onCancel}>Cancel</button></div>
+  </div>;
+}
 
 function validBusiness(value: string | null): value is Business {
   return businessNames.includes(value as Business);
@@ -347,6 +363,7 @@ export default function EmployeePage() {
     return key >= currentWeekStartKey && key < currentWeekEndKey;
   };
   const shiftIsFuture = (shift: Shift) => new Date(shift.startsAt).getTime() > Date.now();
+  const [coverageShiftId, setCoverageShiftId] = useState("");
 
   const myShifts = useMemo(
     () => (data?.teamShifts || []).filter(
@@ -489,11 +506,22 @@ export default function EmployeePage() {
         <div className="employeeList">
           {myShifts.map((shift) => <div className="employeeShift" key={shift.id}>
             <div><strong>{shift.position || session.position}</strong><span>{local(shift.startsAt)} to {localTime(shift.endsAt)}</span>{shift.notes && <small>{shift.notes}</small>}</div>
-            {shiftIsFuture(shift) && <button disabled={busy} onClick={() => void action({ action: "shift-request", requestType: "Offer", shiftId: shift.id }, "Shift offered for manager approval.")}>Offer shift</button>}
+            {new Date(shift.endsAt).getTime() > Date.now() && coverageShiftId !== shift.id && <button disabled={busy} className="employeeCoverageButton" onClick={() => setCoverageShiftId(shift.id)}>I need coverage</button>}
+            {coverageShiftId === shift.id && <CoverageForm shift={shift} busy={busy} onCancel={() => setCoverageShiftId("")} onSend={(note, sickLeave) => void action({ action: "coverage-request", shiftId: shift.id, note, sickLeave }, "Sent to the whole team. Text the manager too; the shift is still yours until a manager approves a cover.").then((ok) => { if (ok) setCoverageShiftId(""); })} />}
           </div>)}
           {myShifts.length === 0 && <p className="empEmpty">No assigned shifts this week.</p>}
         </div>
       </article>
+
+      {(data?.coverageNeeded || []).length > 0 && <article className="employeeCard employeeCoverageCard">
+        <div className="employeeCardHeader"><div><p className="empEyebrow">Help a teammate</p><h2>Shifts needing coverage</h2></div></div>
+        <div className="employeeList">
+          {(data?.coverageNeeded || []).map((item) => <div className="employeeShift" key={item.id}>
+            <div><strong>{item.requester} needs coverage</strong><span>{item.shift}</span>{item.takenBy && <small>{item.takenBy === "you" ? "You offered to take it; waiting for a manager." : `${item.takenBy} offered to take it.`}</small>}</div>
+            {!item.takenBy && <button disabled={busy} onClick={() => void action({ action: "coverage-volunteer", id: item.id }, "Thanks! A manager will confirm before the shift is yours.")}>I&apos;ll take it</button>}
+          </div>)}
+        </div>
+      </article>}
 
       <article className="employeeCard">
         <div className="employeeCardHeader"><div><p className="empEyebrow">Available</p><h2>Open shifts</h2></div></div>

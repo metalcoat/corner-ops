@@ -479,7 +479,12 @@ flowchart LR
   set by `POST /api/employee/session`). Payroll Relief's step shows only where its tables exist (not production yet).
 - A link works for one person only; a resend revokes the older link. After the PIN is chosen the link needs that
   person's PIN to show the checklist again. Nothing is uploaded to Payroll Relief.
-- Handbook sections 12 (alcohol, zero tolerance) and 13 (no smoking/vaping) are marked draft until Chris approves
+- Call-outs (handbook section 3): text the manager 4+ hours ahead, then "I need coverage" on the shift in the team app
+  (`src/lib/shift-coverage.ts`, migration 0045): one message (Hub message, app notification, email) to the whole team,
+  never the reason; a coworker taps "I'll take it" (first wins) and a manager approves on Schedule → Requests, which
+  moves the shift. Late (<4 h) and sick-leave flags show only to managers. Handbook page has "Send to N who haven't
+  signed" (app message, notification, email, text where consented), refused while the version is a draft.
+- Handbook sections 3 (call-outs), 5 (breaks), 13 (alcohol, zero tolerance) and 14 (no smoking/vaping) are marked draft until Chris approves
   the wording; any handbook change asks every employee to sign again.
 
 ## 8c. Delivery car tablet (Corner Deli, dev)

@@ -893,3 +893,9 @@ html[data-business-theme="Tiki"] .employeeMessageDisclosure {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.employeeCoverageButton{border-color:#b45309!important}
+.employeeCoverageForm{flex-basis:100%;display:grid;gap:8px;margin-top:8px;padding:10px;border:1px solid rgba(180,83,9,.6);border-radius:10px;background:rgba(180,83,9,.12)}
+.employeeCoverageForm p{margin:0}.employeeCoverageForm label{display:grid;gap:4px}.employeeCoverageForm label:has(input[type=checkbox]){display:flex;gap:8px;align-items:flex-start}
+.employeeCoverageForm>div{display:flex;gap:8px;flex-wrap:wrap}.employeeCoverageLate{color:inherit}
+.employeeCoverageCard{border-color:rgba(180,83,9,.6)}
+.employeeShift:has(.employeeCoverageForm){flex-wrap:wrap}
