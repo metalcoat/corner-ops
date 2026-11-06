@@ -1,11 +1,18 @@
 import { getSql } from "@/lib/db";
 import type { EmployeeSession } from "@/lib/employee-auth";
 import { assertOnboardingAllowsScheduling } from "@/lib/employee-onboarding";
-import { notifyEmployeesOfOwnerMessage } from "@/lib/push-notifications";
+import { sendConversationMessage, TEAM_CONVERSATION_KEY } from "@/lib/message-conversations";
+import { notifyRecipientsOfEmployeeMessage } from "@/lib/push-notifications";
 import { enforceScheduleTimeOff } from "@/lib/schedule-time-off";
 import { coverageGroupMessage, coverageShiftLabel, isLateCallOut } from "@/lib/shift-coverage-rules";
-import { sendStaffNotification } from "@/lib/staff-notifications";
 import { ensureWorkforceSchema } from "@/lib/workforce";
+
+/** Posts to the team group chat as the employee, with the same app notification a normal team message gets. */
+async function postToTeam(session: EmployeeSession, body: string) {
+  await sendConversationMessage({ business: session.business, conversationKey: TEAM_CONVERSATION_KEY, senderEmployeeId: session.employeeId, senderName: session.name, body });
+  await notifyRecipientsOfEmployeeMessage({ business: session.business, senderEmployeeId: session.employeeId, recipientEmployeeId: null, body, hasPhoto: false })
+    .catch((error) => console.error("[shift-coverage] push failed", error));
+}
 
 type ShiftRow = { id: string; employee_id: string | null; starts_at: string | Date; ends_at: string | Date; position: string; status: string };
 
@@ -19,8 +26,8 @@ async function ownFutureShift(session: EmployeeSession, shiftId: string): Promis
 }
 
 /**
- * "I need coverage": records the call-out, then messages the whole team (Employee Hub message,
- * app notification, email) so anyone can pick the shift up. The employee keeps the shift until a
+ * "I need coverage": records the call-out, then posts in the team group chat (with the app
+ * notification) so anyone can pick the shift up. The employee keeps the shift until a
  * manager approves a coworker taking it.
  */
 export async function requestShiftCoverage(session: EmployeeSession, input: { shiftId: string; note?: string; sickLeave?: boolean }) {
@@ -34,9 +41,8 @@ export async function requestShiftCoverage(session: EmployeeSession, input: { sh
     INSERT INTO shift_requests (id, business, request_type, shift_id, requester_employee_id, employee_response, note, coverage_requested_at, late_call_out, sick_leave)
     VALUES (${id}, ${session.business}, 'Offer', ${shift.id}, ${session.employeeId}, 'Pending', ${String(input.note || "").trim().slice(0, 500)}, NOW(), ${late}, ${input.sickLeave === true})
   `;
-  const body = coverageGroupMessage({ name: session.name, shift: coverageShiftLabel(new Date(shift.starts_at), new Date(shift.ends_at), shift.position) });
-  await sendStaffNotification({ business: session.business, actor: session.name, body });
-  await notifyEmployeesOfOwnerMessage({ business: session.business, body, actor: session.name }).catch((error) => console.error("[shift-coverage] push failed", error));
+  const body = coverageGroupMessage({ shift: coverageShiftLabel(new Date(shift.starts_at), new Date(shift.ends_at), shift.position) });
+  await postToTeam(session, body);
   return { id, late };
 }
 
@@ -81,6 +87,6 @@ export async function volunteerForCoverage(session: EmployeeSession, requestId: 
   ` as unknown as unknown[];
   if (!taken.length) throw new Error("Someone else already offered to take it.");
   const shift = coverageShiftLabel(new Date(request.starts_at), new Date(request.ends_at), request.position);
-  await sendStaffNotification({ business: session.business, actor: session.name, body: `${session.name.split(/\s+/)[0]} will cover ${shift}. Waiting for a manager to approve; until then the shift stays with the original person.` });
+  await postToTeam(session, `I'll cover ${shift}. Waiting for a manager to approve; until then the shift stays with the original person.`);
   return { taken: true };
 }

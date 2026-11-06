@@ -480,7 +480,7 @@ flowchart LR
 - A link works for one person only; a resend revokes the older link. After the PIN is chosen the link needs that
   person's PIN to show the checklist again. Nothing is uploaded to Payroll Relief.
 - Call-outs (handbook section 3): text the manager 4+ hours ahead, then "I need coverage" on the shift in the team app
-  (`src/lib/shift-coverage.ts`, migration 0045): one message (Hub message, app notification, email) to the whole team,
+  (`src/lib/shift-coverage.ts`, migration 0045): a post in the team group chat as the employee (with the app notification),
   never the reason; a coworker taps "I'll take it" (first wins) and a manager approves on Schedule → Requests, which
   moves the shift. Late (<4 h) and sick-leave flags show only to managers. Handbook page has "Send to N who haven't
   signed" (app message, notification, email, text where consented), refused while the version is a draft.

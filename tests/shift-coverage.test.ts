@@ -12,8 +12,8 @@ test("a call-out under 4 hours before the shift is late", () => {
 test("the group message names the shift but never the reason", () => {
   const shift = coverageShiftLabel(new Date("2026-11-08T21:00:00Z"), new Date("2026-11-09T03:00:00Z"), "Pizza");
   assert.equal(shift, "Sun, Nov 8, 4:00 PM–10:00 PM · Pizza");
-  const message = coverageGroupMessage({ name: "Brandon Howie", shift });
-  assert.match(message, /^Brandon needs coverage: Sun, Nov 8, 4:00 PM–10:00 PM · Pizza\./);
+  const message = coverageGroupMessage({ shift });
+  assert.match(message, /^I need coverage: Sun, Nov 8, 4:00 PM–10:00 PM · Pizza\./);
   assert.match(message, /I'll take it/);
   assert.doesNotMatch(message, /sick/i);
 });

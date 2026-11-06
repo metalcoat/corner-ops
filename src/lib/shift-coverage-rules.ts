@@ -12,6 +12,6 @@ export function coverageShiftLabel(startsAt: Date, endsAt: Date, position: strin
 }
 
 /** The one group message. Never says why; sick leave stays private. */
-export function coverageGroupMessage(input: { name: string; shift: string }): string {
-  return `${input.name.split(/\s+/)[0] || input.name} needs coverage: ${input.shift}. Can you take it? Open the Corner Deli app → Schedule → "Shifts needing coverage" and tap I'll take it.`;
+export function coverageGroupMessage(input: { shift: string }): string {
+  return `I need coverage: ${input.shift}. Can anyone take it? Tap "I'll take it" under Schedule → Shifts needing coverage.`;
 }
