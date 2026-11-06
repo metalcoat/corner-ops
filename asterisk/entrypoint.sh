@@ -33,6 +33,12 @@ envsubst '${ASTERISK_OPENAI_DID} ${ASTERISK_OPENAI_PROJECT_ID} ${ASTERISK_VOICE_
   < /opt/corner-ops-asterisk/extensions.conf.template \
   > /etc/asterisk/extensions.conf
 
+# Card-digit second opinion (local only, never logs requests). The card line falls back to Vosk alone if it's off.
+if [ "${VOICE_PAYMENT_SECOND_OPINION:-false}" = "true" ] && [ -x /opt/llama/llama-server ]; then
+  LD_LIBRARY_PATH=/opt/llama /opt/llama/llama-server -m /opt/card-asr/model.gguf --mmproj /opt/card-asr/mmproj.gguf \
+    -t "${VOICE_PAYMENT_SECOND_OPINION_THREADS:-4}" -c 2048 --host 127.0.0.1 --port 18090 --log-disable >/dev/null 2>&1 &
+fi
+
 if [ "${GEMINI_PHONE_BRIDGE_ENABLED:-false}" = "true" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
   /usr/local/bin/corner-ops-gemini-phone &
 fi

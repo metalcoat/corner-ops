@@ -1,3 +1,6 @@
+# llama.cpp CPU server, pinned: runs the card-digit second opinion (LFM3-Audio) inside this container.
+FROM ghcr.io/ggml-org/llama.cpp@sha256:41988e510b6fe0a0b5b9be00a9dbf91d9f0fa691da173d7b06d97d370329fe84 AS llama
+
 FROM ubuntu:24.04
 
 RUN apt-get update \
@@ -6,6 +9,7 @@ RUN apt-get update \
       ca-certificates \
       espeak-ng \
       gettext-base \
+      libgomp1 \
       python3-pip \
       python3-websockets \
       sox \
@@ -21,6 +25,17 @@ ADD --checksum=sha256:d9838b4aaa82a75c4a17f5aca300eaca129aaab2a7cbf951bafbb500eb
 RUN unzip -q /tmp/vosk-model.zip -d /opt \
     && mv /opt/vosk-model-en-us-0.22-lgraph /opt/vosk-model \
     && rm /tmp/vosk-model.zip
+
+# Second opinion on card digits (2026-11-06): LFM3-Audio-2B (Q8_0 GGUF, ~2.4 GB, ~1.5 s per 4-digit answer on 4
+# CPU threads), served by llama.cpp on 127.0.0.1 only when VOICE_PAYMENT_SECOND_OPINION=true. Audio is sent over
+# localhost and never stored. On 200 synthetic phone-codec groups (clean/quiet/noisy/fast) it was right on 188
+# (Vosk 167), never agreed with a wrong Vosk reading, and rescued 20 of Vosk's 26 misses.
+# LFM Open License v1.0: commercial use allowed below USD 10M annual revenue.
+COPY --from=llama /app /opt/llama
+ADD --checksum=sha256:d4e36902ba8f0ee7b333596030a59d650f88ac76660b4d9ba5ff77c3c2258fc0 \
+    https://huggingface.co/LiquidAI/LFM3-Audio-2B-GGUF/resolve/39670cb5c42e9c4bfe046519ba7ffbe47f9552ad/LFM3-Audio-2B-Q8_0.gguf /opt/card-asr/model.gguf
+ADD --checksum=sha256:bd0fce0670c96e405a753f996701dee6568bc6a1318a80091d74fb58f7510d79 \
+    https://huggingface.co/LiquidAI/LFM3-Audio-2B-GGUF/resolve/39670cb5c42e9c4bfe046519ba7ffbe47f9552ad/mmproj-LFM3-Audio-2B-F16.gguf /opt/card-asr/mmproj.gguf
 
 COPY pjsip.conf.template /opt/corner-ops-asterisk/pjsip.conf.template
 COPY extensions.conf.template /opt/corner-ops-asterisk/extensions.conf.template

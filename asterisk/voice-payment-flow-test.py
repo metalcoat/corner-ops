@@ -51,8 +51,16 @@ def digits(voice, value, size=4):
 class Api(http.server.BaseHTTPRequestHandler):
     calls = []
 
+    second_opinion = ""  # what the fake second recognizer "hears" (VOICE_PAYMENT_SECOND_OPINION_URL)
+    second_opinion_calls = 0
+
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["content-length"])))
+        if self.path == "/second-opinion":
+            Api.second_opinion_calls += 1
+            data = json.dumps({"choices": [{"message": {"content": Api.second_opinion}}]}).encode()
+            self.send_response(200); self.send_header("content-type", "application/json"); self.end_headers(); self.wfile.write(data)
+            return
         Api.calls.append(body)
         reply = {"sessionId": "session-1"} if body["action"] == "claim" else {"approved": True}
         data = json.dumps(reply).encode()
@@ -69,11 +77,17 @@ server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Api)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 
 
-def run(answers):
-    """answers: prompt name -> list of ('say', pcm) / ('keys', '4111...#') / ('nothing', None), used in order."""
+def run(answers, second_opinion=None):
+    """answers: prompt name -> list of ('say', pcm) / ('keys', '4111...#') / ('nothing', None), used in order.
+    second_opinion: text the fake second recognizer returns ("down" = an unreachable one, None = off)."""
     Api.calls = []
+    Api.second_opinion, Api.second_opinion_calls = second_opinion or "", 0
     audio_read, audio_write = os.pipe()
     env = {**os.environ, "VOICE_PAYMENT_API_URL": f"http://127.0.0.1:{server.server_port}/", "VOICE_PAYMENT_INTERNAL_SECRET": "test"}
+    if second_opinion == "down":
+        env["VOICE_PAYMENT_SECOND_OPINION_URL"] = "http://127.0.0.1:9/second-opinion"
+    elif second_opinion is not None:
+        env["VOICE_PAYMENT_SECOND_OPINION_URL"] = f"http://127.0.0.1:{server.server_port}/second-opinion"
     process = subprocess.Popen(
         ["sh", "-c", f'exec python3 -W ignore "$0" call-1 3155550100 3<&{audio_read}', SCRIPT],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -233,5 +247,26 @@ for voice, step, word, answers in [
     assert outcome["result"] == "failed" and outcome["charge"] is None, outcome
     assert outcome["prompts"][-1] == "transfer-person", outcome["prompts"]
     assert any(call["action"] == "abandon" and call.get("code") == "caller_asked_for_person" for call in Api.calls), Api.calls
+
+# 9. Second opinion on card digits (2026-11-06).
+spoken = lambda number: " ".join(NAMES[int(d)] for d in number)
+# A fresh copy per run: run() consumes the answer lists.
+everything_else_answers = lambda: {
+    "say-confirm": [("say", speech("Kore", [["yes"]]))],
+    "say-expiration": [("keys", "0428")],
+    "say-security-code": [("keys", "123")],
+    "say-billing-zip": [("keys", "13669")],
+}
+# It agrees: charged as heard.
+check("second opinion agrees", run({"say-card-number": [("say", digits("Kore", VISA))], **everything_else_answers()}, spoken(VISA)), VISA)
+# It hears a different valid card: neither is trusted, the number is asked again (never a wrong card charged).
+OTHER = "4242424242424242"
+outcome = run({"say-card-number": [("say", digits("Kore", VISA))], "card-number": [("say", digits("Kore", VISA[:4]))], **everything_else_answers()}, spoken(OTHER))
+checks.append("second opinion disagrees: asked again, nothing charged")
+assert outcome["charge"] is None and "card-in-groups" in outcome["prompts"], outcome
+# Vosk gets a garbled number; the second opinion's valid reading is used.
+check("second opinion rescues a garbled number", run({"say-card-number": [("say", digits("Aoede", VISA[:7] + VISA[8:]))], **everything_else_answers()}, spoken(VISA)), VISA)
+# The second recognizer is down: Vosk alone, as before.
+check("second opinion down: Vosk alone", run({"say-card-number": [("say", digits("Kore", VISA))], **everything_else_answers()}, "down"), VISA)
 
 sys.stdout.write(json.dumps({"status": "passed", "checks": checks}) + "\n")

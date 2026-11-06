@@ -273,7 +273,8 @@ def listen(phrases,max_keys,max_seconds=20,silence_end=1.8,voice_level=120,prero
         return ("keys",collect_keys(key,max_keys)) if key else ("none","")
     recognizer=Recognizer(phrases)
     state={"started":False,"last_voice":time.monotonic(),"done":False,"peak":0}
-    LAST_LISTEN.clear();LAST_LISTEN.update(started_at=time.monotonic(),state=state)
+    audio=[]  # kept in memory only for the second opinion on this answer, never written anywhere
+    LAST_LISTEN.clear();LAST_LISTEN.update(started_at=time.monotonic(),state=state,audio=audio)
     if preroll:
         # Feed what was said over the prompt; the end-of-answer clock starts from its last voiced chunk.
         quiet=0
@@ -282,7 +283,7 @@ def listen(phrases,max_keys,max_seconds=20,silence_end=1.8,voice_level=120,prero
             level=audioop.rms(chunk,2);state["peak"]=max(state["peak"],level)
             if level>voice_level:state["started"]=True;quiet=0
             else:quiet+=len(chunk)
-            recognizer.feed(chunk)
+            recognizer.feed(chunk);audio.append(chunk)
         state["last_voice"]=time.monotonic()-quiet/(RATE*2)
     stop=threading.Event()
     def reader():
@@ -297,7 +298,7 @@ def listen(phrases,max_keys,max_seconds=20,silence_end=1.8,voice_level=120,prero
             if not chunk:break
             level=audioop.rms(chunk,2);state["peak"]=max(state["peak"],level)
             if level>voice_level:state["started"]=True;state["last_voice"]=time.monotonic()
-            recognizer.feed(chunk)
+            recognizer.feed(chunk);audio.append(chunk)
             if state["started"] and time.monotonic()-state["last_voice"]>silence_end:break
         state["done"]=True
     worker=threading.Thread(target=reader,daemon=True);worker.start()
@@ -346,6 +347,45 @@ def ask(prompt_name,phrases,max_keys,**options):
 
 # ---------------------------------------------------------------- flow
 
+# Second opinion on card digits (Chris, 2026-11-06): LFM3-Audio served by llama.cpp inside this container
+# (entrypoint.sh, VOICE_PAYMENT_SECOND_OPINION=true). Off, down or slow means Vosk alone, as before.
+SECOND_OPINION_URL=os.environ.get("VOICE_PAYMENT_SECOND_OPINION_URL") or (
+    "http://127.0.0.1:18090/v1/chat/completions" if os.environ.get("VOICE_PAYMENT_SECOND_OPINION","").lower()=="true" else "")
+SECOND_OPINION_TIMEOUT=float(os.environ.get("VOICE_PAYMENT_SECOND_OPINION_TIMEOUT","4"))
+
+def second_opinion(accept):
+    """The second recognizer's reading of the answer just heard, as digits, or "" when it has none."""
+    audio=b"".join(LAST_LISTEN.get("audio") or [])
+    if not SECOND_OPINION_URL or not audio:return ""
+    import base64,io,wave
+    buffer=io.BytesIO()
+    with wave.open(buffer,"wb") as target:
+        target.setnchannels(1);target.setsampwidth(2);target.setframerate(RATE);target.writeframes(audio)
+    body={"messages":[{"role":"system","content":"Perform ASR in English."},{"role":"user","content":[
+        {"type":"input_audio","input_audio":{"data":base64.b64encode(buffer.getvalue()).decode(),"format":"wav"}}]}],
+        "temperature":0,"max_tokens":60}
+    try:
+        request=urllib.request.Request(SECOND_OPINION_URL,data=json.dumps(body).encode(),headers={"content-type":"application/json"},method="POST")
+        with urllib.request.urlopen(request,timeout=SECOND_OPINION_TIMEOUT) as response:
+            text=str(json.loads(response.read())["choices"][0]["message"]["content"])
+    except Exception:
+        return ""
+    finally:
+        audio=b"";body=None;buffer=None
+    digits=words_to_digits(re.sub(r"[^a-z0-9 ]"," ",text.lower())) or ""
+    return digits if accept(digits) else ""
+
+def checked(how,value,accept,step):
+    """Vosk's answer against the second opinion. Agreement (or no second opinion) keeps Vosk's; two different
+    readings trust neither, so it's asked again; no Vosk answer takes the second opinion's valid one. Logs only
+    which of those happened."""
+    if how!="speech":return value
+    other=second_opinion(accept)
+    outcome="off" if not SECOND_OPINION_URL else "agree" if value and other==value else "disagree" if value and other else "rescued" if other else "vosk_only" if value else "none"
+    sys.stderr.write(f"VOICE_PAYMENT_SECOND_OPINION step={step} outcome={outcome}\n");sys.stderr.flush()
+    if outcome=="disagree":return ""
+    return value or other
+
 # Two failed answers of any kind (not heard, not a valid card, wrong length) and a person takes the card
 # (Chris, 2026-11-06: callers are often older and hesitant; hand off early instead of looping).
 MAX_MISSES=2
@@ -392,6 +432,7 @@ def card_in_groups():
             how,heard=ask(group_prompt(index,size,sum(sizes)-len(card)),NUMBER_PHRASES,19 if index==0 else size,max_seconds=12,silence_end=1.6)
             if index==0 and how=="keys" and card_complete(heard):return heard  # keyed the whole number
             group=best(how,heard,as_digits,lambda value,size=size:len(value)==size)
+            group=checked(how,group,lambda value,size=size:len(value)==size,f"group{index+1}")
             if len(group)==size:break
             miss("try-again");group=""
         if not group:return ""
@@ -404,6 +445,7 @@ def get_card_number():
     (a dropped or extra digit fails the Luhn check), fall back to four digits at a time."""
     how,heard=ask("say-card-number",NUMBER_PHRASES,19,max_seconds=30,silence_end=2.2)
     digits=heard if how=="keys" else words_to_digits(heard[0]) or "" if heard else ""
+    digits=checked(how,digits if card_complete(digits) else "",card_complete,"whole")
     if card_complete(digits):return digits
     miss("card-in-groups")
     digits=card_in_groups()

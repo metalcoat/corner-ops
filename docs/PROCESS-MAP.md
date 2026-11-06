@@ -136,7 +136,14 @@ flowchart LR
   - Nacho cheese is always on the side; an on-top request lands on the side instead of erroring.
   - A bare yes, sure or yeah to a list question (dips, sub vegetables) means all of it.
   - A caller who asks for a person (person, representative, operator, the store) or sounds frustrated ("this isn't working", swearing, "no no no") is transferred right away with "No problem, let me get you to someone at the store." On the Gemini line the bridge spots the words itself (`person_handoff_reason`), tells Gemini the line, and transfers on its own if Gemini hasn't within 6 s. On the card line the words are in every step's vocabulary (`transfer-person`, code `caller_asked_for_person`). The popup shows "Caller asked for a person" or "Caller sounded frustrated".
-  - The card line writes one `VOICE_PAYMENT_STEP` line per step to the asterisk container log: keys, speech or nothing; whether speech was detected; peak loudness; and only the word and digit counts, never what was said. A second local recognizer (faster-whisper base.en / small.en) was tried 2026-11-06 and got 21–22 of 30 four-digit groups right, against Vosk's 99 of 99 on synthetic voices, so it was not added.
+  - The card line writes one `VOICE_PAYMENT_STEP` line per step to the asterisk container log: keys, speech or nothing; whether speech was detected; peak loudness; and only the word and digit counts, never what was said. The card number gets a second opinion when `VOICE_PAYMENT_SECOND_OPINION` is true (dev): LFM3-Audio-2B (Q8_0 GGUF, pinned by checksum in `asterisk/Dockerfile`) served by llama.cpp inside the phone container on 127.0.0.1:18090. It only receives the audio of the answer just given, never stores it, and its request logging is off.
+  - Agreement, or no second opinion, keeps Vosk's reading.
+  - Two different readings trust neither, so the number is asked again.
+  - If Vosk has no answer, the second opinion's reading is used only if it has the right length, and the whole card still must pass Luhn.
+  - Each step logs `VOICE_PAYMENT_SECOND_OPINION step=… outcome=agree|disagree|rescued|vosk_only|none`.
+  - Benchmark (2026-11-06, 200 synthetic phone-codec groups, clean/quiet/noisy/fast): Vosk 167 right, 7 wrong. LFM3 188 right, 1 wrong, about 1.5 s per answer; it disagreed with all 7 wrong Vosk groups and rescued 20 of 26 misses. Whisper small.en scored 185 but took 2.1 s, and Gemma 4 E2B took 3.7 s; neither was used.
+  - LFM Open License: commercial use allowed below USD 10M annual revenue.
+  - The image grows by about 2.5 GB.
 - From Chris's dev test call 2026-11-06 (f98e637f):
   - If Gemini hears the caller start talking but never decides they've finished, the stall watchdog sends `realtimeInput.audioStreamEnd` before its nudge (checked live on `gemini-3.1-flash-live-preview`), so Gemini answers instead of sitting silent.
   - Topping names the voice model mangles still resolve: doubled words ("Hot Hot Peppers"), a group-name suffix ("Bacon Pizza Topping"), and sweet / green / bell peppers as Peppers.

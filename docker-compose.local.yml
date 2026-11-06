@@ -32,6 +32,8 @@ services:
       GEMINI_PHONE_APP_URL: http://127.0.0.1:3000
       # Background Claude order check on the Gemini line (dev trial 2026-11-06); the app holds the key.
       AI_PHONE_CLAUDE_CHECKER: ${AI_PHONE_CLAUDE_CHECKER:-false}
+      # Card-digit second opinion (LFM3-Audio via llama.cpp on 127.0.0.1:18090 inside this container, ~2.5 GB RAM).
+      VOICE_PAYMENT_SECOND_OPINION: ${VOICE_PAYMENT_SECOND_OPINION:-false}
     healthcheck:
       test: ["CMD-SHELL", "asterisk -rx 'core show uptime' >/dev/null 2>&1"]
       interval: 10s
