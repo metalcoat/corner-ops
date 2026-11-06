@@ -399,6 +399,14 @@ async def main():
     check("a stuck caller turn is ended before the stall nudge", ended and nudged and ended[0] < nudged[0], {"ended": ended, "nudged": nudged})
     gp.STALL_SECONDS = 8
 
+    # The caller answered ("card") and Gemini sat silent (dev test call 2026-11-06, 30 s): after UNSTICK_SECONDS the
+    # bridge ends the audio turn and hands Gemini the caller's words.
+    gp.UNSTICK_SECONDS = 0.3
+    log = await run([transcript("card")] + ["SLEEP"] * 6, [])
+    told = [m for m in log["sent"] if "clientContent" in m and "The caller said" in json.dumps(m) and "card" in json.dumps(m)]
+    check("a frozen turn gets the caller's own words, once", len(told) == 1 and any(n == "unstickTurn" for n, _ in log["events"]), {"told": len(told), "events": [n for n, _ in log["events"]]})
+    gp.UNSTICK_SECONDS = 2.5
+
     # Tool results stay in the Live context and are re-billed each turn (2026-10-28): empty fields, default
     # modifier quantities and raw cents go; ids, display totals, tipCents, false/zero and pizza portions stay.
     cart = gp.voice_safe_tool_result({

@@ -379,7 +379,9 @@ def checked(how,value,accept,step):
     """Vosk's answer against the second opinion. Agreement (or no second opinion) keeps Vosk's; two different
     readings trust neither, so it's asked again; no Vosk answer takes the second opinion's valid one. Logs only
     which of those happened."""
-    if how!="speech":return value
+    # Speech that Vosk turned into nothing still gets a second opinion (dev test call 2026-11-06: a clearly
+    # spoken group came back empty and was never checked).
+    if how=="keys" or (how=="none" and not (LAST_LISTEN.get("state") or {}).get("started")):return value
     other=second_opinion(accept)
     outcome="off" if not SECOND_OPINION_URL else "agree" if value and other==value else "disagree" if value and other else "rescued" if other else "vosk_only" if value else "none"
     sys.stderr.write(f"VOICE_PAYMENT_SECOND_OPINION step={step} outcome={outcome}\n");sys.stderr.flush()
@@ -445,9 +447,12 @@ def get_card_number():
     (a dropped or extra digit fails the Luhn check), fall back to four digits at a time."""
     how,heard=ask("say-card-number",NUMBER_PHRASES,19,max_seconds=30,silence_end=2.2)
     digits=heard if how=="keys" else words_to_digits(heard[0]) or "" if heard else ""
-    digits=checked(how,digits if card_complete(digits) else "",card_complete,"whole")
     if card_complete(digits):return digits
-    miss("card-in-groups")
+    # The whole number in one breath is a quick first try; dropping to four at a time is the normal fallback,
+    # not a strike (dev test call 2026-11-06: one misheard digit there plus one unheard group sent a careful
+    # caller to staff). The second opinion is too slow and miscounts repeats on a whole number, so it only
+    # checks groups.
+    prompt("card-in-groups")
     digits=card_in_groups()
     if digits:return digits
     miss("card-invalid")
@@ -526,6 +531,7 @@ def main():
         # No read-back of the last four (owner request 2026-10-25): a misheard number fails the card check
         # and is asked again; the processor declines a wrong one.
         failure_stage="card_recognition_failed"
+        prompt("lets-get-card")  # said the moment the call reaches the card line (Chris, 2026-11-06)
         card=get_card_number()
         if not card:raise RuntimeError("recognition")
         failure_stage="expiration_recognition_failed"

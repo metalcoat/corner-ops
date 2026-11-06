@@ -47,7 +47,7 @@ async function main(){
       wingExtraSauce:phone.PHONE_INSTRUCTIONS.includes("Extra sauce")&&phone.PHONE_INSTRUCTIONS.includes("4oz side cup matching that wing flavor"),
       pickupPaymentPolicy:phone.PHONE_INSTRUCTIONS.includes("For pickup, never ask cash or card")&&phone.PHONE_INSTRUCTIONS.includes("independently says they want to pay now"),
       responsiveSpeech:phone.PHONE_INSTRUCTIONS.includes("finish it")&&phone.PHONE_INSTRUCTIONS.includes("Incidental noise"),
-      conciseReadback:phone.PHONE_INSTRUCTIONS.includes("Do not narrate work or repeat every item"),
+      conciseReadback:phone.PHONE_INSTRUCTIONS.includes("Do not narrate work or repeat items"),
       fullRealtimeDefault:phone.OPENAI_PHONE_MODEL==="gpt-realtime-1.5",
       unauthorized:unauthorized.status===401,
       protocol:initialized.result?.protocolVersion==="2025-06-18",

@@ -431,6 +431,15 @@ def usage_summary(usage, model):
 
 
 STALL_SECONDS = float(os.environ.get("GEMINI_STALL_SECONDS", "8"))
+# The caller's words stopped coming in but Gemini hasn't answered or started anything: it is holding the turn open
+# (line noise). Dev test calls 2026-11-06 sat silent 20-30 s after "sweet" and "card".
+UNSTICK_SECONDS = float(os.environ.get("GEMINI_UNSTICK_SECONDS", "2.5"))
+
+
+def unstick_message(words):
+    said = " ".join(str(words or "").split())[:300]
+    text = f"(The caller said: \u201c{said}\u201d. Answer that now.)" if said else stall_nudge_message()["clientContent"]["turns"][0]["parts"][0]["text"]
+    return {"clientContent": {"turns": [{"role": "user", "parts": [{"text": text}]}], "turnComplete": True}}
 
 
 def conversation_progress(message):
@@ -1241,8 +1250,25 @@ async def bridge(reader, writer, call_id):
             instead of leaving the caller in silence."""
             nonlocal last_progress
             nudges = 0
+            unstuck_turn = None
             while not close_requested.is_set():
                 await asyncio.sleep(0.25)
+                now = time.monotonic()
+                if (
+                    user_turn_open
+                    and unstuck_turn != customer_turn_id
+                    and customer_transcript.strip()
+                    and now - last_customer_speech > UNSTICK_SECONDS
+                    and now - last_progress > UNSTICK_SECONDS
+                    and not playback.assistant_speaking
+                    and playback.state not in ("ASSISTANT_SPEAKING", "TOOL_EXECUTING")
+                ):
+                    unstuck_turn = customer_turn_id
+                    last_progress = now
+                    await emit("unstickTurn", playback.snapshot())
+                    await gemini.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
+                    await gemini.send(json.dumps(unstick_message(customer_transcript)))
+                    continue
                 if playback.state in ("ASSISTANT_SPEAKING", "TOOL_EXECUTING") or playback.assistant_speaking:
                     last_progress = time.monotonic()
                     continue

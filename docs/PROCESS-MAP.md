@@ -150,6 +150,12 @@ flowchart LR
   - Extra or light sauce adds the Extra Sauce topping.
   - An edit with an unknown modifier names it ("Purple Peppers isn't an option on that") instead of the vague "invalid or ambiguous". Test: `scripts/ai-cart-regressions/pizza-names.ts`.
   - Pickup or delivery is confirmed once ("Delivery to 412 Jay Street, right?"), then never asked or re-read again. Once an order has pickup or delivery set, `price_order` refuses a switch (`SERVICE_ALREADY_SET`) unless `serviceChangeRequested` is true, which means the caller clearly asked to switch. Test: `scripts/ai-cart-regressions/service-type.ts`.
+  - From Chris's 14:18 test call, 2026-11-06:
+    - The bridge unsticks a frozen caller turn after `GEMINI_UNSTICK_SECONDS` (2.5 s) with no model activity: it sends `audioStreamEnd` plus the caller's own words as text ("The caller said: …"). The 8 s stall nudge stays as a backstop.
+    - The prompt now asks for short per-item acknowledgements ("Got it, what else?"), no read-back until the end, and no "everything on that?" when the caller already named a change.
+    - The card line opens with "Okay, let's get your card."
+    - The quick whole-number try isn't a strike.
+    - The second opinion checks only four-digit groups, including a group Vosk heard as nothing. LFM3 took 3.6 s and miscounted repeated digits on a whole number.
 - Docker disk cleanup: `update.sh` prunes after each deploy, but only untagged images and build cache older than 72 h, so tagged leftovers piled up. The box got down to 1.6 GB free on 2026-11-06, and 9 GB was freed by hand that day.
   - `deploy/docker-cleanup.sh` removes untagged images, build cache beyond 5 GB, and unused `corner-ops-*` tags older than 14 days. It keeps `:latest`, `:rollback` and `:before-*`, never touches containers, volumes or base images, logs to `deploy/logs/docker-cleanup.log`, and warns when less than 8 GB is free.
   - `--dry-run` lists what it would remove.

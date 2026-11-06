@@ -58,7 +58,8 @@ class Api(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["content-length"])))
         if self.path == "/second-opinion":
             Api.second_opinion_calls += 1
-            data = json.dumps({"choices": [{"message": {"content": Api.second_opinion}}]}).encode()
+            heard = Api.second_opinion.pop(0) if isinstance(Api.second_opinion, list) and Api.second_opinion else Api.second_opinion
+            data = json.dumps({"choices": [{"message": {"content": heard if isinstance(heard, str) else ""}}]}).encode()
             self.send_response(200); self.send_header("content-type", "application/json"); self.end_headers(); self.wfile.write(data)
             return
         Api.calls.append(body)
@@ -224,16 +225,17 @@ checks.append("silence hands off")
 assert outcome["result"] == "failed" and outcome["charge"] is None, outcome
 assert any(call["action"] == "abandon" for call in Api.calls), Api.calls
 
-# 7. Two failed answers hand off (Chris, 2026-11-06): a garbled whole number, then a garbled first group of
-# four, goes straight to staff with the transfer line instead of looping; nothing is charged.
+# 7. Two failed answers hand off (Chris, 2026-11-06): the quick whole-number try isn't a strike, but two failed
+# groups go straight to staff with the transfer line instead of looping; nothing is charged.
 voice = "Aoede"
 outcome = run({
     "say-card-number": [("say", digits(voice, VISA[:7] + VISA[8:]))],
-    "card-number": [("say", digits(voice, "41"))],
+    "card-number": [("say", digits(voice, "41")), ("say", digits(voice, "41"))],
 })
 checks.append("two misses hand off")
 assert outcome["result"] == "failed" and outcome["charge"] is None, outcome
-assert outcome["prompts"][-1] == "transfer-card-help" and "try-again" not in outcome["prompts"], outcome["prompts"]
+assert outcome["prompts"][-1] == "transfer-card-help" and outcome["prompts"].count("try-again") == 1, outcome["prompts"]
+assert outcome["prompts"][0] == "lets-get-card", outcome["prompts"]
 assert any(call["action"] == "abandon" and call.get("code") == "card_recognition_failed" for call in Api.calls), Api.calls
 
 # 8. Asking for a person at any step goes to the store at once with "No problem, let me get you to someone
@@ -257,15 +259,26 @@ everything_else_answers = lambda: {
     "say-security-code": [("keys", "123")],
     "say-billing-zip": [("keys", "13669")],
 }
-# It agrees: charged as heard.
-check("second opinion agrees", run({"say-card-number": [("say", digits("Kore", VISA))], **everything_else_answers()}, spoken(VISA)), VISA)
-# It hears a different valid card: neither is trusted, the number is asked again (never a wrong card charged).
-OTHER = "4242424242424242"
-outcome = run({"say-card-number": [("say", digits("Kore", VISA))], "card-number": [("say", digits("Kore", VISA[:4]))], **everything_else_answers()}, spoken(OTHER))
+GROUP_ANSWERS = lambda: {
+    "say-card-number": [("say", digits("Aoede", VISA[:7] + VISA[8:]))],
+    "card-number": [("say", digits("Kore", VISA[0:4]))],
+    "next-four": [("say", digits("Kore", VISA[4:8])), ("say", digits("Kore", VISA[8:12]))],
+    "last-four": [("say", digits("Kore", VISA[12:16]))],
+}
+# It agrees on every group: charged as heard.
+check("second opinion agrees", run({**GROUP_ANSWERS(), **everything_else_answers()}, [spoken(VISA[i:i + 4]) for i in range(0, 16, 4)]), VISA)
+# It hears a different group: neither is trusted, that group is asked again (never a wrong card charged).
+outcome = run({**GROUP_ANSWERS(), **everything_else_answers()}, ["nine nine nine nine"] * 8)
 checks.append("second opinion disagrees: asked again, nothing charged")
-assert outcome["charge"] is None and "card-in-groups" in outcome["prompts"], outcome
-# Vosk gets a garbled number; the second opinion's valid reading is used.
-check("second opinion rescues a garbled number", run({"say-card-number": [("say", digits("Aoede", VISA[:7] + VISA[8:]))], **everything_else_answers()}, spoken(VISA)), VISA)
+assert outcome["charge"] is None and "try-again" in outcome["prompts"], outcome
+# Speech Vosk turns into nothing ("yes" isn't a number) gets the second opinion's reading of that group.
+GROUPS = [VISA[i:i + 4] for i in range(0, 16, 4)]
+check("second opinion rescues a group Vosk heard as nothing", run({
+    "say-card-number": [("say", digits("Aoede", VISA[:7] + VISA[8:]))],
+    "card-number": [("say", speech("Kore", [["yes"]]))],
+    "next-four": [("say", digits("Kore", GROUPS[1])), ("say", digits("Kore", GROUPS[2]))],
+    "last-four": [("say", digits("Kore", GROUPS[3]))],
+    **everything_else_answers()}, [spoken(group) for group in GROUPS]), VISA)
 # The second recognizer is down: Vosk alone, as before.
 check("second opinion down: Vosk alone", run({"say-card-number": [("say", digits("Kore", VISA))], **everything_else_answers()}, "down"), VISA)
 
