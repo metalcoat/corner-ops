@@ -40,9 +40,9 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
   const [androidUpdateUrl, setAndroidUpdateUrl] = useState<string | null>(null);
   const onlineOrderAlerts = useOnlineOrderAlert(Boolean(session?.authenticated), alertSound, alertVolume);
   const [online,setOnline]=useState(true),[offlinePending,setOfflinePending]=useState(0),[offlineMessage,setOfflineMessage]=useState(""),[offlineConflicts,setOfflineConflicts]=useState<OfflineCashOrder[]>([]);
-  const [pendingEmployeeMeal,setPendingEmployeeMeal]=useState(false);
+  const [pendingEmployeeMeal,setPendingEmployeeMeal]=useState<""|"meal"|"drink">("");
 
-  useEffect(()=>{if(!menuActive||!pendingEmployeeMeal)return;setPendingEmployeeMeal(false);window.requestAnimationFrame(()=>window.dispatchEvent(new Event("corner-ops-pos-employee-meal")))},[menuActive,pendingEmployeeMeal]);
+  useEffect(()=>{if(!menuActive||!pendingEmployeeMeal)return;const kind=pendingEmployeeMeal;setPendingEmployeeMeal("");window.requestAnimationFrame(()=>window.dispatchEvent(new Event(`corner-ops-pos-employee-${kind}`)))},[menuActive,pendingEmployeeMeal]);
 
   useEffect(()=>{let active=true;const refresh=()=>{const rows=offlineOrders();setOnline(navigator.onLine);setOfflinePending(rows.filter(row=>row.status!=="conflict").length);setOfflineConflicts(rows.filter(row=>row.status==="conflict"))};const sync=async()=>{refresh();if(!navigator.onLine)return;const result=await syncOfflineOrders();if(!active)return;setOfflinePending(result.remaining);if(result.synced)setOfflineMessage(`${result.synced} offline order${result.synced===1?"":"s"} synced to the kitchen and register.`)};refresh();void sync();window.addEventListener("online",sync);window.addEventListener("offline",refresh);window.addEventListener("corner-ops-offline-queue",refresh);const timer=window.setInterval(()=>void sync(),15000);return()=>{active=false;window.clearInterval(timer);window.removeEventListener("online",sync);window.removeEventListener("offline",refresh);window.removeEventListener("corner-ops-offline-queue",refresh)}},[]);
 
@@ -142,8 +142,8 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
     window.setTimeout(() => window.dispatchEvent(new Event("corner-ops-pos-product-search")), 80);
   }
 
-  function showEmployeeMeal() {
-    setPendingEmployeeMeal(true);
+  function showEmployeeMeal(kind: "meal" | "drink" = "meal") {
+    setPendingEmployeeMeal(kind);
     if (!menuActive) router.push("/pos/deli");
   }
 
@@ -160,7 +160,8 @@ export default function DeliPosShell({ children, idleLockSeconds, alertSound, al
       <div className="deliShellUtilities">
         <button type="button" onClick={() => void logout()}>SWITCH EMPLOYEE</button>
         {session?.authenticated && <button type="button" className={`deliAlertEnable ${onlineOrderAlerts.alertsEnabled?"enabled":"needed"}`} disabled={onlineOrderAlerts.alertBusy} onClick={()=>void (onlineOrderAlerts.alertsEnabled?onlineOrderAlerts.testAlerts():onlineOrderAlerts.enableAlerts())}>{onlineOrderAlerts.alertBusy?"ENABLING…":onlineOrderAlerts.alertsEnabled?"🔔":"ENABLE SOUND & NOTIFICATIONS"}</button>}
-        {session?.authenticated && <button type="button" className="deliUtilityIcon" aria-label="Employee meal" title="Employee meal" onClick={showEmployeeMeal}>🍽</button>}
+        {session?.authenticated && <button type="button" className="deliUtilityIcon" aria-label="Employee meal" title="Employee meal" onClick={()=>showEmployeeMeal("meal")}>🍽</button>}
+        {session?.authenticated && <button type="button" className="deliUtilityIcon" aria-label="Employee drink at cost" title="Employee drink at cost" onClick={()=>showEmployeeMeal("drink")}>🥤</button>}
         {session?.authenticated && <Link className={`deliUtilityIcon ${activeWorkspace(pathname, "/pos/deli/ai-calls") ? "active" : ""}`} aria-label="AI call monitor" title="AI call monitor" href="/pos/deli/ai-calls">☎</Link>}
         <a className="deliUtilityIcon" aria-label="All apps" title="All apps (home screen)" href="/pos?choose=1">▦</a>
         <Link className={`deliUtilityIcon ${activeWorkspace(pathname, "/pos/deli/reports") ? "active" : ""}`} aria-label="Reports" title="Reports" aria-current={activeWorkspace(pathname, "/pos/deli/reports") ? "page" : undefined} href="/pos/deli/reports"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 20V10h4v10H4Zm6 0V4h4v16h-4Zm6 0v-7h4v7h-4Z" /></svg></Link>

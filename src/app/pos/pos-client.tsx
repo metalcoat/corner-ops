@@ -802,6 +802,11 @@ export default function PosClient({
     window.addEventListener("corner-ops-pos-employee-meal", open);
     return () => window.removeEventListener("corner-ops-pos-employee-meal", open);
   }, []);
+  useEffect(() => {
+    const open = () => { void openEmployeeDrinks(); };
+    window.addEventListener("corner-ops-pos-employee-drink", open);
+    return () => window.removeEventListener("corner-ops-pos-employee-drink", open);
+  }, []);
   const [cashTender, setCashTender] = useState("");
   const [receiptPrinters, setReceiptPrinters] = useState<
     Array<{
