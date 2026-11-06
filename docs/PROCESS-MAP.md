@@ -645,6 +645,11 @@ flowchart LR
   Changing the amount of a topping on one pizza half preserves the other half. Tiki tabs and employee meals
   use the same size/allowance calculation; employee meal consumption and kitchen submission commit together,
   and inventory is depleted once.
+- Employee drinks at cost (dev, 2026-11-06): 🥤 in the deli toolbar (DRINK in the shared POS bar) for the signed-in PIN
+  employee. Only the "12 - 20 oz Soda" and "2 Liter" categories. Price = (cost + bottle deposit) × (1 + tax), rounded up
+  to the next $0.25 (`ordering-employee-drink-rules.ts`); costs in `ordering_employee_drink_prices` (migration 0043),
+  edited in POS settings > Operations. The order goes in at menu price (stock comes off on submit), the difference
+  becomes a discount so sales tax is on what the employee paid, then checkout opens. API `/api/ordering/employee-drinks`.
 - Guest carts never change the login email of an existing customer matched by phone. Rewards require both the
   authenticated customer and ownership of the current web cart.
 - Online card confirmation locks the order while recording payment and checks for a previously recorded tender
