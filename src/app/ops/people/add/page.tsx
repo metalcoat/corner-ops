@@ -57,6 +57,7 @@ export default function AddEmployeePage() {
           phone: form.get("phone"),
           position: form.get("position") || undefined,
           hourlyRate: form.get("hourlyRate") || undefined,
+          tippedRate: form.get("tippedRate") || undefined,
           smsConsent: form.get("smsConsent") === "on",
         }),
       });
@@ -95,6 +96,7 @@ export default function AddEmployeePage() {
             ? <select name="position" defaultValue=""><option value="">Decide later (Pizza)</option>{CORNER_DELI_POSITIONS.map((position) => <option key={position}>{position}</option>)}</select>
             : <input name="position" placeholder="Bartender" />}</label>
           <label>Hourly rate <small>optional; needed for the NY pay notice</small><input name="hourlyRate" type="number" min="0" step="0.01" placeholder="0.00" /></label>
+          {business === "Corner Deli" && <label>Driver (tipped) rate <small>only if they&apos;ll drive deliveries; at least $10.70 in 2026 (NY food service cash wage + $5.30 tip credit = $16.00). Their pay notice will show both rates and the tip credit.</small><input name="tippedRate" type="number" min="10.70" step="0.01" placeholder="10.70" /></label>}
           <label className="peopleCheck"><input name="smsConsent" type="checkbox" required /> They agreed to get texts from {business === "Tiki" ? "At the Docks" : "Corner Deli"} at this number.</label>
           <button className="primary" disabled={busy}>{busy ? "Adding…" : "Add employee & text setup link"}</button>
         </form>

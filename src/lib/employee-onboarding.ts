@@ -29,6 +29,7 @@ import { getCornerDeliHandbook } from "@/lib/employee-handbook";
 import { assignOnboardingPacket, assignRateChange, getEmploymentFormProfile } from "@/lib/employment-forms";
 import { ensureEmployeeDirectDepositElection } from "@/lib/direct-deposit";
 import { ConflictError, ValidationError } from "@/lib/http";
+import { tippedRateProblem } from "@/lib/ny-tipped-wage";
 import { normalizeSmsPhone } from "@/lib/phone";
 import { employeeKey } from "@/lib/payroll-relief-timesheet";
 import { deliverSms } from "@/lib/sms-notifications";
@@ -125,6 +126,8 @@ export async function createOnboardingEmployee(input: {
   smsConsent: boolean;
   position?: string;
   hourlyRate?: number;
+  /** Driver (tipped) rate, for someone who will drive; NY food service tip credit applies. */
+  tippedRate?: number;
   actor: string;
   actorName: string;
 }) {
@@ -139,6 +142,9 @@ export async function createOnboardingEmployee(input: {
   const position = normalizePosition(input.business, input.position || (input.business === "Tiki" ? "Bartender" : "Pizza"));
   const roleGroup = roleGroupForPosition(input.business, position);
   const hourlyRate = Math.max(0, Number(input.hourlyRate || 0));
+  const tippedRate = Math.max(0, Number(input.tippedRate || 0));
+  const rateProblem = tippedRateProblem({ tippedRateCents: Math.round(tippedRate * 100), hourlyRateCents: Math.round(hourlyRate * 100), year: new Date().getFullYear() });
+  if (rateProblem) throw new ValidationError(rateProblem);
 
   const duplicate = await sql`SELECT id, active FROM employees WHERE business = ${input.business} AND LOWER(BTRIM(name)) = LOWER(${name}) LIMIT 1` as unknown as Array<{ id: string; active: boolean }>;
   if (duplicate[0]) throw new ConflictError(duplicate[0].active ? `${name} is already on the team. Open them on Team to resend their text.` : `${name} is an inactive employee. Reactivate them on Team instead.`);
@@ -147,7 +153,7 @@ export async function createOnboardingEmployee(input: {
   // No PIN yet: a unique placeholder fills the required pin_hash and pin_enabled stays off, so nobody can sign in as them.
   await sql`
     INSERT INTO employees (id, business, name, phone, sms_opt_in, sms_consent_updated_at, pin_hash, pin_enabled, position, role_group, counts_for_tips, hourly_rate, tipped_rate, active)
-    VALUES (${id}, ${input.business}, ${name}, ${phone}, TRUE, NOW(), ${`onboarding-pending:${id}`}, FALSE, ${position}, ${roleGroup}, TRUE, ${hourlyRate}, 0, TRUE)
+    VALUES (${id}, ${input.business}, ${name}, ${phone}, TRUE, NOW(), ${`onboarding-pending:${id}`}, FALSE, ${position}, ${roleGroup}, TRUE, ${hourlyRate}, ${tippedRate}, TRUE)
   `;
   await recordAuditEvent({ business: input.business, action: "employee-added-for-onboarding", actor: input.actor, entityType: "employee", entityId: id, details: { name, position, hourlyRateSet: hourlyRate > 0 } });
 
@@ -453,6 +459,8 @@ export async function sendNewHirePayNotice(input: { business: Business; employee
   const hourlyRate = Number(input.hourlyRate);
   const tippedRate = Math.max(0, Number(input.tippedRate || 0));
   if (!Number.isFinite(hourlyRate) || hourlyRate <= 0) throw new ValidationError("Enter the hourly rate.");
+  const rateProblem = tippedRateProblem({ tippedRateCents: Math.round(tippedRate * 100), hourlyRateCents: Math.round(hourlyRate * 100), year: new Date().getFullYear() });
+  if (rateProblem) throw new ValidationError(rateProblem);
   await getSql()`UPDATE employees SET hourly_rate = ${hourlyRate}, tipped_rate = ${tippedRate}, updated_at = NOW() WHERE id = ${input.employeeId} AND business = ${input.business}`;
   const previous = await getSql()`SELECT 1 FROM employment_forms WHERE business = ${input.business} AND employee_id = ${input.employeeId} AND form_type = 'PAY_NOTICE' LIMIT 1` as unknown as unknown[];
   return assignRateChange({

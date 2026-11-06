@@ -114,6 +114,8 @@ type Approval = {
 };
 
 type Dashboard = {
+  tipCreditShortfalls?: Array<{ employee: string; tippedHours: number; tippedRateCents: number; deliveryTipsCents: number; shortfallCents: number }>;
+  minimumWageCents?: number;
   approval?: Approval;
   summary: {
     source: string;
@@ -466,6 +468,9 @@ export default function PayrollControlPage() {
         <p className="reportNote">{business === "Corner Deli"
           ? "Every saved shift correction and tip override is included the next time totals load. Corner Deli tips are reconciled by business day before the 3.5% deduction, so rounding cannot quietly create extra payroll."
           : "Square tips are split equally among tip-eligible At the Docks employees clocked in when the payment was created. The tip's share of Square's recorded processing fee is deducted, up to 3.5%. Shift corrections on this page also reconcile the live employee clock state."}</p>
+        {business === "Corner Deli" && (data?.tipCreditShortfalls || []).length > 0 && <div className="reportNote"><strong>Driver pay below minimum wage this week:</strong> the cash wage plus delivery tips for driving hours must reach ${((data?.minimumWageCents || 1600) / 100).toFixed(2)}/hour. Add the difference to their pay (e.g. as extra regular pay) before approving:
+          <ul>{(data?.tipCreditShortfalls || []).map((row) => <li key={row.employee}>{row.employee}: {row.tippedHours.toFixed(2)} driving hours at ${(row.tippedRateCents / 100).toFixed(2)} + ${(row.deliveryTipsCents / 100).toFixed(2)} tips → short <strong>${(row.shortfallCents / 100).toFixed(2)}</strong></li>)}</ul>
+        </div>}
         {business === "Tiki" && Boolean(data?.summary.processingFeeReviewCount) && <p className="reportNote"><strong>Review processing fees:</strong> {data?.summary.processingFeeReviewCount} Square payment(s) have no usable fee information. Their tips remain gross until Square's fee is available.</p>}
       </section>
 

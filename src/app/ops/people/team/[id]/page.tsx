@@ -225,7 +225,7 @@ function TeamMember() {
             <button type="button" disabled={busy} onClick={(event) => { const form = event.currentTarget.form; if (form) void savePay(form, true); }}>Save & send NY pay notice</button>
           </div>
         </form>
-        <p className="onboardingHint">New York requires a pay notice at hire and when a rate changes. It goes to their forms for signature.</p>
+        <p className="onboardingHint">New York requires a pay notice at hire and when a rate changes. It goes to their forms for signature.{business === "Corner Deli" && " Drivers: the tipped rate can't be under $10.70 (2026 NY food service cash wage; the $5.30 tip credit makes $16.00). The pay notice lists both rates and the tip credit, and Payroll flags any week a driver's wage plus delivery tips falls short of $16.00 an hour."}</p>
       </article>
       <article className="controlCard">
         <h2>Payroll Relief</h2>

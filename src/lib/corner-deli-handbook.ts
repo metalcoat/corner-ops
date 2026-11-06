@@ -91,6 +91,8 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
   {
     title: "7. Delivery drivers",
     bullets: [
+      "Pay for driving (draft: owner review): driving hours are paid at the driver (tipped) rate shown on your New York pay notice, plus your delivery tips. Corner Deli takes the New York food service tip credit for those hours. If your driver wage plus delivery tips for a week come to less than the full minimum wage for your driving hours, Corner Deli pays the difference.",
+      "Time spent on non-delivery work (prep, dishes, the register) is paid at your regular rate. If you're doing that kind of work for more than a short stretch, tell the manager so the time is recorded correctly.",
       "The rear delivery cash drawer is set to $0 at the end of each night. Each delivery money bag is normally set to $60 at the beginning of the shift.",
       "Count the delivery bag before beginning the shift and report any discrepancy immediately so the starting balance is documented.",
       "The target $60 bag mix is $10 in tens (1 x $10), $25 in fives (5 x $5), $23 in ones (23 x $1), and $2 in quarters (8 x $0.25), subject to available change.",

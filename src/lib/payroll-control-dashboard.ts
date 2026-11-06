@@ -1,3 +1,4 @@
+import { nyFoodServiceRates, tipCreditShortfallCents } from "@/lib/ny-tipped-wage";
 import { getSql } from "@/lib/db";
 import {
   controlledPayrollSummary,
@@ -100,8 +101,24 @@ export async function safePayrollControlDashboard(business: Business, weekStart:
     LIMIT 100
   ` as unknown as Array<Record<string, unknown>>;
 
+  // Drivers: cash wage + delivery tips for their tipped hours must reach the full NY minimum (tip credit check).
+  const year = Number(weekStart.slice(0, 4)) || new Date().getFullYear();
+  const rates = business === "Corner Deli"
+    ? await getSql()`SELECT name, tipped_rate FROM employees WHERE business = ${business}` as unknown as Array<{ name: string; tipped_rate: string | number }>
+    : [];
+  const tippedRateByName = new Map(rates.map((row) => [String(row.name).trim().toLowerCase(), Math.round(Number(row.tipped_rate || 0) * 100)]));
+  const tipCreditShortfalls = ((summary.rows || []) as Array<{ employee: string; driverTipHours?: number; deliveryTips?: number }>)
+    .map((row) => {
+      const tippedRateCents = tippedRateByName.get(String(row.employee).trim().toLowerCase()) || 0;
+      const shortfallCents = tipCreditShortfallCents({ tippedHours: Number(row.driverTipHours || 0), tippedRateCents, tipsCents: Math.round(Number(row.deliveryTips || 0) * 100), year });
+      return { employee: row.employee, tippedHours: Number(row.driverTipHours || 0), tippedRateCents, deliveryTipsCents: Math.round(Number(row.deliveryTips || 0) * 100), shortfallCents };
+    })
+    .filter((row) => row.shortfallCents > 0);
+
   return {
     summary,
+    tipCreditShortfalls,
+    minimumWageCents: nyFoodServiceRates(year).minimumCents,
     punches: (punches as unknown as Array<Record<string, unknown>>).map((row) => {
       const clockIn = timestamp(row.clock_in);
       const clockOut = timestamp(row.clock_out);

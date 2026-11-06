@@ -484,6 +484,11 @@ flowchart LR
   never the reason; a coworker taps "I'll take it" (first wins) and a manager approves on Schedule → Requests, which
   moves the shift. Late (<4 h) and sick-leave flags show only to managers. Handbook page has "Send to N who haven't
   signed" (app message, notification, email, text where consented), refused while the version is a draft.
+- Drivers (tipped): NY food service rates in `src/lib/ny-tipped-wage.ts` (2026 rest of state: $16.00 minimum,
+  $10.70 cash wage, $5.30 tip credit; add each new year's row). Add employee and the Pay tab refuse a driver rate under
+  the cash wage; the pay notice is LS55 with both rates and the tip credit. Payroll shows "Driver pay below minimum
+  wage" when a driver's tipped rate × driving hours + delivery tips is under the minimum for those hours.
+  The 2-hour/20% non-tipped-work rule is handled by paying non-delivery time at the regular rate (handbook section 7).
 - Handbook sections 3 (call-outs), 5 (breaks), 13 (alcohol, zero tolerance) and 14 (no smoking/vaping) are marked draft until Chris approves
   the wording; any handbook change asks every employee to sign again.
 

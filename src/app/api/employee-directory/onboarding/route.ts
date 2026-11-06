@@ -43,6 +43,7 @@ export async function POST(request: Request) {
         smsConsent: body.smsConsent === true,
         position: body.position ? String(body.position) : undefined,
         hourlyRate: body.hourlyRate ? Number(body.hourlyRate) : undefined,
+        tippedRate: body.tippedRate ? Number(body.tippedRate) : undefined,
         actor: session.email,
         actorName: session.displayName,
       }), { status: 201 });
