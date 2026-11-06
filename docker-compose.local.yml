@@ -30,6 +30,8 @@ services:
       GEMINI_PHONE_BRIDGE_ENABLED: ${GEMINI_PHONE_BRIDGE_ENABLED:-true}
       OPENAI_ORDERING_MCP_TOKEN: ${OPENAI_ORDERING_MCP_TOKEN:-}
       GEMINI_PHONE_APP_URL: http://127.0.0.1:3000
+      # Background Claude order check on the Gemini line (dev trial 2026-11-06); the app holds the key.
+      AI_PHONE_CLAUDE_CHECKER: ${AI_PHONE_CLAUDE_CHECKER:-false}
     healthcheck:
       test: ["CMD-SHELL", "asterisk -rx 'core show uptime' >/dev/null 2>&1"]
       interval: 10s
@@ -101,6 +103,11 @@ services:
       OPENAI_REALTIME_MODEL: ${OPENAI_REALTIME_MODEL:-gpt-realtime-1.5}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_PHONE_BRIDGE_ENABLED: ${GEMINI_PHONE_BRIDGE_ENABLED:-true}
+      AI_PHONE_CLAUDE_CHECKER: ${AI_PHONE_CLAUDE_CHECKER:-false}
+    # ANTHROPIC_API_KEY for the Claude order check; the file is optional and absent outside dev.
+    env_file:
+      - path: /opt/corner-ops/config/anthropic-dev.env
+        required: false
     ports:
       - "3000:3000"
     volumes:

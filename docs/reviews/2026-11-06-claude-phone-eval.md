@@ -119,3 +119,40 @@ npm run eval:claude-phone -- --models haiku,sonnet-adaptive [--only key,key] [--
 ```
 
 The key is read from `/opt/corner-ops/config/anthropic-dev.env` (`ANTHROPIC_API_KEY`, mode 600). Raw per-turn results are written to `scripts/claude-phone-eval/results/`, which is git-ignored because it contains caller details.
+
+## Follow-up: Claude as a background order checker on the Gemini line
+
+Built the same day, dev only, behind `AI_PHONE_CLAUDE_CHECKER`. How it works is in `docs/PROCESS-MAP.md`. Gemini keeps the voice. After each cart change, Claude Sonnet 5.5 (adaptive thinking, low effort, structured output) compares what the caller said with the cart, and Gemini gets any mismatch as a private note. The caller never waits on it except before readback, send or payment, and then for at most 1.5 s.
+
+`npx tsx scripts/claude-phone-eval/checker.ts` runs the final check on the 8 logged dev Gemini calls, using their real speech-to-text transcripts and the carts those calls produced:
+
+| Logged call | Gemini's cart | Checker |
+|---|---|---|
+| Big Boss no tomato, 30 wings as 10 hot / 20 medium | wrong (no tomato missing, 50 wings) | flagged both |
+| 30 wings as 15 BBQ / 15 medium | wrong (wings never added) | flagged |
+| Chicken tender dinner with BBQ and coleslaw | wrong (dinner never added) | flagged |
+| Pepperoni pizza, half jalapenos | wrong (two pizzas) | flagged, "merge into one pizza" |
+| Two jumbo pepperoni | right | no flag |
+| Pizza, BBQ wings, fries with nachos | right | no flag* |
+| Poutine, burger, pizza, Pepsi, Big Boss | right | no flag |
+| Pizza and 20 medium wings | right | no flag |
+
+\*The first run flagged "onions may be on the whole pizza", because the cart I gave the checker left out half/whole placement. Placement is now included ("Onions (left half)"), and it's correct.
+
+Also checked:
+- A wings request still waiting on a sauce answer, mid-order: no flag.
+- A timeout comes back as `error` in milliseconds.
+- No key returns `disabled`.
+
+**Cost:** about $0.0034 per check, p50 2.0 s, max 4.3 s (9 checks, $0.031 total). A call with 4 to 8 cart changes plus the final check should cost about $0.02 to $0.03. That's roughly 7,000 calls a month on $200 of API credit.
+
+**Bridge tests:** `asterisk/gemini-phone-bridge-test.py` now has 34 checks, all passing. The new ones cover:
+- off by default;
+- a check after a cart change;
+- the note riding on the next tool result;
+- payment blocked once and then allowed on retry;
+- a slow check not holding payment past the gate;
+- a failing check never blocking and being logged;
+- the idle nudge.
+
+The `--self-test`, `scripts/gemini-phone-validate.ts --offline` and `scripts/gemini-phone-routing-validate.ts` runs all pass.

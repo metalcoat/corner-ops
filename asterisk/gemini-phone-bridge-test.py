@@ -76,8 +76,9 @@ class Writer:
         pass
 
 
-async def run(script, mcp_results):
+async def run(script, mcp_results, checker=None):
     log = {"mcp": [], "app": [], "events": []}
+    gp.CLAUDE_CHECKER_ENABLED = checker is not None
     fake = FakeGemini(script)
     results = list(mcp_results)
 
@@ -98,6 +99,8 @@ async def run(script, mcp_results):
             log["events"].append((values["label"], values.get("detail", {})))
         else:
             log["app"].append(action)
+        if action == "claude_check":
+            return await checker(values)
         if action == "complete":
             return {"closeBridge": True}
         return {}
@@ -114,8 +117,8 @@ async def run(script, mcp_results):
     return log
 
 
-def tool_call(cid, args):
-    return {"toolCall": {"functionCalls": [{"id": cid, "name": "price_order", "args": args}]}}
+def tool_call(cid, args, name="price_order"):
+    return {"toolCall": {"functionCalls": [{"id": cid, "name": name, "args": args}]}}
 
 
 def transcript(text):
@@ -312,6 +315,64 @@ async def main():
     finally:
         gp.bridge, gp.app_action = original_bridge, original_action
     check("bridge failure hands off and releases the call", actions[:1] == ["handoff"] and b"\x00\x00\x00" in writer.frames, {"actions": actions, "frames": [f.hex() for f in writer.frames]})
+
+
+    # Background Claude order check (2026-11-06, AI_PHONE_CLAUDE_CHECKER). Off by default: no check calls.
+    MISMATCH = {"status": "mismatch", "note": "(Private order check: Big Boss is missing No Tomato.)", "mismatches": [{"problem": "no tomato missing", "fix": "add No Tomato"}]}
+    ADD = {"operation": "add", "items": [{"name": "Turkey Big Boss"}]}
+    log = await run([transcript("a big boss no tomato"), tool_call("a", ADD), "WAIT_TOOL_RESPONSE"], [{"ok": True}])
+    check("checker off by default: no check calls", "claude_check" not in log["app"], log["app"])
+
+    async def mismatch(values):
+        return MISMATCH
+
+    log = await run(
+        [transcript("a big boss no tomato"), tool_call("a", ADD), "WAIT_TOOL_RESPONSE", "SLEEP",
+         tool_call("b", {"operation": "read", "items": []}), "WAIT_TOOL_RESPONSE"],
+        [{"ok": True}, {"ok": True}], mismatch,
+    )
+    check("a cart change starts a background check", log["app"].count("claude_check") >= 1, log["app"])
+    check("a mismatch note rides on the next tool result", first_result(log, 1).get("orderCheck") == MISMATCH["note"] and "orderCheck" not in first_result(log, 0), log["toolResponses"])
+
+    log = await run(
+        [transcript("card"), tool_call("a", ADD), "WAIT_TOOL_RESPONSE", "SLEEP",
+         tool_call("p1", {"tipCents": 0}, "request_secure_voice_payment"), "WAIT_TOOL_RESPONSE",
+         tool_call("p2", {"tipCents": 0}, "request_secure_voice_payment"), "WAIT_TOOL_RESPONSE"],
+        [{"ok": True}], mismatch,
+    )
+    blocked = first_result(log, 1)
+    check("a mismatch blocks payment once with the note", blocked.get("error", {}).get("code") == "ORDER_CHECK" and MISMATCH["note"] in blocked["error"]["message"], blocked)
+    check("the same note never blocks twice: the retry pays", log["app"].count("payment") == 1, log["app"])
+
+    gp.CHECK_GATE_SECONDS = 0.2
+
+    async def slow(values):
+        await asyncio.sleep(3)
+        return MISMATCH
+
+    log = await run(
+        [transcript("card"), tool_call("a", ADD), "WAIT_TOOL_RESPONSE",
+         tool_call("p1", {"tipCents": 0}, "request_secure_voice_payment"), "WAIT_TOOL_RESPONSE"],
+        [{"ok": True}], slow,
+    )
+    check("a slow check never holds payment past the gate wait", log["app"].count("payment") == 1 and any(n == "orderCheckTimeout" for n, _ in log["events"]), {"app": log["app"], "events": log["events"]})
+
+    async def broken(values):
+        raise RuntimeError("anthropic down")
+
+    log = await run(
+        [transcript("card"), tool_call("a", ADD), "WAIT_TOOL_RESPONSE", "SLEEP",
+         tool_call("p1", {"tipCents": 0}, "request_secure_voice_payment"), "WAIT_TOOL_RESPONSE"],
+        [{"ok": True}], broken,
+    )
+    check("a failing check never blocks payment and is logged", log["app"].count("payment") == 1 and any(n == "orderCheckError" for n, _ in log["events"]), {"app": log["app"], "events": log["events"]})
+
+    log = await run(
+        [transcript("a big boss no tomato"), tool_call("a", ADD), "WAIT_TOOL_RESPONSE", AUDIO, DONE] + ["SLEEP"] * 14,
+        [{"ok": True}], mismatch,
+    )
+    check("a pending note reaches an idle Gemini as a private nudge", any(n == "orderCheckNote" and d.get("via") == "nudge" for n, d in log["events"]), log["events"])
+    gp.CLAUDE_CHECKER_ENABLED = False
 
     # Tool results stay in the Live context and are re-billed each turn (2026-10-28): empty fields, default
     # modifier quantities and raw cents go; ids, display totals, tipCents, false/zero and pizza portions stay.

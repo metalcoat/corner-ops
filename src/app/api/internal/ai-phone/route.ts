@@ -16,6 +16,7 @@ import { buildPhoneInstructions } from "@/lib/openai-phone-prompt";
 import { phoneOrderingCustomerContext } from "@/lib/ordering-customers";
 import { callerFromSipHeaders } from "@/lib/openai-phone-ordering";
 import { claimCallerFromAiIngress } from "@/lib/three-cx-live-calls";
+import { checkPhoneCall } from "@/lib/ai-phone-order-checker";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -157,6 +158,11 @@ export async function POST(request: Request) {
         });
       await getSql()`UPDATE ordering_call_sessions SET state='handoff_pending',bridge_action='handoff',handoff_reason=${String(body.reason || "Customer requested an employee.").slice(0, 500)},updated_at=NOW() WHERE id=${call.id}`;
       return isoJson({ closeBridge: true });
+    }
+    if (action === "claude_check") {
+      // Background Claude order check (AI_PHONE_CLAUDE_CHECKER); always answers, never fails the call.
+      const stage = body.stage === "final" ? "final" : "cart";
+      return isoJson(await checkPhoneCall(callId, stage, String(body.pendingCustomerText || "").slice(0, 2000)));
     }
     if (action === "payment") {
       if (!call.order_id)

@@ -108,6 +108,7 @@
     "test:ai-payment-safety": "tsx scripts/ai-payment-safety-validate.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "@capacitor/android": "^8.5.3",
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.3",
@@ -128,7 +129,6 @@
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^1.6.0",
     "@capacitor/cli": "^8.5.0",
     "@playwright/test": "^1.62.1",
     "@types/node": "^22.0.0",

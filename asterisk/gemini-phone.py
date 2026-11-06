@@ -246,6 +246,88 @@ def payment_not_ready(error):
     return {"error": {"code": "PAYMENT_NOT_READY", "message": message, "remedy": remedy}}
 
 
+# Background Claude order check (dev trial 2026-11-06, AI_PHONE_CLAUDE_CHECKER): after each cart change the
+# app compares what the caller said with the cart; a mismatch reaches Gemini as a private note. Never adds
+# latency to a normal turn, and a checker error or timeout never blocks the call.
+CLAUDE_CHECKER_ENABLED = os.environ.get("AI_PHONE_CLAUDE_CHECKER", "").lower() in ("1", "true")
+CHECK_GATED_TOOLS = {"hold", "send", "request_secure_voice_payment"}
+CHECK_GATE_SECONDS = 1.5
+CHECK_MAX_BLOCKS = 2
+
+
+class OrderChecker:
+    """Runs checks in the background and keeps the newest unseen mismatch note.
+
+    schedule() after a cart change; gate() before readback/send/payment waits up to CHECK_GATE_SECONDS for
+    the newest check and returns its note to block that tool once (at most CHECK_MAX_BLOCKS per call, so a
+    wrong flag can't trap the caller); take_note() hands a pending note to the next tool result or idle nudge.
+    """
+
+    def __init__(self, request, emit):
+        self.request = request
+        self.emit = emit
+        self.task = None
+        self.sequence = 0
+        self.note = None
+        self.delivered = set()
+        self.blocks = 0
+
+    def schedule(self, stage, pending_text=""):
+        self.sequence += 1
+        self.task = asyncio.create_task(self._run(self.sequence, stage, pending_text))
+        return self.task
+
+    async def _run(self, sequence, stage, pending_text):
+        try:
+            result = await self.request(stage, pending_text)
+        except Exception as error:
+            await self.emit("orderCheckError", {"stage": stage, "error": type(error).__name__})
+            return None
+        if sequence != self.sequence or not isinstance(result, dict):
+            return result  # a newer cart change superseded this check
+        note = str(result.get("note") or "")
+        if result.get("status") == "mismatch" and note and note not in self.delivered:
+            self.note = note
+            await self.emit("orderCheckMismatch", {"stage": stage, "mismatches": result.get("mismatches", [])})
+        elif result.get("status") == "ok":
+            self.note = None
+        return result
+
+    def take_note(self):
+        note, self.note = self.note, None
+        if note:
+            self.delivered.add(note)
+        return note
+
+    async def gate(self, tool):
+        if self.task is not None and not self.task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(self.task), CHECK_GATE_SECONDS)
+            except asyncio.TimeoutError:
+                await self.emit("orderCheckTimeout", {"tool": tool, "waitSeconds": CHECK_GATE_SECONDS})
+            except Exception:
+                pass
+        if self.note and self.blocks < CHECK_MAX_BLOCKS:
+            self.blocks += 1
+            await self.emit("orderCheckBlocked", {"tool": tool, "block": self.blocks})
+            return self.take_note()
+        return None
+
+
+def order_check_blocked(note):
+    return {
+        "error": {
+            "code": "ORDER_CHECK",
+            "message": note,
+            "remedy": "Fix the cart with price_order (or ask the caller one short question), briefly confirm the change, then continue the checkout.",
+        }
+    }
+
+
+def order_check_nudge(note):
+    return {"clientContent": {"turns": [{"role": "user", "parts": [{"text": note}]}], "turnComplete": True}}
+
+
 SILENCE_HANDOFF = re.compile(r"silen|quiet|no (?:answer|response)|not respond|didn.t respond|unresponsive|wait(?:ed|ing)? (?:too )?long|can.t wait|no reply", re.IGNORECASE)
 
 
@@ -724,6 +806,14 @@ async def bridge(reader, writer, call_id):
     user_turn_open = False
     customer_turn_id = 0
     order_mutation_lock = asyncio.Lock()
+    checker = (
+        OrderChecker(
+            lambda stage, text: app_action(call_id, "claude_check", stage=stage, pendingCustomerText=text),
+            emit,
+        )
+        if CLAUDE_CHECKER_ENABLED
+        else None
+    )
 
     async def save_transcript(speaker, text, turn_id):
         value = " ".join(str(text or "").split()).strip()
@@ -969,6 +1059,10 @@ async def bridge(reader, writer, call_id):
                         result = cached_result
                     else:
                         async def execute():
+                            if checker and name in CHECK_GATED_TOOLS:
+                                note = await checker.gate(name)
+                                if note:
+                                    return order_check_blocked(note)
                             if name == "request_human_handoff":
                                 if silence_handoff_blocked(arguments.get("reason", ""), time.monotonic() - last_customer_speech):
                                     # "Um" is not silence (dev test call 2026-10-25 was transferred 2 s after "Um").
@@ -1021,6 +1115,11 @@ async def bridge(reader, writer, call_id):
                         else:
                             result = await execute()
                         tool_gate.record(turn_key, name, arguments, result)
+                        if checker and is_mutation and not is_failed_tool_result(result):
+                            checker.schedule("cart", customer_transcript)
+                    if checker and checker.note and isinstance(result, dict) and not close_requested.is_set():
+                        result = {**result, "orderCheck": checker.take_note()}
+                        await emit("orderCheckNote", {"via": "toolResult", "tool": name})
                     await emit(
                         "toolCallEnd",
                         {
@@ -1091,12 +1190,26 @@ async def bridge(reader, writer, call_id):
                 await emit("stallNudge", {**playback.snapshot(), "nudge": nudges})
                 await gemini.send(json.dumps(stall_nudge_message()))
 
+        async def order_check_watch():
+            """Deliver a pending check note once Gemini and the caller are both quiet."""
+            while not close_requested.is_set():
+                await asyncio.sleep(0.25)
+                if not checker.note or user_turn_open or playback.assistant_speaking or playback.state != "LISTENING":
+                    continue
+                if time.monotonic() - last_progress < 0.6:
+                    continue
+                note = checker.take_note()
+                await emit("orderCheckNote", {"via": "nudge"})
+                await gemini.send(json.dumps(order_check_nudge(note)))
+
         tasks = [
             asyncio.create_task(caller_audio()),
             asyncio.create_task(model_audio()),
             asyncio.create_task(playback.run()),
             asyncio.create_task(stall_watchdog()),
         ]
+        if checker:
+            tasks.append(asyncio.create_task(order_check_watch()))
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in [*pending, *closing_tasks]:
             task.cancel()
