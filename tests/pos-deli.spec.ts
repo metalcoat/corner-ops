@@ -1,7 +1,8 @@
 import { loadEnvFile } from "node:process";
 import { expect, test, type Page } from "@playwright/test";
 
-loadEnvFile("/opt/corner-ops/.env");
+if (process.env.POS_TEST_ENV_FILE) loadEnvFile(process.env.POS_TEST_ENV_FILE);
+else if (!process.env.POS_TEST_ACTIVE_PIN) loadEnvFile("/opt/corner-ops/.env");
 
 async function signIn(page: Page) {
   const pin = process.env.POS_TEST_ACTIVE_PIN;
@@ -13,6 +14,20 @@ async function signIn(page: Page) {
     page.getByText("Corner Deli POS", { exact: true }),
   ).toBeVisible();
 }
+
+test("uncertain online charges stay visible with a manager review link", async ({ page }) => {
+  await page.route("**/api/ordering/orders/online-alerts?**", (route) => route.fulfill({ json: {
+    orders: [{ id: "review-order", source: "web", status: "draft", created_at: new Date().toISOString(), paid_not_sent: true }],
+    paymentReviews: [{ id: "review-payment", order_id: "review-order", display_number: "REVIEW-123", provider_transaction_reference: "mx-review-456" }],
+  } }));
+  await signIn(page);
+  const review = page.getByRole("alert").filter({ hasText: "ONLINE PAYMENT NEEDS A MANAGER CHECK" });
+  await expect(review).toContainText("ORDER #REVIEW-123");
+  await expect(review).toContainText("MX mx-review-456");
+  await expect(review.getByRole("link", { name: "VERIFY IN MX / REVIEW PAYMENT" })).toHaveAttribute("href", "/pos/deli/settings/hardware#card-payment-reviews");
+  await page.getByRole("button", { name: "ACKNOWLEDGE", exact: true }).click();
+  await expect(review).toBeVisible();
+});
 
 test("cashier configures, edits, and saves a backend-priced pizza draft", async ({
   page,
@@ -80,7 +95,7 @@ test("cashier configures, edits, and saves a backend-priced pizza draft", async 
     order?: { total_cents?: number };
   };
   expect(payload.order?.total_cents).toBe(1400);
-  await expect(page.getByText("Backend total")).toBeVisible();
+  await expect(page.getByText(/Held order #/)).toBeVisible();
   await expect(page.getByText("$14.00", { exact: true }).last()).toBeVisible();
 
   await page.screenshot({
@@ -151,10 +166,12 @@ test("pizza topping controls use semantic portion and amount and restore on edit
   await expect(editedPepperoni).toContainText(
     "Left Half Extra · Right Half Regular",
   );
+  await editDialog.locator(".pizzaPortionPicker").getByRole("button", { name: "Left Half", exact: true }).click();
   await editedPepperoni
     .getByRole("button", { name: "Decrease or remove Pepperoni" })
     .click();
   await expect(editedPepperoni).toContainText("Whole · Regular");
+  await editDialog.locator(".pizzaPortionPicker").getByRole("button", { name: "Whole", exact: true }).click();
   await editedPepperoni
     .getByRole("button", { name: "Decrease or remove Pepperoni" })
     .click();
@@ -189,7 +206,7 @@ test("real subs and wings add, update, and explain incomplete choices", async ({
   await dialog.getByLabel("Item notes").fill("Toast wrap");
   await dialog.getByRole("button", { name: "ADD TO ORDER" }).click();
   let line = page.getByRole("article").filter({ hasText: "Turkey Big Boss" });
-  await expect(line).toContainText("$10.25");
+  await expect(line).toContainText("$10.75");
   await expect(line).toContainText("Wraps");
   await page.getByRole("button", { name: "Edit Turkey Big Boss" }).click();
   dialog = page.getByRole("dialog", { name: "Configure Turkey Big Boss" });
@@ -226,6 +243,8 @@ test("real subs and wings add, update, and explain incomplete choices", async ({
   await dialog.getByText("Mild", { exact: true }).click();
   await dialog.getByText("Flats/Wings", { exact: true }).click();
   await dialog.getByRole("button", { name: "ADD TO ORDER" }).click();
+  await page.getByRole("alertdialog", { name: "ASK THE CUSTOMER" })
+    .getByRole("button", { name: "CUSTOMER DECLINED — ADD ITEM" }).click();
   await expect(
     page.getByRole("article").filter({ hasText: "1× Wings" }),
   ).toContainText("$13.50");
@@ -278,11 +297,14 @@ test("Delivery preserves the cart and requires provider validation", async ({
     .getByRole("button", { name: "ADD TO ORDER" })
     .click();
   await page.getByRole("button", { name: "Delivery", exact: true }).click();
-  await expect(page.getByLabel("Street address")).toBeVisible();
-  await page.getByLabel("Street address").fill("41");
+  await page.getByRole("button", { name: "+ ADD NEW ADDRESS", exact: true }).click();
+  const addressDialog = page.getByRole("dialog", { name: "Add new address" });
+  await expect(addressDialog.getByLabel("Delivery street address")).toBeVisible();
+  await addressDialog.getByLabel("Delivery street address").fill("41");
   await expect(
-    page.getByRole("button", { name: "Validate", exact: true }),
+    addressDialog.getByRole("button", { name: "VERIFY ADDRESS", exact: true }),
   ).toBeDisabled();
+  await addressDialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(
     page.getByRole("article").filter({ hasText: "Pizza Logs" }),
   ).toBeVisible();

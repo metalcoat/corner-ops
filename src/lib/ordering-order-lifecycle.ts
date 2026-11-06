@@ -306,7 +306,8 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
       FROM ordering_order_item_modifiers
       WHERE order_item_id = ${item.id}
     `) as ModifierSnapshot[];
-    const selectedCounts = new Map<string, number>();
+    const includedUnits = new Map<string, number>();
+    const declinedGroups = new Set(snapshots.filter((snapshot) => snapshot.selection_state === "declined_included").map((snapshot) => snapshot.group_id));
     const selectedOptions = new Map<string, Set<string>>();
     let modifierTotal = 0;
     for (const snapshot of snapshots) {
@@ -359,8 +360,9 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
             )
           : number(option.current_price_cents);
       const allowedIncluded =
+        !declinedGroups.has(snapshot.group_id) &&
         number(option.included_choice_count) > 0 &&
-        (selectedCounts.get(snapshot.group_id) || 0) <
+        (includedUnits.get(snapshot.group_id) || 0) + quantity <=
           number(option.included_choice_count) &&
         number(snapshot.unit_price_delta_cents) === 0;
       if (
@@ -371,10 +373,7 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
           `A modifier price on ${item.item_name_snapshot} changed. Review and rebuild the order before submitting.`,
         );
       }
-      selectedCounts.set(
-        snapshot.group_id,
-        (selectedCounts.get(snapshot.group_id) || 0) + 1,
-      );
+      if (allowedIncluded) includedUnits.set(snapshot.group_id, (includedUnits.get(snapshot.group_id) || 0) + quantity);
       if (!selectedOptions.has(snapshot.group_id))
         selectedOptions.set(snapshot.group_id, new Set());
       selectedOptions.get(snapshot.group_id)!.add(snapshot.option_id);
@@ -390,7 +389,7 @@ async function revalidateDraft(order: OrderRow): Promise<void> {
       WHERE link.item_id = ${item.item_id}
     `;
     for (const group of groups) {
-      const count = selectedCounts.get(String(group.id)) || 0;
+      const count = selectedOptions.get(String(group.id))?.size || 0;
       if (String(group.behavior) === "pizza_topping") continue;
       const context = String(group.context);
       const parentSelected =

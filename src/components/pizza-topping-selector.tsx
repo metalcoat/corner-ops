@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   normalizePizzaToppings,
+  setPizzaToppingAmount,
   pizzaToppingCount,
   PIZZA_TOPPING_COOK_WARNING,
   type PizzaToppingAmount,
@@ -79,6 +80,7 @@ export default function PizzaToppingSelector({
   }
   function coversPortion(optionId: string, portion: PizzaToppingPortion) {
     const current = entries(optionId);
+    if (portion === "whole") return current.some((entry) => entry.portion === "whole") || current.length === 2;
     return current.some(
       (entry) => entry.portion === "whole" || entry.portion === portion,
     );
@@ -90,7 +92,7 @@ export default function PizzaToppingSelector({
     );
     if (activePortion === "whole") {
       onChange(
-        current.length
+        coversPortion(optionId, "whole")
           ? other
           : [
               ...other,
@@ -158,38 +160,27 @@ export default function PizzaToppingSelector({
         portion,
         amount: same?.amount || whole?.amount || "regular",
       },
-      {
-        modifierOptionId: optionId,
-        portion: oppositePortion,
-        amount: opposite?.amount || whole?.amount || "regular",
-      },
+      ...(opposite ? [{ ...opposite, portion: oppositePortion as PizzaToppingPortion }] : []),
     ]);
   }
   function setAmount(optionId: string, amount: PizzaToppingAmount) {
-    const current = entries(optionId),
-      target =
-        current.find((entry) => entry.portion === editingPortion) || current[0];
-    if (!target) return;
-    onChange(
-      normalizePizzaToppings(
-        selections.map((entry) =>
-          entry === target ? { ...entry, amount } : entry,
-        ),
-      ),
-    );
+    onChange(setPizzaToppingAmount(selections, optionId, editingPortion, amount));
+  }
+  function editingEntry(optionId: string) {
+    const current = entries(optionId);
+    return current.find((entry) => entry.portion === editingPortion || entry.portion === "whole")
+      || (editingPortion === "whole" ? current[0] : undefined);
   }
   function adjust(optionId: string, delta: number) {
     const current = entries(optionId);
     if (!current.length) return;
-    const target =
-        current.find((entry) => entry.portion === editingPortion) || current[0],
-      index = amounts.indexOf(target.amount),
+    const target = editingEntry(optionId),
+      index = target ? amounts.indexOf(target.amount) : -1,
       next = index + delta;
+    if (!target && delta < 0) return;
     if (next < 0) {
-      const remaining = selections.filter(
-        (entry) => entry.modifierOptionId !== optionId || entry !== target,
-      );
-      onChange(normalizePizzaToppings(remaining));
+      const remaining = setPizzaToppingAmount(selections, optionId, editingPortion, null);
+      onChange(remaining);
       if (!remaining.some((entry) => entry.modifierOptionId === optionId))
         setEditingId(null);
       return;
@@ -312,11 +303,7 @@ export default function PizzaToppingSelector({
                   type="button"
                   aria-label={`Increase ${option.name}`}
                   disabled={
-                    (
-                      current.find(
-                        (entry) => entry.portion === editingPortion,
-                      ) || current[0]
-                    ).amount === "triple_extra"
+                    editingEntry(option.id)?.amount === "triple_extra"
                   }
                   onClick={() => adjust(option.id, 1)}
                 >
@@ -357,11 +344,7 @@ export default function PizzaToppingSelector({
                         type="button"
                         key={amount}
                         className={
-                          (
-                            current.find(
-                              (entry) => entry.portion === editingPortion,
-                            ) || current[0]
-                          ).amount === amount
+                          editingEntry(option.id)?.amount === amount
                             ? "selected"
                             : ""
                         }

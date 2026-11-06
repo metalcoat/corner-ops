@@ -2647,9 +2647,12 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px 18px 104px;
+  padding: 16px 18px max(16px, env(safe-area-inset-bottom));
   background: linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
   border-left: 1px solid #1e293b;
+}
+.posCheckoutSidePanel > * {
+  flex-shrink: 0;
 }
 .posCheckoutHeader {
   display: flex;
@@ -2843,6 +2846,11 @@
   line-height: 1.45;
 }
 .posCheckoutSidePanel > .posTenderButtons {
+  /* Credit and house-account actions add rows. Keep their full height in the
+     scroll layout so they cannot cover the keypad or the Back action. */
+  position: static;
+  width: 100%;
+  align-self: stretch;
   gap: 10px;
   padding: 12px 18px max(12px, env(safe-area-inset-bottom));
   background: #0b1220f2;

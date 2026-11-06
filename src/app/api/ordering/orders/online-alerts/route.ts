@@ -3,6 +3,7 @@ import { apiError, unauthorized } from "@/lib/http";
 import type { OrderingBusiness } from "@/lib/ordering-core";
 import { listWaitingOnlineOrders } from "@/lib/ordering-online-alerts";
 import { orderingActor } from "@/lib/ordering-route-auth";
+import { listWebPaymentsNeedingReview } from "@/lib/customer-payment-review";
 
 export const runtime = "nodejs";
 
@@ -14,7 +15,8 @@ export async function GET(request: Request) {
     if (value !== "Corner Deli" && value !== "Tiki") throw new Error("Unknown business.");
     const business: OrderingBusiness = value;
     if (!await orderingActor(business)) return unauthorized();
-    return isoJson({ business, orders: await listWaitingOnlineOrders(business) });
+    const [orders, paymentReviews] = await Promise.all([listWaitingOnlineOrders(business), listWebPaymentsNeedingReview(business)]);
+    return isoJson({ business, orders, paymentReviews });
   } catch (error) {
     return apiError(error);
   }

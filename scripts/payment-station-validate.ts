@@ -2,6 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { loadEnvFile } from "node:process";
+import assert from "node:assert/strict";
 
 loadEnvFile("/opt/corner-ops/.env");
 const address = execFileSync("docker", ["inspect", "corner-ops-postgres", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"], { encoding: "utf8" }).trim();
@@ -36,11 +37,17 @@ async function main() {
       if (!duplicate.duplicate) throw new Error("Payment queue retry duplicated the request.");
       const tipped = await setCheckoutTip({ orderId, business: "Tiki", tipCents: 450, actor });
       if (Number(tipped.order.amount_due_cents) !== 3450) throw new Error("Checkout tip was not added to the amount due.");
+      // Expected failures join this fixture transaction; restore their writes
+      // just as the real request boundary rolls back a failed payment.
+      await sql`SAVEPOINT rejected_cash`;
       let stationlessCashBlocked = false;
       try { await commitTender({ orderId, business: "Tiki", tenderType: "cash", amountTenderedCents: 2000, clientMutationId: `cash-nostation-${suffix}`, actor, receiptPrinterId: printerId, cashControlMode: "till" }); } catch (error) { stationlessCashBlocked = error instanceof Error && /payment station/.test(error.message); }
+      await sql`ROLLBACK TO SAVEPOINT rejected_cash`;
       if (!stationlessCashBlocked) throw new Error("Cash without a payment station bypassed the register.");
       let closedRegisterBlocked = false;
       try { await commitTender({ orderId, business: "Tiki", tenderType: "cash", amountTenderedCents: 2000, clientMutationId: `cash-closed-${suffix}`, actor, receiptPrinterId: printerId, cashControlMode: "till", stationKey }); } catch (error) { closedRegisterBlocked = error instanceof Error && /Open the register/.test(error.message); }
+      await sql`ROLLBACK TO SAVEPOINT rejected_cash`;
+      await sql`RELEASE SAVEPOINT rejected_cash`;
       if (!closedRegisterBlocked) throw new Error("Cash was accepted with no open register.");
       // What the cashier's OPEN REGISTER does (the register screen itself is Corner Deli only): an open session on this station's till.
       const tillId = String((await sql`INSERT INTO ordering_pos_terminals(id,business,name,terminal_key,terminal_type,location_label,allow_cash,allow_offline_cash) VALUES(${randomUUID()},'Tiki',${`Payment ${suffix}`},${stationKey},'pos',${`Payment ${suffix}`},TRUE,TRUE) ON CONFLICT(business,terminal_key) DO UPDATE SET active=TRUE RETURNING id`)[0].id);
@@ -52,8 +59,15 @@ async function main() {
       await reverseTender({ orderId, business: "Tiki", transactionId: String(cashPayment.id), amountCents: 500, clientMutationId: `refund-${suffix}`, reason: "Station validation refund", actor });
       const profile = await paymentStationProfile("Tiki", stationKey);
       const queueStatuses = (await sql`SELECT status FROM ordering_payment_station_queue WHERE order_id=${orderId}`).map((row) => String(row.status));
-      const movements = await sql`SELECT delta_cash_cents FROM ordering_cash_drawer_movements WHERE order_id=${orderId} ORDER BY created_at`;
-      if (profile?.station_mode !== "payment" || !queueStatuses.includes("cancelled") || !queueStatuses.includes("completed") || card.order.payment_status !== "paid" || movements.length !== 2 || Number(movements[0].delta_cash_cents) !== 2000 || Number(movements[1].delta_cash_cents) !== -500) throw new Error("Payment station routing or cash ledger validation failed.");
+      // NOW() is constant within this transaction, so created_at cannot order
+      // the sale and refund. Assert their meanings and tender links instead.
+      const movements = await sql`SELECT movement_type,delta_cash_cents,payment_transaction_id FROM ordering_cash_drawer_movements WHERE order_id=${orderId}`;
+      assert.deepEqual(movements.map((row) => ({ type: String(row.movement_type), cents: Number(row.delta_cash_cents) })).sort((a,b) => a.type.localeCompare(b.type)), [{ type: "refund", cents: -500 }, { type: "sale", cents: 2000 }], "Cash ledger must contain exactly the sale and refund amounts.");
+      assert.equal(String(movements.find((row) => row.movement_type === "sale")?.payment_transaction_id), String(cashPayment.id), "Cash sale must link to the cash tender.");
+      const refund = (await sql`SELECT id FROM ordering_payment_transactions WHERE order_id=${orderId} AND client_mutation_id=${`refund-${suffix}`} AND related_transaction_id=${cashPayment.id}`)[0];
+      assert.ok(refund, "Cash refund must link to the original tender.");
+      assert.equal(String(movements.find((row) => row.movement_type === "refund")?.payment_transaction_id), String(refund.id), "Cash refund movement must link to its reversal.");
+      if (profile?.station_mode !== "payment" || !queueStatuses.includes("cancelled") || !queueStatuses.includes("completed") || card.order.payment_status !== "paid") throw new Error("Payment station routing validation failed.");
       Object.assign(result, { closedRegisterBlocked: true, singlePaymentStation: true, orderTakerQueue: true, queueCancellation: true, queueIdempotency: true, checkoutTip: true, stationlessCashBlocked: true, mxProviderLedger: true, cashRegisterLedger: true, cashRefundLedger: true });
       throw new Error(ROLLBACK);
     });

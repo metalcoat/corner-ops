@@ -10,6 +10,7 @@ import {
 } from "@/lib/pos-offline-sync-policy";
 
 type AlertOrder = { id: string; submitted_at?: string | null; created_at?: string | null; paid_not_sent?: boolean };
+type PaymentReview = { id: string; order_id: string; display_number: string; provider_transaction_reference: string };
 
 /** Orders that arrived this recently still ring when a POS unlocks or reloads. */
 const MISSED_WHILE_AWAY_MS = 10 * 60_000;
@@ -88,6 +89,7 @@ export function useOnlineOrderAlert(
   const [alertBusy, setAlertBusy] = useState(false);
   const [alertNotice, setAlertNotice] = useState("");
   const [pendingOnlineOrders, setPendingOnlineOrders] = useState(0);
+  const [paymentReviews, setPaymentReviews] = useState<PaymentReview[]>([]);
   const [soundBlocked, setSoundBlocked] = useState(false);
 
   const refreshSoundBlocked = useCallback(() => {
@@ -213,6 +215,7 @@ export function useOnlineOrderAlert(
     if (!authenticated) {
       alertState.current = createOnlineAlertState();
       setPendingOnlineOrders(0);
+      setPaymentReviews([]);
       setSoundBlocked(false);
       return;
     }
@@ -226,8 +229,9 @@ export function useOnlineOrderAlert(
           { cache: "no-store" },
         );
         if (!response.ok || stopped) return;
-        const payload = (await response.json()) as { orders?: AlertOrder[] };
+        const payload = (await response.json()) as { orders?: AlertOrder[]; paymentReviews?: PaymentReview[] };
         if (stopped) return;
+        setPaymentReviews(payload.paymentReviews || []);
         const orders = payload.orders || [];
         const recent = orders
           .filter((order) => {
@@ -391,6 +395,7 @@ export function useOnlineOrderAlert(
     enableAlerts,
     testAlerts,
     pendingOnlineOrders,
+    paymentReviews,
     soundBlocked,
     acknowledgeOnlineOrders,
   };

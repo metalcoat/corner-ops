@@ -4,6 +4,7 @@ test("in-store kiosk loads the customer-safe menu and starts a cart", async ({ p
   await page.goto("/kiosk/deli");
   await expect(page.getByText("CORNER DELI SELF-SERVICE", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Search menu")).toBeVisible();
+  await page.getByRole("button", { name: "START ORDER", exact: true }).click();
   const firstItem = page.locator(".menuItem:not(:disabled)").first();
   await expect(firstItem).toBeVisible();
   await firstItem.click();
@@ -11,28 +12,18 @@ test("in-store kiosk loads the customer-safe menu and starts a cart", async ({ p
   await expect(page.getByRole("button", { name: /Add to order/i })).toBeVisible();
 });
 
-test("kiosk cart lists the customer's selected modifiers", async ({ page, request }) => {
-  const response = await request.get("/api/customer/catalog?serviceType=pickup");
-  expect(response.ok()).toBeTruthy();
-  const catalog = await response.json();
-  const item = catalog.categories
-    .flatMap((category: any) => category.items)
-    .find((candidate: any) => candidate.available && candidate.modifiers.some((group: any) =>
-      group.options.some((option: any) => option.available && !option.defaultSelected),
-    ));
-  expect(item).toBeTruthy();
-  const group = item.modifiers.find((candidate: any) =>
-    candidate.options.some((option: any) => option.available && !option.defaultSelected),
-  );
-  const option = group.options.find((candidate: any) => candidate.available && !candidate.defaultSelected);
-
+test("kiosk cart lists the customer's selected modifiers", async ({ page }) => {
+  await page.route("**/api/customer/catalog*", (route) => route.fulfill({ json: {
+    availability: { open: true, orderable: true, reason: "", opensAt: null, nextAvailableAt: null, timezone: "America/New_York" },
+    categories: [{ id: "sandwich", displayName: "Sandwiches", items: [{ id: "test-sandwich", displayName: "Kiosk Sandwich", description: "Choose your toppings", basePriceCents: 600, available: true, imageUrl: null, imageAlt: "", variants: [], combos: [], modifiers: [{ id: "toppings", name: "Toppings", prompt: "Toppings", minSelections: 0, maxSelections: 2, presentationBehavior: "standard", options: [{ id: "tomato", name: "Tomato", priceDeltaCents: 0, available: true, defaultSelected: false }] }] }] }],
+    featuredItems: [], promotions: [], delivery: { enabled: false, minimumOrderCents: 0, maxDistanceMiles: null, feeBands: [] },
+    customer: { authenticated: false, loyaltyAvailableAfterSignIn: true, giftCardsAcceptedAtPayment: true }, checkout: { paymentEnabled: true },
+  } }));
   await page.goto("/kiosk/deli");
-  await page.getByLabel("Search menu").fill(item.displayName);
-  await page.locator(".menuItem", { hasText: item.displayName }).first().click();
-  const choice = page.getByRole("dialog").getByText(option.name, { exact: true }).locator("..").getByRole("checkbox").or(
-    page.getByRole("dialog").getByText(option.name, { exact: true }).locator("..").getByRole("radio"),
-  );
-  await choice.click();
+  await page.getByRole("button", { name: "START ORDER", exact: true }).click();
+  await page.getByLabel("Search menu").fill("Kiosk Sandwich");
+  await page.locator(".menuItem", { hasText: "Kiosk Sandwich" }).click();
+  await page.getByRole("dialog", { name: "Kiosk Sandwich" }).getByRole("button", { name: "Tomato", exact: true }).click();
   await page.getByRole("button", { name: /Add to order/i }).click();
-  await expect(page.locator(".orderCart")).toContainText(`${group.name}: ${option.name}`);
+  await expect(page.locator(".orderCart")).toContainText("Toppings: Tomato");
 });

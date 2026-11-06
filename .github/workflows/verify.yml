@@ -61,6 +61,19 @@ jobs:
             fi
           done < <(find db/migrations -maxdepth 1 -type f -name '*.sql' | sort)
           { echo 'BEGIN; SET LOCAL session_replication_role=replica;'; gzip -dc tests/fixtures/ai-menu.sql.gz; echo 'COMMIT;'; } | psql -v ON_ERROR_STOP=1
+      - name: Web, POS, loyalty and pizza abuse regressions
+        env:
+          DATABASE_URL: ${{ env.VALIDATION_DATABASE_URL }}
+          DATABASE_DRIVER: postgres
+          ORDERING_AUDIT_DATABASE: "1"
+          VALIDATION_DISABLE_OUTBOUND: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:loyalty:regressions
+          npm run test:pizza-pricing:regressions
+          npm run test:pizza-game:regressions
+          npm run test:customer-checkout:regressions
       - name: Dedicated AI regression suites
         shell: bash
         run: |

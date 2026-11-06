@@ -42,8 +42,11 @@ sequenceDiagram
   participant DB as PostgreSQL
   participant MX as MX Merchant
   participant P as POS / printers
-  C->>A: GET catalog (web channel, current time, service type)
-  C->>A: sign in (SMS code, email code or Google)
+  C->>A: GET catalog (web channel, fulfillment time, service type)
+  opt account or pay-later verification
+    C->>A: sign in (SMS code, email code or Google)
+  end
+  C->>C: Review order
   C->>A: POST cart (items + choices, service, timing, contact)
   A->>DB: new draft order, priced from the DB; cart row ties it to the session
   opt delivery
@@ -51,8 +54,9 @@ sequenceDiagram
     C->>A: POST orders/[id]/delivery → driving distance, fee band
   end
   opt reward
-    C->>A: POST orders/[id]/loyalty
+    C->>A: POST orders/[id]/loyalty or points
   end
+  C->>C: Place order after reviewing the final total
   alt pay by card
     C->>A: payments/mx initialize
     A->>MX: look up earlier unconfirmed attempts (replayId)
@@ -71,12 +75,19 @@ sequenceDiagram
   A-->>C: confirmation page; email sent after the response
 ```
 
-- **Every "Place order" prices a fresh draft.** The cart route creates a new draft each time and marks the
+- **Review before placing the order.** "Review order" prices the draft and exposes available pizza and points
+  rewards before any card charge or pay-later submission. The customer then places the reviewed order.
+  The cart route creates a new draft each time and marks the
   session's previous cart row `replaced_at`; only the newest draft can be paid. Changing service type, time,
   contact or delivery details after pricing clears the priced review, so the next tap prices again.
-- **Sign-in is required to price a cart** (any authenticated session: SMS code, email code or Google). Phone
-  numbers typed by an email/Google customer are not verified by SMS.
-- **Service types online:** pickup and delivery (curbside exists in code; pay-later refuses it).
+- **Guests can price and pay by card.** Pay-later requires a signed-in session or the configured temporary
+  SMS bypass. Rewards require sign-in and the active cart belonging to that browser, so a web request cannot
+  modify an old cart or a POS draft. Phone numbers typed by an email/Google customer are not verified by SMS.
+- **Service types online:** pickup, delivery and prepaid curbside. Pay-later refuses curbside.
+- Future-time changes reload the menu for that fulfillment time. Changing service clears the selected time;
+  older catalog or time-slot responses cannot replace the latest selection.
+- Estimates and cart submissions retain modifier quantities, size-specific modifier prices, included-choice
+  allowances and combo option surcharges. Hidden dependent choices are excluded when their trigger is removed.
 
 ## 3. Pricing and rules
 
@@ -106,6 +117,8 @@ MX Checkout API with a browser-side charge (card data never touches our server):
       customer is asked to wait rather than risk a second charge.
    2. **Preflight**: `preflightDraftSubmit` runs every send rule and rolls back. A failure (closed, breakfast
       over, under the delivery minimum, price changed) is shown before any charge.
+      A fully rewarded order with a zero total is rechecked and submitted without contacting MX or creating
+      a payment transaction, including curbside orders. Its reward is consumed once when sent.
    3. One payment attempt per order: under a per-order lock, an open session for the same amount is reused
       (same `replayId`; MX treats a repeat charge with it as the same payment and rejects a different card on
       it, verified in the sandbox). A new session starts after a decline (`retryAfterDecline`, so another card
@@ -115,9 +128,26 @@ MX Checkout API with a browser-side charge (card data never touches our server):
 3. **confirm**: the server looks the payment up at MX by `replayId`, requires "approved" and the exact session
    amount, and that the order still owes exactly that amount (otherwise the charge is voided at MX and the
    customer is asked to pay the current total), then `commitTender` (idempotent on the session's `client_mutation_id`) and `submitDraftOrder`.
+   - The order row is locked while checking for an existing tender and recording a new one. Concurrent
+     confirmations check the existing payment before considering a void, so an already-paid balance cannot
+     trigger reversal of that same successful charge.
+   - A changed-total reversal is claimed under the order/session locks and marked `needs_review` before
+     contacting MX. Concurrent confirmations cannot reverse it twice or replace a successful `voided`
+     result. Interrupted or failed reversals retain the processor reference for staff review and block
+     another payment attempt; confirmed voids return the review-and-pay-again message without contacting MX again.
+   - Uncertain web reversals ring the POS and retain a banner with the order number, MX reference and a
+     link to **Settings → Hardware → Card payments to review**. A manager must void or fully refund the
+     original charge in MX, then use **VERIFY VOID / REFUND IN MX**. The server reads the original payment,
+     checks its reference, amount and full reversal, records the manager's note, and clears the warning.
+     Approval, partial refund, missing reference or an unavailable processor leave checkout blocked; staff
+     cannot take a replacement tender either. Verification itself never charges or refunds a card.
+     New checkout sessions use the `online` channel; legacy `keyed` sessions are included only when the
+     order is web-sourced and the session was created by a web actor.
    - If a send rule still fails after the charge (something changed between preflight and confirm), the
      customer is told the card was charged and the store alerted (409, `paymentRecorded`); the paid draft
      appears on every POS's online-order alert until staff send it from the Order Center.
+     Retried confirmations preserve this warning while the order is still a draft; the confirmation page
+     also displays the pending store check instead of a kitchen progress tracker.
    - A failed first print attempt never fails the request; retries and the chime cover it.
 4. **Saved cards** (`src/lib/mx-saved-cards.ts`, owner request 2026-10-24): a signed-in customer can tick "Save this
    card for next time" in the card dialog. After the payment is approved the dialog sends the same card straight to
@@ -183,6 +213,8 @@ lost-confirm recovery (close the tab right after the card approves, then pay aga
 
 Tracked in [reviews/2026-10-24-production-review.md](reviews/2026-10-24-production-review.md):
 
-- No rate limit on `initialize` (card-testing risk); sign-in codes are limited (3 per 15 min, 5 tries).
+- Card checkout starts are limited to 8/hour per browser session and 20/hour per IP; sign-in codes have
+  request and verification limits. These limits reduce abuse but cannot establish that a payment card is legitimate.
 - Order-ahead slots have no prep lead time or capacity cap.
-- Pay-at-pickup orders have no per-customer limit and earn loyalty before payment.
+- Pay-at-pickup orders have no per-customer open-order limit. Loyalty and points now accrue only after full payment,
+  including cash collected after the order was sent to the kitchen.

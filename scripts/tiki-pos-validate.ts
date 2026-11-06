@@ -23,6 +23,16 @@ async function main(){
     const actor={id:"tiki-validator",name:"Tiki Validator",type:"employee" as const,role:"manager" as const};
     const updated=await appendTikiTabItems({orderId:tabId,items:[{itemId:tikiItemId,quantity:2}],actor});assert.equal(Number(updated?.total_cents),1450);
     const tabs=await listOpenTikiTabs();assert(tabs.some(row=>row.id===tabId&&Number(row.item_count)===2));
+    const variantId=randomUUID(),groupId=randomUUID(),optionId=randomUUID();
+    await sql`INSERT INTO ordering_menu_item_variants(id,item_id,name,base_price_cents) VALUES(${variantId},${tikiItemId},'Large fixture',1200)`;
+    await sql`INSERT INTO ordering_modifier_groups(id,business,name,max_selections,allow_option_quantity) VALUES(${groupId},'Tiki',${`Included fixture ${groupId}`},1,TRUE)`;
+    await sql`INSERT INTO ordering_modifier_options(id,group_id,name,price_delta_cents) VALUES(${optionId},${groupId},'Fixture extra',100)`;
+    await sql`INSERT INTO ordering_menu_item_modifier_groups(id,item_id,group_id) VALUES(${randomUUID()},${tikiItemId},${groupId})`;
+    await sql`INSERT INTO ordering_modifier_presentation_overrides(item_id,group_id,included_choice_count) VALUES(${tikiItemId},${groupId},1)`;
+    await sql`INSERT INTO ordering_menu_variant_modifier_prices(id,variant_id,option_id,price_delta_cents) VALUES(${randomUUID()},${variantId},${optionId},175)`;
+    const priced=await appendTikiTabItems({orderId:tabId,items:[{itemId:tikiItemId,variantId,quantity:2,modifierSelections:{[groupId]:[optionId]},modifierQuantities:{[optionId]:3}}],actor});
+    assert.equal(Number(priced?.total_cents),1450+2*(1200+2*175));
+    result.variantAllowanceQuantityPricing=true;
     let crossMenu=false;try{await appendTikiTabItems({orderId:tabId,items:[{itemId:deliItemId}],actor})}catch(error){crossMenu=error instanceof Error&&/this business/.test(error.message)}assert(crossMenu);
     let crossOrder=false;try{await appendTikiTabItems({orderId:deliOrderId,items:[{itemId:tikiItemId}],actor})}catch(error){crossOrder=error instanceof TabConflictError}assert(crossOrder);
     await sql`UPDATE ordering_orders SET paid_cents=total_cents,amount_due_cents=0,payment_status='paid' WHERE id=${tabId}`;

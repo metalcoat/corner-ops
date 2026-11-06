@@ -16,10 +16,20 @@ import { checkoutNeedsSendDetails, paymentBlocker, tipChangeError } from "@/lib/
 import { ensureOrderingHardwareSchema } from "@/lib/ordering-hardware-schema";
 import { orderReceiptBreakdown } from "@/lib/ordering-sales-tax";
 import { chargeHouseAccount, HouseAccountError, houseAccountReceiptLines, reverseHouseAccountCharge } from "@/lib/ordering-house-accounts";
+import { clawbackUnpaidLoyaltyEarnings, earnLoyaltyForOrder } from "@/lib/ordering-loyalty";
+import { clawbackUnpaidPointsEarnings, earnPointsForOrder } from "@/lib/ordering-points";
 
 export type CheckoutTenderType = "cash" | "card" | "gift_card" | "house_account";
 
 export class PaymentConflictError extends Error {}
+
+async function assertNoUnresolvedWebPayment(orderId: string, business: OrderingBusiness) {
+  const [review] = await getSql()`SELECT session.id FROM ordering_mx_checkout_sessions session JOIN ordering_orders orders ON orders.id=session.order_id
+    WHERE session.order_id=${orderId} AND session.business=${business} AND orders.source='web'
+      AND (session.channel='online' OR (session.channel='keyed' AND session.created_by LIKE 'web:%'))
+      AND session.status='needs_review' LIMIT 1`;
+  if (review) throw new PaymentConflictError("An online card charge needs a manager check. Verify its void or full refund in Settings → Hardware → Card payments to review before taking another payment.");
+}
 
 export async function assertOrderReadyForCheckout(orderId: string, business: OrderingBusiness) {
   if (business !== "Corner Deli") return;
@@ -50,10 +60,12 @@ export async function assertOrderReadyForCheckout(orderId: string, business: Ord
 
 /** Before money is taken (or a card is sent to MX): the checkout rules plus no payments on a voided order. */
 export async function assertOrderCanTakePayment(orderId: string, business: OrderingBusiness) {
+  await ensureOrderingAccountSchema();
   const order = (await getSql()`SELECT status, voided_at FROM ordering_orders WHERE id=${orderId} AND business=${business} LIMIT 1`)[0];
   if (!order) throw new PaymentConflictError("Order was not found.");
   const blocker = paymentBlocker({ status: String(order.status), voided: Boolean(order.voided_at) });
   if (blocker) throw new PaymentConflictError(blocker);
+  await assertNoUnresolvedWebPayment(orderId, business);
   await assertOrderReadyForCheckout(orderId, business);
 }
 
@@ -204,6 +216,10 @@ export async function reverseTender(input: { orderId: string; business: Ordering
     const newPaid = Math.max(0, Number(order.paid_cents) - amount), remaining = settled ? 0 : Math.max(0, Number(order.total_cents) - newPaid);
     const paymentStatus = settled ? (newPaid === 0 ? "refunded" : "partially_refunded") : newPaid === 0 ? "unpaid" : remaining === 0 ? "paid" : "partially_paid";
     await sql`UPDATE ordering_orders SET paid_cents=${newPaid},amount_due_cents=${remaining},payment_status=${paymentStatus},paid_at=CASE WHEN ${remaining}=0 THEN paid_at ELSE NULL END,version=version+1,updated_at=NOW() WHERE id=${input.orderId}`;
+    if(newPaid===0){
+      await clawbackUnpaidLoyaltyEarnings(input.orderId,input.actor,reversalReason);
+      await clawbackUnpaidPointsEarnings(input.orderId,input.actor,reversalReason);
+    }
     if (source.check_id) await sql`UPDATE ordering_checks SET paid_cents=GREATEST(0,paid_cents-${amount}),amount_due_cents=LEAST(total_cents,amount_due_cents+${amount}),status=CASE WHEN paid_cents-${amount}<=0 THEN 'open' WHEN amount_due_cents+${amount}>0 THEN 'partially_paid' ELSE 'paid' END,updated_at=NOW() WHERE id=${source.check_id}`;
     const version = Number(order.version)+1;
     await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) VALUES(${randomUUID()},${input.orderId},${version},'payment_reversed',${input.actor.type},${input.actor.id},${JSON.stringify({transactionId:reversalId,sourceTransactionId:source.id,tenderType:source.tender_type,amountCents:amount,reason:reversalReason,actorName:input.actor.name,actorRole:input.actor.role,totalPaidCents:newPaid,remainingDueCents:remaining,...(input.via?{via:input.via}:{})})}::jsonb)`;
@@ -238,6 +254,10 @@ export async function settleTenderAsStoreCredit(input: { orderId: string; transa
     const settled = input.moneyBack || ["completed", "cancelled"].includes(String(order.status));
     const newPaid = Math.max(0, Number(order.paid_cents) - refundCents), remaining = settled ? 0 : Math.max(0, Number(order.total_cents) - newPaid);
     await sql`UPDATE ordering_orders SET paid_cents=${newPaid},amount_due_cents=${remaining},payment_status=CASE WHEN ${settled} THEN (CASE WHEN ${newPaid}=0 THEN 'refunded' ELSE 'partially_refunded' END) WHEN ${newPaid}=0 THEN 'unpaid' WHEN ${remaining}=0 THEN 'paid' ELSE 'partially_paid' END,paid_at=CASE WHEN ${remaining}=0 THEN paid_at ELSE NULL END,version=version+1,updated_at=NOW() WHERE id=${input.orderId}`;
+    if(newPaid===0){
+      await clawbackUnpaidLoyaltyEarnings(input.orderId,input.actor,reversalReason);
+      await clawbackUnpaidPointsEarnings(input.orderId,input.actor,reversalReason);
+    }
     if (source.check_id) await sql`UPDATE ordering_checks SET paid_cents=GREATEST(0,paid_cents-${refundCents}),amount_due_cents=LEAST(total_cents,amount_due_cents+${refundCents}),status=CASE WHEN paid_cents-${refundCents}<=0 THEN 'open' WHEN amount_due_cents+${refundCents}>0 THEN 'partially_paid' ELSE 'paid' END,updated_at=NOW() WHERE id=${source.check_id}`;
     await sql`INSERT INTO ordering_order_events(id,order_id,order_version,event_type,actor_type,actor_id,details) SELECT ${randomUUID()},id,version,'refund_issued_as_store_credit',${input.actor.type},${input.actor.id},${JSON.stringify({transactionId,sourceTransactionId:source.id,refundCents,creditCents,reason:reversalReason,actorName:input.actor.name,actorRole:input.actor.role,...(input.via?{via:input.via}:{})})}::jsonb FROM ordering_orders WHERE id=${input.orderId}`;
     await reconcileOrderTips(input.orderId,"Corner Deli");
@@ -316,6 +336,7 @@ export async function commitTender(input: {
     // A void leaves amount_due in place, so the balance alone would accept money here.
     const blocker = paymentBlocker({ status: String(order.status), voided: Boolean(order.voided_at) });
     if (blocker) throw new PaymentConflictError(blocker);
+    await assertNoUnresolvedWebPayment(input.orderId, input.business);
     const check = input.checkId ? (await sql`SELECT id,total_cents,paid_cents,amount_due_cents FROM ordering_checks WHERE id=${input.checkId} AND order_id=${input.orderId} FOR UPDATE`)[0] : null;
     if (input.checkId && !check) throw new PaymentConflictError("Check was not found.");
     const due = Number(check?.amount_due_cents ?? order.amount_due_cents);
@@ -404,6 +425,10 @@ export async function commitTender(input: {
     `;
     if (remaining === 0) await completePaidPaymentQueue(input.business,input.orderId,input.checkId);
     if (remaining === 0) await reconcileOrderTips(input.orderId,input.business);
+    if (remaining === 0) {
+      await earnLoyaltyForOrder(input.orderId,input.actor);
+      await earnPointsForOrder(input.orderId,input.actor);
+    }
     await sql`
       INSERT INTO ordering_order_events (id, order_id, order_version, event_type, actor_type, actor_id, details)
       SELECT ${randomUUID()}, id, version, 'payment_recorded', ${input.actor.type}, ${input.actor.id},
