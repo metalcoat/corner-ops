@@ -7,6 +7,7 @@ import EmployeeNotificationPrompt from "./notification-prompt";
 import MessageNotificationRedirect from "./message-notification-redirect";
 import EmployeePinController from "./pin-controller";
 import ProfilePhotoOptimizer from "./profile-photo-optimizer";
+import SetupBanner from "./setup/setup-banner";
 import "./employee-nav.css";
 
 export default async function EmployeeLayout({ children }: Readonly<{ children: ReactNode }>) {
@@ -33,7 +34,7 @@ export default async function EmployeeLayout({ children }: Readonly<{ children: 
         <EmployeeAttendanceBadge />
         <a href="/employee/forgot-pin">Forgot PIN</a>
       </nav>
-      <div className="employeePortalContent"><EmployeeEmailPrompt /><EmployeeNotificationPrompt />{children}</div>
+      <div className="employeePortalContent">{session && <SetupBanner />}<EmployeeEmailPrompt /><EmployeeNotificationPrompt />{children}</div>
     </div>
   );
 }

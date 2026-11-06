@@ -2,6 +2,7 @@ import { ensureSchema, getSql } from "@/lib/db";
 import type { EmployeeSession } from "@/lib/employee-auth";
 import { sendStaffNotification } from "@/lib/staff-notifications";
 import { enforceScheduleTimeOff } from "@/lib/schedule-time-off";
+import { assertOnboardingAllowsScheduling } from "@/lib/employee-onboarding";
 import type { Business } from "@/lib/types";
 
 const TIME_ZONE = "America/New_York";
@@ -261,6 +262,7 @@ export async function createScheduleShift(input: {
   if (end <= start) throw new Error("Shift end must be after the start.");
   if (input.employeeId) await employeeForBusiness(input.employeeId, input.business);
   if (input.status !== "Open" && !input.employeeId) throw new Error("Choose an employee or mark the shift open.");
+  if (input.employeeId && input.status !== "Open") await assertOnboardingAllowsScheduling(input.business, input.employeeId);
 
   const overlap = input.employeeId ? await getSql()`
     SELECT id FROM schedule_shifts
@@ -308,6 +310,7 @@ export async function updateScheduleShift(input: {
   const status = input.status || clean(current.status, 30) as "Draft" | "Published" | "Open" | "Cancelled";
   if (employeeId) await employeeForBusiness(employeeId, input.business);
   if (status !== "Open" && status !== "Cancelled" && !employeeId) throw new Error("Choose an employee or mark the shift open.");
+  if (employeeId && status !== "Open" && status !== "Cancelled") await assertOnboardingAllowsScheduling(input.business, employeeId);
 
   await getSql()`
     UPDATE schedule_shifts SET
@@ -589,6 +592,7 @@ export async function reviewShiftRequest(input: { id: string; business: Business
         LIMIT 1
       ` as unknown as Array<{ starts_at: string; ends_at: string }>;
       if (!claimShift[0]) throw new Error("That shift is no longer open.");
+      await assertOnboardingAllowsScheduling(input.business, String(request.requester_employee_id));
       await enforceScheduleTimeOff({
         business: input.business,
         employeeId: String(request.requester_employee_id),

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  employeeOnboardingSteps,
   inviteUsable,
+  onboardingReminderDue,
+  onboardingReminderText,
+  onboardingStillToDo,
   newOnboardingToken,
   onboardingChecklist,
   onboardingComplete,
@@ -111,5 +115,45 @@ test("setup links and the moved People pages open on the team host", () => {
   assert.equal(teamRoute(`/employee/welcome/${"x".repeat(32)}`), "allow");
   assert.equal(teamRoute("/api/employee/onboarding"), "allow");
   assert.equal(teamRoute("/ops/people"), "home");
+  assert.equal(teamRoute("/employee/setup"), "allow");
   for (const path of ["/ops/people/team", "/ops/people/team/abc", "/ops/people/add", "/ops/people/paperwork", "/ops/people/handbook"]) assert.equal(teamRoute(path), "allow", path);
+});
+
+test("the new hire's steps go in order: later steps stay locked until earlier ones are done", () => {
+  const start = employeeOnboardingSteps(facts());
+  assert.deepEqual(start.map((step) => [step.key, step.status]), [
+    ["account", "waiting"], ["forms", "locked"], ["handbook", "locked"], ["deposit", "optional"], ["app", "locked"],
+  ]);
+  const afterPin = employeeOnboardingSteps(facts({ accountSet: true }));
+  assert.equal(afterPin.find((step) => step.key === "forms")?.status, "waiting");
+  assert.equal(afterPin.find((step) => step.key === "handbook")?.status, "locked");
+  assert.match(afterPin.find((step) => step.key === "handbook")?.detail || "", /after: new-hire forms/);
+  // Forms the store hasn't assigned don't hold up the handbook, but still count as not finished.
+  const noForms = employeeOnboardingSteps(facts({ accountSet: true, formsAssigned: 0 }));
+  assert.equal(noForms.find((step) => step.key === "handbook")?.status, "waiting");
+  assert.deepEqual(onboardingStillToDo(noForms), ["New-hire forms", "Employee handbook", "Schedule app"]);
+  const done = employeeOnboardingSteps(facts({ accountSet: true, formsSigned: 4, handbookAcknowledged: true, appSignIns: 1 }));
+  assert.deepEqual(onboardingStillToDo(done), [], "direct deposit is optional");
+});
+
+test("reminders: once a day from the next day, 10 AM to 7 PM Eastern, seven at most, never when done", () => {
+  const invitedAt = new Date("2026-11-06T20:00:00Z"); // 3 PM Eastern
+  const base = { invitedAt, lastReminderAt: null, remindersSent: 0, stillToDo: ["Employee handbook"] };
+  assert.equal(onboardingReminderDue({ ...base, now: new Date("2026-11-06T22:00:00Z") }), false, "not the same day");
+  assert.equal(onboardingReminderDue({ ...base, now: new Date("2026-11-07T13:00:00Z") }), false, "8 AM is too early");
+  assert.equal(onboardingReminderDue({ ...base, now: new Date("2026-11-07T15:00:00Z") }), true, "10 AM next day");
+  assert.equal(onboardingReminderDue({ ...base, now: new Date("2026-11-08T00:30:00Z") }), false, "7:30 PM is too late");
+  assert.equal(onboardingReminderDue({ ...base, lastReminderAt: new Date("2026-11-07T15:00:00Z"), remindersSent: 1, now: new Date("2026-11-07T20:00:00Z") }), false, "one a day");
+  assert.equal(onboardingReminderDue({ ...base, lastReminderAt: new Date("2026-11-07T15:00:00Z"), remindersSent: 1, now: new Date("2026-11-08T15:00:00Z") }), true);
+  assert.equal(onboardingReminderDue({ ...base, remindersSent: 7, now: new Date("2026-11-14T15:00:00Z") }), false);
+  assert.equal(onboardingReminderDue({ ...base, stillToDo: [], now: new Date("2026-11-07T15:00:00Z") }), false);
+});
+
+test("the reminder says what's left and that they can't be scheduled yet", () => {
+  const text = onboardingReminderText({ name: "Brandon Howie", stillToDo: ["New-hire forms", "Employee handbook", "Schedule app"], link: "https://team.ordercornerdeli.com/employee/setup" });
+  assert.match(text, /^Corner Deli: Hi Brandon, your new-hire setup isn't finished yet\. Still to do: new-hire forms, employee handbook and schedule app\./);
+  assert.match(text, /can't put you on the schedule until everything is complete/);
+  assert.ok(text.includes("https://team.ordercornerdeli.com/employee/setup"));
+  assert.ok(text.includes("315-393-2271") && text.includes("STOP"));
+  assert.ok(text.length <= 320, `text is ${text.length} characters`);
 });

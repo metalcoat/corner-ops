@@ -4,27 +4,20 @@ import { responseMessage } from "@/app/client-http";
 import { useParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { employeePinLength } from "@/lib/employee-pin";
-import { STORE_PHONE, TEAM_APP_APK_URL, type OnboardingStep } from "@/lib/employee-onboarding-shared";
+import { STORE_PHONE, type OnboardingStep } from "@/lib/employee-onboarding-shared";
 import type { Business } from "@/lib/types";
 import "../../forms/forms.css";
-import "./welcome.css";
+import SetupSteps from "../../setup/setup-steps";
 
 type Welcome =
   | { valid: false }
   | { valid: true; business: Business; businessName: string; firstName: string; accountSet: boolean; signedIn: boolean; steps: OnboardingStep[] };
-
-const STEP_LINKS: Record<string, { href: string; label: string }> = {
-  forms: { href: "/employee/forms", label: "Open my forms" },
-  handbook: { href: "/employee/handbook", label: "Read & sign the handbook" },
-  deposit: { href: "/employee/direct-deposit", label: "Set up direct deposit" },
-};
 
 export default function EmployeeWelcomePage() {
   const { token } = useParams<{ token: string }>();
   const [data, setData] = useState<Welcome | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [hubUrl, setHubUrl] = useState("/employee");
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/employee/onboarding?token=${encodeURIComponent(token)}`, { cache: "no-store" });
@@ -32,7 +25,6 @@ export default function EmployeeWelcomePage() {
   }, [token]);
 
   useEffect(() => {
-    setHubUrl(`${window.location.origin}/employee`);
     void load().catch(() => setData({ valid: false }));
   }, [load]);
 
@@ -99,21 +91,8 @@ export default function EmployeeWelcomePage() {
 
     {data.signedIn && <section className="employmentFormsCard">
       <h2>Your checklist</h2>
-      <ol className="welcomeSteps">
-        {data.steps.map((step) => <li key={step.key} className={`welcomeStep ${step.status}`}>
-          <span className="welcomeMark" aria-hidden="true">{step.status === "done" ? "✓" : ""}</span>
-          <div>
-            <strong>{step.label}</strong>
-            <small>{step.detail}</small>
-            {step.key === "app" && <div className="welcomeApp">
-              <a className="employmentPrimary" href={TEAM_APP_APK_URL}>Download the Android app</a>
-              <small>iPhone or no Android? Open <a href={hubUrl}>{hubUrl.replace(/^https?:\/\//, "")}</a> in Safari and choose Share → Add to Home Screen. Sign in with your PIN to see your schedule.</small>
-            </div>}
-            {STEP_LINKS[step.key] && step.status !== "done" && step.status !== "manager" && <a className="employmentPrimary" href={STEP_LINKS[step.key].href}>{STEP_LINKS[step.key].label}</a>}
-          </div>
-        </li>)}
-      </ol>
-      <p>When you finish a step, come back to this page or open the <a href="/employee">Employee Hub</a>. Questions? Call <a href={`tel:${STORE_PHONE}`}>{STORE_PHONE}</a>.</p>
+      <p>Do these in order. Each step opens when the one before it is done.</p>
+      <SetupSteps steps={data.steps} />
     </section>}
   </main>;
 }

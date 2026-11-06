@@ -14,12 +14,15 @@ export type OnboardingStatus = {
   textStatus: string;
   textDetail: string;
   complete: boolean;
+  canSchedule: boolean;
+  stillToDo: string[];
+  reminders: { sent: number; last: string | null; status: string };
   steps: OnboardingStep[];
 };
 
 export type ResendResult = { status: string; detail: string; expiresAt: string; devLink: string | null; text: string };
 
-const MARK: Record<OnboardingStep["status"], string> = { done: "✓", waiting: "…", manager: "!", optional: "–" };
+const MARK: Record<OnboardingStep["status"], string> = { done: "✓", waiting: "…", locked: "🔒", manager: "!", optional: "–" };
 
 /** Result line after a setup text goes out (or is only logged on dev). */
 export function TextResult({ result }: { result: ResendResult }) {
@@ -68,6 +71,10 @@ export default function OnboardingChecklist({ business, status, onChanged, title
       </div>
       <button type="button" disabled={busy} onClick={() => void resend()}>{busy ? "Sending…" : status.hasInvite ? "Resend text" : "Send setup text"}</button>
     </header>
+    <p className="onboardingHint">
+      {status.canSchedule ? "Their own steps are done; they can be scheduled." : `Can't be scheduled yet. They still need: ${status.stillToDo.join(", ")}.`}
+      {" "}{status.reminders.sent ? `Daily reminder texts: ${status.reminders.sent} of 7 sent, last ${status.reminders.last}${status.reminders.status === "logged" ? " (dev: logged)" : status.reminders.status === "failed" ? " (failed)" : ""}.` : "Daily reminder texts start the day after the setup text (10 AM–7 PM)."}
+    </p>
     {accountSet && <p className="onboardingHint">They already chose a PIN. A new link lets them get back to their checklist; it doesn&apos;t change their PIN.</p>}
     <ol className="onboardingSteps">
       {status.steps.map((step) => <li key={step.key} className={step.status}>

@@ -460,6 +460,15 @@ flowchart LR
 - Code: `src/lib/employee-onboarding.ts` (database), `employee-onboarding-rules.ts` (token, text, checklist),
   APIs `/api/employee-directory/onboarding` (managers, workforce permission) and `/api/employee/onboarding` (the link).
 - Text log-only: no Telnyx settings, or `ONBOARDING_SMS_LOG_ONLY=true`; numbers in `SMS_TEST_NUMBERS` still send.
+- The new hire's steps run in order (PIN → forms → handbook → schedule app; direct deposit optional): a later
+  step shows locked until the earlier one is done. Every Employee Hub page shows a "setup isn't finished" banner
+  (`/employee/setup` is the signed-in checklist).
+- Daily reminder text from the day after the setup text, 10 AM–7 PM Eastern, at most 7
+  (`employee_onboarding_reminders`, migration 0041), sent by the every-5-minute `schedule-delivery` cron. Before
+  the PIN is chosen it carries a fresh setup link; after, `/employee/setup`. It says they can't be scheduled yet.
+- Scheduling gate (`assertOnboardingAllowsScheduling`, `src/lib/workforce.ts`): a person who came in through Add
+  employee can't be given a shift (create, edit, open-shift claim) until their own steps are done. Staff never
+  sent a setup link are unaffected. Store-side items (I-9 review, Payroll Relief match) don't block scheduling.
 - A link works for one person only; a resend revokes the older link. After the PIN is chosen the link needs that
   person's PIN to show the checklist again. Nothing is uploaded to Payroll Relief.
 - Handbook sections 12 (alcohol, zero tolerance) and 13 (no smoking/vaping) are marked draft until Chris approves

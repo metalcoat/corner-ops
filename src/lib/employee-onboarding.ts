@@ -6,7 +6,11 @@ import { ensureEmployeeDirectorySchema } from "@/lib/employee-directory";
 import { ensureEmployeeProfileSchema } from "@/lib/employee-profile";
 import { clearEmployeeSession, createEmployeeSession, getEmployeeSession } from "@/lib/employee-auth";
 import {
+  employeeOnboardingSteps,
   inviteUsable,
+  onboardingReminderDue,
+  onboardingReminderText,
+  onboardingStillToDo,
   newOnboardingToken,
   onboardingChecklist,
   onboardingComplete,
@@ -175,41 +179,45 @@ async function assignNewHirePaperwork(input: { business: Business; employeeId: s
 }
 
 /** New link for one employee: older links stop working, then one text goes out (or is logged off production). */
+/** A fresh personal link for one employee; any older link stops working. */
+async function createInviteLink(business: Business, employeeId: string, actor: string) {
+  const sql = getSql();
+  const token = newOnboardingToken();
+  const id = randomUUID();
+  const expiresAt = onboardingExpiry();
+  await sql`UPDATE employee_onboarding_invites SET revoked_at = NOW() WHERE business = ${business} AND employee_id = ${employeeId} AND revoked_at IS NULL`;
+  await sql`
+    INSERT INTO employee_onboarding_invites (id, business, employee_id, token_hash, created_by, expires_at)
+    VALUES (${id}, ${business}, ${employeeId}, ${onboardingTokenHash(token)}, ${actor}, ${expiresAt})
+  `;
+  const baseUrl = cornerOpsBaseUrl(business);
+  return { id, expiresAt, link: baseUrl ? onboardingLink(baseUrl, token) : "" };
+}
+
+/** Texts (or, off production, logs) one onboarding message. */
+async function sendOnboardingText(employee: EmployeeRow, text: string, link: string) {
+  if (!link) return { status: "failed", detail: "APP_URL or EMPLOYEE_APP_URL is not configured.", devLink: null as string | null };
+  if (onboardingSmsLogOnly(employee.phone)) {
+    console.info(`[onboarding-sms] log-only, to ${employee.phone}:\n${text}`);
+    return { status: "logged", detail: "Not texted: SMS is in log-only mode here.", devLink: link as string | null };
+  }
+  const result = await deliverSms({ recipients: [{ id: employee.id, name: employee.name, phone: employee.phone, smsOptIn: employee.sms_opt_in }], text: () => text });
+  if (result.sent) return { status: "sent", detail: "", devLink: null };
+  return {
+    status: "failed",
+    detail: result.notOptedIn ? "They have opted out of texts." : result.failures[0]?.message || (result.configured ? "The text was not accepted." : "SMS is not configured."),
+    devLink: null,
+  };
+}
+
 export async function issueOnboardingInvite(input: { business: Business; employeeId: string; actor: string }) {
   const employee = await employeeRow(input.business, input.employeeId);
   if (!employee.active) throw new ValidationError("Reactivate this employee before sending a setup text.");
   if (!employee.phone) throw new ValidationError("Add a mobile number for this employee first.");
   const sql = getSql();
-  const token = newOnboardingToken();
-  const id = randomUUID();
-  const expiresAt = onboardingExpiry();
-  await sql`UPDATE employee_onboarding_invites SET revoked_at = NOW() WHERE business = ${input.business} AND employee_id = ${input.employeeId} AND revoked_at IS NULL`;
-  await sql`
-    INSERT INTO employee_onboarding_invites (id, business, employee_id, token_hash, created_by, expires_at)
-    VALUES (${id}, ${input.business}, ${input.employeeId}, ${onboardingTokenHash(token)}, ${input.actor}, ${expiresAt})
-  `;
-  const baseUrl = cornerOpsBaseUrl(input.business);
-  const link = baseUrl ? onboardingLink(baseUrl, token) : "";
+  const { id, expiresAt, link } = await createInviteLink(input.business, input.employeeId, input.actor);
   const text = onboardingSmsText({ name: employee.name, link, businessName: businessDisplayName(input.business) });
-
-  let status = "sent";
-  let detail = "";
-  let devLink: string | null = null;
-  if (!link) {
-    status = "failed";
-    detail = "APP_URL or EMPLOYEE_APP_URL is not configured.";
-  } else if (onboardingSmsLogOnly(employee.phone)) {
-    status = "logged";
-    detail = "Not texted: SMS is in log-only mode here.";
-    devLink = link;
-    console.info(`[onboarding-sms] log-only, to ${employee.phone}:\n${text}`);
-  } else {
-    const result = await deliverSms({ recipients: [{ id: employee.id, name: employee.name, phone: employee.phone, smsOptIn: true }], text: () => text });
-    if (!result.sent) {
-      status = "failed";
-      detail = result.failures[0]?.message || (result.configured ? "The text was not accepted." : "SMS is not configured.");
-    }
-  }
+  const { status, detail, devLink } = await sendOnboardingText(employee, text, link);
   await sql`UPDATE employee_onboarding_invites SET sms_status = ${status}, sms_detail = ${detail.slice(0, 300)} WHERE id = ${id}`;
   await recordAuditEvent({ business: input.business, action: "onboarding-link-texted", actor: input.actor, entityType: "employee", entityId: input.employeeId, details: { inviteId: id, status, detail, expiresAt: expiresAt.toISOString() } });
   return { status, detail, expiresAt: expiresAt.toISOString(), devLink, text: text.replace(link || "\u0000", "<personal link>") };
@@ -330,7 +338,12 @@ async function onboardingFacts(business: Business, employeeId: string): Promise<
 export async function onboardingStatus(business: Business, employeeId: string) {
   const facts = await onboardingFacts(business, employeeId);
   const steps = onboardingChecklist(facts);
+  const own = onboardingStillToDo(employeeOnboardingSteps(facts));
+  const reminder = (await getSql()`SELECT reminders_sent, last_reminder_at, last_status FROM employee_onboarding_reminders WHERE employee_id = ${employeeId} LIMIT 1` as unknown as Array<{ reminders_sent: number; last_reminder_at: string | null; last_status: string }>)[0];
   return {
+    canSchedule: !facts.invite || own.length === 0,
+    stillToDo: own,
+    reminders: reminder ? { sent: Number(reminder.reminders_sent), last: eastern(reminder.last_reminder_at), status: reminder.last_status } : { sent: 0, last: null, status: "" },
     employeeId,
     name: facts.name,
     hasInvite: Boolean(facts.invite),
@@ -356,22 +369,70 @@ export async function listOnboardingInProgress(business: Business) {
   return statuses.filter((status) => !status.complete);
 }
 
-/** The new hire's own list on the setup page: where each step lives in the Employee Hub. */
+/** The new hire's own steps, in order (later steps stay locked until earlier ones are done). */
 async function employeeSteps(business: Business, employeeId: string): Promise<OnboardingStep[]> {
-  const facts = await onboardingFacts(business, employeeId);
-  const steps: OnboardingStep[] = [
-    { key: "account", label: "Employee account", status: facts.accountSet ? "done" : "waiting", detail: facts.accountSet ? "Your PIN is set." : "Choose your PIN." },
-    {
-      key: "forms",
-      label: "New-hire forms",
-      status: !facts.formsAssigned ? "manager" : facts.formsSigned >= facts.formsAssigned ? "done" : "waiting",
-      detail: !facts.formsAssigned ? "Your manager hasn't assigned your forms yet." : `${facts.formsSigned} of ${facts.formsAssigned} done: W-4, IT-2104, I-9 and the rest.`,
-    },
-  ];
-  if (facts.handbookRequired) steps.push({ key: "handbook", label: "Employee handbook", status: facts.handbookAcknowledged ? "done" : "waiting", detail: facts.handbookAcknowledged ? "Signed." : "Read it and sign at the bottom." });
-  steps.push({ key: "deposit", label: "Direct deposit (optional)", status: facts.directDeposit === "completed" ? "done" : "optional", detail: facts.directDeposit === "completed" ? "Submitted." : "Get paid straight to your bank account." });
-  steps.push({ key: "app", label: "Schedule app", status: facts.appSignIns > 0 ? "done" : "waiting", detail: facts.appSignIns > 0 ? "You're signed in on the app." : "Install the app and sign in with your PIN." });
-  return steps;
+  return employeeOnboardingSteps(await onboardingFacts(business, employeeId));
+}
+
+/** For the Employee Hub: the signed-in employee's setup list, or null if they never got a setup link. */
+export async function myOnboarding(business: Business, employeeId: string) {
+  const invited = await getSql()`SELECT 1 FROM employee_onboarding_invites WHERE business = ${business} AND employee_id = ${employeeId} LIMIT 1` as unknown as unknown[];
+  if (!invited.length) return null;
+  const steps = await employeeSteps(business, employeeId);
+  return { steps, stillToDo: onboardingStillToDo(steps) };
+}
+
+/**
+ * Nobody who came in through Add employee goes on the schedule until their own setup is done.
+ * Staff who were never sent a setup link are not affected.
+ */
+export async function assertOnboardingAllowsScheduling(business: Business, employeeId: string) {
+  const mine = await myOnboarding(business, employeeId);
+  if (!mine?.stillToDo.length) return;
+  const name = (await employeeRow(business, employeeId)).name;
+  throw new ValidationError(`${name} can't be scheduled until their new-hire setup is complete. Still to do: ${mine.stillToDo.join(", ")}.`);
+}
+
+/**
+ * Daily reminder texts (called from the every-5-minute schedule-delivery job). A new hire who has
+ * not chosen a PIN gets a fresh setup link; one who has gets the Employee Hub setup page.
+ */
+export async function sendOnboardingReminders(now = new Date()) {
+  const sql = getSql();
+  const rows = await sql`
+    SELECT e.id, e.business, MIN(i.created_at) AS invited_at, r.reminders_sent, r.last_reminder_at
+    FROM employees e
+    JOIN employee_onboarding_invites i ON i.employee_id = e.id
+    LEFT JOIN employee_onboarding_reminders r ON r.employee_id = e.id
+    WHERE e.active = TRUE AND e.phone <> ''
+    GROUP BY e.id, e.business, r.reminders_sent, r.last_reminder_at
+    HAVING MIN(i.created_at) > ${new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)}
+  ` as unknown as Array<{ id: string; business: Business; invited_at: Date | string; reminders_sent: number | null; last_reminder_at: Date | string | null }>;
+  const results: Array<{ employeeId: string; status: string }> = [];
+  for (const row of rows) {
+    const mine = await myOnboarding(row.business, row.id);
+    const stillToDo = mine?.stillToDo || [];
+    if (!onboardingReminderDue({ now, invitedAt: new Date(row.invited_at), lastReminderAt: asDate(row.last_reminder_at), remindersSent: Number(row.reminders_sent || 0), stillToDo })) continue;
+    // Claim today's reminder first so two overlapping runs can't both text.
+    const claimed = await sql`
+      INSERT INTO employee_onboarding_reminders (employee_id, business, reminders_sent, last_reminder_at)
+      VALUES (${row.id}, ${row.business}, 1, ${now})
+      ON CONFLICT (employee_id) DO UPDATE SET reminders_sent = employee_onboarding_reminders.reminders_sent + 1, last_reminder_at = EXCLUDED.last_reminder_at
+      WHERE employee_onboarding_reminders.last_reminder_at IS NULL
+        OR employee_onboarding_reminders.last_reminder_at < ${new Date(now.getTime() - 12 * 60 * 60 * 1000)}
+      RETURNING employee_id
+    ` as unknown as unknown[];
+    if (!claimed.length) continue;
+    const employee = await employeeRow(row.business, row.id);
+    let link = `${cornerOpsBaseUrl(row.business).replace(/\/+$/, "")}/employee/setup`;
+    if (!employee.pin_enabled) link = (await createInviteLink(row.business, row.id, "daily reminder")).link;
+    const text = onboardingReminderText({ name: employee.name, stillToDo, link, businessName: businessDisplayName(row.business) });
+    const sent = await sendOnboardingText(employee, text, cornerOpsBaseUrl(row.business) ? link : "");
+    await sql`UPDATE employee_onboarding_reminders SET last_status = ${sent.status}, last_detail = ${sent.detail.slice(0, 300)} WHERE employee_id = ${row.id}`;
+    await recordAuditEvent({ business: row.business, action: "onboarding-reminder-texted", actor: "daily reminder", entityType: "employee", entityId: row.id, details: { status: sent.status, detail: sent.detail, stillToDo } });
+    results.push({ employeeId: row.id, status: sent.status });
+  }
+  return { checked: rows.length, reminded: results };
 }
 
 /** Pay tab: save the rate and send the NY new-hire pay notice that Add employee held back. */
