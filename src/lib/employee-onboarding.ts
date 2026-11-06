@@ -22,7 +22,7 @@ import {
   validOnboardingTokenShape,
   type OnboardingStep,
 } from "@/lib/employee-onboarding-rules";
-import { assertEmployeePinAvailable, employeePinUpdate, isEmployeePinUniqueViolation } from "@/lib/employee-pin-security";
+import { assertEmployeePinAvailable, createEmployeePinRecord, isEmployeePinUniqueViolation } from "@/lib/employee-pin-security";
 import { recordEmployeePinAudit } from "@/lib/employee-pin-audit";
 import { validateEmployeePin } from "@/lib/employee-pin";
 import { getCornerDeliHandbook } from "@/lib/employee-handbook";
@@ -267,7 +267,7 @@ export async function completeOnboardingAccount(input: { token: unknown; pin: un
   await assertEmployeePinAvailable({ business: invite.business, pin, employeeName: "That", excludeEmployeeId: invite.employee_id }).catch(() => {
     throw new ConflictError("That PIN is taken. Please choose a different one.");
   });
-  const record = employeePinUpdate(invite.business, pin, invite.employee.name);
+  const record = createEmployeePinRecord(invite.business, pin, invite.employee.name);
   try {
     await getSql()`
       UPDATE employees SET pin_hash = ${record.hash}, pin_salt = ${record.salt}, pin_hash_version = ${record.version},
@@ -298,19 +298,32 @@ export async function signInFromOnboardingLink(input: { token: unknown; pin: unk
 
 type Facts = Parameters<typeof onboardingChecklist>[0];
 
+/** Payroll Relief matching only exists where its tables do (dev and staging, not today's production). */
+async function payrollReliefMatch(business: Business, name: string): Promise<{ applies: boolean; eeNum: string | null }> {
+  if (business !== "Corner Deli") return { applies: false, eeNum: null };
+  const sql = getSql();
+  const present = await sql`SELECT to_regclass('public.payroll_relief_employees') IS NOT NULL AS ok` as unknown as Array<{ ok: boolean }>;
+  if (!present[0]?.ok) return { applies: false, eeNum: null };
+  const rows = await sql`SELECT ee_num FROM payroll_relief_employees WHERE business = ${business} AND employee_key = ${employeeKey(name)} LIMIT 1` as unknown as Array<{ ee_num: string }>;
+  return { applies: true, eeNum: rows[0]?.ee_num || null };
+}
+
+/** The new hire signed in with their PIN from the app or Employee Hub (not the setup link). */
+export async function recordOnboardingAppSignIn(employeeId: string) {
+  await getSql()`UPDATE employee_onboarding_invites SET app_signed_in_at = NOW() WHERE employee_id = ${employeeId} AND app_signed_in_at IS NULL`;
+}
+
 async function onboardingFacts(business: Business, employeeId: string): Promise<Facts & { name: string; invite: InviteRow | null }> {
   const sql = getSql();
   const employee = await employeeRow(business, employeeId);
   const handbook = getCornerDeliHandbook();
-  const [invites, forms, handbookRows, deposits, sessions, relief] = await Promise.all([
+  const [invites, forms, handbookRows, deposits, signIns, relief] = await Promise.all([
     sql`SELECT * FROM employee_onboarding_invites WHERE business = ${business} AND employee_id = ${employeeId} ORDER BY created_at DESC LIMIT 1` as unknown as Promise<InviteRow[]>,
     sql`SELECT form_type, status FROM employment_forms WHERE business = ${business} AND employee_id = ${employeeId} AND status <> 'Superseded'` as unknown as Promise<Array<{ form_type: string; status: string }>>,
     sql`SELECT 1 FROM employee_handbook_acknowledgments WHERE employee_id = ${employeeId} AND business = ${business} AND handbook_version = ${handbook.version} AND content_hash = ${handbook.contentHash} LIMIT 1` as unknown as Promise<unknown[]>,
     sql`SELECT status FROM direct_deposit_elections WHERE business = ${business} AND employee_id = ${employeeId} AND status <> 'Superseded'` as unknown as Promise<Array<{ status: string }>>,
-    sql`SELECT COUNT(*)::int n FROM employee_app_sessions WHERE employee_id = ${employeeId} AND device_label <> 'Onboarding link'` as unknown as Promise<Array<{ n: number }>>,
-    business === "Corner Deli"
-      ? sql`SELECT ee_num FROM payroll_relief_employees WHERE business = ${business} AND employee_key = ${employeeKey(employee.name)} LIMIT 1` as unknown as Promise<Array<{ ee_num: string }>>
-      : Promise.resolve([] as Array<{ ee_num: string }>),
+    sql`SELECT COUNT(*)::int n FROM employee_onboarding_invites WHERE employee_id = ${employeeId} AND app_signed_in_at IS NOT NULL` as unknown as Promise<Array<{ n: number }>>,
+    payrollReliefMatch(business, employee.name),
   ]);
   const invite = invites[0] || null;
   const signed = forms.filter((form) => form.status !== "Assigned");
@@ -328,9 +341,9 @@ async function onboardingFacts(business: Business, employeeId: string): Promise<
     handbookRequired: business === "Corner Deli",
     handbookAcknowledged: handbookRows.length > 0,
     directDeposit: deposits.some((row) => row.status === "Completed") ? "completed" : deposits.length ? "assigned" : "none",
-    appSignIns: Number(sessions[0]?.n || 0),
-    payrollReliefApplies: business === "Corner Deli",
-    payrollReliefEeNum: relief[0]?.ee_num || null,
+    appSignIns: Number(signIns[0]?.n || 0),
+    payrollReliefApplies: relief.applies,
+    payrollReliefEeNum: relief.eeNum,
     hourlyRateSet: Number(employee.hourly_rate) > 0,
   };
 }

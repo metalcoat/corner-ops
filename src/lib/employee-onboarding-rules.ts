@@ -110,7 +110,7 @@ export function onboardingChecklist(facts: OnboardingFacts): OnboardingStep[] {
     status: facts.directDeposit === "completed" ? "done" : "optional",
     detail: facts.directDeposit === "completed" ? "Election submitted." : "Optional; not submitted yet.",
   });
-  steps.push({ key: "app", label: "Schedule app", status: facts.appSignIns > 0 ? "done" : "waiting", detail: facts.appSignIns > 0 ? `Signed in on ${facts.appSignIns} device${facts.appSignIns === 1 ? "" : "s"}.` : "Not signed in yet." });
+  steps.push({ key: "app", label: "Schedule app", status: facts.appSignIns > 0 ? "done" : "waiting", detail: facts.appSignIns > 0 ? "Signed in to the app or Employee Hub with their PIN." : "Not signed in yet." });
   if (facts.payrollReliefApplies) {
     steps.push({
       key: "payroll",

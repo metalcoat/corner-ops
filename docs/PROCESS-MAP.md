@@ -469,6 +469,8 @@ flowchart LR
 - Scheduling gate (`assertOnboardingAllowsScheduling`, `src/lib/workforce.ts`): a person who came in through Add
   employee can't be given a shift (create, edit, open-shift claim) until their own steps are done. Staff never
   sent a setup link are unaffected. Store-side items (I-9 review, Payroll Relief match) don't block scheduling.
+- "Schedule app" is done once they sign in with their PIN from the app or Hub (`app_signed_in_at`, migration 0042,
+  set by `POST /api/employee/session`). Payroll Relief's step shows only where its tables exist (not production yet).
 - A link works for one person only; a resend revokes the older link. After the PIN is chosen the link needs that
   person's PIN to show the checklist again. Nothing is uploaded to Payroll Relief.
 - Handbook sections 12 (alcohol, zero tolerance) and 13 (no smoking/vaping) are marked draft until Chris approves
