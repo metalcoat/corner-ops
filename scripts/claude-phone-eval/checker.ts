@@ -76,22 +76,30 @@ async function main() {
   console.log(`${garbled.status === "ok" ? "PASS" : "FAIL"} quiet  garbled speech, item in cart: ${garbled.status}`);
   if (garbled.status !== "ok") failures.push(`garbled request flagged: ${JSON.stringify(garbled.mismatches)}`);
 
-  // Chris 2026-11-06: mashed on a hot meat meal always gets gravy on top; gravy may go on the meal's fries.
+  // Chris 2026-11-06: gravy on a hot meat meal's side is asked; a yes puts it on top. A bare yes to a list means all of it.
   const gravy = await checker.checkOrder({
     stage: "final",
     serviceType: "pickup",
     transcript: [
-      { speaker: "customer", text: "Can I get a hot turkey with Italian, and mashed potatoes. And a hot roast beef with ranch and fries with gravy on top." },
+      { speaker: "customer", text: "Can I get a hot turkey with Italian, and mashed potatoes. And a hot roast beef with ranch and fries." },
+      { speaker: "assistant", text: "Gravy on the mashed potatoes?" },
+      { speaker: "customer", text: "Yes." },
+      { speaker: "assistant", text: "Would you like gravy on the fries?" },
+      { speaker: "customer", text: "Sure." },
+      { speaker: "customer", text: "And 10 mild wings." },
+      { speaker: "assistant", text: "Would you like blue cheese, ranch, or celery with that?" },
+      { speaker: "customer", text: "Yeah, sure." },
       { speaker: "assistant", text: "Here's your order: a hot turkey with Italian and mashed potatoes, and a hot roast beef with ranch and fries with gravy on them. Does that sound right?" },
     ],
     cart: [
       { lineId: "t", name: "Hot Turkey", variant: "", quantity: 1, modifiers: ["SM Tossed Sal", "Italian (On Salad)", "Small Mashed", "Gravy"], lineTotalCents: 1250 },
       { lineId: "r", name: "Hot Roast Beef", variant: "", quantity: 1, modifiers: ["SM Tossed Sal", "Ranch (On Salad)", "Small French Fries", "Gravy on Fries"], lineTotalCents: 1325 },
+      { lineId: "w", name: "Wings", variant: "10 Wings", quantity: 1, modifiers: ["Mild", "Blue Cheese (4oz)", "Ranch (4oz)", "Celery"], lineTotalCents: 1525 },
     ],
   });
   cost += gravy.costUsd;
   ms.push(gravy.ms);
-  console.log(`${gravy.status === "ok" ? "PASS" : "FAIL"} quiet  gravy on meal mashed and fries: ${gravy.status}`);
+  console.log(`${gravy.status === "ok" ? "PASS" : "FAIL"} quiet  asked meal gravy, and a bare yes to the dips list: ${gravy.status}`);
   if (gravy.status !== "ok") failures.push(`meal gravy flagged: ${JSON.stringify(gravy.mismatches)}`);
 
   // Failure paths: a timeout comes back as status error and a missing key as disabled, never a throw.

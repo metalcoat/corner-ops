@@ -468,18 +468,20 @@ async function mergeSpokenCartLine(
     }
     // "nacho cheese on the fries" / "gravy on top" pick the on-fries option; otherwise on the side.
     const fryTopping = /^(?:(?:put|add|with)\s+)?(?:the\s+)?(nacho cheese|gravy)\b(.*)$/i.exec(edit.name.trim());
+    const fryChoices = (where: string) =>
+      groups
+        .flatMap((group: any) => (group.options || []).map((option: any) => ({ group, option })))
+        .filter(({ option }: any) => option.available && new RegExp(`^${fryTopping![1]} on ${where}$`, "i").test(option.name));
+    // No on-the-fries option (nacho cheese is side-only, Chris 2026-11-06): it goes on the side.
     const fryOption = fryTopping
-      ? groups
-          .flatMap((group: any) => (group.options || []).map((option: any) => ({ group, option })))
-          .filter(({ option }: any) =>
-            option.available &&
-            new RegExp(`^${fryTopping[1]} on ${
-              edit.placement === "topping" ||
-              (edit.placement !== "side" && /\b(?:on (?:the )?(?:fries|them|it|top)|over|melted)\b/i.test(fryTopping[2]))
-                ? "fries"
-                : "side"
-            }$`, "i").test(option.name),
-          )
+      ? (() => {
+          const wanted = edit.placement === "topping" ||
+            (edit.placement !== "side" && /\b(?:on (?:the )?(?:fries|them|it|top)|over|melted)\b/i.test(fryTopping[2]))
+            ? "fries"
+            : "side";
+          const found = fryChoices(wanted);
+          return found.length || wanted === "side" ? found : fryChoices("side");
+        })()
       : [];
     const sauceAsFlavor =
       wingLine && !edit.group && !removal && /\s+sauce$/i.test(edit.name.trim()) &&

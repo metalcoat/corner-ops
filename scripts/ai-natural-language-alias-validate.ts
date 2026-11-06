@@ -563,13 +563,13 @@ async function main() {
     );
 
     await expectError("hot turkey with mashed", /Small or medium/i);
-    // Mashed on a hot meat meal always gets gravy on top, never a question (Chris, 2026-11-06).
     result = await price("hot turkey with small salad ranch medium mashed");
-    assert.equal(result.required_follow_up, undefined);
+    assert.equal(
+      result.required_follow_up,
+      "Gravy on the mashed potatoes?",
+    );
     assert.ok(
-      result.modifierNames.some((name: string) => /Medium Mashed/i.test(name)) &&
-        result.modifierNames.some((name: string) => /^Gravy$/i.test(name)),
-      JSON.stringify(result.modifierNames),
+      result.modifierNames.some((name: string) => /Medium Mashed/i.test(name)),
     );
     await expectError("hot turkey with medium mashed and gravy", /dressing/i);
     result = await price(
@@ -724,9 +724,23 @@ async function main() {
         orderId: initial.id,
         items: sized.items,
       });
-      // Gravy goes on the mashed by itself now (Chris, 2026-11-06): no gravy question to answer.
-      assert.equal(withMashed.required_follow_up, undefined);
-      const complete = withMashed;
+      assert.equal(withMashed.required_follow_up, "Gravy on the mashed potatoes?");
+      const gravy = await applyPendingModifierAnswer({
+        orderId: initial.id,
+        pendingItem: withMashed.pending_item,
+        customerText: "Yes, please.",
+        operation: "replace_item",
+        targetItem: "Hot Turkey",
+        items: [],
+      });
+      const complete = await priceSpokenOrder({
+        business: "Corner Deli",
+        actor,
+        service: "pickup",
+        orderId: initial.id,
+        items: gravy.items,
+        resolvedPendingQuestions: gravy.resolvedPendingQuestions,
+      });
       assert.equal(complete.pending_item, undefined);
       const canonical = await sql`
         SELECT modifier.option_id

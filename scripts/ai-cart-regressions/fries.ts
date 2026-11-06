@@ -11,14 +11,14 @@ async function main() {
     return m.invoke({ operation: "add", items });
   };
   try {
-    await h.check("French fries: nacho/gravy default on side; 'on top'/'on the fries'/placement topping go on fries", async () => {
+    await h.check("French fries: nacho/gravy default on side; gravy 'on top'/'on the fries' goes on fries; nacho stays on the side (Chris 2026-11-06)", async () => {
       const cases: Array<[any, string]> = [
         [{ name: "nacho cheese" }, "Fry Option:Nacho Cheese on Side"],
         [{ name: "gravy" }, "Fry Option:Gravy on Side"],
-        [{ name: "nacho cheese on top" }, "Fry Option:Nacho Cheese on Fries"],
+        [{ name: "nacho cheese on top" }, "Fry Option:Nacho Cheese on Side"],
         [{ name: "gravy on the fries" }, "Fry Option:Gravy on Fries"],
         [{ name: "gravy", placement: "topping" }, "Fry Option:Gravy on Fries"],
-        [{ name: "Nacho Cheese", placement: "topping" }, "Fry Option:Nacho Cheese on Fries"],
+        [{ name: "Nacho Cheese", placement: "topping" }, "Fry Option:Nacho Cheese on Side"],
       ];
       for (const [mod, want] of cases) {
         const r = await add([{ name: "large fries", quantity: 1, modifiers: [mod] }]);
@@ -51,7 +51,6 @@ async function main() {
       for (const args of [
         { operation: "add", items: [{ name: "large fries", quantity: 1, modifiers: [{ name: "avocado" }] }] },
         { operation: "replace_item", targetLineId: c[0].lineId, items: [{ name: "Large French Fries", quantity: 1, modifiers: [{ name: "gravy" }, { name: "avocado" }] }] },
-        { operation: "replace_item", targetLineId: c[0].lineId, items: [{ name: "Large French Fries", quantity: 1, modifiers: [{ name: "nacho" }] }] },
         { operation: "replace_item", targetLineId: c[0].lineId, items: [{ name: "Large French Fries", quantity: 1, modifiers: [{ name: "Gravy on Side", group: "Burger Toppings" }] }] },
       ]) {
         const r = await m.invoke(args);
@@ -61,12 +60,12 @@ async function main() {
     });
 
     // ---------------- defects ----------------
-    await h.check("DEFECT curly/waffle fries and tater tots: explicit 'on top'/placement topping must not land on the side", async () => {
+    await h.check("curly/waffle fries and tater tots: gravy 'on top' lands on the fries; nacho cheese stays on the side", async () => {
       const failures: string[] = [];
       for (const item of ["large curly fries", "large waffle fries", "large tater tots"])
         for (const [mod, want] of [
-          [{ name: "nacho cheese on top" }, "Fry Option:Nacho Cheese on Fries"],
-          [{ name: "nacho cheese", placement: "topping" }, "Fry Option:Nacho Cheese on Fries"],
+          [{ name: "nacho cheese on top" }, "Fry Option:Nacho Cheese on Side"],
+          [{ name: "nacho cheese", placement: "topping" }, "Fry Option:Nacho Cheese on Side"],
           [{ name: "gravy", placement: "topping" }, "Fry Option:Gravy on Fries"],
         ] as Array<[any, string]>) {
           const r = await add([{ name: item, quantity: 1, modifiers: [mod] }]);
@@ -93,7 +92,7 @@ async function main() {
       assert.deepEqual(failures, []);
     });
 
-    await h.check("[minor] edit accepts the same placement phrases as add ('nacho cheese on the fries', 'gravy on top')", async () => {
+    await h.check("[minor] edit accepts the same placement phrases as add ('nacho cheese on the fries' goes on the side, 'gravy on top')", async () => {
       const failures: string[] = [];
       for (const name of ["nacho cheese on the fries", "gravy on top"]) {
         const m = await h.newMcpCall();

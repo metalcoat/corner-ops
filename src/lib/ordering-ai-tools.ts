@@ -1994,7 +1994,8 @@ export async function priceSpokenOrder(input: {
             !mealSides!.options.some((option) => /mashed/i.test(option.name) && (modifierSelections[mealSides!.id] || []).includes(option.id)),
           friesPlacement = (/(?:French|Curly|Waffle) Fries$|Tater Tots$/i.test(item.name) || mealFrySide) && placementMatch,
           raw = friesPlacement ? spokenKey(placementMatch[1]) : spokenKey(requestedModifier.name),
-          explicitOnItem = requestedModifier.placement === "topping" || (requestedModifier.placement !== "side" && !/on (?:the )?side/i.test(requestedModifier.name) && /\b(on (?:it|them|the|top|fries)|over|melted)\b/i.test(requestedModifier.name)),
+          // A meal is one container: its gravy goes on top of the fries unless the caller says on the side.
+          explicitOnItem = requestedModifier.placement === "topping" || (requestedModifier.placement !== "side" && !/on (?:the )?side/i.test(requestedModifier.name) && (/\b(on (?:it|them|the|top|fries)|over|melted)\b/i.test(requestedModifier.name) || (mealFrySide && /^gravy$/i.test(String(placementMatch?.[1] || ""))))),
           mealWithIncludedSalad = item.modifiers.some(
             (group) => group.name === "Choose a Salad (Dinner)",
           ),
@@ -2105,7 +2106,9 @@ export async function priceSpokenOrder(input: {
                       )
                     ? wingSauceChoices
                     : choices,
-          placementChoice = friesPlacement ? choices.find(({option}) => new RegExp(`^${raw}(?: on (?:the )?(?:side|frie))?$`, "i").test(spokenKey(option.name)) && (/on (?:the )?side/i.test(option.name) === !(requestedModifier.placement === "topping" || explicitOnItem)) ) : undefined,
+          placementChoice = friesPlacement ? choices.find(({option}) => new RegExp(`^${raw}(?: on (?:the )?(?:side|frie))?$`, "i").test(spokenKey(option.name)) && (/on (?:the )?side/i.test(option.name) === !(requestedModifier.placement === "topping" || explicitOnItem)) )
+            // No on-the-fries option (nacho cheese is side-only, Chris 2026-11-06): it goes on the side, never an error.
+            ?? choices.find(({option}) => new RegExp(`^${raw} on (?:the )?side$`, "i").test(spokenKey(option.name))) : undefined,
           // An item with its own plain topping (Hot Dog Choices: Nacho Cheese) keeps it; the $1.75 fry cup is for fry items.
           ownTopping = friesPlacement ? [] : matchingChoices.filter(
             ({ option, group }) => spokenKey(option.name) === raw && !/fry|side/i.test(group.name),
@@ -2211,14 +2214,7 @@ export async function priceSpokenOrder(input: {
                 (modifierSelections[group.id] || []).includes(option.id),
             ),
         );
-      // Mashed on a hot meat meal always gets gravy on top (Chris, 2026-11-06): add it, never ask.
-      const mashedMods = item.modifiers.find((group) => group.name === "Mashed Mods"),
-        mashedGravy = mashedMods?.options.find((option) => /^Gravy$/i.test(option.name));
-      if (hotMeatMeal && mashedSelected && !gravySelected && mashedMods && mashedGravy)
-        modifierSelections[mashedMods.id] = [
-          ...new Set([...(modifierSelections[mashedMods.id] || []), mashedGravy.id]),
-        ];
-      else if (
+      if (
         hotMeatMeal &&
         mashedSelected &&
         !gravySelected &&
