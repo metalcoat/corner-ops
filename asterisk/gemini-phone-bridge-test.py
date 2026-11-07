@@ -373,6 +373,27 @@ async def main():
         [{"ok": True}], mismatch,
     )
     check("a pending note reaches an idle Gemini as a private nudge", any(n == "orderCheckNote" and d.get("via") == "nudge" for n, d in log["events"]), log["events"])
+
+    # Claude fixed the cart itself (AI_PHONE_CLAUDE_AUTOFIX, 2026-11-07): Gemini hears what changed even when a
+    # newer cart change superseded that check, and a fully fixed cart leaves no mismatch note.
+    FIXED = {"status": "fixed", "note": "", "mismatches": [], "fixed": ["added Pepperoni to the Pizza"], "fixNote": "(Private order update: added Pepperoni to the Pizza.)"}
+    calls = {"n": 0}
+
+    async def fixed_first(values):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await asyncio.sleep(0.3)
+            return FIXED
+        return {"status": "ok", "note": "", "mismatches": []}
+
+    log = await run(
+        [transcript("pepperoni pizza"), tool_call("a", ADD), "WAIT_TOOL_RESPONSE", tool_call("b", ADD), "WAIT_TOOL_RESPONSE", "SLEEP", "SLEEP", "SLEEP",
+         tool_call("c", {"operation": "read", "items": []}), "WAIT_TOOL_RESPONSE"],
+        [{"ok": True}, {"ok": True}, {"ok": True}], fixed_first,
+    )
+    note = first_result(log, 2).get("orderCheck", "")
+    check("a fix note reaches Gemini even after a newer check", FIXED["fixNote"] in note, log["toolResponses"])
+    check("a fixed cart is not reported as a mismatch", not any(n == "orderCheckMismatch" for n, _ in log["events"]) and any(n == "orderCheckFixed" for n, _ in log["events"]), log["events"])
     gp.CLAUDE_CHECKER_ENABLED = False
 
     # Asking for a person or sounding frustrated goes to the store at once (Chris, 2026-11-06).

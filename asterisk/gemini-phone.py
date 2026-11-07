@@ -261,6 +261,8 @@ class OrderChecker:
     schedule() after a cart change; gate() before readback/send/payment waits up to CHECK_GATE_SECONDS for
     the newest check and returns its note to block that tool once (at most CHECK_MAX_BLOCKS per call, so a
     wrong flag can't trap the caller); take_note() hands a pending note to the next tool result or idle nudge.
+    A check that fixed the cart itself (AI_PHONE_CLAUDE_AUTOFIX) returns fixNote: that one is always passed on,
+    even when a newer check superseded it, since the cart really changed.
     """
 
     def __init__(self, request, emit):
@@ -269,6 +271,7 @@ class OrderChecker:
         self.task = None
         self.sequence = 0
         self.note = None
+        self.fixes = []
         self.delivered = set()
         self.blocks = 0
 
@@ -283,21 +286,29 @@ class OrderChecker:
         except Exception as error:
             await self.emit("orderCheckError", {"stage": stage, "error": type(error).__name__})
             return None
+        fix_note = str(result.get("fixNote") or "") if isinstance(result, dict) else ""
+        if fix_note:
+            self.fixes.append(fix_note)
+            await self.emit("orderCheckFixed", {"stage": stage, "fixed": result.get("fixed", [])})
         if sequence != self.sequence or not isinstance(result, dict):
             return result  # a newer cart change superseded this check
         note = str(result.get("note") or "")
         if result.get("status") == "mismatch" and note and note not in self.delivered:
             self.note = note
             await self.emit("orderCheckMismatch", {"stage": stage, "mismatches": result.get("mismatches", [])})
-        elif result.get("status") == "ok":
+        elif result.get("status") in ("ok", "fixed"):
             self.note = None
         return result
 
+    def has_note(self):
+        return bool(self.note or self.fixes)
+
     def take_note(self):
-        note, self.note = self.note, None
-        if note:
-            self.delivered.add(note)
-        return note
+        notes = [*self.fixes, *([self.note] if self.note else [])]
+        if self.note:
+            self.delivered.add(self.note)
+        self.note, self.fixes = None, []
+        return " ".join(notes) or None
 
     async def gate(self, tool):
         if self.task is not None and not self.task.done():
@@ -307,7 +318,7 @@ class OrderChecker:
                 await self.emit("orderCheckTimeout", {"tool": tool, "waitSeconds": CHECK_GATE_SECONDS})
             except Exception:
                 pass
-        if self.note and self.blocks < CHECK_MAX_BLOCKS:
+        if self.has_note() and self.blocks < CHECK_MAX_BLOCKS:
             self.blocks += 1
             await self.emit("orderCheckBlocked", {"tool": tool, "block": self.blocks})
             return self.take_note()
@@ -319,7 +330,7 @@ def order_check_blocked(note):
         "error": {
             "code": "ORDER_CHECK",
             "message": note,
-            "remedy": "Fix the cart with price_order (or ask the caller one short question), briefly confirm the change, then continue the checkout.",
+            "remedy": "Follow the note: fix the cart with price_order only where it asks you to (or ask the caller one short question), briefly tell the caller about any change, then continue the checkout.",
         }
     }
 
@@ -1210,7 +1221,7 @@ async def bridge(reader, writer, call_id):
                         tool_gate.record(turn_key, name, arguments, result)
                         if checker and is_mutation and not is_failed_tool_result(result):
                             checker.schedule("cart", customer_transcript)
-                    if checker and checker.note and isinstance(result, dict) and not close_requested.is_set():
+                    if checker and checker.has_note() and isinstance(result, dict) and not close_requested.is_set():
                         result = {**result, "orderCheck": checker.take_note()}
                         await emit("orderCheckNote", {"via": "toolResult", "tool": name})
                     await emit(
@@ -1330,7 +1341,7 @@ async def bridge(reader, writer, call_id):
             """Deliver a pending check note once Gemini and the caller are both quiet."""
             while not close_requested.is_set():
                 await asyncio.sleep(0.25)
-                if not checker.note or user_turn_open or playback.assistant_speaking or playback.state != "LISTENING":
+                if not checker.has_note() or user_turn_open or playback.assistant_speaking or playback.state != "LISTENING":
                     continue
                 if time.monotonic() - last_progress < 0.6:
                     continue

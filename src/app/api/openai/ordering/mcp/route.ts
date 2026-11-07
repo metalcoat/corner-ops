@@ -6,6 +6,7 @@ import {
   type AiOrderingToolName,
 } from "@/app/api/ordering/ai/tools/route";
 import { getSql } from "@/lib/db";
+import { withCallCartLock } from "@/lib/ai-phone-call-lock";
 import {
   AiToolError,
   auditAiTool,
@@ -440,6 +441,13 @@ export async function POST(request: Request) {
   if (rpc.method === "tools/list") return reply(rpc.id, { tools });
   if (rpc.method !== "tools/call")
     return failure(rpc.id, -32601, "Method not found.");
+  // Cart writes for one call run one at a time (Gemini and Claude's cart fixes, ai-phone-call-lock.ts).
+  if (rpc.params?.name === "price_order")
+    return withCallCartLock(String((rpc.params?.arguments as Record<string, unknown> | undefined)?.callId || ""), () => callTool(rpc));
+  return callTool(rpc);
+}
+
+async function callTool(rpc: Rpc) {
   const requestedName = String(rpc.params?.name || ""),
     name = requestedName as AiOrderingToolName,
     args = {

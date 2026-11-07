@@ -108,6 +108,8 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_PHONE_BRIDGE_ENABLED: ${GEMINI_PHONE_BRIDGE_ENABLED:-true}
       AI_PHONE_CLAUDE_CHECKER: ${AI_PHONE_CLAUDE_CHECKER:-false}
+      # Claude adds a missing item or topping to the cart itself (dev 2026-11-07); needs the checker on.
+      AI_PHONE_CLAUDE_AUTOFIX: ${AI_PHONE_CLAUDE_AUTOFIX:-false}
     # ANTHROPIC_API_KEY for the Claude order check; the file is optional and absent outside dev.
     env_file:
       - path: /opt/corner-ops/config/anthropic-dev.env

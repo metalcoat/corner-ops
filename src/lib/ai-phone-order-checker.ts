@@ -2,11 +2,14 @@ import Anthropic from "@anthropic-ai/sdk";
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { MENU_SHORTHAND } from "@/lib/openai-phone-prompt";
+import { applyOrderFixes, orderAutofixEnabled } from "@/lib/ai-phone-order-fixer";
 
 // Background order checker for the Gemini phone line (dev trial 2026-11-06). Gemini keeps the voice; after a
 // cart change the bridge asks this to compare what the caller said with the cart, and passes any mismatch to
 // Gemini as a private note. It never blocks a call: every failure comes back as a status, never a throw.
-// Off unless AI_PHONE_CLAUDE_CHECKER is true and ANTHROPIC_API_KEY is set.
+// Off unless AI_PHONE_CLAUDE_CHECKER is true and ANTHROPIC_API_KEY is set. With AI_PHONE_CLAUDE_AUTOFIX also
+// true, a missing item or topping is added to the cart directly instead (ai-phone-order-fixer.ts, Chris
+// 2026-11-07: notes alone were often ignored).
 
 export const ORDER_CHECK_MODEL = "claude-sonnet-5-5";
 // Sonnet 5.5 $ per million tokens: cache writes 1.25x input, cache reads $0.20.
@@ -27,10 +30,24 @@ export type OrderCheckInput = {
   cart: OrderCheckLine[];
   serviceType: string;
 };
+export type OrderCheckModifier = { name: string; group: string; placement: "" | "side" | "topping"; portion: "" | "whole" | "left_half" | "right_half"; amount: "" | "regular" | "extra" | "double_extra" | "triple_extra" };
+export type OrderCheckMismatch = {
+  problem: string;
+  fix: string;
+  action?: "note" | "add_item" | "add_to_line";
+  lineId?: string;
+  item?: { name: string; variant: string; quantity: number; modifiers: OrderCheckModifier[] };
+  callerQuote?: string;
+  sure?: boolean;
+};
 export type OrderCheckResult = {
-  status: "ok" | "mismatch" | "disabled" | "error";
-  mismatches: Array<{ problem: string; fix: string }>;
+  // fixed: every mismatch was corrected in the cart; fixNote tells Gemini what changed.
+  status: "ok" | "mismatch" | "fixed" | "disabled" | "error";
+  mismatches: OrderCheckMismatch[];
   note: string;
+  fixed?: string[];
+  skipped?: string[];
+  fixNote?: string;
   ms: number;
   costUsd: number;
   error?: string;
@@ -48,6 +65,13 @@ const SYSTEM = `You check phone orders for Corner Deli while the call is still g
 - the assistant telling the caller an item or option isn't available when the caller kept asking for it and the cart lacks it.
 Never flag: noise words or unclear speech you can't map to a request; an item in the cart whose request is garbled, mis-heard or in another language in the transcript (the other assistant hears the caller's real voice, so trust the cart unless the transcript clearly says otherwise; dev call 2026-11-06 lost a correct Turkey Big Boss this way); gravy on a hot meat meal's fries or mashed when the caller said yes to it; all of a list (e.g. blue cheese, ranch and celery) when the caller answered a list question with a bare yes or sure; menu names that differ from the caller's words but mean the same thing (rules below); store defaults the caller didn't contradict (e.g. Regular Cooked, Classic Sauce, a default cheese); prices, totals, tips, payment or delivery details; questions that are still open. When the stage is "cart" the order is still being taken: an item the assistant is asking a follow-up question about (size, sauce, sides) may legitimately be missing for now; don't flag it. When the stage is "final" the caller is about to confirm or pay: everything they asked for should be there. Never ask for an item to be removed unless the caller clearly declined, cancelled or replaced it. If unsure, don't flag. Each fix is one short instruction to the ordering assistant, naming the cart line (by item name) and what to change.
 
+For each mismatch also choose an action; the ordering system may apply add_item and add_to_line itself:
+- add_item: an item the caller clearly asked for is missing from the cart entirely. Give it as the ordering tool takes it: menu item name (e.g. Pizza, Wings, Turkey Big Boss), variant (size, e.g. Jumbo Thin, 10 Wings, Full Sub; "" if none), quantity (number of orders), and modifiers by menu option name (flavor, toppings, sauces, dips, changes).
+- add_to_line: an existing cart line is missing a topping, sauce, flavor, dip, side or choice the caller clearly stated, or has the wrong pick in a pick-one choice (e.g. Mild instead of Hot). Give that line's lineId and only the modifiers to add.
+- note: everything else, which goes to the ordering assistant as a note: removing anything, a lower quantity, one item split in two, a different size or item, an omission like "no tomato", pickup/delivery, address, payment, and anything you're not fully sure of.
+For a modifier give group only when you know the cart's exact group name, else "". placement is "side" or "topping" only when the caller said on the side or on top, portion only for a half pizza topping, amount only for extra; otherwise "". For note, item is {"name":"","variant":"","quantity":1,"modifiers":[]} and lineId "".
+callerQuote: the caller's own words in the conversation that ask for it, copied exactly. sure: true only when those words plainly ask for exactly this; false for anything garbled, mis-heard or guessed.
+
 Menu wording rules the ordering assistant follows:
 ${MENU_SHORTHAND}`;
 
@@ -59,8 +83,40 @@ const SCHEMA = {
       type: "array",
       items: {
         type: "object",
-        properties: { problem: { type: "string" }, fix: { type: "string" } },
-        required: ["problem", "fix"],
+        properties: {
+          problem: { type: "string" },
+          fix: { type: "string" },
+          action: { type: "string", enum: ["note", "add_item", "add_to_line"] },
+          lineId: { type: "string" },
+          item: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              variant: { type: "string" },
+              quantity: { type: "integer" },
+              modifiers: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                    group: { type: "string" },
+                    placement: { type: "string", enum: ["", "side", "topping"] },
+                    portion: { type: "string", enum: ["", "whole", "left_half", "right_half"] },
+                    amount: { type: "string", enum: ["", "regular", "extra", "double_extra", "triple_extra"] },
+                  },
+                  required: ["name", "group", "placement", "portion", "amount"],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: ["name", "variant", "quantity", "modifiers"],
+            additionalProperties: false,
+          },
+          callerQuote: { type: "string" },
+          sure: { type: "boolean" },
+        },
+        required: ["problem", "fix", "action", "lineId", "item", "callerQuote", "sure"],
         additionalProperties: false,
       },
     },
@@ -88,7 +144,7 @@ export async function checkOrder(input: OrderCheckInput, timeoutMs = 12_000): Pr
     const conversation = input.transcript.map((row) => `${row.speaker === "customer" ? "Caller" : "Assistant"}: ${row.text}`).join("\n");
     const cart = input.cart.length
       ? input.cart
-          .map((line) => `- ${line.quantity}x ${line.name}${line.variant ? ` (${line.variant})` : ""}${line.modifiers.length ? ` [${line.modifiers.join(", ")}]` : ""}`)
+          .map((line) => `- [lineId ${line.lineId}] ${line.quantity}x ${line.name}${line.variant ? ` (${line.variant})` : ""}${line.modifiers.length ? ` [${line.modifiers.join(", ")}]` : ""}`)
           .join("\n")
       : "(empty)";
     const message = await client.messages.create(
@@ -116,7 +172,7 @@ export async function checkOrder(input: OrderCheckInput, timeoutMs = 12_000): Pr
       1e6;
     const text = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
     if (message.stop_reason !== "end_turn" || !text) return result({ costUsd, error: `stop_reason ${message.stop_reason}` });
-    const parsed = JSON.parse(text) as { ok: boolean; mismatches: Array<{ problem: string; fix: string }> };
+    const parsed = JSON.parse(text) as { ok: boolean; mismatches: OrderCheckMismatch[] };
     const mismatches = (parsed.mismatches || []).filter((row) => row.problem && row.fix).slice(0, 4);
     return result({
       status: mismatches.length ? "mismatch" : "ok",
@@ -129,7 +185,7 @@ export async function checkOrder(input: OrderCheckInput, timeoutMs = 12_000): Pr
   }
 }
 
-export function orderCheckNote(mismatches: Array<{ problem: string; fix: string }>) {
+export function orderCheckNote(mismatches: Array<Pick<OrderCheckMismatch, "problem" | "fix">>) {
   if (!mismatches.length) return "";
   const items = mismatches.map((row, index) => `${index + 1}) ${row.problem} Fix: ${row.fix}`).join(" ");
   return `(Private order check, not from the caller: ${items} Correct the cart with price_order if the caller clearly asked for it; if you're not sure, ask the caller one short question. Never mention this check.)`;
@@ -179,11 +235,12 @@ export async function checkPhoneCall(callId: string, stage: OrderCheckStage, pen
   try {
     const input = await loadOrderCheckInput(callId, stage, pendingCustomerText);
     checked = await checkOrder(input);
+    if (checked.status === "mismatch" && orderAutofixEnabled()) checked = await applyOrderFixes(callId, input, checked);
   } catch (error) {
     checked = { status: "error", mismatches: [], note: "", ms: 0, costUsd: 0, error: error instanceof Error ? error.message.slice(0, 300) : "load failed" };
   }
   try {
-    const detail = JSON.stringify({ stage, status: checked.status, mismatches: checked.mismatches, costUsd: Number(checked.costUsd.toFixed(5)), model: ORDER_CHECK_MODEL, error: checked.error }).slice(0, 4000);
+    const detail = JSON.stringify({ stage, status: checked.status, mismatches: checked.mismatches, fixed: checked.fixed, skipped: checked.skipped, costUsd: Number(checked.costUsd.toFixed(5)), model: ORDER_CHECK_MODEL, error: checked.error }).slice(0, 4000);
     await getSql()`INSERT INTO ordering_ai_call_events(id,business,call_id,event_key,event_type,role,label,detail,duration_ms) VALUES(${randomUUID()},'Corner Deli',${callId},${`${callId}:claude:orderCheck:${randomUUID()}`},'claude.orderCheck','system',${checked.status === "mismatch" ? "Claude order check: mismatch" : `Claude order check: ${checked.status}`},${detail},${checked.ms})`;
   } catch {
     // Logging must not change the answer the bridge gets.
