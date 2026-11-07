@@ -199,6 +199,37 @@ wait_for_health() {
   return 1
 }
 
+# Phone calls on the Asterisk line (AI ordering, card line, transfers). A deploy rebuilds for ~3 minutes and
+# restarts the app every phone order step goes through; one that landed mid-call hurt Chris's test call
+# (2026-11-06), so the build waits for an idle line and the restart waits again. Bypass with
+# CORNER_OPS_DEPLOY_DURING_CALLS=1.
+readonly CALL_WAIT_LIMIT_SECONDS=1800
+active_calls() {
+  docker exec corner-ops-asterisk asterisk -rx "core show channels count" 2>/dev/null \
+    | awk '/active call/ {print $1; found=1} END {if (!found) print 0}'
+}
+
+wait_for_idle_phone_line() {
+  local stage="$1" waited=0 calls
+  [[ "${CORNER_OPS_DEPLOY_DURING_CALLS:-}" == 1 ]] && return 0
+  calls="$(active_calls)"
+  while [[ "$calls" =~ ^[0-9]+$ ]] && (( calls > 0 )); do
+    if (( waited == 0 )); then
+      log "${calls} phone call(s) active; waiting before ${stage}."
+    fi
+    if (( waited >= CALL_WAIT_LIMIT_SECONDS )); then
+      log "WARNING: calls still active after ${CALL_WAIT_LIMIT_SECONDS}s; continuing with ${stage}."
+      return 0
+    fi
+    sleep 5
+    waited=$((waited + 5))
+    calls="$(active_calls)"
+  done
+  if (( waited > 0 )); then
+    log "Phone line idle after ${waited}s; continuing with ${stage}."
+  fi
+}
+
 if [[ ! -f "$ENV_FILE" ]]; then
   log "Required local environment file is missing: ${ENV_FILE}"
   record_result configuration_error
@@ -245,6 +276,17 @@ if [[ "$force" == false && -n "$failed_sha" && "$remote_sha" == "$failed_sha" ]]
   exit 0
 fi
 
+# The every-minute timer just tries again next minute; a manual --force run waits.
+if [[ "$force" == false && "${CORNER_OPS_DEPLOY_DURING_CALLS:-}" != 1 ]]; then
+  calls="$(active_calls)"
+  if [[ "$calls" =~ ^[0-9]+$ ]] && (( calls > 0 )); then
+    log "${calls} phone call(s) active; deferring ${remote_sha} to the next run."
+    record_result deferred_active_call
+    exit 0
+  fi
+fi
+wait_for_idle_phone_line "the build"
+
 log "Preparing candidate ${remote_sha}."
 if ! clean_runtime_checkout; then
   record_candidate_failure "$remote_sha" "runtime cleanup failed; inspect ownership diagnostics above" "$runtime_sha"
@@ -288,6 +330,7 @@ if [[ "$image_build_failed" == true ]]; then
   exit 1
 fi
 
+wait_for_idle_phone_line "restarting the app"
 log "Starting candidate ${remote_sha}; persistent volumes are unchanged."
 docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build postgres
 # The app no longer creates its own tables: apply db/migrations before the new app starts.
