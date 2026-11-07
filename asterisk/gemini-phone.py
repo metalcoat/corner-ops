@@ -457,6 +457,12 @@ def conversation_progress(message):
 # "Take your time." Re-asking the question (the old nudge) talked over a caller who was about to order
 # (dev test call 2026-11-06 19:41).
 CALLER_THINKING_SECONDS = float(os.environ.get("GEMINI_CALLER_THINKING_SECONDS", "20"))
+# Caller audio louder than this RMS (8 kHz slin) counts as voice in the per-call audio stats.
+VOICE_RMS = 300
+# After two "Take your time." nudges with no voice from the caller at all (dev test call 2026-11-07 02:43: Gemini
+# heard nothing for 50 s, maybe a one-way phone line), hand the caller to the store instead of waiting forever.
+CANT_HEAR_LINE = "I'm having trouble hearing you, let me get you to someone at the store."
+CANT_HEAR_GRACE_SECONDS = 5  # time for the line to play before the transfer
 
 
 def stall_nudge_message(caller_turn=True):
@@ -874,6 +880,7 @@ async def bridge(reader, writer, call_id):
         else None
     )
     person_handoff = {"reason": None, "task": None}
+    caller_stats = {"frames": 0, "voiced": 0, "peak": 0, "window_frames": 0, "window_peak": 0}
 
     async def save_transcript(speaker, text, turn_id):
         value = " ".join(str(text or "").split()).strip()
@@ -972,6 +979,12 @@ async def bridge(reader, writer, call_id):
                 if kind == 0x00:
                     break
                 if kind == 0x10 and payload:
+                    level = audioop.rms(payload, 2)
+                    caller_stats["frames"] += 1
+                    caller_stats["window_frames"] += 1
+                    caller_stats["voiced"] += level > VOICE_RMS
+                    caller_stats["peak"] = max(caller_stats["peak"], level)
+                    caller_stats["window_peak"] = max(caller_stats["window_peak"], level)
                     pcm16, input_state = audioop.ratecv(
                         payload, 2, 1, 8000, 16000, input_state
                     )
@@ -1283,6 +1296,18 @@ async def bridge(reader, writer, call_id):
                 caller_turn = last_customer_speech > last_assistant_done
                 if time.monotonic() - last_progress < (STALL_SECONDS if caller_turn else CALLER_THINKING_SECONDS) or nudges >= 3:
                     continue
+                if not caller_turn and nudges >= 2 and caller_stats["voiced"] == 0:
+                    # Nothing that sounds like a voice has come in all call: the caller can't be heard.
+                    nudges = 3
+                    await emit("cantHearCaller", {"frames": caller_stats["frames"], "peak": caller_stats["peak"]})
+                    await gemini.send(json.dumps({"clientContent": {"turns": [{"role": "user", "parts": [{"text": f'Say exactly: "{CANT_HEAR_LINE}"'}]}], "turnComplete": True}}))
+                    await asyncio.sleep(CANT_HEAR_GRACE_SECONDS)
+                    if not close_requested.is_set():
+                        value = await app_action(call_id, "handoff", reason="The AI couldn't hear the caller (no voice on the line).")
+                        if value.get("closeBridge", True):
+                            close_requested.set()
+                            await terminate_audiosocket(writer)
+                    continue
                 nudges += 1
                 last_progress = time.monotonic()
                 if user_turn_open:
@@ -1292,6 +1317,14 @@ async def bridge(reader, writer, call_id):
                     await gemini.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
                 await emit("stallNudge", {**playback.snapshot(), "nudge": nudges, "callerTurn": caller_turn})
                 await gemini.send(json.dumps(stall_nudge_message(caller_turn)))
+
+        async def caller_audio_watch():
+            """Every 10 s: how much caller audio arrived and how loud (frames, peak), so a call where the AI
+            "heard nothing" shows whether the line delivered audio at all. Never the audio itself."""
+            while not close_requested.is_set():
+                await asyncio.sleep(10)
+                await emit("callerAudio", {"frames": caller_stats["window_frames"], "peak": caller_stats["window_peak"], "voicedTotal": caller_stats["voiced"]})
+                caller_stats["window_frames"] = caller_stats["window_peak"] = 0
 
         async def order_check_watch():
             """Deliver a pending check note once Gemini and the caller are both quiet."""
@@ -1313,6 +1346,7 @@ async def bridge(reader, writer, call_id):
         ]
         if checker:
             tasks.append(asyncio.create_task(order_check_watch()))
+        tasks.append(asyncio.create_task(caller_audio_watch()))
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in [*pending, *closing_tasks]:
             task.cancel()

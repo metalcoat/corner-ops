@@ -687,9 +687,12 @@ export async function POST(request: Request) {
     // Pickup/delivery, once set, only changes when the caller asks (dev test call 2026-11-06 flipped twice on
     // mis-heard speech). A different serviceType without serviceChangeRequested changes nothing.
     if (requestedName === "price_order" && call.order_id) {
-      const current = String(
-        (await getSql()`SELECT service_type FROM ordering_orders WHERE id=${String(call.order_id)}`)[0]?.service_type || "",
-      );
+      const order = (
+        await getSql()`SELECT orders.service_type,(SELECT count(*) FROM ordering_order_items item WHERE item.order_id=orders.id)::int lines FROM ordering_orders orders WHERE orders.id=${String(call.order_id)}`
+      )[0];
+      // Before anything is ordered the caller is still answering "pickup or delivery?": a correction there is
+      // always taken (a mis-heard opening must never lock the wrong type in).
+      const current = Number(order?.lines || 0) > 0 ? String(order?.service_type || "") : "";
       const wanted = String(args.serviceType || "");
       if (["pickup", "delivery"].includes(current) && wanted === "undecided") args.serviceType = current;
       else if (["pickup", "delivery"].includes(current) && ["pickup", "delivery"].includes(wanted) && wanted !== current && args.serviceChangeRequested !== true)

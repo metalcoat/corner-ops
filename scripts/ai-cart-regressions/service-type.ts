@@ -15,6 +15,13 @@ async function main() {
       assert.ok(r.isError && r.body.error?.code === "SERVICE_ALREADY_SET", JSON.stringify(r.body));
       assert.equal(await service(r0.orderId!), "delivery");
     });
+    await h.check("before anything is ordered, a correction to pickup is always taken", async () => {
+      const m = await h.newMcpCall();
+      const r0 = await m.invoke({ operation: "read", serviceType: "delivery", items: [] });
+      const r = await m.invoke({ operation: "read", serviceType: "pickup", items: [] });
+      assert.ok(!r.isError, JSON.stringify(r.body));
+      if (r0.orderId) assert.equal(await service(r0.orderId), "pickup");
+    });
     await h.check("'undecided' after it's set keeps the set type", async () => {
       const m = await h.newMcpCall();
       const r0 = await m.invoke({ operation: "add", serviceType: "pickup", items: [{ name: "Turkey Big Boss", quantity: 1 }] });

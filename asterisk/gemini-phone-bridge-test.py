@@ -418,6 +418,14 @@ async def main():
     check("after the thinking time only 'Take your time.'", nudges and "Take your time" in nudges[0] and "repeat" not in nudges[0].replace("Don't repeat", ""), nudges)
     gp.STALL_SECONDS, gp.CALLER_THINKING_SECONDS = 8, 20
 
+    # No voice from the caller all call (dev test call 2026-11-07: Gemini heard nothing for 50 s): after two
+    # "Take your time." nudges the AI says it can't hear them and the call goes to the store.
+    gp.STALL_SECONDS, gp.CALLER_THINKING_SECONDS, gp.CANT_HEAR_GRACE_SECONDS = 0.1, 0.3, 0.1
+    log = await run([AUDIO, DONE] + ["SLEEP"] * 25, [])
+    said = [m for m in log["sent"] if "clientContent" in m and "trouble hearing you" in json.dumps(m)]
+    check("a caller the AI can't hear goes to the store", said and "handoff" in log["app"] and any(n == "cantHearCaller" for n, _ in log["events"]), {"app": log["app"], "events": [n for n, _ in log["events"]]})
+    gp.STALL_SECONDS, gp.CALLER_THINKING_SECONDS, gp.CANT_HEAR_GRACE_SECONDS = 8, 20, 5
+
     # Tool results stay in the Live context and are re-billed each turn (2026-10-28): empty fields, default
     # modifier quantities and raw cents go; ids, display totals, tipCents, false/zero and pizza portions stay.
     cart = gp.voice_safe_tool_result({

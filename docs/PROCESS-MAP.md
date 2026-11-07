@@ -165,6 +165,11 @@ flowchart LR
     - Pizza lines are said as "jumbo pizza with …", without Classic Sauce / Regular Cooked.
     - The bridge's silence nudge tells the caller-thinking case (the AI spoke last: wait `GEMINI_CALLER_THINKING_SECONDS`, 20 s, then only "Take your time.") apart from Gemini not answering (answer what the caller said). It never re-asks the question.
     - Test: `scripts/ai-cart-regressions/wording.ts`.
+  - From Chris's 2026-11-07 02:43 test call, where Gemini heard nothing for 50 s:
+    - The bridge logs `gemini.callerAudio` every 10 s: frames and peak level only, never audio.
+    - After two "Take your time." nudges with no caller voice all call, it says "I'm having trouble hearing you, let me get you to someone at the store." and hands off.
+    - The pickup/delivery lock applies only once the order has items, so an opening correction is always taken.
+    - "Pick it up", "carry out", "takeout" and "to go" all mean pickup.
 - Docker disk cleanup: `update.sh` prunes after each deploy, but only untagged images and build cache older than 72 h, so tagged leftovers piled up. The box got down to 1.6 GB free on 2026-11-06, and 9 GB was freed by hand that day.
   - `deploy/docker-cleanup.sh` removes untagged images, build cache beyond 5 GB, and unused `corner-ops-*` tags older than 14 days. It keeps `:latest`, `:rollback` and `:before-*`, never touches containers, volumes or base images, logs to `deploy/logs/docker-cleanup.log`, and warns when less than 8 GB is free.
   - `--dry-run` lists what it would remove.
