@@ -239,20 +239,31 @@ export async function triviaTotals(playerId: number, date = triviaBusinessDate()
   return { today: Number(row?.today ?? 0), month: Number(row?.month ?? 0), year: Number(row?.year ?? 0) };
 }
 
-/** For the TV: correct answers in the last half minute ("Sam got it!") and the newest question someone is on. */
-export async function triviaLive(): Promise<{ cheers: { id: number; name: string }[]; question: { id: string; q: string; topic: string } | null }> {
+export type TriviaTvQuestion = { id: string; q: string; topic: string; choices: string[] };
+export type TriviaTvSolve = TriviaTvQuestion & { answerId: number; answer: string; name: string | null };
+const tvQuestion = (question: TriviaQuestion): TriviaTvQuestion =>
+  ({ id: question.id, q: question.q, topic: question.topic, choices: [question.a, ...question.wrong].sort((a, b) => a.localeCompare(b)) });
+
+/**
+ * For the TV: the newest question someone is on (asked in the last 10 minutes; the TV shows it in place of the fun
+ * fact) and right answers from the last half minute, with the answer to mark. Hidden players' names come back null.
+ */
+export async function triviaLive(): Promise<{ question: TriviaTvQuestion | null; solves: TriviaTvSolve[] }> {
   const sql = getSql();
-  const [cheers, latest] = await Promise.all([
-    sql`SELECT a.id, p.nickname FROM trivia_answers a JOIN trivia_players p ON p.id = a.player_id
-        WHERE p.business = ${BUSINESS} AND NOT p.hidden AND a.correct AND a.answered_at > NOW() - INTERVAL '30 seconds'
+  const [solves, latest] = await Promise.all([
+    sql`SELECT a.id, a.question_id, p.nickname, p.hidden FROM trivia_answers a JOIN trivia_players p ON p.id = a.player_id
+        WHERE p.business = ${BUSINESS} AND a.correct AND a.answered_at > NOW() - INTERVAL '30 seconds'
         ORDER BY a.answered_at DESC LIMIT 5`,
     sql`SELECT a.question_id FROM trivia_answers a JOIN trivia_players p ON p.id = a.player_id
-        WHERE p.business = ${BUSINESS} AND a.asked_at > NOW() - INTERVAL '15 minutes' ORDER BY a.asked_at DESC LIMIT 1`,
+        WHERE p.business = ${BUSINESS} AND a.asked_at > NOW() - INTERVAL '10 minutes' ORDER BY a.asked_at DESC LIMIT 1`,
   ]);
   const question = latest[0] ? QUESTIONS.get(String(latest[0].question_id)) : undefined;
   return {
-    cheers: cheers.map((row) => ({ id: Number(row.id), name: String(row.nickname) })),
-    question: question ? { id: question.id, q: question.q, topic: question.topic } : null,
+    question: question ? tvQuestion(question) : null,
+    solves: solves.flatMap((row) => {
+      const solved = QUESTIONS.get(String(row.question_id));
+      return solved ? [{ ...tvQuestion(solved), answerId: Number(row.id), answer: solved.a, name: row.hidden ? null : String(row.nickname) }] : [];
+    }),
   };
 }
 

@@ -444,10 +444,13 @@ flowchart LR
   changes, so a holiday ends at store midnight rather than at the 4 AM reload. Switched over 2026-10-22: `menu-tv.sh` also wakes this TV and keeps
   the greeter page on it; the Pi greeter program still runs on HDMI but isn't shown, and the Pi only keeps its CEC
   "off" lines as a backup.
-- Lobby trivia (dev, 2026-11-07): the greeter TV's bottom-right corner (`src/app/pos/greeter/tv/trivia-corner.tsx`,
-  polling `GET /api/pos/greeter/trivia` every 4 s) shows a QR that changes every minute (HMAC of the minute,
-  `src/lib/trivia-rules.ts`; good for 2–3 minutes), the top 5 Today → This month → This year, the question someone is
-  on, and "<name> got it!". It grows to the bottom centre during each walk-in's welcome. The QR opens `/trivia` on the public
+- Lobby trivia (dev, 2026-11-07): the greeter TV's top-right corner (`src/app/pos/greeter/tv/trivia-corner.tsx`,
+  polling `GET /api/pos/greeter/trivia` every 4 s; below the holiday ribbon, clear of every slide; hidden on the NFL
+  screen) shows a QR that changes every minute (HMAC of the minute, `src/lib/trivia-rules.ts`; good for 2–3 minutes),
+  the top 5 Today → This month → This year and "<name> got it!". While someone has had a question in the last
+  10 minutes, that question (choices in A–Z order, no letters) takes the fun fact's turn; when someone gets one right
+  the TV jumps to it and lights up the answer for 12 s. With nobody playing the fun facts run as before. The card
+  moves to the bottom centre, bigger, during each walk-in's welcome. The QR opens `/trivia` on the public
   site (`TRIVIA_BASE_URL`, else dev.ordercornerdeli.com / ordercornerdeli.com in production); a scan lets that phone
   play 30 minutes. Nickname, then up to 15 random questions a store day (4 AM day, no repeats), checked on the server
   (`POST /api/customer/trivia`, `src/lib/lobby-trivia.ts`; tables `trivia_*`, migration 0047; questions in

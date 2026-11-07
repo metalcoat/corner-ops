@@ -5,7 +5,7 @@ import { GREETER_WELCOME_MS, greeterNext } from "@/lib/door-chime-policy";
 import type { NflGame } from "@/lib/greeter-nfl";
 import SeasonFx from "../../menu-board/season-fx";
 import SpookyScene from "./spooky-scene";
-import TriviaCorner from "./trivia-corner";
+import TriviaCorner, { TriviaSlide, useTriviaFeed } from "./trivia-corner";
 
 const POLL_MS = 2_000;
 const SLIDE_MS = 15_000;
@@ -68,6 +68,18 @@ export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbo
   const [inApp, setInApp] = useState(false);
   useEffect(() => setInApp(Boolean(tvBridge())), []);
   const youTube = useRef<HTMLDivElement>(null);
+  // Lobby trivia: while someone is playing, their question takes the fun fact's turn.
+  const trivia = useTriviaFeed();
+  const triviaTurn = showing === "fact" && Boolean(trivia.showing);
+  // Someone just got one right: jump to the question screen so the room sees it marked.
+  const solvedId = trivia.showing?.solvedId;
+  useEffect(() => {
+    if (!solvedId) return;
+    setSlide((s) => {
+      const list = orderRef.current, at = list.indexOf("fact");
+      return list[s % list.length] === "fact" || at < 0 ? s : at;
+    });
+  }, [solvedId]);
 
   // Scale the 1920x1080 stage to the screen.
   useEffect(() => {
@@ -94,7 +106,8 @@ export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbo
       setWeatherStamp(Math.floor(Date.now() / WEATHER_MS));
     }, SLIDE_MS);
     return () => window.clearInterval(timer);
-  }, [factCount]);
+    // Restarted when a right answer jumps to the question screen, so it gets a full turn.
+  }, [factCount, solvedId]);
 
   // Today's NFL games and live scores (empty on days without games, so the screen drops out).
   useEffect(() => {
@@ -251,8 +264,9 @@ export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbo
         </section>
         {pictures.map(([key, src]) => (
           // eslint-disable-next-line @next/next/no-img-element
-          <img key={key} className={`gtSlide gtPicture${showing === key && !welcome ? " on" : ""}`} src={src} alt="" />
+          <img key={key} className={`gtSlide gtPicture${showing === key && !welcome && !(key === "fact" && triviaTurn) ? " on" : ""}`} src={src} alt="" />
         ))}
+        {trivia.showing && <TriviaSlide showing={trivia.showing} on={triviaTurn && !welcome} />}
         <WeatherArt on={showing === "weather" && !welcome} stamp={weatherStamp} />
         {games.length > 0 && <NflSlide games={games} on={showing === "nfl" && !welcome} />}
         <SeasonFx season={season} />
@@ -271,7 +285,7 @@ export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbo
             <div className="gtYt"><div ref={youTube} /></div>
           </div>
         )}
-        <TriviaCorner welcome={welcome} />
+        <TriviaCorner feed={trivia} welcome={welcome} hidden={showing === "nfl"} />
         {offline && <i className="gtOffline" title="Can't reach the store server" />}
       </div>
     </main>
