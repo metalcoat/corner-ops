@@ -496,6 +496,8 @@ flowchart LR
   By-role pricing needs the employee's signed agreement (29 CFR 778.419): it is on the two-rate pay notice
   (`employment_forms.overtime_by_role_agreement`, migration 0046) and in handbook section 7. Without a signed one,
   Payroll shows the weighted-average overtime (29 CFR 778.115) to pay instead.
+  Paperwork → "Send overtime agreement to drivers" issues every active employee with a driver rate who hasn't signed
+  it an updated pay notice (same rates + agreement, `noticeKind: overtime-agreement`) and a Hub message to sign it.
   Payroll Relief: driving overtime goes in its own timesheet column `TipOT` (env `PAYROLL_RELIEF_DRIVER_OT_CODE`)
   once Chris adds that earnings code; in-store overtime stays in `OT`. Without the column all overtime goes in
   `OT` with a note on the plan. Scheduler: anyone over 40 shows which shifts the overtime lands on and suggests

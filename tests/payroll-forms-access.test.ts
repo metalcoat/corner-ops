@@ -128,7 +128,7 @@ test("ordinary administrator review remains redacted", async () => {
     "next/server": { NextResponse: Response }, "@/lib/rate-limit": { clientIp: () => "203.0.113.9" }, "@/lib/auth": { ...auth, getSession: async () => identity("Owner") },
     "@/lib/db": { getSql: () => async () => [] },
     "@/lib/employment-forms": { getEmploymentForm: async () => completed, ensureEmploymentFormsSchema: async () => undefined },
-    "@/lib/sensitive-redaction": { redactEmploymentSensitiveData }, "@/lib/i9-validation": {},
+    "@/lib/sensitive-redaction": { redactEmploymentSensitiveData }, "@/lib/i9-validation": {}, "@/lib/staff-notifications": {},
   });
   const response = await route.GET({ nextUrl: new URL(`https://ops.example.invalid/api/employment-forms?business=Tiki&id=${id}`) });
   assert.equal(response.status, 200); assert.doesNotMatch(await response.text(), /000-12-3456/);

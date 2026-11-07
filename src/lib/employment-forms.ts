@@ -319,7 +319,7 @@ export async function assignRateChange(input: {
   actor: string;
   employerSignature: string;
   /** "new-hire" when this is the first pay notice (Add employee had no rate yet). */
-  noticeKind?: "new-hire" | "rate-change";
+  noticeKind?: "new-hire" | "rate-change" | "overtime-agreement";
 }): Promise<EmploymentFormSummary> {
   await ensureEmploymentFormsSchema();
   const employee = await findEmployee(input.business, input.employeeId);
@@ -457,4 +457,39 @@ export async function completeEmployerI9(input: {
   ` as unknown as FormRow[];
   await event(row.id, "employer-completed-i9", input.actor, { ipAddress: input.ipAddress, userAgent: input.userAgent });
   return summary(updated[0]);
+}
+
+/**
+ * Every active employee with a driver (tipped) rate who hasn't signed the overtime-by-job agreement gets an
+ * updated NY pay notice (their current rates plus the agreement) to sign in the Employee Hub. Anyone with an
+ * unsigned one already waiting is skipped. Payroll uses the weighted average for them until they sign.
+ */
+export async function sendOvertimeAgreements(input: { business: Business; actor: string; employerSignature: string }) {
+  await ensureEmploymentFormsSchema();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT e.id, e.name, e.hourly_rate, e.tipped_rate,
+      EXISTS (SELECT 1 FROM employment_forms f WHERE f.employee_id = e.id AND f.form_type = 'PAY_NOTICE' AND f.overtime_by_role_agreement AND f.status IN ('Employee Signed', 'Completed')) AS signed,
+      EXISTS (SELECT 1 FROM employment_forms f WHERE f.employee_id = e.id AND f.form_type = 'PAY_NOTICE' AND f.overtime_by_role_agreement AND f.status = 'Assigned') AS waiting
+    FROM employees e
+    WHERE e.business = ${input.business} AND e.active = TRUE AND e.tipped_rate > 0 AND e.hourly_rate > 0
+    ORDER BY e.name
+  ` as unknown as Array<{ id: string; name: string; hourly_rate: string | number; tipped_rate: string | number; signed: boolean; waiting: boolean }>;
+  const sent: string[] = [];
+  const skipped: string[] = [];
+  for (const row of rows) {
+    if (row.signed || row.waiting) { skipped.push(row.name); continue; }
+    await assignRateChange({
+      business: input.business,
+      employeeId: row.id,
+      effectiveDate: new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }),
+      hourlyRate: Number(row.hourly_rate),
+      tippedRate: Number(row.tipped_rate),
+      actor: input.actor,
+      employerSignature: input.employerSignature,
+      noticeKind: "overtime-agreement",
+    });
+    sent.push(row.name);
+  }
+  return { sent, skipped };
 }
