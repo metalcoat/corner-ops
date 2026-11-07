@@ -642,6 +642,8 @@ async function callTool(rpc: Rpc) {
         isError: true,
       });
   }
+  // Answers already given for an item that is still waiting on another question (applyPendingModifierAnswer).
+  let carried: { items: Array<{ name: string; modifiers?: unknown[] }>; questions: string[] } | null = null;
   const started = Date.now(),
     requestId = randomUUID(),
     provider = String(call.selected_provider || "openai"),
@@ -682,6 +684,9 @@ async function callTool(rpc: Rpc) {
               items: applyFryPlacementSpeech(Array.isArray(args.items) ? (args.items as any) : [],String(args.customerText || "")),
             })
           : null,
+      carriedItem = pendingApplied
+        ? (carried = { items: pendingApplied.items, questions: pendingApplied.resolvedPendingQuestions || [] })
+        : null,
       phoneItems =
       requestedName === "price_order"
         ? await incrementalSpokenCart(
@@ -881,7 +886,19 @@ async function callTool(rpc: Rpc) {
             "Retry once, then hand off to an employee.",
             500,
           );
-    const pendingItem = known.details.pendingItem || null;
+    // The voice model often re-sends the item bare with just the answer, so what it already said about this item
+    // (toppings, earlier answers) is kept on the pending question.
+    const sameItem = carried?.items.filter(
+      (item) => item.name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() === String((known.details.pendingItem as { customerRequest?: string } | undefined)?.customerRequest || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(),
+    );
+    const collected = sameItem?.length === 1 ? sameItem[0].modifiers || [] : [];
+    const pendingItem = known.details.pendingItem
+      ? {
+          ...known.details.pendingItem,
+          ...(collected.length ? { collectedModifiers: collected } : {}),
+          ...(sameItem?.length === 1 && carried?.questions.length ? { resolvedQuestions: carried.questions } : {}),
+        }
+      : null;
     if (requestedName === "price_order" && pendingItem)
       await getSql()`UPDATE ordering_call_sessions SET pending_item=${JSON.stringify(pendingItem)}::jsonb,updated_at=NOW() WHERE id=${call.id}`;
     await auditAiTool({

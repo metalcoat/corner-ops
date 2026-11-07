@@ -120,8 +120,9 @@ export function fixNote(fixed: string[], followUps: string[] = []) {
 
 /** Apply the safe fixes from a mismatch check; the rest stay in the note for Gemini. Never throws. */
 export async function applyOrderFixes(callId: string, input: OrderCheckInput, checked: OrderCheckResult): Promise<OrderCheckResult> {
-  const plans = checked.mismatches.map((mismatch) => ({ mismatch, plan: planFix(input, mismatch) }));
-  if (!plans.some((row) => "arguments" in row.plan)) return { ...checked, skipped: plans.map((row) => ("skip" in row.plan ? row.plan.skip : "")) };
+  const early = checked.mismatches.map((mismatch) => planFix(input, mismatch));
+  if (!early.some((plan) => "arguments" in plan || plan.skip === "caller quote not found"))
+    return { ...checked, skipped: early.map((plan) => ("skip" in plan ? plan.skip : "")) };
   const fixed: string[] = [];
   const followUps: string[] = [];
   const remaining: OrderCheckMismatch[] = [];
@@ -134,7 +135,11 @@ export async function applyOrderFixes(callId: string, input: OrderCheckInput, ch
       const current = await loadOrderCheckInput(callId, input.stage);
       const blocked =
         session?.state !== "ai" ? "call not with the AI" : session?.pending_item ? "question open" : cartFingerprint(current.cart) !== cartFingerprint(input.cart) ? "cart changed" : "";
-      for (const { mismatch, plan } of plans) {
+      // Gemini's reply to the caller's words is often saved after the check started (dev call 2026-11-07 17:03:
+      // "Got it, what else?" came 2 s later), so the quote is checked against the transcript as it is now.
+      const now = { ...input, transcript: current.transcript };
+      for (const mismatch of checked.mismatches) {
+        const plan = planFix(now, mismatch);
         if (!("arguments" in plan) || blocked) {
           skipped.push("skip" in plan ? plan.skip : blocked);
           remaining.push(mismatch);

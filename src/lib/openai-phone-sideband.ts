@@ -133,11 +133,12 @@ export async function applyPendingModifierAnswer(input: {
   resolvedPendingQuestions?: string[];
 }> {
   const pending = input.pendingItem;
-  if (!input.orderId || !pending) return { ...input };
-  const current = await spokenCart(input.orderId);
+  if (!pending) return { ...input };
   const activeName = String(
     pending.activeItem || pending.category || pending.customerRequest || "",
   );
+  if (!input.orderId) return answerPendingNewItem(input, pending, activeName);
+  const current = await spokenCart(input.orderId);
   const candidates = current.filter(item => pending.lineId ? item.lineId === pending.lineId : cartKey(item.name) === cartKey(activeName));
   const line = candidates.length === 1 ? candidates[0] : undefined;
   if ((pending.missingRequiredFields || []).includes("mashed size")) {
@@ -165,7 +166,7 @@ export async function applyPendingModifierAnswer(input: {
       ],
     };
   }
-  if (!line) return { ...input };
+  if (!line) return answerPendingNewItem(input, pending, activeName);
   if (pending.pendingQuestion === "mashed_gravy") {
     if (!affirmative(input.customerText) && !negative(input.customerText))
       return { ...input };
@@ -190,6 +191,59 @@ export async function applyPendingModifierAnswer(input: {
     };
   }
   return { ...input };
+}
+// An item still waiting on a question isn't in the cart yet, and the voice model often re-sends it bare with only
+// the caller's answer as customerText: dev call 2026-11-07 17:03 asked "What kind of dressing..." six times while
+// the caller said "Italian". The answer is matched against the open question's own choices, and answers to earlier
+// questions on the same item ride along in pendingItem.collectedModifiers.
+const HAMBURGER_STEAK_TOPPINGS = ["Mushrooms", "Onions", "Peppers"];
+async function answerPendingNewItem(
+  input: Parameters<typeof applyPendingModifierAnswer>[0],
+  pending: Record<string, any>,
+  activeName: string,
+) {
+  if (input.operation !== "add" || !pending.actualMenuItemId) return { ...input };
+  const wanted = [pending.customerRequest, activeName].filter(Boolean).map((name) => cartKey(String(name)));
+  const index = input.items.findIndex((item) => wanted.includes(cartKey(item.name)));
+  if (index < 0) return { ...input };
+  const item = input.items[index];
+  const text = ` ${spokenKey(input.customerText)} `;
+  const answered: SpokenOrderItem["modifiers"] = [];
+  const questions: string[] = [...(Array.isArray(pending.resolvedQuestions) ? pending.resolvedQuestions.map(String) : [])];
+  if (pending.pendingQuestion === "hamburger_steak_toppings") {
+    const named = HAMBURGER_STEAK_TOPPINGS.filter((name) => new RegExp(`\\b${name.slice(0, -1).toLowerCase()}`).test(text));
+    const chosen = named.length ? named : affirmative(input.customerText) || /\b(?:all|everything|all three)\b/.test(text) ? HAMBURGER_STEAK_TOPPINGS : [];
+    if (chosen.length || negative(input.customerText)) {
+      answered.push(...chosen.map((name) => ({ name, group: "Hamburger Steak Options" })));
+      questions.push("hamburger_steak_toppings");
+    }
+  } else {
+    const catalog = await menuCatalog("Corner Deli", new Date(), item.name);
+    const menuItem = catalog.flatMap((category) => category.items || []).find((row: any) => row.id === pending.actualMenuItemId);
+    for (const groupName of (pending.missingRequiredFields || []).map(String)) {
+      const group = menuItem?.modifiers?.find((row: any) => row.name === groupName);
+      if (!group) continue;
+      const options = (group.options || []).filter((option: any) => option.available !== false);
+      let matches = options.filter((option: any) =>
+        modifierAliases(String(option.name), String(group.name)).some((alias) => {
+          const key = spokenKey(alias);
+          return key.length > 1 && !/^no\b/.test(key) && text.includes(` ${key} `);
+        }),
+      );
+      if (!matches.length && negative(input.customerText)) matches = options.filter((option: any) => /^no\b/i.test(String(option.name)) && !/tomato|salad/i.test(String(option.name)));
+      if (matches.length === 1) answered.push({ name: String(matches[0].name), group: String(group.name) });
+    }
+  }
+  const carried = Array.isArray(pending.collectedModifiers) ? (pending.collectedModifiers as SpokenOrderItem["modifiers"]) : [];
+  const modifiers = [...(item.modifiers || [])];
+  for (const modifier of [...(carried || []), ...(answered || [])])
+    if (!modifiers.some((row) => modifierKey(row.name) === modifierKey(modifier.name))) modifiers.push(modifier);
+  if (modifiers.length === (item.modifiers || []).length && !questions.length) return { ...input };
+  return {
+    ...input,
+    items: input.items.map((row, i) => (i === index ? { ...item, modifiers } : row)),
+    resolvedPendingQuestions: questions,
+  };
 }
 const cartKey = (value: string) =>
   value
@@ -938,6 +992,8 @@ export function startOpenAiSideband(
         resolvedQuestions.add("cold_sub_condiments");
       if (args.coldSubVegetablesDecision)
         resolvedQuestions.add("cold_sub_vegetables");
+      if (args.hamburgerSteakToppingsDecision)
+        resolvedQuestions.add("hamburger_steak_toppings");
       for (const question of pendingApplied.resolvedPendingQuestions || [])
         resolvedQuestions.add(question);
       const attached = await attachStandaloneModifierAnswer(
@@ -1116,7 +1172,7 @@ export function startOpenAiSideband(
       else if (hamburgerSteakNeedsToppings)
         Object.assign(result, {
           required_follow_up:
-            "Would you like mushrooms, onions, or peppers on it?",
+            "Would you like peppers, mushrooms, or onions on that?",
         });
       else if (burgerNeedsToppings)
         Object.assign(result, {

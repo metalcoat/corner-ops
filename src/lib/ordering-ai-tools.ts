@@ -2342,6 +2342,13 @@ export async function priceSpokenOrder(input: {
         if (!input.resolvedPendingQuestions?.includes("steak_style_double_meat") && !selected.has("double meat"))
           throw new AiToolError("FOLLOW_UP_REQUIRED", "Do you want double meat?", "Ask exactly: Do you want double meat?", 409, { pendingItem: { category: spokenKey(item.name), customerRequest: requested.name, actualMenuItemId: item.id, actualVariantId: variant?.id || null, pendingQuestion: "steak_style_double_meat", missingRequiredFields: ["steak-style double meat"] } });
       }
+      // Hamburger Steak: toppings first, then the salad dressing (Chris, 2026-11-07).
+      if (
+        /^hamburger steak/i.test(item.name) &&
+        !input.resolvedPendingQuestions?.includes("hamburger_steak_toppings") &&
+        !spokenModifiers.some((modifier) => /^(?:extra\s+)?(?:mushrooms?|onions?|peppers?)$/i.test(String(modifier.name).trim()))
+      )
+        throw new AiToolError("FOLLOW_UP_REQUIRED", "Would you like peppers, mushrooms, or onions on that?", "Ask exactly: Would you like peppers, mushrooms, or onions on that?", 409, { pendingItem: { category: spokenKey(item.name), customerRequest: requested.name, actualMenuItemId: item.id, actualVariantId: variant?.id || null, pendingQuestion: "hamburger_steak_toppings", missingRequiredFields: ["hamburger steak toppings"] } });
       if (
         item.name === "Pizza Logs" &&
         !item.modifiers.some((group) =>
@@ -2391,7 +2398,9 @@ export async function priceSpokenOrder(input: {
               : /^Choose Dressing(?: \(On Salad\))?$/.test(
                     missingRequired.name,
                   )
-                ? "What kind of dressing do you want for your salad?"
+                ? /^hamburger steak/i.test(item.name)
+                  ? "It comes with a small salad. What dressing would you like?"
+                  : "What kind of dressing do you want for your salad?"
                 : spokenKey(missingRequired.name).includes("cheese")
                   ? `What cheese: ${choices.join(", ")}?`
                   : `Choose ${missingRequired.name}: ${choices.join(", ")}?`;
