@@ -828,6 +828,12 @@ async function callTool(rpc: Rpc) {
       );
       if (compact.wingReadback) (result as Record<string, any>).wingReadback = compact.wingReadback;
     }
+    // The delivery address rides on every cart result, so Gemini can drop old call audio (a shorter context
+    // window, 2026-11-07) without asking for the address again.
+    if (orderId && ["price_order", "get_draft"].includes(requestedName) && result && typeof result === "object" && (result as Record<string, any>).service_type === "delivery") {
+      const address = (await getSql()`SELECT line1,line2 FROM ordering_order_delivery_addresses WHERE order_id=${orderId}`)[0];
+      if (address) (result as Record<string, any>).deliveryTo = [address.line1, address.line2].filter(Boolean).join(", ");
+    }
     if (orderId) {
       resolvedQuestions.delete("cold_sub_condiments");
       resolvedQuestions.delete("cold_sub_vegetables");

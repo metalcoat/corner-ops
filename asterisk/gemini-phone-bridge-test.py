@@ -462,10 +462,23 @@ async def main():
     check("compact cart keeps portions and non-default modifier quantities", "quantity" not in modifiers[0] and modifiers[0]["portion"] == "left_half" and modifiers[1]["quantity"] == 2, modifiers)
     failed = gp.voice_safe_tool_result({"ok": False, "error": {"code": "ITEM_NOT_ON_MENU", "message": "No match."}, "pending": False})
     check("compact error keeps ok false and the error", failed["ok"] is False and failed["error"]["code"] == "ITEM_NOT_ON_MENU" and failed["pending"] is False, failed)
+    # A priced cart from the app keeps only what Gemini reads back or sends back (2026-11-07: ~3.5 KB -> ~1.7 KB).
+    raw_cart = {
+        "id": "o1", "business": "Corner Deli", "display_number": "25038", "payment_status": "unpaid", "payment_preference": "unspecified",
+        "service_type": "delivery", "version": 5, "first_name_snapshot": "Chris", "last_name_snapshot": "F", "phone_snapshot": "315",
+        "subtotal_cents": 6625, "tax_cents": 0, "tip_cents": 500, "delivery_fee_cents": 300, "total_cents": 7425, "paid_cents": 0,
+        "amount_due_cents": 7425, "timing_message_snapshot": "Give us 40 minutes.", "deliveryTo": "412 Jay St", "wingReadback": "10 wings mild",
+        "lines": [{"id": "x", "cart_line_id": "L1", "lineId": "L1", "item_id": "i", "item_name_snapshot": "Wings", "variant_id": "v",
+                   "variant_name_snapshot": "10 Wings", "quantity": 1, "unit_price_cents": 1350, "line_total_cents": 1775,
+                   "say": "10 wings mild", "modifiers": [{"group": "Wing Sauce", "name": "Mild", "amount": "regular"}]}],
+    }
+    small = gp.voice_safe_tool_result(raw_cart)
+    check("compact cart keeps what Gemini reads and sends back", small["lines"][0] == {"lineId": "L1", "name": "Wings", "variant": "10 Wings", "quantity": 1, "say": "10 wings mild", "modifiers": [{"group": "Wing Sauce", "name": "Mild"}]} and small["totalDisplay"] == "$74.25" and small["deliveryFeeDisplay"] == "$3.00" and small["tipCents"] == 500 and small["deliveryTo"] == "412 Jay St" and small["firstName"] == "Chris" and small["service_type"] == "delivery" and small["wingReadback"] == "10 wings mild", small)
+    check("compact cart drops ids, snapshots and raw cents", not {"id", "business", "total_cents", "amount_due_cents", "version", "phone_snapshot", "paymentMethod", "amountDueDisplay"} & set(small), small)
     usage = gp.new_usage()
     gp.add_usage(usage, {"promptTokenCount": 10, "cachedContentTokenCount": 4, "toolUsePromptTokenCount": 2, "promptTokensDetails": [{"modality": "TEXT", "tokenCount": 10}]})
     summary = gp.usage_summary(usage, "m")
-    check("usage summary reports cached and tool-use prompt tokens", summary["cachedTokens"] == 4 and summary["toolUsePromptTokens"] == 2 and summary["messages"] == 1, summary)
+    check("usage summary reports cached and tool-use prompt tokens", summary["firstPromptTokens"] == 10 and summary["cachedTokens"] == 4 and summary["toolUsePromptTokens"] == 2 and summary["messages"] == 1, summary)
     print(json.dumps({"status": "passed", "checks": len(checks)}))
 
 

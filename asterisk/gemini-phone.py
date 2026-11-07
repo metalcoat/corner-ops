@@ -126,9 +126,63 @@ def compact_tool_result(value, top=True):
     return compact
 
 
+def dollars(cents):
+    return f"${int(cents) / 100:,.2f}"
+
+
+# A priced cart was ~3.5 KB for four lines (database ids, raw cents, snapshots), kept in the Live context and
+# re-billed on every later turn of the call (2026-11-07: tool results were over a third of a 7-minute call's
+# text tokens). Gemini needs what it reads back and what it sends back: lineId, item name, size, quantity,
+# modifiers, the say text, totals as dollars, tip, service, name and wait.
+CART_ORDER_KEYS = {
+    "service_type": "service_type", "payment_preference": "paymentMethod", "first_name_snapshot": "firstName",
+    "last_name_snapshot": "lastName", "tip_cents": "tipCents", "timing_message_snapshot": "wait",
+}
+CART_DROPPED_KEYS = {
+    "id", "business", "display_number", "payment_status", "timing_mode", "version", "phone_snapshot",
+    "subtotal_cents", "discount_cents", "tax_cents", "delivery_fee_cents", "total_cents", "paid_cents",
+    "amount_due_cents", "pricingAuthority", "currency",
+}
+
+
+def compact_cart_result(value):
+    if not (isinstance(value, dict) and isinstance(value.get("lines"), list) and "total_cents" in value):
+        return value
+    cart = {}
+    for key, item in value.items():
+        if key in CART_ORDER_KEYS:
+            if not (key == "payment_preference" and item == "unspecified"):
+                cart[CART_ORDER_KEYS[key]] = item
+        elif key == "lines":
+            cart["lines"] = [
+                {
+                    "lineId": line.get("lineId") or line.get("cart_line_id"),
+                    "name": line.get("item_name_snapshot"),
+                    "variant": line.get("variant_name_snapshot"),
+                    "quantity": line.get("quantity"),
+                    "say": line.get("say"),
+                    "modifiers": [
+                        {k: v for k, v in modifier.items() if not (k == "amount" and v == "regular")}
+                        for modifier in line.get("modifiers") or []
+                        if isinstance(modifier, dict)
+                    ],
+                }
+                for line in item
+                if isinstance(line, dict)
+            ]
+        elif key not in CART_DROPPED_KEYS:
+            cart[key] = item
+    cart["totalDisplay"] = dollars(value.get("total_cents") or 0)
+    if value.get("amount_due_cents") is not None and value.get("amount_due_cents") != value.get("total_cents"):
+        cart["amountDueDisplay"] = dollars(value["amount_due_cents"])
+    if value.get("delivery_fee_cents"):
+        cart["deliveryFeeDisplay"] = dollars(value["delivery_fee_cents"])
+    return cart
+
+
 def voice_safe_tool_result(value):
     """Keep operational draft language out of provider-facing tool results."""
-    safe = compact_tool_result(scrub_internal_order_language(value))
+    safe = compact_tool_result(scrub_internal_order_language(compact_cart_result(value)))
     if isinstance(safe, dict):
         if is_failed_tool_result(safe):
             # An error must reach the model intact; "continue checkout" would tell it to ignore the failure.
@@ -412,6 +466,9 @@ def add_usage(usage, metadata):
     if not isinstance(metadata, dict):
         return
     usage["messages"] += 1
+    if usage["messages"] == 1:
+        # Instructions + tool list + greeting: what every later turn pays again before any history.
+        usage["firstPrompt"] = int(metadata.get("promptTokenCount") or 0)
     usage["prompt"] += int(metadata.get("promptTokenCount") or 0)
     usage["response"] += int(metadata.get("responseTokenCount") or 0)
     # Live has no explicit cache; this shows whether Google applies any implicit caching to the prompt.
@@ -431,6 +488,7 @@ def usage_summary(usage, model):
     return {
         "model": model,
         "promptTokens": usage["prompt"],
+        "firstPromptTokens": usage.get("firstPrompt", 0),
         "responseTokens": usage["response"],
         "cachedTokens": usage["cached"],
         "toolUsePromptTokens": usage["toolUsePrompt"],
