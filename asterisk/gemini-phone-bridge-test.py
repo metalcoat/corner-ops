@@ -59,6 +59,22 @@ class Reader:
         await asyncio.sleep(3600)
 
 
+class VoiceReader:
+    """A caller who keeps talking: loud 20 ms frames, one every 5 ms."""
+
+    def __init__(self, sample=b"\x00\x20"):
+        self.header = True
+        self.sample = sample
+
+    async def readexactly(self, n):
+        if self.header:
+            self.header = False
+            await asyncio.sleep(0.005)
+            return bytes([0x10]) + (320).to_bytes(2, "big")
+        self.header = True
+        return (self.sample * 160)[:n]
+
+
 class Writer:
     def __init__(self):
         self.frames = []
@@ -76,7 +92,7 @@ class Writer:
         pass
 
 
-async def run(script, mcp_results, checker=None):
+async def run(script, mcp_results, checker=None, reader=None):
     log = {"mcp": [], "app": [], "events": []}
     gp.CLAUDE_CHECKER_ENABLED = checker is not None
     fake = FakeGemini(script)
@@ -109,7 +125,7 @@ async def run(script, mcp_results, checker=None):
     gp.websockets.connect = lambda *a, **k: fake
     writer = Writer()
     try:
-        await asyncio.wait_for(gp.handle_bridge if False else gp.bridge(Reader(), writer, "call-1"), 5)
+        await asyncio.wait_for(gp.handle_bridge if False else gp.bridge(reader or Reader(), writer, "call-1"), 5)
     except Exception as e:  # noqa
         log["exception"] = type(e).__name__
     await asyncio.sleep(0.05)
@@ -465,6 +481,20 @@ async def main():
     said = [m for m in log["sent"] if "clientContent" in m and "trouble hearing you" in json.dumps(m)]
     check("a caller the AI can't hear goes to the store", said and "handoff" in log["app"] and any(n == "cantHearCaller" for n, _ in log["events"]), {"app": log["app"], "events": [n for n, _ in log["events"]]})
     gp.STALL_SECONDS, gp.CALLER_THINKING_SECONDS, gp.CANT_HEAR_GRACE_SECONDS = 8, 20, 5
+
+    # The caller keeps talking but Gemini transcribes nothing (dev test call 2026-11-07 18:57): reset its speech
+    # detection once, then say it can't hear them and go to the store.
+    gp.DEAF_VOICED_FRAMES, gp.DEAF_SECONDS, gp.CANT_HEAR_GRACE_SECONDS = 20, 0.3, 0.1
+    log = await run([AUDIO, DONE] + ["SLEEP"] * 30, [], reader=VoiceReader())
+    deaf = [d for n, d in log["events"] if n == "geminiDeaf"]
+    resets = [m for m in log["sent"] if m.get("realtimeInput", {}).get("audioStreamEnd")]
+    said = [m for m in log["sent"] if "clientContent" in m and "trouble hearing you" in json.dumps(m)]
+    check("a deaf Gemini gets one reset, then the caller goes to the store", len(deaf) == 2 and resets and said and "handoff" in log["app"], {"events": [n for n, _ in log["events"]], "app": log["app"]})
+    log = await run([AUDIO, DONE] + ["SLEEP"] * 30, [])
+    log2 = await run([AUDIO, DONE] + ["SLEEP"] * 30, [], reader=VoiceReader(b"\x58\x02"))
+    check("background noise is not mistaken for a deaf Gemini", not any(n == "geminiDeaf" for n, _ in log2["events"]), [n for n, _ in log2["events"]])
+    check("no voice on the line is not mistaken for a deaf Gemini", not any(n == "geminiDeaf" for n, _ in log["events"]), [n for n, _ in log["events"]])
+    gp.DEAF_VOICED_FRAMES, gp.DEAF_SECONDS, gp.CANT_HEAR_GRACE_SECONDS = 75, 4.0, 5
 
     # Tool results stay in the Live context and are re-billed each turn (2026-10-28): empty fields, default
     # modifier quantities and raw cents go; ids, display totals, tipCents, false/zero and pizza portions stay.

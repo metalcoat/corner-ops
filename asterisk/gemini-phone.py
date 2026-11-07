@@ -555,6 +555,12 @@ VOICE_RMS = 300
 # heard nothing for 50 s, maybe a one-way phone line), hand the caller to the store instead of waiting forever.
 CANT_HEAR_LINE = "I'm having trouble hearing you, let me get you to someone at the store."
 CANT_HEAR_GRACE_SECONDS = 5  # time for the line to play before the transfer
+# Gemini stopped hearing a caller whose voice kept arriving (dev test call 2026-11-07 18:57: ~12 s of loud speech,
+# no transcription, only "Take your time."). Voice while the AI is listening, with nothing transcribed for a
+# while, means its speech detection is stuck: reset it once, and if that happens again, go to the store.
+DEAF_VOICED_FRAMES = 75  # 20 ms frames: 1.5 s of voice
+DEAF_RMS = 1500  # clearly speech, not a TV or kitchen in the background (that call's speech peaked 5,000-7,800)
+DEAF_SECONDS = 4.0
 
 
 def stall_nudge_message(caller_turn=True):
@@ -1012,7 +1018,7 @@ async def bridge(reader, writer, call_id):
         else None
     )
     person_handoff = {"reason": None, "task": None, "turn": 0, "line_said": False, "line_blocks": 0}
-    caller_stats = {"frames": 0, "voiced": 0, "peak": 0, "window_frames": 0, "window_peak": 0}
+    caller_stats = {"frames": 0, "voiced": 0, "peak": 0, "window_frames": 0, "window_peak": 0, "voiced_listening": 0, "heard_mark": 0}
 
     async def save_transcript(speaker, text, turn_id):
         value = " ".join(str(text or "").split()).strip()
@@ -1115,6 +1121,8 @@ async def bridge(reader, writer, call_id):
                     caller_stats["frames"] += 1
                     caller_stats["window_frames"] += 1
                     caller_stats["voiced"] += level > VOICE_RMS
+                    if level > DEAF_RMS and not playback.assistant_speaking and playback.state == "LISTENING":
+                        caller_stats["voiced_listening"] += 1
                     caller_stats["peak"] = max(caller_stats["peak"], level)
                     caller_stats["window_peak"] = max(caller_stats["window_peak"], level)
                     pcm16, input_state = audioop.ratecv(
@@ -1169,6 +1177,7 @@ async def bridge(reader, writer, call_id):
                         await emit("userSpeechStart", playback.snapshot())
                     customer_transcript = join_transcript(customer_transcript, transcription["text"])
                     last_customer_speech = time.monotonic()
+                    caller_stats["heard_mark"] = caller_stats["voiced_listening"]
                     reason = person_handoff_reason(customer_transcript)
                     if reason and not person_handoff["reason"] and not close_requested.is_set():
                         person_handoff["reason"] = reason
@@ -1442,9 +1451,35 @@ async def bridge(reader, writer, call_id):
             nonlocal last_progress
             nudges = 0
             unstuck_turn = None
+            deaf = {"resets": 0}
             while not close_requested.is_set():
                 await asyncio.sleep(0.25)
                 now = time.monotonic()
+                unheard = caller_stats["voiced_listening"] - caller_stats["heard_mark"]
+                if (
+                    unheard >= DEAF_VOICED_FRAMES
+                    and not user_turn_open
+                    and now - last_customer_speech > DEAF_SECONDS
+                    and now - last_progress > DEAF_SECONDS
+                    and playback.state == "LISTENING"
+                    and not playback.assistant_speaking
+                ):
+                    caller_stats["heard_mark"] = caller_stats["voiced_listening"]
+                    deaf["resets"] += 1
+                    await emit("geminiDeaf", {"voicedFrames": unheard, "reset": deaf["resets"]})
+                    if deaf["resets"] == 1:
+                        last_progress = now
+                        await gemini.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
+                        continue
+                    await gemini.send(json.dumps({"clientContent": {"turns": [{"role": "user", "parts": [{"text": f'Say exactly: "{CANT_HEAR_LINE}"'}]}], "turnComplete": True}}))
+                    await asyncio.sleep(CANT_HEAR_GRACE_SECONDS)
+                    await playback.wait_until_complete()
+                    if not close_requested.is_set():
+                        value = await app_action(call_id, "handoff", reason="The AI stopped hearing the caller.")
+                        if value.get("closeBridge", True):
+                            close_requested.set()
+                            await terminate_audiosocket(writer)
+                    return
                 if (
                     user_turn_open
                     and unstuck_turn != customer_turn_id
