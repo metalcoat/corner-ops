@@ -279,6 +279,8 @@ if [[ -n "$previous_image_id" ]]; then
 fi
 
 image_build_failed=false
+# The POS shows which commit it runs (System status); docker-compose.local.yml passes this to the app build.
+export APP_BUILD_SHA="$remote_sha"
 docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build asterisk app \
   || image_build_failed=true
 if [[ "$image_build_failed" == true ]]; then

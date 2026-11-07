@@ -173,6 +173,9 @@ flowchart LR
 - The phone dialplan never expands `VOICE_PAYMENT_INTERNAL_SECRET` (2026-11-07). Before, `Set(CURLOPT(httpheader)=…)` printed it in Asterisk's verbose log on every call. Routing and status lookups now go through the AGI helper `asterisk/ai-route.py` (`/usr/local/bin/corner-ops-ai-route route|status`), which reads the secret from its own environment.
   - Tests: `asterisk/ai-route-test.py`, plus assertions in `scripts/gemini-phone-validate.ts`.
   - The dev secret was rotated the same day. Production needs the same image change at switchover, and its secret rotated if it ever ran the old dialplan with verbose logging.
+- POS build label (2026-11-07): the POS header shows which server it's on, DEV (amber), STAGING (purple) or PROD (green); it was hard-coded "DEV" before. System status (the colored dot) lists Server and Version: the commit plus the image build time.
+  - The environment comes from `APP_ENVIRONMENT` if set, else `LOCAL_DEVELOPMENT` and the app URLs (`src/lib/build-info.ts`).
+  - The Dockerfile stamps `/app/.built-at`. The commit comes from the `APP_BUILD_SHA` build arg, which `deploy/update.sh` exports and `docker-compose.local.yml` passes; a production build shows the build time unless it passes the arg too.
 - Docker disk cleanup: `update.sh` prunes after each deploy, but only untagged images and build cache older than 72 h, so tagged leftovers piled up. The box got down to 1.6 GB free on 2026-11-06, and 9 GB was freed by hand that day.
   - `deploy/docker-cleanup.sh` removes untagged images, build cache beyond 5 GB, and unused `corner-ops-*` tags older than 14 days. It keeps `:latest`, `:rollback` and `:before-*`, never touches containers, volumes or base images, logs to `deploy/logs/docker-cleanup.log`, and warns when less than 8 GB is free.
   - `--dry-run` lists what it would remove.
