@@ -182,6 +182,15 @@ export function normalizeSpokenModifier(
   modifier: NonNullable<SpokenOrderItem["modifiers"]>[number],
 ) {
   let next = { ...modifier };
+  // A made-up group spelled as its options ("Blue Cheese/Ranch/Celery" for wings, dev test call 2026-11-07)
+  // is the one real group holding all of them ("Wings Add Ons").
+  if (next.group?.includes("/") && !groups.some((group) => group.name === next.group)) {
+    const parts = next.group.split("/").map((part) => spokenKey(part)).filter(Boolean);
+    const holder = groups.filter((group) =>
+      parts.every((part) => group.options.some((option) => modifierAliases(option.name, group.name).some((alias) => spokenKey(alias) === part))),
+    );
+    if (holder.length === 1) next = { ...next, group: holder[0].name };
+  }
   if (next.group && !groups.some((group) => group.name === next.group)) {
     const wanted = spokenKey(next.group);
     const related = groups.filter((group) => {

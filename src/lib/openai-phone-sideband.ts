@@ -19,6 +19,7 @@ import {
   setAiPaymentDetails,
   serviceType,
   type SpokenOrderItem,
+  normalizeSpokenModifier,
 } from "@/lib/ordering-ai-tools";
 import { recordAiRegression } from "@/lib/ordering-ai-regressions";
 import { resolvePhoneCustomerId } from "@/lib/ordering-ai-phone-guard";
@@ -455,7 +456,10 @@ async function mergeSpokenCartLine(
   // A side cup only rides along on an edit of the same item, never on a line being swapped for another item.
   const sameItem = !incoming.name || ` ${cartKey(existing.name)} `.includes(` ${cartKey(incoming.name)} `);
   const wingLine = /^(?:boneless )?wings?$/i.test(existing.name.trim());
-  for (const edit of incoming.modifiers || []) {
+  for (const spoken of incoming.modifiers || []) {
+    // An edit takes the same name/group clean-up as an add: a group the item doesn't have ("Toppings" on a
+    // pizza, dev test call 2026-11-07) made pepperoni, blue cheese and celery all "not an option".
+    const edit = normalizeSpokenModifier(groups as any, spoken);
     const removal = resolveSpokenModifierRemoval(groups, edit);
     const restore = removal ? null : resolveSpokenRecipeRestore(groups, edit);
     if (restore) {

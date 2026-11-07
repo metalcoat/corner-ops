@@ -173,6 +173,10 @@ flowchart LR
 - The phone dialplan never expands `VOICE_PAYMENT_INTERNAL_SECRET` (2026-11-07). Before, `Set(CURLOPT(httpheader)=…)` printed it in Asterisk's verbose log on every call. Routing and status lookups now go through the AGI helper `asterisk/ai-route.py` (`/usr/local/bin/corner-ops-ai-route route|status`), which reads the secret from its own environment.
   - Tests: `asterisk/ai-route-test.py`, plus assertions in `scripts/gemini-phone-validate.ts`.
   - The dev secret was rotated the same day. Production needs the same image change at switchover, and its secret rotated if it ever ran the old dialplan with verbose logging.
+- AI phone cart, 2026-11-07 15:10 test call: the voice model sent modifiers with group names the item doesn't have ("Toppings" on a pizza, "Blue Cheese/Ranch/Celery" on wings). Pepperoni, blue cheese and celery were refused and the wings were dropped.
+  - Line edits now go through the same group clean-up as adds (`normalizeSpokenModifier`).
+  - A slash-joined made-up group maps to the one real group holding all its options. A real but wrong group still stays an error.
+  - Test: `scripts/ai-cart-regressions/model-groups.ts`.
 - POS build label (2026-11-07): the POS header shows which server it's on, DEV (amber), STAGING (purple) or PROD (green); it was hard-coded "DEV" before. System status (the colored dot) lists Server and Version: the commit plus the image build time.
   - The environment comes from `APP_ENVIRONMENT` if set, else `LOCAL_DEVELOPMENT` and the app URLs (`src/lib/build-info.ts`).
   - The Dockerfile stamps `/app/.built-at`. The commit comes from the `APP_BUILD_SHA` build arg, which `deploy/update.sh` exports and `docker-compose.local.yml` passes; a production build shows the build time unless it passes the arg too.
