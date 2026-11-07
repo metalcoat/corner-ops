@@ -1,5 +1,6 @@
 import GreeterTvSettingsClient from "../greeter-tv-settings-client";
+import LobbyTriviaSettingsClient from "../lobby-trivia-settings-client";
 import StoreOperationsSettingsClient from "../store-operations-settings-client";
 import StaleDraftSettingsClient from "../stale-draft-settings-client";
 import EmployeeDrinkSettingsClient from "../employee-drink-settings-client";
-export default function OperationsPage() { return <><GreeterTvSettingsClient /><StoreOperationsSettingsClient /><StaleDraftSettingsClient /><EmployeeDrinkSettingsClient /></>; }
+export default function OperationsPage() { return <><GreeterTvSettingsClient /><LobbyTriviaSettingsClient /><StoreOperationsSettingsClient /><StaleDraftSettingsClient /><EmployeeDrinkSettingsClient /></>; }

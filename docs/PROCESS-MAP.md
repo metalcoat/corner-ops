@@ -444,6 +444,18 @@ flowchart LR
   changes, so a holiday ends at store midnight rather than at the 4 AM reload. Switched over 2026-10-22: `menu-tv.sh` also wakes this TV and keeps
   the greeter page on it; the Pi greeter program still runs on HDMI but isn't shown, and the Pi only keeps its CEC
   "off" lines as a backup.
+- Lobby trivia (dev, 2026-11-07): the greeter TV's bottom-right corner (`src/app/pos/greeter/tv/trivia-corner.tsx`,
+  polling `GET /api/pos/greeter/trivia` every 4 s) shows a QR that changes every minute (HMAC of the minute,
+  `src/lib/trivia-rules.ts`; good for 2–3 minutes), the top 5 Today → This month → This year, the question someone is
+  on, and "<name> got it!". It grows for each walk-in's welcome and 15 s after. The QR opens `/trivia` on the public
+  site (`TRIVIA_BASE_URL`, else dev.ordercornerdeli.com / ordercornerdeli.com in production); a scan lets that phone
+  play 30 minutes. Nickname, then up to 15 random questions a store day (4 AM day, no repeats), checked on the server
+  (`POST /api/customer/trivia`, `src/lib/lobby-trivia.ts`; tables `trivia_*`, migration 0047; questions in
+  `src/lib/trivia-questions.ts`, by id). Players are a signed cookie; "Add your phone number" reuses the ordering
+  site's texted-code sign-in so scores follow them to a new phone. Boards: most correct, tie to whoever got there
+  first. POS Settings › Operations › Lobby trivia: on/off switch (off = no QR, phones see "paused", nothing accepted;
+  with no setting saved it's on except in production) and Hide for any player's name. No points or prizes.
+  Tests: `tests/lobby-trivia.test.ts`, `npm run test:lobby-trivia` (dev database).
 
 ## 8b-1. Corner Deli employee app (Android)
 

@@ -5,6 +5,7 @@ import { GREETER_WELCOME_MS, greeterNext } from "@/lib/door-chime-policy";
 import type { NflGame } from "@/lib/greeter-nfl";
 import SeasonFx from "../../menu-board/season-fx";
 import SpookyScene from "./spooky-scene";
+import TriviaCorner from "./trivia-corner";
 
 const POLL_MS = 2_000;
 const SLIDE_MS = 15_000;
@@ -270,6 +271,7 @@ export default function GreeterTv({ qrSvg, orderUrl, season, followSeason, ribbo
             <div className="gtYt"><div ref={youTube} /></div>
           </div>
         )}
+        <TriviaCorner welcome={welcome} />
         {offline && <i className="gtOffline" title="Can't reach the store server" />}
       </div>
     </main>

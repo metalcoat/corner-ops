@@ -2,6 +2,7 @@ import DeliverySettingsClient from "./delivery-settings-client";
 import PosSettingsClient from "./pos-settings-client";
 import StoreOperationsSettingsClient from "./store-operations-settings-client";
 import GreeterTvSettingsClient from "./greeter-tv-settings-client";
+import LobbyTriviaSettingsClient from "./lobby-trivia-settings-client";
 import PromotionsSettingsClient from "./promotions-settings-client";
 import LoyaltySettingsClient from "./loyalty-settings-client";
 import GiftCardSettingsClient from "./gift-card-settings-client";
@@ -10,5 +11,5 @@ import HardwareSettingsClient from "./hardware-settings-client";
 import AiPhoneSettingsClient from "./ai-phone-settings-client";
 
 export default function DeliDeliverySettingsPage() {
-  return <><AiPhoneSettingsClient /><PosSettingsClient /><HardwareSettingsClient /><GreeterTvSettingsClient /><StoreOperationsSettingsClient /><DeliverySettingsClient /><PromotionsSettingsClient /><LoyaltySettingsClient /><GiftCardSettingsClient /><BarcodeSettingsClient /></>;
+  return <><AiPhoneSettingsClient /><PosSettingsClient /><HardwareSettingsClient /><GreeterTvSettingsClient /><LobbyTriviaSettingsClient /><StoreOperationsSettingsClient /><DeliverySettingsClient /><PromotionsSettingsClient /><LoyaltySettingsClient /><GiftCardSettingsClient /><BarcodeSettingsClient /></>;
 }
