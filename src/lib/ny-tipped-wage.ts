@@ -34,3 +34,14 @@ export function tipCreditShortfallCents(input: { tippedHours: number; tippedRate
   const paid = Math.round(hours * input.tippedRateCents) + Math.max(0, Math.round(input.tipsCents));
   return Math.max(0, owed - paid);
 }
+
+/**
+ * Overtime cash rate for tipped (driving) hours: 1.5 × the full rate (cash wage + tip credit) minus the tip
+ * credit, i.e. driver rate + half the minimum while a credit is taken. 2026: $10.70 → $18.70 (1.5 × $16.00 − $5.30).
+ * With no tip credit (driver rate at or above minimum) it is plain 1.5 × the driver rate.
+ */
+export function tippedOvertimeRateCents(tippedRateCents: number, year: number): number {
+  const rates = nyFoodServiceRates(year);
+  const credit = Math.max(0, Math.min(rates.tipCreditCents, rates.minimumCents - tippedRateCents));
+  return Math.round(1.5 * (tippedRateCents + credit)) - credit;
+}

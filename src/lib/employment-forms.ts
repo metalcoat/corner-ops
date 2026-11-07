@@ -1,4 +1,4 @@
-import { nyFoodServiceRates } from "@/lib/ny-tipped-wage";
+import { nyFoodServiceRates, tippedOvertimeRateCents } from "@/lib/ny-tipped-wage";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { requireStrongSecret } from "@/lib/secret-strength";
 import { ensureSchema, getSql } from "@/lib/db";
@@ -297,6 +297,8 @@ export async function assignOnboardingPacket(input: {
         regularRate: hourlyRate,
         secondaryRate: multipleRates ? tippedRate : null,
         overtimeRate: hourlyRate * 1.5,
+        // Second overtime rate for driving (tipped) hours: 1.5 × minimum minus the tip credit.
+        tippedOvertimeRate: multipleRates ? tippedOvertimeRateCents(Math.round(tippedRate * 100), Number(String(input.hireDate).slice(0, 4)) || new Date().getFullYear()) / 100 : null,
         tipCreditOrAllowance: multipleRates ? nyTipCreditPerHour(tippedRate, input.hireDate) : 0,
       },
     })]),
@@ -336,6 +338,7 @@ export async function assignRateChange(input: {
       regularRate: input.hourlyRate,
       secondaryRate: multipleRates ? input.tippedRate : null,
       overtimeRate: input.hourlyRate * 1.5,
+      tippedOvertimeRate: multipleRates ? tippedOvertimeRateCents(Math.round(input.tippedRate * 100), Number(String(input.effectiveDate).slice(0, 4)) || new Date().getFullYear()) / 100 : null,
       tipCreditOrAllowance: multipleRates ? nyTipCreditPerHour(input.tippedRate, input.effectiveDate) : 0,
       effectiveDate: input.effectiveDate,
     },

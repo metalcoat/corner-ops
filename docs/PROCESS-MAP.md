@@ -489,6 +489,11 @@ flowchart LR
   the cash wage; the pay notice is LS55 with both rates and the tip credit. Payroll shows "Driver pay below minimum
   wage" when a driver's tipped rate × driving hours + delivery tips is under the minimum for those hours.
   The 2-hour/20% non-tipped-work rule is handled by paying non-delivery time at the regular rate (handbook section 7).
+- Second overtime rule (2026-11-07, `src/lib/payroll-overtime-rules.ts`): hours past 40 are taken in the order worked
+  and belong to the role at that moment (driver shifts are tipped after 3 PM, as for TipWa). In-store overtime is
+  1.5 × regular; driving overtime is driver rate + ½ minimum while a tip credit is taken (2026: $10.70 → $18.70).
+  Payroll shows "Overtime by role" with pay per role; the LS55 pay notice lists both overtime rates. The Payroll
+  Relief export still sends one OT column (Payroll Relief prices it from its own rate); see the open item below.
 - Handbook sections 3 (call-outs), 5 (breaks), 13 (alcohol, zero tolerance) and 14 (no smoking/vaping) are marked draft until Chris approves
   the wording; any handbook change asks every employee to sign again.
 
