@@ -307,6 +307,14 @@ CLAUDE_CHECKER_ENABLED = os.environ.get("AI_PHONE_CLAUDE_CHECKER", "").lower() i
 CHECK_GATED_TOOLS = {"hold", "send", "request_secure_voice_payment"}
 CHECK_GATE_SECONDS = 1.5
 CHECK_MAX_BLOCKS = 2
+# A final check before the readback (dev call 2026-11-07 20:16: wings whose sauce question was answered never went
+# on, and the last check had treated them as still pending). It starts when the caller says they're done and is
+# waited for (at most CHECK_GATE_SECONDS) when Gemini reads the cart for the readback (get_draft); its fix or note
+# comes back with that cart.
+FINAL_ORDER_PHRASE = re.compile(
+    r"\bthat'?s (?:it|all|everything)\b|\bthat(?: is|'ll be| will be) (?:it|all)\b|\bnothing else\b|\bi'?m (?:all )?(?:good|done)\b",
+    re.IGNORECASE,
+)
 # A note used to go in as its own user turn (clientContent, turnComplete) once Gemini and the caller were quiet.
 # Gemini almost never answered it (5-20 s later), and on dev test call 2026-11-07 18:57 it stopped hearing the
 # caller right after one, which it did for none of the 16 notes that rode on a tool result. Notes now ride only on
@@ -333,6 +341,7 @@ class OrderChecker:
         self.fixes = []
         self.delivered = set()
         self.blocks = 0
+        self.final_turn = None
 
     def schedule(self, stage, pending_text=""):
         self.sequence += 1
@@ -358,6 +367,21 @@ class OrderChecker:
         elif result.get("status") in ("ok", "fixed"):
             self.note = None
         return result
+
+    def final(self, turn, pending_text=""):
+        """One final-stage check per caller turn."""
+        if self.final_turn != turn:
+            self.final_turn = turn
+            self.schedule("final", pending_text)
+
+    async def wait_latest(self, tool):
+        if self.task is not None and not self.task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(self.task), CHECK_GATE_SECONDS)
+            except asyncio.TimeoutError:
+                await self.emit("orderCheckTimeout", {"tool": tool, "waitSeconds": CHECK_GATE_SECONDS})
+            except Exception:
+                pass
 
     def has_note(self):
         return bool(self.note or self.fixes)
@@ -1190,6 +1214,8 @@ async def bridge(reader, writer, call_id):
                     customer_transcript = join_transcript(customer_transcript, transcription["text"])
                     last_customer_speech = time.monotonic()
                     caller_stats["heard_mark"] = caller_stats["voiced_listening"]
+                    if checker and FINAL_ORDER_PHRASE.search(customer_transcript):
+                        checker.final(customer_turn_id, customer_transcript)
                     reason = person_handoff_reason(customer_transcript)
                     if reason and not person_handoff["reason"] and not close_requested.is_set():
                         person_handoff["reason"] = reason
@@ -1324,6 +1350,9 @@ async def bridge(reader, writer, call_id):
                         result = cached_result
                     else:
                         async def execute():
+                            if checker and name == "get_draft":
+                                checker.final(customer_turn_id, customer_transcript)
+                                await checker.wait_latest(name)
                             if checker and name in CHECK_GATED_TOOLS:
                                 note = await checker.gate(name)
                                 if note:

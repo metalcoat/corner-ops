@@ -62,7 +62,7 @@ export const ON_DEMAND_RULES = [
   { key: "burger", match: "burger", text: BURGER_POLICY },
   { key: "steak_sub", match: "^(?:steak|chicken fajita|hot sausage)\\b", text: STEAK_STYLE_SUB_POLICY },
 ];
-const ON_DEMAND_NOTE = `Rules for delivery checkout and addresses, hot meat meals and the Chicken Tender Dinner, burgers, and steak-style subs arrive as itemRules in a tool result the first time the call needs them; follow them exactly as if they were written here. Don't call PRICE_ORDER just to record pickup or the confirmed name: send them with the first food item. For delivery, send it together with the address.`;
+const ON_DEMAND_NOTE = `Rules for delivery checkout and addresses, hot meat meals and the Chicken Tender Dinner, burgers, and steak-style subs arrive as itemRules in a tool result the first time the call needs them; follow them exactly as if they were written here. Don't call PRICE_ORDER just to record pickup or the confirmed name: send them with the first food item. For delivery, send it together with the address. Right before the readback, silently call GET_DRAFT and read the order back from its result, including any order check note on it.`;
 
 export function buildPhoneInstructions(input: {
   callId: string;

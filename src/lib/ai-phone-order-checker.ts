@@ -39,7 +39,7 @@ export type OrderCheckModifier = { name: string; group: string; placement: "" | 
 export type OrderCheckMismatch = {
   problem: string;
   fix: string;
-  action?: "note" | "add_item" | "add_to_line";
+  action?: "note" | "add_item" | "add_to_line" | "remove_duplicate";
   lineId?: string;
   item?: { name: string; variant: string; quantity: number; modifiers: OrderCheckModifier[] };
   callerQuote?: string;
@@ -73,7 +73,8 @@ Never flag: noise words or unclear speech you can't map to a request; an item in
 For each mismatch also choose an action; the ordering system may apply add_item and add_to_line itself:
 - add_item: an item the caller clearly asked for is missing from the cart entirely. Give it as the ordering tool takes it: menu item name (e.g. Pizza, Wings, Turkey Big Boss), variant (size, e.g. Jumbo Thin, 10 Wings, Full Sub; "" if none), quantity (number of orders), and modifiers by menu option name (flavor, toppings, sauces, dips, changes).
 - add_to_line: an existing cart line is missing a topping, sauce, flavor, dip, side or choice the caller clearly stated, or has the wrong pick in a pick-one choice (e.g. Mild instead of Hot). Give that line's lineId and only the modifiers to add.
-- note: everything else, which goes to the ordering assistant as a note: removing anything, a lower quantity, one item split in two, a different size or item, an omission like "no tomato", pickup/delivery, address, payment, and anything you're not fully sure of.
+- remove_duplicate: two cart lines are exactly the same item, size, quantity and options, and the caller clearly asked for it only once (never when they said two, another, both or a second one). Give the lineId of the extra line; item is {"name":"","variant":"","quantity":1,"modifiers":[]}. callerQuote is the caller's one request for it.
+- note: everything else, which goes to the ordering assistant as a note: removing anything else, a lower quantity, one item split in two, a different size or item, an omission like "no tomato", pickup/delivery, address, payment, and anything you're not fully sure of.
 For a modifier give group only when you know the cart's exact group name, else "". placement is "side" or "topping" only when the caller said on the side or on top, portion only for a half pizza topping, amount only for extra; otherwise "". For note, item is {"name":"","variant":"","quantity":1,"modifiers":[]} and lineId "".
 callerQuote: the caller's own words in the conversation that ask for it, copied exactly. sure: true only when those words plainly ask for exactly this; false for anything garbled, mis-heard or guessed. A cart change the assistant tried that didn't go through shows what it heard from the caller's real voice: when it matches the caller's words (e.g. "30 Wayne medium with blue cheese and celery" and a failed add of 30 Wings), the request is clear, so sure can be true. Never add an item that failed as not on the menu.
 
@@ -91,7 +92,7 @@ const SCHEMA = {
         properties: {
           problem: { type: "string" },
           fix: { type: "string" },
-          action: { type: "string", enum: ["note", "add_item", "add_to_line"] },
+          action: { type: "string", enum: ["note", "add_item", "add_to_line", "remove_duplicate"] },
           lineId: { type: "string" },
           item: {
             type: "object",

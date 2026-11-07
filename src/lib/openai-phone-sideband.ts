@@ -398,11 +398,29 @@ export async function incrementalSpokenCart(
       409,
       { options: ["Same pizza", "Second pizza"] },
     );
-  if (operation === "add")
-    return [
-      ...current,
-      ...changed.map((item) => ({ ...item, lineId: randomUUID() })),
-    ];
+  if (operation === "add") {
+    // Extra plain pizzas on dev calls 2026-11-07 (17:02, 17:41, 18:33, 18:57) came from adds that (a) carried an
+    // existing line's lineId, meaning "change this one", or (b) re-sent a line already in the cart alongside new
+    // items. (a) now edits that line; (b) is skipped when several items came at once and the caller's latest
+    // words don't name it or ask for another.
+    const next = [...current];
+    const another = /\b(?:another|second|2nd|two|2|separate|new|other|extra|more)\b/i.test(customerText);
+    const said = ` ${cartKey(customerText)} `;
+    for (const item of changed) {
+      const index = item.lineId ? next.findIndex((line) => line.lineId === item.lineId) : -1;
+      if (index >= 0) {
+        next[index] = await mergeSpokenCartLine(next[index], item);
+        continue;
+      }
+      const resent =
+        changed.length > 1 &&
+        !another &&
+        !said.includes(` ${cartKey(item.name)} `) &&
+        current.some((line) => sameOrderedLine(line, item));
+      if (!resent) next.push({ ...item, lineId: randomUUID() });
+    }
+    return next;
+  }
   if (operation === "replace_item" && changed.length > 1) {
     const replacements = new Map<string, SpokenOrderItem>();
     for (const incoming of changed) {
@@ -512,6 +530,14 @@ export async function incrementalSpokenCart(
     );
   const replacement = await mergeSpokenCartLine(current[index], changed[0]);
   return current.map((item, i) => (i === index ? replacement : item));
+}
+/** The cart line already has everything this item asks for (same item, size and no new modifiers). */
+function sameOrderedLine(line: SpokenOrderItem, item: SpokenOrderItem) {
+  if (cartKey(line.name) !== cartKey(item.name)) return false;
+  const [have, want] = [cartKey(line.variant || ""), cartKey(item.variant || "")];
+  if (want && !have.startsWith(want) && !want.startsWith(have)) return false;
+  if (Number(item.quantity || 1) > Number(line.quantity || 1)) return false;
+  return (item.modifiers || []).every((wanted) => !wanted.remove && (line.modifiers || []).some((mod) => modifierKey(mod.name) === modifierKey(wanted.name)));
 }
 async function mergeSpokenCartLine(
   existing: SpokenOrderItem,

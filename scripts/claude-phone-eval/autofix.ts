@@ -16,7 +16,16 @@ const KEY_FILE = "/opt/corner-ops/config/anthropic-dev.env";
 if (!process.env.ANTHROPIC_API_KEY && existsSync(KEY_FILE)) loadEnvFile(KEY_FILE);
 
 type Expect = "adds" | "nothing";
-const REPLAYS: Array<{ callId: string; expect: Expect | "either"; what: string; untilAssistant?: RegExp; dropLines?: RegExp; dropModifiers?: RegExp; mustAdd?: RegExp }> = [
+// duplicateLine copies the first matching cart line (an exact duplicate); removesDuplicate says whether Claude
+// must take one back off (Chris's OK, 2026-11-07) or must leave both (the caller asked for two).
+const REPLAYS: Array<{ callId: string; expect: Expect | "either"; what: string; untilAssistant?: RegExp; dropLines?: RegExp; dropModifiers?: RegExp; mustAdd?: RegExp; duplicateLine?: RegExp; removesDuplicate?: boolean | "either" }> = [
+  // Extra pizzas on 2026-11-07 calls, replayed as exact duplicates of a pizza the caller asked for once.
+  { callId: "d652a714-bf34-437c-b88d-cb711d4ddb4f", expect: "either", what: "17:02 one jumbo pepperoni asked once, cart has it twice", untilAssistant: /^Do you want everything on that/, dropLines: /Nacho|Hamburger|Wings/, duplicateLine: /^Pizza$/, removesDuplicate: true },
+  { callId: "78483e80-9515-4c22-83db-615e4d80b0f9", expect: "either", what: "17:41 one large pepperoni asked once, cart has it twice", untilAssistant: /^Alright, so I've got one jumbo pizza/, duplicateLine: /^Pizza$/, removesDuplicate: true },
+  // 18:57's toppings were garbled ("pork brain sausage"): Claude may hold back, but never removes more than one.
+  { callId: "1f0c4671-484e-49f4-bbe7-060922831c65", expect: "either", what: "18:57 one jumbo pizza asked once (garbled toppings), cart has it twice", untilAssistant: /^Got it, what else\?/, dropLines: /Hamburger/, duplicateLine: /^Pizza$/, removesDuplicate: "either" },
+  // 18:33: "two jumbo pizzas": a doubled pizza must stay (it's a note for Gemini to ask about, never a removal).
+  { callId: "620d00ee-448a-4c0d-9c7c-45df4524b91f", expect: "either", what: "18:33 caller said two jumbo pizzas: a doubled pizza is never removed", duplicateLine: /^Pizza$/, removesDuplicate: false },
   // 2026-11-07 15:10: Gemini sent made-up group names, so the wings and dips never went on. Replayed at the
   // readback, before the caller noticed.
   { callId: "036f046f-34f0-4425-b7df-cad50396f543", expect: "adds", what: "15:10 readback: 30 mild wings with blue cheese and celery missing", untilAssistant: /^Okay, I have a jumbo pizza/, dropLines: /^Wings$/, mustAdd: /^Wings$/ },
@@ -59,6 +68,13 @@ async function main() {
   ];
   const input = { stage: "cart" as const, serviceType: "pickup", transcript, cart: [{ lineId: "L1", name: "Pizza", variant: "Jumbo Thin 16\"", quantity: 1, modifiers: ["Classic Sauce"], lineTotalCents: 1500 }] };
   const pepperoni = { problem: "pepperoni missing", fix: "add Pepperoni", action: "add_to_line" as const, lineId: "L1", item: { name: "Pizza", variant: "", quantity: 1, modifiers: [{ name: "Pepperoni", group: "", placement: "" as const, portion: "" as const, amount: "" as const }] }, callerQuote: "jumbo pepperoni pizza", sure: true };
+  const dupes = (said: string) => ({
+    stage: "final" as const,
+    serviceType: "pickup",
+    transcript: [{ speaker: "customer" as const, text: said }, { speaker: "assistant" as const, text: "Got it. Anything else?" }],
+    cart: ["D1", "D2"].map((lineId) => ({ lineId, name: "Pizza", variant: 'Jumbo Thin 16"', quantity: 1, modifiers: ["Pepperoni"], lineTotalCents: 1700 })),
+  });
+  const removal = { problem: "pizza twice", fix: "remove one", action: "remove_duplicate" as const, lineId: "D2", item: { name: "", variant: "", quantity: 1, modifiers: [] }, callerQuote: "jumbo pepperoni pizza", sure: true };
   const rules: Array<[string, boolean]> = [
     ["a sure, quoted topping on a line is applied", "arguments" in fixer.planFix(input, pepperoni)],
     ["the line keeps its own size and quantity", JSON.stringify(fixer.planFix(input, pepperoni)).includes('"quantity":1') && JSON.stringify(fixer.planFix(input, pepperoni)).includes("Jumbo Thin")],
@@ -68,6 +84,12 @@ async function main() {
     ["words Gemini hasn't answered yet stay a note", !("arguments" in fixer.planFix(input, { ...pepperoni, action: "add_item", lineId: "", callerQuote: "20 hot wings", item: { name: "Wings", variant: "20 Wings", quantity: 1, modifiers: [] } }))],
     ["an unknown line stays a note", !("arguments" in fixer.planFix(input, { ...pepperoni, lineId: "nope" }))],
     ["a big new quantity stays a note", !("arguments" in fixer.planFix(input, { ...pepperoni, action: "add_item", lineId: "", item: { ...pepperoni.item, quantity: 9 } }))],
+    ["an exact duplicate asked for once may be removed", fixer.duplicateBlocked(dupes("Can I get a jumbo pepperoni pizza?"), "D2") === ""],
+    ["never when the caller said two", fixer.duplicateBlocked(dupes("Can I get two jumbo pepperoni pizzas?"), "D2") !== ""],
+    ["never when the caller said another", fixer.duplicateBlocked(dupes("and another pepperoni pizza"), "D2") !== ""],
+    ["a two liter Pepsi doesn't count as two pizzas", fixer.duplicateBlocked(dupes("A jumbo pepperoni pizza and a two liter Pepsi"), "D2") === ""],
+    ["a pizza with different toppings is not a duplicate", fixer.duplicateBlocked({ ...dupes("a jumbo pepperoni pizza"), cart: [dupes("x").cart[0], { ...dupes("x").cart[1], modifiers: ["Sausage"] }] }, "D2") !== ""],
+    ["a removal needs Claude sure and a quote", !("arguments" in fixer.planFix(dupes("Can I get a jumbo pepperoni pizza?"), { ...removal, sure: false })) && "arguments" in fixer.planFix(dupes("Can I get a jumbo pepperoni pizza?"), removal)],
     ["a changed cart is noticed", fixer.cartFingerprint(input.cart) !== fixer.cartFingerprint([{ ...input.cart[0], modifiers: ["Classic Sauce", "Pepperoni"] }])],
   ];
   for (const [name, ok] of rules) ok ? console.log(`PASS ${name}`) : fail(name);
@@ -93,6 +115,16 @@ async function main() {
         if (replay.dropModifiers)
           for (const row of await sql`SELECT m.id,m.option_name_snapshot FROM ordering_order_item_modifiers m JOIN ordering_order_items i ON i.id=m.order_item_id WHERE i.order_id=${loaded.orderId}`)
             if (replay.dropModifiers.test(String(row.option_name_snapshot))) await sql`DELETE FROM ordering_order_item_modifiers WHERE id=${row.id}`;
+        if (replay.duplicateLine) {
+          const source = (await sql`SELECT id FROM ordering_order_items WHERE order_id=${loaded.orderId} ORDER BY sort_order,created_at,id`).find((row: any, index: number) => replay.duplicateLine!.test(loaded.cart[index]?.name || ""));
+          assert.ok(source, `${replay.what}: no line to duplicate`);
+          const columns = (await sql`SELECT column_name FROM information_schema.columns WHERE table_name='ordering_order_items' AND column_name NOT IN ('id','cart_line_id')`).map((row: any) => `"${row.column_name}"`);
+          const modifierColumns = (await sql`SELECT column_name FROM information_schema.columns WHERE table_name='ordering_order_item_modifiers' AND column_name NOT IN ('id','order_item_id')`).map((row: any) => `"${row.column_name}"`);
+          const raw = (text: string, ...values: unknown[]) => sql(Object.assign(text.split(/\$\d+/), { raw: text.split(/\$\d+/) }) as unknown as TemplateStringsArray, ...values);
+          const copy = randomUUID();
+          await raw(`INSERT INTO ordering_order_items(id,cart_line_id,${columns.join(",")}) SELECT $1,$2,${columns.join(",")} FROM ordering_order_items WHERE id=$3`, copy, randomUUID(), source.id);
+          await raw(`INSERT INTO ordering_order_item_modifiers(id,order_item_id,${modifierColumns.join(",")}) SELECT gen_random_uuid(),$1,${modifierColumns.join(",")} FROM ordering_order_item_modifiers WHERE order_item_id=$2`, copy, source.id);
+        }
         loaded = await checker.loadOrderCheckInput(replay.callId, "final");
         let transcript = loaded.transcript;
         if (replay.untilAssistant) {
@@ -118,9 +150,15 @@ async function main() {
     }
     const fixed = outcome.fixed || [];
     const problems: string[] = [];
+    const removed = loaded.cart.filter((line) => !after.some((row) => row.lineId === line.lineId));
+    const twinOf = (line: (typeof loaded.cart)[number]) => loaded.cart.filter((row) => row.name === line.name && row.variant === line.variant && row.quantity === line.quantity && [...row.modifiers].sort().join() === [...line.modifiers].sort().join()).length > 1;
+    if (replay.removesDuplicate === true && !(removed.length === 1 && twinOf(removed[0]))) problems.push(`expected one duplicate removed, removed ${removed.length}`);
+    const removalAllowed = (replay.removesDuplicate === true || replay.removesDuplicate === "either") && removed.length === 1 && twinOf(removed[0]);
     for (const line of loaded.cart) {
       const now = after.find((row) => row.lineId === line.lineId);
-      if (!now) problems.push(`removed ${line.name}`);
+      if (!now) {
+        if (!(removalAllowed && removed[0] === line)) problems.push(`removed ${line.name}`);
+      }
       else if (now.quantity < line.quantity) problems.push(`lowered ${line.name}`);
       else if (line.modifiers.some((modifier) => !now.modifiers.includes(modifier) && !/sauce|cooked/i.test(modifier)))
         problems.push(`dropped a modifier on ${line.name}: ${line.modifiers.filter((m) => !now.modifiers.includes(m)).join(", ")}`);

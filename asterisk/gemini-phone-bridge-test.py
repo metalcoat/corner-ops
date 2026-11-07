@@ -410,6 +410,22 @@ async def main():
     check("with GEMINI_ORDER_CHECK_NUDGE a pending note reaches an idle Gemini", any(n == "orderCheckNote" and d.get("via") == "nudge" for n, d in log["events"]), log["events"])
     gp.CHECK_IDLE_NUDGE = False
 
+    # The caller says they're done: a final check starts at once, and the readback's get_draft waits for it and
+    # carries its fix (dev call 2026-11-07 20:16: lost wings were never re-checked before the readback).
+    stages = []
+
+    async def final_fix(values):
+        stages.append(values.get("stage"))
+        await asyncio.sleep(0.05)
+        if values.get("stage") == "final":
+            return {"status": "fixed", "note": "", "mismatches": [], "fixed": ["added 10 Boneless Wings (BBQ)"], "fixNote": "(Private order update: added 10 Boneless Wings (BBQ).)"}
+        return {"status": "ok", "note": "", "mismatches": []}
+
+    log = await run([transcript("ah that's it"), tool_call("g", {}, "get_draft"), "WAIT_TOOL_RESPONSE"], [{"ok": True, "lines": []}], final_fix)
+    check("'that's it' starts a final check, once", stages.count("final") == 1, stages)
+    check("the readback's cart carries the final check's fix", "Boneless Wings" in str(first_result(log, 0).get("orderCheck", "")), {"r": log["toolResponses"], "e": [n for n, _ in log["events"]], "app": log["app"]})
+    check("final-order phrases", all(gp.FINAL_ORDER_PHRASE.search(t) for t in ["that's it", "that'll be all", "nothing else", "I'm good"]) and not gp.FINAL_ORDER_PHRASE.search("is that it with the fries"), {})
+
     # Claude fixed the cart itself (AI_PHONE_CLAUDE_AUTOFIX, 2026-11-07): Gemini hears what changed even when a
     # newer cart change superseded that check, and a fully fixed cart leaves no mismatch note.
     FIXED = {"status": "fixed", "note": "", "mismatches": [], "fixed": ["added Pepperoni to the Pizza"], "fixNote": "(Private order update: added Pepperoni to the Pizza.)"}

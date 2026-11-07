@@ -20,6 +20,8 @@ import { POST as orderingMcp } from "@/app/api/openai/ordering/mcp/route";
 //   already answered (not words still being handled, which Gemini may be adding right now);
 // - the cart is exactly the cart Claude checked (otherwise a newer check is coming) and no question about an
 //   item is open; the cart lock keeps Gemini from writing in between.
+// Since 2026-11-07 (Chris's OK) one removal too: an exact duplicate line (same item, size, quantity and options as
+// another line) of something the caller asked for once, never when they said two/another/both about that item.
 // Off unless AI_PHONE_CLAUDE_AUTOFIX is true.
 
 export const orderAutofixEnabled = () => ["1", "true"].includes(String(process.env.AI_PHONE_CLAUDE_AUTOFIX || "").toLowerCase());
@@ -54,10 +56,41 @@ const modifierInput = (modifier: NonNullable<OrderCheckMismatch["item"]>["modifi
 });
 
 /** The price_order call for one mismatch, or why it stays a note. */
+const lineKey = (line: OrderCheckLine) => JSON.stringify([words(line.name), words(line.variant), line.quantity, line.modifiers.map(words).sort()]);
+const ASKED_MORE_THAN_ONE = /\b(?:two|2|another|both|second|couple|pair|extra|more)\b/;
+
+/** Why an exact-duplicate removal isn't allowed, or "" when it is. */
+export function duplicateBlocked(input: OrderCheckInput, lineId: string) {
+  const line = input.cart.find((row) => row.lineId && row.lineId === lineId);
+  if (!line) return "line not in cart";
+  const twins = input.cart.filter((row) => row.lineId !== line.lineId && lineKey(row) === lineKey(line));
+  if (twins.length !== 1) return "not an exact duplicate";
+  const item = words(line.name).split(" ").filter((word) => word.length > 2);
+  const asked = input.transcript.filter((row) => row.speaker === "customer").map((row) => ` ${words(row.text)} `);
+  // "two liter" is a drink size, not a second item.
+  if (asked.some((text) => item.some((word) => text.includes(` ${word}`)) && ASKED_MORE_THAN_ONE.test(text.replace(/\b(?:two|2) liter\b/g, ""))))
+    return "caller may have asked for more than one";
+  return "";
+}
+
 export function planFix(input: OrderCheckInput, mismatch: OrderCheckMismatch): FixPlan | { skip: string } {
-  if (mismatch.action !== "add_item" && mismatch.action !== "add_to_line") return { skip: "note" };
+  if (mismatch.action !== "add_item" && mismatch.action !== "add_to_line" && mismatch.action !== "remove_duplicate") return { skip: "note" };
   if (!mismatch.sure) return { skip: "not sure" };
   if (!quoteAnswered(input.transcript, String(mismatch.callerQuote || ""))) return { skip: "caller quote not found" };
+  if (mismatch.action === "remove_duplicate") {
+    const blocked = duplicateBlocked(input, String(mismatch.lineId || ""));
+    if (blocked) return { skip: blocked };
+    const line = input.cart.find((row) => row.lineId === mismatch.lineId)!;
+    return {
+      arguments: {
+        operation: "remove_item",
+        serviceType: ["pickup", "delivery"].includes(input.serviceType) ? input.serviceType : "undecided",
+        targetLineId: line.lineId,
+        items: [{ name: line.name, lineId: line.lineId, quantity: line.quantity }],
+      },
+      summary: `removed duplicate ${line.variant ? `${line.variant} ` : ""}${line.name}`.replace(/\s+/g, " "),
+    };
+  }
   const item = mismatch.item;
   const modifiers = (item?.modifiers || []).filter((modifier) => modifier.name.trim()).map(modifierInput);
   const serviceType = ["pickup", "delivery"].includes(input.serviceType) ? input.serviceType : "undecided";
@@ -139,7 +172,10 @@ export async function applyOrderFixes(callId: string, input: OrderCheckInput, ch
       // "Got it, what else?" came 2 s later), so the quote is checked against the transcript as it is now.
       const now = { ...input, transcript: current.transcript };
       for (const mismatch of checked.mismatches) {
-        const plan = planFix(now, mismatch);
+        let plan = planFix(now, mismatch);
+        // Never remove a line that another fix in this check is changing.
+        if (mismatch.action === "remove_duplicate" && checked.mismatches.some((other) => other !== mismatch && other.lineId === mismatch.lineId && other.action === "add_to_line"))
+          plan = { skip: "line also being changed" };
         if (!("arguments" in plan) || blocked) {
           skipped.push("skip" in plan ? plan.skip : blocked);
           remaining.push(mismatch);
