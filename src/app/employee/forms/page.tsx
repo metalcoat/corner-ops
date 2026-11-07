@@ -193,7 +193,7 @@ export default function EmployeeFormsPage() {
             {initial.tippedOvertimeRate !== null && initial.tippedOvertimeRate !== undefined && <div><span>Overtime rate, driving (tipped)</span><strong>{dollars(initial.tippedOvertimeRate)}</strong><small>1.5 × minimum wage minus the tip credit</small></div>}
             <div><span>Tip credit or allowance shown</span><strong>{dollars(initial.tipCreditOrAllowance)}</strong></div>
             <div><span>Pay frequency</span><strong>{text(employer.payFrequency)}</strong><small>Regular payday: {text(employer.payday)}</small></div>
-          </div><div className="employmentCallout">I acknowledge receiving this written notice before beginning work at the stated rate or before the stated rate change becomes effective.</div></div>}
+          </div>{Boolean(initial.overtimeByRoleAgreement) && <div className="employmentCallout"><strong>Overtime by job:</strong> {text(initial.overtimeByRoleAgreement)}</div>}<div className="employmentCallout">I acknowledge receiving this written notice before beginning work at the stated rate or before the stated rate change becomes effective.</div></div>}
 
           {selected.formType === "MEAL_POLICY" && <div className="employmentSection"><h3>Meal-period acknowledgment</h3><div className="employmentPolicyText">{text(initial.statement)}</div></div>}
 

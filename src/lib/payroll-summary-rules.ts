@@ -930,6 +930,8 @@ export async function payrollSummary(business: Business, weekStart: string) {
         overtimeHours,
         overtimeRegularHours: byRole.regularOvertimeHours,
         overtimeTippedHours: byRole.tippedOvertimeHours,
+        straightRegularHoursByRole: byRole.regularStraightHours,
+        straightTippedHoursByRole: byRole.tippedStraightHours,
         tipsBeforeFee: Math.round(row.tipsBeforeFee * 100) / 100,
         pickupTipsBeforeFee: Math.round(row.pickupTipsBeforeFee * 100) / 100,
         deliveryTipsBeforeFee: Math.round(row.deliveryTipsBeforeFee * 100) / 100,

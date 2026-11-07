@@ -18,7 +18,10 @@
 // (commas inside names are written as two spaces: "Allen  Gregory M." is "Allen, Gregory M.").
 
 /** What Corner Ops enters: Reg = regular hours, TipWa = driver (tipped-wage) hours, PCTip = tips, OT = overtime hours. */
-export type HoursTotals = { reg: number; tipHours: number; tips: number; ot: number };
+export type HoursTotals = { reg: number; tipHours: number; tips: number; ot: number; /** Driver (tipped) overtime, only when the timesheet has that column. */ tipOt?: number };
+
+/** Payroll Relief earnings code for driver (tipped) overtime. Chris adds it in Payroll Relief; until then all overtime goes in OT. */
+export const DRIVER_OT_CODE = process.env.PAYROLL_RELIEF_DRIVER_OT_CODE?.trim() || "TipOT";
 
 export type TimesheetEmployee = {
   /** Index into Timesheet.lines. */
@@ -41,7 +44,7 @@ export type Timesheet = {
   periodEnd: string;
   payDate: string;
   schedule: string;
-  columns: { payType: number; reg: number; tipHours: number; tips: number; ot: number };
+  columns: { payType: number; reg: number; tipHours: number; tips: number; ot: number; /** -1 when Payroll Relief has no driver OT column. */ tipOt: number };
   employees: TimesheetEmployee[];
 };
 
@@ -126,6 +129,7 @@ export function parseTimesheet(text: string): Timesheet {
   };
   const missing = (Object.keys(columns) as Array<keyof typeof columns>).filter((key) => columns[key] < 0).map((key) => REQUIRED_CODES[key]);
   if (missing.length) throw new Error(`The downloaded timesheet is missing the ${missing.join(", ")} column(s).`);
+  const tipOt = column(DRIVER_OT_CODE);
 
   // "Label:" cells before the column codes, each followed by its value.
   const labels = new Map<string, string>();
@@ -158,7 +162,7 @@ export function parseTimesheet(text: string): Timesheet {
     periodEnd: usDateToIso(period[1] || ""),
     payDate: usDateToIso(labels.get("pay date") || ""),
     schedule: labels.get("pay schedule") || "",
-    columns,
+    columns: { ...columns, tipOt },
     employees,
   };
 }
@@ -169,14 +173,17 @@ export function timesheetRoster(sheet: Timesheet): RosterEntry[] {
 
 /** Totals of Reg, TipWa, PCTip and OT over every employee line (salaried ones included), as Payroll Relief's Totals row adds them. */
 export function timesheetTotals(sheet: Timesheet): HoursTotals {
-  const totals = { reg: 0, tipHours: 0, tips: 0, ot: 0 };
+  const totals = { reg: 0, tipHours: 0, tips: 0, ot: 0, tipOt: 0 };
   for (const employee of sheet.employees) {
     totals.reg += amount(employee.cells[sheet.columns.reg]);
     totals.tipHours += amount(employee.cells[sheet.columns.tipHours]);
     totals.tips += amount(employee.cells[sheet.columns.tips]);
     totals.ot += amount(employee.cells[sheet.columns.ot]);
+    if (sheet.columns.tipOt >= 0) totals.tipOt += amount(employee.cells[sheet.columns.tipOt]);
   }
-  return { reg: round2(totals.reg), tipHours: round2(totals.tipHours), tips: round2(totals.tips), ot: round2(totals.ot) };
+  const result: HoursTotals = { reg: round2(totals.reg), tipHours: round2(totals.tipHours), tips: round2(totals.tips), ot: round2(totals.ot) };
+  if (sheet.columns.tipOt >= 0) result.tipOt = round2(totals.tipOt);
+  return result;
 }
 
 export function timesheetText(sheet: Timesheet): string {
@@ -192,6 +199,8 @@ export type PayrollRowInput = {
   regularHours?: number;
   overtimeHours?: number;
   driverTipHours?: number;
+  /** Second overtime rule: overtime hours worked while driving (part of overtimeHours). */
+  overtimeTippedHours?: number;
   tips?: number;
 };
 
@@ -200,17 +209,25 @@ export function employeeKey(name: string): string {
   return String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-export function rowAmounts(row: PayrollRowInput): HoursTotals {
-  return {
+/** splitDriverOt: the timesheet has a driver OT column, so driving overtime goes there and OT keeps in-store overtime. */
+export function rowAmounts(row: PayrollRowInput, splitDriverOt = false): HoursTotals {
+  const overtime = round2(Number(row.overtimeHours || 0));
+  const amounts: HoursTotals = {
     reg: round2(Number(row.regularHours || 0)),
     tipHours: round2(Number(row.driverTipHours || 0)),
     tips: round2(Number(row.tips || 0)),
-    ot: round2(Number(row.overtimeHours || 0)),
+    ot: overtime,
   };
+  if (splitDriverOt) {
+    const tipOt = round2(Math.min(overtime, Math.max(0, Number(row.overtimeTippedHours || 0))));
+    amounts.ot = round2(overtime - tipOt);
+    amounts.tipOt = tipOt;
+  }
+  return amounts;
 }
 
 function isZero(t: HoursTotals): boolean {
-  return !t.reg && !t.tipHours && !t.tips && !t.ot;
+  return !t.reg && !t.tipHours && !t.tips && !t.ot && !t.tipOt;
 }
 
 function fmt(value: number): string {
@@ -241,11 +258,15 @@ export function planTimesheet(source: Timesheet, rows: PayrollRowInput[], mappin
   const problems: string[] = [];
   const notes: string[] = [];
   const wanted = new Map<string, { employees: string[]; amounts: HoursTotals }>();
+  const splitDriverOt = sheet.columns.tipOt >= 0;
+  if (!splitDriverOt && rows.some((row) => Number(row.overtimeTippedHours || 0) > 0)) {
+    notes.push(`Driver overtime is in the OT column with in-store overtime: Payroll Relief's timesheet has no ${DRIVER_OT_CODE} column yet, so it pays all overtime at one rate. Check driving overtime against the Payroll page's "Overtime by role".`);
+  }
 
   for (const row of rows) {
     const name = String(row.employee || "").trim();
     if (!name || /^(unallocated|cover)$/i.test(name)) continue;
-    const amounts = rowAmounts(row);
+    const amounts = rowAmounts(row, splitDriverOt);
     const num = String(mapping[employeeKey(name)] || "").trim();
     if (!num) {
       if (!isZero(amounts)) problems.push(`${name} has hours or tips but isn't matched to a Payroll Relief employee (choose one under AccountantsOffice employees on the payroll page).`);
@@ -260,13 +281,14 @@ export function planTimesheet(source: Timesheet, rows: PayrollRowInput[], mappin
       if (!isZero(amounts)) notes.push(`${name} (EE #${num}) is salaried in Payroll Relief; left as it is.`);
       continue;
     }
-    const entry = wanted.get(num) || { employees: [], amounts: { reg: 0, tipHours: 0, tips: 0, ot: 0 } };
+    const entry = wanted.get(num) || { employees: [], amounts: { reg: 0, tipHours: 0, tips: 0, ot: 0, ...(splitDriverOt ? { tipOt: 0 } : {}) } };
     entry.employees.push(name);
     entry.amounts = {
       reg: round2(entry.amounts.reg + amounts.reg),
       tipHours: round2(entry.amounts.tipHours + amounts.tipHours),
       tips: round2(entry.amounts.tips + amounts.tips),
       ot: round2(entry.amounts.ot + amounts.ot),
+      ...(splitDriverOt ? { tipOt: round2(Number(entry.amounts.tipOt || 0) + Number(amounts.tipOt || 0)) } : {}),
     };
     wanted.set(num, entry);
   }
@@ -276,13 +298,14 @@ export function planTimesheet(source: Timesheet, rows: PayrollRowInput[], mappin
 
   const mappedNums = new Set(Object.values(mapping).map((n) => String(n || "").trim()).filter(Boolean));
   const c = sheet.columns;
-  const current = (e: TimesheetEmployee): HoursTotals => ({ reg: amount(e.cells[c.reg]), tipHours: amount(e.cells[c.tipHours]), tips: amount(e.cells[c.tips]), ot: amount(e.cells[c.ot]) });
+  const current = (e: TimesheetEmployee): HoursTotals => ({ reg: amount(e.cells[c.reg]), tipHours: amount(e.cells[c.tipHours]), tips: amount(e.cells[c.tips]), ot: amount(e.cells[c.ot]), ...(splitDriverOt ? { tipOt: amount(e.cells[c.tipOt]) } : {}) });
   const write = (e: TimesheetEmployee, t: HoursTotals) => {
-    while (e.cells.length <= Math.max(c.reg, c.tipHours, c.tips, c.ot)) e.cells.push("");
+    while (e.cells.length <= Math.max(c.reg, c.tipHours, c.tips, c.ot, c.tipOt)) e.cells.push("");
     e.cells[c.reg] = fmt(t.reg);
     e.cells[c.tipHours] = fmt(t.tipHours);
     e.cells[c.tips] = fmt(t.tips);
     e.cells[c.ot] = fmt(t.ot);
+    if (splitDriverOt) e.cells[c.tipOt] = fmt(Number(t.tipOt || 0));
     sheet.lines[e.line] = csvLine(e.cells);
   };
 
@@ -298,7 +321,7 @@ export function planTimesheet(source: Timesheet, rows: PayrollRowInput[], mappin
       // Matched to someone in Corner Ops who has nothing this week: Corner Ops' numbers (none) are the entry.
       const before = current(employee);
       if (!isZero(before)) cleared.push({ num: employee.num, rosterName: employee.name, before });
-      write(employee, { reg: 0, tipHours: 0, tips: 0, ot: 0 });
+      write(employee, { reg: 0, tipHours: 0, tips: 0, ot: 0, ...(splitDriverOt ? { tipOt: 0 } : {}) });
     } else {
       const before = current(employee);
       if (!isZero(before)) notes.push(`EE #${employee.num} ${employee.name} isn't matched to anyone in Corner Ops; left as it is (${formatTotals(before)}).`);
@@ -379,19 +402,23 @@ export function gridTotals(header: GridCell[], totalsRow: GridCell[]): HoursTota
     if (value === undefined) return null;
     out[key] = round2(amount(value));
   }
+  // Optional driver OT column; the OT pattern above is anchored at the start, so it never matches it.
+  const driverOtAt = heads.findIndex((h) => new RegExp(`^${DRIVER_OT_CODE}\\b`, "i").test(h));
+  if (driverOtAt >= 0 && values[driverOtAt + offset] !== undefined) out.tipOt = round2(amount(values[driverOtAt + offset]));
   return out as HoursTotals;
 }
 
 /** What differs between the file's totals and the grid's (to the cent). */
 export function compareTotals(expected: HoursTotals, actual: HoursTotals): string[] {
-  const labels: Record<keyof HoursTotals, string> = { reg: "Reg", tipHours: "TipWa", tips: "PCTip", ot: "OT" };
+  const labels: Record<keyof HoursTotals, string> = { reg: "Reg", tipHours: "TipWa", tips: "PCTip", ot: "OT", tipOt: DRIVER_OT_CODE };
   return (Object.keys(labels) as Array<keyof HoursTotals>)
-    .filter((key) => Math.abs(round2(expected[key]) - round2(actual[key])) > 0.005)
-    .map((key) => `${labels[key]} ${round2(actual[key]).toFixed(2)} in Payroll Relief vs ${round2(expected[key]).toFixed(2)} in the file`);
+    .filter((key) => key !== "tipOt" || (expected.tipOt !== undefined && actual.tipOt !== undefined))
+    .filter((key) => Math.abs(round2(Number(expected[key] || 0)) - round2(Number(actual[key] || 0))) > 0.005)
+    .map((key) => `${labels[key]} ${round2(Number(actual[key] || 0)).toFixed(2)} in Payroll Relief vs ${round2(Number(expected[key] || 0)).toFixed(2)} in the file`);
 }
 
 export function formatTotals(t: HoursTotals): string {
-  return `Reg ${round2(t.reg).toFixed(2)}, Tipped ${round2(t.tipHours).toFixed(2)}, Tips $${round2(t.tips).toFixed(2)}, OT ${round2(t.ot).toFixed(2)}`;
+  return `Reg ${round2(t.reg).toFixed(2)}, Tipped ${round2(t.tipHours).toFixed(2)}, Tips $${round2(t.tips).toFixed(2)}, OT ${round2(t.ot).toFixed(2)}${t.tipOt !== undefined ? `, Driver OT ${round2(t.tipOt).toFixed(2)}` : ""}`;
 }
 
 /**

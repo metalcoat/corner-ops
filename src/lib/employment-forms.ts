@@ -232,18 +232,21 @@ async function insertForm(input: {
     INSERT INTO employment_forms (
       id, business, employee_id, employee_name, form_type, title, template_version,
       source_url, status, effective_date, encrypted_payload, assigned_by,
-      employer_signature_name, employer_signed_at
+      employer_signature_name, employer_signed_at, overtime_by_role_agreement
     ) VALUES (
       ${id}, ${input.business}, ${input.employee.id}, ${input.employee.name}, ${input.type},
       ${template.title}, ${template.version}, ${template.sourceUrl}, 'Assigned',
       ${input.effectiveDate || null}, ${encryptPayload(input.payload)}, ${input.actor},
-      ${employerSigned}, ${employerSigned ? new Date().toISOString() : null}
+      ${employerSigned}, ${employerSigned ? new Date().toISOString() : null}, ${input.payload.overtimeByRoleAgreement ? true : false}
     )
     RETURNING *
   ` as unknown as FormRow[];
   await event(id, "assigned", input.actor, { templateVersion: template.version, effectiveDate: input.effectiveDate || null });
   return summary(rows[0]);
 }
+
+/** Agreed in advance on the two-rate pay notice (29 CFR 778.419); without it overtime uses the weighted average. */
+export const OVERTIME_BY_ROLE_AGREEMENT = "I agree that when I work more than 40 hours in a week, each overtime hour is paid at 1.5 times the rate for the job I am doing during that hour: in-store work at the in-store overtime rate, and driving at the driving (tipped) overtime rate shown on this notice.";
 
 /** Tip credit on the NY pay notice: minimum wage minus the driver (tipped) cash rate, never above the legal credit. */
 function nyTipCreditPerHour(tippedRate: number, onDate: string): number {
@@ -299,6 +302,7 @@ export async function assignOnboardingPacket(input: {
         overtimeRate: hourlyRate * 1.5,
         // Second overtime rate for driving (tipped) hours: 1.5 × minimum minus the tip credit.
         tippedOvertimeRate: multipleRates ? tippedOvertimeRateCents(Math.round(tippedRate * 100), Number(String(input.hireDate).slice(0, 4)) || new Date().getFullYear()) / 100 : null,
+        overtimeByRoleAgreement: multipleRates ? OVERTIME_BY_ROLE_AGREEMENT : null,
         tipCreditOrAllowance: multipleRates ? nyTipCreditPerHour(tippedRate, input.hireDate) : 0,
       },
     })]),
@@ -339,6 +343,7 @@ export async function assignRateChange(input: {
       secondaryRate: multipleRates ? input.tippedRate : null,
       overtimeRate: input.hourlyRate * 1.5,
       tippedOvertimeRate: multipleRates ? tippedOvertimeRateCents(Math.round(input.tippedRate * 100), Number(String(input.effectiveDate).slice(0, 4)) || new Date().getFullYear()) / 100 : null,
+      overtimeByRoleAgreement: multipleRates ? OVERTIME_BY_ROLE_AGREEMENT : null,
       tipCreditOrAllowance: multipleRates ? nyTipCreditPerHour(input.tippedRate, input.effectiveDate) : 0,
       effectiveDate: input.effectiveDate,
     },

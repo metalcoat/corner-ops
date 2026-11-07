@@ -2,6 +2,7 @@
 
 import { CSSProperties, DragEvent, FormEvent, useMemo, useState } from "react";
 import { positionsForBusiness } from "@/lib/business-positions";
+import { overtimeScheduleHint } from "@/lib/schedule-overtime-hint";
 import {
   analyzeShiftMealCompliance,
   mealRequirements,
@@ -695,7 +696,16 @@ export default function ScheduleBoard({ business, employees, shifts, timeOff, bu
         <summary>View {issueCount} schedule warning{issueCount === 1 ? "" : "s"}</summary>
         <div className="scheduleIssueList">
           {publishAnalysis.overThirtyEight.map((employee) => <div className="scheduleIssue warning" key={`38-${employee.employeeId}`}><strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} paid hours.</span></div>)}
-          {publishAnalysis.overForty.map((employee) => <div className="scheduleIssue danger" key={`40-${employee.employeeId}`}><strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} paid hours. Manager confirmation required to publish.</span></div>)}
+          {publishAnalysis.overForty.map((employee) => {
+            const hint = business === "Corner Deli" ? overtimeScheduleHint(weekShifts.filter((shift) => shift.employeeId === employee.employeeId && shift.status !== "Cancelled").map((shift) => ({
+              id: shift.id, startsAt: shift.startsAt, endsAt: shift.endsAt, position: shift.position,
+              hours: Math.max(0, (new Date(shift.endsAt).getTime() - new Date(shift.startsAt).getTime()) / 3_600_000 - (Number(shift.mealBreakMinutes || 0) + Number(shift.extraMealBreakMinutes || 0)) / 60),
+            }))) : null;
+            return <div className="scheduleIssue danger" key={`40-${employee.employeeId}`}><strong>{employee.employeeName}</strong><span>{employee.hours.toFixed(1)} paid hours. Manager confirmation required to publish.</span>
+              {hint && hint.overtimeShifts.length > 0 && <span>Overtime lands on: {hint.overtimeShifts.map((item) => `${new Date(item.startsAt).toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "short" })} ${item.position || "shift"} (${item.overtimeHours.toFixed(1)} h${item.driving ? ", driving" : ", in-store"})`).join(", ")}.</span>}
+              {hint?.suggestion && <span><strong>Tip:</strong> {hint.suggestion}</span>}
+            </div>;
+          })}
           {publishAnalysis.overlaps.map((item) => <div className="scheduleIssue danger" key={`${item.firstShiftId}-${item.secondShiftId}`}><strong>{item.employeeName}</strong><span>Overlapping assignments at {localDateTime(item.startsAt)}.</span></div>)}
           {publishAnalysis.coverageGaps.map((gap) => <div className="scheduleIssue danger" key={`${gap.dateKey}-${gap.startsAt}`}><strong>No employee coverage</strong><span>{localDateTime(gap.startsAt)}–{localTime(gap.endsAt)} ({gap.minutes} minutes).</span></div>)}
           {publishAnalysis.mealPeriodViolations.map((item) => <div className="scheduleIssue warning" key={`${item.shiftId}-${item.code}`}><strong>{item.employeeName}</strong><span>{item.message}</span></div>)}

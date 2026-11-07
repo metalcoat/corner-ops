@@ -45,3 +45,9 @@ export function tippedOvertimeRateCents(tippedRateCents: number, year: number): 
   const credit = Math.max(0, Math.min(rates.tipCreditCents, rates.minimumCents - tippedRateCents));
   return Math.round(1.5 * (tippedRateCents + credit)) - credit;
 }
+
+/** Full hourly rate for a tipped hour (cash wage + the tip credit taken), used for the weighted-average regular rate. */
+export function tippedFullRateCents(tippedRateCents: number, year: number): number {
+  const rates = nyFoodServiceRates(year);
+  return tippedRateCents + Math.max(0, Math.min(rates.tipCreditCents, rates.minimumCents - tippedRateCents));
+}

@@ -49,7 +49,7 @@ test("reads the header, columns and employees of the download", () => {
   assert.equal(sheet.periodStart, "2026-09-28");
   assert.equal(sheet.periodEnd, "2026-10-04");
   assert.equal(sheet.payDate, "2026-10-09");
-  assert.deepEqual(sheet.columns, { payType: 2, reg: 3, tipHours: 5, tips: 6, ot: 7 });
+  assert.deepEqual(sheet.columns, { payType: 2, reg: 3, tipHours: 5, tips: 6, ot: 7, tipOt: -1 });
   assert.equal(sheet.employees.length, 6);
   assert.deepEqual(timesheetRoster(sheet)[0], { num: "26", name: "Allen  Gregory M.", payType: "H" });
   assert.deepEqual(timesheetTotals(sheet), { reg: 99, tipHours: 0, tips: 85.8, ot: 0 });
@@ -196,4 +196,26 @@ test("employees already matched aren't guessed for someone else", () => {
   // Two names that both look like the only Seth: neither is guessed.
   const tie = guessRosterMatches(["Seth", "seth "], ROSTER);
   assert.equal(tie.Seth, null);
+});
+
+test("driver overtime goes in its own TipOT column once Payroll Relief has one", () => {
+  const withDriverOt = DOWNLOAD
+    .replace(",,S/H,Reg,Sick,TipWa,PCTip,OT,SPOH,DED426434", ",,S/H,Reg,Sick,TipWa,PCTip,OT,SPOH,DED426434,TipOT")
+    .replace("Emp,Employee,Salaried,Regular,Sick,TipWage,Paycheck Tips,Overtime,Spread of Hours,Overpayment", "Emp,Employee,Salaried,Regular,Sick,TipWage,Paycheck Tips,Overtime,Spread of Hours,Overpayment,Tipped Overtime");
+  const sheet = parseTimesheet(withDriverOt);
+  assert.equal(sheet.columns.tipOt, 10);
+  const row = { employee: "Gregory Allen", regularHours: 32, driverTipHours: 8, overtimeHours: 5, overtimeTippedHours: 3, tips: 90 };
+  const plan = planTimesheet(sheet, [row], { [employeeKey("Gregory Allen")]: "26" });
+  assert.deepEqual(plan.entries[0].amounts, { reg: 32, tipHours: 8, tips: 90, ot: 2, tipOt: 3 });
+  const line = parseCsvLine(plan.text.split("\r\n")[sheet.employees[0].line]);
+  assert.equal(line[7], "2.00");
+  assert.equal(line[10], "3.00");
+  assert.equal(plan.totals.tipOt, 3);
+
+  // Without the column all overtime stays in OT, with a note to check the driving overtime by hand.
+  const old = planTimesheet(parseTimesheet(DOWNLOAD), [row], { [employeeKey("Gregory Allen")]: "26" });
+  assert.deepEqual(old.entries[0].amounts, { reg: 32, tipHours: 8, tips: 90, ot: 5 });
+  assert.ok(old.notes.some((note) => /no TipOT column/.test(note)));
+  assert.equal(formatTotals({ reg: 1, tipHours: 2, tips: 3, ot: 4, tipOt: 5 }), "Reg 1.00, Tipped 2.00, Tips $3.00, OT 4.00, Driver OT 5.00");
+  assert.deepEqual(compareTotals({ reg: 1, tipHours: 0, tips: 0, ot: 2, tipOt: 3 }, { reg: 1, tipHours: 0, tips: 0, ot: 2, tipOt: 2 }), ["TipOT 2.00 in Payroll Relief vs 3.00 in the file"]);
 });

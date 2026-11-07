@@ -58,6 +58,7 @@
     "src/lib/shift-coverage-rules.ts",
     "src/lib/ny-tipped-wage.ts",
     "src/lib/payroll-overtime-rules.ts",
+    "src/lib/schedule-overtime-hint.ts",
     "src/lib/games/rampage/*.ts",
     "src/lib/games/sub-mission/*.ts",
     "src/lib/games/pizza-rush/engine.ts",

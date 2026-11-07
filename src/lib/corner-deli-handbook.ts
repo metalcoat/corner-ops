@@ -92,6 +92,7 @@ export const CORNER_DELI_HANDBOOK_SECTIONS: HandbookSection[] = [
     title: "7. Delivery drivers",
     bullets: [
       "Pay for driving (draft: owner review): driving hours are paid at the driver (tipped) rate shown on your New York pay notice, plus your delivery tips. Corner Deli takes the New York food service tip credit for those hours. If your driver wage plus delivery tips for a week come to less than the full minimum wage for your driving hours, Corner Deli pays the difference.",
+      "Overtime (draft: owner review): hours over 40 in a week are counted in the order you work them. Each overtime hour is paid at 1.5 times the rate for the job you're doing at that time: in-store at 1.5 times your regular rate, driving at the driving overtime rate on your pay notice ($18.70 in 2026 for a $10.70 driver rate). You agree to this when you sign your pay notice.",
       "Time spent on non-delivery work (prep, dishes, the register) is paid at your regular rate. If you're doing that kind of work for more than a short stretch, tell the manager so the time is recorded correctly.",
       "The rear delivery cash drawer is set to $0 at the end of each night. Each delivery money bag is normally set to $60 at the beginning of the shift.",
       "Count the delivery bag before beginning the shift and report any discrepancy immediately so the starting balance is documented.",

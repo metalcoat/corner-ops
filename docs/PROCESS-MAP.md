@@ -492,8 +492,14 @@ flowchart LR
 - Second overtime rule (2026-11-07, `src/lib/payroll-overtime-rules.ts`): hours past 40 are taken in the order worked
   and belong to the role at that moment (driver shifts are tipped after 3 PM, as for TipWa). In-store overtime is
   1.5 × regular; driving overtime is driver rate + ½ minimum while a tip credit is taken (2026: $10.70 → $18.70).
-  Payroll shows "Overtime by role" with pay per role; the LS55 pay notice lists both overtime rates. The Payroll
-  Relief export still sends one OT column (Payroll Relief prices it from its own rate); see the open item below.
+  Payroll shows "Overtime by role" with pay per role; the LS55 pay notice lists both overtime rates.
+  By-role pricing needs the employee's signed agreement (29 CFR 778.419): it is on the two-rate pay notice
+  (`employment_forms.overtime_by_role_agreement`, migration 0046) and in handbook section 7. Without a signed one,
+  Payroll shows the weighted-average overtime (29 CFR 778.115) to pay instead.
+  Payroll Relief: driving overtime goes in its own timesheet column `TipOT` (env `PAYROLL_RELIEF_DRIVER_OT_CODE`)
+  once Chris adds that earnings code; in-store overtime stays in `OT`. Without the column all overtime goes in
+  `OT` with a note on the plan. Scheduler: anyone over 40 shows which shifts the overtime lands on and suggests
+  putting driving last in the week (`src/lib/schedule-overtime-hint.ts`); it never blocks.
 - Handbook sections 3 (call-outs), 5 (breaks), 13 (alcohol, zero tolerance) and 14 (no smoking/vaping) are marked draft until Chris approves
   the wording; any handbook change asks every employee to sign again.
 

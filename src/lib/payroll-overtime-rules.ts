@@ -39,3 +39,19 @@ export function overtimePayCents(split: OvertimeSplit, rates: { regularRateCents
   const tipped = Math.round(split.tippedOvertimeHours * rates.tippedOvertimeRateCents);
   return { regularCents: regular, tippedCents: tipped, totalCents: regular + tipped };
 }
+
+/**
+ * Default overtime for two rates when there is no signed by-role agreement (29 CFR 778.115): every hour
+ * is paid straight time at its own role's cash rate, plus a half-time premium on the weighted-average
+ * regular rate for each overtime hour. Tipped hours count at the full rate (cash wage + tip credit).
+ * Returns the overtime hours' cash pay, comparable to overtimePayCents().totalCents.
+ */
+export function weightedAverageOvertimeCents(split: OvertimeSplit, rates: { regularRateCents: number; tippedCashRateCents: number; tippedFullRateCents: number }): number {
+  const regularHours = split.regularStraightHours + split.regularOvertimeHours;
+  const tippedHours = split.tippedStraightHours + split.tippedOvertimeHours;
+  const totalHours = regularHours + tippedHours;
+  const overtimeHours = split.regularOvertimeHours + split.tippedOvertimeHours;
+  if (!totalHours || !overtimeHours) return 0;
+  const regularRate = (regularHours * rates.regularRateCents + tippedHours * rates.tippedFullRateCents) / totalHours;
+  return Math.round(split.regularOvertimeHours * rates.regularRateCents + split.tippedOvertimeHours * rates.tippedCashRateCents + 0.5 * regularRate * overtimeHours);
+}
