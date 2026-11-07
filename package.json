@@ -109,6 +109,7 @@
     "test:ai-cart-safety": "tsx scripts/ai-cart-safety-validate.ts",
     "test:ai-payment-safety": "tsx scripts/ai-payment-safety-validate.ts",
     "test:ai-phone-handoff": "tsx scripts/ai-phone-handoff-validate.ts",
+    "test:ai-phone-store-rules": "tsx scripts/ai-phone-store-rules-validate.ts",
     "test:loyalty:regressions": "tsx scripts/loyalty-regressions-validate.ts && tsx scripts/loyalty-card-validate.ts",
     "test:pizza-pricing:regressions": "tsx scripts/pizza-pricing-regressions-validate.ts && tsx scripts/employee-meal-regressions-validate.ts",
     "test:pizza-game:regressions": "tsx scripts/pizza-game-regressions-validate.ts",

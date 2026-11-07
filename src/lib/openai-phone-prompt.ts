@@ -57,6 +57,8 @@ export function buildPhoneInstructions(input: {
   settings: AiPhoneSettings;
   business: RealtimeBusinessContext;
   customer?: PhoneOrderingCustomerContext | null;
+  /** Manager-edited store rules (ai-phone-store-rules.ts), loaded when the call starts. */
+  storeRules?: string;
 }) {
   const mode =
     input.settings.mode === "shadow"
@@ -89,8 +91,11 @@ export function buildPhoneInstructions(input: {
     mode,
     live,
     customer,
+    input.storeRules || "",
     `Current callId: ${input.callId}. Caller phone: ${input.callerPhone || "unavailable"}. Line: ${input.lineLabel}. Every tool call must include callId.`,
-  ].join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 export function compactAcknowledgement(index: number) {

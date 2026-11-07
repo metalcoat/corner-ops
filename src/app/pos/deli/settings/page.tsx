@@ -9,7 +9,8 @@ import GiftCardSettingsClient from "./gift-card-settings-client";
 import BarcodeSettingsClient from "./barcode-settings-client";
 import HardwareSettingsClient from "./hardware-settings-client";
 import AiPhoneSettingsClient from "./ai-phone-settings-client";
+import AiPhoneRulesClient from "./ai-phone-rules-client";
 
 export default function DeliDeliverySettingsPage() {
-  return <><AiPhoneSettingsClient /><PosSettingsClient /><HardwareSettingsClient /><GreeterTvSettingsClient /><LobbyTriviaSettingsClient /><StoreOperationsSettingsClient /><DeliverySettingsClient /><PromotionsSettingsClient /><LoyaltySettingsClient /><GiftCardSettingsClient /><BarcodeSettingsClient /></>;
+  return <><AiPhoneSettingsClient /><AiPhoneRulesClient /><PosSettingsClient /><HardwareSettingsClient /><GreeterTvSettingsClient /><LobbyTriviaSettingsClient /><StoreOperationsSettingsClient /><DeliverySettingsClient /><PromotionsSettingsClient /><LoyaltySettingsClient /><GiftCardSettingsClient /><BarcodeSettingsClient /></>;
 }

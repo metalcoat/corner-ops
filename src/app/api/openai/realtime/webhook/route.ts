@@ -24,6 +24,7 @@ import {
   callerFromLivePosFeed,
   claimCallerFromAiIngress,
 } from "@/lib/three-cx-live-calls";
+import { storeRulesInstructions } from "@/lib/ai-phone-store-rules";
 
 export const runtime = "nodejs";
 
@@ -67,10 +68,11 @@ export async function POST(request: Request) {
     aiIngressCaller = sipCaller ? "" : await claimCallerFromAiIngress(),
     callerPhone =
       sipCaller || aiIngressCaller || (await callerFromLivePosFeed(lineLabel)),
-    [settings, business, customer] = await Promise.all([
+    [settings, business, customer, storeRules] = await Promise.all([
       getAiPhoneSettings(),
       realtimeBusinessContext(),
       phoneOrderingCustomerContext("Corner Deli", callerPhone),
+      storeRulesInstructions(),
     ]),
     model = settings.model;
   console.info("OpenAI caller identity resolved.", {
@@ -149,6 +151,7 @@ export async function POST(request: Request) {
         settings,
         business,
         customer,
+        storeRules,
       }),
       tools: [
         OPENAI_PRICE_ORDER_TOOL,

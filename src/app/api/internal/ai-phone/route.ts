@@ -17,6 +17,7 @@ import { phoneOrderingCustomerContext } from "@/lib/ordering-customers";
 import { callerFromSipHeaders } from "@/lib/openai-phone-ordering";
 import { claimCallerFromAiIngress } from "@/lib/three-cx-live-calls";
 import { checkPhoneCall } from "@/lib/ai-phone-order-checker";
+import { storeRulesInstructions } from "@/lib/ai-phone-store-rules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,13 +58,14 @@ export async function GET(request: Request) {
         { error: "Gemini call not found." },
         { status: 404 },
       );
-    const [settings, business, customer] = await Promise.all([
+    const [settings, business, customer, storeRules] = await Promise.all([
       getAiPhoneSettings(),
       realtimeBusinessContext(),
       phoneOrderingCustomerContext(
         "Corner Deli",
         String(row.caller_phone || ""),
       ),
+      storeRulesInstructions(),
     ]);
     return isoJson({
       model: String(row.selected_model || settings.geminiModel),
@@ -76,6 +78,7 @@ export async function GET(request: Request) {
         settings,
         business,
         customer,
+        storeRules,
       })}\nAfter speaking the exact final closing sentence, call complete_call.`,
     });
   }

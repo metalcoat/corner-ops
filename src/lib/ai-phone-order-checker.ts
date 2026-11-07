@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { MENU_SHORTHAND } from "@/lib/openai-phone-prompt";
 import { applyOrderFixes, orderAutofixEnabled } from "@/lib/ai-phone-order-fixer";
+import { storeRulesInstructions } from "@/lib/ai-phone-store-rules";
 
 // Background order checker for the Gemini phone line (dev trial 2026-11-06). Gemini keeps the voice; after a
 // cart change the bridge asks this to compare what the caller said with the cart, and passes any mismatch to
@@ -26,6 +27,8 @@ export type OrderCheckLine = {
 };
 export type OrderCheckInput = {
   stage: OrderCheckStage;
+  /** The store rules block Gemini was given (ai-phone-store-rules.ts), so a store rule isn't flagged as a mistake. */
+  storeRules?: string;
   transcript: Array<{ speaker: "customer" | "assistant"; text: string }>;
   cart: OrderCheckLine[];
   serviceType: string;
@@ -157,7 +160,7 @@ export async function checkOrder(input: OrderCheckInput, timeoutMs = 12_000): Pr
         messages: [
           {
             role: "user",
-            content: `Stage: ${input.stage}\nService: ${input.serviceType || "not chosen yet"}\n\nConversation so far:\n${conversation || "(nothing yet)"}\n\nCurrent cart:\n${cart}`,
+            content: `${input.storeRules ? `${input.storeRules}\n\n` : ""}Stage: ${input.stage}\nService: ${input.serviceType || "not chosen yet"}\n\nConversation so far:\n${conversation || "(nothing yet)"}\n\nCurrent cart:\n${cart}`,
           },
         ],
       },
@@ -233,7 +236,7 @@ export async function checkPhoneCall(callId: string, stage: OrderCheckStage, pen
   if (!orderCheckerEnabled()) return { status: "disabled", mismatches: [], note: "", ms: 0, costUsd: 0 };
   let checked: OrderCheckResult;
   try {
-    const input = await loadOrderCheckInput(callId, stage, pendingCustomerText);
+    const input = { ...(await loadOrderCheckInput(callId, stage, pendingCustomerText)), storeRules: await storeRulesInstructions() };
     checked = await checkOrder(input);
     if (checked.status === "mismatch" && orderAutofixEnabled()) checked = await applyOrderFixes(callId, input, checked);
   } catch (error) {
