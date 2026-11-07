@@ -43,9 +43,10 @@ COPY rtp.conf /etc/asterisk/rtp.conf
 COPY entrypoint.sh /usr/local/bin/corner-ops-asterisk-entrypoint
 COPY voice-payment.py /usr/local/bin/corner-ops-voice-payment
 COPY gemini-phone.py /usr/local/bin/corner-ops-gemini-phone
+COPY ai-route.py /usr/local/bin/corner-ops-ai-route
 COPY voice-payment-prompts/ /opt/corner-ops-asterisk/voice-payment-prompts/
 
-RUN chmod 0755 /usr/local/bin/corner-ops-asterisk-entrypoint /usr/local/bin/corner-ops-voice-payment /usr/local/bin/corner-ops-gemini-phone \
+RUN chmod 0755 /usr/local/bin/corner-ops-asterisk-entrypoint /usr/local/bin/corner-ops-voice-payment /usr/local/bin/corner-ops-gemini-phone /usr/local/bin/corner-ops-ai-route \
     && mkdir -p /usr/share/asterisk/sounds/en/voice-payment \
     && for spec in \
       'welcome:You are now on the secure automated payment line. Nothing you say here is sent to the ordering assistant or saved in a transcript.' \

@@ -170,6 +170,9 @@ flowchart LR
     - After two "Take your time." nudges with no caller voice all call, it says "I'm having trouble hearing you, let me get you to someone at the store." and hands off.
     - The pickup/delivery lock applies only once the order has items, so an opening correction is always taken.
     - "Pick it up", "carry out", "takeout" and "to go" all mean pickup.
+- The phone dialplan never expands `VOICE_PAYMENT_INTERNAL_SECRET` (2026-11-07). Before, `Set(CURLOPT(httpheader)=…)` printed it in Asterisk's verbose log on every call. Routing and status lookups now go through the AGI helper `asterisk/ai-route.py` (`/usr/local/bin/corner-ops-ai-route route|status`), which reads the secret from its own environment.
+  - Tests: `asterisk/ai-route-test.py`, plus assertions in `scripts/gemini-phone-validate.ts`.
+  - The dev secret was rotated the same day. Production needs the same image change at switchover, and its secret rotated if it ever ran the old dialplan with verbose logging.
 - Docker disk cleanup: `update.sh` prunes after each deploy, but only untagged images and build cache older than 72 h, so tagged leftovers piled up. The box got down to 1.6 GB free on 2026-11-06, and 9 GB was freed by hand that day.
   - `deploy/docker-cleanup.sh` removes untagged images, build cache beyond 5 GB, and unused `corner-ops-*` tags older than 14 days. It keeps `:latest`, `:rollback` and `:before-*`, never touches containers, volumes or base images, logs to `deploy/logs/docker-cleanup.log`, and warns when less than 8 GB is free.
   - `--dry-run` lists what it would remove.

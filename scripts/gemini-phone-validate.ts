@@ -109,6 +109,10 @@ async function main() {
     dialplan,
     /TryExec\(AudioSocket\(\$\{AI_CALL_ID\},127\.0\.0\.1:9092\)\)/,
   );
+  // The internal secret must never be expanded in the dialplan: Asterisk's verbose log printed it (2026-11-07).
+  assert.doesNotMatch(dialplan, /INTERNAL_SECRET|CURLOPT\(httpheader\)/);
+  assert.match(dialplan, /AGI\(\/usr\/local\/bin\/corner-ops-ai-route,route,/);
+  assert.match(dialplan, /AGI\(\/usr\/local\/bin\/corner-ops-ai-route,status,\$\{AI_CALL_ID\}\)/);
   assert.match(bridge, /functionDeclarations/);
   assert.match(bridge, /request_secure_voice_payment/);
   assert.match(bridge, /terminate_audiosocket/);
