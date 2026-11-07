@@ -1,3 +1,4 @@
+import { nyFoodServiceRates } from "@/lib/ny-tipped-wage";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { requireStrongSecret } from "@/lib/secret-strength";
 import { ensureSchema, getSql } from "@/lib/db";
@@ -244,6 +245,13 @@ async function insertForm(input: {
   return summary(rows[0]);
 }
 
+/** Tip credit on the NY pay notice: minimum wage minus the driver (tipped) cash rate, never above the legal credit. */
+function nyTipCreditPerHour(tippedRate: number, onDate: string): number {
+  const rates = nyFoodServiceRates(Number(String(onDate).slice(0, 4)) || new Date().getFullYear());
+  const credit = rates.minimumCents - Math.round(tippedRate * 100);
+  return Math.max(0, Math.min(rates.tipCreditCents, credit)) / 100;
+}
+
 export async function assignOnboardingPacket(input: {
   business: Business;
   employeeId: string;
@@ -289,7 +297,7 @@ export async function assignOnboardingPacket(input: {
         regularRate: hourlyRate,
         secondaryRate: multipleRates ? tippedRate : null,
         overtimeRate: hourlyRate * 1.5,
-        tipCreditOrAllowance: multipleRates ? Math.max(0, hourlyRate - tippedRate) : 0,
+        tipCreditOrAllowance: multipleRates ? nyTipCreditPerHour(tippedRate, input.hireDate) : 0,
       },
     })]),
     insertForm({ business: input.business, employee, type: "MEAL_POLICY", actor: input.actor, effectiveDate: input.hireDate, employerSignature: input.employerSignature, payload: { ...common, ...mealPolicy } }),
@@ -328,7 +336,7 @@ export async function assignRateChange(input: {
       regularRate: input.hourlyRate,
       secondaryRate: multipleRates ? input.tippedRate : null,
       overtimeRate: input.hourlyRate * 1.5,
-      tipCreditOrAllowance: multipleRates ? Math.max(0, input.hourlyRate - input.tippedRate) : 0,
+      tipCreditOrAllowance: multipleRates ? nyTipCreditPerHour(input.tippedRate, input.effectiveDate) : 0,
       effectiveDate: input.effectiveDate,
     },
   });
